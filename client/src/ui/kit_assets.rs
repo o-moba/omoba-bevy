@@ -144,6 +144,11 @@ impl KitImage {
 #[derive(Component, Clone, Copy)]
 pub(crate) struct LowDensity;
 
+/// Texture density override for large full-screen images. Living backgrounds
+/// select their 1080 layer from physical window height rather than UI scale.
+#[derive(Component, Clone, Copy)]
+pub(crate) struct HighDensity;
+
 /// Atlas layouts per sprite and density, created once.
 #[derive(Resource, Default)]
 pub(crate) struct KitAtlasLayouts(HashMap<(Sprite, bool), Handle<TextureAtlasLayout>>);
@@ -178,15 +183,16 @@ pub(crate) fn resolve_kit_images(
         Ref<KitImage>,
         Option<&mut ImageNode>,
         Has<LowDensity>,
+        Has<HighDensity>,
     )>,
 ) {
     let Some(assets) = assets else { return };
     let all = density.is_changed();
-    for (entity, kit, image, low) in &mut images {
+    for (entity, kit, image, low, high) in &mut images {
         if !all && !kit.is_changed() && image.is_some() {
             continue;
         }
-        let hi = density.hi() && !low;
+        let hi = high || (density.hi() && !low);
         let texel = if hi { 2.0 } else { 1.0 };
         let handle: Handle<Image> = assets.load(kit.source.path(hi));
         let mode = match kit.source.insets() {

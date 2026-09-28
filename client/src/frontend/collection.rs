@@ -18,6 +18,7 @@ use super::preview::{AvatarPreview, PreviewStatus};
 use super::widgets;
 use crate::i18n::{Locale, Localized, tr};
 use crate::team::{AvatarThumbnails, TeamSelection};
+use crate::ui::living_background::{self, LivingBands, LivingScene};
 use crate::ui::theme::{self, ButtonKind};
 use crate::ui::widgets::{ButtonStyle, compact_screen_tile, screen_button, screen_tile};
 use crate::ui::{Activated, TestId, UiAction, UiActionAppExt, UiSet};
@@ -265,6 +266,7 @@ fn spawn_collection(
     ensure_thumbnails(&asset_server, &mut thumbnails);
     let catalogue = crate::passport::avatar_catalogue();
     let phone = platform.is_mobile();
+    let form = theme::Form::of(phone);
     let entries = collection_entries();
     // Open on something: the current loadout avatar, else the showcase, else
     // the first entry.
@@ -288,6 +290,15 @@ fn spawn_collection(
             "CollectionScreen",
         ))
         .with_children(|root| {
+            living_background::spawn(
+                root,
+                LivingScene::Arena,
+                LivingBands {
+                    header: Some(if phone { 56.0 } else { 104.0 }),
+                    footer: None,
+                },
+                form,
+            );
             root.spawn(Node {
                 justify_content: JustifyContent::SpaceBetween,
                 align_items: AlignItems::Center,

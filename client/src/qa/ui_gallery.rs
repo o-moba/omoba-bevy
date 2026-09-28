@@ -23,7 +23,7 @@ use bevy::{
 use crate::i18n::{Locale, LocaleId, Localized};
 use crate::ui::{
     Pressable, ScrollArea, UiActionAppExt,
-    kit_assets::{Background, Icon, KitImage},
+    kit_assets::{Background, CoverImage, Icon, KitImage, LowDensity},
     theme::{self, ButtonKind, ButtonState, Form, UiForm},
     tokens::{TextRole, color, size, space},
     widgets::{
@@ -1695,6 +1695,39 @@ fn type_page(body: &mut ChildSpawnerCommands) {
 }
 
 fn backgrounds_page(body: &mut ChildSpawnerCommands, form: Form) {
+    row(body, "kit.gallery.row.living_backgrounds", |line| {
+        for (plate, label) in [
+            (Background::LivingArenaPlate, "Arena"),
+            (Background::LivingStagePlate, "Stage"),
+            (Background::LivingVictoryPlate, "Victory"),
+            (Background::LivingDefeatPlate, "Defeat"),
+        ] {
+            line.spawn((
+                Node {
+                    width: Val::Px(240.0),
+                    height: Val::Px(135.0),
+                    flex_direction: FlexDirection::Column,
+                    justify_content: JustifyContent::Center,
+                    align_items: AlignItems::Center,
+                    overflow: Overflow::clip(),
+                    ..default()
+                },
+                KitImage::background(plate),
+                CoverImage { anchor_y: 0.5 },
+                LowDensity,
+                Name::new(format!("GalleryLiving{label}")),
+            ))
+            .with_children(|preview| {
+                preview.spawn((
+                    Text::new(label),
+                    theme::role_text(TextRole::Heading),
+                    TextColor(color::TEXT_PRIMARY),
+                    ZIndex(1),
+                    Pickable::IGNORE,
+                ));
+            });
+        }
+    });
     row(body, "kit.gallery.row.backgrounds", |line| {
         for background in Background::ALL {
             line.spawn((

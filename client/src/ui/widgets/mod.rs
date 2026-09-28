@@ -598,7 +598,18 @@ pub(crate) struct FocusRingOffset(pub f32);
 pub(crate) const FOCUS_HALO: f32 = space::S4 + border::FOCUS;
 
 /// The ring (and halo) bundle for a node covering the focused control.
-fn ring_bundle(offset: f32, corner: f32) -> impl Bundle {
+fn ring_bundle(offset: f32, corner: f32, living: bool) -> impl Bundle {
+    let (halo_width, halo_color) = if living {
+        (
+            offset + border::FOCUS + 2.0,
+            theme::perceptual(color::SCRIM_LIVING),
+        )
+    } else {
+        (
+            FOCUS_HALO + offset - border::FOCUS_OFFSET,
+            theme::perceptual(color::FOCUS_HALO),
+        )
+    };
     (
         Outline::new(Val::Px(border::FOCUS), Val::Px(offset), color::FOCUS_RING),
         bevy::ui::FocusPolicy::Pass,
@@ -613,11 +624,7 @@ fn ring_bundle(offset: f32, corner: f32) -> impl Bundle {
                 border_radius: BorderRadius::all(Val::Px(corner)),
                 ..default()
             },
-            Outline::new(
-                Val::Px(FOCUS_HALO + offset - border::FOCUS_OFFSET),
-                Val::Px(0.0),
-                theme::perceptual(color::FOCUS_HALO),
-            ),
+            Outline::new(Val::Px(halo_width), Val::Px(0.0), halo_color),
             Pickable::IGNORE,
             FocusHalo,
         )],
@@ -631,6 +638,7 @@ fn ring_bundle(offset: f32, corner: f32) -> impl Bundle {
 pub(crate) fn paint_focus_ring(
     mut commands: Commands,
     focus: Option<Res<super::UiFocus>>,
+    living: Query<(), With<super::living_background::LivingBackground>>,
     buttons: Query<(
         &ComputedNode,
         &UiGlobalTransform,
@@ -640,6 +648,7 @@ pub(crate) fn paint_focus_ring(
     mut rings: Query<(&mut Node, &mut Outline), With<FocusRing>>,
     mut halos: Query<(&mut Node, &mut Outline), (With<FocusHalo>, Without<FocusRing>)>,
 ) {
+    let living = !living.is_empty();
     let placed = focus
         .as_ref()
         .and_then(|focus| focus.focused())
@@ -668,7 +677,7 @@ pub(crate) fn paint_focus_ring(
                     display: Display::None,
                     ..default()
                 },
-                ring_bundle(border::FOCUS_OFFSET, radius::MD),
+                ring_bundle(border::FOCUS_OFFSET, radius::MD, living),
                 GlobalZIndex(5000),
                 FocusRing,
                 Name::new("UiFocusRing"),
@@ -687,11 +696,18 @@ pub(crate) fn paint_focus_ring(
                 if halo.border_radius != radius {
                     halo.border_radius = radius;
                 }
-                let next = Outline::new(
-                    Val::Px(FOCUS_HALO + offset - border::FOCUS_OFFSET),
-                    Val::Px(0.0),
-                    theme::perceptual(color::FOCUS_HALO),
-                );
+                let (width, color) = if living {
+                    (
+                        offset + border::FOCUS + 2.0,
+                        theme::perceptual(color::SCRIM_LIVING),
+                    )
+                } else {
+                    (
+                        FOCUS_HALO + offset - border::FOCUS_OFFSET,
+                        theme::perceptual(color::FOCUS_HALO),
+                    )
+                };
+                let next = Outline::new(Val::Px(width), Val::Px(0.0), color);
                 if *glow != next {
                     *glow = next;
                 }
@@ -748,7 +764,7 @@ pub(crate) fn paint_preview_rings(
                 border_radius: BorderRadius::all(Val::Px(corner)),
                 ..default()
             },
-            ring_bundle(offset, corner),
+            ring_bundle(offset, corner, false),
             GlobalZIndex(4900),
             PreviewRing,
         ));

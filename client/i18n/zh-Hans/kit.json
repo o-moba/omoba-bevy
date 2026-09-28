@@ -68,6 +68,7 @@
   "kit.gallery.row.skill_card": "技能卡（提示 · 长按卡）",
   "kit.gallery.row.icons": "图标",
   "kit.gallery.row.backgrounds": "背景上的聚焦",
+  "kit.gallery.row.living_backgrounds": "动态场景",
   "kit.gallery.sample.toast_info": "已向 {name} 发送组队邀请",
   "kit.gallery.sample.toast_success": "进度已保存",
   "kit.gallery.sample.toast_warning": "正在重新连接服务器…",

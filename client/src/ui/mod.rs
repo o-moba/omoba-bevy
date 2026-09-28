@@ -9,6 +9,7 @@ pub(crate) mod focus;
 pub(crate) mod font_cmap;
 pub(crate) mod gesture;
 pub(crate) mod kit_assets;
+pub(crate) mod living_background;
 pub(crate) mod modal;
 pub(crate) mod scroll;
 pub(crate) mod test_id;
@@ -106,6 +107,7 @@ impl Plugin for UiKitPlugin {
                     kit_assets::keep_preloaded.after(kit_assets::update_ui_density),
                 ),
             );
+        app.add_plugins(living_background::LivingBackgroundPlugin);
         widgets::controls::add_systems(app);
         widgets::surfaces::add_systems(app);
         widgets::game::add_systems(app);

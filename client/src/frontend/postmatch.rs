@@ -26,7 +26,8 @@ use crate::net::{
     GameState, GameStateSnapshot, LinkStatus, NetworkAvatar, NetworkCommand, SessionUiCommand,
 };
 use crate::team::Team;
-use crate::ui::kit_assets::{Background, CoverImage, Frame, Icon, KitImage};
+use crate::ui::kit_assets::{Frame, Icon, KitImage};
+use crate::ui::living_background::{self, LivingBands, LivingScene};
 use crate::ui::theme::{self, ButtonKind, Form, TextStyle};
 use crate::ui::tokens::{TextRole, border, color, motion, radius, size, space};
 use crate::ui::widgets::{
@@ -77,7 +78,6 @@ struct PostMatchShape {
 /// The screen's long-lived parts (the body is rebuilt, these are not).
 #[derive(Component, Clone, Copy)]
 struct PostMatchParts {
-    background: Entity,
     banner: Entity,
     body: Entity,
     status: Entity,
@@ -491,8 +491,8 @@ fn build_screen(commands: &mut Commands, inputs: &ScreenInputs) {
     let form = inputs.form();
     let safe = inputs.mobile.as_deref().map(|mobile| mobile.safe);
     let background = match model.outcome {
-        Outcome::Defeat => Background::ResultDefeat,
-        Outcome::Victory | Outcome::Complete => Background::ResultVictory,
+        Outcome::Defeat => LivingScene::Defeat,
+        Outcome::Victory | Outcome::Complete => LivingScene::Victory,
     };
     let mut parts = None;
     commands
@@ -512,33 +512,21 @@ fn build_screen(commands: &mut Commands, inputs: &ScreenInputs) {
             inputs.shape(),
         ))
         .with_children(|root| {
-            // The background crossfades over the live world
-            // (`animate_post_match`); it starts clear.
-            let background = root
-                .spawn((
-                    Node {
-                        position_type: PositionType::Absolute,
-                        left: Val::Px(0.0),
-                        right: Val::Px(0.0),
-                        top: Val::Px(0.0),
-                        bottom: Val::Px(0.0),
-                        ..default()
-                    },
-                    KitImage {
-                        tint: Color::WHITE.with_alpha(0.0),
-                        ..KitImage::background(background)
-                    },
-                    CoverImage { anchor_y: 0.5 },
-                    Pickable::IGNORE,
-                    Name::new("PostMatchBackground"),
-                ))
-                .id();
+            living_background::spawn(
+                root,
+                background,
+                LivingBands {
+                    header: None,
+                    footer: (form == Form::Desktop).then_some(64.0),
+                },
+                form,
+            );
             parts = Some(match form {
                 Form::Desktop => {
                     root.spawn(surfaces::ornament_frame());
-                    desktop_layout(root, &model, background)
+                    desktop_layout(root, &model)
                 }
-                Form::Phone => phone_layout(root, &model, background, safe),
+                Form::Phone => phone_layout(root, &model, safe),
             });
         })
         .insert(parts.expect("layout spawned"));
@@ -546,14 +534,9 @@ fn build_screen(commands: &mut Commands, inputs: &ScreenInputs) {
 
 /// Desktop (result.md): a 1280×720 stage centred in the window (the screen
 /// scales with R2.3 around it), one column from y 48.
-fn desktop_layout(
-    root: &mut ChildSpawnerCommands,
-    model: &ResultModel,
-    background: Entity,
-) -> PostMatchParts {
+fn desktop_layout(root: &mut ChildSpawnerCommands, model: &ResultModel) -> PostMatchParts {
     let form = Form::Desktop;
     let mut parts = PostMatchParts {
-        background,
         banner: Entity::PLACEHOLDER,
         body: Entity::PLACEHOLDER,
         status: Entity::PLACEHOLDER,
@@ -669,7 +652,6 @@ pub(crate) fn result_ui_scale(width: f32, height: f32) -> f32 {
 fn phone_layout(
     root: &mut ChildSpawnerCommands,
     model: &ResultModel,
-    background: Entity,
     safe: Option<crate::mobile_controls::MobileSafeInsets>,
 ) -> PostMatchParts {
     let form = Form::Phone;
@@ -678,7 +660,6 @@ fn phone_layout(
         (safe.left, safe.right, safe.top, safe.bottom)
     });
     let mut parts = PostMatchParts {
-        background,
         banner: Entity::PLACEHOLDER,
         body: Entity::PLACEHOLDER,
         status: Entity::PLACEHOLDER,
@@ -827,6 +808,9 @@ fn spawn_banner(
 }
 
 fn spawn_summary(body: &mut ChildSpawnerCommands, summary: &str, form: Form) {
+    if summary.is_empty() {
+        return;
+    }
     let (width, height, gap, role) = match form {
         Form::Desktop => (Val::Px(800.0), 28.0, space::S16, TextRole::Heading),
         Form::Phone => (Val::Px(600.0), 20.0, 6.0, TextRole::Label),
@@ -837,17 +821,17 @@ fn spawn_summary(body: &mut ChildSpawnerCommands, summary: &str, form: Form) {
             max_width: Val::Percent(100.0),
             height: Val::Px(height),
             margin: UiRect::top(Val::Px(gap)),
+            padding: UiRect::axes(Val::Px(space::S12), Val::Px(space::S4)),
             column_gap: Val::Px(space::S16),
             align_items: AlignItems::Center,
             justify_content: JustifyContent::Center,
+            border_radius: BorderRadius::all(Val::Px(radius::MD)),
             ..default()
         },
+        BackgroundColor(theme::perceptual(color::SURFACE_GLASS_STRONG)),
         Name::new("PostMatchSummary"),
     ))
     .with_children(|row| {
-        if summary.is_empty() {
-            return;
-        }
         let rule = || {
             (
                 Node {
@@ -1281,8 +1265,10 @@ fn spawn_status_line(
                 column_gap: Val::Px(space::S8),
                 justify_content: JustifyContent::Center,
                 align_items: AlignItems::Center,
+                border_radius: BorderRadius::all(Val::Px(radius::MD)),
                 ..default()
             },
+            BackgroundColor(theme::perceptual(color::SURFACE_GLASS_STRONG)),
             StatusLine::default(),
             Name::new("PostMatchStatus"),
         ))
@@ -1412,20 +1398,31 @@ fn details_state(details: &Cell<()>) -> (Visibility, bool) {
 }
 
 fn spawn_back(row: &mut ChildSpawnerCommands, form: Form, width: f32) {
-    spawn_button(
-        row,
+    row.spawn((
         Node {
             width: Val::Px(width),
-            ..button_node(ButtonSize::Regular, ButtonKind::Link, form)
+            border_radius: BorderRadius::all(Val::Px(radius::MD)),
+            ..default()
         },
-        tr("postmatch.button.back_to_menu"),
-        TextStyle::new(TextRole::Button).sized(crate::ui::widgets::TERTIARY_LABEL),
-        ButtonKind::Link,
-        None,
-        PostMatchAction::BackToMenu,
-        TestId::new("PostMatchBackToMenu"),
-        (),
-    );
+        BackgroundColor(theme::perceptual(color::SURFACE_GLASS_STRONG)),
+        Name::new("PostMatchBackPlate"),
+    ))
+    .with_children(|plate| {
+        spawn_button(
+            plate,
+            Node {
+                width: Val::Percent(100.0),
+                ..button_node(ButtonSize::Regular, ButtonKind::Link, form)
+            },
+            tr("postmatch.button.back_to_menu"),
+            TextStyle::new(TextRole::Button).sized(crate::ui::widgets::TERTIARY_LABEL),
+            ButtonKind::Link,
+            None,
+            PostMatchAction::BackToMenu,
+            TestId::new("PostMatchBackToMenu"),
+            (),
+        );
+    });
 }
 
 /// The next-round badge (desktop; rematch servers only): muted, 28 high,
@@ -1648,7 +1645,6 @@ fn animate_post_match(
     time: Option<Res<Time>>,
     latch: Option<Res<PostMatchLatch>>,
     roots: Query<&PostMatchParts>,
-    mut images: Query<&mut KitImage>,
     mut transforms: Query<&mut UiTransform>,
     mut segments: Query<(&mut Node, &mut GainedSegment)>,
     mut flashes: Query<(&mut BorderColor, &mut LevelFlash)>,
@@ -1658,13 +1654,6 @@ fn animate_post_match(
     };
     let now = time.elapsed_secs();
     let since = now - latch.as_ref().map_or(now, |latch| latch.entered_at);
-    let fade = (since / motion::DURATION_SCREEN_FADE.as_secs_f32()).clamp(0.0, 1.0);
-    if let Ok(mut image) = images.get_mut(parts.background) {
-        let tint = Color::WHITE.with_alpha(motion::EASING_STANDARD.ease(fade));
-        if image.tint != tint {
-            image.tint = tint;
-        }
-    }
     let open = (since / motion::DURATION_PANEL_OPEN.as_secs_f32()).clamp(0.0, 1.0);
     if let Ok(mut transform) = transforms.get_mut(parts.banner) {
         let from = motion::PANEL_OPEN_SCALE_FROM;

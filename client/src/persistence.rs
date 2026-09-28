@@ -23,13 +23,14 @@ use crate::model_scale::{
 };
 use crate::session_config::{DEFAULT_GAME_SERVER_ADDR, FALLBACK_GAME_SERVER_ADDR};
 use crate::team::CharacterChoice;
+use crate::ui::living_background::MotionSettings;
 use crate::world::{
     LightingSettings, MAX_AMBIENT_BRIGHTNESS, MAX_LIGHT_ILLUMINANCE, MAX_LIGHT_PITCH_DEG,
     MAX_LIGHT_YAW_DEG, MIN_AMBIENT_BRIGHTNESS, MIN_LIGHT_ILLUMINANCE, MIN_LIGHT_PITCH_DEG,
     MIN_LIGHT_YAW_DEG,
 };
 
-const SCHEMA_VERSION: u32 = 5;
+const SCHEMA_VERSION: u32 = 6;
 const LEGACY_DEFAULT_MODEL_TARGET_HEIGHT: f32 = 1.15;
 const SCHEMA_3_DEFAULT_MODEL_TARGET_HEIGHT: f32 = 1.45;
 const PREFS_FILENAME: &str = "client_preferences.json";
@@ -60,6 +61,7 @@ impl Plugin for ClientPersistencePlugin {
         app.init_resource::<FileGameServerAddr>()
             .init_resource::<AudioSettings>()
             .init_resource::<CameraSettings>()
+            .init_resource::<MotionSettings>()
             .init_resource::<ResolvedServerAddressForPrefs>()
             .init_resource::<ClientSessionId>()
             .init_resource::<ClientPreferencesInitialSavePending>()
@@ -110,6 +112,9 @@ struct ClientPreferencesFile {
     /// Follow-camera distance multiplier; absent in files written before it existed.
     #[serde(default)]
     camera_zoom: Option<f32>,
+    /// Accessibility: disable decorative parallax and particles.
+    #[serde(default)]
+    reduce_motion: bool,
     /// Interface language code (`en`, `zh-Hans`); absent before 0.26 means
     /// English. An unknown code reads as English.
     #[serde(default)]
@@ -280,6 +285,7 @@ pub(crate) fn load_persistent_client_settings(
     mut gate: ResMut<ClientPrefsSaveGate>,
     mut audio: ResMut<AudioSettings>,
     mut camera: ResMut<CameraSettings>,
+    mut motion: ResMut<MotionSettings>,
     mut saved_language: ResMut<SavedLanguage>,
 ) {
     gate.suppress_saves = 3;
@@ -315,6 +321,7 @@ pub(crate) fn load_persistent_client_settings(
     // queue the migrated schema so the one-time default migration is persisted.
     initial_save_pending.0 = disk.schema_version < SCHEMA_VERSION;
     *audio = disk.audio.sanitized();
+    motion.reduce = disk.reduce_motion;
     saved_language.0 = stored_language(disk.language.as_deref());
     if let Some(zoom) = disk.camera_zoom {
         *camera = CameraSettings { zoom }.sanitized();
@@ -393,6 +400,7 @@ fn build_file_from_state(
         light_yaw_deg: Some(lighting.light_yaw_deg),
         audio: audio.sanitized(),
         camera_zoom: Some(camera.sanitized().zoom),
+        reduce_motion: false,
         language: None,
     }
 }
@@ -418,6 +426,7 @@ pub(crate) fn save_client_preferences_to_disk(
     client_session_id: &str,
     audio: &AudioSettings,
     camera: &CameraSettings,
+    motion: &MotionSettings,
     language: Option<crate::i18n::LocaleId>,
 ) -> io::Result<()> {
     let Some(path) = preferences_path() else {
@@ -441,6 +450,7 @@ pub(crate) fn save_client_preferences_to_disk(
         audio,
         camera,
     );
+    prefs.reduce_motion = motion.reduce;
     prefs.language = language.map(|language| language.code().to_owned());
     write_preferences_file(&path, &prefs)
 }
@@ -455,6 +465,7 @@ fn save_client_preferences_on_change(
     client_session_id: Res<ClientSessionId>,
     audio: Res<AudioSettings>,
     camera: Res<CameraSettings>,
+    motion: Res<MotionSettings>,
     locale: Option<Res<crate::i18n::Locale>>,
     saved_language: Res<SavedLanguage>,
 ) {
@@ -470,6 +481,7 @@ fn save_client_preferences_on_change(
         || client_session_id.is_changed()
         || audio.is_changed()
         || camera.is_changed()
+        || motion.is_changed()
         || crate::i18n::locale_changed(&locale);
     if !changed && !initial_save_pending.0 {
         return;
@@ -488,6 +500,7 @@ fn save_client_preferences_on_change(
         client_session_id.0.as_str(),
         audio.as_ref(),
         camera.as_ref(),
+        motion.as_ref(),
         language_to_save(locale.as_deref(), &saved_language),
     ) {
         warn!("Failed to save client preferences: {e}");
@@ -506,6 +519,7 @@ pub(crate) fn reset_graphics_to_defaults(
     game_server_addr: &str,
     client_session_id: &str,
     audio: &AudioSettings,
+    motion: &MotionSettings,
     language: Option<crate::i18n::LocaleId>,
 ) {
     *lighting = LightingSettings::default();
@@ -520,6 +534,7 @@ pub(crate) fn reset_graphics_to_defaults(
         client_session_id,
         audio,
         camera,
+        motion,
         language,
     ) {
         warn!("Failed to save preferences after reset: {e}");
@@ -628,7 +643,7 @@ mod tests {
         );
         let bytes = serde_json::to_vec(&file).unwrap();
         let restored: ClientPreferencesFile = serde_json::from_slice(&bytes).unwrap();
-        assert_eq!(restored.schema_version, 5);
+        assert_eq!(restored.schema_version, SCHEMA_VERSION);
         assert_eq!(restored.audio, audio);
         assert_eq!(restored.model_target_height, Some(2.4));
         assert_eq!(restored.character, Some(CharacterChoice::Paco));
@@ -737,12 +752,14 @@ mod tests {
             "language-relaunch",
             &AudioSettings::default(),
             &CameraSettings::default(),
+            &MotionSettings { reduce: true },
             language_to_save(Some(&picked), &SavedLanguage::default()),
         )
         .unwrap();
         let written: serde_json::Value =
             serde_json::from_slice(&fs::read(dir.join(PREFS_FILENAME)).unwrap()).unwrap();
         assert_eq!(written["language"], "zh-Hans");
+        assert_eq!(written["reduce_motion"], true);
         assert_eq!(saved_language(), Some(zh));
         // The next launch starts in the saved language.
         let mut app = App::new();

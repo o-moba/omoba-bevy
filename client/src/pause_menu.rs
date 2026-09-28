@@ -16,12 +16,15 @@ use crate::model_scale::{
     DEFAULT_MODEL_TARGET_HEIGHT, MAX_MODEL_TARGET_HEIGHT, MIN_MODEL_TARGET_HEIGHT,
     ModelScaleSettings,
 };
-use crate::net::{ClientConnectionState, ClientSession};
+use crate::net::{ClientConnectionState, ClientSession, GameState, GameStateSnapshot};
 use crate::persistence::{
     ClientPrefsSaveGate, ClientSessionId, ResolvedServerAddressForPrefs, reset_graphics_to_defaults,
 };
 use crate::session_config::DEFAULT_GAME_SERVER_ADDR;
 use crate::team::TeamSelection;
+use crate::ui::living_background::{
+    self, LivingBackground, LivingBands, LivingScene, MotionSettings,
+};
 use crate::ui::{
     Activated, GestureEpoch, ModalId, ModalRoot, ScrollArea, UiAction, UiActionAppExt, UiSet,
     theme::{self, ButtonKind, metric},
@@ -101,8 +104,10 @@ impl Plugin for PauseMenuPlugin {
                         .after(apply_pause_audio)
                         .after(apply_pause_language),
                     update_language_value.after(apply_pause_language),
+                    update_motion_value.after(apply_pause_settings),
                     sync_pause_menu_visibility,
                     sync_pause_menu_sections,
+                    sync_settings_living_background,
                     reset_pause_scroll_on_navigation.after(apply_pause_navigation),
                     sync_practice_actions,
                     sync_settings_server_addr_label,
@@ -148,8 +153,15 @@ struct SettingsServerAddrLabel;
 #[derive(Component)]
 struct LanguageValue;
 
+/// The Reduce motion row's localized on/off value.
+#[derive(Component)]
+struct MotionValue;
+
 #[derive(Component)]
 struct PauseMenuPanel;
+
+#[derive(Component)]
+struct PauseLivingBackground;
 
 /// A stepped graphics setting on the settings page.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -183,6 +195,7 @@ pub(crate) enum PauseAction {
     OpenPractice,
     /// Switch to the next shipped language.
     CycleLanguage,
+    ToggleReduceMotion,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -241,6 +254,54 @@ fn size_desktop_pause_panel(
             panel.height = height;
         }
     }
+}
+
+/// Settings entered from the front end use the Arena painting; the same menu
+/// opened during a live match deliberately keeps the world visible.
+fn sync_settings_living_background(
+    mut commands: Commands,
+    menu: Res<PauseMenuState>,
+    game: Option<Res<GameStateSnapshot>>,
+    screen: Option<Res<State<crate::frontend::AppScreen>>>,
+    platform: Res<crate::ui::UiPlatform>,
+    roots: Query<Entity, With<PauseMenuRoot>>,
+    backgrounds: Query<Entity, (With<PauseLivingBackground>, With<LivingBackground>)>,
+) {
+    let in_match = game
+        .as_ref()
+        .is_some_and(|game| matches!(game.state, GameState::Running))
+        && !screen.as_ref().is_some_and(|screen| screen.get().is_menu());
+    let should_show = menu.open && menu.in_settings && !in_match;
+    if !should_show {
+        for background in &backgrounds {
+            commands.entity(background).try_despawn();
+        }
+        return;
+    }
+    if !backgrounds.is_empty() {
+        return;
+    }
+    let Ok(root) = roots.single() else { return };
+    let form = theme::Form::of(platform.is_mobile());
+    commands.entity(root).with_children(|parent| {
+        let background = living_background::spawn(
+            parent,
+            LivingScene::Arena,
+            LivingBands {
+                header: Some(if form == theme::Form::Phone {
+                    56.0
+                } else {
+                    104.0
+                }),
+                footer: None,
+            },
+            form,
+        );
+        parent
+            .commands()
+            .entity(background)
+            .insert(PauseLivingBackground);
+    });
 }
 
 fn section_title(parent: &mut ChildSpawnerCommands, key: &'static str, name: &str) {
@@ -483,6 +544,31 @@ fn setup_pause_menu_ui(mut commands: Commands) {
                                 AudioLabel::Mute,
                                 "PauseMenuAudioMuteLabel",
                             );
+
+                            section_title(
+                                settings,
+                                "pause.settings.motion",
+                                "PauseMenuMotionTitle",
+                            );
+                            widgets::toggle_row(
+                                settings,
+                                Localized::new("pause.motion.reduce"),
+                                tr("kit.gallery.state.off"),
+                                MotionValue,
+                                PauseAction::ToggleReduceMotion,
+                                "PauseMenuReduceMotion",
+                            );
+                            settings.spawn((
+                                Localized::new("pause.motion.reduce_hint").into_text(),
+                                crate::ui::theme::role_text(crate::ui::tokens::TextRole::Caption),
+                                TextColor(theme::MUTED),
+                                Node {
+                                    max_width: Val::Px(metric::MENU_W),
+                                    flex_shrink: 0.0,
+                                    ..default()
+                                },
+                                Name::new("PauseMenuReduceMotionHint"),
+                            ));
 
                             settings.spawn((
                                 Text::new(""),
@@ -808,6 +894,7 @@ fn apply_pause_settings(
     mut lighting: ResMut<LightingSettings>,
     mut model: ResMut<ModelScaleSettings>,
     mut camera: ResMut<CameraSettings>,
+    mut motion: ResMut<MotionSettings>,
     mut prefs_gate: ResMut<ClientPrefsSaveGate>,
     resolved_addr: Res<ResolvedServerAddressForPrefs>,
     client_session_id: Res<ClientSessionId>,
@@ -857,13 +944,35 @@ fn apply_pause_settings(
                     addr,
                     client_session_id.0.as_str(),
                     audio.as_ref(),
+                    motion.as_ref(),
                     crate::persistence::language_to_save(
                         locale.as_deref(),
                         saved_language.as_deref().unwrap_or(&Default::default()),
                     ),
                 );
             }
+            PauseAction::ToggleReduceMotion => motion.reduce = !motion.reduce,
             _ => {}
+        }
+    }
+}
+
+fn update_motion_value(
+    settings: Res<MotionSettings>,
+    locale: Option<Res<Locale>>,
+    mut values: Query<&mut Text, With<MotionValue>>,
+) {
+    if !settings.is_changed() && !locale_changed(&locale) {
+        return;
+    }
+    let next = tr(if settings.reduce {
+        "kit.gallery.state.on"
+    } else {
+        "kit.gallery.state.off"
+    });
+    for mut value in &mut values {
+        if value.0 != next {
+            value.0 = next.to_owned();
         }
     }
 }
@@ -2073,13 +2182,42 @@ mod tests {
         app.update();
         let button = harness::find(app.world_mut(), "PauseMenuLanguageButton").unwrap();
         let value = harness::find(app.world_mut(), "PauseMenuLanguageValue").unwrap();
+        let motion = harness::find(app.world_mut(), "PauseMenuReduceMotionButton").unwrap();
         assert_eq!(
             app.world().get::<UiAction<PauseAction>>(button).unwrap().0,
             PauseAction::CycleLanguage
         );
         assert_eq!(app.world().get::<Text>(value).unwrap().0, "English");
+        assert_eq!(
+            app.world().get::<UiAction<PauseAction>>(motion).unwrap().0,
+            PauseAction::ToggleReduceMotion
+        );
         let section = app.world().get::<ChildOf>(button).unwrap().parent();
         assert!(app.world().get::<SettingsSection>(section).is_some());
+    }
+
+    #[test]
+    fn reduce_motion_toggle_is_edge_triggered_and_keeps_graphics_reset_separate() {
+        let mut app = App::new();
+        app.init_resource::<LightingSettings>()
+            .init_resource::<ModelScaleSettings>()
+            .init_resource::<CameraSettings>()
+            .init_resource::<MotionSettings>()
+            .init_resource::<ClientPrefsSaveGate>()
+            .init_resource::<ResolvedServerAddressForPrefs>()
+            .init_resource::<ClientSessionId>()
+            .init_resource::<TeamSelection>()
+            .init_resource::<AudioSettings>()
+            .add_message::<Activated<PauseAction>>()
+            .add_systems(Update, apply_pause_settings);
+        app.world_mut().write_message(Activated {
+            action: PauseAction::ToggleReduceMotion,
+            source: Entity::PLACEHOLDER,
+        });
+        app.update();
+        assert!(app.world().resource::<MotionSettings>().reduce);
+        app.update();
+        assert!(app.world().resource::<MotionSettings>().reduce);
     }
 
     /// R6.5: Controls opened from Settings closes back into Settings (the

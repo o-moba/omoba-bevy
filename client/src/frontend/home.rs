@@ -14,6 +14,7 @@ use crate::career::CareerClient;
 use crate::i18n::{Locale, data, tr, trf};
 use crate::net::{ClientConnectionState, ClientSession, NetworkCommand};
 use crate::team::AvatarThumbnails;
+use crate::ui::living_background::{self, LivingBands, LivingScene};
 use crate::ui::theme::{self, ButtonKind};
 use crate::ui::widgets::screen_button;
 use crate::ui::{Activated, UiActionAppExt, UiSet};
@@ -184,6 +185,7 @@ fn spawn_home(
     }
     let preview_image = preview.image.clone();
     let phone = platform.is_mobile();
+    let form = theme::Form::of(phone);
     let party_line = signature(&career, &session, &card, &party, locale.as_deref());
     let (status, status_color) = connection_line(&session);
     let profile = career.view.profile.clone();
@@ -198,6 +200,19 @@ fn spawn_home(
             HomeRoot,
         ))
         .with_children(|root| {
+            living_background::spawn(
+                root,
+                LivingScene::Stage,
+                if phone {
+                    LivingBands::default()
+                } else {
+                    LivingBands {
+                        header: Some(104.0),
+                        footer: Some(56.0),
+                    }
+                },
+                form,
+            );
             root.spawn(Node {
                 justify_content: JustifyContent::SpaceBetween,
                 align_items: AlignItems::Center,

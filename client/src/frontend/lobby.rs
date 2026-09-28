@@ -18,6 +18,7 @@ use super::{AppScreen, automation_bypass, widgets};
 use crate::i18n::{Locale, tr, trf};
 use crate::net::{ClientSession, NetworkCommand};
 use crate::party::PartyClient;
+use crate::ui::living_background::{self, LivingBands, LivingScene};
 use crate::ui::theme::{self, ButtonKind};
 use crate::ui::widgets::screen_button;
 use crate::ui::{Activated, UiActionAppExt, UiSet};
@@ -153,6 +154,7 @@ fn spawn_lobby(
         return;
     }
     let phone = platform.is_mobile();
+    let form = theme::Form::of(phone);
     let sig = signature(&party, &career, &session, &field, locale.as_deref());
     let view = &sig.view;
     stage.members = stage_members(view, crate::party::presence_avatar(&card, &selection));
@@ -168,6 +170,15 @@ fn spawn_lobby(
             LobbyRoot,
         ))
         .with_children(|root| {
+            living_background::spawn(
+                root,
+                LivingScene::Arena,
+                LivingBands {
+                    header: Some(if phone { 56.0 } else { 104.0 }),
+                    footer: (!phone).then_some(80.0),
+                },
+                form,
+            );
             root.spawn(Node {
                 justify_content: JustifyContent::SpaceBetween,
                 align_items: AlignItems::Center,

@@ -24,8 +24,10 @@ from sync_ui_tokens import ROOT, find_handoff  # noqa: E402
 
 INSTALL = ROOT / "client/assets/ui/verdant"
 MANIFEST = INSTALL / "manifest.json"
-# BUILD-ORDER step 0: "the new assets add <= 2.3 MB" (manifest `package_bytes`).
-PACKAGE_BUDGET = int(2.3 * 1024 * 1024)
+# BUILD-ORDER F11 adds the four 720/1080 living scenes to the original
+# 2.3 MiB kit. The handoff totals about 6.51 MiB; keep a small, explicit
+# ceiling so an accidental source/master image still fails the check.
+PACKAGE_BUDGET = int(6.6 * 1024 * 1024)
 LICENCE_TEXTS = ("fonts/OFL-Cinzel.txt", "fonts/OFL-Inter.txt", "fonts/OFL-BarlowCondensed.txt",
                  "fonts/OFL-NotoSerifSC.txt")
 KEPT_FIELDS = ("size_1x", "size_2x", "nine_slice", "atlas", "tintable", "licence", "attribution")

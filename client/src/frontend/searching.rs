@@ -13,6 +13,7 @@ use crate::career::CareerClient;
 use crate::i18n::{Localized, data, tr, trf};
 use crate::net::{ClientSession, GameState, GameStateSnapshot, SessionUiCommand};
 use crate::team::TeamSelection;
+use crate::ui::living_background::{self, LivingBands, LivingScene};
 use crate::ui::theme::{self, ButtonKind};
 use crate::ui::widgets::screen_button;
 use crate::ui::{Activated, UiActionAppExt, UiSet};
@@ -91,14 +92,20 @@ fn hero_line(selection: &TeamSelection) -> String {
     )
 }
 
-fn spawn_searching(mut commands: Commands, selection: Res<TeamSelection>) {
+fn spawn_searching(
+    mut commands: Commands,
+    selection: Res<TeamSelection>,
+    platform: Res<crate::ui::UiPlatform>,
+) {
     let hero = hero_line(&selection);
+    let form = theme::Form::of(platform.is_mobile());
     commands
         .spawn(widgets::screen_root(
             AppScreen::Searching,
             "SearchingScreen",
         ))
         .with_children(|root| {
+            living_background::spawn(root, LivingScene::Stage, LivingBands::default(), form);
             root.spawn((
                 Node {
                     width: Val::Px(620.0),

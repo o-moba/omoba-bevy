@@ -6,7 +6,15 @@ The canonical repository version lives in `Cargo.toml` under `[workspace.package
 
 ## [Unreleased]
 
-Workspace version 0.27.0.
+Workspace version 0.28.0.
+
+### Verdant Crown HUD, result and living scenes (0.28.0)
+- **Match HUD:** desktop and phone now use the handoff HUD plates, portrait and vitals, ability cards, quick-buy/equipment controls, target frame, score strip, minimap frame and production controller/touch focus behaviour. World-anchored overlays compensate for desktop UI scale.
+- **Result and loading:** the result/post-match screen is rebuilt for desktop and phone with victory/defeat presentation, live/career result states, progress, rematch status, focus routing and loading/prematch states. The production result QA covers finalizing, saved, guest defeat, abandoned, loading failure and controller focus fixtures.
+- **Living scenes:** Home/searching use Stage; lobby, collection, profile, out-of-match career/Supporter/Settings use Arena; result uses Victory or Defeat. The component combines 720/1080 cover layers with deterministic rays, mist, motes and leaves/petals/ash, header/footer legibility bands and a dark focus keyline. Phone automatically falls back to the plate when menu frame-time p90 exceeds 25 ms.
+- **Accessibility:** Settings → Motion → Reduce motion persists in `client_preferences.json` and removes parallax/decorative animation while retaining the static plate, foreground, vignette and screen fades. In-match menus keep the live world instead of creating a painted backdrop.
+- **Assets/tooling:** Bevy WebP support is enabled; 16 scene layers and eight tintable sprite densities are installed by the hash-locked Verdant asset pipeline. The gallery includes all four living scenes. Asset/token sync checks and the UI screen map remain the source-of-truth gates.
+- QA: the complete 44-shot component gallery passed on the native Bevy renderer; production result QA wrote all eight fixtures; client library tests pass. Physical iPhone/Android performance and gamepad checks remain release-candidate gates.
 
 ### Verdant Crown help / field guide (P0)
 - **Client:** the in-match help is now the field guide from the design handoff: six illustrated control cards (desktop) or ten compact cards with a scroll thumb (phone) instead of a text wall, with keyboard, controller and touch legends from their own i18n keys (en + zh-Hans). It auto-shows once on the first match, opens on F1 and over Home, and closes with its button, Esc, controller East or F1. Help is a registered modal (`ModalId::Help`), so controller focus starts on its dismiss button.

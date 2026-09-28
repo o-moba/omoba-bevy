@@ -4,10 +4,12 @@
  "package_bytes": {
   "frames": 72679,
   "icons": 127618,
-  "sprites": 190206,
+  "sprites": 211018,
   "backgrounds": 139636,
-  "fonts": 1778040,
-  "total": 2308179
+  "living-1080": 2956364,
+  "living-720": 1540429,
+  "fonts": 1789132,
+  "total": 6836876
  },
  "assets": [
   {
@@ -2087,6 +2089,242 @@
    "attribution": "Omoba (Ekza) in-game render"
   },
   {
+   "path": "backgrounds/living/arena/plate-1080.jpg",
+   "bytes": 446914,
+   "size_1x": [
+    1920,
+    1080
+   ],
+   "tintable": false,
+   "licence": "CC-BY-4.0 (Omoba Verdant art) — see omoba-bevy LICENSING.md",
+   "attribution": "Omoba (Ekza) — generated for Omoba"
+  },
+  {
+   "path": "backgrounds/living/arena/foreground-1080.webp",
+   "bytes": 341098,
+   "size_1x": [
+    1920,
+    1080
+   ],
+   "tintable": false,
+   "licence": "CC-BY-4.0 (Omoba Verdant art) — see omoba-bevy LICENSING.md",
+   "attribution": "Omoba (Ekza) — generated for Omoba"
+  },
+  {
+   "path": "backgrounds/living/arena/plate-720.jpg",
+   "bytes": 230029,
+   "size_1x": [
+    1280,
+    720
+   ],
+   "tintable": false,
+   "licence": "CC-BY-4.0 (Omoba Verdant art) — see omoba-bevy LICENSING.md",
+   "attribution": "Omoba (Ekza) — generated for Omoba"
+  },
+  {
+   "path": "backgrounds/living/arena/foreground-720.webp",
+   "bytes": 172294,
+   "size_1x": [
+    1280,
+    720
+   ],
+   "tintable": false,
+   "licence": "CC-BY-4.0 (Omoba Verdant art) — see omoba-bevy LICENSING.md",
+   "attribution": "Omoba (Ekza) — generated for Omoba"
+  },
+  {
+   "path": "backgrounds/living/stage/plate-1080.jpg",
+   "bytes": 384899,
+   "size_1x": [
+    1920,
+    1080
+   ],
+   "tintable": false,
+   "licence": "CC-BY-4.0 (Omoba Verdant art) — see omoba-bevy LICENSING.md",
+   "attribution": "Omoba (Ekza) — generated for Omoba"
+  },
+  {
+   "path": "backgrounds/living/stage/foreground-1080.webp",
+   "bytes": 345170,
+   "size_1x": [
+    1920,
+    1080
+   ],
+   "tintable": false,
+   "licence": "CC-BY-4.0 (Omoba Verdant art) — see omoba-bevy LICENSING.md",
+   "attribution": "Omoba (Ekza) — generated for Omoba"
+  },
+  {
+   "path": "backgrounds/living/stage/plate-720.jpg",
+   "bytes": 209267,
+   "size_1x": [
+    1280,
+    720
+   ],
+   "tintable": false,
+   "licence": "CC-BY-4.0 (Omoba Verdant art) — see omoba-bevy LICENSING.md",
+   "attribution": "Omoba (Ekza) — generated for Omoba"
+  },
+  {
+   "path": "backgrounds/living/stage/foreground-720.webp",
+   "bytes": 177778,
+   "size_1x": [
+    1280,
+    720
+   ],
+   "tintable": false,
+   "licence": "CC-BY-4.0 (Omoba Verdant art) — see omoba-bevy LICENSING.md",
+   "attribution": "Omoba (Ekza) — generated for Omoba"
+  },
+  {
+   "path": "backgrounds/living/victory/plate-1080.jpg",
+   "bytes": 534754,
+   "size_1x": [
+    1920,
+    1080
+   ],
+   "tintable": false,
+   "licence": "CC-BY-4.0 (Omoba Verdant art) — see omoba-bevy LICENSING.md",
+   "attribution": "Omoba (Ekza) — generated for Omoba"
+  },
+  {
+   "path": "backgrounds/living/victory/foreground-1080.webp",
+   "bytes": 254518,
+   "size_1x": [
+    1920,
+    1080
+   ],
+   "tintable": false,
+   "licence": "CC-BY-4.0 (Omoba Verdant art) — see omoba-bevy LICENSING.md",
+   "attribution": "Omoba (Ekza) — generated for Omoba"
+  },
+  {
+   "path": "backgrounds/living/victory/plate-720.jpg",
+   "bytes": 281606,
+   "size_1x": [
+    1280,
+    720
+   ],
+   "tintable": false,
+   "licence": "CC-BY-4.0 (Omoba Verdant art) — see omoba-bevy LICENSING.md",
+   "attribution": "Omoba (Ekza) — generated for Omoba"
+  },
+  {
+   "path": "backgrounds/living/victory/foreground-720.webp",
+   "bytes": 135070,
+   "size_1x": [
+    1280,
+    720
+   ],
+   "tintable": false,
+   "licence": "CC-BY-4.0 (Omoba Verdant art) — see omoba-bevy LICENSING.md",
+   "attribution": "Omoba (Ekza) — generated for Omoba"
+  },
+  {
+   "path": "backgrounds/living/defeat/plate-1080.jpg",
+   "bytes": 360543,
+   "size_1x": [
+    1920,
+    1080
+   ],
+   "tintable": false,
+   "licence": "CC-BY-4.0 (Omoba Verdant art) — see omoba-bevy LICENSING.md",
+   "attribution": "Omoba (Ekza) — generated for Omoba"
+  },
+  {
+   "path": "backgrounds/living/defeat/foreground-1080.webp",
+   "bytes": 288468,
+   "size_1x": [
+    1920,
+    1080
+   ],
+   "tintable": false,
+   "licence": "CC-BY-4.0 (Omoba Verdant art) — see omoba-bevy LICENSING.md",
+   "attribution": "Omoba (Ekza) — generated for Omoba"
+  },
+  {
+   "path": "backgrounds/living/defeat/plate-720.jpg",
+   "bytes": 183139,
+   "size_1x": [
+    1280,
+    720
+   ],
+   "tintable": false,
+   "licence": "CC-BY-4.0 (Omoba Verdant art) — see omoba-bevy LICENSING.md",
+   "attribution": "Omoba (Ekza) — generated for Omoba"
+  },
+  {
+   "path": "backgrounds/living/defeat/foreground-720.webp",
+   "bytes": 151246,
+   "size_1x": [
+    1280,
+    720
+   ],
+   "tintable": false,
+   "licence": "CC-BY-4.0 (Omoba Verdant art) — see omoba-bevy LICENSING.md",
+   "attribution": "Omoba (Ekza) — generated for Omoba"
+  },
+  {
+   "path": "sprites/leaf@1x.png",
+   "path_2x": "sprites/leaf@2x.png",
+   "bytes": 1600,
+   "size_1x": [
+    32,
+    16
+   ],
+   "size_2x": [
+    64,
+    32
+   ],
+   "tintable": true,
+   "licence": "CC-BY-4.0 (Omoba Verdant art) — programmatic, drawn for this handoff"
+  },
+  {
+   "path": "sprites/petal@1x.png",
+   "path_2x": "sprites/petal@2x.png",
+   "bytes": 870,
+   "size_1x": [
+    24,
+    16
+   ],
+   "size_2x": [
+    48,
+    32
+   ],
+   "tintable": true,
+   "licence": "CC-BY-4.0 (Omoba Verdant art) — programmatic, drawn for this handoff"
+  },
+  {
+   "path": "sprites/ray-wedge@1x.png",
+   "path_2x": "sprites/ray-wedge@2x.png",
+   "bytes": 12134,
+   "size_1x": [
+    64,
+    512
+   ],
+   "size_2x": [
+    128,
+    1024
+   ],
+   "tintable": true,
+   "licence": "CC-BY-4.0 (Omoba Verdant art) — programmatic, drawn for this handoff"
+  },
+  {
+   "path": "sprites/vignette@1x.png",
+   "path_2x": "sprites/vignette@2x.png",
+   "bytes": 6208,
+   "size_1x": [
+    320,
+    180
+   ],
+   "size_2x": [
+    640,
+    360
+   ],
+   "tintable": true,
+   "licence": "CC-BY-4.0 (Omoba Verdant art) — programmatic, drawn for this handoff"
+  },
+  {
    "path": "fonts/Cinzel-SemiBold.ttf",
    "bytes": 77164,
    "tintable": true,
@@ -2130,7 +2368,7 @@
   },
   {
    "path": "fonts/NotoSerifSC-SemiBold-subset.ttf",
-   "bytes": 383804,
+   "bytes": 394896,
    "tintable": true,
    "licence": "SIL Open Font License 1.1 (no Reserved Font Name)",
    "attribution": "Noto Serif SC © 2017 Google Inc. / Adobe"

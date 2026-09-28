@@ -20,6 +20,7 @@ use super::AppScreen;
 use super::widgets;
 use crate::i18n::{Locale, data, tr, trf};
 use crate::team::AvatarThumbnails;
+use crate::ui::living_background::{self, LivingBands, LivingScene};
 use crate::ui::theme::{self, ButtonKind};
 use crate::ui::widgets::{ButtonStyle, screen_button, screen_tile};
 use crate::ui::{Activated, TestId, UiAction, UiActionAppExt, UiSet};
@@ -310,6 +311,7 @@ fn spawn_card_screen(
     platform: Res<crate::ui::UiPlatform>,
 ) {
     let phone = platform.is_mobile();
+    let form = theme::Form::of(phone);
     let wins = career
         .view
         .profile
@@ -321,6 +323,15 @@ fn spawn_card_screen(
             CardScreenRoot,
         ))
         .with_children(|root| {
+            living_background::spawn(
+                root,
+                LivingScene::Arena,
+                LivingBands {
+                    header: Some(if phone { 56.0 } else { 104.0 }),
+                    footer: None,
+                },
+                form,
+            );
             root.spawn(Node {
                 justify_content: JustifyContent::SpaceBetween,
                 align_items: AlignItems::Center,

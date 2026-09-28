@@ -1,12 +1,13 @@
 //! Server-authorized cosmetics. Preview has a separate camera and never equips a
 //! world actor; all live aura components come only from the server snapshot.
 // i18n-strict
+use crate::ui::living_background::{self, LivingBands, LivingScene};
 use crate::{
     career::{CareerClient, CareerModal},
     combat::CombatStats,
     i18n::{Locale, data, tr, trf},
     input_context::InputContextSet,
-    net::{NetworkCommand, RemotePlayer},
+    net::{GameState, GameStateSnapshot, NetworkCommand, RemotePlayer},
     player::Player,
     sprite::PlayerVisualMode,
     ui::{
@@ -833,12 +834,19 @@ fn render_panel(
     roots: Query<Entity, With<SupporterRoot>>,
     windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
     locale: Option<Res<Locale>>,
+    game: Option<Res<GameStateSnapshot>>,
+    screen: Option<Res<State<crate::frontend::AppScreen>>>,
+    ui_platform: Res<crate::ui::UiPlatform>,
     mut prior: Local<String>,
 ) {
     let compact = windows.single().is_ok_and(|w| w.height() < 540.);
+    let in_match = game
+        .as_ref()
+        .is_some_and(|game| matches!(game.state, GameState::Running))
+        && !screen.as_ref().is_some_and(|screen| screen.get().is_menu());
     let summary = status_label(career.view.supporter.as_ref());
     let key = format!(
-        "{}|{:?}|{}|{:?}|{}|{:?}|{}|{}",
+        "{}|{:?}|{}|{:?}|{}|{:?}|{}|{}|{}",
         state.open,
         state.selected,
         summary,
@@ -846,7 +854,8 @@ fn render_panel(
         career.nickname,
         career.view.error,
         compact,
-        locale.as_ref().map_or(0, |locale| locale.generation())
+        locale.as_ref().map_or(0, |locale| locale.generation()),
+        in_match,
     );
     if *prior == key {
         return;
@@ -875,6 +884,18 @@ fn render_panel(
             GlobalZIndex(1300),
         ))
         .with_children(|root| {
+            if !in_match {
+                let form = ui::Form::of(ui_platform.is_mobile());
+                living_background::spawn(
+                    root,
+                    LivingScene::Arena,
+                    LivingBands {
+                        header: Some(if form == ui::Form::Phone { 56.0 } else { 138.0 }),
+                        footer: None,
+                    },
+                    form,
+                );
+            }
             root.spawn((
                 Node {
                     position_type: PositionType::Absolute,

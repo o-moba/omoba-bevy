@@ -68,6 +68,7 @@
   "kit.gallery.row.skill_card": "skill card (tooltip · hold card)",
   "kit.gallery.row.icons": "icons",
   "kit.gallery.row.backgrounds": "focus over backgrounds",
+  "kit.gallery.row.living_backgrounds": "living scenes",
   "kit.gallery.sample.toast_info": "Party invite sent to {name}",
   "kit.gallery.sample.toast_success": "Progress saved",
   "kit.gallery.sample.toast_warning": "Reconnecting to the server…",

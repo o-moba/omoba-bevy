@@ -695,6 +695,31 @@ The match HUD is built from `omoba-ui/handoff/screens/hud.md` (+ the
 - **Dashed CANCEL rim** (phone) is solid `color.state.danger` (Bevy borders
   are solid).
 
+## Living backgrounds (F11)
+
+`ui::living_background::spawn(parent, scene, bands, form)` must be the first
+child of a screen root. `LivingScene` selects Arena, Stage, Victory or Defeat;
+`LivingBands` adds the full-width contrast gradients required by that screen.
+The component owns the plate, rays/fog/rune, deterministic back particles,
+foreground, front particles, vignette and bands in paint order.
+
+Only the plate and foreground use the physical-height density override:
+desktop windows above 800 px load 1080 layers and every other desktop window
+loads 720; phones always load 720. Sprites continue to follow `UiDensity`.
+Cover fitting is limited to the two photographic layers, and all animation is
+post-layout `UiTransform`/tint work.
+
+`MotionSettings::reduce` is persisted as `reduce_motion` in preferences schema
+6. Reduce motion keeps plate + foreground + vignette and screen fades while
+hiding every decorative effect. `LivingQuality` samples mobile menu frame time
+and switches the session to plate + vignette when p90 exceeds 25 ms for three
+seconds. Set `OMOBA_UI_LOW_END=1` to force that path in QA.
+
+While a living root exists, the ordinary focus halo becomes a 7 px dark
+keyline under the unchanged gold ring. Menus opened during a running match do
+not create a living root, so the live world and ordinary focus treatment stay
+in place.
+
 ## Controls guide (P0-C)
 
 `help_overlay.rs` builds the guide from `omoba-ui/handoff/screens/hud-help.md`

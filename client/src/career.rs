@@ -1,5 +1,6 @@
 //! Authoritative career UI. Match receipts outlive live entities and connections.
 // i18n-strict
+use crate::ui::living_background::{self, LivingBands, LivingScene};
 use crate::{
     i18n::{Locale, data, lookup, tr, trf},
     input_context::InputContextSet,
@@ -2196,6 +2197,7 @@ struct RenderKey {
     show_entry: bool,
     selection_recovery: bool,
     mode: PlayerVisualMode,
+    in_match: bool,
     /// A language change rebuilds the screen in the new language.
     locale: u32,
 }
@@ -2268,6 +2270,10 @@ fn render(
     let front_end_menu = screen.as_ref().is_some_and(|screen| {
         screen.get().is_menu() || *screen.get() == crate::frontend::AppScreen::PostMatch
     });
+    let in_match = game
+        .as_ref()
+        .is_some_and(|game| matches!(game.state, GameState::Running))
+        && !front_end_menu;
     let show_entry = !front_end_menu
         && (selection_recovery
             || queue_text(&career.view.queue).is_some()
@@ -2311,6 +2317,7 @@ fn render(
         show_entry,
         selection_recovery,
         mode,
+        in_match,
         locale,
     };
     if previous.as_ref() == Some(&key) {
@@ -2442,6 +2449,26 @@ fn render(
             }),
         ))
         .with_children(|outer| {
+            if !in_match {
+                living_background::spawn(
+                    outer,
+                    LivingScene::Arena,
+                    LivingBands {
+                        header: Some(if phone {
+                            56.0
+                        } else {
+                            match career.modal {
+                                CareerModal::WebLink | CareerModal::Devices => 190.0,
+                                CareerModal::History => 172.0,
+                                CareerModal::Result => 132.0,
+                                _ => 104.0,
+                            }
+                        }),
+                        footer: None,
+                    },
+                    ui::Form::of(phone),
+                );
+            }
             outer
                 .spawn((
                     Node {
