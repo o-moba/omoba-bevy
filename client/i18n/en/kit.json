@@ -64,6 +64,7 @@
   "kit.gallery.row.scoreboard": "scoreboard row",
   "kit.gallery.row.timer": "timer ring",
   "kit.gallery.row.hud": "HUD plates",
+  "kit.gallery.row.skill_card": "skill card (tooltip · hold card)",
   "kit.gallery.row.icons": "icons",
   "kit.gallery.row.backgrounds": "focus over backgrounds",
   "kit.gallery.sample.toast_info": "Party invite sent to {name}",

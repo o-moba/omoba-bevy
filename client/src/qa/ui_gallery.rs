@@ -1474,6 +1474,57 @@ fn hud_page(body: &mut ChildSpawnerCommands, form: Form) {
             form,
         );
     });
+    row(body, "kit.gallery.row.skill_card", |line| {
+        skill_cards(
+            line,
+            &crate::net::PlayerProgression {
+                level: 4,
+                ranks: [1, 1, 1, 0],
+                ..default()
+            },
+        );
+    });
+}
+
+/// The HUD's skill card (`skill-description.md`): the desktop tooltip with
+/// its keycap and live status, and the phone hold card with the touch hint.
+fn skill_cards(line: &mut ChildSpawnerCommands, progression: &crate::net::PlayerProgression) {
+    let parent = line.target_entity();
+    let mut commands = line.commands();
+    for (form, key) in [(Form::Desktop, Some("E")), (Form::Phone, None)] {
+        let card = crate::combat::skill_card::spawn_skill_card(&mut commands, form, ());
+        let mut view = crate::combat::skill_card::SkillCardView::of(
+            shared::HeroClass::Warden,
+            progression,
+            2,
+            100.0,
+            4.0,
+        );
+        view.key = key.map(str::to_owned);
+        if form == Form::Desktop {
+            view.status = Some((
+                crate::i18n::tr("combat.hotbar.ready").to_owned(),
+                crate::combat::skill_card::StatusTone::Ready,
+            ));
+        } else {
+            view.hint = true;
+        }
+        commands.entity(card).insert((
+            view,
+            Node {
+                width: Val::Px(crate::combat::skill_card::CARD.x),
+                height: Val::Px(crate::combat::skill_card::CARD.y),
+                padding: UiRect::axes(Val::Px(space::S12), Val::Px(space::S8 + 2.0)),
+                flex_direction: FlexDirection::Column,
+                row_gap: Val::Px(space::S4),
+                border: UiRect::all(Val::Px(1.0)),
+                border_radius: BorderRadius::all(Val::Px(8.0)),
+                ..default()
+            },
+        ));
+        commands.entity(card).remove::<GlobalZIndex>();
+        commands.entity(parent).add_child(card);
+    }
 }
 
 fn type_page(body: &mut ChildSpawnerCommands) {

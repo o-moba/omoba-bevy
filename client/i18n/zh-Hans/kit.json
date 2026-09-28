@@ -64,6 +64,7 @@
   "kit.gallery.row.scoreboard": "记分行",
   "kit.gallery.row.timer": "计时环",
   "kit.gallery.row.hud": "界面面板",
+  "kit.gallery.row.skill_card": "技能卡（提示 · 长按卡）",
   "kit.gallery.row.icons": "图标",
   "kit.gallery.row.backgrounds": "背景上的聚焦",
   "kit.gallery.sample.toast_info": "已向 {name} 发送组队邀请",
