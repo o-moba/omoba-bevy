@@ -28,6 +28,7 @@ use crate::i18n::UiLabel;
 
 pub(crate) mod controls;
 pub(crate) mod game;
+pub(crate) mod status;
 pub(crate) mod surfaces;
 
 /// Colour role of a kit button. Painted by [`paint_pressables`] from

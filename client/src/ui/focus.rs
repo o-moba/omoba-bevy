@@ -60,6 +60,17 @@ pub(crate) struct FocusAdjust {
     pub step: i8,
 }
 
+/// How a control takes the focus when its surface appears (the default is
+/// the first candidate, top-to-bottom then left-to-right).
+#[derive(Component, Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum FocusEntry {
+    /// Focused first when the surface appears (a Retry that just appeared).
+    Preferred,
+    /// Never focused by the surface appearing; the first direction focuses
+    /// it (a Cancel on a shared countdown: a stray confirm must not press it).
+    Deferred,
+}
+
 /// The focused kit button, if a focus driver is active.
 #[derive(Resource, Default, Debug)]
 pub(crate) struct UiFocus {
@@ -98,19 +109,39 @@ impl UiFocus {
         self.revealed = None;
     }
 
-    /// One frame of navigation over `candidates` (sorted top-to-bottom, then
-    /// left-to-right). Returns the button a confirm activates.
+    /// [`Self::step_with`] with the default entry for every candidate.
+    #[cfg(test)]
     pub(crate) fn step(
         &mut self,
         candidates: &[Candidate],
         nav: impl IntoIterator<Item = FocusNav>,
+    ) -> Option<Entity> {
+        self.step_with(candidates, nav, |_| None)
+    }
+
+    /// One frame of navigation over `candidates` (sorted top-to-bottom, then
+    /// left-to-right), with each candidate's [`FocusEntry`] (`None` = the
+    /// default). Returns the button a confirm activates.
+    pub(crate) fn step_with(
+        &mut self,
+        candidates: &[Candidate],
+        nav: impl IntoIterator<Item = FocusNav>,
+        entry: impl Fn(Entity) -> Option<FocusEntry>,
     ) -> Option<Entity> {
         let surface: Vec<Entity> = candidates.iter().map(|c| c.entity).collect();
         if surface != self.surface {
             // A new modal, page or section never inherits a confirm meant for
             // the buttons it replaced.
             self.surface = surface;
-            self.focused = candidates.first().map(|c| c.entity);
+            self.focused = candidates
+                .iter()
+                .find(|c| entry(c.entity) == Some(FocusEntry::Preferred))
+                .or_else(|| {
+                    candidates
+                        .iter()
+                        .find(|c| entry(c.entity) != Some(FocusEntry::Deferred))
+                })
+                .map(|c| c.entity);
             self.confirm_ready = false;
             return None;
         }
@@ -264,6 +295,7 @@ pub(crate) fn navigate_focus(
     mut presses: MessageWriter<SyntheticPress>,
     adjustable: Query<(), With<FocusAdjustable>>,
     skipped: Query<(), With<FocusSkip>>,
+    entries: Query<&FocusEntry>,
     mut adjust: MessageWriter<FocusAdjust>,
 ) {
     let mut steps: Vec<FocusNav> = nav.read().copied().collect();
@@ -335,7 +367,9 @@ pub(crate) fn navigate_focus(
             .then_with(|| a.rect.center().x.total_cmp(&b.rect.center().x))
             .then_with(|| a.entity.cmp(&b.entity))
     });
-    if let Some(entity) = focus.step(&candidates, steps) {
+    if let Some(entity) = focus.step_with(&candidates, steps, |entity| {
+        entries.get(entity).ok().copied()
+    }) {
         presses.write(SyntheticPress(entity));
     }
     let Some(focused) = focus.focused else {
@@ -397,6 +431,36 @@ mod tests {
             directional_neighbor(&buttons, None, Vec2::X),
             Some(buttons[0].entity)
         );
+    }
+
+    #[test]
+    fn a_preferred_control_takes_the_new_surface_and_a_deferred_one_waits_for_a_direction() {
+        let mut focus = UiFocus {
+            enabled: true,
+            ..default()
+        };
+        let cancel = candidate(1, Vec2::ZERO);
+        let retry = candidate(2, Vec2::Y * 200.0);
+        let entry = |entity: Entity| {
+            if entity == cancel.entity {
+                Some(FocusEntry::Deferred)
+            } else if entity == retry.entity {
+                Some(FocusEntry::Preferred)
+            } else {
+                None
+            }
+        };
+        // Cancel alone: nothing focused, a confirm presses nothing.
+        assert_eq!(focus.step_with(&[cancel], [FocusNav::Confirm], entry), None);
+        assert_eq!(focus.focused(), None);
+        focus.step_with(&[cancel], [], entry);
+        assert_eq!(focus.step_with(&[cancel], [FocusNav::Confirm], entry), None);
+        // A direction focuses it.
+        focus.step_with(&[cancel], [FocusNav::Down], entry);
+        assert_eq!(focus.focused(), Some(cancel.entity));
+        // Retry appears below Cancel and takes the focus.
+        focus.step_with(&[cancel, retry], [], entry);
+        assert_eq!(focus.focused(), Some(retry.entity));
     }
 
     #[test]

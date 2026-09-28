@@ -18,7 +18,7 @@ pub(crate) mod widgets;
 
 pub(crate) use action::{Activated, UiAction, UiActionAppExt};
 pub(crate) use back::{BackInput, BackPress};
-pub(crate) use focus::{FocusNav, UiFocus};
+pub(crate) use focus::{FocusEntry, FocusNav, UiFocus};
 pub(crate) use gesture::{GestureEpoch, Pressable, SyntheticPress};
 pub(crate) use modal::{ModalAppExt, ModalId, ModalRoot, ModalStack};
 pub(crate) use scroll::ScrollArea;
@@ -102,6 +102,7 @@ impl Plugin for UiKitPlugin {
         widgets::controls::add_systems(app);
         widgets::surfaces::add_systems(app);
         widgets::game::add_systems(app);
+        widgets::status::add_systems(app);
         app.add_systems(Update, gesture::recognize_presses.in_set(UiSet::Gesture))
             .add_systems(Update, scroll::scroll_areas.in_set(UiSet::Scroll))
             .add_systems(Update, focus::navigate_focus.in_set(UiSet::Focus))

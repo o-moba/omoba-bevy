@@ -1387,7 +1387,12 @@ pub(crate) struct TimerRing {
 }
 
 /// The two atlas layers of a ring (track = full frame, live arc = progress).
-fn timer_ring_layers(parent: &mut ChildSpawnerCommands, progress: f32, track: Color, arc: Color) {
+pub(crate) fn timer_ring_layers(
+    parent: &mut ChildSpawnerCommands,
+    progress: f32,
+    track: Color,
+    arc: Color,
+) {
     let full = Node {
         position_type: PositionType::Absolute,
         left: Val::Px(0.0),
@@ -1424,11 +1429,34 @@ pub(crate) fn ring_frame(progress: f32) -> usize {
 }
 
 /// Ring sizes (`timer-ring.md`): lg 160 (ring 8, `type.number_xl`), md 96
-/// (ring 6, `type.number_lg`).
+/// (ring 6, `type.number_lg`), sm 44 (ring 4, `type.number`; the phone
+/// header countdown of `prematch-countdown.md`).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum RingSize {
     Large,
     Medium,
+    Small,
+}
+
+impl RingSize {
+    /// Side, ring thickness and the role of the number inside.
+    pub(crate) fn metrics(self) -> (f32, f32, TextRole) {
+        match self {
+            RingSize::Large => (size::TIMER_RING_LG, space::S8, TextRole::NumberXl),
+            RingSize::Medium => (
+                size::TIMER_RING_MD,
+                space::S4 + border::FRAME,
+                TextRole::NumberLg,
+            ),
+            RingSize::Small => (size::TIMER_RING_SM, space::S4, TextRole::Number),
+        }
+    }
+
+    /// Diameter of the centre disc inside the ring.
+    pub(crate) fn disc(self) -> f32 {
+        let (side, thickness, _) = self.metrics();
+        side - 2.0 * thickness - border::FRAME
+    }
 }
 
 /// A timer ring: track `color.surface.3`, arc `color.gold.400` (warning
@@ -1441,14 +1469,8 @@ pub(crate) fn timer_ring(
     time: String,
     caption: Option<String>,
 ) -> Entity {
-    let (side, thickness, role) = match ring_size {
-        RingSize::Large => (size::TIMER_RING_LG, space::S8, TextRole::NumberXl),
-        RingSize::Medium => (
-            size::TIMER_RING_MD,
-            space::S4 + border::FRAME,
-            TextRole::NumberLg,
-        ),
-    };
+    let (side, _, role) = ring_size.metrics();
+    let disc = ring_size.disc();
     parent
         .spawn((
             Node {
@@ -1465,8 +1487,8 @@ pub(crate) fn timer_ring(
             timer_ring_layers(root, ring.progress, color::SURFACE_3, ring_color(ring));
             root.spawn((
                 Node {
-                    width: Val::Px(side - 2.0 * thickness - border::FRAME),
-                    height: Val::Px(side - 2.0 * thickness - border::FRAME),
+                    width: Val::Px(disc),
+                    height: Val::Px(disc),
                     flex_direction: FlexDirection::Column,
                     justify_content: JustifyContent::Center,
                     align_items: AlignItems::Center,
