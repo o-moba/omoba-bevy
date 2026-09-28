@@ -59,6 +59,7 @@ impl Plugin for PauseMenuPlugin {
         app.init_resource::<PauseMenuState>()
             .init_resource::<AudioSettings>()
             .init_resource::<crate::help_overlay::HelpOverlayVisible>()
+            .init_resource::<SettingsHelpReturn>()
             .add_ui_action::<PauseAction>()
             .add_systems(Startup, setup_pause_menu_ui)
             .configure_sets(
@@ -90,6 +91,7 @@ impl Plugin for PauseMenuPlugin {
                 Update,
                 (
                     apply_pause_navigation,
+                    return_to_settings_after_help.after(apply_pause_navigation),
                     apply_pause_settings,
                     apply_pause_audio,
                     apply_pause_session,
@@ -119,6 +121,11 @@ pub(crate) struct PauseMenuState {
     pub(crate) open: bool,
     pub(crate) in_settings: bool,
 }
+
+/// The controls guide was opened from Settings (DECISIONS R6.5): closing it
+/// reopens Settings where the player left it instead of returning to the game.
+#[derive(Resource, Default, Debug, PartialEq, Eq)]
+pub(crate) struct SettingsHelpReturn(pub(crate) bool);
 
 #[derive(Component)]
 struct PauseMenuRoot;
@@ -427,6 +434,14 @@ fn setup_pause_menu_ui(mut commands: Commands) {
                                 LanguageValue,
                                 PauseAction::CycleLanguage,
                                 "PauseMenuLanguage",
+                            );
+                            // Opens the controls guide; closing it returns here (R6.5).
+                            widgets::button(
+                                settings,
+                                Localized::new("pause.settings.controls"),
+                                ButtonKind::Secondary,
+                                PauseAction::Help,
+                                "PauseMenuSettingsControlsButton",
                             );
 
                             section_title(settings, "pause.settings.sound", "PauseMenuAudioTitle");
@@ -742,11 +757,15 @@ fn sync_pause_menu_sections(
 }
 
 /// Page navigation: resume/close, settings in and out, the controls guide.
+/// The guide closes the menu; opened from Settings it remembers to come back
+/// (R6.5, [`return_to_settings_after_help`]).
 fn apply_pause_navigation(
     mut activated: MessageReader<Activated<PauseAction>>,
     mut menu: ResMut<PauseMenuState>,
     mut help: ResMut<crate::help_overlay::HelpOverlayVisible>,
+    help_return: Option<ResMut<SettingsHelpReturn>>,
 ) {
+    let mut help_return = help_return;
     for Activated { action, .. } in activated.read() {
         match action {
             PauseAction::Resume | PauseAction::Close => {
@@ -756,12 +775,30 @@ fn apply_pause_navigation(
             PauseAction::OpenSettings => menu.in_settings = true,
             PauseAction::BackFromSettings => menu.in_settings = false,
             PauseAction::Help if menu.open => {
+                if let Some(help_return) = help_return.as_mut() {
+                    help_return.0 = menu.in_settings;
+                }
                 menu.open = false;
                 menu.in_settings = false;
                 help.0 = true;
             }
             _ => {}
         }
+    }
+}
+
+/// R6.5: the guide opened from Settings closes back into Settings, on the
+/// page the player left (the Esc/B that closed the guide was consumed by it,
+/// so the menu stays open). From the Game menu it returns to the game.
+fn return_to_settings_after_help(
+    help: Res<crate::help_overlay::HelpOverlayVisible>,
+    mut help_return: ResMut<SettingsHelpReturn>,
+    mut menu: ResMut<PauseMenuState>,
+) {
+    if help_return.0 && !help.0 {
+        help_return.0 = false;
+        menu.open = true;
+        menu.in_settings = true;
     }
 }
 
@@ -2043,6 +2080,78 @@ mod tests {
         assert_eq!(app.world().get::<Text>(value).unwrap().0, "English");
         let section = app.world().get::<ChildOf>(button).unwrap().parent();
         assert!(app.world().get::<SettingsSection>(section).is_some());
+    }
+
+    /// R6.5: Controls opened from Settings closes back into Settings (the
+    /// Esc that closed the guide does not also close the menu); the Game
+    /// menu's Controls guide still returns to the game.
+    #[test]
+    fn controls_from_settings_return_to_settings_and_the_game_menu_guide_does_not() {
+        let mut app = App::new();
+        app.add_plugins(bevy::state::app::StatesPlugin)
+            .insert_state(crate::frontend::AppScreen::Home)
+            .init_resource::<ButtonInput<KeyCode>>()
+            .init_resource::<crate::net::GameStateSnapshot>()
+            .insert_resource(PauseMenuState {
+                open: true,
+                in_settings: true,
+            })
+            .init_resource::<SettingsHelpReturn>()
+            .add_message::<Activated<PauseAction>>()
+            .add_plugins(crate::help_overlay::HelpOverlayPlugin)
+            .add_systems(Startup, setup_pause_menu_ui)
+            .add_systems(
+                Update,
+                (
+                    dispatch_actions::<PauseAction>
+                        .before(crate::help_overlay::HelpOverlaySet::Input),
+                    toggle_pause_menu.after(crate::help_overlay::HelpOverlaySet::Input),
+                    (apply_pause_navigation, return_to_settings_after_help)
+                        .chain()
+                        .after(toggle_pause_menu),
+                ),
+            );
+        app.update();
+        let press = |app: &mut App, id: &str| {
+            let button = harness::find(app.world_mut(), id).unwrap();
+            app.world_mut()
+                .entity_mut(button)
+                .insert(Interaction::Pressed);
+            app.update();
+            app.world_mut().entity_mut(button).insert(Interaction::None);
+            app.update();
+        };
+        let escape = |app: &mut App| {
+            app.world_mut()
+                .resource_mut::<ButtonInput<KeyCode>>()
+                .press(KeyCode::Escape);
+            app.update();
+            let mut keys = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+            keys.release(KeyCode::Escape);
+            keys.clear();
+            app.update();
+        };
+        let help = |app: &App| {
+            app.world()
+                .resource::<crate::help_overlay::HelpOverlayVisible>()
+                .0
+        };
+        press(&mut app, "PauseMenuSettingsControlsButton");
+        assert!(help(&app));
+        assert!(!app.world().resource::<PauseMenuState>().open);
+        escape(&mut app);
+        assert!(!help(&app));
+        let menu = app.world().resource::<PauseMenuState>();
+        assert!(menu.open && menu.in_settings, "back on Settings");
+        // The Game menu's guide closes to the game (today's behaviour).
+        app.world_mut().resource_mut::<PauseMenuState>().in_settings = false;
+        app.update();
+        press(&mut app, "PauseMenuHelpButton");
+        assert!(help(&app));
+        escape(&mut app);
+        assert!(!help(&app));
+        assert!(!app.world().resource::<PauseMenuState>().open);
+        assert!(!app.world().resource::<SettingsHelpReturn>().0);
     }
 
     #[test]

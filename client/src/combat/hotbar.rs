@@ -37,9 +37,8 @@ pub(super) const SKILL_SLOT_SIZE: f32 = size::ABILITY.desktop;
 /// slots `space.16` apart.
 const BAR_INSET: (f32, f32) = (20.0, 14.0);
 const SKILL_SLOT_GAP: f32 = space::S16;
-/// Upgrade chip (`hud.md` `upgrade-chip`): 24 high, keycap 18.
+/// Upgrade chip (`hud.md` `upgrade-chip`): 24 high.
 const CHIP_H: f32 = 24.0;
-const CHIP_KEYCAP: f32 = 18.0;
 
 /// A press on the desktop skill bar: cast the slot, spend a point on it, or
 /// (the upgrade chip) spend a point on the first eligible slot, like `U`.
@@ -249,27 +248,10 @@ pub(super) fn setup_combat_ui(
                 TextColor(color::TEXT_ON_GOLD),
                 TextLayout::new_with_no_wrap(),
             ));
-            chip.spawn((
-                Node {
-                    min_width: Val::Px(CHIP_KEYCAP),
-                    height: Val::Px(CHIP_KEYCAP),
-                    padding: UiRect::horizontal(Val::Px(space::S4)),
-                    justify_content: JustifyContent::Center,
-                    align_items: AlignItems::Center,
-                    border: UiRect::all(Val::Px(border::HAIRLINE)),
-                    border_radius: BorderRadius::all(Val::Px(radius::SM)),
-                    ..default()
-                },
-                BackgroundColor(color::SURFACE_1_OPAQUE),
-                BorderColor::all(color::GOLD_600),
-            ))
-            .with_child((
-                Text::new(crate::input_bindings::upgrade_key_display()),
-                theme::styled_text(
-                    TextStyle::keep_case(TextRole::Label).sized(TextRole::NumberSm.style().size),
-                ),
-                TextColor(color::TEXT_GOLD),
-            ));
+            crate::ui::widgets::surfaces::keycap(
+                chip,
+                crate::input_bindings::upgrade_key_display(),
+            );
         });
     if !phone {
         super::skill_card::spawn_skill_card(

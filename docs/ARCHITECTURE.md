@@ -74,7 +74,9 @@ environment variable is set: `OMOBA_ANIMATION_QA` (runs instead of the game),
 `team-vision`), `OMOBA_FRONTEND_QA_OUTPUT` (with `OMOBA_AVATAR_QA` or
 `OMOBA_FRONTEND_QA_FLOW`), `OMOBA_SOCIAL_QA_OUTPUT`, `OMOBA_AUDIO_QA_OUTPUT`,
 `OMOBA_OFFLINE_SMOKE_DIR`, `OMOBA_CAREER_QA_OUTPUT`,
-`OMOBA_SUPPORTER_QA_DIR`, and `OMOBA_SANDBOX_QA_OUTPUT` (the Combat Test
+`OMOBA_SUPPORTER_QA_DIR`, `OMOBA_HELP_QA_SHOTS` (the controls guide's
+controller focus and Settings → Controls return), and
+`OMOBA_SANDBOX_QA_OUTPUT` (the Combat Test
 panel harness, which stays in `sandbox/ui/qa.rs` because it drives the
 panel's private types). `cargo clippy -p client --lib --no-default-features`
 (`make check-no-qa`, also in CI) keeps the build without them free of

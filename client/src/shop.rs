@@ -15,7 +15,7 @@ use crate::{
     ui::{
         Activated, ModalId, ModalRoot, TestId, UiAction, UiActionAppExt,
         kit_assets::{Icon, KitImage},
-        theme::{self as ui, ButtonKind, Form, TextStyle},
+        theme::{self as ui, ButtonKind, Form},
         tokens::{TextRole, border, color, radius, size, space},
         widgets::{
             ButtonStyle, KitParts, KitSkin, game, icon_node,
@@ -171,7 +171,6 @@ const SLOT_GAP: f32 = 6.0;
 const EQUIPMENT_PADDING: f32 = space::S8;
 /// Gold row (desktop status plate): 104 × 24 with a keycap.
 const GOLD_ROW: Vec2 = Vec2::new(104.0, 24.0);
-const GOLD_KEYCAP: f32 = 18.0;
 
 /// The desktop gold row of the player status plate (`hud.md`
 /// `player-status`): a plate button (`ShopAction::Toggle`) with `hud/gold`,
@@ -214,36 +213,9 @@ pub(crate) fn spawn_gold_row(parent: &mut ChildSpawnerCommands) {
             QuickGold,
             Name::new("QuickGoldText"),
         ));
-        row.spawn(keycap(crate::input_bindings::shop_key_display()));
+        crate::ui::widgets::surfaces::keycap(row, crate::input_bindings::shop_key_display());
     });
     row.insert(parts);
-}
-
-/// A key badge like the ability key (`color.surface.1.opaque`, `gold.600`
-/// hairline, the key in `type.number_sm` size gold).
-fn keycap(key: &'static str) -> impl Bundle {
-    (
-        Node {
-            min_width: Val::Px(GOLD_KEYCAP),
-            height: Val::Px(GOLD_KEYCAP),
-            padding: UiRect::horizontal(Val::Px(space::S4)),
-            justify_content: JustifyContent::Center,
-            align_items: AlignItems::Center,
-            border: UiRect::all(Val::Px(border::HAIRLINE)),
-            border_radius: BorderRadius::all(Val::Px(radius::SM)),
-            ..default()
-        },
-        BackgroundColor(color::SURFACE_1_OPAQUE),
-        BorderColor::all(color::GOLD_600),
-        Pickable::IGNORE,
-        children![(
-            Text::new(key),
-            ui::styled_text(
-                TextStyle::keep_case(TextRole::Label).sized(TextRole::NumberSm.style().size)
-            ),
-            TextColor(color::TEXT_GOLD),
-        )],
-    )
 }
 
 /// An item slot button (`item-slot.md` look: `color.surface.0`, subtle

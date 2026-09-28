@@ -86,6 +86,7 @@ pub(crate) fn draw_legend(
         ),
         With<ControllerLegend>,
     >,
+    help: Option<Res<crate::help_overlay::HelpOverlayShown>>,
 ) {
     let viewport = windows
         .single()
@@ -110,8 +111,16 @@ pub(crate) fn draw_legend(
         // Desktop match: bottom-centre above the ability bar, y 520–572 at
         // 720 (hud.md § States, Controller active).
         let desktop_match = !menu && phone.is_none();
+        // Over the help guide the strip hugs the top edge so it clears the
+        // guide's frame and the phone dismiss button.
+        let help_open = help.as_ref().is_some_and(|help| help.0);
         let (top, bottom, size) = if menu {
-            let top = phone.map_or(12.0, |mobile| mobile.safe.top + 8.0);
+            let top = match (phone, help_open) {
+                (Some(mobile), true) => mobile.safe.top,
+                (Some(mobile), false) => mobile.safe.top + 8.0,
+                (None, true) => 0.0,
+                (None, false) => 12.0,
+            };
             (Val::Px(top), Val::Auto, 10.0)
         } else if let Some(mobile) = phone {
             (Val::Auto, Val::Px(mobile.safe.bottom), 10.0)

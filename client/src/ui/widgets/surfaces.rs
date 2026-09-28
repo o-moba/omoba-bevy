@@ -737,6 +737,151 @@ pub(crate) fn run_toasts(
     }
 }
 
+/// A keycap: the ability button's key badge (`ability-button.md`) as an
+/// inline control legend (`hud-help.md` inputs): `size.badge.height` high,
+/// `color.surface.1.opaque`, hairline `color.gold.600`, the key in
+/// `type.number_sm` size and the semibold body face, `color.text.gold`.
+/// Key names are glyphs, never translated.
+pub(crate) fn keycap(parent: &mut ChildSpawnerCommands, key: impl UiLabel) -> Entity {
+    parent
+        .spawn((
+            Node {
+                min_width: Val::Px(size::BADGE_HEIGHT),
+                height: Val::Px(size::BADGE_HEIGHT),
+                padding: UiRect::horizontal(Val::Px(space::S4)),
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                flex_shrink: 0.0,
+                border: UiRect::all(Val::Px(border::HAIRLINE)),
+                border_radius: BorderRadius::all(Val::Px(radius::SM)),
+                ..default()
+            },
+            BackgroundColor(color::SURFACE_1_OPAQUE),
+            BorderColor::all(color::GOLD_600),
+            Pickable::IGNORE,
+        ))
+        .with_child((
+            key.into_text(),
+            theme::styled_text(
+                TextStyle::keep_case(TextRole::Label).sized(TextRole::NumberSm.style().size),
+            ),
+            TextColor(color::TEXT_GOLD),
+        ))
+        .id()
+}
+
+/// Info card padding (`space.16` desktop / `space.12` phone, `hud-help.md`).
+pub(crate) const INFO_CARD_PADDING: Metric = Metric::new(space::S16, space::S12);
+/// The icon disc (`size.icon.xl` / `size.icon.lg`) and its icon
+/// (`size.icon.md` / `size.icon.sm`).
+pub(crate) const INFO_CARD_DISC: Metric = Metric::new(size::ICON_XL, size::ICON_LG);
+pub(crate) const INFO_CARD_ICON: Metric = Metric::new(size::ICON_MD, size::ICON_SM);
+/// Card title: `type.heading`, set at 16 px on a phone (`hud-help.md`), below
+/// the phone heading minimum, so the card owns that size ([`theme::PhoneSized`]).
+pub(crate) const INFO_CARD_TITLE: Metric =
+    Metric::new(TextRole::Heading.style().size.desktop, 16.0);
+/// Gap between the disc and the title (the redline's 10 px) and between the
+/// header and the body (`space.8` / `space.4`).
+pub(crate) const INFO_CARD_HEAD_GAP: f32 = 10.0;
+pub(crate) const INFO_CARD_BODY_GAP: Metric = Metric::new(space::S8, space::S4);
+
+/// The parts of an [`info_card`] a screen fills or tests.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct InfoCard {
+    pub card: Entity,
+    pub title: Entity,
+    pub body: Entity,
+}
+
+/// An illustrated info card (`hud-help.md` help cards): a plain panel in
+/// `color.surface.2` with `color.border.subtle`, `radius.md`; a header with an
+/// icon disc (`color.surface.3`, hairline `color.gold.600`, gold icon) and a
+/// `type.heading` gold title; a `type.body` secondary body. The caller sizes
+/// the card (`node`) and may add an input legend row (keycaps, badges) at the
+/// bottom. Not interactive.
+pub(crate) fn info_card(
+    parent: &mut ChildSpawnerCommands,
+    node: Node,
+    icon: Icon,
+    title: impl UiLabel,
+    body: impl UiLabel,
+    form: Form,
+) -> InfoCard {
+    let phone = form == Form::Phone;
+    let padding = INFO_CARD_PADDING.at(form);
+    let disc = INFO_CARD_DISC.at(form);
+    let mut parts = InfoCard {
+        card: Entity::PLACEHOLDER,
+        title: Entity::PLACEHOLDER,
+        body: Entity::PLACEHOLDER,
+    };
+    let mut card = parent.spawn((
+        Node {
+            flex_direction: FlexDirection::Column,
+            padding: UiRect::all(Val::Px(padding)),
+            border: UiRect::all(Val::Px(border::HAIRLINE)),
+            border_radius: BorderRadius::all(Val::Px(radius::MD)),
+            overflow: Overflow::clip(),
+            ..node
+        },
+        BackgroundColor(color::SURFACE_2),
+        BorderColor::all(color::BORDER_SUBTLE),
+    ));
+    parts.card = card.id();
+    card.with_children(|card| {
+        card.spawn(Node {
+            height: Val::Px(disc),
+            column_gap: Val::Px(INFO_CARD_HEAD_GAP),
+            align_items: AlignItems::Center,
+            flex_shrink: 0.0,
+            ..default()
+        })
+        .with_children(|head| {
+            head.spawn((
+                Node {
+                    width: Val::Px(disc),
+                    height: Val::Px(disc),
+                    flex_shrink: 0.0,
+                    justify_content: JustifyContent::Center,
+                    align_items: AlignItems::Center,
+                    border: UiRect::all(Val::Px(border::HAIRLINE)),
+                    border_radius: BorderRadius::all(Val::Percent(50.0)),
+                    ..default()
+                },
+                BackgroundColor(color::SURFACE_3),
+                BorderColor::all(color::GOLD_600),
+            ))
+            .with_child(icon_node(icon, INFO_CARD_ICON.at(form), color::TEXT_GOLD));
+            let mut title = head.spawn((
+                title.into_text(),
+                theme::styled_text(TextStyle::new(TextRole::Heading).sized(INFO_CARD_TITLE)),
+                TextColor(color::TEXT_GOLD),
+                TextLayout::new_with_no_wrap(),
+            ));
+            if phone {
+                // Below the phone heading minimum: the card owns the size.
+                title.insert((
+                    theme::PhoneSized,
+                    TextFont::from_font_size(INFO_CARD_TITLE.phone),
+                ));
+            }
+            parts.title = title.id();
+        });
+        parts.body = card
+            .spawn((
+                body.into_text(),
+                theme::role_text(TextRole::Body),
+                TextColor(color::TEXT_SECONDARY),
+                Node {
+                    margin: UiRect::top(Val::Px(INFO_CARD_BODY_GAP.at(form))),
+                    ..default()
+                },
+            ))
+            .id();
+    });
+    parts
+}
+
 /// Every system of this module.
 pub(crate) fn add_systems(app: &mut App) {
     app.add_message::<ToastRequest>().add_systems(
