@@ -400,30 +400,45 @@ fn spawn_desktop_guide(root: &mut ChildSpawnerCommands) {
         ..default()
     })
     .with_children(|panel| {
-        panel.spawn((
-            Localized::new("help.eyebrow").into_text(),
-            theme::role_text(TextRole::Eyebrow),
-            TextColor(color::TEXT_MUTED),
-            TextLayout::new(Justify::Center, LineBreak::NoWrap),
-            Node {
-                height: Val::Px(DESKTOP_EYEBROW_H),
-                margin: UiRect::bottom(Val::Px(space::S4)),
-                ..default()
-            },
-            Name::new("HelpEyebrow"),
-        ));
-        panel.spawn((
-            Localized::new("help.title").into_text(),
-            theme::role_text(TextRole::Title),
-            TextColor(color::TEXT_GOLD),
-            TextLayout::new(Justify::Center, LineBreak::NoWrap),
-            Node {
-                height: Val::Px(DESKTOP_TITLE_H),
-                margin: UiRect::bottom(Val::Px(space::S16)),
-                ..default()
-            },
-            Name::new("HelpTitle"),
-        ));
+        // Bevy justifies text within its widest line, so a single line is
+        // centred by its row.
+        for (key, role, tint, height, gap, name) in [
+            (
+                "help.eyebrow",
+                TextRole::Eyebrow,
+                color::TEXT_MUTED,
+                DESKTOP_EYEBROW_H,
+                space::S4,
+                "HelpEyebrow",
+            ),
+            (
+                "help.title",
+                TextRole::Title,
+                color::TEXT_GOLD,
+                DESKTOP_TITLE_H,
+                space::S16,
+                "HelpTitle",
+            ),
+        ] {
+            panel
+                .spawn((
+                    Node {
+                        height: Val::Px(height),
+                        margin: UiRect::bottom(Val::Px(gap)),
+                        justify_content: JustifyContent::Center,
+                        align_items: AlignItems::Center,
+                        flex_shrink: 0.0,
+                        ..default()
+                    },
+                    Name::new(name),
+                ))
+                .with_child((
+                    Localized::new(key).into_text(),
+                    theme::role_text(role),
+                    TextColor(tint),
+                    TextLayout::new(Justify::Center, LineBreak::NoWrap),
+                ));
+        }
         panel
             .spawn((
                 Node {
@@ -481,21 +496,26 @@ fn spawn_desktop_guide(root: &mut ChildSpawnerCommands) {
             ))
             .with_children(|footer| {
                 spawn_dismiss(footer, form);
-                footer.spawn((
-                    reopen_hint().into_text(),
-                    theme::role_text(TextRole::Caption),
-                    TextColor(color::TEXT_MUTED),
-                    TextLayout::new_with_justify(Justify::Right),
-                    Node {
-                        position_type: PositionType::Absolute,
-                        left: Val::Px(DESKTOP_HINT.min.x),
-                        top: Val::Px(DESKTOP_HINT.min.y),
-                        width: Val::Px(DESKTOP_HINT.width()),
-                        height: Val::Px(DESKTOP_HINT.height()),
-                        ..default()
-                    },
-                    Name::new("HelpReopenHint"),
-                ));
+                footer
+                    .spawn((
+                        Node {
+                            position_type: PositionType::Absolute,
+                            left: Val::Px(DESKTOP_HINT.min.x),
+                            top: Val::Px(DESKTOP_HINT.min.y),
+                            width: Val::Px(DESKTOP_HINT.width()),
+                            height: Val::Px(DESKTOP_HINT.height()),
+                            justify_content: JustifyContent::FlexEnd,
+                            align_items: AlignItems::Center,
+                            ..default()
+                        },
+                        Name::new("HelpReopenHint"),
+                    ))
+                    .with_child((
+                        reopen_hint().into_text(),
+                        theme::role_text(TextRole::Caption),
+                        TextColor(color::TEXT_MUTED),
+                        TextLayout::new_with_justify(Justify::Right),
+                    ));
             });
     });
 }
