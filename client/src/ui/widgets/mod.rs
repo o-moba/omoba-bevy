@@ -97,6 +97,10 @@ pub(crate) enum KitSkin {
     Input,
     /// An ability button (circle, rim, cooldown, badges).
     Ability,
+    /// A HUD plate that is a button (`hud-plate.md`: the score strip, the
+    /// gold row): glass fill kept in every state, hairline border that turns
+    /// `color.gold.500` on hover.
+    Plate,
 }
 
 /// Child entities [`paint_kit`] repaints, recorded at spawn.
@@ -331,6 +335,7 @@ fn skin_fill(skin: KitSkin, style: &ButtonStyle, state: ButtonState) -> Option<C
         KitSkin::Toggle | KitSkin::Slider | KitSkin::Ability | KitSkin::Tertiary => {
             Some(Color::NONE)
         }
+        KitSkin::Plate => Some(theme::perceptual(color::SURFACE_GLASS_STRONG)),
         KitSkin::Cycle | KitSkin::HeroTile => Some(color::SURFACE_2),
         KitSkin::Input => Some(color::SURFACE_0),
         KitSkin::Slab | KitSkin::Native => None,
@@ -371,6 +376,10 @@ fn skin_border(skin: KitSkin, style: &ButtonStyle, state: ButtonState) -> Option
             (Hover, _) => color::GOLD_600,
             _ => color::BORDER_SUBTLE,
         },
+        KitSkin::Plate => match (state, style.selected) {
+            (Hover | Pressed, _) | (_, true) => color::GOLD_500,
+            _ => theme::perceptual(color::BORDER_HAIRLINE),
+        },
         KitSkin::Slab
         | KitSkin::Tertiary
         | KitSkin::Tab { .. }
@@ -386,7 +395,7 @@ fn icon_tint(skin: KitSkin, style: &ButtonStyle, state: ButtonState) -> Color {
     match (skin, state) {
         (_, Disabled) => color::TEXT_DISABLED,
         (KitSkin::Icon, Hover) => color::GOLD_300,
-        (KitSkin::Icon | KitSkin::Cycle, _) => color::TEXT_GOLD,
+        (KitSkin::Icon | KitSkin::Cycle | KitSkin::Plate, _) => color::TEXT_GOLD,
         (KitSkin::ShopCard, _) => color::GOLD_400,
         (KitSkin::Tab { .. }, _) if style.selected => color::TEXT_GOLD,
         (KitSkin::Tab { .. }, Hover) => color::TEXT_PRIMARY,
@@ -407,7 +416,8 @@ fn press_scale(skin: KitSkin, state: ButtonState) -> f32 {
             | KitSkin::Native
             | KitSkin::Row
             | KitSkin::HeroTile
-            | KitSkin::ShopCard,
+            | KitSkin::ShopCard
+            | KitSkin::Plate,
             ButtonState::Pressed,
         ) => motion::PRESS_SCALE,
         _ => 1.0,
@@ -744,7 +754,12 @@ pub(crate) fn paint_preview_rings(
     }
 }
 
-fn button_bundle<T: UiActionT>(node: Node, kind: ButtonKind, action: T, id: TestId) -> impl Bundle {
+pub(crate) fn button_bundle<T: UiActionT>(
+    node: Node,
+    kind: ButtonKind,
+    action: T,
+    id: TestId,
+) -> impl Bundle {
     let style = ButtonStyle::new(kind);
     (
         Button,
@@ -754,6 +769,34 @@ fn button_bundle<T: UiActionT>(node: Node, kind: ButtonKind, action: T, id: Test
         style,
         UiAction(action),
         id,
+    )
+}
+
+/// A HUD plate that is a button ([`KitSkin::Plate`]): `node` gets the
+/// hairline border and `radius.md`; the owner spawns the content and colours
+/// its text (the kit repaints the border, an `icon` part and the press scale).
+pub(crate) fn plate_button<T: UiActionT>(
+    node: Node,
+    action: T,
+    id: impl Into<TestId>,
+    parts: KitParts,
+) -> impl Bundle {
+    (
+        Button,
+        Node {
+            border: UiRect::all(Val::Px(border::HAIRLINE)),
+            border_radius: BorderRadius::all(Val::Px(radius::MD)),
+            ..node
+        },
+        BorderColor::all(theme::perceptual(color::BORDER_HAIRLINE)),
+        BackgroundColor(theme::perceptual(color::SURFACE_GLASS_STRONG)),
+        ButtonStyle::new(ButtonKind::Tile),
+        UiAction(action),
+        id.into(),
+        KitSkin::Plate,
+        NoSlab,
+        UiTransform::IDENTITY,
+        parts,
     )
 }
 

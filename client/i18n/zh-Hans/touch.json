@@ -1,7 +1,6 @@
 {
   "touch.attack": "攻击",
   "touch.ability.locked": "{level}级解锁",
-  "touch.ability.no_mana": "法力",
   "touch.rank.back": "返回",
   "touch.rank.points": "+{points}\n加点",
   "touch.target.minion": "小兵",
@@ -14,6 +13,5 @@
   "touch.aim.skill": "拖动瞄准 · 松开施放\n移到 × 取消",
   "touch.skill.rank": "{rank} 级",
   "touch.skill.unlocks": "{level} 级解锁",
-  "touch.skill.card": "{name}  ·  {availability}\n{description}\n\n{mana} 法力  ·  冷却 {cooldown} 秒\n松开关闭 · 轻触或拖动施放",
   "touch.rotate": "请横置手机\n横屏游玩 Omoba"
 }

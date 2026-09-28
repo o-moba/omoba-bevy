@@ -15,5 +15,10 @@
   "edge.scoreboard.detail": "金币 ↑ 为本局总收入，不含初始金币。清空一条兵线即可解锁敌方基地。",
   "edge.scoreboard.waiting": "等待实时比分…",
   "edge.scoreboard.empty": "暂无玩家",
-  "edge.scoreboard.offline": "{name} · 离线"
+  "edge.scoreboard.offline": "{name} · 离线",
+  "edge.target.minion_melee": "近战小兵",
+  "edge.target.minion_caster": "远程小兵",
+  "edge.target.tower": "防御塔",
+  "edge.target.base": "基地",
+  "edge.target.boss": "头目"
 }

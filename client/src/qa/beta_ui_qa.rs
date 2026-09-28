@@ -720,7 +720,7 @@ fn capture(
         return;
     }
     let primary_nodes: Vec<_> = scene.nodes.iter().filter(|(name, _, _, _)| edge::tracked(name.as_str()) || matches!(name.as_str(),
-        "FindMatchButton" | "AvatarGrid" | "HelpDismissButton" | "HelpOverlayRoot" | "GameStateLabel" | "ConnectionStatusPanel" | "MinimapRoot" | "MatchObjectivePanel" | "MatchHudColumn" | "SkillBarRoot" | "SkillSlot-Q" | "SkillSlot-R" | "EquipmentHud" | "ShopOpenButton" | "ShopPanel" | "ShopCloseButton" | "ShopBuy-EB" | "ShopBuy-GC" | "ShopSummary" | "ShopFeedback" | "MobileJoystick" | "MobileAttack" | "MobileAbility-0" | "MobileAbility-1" | "MobileAbility-2" | "MobileAbility-3" | "MobileUpgrade-0" | "MobileUpgrade-1" | "MobileUpgrade-2" | "MobileUpgrade-3" | "PhoneMenuBar" | "QaSkillUpgradeFixtureLabel" | "SocialEntry" | "SocialStatus" | "CareerEntryActions" | "HudProgressionText" | "HudXpText" | "MatchStatusText" | "MatchBuffText" | "EquipmentGold")
+        "FindMatchButton" | "AvatarGrid" | "HelpDismissButton" | "HelpOverlayRoot" | "GameStateLabel" | "ConnectionStatusPanel" | "MinimapRoot" | "MatchObjectivePanel" | "MatchHudColumn" | "SkillBarRoot" | "SkillSlot-Q" | "SkillSlot-R" | "EquipmentHud" | "ShopOpenButton" | "ShopPanel" | "ShopCloseButton" | "ShopBuy-EB" | "ShopBuy-GC" | "ShopSummary" | "ShopFeedback" | "MobileJoystick" | "MobileAttack" | "MobileAbility-0" | "MobileAbility-1" | "MobileAbility-2" | "MobileAbility-3" | "MobileUpgrade-0" | "MobileUpgrade-1" | "MobileUpgrade-2" | "MobileUpgrade-3" | "PhoneMenuBar" | "QaSkillUpgradeFixtureLabel" | "SocialEntry" | "SocialStatus" | "CareerEntryActions" | "MatchStatusText" | "MatchBuffText" | "SkillUpgradeChip" | "MatchBuffChips" | "BrushStatus" | "OfflinePracticeBanner")
             || name.as_str().starts_with("ShopBuy-") || name.as_str().starts_with("ShopDescription-") || name.as_str().starts_with("ShopDetails-") || name.as_str().starts_with("SkillName-") || name.as_str().starts_with("SkillRank-") || name.as_str().starts_with("SkillSlot-") || name.as_str().starts_with("SkillIcon-"))
         .map(|(name, node, transform, visible)| {
             let center = transform.translation;
@@ -763,29 +763,23 @@ fn capture(
             let Some(rect) = measured_logical_rect(node) else {
                 return false;
             };
+            // hud.md `minimap`: desktop 176 at (16, 16); phone 120 at
+            // safe left + 16, safe top + 12.
             let expected = if phone {
-                if qa.height <= 340 {
-                    96.0
-                } else {
-                    116.0 * mobile.as_ref().unwrap().scale()
-                }
+                crate::hud_layout::HudLayout::phone(mobile.as_ref().unwrap()).minimap
             } else {
-                144.0
+                Rect::from_corners(
+                    Vec2::splat(crate::minimap::DESKTOP_MINIMAP_INSET),
+                    Vec2::splat(
+                        crate::minimap::DESKTOP_MINIMAP_INSET
+                            + crate::minimap::DESKTOP_MINIMAP_SIZE,
+                    ),
+                )
             };
-            let inset = if phone {
-                mobile.as_ref().unwrap().safe.left
-            } else {
-                16.0
-            };
-            let top = if phone {
-                mobile.as_ref().unwrap().safe.top
-            } else {
-                16.0
-            };
-            (rect.width() - expected).abs() <= 1.0
-                && (rect.height() - expected).abs() <= 1.0
-                && (rect.min.x - inset).abs() <= 1.0
-                && (rect.min.y - top).abs() <= 1.0
+            (rect.width() - expected.width()).abs() <= 1.0
+                && (rect.height() - expected.height()).abs() <= 1.0
+                && (rect.min.x - expected.min.x).abs() <= 1.0
+                && (rect.min.y - expected.min.y).abs() <= 1.0
         });
     let playfield_clear = !resting
         || primary_nodes
@@ -816,9 +810,7 @@ fn capture(
                 return true;
             };
             let parent = match name {
-                "HudProgressionText" | "HudXpText" => Some("MatchHudColumn".to_owned()),
-                "MatchStatusText" | "MatchBuffText" => Some("MatchObjectivePanel".to_owned()),
-                "EquipmentGold" => Some("EquipmentHud".to_owned()),
+                "MatchStatusText" => Some("MatchObjectivePanel".to_owned()),
                 "TargetHealthName" | "TargetHealthValue" => Some("TargetHealthRoot".to_owned()),
                 "QuickBuyPrice-0" => Some("QuickBuy-0".to_owned()),
                 "QuickBuyPrice-1" => Some("QuickBuy-1".to_owned()),
@@ -951,10 +943,12 @@ fn capture(
             "MobileDash",
             "MobileHaste",
         ],
+        // Desktop: the gold row is in the status plate, the quick-buy
+        // offers in the equipment plate (hud.md).
         _ if resting => &[
             "MinimapRoot",
             "MatchHudColumn",
-            "QuickBuyHud",
+            "EquipmentHud",
             "GoldShopButton",
             "QuickBuy-0",
             "QuickBuy-1",
@@ -996,8 +990,10 @@ fn capture(
         "MatchObjectivePanel",
         "MatchHudColumn",
         "SkillBarRoot",
+        "SkillUpgradeChip",
         "EquipmentHud",
         "QuickBuyHud",
+        "MatchBuffChips",
         "MatchScoreStrip",
         "MatchMenuButton",
         "TargetHealthRoot",
@@ -1127,6 +1123,8 @@ fn persistent_hud_panel(name: &str) -> bool {
             | "CareerEntryActions"
             | "ConnectionStatusPanel"
             | "QuickBuyHud"
+            | "MatchBuffChips"
+            | "SkillUpgradeChip"
             | "MatchScoreStrip"
             | "MatchMenuButton"
             | "TargetHealthRoot"

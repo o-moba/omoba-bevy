@@ -1,4 +1,6 @@
-//! In-match HUD: progression, local HP/mana, target summary, objective hint, and key hints.
+//! In-match HUD: the player status plate (portrait, XP ring, level, HP, mana,
+//! gold), the team-buff chips, the (hidden) objective hint and the gameplay
+//! HUD visibility (`omoba-ui/handoff/screens/hud.md`).
 // i18n-strict
 
 use bevy::prelude::*;
@@ -6,6 +8,7 @@ use bevy::prelude::*;
 use crate::i18n::{data, tr, trf};
 
 use crate::combat::{CombatStats, TargetState};
+use crate::hud_layout::HudRegion;
 #[cfg(test)]
 use crate::input_bindings::upgrade_key_display;
 use crate::input_bindings::{help_key_display, skill_keys_display};
@@ -17,6 +20,16 @@ use crate::net::{
 use crate::net::{TargetId, TargetKind};
 use crate::player::Player;
 use crate::team::{Team, TeamSelection};
+use crate::ui::{
+    kit_assets::Icon,
+    theme::{self as ui, Form, TextStyle},
+    tokens::{TextRole, color, radius, size, space},
+    widgets::{
+        game::{self, BarKind, BarValue, PortraitSpec, PortraitView},
+        icon_node,
+        surfaces::{Tooltip, TooltipText},
+    },
+};
 #[cfg(test)]
 use shared::HeroClass;
 
@@ -28,11 +41,9 @@ pub(crate) struct MatchHudVisuals;
 impl Plugin for MatchHudPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, setup_match_hud)
-            .add_systems(Update, adapt_desktop_dock)
-            .add_systems(Update, sync_buff_row_visibility.after(MatchHudVisuals))
             .add_systems(
                 Update,
-                (update_match_hud, update_hero_details)
+                (update_match_hud, update_player_status, update_buff_chips)
                     .in_set(MatchHudVisuals)
                     .after(crate::net::ClientNetPipeline::ApplySnapshot),
             )
@@ -44,208 +55,24 @@ impl Plugin for MatchHudPlugin {
 }
 
 #[derive(Component)]
-struct MatchHudProgressionText;
-
-#[derive(Component)]
 struct MatchHudStatusText;
 
-/// Active boss team-buff indicator (hidden while no buff is active).
+/// The team-buff chip column (`hud.md` region `buff-chips`).
 #[derive(Component)]
-struct MatchHudBuffText;
+struct BuffChips;
 
-/// Container for the HP/Mana bars; hidden until the match is running.
-#[derive(Component)]
-struct HudBarsRoot;
-
-#[derive(Component)]
-struct HpBarFill;
-
-#[derive(Component)]
-struct ManaBarFill;
-
-const BAR_TRACK_COLOR: Color = Color::srgba(0.10, 0.11, 0.14, 0.92);
-const MANA_BAR_COLOR: Color = Color::srgb(0.30, 0.55, 0.95);
-
-/// HP bar tints green/amber/red so low health reads at a glance.
-fn hp_bar_color(ratio: f32) -> Color {
-    if ratio > 0.5 {
-        Color::srgb(0.30, 0.78, 0.34)
-    } else if ratio > 0.25 {
-        Color::srgb(0.90, 0.74, 0.20)
-    } else {
-        Color::srgb(0.86, 0.26, 0.22)
-    }
-}
-
-fn setup_match_hud(mut commands: Commands) {
-    use crate::ui::theme as ui;
-    commands
-        .spawn((
-            Button,
-            Node {
-                position_type: PositionType::Absolute,
-                left: Val::Px(16.0),
-                top: Val::Px(218.0),
-                width: Val::Px(144.0),
-                height: Val::Px(38.0),
-                padding: UiRect::all(Val::Px(3.0)),
-                column_gap: Val::Px(5.0),
-                align_items: AlignItems::Center,
-                ..ui::panel_node()
-            },
-            BackgroundColor(ui::PANEL),
-            BorderColor::all(ui::EDGE),
-            ZIndex(12),
-            Name::new("MatchHudColumn"),
-        ))
-        .with_children(|panel| {
-            panel.spawn((
-                Text::new(trf("hud.level", &[("level", &1)])),
-                ui::text(12.0),
-                TextColor(ui::GOLD),
-                MatchHudProgressionText,
-                Name::new("HudProgressionText"),
-                Node {
-                    width: Val::Px(24.0),
-                    flex_shrink: 0.0,
-                    ..default()
-                },
-            ));
-            panel
-                .spawn((
-                    Node {
-                        flex_grow: 1.0,
-                        flex_direction: FlexDirection::Column,
-                        row_gap: Val::Px(2.0),
-                        ..default()
-                    },
-                    Visibility::Hidden,
-                    HudBarsRoot,
-                    Name::new("MatchHudBars"),
-                ))
-                .with_children(|bars| {
-                    spawn_stat_bar(bars, HudResource::Health, hp_bar_color(1.0), HpBarFill);
-                    spawn_stat_bar(bars, HudResource::Mana, MANA_BAR_COLOR, ManaBarFill);
-                });
-            panel.spawn((
-                Text::new(""),
-                ui::text(12.0),
-                TextColor(ui::MUTED),
-                HudXpText,
-                Node {
-                    display: Display::None,
-                    ..default()
-                },
-                Name::new("HudXpText"),
-            ));
-        });
-    commands
-        .spawn((
-            Node {
-                position_type: PositionType::Absolute,
-                left: Val::Px(468.0),
-                bottom: Val::Px(166.0),
-                width: Val::Px(344.0),
-                justify_content: JustifyContent::Center,
-                ..default()
-            },
-            Pickable::IGNORE,
-            ZIndex(8),
-            Name::new("MatchObjectiveRoot"),
-        ))
-        .with_children(|root| {
-            root.spawn((
-                Button,
-                Node {
-                    width: Val::Percent(100.0),
-                    max_width: Val::Px(344.0),
-                    min_width: Val::Px(0.0),
-                    flex_direction: FlexDirection::Column,
-                    align_items: AlignItems::FlexStart,
-                    row_gap: Val::Px(3.0),
-                    padding: UiRect::axes(Val::Px(12.0), Val::Px(8.0)),
-                    ..ui::panel_node()
-                },
-                BackgroundColor(ui::PANEL),
-                BorderColor::all(ui::EDGE),
-                Name::new("MatchObjectivePanel"),
-            ))
-            .with_children(|panel| {
-                panel.spawn((
-                    Text::new(""),
-                    ui::text(12.0),
-                    TextColor(ui::IVORY),
-                    MatchHudStatusText,
-                    Name::new("MatchStatusText"),
-                ));
-                panel.spawn((
-                    Text::new(""),
-                    ui::text(11.0),
-                    TextColor(ui::GOLD),
-                    MatchHudBuffText,
-                    Name::new("MatchBuffText"),
-                ));
-            });
-        });
-}
-
-/// Shared anchor keeps status and ability rows aligned at every desktop width.
-pub(crate) fn desktop_skills_left(width: f32) -> f32 {
-    ((width - 344.0) * 0.5).max(16.0)
-}
-
-fn adapt_desktop_dock(
-    windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
-    mobile: Option<Res<crate::mobile_controls::MobileControls>>,
-    mut nodes: Query<(&Name, &mut Node)>,
-) {
-    let phone = mobile.as_ref().filter(|m| m.enabled);
-    let Ok(window) = windows.single() else {
-        return;
-    };
-    for (name, mut node) in &mut nodes {
-        if name.as_str() == "MatchHudColumn" {
-            let (left, top, width) = phone.map_or((16.0, 218.0, 144.0), |m| {
-                (
-                    m.safe.left + if m.viewport.y <= 340.0 { 102.0 } else { 0.0 },
-                    m.safe.top
-                        + if m.viewport.y <= 340.0 {
-                            0.0
-                        } else {
-                            172.0 * m.scale()
-                        },
-                    140.0 * m.scale(),
-                )
-            });
-            node.left = Val::Px(left);
-            node.top = Val::Px(top);
-            node.bottom = Val::Auto;
-            node.width = Val::Px(width);
-            node.height = Val::Px(38.0);
-        }
-        if phone.is_none()
-            && matches!(
-                name.as_str(),
-                "MatchObjectiveRoot" | "SkillBarRoot" | "ActionFeedback"
-            )
-        {
-            node.left = Val::Px(desktop_skills_left(window.width()));
-        }
-    }
-}
-
+/// The status plate's portrait (avatar, XP ring, level disc).
 #[derive(Component)]
 struct HudPortrait;
-#[derive(Component)]
-struct HudXpText;
-/// Which pool a HUD bar shows. Identity comes from this, never from text.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum HudResource {
+
+/// The status plate's HP and mana bars.
+#[derive(Component, Clone, Copy, PartialEq, Eq, Debug)]
+enum HudBar {
     Health,
     Mana,
 }
 
-impl HudResource {
+impl HudBar {
     /// Stable id in the bar's `Name` (`MatchHudBar-HP`); never translated.
     const fn id(self) -> &'static str {
         match self {
@@ -255,75 +82,373 @@ impl HudResource {
     }
 }
 
-#[derive(Component)]
-struct HudResourceText(HudResource);
+/// Status plate anatomy (hud.md: desktop 288 × 72, phone 200 × 48).
+const DESKTOP_HP_W: f32 = 200.0;
+const DESKTOP_MANA_W: f32 = 156.0;
+const PHONE_BAR_W: f32 = 140.0;
+/// Phone level disc (`hud.md` phone player-status: 18).
+const PHONE_LEVEL_DISC: f32 = 18.0;
+/// Buff chip (hud.md `buff-chips`): 24 high, max 344 wide.
+const BUFF_CHIP_H: f32 = 24.0;
+/// The desktop offline-practice badge sits atop the chip column; the chips
+/// move down by its height + `space.4` (VARIANTS.md `offline-practice`).
+pub(crate) const PRACTICE_BADGE_SHIFT: f32 = BUFF_CHIP_H + space::S4;
 
-fn update_hero_details(
+fn phone_hud(mobile: Option<&crate::mobile_controls::MobileControls>) -> bool {
+    mobile.is_some_and(|mobile| mobile.enabled)
+}
+
+fn setup_match_hud(
     mut commands: Commands,
-    assets: Res<AssetServer>,
+    mobile: Option<Res<crate::mobile_controls::MobileControls>>,
+) {
+    let form = Form::of(phone_hud(mobile.as_deref()));
+    spawn_player_status(&mut commands, form);
+    commands.spawn((
+        Node {
+            position_type: PositionType::Absolute,
+            flex_direction: FlexDirection::Column,
+            align_items: AlignItems::FlexStart,
+            row_gap: Val::Px(space::S4),
+            ..default()
+        },
+        HudRegion::BuffChips,
+        BuffChips,
+        Pickable::IGNORE,
+        ZIndex(12),
+        Name::new("MatchBuffChips"),
+    ));
+    // The objective hint stays hidden (hud.md § Out of scope): goal text
+    // lives in the scoreboard detail and help.
+    commands
+        .spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(468.0),
+                bottom: Val::Px(166.0),
+                width: Val::Px(344.0),
+                justify_content: JustifyContent::Center,
+                display: Display::None,
+                ..default()
+            },
+            Pickable::IGNORE,
+            ZIndex(8),
+            Name::new("MatchObjectiveRoot"),
+        ))
+        .with_children(|root| {
+            root.spawn((
+                Node {
+                    width: Val::Percent(100.0),
+                    flex_direction: FlexDirection::Column,
+                    padding: UiRect::axes(Val::Px(space::S12), Val::Px(space::S8)),
+                    ..default()
+                },
+                Name::new("MatchObjectivePanel"),
+            ))
+            .with_children(|panel| {
+                panel.spawn((
+                    Text::new(""),
+                    theme_caption(),
+                    TextColor(color::TEXT_PRIMARY),
+                    MatchHudStatusText,
+                    Name::new("MatchStatusText"),
+                ));
+            });
+        });
+}
+
+fn theme_caption() -> impl Bundle {
+    ui::styled_text(TextStyle::keep_case(TextRole::Caption))
+}
+
+/// The player status plate: portrait with XP ring and level disc, HP bar,
+/// mana bar (+ value on desktop) and, on desktop, the gold row that opens
+/// the shop (phones have gold in the quick-buy row).
+fn spawn_player_status(commands: &mut Commands, form: Form) {
+    let phone = form == Form::Phone;
+    let portrait = if phone {
+        PortraitSpec {
+            side: size::PORTRAIT_SM,
+            ring: true,
+            disc: PHONE_LEVEL_DISC,
+            disc_at: Vec2::splat(-space::S2),
+            icon: size::ICON_MD,
+        }
+    } else {
+        PortraitSpec {
+            side: size::PORTRAIT_MD,
+            ring: true,
+            disc: game::LEVEL_DISC,
+            disc_at: Vec2::splat(-space::S2),
+            icon: size::ICON_LG,
+        }
+    };
+    let (padding, gap) = if phone {
+        // 4 + 40 + 8 + 140 + 8 = 200; 4 + 40 + 4 = 48.
+        (
+            UiRect::new(
+                Val::Px(space::S4),
+                Val::Px(space::S8),
+                Val::Px(space::S4),
+                Val::Px(space::S4),
+            ),
+            space::S8,
+        )
+    } else {
+        // 10 + 56 + 12 + 200 + 10 = 288; 8 + 56 + 8 = 72.
+        (
+            UiRect::axes(
+                Val::Px(game::PLATE_PADDING.1),
+                Val::Px(game::PLATE_PADDING.0),
+            ),
+            space::S12,
+        )
+    };
+    commands
+        .spawn((
+            // A Button keeps world clicks off the plate.
+            Button,
+            game::hud_plate(true),
+            HudRegion::PlayerStatus,
+            ZIndex(12),
+            Name::new("MatchHudColumn"),
+        ))
+        .insert(Node {
+            position_type: PositionType::Absolute,
+            padding,
+            column_gap: Val::Px(gap),
+            align_items: AlignItems::Center,
+            border: UiRect::all(Val::Px(crate::ui::tokens::border::HAIRLINE)),
+            border_radius: BorderRadius::all(Val::Px(radius::MD)),
+            ..default()
+        })
+        .with_children(|plate| {
+            let view = PortraitView {
+                art: None,
+                fallback: game::class_icon(shared::HeroClass::Warrior),
+                level: Some(1),
+                xp: 0.0,
+                grey: false,
+                strong_rim: false,
+            };
+            let entity = game::live_portrait(plate, view, portrait, (HudPortrait, Button));
+            if !phone {
+                plate.commands().entity(entity).insert((
+                    Tooltip {
+                        title: None,
+                        body: "hud.xp",
+                    },
+                    TooltipText::default(),
+                ));
+            }
+            plate
+                .spawn(Node {
+                    flex_direction: FlexDirection::Column,
+                    justify_content: if phone {
+                        JustifyContent::Center
+                    } else {
+                        JustifyContent::SpaceBetween
+                    },
+                    row_gap: Val::Px(space::S4),
+                    height: Val::Percent(100.0),
+                    ..default()
+                })
+                .with_children(|column| {
+                    let hp_w = if phone { PHONE_BAR_W } else { DESKTOP_HP_W };
+                    let mana_w = if phone { PHONE_BAR_W } else { DESKTOP_MANA_W };
+                    let start = BarValue {
+                        current: 100.0,
+                        max: 100.0,
+                        respawn: None,
+                    };
+                    let hp = game::bar(column, BarKind::HpSelf, start, Val::Px(hp_w), form, true);
+                    column.commands().entity(hp).insert((
+                        HudBar::Health,
+                        Name::new(format!("MatchHudBar-{}", HudBar::Health.id())),
+                    ));
+                    // Desktop: the mana value sits right of the 156 bar.
+                    let mana_row_w = if phone { mana_w } else { hp_w };
+                    let mana = game::bar(
+                        column,
+                        BarKind::Mana,
+                        start,
+                        Val::Px(mana_row_w),
+                        form,
+                        !phone,
+                    );
+                    column.commands().entity(mana).insert((
+                        HudBar::Mana,
+                        Name::new(format!("MatchHudBar-{}", HudBar::Mana.id())),
+                    ));
+                    if !phone {
+                        crate::shop::spawn_gold_row(column);
+                    }
+                });
+        });
+}
+
+/// Portrait, level, XP, HP, mana and the dead state of the status plate.
+#[allow(clippy::type_complexity)]
+fn update_player_status(
     player: Query<
         (
             &CombatStats,
             &PlayerProgression,
+            Option<&NetworkHeroClass>,
             Option<&crate::net::NetworkAvatar>,
         ),
         With<Player>,
     >,
-    mut labels: Query<(&HudResourceText, &mut Text), Without<HudXpText>>,
-    mut xp: Query<&mut Text, (With<HudXpText>, Without<HudResourceText>)>,
-    portraits: Query<Entity, With<HudPortrait>>,
-    mut previous: Local<Option<String>>,
+    selection: Res<TeamSelection>,
+    mut portraits: Query<(&mut PortraitView, Option<&mut TooltipText>), With<HudPortrait>>,
+    mut bars: Query<(&HudBar, &mut BarValue)>,
 ) {
-    let Ok((stats, progression, avatar)) = player.single() else {
+    let Ok((stats, progression, class, avatar)) = player.single() else {
         return;
     };
-    for (label, mut text) in &mut labels {
-        text.0 = if label.0 == HudResource::Health {
-            format!("{:.0} / {:.0}", stats.hp.max(0.0), stats.max_hp)
-        } else {
-            format!("{:.0} / {:.0}", stats.mana.max(0.0), stats.max_mana)
-        };
-    }
-    for mut text in &mut xp {
-        text.0 = if progression.next_level_xp == 0 {
-            tr("hud.max_level").into()
-        } else {
-            trf(
-                "hud.xp",
-                &[
-                    ("xp", &progression.xp),
-                    ("next", &progression.next_level_xp),
-                    ("points", &progression.skill_points),
-                ],
-            )
-        };
-    }
-    let slug = avatar
+    let alive = stats.is_alive();
+    let class = class.map_or(selection.hero_class, |class| class.0);
+    let art = avatar
         .and_then(|avatar| avatar.0.as_deref())
-        .unwrap_or("agnes");
-    if previous.as_deref() != Some(slug) {
-        *previous = Some(slug.to_owned());
-        for entity in &portraits {
-            commands.entity(entity).despawn_related::<Children>();
-            // A shipped portrait is preferred; the neutral hero silhouette is a
-            // deliberate fallback for the one roster entry without a thumbnail.
-            if let Some(path) = omoba_passport::avatars::avatar_definition(slug)
-                .and_then(crate::passport::thumbnail_asset_path)
-            {
-                commands
-                    .entity(entity)
-                    .insert(ImageNode::new(assets.load(path)));
+        .and_then(omoba_passport::avatars::avatar_definition)
+        .and_then(crate::passport::thumbnail_asset_path);
+    let xp = if progression.next_level_xp == 0 {
+        1.0
+    } else {
+        (progression.xp as f32 / progression.next_level_xp as f32).clamp(0.0, 1.0)
+    };
+    for (mut view, tooltip) in &mut portraits {
+        let next = PortraitView {
+            art: art.clone(),
+            fallback: game::class_icon(class),
+            level: Some(progression.level.max(1)),
+            xp,
+            grey: !alive,
+            strong_rim: false,
+        };
+        if *view != next {
+            *view = next;
+        }
+        if let Some(mut tooltip) = tooltip {
+            let text = if progression.next_level_xp == 0 {
+                tr("hud.max_level").to_owned()
             } else {
-                commands.entity(entity).remove::<ImageNode>();
-                commands.entity(entity).with_children(|portrait| {
-                    portrait.spawn((
-                        Text::new("H"),
-                        crate::ui::theme::text(24.0),
-                        TextColor(crate::ui::theme::GOLD),
-                    ));
-                });
+                trf(
+                    "hud.xp",
+                    &[
+                        ("xp", &progression.xp),
+                        ("next", &progression.next_level_xp),
+                        ("points", &progression.skill_points),
+                    ],
+                )
+            };
+            if tooltip.body != text {
+                tooltip.body = text;
             }
         }
+    }
+    for (bar, mut value) in &mut bars {
+        let next = match bar {
+            HudBar::Health => BarValue {
+                current: stats.hp.max(0.0),
+                max: stats.max_hp.max(1.0),
+                // Dead: fill hidden, `hud.target.defeated` over the track;
+                // respawn seconds are not replicated (hud.md § States).
+                respawn: (!alive).then_some(0),
+            },
+            HudBar::Mana => BarValue {
+                current: stats.mana.max(0.0),
+                max: stats.max_mana.max(1.0),
+                respawn: (!alive).then_some(0),
+            },
+        };
+        if *value != next {
+            *value = next;
+        }
+    }
+}
+
+/// The active team buffs of the local team as chips (`hud/level-up` +
+/// `type.caption` gold on glass), under the practice badge in practice.
+#[allow(clippy::type_complexity)]
+fn update_buff_chips(
+    mut commands: Commands,
+    game_state: Option<Res<GameStateSnapshot>>,
+    session: Option<Res<crate::net::ClientSession>>,
+    local_team: Query<&Team, With<Player>>,
+    locale: Option<Res<crate::i18n::Locale>>,
+    mut columns: Query<(Entity, &mut Node), With<BuffChips>>,
+    mut previous: Local<Option<Vec<String>>>,
+) {
+    let running = game_state
+        .as_ref()
+        .is_some_and(|g| matches!(g.state, GameState::Running));
+    let lines: Vec<String> = if running {
+        let buffs = game_state
+            .as_ref()
+            .map(|snapshot| snapshot.team_buffs.as_slice())
+            .unwrap_or(&[]);
+        local_team
+            .single()
+            .map(|team| team_buff_hud_text(buffs, *team))
+            .unwrap_or_default()
+            .lines()
+            .map(str::to_owned)
+            .collect()
+    } else {
+        Vec::new()
+    };
+    let practice = session.as_ref().is_some_and(|session| session.is_offline());
+    for (_, mut node) in &mut columns {
+        let margin = Val::Px(if practice { PRACTICE_BADGE_SHIFT } else { 0.0 });
+        if node.margin.top != margin {
+            node.margin.top = margin;
+        }
+    }
+    let relabel = crate::i18n::locale_changed(&locale);
+    if previous.as_ref() == Some(&lines) && !relabel {
+        return;
+    }
+    // Log transitions (not the per-second countdown) for evidence runs.
+    let count = |lines: &Option<Vec<String>>| lines.as_ref().map_or(0, Vec::len);
+    if lines.is_empty() && count(&previous) > 0 {
+        info!("[hud] team buff indicator cleared");
+    } else if !lines.is_empty() && count(&previous) != lines.len() {
+        info!("[hud] team buff indicator: {}", lines.join(" | "));
+    }
+    *previous = Some(lines.clone());
+    for (column, _) in &mut columns {
+        commands.entity(column).despawn_related::<Children>();
+        commands.entity(column).with_children(|column| {
+            for (index, line) in lines.iter().enumerate() {
+                column
+                    .spawn((
+                        Node {
+                            height: Val::Px(BUFF_CHIP_H),
+                            max_width: Val::Percent(100.0),
+                            padding: UiRect::horizontal(Val::Px(space::S8)),
+                            column_gap: Val::Px(space::S4),
+                            align_items: AlignItems::Center,
+                            overflow: Overflow::clip_x(),
+                            border_radius: BorderRadius::all(Val::Px(radius::PILL)),
+                            ..default()
+                        },
+                        BackgroundColor(ui::perceptual(color::SURFACE_GLASS_STRONG)),
+                        Pickable::IGNORE,
+                        Name::new(format!("MatchBuffChip-{index}")),
+                    ))
+                    .with_children(|chip| {
+                        chip.spawn(icon_node(Icon::HudLevelUp, size::ICON_SM, color::TEXT_GOLD));
+                        chip.spawn((
+                            Text::new(line.clone()),
+                            theme_caption(),
+                            TextColor(color::TEXT_GOLD),
+                            TextLayout::new_with_no_wrap(),
+                            Name::new("MatchBuffText"),
+                        ));
+                    });
+            }
+        });
     }
 }
 
@@ -339,103 +464,61 @@ fn sync_gameplay_hud_visibility(
     mut roots: Query<(&Name, &mut Node, &mut Visibility), Without<ChildOf>>,
     gamepad: Option<Res<crate::gamepad::GamepadControls>>,
 ) {
+    let phone = phone_hud(mobile.as_deref());
     // The touch skill buttons hide while a controller owns input; the
     // desktop skill bar carries its bindings instead.
-    let touch_hud = mobile.as_ref().is_some_and(|mobile| mobile.enabled)
-        && !gamepad.as_ref().is_some_and(|pad| pad.active);
+    let touch_hud = phone && !gamepad.as_ref().is_some_and(|pad| pad.active);
     let show = session.join_confirmed()
         && matches!(game.state, GameState::Running)
         && !help.is_some_and(|help| help.0)
         && !pause.is_some_and(|pause| pause.open)
         && !shop.is_some_and(|shop| shop.open);
     for (name, mut node, mut visibility) in &mut roots {
+        let name = name.as_str();
         if matches!(
-            name.as_str(),
+            name,
             "MatchHudColumn"
                 | "SkillBarRoot"
+                | "SkillUpgradeChip"
                 | "ActionFeedback"
                 | "EquipmentHud"
                 | "MatchObjectiveRoot"
+                | "MatchBuffChips"
                 | "QuickBuyHud"
         ) {
-            // Transient feedback owns its own empty/expired layout state.
-            if name.as_str() != "ActionFeedback" {
-                node.display = if show
-                    && name.as_str() != "MatchObjectiveRoot"
-                    && name.as_str() != "EquipmentHud"
-                    && !(name.as_str() == "SkillBarRoot" && touch_hud)
-                {
+            // Transient feedback and the upgrade chip own their empty state.
+            if !matches!(name, "ActionFeedback" | "SkillUpgradeChip") {
+                let displayed = show
+                    && name != "MatchObjectiveRoot"
+                    // Desktop: inventory + quick-buy plate; phone: the row.
+                    && !(name == "EquipmentHud" && phone)
+                    && (name != "QuickBuyHud" || phone)
+                    && !(name == "SkillBarRoot" && touch_hud);
+                let display = if displayed {
                     Display::Flex
                 } else {
                     Display::None
                 };
+                if node.display != display {
+                    node.display = display;
+                }
             }
-            *visibility = if show {
+            let next = if show {
                 Visibility::Inherited
             } else {
                 Visibility::Hidden
             };
+            if *visibility != next {
+                *visibility = next;
+            }
         }
     }
-}
-
-/// Empty text still has a line box in Bevy; remove that row until a real buff is active.
-fn sync_buff_row_visibility(mut rows: Query<(&Text, &mut Node), With<MatchHudBuffText>>) {
-    for (text, mut node) in &mut rows {
-        node.display = if text.0.is_empty() {
-            Display::None
-        } else {
-            Display::Flex
-        };
-    }
-}
-
-fn spawn_stat_bar<F: Component>(
-    col: &mut ChildSpawnerCommands,
-    resource: HudResource,
-    fill_color: Color,
-    fill_marker: F,
-) {
-    col.spawn((
-        Node {
-            width: Val::Percent(100.0),
-            height: Val::Px(14.0),
-            align_items: AlignItems::Center,
-            justify_content: JustifyContent::Center,
-            border_radius: BorderRadius::all(Val::Px(3.0)),
-            overflow: Overflow::clip(),
-            ..default()
-        },
-        BackgroundColor(BAR_TRACK_COLOR),
-        Name::new(format!("MatchHudBar-{}", resource.id())),
-    ))
-    .with_children(|track| {
-        track.spawn((
-            Node {
-                position_type: PositionType::Absolute,
-                left: Val::Px(0.0),
-                top: Val::Px(0.0),
-                width: Val::Percent(100.0),
-                height: Val::Percent(100.0),
-                ..default()
-            },
-            BackgroundColor(fill_color),
-            fill_marker,
-        ));
-        track.spawn((
-            Text::new("100 / 100"),
-            crate::ui::theme::text(12.0),
-            TextColor(Color::WHITE),
-            HudResourceText(resource),
-            ZIndex(1),
-        ));
-    });
 }
 
 fn update_match_hud(
     game_state: Option<Res<GameStateSnapshot>>,
     team_selection: Res<TeamSelection>,
-    player: Query<(&CombatStats, &PlayerProgression, Option<&NetworkHeroClass>), With<Player>>,
+    player: Query<(&CombatStats, Option<&NetworkHeroClass>), With<Player>>,
     local_team: Query<&Team, With<Player>>,
     enemy_bases: Query<
         (
@@ -448,96 +531,21 @@ fn update_match_hud(
     >,
     target_state: Res<TargetState>,
     mobile: Option<Res<crate::mobile_controls::MobileControls>>,
-    mut prog: Query<
-        &mut Text,
-        (
-            With<MatchHudProgressionText>,
-            Without<MatchHudStatusText>,
-            Without<MatchHudBuffText>,
-        ),
-    >,
-    mut status: Query<
-        &mut Text,
-        (
-            With<MatchHudStatusText>,
-            Without<MatchHudProgressionText>,
-            Without<MatchHudBuffText>,
-        ),
-    >,
-    mut buff_text: Query<
-        &mut Text,
-        (
-            With<MatchHudBuffText>,
-            Without<MatchHudProgressionText>,
-            Without<MatchHudStatusText>,
-        ),
-    >,
-    mut bars_root: Query<&mut Visibility, With<HudBarsRoot>>,
-    mut hp_fill: Query<(&mut Node, &mut BackgroundColor), (With<HpBarFill>, Without<ManaBarFill>)>,
-    mut mana_fill: Query<
-        (&mut Node, &mut BackgroundColor),
-        (With<ManaBarFill>, Without<HpBarFill>),
-    >,
+    mut status: Query<&mut Text, With<MatchHudStatusText>>,
 ) {
-    let Ok(mut prog_text) = prog.single_mut() else {
-        return;
-    };
     let Ok(mut status_text) = status.single_mut() else {
         return;
     };
-
-    let Some((stats, progression, replicated_class)) = player.iter().next() else {
-        prog_text.0 = tr("hud.no_player").into();
+    let Some((stats, replicated_class)) = player.iter().next() else {
         status_text.0.clear();
-        if let Ok(mut v) = bars_root.single_mut() {
-            *v = Visibility::Hidden;
-        }
         return;
     };
     let hero_class = replicated_class
         .map(|class| class.0)
         .unwrap_or(team_selection.hero_class);
-
     let running = game_state
         .as_ref()
         .is_some_and(|g| matches!(g.state, GameState::Running));
-
-    update_stat_bars(
-        running,
-        *stats,
-        &mut bars_root,
-        &mut hp_fill,
-        &mut mana_fill,
-    );
-
-    // Boss team-buff indicator: only the LOCAL team's active buffs, with
-    // remaining seconds; empty (invisible) when nothing is active.
-    if let Ok(mut buff) = buff_text.single_mut() {
-        let next = if running {
-            let buffs = game_state
-                .as_ref()
-                .map(|snapshot| snapshot.team_buffs.as_slice())
-                .unwrap_or(&[]);
-            local_team
-                .single()
-                .map(|team| team_buff_hud_text(buffs, *team))
-                .unwrap_or_default()
-        } else {
-            String::new()
-        };
-        if buff.0 != next {
-            // Log transitions (not the per-second countdown) for evidence runs.
-            if next.is_empty() {
-                info!("[hud] team buff indicator cleared");
-            } else if buff.0.is_empty() || buff.0.lines().count() != next.lines().count() {
-                info!("[hud] team buff indicator: {}", next.replace('\n', " | "));
-            }
-            buff.0 = next;
-        }
-    }
-
-    prog_text.0 = trf("hud.level", &[("level", &progression.level.max(1))]);
-
     if !running {
         status_text.0 = trf(
             "hud.prematch",
@@ -549,10 +557,9 @@ fn update_match_hud(
         );
         return;
     }
-
     let objective_line = enemy_base_objective_line(&local_team, &enemy_bases);
     // Phones name the touch controls instead of the keyboard shortcuts.
-    let phone = mobile.as_ref().is_some_and(|mobile| mobile.enabled);
+    let phone = phone_hud(mobile.as_deref());
     let target = tr(
         match (
             stats.is_alive(),
@@ -567,37 +574,6 @@ fn update_match_hud(
         },
     );
     status_text.0 = format!("{objective_line}\n{target}");
-}
-
-fn update_stat_bars(
-    running: bool,
-    stats: CombatStats,
-    bars_root: &mut Query<&mut Visibility, With<HudBarsRoot>>,
-    hp_fill: &mut Query<(&mut Node, &mut BackgroundColor), (With<HpBarFill>, Without<ManaBarFill>)>,
-    mana_fill: &mut Query<
-        (&mut Node, &mut BackgroundColor),
-        (With<ManaBarFill>, Without<HpBarFill>),
-    >,
-) {
-    if let Ok(mut v) = bars_root.single_mut() {
-        *v = if running {
-            Visibility::Inherited
-        } else {
-            Visibility::Hidden
-        };
-    }
-
-    let hp_ratio = (stats.hp.max(0.0) / stats.max_hp.max(1.0)).clamp(0.0, 1.0);
-    let mana_ratio = (stats.mana.max(0.0) / stats.max_mana.max(1.0)).clamp(0.0, 1.0);
-
-    if let Ok((mut node, mut color)) = hp_fill.single_mut() {
-        node.width = Val::Percent(hp_ratio * 100.0);
-        *color = BackgroundColor(hp_bar_color(hp_ratio));
-    }
-    if let Ok((mut node, mut color)) = mana_fill.single_mut() {
-        node.width = Val::Percent(mana_ratio * 100.0);
-        *color = BackgroundColor(MANA_BAR_COLOR);
-    }
 }
 
 /// One line per active buff of the LOCAL player's team, with the remaining

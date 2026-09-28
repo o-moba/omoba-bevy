@@ -15,5 +15,10 @@
   "edge.scoreboard.detail": "Gold ↑ is total income this round; starting gold excluded. Clear one lane to unlock the enemy base.",
   "edge.scoreboard.waiting": "Waiting for live score…",
   "edge.scoreboard.empty": "No players",
-  "edge.scoreboard.offline": "{name} · off"
+  "edge.scoreboard.offline": "{name} · off",
+  "edge.target.minion_melee": "Melee minion",
+  "edge.target.minion_caster": "Caster minion",
+  "edge.target.tower": "Tower",
+  "edge.target.base": "Base",
+  "edge.target.boss": "BOSS"
 }

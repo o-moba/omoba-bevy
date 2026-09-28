@@ -358,13 +358,20 @@ fn scale_menus_to_the_window(
     let unscaled_pause = pause.as_ref().is_some_and(|state| state.open);
     let wanted = if !phone {
         // Desktop menus follow the 1280×720 reference (DECISIONS R2.3). The
-        // match stays at 1.0 until its world-anchored overlays (nameplates,
-        // floating combat numbers, chat bubbles), which place nodes at
-        // logical viewport coordinates, divide by `UiScale` (HUD step P0-A).
-        // Draft/loading size themselves from the real window width, so they
-        // stay at 1.0. Below the reference size the legacy height shrink
-        // still applies, so short windows keep fitting the menus.
-        if screen.get().is_menu() && !shared_prematch {
+        // match does too above the reference (R2.3a, F8.1): the HUD lays out
+        // in logical UI pixels from the handoff and every world-anchored
+        // overlay (nameplates, floating combat numbers, chat bubbles, the
+        // lock frame, the aim preview) divides its viewport point by
+        // `UiScale`; below the reference it stays 1.0 (the HUD fits 1024 ×
+        // 640 as drawn). Draft/loading size themselves from the real window
+        // width, so they stay at 1.0. Below the reference size the legacy
+        // height shrink still applies, so short windows keep fitting the menus.
+        if *screen.get() == AppScreen::InMatch {
+            crate::ui::theme::metric::desktop_ui_scale(
+                window.resolution.width(),
+                window.resolution.height(),
+            )
+        } else if screen.get().is_menu() && !shared_prematch {
             let up = crate::ui::theme::metric::desktop_ui_scale(
                 window.resolution.width(),
                 window.resolution.height(),
@@ -532,10 +539,11 @@ mod tests {
     }
 
     /// R2.3: desktop menus follow the 1280×720 reference up to 2.0 (floor
-    /// `DESKTOP_SCALE_MIN`); the desktop match keeps 1.0 (world-anchored
-    /// overlays).
+    /// `DESKTOP_SCALE_MIN`); since F8.1 (world-anchored overlays divide by
+    /// `UiScale`) the desktop match does too, without the menus' shrink
+    /// below the reference.
     #[test]
-    fn desktop_menus_scale_to_the_reference_and_the_match_does_not() {
+    fn desktop_menus_and_the_match_scale_to_the_reference() {
         for ((width, height), expected) in [
             ((1280, 720), 1.0),
             ((1920, 1080), 1.5),
@@ -568,7 +576,11 @@ mod tests {
                 .set(AppScreen::InMatch);
             app.update();
             app.update();
-            assert_eq!(app.world().resource::<UiScale>().0, 1.0, "in match");
+            assert_eq!(
+                app.world().resource::<UiScale>().0,
+                crate::ui::theme::metric::desktop_ui_scale(width as f32, height as f32),
+                "{width}x{height} in match"
+            );
             // Draft and loading lay out from the real window width.
             for prematch in [AppScreen::Draft, AppScreen::Loading] {
                 app.world_mut()

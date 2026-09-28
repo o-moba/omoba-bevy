@@ -1177,6 +1177,7 @@ fn ability(ability: &'static str, key: &'static str) -> AbilityView {
         rank: 2,
         cooldown: None,
         locked: false,
+        unlock_level: Some(6),
         no_mana: false,
         pips: true,
     }

@@ -395,28 +395,67 @@ pub(super) fn mobile_geometry_valid(
         }
         let center = rect.center();
         let mut radius = rect.width() * 0.5;
-        let satellite = name.starts_with("MobileAbility-")
-            || matches!(name, "MobileMinionAttack" | "MobileTowerAttack");
-        if satellite && (center.distance(attack.center()) - 92.0 * scale).abs() > 1.0 {
+        // Drawing and input share one layout: each control sits on its
+        // layout centre.
+        let expected = match name {
+            "MobileJoystick" => Some(layout.joystick_center),
+            "MobileAttack" => Some(layout.attack_center),
+            "MobileMinionAttack" => Some(layout.category_centers[0]),
+            "MobileTowerAttack" => Some(layout.category_centers[1]),
+            "MobileDash" => Some(layout.utility_centers[0]),
+            "MobileHaste" => Some(layout.utility_centers[1]),
+            "MobileRankMode" => Some(layout.upgrade_center),
+            "MobileAttackCancel" => Some(layout.cancel_center),
+            _ => name
+                .strip_prefix("MobileAbility-")
+                .and_then(|slot| slot.parse::<usize>().ok())
+                .and_then(|slot| layout.ability_centers.get(slot).copied()),
+        };
+        if expected.is_some_and(|expected| expected.distance(center) > 1.0) {
+            return false;
+        }
+        // hud.md phone: abilities on the inner arc (R 104), the utilities,
+        // MIN / TWR, RANK and CANCEL on the outer arc (R 168), both on ATK.
+        let inner = name.starts_with("MobileAbility-");
+        let outer = matches!(
+            name,
+            "MobileMinionAttack"
+                | "MobileTowerAttack"
+                | "MobileDash"
+                | "MobileHaste"
+                | "MobileRankMode"
+                | "MobileAttackCancel"
+        );
+        let orbit = if inner {
+            Some(crate::ui::tokens::size::COMBAT_ORBIT_ABILITY_PHONE)
+        } else if outer {
+            Some(crate::ui::tokens::size::COMBAT_ORBIT_UTILITY_PHONE)
+        } else {
+            None
+        };
+        if orbit.is_some_and(|orbit| (center.distance(attack.center()) - orbit * scale).abs() > 1.0)
+        {
             return false;
         }
         if let Some(slot) = name.strip_prefix("MobileAbility-") {
-            let Some(rank) = shown(&format!("MobileRankRing-{slot}")) else {
-                return false;
-            };
-            if rank.center().distance(center) > 1.0
-                || (rank.width() * 0.5 - radius - 3.0 * scale).abs() > 1.0
-            {
-                return false;
+            // The rank ring shows only on an upgradable ability, on its disc.
+            if let Some(rank) = shown(&format!("MobileRankRing-{slot}")) {
+                if rank.center().distance(center) > 1.0 || (rank.width() * 0.5 - radius).abs() > 1.0
+                {
+                    return false;
+                }
             }
-            radius = rank.width() * 0.5;
-        } else if name == "MobileJoystick" {
+        }
+        let visible_radius = radius;
+        if name == "MobileJoystick" {
+            // The capture circle (1.3 × r) may pass the safe bottom by the
+            // redline's 2.6 px; the visible base stays inside.
             radius *= 1.3;
         }
-        if center.x - radius < mobile.safe.left - 1.0
-            || center.y - radius < mobile.safe.top - 1.0
-            || center.x + radius > mobile.viewport.x - mobile.safe.right + 1.0
-            || center.y + radius > mobile.viewport.y - mobile.safe.bottom + 1.0
+        if center.x - visible_radius < mobile.safe.left - 1.0
+            || center.y - visible_radius < mobile.safe.top - 1.0
+            || center.x + visible_radius > mobile.viewport.x - mobile.safe.right + 1.0
+            || center.y + visible_radius > mobile.viewport.y - mobile.safe.bottom + 1.0
         {
             return false;
         }
@@ -547,10 +586,11 @@ mod tests {
                 layout.ability_centers[slot],
                 layout.ability_radii[slot],
             ));
+            // hud.md: the rank ring (+ badge, gold rim) is the ability's disc.
             circles.push((
                 format!("MobileRankRing-{slot}"),
                 layout.ability_centers[slot],
-                layout.ability_radii[slot] + 3.0 * mobile.combat_scale(),
+                layout.ability_radii[slot],
             ));
         }
         circles

@@ -416,6 +416,15 @@ pub(crate) struct Tooltip {
     pub body: &'static str,
 }
 
+/// Tooltip text the owner writes (live values: the XP line `hud.xp`, an
+/// item's name, description and unavailable reason); it replaces the
+/// [`Tooltip`] keys while present.
+#[derive(Component, Clone, PartialEq, Eq, Debug, Default)]
+pub(crate) struct TooltipText {
+    pub title: Option<String>,
+    pub body: String,
+}
+
 /// The one live tooltip.
 #[derive(Component)]
 pub(crate) struct TooltipRoot {
@@ -436,6 +445,7 @@ pub(crate) fn show_tooltips(
         &Interaction,
         &ComputedNode,
         &UiGlobalTransform,
+        Option<&TooltipText>,
     )>,
     mut roots: Query<(Entity, &TooltipRoot, &mut Node, &ComputedNode)>,
     mut hovered: Local<Option<(Entity, Duration)>>,
@@ -470,11 +480,11 @@ pub(crate) fn show_tooltips(
             if let Some((root, _)) = current {
                 commands.entity(root).despawn();
             }
-            let Ok((_, tooltip, ..)) = anchors.get(anchor) else {
+            let Ok((_, tooltip, _, _, _, text)) = anchors.get(anchor) else {
                 return;
             };
             let title = tooltip.title.map(crate::i18n::Localized::new);
-            let body = crate::i18n::Localized::new(tooltip.body);
+            let dynamic = text.cloned();
             commands
                 .spawn((
                     tooltip_bundle(),
@@ -493,10 +503,13 @@ pub(crate) fn show_tooltips(
                     border_radius: BorderRadius::all(Val::Px(radius::MD)),
                     ..default()
                 })
-                .with_children(|tip| tooltip_content(tip, title, body));
+                .with_children(|tip| match dynamic {
+                    Some(TooltipText { title, body }) => tooltip_content(tip, title, body),
+                    None => tooltip_content(tip, title, crate::i18n::Localized::new(tooltip.body)),
+                });
         }
         (Some(anchor), Some(_)) => {
-            let Ok((_, _, _, anchor_node, anchor_at)) = anchors.get(anchor) else {
+            let Ok((_, _, _, anchor_node, anchor_at, _)) = anchors.get(anchor) else {
                 return;
             };
             for (_, _, mut node, tip) in &mut roots {

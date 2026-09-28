@@ -116,23 +116,31 @@ fn setup(
         FocusPolicy::Pass,
         Pickable::IGNORE,
     ));
+    // hud.md `brush-chip`: a badge centred under the target frame, muted
+    // while concealed, danger while revealed; `type.caption` semibold.
     commands.spawn((
         Name::new("BrushStatus"),
         BrushStatus,
         Text::new(""),
-        crate::ui::theme::text(12.),
-        TextColor(Color::srgb(0.7, 1., 0.78)),
+        crate::ui::theme::styled_text(
+            crate::ui::theme::TextStyle::keep_case(crate::ui::tokens::TextRole::Label)
+                .sized(crate::ui::tokens::TextRole::Caption.style().size),
+        ),
+        TextColor(crate::ui::tokens::color::TEXT_SECONDARY),
+        TextLayout::new_with_no_wrap(),
         Node {
             position_type: PositionType::Absolute,
-            top: Val::Px(74.),
-            left: Val::Percent(50.),
-            padding: UiRect::axes(Val::Px(10.), Val::Px(4.)),
-            border_radius: BorderRadius::all(Val::Px(5.)),
+            padding: UiRect::axes(
+                Val::Px(crate::ui::tokens::space::S8),
+                Val::Px(crate::ui::tokens::space::S4),
+            ),
+            border_radius: BorderRadius::all(Val::Px(crate::ui::tokens::radius::PILL)),
             display: Display::None,
             ..default()
         },
         UiTransform::from_translation(Val2::new(Val::Percent(-50.), Val::Px(0.))),
-        BackgroundColor(Color::srgba(0.035, 0.075, 0.07, 0.90)),
+        crate::hud_layout::HudRegion::BrushChip,
+        BackgroundColor(crate::ui::tokens::color::SURFACE_3),
         GlobalZIndex(25),
         FocusPolicy::Pass,
         Pickable::IGNORE,
@@ -283,7 +291,10 @@ fn sync_visibility(
             Without<BrushStatus>,
         ),
     >,
-    mut status: Query<(&mut Text, &mut Node, &mut TextColor), With<BrushStatus>>,
+    mut status: Query<
+        (&mut Text, &mut Node, &mut TextColor, &mut BackgroundColor),
+        With<BrushStatus>,
+    >,
     mut brush: Query<&mut Visibility, With<BrushArt>>,
 ) {
     art.active = *mode == PlayerVisualMode::Models3d
@@ -304,7 +315,7 @@ fn sync_visibility(
             Visibility::Hidden
         };
     }
-    for (mut text, mut node, mut color) in &mut status {
+    for (mut text, mut node, mut color, mut fill) in &mut status {
         let vision = game.as_ref().and_then(|g| g.vision.as_ref());
         let show = art.active && vision.is_some_and(|v| v.local_brush.is_some());
         node.display = if show { Display::Flex } else { Display::None };
@@ -317,11 +328,19 @@ fn sync_visibility(
             if text.0 != line {
                 text.0 = line.into();
             }
-            color.0 = if vision.local_hidden {
-                Color::srgb(0.65, 1., 0.73)
+            let (ink, badge) = if vision.local_hidden {
+                (
+                    crate::ui::tokens::color::TEXT_SECONDARY,
+                    crate::ui::tokens::color::SURFACE_3,
+                )
             } else {
-                Color::srgb(1., 0.79, 0.40)
+                (
+                    crate::ui::tokens::color::TEXT_PRIMARY,
+                    crate::ui::tokens::color::STATE_DANGER,
+                )
             };
+            color.0 = ink;
+            fill.0 = badge;
         }
     }
     if !art.active {

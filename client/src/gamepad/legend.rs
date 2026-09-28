@@ -42,20 +42,25 @@ pub(crate) fn legend(playstation: bool, menu: bool, phone: bool) -> &'static str
 pub(crate) struct ControllerLegend;
 
 pub(crate) fn setup_legend(mut commands: Commands) {
+    use crate::ui::tokens::{border, color, radius, space};
     commands.spawn((
         Text::new(""),
         crate::ui::theme::text(12.0),
-        TextColor(crate::ui::theme::IVORY),
-        BackgroundColor(crate::ui::theme::PANEL),
+        TextColor(color::TEXT_PRIMARY),
+        BackgroundColor(crate::ui::theme::perceptual(color::SURFACE_GLASS_STRONG)),
+        BorderColor::all(crate::ui::theme::perceptual(color::BORDER_HAIRLINE)),
         Node {
             position_type: PositionType::Absolute,
             bottom: Val::Px(4.0),
             left: Val::Percent(20.0),
             max_width: Val::Percent(60.0),
-            padding: UiRect::axes(Val::Px(8.0), Val::Px(5.0)),
+            padding: UiRect::axes(Val::Px(space::S8), Val::Px(space::S4 + 1.0)),
+            border: UiRect::all(Val::Px(border::HAIRLINE)),
+            border_radius: BorderRadius::all(Val::Px(radius::MD)),
             display: Display::None,
             ..default()
         },
+        UiTransform::IDENTITY,
         GlobalZIndex(2000),
         bevy::ui::FocusPolicy::Pass,
         Pickable::IGNORE,
@@ -71,13 +76,26 @@ pub(crate) fn draw_legend(
     context: Res<crate::input_context::GameplayInputContext>,
     mobile: Option<Res<crate::mobile_controls::MobileControls>>,
     windows: Query<&Window, With<PrimaryWindow>>,
-    mut strips: Query<(&mut Node, &mut Text, &mut TextFont), With<ControllerLegend>>,
+    ui_scale: Option<Res<UiScale>>,
+    mut strips: Query<
+        (
+            &mut Node,
+            &mut Text,
+            &mut TextFont,
+            Option<&mut UiTransform>,
+        ),
+        With<ControllerLegend>,
+    >,
 ) {
+    let viewport = windows
+        .single()
+        .map(|window| crate::hud_layout::ui_viewport(window, ui_scale.as_deref()))
+        .unwrap_or(Vec2::new(1280.0, 720.0));
     let focused = windows.single().is_ok_and(|window| window.focused);
     let visible = controls.active && controls.connected && focused;
     let phone = mobile.as_ref().filter(|mobile| mobile.enabled);
     let menu = !context.gameplay_allowed();
-    for (mut node, mut text, mut font) in &mut strips {
+    for (mut node, mut text, mut font, transform) in &mut strips {
         let display = if visible {
             Display::Flex
         } else {
@@ -89,17 +107,35 @@ pub(crate) fn draw_legend(
         if !visible {
             continue;
         }
+        // Desktop match: bottom-centre above the ability bar, y 520–572 at
+        // 720 (hud.md § States, Controller active).
+        let desktop_match = !menu && phone.is_none();
         let (top, bottom, size) = if menu {
             let top = phone.map_or(12.0, |mobile| mobile.safe.top + 8.0);
             (Val::Px(top), Val::Auto, 10.0)
         } else if let Some(mobile) = phone {
             (Val::Auto, Val::Px(mobile.safe.bottom), 10.0)
         } else {
-            (Val::Auto, Val::Px(4.0), 12.0)
+            let strip = crate::hud_layout::HudLayout::desktop(viewport, true).legend;
+            (Val::Auto, Val::Px(viewport.y - strip.max.y), 12.0)
         };
         if node.top != top || node.bottom != bottom {
             node.top = top;
             node.bottom = bottom;
+        }
+        let (left, shift) = if desktop_match {
+            (Val::Percent(50.0), -50.0)
+        } else {
+            (Val::Percent(20.0), 0.0)
+        };
+        if node.left != left {
+            node.left = left;
+        }
+        if let Some(mut transform) = transform {
+            let translation = Val2::new(Val::Percent(shift), Val::Px(0.0));
+            if transform.translation != translation {
+                transform.translation = translation;
+            }
         }
         if font.font_size != size {
             font.font_size = size;

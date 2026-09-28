@@ -809,41 +809,95 @@ impl Simulation {
 
 #[derive(Component)]
 pub(super) struct PracticeBanner;
-pub(super) fn setup_banner(mut commands: Commands) {
+/// The offline-practice banner (`VARIANTS.md` `offline-practice`, R5.6):
+/// desktop = a muted badge atop the buff-chip column (the chips move down
+/// by `match_hud::PRACTICE_BADGE_SHIFT`); phone = a toast in the
+/// action-feedback slot for `motion.duration.toast_hold` at match start.
+pub(super) fn setup_banner(
+    mut commands: Commands,
+    mobile: Option<Res<crate::mobile_controls::MobileControls>>,
+) {
+    use crate::ui::tokens::{TextRole, border, color, radius, space};
+    let phone = mobile.as_ref().is_some_and(|mobile| mobile.enabled);
+    let (region, fill, ink, corner, padding) = if phone {
+        (
+            crate::hud_layout::HudRegion::ActionFeedback,
+            crate::ui::theme::perceptual(color::SURFACE_GLASS_STRONG),
+            color::TEXT_PRIMARY,
+            radius::MD,
+            UiRect::axes(Val::Px(space::S12), Val::Px(space::S8)),
+        )
+    } else {
+        (
+            crate::hud_layout::HudRegion::BuffChips,
+            crate::ui::theme::perceptual(color::SURFACE_GLASS_STRONG),
+            color::TEXT_SECONDARY,
+            radius::PILL,
+            UiRect::axes(Val::Px(space::S8), Val::Px(space::S4)),
+        )
+    };
     commands.spawn((
         crate::i18n::Localized::with_args("net.practice.banner", [("level", &LEVEL)]).into_text(),
-        TextFont {
-            font_size: 13.0,
-            ..default()
-        },
-        TextColor(crate::ui::theme::GOLD),
-        BackgroundColor(crate::ui::theme::PANEL),
+        crate::ui::theme::styled_text(
+            crate::ui::theme::TextStyle::keep_case(TextRole::Label)
+                .sized(TextRole::Caption.style().size),
+        ),
+        TextColor(ink),
+        TextLayout::new_with_no_wrap(),
+        BackgroundColor(fill),
+        BorderColor::all(if phone {
+            crate::ui::theme::perceptual(color::BORDER_HAIRLINE)
+        } else {
+            Color::NONE
+        }),
         Node {
             position_type: PositionType::Absolute,
-            top: Val::Px(68.0),
-            left: Val::Percent(35.0),
-            padding: UiRect::axes(Val::Px(8.0), Val::Px(4.0)),
+            padding,
+            border: UiRect::all(Val::Px(if phone { border::HAIRLINE } else { 0.0 })),
+            border_radius: BorderRadius::all(Val::Px(corner)),
             display: Display::None,
             ..default()
         },
+        UiTransform::IDENTITY,
+        region,
         ZIndex(22),
+        Pickable::IGNORE,
         PracticeBanner,
         Name::new("OfflinePracticeBanner"),
     ));
 }
 pub(super) fn sync_banner(
+    time: Res<Time>,
     session: Res<ClientSession>,
     screen: Option<Res<State<crate::frontend::AppScreen>>>,
+    mobile: Option<Res<crate::mobile_controls::MobileControls>>,
+    mut shown_for: Local<Option<f32>>,
     mut banners: Query<&mut Node, With<PracticeBanner>>,
 ) {
-    let visible = session.is_offline()
+    let practice = session.is_offline()
         && screen.is_some_and(|s| *s.get() == crate::frontend::AppScreen::InMatch);
+    let phone = mobile.as_ref().is_some_and(|mobile| mobile.enabled);
+    // Phone: a start-of-match toast, held `motion.duration.toast_hold`.
+    let visible = if phone {
+        let hold = crate::ui::tokens::motion::DURATION_TOAST_HOLD.as_secs_f32();
+        *shown_for = if practice {
+            Some(shown_for.map_or(0.0, |elapsed| elapsed + time.delta_secs()))
+        } else {
+            None
+        };
+        shown_for.is_some_and(|elapsed| elapsed < hold)
+    } else {
+        practice
+    };
     for mut node in &mut banners {
-        node.display = if visible {
+        let display = if visible {
             Display::Flex
         } else {
             Display::None
         };
+        if node.display != display {
+            node.display = display;
+        }
     }
 }
 

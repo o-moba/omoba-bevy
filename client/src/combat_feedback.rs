@@ -255,6 +255,7 @@ fn place_numbers(
     mut commands: Commands,
     time: Res<Time>,
     mode: Res<PlayerVisualMode>,
+    ui_scale: Option<Res<UiScale>>,
     camera: Query<(&Camera, &Transform), With<MainCamera>>,
     mut numbers: Query<(
         Entity,
@@ -291,6 +292,7 @@ fn place_numbers(
                 .then_some(screen)
         });
         if let Some(screen) = screen {
+            let screen = crate::hud_layout::world_to_ui(screen, ui_scale.as_deref());
             node.display = Display::Flex;
             node.left = Val::Px(screen.x - 12.0 + number.lane * (5.0 + 8.0 * progress));
             node.top = Val::Px(screen.y - 25.0 - 42.0 * progress);
