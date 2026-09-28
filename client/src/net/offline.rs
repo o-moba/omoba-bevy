@@ -829,7 +829,7 @@ pub(super) fn setup_banner(
         )
     } else {
         (
-            crate::hud_layout::HudRegion::BuffChips,
+            crate::hud_layout::HudRegion::PracticeBadge,
             crate::ui::theme::perceptual(color::SURFACE_GLASS_STRONG),
             color::TEXT_SECONDARY,
             radius::PILL,

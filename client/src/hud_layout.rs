@@ -300,7 +300,7 @@ impl HudLayout {
     pub(crate) fn region(&self, region: HudRegion) -> Rect {
         let button = size::ICON_BUTTON.at(self.form);
         match region {
-            HudRegion::BuffChips => self.buff_chips,
+            HudRegion::BuffChips | HudRegion::PracticeBadge => self.buff_chips,
             HudRegion::TargetFrame => self.target_frame,
             HudRegion::BrushChip => self.brush_chip,
             HudRegion::ScoreStrip => self.score_strip,
@@ -327,6 +327,9 @@ impl HudLayout {
 #[derive(Component, Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum HudRegion {
     BuffChips,
+    /// The desktop offline-practice badge atop the buff-chip column (hugs
+    /// its text).
+    PracticeBadge,
     TargetFrame,
     BrushChip,
     ScoreStrip,
@@ -361,7 +364,7 @@ enum Anchor {
 impl HudRegion {
     fn anchor(self, form: Form) -> Anchor {
         match self {
-            HudRegion::QuickBuy => Anchor::TopLeft,
+            HudRegion::QuickBuy | HudRegion::PracticeBadge => Anchor::TopLeft,
             HudRegion::SocialStatus => Anchor::TopRight,
             HudRegion::BrushChip => Anchor::TopCentre,
             HudRegion::ActionFeedback if form == Form::Phone => Anchor::TopCentre,
