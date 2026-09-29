@@ -1,0 +1,6 @@
+interface:
+  display_name: "OMOBA UI verification"
+  short_description: "Focused UI checks with an explicit release matrix"
+  default_prompt: "Use $omoba-ui-verification to check the affected OMOBA UI on one language and one device."
+policy:
+  allow_implicit_invocation: true

@@ -24,8 +24,11 @@ client/assets/*
 .claude/skills/*
 !.claude/skills/omoba-sprite-character/
 !.claude/skills/omoba-sprite-character/**
-.claude/rules/
-.claude/rules/**
+!.claude/skills/omoba-ui-verification/
+!.claude/skills/omoba-ui-verification/**
+!.claude/rules/
+.claude/rules/*
+!.claude/rules/ui-verification-budget.md
 .cursor/*
 .cursor/rules/
 .cursor/rules/**
