@@ -4,7 +4,7 @@
 
 The party lobby displays up to five live avatars, with the viewer in the centre foreground and teammates staggered behind. Mouse or touch dragging turns the heroes without moving the formation. Desktop, phone and tablet have a separate scrolling social panel for invitations, party members and online players. Current server presence is shown as “In lobby”; there is no invented ready vote. Bot practice and public quick match keep the existing leader-controlled party flow.
 
-The same renderer serves the authoritative draft and shared countdown/loading preview. Class, avatar, lane and lock/readiness labels come from server snapshots. The local hero stays visible while choosing; teammates' models appear on confirmation, with empty stands labelled PICKING beforehand. Once the roster has gathered, selection lasts up to 30 seconds and can end early when everyone locks. At expiry, accepted selections lock after any pending avatar-admission check finishes; loading still waits for every client's assets. This does not add cross-server invitations, late joining or new matchmaking rules.
+The same renderer serves the authoritative draft and shared countdown/loading preview. Class, avatar, lane and lock/readiness labels come from server snapshots. The local hero stays visible while choosing; teammates' models appear on confirmation, with empty stands labelled PICKING beforehand. Once the roster has gathered, a 30-second selection timer starts and can end early when everyone locks. At expiry, accepted selections lock after any pending avatar-admission check finishes; loading still waits for every client's assets. This does not add cross-server invitations, late joining or new matchmaking rules.
 
 ## First impression UI (0.28.4)
 
@@ -70,16 +70,17 @@ All 15 shipped playable 3D avatars use the engine's shared Run motion during nor
 
 Validated VRM0/VRM1 skinned humanoids receive runtime clips adapted to their bone map and rest pose, including models with no embedded clips. Original skin bytes remain unchanged. This is skeletal compatibility for a documented subset, not complete VRM materials/face/hair support. Approved Studio models gain runtime Run through normal verified loading; accepting externally published clipless models still requires a versioned profile rollout. See [architecture, import and limits](humanoid-motion.md).
 
-Canonical version: `0.23.0-rc.3`
+Canonical version: `0.28.5`
 
 ## Team draft and shared loading
 
 Normal Find match assigns a team and map side automatically. Each assigned team
 can inspect accepted avatar/class choices, choose an intended Solo, Jungle, Mid,
 Carry or Support role, and lock or unlock its choice. Duplicate and composition
-warnings inform the team without banning duplicate classes or roles. The roster scrolls for larger configured teams.
+warnings inform the team without banning duplicate classes or roles. The shared stage displays up to five teammates.
 
-All required human players lock before the shared three-second countdown. The
+The shared three-second countdown begins after everyone locks, or after the
+selection deadline expires and pending avatar checks finish. The
 loading screen retains the frozen roster and shows actual readiness. A client
 acknowledges only after map and final avatar dependencies load; the server waits
 for every required participant and the durable career-start acknowledgment.
