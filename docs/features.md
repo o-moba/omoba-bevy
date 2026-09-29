@@ -1,5 +1,9 @@
 # Feature Inventory
 
+## First impression UI (0.28.4)
+
+Home owns a unified, inset header on desktop and tablets, including its touch utility controls, with the build label retained inside the footer. Hero Select includes the selected 3D character on compact phones, larger portrait tiles, class icons, touch catalogue scrolling and a separate admission notice. Settings uses a shared icon rail, aligned cards, real volume/lighting sliders and fixed close/back actions. Touch scrolling does not change slider values. Background paintings reveal even when their window is unfocused.
+
 ## Tablet menus, Russian and offline lane practice (0.28.3)
 
 Home's decorative frame uses equal viewport insets on tablets and desktops; its character and controls retain their fitted composition. The top shading fades from the screen edge, and tablets use a single Help/Menu/Server bar. Graphics settings share aligned label and control columns with fixed close/back navigation. Mobile menus leave matches without quitting the application; desktop retains Exit. Settings also includes Русский alongside English and 简体中文, with the choice saved locally.

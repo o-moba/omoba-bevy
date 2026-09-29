@@ -21,6 +21,10 @@ use bevy::{
 
 use super::gesture::{TAP_SLOP, logical_ui_rect};
 use super::modal::ModalGate;
+use super::widgets::{
+    KitParts,
+    controls::{Slider, SliderDragAxis, slider_drag_axis, slider_touch_rect},
+};
 
 /// Which build an input path is live on. `Phone` also requires the phone HUD
 /// to be landscape and focused, like the tap recognizer.
@@ -160,6 +164,8 @@ struct Held {
     start: Vec2,
     previous: Vec2,
     moved: bool,
+    started_on_slider: bool,
+    slider_axis: Option<SliderDragAxis>,
     /// Finger travel (logical px) not yet applied to the area.
     pending: f32,
     ended: bool,
@@ -195,6 +201,8 @@ pub(crate) fn scroll_areas(
     window: Query<(Entity, &Window), With<PrimaryWindow>>,
     gate: ModalGate,
     mut areas: Query<AreaItem>,
+    sliders: Query<(Entity, &KitParts, &super::Pressable), With<Slider>>,
+    tracks: Query<(&ComputedNode, &UiGlobalTransform)>,
 ) {
     let state = &mut *state;
     let wheel: Vec<MouseWheel> = wheel
@@ -271,6 +279,19 @@ pub(crate) fn scroll_areas(
     for event in touches.iter().filter(|e| e.window == window_entity) {
         if event.phase == TouchPhase::Started {
             if state.held.as_ref().is_none_or(|held| held.ended) {
+                let started_on_slider = sliders.iter().any(|(entity, parts, pressable)| {
+                    !pressable.disabled
+                        && !pressable.blocked
+                        && gate.allows(entity)
+                        && parts
+                            .track
+                            .and_then(|track| tracks.get(track).ok())
+                            .is_some_and(|(node, transform)| {
+                                node.size().min_element() > 0.0
+                                    && slider_touch_rect(node, transform, dpi)
+                                        .contains(event.position * dpi)
+                            })
+                });
                 state.held = areas
                     .iter()
                     .filter_map(|(entity, area, node, transform, visibility, clip, _)| {
@@ -297,6 +318,8 @@ pub(crate) fn scroll_areas(
                         start: event.position,
                         previous: event.position,
                         moved: false,
+                        started_on_slider,
+                        slider_axis: None,
                         pending: 0.0,
                         ended: false,
                     });
@@ -315,7 +338,14 @@ pub(crate) fn scroll_areas(
             continue;
         }
         let was_moved = held.moved;
-        held.moved |= held.start.distance(event.position) > held.threshold;
+        if held.started_on_slider {
+            if held.slider_axis.is_none() {
+                held.slider_axis = slider_drag_axis(event.position - held.start);
+            }
+            held.moved = held.slider_axis == Some(SliderDragAxis::Vertical);
+        } else {
+            held.moved |= held.start.distance(event.position) > held.threshold;
+        }
         if held.moved {
             // The first scrolling event catches up from the start point.
             held.pending += if was_moved {

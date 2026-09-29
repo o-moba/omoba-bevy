@@ -282,6 +282,8 @@ pub enum ButtonKind {
     /// (external targets add the `nav/link` icon).
     Link,
     /// A team's lock-in button: the primary slab with a team-colour bar.
+    // Kept for team-themed kit samples; automatic matchmaking uses Primary.
+    #[cfg_attr(not(feature = "qa"), allow(dead_code))]
     Team(crate::domain::Team),
     /// A desktop combat skill-bar slot; darkens while held.
     Skill,

@@ -482,8 +482,8 @@ fn spawn_band(parent: &mut ChildSpawnerCommands, header: bool, solid: f32, fade:
     parent.spawn((
         Node {
             position_type: PositionType::Absolute,
-            top: header.then_some(Val::Px(0.0)).unwrap_or(Val::Auto),
-            bottom: (!header).then_some(Val::Px(0.0)).unwrap_or(Val::Auto),
+            top: if header { Val::Px(0.0) } else { Val::Auto },
+            bottom: if header { Val::Auto } else { Val::Px(0.0) },
             left: Val::Px(0.0),
             right: Val::Px(0.0),
             height: Val::Px(solid + fade),
@@ -626,15 +626,19 @@ fn animate_living_backgrounds(
     )>,
 ) {
     let Ok(window) = windows.single() else { return };
+    // Finish revealing a newly entered screen even if the window has not
+    // acquired focus yet. Focus only pauses decorative movement; sharing its
+    // zero delta with the reveal would leave every painted layer transparent.
+    let transition_delta = time.delta_secs().min(0.05);
     let delta = if window.focused {
-        time.delta_secs().min(0.05)
+        transition_delta
     } else {
         0.0
     };
     let fade_duration = motion::DURATION_SCREEN_FADE.as_secs_f32().max(f32::EPSILON);
     let mut root_state = Vec::new();
     for (entity, root, mut fade) in &mut roots {
-        fade.0 = (fade.0 + delta / fade_duration).min(1.0);
+        fade.0 = (fade.0 + transition_delta / fade_duration).min(1.0);
         root_state.push((entity, root.scene, motion::EASING_STANDARD.ease(fade.0)));
     }
     if root_state.is_empty() {
@@ -852,6 +856,78 @@ mod tests {
         assert!(!use_high_density(true, 1080));
         assert!(!use_high_density(false, 800));
         assert!(use_high_density(false, 801));
+    }
+
+    #[test]
+    fn an_unfocused_screen_reveals_its_painting_without_advancing_motion() {
+        let mut app = App::new();
+        app.init_resource::<Time>()
+            .init_resource::<MotionSettings>()
+            .init_resource::<LivingQuality>()
+            .init_resource::<LivingClock>()
+            .insert_resource(super::super::UiPlatform(crate::platform::UiProfile::Mobile))
+            .add_systems(Update, animate_living_backgrounds);
+        let window = app
+            .world_mut()
+            .spawn((
+                Window {
+                    focused: false,
+                    ..default()
+                },
+                PrimaryWindow,
+            ))
+            .id();
+        let backdrop = app
+            .world_mut()
+            .spawn((
+                LivingBackground {
+                    scene: LivingScene::Stage,
+                },
+                LivingFade::default(),
+            ))
+            .id();
+        let plate = app
+            .world_mut()
+            .spawn((
+                LivingOwner(backdrop),
+                LivingVisual::Plate,
+                LivingTint(Color::WHITE),
+                KitImage::background(LivingScene::Stage.plate()),
+                UiTransform::default(),
+                Visibility::Inherited,
+            ))
+            .id();
+
+        for _ in 0..20 {
+            app.world_mut()
+                .resource_mut::<Time>()
+                .advance_by(std::time::Duration::from_millis(50));
+            app.update();
+        }
+
+        assert_eq!(app.world().get::<LivingFade>(backdrop).unwrap().0, 1.0);
+        assert_eq!(
+            app.world().get::<KitImage>(plate).unwrap().tint.alpha(),
+            1.0
+        );
+        assert_eq!(
+            app.world().get::<Visibility>(plate),
+            Some(&Visibility::Inherited)
+        );
+        let clock = app.world().resource::<LivingClock>();
+        assert_eq!(clock.elapsed, 0.0);
+        assert_eq!(clock.drift, Vec2::ZERO);
+
+        app.world_mut().get_mut::<Window>(window).unwrap().focused = true;
+        app.world_mut()
+            .resource_mut::<Time>()
+            .advance_by(std::time::Duration::from_millis(50));
+        app.update();
+        assert!(app.world().resource::<LivingClock>().elapsed > 0.0);
+        assert_eq!(
+            app.world().get::<KitImage>(plate).unwrap().tint.alpha(),
+            1.0
+        );
     }
 
     #[test]

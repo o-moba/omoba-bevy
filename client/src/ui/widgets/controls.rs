@@ -7,9 +7,13 @@
 // i18n-strict
 // Kit parts that screen steps adopt; the kit gallery (`qa` feature) uses all of them.
 #![cfg_attr(not(feature = "qa"), allow(dead_code))]
-use std::time::Duration;
+use std::{collections::HashMap, time::Duration};
 
-use bevy::prelude::*;
+use bevy::{
+    ecs::message::MessageCursor,
+    input::touch::{TouchInput, TouchPhase},
+    prelude::*,
+};
 
 use super::{ButtonStyle, KitParts, KitSkin, NoSlab, button_bundle, icon_node};
 use crate::i18n::UiLabel;
@@ -437,6 +441,44 @@ pub(crate) struct SliderChanged {
     pub value: f32,
 }
 
+/// A drag that begins on a slider chooses its owner once, after tap slop.
+/// The parent vertical scroller uses the same decision as the slider.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum SliderDragAxis {
+    Horizontal,
+    Vertical,
+}
+
+pub(crate) fn slider_drag_axis(delta: Vec2) -> Option<SliderDragAxis> {
+    let delta = delta.abs();
+    if delta.max_element() <= crate::ui::gesture::TAP_SLOP {
+        return None;
+    }
+    Some(if delta.x > delta.y {
+        SliderDragAxis::Horizontal
+    } else {
+        SliderDragAxis::Vertical
+    })
+}
+
+pub(crate) fn slider_touch_rect(
+    node: &ComputedNode,
+    transform: &UiGlobalTransform,
+    dpi: f32,
+) -> Rect {
+    let rect = crate::ui::focus::node_rect(node, transform);
+    Rect::from_corners(
+        rect.min - Vec2::Y * size::SLIDER_HIT_PHONE * dpi * 0.5,
+        rect.max + Vec2::Y * size::SLIDER_HIT_PHONE * dpi * 0.5,
+    )
+}
+
+#[derive(Default)]
+pub(crate) struct SliderTouchDirections {
+    reader: MessageCursor<TouchInput>,
+    fingers: HashMap<u64, (Vec2, Option<SliderDragAxis>)>,
+}
+
 /// `label · slider · value` (`slider.md`). The row is the focusable control
 /// (ring offset 6), the thumb follows [`Slider::value`] and the value shows
 /// it in percent. The owner reads [`SliderChanged`] or the component.
@@ -651,13 +693,40 @@ pub(crate) fn paint_slider_values(
 /// focused one. Disabled or modal-blocked sliders do not move.
 #[allow(clippy::type_complexity)]
 pub(crate) fn drive_sliders(
+    mut directions: Local<SliderTouchDirections>,
     mut sliders: Query<(Entity, &mut Slider, &Interaction, &Pressable, &KitParts)>,
     tracks: Query<(&ComputedNode, &UiGlobalTransform)>,
     windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
     touches: Option<Res<Touches>>,
+    touch_events: Option<Res<Messages<TouchInput>>>,
     mut adjust: MessageReader<FocusAdjust>,
     mut changed: MessageWriter<SliderChanged>,
 ) {
+    directions.fingers.retain(|id, _| {
+        touches.as_ref().is_some_and(|touches| {
+            touches.get_pressed(*id).is_some() || touches.get_released(*id).is_some()
+        })
+    });
+    if let Some(events) = touch_events.as_ref() {
+        let events: Vec<_> = directions.reader.read(events).copied().collect();
+        for event in events {
+            match event.phase {
+                TouchPhase::Started => {
+                    directions.fingers.insert(event.id, (event.position, None));
+                }
+                TouchPhase::Moved | TouchPhase::Ended => {
+                    if let Some((start, axis)) = directions.fingers.get_mut(&event.id)
+                        && axis.is_none()
+                    {
+                        *axis = slider_drag_axis(event.position - *start);
+                    }
+                }
+                TouchPhase::Canceled => {
+                    directions.fingers.remove(&event.id);
+                }
+            }
+        }
+    }
     let adjustments: Vec<FocusAdjust> = adjust.read().copied().collect();
     let window = windows.single().ok();
     let pointer = window.and_then(|window| {
@@ -678,10 +747,33 @@ pub(crate) fn drive_sliders(
             let rect = crate::ui::focus::node_rect(node, transform);
             let touch = touches.as_ref().and_then(|touches| {
                 let scale = window.map_or(1.0, Window::scale_factor);
+                if !pressable.touch_mode {
+                    return None;
+                }
+                let hit = slider_touch_rect(node, transform, scale);
                 touches
                     .iter()
-                    .map(|touch| touch.position() * scale)
-                    .find(|_| pressable.touch_mode && *interaction != Interaction::None)
+                    .find_map(|touch| {
+                        (hit.contains(touch.start_position() * scale)
+                            && directions
+                                .fingers
+                                .get(&touch.id())
+                                .is_some_and(|(_, axis)| *axis == Some(SliderDragAxis::Horizontal)))
+                        .then_some(touch.position() * scale)
+                    })
+                    .or_else(|| {
+                        touches.iter_just_released().find_map(|touch| {
+                            (pressable.activated
+                                && directions
+                                    .fingers
+                                    .get(&touch.id())
+                                    .is_some_and(|(_, axis)| axis.is_none())
+                                && hit.contains(touch.start_position() * scale)
+                                && touch.position().distance(touch.start_position())
+                                    <= crate::ui::gesture::TAP_SLOP)
+                                .then_some(touch.position() * scale)
+                        })
+                    })
             });
             let held = if pressable.touch_mode {
                 touch
@@ -1193,6 +1285,160 @@ mod tests {
         });
         app.update();
         assert_eq!(app.world().get::<Slider>(slider_entity).unwrap().value, 1.0);
+    }
+
+    #[test]
+    fn touch_slider_ignores_vertical_scroll_and_accepts_horizontal_drag() {
+        use bevy::input::touch::{TouchInput, TouchPhase, touch_screen_input_system};
+        let mut app = App::new();
+        app.init_resource::<Touches>()
+            .add_message::<TouchInput>()
+            .add_message::<FocusAdjust>()
+            .add_message::<SliderChanged>()
+            .add_systems(Update, (touch_screen_input_system, drive_sliders).chain());
+        let window = app
+            .world_mut()
+            .spawn((Window::default(), bevy::window::PrimaryWindow))
+            .id();
+        let track = app
+            .world_mut()
+            .spawn((
+                ComputedNode {
+                    size: Vec2::new(200.0, 4.0),
+                    inverse_scale_factor: 1.0,
+                    ..default()
+                },
+                UiGlobalTransform::from_translation(Vec2::new(200.0, 100.0)),
+            ))
+            .id();
+        let slider = app
+            .world_mut()
+            .spawn((
+                Slider {
+                    value: 0.5,
+                    step: 0.05,
+                },
+                Pressable {
+                    touch_mode: true,
+                    ..default()
+                },
+                Interaction::Pressed,
+                KitParts {
+                    track: Some(track),
+                    ..default()
+                },
+            ))
+            .id();
+        for (id, phase, position, expected) in [
+            (1, TouchPhase::Started, Vec2::new(200.0, 100.0), 0.5),
+            (1, TouchPhase::Moved, Vec2::new(210.0, 140.0), 0.5),
+            (1, TouchPhase::Ended, Vec2::new(210.0, 140.0), 0.5),
+            (2, TouchPhase::Started, Vec2::new(200.0, 100.0), 0.5),
+            (2, TouchPhase::Moved, Vec2::new(250.0, 100.0), 0.75),
+        ] {
+            app.world_mut().write_message(TouchInput {
+                id,
+                phase,
+                position,
+                window,
+                force: None,
+            });
+            app.update();
+            assert!((app.world().get::<Slider>(slider).unwrap().value - expected).abs() < 1e-5);
+        }
+    }
+
+    #[test]
+    fn touch_slider_and_scrolling_parent_own_only_one_axis_per_gesture() {
+        use crate::ui::scroll::{ScrollArea, scroll_areas};
+        use bevy::input::touch::{TouchInput, TouchPhase, touch_screen_input_system};
+        let mut app = App::new();
+        app.init_resource::<Touches>()
+            .insert_resource(crate::ui::UiPlatform(crate::platform::UiProfile::Mobile))
+            .add_message::<TouchInput>()
+            .add_message::<FocusAdjust>()
+            .add_message::<SliderChanged>()
+            .add_systems(
+                Update,
+                (touch_screen_input_system, scroll_areas, drive_sliders).chain(),
+            );
+        let window = app
+            .world_mut()
+            .spawn((Window::default(), bevy::window::PrimaryWindow))
+            .id();
+        let area = app
+            .world_mut()
+            .spawn((
+                Node::default(),
+                ScrollArea::menu(32.0),
+                ScrollPosition(Vec2::new(0.0, 40.0)),
+                InheritedVisibility::VISIBLE,
+                ComputedNode {
+                    size: Vec2::new(400.0, 240.0),
+                    content_size: Vec2::new(400.0, 800.0),
+                    inverse_scale_factor: 1.0,
+                    ..default()
+                },
+                UiGlobalTransform::from_translation(Vec2::new(200.0, 120.0)),
+            ))
+            .id();
+        let track = app
+            .world_mut()
+            .spawn((
+                ComputedNode {
+                    size: Vec2::new(200.0, 4.0),
+                    inverse_scale_factor: 1.0,
+                    ..default()
+                },
+                UiGlobalTransform::from_translation(Vec2::new(200.0, 100.0)),
+            ))
+            .id();
+        let slider = app
+            .world_mut()
+            .spawn((
+                Slider {
+                    value: 0.5,
+                    step: 0.05,
+                },
+                Pressable {
+                    touch_mode: true,
+                    ..default()
+                },
+                Interaction::Pressed,
+                KitParts {
+                    track: Some(track),
+                    ..default()
+                },
+            ))
+            .id();
+        for (id, phase, position, expected_value, expected_scroll) in [
+            (1, TouchPhase::Started, Vec2::new(200.0, 100.0), 0.5, 40.0),
+            (1, TouchPhase::Moved, Vec2::new(250.0, 92.0), 0.75, 40.0),
+            (1, TouchPhase::Moved, Vec2::new(250.0, 20.0), 0.75, 40.0),
+            (1, TouchPhase::Ended, Vec2::new(250.0, 20.0), 0.75, 40.0),
+            (2, TouchPhase::Started, Vec2::new(200.0, 100.0), 0.75, 40.0),
+            (2, TouchPhase::Moved, Vec2::new(208.0, 50.0), 0.75, 90.0),
+            (2, TouchPhase::Moved, Vec2::new(290.0, 50.0), 0.75, 90.0),
+            (2, TouchPhase::Ended, Vec2::new(290.0, 50.0), 0.75, 90.0),
+        ] {
+            app.world_mut().write_message(TouchInput {
+                id,
+                phase,
+                position,
+                window,
+                force: None,
+            });
+            app.update();
+            assert!(
+                (app.world().get::<Slider>(slider).unwrap().value - expected_value).abs() < 1e-5,
+                "{id} {phase:?}: slider"
+            );
+            assert_eq!(
+                app.world().get::<ScrollPosition>(area).unwrap().y,
+                expected_scroll,
+                "{id} {phase:?}: scroll"
+            );
+        }
     }
 
     #[test]

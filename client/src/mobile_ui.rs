@@ -79,6 +79,23 @@ pub(crate) struct ServerEntry {
     keyboard: bool,
 }
 
+impl ServerEntry {
+    /// Screen-owned utility buttons share the address editor without a
+    /// second floating toolbar competing with the menu's own header.
+    pub(crate) fn open_for(&mut self, session: &ClientSession) {
+        if session.join_in_flight() || session.has_committed_join() {
+            return;
+        }
+        self.open = true;
+        self.address = if session.server_addr() == "127.0.0.1:4000" {
+            String::new()
+        } else {
+            session.server_addr().to_owned()
+        };
+        self.error = None;
+    }
+}
+
 /// Presses on the phone bar and the server-address entry. The buttons keep
 /// their fixed `TILE` colour (no `ButtonStyle`).
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -145,17 +162,17 @@ fn setup_phone_ui(mut commands: Commands) {
             Name::new("PhoneMenuBar"),
         ))
         .with_children(|bar| {
-            phone_button(bar, "?", "PhoneHelpButton", PhoneAction::Help);
+            phone_button(bar, "?", "LegacyPhoneHelpButton", PhoneAction::Help);
             phone_button(
                 bar,
                 Localized::new("phone.bar.menu"),
-                "PhoneMenuButton",
+                "LegacyPhoneMenuButton",
                 PhoneAction::Menu,
             );
             phone_button(
                 bar,
                 Localized::new("phone.bar.server"),
-                "PhoneServerButton",
+                "LegacyPhoneServerButton",
                 PhoneAction::Server,
             );
         });
@@ -308,13 +325,7 @@ fn phone_menu_actions(
             PhoneAction::Menu => pause.open = !pause.open,
             PhoneAction::Help => help.0 = !help.0,
             PhoneAction::Server if !session.join_in_flight() && !session.has_committed_join() => {
-                entry.open = true;
-                entry.address = if session.server_addr() == "127.0.0.1:4000" {
-                    String::new()
-                } else {
-                    session.server_addr().to_owned()
-                };
-                entry.error = None;
+                entry.open_for(&session);
             }
             PhoneAction::Close => {
                 entry.open = false;
@@ -394,7 +405,7 @@ pub(crate) fn address_keyboard(
 fn sync_phone_ui(
     mobile: Res<MobileControls>,
     session: Res<ClientSession>,
-    screen: Option<Res<State<crate::frontend::AppScreen>>>,
+    _screen: Option<Res<State<crate::frontend::AppScreen>>>,
     shop: Option<Res<crate::shop::ShopState>>,
     mut entry: ResMut<ServerEntry>,
     mut bar: Query<
@@ -428,14 +439,9 @@ fn sync_phone_ui(
             entry.open = true;
         }
     }
-    // The bar is how a phone reaches settings and the server address: it
-    // belongs on the home screen and the picker. The match has its compact
-    // score/menu strip. The other menus
-    // have their own Back and would collide with it in the corner.
-    let bar_wanted = screen.as_ref().is_some_and(|screen| {
-        use crate::frontend::AppScreen;
-        matches!(screen.get(), AppScreen::Home | AppScreen::HeroSelect)
-    });
+    // Home now owns its Help/Settings/Server controls inside the header;
+    // the picker owns Back. Keep the editor, hide the legacy floating bar.
+    let bar_wanted = false;
     for mut node in &mut bar {
         node.display = if mobile.enabled
             && mobile.landscape
@@ -545,7 +551,12 @@ fn adapt_phone_layout(
     mobile: Res<MobileControls>,
     session: Res<ClientSession>,
     mut nodes: Query<(Entity, NodeKey, &mut Node, Option<&mut UiTransform>)>,
-    mut fonts: Query<(Entity, &mut TextFont, Option<&PhoneFontSize>)>,
+    mut fonts: Query<(
+        Entity,
+        &mut TextFont,
+        Option<&PhoneFontSize>,
+        Option<&crate::ui::theme::TextStyle>,
+    )>,
     mut copy: Query<(NodeKey, &mut Text), Without<crate::i18n::Localized>>,
     hierarchy: Query<(Option<&ChildOf>, NodeKey)>,
     pause: Option<Res<crate::pause_menu::PauseMenuState>>,
@@ -564,6 +575,11 @@ fn adapt_phone_layout(
     let grid_left = left + class_width + 20.0;
     let grid_width = width - class_width - 20.0;
     for (entity, name, mut node, _transform) in &mut nodes {
+        // Hero Select owns its responsive layout. Never overwrite it with
+        // the legacy full-width grid/no-preview phone composition.
+        if phone_family(entity, &hierarchy) == Some(PhoneText::Entry) {
+            continue;
+        }
         match name.as_str() {
             "TeamSelectOverlay" => {
                 node.padding = UiRect::ZERO;
@@ -718,8 +734,8 @@ fn adapt_phone_layout(
                     )
                 });
                 node.max_height = Val::Px(height);
-                node.padding = UiRect::all(Val::Px(10.0));
-                node.row_gap = Val::Px(6.0);
+                node.padding = UiRect::axes(Val::Px(16.0), Val::Px(12.0));
+                node.row_gap = Val::Px(8.0);
                 node.overflow = Overflow::clip();
             }
             "PauseMenuMainSection" => node.row_gap = Val::Px(10.0),
@@ -763,10 +779,13 @@ fn adapt_phone_layout(
             _ => {}
         }
     }
-    for (entity, mut font, base) in &mut fonts {
+    for (entity, mut font, base, style) in &mut fonts {
         let Some(family) = phone_family(entity, &hierarchy) else {
             continue;
         };
+        if family == PhoneText::Entry || style.is_some() {
+            continue;
+        }
         let original = base.map_or(font.font_size, |base| base.0);
         if base.is_none() {
             commands
@@ -1035,14 +1054,7 @@ mod tests {
             }
             let mut bars = app.world_mut().query_filtered::<&Node, With<PhoneBar>>();
             let node = bars.single(app.world()).unwrap();
-            assert_eq!(
-                node.display,
-                if shop_open {
-                    Display::None
-                } else {
-                    Display::Flex
-                }
-            );
+            assert_eq!(node.display, Display::None);
             let Val::Px(top) = node.top else {
                 panic!("safe top")
             };
@@ -1061,7 +1073,7 @@ mod tests {
     }
 
     #[test]
-    fn phone_menu_bar_belongs_only_to_home_and_hero_picker() {
+    fn screen_owned_headers_hide_the_legacy_floating_phone_bar() {
         let mut app = App::new();
         let mut mobile = MobileControls::default();
         mobile.enabled = true;
@@ -1079,17 +1091,7 @@ mod tests {
             app.insert_resource(State::new(screen));
             app.update();
             let mut bars = app.world_mut().query_filtered::<&Node, With<PhoneBar>>();
-            assert_eq!(
-                bars.single(app.world()).unwrap().display,
-                if matches!(
-                    screen,
-                    crate::frontend::AppScreen::Home | crate::frontend::AppScreen::HeroSelect
-                ) {
-                    Display::Flex
-                } else {
-                    Display::None
-                }
-            );
+            assert_eq!(bars.single(app.world()).unwrap().display, Display::None);
         }
     }
 

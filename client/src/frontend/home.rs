@@ -50,6 +50,7 @@ enum HomeAction {
     Party,
     Help,
     Settings,
+    Server,
     AcceptInvite(u64),
     DeclineInvite(u64),
 }
@@ -178,6 +179,66 @@ fn home_canvas(mobile: bool, viewport: Vec2, ui_scale: f32) -> (bool, Node, UiTr
     )
 }
 
+// Authored content stays inside the visible ornament, including its corners.
+// The header/footer share one physical inset even on a tall tablet canvas.
+const HOME_INSET: f32 = 64.0;
+fn header_top(fit: f32, outer_y: f32) -> f32 {
+    HOME_INSET / fit - outer_y
+}
+
+fn home_control_size(authored: f32, mobile: bool, fit: f32) -> f32 {
+    if mobile {
+        authored.max(theme::metric::TOUCH_MIN / fit.max(0.1))
+    } else {
+        authored
+    }
+}
+
+fn spawn_home_utilities(
+    parent: &mut ChildSpawnerCommands,
+    mobile: bool,
+    form: theme::Form,
+    fit: f32,
+) {
+    for (icon, action, desktop_id, phone_id) in [
+        (
+            Icon::NavHelpCircle,
+            HomeAction::Help,
+            "HomeHelp",
+            "PhoneHelpButton",
+        ),
+        (
+            Icon::NavSettings,
+            HomeAction::Settings,
+            "HomeSettings",
+            "PhoneMenuButton",
+        ),
+        (
+            Icon::NavLink,
+            HomeAction::Server,
+            "HomeServer",
+            "PhoneServerButton",
+        ),
+    ] {
+        if matches!(action, HomeAction::Server) && !mobile {
+            continue;
+        }
+        let button = kit::controls::sized_icon_button(
+            parent,
+            icon,
+            form,
+            ButtonKind::Secondary,
+            action,
+            if mobile { phone_id } else { desktop_id },
+        );
+        let side = home_control_size(if mobile { 44.0 } else { 40.0 }, mobile, fit);
+        parent
+            .commands()
+            .entity(button)
+            .insert(kit::controls::icon_button_node(side, radius::PILL));
+    }
+}
+
 /// What the home screen renders from. When it changes, the screen is rebuilt.
 #[derive(PartialEq, Clone)]
 struct HomeSignature {
@@ -284,9 +345,7 @@ pub fn last_match_line(result: &shared::career::MatchResult, profile_id: Option<
 /// Shared status line: the home header and the picker header both use it.
 pub(crate) fn connection_line(session: &ClientSession) -> (String, Color) {
     match session.state() {
-        ClientConnectionState::Connected => {
-            (tr("home.connection.online").to_owned(), theme::PRIMARY)
-        }
+        ClientConnectionState::Connected => (tr("home.connection.online").to_owned(), theme::JADE),
         ClientConnectionState::Connecting | ClientConnectionState::WaitingForServer => {
             (tr("home.connection.connecting").to_owned(), theme::GOLD)
         }
@@ -368,71 +427,105 @@ fn spawn_home(
                 root.spawn((
                     Node {
                         position_type: PositionType::Absolute,
-                        left: Val::Px(40.0),
-                        top: Val::Px(64.0 / fit - outer_y),
-                        flex_direction: FlexDirection::Column,
-                        row_gap: Val::Px(2.0),
+                        left: Val::Px(HOME_INSET),
+                        right: Val::Px(HOME_INSET),
+                        top: Val::Px(header_top(fit, outer_y)),
+                        height: Val::Px(64.0),
+                        align_items: AlignItems::Center,
+                        justify_content: JustifyContent::SpaceBetween,
+                        column_gap: Val::Px(space::S24),
                         ..default()
                     },
-                    Name::new("HomeBrand"),
+                    Name::new("HomeHeader"),
                 ))
-                .with_children(|brand| {
-                    brand.spawn(widgets::heading("OMOBA", 34.0)); // i18n-allow
-                    brand.spawn(widgets::label(tr("home.tagline"), 13.0, theme::MUTED));
+                .with_children(|header| {
+                    header
+                        .spawn((
+                            Node {
+                                flex_direction: FlexDirection::Column,
+                                row_gap: Val::Px(space::S4),
+                                ..default()
+                            },
+                            Name::new("HomeBrand"),
+                        ))
+                        .with_children(|brand| {
+                            brand.spawn((Text::new("OMOBA"), theme::role_text(TextRole::Title))); // i18n-allow
+                            brand.spawn((
+                                Text::new(tr("home.tagline")),
+                                theme::role_text(TextRole::Eyebrow),
+                            ));
+                        });
+                    header
+                        .spawn((
+                            Node {
+                                align_items: AlignItems::Center,
+                                column_gap: Val::Px(space::S8),
+                                ..default()
+                            },
+                            Name::new("HomeUtilityButtons"),
+                        ))
+                        .with_children(|buttons| {
+                            buttons
+                                .spawn((
+                                    Node {
+                                        max_width: Val::Px(240.0),
+                                        margin: UiRect::right(Val::Px(space::S16)),
+                                        padding: UiRect::axes(Val::Px(12.0), Val::Px(8.0)),
+                                        border_radius: BorderRadius::all(Val::Px(20.0)),
+                                        ..default()
+                                    },
+                                    BackgroundColor(
+                                        theme::perceptual(color::SURFACE_1).with_alpha(0.94),
+                                    ),
+                                    Name::new("HomeConnectionPill"),
+                                ))
+                                .with_children(|pill| {
+                                    pill.spawn((
+                                        widgets::label(&status, 13.0, status_color),
+                                        Name::new("HomeConnectionStatus"),
+                                    ));
+                                });
+                            spawn_home_utilities(
+                                buttons,
+                                platform.is_mobile(),
+                                theme::Form::of(platform.is_mobile()),
+                                fit,
+                            );
+                        });
                 });
+            } else {
                 root.spawn((
-                    widgets::label(&status, 15.0, status_color),
                     Node {
                         position_type: PositionType::Absolute,
-                        right: Val::Px(if platform.is_mobile() { 40.0 } else { 140.0 }),
-                        top: Val::Px(76.0 / fit - outer_y),
+                        right: Val::Px(63.0),
+                        top: Val::Px(12.0),
+                        column_gap: Val::Px(space::S8),
                         ..default()
                     },
-                    Name::new("HomeConnectionStatus"),
-                ));
-                // Touch Home already has Help/Menu/Server in its native utility bar.
-                if !platform.is_mobile() {
-                    root.spawn((
-                        Node {
-                            position_type: PositionType::Absolute,
-                            right: Val::Px(40.0),
-                            top: Val::Px(64.0 / fit - outer_y),
-                            column_gap: Val::Px(space::S8),
-                            ..default()
-                        },
-                        Name::new("HomeUtilityButtons"),
-                    ))
-                    .with_children(|buttons| {
-                        kit::controls::sized_icon_button(
-                            buttons,
-                            Icon::NavHelpCircle,
-                            form,
-                            ButtonKind::Secondary,
-                            HomeAction::Help,
-                            "HomeHelp",
-                        );
-                        kit::controls::sized_icon_button(
-                            buttons,
-                            Icon::NavSettings,
-                            form,
-                            ButtonKind::Secondary,
-                            HomeAction::Settings,
-                            "HomeSettings",
-                        );
-                    });
-                }
-            } else {
-                // The phone utility bar owns the top-right corner. Keep the
-                // status in the accessibility tree while avoiding a visual
-                // collision with Help / Menu / Server.
+                    Name::new("HomeUtilityButtons"),
+                ))
+                .with_children(|buttons| {
+                    spawn_home_utilities(buttons, true, theme::Form::Phone, fit);
+                });
                 root.spawn((
-                    widgets::label(&status, 14.0, status_color),
                     Node {
-                        display: Display::None,
+                        position_type: PositionType::Absolute,
+                        right: Val::Px(63.0),
+                        top: Val::Px(66.0),
+                        max_width: Val::Px(240.0),
+                        padding: UiRect::axes(Val::Px(10.0), Val::Px(5.0)),
+                        border_radius: BorderRadius::all(Val::Px(16.0)),
                         ..default()
                     },
-                    Name::new("HomeConnectionStatus"),
-                ));
+                    BackgroundColor(theme::perceptual(color::SURFACE_1).with_alpha(0.94)),
+                    Name::new("HomeConnectionPill"),
+                ))
+                .with_children(|pill| {
+                    pill.spawn((
+                        widgets::label(&status, 12.0, status_color),
+                        Name::new("HomeConnectionStatus"),
+                    ));
+                });
             }
 
             spawn_home_identity(
@@ -442,8 +535,14 @@ fn spawn_home(
                 profile.as_ref(),
                 &career.nickname,
                 &thumbnails,
-                last_match.as_deref(),
+                if phone && party_line.invite.is_some() {
+                    None
+                } else {
+                    last_match.as_deref()
+                },
                 unit,
+                platform.is_mobile(),
+                fit,
             );
 
             let avatar_name = card
@@ -484,8 +583,8 @@ fn spawn_home(
             root.spawn((
                 Node {
                     position_type: PositionType::Absolute,
-                    left: Val::Px(if phone { 63.0 * unit } else { 520.0 }),
-                    top: Val::Px(if phone { 260.0 * unit } else { stage_y + 28.0 }),
+                    left: Val::Px(if phone { 330.0 * unit } else { 520.0 }),
+                    top: Val::Px(if phone { 270.0 * unit } else { stage_y + 28.0 }),
                     width: Val::Px(if phone { 180.0 * unit } else { 240.0 }),
                     height: Val::Px(if phone { 36.0 * unit } else { 64.0 }),
                     padding: UiRect::axes(Val::Px(space::S12), Val::Px(space::S4)),
@@ -528,7 +627,7 @@ fn spawn_home(
             root.spawn((
                 Node {
                     position_type: PositionType::Absolute,
-                    left: Val::Px(if phone { 561.0 * unit } else { 880.0 }),
+                    left: Val::Px(if phone { 561.0 * unit } else { 856.0 }),
                     top: Val::Px(if phone { 130.0 * unit } else { 204.0 }),
                     width: Val::Px(if phone { 220.0 * unit } else { 360.0 }),
                     flex_direction: FlexDirection::Column,
@@ -600,7 +699,11 @@ fn spawn_home(
                     column,
                     Node {
                         width: Val::Px(if phone { 180.0 * unit } else { 280.0 }),
-                        height: Val::Px(if phone { 44.0 * unit } else { 46.0 }),
+                        height: Val::Px(home_control_size(
+                            if phone { 44.0 * unit } else { 46.0 },
+                            platform.is_mobile(),
+                            fit,
+                        )),
                         justify_content: JustifyContent::Center,
                         align_items: AlignItems::Center,
                         column_gap: Val::Px(space::S8 * unit),
@@ -620,7 +723,7 @@ fn spawn_home(
             root.spawn((
                 Node {
                     position_type: PositionType::Absolute,
-                    left: Val::Px(if phone { 63.0 * unit } else { 880.0 }),
+                    left: Val::Px(if phone { 63.0 * unit } else { 856.0 }),
                     top: Val::Px(if phone { 313.0 * unit } else { 500.0 }),
                     width: Val::Px(if phone { 718.0 * unit } else { 360.0 }),
                     height: Val::Px(if phone { 56.0 * unit } else { 88.0 }),
@@ -687,7 +790,7 @@ fn spawn_home(
             });
 
             if let Some((party_id, from)) = &party_line.invite {
-                spawn_invite_banner(root, *party_id, from);
+                spawn_invite_banner(root, *party_id, from, phone, platform.is_mobile(), fit);
             }
             // Build metadata is deliberately smaller than interactive labels;
             // keep it below the navigation strip on mobile and footer on desktop.
@@ -700,8 +803,8 @@ fn spawn_home(
                 TextColor(theme::MUTED),
                 Node {
                     position_type: PositionType::Absolute,
-                    left: Val::Px(if phone { 63.0 * unit } else { 40.0 }),
-                    bottom: Val::Px(if phone { 4.0 } else { 6.0 } - outer_y),
+                    left: Val::Px(if phone { 63.0 * unit } else { HOME_INSET }),
+                    bottom: Val::Px(if phone { 4.0 } else { 48.0 / fit } - outer_y),
                     ..default()
                 },
                 bevy::ui::FocusPolicy::Pass,
@@ -712,8 +815,8 @@ fn spawn_home(
                     widgets::label(tr("home.footer"), 12.0, theme::MUTED),
                     Node {
                         position_type: PositionType::Absolute,
-                        left: Val::Px(40.0),
-                        bottom: Val::Px(24.0 - outer_y),
+                        right: Val::Px(HOME_INSET),
+                        bottom: Val::Px(48.0 / fit - outer_y),
                         ..default()
                     },
                 ));
@@ -731,12 +834,15 @@ fn spawn_home_identity(
     thumbnails: &AvatarThumbnails,
     last_match: Option<&str>,
     unit: f32,
+    mobile: bool,
+    fit: f32,
 ) {
     if !phone {
+        let account_side = home_control_size(if mobile { 44.0 } else { 40.0 }, mobile, fit);
         root.spawn((
             Node {
                 position_type: PositionType::Absolute,
-                left: Val::Px(40.0),
+                left: Val::Px(HOME_INSET),
                 top: Val::Px(248.0),
                 width: Val::Px(380.0),
                 flex_direction: FlexDirection::Column,
@@ -750,7 +856,7 @@ fn spawn_home_identity(
             spawn_card(column, card, profile, fallback_nickname, thumbnails);
             column
                 .spawn(Node {
-                    width: Val::Px(332.0),
+                    width: Val::Px(278.0 + space::S8 + account_side),
                     column_gap: Val::Px(space::S8),
                     ..default()
                 })
@@ -762,25 +868,33 @@ fn spawn_home_identity(
                         HomeAction::Card,
                         "HomeCustomizeCard",
                     );
-                    buttons.commands().entity(customize).insert(Node {
-                        width: Val::Px(278.0),
-                        height: Val::Px(46.0),
-                        justify_content: JustifyContent::Center,
-                        align_items: AlignItems::Center,
-                        ..kit::button_node(
-                            ButtonSize::Regular,
-                            ButtonKind::Secondary,
-                            theme::Form::Desktop,
-                        )
-                    });
-                    kit::controls::sized_icon_button(
+                    buttons
+                        .commands()
+                        .entity(customize)
+                        .remove::<kit::MenuControl>()
+                        .insert(Node {
+                            width: Val::Px(278.0),
+                            height: Val::Px(home_control_size(46.0, mobile, fit)),
+                            justify_content: JustifyContent::Center,
+                            align_items: AlignItems::Center,
+                            ..kit::button_node(
+                                ButtonSize::Regular,
+                                ButtonKind::Secondary,
+                                theme::Form::Desktop,
+                            )
+                        });
+                    let account = kit::controls::sized_icon_button(
                         buttons,
                         Icon::SettingsUserCog,
-                        theme::Form::Desktop,
+                        theme::Form::of(mobile),
                         ButtonKind::Secondary,
                         HomeAction::Profile,
                         "HomeAccount",
                     );
+                    buttons
+                        .commands()
+                        .entity(account)
+                        .insert(kit::controls::icon_button_node(account_side, radius::PILL));
                 });
             if let Some(last) = last_match {
                 column
@@ -937,6 +1051,7 @@ fn home_actions(
     party: Option<Res<crate::party::PartyClient>>,
     mut pause: Option<ResMut<crate::pause_menu::PauseMenuState>>,
     mut help: Option<ResMut<crate::help_overlay::HelpOverlayVisible>>,
+    mut server_entry: Option<ResMut<crate::mobile_ui::ServerEntry>>,
 ) {
     let in_party = party.as_ref().is_some_and(|p| p.in_party());
     let leads = party.as_ref().is_some_and(|p| p.view.is_leader());
@@ -1004,6 +1119,11 @@ fn home_actions(
                     pause.in_settings = true;
                 }
             }
+            HomeAction::Server => {
+                if let Some(entry) = server_entry.as_deref_mut() {
+                    entry.open_for(&session);
+                }
+            }
         }
     }
 }
@@ -1053,56 +1173,92 @@ fn refresh_home(
     );
 }
 
-/// "X invites you to a party" with Accept / Decline: a toast centred at the
-/// top of the screen, over the layout rather than inside a column.
-fn spawn_invite_banner(parent: &mut ChildSpawnerCommands, party_id: u64, from: &str) {
+/// A bounded invitation in the left column. On phones it replaces the recent
+/// match chip, leaving both the top utility row and the hero stage clear.
+fn spawn_invite_banner(
+    parent: &mut ChildSpawnerCommands,
+    party_id: u64,
+    from: &str,
+    phone: bool,
+    mobile: bool,
+    fit: f32,
+) {
+    let button_height = home_control_size(44.0, mobile, fit);
     parent
         .spawn((
             Node {
                 position_type: PositionType::Absolute,
-                top: Val::Px(20.0),
-                left: Val::Px(0.0),
-                right: Val::Px(0.0),
-                justify_content: JustifyContent::Center,
+                top: Val::Px(if phone { 68.0 } else { 178.0 - button_height }),
+                left: Val::Px(if phone { 63.0 } else { HOME_INSET }),
+                width: Val::Px(if phone { 230.0 } else { 380.0 }),
+                height: Val::Px(66.0 + button_height),
+                flex_direction: FlexDirection::Column,
+                row_gap: Val::Px(space::S8),
+                padding: UiRect::all(Val::Px(space::S8)),
+                border: UiRect::all(Val::Px(border::HAIRLINE)),
+                border_radius: BorderRadius::all(Val::Px(radius::MD)),
                 ..default()
             },
-            Pickable::IGNORE,
+            BackgroundColor(theme::TILE_SELECTED),
+            BorderColor::all(theme::GOLD),
+            Name::new("HomePartyInvite"),
         ))
-        .with_children(|strip| {
-            strip
-                .spawn((
-                    Node {
-                        align_items: AlignItems::Center,
-                        column_gap: Val::Px(10.0),
-                        padding: UiRect::axes(Val::Px(14.0), Val::Px(6.0)),
-                        border: UiRect::all(Val::Px(1.0)),
-                        border_radius: BorderRadius::all(Val::Px(10.0)),
-                        ..default()
-                    },
-                    BackgroundColor(theme::TILE_SELECTED),
-                    BorderColor::all(theme::GOLD),
-                    Name::new("HomePartyInvite"),
-                ))
-                .with_children(|banner| {
-                    banner.spawn(widgets::label(
-                        &trf("home.invite", &[("name", &from)]),
-                        14.0,
-                        theme::IVORY,
-                    ));
-                    screen_button(
-                        banner,
-                        tr("home.button.accept"),
-                        ButtonKind::Secondary,
-                        HomeAction::AcceptInvite(party_id),
-                        "HomeAcceptInvite",
-                    );
-                    screen_button(
-                        banner,
-                        tr("home.button.decline"),
-                        ButtonKind::Secondary,
-                        HomeAction::DeclineInvite(party_id),
-                        "HomeDeclineInvite",
-                    );
+        .with_children(|banner| {
+            banner.spawn((
+                Text::new(trf("home.invite", &[("name", &from)])),
+                theme::role_text(TextRole::Caption),
+                TextLayout::new(Justify::Left, LineBreak::WordOrCharacter),
+                Node {
+                    width: Val::Percent(100.0),
+                    height: Val::Px(40.0),
+                    flex_shrink: 0.0,
+                    overflow: Overflow::clip(),
+                    ..default()
+                },
+                Name::new("HomePartyInviteLabel"),
+            ));
+            banner
+                .spawn(Node {
+                    width: Val::Percent(100.0),
+                    height: Val::Px(button_height),
+                    flex_shrink: 0.0,
+                    column_gap: Val::Px(space::S8),
+                    ..default()
+                })
+                .with_children(|actions| {
+                    for (label, action, id) in [
+                        (
+                            "home.button.accept",
+                            HomeAction::AcceptInvite(party_id),
+                            "HomeAcceptInvite",
+                        ),
+                        (
+                            "home.button.decline",
+                            HomeAction::DeclineInvite(party_id),
+                            "HomeDeclineInvite",
+                        ),
+                    ] {
+                        kit::spawn_button(
+                            actions,
+                            Node {
+                                flex_grow: 1.0,
+                                flex_basis: Val::Px(0.0),
+                                min_width: Val::Px(0.0),
+                                height: Val::Px(button_height),
+                                justify_content: JustifyContent::Center,
+                                align_items: AlignItems::Center,
+                                padding: UiRect::horizontal(Val::Px(space::S4)),
+                                ..default()
+                            },
+                            tr(label),
+                            TextStyle::new(TextRole::Button).sized(Metric::new(13.0, 13.0)),
+                            ButtonKind::Secondary,
+                            None,
+                            action,
+                            id.into(),
+                            (),
+                        );
+                    }
                 });
         });
 }
@@ -1110,6 +1266,104 @@ fn spawn_invite_banner(parent: &mut ChildSpawnerCommands, party_id: u64, from: &
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tablet_home_controls_retain_touch_size_and_invites_stay_between_header_and_profile() {
+        use crate::ui::test_id::harness;
+        for viewport in [
+            Vec2::new(1024.0, 768.0),
+            Vec2::new(1180.0, 820.0),
+            Vec2::new(1366.0, 1024.0),
+        ] {
+            let fit = (viewport.x / 1280.0).min(viewport.y / 720.0);
+            let mut app = harness::kit_app();
+            harness::spawn_ui(app.world_mut(), |root| {
+                spawn_home_utilities(root, true, theme::Form::Phone, fit);
+                spawn_home_identity(
+                    root,
+                    false,
+                    &ProfileCard::default(),
+                    None,
+                    "Player",
+                    &AvatarThumbnails::default(),
+                    None,
+                    1.0,
+                    true,
+                    fit,
+                );
+                spawn_invite_banner(root, 1, "AReallyLongInviterName1234", false, true, fit);
+            });
+            for id in [
+                "PhoneHelpButton",
+                "PhoneMenuButton",
+                "PhoneServerButton",
+                "HomeAccount",
+                "HomeCustomizeCard",
+                "HomeAcceptInvite",
+                "HomeDeclineInvite",
+            ] {
+                let entity = harness::find(app.world_mut(), id).unwrap();
+                let node = app.world().get::<Node>(entity).unwrap();
+                let Val::Px(height) = node.height else {
+                    panic!("{id} has no explicit hit height")
+                };
+                assert!(
+                    height * fit >= 43.99,
+                    "{id} shrinks below44px on {viewport:?}"
+                );
+                if let Val::Px(width) = node.width {
+                    assert!(width * fit >= 43.99, "{id} shrinks below44px wide");
+                }
+            }
+            let (_, invite) = app
+                .world_mut()
+                .query::<(&Name, &Node)>()
+                .iter(app.world())
+                .find(|(name, _)| name.as_str() == "HomePartyInvite")
+                .unwrap();
+            let (Val::Px(top), Val::Px(height)) = (invite.top, invite.height) else {
+                panic!()
+            };
+            let outer_y = (viewport.y / fit - 720.0) * 0.5;
+            assert!(top >= header_top(fit, outer_y) + 64.0);
+            assert!(top + height < 248.0, "invite must not cover the profile");
+        }
+    }
+
+    #[test]
+    fn phone_long_name_invite_stays_in_its_left_slot_and_wraps() {
+        use crate::ui::test_id::harness;
+        let mut app = harness::kit_app();
+        let inviter = "AReallyLongInviterName1234";
+        harness::spawn_ui(app.world_mut(), |root| {
+            spawn_invite_banner(root, 1, inviter, true, true, 1.0);
+        });
+        let (_, invite) = app
+            .world_mut()
+            .query::<(&Name, &Node)>()
+            .iter(app.world())
+            .find(|(name, _)| name.as_str() == "HomePartyInvite")
+            .unwrap();
+        let (Val::Px(left), Val::Px(top), Val::Px(width)) = (invite.left, invite.top, invite.width)
+        else {
+            panic!()
+        };
+        assert!(
+            left >= 63.0 && left + width < 300.0,
+            "invite must stay left of the hero"
+        );
+        assert!(top >= 64.0, "invite must stay below identity and utilities");
+        let (_, label, layout, node) = app
+            .world_mut()
+            .query::<(&Name, &Text, &TextLayout, &Node)>()
+            .iter(app.world())
+            .find(|(name, _, _, _)| name.as_str() == "HomePartyInviteLabel")
+            .unwrap();
+        assert!(label.0.contains(inviter));
+        assert_eq!(layout.linebreak, LineBreak::WordOrCharacter);
+        assert_eq!(node.width, Val::Percent(100.0));
+        assert_eq!(node.overflow, Overflow::clip());
+    }
 
     #[test]
     fn tablet_uses_the_spacious_canvas_centered_in_its_viewport() {

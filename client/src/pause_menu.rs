@@ -11,7 +11,7 @@ use bevy::{
 
 use crate::audio_settings::AudioSettings;
 use crate::camera::{CAMERA_ZOOM_STEP, CameraSettings};
-use crate::i18n::{Locale, Localized, locale_changed, tr, trf};
+use crate::i18n::{Locale, Localized, tr, trf};
 use crate::model_scale::{
     DEFAULT_MODEL_TARGET_HEIGHT, MAX_MODEL_TARGET_HEIGHT, MIN_MODEL_TARGET_HEIGHT,
     ModelScaleSettings,
@@ -25,16 +25,19 @@ use crate::team::TeamSelection;
 use crate::ui::living_background::{
     self, LivingBackground, LivingBands, LivingScene, MotionSettings,
 };
+use crate::ui::widgets::controls::{Slider, SliderChanged};
 use crate::ui::{
     Activated, GestureEpoch, ModalId, ModalRoot, ScrollArea, UiAction, UiActionAppExt, UiSet,
+    kit_assets::Icon,
+    test_id::NodeKey,
     theme::{self, ButtonKind, metric},
+    tokens::{TextRole, color},
     widgets,
 };
 use crate::world::{
-    DEFAULT_AMBIENT_BRIGHTNESS, DEFAULT_LIGHT_ILLUMINANCE, DEFAULT_LIGHT_PITCH_DEG,
-    DEFAULT_LIGHT_YAW_DEG, LightingSettings, MAX_AMBIENT_BRIGHTNESS, MAX_LIGHT_ILLUMINANCE,
-    MAX_LIGHT_PITCH_DEG, MAX_LIGHT_YAW_DEG, MIN_AMBIENT_BRIGHTNESS, MIN_LIGHT_ILLUMINANCE,
-    MIN_LIGHT_PITCH_DEG, MIN_LIGHT_YAW_DEG,
+    LightingSettings, MAX_AMBIENT_BRIGHTNESS, MAX_LIGHT_ILLUMINANCE, MAX_LIGHT_PITCH_DEG,
+    MAX_LIGHT_YAW_DEG, MIN_AMBIENT_BRIGHTNESS, MIN_LIGHT_ILLUMINANCE, MIN_LIGHT_PITCH_DEG,
+    MIN_LIGHT_YAW_DEG,
 };
 
 const SCALE_STEP: f32 = 0.04;
@@ -101,11 +104,7 @@ impl Plugin for PauseMenuPlugin {
                     apply_pause_session,
                     apply_pause_language,
                     update_setting_labels.after(apply_pause_settings),
-                    update_audio_labels
-                        .after(apply_pause_audio)
-                        .after(apply_pause_language),
                     update_language_value.after(apply_pause_language),
-                    update_motion_value.after(apply_pause_settings),
                     sync_pause_menu_visibility,
                     sync_pause_menu_sections,
                     sync_settings_living_background,
@@ -118,7 +117,20 @@ impl Plugin for PauseMenuPlugin {
             )
             .add_systems(
                 PostUpdate,
-                size_desktop_pause_panel.before(bevy::ui::UiSystems::Layout),
+                (size_desktop_pause_panel, layout_pause_contents)
+                    .chain()
+                    .before(bevy::ui::UiSystems::Layout),
+            )
+            .add_systems(
+                Update,
+                (apply_settings_sliders, sync_settings_sliders)
+                    .chain()
+                    .after(UiSet::Paint)
+                    .after(PauseMenuSet::Visuals),
+            )
+            .add_systems(
+                PostUpdate,
+                paint_settings_scrollbar.after(bevy::ui::UiSystems::Layout),
             );
     }
 }
@@ -141,6 +153,21 @@ pub(crate) enum SettingsTab {
 #[derive(Component)]
 struct SettingsRail;
 
+#[derive(Component)]
+struct SettingsRailItem;
+
+#[derive(Component)]
+struct SettingsScrollTrack;
+
+#[derive(Component)]
+struct SettingsScrollThumb;
+
+#[derive(Component, Clone, Copy)]
+enum SettingsSlider {
+    Audio(AudioBus),
+    Lighting(Setting),
+}
+
 fn settings_group(
     parent: &mut ChildSpawnerCommands,
     tab: SettingsTab,
@@ -150,16 +177,18 @@ fn settings_group(
         .spawn((
             Node {
                 width: Val::Percent(100.0),
-                max_width: Val::Px(560.0),
+                max_width: Val::Px(820.0),
                 flex_direction: FlexDirection::Column,
                 align_items: AlignItems::Stretch,
-                row_gap: Val::Px(12.0),
+                row_gap: Val::Px(8.0),
                 flex_shrink: 0.0,
-                padding: UiRect::axes(Val::Px(16.0), Val::Px(12.0)),
+                padding: UiRect::all(Val::Px(20.0)),
+                border: UiRect::all(Val::Px(1.0)),
                 border_radius: BorderRadius::all(Val::Px(12.0)),
                 ..default()
             },
-            BackgroundColor(theme::PANEL),
+            BackgroundColor(color::SURFACE_2),
+            BorderColor::all(color::BORDER_SUBTLE),
             tab,
         ))
         .with_children(build);
@@ -233,10 +262,6 @@ struct SettingsServerAddrLabel;
 /// The Language row's value (the active language's native name).
 #[derive(Component)]
 struct LanguageValue;
-
-/// The Reduce motion row's localized on/off value.
-#[derive(Component)]
-struct MotionValue;
 
 #[derive(Component)]
 struct PauseMenuPanel;
@@ -312,15 +337,8 @@ impl AudioBus {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) enum AudioButton {
-    Adjust(AudioBus, f32),
     Mute,
 }
-#[derive(Component, Clone, Copy)]
-enum AudioLabel {
-    Bus(AudioBus),
-    Mute,
-}
-
 fn size_desktop_pause_panel(
     menu: Res<PauseMenuState>,
     mobile: Option<Res<crate::mobile_controls::MobileControls>>,
@@ -334,14 +352,15 @@ fn size_desktop_pause_panel(
     let height = if menu.in_settings {
         Val::Percent(92.0)
     } else {
-        Val::Px(metric::pause_panel_height(form, false, 0.0))
+        Val::Px(440.0)
     };
     for mut panel in &mut panels {
         panel.width = if menu.in_settings {
             Val::Percent(94.0)
         } else {
-            Val::Px(metric::PAUSE_PANEL.0)
+            Val::Px(560.0)
         };
+        panel.max_width = Val::Px(if menu.in_settings { 1120.0 } else { 560.0 });
         if panel.height != height {
             panel.height = height;
         }
@@ -397,12 +416,350 @@ fn sync_settings_living_background(
 }
 
 fn section_title(parent: &mut ChildSpawnerCommands, key: &'static str, name: &str) {
-    parent.spawn((
-        Localized::new(key).into_text(),
-        theme::text(18.0),
-        TextColor(theme::GOLD),
-        Name::new(name.to_owned()),
-    ));
+    parent
+        .spawn((
+            Node {
+                width: Val::Percent(100.0),
+                min_height: Val::Px(28.0),
+                align_items: AlignItems::Center,
+                column_gap: Val::Px(16.0),
+                margin: UiRect::bottom(Val::Px(4.0)),
+                flex_shrink: 0.0,
+                ..default()
+            },
+            Name::new(format!("{name}Group")), // i18n-allow: ECS debug name, not player text.
+        ))
+        .with_children(|heading| {
+            heading.spawn((
+                Localized::new(key).into_text(),
+                theme::role_text(TextRole::Heading),
+                TextColor(theme::GOLD),
+                Name::new(name.to_owned()),
+            ));
+            heading.spawn((
+                Node {
+                    height: Val::Px(1.0),
+                    flex_grow: 1.0,
+                    ..default()
+                },
+                BackgroundColor(color::BORDER_SUBTLE),
+            ));
+        });
+}
+
+/// Settings own their responsive columns; the slider kit owns dragging,
+/// focus and the thumb. Fixed columns keep values aligned between sections.
+fn settings_slider(
+    parent: &mut ChildSpawnerCommands,
+    label: Localized,
+    source: SettingsSlider,
+    form: theme::Form,
+    id: &str,
+) {
+    let (value, step) = match source {
+        SettingsSlider::Audio(bus) => (bus.value(AudioSettings::default()), AUDIO_STEP),
+        SettingsSlider::Lighting(setting) => {
+            let (min, max, step) = lighting_slider_range(setting);
+            (
+                (lighting_value(setting, &LightingSettings::default()) - min) / (max - min),
+                step / (max - min),
+            )
+        }
+    };
+    let slider = widgets::controls::slider(parent, label, value, form, id);
+    parent
+        .commands()
+        .entity(slider)
+        .insert((source, Slider { value, step }));
+}
+
+fn lighting_slider_range(setting: Setting) -> (f32, f32, f32) {
+    match setting {
+        Setting::Light => (
+            MIN_LIGHT_ILLUMINANCE,
+            MAX_LIGHT_ILLUMINANCE,
+            ILLUMINANCE_STEP,
+        ),
+        Setting::Ambient => (MIN_AMBIENT_BRIGHTNESS, MAX_AMBIENT_BRIGHTNESS, AMBIENT_STEP),
+        Setting::Pitch => (MIN_LIGHT_PITCH_DEG, MAX_LIGHT_PITCH_DEG, ANGLE_STEP_DEG),
+        Setting::Yaw => (MIN_LIGHT_YAW_DEG, MAX_LIGHT_YAW_DEG, ANGLE_STEP_DEG),
+        _ => unreachable!("only lighting settings use a continuous slider"),
+    }
+}
+
+fn lighting_value(setting: Setting, lighting: &LightingSettings) -> f32 {
+    match setting {
+        Setting::Light => lighting.illuminance,
+        Setting::Ambient => lighting.ambient_brightness,
+        Setting::Pitch => lighting.light_pitch_deg,
+        Setting::Yaw => lighting.light_yaw_deg,
+        _ => unreachable!("only lighting settings use a continuous slider"),
+    }
+}
+
+fn apply_settings_sliders(
+    mut events: MessageReader<SliderChanged>,
+    sliders: Query<&SettingsSlider>,
+    menu: Res<PauseMenuState>,
+    career: Option<Res<crate::career::CareerClient>>,
+    social: Option<Res<crate::social::SocialClient>>,
+    mut audio: ResMut<AudioSettings>,
+    mut lighting: ResMut<LightingSettings>,
+) {
+    let allowed = menu.open
+        && menu.in_settings
+        && !career.as_ref().is_some_and(|career| career.modal_open())
+        && !social
+            .as_ref()
+            .is_some_and(|social| social.blocks_gameplay());
+    for event in events.read() {
+        if !allowed || !event.value.is_finite() {
+            continue;
+        }
+        let Ok(source) = sliders.get(event.slider) else {
+            continue;
+        };
+        let normalized = event.value.clamp(0.0, 1.0);
+        match *source {
+            SettingsSlider::Audio(bus) => {
+                let delta = normalized - bus.value(*audio);
+                bus.adjust(&mut audio, delta);
+            }
+            SettingsSlider::Lighting(setting) => {
+                let (min, max, step) = lighting_slider_range(setting);
+                let value =
+                    (min + ((normalized * (max - min)) / step).round() * step).clamp(min, max);
+                match setting {
+                    Setting::Light => lighting.illuminance = value,
+                    Setting::Ambient => lighting.ambient_brightness = value,
+                    Setting::Pitch => lighting.light_pitch_deg = value,
+                    Setting::Yaw => lighting.light_yaw_deg = value,
+                    _ => unreachable!(),
+                }
+            }
+        }
+    }
+}
+
+fn sync_settings_sliders(
+    audio: Res<AudioSettings>,
+    lighting: Res<LightingSettings>,
+    motion: Res<MotionSettings>,
+    mut sliders: Query<(&SettingsSlider, &mut Slider, &widgets::KitParts)>,
+    mut values: Query<&mut Text>,
+    mut toggles: Query<(&UiAction<PauseAction>, &mut widgets::ButtonStyle)>,
+) {
+    for (source, mut slider, parts) in &mut sliders {
+        let (value, label) = match *source {
+            SettingsSlider::Audio(bus) => {
+                let value = bus.value(audio.sanitized());
+                (value, format!("{:.0}%", value * 100.0))
+            }
+            SettingsSlider::Lighting(setting) => {
+                let (min, max, _) = lighting_slider_range(setting);
+                let value = lighting_value(setting, &lighting);
+                (
+                    (value - min) / (max - min),
+                    match setting {
+                        Setting::Pitch | Setting::Yaw => format!("{value:.0}°"),
+                        _ => format!("{value:.0}"),
+                    },
+                )
+            }
+        };
+        if (slider.value - value).abs() > f32::EPSILON {
+            slider.value = value;
+        }
+        if let Some(entity) = parts.extra[0]
+            && let Ok(mut text) = values.get_mut(entity)
+            && text.0 != label
+        {
+            text.0 = label;
+        }
+    }
+    for (action, mut style) in &mut toggles {
+        let selected = match action.0 {
+            PauseAction::ToggleReduceMotion => motion.reduce,
+            PauseAction::Audio(AudioButton::Mute) => audio.muted,
+            _ => continue,
+        };
+        widgets::ButtonStyle::set_selected(&mut style, selected);
+    }
+}
+
+#[allow(clippy::type_complexity)]
+fn layout_pause_contents(
+    windows: Query<&Window, With<PrimaryWindow>>,
+    mobile: Option<Res<crate::mobile_controls::MobileControls>>,
+    menu: Res<PauseMenuState>,
+    screen: Option<Res<State<crate::frontend::AppScreen>>>,
+    mut nodes: Query<(
+        NodeKey,
+        Option<&SettingsRail>,
+        Option<&SettingsRailItem>,
+        Option<&SettingsTab>,
+        Option<&SettingsScrollTrack>,
+        &mut Node,
+    )>,
+    sliders: Query<(Entity, &widgets::KitParts), With<SettingsSlider>>,
+    actions: Query<(&UiAction<PauseAction>, &widgets::KitParts)>,
+) {
+    let size = mobile
+        .as_ref()
+        .filter(|mobile| mobile.enabled)
+        .map(|mobile| mobile.viewport)
+        .or_else(|| {
+            windows
+                .single()
+                .ok()
+                .map(|window| Vec2::new(window.width(), window.height()))
+        })
+        .unwrap_or(Vec2::new(1280.0, 720.0));
+    let compact = size.y < 540.0 || size.x < 900.0;
+    let inset = if compact { 16.0 } else { 28.0 };
+    let rail_width = if compact { 148.0 } else { 196.0 };
+    let content_left = inset + rail_width + if compact { 16.0 } else { 28.0 };
+    let content_top = if compact { 64.0 } else { 100.0 };
+    let content_bottom = if compact { 12.0 } else { 76.0 };
+    let front_end = screen.as_ref().is_some_and(|screen| screen.get().is_menu());
+    for (name, rail, rail_item, group, track, mut node) in &mut nodes {
+        if rail.is_some() {
+            node.left = Val::Px(inset);
+            node.top = Val::Px(content_top);
+            node.bottom = Val::Px(inset);
+            node.width = Val::Px(rail_width);
+            node.row_gap = Val::Px(4.0);
+        }
+        if rail_item.is_some() {
+            node.width = Val::Percent(100.0);
+            node.min_height = Val::Px(44.0);
+            node.padding = UiRect::horizontal(Val::Px(if compact { 8.0 } else { 16.0 }));
+        }
+        if group.is_some() {
+            node.padding = UiRect::all(Val::Px(if compact { 10.0 } else { 20.0 }));
+            node.row_gap = Val::Px(if compact { 4.0 } else { 8.0 });
+        }
+        if track.is_some() {
+            node.top = Val::Px(content_top);
+            node.bottom = Val::Px(content_bottom);
+            node.right = Val::Px(inset);
+        }
+        match name.as_str() {
+            "PauseMenuPanel" if !menu.in_settings && front_end => {
+                node.height = Val::Px(if compact { 300.0 } else { 380.0 });
+            }
+            "PauseMenuTitle" => {
+                node.margin.left = Val::Px(if compact && menu.in_settings {
+                    60.0
+                } else {
+                    0.0
+                });
+            }
+            "PauseMenuHeader" => node.padding.bottom = Val::Px(if compact { 0.0 } else { 8.0 }),
+            "PauseMenuAudioTitleGroup" => {
+                node.display = if compact {
+                    Display::None
+                } else {
+                    Display::Flex
+                }
+            }
+            "PauseMenuSettingsSection" => {
+                node.left = Val::Px(content_left);
+                node.top = Val::Px(content_top);
+                node.right = Val::Px(inset + 12.0);
+                node.bottom = Val::Px(content_bottom);
+                node.align_items = AlignItems::Stretch;
+                node.row_gap = Val::Px(if compact { 10.0 } else { 16.0 });
+            }
+            "PauseMenuSettingsFooter" => {
+                node.left = Val::Px(if compact { inset } else { content_left });
+                node.right = if compact {
+                    Val::Auto
+                } else {
+                    Val::Px(inset + 12.0)
+                };
+                node.top = if compact { Val::Px(12.0) } else { Val::Auto };
+                node.bottom = if compact { Val::Auto } else { Val::Px(16.0) };
+                node.width = if compact { Val::Px(44.0) } else { Val::Auto };
+                node.justify_content = JustifyContent::FlexEnd;
+            }
+            "BackButton" => {
+                node.width = Val::Px(if compact { 44.0 } else { 180.0 });
+                node.max_width = node.width;
+                node.min_width = Val::Px(44.0);
+                node.height = Val::Px(if compact { 44.0 } else { 46.0 });
+                node.padding = UiRect::horizontal(Val::Px(if compact { 0.0 } else { 16.0 }));
+            }
+            _ => {}
+        }
+    }
+    for (action, parts) in &actions {
+        if action.0 == PauseAction::BackFromSettings
+            && let Some(label) = parts.label
+            && let Ok((_, _, _, _, _, mut node)) = nodes.get_mut(label)
+        {
+            node.display = if compact {
+                Display::None
+            } else {
+                Display::Flex
+            };
+        }
+    }
+    for (entity, parts) in &sliders {
+        if let Ok((_, _, _, _, _, mut row)) = nodes.get_mut(entity) {
+            row.width = Val::Percent(100.0);
+            row.column_gap = Val::Px(if compact { 10.0 } else { 20.0 });
+            row.border = UiRect::bottom(Val::Px(1.0));
+        }
+        for (part, width, grow) in [
+            (parts.label, if compact { 106.0 } else { 160.0 }, false),
+            (parts.track, 0.0, true),
+            (parts.extra[0], 60.0, false),
+        ] {
+            if let Some(part) = part
+                && let Ok((_, _, _, _, _, mut node)) = nodes.get_mut(part)
+            {
+                node.width = if grow { Val::Auto } else { Val::Px(width) };
+                node.max_width = if grow {
+                    Val::Percent(100.0)
+                } else {
+                    Val::Px(width)
+                };
+                node.min_width = Val::Px(if grow { 64.0 } else { 0.0 });
+                node.flex_grow = if grow { 1.0 } else { 0.0 };
+                node.flex_basis = if grow { Val::Px(0.0) } else { Val::Auto };
+                node.flex_shrink = if grow { 1.0 } else { 0.0 };
+            }
+        }
+    }
+}
+
+#[allow(clippy::type_complexity)]
+fn paint_settings_scrollbar(
+    menu: Res<PauseMenuState>,
+    bodies: Query<(&ComputedNode, &ScrollPosition), With<SettingsSection>>,
+    mut bars: Query<
+        (&mut Node, Has<SettingsScrollThumb>),
+        Or<(With<SettingsScrollTrack>, With<SettingsScrollThumb>)>,
+    >,
+) {
+    let Ok((computed, scroll)) = bodies.single() else {
+        return;
+    };
+    let max = crate::ui::scroll::max_offset(computed);
+    let ratio = (computed.size().y / computed.content_size().y.max(1.0)).clamp(0.08, 1.0);
+    for (mut node, thumb) in &mut bars {
+        node.display = if menu.open && menu.in_settings && max > 1.0 {
+            Display::Flex
+        } else {
+            Display::None
+        };
+        if thumb {
+            node.height = Val::Percent(ratio * 100.0);
+            node.top =
+                Val::Percent((scroll.y / max.max(1.0)).clamp(0.0, 1.0) * (1.0 - ratio) * 100.0);
+        }
+    }
 }
 
 fn setting_row(
@@ -462,7 +819,32 @@ fn setting_row(
         });
 }
 
-fn setup_pause_menu_ui(mut commands: Commands) {
+fn menu_button(
+    parent: &mut ChildSpawnerCommands,
+    key: &'static str,
+    kind: ButtonKind,
+    icon: Icon,
+    action: PauseAction,
+    id: &str,
+) -> Entity {
+    let mut node = widgets::button_node(widgets::ButtonSize::Regular, kind, theme::Form::Desktop);
+    node.width = Val::Percent(100.0);
+    node.max_width = Val::Px(400.0);
+    widgets::spawn_button(
+        parent,
+        node,
+        Localized::new(key),
+        theme::TextStyle::new(TextRole::Button),
+        kind,
+        Some(icon),
+        action,
+        id.into(),
+        (),
+    )
+}
+
+fn setup_pause_menu_ui(mut commands: Commands, platform: Option<Res<crate::ui::UiPlatform>>) {
+    let form = theme::Form::of(mobile_pause(platform.as_deref()));
     commands
         .spawn((
             Node {
@@ -502,7 +884,7 @@ fn setup_pause_menu_ui(mut commands: Commands) {
                         ..default()
                     },
                     BackgroundColor(theme::PANEL.with_alpha(1.0)),
-                    BorderColor::all(theme::EDGE),
+                    BorderColor::all(color::GOLD_700),
                     // The front-end Settings painting is inserted lazily as a
                     // sibling after this panel. Keep the controls in an
                     // explicit foreground layer instead of relying on child
@@ -524,58 +906,73 @@ fn setup_pause_menu_ui(mut commands: Commands) {
                                 flex_direction: FlexDirection::Column,
                                 row_gap: Val::Px(8.0),
                                 flex_shrink: 0.0,
+                                overflow: Overflow::scroll_y(),
                                 ..default()
                             },
                             Visibility::Hidden,
                             SettingsRail,
+                            ScrollArea::menu(MENU_WHEEL_STEP),
                         ))
                         .with_children(|rail| {
-                            for (tab, key, id) in [
+                            for (tab, key, icon, id) in [
                                 (
                                     SettingsTab::Sound,
                                     "pause.settings.sound",
+                                    Icon::SettingsVolume2,
                                     "SettingsTabSound",
                                 ),
                                 (
                                     SettingsTab::Graphics,
                                     "pause.settings.graphics",
+                                    Icon::SettingsMonitor,
                                     "SettingsTabGraphics",
                                 ),
                                 (
                                     SettingsTab::Camera,
                                     "pause.settings.camera",
+                                    Icon::SettingsCamera,
                                     "SettingsTabCamera",
                                 ),
                                 (
                                     SettingsTab::Language,
                                     "pause.settings.language",
+                                    Icon::SettingsLanguages,
                                     "SettingsTabLanguage",
                                 ),
                             ] {
-                                let button = widgets::compact_screen_tile(
+                                let button = widgets::controls::tab(
                                     rail,
                                     Localized::new(key),
+                                    Some(icon),
+                                    widgets::controls::TabPlacement::Rail,
+                                    form,
                                     tab == SettingsTab::Sound,
                                     PauseAction::SettingsTab(tab),
                                     id,
-                                    true,
                                 );
-                                rail.commands().entity(button).insert(Node {
-                                    width: Val::Percent(100.0),
-                                    height: Val::Px(44.0),
-                                    align_items: AlignItems::Center,
-                                    justify_content: JustifyContent::Center,
-                                    ..default()
-                                });
+                                rail.commands().entity(button).insert(SettingsRailItem);
                             }
-                            widgets::compact_screen_tile(
+                            rail.spawn((
+                                Node {
+                                    height: Val::Px(1.0),
+                                    width: Val::Percent(100.0),
+                                    margin: UiRect::vertical(Val::Px(8.0)),
+                                    flex_shrink: 0.0,
+                                    ..default()
+                                },
+                                BackgroundColor(color::BORDER_SUBTLE),
+                            ));
+                            let controls = widgets::controls::tab(
                                 rail,
                                 Localized::new("pause.settings.controls"),
+                                Some(Icon::SettingsGamepad2),
+                                widgets::controls::TabPlacement::Rail,
+                                form,
                                 false,
                                 PauseAction::Help,
                                 "PauseMenuSettingsControlsButton",
-                                true,
                             );
+                            rail.commands().entity(controls).insert(SettingsRailItem);
                         });
                     panel
                         .spawn((
@@ -585,20 +982,24 @@ fn setup_pause_menu_ui(mut commands: Commands) {
                                 flex_shrink: 0.0,
                                 justify_content: JustifyContent::SpaceBetween,
                                 align_items: AlignItems::Center,
+                                border: UiRect::bottom(Val::Px(1.0)),
+                                padding: UiRect::bottom(Val::Px(8.0)),
                                 ..default()
                             },
                             Name::new("PauseMenuHeader"),
+                            BorderColor::all(color::BORDER_SUBTLE),
                         ))
                         .with_children(|header| {
                             header.spawn((
                                 Localized::new("pause.title").into_text(),
-                                theme::text(28.0),
-                                TextColor(theme::IVORY),
+                                theme::role_text(TextRole::Title),
+                                TextColor(theme::GOLD),
                                 Name::new("PauseMenuTitle"),
                             ));
-                            widgets::icon_button(
+                            widgets::controls::sized_icon_button(
                                 header,
-                                "×",
+                                Icon::NavX,
+                                theme::Form::Phone,
                                 ButtonKind::Secondary,
                                 PauseAction::Close,
                                 "PauseMenuCloseButton",
@@ -627,43 +1028,48 @@ fn setup_pause_menu_ui(mut commands: Commands) {
                         .with_children(|main| {
                             main.spawn((
                                 Text::new(tr("pause.hint.online")),
-                                theme::text(14.0),
+                                theme::role_text(TextRole::Caption),
                                 TextColor(theme::MUTED),
                                 Name::new("PauseMenuMainTitle"),
                             ));
-                            widgets::button(
+                            menu_button(
                                 main,
-                                Localized::new("pause.button.settings"),
+                                "pause.button.settings",
                                 ButtonKind::Secondary,
+                                Icon::NavSettings,
                                 PauseAction::OpenSettings,
                                 "SettingsButton",
                             );
                             crate::debug::tools_page::spawn_practice_open_button(main);
-                            widgets::button(
+                            menu_button(
                                 main,
-                                Localized::new("pause.button.help"),
+                                "pause.button.help",
                                 ButtonKind::Secondary,
+                                Icon::SettingsGamepad2,
                                 PauseAction::Help,
                                 "PauseMenuHelpButton",
                             );
-                            widgets::button(
+                            menu_button(
                                 main,
-                                Localized::new("pause.button.exit"),
-                                ButtonKind::Secondary,
+                                "pause.button.exit",
+                                ButtonKind::Danger,
+                                Icon::NavLogOut,
                                 PauseAction::Exit,
                                 "PauseMenuExitButton",
                             );
-                            widgets::button(
+                            menu_button(
                                 main,
-                                Localized::new("pause.button.leave_match"),
-                                ButtonKind::Secondary,
+                                "pause.button.leave_match",
+                                ButtonKind::Danger,
+                                Icon::NavLogOut,
                                 PauseAction::LeaveMatch,
                                 "PauseMenuLeaveMatchButton",
                             );
-                            widgets::button(
+                            menu_button(
                                 main,
-                                Localized::new("pause.button.leave_practice"),
+                                "pause.button.leave_practice",
                                 ButtonKind::Secondary,
+                                Icon::NavLogOut,
                                 PauseAction::LeavePractice,
                                 "PauseMenuLeavePracticeButton",
                             );
@@ -696,6 +1102,11 @@ fn setup_pause_menu_ui(mut commands: Commands) {
                         ))
                         .with_children(|settings| {
                             settings_group(settings, SettingsTab::Language, |settings| {
+                                section_title(
+                                    settings,
+                                    "pause.settings.language",
+                                    "PauseMenuLanguageTitle",
+                                );
                                 widgets::toggle_row(
                                     settings,
                                     Localized::new("pause.settings.language"),
@@ -729,28 +1140,20 @@ fn setup_pause_menu_ui(mut commands: Commands) {
                                     ),
                                     (AudioBus::Ui, "pause.audio.ui", "PauseMenuAudioUiControls"),
                                 ] {
-                                    widgets::adjust_row(
+                                    settings_slider(
                                         settings,
                                         Localized::new(key),
-                                        format!(
-                                            "{:.0}%",
-                                            bus.value(AudioSettings::default()) * 100.0
-                                        ),
-                                        AudioLabel::Bus(bus),
-                                        PauseAction::Audio(AudioButton::Adjust(bus, -AUDIO_STEP)),
-                                        PauseAction::Audio(AudioButton::Adjust(bus, AUDIO_STEP)),
+                                        SettingsSlider::Audio(bus),
+                                        form,
                                         name,
                                     );
                                 }
-                                // Mute/unmute is state-dependent: `update_audio_labels` owns it.
-                                widgets::button_with_label(
+                                widgets::controls::toggle(
                                     settings,
-                                    tr("pause.audio.mute"),
-                                    ButtonKind::Secondary,
+                                    Localized::new("pause.audio.mute"),
+                                    false,
                                     PauseAction::Audio(AudioButton::Mute),
                                     "PauseMenuAudioMuteButton",
-                                    AudioLabel::Mute,
-                                    "PauseMenuAudioMuteLabel",
                                 );
                             });
                             settings_group(settings, SettingsTab::Graphics, |settings| {
@@ -759,13 +1162,12 @@ fn setup_pause_menu_ui(mut commands: Commands) {
                                     "pause.settings.motion",
                                     "PauseMenuMotionTitle",
                                 );
-                                let motion_row = widgets::toggle_row(
+                                let motion_row = widgets::controls::toggle(
                                     settings,
                                     Localized::new("pause.motion.reduce"),
-                                    tr("kit.gallery.state.off"),
-                                    MotionValue,
+                                    false,
                                     PauseAction::ToggleReduceMotion,
-                                    "PauseMenuReduceMotion",
+                                    "PauseMenuReduceMotionButton",
                                 );
                                 settings.commands().entity(motion_row).insert(Node {
                                     width: Val::Percent(100.0),
@@ -825,32 +1227,32 @@ fn setup_pause_menu_ui(mut commands: Commands) {
                                     "pause.settings.lighting",
                                     "PauseMenuLightingTitle",
                                 );
-                                setting_row(
+                                settings_slider(
                                     settings,
                                     Localized::new("pause.light.main"),
-                                    format!("{:.0}", DEFAULT_LIGHT_ILLUMINANCE),
-                                    Setting::Light,
+                                    SettingsSlider::Lighting(Setting::Light),
+                                    form,
                                     "PauseMenuMainLightControls",
                                 );
-                                setting_row(
+                                settings_slider(
                                     settings,
                                     Localized::new("pause.light.ambient"),
-                                    format!("{:.0}", DEFAULT_AMBIENT_BRIGHTNESS),
-                                    Setting::Ambient,
+                                    SettingsSlider::Lighting(Setting::Ambient),
+                                    form,
                                     "PauseMenuAmbientControls",
                                 );
-                                setting_row(
+                                settings_slider(
                                     settings,
                                     Localized::new("pause.light.pitch"),
-                                    format!("{:.0}°", DEFAULT_LIGHT_PITCH_DEG),
-                                    Setting::Pitch,
+                                    SettingsSlider::Lighting(Setting::Pitch),
+                                    form,
                                     "PauseMenuPitchControls",
                                 );
-                                setting_row(
+                                settings_slider(
                                     settings,
                                     Localized::new("pause.light.yaw"),
-                                    format!("{:.0}°", DEFAULT_LIGHT_YAW_DEG),
-                                    Setting::Yaw,
+                                    SettingsSlider::Lighting(Setting::Yaw),
+                                    form,
                                     "PauseMenuYawControls",
                                 );
                             });
@@ -904,6 +1306,32 @@ fn setup_pause_menu_ui(mut commands: Commands) {
                     panel
                         .spawn((
                             Node {
+                                position_type: PositionType::Absolute,
+                                width: Val::Px(4.0),
+                                border_radius: BorderRadius::all(Val::Px(2.0)),
+                                display: Display::None,
+                                ..default()
+                            },
+                            SettingsScrollTrack,
+                            BackgroundColor(color::SURFACE_3),
+                            Pickable::IGNORE,
+                        ))
+                        .with_children(|track| {
+                            track.spawn((
+                                Node {
+                                    position_type: PositionType::Absolute,
+                                    width: Val::Percent(100.0),
+                                    border_radius: BorderRadius::all(Val::Px(2.0)),
+                                    ..default()
+                                },
+                                SettingsScrollThumb,
+                                BackgroundColor(color::GOLD_500),
+                                Pickable::IGNORE,
+                            ));
+                        });
+                    panel
+                        .spawn((
+                            Node {
                                 flex_shrink: 0.0,
                                 min_height: Val::Px(metric::BUTTON_H),
                                 justify_content: JustifyContent::Center,
@@ -913,10 +1341,11 @@ fn setup_pause_menu_ui(mut commands: Commands) {
                             Name::new("PauseMenuMainFooter"),
                         ))
                         .with_children(|footer| {
-                            widgets::button(
+                            menu_button(
                                 footer,
-                                Localized::new("pause.button.resume"),
+                                "pause.button.resume",
                                 ButtonKind::Primary,
+                                Icon::NavPlay,
                                 PauseAction::Resume,
                                 "PauseMenuResumeButton",
                             );
@@ -939,10 +1368,11 @@ fn setup_pause_menu_ui(mut commands: Commands) {
                             Name::new("PauseMenuSettingsFooter"),
                         ))
                         .with_children(|footer| {
-                            widgets::button(
+                            menu_button(
                                 footer,
-                                Localized::new("common.back"),
+                                "common.back",
                                 ButtonKind::Secondary,
+                                Icon::NavChevronLeft,
                                 PauseAction::BackFromSettings,
                                 "BackButton",
                             );
@@ -1207,26 +1637,6 @@ fn apply_pause_settings(
     }
 }
 
-fn update_motion_value(
-    settings: Res<MotionSettings>,
-    locale: Option<Res<Locale>>,
-    mut values: Query<&mut Text, With<MotionValue>>,
-) {
-    if !settings.is_changed() && !locale_changed(&locale) {
-        return;
-    }
-    let next = tr(if settings.reduce {
-        "kit.gallery.state.on"
-    } else {
-        "kit.gallery.state.off"
-    });
-    for mut value in &mut values {
-        if value.0 != next {
-            value.0 = next.to_owned();
-        }
-    }
-}
-
 /// Sound levels and mute; only while the settings page is the front-most modal.
 fn apply_pause_audio(
     mut activated: MessageReader<Activated<PauseAction>>,
@@ -1242,16 +1652,13 @@ fn apply_pause_audio(
             .as_ref()
             .is_some_and(|social| social.blocks_gameplay());
     for Activated { action, .. } in activated.read() {
-        let PauseAction::Audio(button) = action else {
+        let PauseAction::Audio(AudioButton::Mute) = action else {
             continue;
         };
         if !allowed {
             continue;
         }
-        match *button {
-            AudioButton::Adjust(bus, delta) => bus.adjust(&mut settings, delta),
-            AudioButton::Mute => settings.muted = !settings.muted,
-        }
+        settings.muted = !settings.muted;
     }
 }
 
@@ -1303,30 +1710,6 @@ fn apply_pause_session(
             }
             _ => {}
         }
-    }
-}
-
-/// Levels and the mute caption follow the settings and the language (the
-/// caption's key depends on the mute state, so it is not `Localized`).
-fn update_audio_labels(
-    settings: Res<AudioSettings>,
-    locale: Option<Res<Locale>>,
-    mut labels: Query<(&AudioLabel, &mut Text)>,
-) {
-    if !settings.is_changed() && !locale_changed(&locale) {
-        return;
-    }
-    let settings = settings.sanitized();
-    for (label, mut text) in &mut labels {
-        text.0 = match *label {
-            AudioLabel::Bus(bus) => format!("{:.0}%", bus.value(settings) * 100.0),
-            AudioLabel::Mute => tr(if settings.muted {
-                "pause.audio.unmute"
-            } else {
-                "pause.audio.mute"
-            })
-            .into(),
-        };
     }
 }
 
@@ -1441,14 +1824,35 @@ fn sync_settings_server_addr_label(
 }
 
 /// Mobile platforms leave sessions without terminating the application.
+#[allow(clippy::type_complexity)]
 fn sync_practice_actions(
     platform: Option<Res<crate::ui::UiPlatform>>,
     session: Res<ClientSession>,
-    mut buttons: Query<(&mut Node, &UiAction<PauseAction>)>,
+    screen: Option<Res<State<crate::frontend::AppScreen>>>,
+    mut buttons: Query<(
+        &mut Node,
+        &UiAction<PauseAction>,
+        Option<&widgets::KitParts>,
+    )>,
     mut hints: Query<(&Name, &mut Text)>,
+    mut labels: Query<&mut Localized>,
 ) {
     let offline = session.is_offline();
-    for (mut node, action) in &mut buttons {
+    let front_end = screen.as_ref().is_some_and(|screen| screen.get().is_menu());
+    for (mut node, action, parts) in &mut buttons {
+        if action.0 == PauseAction::Resume
+            && let Some(label) = parts.and_then(|parts| parts.label)
+            && let Ok(mut label) = labels.get_mut(label)
+        {
+            let key = if front_end {
+                "common.back"
+            } else {
+                "pause.button.resume"
+            };
+            if label.key != key {
+                label.key = key;
+            }
+        }
         let visible = match action.0 {
             PauseAction::Exit => !offline && !mobile_pause(platform.as_deref()),
             PauseAction::LeaveMatch => {
@@ -1468,11 +1872,15 @@ fn sync_practice_actions(
     }
     for (name, mut text) in &mut hints {
         if name.as_str() == "PauseMenuMainTitle" {
-            let label = tr(if offline {
-                "pause.hint.offline"
+            let label = if front_end {
+                ""
             } else {
-                "pause.hint.online"
-            });
+                tr(if offline {
+                    "pause.hint.offline"
+                } else {
+                    "pause.hint.online"
+                })
+            };
             if text.0 != label {
                 text.0 = label.into();
             }
@@ -1491,15 +1899,6 @@ mod tests {
         mouse::{MouseScrollUnit, MouseWheel},
         touch::{TouchInput, TouchPhase},
     };
-
-    fn action_button(app: &mut App, wanted: impl Fn(&PauseAction) -> bool) -> Entity {
-        app.world_mut()
-            .query::<(Entity, &UiAction<PauseAction>)>()
-            .iter(app.world())
-            .find(|(_, action)| wanted(&action.0))
-            .unwrap()
-            .0
-    }
 
     // Real Bevy/Taffy layout, font measurement and clipping; no fabricated
     // ComputedNode rectangles. GPU/window event loop are not required.
@@ -1554,7 +1953,9 @@ mod tests {
             )
             .add_systems(
                 PostUpdate,
-                size_desktop_pause_panel.before(bevy::ui::UiSystems::Layout),
+                (size_desktop_pause_panel, layout_pause_contents)
+                    .chain()
+                    .before(bevy::ui::UiSystems::Layout),
             );
         let mut mobile = crate::mobile_controls::MobileControls::default();
         mobile.enabled = mobile_enabled;
@@ -1607,7 +2008,7 @@ mod tests {
     }
 
     #[test]
-    fn tablet_graphics_rows_share_label_and_stepper_columns() {
+    fn tablet_graphics_rows_share_label_slider_and_value_columns() {
         let (mut app, _) = layout_app(Vec2::new(1180.0, 820.0), 2.0, true);
         app.insert_resource(SettingsTab::Graphics)
             .add_systems(Update, settings_tabs);
@@ -1625,18 +2026,18 @@ mod tests {
             let row = named(&mut app, id);
             let label = app.world().get::<Children>(row).unwrap()[0];
             let label_rect = rect(&app, label, 2.0);
-            let minus = named(&mut app, &format!("{id}-Down"));
-            let minus_rect = rect(&app, minus, 2.0);
+            let parts = *app.world().get::<widgets::KitParts>(row).unwrap();
+            let track_rect = rect(&app, parts.track.unwrap(), 2.0);
             if let Some(x) = label_x {
                 assert!((label_rect.min.x - x).abs() < 1.0);
             }
             if let Some(x) = button_x {
-                assert!((minus_rect.min.x - x).abs() < 1.0);
+                assert!((track_rect.min.x - x).abs() < 1.0);
             }
-            assert!(label_rect.max.x <= minus_rect.min.x);
-            assert!(minus_rect.width() >= 44.0);
+            assert!(label_rect.max.x <= track_rect.min.x);
+            assert!(track_rect.width() >= 160.0);
             label_x = Some(label_rect.min.x);
-            button_x = Some(minus_rect.min.x);
+            button_x = Some(track_rect.min.x);
         }
     }
 
@@ -1668,7 +2069,7 @@ mod tests {
                 if mobile { Display::Flex } else { Display::None }
             );
             app.world_mut().write_message(Activated {
-                entity: leave,
+                source: leave,
                 action: PauseAction::LeaveMatch,
             });
             app.update();
@@ -1842,6 +2243,37 @@ mod tests {
     }
 
     #[test]
+    fn phone_sound_keeps_all_volume_controls_and_header_navigation_in_view() {
+        let (mut app, _) = layout_app(Vec2::new(844.0, 390.0), 3.0, true);
+        app.init_resource::<SettingsTab>()
+            .add_systems(Update, settings_tabs.after(apply_pause_navigation));
+        app.update();
+        app.update();
+        let body = named(&mut app, "PauseMenuSettingsSection");
+        let bounds = rect(&app, body, 3.0);
+        for id in [
+            "PauseMenuAudioMasterControls",
+            "PauseMenuAudioMusicControls",
+            "PauseMenuAudioEffectsControls",
+            "PauseMenuAudioUiControls",
+            "PauseMenuAudioMuteButton",
+        ] {
+            let entity = named(&mut app, id);
+            let control = rect(&app, entity, 3.0);
+            assert!(
+                bounds.contains(control.min) && bounds.contains(control.max),
+                "{id}: {control:?} outside {bounds:?}"
+            );
+        }
+        let back = named(&mut app, "BackButton");
+        let close = named(&mut app, "PauseMenuCloseButton");
+        for entity in [back, close] {
+            let control = rect(&app, entity, 3.0);
+            assert!(control.height() >= 44.0 && control.max.y <= bounds.min.y);
+        }
+    }
+
+    #[test]
     fn real_short_desktop_layout_scrolls_both_bodies_and_keeps_fixed_actions() {
         for size in [Vec2::new(640.0, 280.0), Vec2::new(1280.0, 720.0)] {
             let (mut app, window) = layout_app(size, 1.0, false);
@@ -1942,37 +2374,39 @@ mod tests {
         };
         let mut app = App::new();
         app.insert_resource(initial)
+            .init_resource::<LightingSettings>()
+            .init_resource::<MotionSettings>()
             .insert_resource(PauseMenuState {
                 open: false,
                 in_settings: true,
             })
             .add_message::<Activated<PauseAction>>()
+            .add_message::<SliderChanged>()
             .add_systems(Startup, setup_pause_menu_ui)
             .add_systems(
                 Update,
                 (
                     dispatch_actions::<PauseAction>,
                     apply_pause_audio,
-                    update_audio_labels,
+                    apply_settings_sliders,
+                    sync_settings_sliders,
                 )
                     .chain(),
             );
         app.update();
-        let music = action_button(
-            &mut app,
-            |action| matches!(action, PauseAction::Audio(AudioButton::Adjust(AudioBus::Music, delta)) if *delta < 0.0),
-        );
-        app.world_mut()
-            .entity_mut(music)
-            .insert(Interaction::Pressed);
+        let music = named(&mut app, "PauseMenuAudioMusicControls");
+        app.world_mut().write_message(SliderChanged {
+            slider: music,
+            value: 0.15,
+        });
         app.update();
         assert_eq!(*app.world().resource::<AudioSettings>(), initial);
-        app.world_mut().entity_mut(music).insert(Interaction::None);
         app.world_mut().resource_mut::<PauseMenuState>().open = true;
         app.update();
-        app.world_mut()
-            .entity_mut(music)
-            .insert(Interaction::Pressed);
+        app.world_mut().write_message(SliderChanged {
+            slider: music,
+            value: 0.15,
+        });
         app.update();
         let expected = AudioSettings {
             music: 0.15,
@@ -1981,23 +2415,18 @@ mod tests {
         assert_eq!(*app.world().resource::<AudioSettings>(), expected);
         app.update();
         assert_eq!(*app.world().resource::<AudioSettings>(), expected);
-        let labels: Vec<_> = app
-            .world_mut()
-            .query::<(&AudioLabel, &Text)>()
-            .iter(app.world())
-            .map(|(label, text)| (*label, text.0.clone()))
-            .collect();
-        assert!(
-            labels.iter().any(
-                |(label, text)| matches!(label, AudioLabel::Bus(AudioBus::Music)) && text == "15%"
-            )
-        );
-        assert!(
-            labels
-                .iter()
-                .any(|(label, text)| matches!(label, AudioLabel::Mute) && text == "Unmute sound")
+        let parts = app.world().get::<widgets::KitParts>(music).unwrap();
+        assert_eq!(
+            app.world().get::<Text>(parts.extra[0].unwrap()).unwrap().0,
+            "15%"
         );
         let mute = harness::find(app.world_mut(), "PauseMenuAudioMuteButton").unwrap();
+        assert!(
+            app.world()
+                .get::<widgets::ButtonStyle>(mute)
+                .unwrap()
+                .selected
+        );
         app.world_mut()
             .entity_mut(mute)
             .insert(Interaction::Pressed);
@@ -2019,7 +2448,56 @@ mod tests {
     }
 
     #[test]
-    fn mobile_audio_changes_on_short_release_but_never_on_scroll_or_closed_menu() {
+    fn lighting_sliders_clamp_and_resync_after_external_reset() {
+        let mut app = App::new();
+        app.init_resource::<AudioSettings>()
+            .init_resource::<LightingSettings>()
+            .init_resource::<MotionSettings>()
+            .insert_resource(PauseMenuState {
+                open: true,
+                in_settings: true,
+            })
+            .add_message::<SliderChanged>()
+            .add_systems(Startup, setup_pause_menu_ui)
+            .add_systems(
+                Update,
+                (apply_settings_sliders, sync_settings_sliders).chain(),
+            );
+        app.update();
+        let light = named(&mut app, "PauseMenuMainLightControls");
+        let yaw = named(&mut app, "PauseMenuYawControls");
+        app.world_mut().write_message(SliderChanged {
+            slider: light,
+            value: 2.0,
+        });
+        app.world_mut().write_message(SliderChanged {
+            slider: yaw,
+            value: -1.0,
+        });
+        app.update();
+        assert_eq!(
+            app.world().resource::<LightingSettings>().illuminance,
+            MAX_LIGHT_ILLUMINANCE
+        );
+        assert_eq!(
+            app.world().resource::<LightingSettings>().light_yaw_deg,
+            MIN_LIGHT_YAW_DEG
+        );
+        app.world_mut().insert_resource(LightingSettings::default());
+        app.update();
+        let default = LightingSettings::default();
+        let expected = (default.illuminance - MIN_LIGHT_ILLUMINANCE)
+            / (MAX_LIGHT_ILLUMINANCE - MIN_LIGHT_ILLUMINANCE);
+        assert!((app.world().get::<Slider>(light).unwrap().value - expected).abs() < 1e-5);
+        let parts = app.world().get::<widgets::KitParts>(yaw).unwrap();
+        assert_eq!(
+            app.world().get::<Text>(parts.extra[0].unwrap()).unwrap().0,
+            format!("{:.0}°", default.light_yaw_deg)
+        );
+    }
+
+    #[test]
+    fn mobile_mute_changes_on_short_release_but_never_on_scroll_or_closed_menu() {
         let mut app = App::new();
         let mut mobile = crate::mobile_controls::MobileControls::default();
         mobile.enabled = true;
@@ -2052,10 +2530,7 @@ mod tests {
         app.world_mut().spawn((
             Button,
             Node::default(),
-            UiAction(PauseAction::Audio(AudioButton::Adjust(
-                AudioBus::Music,
-                0.05,
-            ))),
+            UiAction(PauseAction::Audio(AudioButton::Mute)),
             Interaction::Pressed,
             BackgroundColor(theme::TILE),
             ComputedNode {
@@ -2077,21 +2552,21 @@ mod tests {
         app.world_mut()
             .write_message(event(1, TouchPhase::Started, center));
         app.update();
-        assert_eq!(app.world().resource::<AudioSettings>().music, 0.25);
+        assert!(!app.world().resource::<AudioSettings>().muted);
         app.world_mut()
             .write_message(event(1, TouchPhase::Moved, center + Vec2::Y * 30.0));
         app.world_mut()
             .write_message(event(1, TouchPhase::Ended, center));
         app.update();
-        assert_eq!(app.world().resource::<AudioSettings>().music, 0.25);
+        assert!(!app.world().resource::<AudioSettings>().muted);
         app.world_mut()
             .write_message(event(2, TouchPhase::Started, center));
         app.world_mut()
             .write_message(event(2, TouchPhase::Ended, center + Vec2::X * 3.0));
         app.update();
-        assert_eq!(app.world().resource::<AudioSettings>().music, 0.3);
+        assert!(app.world().resource::<AudioSettings>().muted);
         app.update();
-        assert_eq!(app.world().resource::<AudioSettings>().music, 0.3);
+        assert!(app.world().resource::<AudioSettings>().muted);
         app.world_mut()
             .write_message(event(3, TouchPhase::Started, center));
         app.update();
@@ -2099,7 +2574,7 @@ mod tests {
         app.world_mut()
             .write_message(event(3, TouchPhase::Ended, center));
         app.update();
-        assert_eq!(app.world().resource::<AudioSettings>().music, 0.3);
+        assert!(app.world().resource::<AudioSettings>().muted);
     }
 
     #[test]
@@ -2516,7 +2991,6 @@ mod tests {
                 (
                     dispatch_actions::<PauseAction>,
                     apply_pause_language,
-                    update_audio_labels,
                     update_language_value,
                     sync_practice_actions,
                     sync_settings_server_addr_label,
@@ -2530,13 +3004,21 @@ mod tests {
         };
         let child_text = |app: &mut App, id: &str| {
             let entity = named(app, id);
-            let child = app.world().get::<Children>(entity).unwrap()[0];
+            let child = app
+                .world()
+                .get::<widgets::KitParts>(entity)
+                .unwrap()
+                .label
+                .unwrap();
             app.world().get::<Text>(child).unwrap().0.clone()
         };
         assert_eq!(text(&mut app, "PauseMenuLanguageValue"), "English");
         assert_eq!(text(&mut app, "PauseMenuTitle"), "Game menu");
         assert_eq!(child_text(&mut app, "SettingsButton"), "Settings");
-        assert_eq!(text(&mut app, "PauseMenuAudioMuteLabel"), "Mute sound");
+        assert_eq!(
+            child_text(&mut app, "PauseMenuAudioMuteButton"),
+            "Mute sound"
+        );
         let button = harness::find(app.world_mut(), "PauseMenuLanguageButton").unwrap();
         app.world_mut()
             .entity_mut(button)
@@ -2563,7 +3045,7 @@ mod tests {
         assert_eq!(text(&mut app, "PauseMenuTitle"), "游戏菜单");
         assert_eq!(child_text(&mut app, "SettingsButton"), "设置");
         assert_eq!(child_text(&mut app, "BackButton"), "返回");
-        assert_eq!(text(&mut app, "PauseMenuAudioMuteLabel"), "静音");
+        assert_eq!(child_text(&mut app, "PauseMenuAudioMuteButton"), "静音");
         assert_eq!(text(&mut app, "PauseMenuAudioTitle"), "声音");
         assert_eq!(
             text(&mut app, "PauseMenuMainTitle"),
@@ -2581,7 +3063,10 @@ mod tests {
         app.update();
         assert_eq!(app.world().resource::<Locale>().id(), LocaleId::ENGLISH);
         assert_eq!(text(&mut app, "PauseMenuTitle"), "Game menu");
-        assert_eq!(text(&mut app, "PauseMenuAudioMuteLabel"), "Mute sound");
+        assert_eq!(
+            child_text(&mut app, "PauseMenuAudioMuteButton"),
+            "Mute sound"
+        );
     }
 
     #[test]

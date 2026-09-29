@@ -17,7 +17,10 @@ use crate::frontend::AppScreen;
 use crate::i18n::{Locale, Localized, data, locale_changed, tr};
 use crate::net::{ClientConnectionState, ClientSession, NetworkCommand, SessionUiCommand};
 use crate::sprite::{PlayerVisualMode, SpriteVisualAssets};
+use crate::ui::kit_assets::Icon;
 use crate::ui::theme::ButtonKind;
+use crate::ui::theme::{self, TextStyle};
+use crate::ui::tokens::{Metric, TextRole};
 use crate::ui::widgets::ButtonStyle;
 use crate::ui::{Activated, TestId, UiAction, UiActionAppExt, UiSet};
 pub use shared::wire::CharacterChoice;
@@ -127,19 +130,18 @@ impl Plugin for TeamSelectPlugin {
                     .before(team_select_ui_system)
                     .run_if(in_state(AppScreen::HeroSelect)),
             )
-            .add_systems(
-                Update,
-                adapt_mobile_selection_contrast
-                    .after(team_select_ui_system)
-                    .after(UiSet::Paint)
-                    .run_if(in_state(AppScreen::HeroSelect)),
-            )
             .add_systems(Update, (autojoin_from_env, sync_practice_picker));
         app.add_systems(
             PostUpdate,
             layout_spacious_picker
                 .after(crate::mobile_ui::MobileUiLayout)
                 .before(bevy::ui::UiSystems::Layout)
+                .run_if(in_state(AppScreen::HeroSelect)),
+        );
+        app.add_systems(
+            PostUpdate,
+            sync_picker_scrollbar
+                .after(bevy::ui::UiSystems::Layout)
                 .run_if(in_state(AppScreen::HeroSelect)),
         );
     }
@@ -155,6 +157,10 @@ pub struct HeroSelectBackButton;
 /// Connection status inside the picker header.
 #[derive(Component)]
 struct HeroSelectStatus;
+
+/// Admission failures have their own stable place above the primary action.
+#[derive(Component)]
+struct HeroSelectNotice;
 
 #[derive(Component)]
 struct JoinActionLabel;
@@ -213,14 +219,10 @@ fn class_line(class: HeroClass) -> String {
 struct TeamSelectButton;
 
 #[derive(Component)]
-struct ClassSelectButton {
-    class: HeroClass,
-}
+struct ClassSelectButton;
 
 #[derive(Component)]
-struct AvatarSelectButton {
-    slug: String,
-}
+struct AvatarSelectButton;
 
 /// Placeholder node inside an avatar button that receives the thumbnail image
 /// once [`AvatarThumbnails`] has a handle for the slug.
@@ -231,6 +233,11 @@ struct AvatarThumbnailSlot {
 
 #[derive(Component)]
 struct ModelAvatarGrid;
+
+#[derive(Component)]
+struct PickerScrollbar;
+#[derive(Component)]
+struct PickerScrollThumb;
 
 #[derive(Component)]
 struct WalletStatusText;
@@ -250,9 +257,7 @@ const WALLET_BUTTON_COLOR: Color = crate::ui::theme::LINK;
 struct SpriteAvatarGrid;
 
 #[derive(Component)]
-struct SpriteSelectButton {
-    id: String,
-}
+struct SpriteSelectButton;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct SpriteGridLayout {
@@ -500,11 +505,15 @@ pub fn spawn_team_select_ui(
                 parent,
                 crate::ui::living_background::LivingScene::Arena,
                 crate::ui::living_background::LivingBands {
-                    header: Some(76.0),
-                    footer: Some(52.0),
+                    header: Some(120.0),
+                    footer: None,
                 },
                 crate::ui::theme::Form::of(compact),
             );
+            parent.spawn((
+                crate::ui::widgets::surfaces::ornament_frame(),
+                Name::new("HeroSelectOrnament"),
+            ));
             parent
                 .spawn((
                     Node {
@@ -533,13 +542,16 @@ pub fn spawn_team_select_ui(
                             TestId::new("HeroSelectBack"),
                         ))
                         .with_children(|button| {
+                            button.spawn(crate::ui::widgets::icon_node(
+                                Icon::NavChevronLeft,
+                                20.0,
+                                theme::GOLD,
+                            ));
                             button.spawn((
                                 Localized::new("team.back").into_text(),
-                                TextFont {
-                                    font_size: 15.0,
-                                    ..default()
-                                },
-                                TextColor::WHITE,
+                                theme::role_text(TextRole::Button),
+                                TextColor(theme::IVORY),
+                                Name::new("HeroSelectBackLabel"),
                             ));
                         });
                     header.spawn((
@@ -548,7 +560,8 @@ pub fn spawn_team_select_ui(
                             font_size: 26.0,
                             ..default()
                         },
-                        TextColor::WHITE,
+                        TextStyle::new(TextRole::Title),
+                        TextColor(theme::GOLD),
                         Name::new("HeroSelectTitle"),
                     ));
                     header.spawn((
@@ -557,6 +570,7 @@ pub fn spawn_team_select_ui(
                             font_size: 13.0,
                             ..default()
                         },
+                        TextStyle::keep_case(TextRole::Caption),
                         TextColor(crate::ui::theme::MUTED),
                         Node {
                             margin: UiRect::left(Val::Auto),
@@ -707,13 +721,37 @@ pub fn spawn_team_select_ui(
                         spawn_avatar_button(
                             grid,
                             &avatar.slug,
-                            &format!("{} · {}", avatar.display_name, entry.source.label()),
+                            &avatar.display_name,
                             selection.avatar.as_deref() == Some(avatar.slug.as_str()),
                         );
                     }
-                    if !crate::passport::account_connected() {
-                        spawn_avatar_group_hint(grid, Localized::new("team.connect_hint"));
-                    }
+                    spawn_ekza_row(grid);
+                });
+
+            parent
+                .spawn((
+                    Node {
+                        position_type: PositionType::Absolute,
+                        width: Val::Px(3.0),
+                        border_radius: BorderRadius::all(Val::Px(2.0)),
+                        ..default()
+                    },
+                    BackgroundColor(theme::EDGE),
+                    PickerScrollbar,
+                    Name::new("PickerScrollbar"),
+                ))
+                .with_children(|track| {
+                    track.spawn((
+                        Node {
+                            position_type: PositionType::Absolute,
+                            width: Val::Percent(100.0),
+                            height: Val::Percent(40.0),
+                            border_radius: BorderRadius::all(Val::Px(2.0)),
+                            ..default()
+                        },
+                        BackgroundColor(theme::GOLD),
+                        PickerScrollThumb,
+                    ));
                 });
 
             parent
@@ -760,8 +798,6 @@ pub fn spawn_team_select_ui(
                     }
                 });
 
-            spawn_ekza_row(parent);
-
             spawn_section_title(
                 parent,
                 PhoneCopy::label(
@@ -795,7 +831,15 @@ pub fn spawn_team_select_ui(
                     ..default()
                 },
                 TextColor(Color::srgba(0.78, 0.80, 0.86, 1.0)),
+                TextStyle::new(TextRole::Caption),
                 Name::new("TeamSelectHint"),
+            ));
+            parent.spawn((
+                Text::new(""),
+                theme::role_text(TextRole::Caption),
+                TextColor(theme::GOLD),
+                HeroSelectNotice,
+                Name::new("HeroSelectNotice"),
             ));
             if visual_mode == PlayerVisualMode::Models3d {
                 spawn_hero_panel(parent, selection, preview_image.clone());
@@ -872,42 +916,66 @@ fn spawn_hero_panel(
                 Name::new("HeroSelectPreview"),
                 crate::frontend::preview::InteractivePreview,
             ));
-            panel.spawn((
-                Text::new(avatar_name.to_owned()),
-                TextFont {
-                    font_size: 19.0,
-                    ..default()
-                },
-                TextColor(crate::ui::theme::IVORY),
-                HeroPanelAvatarName,
-                Name::new("HeroSelectAvatarName"),
-            ));
-            panel.spawn((
-                Text::new(class_line(class)),
-                TextFont {
-                    font_size: 12.5,
-                    ..default()
-                },
-                TextColor(crate::ui::theme::MUTED),
-                HeroPanelClassName,
-                Name::new("HeroSelectClassName"),
-            ));
-            for (index, ability) in class.abilities().iter().enumerate() {
-                panel.spawn((
-                    Text::new(format!(
-                        "{}  {}",
-                        ability_key(index),
-                        data::ability_name(ability)
-                    )),
-                    TextFont {
-                        font_size: 13.0,
+            panel
+                .spawn((
+                    Node {
+                        width: Val::Percent(100.0),
+                        flex_direction: FlexDirection::Column,
+                        align_items: AlignItems::Center,
+                        row_gap: Val::Px(4.0),
+                        padding: UiRect::all(Val::Px(12.0)),
                         ..default()
                     },
-                    TextColor(crate::ui::theme::GOLD),
-                    HeroPanelAbility(index),
-                    Name::new(format!("HeroSelectAbility-{index}")),
-                ));
-            }
+                    BackgroundColor(theme::PANEL_OPAQUE),
+                    Name::new("HeroSelectStageCaption"),
+                ))
+                .with_children(|caption| {
+                    caption.spawn((
+                        Text::new(avatar_name.to_owned()),
+                        TextFont::default(),
+                        TextStyle::keep_case(TextRole::Heading),
+                        TextColor(theme::IVORY),
+                        TextLayout::new_with_justify(Justify::Center),
+                        HeroPanelAvatarName,
+                        Name::new("HeroSelectAvatarName"),
+                    ));
+                    caption.spawn((
+                        Text::new(class_line(class)),
+                        theme::role_text(TextRole::Caption),
+                        TextColor(theme::GOLD),
+                        TextLayout::new_with_justify(Justify::Center),
+                        HeroPanelClassName,
+                        Name::new("HeroSelectClassName"),
+                    ));
+                });
+            panel
+                .spawn((
+                    Node {
+                        width: Val::Percent(100.0),
+                        flex_direction: FlexDirection::Column,
+                        row_gap: Val::Px(4.0),
+                        padding: UiRect::all(Val::Px(12.0)),
+                        border: UiRect::top(Val::Px(1.0)),
+                        ..default()
+                    },
+                    BorderColor::all(theme::EDGE),
+                    Name::new("HeroSelectAbilityList"),
+                ))
+                .with_children(|kit| {
+                    for (index, ability) in class.abilities().iter().enumerate() {
+                        kit.spawn((
+                            Text::new(format!(
+                                "{}  {}",
+                                ability_key(index),
+                                data::ability_name(ability)
+                            )),
+                            theme::role_text(TextRole::Caption),
+                            TextColor(theme::MUTED),
+                            HeroPanelAbility(index),
+                            Name::new(format!("HeroSelectAbility-{index}")),
+                        ));
+                    }
+                });
         });
 }
 
@@ -921,21 +989,29 @@ fn ability_key(index: usize) -> &'static str {
 fn sync_hero_select_status(
     session: Res<crate::net::ClientSession>,
     notice: Option<Res<crate::frontend::JoinNotice>>,
-    mut status: Query<(&mut Text, &mut TextColor), With<HeroSelectStatus>>,
+    mut status: Query<
+        (&mut Text, &mut TextColor),
+        (With<HeroSelectStatus>, Without<HeroSelectNotice>),
+    >,
+    mut notices: Query<&mut Text, (With<HeroSelectNotice>, Without<HeroSelectStatus>)>,
 ) {
-    // A failed lock-in outranks the plain connection line: it is the reason
-    // the player is looking at the picker again.
-    let (line, color) = match notice.as_ref().and_then(|notice| notice.0.clone()) {
-        Some(reason) => (reason, crate::ui::theme::GOLD),
-        None => {
-            if session.is_offline() {
-                (tr("home.offline_hint").to_owned(), crate::ui::theme::GOLD)
-            } else {
-                let (line, _) = crate::frontend::home::connection_line(&session);
-                (line, crate::ui::theme::MUTED)
-            }
+    let (line, color) = {
+        if session.is_offline() {
+            (tr("home.offline_hint").to_owned(), crate::ui::theme::GOLD)
+        } else {
+            let (line, _) = crate::frontend::home::connection_line(&session);
+            (line, crate::ui::theme::MUTED)
         }
     };
+    let notice_line = notice
+        .as_ref()
+        .and_then(|notice| notice.0.as_deref())
+        .unwrap_or("");
+    for mut text in &mut notices {
+        if text.0 != notice_line {
+            text.0 = notice_line.to_owned();
+        }
+    }
     for (mut text, mut text_color) in &mut status {
         if text.0 != line {
             text.0.clone_from(&line);
@@ -1019,6 +1095,7 @@ fn spawn_ekza_row(parent: &mut ChildSpawnerCommands) {
                     font_size: 12.5,
                     ..default()
                 },
+                TextStyle::keep_case(TextRole::Caption),
                 TextColor(crate::ui::theme::MUTED),
                 WalletStatusText,
                 Name::new("PassportStatus"),
@@ -1032,6 +1109,7 @@ fn spawn_ekza_row(parent: &mut ChildSpawnerCommands) {
                     font_size: 12.5,
                     ..default()
                 },
+                TextStyle::keep_case(TextRole::Caption),
                 TextColor(crate::ui::theme::MUTED),
                 AccountStatusText,
                 Name::new("EkzaAccountStatus"),
@@ -1094,6 +1172,7 @@ fn spawn_connect_button(
                 font_size: 13.0,
                 ..default()
             },
+            TextStyle::new(TextRole::Button).sized(Metric::new(14.0, 12.0)),
             TextColor::WHITE,
         ));
     });
@@ -1101,7 +1180,36 @@ fn spawn_connect_button(
 
 /// The hero roster grids: 48 px per wheel notch, 180 px per PageUp/PageDown.
 fn roster_scroll() -> crate::ui::ScrollArea {
-    crate::ui::ScrollArea::wheel(48.0).page_keys(180.0)
+    crate::ui::ScrollArea::wheel(48.0)
+        .page_keys(180.0)
+        .touch_drag(8.0)
+        .keyed(0x4845524f)
+}
+
+fn sync_picker_scrollbar(
+    grid: Query<(&ComputedNode, &ScrollPosition), With<ModelAvatarGrid>>,
+    mut tracks: Query<&mut Visibility, With<PickerScrollbar>>,
+    mut thumbs: Query<&mut Node, With<PickerScrollThumb>>,
+) {
+    let Ok((computed, scroll)) = grid.single() else {
+        return;
+    };
+    let viewport = computed.size().y * computed.inverse_scale_factor();
+    let content = computed.content_size().y * computed.inverse_scale_factor();
+    let overflow = (content - viewport).max(0.0);
+    for mut visibility in &mut tracks {
+        *visibility = if overflow > 1.0 {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
+    }
+    let ratio = (viewport / content.max(1.0)).clamp(0.08, 1.0);
+    for mut node in &mut thumbs {
+        node.height = Val::Percent(ratio * 100.0);
+        node.top =
+            Val::Percent((scroll.y / overflow.max(1.0)).clamp(0.0, 1.0) * (1.0 - ratio) * 100.0);
+    }
 }
 
 fn spawn_sprite_button(
@@ -1138,9 +1246,7 @@ fn spawn_sprite_button(
                 selected,
             },
             UiAction(HeroSelectAction::Sprite(character.id.clone())),
-            SpriteSelectButton {
-                id: character.id.clone(),
-            },
+            SpriteSelectButton,
         ));
     }
     tile.with_children(|button| {
@@ -1189,11 +1295,8 @@ fn spawn_sprite_button(
 fn spawn_section_title(parent: &mut ChildSpawnerCommands, title: impl Bundle, name: &str) {
     parent.spawn((
         title,
-        TextFont {
-            font_size: 20.0,
-            ..default()
-        },
-        TextColor(Color::WHITE),
+        theme::role_text(TextRole::Eyebrow),
+        TextColor(theme::GOLD),
         Name::new(name.to_owned()),
     ));
 }
@@ -1204,7 +1307,8 @@ fn spawn_avatar_group_label(grid: &mut ChildSpawnerCommands, title: &'static str
     grid.spawn((
         Node {
             width: Val::Percent(100.0),
-            justify_content: JustifyContent::Center,
+            justify_content: JustifyContent::FlexStart,
+            padding: UiRect::top(Val::Px(8.0)),
             ..default()
         },
         Name::new(name.to_owned()),
@@ -1212,11 +1316,8 @@ fn spawn_avatar_group_label(grid: &mut ChildSpawnerCommands, title: &'static str
     .with_children(|row| {
         row.spawn((
             Localized::new(title).into_text(),
-            TextFont {
-                font_size: 15.0,
-                ..default()
-            },
-            TextColor(Color::srgb(0.78, 0.86, 1.0)),
+            theme::role_text(TextRole::Eyebrow),
+            TextColor(theme::GOLD),
         ));
     });
 }
@@ -1225,7 +1326,7 @@ fn spawn_avatar_group_hint(grid: &mut ChildSpawnerCommands, hint: impl crate::i1
     grid.spawn((
         Node {
             width: Val::Percent(100.0),
-            justify_content: JustifyContent::Center,
+            justify_content: JustifyContent::FlexStart,
             ..default()
         },
         Name::new("PurchasedAvatarsHint"),
@@ -1233,11 +1334,8 @@ fn spawn_avatar_group_hint(grid: &mut ChildSpawnerCommands, hint: impl crate::i1
     .with_children(|row| {
         row.spawn((
             hint.into_text(),
-            TextFont {
-                font_size: 12.0,
-                ..default()
-            },
-            TextColor(Color::srgb(0.7, 0.7, 0.7)),
+            theme::role_text(TextRole::Caption),
+            TextColor(theme::MUTED),
         ));
     });
 }
@@ -1266,26 +1364,20 @@ fn spawn_class_button(row: &mut ChildSpawnerCommands, class: HeroClass, selected
             selected,
         },
         UiAction(HeroSelectAction::Class(class)),
-        ClassSelectButton { class },
+        ClassSelectButton,
         TestId::new(format!("ClassButton-{}", class.id())),
     ))
     .with_children(|button| {
-        let (name, tagline) = class_keys(class);
-        button.spawn((
-            Localized::new(name).into_text(),
-            TextFont {
-                font_size: 17.0,
-                ..default()
-            },
-            TextColor(Color::WHITE),
+        let (name, _) = class_keys(class);
+        button.spawn(crate::ui::widgets::icon_node(
+            crate::ui::widgets::game::class_icon(class),
+            24.0,
+            theme::GOLD,
         ));
         button.spawn((
-            Localized::new(tagline).into_text(),
-            TextFont {
-                font_size: 10.5,
-                ..default()
-            },
-            TextColor(Color::srgba(0.82, 0.84, 0.90, 1.0)),
+            Localized::new(name).into_text(),
+            theme::role_text(TextRole::Button),
+            TextColor(theme::IVORY),
         ));
     });
 }
@@ -1319,9 +1411,7 @@ fn spawn_avatar_button(
             selected,
         },
         UiAction(HeroSelectAction::Avatar(slug.to_owned())),
-        AvatarSelectButton {
-            slug: slug.to_owned(),
-        },
+        AvatarSelectButton,
         TestId::new(format!("AvatarButton-{slug}")),
     ))
     .with_children(|button| {
@@ -1346,26 +1436,23 @@ fn spawn_avatar_button(
                     .and_then(crate::passport::thumbnail_asset_path)
                     .is_none()
                 {
-                    let initials: String = slug
-                        .split('-')
-                        .filter_map(|part| part.chars().next())
-                        .take(2)
-                        .flat_map(char::to_uppercase)
-                        .collect();
-                    portrait.spawn((
-                        Text::new(initials),
-                        crate::ui::theme::text(22.0),
-                        TextColor(crate::ui::theme::GOLD),
+                    portrait.spawn(crate::ui::widgets::icon_node(
+                        Icon::ClassWarrior,
+                        32.0,
+                        theme::GOLD,
                     ));
                 }
             });
         button.spawn((
             Text::new(display_name),
-            TextFont {
-                font_size: 10.5,
+            TextFont::default(),
+            TextStyle::keep_case(TextRole::Caption).sized(Metric::new(13.0, 11.0)),
+            TextColor(theme::IVORY),
+            TextLayout::new_with_justify(Justify::Center),
+            Node {
+                max_width: Val::Percent(100.0),
                 ..default()
             },
-            TextColor(Color::srgba(0.86, 0.88, 0.92, 1.0)),
         ));
     });
 }
@@ -1401,11 +1488,11 @@ fn spawn_team_button(row: &mut ChildSpawnerCommands, team: Team, name: &str) {
             ..default()
         },
         BackgroundColor(crate::ui::theme::button_idle_color(
-            ButtonKind::Team(team),
+            ButtonKind::Primary,
             false,
         )),
         BorderColor::all(crate::ui::theme::EDGE),
-        ButtonStyle::new(ButtonKind::Team(team)),
+        ButtonStyle::new(ButtonKind::Primary),
         UiAction(HeroSelectAction::LockIn(team)),
         TeamSelectButton,
         TestId::new(name.to_owned()),
@@ -1418,61 +1505,10 @@ fn spawn_team_button(row: &mut ChildSpawnerCommands, team: Team, name: &str) {
             } else {
                 "team.join.find_match"
             })),
-            TextFont {
-                font_size: 22.0,
-                ..default()
-            },
-            TextColor(Color::WHITE),
+            theme::role_text(TextRole::ButtonLg),
+            TextColor(theme::IVORY),
         ));
     });
-}
-
-/// Small phone labels retain their pale text on a dark selected tile. A gold
-/// outline distinguishes selection without reducing text contrast or tile space.
-fn adapt_mobile_selection_contrast(
-    mut commands: Commands,
-    mobile: Option<Res<crate::mobile_controls::MobileControls>>,
-    selection: Res<TeamSelection>,
-    mut tiles: Query<
-        (
-            Entity,
-            Option<&ClassSelectButton>,
-            Option<&AvatarSelectButton>,
-            Option<&SpriteSelectButton>,
-            &mut BackgroundColor,
-            Option<&mut Outline>,
-        ),
-        Or<(
-            With<ClassSelectButton>,
-            With<AvatarSelectButton>,
-            With<SpriteSelectButton>,
-        )>,
-    >,
-) {
-    if !mobile.as_ref().is_some_and(|mobile| mobile.enabled) {
-        return;
-    }
-    for (entity, class, avatar, sprite, mut background, outline) in &mut tiles {
-        let selected = class.is_some_and(|button| button.class == selection.hero_class)
-            || avatar
-                .is_some_and(|button| selection.avatar.as_deref() == Some(button.slug.as_str()))
-            || sprite.is_some_and(|button| button.id == selection.sprite_character);
-        if selected {
-            *background = crate::ui::theme::TILE.into();
-        }
-        let color = if selected {
-            crate::ui::theme::GOLD
-        } else {
-            Color::NONE
-        };
-        if let Some(mut outline) = outline {
-            outline.color = color;
-        } else {
-            commands
-                .entity(entity)
-                .insert(Outline::new(Val::Px(2.0), Val::ZERO, color));
-        }
-    }
 }
 
 /// Applies hero-select presses. Runs after `UiSet::Dispatch` and before the
@@ -1733,6 +1769,7 @@ fn layout_spacious_picker(
     windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
     scale: Res<UiScale>,
     session: Res<ClientSession>,
+    mobile: Option<Res<crate::mobile_controls::MobileControls>>,
     mut nodes: Query<(
         Option<&Name>,
         Option<&TestId>,
@@ -1744,12 +1781,32 @@ fn layout_spacious_picker(
     let Ok(window) = windows.single() else {
         return;
     };
-    let spacious = window.height() >= 600.0;
     let w = window.width() / scale.0.max(0.1);
     let h = window.height() / scale.0.max(0.1);
-    let left_w = w * 0.70 - 64.0;
-    let stage_x = w * 0.70;
-    let stage_w = w * 0.30 - 32.0;
+    let phone = window.height() < 600.0;
+    let safe = mobile
+        .as_ref()
+        .filter(|m| m.enabled)
+        .map(|m| [m.safe.left, m.safe.right, m.safe.top, m.safe.bottom])
+        .unwrap_or([0.0; 4]);
+    let layout = PickerLayout::new(w, h, phone, safe.map(|v| v / scale.0.max(0.1)));
+    let PickerLayout {
+        inset,
+        top,
+        bottom,
+        left_w,
+        stage_x,
+        stage_w,
+        class_y,
+        grid_x,
+        grid_y,
+        grid_w,
+        grid_h,
+        stage_y,
+        stage_h,
+        action_y,
+        ..
+    } = layout;
     let absolute = |node: &mut Node, x, y, width, height| {
         node.position_type = PositionType::Absolute;
         node.left = Val::Px(x);
@@ -1760,6 +1817,8 @@ fn layout_spacious_picker(
         node.height = Val::Px(height);
         node.max_width = Val::Auto;
         node.max_height = Val::Auto;
+        node.min_width = Val::Px(0.0);
+        node.min_height = Val::Px(0.0);
     };
     for (name, id, class, action, mut node) in &mut nodes {
         let key = crate::ui::test_id::node_key(name, id).unwrap_or_default();
@@ -1767,79 +1826,253 @@ fn layout_spacious_picker(
             || action.is_some_and(|a| matches!(&a.0, HeroSelectAction::Avatar(slug) if omoba_passport::avatars::avatar_definition(slug).is_none()))) {
             node.display = Display::None; continue;
         }
-        if !spacious {
-            continue;
-        }
         if class.is_some() {
-            node.width = Val::Px((left_w - 48.0) / 5.0);
-            node.height = Val::Px(64.0);
+            node.width = Val::Px(if phone { left_w } else { (left_w - 32.0) / 5.0 });
+            node.height = Val::Px(if phone {
+                ((bottom - class_y - 24.0) / 5.0).clamp(40.0, 48.0)
+            } else {
+                64.0
+            });
+            node.flex_direction = if phone {
+                FlexDirection::Row
+            } else {
+                FlexDirection::Column
+            };
+            node.column_gap = Val::Px(8.0);
+            node.flex_shrink = 0.0;
         }
         if action.is_some_and(|a| matches!(a.0, HeroSelectAction::Avatar(_))) {
-            node.width = Val::Px(112.0);
-            node.height = Val::Px(128.0);
+            node.width = Val::Px(layout.tile_width());
+            node.height = Val::Px(layout.tile_width() + if phone { 28.0 } else { 32.0 });
+            node.padding = UiRect::all(Val::Px(5.0));
+            node.justify_content = JustifyContent::FlexStart;
         }
         match key {
             "PickerAvatarThumbnail" => {
-                node.width = Val::Px(84.0);
-                node.height = Val::Px(84.0);
+                node.width = Val::Px(layout.tile_width() - 10.0);
+                node.height = Val::Px(layout.tile_width() - 10.0);
+                node.flex_shrink = 0.0;
             }
             "TeamSelectOverlay" => {
                 node.padding = UiRect::ZERO;
             }
             "HeroSelectHeader" => {
-                absolute(&mut node, 32.0, 24.0, left_w, 48.0);
+                absolute(&mut node, inset, top, w - inset - layout.right, 48.0);
                 node.flex_direction = FlexDirection::Row;
+                node.column_gap = Val::Px(if phone { 12.0 } else { 20.0 });
             }
-            "HeroSelectTitle" | "HeroSelectStatus" => node.display = Display::Flex,
+            "HeroSelectTitle" => {
+                node.display = Display::Flex;
+                node.max_width = Val::Percent(60.0);
+                node.margin.left = Val::Px(if phone { 0.0 } else { 16.0 });
+            }
+            "HeroSelectStatus" => {
+                node.display = if phone { Display::None } else { Display::Flex };
+                node.max_width = Val::Px(stage_w);
+            }
             "HeroSelectBack" => {
-                node.width = Val::Auto;
+                node.width = Val::Px(if phone { 44.0 } else { 128.0 });
                 node.height = Val::Px(44.0);
+                node.flex_shrink = 0.0;
+                node.padding = UiRect::ZERO;
+                node.column_gap = Val::Px(8.0);
             }
-            "ClassSelectTitle" => absolute(&mut node, 32.0, 92.0, left_w, 24.0),
+            "HeroSelectBackLabel" => {
+                node.display = if phone { Display::None } else { Display::Flex }
+            }
+            "HeroSelectOrnament" => {
+                node.display = if phone { Display::None } else { Display::Flex }
+            }
+            "ClassSelectTitle" => absolute(&mut node, inset, class_y - 24.0, left_w, 20.0),
             "ClassButtonsRow" => {
-                absolute(&mut node, 32.0, 124.0, left_w, 64.0);
-                node.flex_direction = FlexDirection::Row;
-                node.column_gap = Val::Px(12.0);
-                node.flex_wrap = FlexWrap::NoWrap;
-            }
-            "AvatarSelectTitle" => absolute(&mut node, 32.0, 208.0, left_w, 24.0),
-            "RendererStatus" => node.display = Display::None,
-            "AvatarGrid" => {
                 absolute(
                     &mut node,
-                    32.0,
-                    244.0,
+                    inset,
+                    class_y,
                     left_w,
-                    (h - if session.is_offline() { 292.0 } else { 370.0 }).max(160.0),
+                    if phone { bottom - class_y } else { 64.0 },
                 );
-                node.padding = UiRect::all(Val::Px(12.0));
-                node.row_gap = Val::Px(12.0);
-                node.column_gap = Val::Px(12.0);
+                node.flex_direction = if phone {
+                    FlexDirection::Column
+                } else {
+                    FlexDirection::Row
+                };
+                node.justify_content = JustifyContent::FlexStart;
+                node.column_gap = Val::Px(8.0);
+                node.row_gap = Val::Px(6.0);
+                node.flex_wrap = FlexWrap::NoWrap;
+            }
+            "AvatarSelectTitle" => absolute(&mut node, grid_x, grid_y - 24.0, grid_w, 20.0),
+            "RendererStatus" => node.display = Display::None,
+            "PickerScrollbar" => absolute(
+                &mut node,
+                grid_x + grid_w - 4.0,
+                grid_y + 8.0,
+                3.0,
+                grid_h - 16.0,
+            ),
+            "AvatarGrid" => {
+                absolute(&mut node, grid_x, grid_y, grid_w, grid_h);
+                node.padding = UiRect::all(Val::Px(if phone { 4.0 } else { 12.0 }));
+                node.row_gap = Val::Px(8.0);
+                node.column_gap = Val::Px(8.0);
                 node.align_content = AlignContent::FlexStart;
                 node.justify_content = JustifyContent::FlexStart;
                 node.border_radius = BorderRadius::all(Val::Px(12.0));
             }
             "HeroSelectPanel" => {
                 node.display = Display::Flex;
-                absolute(&mut node, stage_x, 92.0, stage_w, h - 244.0);
+                absolute(&mut node, stage_x, stage_y, stage_w, stage_h);
+                node.padding = UiRect::ZERO;
+                node.row_gap = Val::Px(0.0);
+                node.overflow = Overflow::clip();
             }
             "HeroSelectPreview" => {
                 node.width = Val::Auto;
-                node.height = Val::Px((h - 454.0).max(156.0));
+                node.height = Val::Px(if phone {
+                    (stage_h - 62.0).max(100.0)
+                } else {
+                    (stage_h - 204.0).max(156.0)
+                });
                 node.flex_shrink = 0.0;
             }
-            "TeamSelectTitle" => absolute(&mut node, stage_x, h - 128.0, stage_w, 24.0),
+            "HeroSelectStageCaption" => {
+                node.padding = UiRect::all(Val::Px(if phone { 6.0 } else { 12.0 }));
+                node.position_type = if phone {
+                    PositionType::Absolute
+                } else {
+                    PositionType::Relative
+                };
+                node.bottom = if phone { Val::Px(0.0) } else { Val::Auto };
+                node.max_height = Val::Px(if phone { 72.0 } else { 92.0 });
+                node.flex_shrink = 0.0;
+            }
+            "HeroSelectAvatarName" | "HeroSelectClassName" => node.max_width = Val::Percent(100.0),
+            "HeroSelectAbilityList" => {
+                node.display = if phone { Display::None } else { Display::Flex }
+            }
+            "HeroSelectNotice" => absolute(
+                &mut node,
+                stage_x,
+                action_y - if phone { 46.0 } else { 52.0 },
+                stage_w,
+                40.0,
+            ),
+            "TeamSelectTitle" => node.display = Display::None,
             "TeamButtonsRow" => {
-                absolute(&mut node, stage_x, h - 96.0, stage_w, 56.0);
+                absolute(&mut node, stage_x, action_y, stage_w, 56.0);
                 node.justify_content = JustifyContent::Center;
             }
-            "TeamSelectHint" => node.display = Display::None,
+            "FindMatchButton" => {
+                node.width = Val::Percent(100.0);
+                node.height = Val::Px(56.0);
+            }
+            "TeamSelectHint" => {
+                node.display = if phone { Display::None } else { Display::Flex };
+                absolute(&mut node, inset, top + 52.0, left_w, 22.0);
+            }
             "EkzaConnectRow" => {
-                node.display = Display::Flex;
-                absolute(&mut node, 32.0, h - 108.0, left_w, 80.0);
+                node.display = if phone { Display::None } else { Display::Flex };
+                node.width = Val::Percent(100.0);
+                node.max_width = Val::Percent(100.0);
+                node.justify_content = JustifyContent::FlexStart;
             }
             _ => {}
         }
+    }
+}
+
+/// One set of geometry keeps the roster, live preview and action disjoint on
+/// wide screens and on the compact, three-column phone picker.
+#[derive(Clone, Copy, Debug)]
+struct PickerLayout {
+    phone: bool,
+    inset: f32,
+    right: f32,
+    top: f32,
+    bottom: f32,
+    left_w: f32,
+    class_y: f32,
+    grid_x: f32,
+    grid_y: f32,
+    grid_w: f32,
+    grid_h: f32,
+    stage_x: f32,
+    stage_y: f32,
+    stage_w: f32,
+    stage_h: f32,
+    action_y: f32,
+}
+
+impl PickerLayout {
+    fn new(w: f32, h: f32, phone: bool, safe: [f32; 4]) -> Self {
+        let inset = if phone {
+            safe[0] + 12.0
+        } else {
+            safe[0].max(48.0)
+        };
+        let right = if phone {
+            safe[1] + 12.0
+        } else {
+            safe[1].max(48.0)
+        };
+        let top = if phone {
+            safe[2] + 8.0
+        } else {
+            safe[2].max(40.0)
+        };
+        let bottom = h - if phone {
+            safe[3] + 12.0
+        } else {
+            safe[3].max(48.0)
+        };
+        let available = w - inset - right;
+        let stage_w = if phone {
+            available * 0.35
+        } else {
+            (available * 0.29).min(352.0)
+        };
+        let stage_x = w - right - stage_w;
+        let left_w = if phone {
+            available * 0.22
+        } else {
+            stage_x - inset - 24.0
+        };
+        let class_y = top + if phone { 72.0 } else { 104.0 };
+        let grid_x = if phone { inset + left_w + 12.0 } else { inset };
+        let grid_y = if phone { class_y } else { class_y + 104.0 };
+        let grid_w = if phone {
+            stage_x - grid_x - 12.0
+        } else {
+            left_w
+        };
+        let stage_y = class_y - 24.0;
+        let action_y = bottom - 56.0;
+        let stage_h = action_y - stage_y - if phone { 54.0 } else { 64.0 };
+        Self {
+            phone,
+            inset,
+            right,
+            top,
+            bottom,
+            left_w,
+            class_y,
+            grid_x,
+            grid_y,
+            grid_w,
+            grid_h: bottom - grid_y,
+            stage_x,
+            stage_y,
+            stage_w,
+            stage_h,
+            action_y,
+        }
+    }
+
+    fn tile_width(self) -> f32 {
+        let columns = if self.phone { 3.0 } else { 8.0 };
+        let padding = if self.phone { 8.0 } else { 24.0 };
+        ((self.grid_w - padding - (columns - 1.0) * 8.0) / columns).floor()
     }
 }
 
@@ -1847,6 +2080,42 @@ fn layout_spacious_picker(
 mod tests {
     use super::*;
     use shared::SPRITE_CHARACTER_IDS;
+
+    #[test]
+    fn hero_picker_keeps_preview_notice_and_action_inside_each_viewport() {
+        for (w, h, phone, safe) in [
+            (1280.0, 720.0, false, [0.0; 4]),
+            (1180.0, 820.0, false, [32.0, 32.0, 12.0, 20.0]),
+            (844.0, 390.0, true, [32.0, 32.0, 12.0, 20.0]),
+        ] {
+            let p = PickerLayout::new(w, h, phone, safe);
+            assert!(p.grid_x + p.grid_w + 10.0 <= p.stage_x);
+            assert!(p.stage_h >= 140.0, "{p:?}");
+            assert!(p.stage_y + p.stage_h <= p.action_y - 46.0);
+            assert!(p.action_y + 56.0 <= h - safe[3]);
+            assert!(p.stage_x + p.stage_w <= w - safe[1]);
+            assert!(p.grid_y + p.grid_h <= h - safe[3]);
+            assert!(p.tile_width() >= 68.0, "{p:?}");
+            if phone {
+                assert!(p.inset + p.left_w + 10.0 <= p.grid_x);
+            }
+        }
+    }
+
+    #[test]
+    fn picker_admission_notice_and_connection_queries_are_disjoint() {
+        let mut world = World::new();
+        let mut system = IntoSystem::into_system(sync_hero_select_status);
+        system.initialize(&mut world);
+    }
+
+    #[test]
+    fn picker_roster_supports_swipe_without_turning_taps_into_scroll() {
+        let scroll = roster_scroll();
+        assert!(scroll.wheel.is_some());
+        assert!(scroll.drag.is_some());
+        assert_eq!(scroll.key, Some(0x4845524f));
+    }
 
     /// O25: the lock-in decision for every connection/mode combination.
     #[test]
@@ -2147,7 +2416,7 @@ mod tests {
         let button = harness::find(app.world_mut(), "FindMatchButton").unwrap();
         assert_eq!(
             app.world().get::<BackgroundColor>(button).unwrap().0,
-            crate::ui::theme::TEAM_GREEN
+            crate::ui::theme::PRIMARY
         );
         harness::set_disabled(app.world_mut(), "FindMatchButton", true);
         harness::press(app.world_mut(), "FindMatchButton");

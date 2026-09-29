@@ -4,6 +4,14 @@ All notable changes to this repository should be documented in this file.
 
 The canonical repository version lives in `Cargo.toml` under `[workspace.package].version` and follows SemVer.
 
+## [0.28.4] - 2026-09-29
+
+### First impression polish
+- Compose the Home wordmark, connection state and utility icons in one inset header; keep the version footer inside the tablet ornament and centre the phone hero nameplate beneath its model.
+- Replace the prototype character picker with illustrated avatar tiles, class icons, a visible selected-character preview on phone and tablet, an independent admission notice, and touch-scrolling catalogue.
+- Restyle Settings/Game Menu with display headings, icon navigation and aligned cards; use sliders for volume and lighting, switches for mute and reduced motion, and fixed close/back controls around a scrolling body.
+- Finish revealing painted menu backgrounds even when a capture window is unfocused; pause only decorative motion. Keep vertical touch scrolling from adjusting sliders accidentally.
+
 ## [0.28.3] - 2026-09-28
 
 ### Tablet composition and offline lanes
