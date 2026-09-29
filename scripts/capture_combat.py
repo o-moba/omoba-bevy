@@ -41,17 +41,27 @@ class PassiveTarget(ScenarioPeer):
 
 
 class CombatObserver(SnapshotObserver):
-    """Keep the original hello-only endpoint but retain full combat fields.
+    """Passive blue-team endpoint retaining original combat snapshots.
 
-    Frame bounds match capture_verdant. No response packet is rewritten, and the
-    JSONL contains original complete snapshots, including event/actor identities.
+    Unjoined endpoints receive empty prejoin snapshots. Join the target's team
+    for ordinary shared vision, but never send movement, attacks or skills.
+    No response packet is rewritten; the JSONL preserves server actor/event IDs.
     """
+    def __init__(self, address, output):
+        super().__init__(address, output)
+        self.joined = False
+
     def update(self, now):
         if now - self.last_hello >= 1.0:
             self.last_hello = now
             self.socket.send(json.dumps(dict(type="hello", protocol_version=catalog.protocol_version())).encode())
+            if not self.joined:
+                self.socket.send(json.dumps(dict(
+                    type="join", team="blue", character="cube", hero_class="warrior",
+                    session_id=f"combat-observer-{os.getpid()}",
+                )).encode())
         self.pending = {key: value for key, value in self.pending.items() if now - value[0] < 2.0}
-        # Bound one poll even if a broken server floods this read-only endpoint.
+        # Bound one poll even if a broken server floods this passive endpoint.
         for _ in range(2048):
             try:
                 data = self.socket.recv(65536)
@@ -61,7 +71,7 @@ class CombatObserver(SnapshotObserver):
                 if not FRAME_HEADER.size <= len(data) <= 1200:
                     raise RuntimeError("Invalid observer frame length")
                 _, version, epoch, tick, index, count, total = FRAME_HEADER.unpack_from(data)
-                if version != 2 or not 0 < count <= 56 or not index < count or total > 65507:
+                if version != catalog.protocol_version() or not 0 < count <= 56 or not index < count or total > 65507:
                     raise RuntimeError("Invalid observer frame header")
                 key = (epoch, tick)
                 if key not in self.pending and len(self.pending) >= 4:
@@ -76,6 +86,8 @@ class CombatObserver(SnapshotObserver):
                     raise RuntimeError("Incomplete observer frame reconstruction")
             packet = json.loads(data)
             if packet.get("type") == "snapshot":
+                self.joined = any(player["id"] == packet.get("your_id")
+                                  for player in packet.get("players", []))
                 self.samples.append(packet)
                 self.output.write(json.dumps(packet, separators=(",", ":")) + "\n")
                 self.output.flush()

@@ -11,6 +11,7 @@ import time
 import unittest
 
 from capture_verdant import FRAME_HEADER, SnapshotObserver, verify_navigation
+from capture_combat import CombatObserver
 
 
 def evidence():
@@ -106,16 +107,50 @@ class NavigationEvidenceTest(unittest.TestCase):
                 data = json.dumps(packet).encode()
                 halves = (data[:len(data) // 2], data[len(data) // 2:])
                 for index in (1, 0):
-                    server.sendto(FRAME_HEADER.pack(b"OMB1", 2, 9, 42, index, 2, len(data)) + halves[index], address)
+                    server.sendto(FRAME_HEADER.pack(b"OMB1", catalog.protocol_version(), 9, 42, index, 2, len(data)) + halves[index], address)
                 deadline = time.monotonic() + 1
                 while not observer.samples and time.monotonic() < deadline:
                     select.select([observer.socket], [], [], max(0, deadline - time.monotonic()))
                     observer.update(1.1)
                 self.assertEqual(observer.samples[0]["snapshot_tick"], 42)
                 self.assertEqual(json.loads(path.read_text())["players"], packet["players"])
+                # Historical frame versions must still be rejected, not silently accepted.
+                stale = FRAME_HEADER.pack(b"OMB1", catalog.protocol_version() - 1,
+                                          9, 43, 0, 1, len(data)) + data
+                server.sendto(stale, address)
+                select.select([observer.socket], [], [], 1)
+                with self.assertRaisesRegex(RuntimeError, "invalid observer snapshot frame header"):
+                    observer.update(1.2)
                 server.setblocking(False)
                 with self.assertRaises(BlockingIOError):
                     server.recvfrom(65536)  # No Join/Transform commands were sent.
+            finally:
+                observer.close()
+
+    def test_combat_observer_joins_for_vision_without_gameplay_commands(self):
+        with tempfile.TemporaryDirectory() as directory, socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as server:
+            server.bind(("127.0.0.1", 0))
+            server.settimeout(1)
+            observer = CombatObserver(server.getsockname(), Path(directory) / "combat.jsonl")
+            try:
+                observer.update(1)
+                hello, address = server.recvfrom(65536)
+                join, _ = server.recvfrom(65536)
+                self.assertEqual(json.loads(hello), dict(type="hello", protocol_version=catalog.protocol_version()))
+                self.assertEqual(json.loads(join)["team"], "blue")
+                self.assertEqual(json.loads(join)["type"], "join")
+                packet = dict(type="snapshot", your_id=7, snapshot_tick=42,
+                              players=[dict(id=7, hp=100)], projectiles=[], combat_events=[])
+                server.sendto(json.dumps(packet).encode(), address)
+                select.select([observer.socket], [], [], 1)
+                observer.update(1.1)
+                self.assertTrue(observer.joined)
+                self.assertEqual(observer.samples, [packet])
+                observer.update(2.1)
+                self.assertEqual(json.loads(server.recvfrom(65536)[0])["type"], "hello")
+                server.setblocking(False)
+                with self.assertRaises(BlockingIOError):
+                    server.recvfrom(65536)  # No rejoin, movement, attacks or skills.
             finally:
                 observer.close()
 

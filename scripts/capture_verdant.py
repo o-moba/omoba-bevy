@@ -166,7 +166,7 @@ class ScenarioPeer:
                 if len(data) < FRAME_HEADER.size or len(data) > 1200:
                     raise RuntimeError("invalid native frame size")
                 _, version, epoch, tick, index, count, total = FRAME_HEADER.unpack_from(data)
-                if version != 2 or not 0 < count <= 56 or not index < count or total > 65507:
+                if version != catalog.protocol_version() or not 0 < count <= 56 or not index < count or total > 65507:
                     raise RuntimeError("invalid native frame header")
                 key = (epoch, tick)
                 if key not in self.pending and len(self.pending) >= 4:
@@ -225,7 +225,7 @@ class SnapshotObserver:
                 if len(data) < FRAME_HEADER.size or len(data) > 1200:
                     raise RuntimeError("invalid observer snapshot frame size")
                 _, version, epoch, tick, index, count, total = FRAME_HEADER.unpack_from(data)
-                if version != 2 or not 0 < count <= 56 or not index < count or total > 65507:
+                if version != catalog.protocol_version() or not 0 < count <= 56 or not index < count or total > 65507:
                     raise RuntimeError("invalid observer snapshot frame header")
                 key = (epoch, tick)
                 if key not in self.pending and len(self.pending) >= 4:

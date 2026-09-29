@@ -229,7 +229,11 @@ it can lock distant visible enemies without increasing damage range. Release
 revalidates the exact preview rather than substituting another enemy. Desktop
 mouse targeting remains separate.
 
-All five classes have four illustrated skills. A stationary phone hold opens
+All 16 classes have four individually illustrated skills (64 total), generated
+with Higgsfield GPT Image 2.5. The action silhouettes distinguish binds, shields,
+projectiles, leaps, traps and finishers, with coordinated class palettes and
+circular crops for the hotbar. Presentation atlases remain independent of skill
+recipes and gameplay IDs. A stationary 1.5-second phone hold opens
 ability name, description, rank/unlock level, mana cost and cooldown; releasing
 inspection never fires a skill. A quick tap casts, and a deliberate drag aims.
 Desktop slots reuse the same presentation-only art while retaining shortcuts and
