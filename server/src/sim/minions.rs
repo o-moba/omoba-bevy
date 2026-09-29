@@ -112,6 +112,7 @@ pub(crate) fn simulate_minions(world: &mut GameWorld, tick: TickCtx) -> Vec<Comb
         structures,
         projectiles,
         next_projectile_id,
+        skill_runtime,
         game_state,
         ..
     } = world;
@@ -163,6 +164,15 @@ pub(crate) fn simulate_minions(world: &mut GameWorld, tick: TickCtx) -> Vec<Comb
     let minion_vision_sq = MINION_VISION_RANGE * MINION_VISION_RANGE;
 
     for minion in minions.values_mut() {
+        if skill_runtime.npc_stunned(
+            TargetId {
+                kind: TargetKind::Minion,
+                id: minion.state.id,
+            },
+            now,
+        ) {
+            continue;
+        }
         if minion.state.hp <= 0.0 {
             minion.state.state = MinionBrainState::Dead;
             minion.state.target_kind = None;
@@ -178,6 +188,13 @@ pub(crate) fn simulate_minions(world: &mut GameWorld, tick: TickCtx) -> Vec<Comb
             CombatEntityKind::Minion,
             minion.state.id,
             ProjectileStyle::Standard,
+        );
+        let movement_multiplier = skill_runtime.npc_movement(
+            TargetId {
+                kind: TargetKind::Minion,
+                id: minion.state.id,
+            },
+            now,
         );
         let minion_position = Vec3f::new(minion.state.x, minion.state.y, minion.state.z);
 
@@ -294,7 +311,7 @@ pub(crate) fn simulate_minions(world: &mut GameWorld, tick: TickCtx) -> Vec<Comb
             } else {
                 minion.state.state = MinionBrainState::Chasing;
                 let distance = distance_sq.sqrt();
-                let travel = (MINION_SPEED * dt).min(distance);
+                let travel = (MINION_SPEED * movement_multiplier * dt).min(distance);
                 if distance > 0.0001 {
                     let inv_distance = distance.recip();
                     minion.state.x += dir_x * inv_distance * travel;
@@ -405,7 +422,7 @@ pub(crate) fn simulate_minions(world: &mut GameWorld, tick: TickCtx) -> Vec<Comb
             }
 
             let distance = distance_sq.sqrt();
-            let travel = (MINION_SPEED * dt).min(distance);
+            let travel = (MINION_SPEED * movement_multiplier * dt).min(distance);
             let inv_distance = distance.recip();
             minion.state.x += dir_x * inv_distance * travel;
             minion.state.z += dir_z * inv_distance * travel;

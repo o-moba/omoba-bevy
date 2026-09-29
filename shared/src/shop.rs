@@ -153,7 +153,7 @@ pub fn item_cooldown(
     slot: SkillSlot,
     bonuses: ItemBonuses,
 ) -> Duration {
-    let rate = if slot == SkillSlot::Q {
+    let rate = if slot == SkillSlot::Q && crate::loadout::SkillId::from_id(def.id).is_none() {
         bonuses.attack_speed_multiplier
     } else {
         bonuses.spell_haste_multiplier
@@ -293,7 +293,9 @@ mod tests {
             assert!(
                 definition.range > 0.0 && definition.damage > 0.0 && definition.cooldown_secs > 0.0
             );
-            assert!(definition.range < class.ability(SkillSlot::Q).cast_range);
+            if !class.is_standard() {
+                assert!(definition.range < class.ability(SkillSlot::Q).cast_range);
+            }
             let base = basic_attack_cooldown(definition, ItemBonuses::NONE);
             let haste = item_bonuses(&[ItemId::FocusCharm]);
             assert_eq!(basic_attack_cooldown(definition, haste), base);

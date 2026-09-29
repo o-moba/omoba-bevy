@@ -384,7 +384,7 @@ fn actual_udp_receiver_accepts_the_basic_wire_contract_once() {
 
 #[test]
 fn skill_recovery_blocks_cross_slot_bursts_without_spending_and_basics_overlap() {
-    for class in HeroClass::ALL {
+    for class in HeroClass::LEGACY {
         let (mut rt, a, _, target, now) = fixture();
         let player = rt.world.players.get_mut(&a).unwrap();
         player.hero.identity.hero_class = class;

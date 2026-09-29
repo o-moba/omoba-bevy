@@ -24,6 +24,7 @@ pub(crate) struct TickCtx {
 }
 
 pub(crate) struct GameWorld {
+    pub(crate) skill_runtime: crate::skills::SkillWorld,
     pub(crate) players: HashMap<SocketAddr, ConnectedPlayer>,
     pub(crate) disconnected_sessions: HashMap<String, DisconnectedSession>,
     pub(crate) projectiles: HashMap<u64, Projectile>,
@@ -50,6 +51,7 @@ impl GameWorld {
         // their spawn schedule (see `schedule_boss_spawns`).
         neutrals.extend(build_boss_neutrals(&mut next_neutral_id));
         Self {
+            skill_runtime: crate::skills::SkillWorld::default(),
             players: HashMap::new(),
             disconnected_sessions: HashMap::new(),
             projectiles: HashMap::new(),
@@ -73,6 +75,7 @@ impl GameWorld {
     #[cfg(test)]
     pub(crate) fn empty() -> Self {
         Self {
+            skill_runtime: crate::skills::SkillWorld::default(),
             players: HashMap::new(),
             disconnected_sessions: HashMap::new(),
             projectiles: HashMap::new(),

@@ -296,6 +296,7 @@ fn apply_snapshot_resources(
 
     network_state.local_id = Some(your_id);
     game_state_snapshot.your_id = your_id;
+    game_state_snapshot.skill_effects = std::mem::take(&mut data.skill_effects);
     game_state_snapshot.prematch = data.prematch.take();
     game_state_snapshot.match_mode = std::mem::take(&mut data.match_mode);
     game_state_snapshot.geometry_id = std::mem::take(&mut data.geometry_id);
@@ -399,6 +400,7 @@ fn local_hero_components(state: &PlayerState, your_id: u64) -> impl Bundle {
             NetworkSpriteCharacter(state.sprite_character.clone()),
             PlayerCosmeticAction::from(state),
             NetworkHeroClass(state.hero_class),
+            PlayerLoadout(state.loadout.clone()),
             crate::supporter::NetworkSupporterAura(state.supporter_aura),
         ),
         player_state_to_combat_stats(state),
@@ -500,6 +502,7 @@ fn apply_snapshot_local_player(
                 NetworkAvatar(local_player_state.avatar.clone()),
                 NetworkSpriteCharacter(local_player_state.sprite_character.clone()),
                 NetworkHeroClass(local_player_state.hero_class),
+                PlayerLoadout(local_player_state.loadout.clone()),
                 crate::supporter::NetworkSupporterAura(local_player_state.supporter_aura),
                 player_state_to_progression(local_player_state),
                 player_state_to_equipment(local_player_state),
@@ -716,6 +719,7 @@ fn apply_snapshot_remote_players(
                 NetworkAvatar(player.avatar.clone()),
                 NetworkSpriteCharacter(player.sprite_character.clone()),
                 NetworkHeroClass(player.hero_class),
+                PlayerLoadout(player.loadout.clone()),
                 crate::supporter::NetworkSupporterAura(player.supporter_aura),
                 player_state_to_combat_stats(player),
                 player_state_to_progression(player),
@@ -753,7 +757,10 @@ fn apply_snapshot_remote_players(
             NetworkAvatar(player.avatar.clone()),
             NetworkSpriteCharacter(player.sprite_character.clone()),
             PlayerCosmeticAction::from(player),
-            NetworkHeroClass(player.hero_class),
+            (
+                NetworkHeroClass(player.hero_class),
+                PlayerLoadout(player.loadout.clone()),
+            ),
             player_state_to_combat_stats(player),
             player_state_to_progression(player),
             RemotePlayerInterpolation::new(spawn_translation, spawn_rotation, snapshot_wall_time),

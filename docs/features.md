@@ -1,5 +1,21 @@
 # Feature Inventory
 
+## Deliberate skill inspection (0.30.1)
+
+Skill descriptions open after holding the same skill for 1.5 seconds using a hotbar press, Q/W/E/R, a controller skill binding, or a stationary touch. Hover, short presses and basic attacks keep the combat view clear. Releasing the hold or opening a menu hides descriptions immediately. The standard-kit explanation panel follows the same rule; ordinary casting remains unchanged.
+
+## Expanded standard roster (0.30.0)
+
+Eleven modular presets now cover the standard roster. The nine additions are **Cinderforge, Edgeweaver, Stormfist, Veilstalker, Emberveil, Orbitwright, Riftshot, Chainkeeper and Frostguard**, each with a passive, basic profile and Q/W/E/R. Reusable mechanics include parry, charm, camouflage, Energy, persistent orbs, temporary terrain, forging, ally rescue and projectile interception. Keyboard, touch and controller use the same authoritative commands. The roster scrolls independently of avatar selection. See [implementation and remaining TODO](progress/2026-09-29-remaining-roster.md).
+
+## Standard kits and reusable skill recipes (0.29.0)
+
+**Dawnweaver** is a ranged control/support kit: spell marks empower attacks, a snare catches two targets, a returning projectile shields allies, a slowing field detonates on recast, and a telegraphed beam finishes the combo. **Wildspark** is a ranged carry: switch between a stacking repeater and Mana-consuming splash rockets, catch enemies with a slowing shot and armed traps, fire a long-range finisher and accelerate after qualifying takedowns. Both classes use any supported avatar and keep the existing level/skill-unlock system.
+
+The shared catalogue now separates 44 reusable skill definitions from eleven four-slot presets. Versioned `BuildRecipe` data chooses a core, passive and skills; a pure resolver checks slot and attack-profile compatibility before the server executes effects. Mixed recipes are tested internally. The public constructor, persistent user recipes and website synchronization are still deferred; the game exposes the eleven fixed presets. Numbers are initial tuning values, not a competitive balance guarantee.
+
+Server-authoritative aim, cooldowns, costs, control, shields, weapon modes, effect lifetimes and fog-filtered snapshots use protocol 4. New peers reject incompatible protocol versions explicitly. Desktop, touch and controller paths share aimed casts; original icons and English/Russian/Chinese text accompany the hotbar, recast/mode/status feedback and effect geometry. New kits work in authoritative matches and local server practice; in-process offline practice offers only its five supported classes. See [implementation, architecture and remaining TODO](progress/2026-09-29-standard-kits.md).
+
 ## iPad phone-layout preview (0.28.6)
 
 On an eligible landscape iPad, Settings → Graphics → iPhone 16 layout preview temporarily centres the actual game window at 852×393 logical points. Existing phone menus, HUD and window-local touch input work without a separate renderer. A native Return to iPad button remains outside the game; returning, backgrounding or rotating restores the tablet window. The option is absent on phones, Android and desktops, cannot be enabled through a stale action, and is not saved in preferences. This previews layout using the game's phone safe-area policy, not iPhone GPU performance or exact physical screen size.
@@ -74,7 +90,7 @@ All 15 shipped playable 3D avatars use the engine's shared Run motion during nor
 
 Validated VRM0/VRM1 skinned humanoids receive runtime clips adapted to their bone map and rest pose, including models with no embedded clips. Original skin bytes remain unchanged. This is skeletal compatibility for a documented subset, not complete VRM materials/face/hair support. Approved Studio models gain runtime Run through normal verified loading; accepting externally published clipless models still requires a versioned profile rollout. See [architecture, import and limits](humanoid-motion.md).
 
-Canonical version: `0.28.6`
+Canonical version: `0.29.0`
 
 ## Team draft and shared loading
 

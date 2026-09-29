@@ -81,6 +81,7 @@ fn snapshot(rt: &mut ServerRuntime, addr: SocketAddr, now: Instant) -> ServerPac
         ),
         scoreboard: rt.combat_log.ledger.live_scoreboard(),
         prematch: None,
+        skill_effects: crate::skills::effects(&rt.world, now),
         projectiles: rt
             .world
             .projectiles
@@ -145,6 +146,65 @@ fn minion(id: u64, team: Team, pos: [f32; 2]) -> Minion {
         next_waypoint: 0,
         last_attack_at: None,
         aggro_target: None,
+    }
+}
+
+#[test]
+fn shockline_reveals_hit_npcs_for_its_team_until_expiry() {
+    for kind in [TargetKind::Minion, TargetKind::Neutral] {
+        let (mut rt, caster, opponent, now) = fixture();
+        let p = rt.world.players.get_mut(&caster).unwrap();
+        p.hero.x = 0.0;
+        p.hero.z = 0.0;
+        p.hero.skills.loadout = shared::loadout::preset_for_class(HeroClass::Wildspark);
+        p.modifiers.unlock_all = true;
+        let p = rt.world.players.get_mut(&opponent).unwrap();
+        p.hero.x = 120.0;
+        p.hero.z = 0.0;
+        let id = if kind == TargetKind::Minion {
+            rt.world
+                .minions
+                .insert(501, minion(501, Team::Blue, [6.0, 0.0]));
+            501
+        } else {
+            let mut camps = build_neutral_camps(&mut 700);
+            let id = *camps.keys().min().unwrap();
+            let mut neutral = camps.remove(&id).unwrap();
+            neutral.state.x = 6.0;
+            neutral.state.z = 0.0;
+            rt.world.neutrals.insert(id, neutral);
+            id
+        };
+        crate::skills::cast(&mut rt.world, caster, 1, [24.0, 0.0], 1, now);
+        let at = now + Duration::from_millis(300);
+        crate::skills::tick(&mut rt.world, TickCtx { now: at, dt: 0.3 });
+        if kind == TargetKind::Minion {
+            rt.world.minions.get_mut(&id).unwrap().state.x = 40.0;
+        } else {
+            rt.world.neutrals.get_mut(&id).unwrap().state.x = 40.0;
+        }
+        let target = TargetId { kind, id };
+        assert!(target_visible(Team::Green, target, &rt.world, at));
+        if kind == TargetKind::Neutral {
+            assert!(!target_visible(Team::Blue, target, &rt.world, at));
+        }
+        let ServerPacket::Snapshot {
+            minions, neutrals, ..
+        } = snapshot(&mut rt, caster, at)
+        else {
+            unreachable!()
+        };
+        assert_eq!(minions.len() + neutrals.len(), 1);
+
+        let expired = now + Duration::from_secs(3);
+        assert!(!target_visible(Team::Green, target, &rt.world, expired));
+        let ServerPacket::Snapshot {
+            minions, neutrals, ..
+        } = snapshot(&mut rt, caster, expired)
+        else {
+            unreachable!()
+        };
+        assert!(minions.is_empty() && neutrals.is_empty());
     }
 }
 

@@ -105,6 +105,7 @@ pub(crate) fn status_snapshot(
         players: Vec::new(),
         scoreboard: None,
         prematch: None,
+        skill_effects: Vec::new(),
         projectiles: Vec::new(),
         combat_events: Vec::new(),
         structures: Vec::new(),

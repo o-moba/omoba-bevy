@@ -9,10 +9,21 @@ from __future__ import annotations
 
 from functools import lru_cache
 import json
+import re
 from pathlib import Path
 
 CATALOG_DIR = Path(__file__).resolve().parents[1] / 'shared' / 'assets' / 'catalog'
 SCHEMA_VERSION = 1
+
+
+@lru_cache(maxsize=1)
+def protocol_version() -> int:
+    """Use the same live protocol as Rust; historical fixtures keep their version."""
+    source = (CATALOG_DIR.parents[1] / 'src' / 'protocol.rs').read_text(encoding='utf-8')
+    match = re.search(r'pub const PROTOCOL_VERSION: u16 = (\d+);', source)
+    if match is None:
+        raise ValueError('shared protocol version constant not found')
+    return int(match.group(1))
 
 
 @lru_cache(maxsize=None)
@@ -29,8 +40,37 @@ def _load(directory: Path, name: str, key: str) -> tuple:
 
 
 def heroes(directory: Path = CATALOG_DIR) -> tuple:
-    """Hero classes in `HeroClass::ALL` order, as the JSON objects."""
-    return _load(Path(directory), 'heroes', 'classes')
+    """Hero classes in enum order, resolving reusable skill references.
+
+    Keep the existing ``abilities`` view for QA consumers. Its damage field is
+    informational; modular casts still require the aimed wire request.
+    """
+    directory = Path(directory)
+    result = []
+    skills = None
+    for raw in _load(directory, 'heroes', 'classes'):
+        hero = dict(raw)
+        if 'skills' in hero:
+            if skills is None:
+                skills = {entry['id']: entry for entry in _load(directory, 'skills', 'skills')}
+            abilities = []
+            for identifier in hero['skills']:
+                if identifier not in skills:
+                    raise ValueError(f'unknown skill reference {identifier!r}')
+                ability = dict(skills[identifier])
+                damage = ability['effect'].get('damage')
+                # These techniques author shield, delayed mark or buff strength,
+                # not an immediate damaging cast for the transport QA consumer.
+                support = ability['effect'].get('action') in {
+                    'double_strike', 'vital_challenge', 'guard_leap', 'curse',
+                    'detonation_mark', 'lantern', 'ally_leap', 'intercept_shield',
+                }
+                if damage is not None and damage > 0 and not support:
+                    ability['projectile_damage'] = damage
+                abilities.append(ability)
+            hero['abilities'] = abilities
+        result.append(hero)
+    return tuple(result)
 
 
 def items(directory: Path = CATALOG_DIR) -> tuple:

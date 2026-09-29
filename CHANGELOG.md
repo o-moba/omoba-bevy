@@ -4,6 +4,31 @@ All notable changes to this repository should be documented in this file.
 
 The canonical repository version lives in `Cargo.toml` under `[workspace.package].version` and follows SemVer.
 
+## [0.30.1] - 2026-09-29
+
+### Quiet combat descriptions
+
+- Show skill descriptions and the standard-kit explanation panel only after a continuous 1.5-second skill hold. Hover, short presses and basic attacks do not open them; release and gameplay interruption hide them.
+- Share the threshold across mouse, keyboard, controller and touch. Preserve touch drag aiming and inspection release without casting; omit the redundant successful-cast text banner.
+
+## [0.30.0] - 2026-09-29
+
+### Expanded standard roster
+
+- Add Cinderforge, Edgeweaver, Stormfist, Veilstalker, Emberveil, Orbitwright, Riftshot, Chainkeeper and Frostguard: nine original presets, 36 skills and nine passives on the reusable recipe runtime.
+- Add staged recasts, parry, charm, camouflage, Energy, persistent orbs, temporary terrain, forging, collectible souls, allied lantern interaction and directional projectile interception. Protocol 4 and `standard-kits-2` explicitly separate this contract from older clients.
+- Add original glyphs, English/Russian/Chinese skill descriptions, a scrolling roster, combat feedback and shared desktop/touch/controller interaction. Offline practice remains limited to legacy classes.
+- Track implemented mechanics, adaptations, verification and remaining constructor/balance work in [the roster progress note](docs/progress/2026-09-29-remaining-roster.md).
+
+## [0.29.0] - 2026-09-29
+
+### Standard combat kits and reusable skills
+
+- Add Dawnweaver (marks, a two-target snare, returning shields, a recastable slowing field and a warned beam) and Wildspark (repeater/rocket weapons, takedown momentum, a slowing shot, armed traps and a long-range finisher), independently of avatar selection.
+- Define eight reusable skills, two passives and validated, revisioned loadout recipes. Fixed presets are available now; compatible mixed recipes execute in server tests, while a public constructor and website save/equip remain future work.
+- Resolve aimed casts, resources, replay protection, damage, shields, control, effect lifetimes and fog visibility on the server. Protocol 3 explicitly rejects incompatible peers. Existing five classes retain their combat path.
+- Add original ability icons, localized descriptions, aim previews, mode/recast indicators and replicated combat effects. New kits require a server, including local bot practice; offline practice keeps its five supported classes.
+
 ## [0.28.6] - 2026-09-29
 
 ### iPad layout preview

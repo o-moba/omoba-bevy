@@ -10,5 +10,6 @@
   "error.purchase.insufficient_gold": "Недостаточно золота.",
   "error.purchase.already_owned": "Этот предмет уже у вас есть.",
   "error.purchase.inventory_full": "Все шесть слотов инвентаря заполнены.",
-  "error.purchase.unknown_item": "Этот предмет отсутствует в текущем каталоге."
+  "error.purchase.unknown_item": "Этот предмет отсутствует в текущем каталоге.",
+  "error.join.offline_kit_unsupported": "Подключитесь к серверу для игры этим стилем или выберите другой для тренировки без сети."
 }

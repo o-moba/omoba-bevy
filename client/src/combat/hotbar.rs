@@ -15,10 +15,7 @@ use crate::ui::{
     kit_assets::Icon,
     theme::{self, Form, TextStyle},
     tokens::{TextRole, border, color, radius, size, space},
-    widgets::{
-        game::{self, AbilityView},
-        surfaces::TOOLTIP_DELAY,
-    },
+    widgets::game::{self, AbilityView},
 };
 use bevy::prelude::*;
 use shared::{
@@ -71,7 +68,7 @@ pub(super) struct SkillRankLabel {
 /// A hotbar slot's ability button (its [`AbilityView`] follows the kit).
 #[derive(Component)]
 pub(super) struct SkillSlotButton {
-    slot: usize,
+    pub(super) slot: usize,
 }
 
 /// Ability-name carrier on a hotbar slot (not drawn; names live in the
@@ -285,6 +282,17 @@ fn slot_status(
             ),
             StatusTone::Muted,
         )
+    } else if cooldowns.recast[slot] {
+        (
+            trf(
+                "combat.standard.recast",
+                &[
+                    ("key", &["Q", "W", "E", "R"][slot]),
+                    ("seconds", &format!("{:.1}", cooldowns.recast_secs[slot])),
+                ],
+            ),
+            StatusTone::Ready,
+        )
     } else if cooldowns.remaining_secs[slot] > 0.0 {
         (
             trf(
@@ -343,6 +351,7 @@ pub(super) fn update_skill_bar_system(
     mut rank_labels: Query<(&SkillRankLabel, &mut Text), Without<SkillNameLabel>>,
     mut name_labels: Query<(&SkillNameLabel, &mut Text), Without<SkillRankLabel>>,
     images: Option<Res<Assets<Image>>>,
+    assets: Option<Res<AssetServer>>,
     mut icons: Query<(&DesktopSkillIcon, &mut ImageNode, &mut Node), Without<SkillUpgradeButton>>,
     mut upgrade_buttons: Query<
         (&SkillUpgradeButton, &mut Node),
@@ -369,6 +378,9 @@ pub(super) fn update_skill_bar_system(
             continue;
         };
         let definition = ability_for_class_slot(class, slot);
+        if let Some(assets) = assets.as_ref() {
+            image.image = assets.load(crate::skill_icons::atlas_path(definition.id));
+        }
         image.rect = images
             .as_ref()
             .and_then(|images| images.get(&image.image))
@@ -381,8 +393,9 @@ pub(super) fn update_skill_bar_system(
         let rank = prog.ranks[icon.slot].max(1);
         let available = prog.unlocked()[icon.slot]
             && cooldowns.remaining_secs[icon.slot] <= 0.0
-            && local
-                .is_none_or(|(_, _, stats, _)| stats.mana >= scaled_mana_cost(definition, rank));
+            && local.is_none_or(|(_, _, stats, _)| {
+                cooldowns.recast[icon.slot] || stats.mana >= scaled_mana_cost(definition, rank)
+            });
         image.color = if available {
             Color::WHITE
         } else {
@@ -420,7 +433,11 @@ pub(super) fn update_skill_bar_system(
         let rank = prog.ranks.get(label.slot).copied().unwrap_or(1).max(1);
         let slot = SkillSlot::from_index(label.slot as u8).expect("hotbar slot");
         let definition = ability_for_class_slot(class, slot);
-        let cost = scaled_mana_cost(definition, rank);
+        let cost = if cooldowns.recast[label.slot] {
+            0.0
+        } else {
+            scaled_mana_cost(definition, rank)
+        };
         let (status, _) = slot_status(
             label.slot,
             &prog,
@@ -448,7 +465,11 @@ pub(super) fn update_skill_bar_system(
     for (button, mut view) in &mut slots {
         let rank = prog.ranks[button.slot].max(1);
         let definition = ability_for_class_slot(class, SkillSlot::ALL[button.slot]);
-        let cost = scaled_mana_cost(definition, rank);
+        let cost = if cooldowns.recast[button.slot] {
+            0.0
+        } else {
+            scaled_mana_cost(definition, rank)
+        };
         let remaining = cooldowns.remaining_secs[button.slot];
         let unlocked = prog.unlocked()[button.slot];
         // hud.md § States, Dead: every ability is veiled (no lock, no level).
@@ -494,17 +515,13 @@ pub(super) fn update_skill_bar_system(
     }
 }
 
-/// The desktop ability tooltip: shown after the tooltip delay on a hovered
-/// slot (moving between slots swaps it at once), live while open, hidden
-/// when the pointer leaves, a cast starts or play is gated; a controller
-/// never focuses the bar, so it never shows one.
+/// Show a skill card only for a deliberate held skill; touch has its own card.
 #[allow(clippy::type_complexity, clippy::too_many_arguments)]
 pub(super) fn update_skill_tooltip(
-    time: Res<Time>,
+    inspection: Res<super::inspection::SkillInspection>,
     windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
     ui_scale: Option<Res<UiScale>>,
     context: Res<GameplayInputContext>,
-    gamepad: Option<Res<crate::gamepad::GamepadControls>>,
     local: Query<
         (
             &PlayerProgression,
@@ -534,30 +551,14 @@ pub(super) fn update_skill_tooltip(
     keys: Query<(&SkillSlotButton, &crate::ui::widgets::game::AbilityParts)>,
     key_texts: Query<&Text>,
     mut tooltips: Query<(&mut SkillCardView, &mut Node), With<SkillTooltip>>,
-    mut hovered: Local<Option<(usize, f32)>>,
 ) {
     let (team_selection, cooldowns, pending, target, game) = state;
     let Ok((mut view, mut node)) = tooltips.single_mut() else {
         return;
     };
-    let now = time.elapsed_secs();
-    let pointer = slots
-        .iter()
-        .find(|(_, interaction, ..)| **interaction != Interaction::None)
-        .map(|(slot, ..)| slot.slot);
-    let pad = gamepad.as_ref().is_some_and(|pad| pad.active);
-    let casting = pending.request.is_some();
-    *hovered = match (pointer, *hovered) {
-        (Some(slot), Some((was, since))) if was == slot => Some((slot, since)),
-        // Moving between slots while one is shown swaps without delay.
-        (Some(slot), Some(_)) if view.visible => Some((slot, now - TOOLTIP_DELAY.as_secs_f32())),
-        (Some(slot), _) => Some((slot, now)),
-        (None, _) => None,
-    };
-    let shown = hovered
-        .filter(|(_, since)| now - since >= TOOLTIP_DELAY.as_secs_f32())
-        .map(|(slot, _)| slot)
-        .filter(|_| !pad && !casting && context.gameplay_allowed());
+    let shown = inspection
+        .slot
+        .filter(|_| !inspection.touch && context.gameplay_allowed());
     let Some(slot) = shown else {
         if view.visible {
             view.visible = false;
@@ -583,6 +584,10 @@ pub(super) fn update_skill_tooltip(
         )
     };
     let mut next = SkillCardView::of(class, prog, slot, stats.mana, duration);
+    if cooldowns.recast[slot] {
+        next.mana = 0;
+        next.no_mana = false;
+    }
     let definition = ability_for_class_slot(class, SkillSlot::ALL[slot]);
     let out_of_range = target
         .selected_entity

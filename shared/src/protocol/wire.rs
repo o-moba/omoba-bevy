@@ -111,6 +111,21 @@ pub enum ClientPacket {
         #[serde(default)]
         slot: u8,
     },
+    /// Version-three modular skill cast. Aim is a world XZ point; the server
+    /// derives trajectories and validates stage/cost from the frozen loadout.
+    Interact {
+        object_id: u64,
+        server_epoch: u64,
+        match_id: u64,
+        request_id: u64,
+    },
+    CastSkill {
+        slot: u8,
+        aim: [f32; 2],
+        server_epoch: u64,
+        match_id: u64,
+        request_id: u64,
+    },
     Utility {
         action: crate::utility::UtilityAction,
         direction: [f32; 2],
@@ -231,6 +246,8 @@ fn default_minion_brain_state() -> MinionBrainState {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlayerState {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub loadout: Option<crate::loadout::LoadoutState>,
     /// Cosmetic only, authorized from persisted profile grants by the game server.
     #[serde(default)]
     pub supporter_aura: Option<crate::supporter::AuraStyle>,
@@ -541,6 +558,8 @@ pub enum ServerPacket {
         prematch: Option<crate::prematch::PrematchSnapshot>,
         #[serde(default)]
         projectiles: Vec<ProjectileState>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        skill_effects: Vec<crate::loadout::SkillEffectState>,
         #[serde(default)]
         combat_events: Vec<CombatEvent>,
         #[serde(default)]
@@ -587,7 +606,7 @@ mod tests {
     use serde_json::{Value, json};
 
     /// Every `ClientPacket` variant, as the server accepts it.
-    const CLIENT_PACKET_TAGS: [&str; 18] = [
+    const CLIENT_PACKET_TAGS: [&str; 19] = [
         "sandbox",
         "leave",
         "social",
@@ -595,6 +614,7 @@ mod tests {
         "hello",
         "transform",
         "cast",
+        "cast_skill",
         "utility",
         "basic_attack",
         "join",
@@ -617,6 +637,7 @@ mod tests {
             json!({"type":"hello","protocol_version":2}),
             json!({"type":"transform","dash_sequence":3,"x":1.5,"y":0.0,"z":-2.25,"yaw":0.5}),
             json!({"type":"cast","target":{"kind":"player","id":4},"slot":2}),
+            json!({"type":"cast_skill","slot":2,"aim":[12.0,4.0],"server_epoch":7,"match_id":3,"request_id":21}),
             json!({"type":"utility","action":"dash","direction":[1.0,0.0],"server_epoch":7,"match_id":3,"request_id":5}),
             json!({"type":"basic_attack","target":{"kind":"minion","id":9},"server_epoch":7,"match_id":3,"request_id":11}),
             json!({"type":"join","prematch":true,"team":"green","character":"ipfs","hero_class":"warden","avatar":"agnes","sprite_character":null,"session_id":"session-1","passport_ticket":null}),
@@ -639,10 +660,15 @@ mod tests {
             match_mode: "dev".into(),
             geometry_id: "verdant".into(),
             map_profile: "verdant_default".into(),
-            meta: SnapshotMeta::new(7, 3, 42),
+            // Historical v2 fixture intentionally remains byte-for-byte stable.
+            meta: SnapshotMeta {
+                protocol_version: 2,
+                ..SnapshotMeta::new(7, 3, 42)
+            },
             join_error: Some(JoinRejection::MatchFull),
             your_id: 1,
             players: vec![PlayerState {
+                loadout: None,
                 supporter_aura: Some(crate::supporter::AuraStyle::Solar),
                 is_bot: true,
                 id: 1,
@@ -700,6 +726,7 @@ mod tests {
             }],
             scoreboard: None,
             prematch: None,
+            skill_effects: Vec::new(),
             projectiles: vec![ProjectileState {
                 source_kind: CombatEntityKind::Player,
                 style: ProjectileStyle::Claw,
@@ -816,6 +843,70 @@ mod tests {
             let decoded: ServerPacket = serde_json::from_str(&encoded).unwrap();
             assert_eq!(serde_json::to_string(&decoded).unwrap(), encoded, "{tag}");
         }
+    }
+
+    #[test]
+    fn modular_effect_and_recast_state_round_trip_without_an_owner_entity() {
+        use crate::loadout::{
+            CoreId, EffectVisualKind, LoadoutState, SkillEffectState, SkillId, SkillSlotState,
+            WeaponMode,
+        };
+        let mut packet = populated_snapshot();
+        let ServerPacket::Snapshot {
+            players,
+            skill_effects,
+            meta,
+            ..
+        } = &mut packet
+        else {
+            unreachable!()
+        };
+        meta.protocol_version = crate::protocol::PROTOCOL_VERSION;
+        players[0].hero_class = HeroClass::Wildspark;
+        players[0].loadout = Some(LoadoutState {
+            recipe: Some(CoreId::Wildspark.preset()),
+            weapon_mode: WeaponMode::Rockets,
+            shield_hp: 30.0,
+            basic_attack_range: 16.0,
+            basic_attack_mana_cost: 4.0,
+            cast_request_id: 21,
+            slots: [SkillSlotState {
+                can_recast: true,
+                recast_remaining_secs: 2.0,
+                active: true,
+            }; 4],
+            ..LoadoutState::default()
+        });
+        skill_effects.push(SkillEffectState {
+            id: 4,
+            owner_id: 0,
+            owner_team: Team::Green,
+            skill: SkillId::WildRocket,
+            kind: EffectVisualKind::Rocket,
+            position: [12.0, 3.0],
+            end: [13.0, 3.0],
+            radius: 0.7,
+            remaining_secs: 1.0,
+            armed: true,
+            consumed_segments: 0,
+        });
+        let json = serde_json::to_string(&packet).unwrap();
+        let again: ServerPacket = serde_json::from_str(&json).unwrap();
+        assert_eq!(serde_json::to_string(&again).unwrap(), json);
+        let ServerPacket::Snapshot {
+            players,
+            skill_effects,
+            ..
+        } = again
+        else {
+            unreachable!()
+        };
+        assert_eq!(
+            players[0].loadout.as_ref().unwrap().weapon_mode,
+            WeaponMode::Rockets
+        );
+        assert_eq!(skill_effects[0].owner_id, 0);
+        assert!(players[0].loadout.as_ref().unwrap().slots[2].can_recast);
     }
 
     #[test]

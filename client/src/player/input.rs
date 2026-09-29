@@ -173,6 +173,7 @@ pub(super) fn move_player_analog(
                 Option<&crate::net::PlayerUtility>,
                 Option<&crate::net::NetworkHeroClass>,
                 Option<&crate::net::PlayerProgression>,
+                Option<&crate::net::PlayerLoadout>,
             ),
             With<Player>,
         >,
@@ -208,7 +209,7 @@ pub(super) fn move_player_analog(
         .ok()
         .map(|camera| mobile_screen_direction(movement, camera, *mode))
         .unwrap_or(Vec3::ZERO);
-    for (entity, mut transform, stats, equipment, utility, class, progression) in
+    for (entity, mut transform, stats, equipment, utility, class, progression, loadout) in
         &mut transforms.p0()
     {
         commands.entity(entity).remove::<Jumping>();
@@ -239,7 +240,8 @@ pub(super) fn move_player_analog(
                 }
                 * equipment.map_or(1.0, |e| e.item_bonuses.move_speed_multiplier)
                 * hero_movement_multiplier(class, progression),
-        ) * utility.map_or(1.0, |u| u.state.movement_multiplier());
+        ) * utility.map_or(1.0, |u| u.state.movement_multiplier())
+            * crate::combat::standard::movement_factor(loadout);
         // Bound a resumed/hitched frame; the server movement envelope remains authoritative.
         let desired = current
             + direction
@@ -251,6 +253,7 @@ pub(super) fn move_player_analog(
             desired = map.clamp_position(desired);
         }
         desired = clip_static_movement(current, desired);
+        desired = crate::navigation::clip_skill_terrain(current, desired, game.as_deref());
         transform.translation.x = desired.x;
         transform.translation.z = desired.z;
         let yaw = shared::math::hero_yaw_towards(direction.x, direction.z);
@@ -288,6 +291,7 @@ fn secondary_move_pressed(
 /// Plan once per new destination. Attack approach targets use the same route
 /// machinery, while transient hero overlap remains the existing local resolver.
 pub(super) fn plan_movement_routes(
+    game: Option<Res<GameStateSnapshot>>,
     mut commands: Commands,
     players: Query<
         (
@@ -309,7 +313,14 @@ pub(super) fn plan_movement_routes(
         .filter(|(_, _, stats)| stats.is_none_or(|stats| stats.is_alive()))
         .map(|(transform, kind, _)| (transform.translation, *kind))
         .collect();
-    let structure_revision = structure_revision(&structures);
+    let terrain = crate::navigation::skill_terrain(game.as_deref());
+    let structure_revision = terrain
+        .iter()
+        .fold(structure_revision(&structures), |h, d| {
+            h.wrapping_mul(31)
+                ^ u64::from(d.center[0].to_bits())
+                ^ u64::from(d.center[1].to_bits()).rotate_left(17)
+        });
     let layout = layout.as_deref().copied().unwrap_or_default();
     let running = context.as_ref().is_none_or(|context| context.running);
     for (entity, transform, target, route, stats) in &players {
@@ -327,7 +338,7 @@ pub(super) fn plan_movement_routes(
         if route.is_some_and(|route| {
             route.structure_revision == structure_revision
                 && route.waypoints.first().is_none_or(|next| {
-                    let discs: Vec<_> = structures
+                    let mut discs: Vec<_> = structures
                         .iter()
                         .map(|(p, kind)| shared::navigation::Disc {
                             center: [p.x, p.z],
@@ -335,6 +346,7 @@ pub(super) fn plan_movement_routes(
                                 - shared::navigation::HERO_RADIUS,
                         })
                         .collect();
+                    discs.extend_from_slice(&terrain);
                     shared::navigation::world_navigation().segment_clear_with_discs(
                         transform.translation.xz().to_array(),
                         next.xz().to_array(),
@@ -349,11 +361,12 @@ pub(super) fn plan_movement_routes(
         }) {
             continue;
         }
-        match crate::navigation::plan_route(
+        match crate::navigation::plan_route_with_terrain(
             &layout,
             transform.translation,
             target.target,
             &structures,
+            &terrain,
         ) {
             Some(waypoints) if !waypoints.is_empty() => {
                 commands.entity(entity).insert(MovementRoute {

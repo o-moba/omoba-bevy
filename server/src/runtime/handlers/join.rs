@@ -45,7 +45,8 @@ impl ServerRuntime {
         world.ensure_connected(addr, now);
         let player = world.players.get_mut(&addr).unwrap();
         player.last_seen = now;
-        if !player.protocol_compatible {
+        if !player.protocol_compatible || (hero_class.is_standard() && !player.framed_snapshots) {
+            player.join_error = Some(shared::protocol::JoinRejection::ProtocolMismatch);
             return ControlFlow::Break(());
         }
         // A joined endpoint cannot rewrite its identity or loadout through Join.
@@ -61,6 +62,10 @@ impl ServerRuntime {
         }
         // A reclaim is already joined: retain all authoritative round state.
         if let Some(player) = world.players.get_mut(&addr).filter(|player| player.joined) {
+            if player.hero.skills.loadout.is_some() && !player.framed_snapshots {
+                player.join_error = Some(shared::protocol::JoinRejection::ProtocolMismatch);
+                return ControlFlow::Break(());
+            }
             player.join_error = None;
             self.register_career_participant(addr);
             self.fill_practice_bots(now);

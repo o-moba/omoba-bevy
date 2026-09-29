@@ -923,16 +923,20 @@ pub(crate) fn resolve_ability_art(
         match image {
             None => {
                 commands.entity(entity).insert(
-                    ImageNode::new(assets.load(crate::skill_icons::ATLAS_PATH))
+                    ImageNode::new(assets.load(crate::skill_icons::atlas_path(ability)))
                         .with_mode(NodeImageMode::Stretch),
                 );
             }
-            Some(mut image) if image.rect.is_none() => {
+            Some(mut image) => {
+                let wanted = assets.load(crate::skill_icons::atlas_path(ability));
+                if image.image != wanted {
+                    image.image = wanted;
+                    image.rect = None;
+                }
                 if let Some(texture) = textures.get(&image.image) {
                     image.rect = crate::skill_icons::icon_rect(ability, texture.size().as_vec2());
                 }
             }
-            Some(_) => {}
         }
     }
 }
@@ -1318,6 +1322,12 @@ pub(crate) fn class_icon(class: shared::HeroClass) -> Icon {
         HeroClass::Ranger => Icon::ClassRanger,
         HeroClass::Cleric => Icon::ClassCleric,
         HeroClass::Warden => Icon::ClassWarden,
+        HeroClass::Dawnweaver => Icon::ClassCleric,
+        HeroClass::Wildspark | HeroClass::Riftshot => Icon::ClassRanger,
+        HeroClass::Cinderforge | HeroClass::Edgeweaver | HeroClass::Stormfist => Icon::ClassWarrior,
+        HeroClass::Veilstalker => Icon::ClassWarden,
+        HeroClass::Emberveil | HeroClass::Orbitwright => Icon::ClassMage,
+        HeroClass::Chainkeeper | HeroClass::Frostguard => Icon::ClassCleric,
     }
 }
 

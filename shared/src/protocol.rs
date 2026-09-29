@@ -6,9 +6,9 @@ mod wire_enums;
 
 use serde::{Deserialize, Serialize};
 
-// Version 2 adds independent basic attacks and their authoritative cooldowns.
-// Reject v1 peers explicitly instead of silently dropping the new strike packet.
-pub const PROTOCOL_VERSION: u16 = 2;
+// Version 4 expands the roster and adds explicit allied-object interaction.
+// Reject older peers rather than showing invisible threats or the wrong skills.
+pub const PROTOCOL_VERSION: u16 = 4;
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
@@ -38,6 +38,7 @@ pub enum JoinRejection {
     ProtocolMismatch,
     MapGeometryMismatch,
     AvatarNotAuthorized,
+    OfflineKitUnsupported,
 }
 
 impl JoinRejection {
@@ -55,6 +56,9 @@ impl JoinRejection {
             }
             Self::AvatarNotAuthorized => {
                 "Purchased avatar approval failed. Reconnect your wallet or choose a free avatar."
+            }
+            Self::OfflineKitUnsupported => {
+                "Connect to play this fighting style, or choose another style for offline practice."
             }
         }
     }

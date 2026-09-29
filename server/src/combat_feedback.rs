@@ -178,6 +178,25 @@ pub(crate) fn apply_player_damage_typed(
     now: Instant,
     magical: bool,
 ) -> Option<CombatEvent> {
+    apply_player_damage_kind(
+        players,
+        target_id,
+        damage,
+        now,
+        if magical {
+            shared::loadout::DamageType::Magic
+        } else {
+            shared::loadout::DamageType::Physical
+        },
+    )
+}
+pub(crate) fn apply_player_damage_kind(
+    players: &mut HashMap<SocketAddr, ConnectedPlayer>,
+    target_id: u64,
+    damage: f32,
+    now: Instant,
+    kind: shared::loadout::DamageType,
+) -> Option<CombatEvent> {
     if !damage.is_finite() || damage <= 0.0 {
         return None;
     }
@@ -187,8 +206,44 @@ pub(crate) fn apply_player_damage_typed(
             && player.hero.hp > 0.0
             && !player.modifiers.god_mode
     })?;
+    if player.hero.skills.advanced.immune(now) {
+        return None;
+    }
+    player.hero.skills.advanced.last_combat = Some(now);
+    player.hero.skills.advanced.forge_ready = false;
+    player.hero.skills.advanced.forge_since = None;
     let before = player.hero.hp;
-    let damage = hero_stats::mitigate(player, damage, magical);
+    let damage = if kind == shared::loadout::DamageType::True {
+        damage
+    } else {
+        let mitigated =
+            hero_stats::mitigate(player, damage, kind == shared::loadout::DamageType::Magic);
+        if kind == shared::loadout::DamageType::Magic
+            && player
+                .hero
+                .skills
+                .advanced
+                .weakened_until
+                .is_some_and(|until| until > now)
+        {
+            mitigated + (damage - mitigated) * 0.3
+        } else {
+            mitigated
+        }
+    };
+    let damage = if kind != shared::loadout::DamageType::True
+        && player
+            .hero
+            .skills
+            .advanced
+            .defense_until
+            .is_some_and(|until| until > now)
+    {
+        damage * 100.0 / (100.0 + player.hero.skills.advanced.defense)
+    } else {
+        damage
+    };
+    let damage = player.hero.skills.absorb(damage, now);
     player.hero.hp = if player.modifiers.infinite_hp {
         before
     } else {

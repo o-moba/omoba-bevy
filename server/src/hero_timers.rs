@@ -84,18 +84,13 @@ fn combat_clocks_suspended(player: &ConnectedPlayer) -> bool {
     player.hero.hp <= 0.0 || no_cooldowns(player)
 }
 
-/// Full basic-attack cooldown for the hero's current class, level and gear.
-pub(crate) fn basic_attack_cooldown(player: &ConnectedPlayer) -> f32 {
-    hero_stats::basic_attack_cooldown(player).as_secs_f32()
-}
-
 pub(crate) fn basic_attack_remaining(player: &ConnectedPlayer, now: Instant) -> f32 {
     if combat_clocks_suspended(player) {
         return 0.0;
     }
     remaining_of(
         player.timers.last_basic_attack_at,
-        hero_stats::basic_attack_cooldown(player),
+        hero_stats::basic_attack_cooldown_at(player, now),
         now,
     )
 }
@@ -123,6 +118,13 @@ pub(crate) fn skill_cooldown_remaining(
 
 /// Shared inter-skill recovery window, measured from the latest cast.
 pub(crate) fn skill_recovery_remaining(player: &ConnectedPlayer, now: Instant) -> f32 {
+    if player.hero.skills.loadout.is_some() {
+        return if combat_clocks_suspended(player) {
+            0.0
+        } else {
+            remaining_until(player.hero.skills.recovery_until, now)
+        };
+    }
     if combat_clocks_suspended(player) {
         return 0.0;
     }

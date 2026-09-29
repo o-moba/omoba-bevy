@@ -22,7 +22,10 @@ import catalog
 from capture_verdant import FRAME_HEADER, ScenarioPeer, SnapshotObserver, sha256, verify_beta_ui_profile
 
 IMAGES = ("01-combat-ready.png", "02-projectile-flight.png", "03-confirmed-impact.png")
-STYLES = catalog.projectile_styles()
+# This scenario proves the legacy homing projectile. Aimed standard kits use
+# StandardKitsQaPlugin and verify_standard_kits.py instead.
+STYLES = {hero['id']: hero['projectile_style'] for hero in catalog.heroes()
+          if 'skills' not in hero}
 
 
 class PassiveTarget(ScenarioPeer):
@@ -46,7 +49,7 @@ class CombatObserver(SnapshotObserver):
     def update(self, now):
         if now - self.last_hello >= 1.0:
             self.last_hello = now
-            self.socket.send(b'{"type":"hello","protocol_version":2}')
+            self.socket.send(json.dumps(dict(type="hello", protocol_version=catalog.protocol_version())).encode())
         self.pending = {key: value for key, value in self.pending.items() if now - value[0] < 2.0}
         # Bound one poll even if a broken server floods this read-only endpoint.
         for _ in range(2048):

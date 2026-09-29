@@ -125,6 +125,21 @@ pub(super) fn mobile_cast_system(
         return;
     };
     let definition = ability_for_class_slot(class, slot);
+    if shared::loadout::preset_for_class(class).is_some() {
+        let range = scaled_cast_range(definition, prog.ranks[intent.slot].max(1));
+        let direction = intent
+            .aim
+            .and_then(|screen| {
+                camera.single().ok().map(|(_, pose)| {
+                    crate::player::mobile_screen_direction(screen, pose, *visual_mode).xz()
+                })
+            })
+            .unwrap_or_else(|| transform.forward().xz())
+            .normalize_or_zero();
+        queue_cast_request(intent.slot, class, &target, &mut pending, &mut feedback);
+        pending.aim = Some(transform.translation.xz() + direction * range * intent.extent);
+        return;
+    }
     if definition.targeting == TargetingMode::UnitTarget {
         let Ok((camera, camera_transform)) = camera.single() else {
             return;

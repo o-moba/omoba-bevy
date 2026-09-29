@@ -24,11 +24,13 @@ impl ServerRuntime {
         if let Some(player) = world.players.get_mut(&addr) {
             player.last_seen = now;
         }
+        let terrain = crate::skills::advanced::terrain(world, now);
         if matches!(world.game_state, GameState::Running)
             && let Some(player) = world.players.get_mut(&addr)
             && player.hero.hp > 0.0
             && dash_sequence == player.hero.utility.dash_sequence
         {
+            let from = [player.hero.x, player.hero.z];
             handle_transform_request_with_structures(
                 player,
                 &world.map_layout,
@@ -39,6 +41,10 @@ impl ServerRuntime {
                 yaw,
                 now,
             );
+            let clipped =
+                shared::navigation::clip_discs(from, [player.hero.x, player.hero.z], &terrain);
+            player.hero.x = clipped[0];
+            player.hero.z = clipped[1];
         }
         ControlFlow::Continue(())
     }

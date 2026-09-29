@@ -188,10 +188,11 @@ pub(crate) fn bot_avatar(class: HeroClass, slot: u16) -> Option<&'static str> {
     // Each class alternates two free appearances without changing its sprite kit.
     let preferred = match class {
         HeroClass::Warrior => ["good-knight", "bao-samurai"],
-        HeroClass::Ranger => ["megan-the-fox", "cyberpal"],
-        HeroClass::Mage => ["agnes", "stitch-witch"],
+        HeroClass::Ranger | HeroClass::Wildspark => ["megan-the-fox", "cyberpal"],
+        HeroClass::Mage | HeroClass::Dawnweaver => ["agnes", "stitch-witch"],
         HeroClass::Cleric => ["anna", "mega-angel"],
         HeroClass::Warden => ["cool-tiger", "lady-koi"],
+        _ => ["good-knight", "agnes"],
     };
     let variant = ((slot.saturating_sub(1) / 4) % 2) as usize;
     [preferred[variant], preferred[1 - variant], "agnes", "anna"]
@@ -607,7 +608,7 @@ impl ServerRuntime {
         }
         let mut addresses: Vec<_> = self.bots.controllers.keys().copied().collect();
         addresses.sort_unstable();
-        let discs: Vec<_> = self
+        let mut discs: Vec<_> = self
             .world
             .structures
             .values()
@@ -617,6 +618,7 @@ impl ServerRuntime {
                 radius: structure_collision_radius(s.state.kind),
             })
             .collect();
+        discs.extend(crate::skills::advanced::terrain(&self.world, now));
         for addr in addresses {
             if !matches!(self.world.game_state, GameState::Running) {
                 break;
@@ -717,6 +719,57 @@ impl ServerRuntime {
                     controller.next_route = now;
                 }
                 if let Some(target) = controller.target {
+                    if self.world.players[&addr].hero.skills.loadout.is_some() {
+                        if let Some((position, _)) = basic_attack::resolve_hostile_target(
+                            team,
+                            target,
+                            &self.world.players,
+                            &self.world.minions,
+                            &self.world.structures,
+                            &self.world.neutrals,
+                        ) {
+                            for slot in 0..4 {
+                                let p = &self.world.players[&addr];
+                                let definition = p
+                                    .hero
+                                    .skills
+                                    .loadout
+                                    .as_ref()
+                                    .unwrap()
+                                    .skill(SkillSlot::from_index(slot).unwrap());
+                                // Select a weapon once for this encounter; avoid repeatedly toggling.
+                                if matches!(
+                                    definition.effect,
+                                    shared::loadout::SkillEffect::WeaponToggle { .. }
+                                ) && p.hero.skills.mode == shared::loadout::WeaponMode::Rockets
+                                {
+                                    continue;
+                                }
+                                let mut aim = [position.x, position.z];
+                                if matches!(
+                                    definition.effect,
+                                    shared::loadout::SkillEffect::Technique {
+                                        action: shared::loadout::Technique::AllyLeap
+                                            | shared::loadout::Technique::BallGuard
+                                            | shared::loadout::Technique::GuardLeap,
+                                        ..
+                                    }
+                                ) {
+                                    aim = [p.hero.x, p.hero.z];
+                                } else if definition.ability.targeting == TargetingMode::Point {
+                                    let dx = aim[0] - p.hero.x;
+                                    let dz = aim[1] - p.hero.z;
+                                    let dist = dx.hypot(dz);
+                                    if dist > definition.ability.cast_range {
+                                        let f = definition.ability.cast_range / dist;
+                                        aim = [p.hero.x + dx * f, p.hero.z + dz * f];
+                                    }
+                                }
+                                let request = p.hero.skills.request_id.saturating_add(1);
+                                crate::skills::cast(&mut self.world, addr, slot, aim, request, now);
+                            }
+                        }
+                    }
                     // Every unlocked hostile-target skill; the cast path
                     // enforces range, mana and cooldown for each slot.
                     for slot in 0..4 {
@@ -767,9 +820,7 @@ impl ServerRuntime {
                     )
                     .map(|(position, radius)| (target, position, radius))
                 });
-            let reach =
-                shared::basic_attack_for_class(self.world.players[&addr].hero.identity.hero_class)
-                    .range;
+            let reach = crate::skills::attack_modifiers(&self.world.players[&addr]).0;
             let mut in_range = false;
             let destination = if retreating {
                 let spawn = spawn_position_for_team(&self.world.map_layout, team);
@@ -856,7 +907,9 @@ impl ServerRuntime {
                 .map(|p| (p.hero.identity.id, [p.hero.x, p.hero.z]))
                 .collect();
             others.sort_unstable_by_key(|(id, _)| *id);
-            let step = hero_stats::move_speed(&self.world.players[&addr]) * dt;
+            let step = hero_stats::move_speed(&self.world.players[&addr])
+                * self.world.players[&addr].hero.skills.movement(now)
+                * dt;
             let accepted = steer_bot_step(id, origin, desired, step, &others, &discs);
             let movement = [accepted[0] - origin[0], accepted[1] - origin[1]];
             if movement[0].hypot(movement[1]) > 0.000_1 {

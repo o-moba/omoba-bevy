@@ -7,8 +7,15 @@
       "tagline": "Close-range bruiser: heavy hits, self-sustain",
       "role": "solo",
       "base_hp": 220.0,
-      "growth": { "basic_damage_cap": 1.8, "attack_rate_cap": 1.6 },
-      "basic_attack": { "range": 4.0, "damage": 12.0, "cooldown_secs": 0.9 },
+      "growth": {
+        "basic_damage_cap": 1.8,
+        "attack_rate_cap": 1.6
+      },
+      "basic_attack": {
+        "range": 4.0,
+        "damage": 12.0,
+        "cooldown_secs": 0.9
+      },
       "projectile_style": "crescent",
       "abilities": [
         {
@@ -52,7 +59,14 @@
           "projectile_damage": 60.0
         }
       ],
-      "recommended_items": ["vitality_gem", "ember_blade", "guardian_crest", "trail_boots", "swift_grip", "focus_charm"]
+      "recommended_items": [
+        "vitality_gem",
+        "ember_blade",
+        "guardian_crest",
+        "trail_boots",
+        "swift_grip",
+        "focus_charm"
+      ]
     },
     {
       "id": "mage",
@@ -60,8 +74,15 @@
       "tagline": "Long-range nuker: big damage, mana engine",
       "role": "mid",
       "base_hp": 180.0,
-      "growth": { "basic_damage_cap": 1.6, "attack_rate_cap": 1.5 },
-      "basic_attack": { "range": 14.0, "damage": 8.0, "cooldown_secs": 1.1 },
+      "growth": {
+        "basic_damage_cap": 1.6,
+        "attack_rate_cap": 1.5
+      },
+      "basic_attack": {
+        "range": 14.0,
+        "damage": 8.0,
+        "cooldown_secs": 1.1
+      },
       "projectile_style": "arcane",
       "abilities": [
         {
@@ -105,7 +126,14 @@
           "projectile_damage": 72.0
         }
       ],
-      "recommended_items": ["ember_blade", "focus_charm", "trail_boots", "vitality_gem", "guardian_crest", "swift_grip"]
+      "recommended_items": [
+        "ember_blade",
+        "focus_charm",
+        "trail_boots",
+        "vitality_gem",
+        "guardian_crest",
+        "swift_grip"
+      ]
     },
     {
       "id": "ranger",
@@ -113,8 +141,15 @@
       "tagline": "Fast skirmisher: rapid shots, longest reach",
       "role": "carry",
       "base_hp": 185.0,
-      "growth": { "basic_damage_cap": 1.85, "attack_rate_cap": 1.8 },
-      "basic_attack": { "range": 16.0, "damage": 10.0, "cooldown_secs": 0.85 },
+      "growth": {
+        "basic_damage_cap": 1.85,
+        "attack_rate_cap": 1.8
+      },
+      "basic_attack": {
+        "range": 16.0,
+        "damage": 10.0,
+        "cooldown_secs": 0.85
+      },
       "projectile_style": "arrow",
       "abilities": [
         {
@@ -158,7 +193,14 @@
           "projectile_damage": 48.0
         }
       ],
-      "recommended_items": ["swift_grip", "ember_blade", "trail_boots", "vitality_gem", "guardian_crest", "focus_charm"]
+      "recommended_items": [
+        "swift_grip",
+        "ember_blade",
+        "trail_boots",
+        "vitality_gem",
+        "guardian_crest",
+        "focus_charm"
+      ]
     },
     {
       "id": "cleric",
@@ -166,8 +208,15 @@
       "tagline": "Support: modest damage, strong heals",
       "role": "support",
       "base_hp": 200.0,
-      "growth": { "basic_damage_cap": 1.5, "attack_rate_cap": 1.55 },
-      "basic_attack": { "range": 12.0, "damage": 8.0, "cooldown_secs": 1.0 },
+      "growth": {
+        "basic_damage_cap": 1.5,
+        "attack_rate_cap": 1.55
+      },
+      "basic_attack": {
+        "range": 12.0,
+        "damage": 8.0,
+        "cooldown_secs": 1.0
+      },
       "projectile_style": "holy",
       "abilities": [
         {
@@ -211,7 +260,14 @@
           "self_heal": 60.0
         }
       ],
-      "recommended_items": ["vitality_gem", "focus_charm", "trail_boots", "guardian_crest", "swift_grip", "ember_blade"]
+      "recommended_items": [
+        "vitality_gem",
+        "focus_charm",
+        "trail_boots",
+        "guardian_crest",
+        "swift_grip",
+        "ember_blade"
+      ]
     },
     {
       "id": "warden",
@@ -219,8 +275,15 @@
       "tagline": "Jungler: fast camp clears, bonus forest gold",
       "role": "jungle",
       "base_hp": 210.0,
-      "growth": { "basic_damage_cap": 1.75, "attack_rate_cap": 1.65 },
-      "basic_attack": { "range": 5.0, "damage": 11.0, "cooldown_secs": 0.85 },
+      "growth": {
+        "basic_damage_cap": 1.75,
+        "attack_rate_cap": 1.65
+      },
+      "basic_attack": {
+        "range": 5.0,
+        "damage": 11.0,
+        "cooldown_secs": 0.85
+      },
       "projectile_style": "claw",
       "abilities": [
         {
@@ -264,7 +327,355 @@
           "projectile_damage": 56.0
         }
       ],
-      "recommended_items": ["swift_grip", "vitality_gem", "ember_blade", "trail_boots", "guardian_crest", "focus_charm"]
+      "recommended_items": [
+        "swift_grip",
+        "vitality_gem",
+        "ember_blade",
+        "trail_boots",
+        "guardian_crest",
+        "focus_charm"
+      ]
+    },
+    {
+      "id": "dawnweaver",
+      "display_name": "Dawnweaver",
+      "tagline": "Light mage: bind, shield, field and beam",
+      "role": "mid",
+      "base_hp": 180,
+      "growth": {
+        "basic_damage_cap": 1.6,
+        "attack_rate_cap": 1.6
+      },
+      "basic_attack": {
+        "range": 10,
+        "damage": 12,
+        "cooldown_secs": 1.2
+      },
+      "projectile_style": "holy",
+      "skills": [
+        "dawn_bind",
+        "dawn_barrier",
+        "dawn_field",
+        "dawn_ray"
+      ],
+      "recommended_items": [
+        "ember_blade",
+        "focus_charm",
+        "trail_boots",
+        "vitality_gem",
+        "guardian_crest",
+        "swift_grip"
+      ]
+    },
+    {
+      "id": "wildspark",
+      "display_name": "Wildspark",
+      "tagline": "Explosive marksman: weapon modes, traps and takedown momentum",
+      "role": "carry",
+      "base_hp": 190,
+      "growth": {
+        "basic_damage_cap": 1.6,
+        "attack_rate_cap": 1.6
+      },
+      "basic_attack": {
+        "range": 11.5,
+        "damage": 18,
+        "cooldown_secs": 1.0
+      },
+      "projectile_style": "arrow",
+      "skills": [
+        "wild_switch",
+        "wild_zap",
+        "wild_traps",
+        "wild_rocket"
+      ],
+      "recommended_items": [
+        "ember_blade",
+        "focus_charm",
+        "trail_boots",
+        "vitality_gem",
+        "guardian_crest",
+        "swift_grip"
+      ]
+    },
+    {
+      "id": "cinderforge",
+      "display_name": "Cinderforge",
+      "tagline": "Forge defenses, raise terrain and lead the charge",
+      "role": "solo",
+      "base_hp": 260,
+      "growth": {
+        "basic_damage_cap": 1.6,
+        "attack_rate_cap": 1.6
+      },
+      "basic_attack": {
+        "range": 4,
+        "damage": 17,
+        "cooldown_secs": 1.2
+      },
+      "projectile_style": "crescent",
+      "skills": [
+        "fault_line",
+        "furnace_breath",
+        "anvil_charge",
+        "mountain_echo"
+      ],
+      "recommended_items": [
+        "ember_blade",
+        "focus_charm",
+        "trail_boots",
+        "vitality_gem",
+        "guardian_crest",
+        "swift_grip"
+      ]
+    },
+    {
+      "id": "edgeweaver",
+      "display_name": "Edgeweaver",
+      "tagline": "Strike directional vitals and parry decisive blows",
+      "role": "solo",
+      "base_hp": 205,
+      "growth": {
+        "basic_damage_cap": 1.6,
+        "attack_rate_cap": 1.6
+      },
+      "basic_attack": {
+        "range": 3.5,
+        "damage": 19,
+        "cooldown_secs": 1.05
+      },
+      "projectile_style": "crescent",
+      "skills": [
+        "edge_lunge",
+        "mirror_guard",
+        "twin_tempo",
+        "fourfold_duel"
+      ],
+      "recommended_items": [
+        "ember_blade",
+        "focus_charm",
+        "trail_boots",
+        "vitality_gem",
+        "guardian_crest",
+        "swift_grip"
+      ]
+    },
+    {
+      "id": "stormfist",
+      "display_name": "Stormfist",
+      "tagline": "Energy fighter with linked dashes and a chain kick",
+      "role": "jungle",
+      "base_hp": 215,
+      "growth": {
+        "basic_damage_cap": 1.6,
+        "attack_rate_cap": 1.6
+      },
+      "basic_attack": {
+        "range": 3.5,
+        "damage": 18,
+        "cooldown_secs": 1
+      },
+      "projectile_style": "crescent",
+      "skills": [
+        "echo_strike",
+        "anchor_step",
+        "thunder_pulse",
+        "thunder_kick"
+      ],
+      "recommended_items": [
+        "ember_blade",
+        "focus_charm",
+        "trail_boots",
+        "vitality_gem",
+        "guardian_crest",
+        "swift_grip"
+      ]
+    },
+    {
+      "id": "veilstalker",
+      "display_name": "Veilstalker",
+      "tagline": "Hidden hunter with prepared curses and a retreating finisher",
+      "role": "jungle",
+      "base_hp": 185,
+      "growth": {
+        "basic_damage_cap": 1.6,
+        "attack_rate_cap": 1.6
+      },
+      "basic_attack": {
+        "range": 3,
+        "damage": 18,
+        "cooldown_secs": 1
+      },
+      "projectile_style": "claw",
+      "skills": [
+        "thorn_volley",
+        "patient_curse",
+        "shadow_lash",
+        "nightfall"
+      ],
+      "recommended_items": [
+        "ember_blade",
+        "focus_charm",
+        "trail_boots",
+        "vitality_gem",
+        "guardian_crest",
+        "swift_grip"
+      ]
+    },
+    {
+      "id": "emberveil",
+      "display_name": "Emberveil",
+      "tagline": "Returning orb, charm and a sequence of fiery dashes",
+      "role": "mid",
+      "base_hp": 185,
+      "growth": {
+        "basic_damage_cap": 1.6,
+        "attack_rate_cap": 1.6
+      },
+      "basic_attack": {
+        "range": 10,
+        "damage": 13,
+        "cooldown_secs": 1.15
+      },
+      "projectile_style": "arcane",
+      "skills": [
+        "wandering_ember",
+        "kindled_wisps",
+        "heart_tether",
+        "flame_dance"
+      ],
+      "recommended_items": [
+        "ember_blade",
+        "focus_charm",
+        "trail_boots",
+        "vitality_gem",
+        "guardian_crest",
+        "swift_grip"
+      ]
+    },
+    {
+      "id": "orbitwright",
+      "display_name": "Orbitwright",
+      "tagline": "Control the battlefield through one persistent orb",
+      "role": "mid",
+      "base_hp": 180,
+      "growth": {
+        "basic_damage_cap": 1.6,
+        "attack_rate_cap": 1.6
+      },
+      "basic_attack": {
+        "range": 10,
+        "damage": 12,
+        "cooldown_secs": 1.15
+      },
+      "projectile_style": "holy",
+      "skills": [
+        "orbital_command",
+        "orbital_field",
+        "orbital_guard",
+        "orbital_collapse"
+      ],
+      "recommended_items": [
+        "ember_blade",
+        "focus_charm",
+        "trail_boots",
+        "vitality_gem",
+        "guardian_crest",
+        "swift_grip"
+      ]
+    },
+    {
+      "id": "riftshot",
+      "display_name": "Riftshot",
+      "tagline": "Accurate shots, detonation marks and a blink",
+      "role": "carry",
+      "base_hp": 185,
+      "growth": {
+        "basic_damage_cap": 1.6,
+        "attack_rate_cap": 1.6
+      },
+      "basic_attack": {
+        "range": 11,
+        "damage": 17,
+        "cooldown_secs": 1.1
+      },
+      "projectile_style": "arrow",
+      "skills": [
+        "rift_needle",
+        "rift_seal",
+        "rift_step",
+        "horizon_wave"
+      ],
+      "recommended_items": [
+        "ember_blade",
+        "focus_charm",
+        "trail_boots",
+        "vitality_gem",
+        "guardian_crest",
+        "swift_grip"
+      ]
+    },
+    {
+      "id": "chainkeeper",
+      "display_name": "Chainkeeper",
+      "tagline": "Hook enemies, rescue allies and collect souls",
+      "role": "support",
+      "base_hp": 220,
+      "growth": {
+        "basic_damage_cap": 1.6,
+        "attack_rate_cap": 1.6
+      },
+      "basic_attack": {
+        "range": 8,
+        "damage": 15,
+        "cooldown_secs": 1.15
+      },
+      "projectile_style": "holy",
+      "skills": [
+        "iron_hook",
+        "guiding_lantern",
+        "chain_sweep",
+        "iron_boundary"
+      ],
+      "recommended_items": [
+        "ember_blade",
+        "focus_charm",
+        "trail_boots",
+        "vitality_gem",
+        "guardian_crest",
+        "swift_grip"
+      ]
+    },
+    {
+      "id": "frostguard",
+      "display_name": "Frostguard",
+      "tagline": "Protect allies and intercept incoming projectiles",
+      "role": "support",
+      "base_hp": 250,
+      "growth": {
+        "basic_damage_cap": 1.6,
+        "attack_rate_cap": 1.6
+      },
+      "basic_attack": {
+        "range": 4,
+        "damage": 16,
+        "cooldown_secs": 1.15
+      },
+      "projectile_style": "crescent",
+      "skills": [
+        "winter_shard",
+        "sheltering_leap",
+        "northwall",
+        "winter_divide"
+      ],
+      "recommended_items": [
+        "ember_blade",
+        "focus_charm",
+        "trail_boots",
+        "vitality_gem",
+        "guardian_crest",
+        "swift_grip"
+      ]
     }
   ]
 }

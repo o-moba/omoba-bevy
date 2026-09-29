@@ -7,6 +7,7 @@ All transitions use regular movement; screenshots are native Bevy readbacks.
 import argparse
 import copy
 import json
+import catalog
 import math
 import os
 from pathlib import Path
@@ -42,7 +43,7 @@ class AdmittedObserver(CombatObserver):
     def update(self, now):
         if not self.joined and now - self.last_join >= 1.:
             self.last_join = now
-            self.send(dict(type="hello", protocol_version=2))
+            self.send(dict(type="hello", protocol_version=catalog.protocol_version()))
             self.send(dict(type="join", team=self.team, character="cube", hero_class="ranger",
                            avatar="agnes", session_id=f"vision-qa-{self.team}-{os.getpid()}"))
         super().update(now)

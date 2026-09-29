@@ -199,6 +199,7 @@ impl ConnectedPlayer {
     ) -> PlayerState {
         let Self { hero, economy, .. } = self;
         PlayerState {
+            loadout: crate::skills::state(self, now),
             supporter_aura: hero.identity.supporter_aura,
             is_bot: hero.identity.is_bot,
             id: hero.identity.id,
@@ -224,7 +225,8 @@ impl ConnectedPlayer {
             item_bonuses: hero_stats::combat_bonuses(self),
             shop_available: shop_is_available(hero, map, phase),
             last_purchase: economy.last_purchase.clone(),
-            basic_attack_cooldown_secs: hero_timers::basic_attack_cooldown(self),
+            basic_attack_cooldown_secs: hero_stats::basic_attack_cooldown_at(self, now)
+                .as_secs_f32(),
             basic_attack_remaining_secs: hero_timers::basic_attack_remaining(self, now),
             skill_cooldown_remaining_secs: std::array::from_fn(|i| {
                 hero_timers::skill_cooldown_remaining(self, SkillSlot::ALL[i], now)
@@ -249,7 +251,7 @@ impl ConnectedPlayer {
     /// The replicated `PlayerState` as every other client sees it, teammates
     /// included: the owner view with the private economy blanked (wallet,
     /// income, inventory, gear bonuses, purchase receipt) and the owner's
-    /// request marks (basic-attack and utility request ids) zeroed. Level,
+    /// request marks (basic-attack, skill and utility request ids) zeroed. Level,
     /// XP, ranks and the cooldown copies stay public. Every blanked field is
     /// `#[serde(default)]` on the wire, so this is protocol-compatible.
     pub(crate) fn public_view(
@@ -258,7 +260,13 @@ impl ConnectedPlayer {
         map: &MapLayoutState,
         phase: &GameState,
     ) -> PlayerState {
-        let view = self.owner_view(now, map, phase);
+        let mut view = self.owner_view(now, map, phase);
+        if let Some(loadout) = &mut view.loadout {
+            loadout.cast_request_id = 0;
+            loadout.orb_position = None;
+            loadout.challenge_target = None;
+            loadout.challenge_sides = 0;
+        }
         PlayerState {
             gold: 0,
             earned_gold: 0,

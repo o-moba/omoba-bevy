@@ -15,6 +15,7 @@ use super::{GameState, Lane, MinionBrainState, NeutralAiState, NeutralCampType, 
 
 #[derive(Resource, Default, Clone)]
 pub struct GameStateSnapshot {
+    pub skill_effects: Vec<shared::loadout::SkillEffectState>,
     pub sandbox: Option<shared::sandbox::SandboxSnapshot>,
     /// What debug commands the server accepts from us (step 11f); `None`
     /// from a server that predates the field. Read it through
@@ -156,6 +157,9 @@ impl From<&PlayerState> for PlayerCosmeticAction {
 }
 
 /// Authoritative hero class replicated from the server.
+#[derive(Component, Clone, Debug, Default)]
+pub struct PlayerLoadout(pub Option<shared::loadout::LoadoutState>);
+
 #[derive(Component, Clone, Copy, Debug)]
 pub struct NetworkHeroClass(pub HeroClass);
 

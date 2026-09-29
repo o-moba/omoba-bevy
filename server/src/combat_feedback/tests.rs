@@ -61,6 +61,11 @@ fn projectiles(rt: &mut ServerRuntime, now: Instant, dt: f32) -> Vec<CombatEvent
 fn every_class_keeps_basic_and_skill_travel_with_confirmed_source_style_and_slot() {
     for class in HeroClass::ALL {
         for slot in [None, Some(0)] {
+            // Standard aimed skills have separate geometry/effect tests; their
+            // basic strikes still use this same authoritative travel contract.
+            if slot.is_some() && class.is_standard() {
+                continue;
+            }
             let (mut rt, a, b, now) = fixture();
             rt.world
                 .players
@@ -69,6 +74,9 @@ fn every_class_keeps_basic_and_skill_travel_with_confirmed_source_style_and_slot
                 .hero
                 .identity
                 .hero_class = class;
+            // New melee cores have a shorter legal strike range. Keep the
+            // target in range while retaining measurable projectile travel.
+            rt.world.players.get_mut(&b).unwrap().hero.x = 2.0;
             let target = TargetId {
                 kind: TargetKind::Player,
                 id: rt.world.players[&b].hero.identity.id,
@@ -89,7 +97,7 @@ fn every_class_keeps_basic_and_skill_travel_with_confirmed_source_style_and_slot
                 .projectiles
                 .values()
                 .next()
-                .expect("accepted attack");
+                .unwrap_or_else(|| panic!("accepted attack for {class:?} / {slot:?}"));
             assert_eq!(projectile.state.source_kind, CombatEntityKind::Player);
             assert_eq!(projectile.state.style, ProjectileStyle::for_class(class));
             assert_eq!(
@@ -97,7 +105,8 @@ fn every_class_keeps_basic_and_skill_travel_with_confirmed_source_style_and_slot
                 Some(slot.unwrap_or(shared::BASIC_ATTACK_ACTION_SLOT))
             );
             assert!(projectile.state.direction.iter().all(|v| v.is_finite()));
-            assert!(projectile.state.direction[0] > 0.99);
+            assert!(projectile.state.direction[0] > 0.9);
+            assert!(projectile.state.direction[2].abs() < 0.001);
             let expected_damage = projectile.damage;
             assert_eq!(rt.world.players[&b].hero.hp, MAX_HP);
             assert!(projectiles(&mut rt, now + Duration::from_millis(10), 0.01).is_empty());
@@ -552,6 +561,7 @@ fn cosmetic_history_yields_space_to_gameplay_and_keeps_newest_receipts() {
         players: vec![player],
         scoreboard: None,
         prematch: None,
+        skill_effects: Vec::new(),
         projectiles: vec![],
         combat_events: vec![],
         structures: vec![],

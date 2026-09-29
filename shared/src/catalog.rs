@@ -49,6 +49,7 @@ fn loaded<T>(path: &str, result: Result<T, String>) -> T {
 /// the client's `main` call it first, so bad data stops the process at
 /// startup instead of on the first lookup.
 pub fn ensure_loaded() {
+    crate::loadout::ensure_loaded();
     LazyLock::force(&HEROES);
     LazyLock::force(&ITEMS);
 }
@@ -103,7 +104,10 @@ struct RawHero {
     growth: RawGrowth,
     basic_attack: RawBasicAttack,
     projectile_style: String,
+    #[serde(default)]
     abilities: Vec<RawAbility>,
+    #[serde(default)]
+    skills: Option<[crate::loadout::SkillId; 4]>,
     recommended_items: Vec<ItemId>,
 }
 
@@ -257,16 +261,43 @@ fn parse_hero(
     )?;
     let projectile_style = projectile_style(context, &hero.projectile_style)?;
 
-    check(hero.abilities.len() == SkillSlot::ALL.len(), || {
-        format!(
-            "{context}: {} abilities, expected one per slot (Q/W/E/R)",
-            hero.abilities.len()
-        )
+    check(hero.skills.is_none() || hero.abilities.is_empty(), || {
+        format!("{context}: specify skills or inline abilities, not both")
     })?;
+    check(
+        hero.skills.is_some() || hero.abilities.len() == SkillSlot::ALL.len(),
+        || {
+            format!(
+                "{context}: {} abilities, expected one per slot (Q/W/E/R)",
+                hero.abilities.len()
+            )
+        },
+    )?;
     let mut abilities = Vec::with_capacity(SkillSlot::ALL.len());
-    for (slot, ability) in SkillSlot::ALL.into_iter().zip(hero.abilities) {
-        let context = format!("{context} {slot:?}");
-        abilities.push(parse_ability(&context, ability, ability_ids)?);
+    if let Some(ids) = hero.skills {
+        for (slot, id) in SkillSlot::ALL.into_iter().zip(ids) {
+            let definition = crate::loadout::skill(id);
+            check(definition.slot == slot, || {
+                format!("{context}: skill {} in wrong slot", id.id())
+            })?;
+            // Definitions are unique in skills.json; multiple recipes may refer
+            // to the same skill. Do not impose legacy inline-ID uniqueness here.
+            abilities.push(definition.ability);
+        }
+        let preset = crate::loadout::preset_for_class(class).ok_or_else(|| {
+            format!("{context}: a legacy class cannot silently become a modular kit")
+        })?;
+        check(preset.skills() == ids, || {
+            format!("{context}: skill references differ from frozen preset")
+        })?;
+    } else {
+        check(!class.is_standard(), || {
+            format!("{context}: modular preset needs skill references")
+        })?;
+        for (slot, ability) in SkillSlot::ALL.into_iter().zip(hero.abilities) {
+            let context = format!("{context} {slot:?}");
+            abilities.push(parse_ability(&context, ability, ability_ids)?);
+        }
     }
 
     // Unknown item ids already failed to parse, so this makes the list a
@@ -351,6 +382,11 @@ fn parse_ability(
             check(ability.cast_range == 0.0, || {
                 format!("{context}: a self_target ability has cast_range 0")
             })?;
+        }
+        TargetingMode::Direction | TargetingMode::Point => {
+            return Err(format!(
+                "{context}: aimed skills require a reusable skill reference"
+            ));
         }
     }
 
@@ -494,7 +530,7 @@ mod tests {
             heroes_with(|v| {
                 v["classes"].as_array_mut().unwrap().pop();
             }),
-            "4 classes, expected one per HeroClass (5)",
+            "15 classes, expected one per HeroClass (16)",
         );
         assert_rejected(
             items_with(|v| v["items"].as_array_mut().unwrap().swap(1, 2)),

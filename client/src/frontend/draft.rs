@@ -727,6 +727,8 @@ fn render_draft(
                     picker
                         .spawn(Node {
                             column_gap: Val::Px(4.0),
+                            row_gap: Val::Px(4.0),
+                            flex_wrap: FlexWrap::Wrap,
                             ..default()
                         })
                         .with_children(|classes| {
@@ -736,7 +738,7 @@ fn render_draft(
                                     data::hero_name(class),
                                     DraftAction::Class(class),
                                     &format!("DraftClass-{}", class.id()),
-                                    (picker_width - 16.0) / 5.0,
+                                    (picker_width - 12.0) / 4.0,
                                     false,
                                     choice.is_some_and(|c| c.hero_class == class),
                                 );

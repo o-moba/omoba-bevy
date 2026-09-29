@@ -203,6 +203,7 @@ pub(crate) fn join_rejection(rejection: JoinRejection) -> &'static str {
         JoinRejection::ProtocolMismatch => "error.join.protocol_mismatch",
         JoinRejection::MapGeometryMismatch => "error.join.map_geometry_mismatch",
         JoinRejection::AvatarNotAuthorized => "error.join.avatar_not_authorized",
+        JoinRejection::OfflineKitUnsupported => "error.join.offline_kit_unsupported",
     })
 }
 
@@ -321,6 +322,7 @@ mod tests {
             JoinRejection::ProtocolMismatch,
             JoinRejection::MapGeometryMismatch,
             JoinRejection::AvatarNotAuthorized,
+            JoinRejection::OfflineKitUnsupported,
         ] {
             assert_eq!(join_rejection(rejection), rejection.message());
         }

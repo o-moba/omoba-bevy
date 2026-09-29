@@ -2,6 +2,7 @@
 """Tests for independent native navigation evidence, without a GUI process."""
 import copy
 import json
+import catalog
 from pathlib import Path
 import select
 import socket
@@ -99,7 +100,7 @@ class NavigationEvidenceTest(unittest.TestCase):
             try:
                 observer.update(1)
                 hello, address = server.recvfrom(65536)
-                self.assertEqual(json.loads(hello), dict(type="hello", protocol_version=2))
+                self.assertEqual(json.loads(hello), dict(type="hello", protocol_version=catalog.protocol_version()))
                 packet = dict(type="snapshot", server_epoch=9, round_id=1, snapshot_tick=42,
                               players=[dict(id=7, x=1, z=2, hp=100)], structures=[])
                 data = json.dumps(packet).encode()

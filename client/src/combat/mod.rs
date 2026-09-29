@@ -4,11 +4,13 @@ mod cast;
 mod cooldown;
 mod feedback;
 mod hotbar;
+pub(crate) mod inspection;
 mod marker;
 mod mobile;
 mod round_reset;
 mod selection;
 pub(crate) mod skill_card;
+pub(crate) mod standard;
 pub(crate) mod targeting;
 
 pub use crate::domain::{CombatStats, MAX_HP};
@@ -59,13 +61,22 @@ impl Plugin for CombatPlugin {
             .init_resource::<WorldPointerState>()
             .init_resource::<PendingCast>()
             .init_resource::<ActionFeedback>()
+            .init_resource::<inspection::SkillInspection>()
             .add_systems(
                 Update,
                 reset_round_input_state
                     .after(crate::net::ClientNetPipeline::ApplySnapshot)
                     .before(InputContextSet::Modal),
             )
-            .add_systems(Startup, setup_combat_visual_assets)
+            .add_systems(Startup, (setup_combat_visual_assets, standard::setup))
+            .add_systems(
+                Update,
+                (
+                    standard::interact,
+                    standard::draw_effects,
+                    standard::draw_aim,
+                ),
+            )
             .add_systems(
                 Startup,
                 (setup_combat_ui, crate::targeting::setup_targeting_ui),
@@ -94,7 +105,9 @@ impl Plugin for CombatPlugin {
                     resolve_pending_cast_system,
                     skill_upgrade_input_system,
                     update_skill_bar_system,
+                    inspection::update_inspection,
                     update_skill_tooltip,
+                    standard::update_status,
                     sync_skill_key_labels,
                     crate::targeting::draw_targeting_ui,
                 )

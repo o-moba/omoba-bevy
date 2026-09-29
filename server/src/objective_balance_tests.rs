@@ -29,6 +29,13 @@ fn siege(
     let addr: SocketAddr = "127.0.0.1:59201".parse().unwrap();
     rt.handle_packet(
         addr,
+        ClientPacket::Hello {
+            protocol_version: shared::protocol::PROTOCOL_VERSION,
+        },
+        now,
+    );
+    rt.handle_packet(
+        addr,
         ClientPacket::Join {
             prematch: false,
             team: Team::Green,
@@ -78,10 +85,15 @@ fn siege(
         }
         if fire_hero {
             handle_basic_attack_request(&mut rt.world, addr, target, tick + 1, at);
-            handle_cast_request(&mut rt.world, addr, target, 0, at);
+            if class.is_standard() {
+                crate::skills::cast(&mut rt.world, addr, 0, [3.0, 0.0], tick + 1, at);
+            } else {
+                handle_cast_request(&mut rt.world, addr, target, 0, at);
+            }
         }
         simulate_tower_attacks(&mut rt.world, at);
         simulate_projectiles(&mut rt.world, TickCtx { now: at, dt });
+        crate::skills::tick(&mut rt.world, TickCtx { now: at, dt });
         if rt.world.players[&addr].hero.hp <= 0.0 || rt.world.structures[&tower_id].state.hp <= 0.0
         {
             elapsed = tick as f32 * dt;

@@ -23,6 +23,7 @@ pub(in crate::net) struct PendingServerSnapshotFrame {
 }
 
 pub(in crate::net) struct PendingSnapshotData {
+    pub(in crate::net) skill_effects: Vec<shared::loadout::SkillEffectState>,
     pub(in crate::net) vision: Option<shared::vision::TeamVision>,
     pub(in crate::net) forest_pickups: Vec<shared::forest_pickups::ForestPickupState>,
     pub(in crate::net) sandbox: Option<shared::sandbox::SandboxSnapshot>,
@@ -132,6 +133,7 @@ pub(in crate::net) fn ingest_server_snapshot_packets(
                     }
                 }
                 ServerPacket::Snapshot {
+                    skill_effects,
                     sandbox,
                     debug_access,
                     forest_pickups,
@@ -185,6 +187,7 @@ pub(in crate::net) fn ingest_server_snapshot_packets(
                         client_session.join_exhausted = false;
                     }
                     latest_snapshot = Some(PendingSnapshotData {
+                        skill_effects,
                         sandbox,
                         debug_access,
                         forest_pickups,

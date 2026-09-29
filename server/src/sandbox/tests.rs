@@ -379,7 +379,16 @@ fn sandbox_ai_modes_forced_cast_and_all_heroes() {
             )
             .accepted
         );
-        assert!(!rt.world.projectiles.is_empty());
+        if hero.is_standard() {
+            // Instant lunges and buffs need not leave a world effect.
+            assert_eq!(
+                rt.world.players[&ENEMY_ADDR].hero.last_action.slot, 0,
+                "forced Q cast for {hero:?}"
+            );
+            assert!(rt.world.players[&ENEMY_ADDR].timers.last_cast_at[0].is_some());
+        } else {
+            assert!(!rt.world.projectiles.is_empty());
+        }
         rt.world.projectiles.clear();
         c.enemy.behavior = BotBehavior::Fight;
         c.enemy.actor.no_cooldowns = true;
