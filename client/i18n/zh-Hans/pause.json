@@ -34,7 +34,7 @@
   "pause.model.scale": "缩放",
   "pause.credits.icons": "图标由 Delapouite、Lorc、Sbed、Zeromancer 制作，来自 https://game-icons.net（CC BY 3.0）。界面图标：Lucide（ISC）。字体：Cinzel、Inter、Barlow Condensed、Noto Serif SC、Noto Sans CJK SC（SIL OFL 1.1）。",
   "pause.button.leave_match": "离开对局",
-  "pause.preview.iphone16": "iPhone 16 布局预览",
-  "pause.preview.hint": "在 iPad 上临时显示手机布局。点击游戏上方的「返回 iPad」恢复全屏。",
+  "pause.preview.iphone16": "iPhone 16 界面预览",
+  "pause.preview.hint": "在 iPad 上显示手机界面。点击游戏上方的“返回 iPad”恢复全屏。",
   "pause.preview.return": "返回 iPad"
 }
