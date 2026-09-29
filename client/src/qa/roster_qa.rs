@@ -37,7 +37,10 @@ impl Plugin for RosterQaPlugin {
             return;
         };
         let followup = std::env::var_os("OMOBA_ROSTER_QA_FOLLOWUP").is_some();
-        let classes = if followup {
+        let inspection = std::env::var_os("OMOBA_ROSTER_QA_INSPECTION").is_some();
+        let classes = if inspection {
+            vec![HeroClass::Dawnweaver]
+        } else if followup {
             vec![
                 HeroClass::Cinderforge,
                 HeroClass::Stormfist,
@@ -52,6 +55,9 @@ impl Plugin for RosterQaPlugin {
             dir,
             classes,
             followup,
+            inspection,
+            hold_started: None,
+            hold_phase: 0,
             stage: 0,
             index: 0,
             frames: 0,
@@ -82,6 +88,9 @@ struct Qa {
     dir: PathBuf,
     classes: Vec<HeroClass>,
     followup: bool,
+    inspection: bool,
+    hold_started: Option<Instant>,
+    hold_phase: usize,
     stage: u8,
     index: usize,
     frames: u32,
@@ -137,6 +146,10 @@ fn step(
     mut outgoing: MessageWriter<NetworkCommand>,
     mut exit: MessageWriter<AppExit>,
     context: Res<crate::input_context::GameplayInputContext>,
+    mut keys: ResMut<ButtonInput<KeyCode>>,
+    inspected: Res<crate::combat::inspection::SkillInspection>,
+    cards: Query<&crate::combat::skill_card::SkillCardView>,
+    panels: Query<(&Name, &Node)>,
 ) {
     if qa.stage == 255 {
         return;
@@ -154,7 +167,7 @@ fn step(
     }
     match qa.stage {
         1 if *screen.get() == AppScreen::HeroSelect && qa.frames > 150 => {
-            if qa.followup {
+            if qa.followup || qa.inspection {
                 qa.readbacks.push("selection-reused-from-native-1".into());
                 qa.stage = 2;
                 return;
@@ -221,6 +234,12 @@ fn step(
             if class.0 != qa.classes[qa.index] || !context.gameplay_allowed() {
                 return;
             }
+            if qa.inspection {
+                keys.press(KeyCode::KeyQ);
+                qa.hold_started = Some(Instant::now());
+                qa.stage = 5;
+                return;
+            }
             qa.cast_ack = loadout.0.as_ref().map_or(0, |s| s.cast_request_id);
             let slot = if qa.followup && class.0 == HeroClass::Chainkeeper {
                 3
@@ -244,6 +263,58 @@ fn step(
             outgoing.write(NetworkCommand::CastSkill { slot, aim });
             qa.frames = 0;
             qa.stage = 5;
+        }
+        5 if qa.inspection => {
+            let elapsed = qa.hold_started.unwrap().elapsed().as_secs_f32();
+            let expected = (qa.hold_phase + 1).min(3);
+            if qa.readbacks.len() < expected {
+                return;
+            }
+            let phase = qa.hold_phase;
+            let ready = match phase {
+                0 => elapsed >= 0.3,
+                1 => elapsed >= 1.8,
+                2 => {
+                    keys.release(KeyCode::KeyQ);
+                    qa.frames = 0;
+                    qa.hold_phase = 3;
+                    false
+                }
+                3 => qa.frames >= 4,
+                _ => false,
+            };
+            if ready {
+                let shown = phase == 1;
+                let card = cards.iter().any(|c| c.visible);
+                let panel = panels
+                    .iter()
+                    .any(|(n, p)| n.as_str() == "StandardKitStatus" && p.display != Display::None);
+                if inspected.slot.is_some() != shown || card != shown || panel != shown {
+                    let _ = std::fs::write(qa.dir.join("failure.json"),
+                        serde_json::json!({"phase":phase,"inspection":inspected.slot,"card":card,"panel":panel}).to_string());
+                    qa.stage = 255;
+                    exit.write(AppExit::error());
+                    return;
+                }
+                let name = match phase {
+                    0 => "01-short-hold",
+                    1 => "02-long-hold",
+                    _ => "03-released",
+                };
+                capture(
+                    &mut commands,
+                    &mut qa,
+                    name.into(),
+                    serde_json::json!({"held_seconds":elapsed,"description_visible":shown,"card_visible":card,"panel_visible":panel}),
+                );
+                qa.hold_phase += 1;
+            }
+            if qa.hold_phase == 4 && qa.readbacks.len() == 4 {
+                let _ = std::fs::write(qa.dir.join("summary.json"),
+                    serde_json::to_vec_pretty(&serde_json::json!({"pass":true,"locale":"en","viewport":[1280,720],"scripted":true,"captures":qa.captures})).unwrap());
+                qa.stage = 255;
+                exit.write(AppExit::Success);
+            }
         }
         5 if qa.frames >= 12 => {
             let Ok((_, class, loadout)) = local.single() else {

@@ -81,7 +81,7 @@ pub(crate) struct MobileAttackIntent {
 const ATTACK_HOLD_SECONDS: f32 = 0.18;
 const ATTACK_DRAG_DEAD_ZONE: f32 = 12.0;
 const ATTACK_DRAG_REACH: f32 = 96.0;
-const SKILL_DESCRIPTION_SECONDS: f32 = 0.45;
+const SKILL_DESCRIPTION_SECONDS: f32 = crate::combat::inspection::HOLD_SECONDS as f32;
 const SKILL_DRAG_DEAD_ZONE: f32 = 20.0;
 /// The combat group of `hud.md` (phone): ATK 96 anchored 76 px inside the
 /// safe bottom-right corner, the four abilities (64) on an inner arc and the
@@ -545,7 +545,7 @@ impl MobileControls {
         }
     }
 
-    fn inspected_skill(&self) -> Option<usize> {
+    pub(crate) fn inspected_skill(&self) -> Option<usize> {
         self.captures
             .values()
             .find_map(|capture| match capture.control {
@@ -1843,7 +1843,9 @@ mod tests {
             layout.joystick_center + Vec2::X * 40.0,
         );
         m.event(1, TouchPhase::Moved, skill + Vec2::X * 15.0);
-        m.advance_hold_time(SKILL_DESCRIPTION_SECONDS);
+        m.advance_hold_time(1.49);
+        assert_eq!(m.inspected_skill(), None, "short holds must not inspect");
+        m.advance_hold_time(0.02);
         assert_eq!(m.inspected_skill(), Some(1));
         assert!(m.movement.x > 0.0);
         // After opening help, later finger movement must never cast accidentally.
@@ -1860,7 +1862,7 @@ mod tests {
         let skill = m.layout().ability_centers[0];
         m.event(1, TouchPhase::Started, skill);
         m.event(1, TouchPhase::Moved, skill + Vec2::NEG_X * 50.0);
-        m.advance_hold_time(1.0);
+        m.advance_hold_time(SKILL_DESCRIPTION_SECONDS + 1.0);
         assert_eq!(m.inspected_skill(), None);
         m.event(1, TouchPhase::Ended, skill + Vec2::NEG_X * 50.0);
         assert_eq!(

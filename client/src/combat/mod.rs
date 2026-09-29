@@ -4,6 +4,7 @@ mod cast;
 mod cooldown;
 mod feedback;
 mod hotbar;
+pub(crate) mod inspection;
 mod marker;
 mod mobile;
 mod round_reset;
@@ -60,6 +61,7 @@ impl Plugin for CombatPlugin {
             .init_resource::<WorldPointerState>()
             .init_resource::<PendingCast>()
             .init_resource::<ActionFeedback>()
+            .init_resource::<inspection::SkillInspection>()
             .add_systems(
                 Update,
                 reset_round_input_state
@@ -70,7 +72,6 @@ impl Plugin for CombatPlugin {
             .add_systems(
                 Update,
                 (
-                    standard::update_status,
                     standard::interact,
                     standard::draw_effects,
                     standard::draw_aim,
@@ -104,7 +105,9 @@ impl Plugin for CombatPlugin {
                     resolve_pending_cast_system,
                     skill_upgrade_input_system,
                     update_skill_bar_system,
+                    inspection::update_inspection,
                     update_skill_tooltip,
+                    standard::update_status,
                     sync_skill_key_labels,
                     crate::targeting::draw_targeting_ui,
                 )

@@ -178,7 +178,7 @@ fn try_cast_slot(
         target,
         slot: slot.index() as u8,
     });
-    report(feedback, "combat.cast.casting", def, &[]);
+    info!("Casting {}", def.name);
     true
 }
 

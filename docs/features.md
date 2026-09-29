@@ -1,5 +1,9 @@
 # Feature Inventory
 
+## Deliberate skill inspection (0.30.1)
+
+Skill descriptions open after holding the same skill for 1.5 seconds using a hotbar press, Q/W/E/R, a controller skill binding, or a stationary touch. Hover, short presses and basic attacks keep the combat view clear. Releasing the hold or opening a menu hides descriptions immediately. The standard-kit explanation panel follows the same rule; ordinary casting remains unchanged.
+
 ## Expanded standard roster (0.30.0)
 
 Eleven modular presets now cover the standard roster. The nine additions are **Cinderforge, Edgeweaver, Stormfist, Veilstalker, Emberveil, Orbitwright, Riftshot, Chainkeeper and Frostguard**, each with a passive, basic profile and Q/W/E/R. Reusable mechanics include parry, charm, camouflage, Energy, persistent orbs, temporary terrain, forging, ally rescue and projectile interception. Keyboard, touch and controller use the same authoritative commands. The roster scrolls independently of avatar selection. See [implementation and remaining TODO](progress/2026-09-29-remaining-roster.md).

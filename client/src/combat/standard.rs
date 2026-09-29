@@ -87,6 +87,7 @@ pub(super) fn setup(mut commands: Commands, assets: Res<AssetServer>) {
 }
 
 pub(super) fn update_status(
+    inspection: Res<super::inspection::SkillInspection>,
     local: Query<(&NetworkHeroClass, &PlayerLoadout), With<Player>>,
     mut label: Query<(&mut Text, &mut Node), With<StandardStatus>>,
     mobile: Res<crate::mobile_controls::MobileControls>,
@@ -95,6 +96,10 @@ pub(super) fn update_status(
     let Ok((mut text, mut node)) = label.single_mut() else {
         return;
     };
+    if inspection.slot.is_none() {
+        node.display = Display::None;
+        return;
+    }
     let Ok((class, loadout)) = local.single() else {
         node.display = Display::None;
         return;

@@ -4,6 +4,13 @@ All notable changes to this repository should be documented in this file.
 
 The canonical repository version lives in `Cargo.toml` under `[workspace.package].version` and follows SemVer.
 
+## [0.30.1] - 2026-09-29
+
+### Quiet combat descriptions
+
+- Show skill descriptions and the standard-kit explanation panel only after a continuous 1.5-second skill hold. Hover, short presses and basic attacks do not open them; release and gameplay interruption hide them.
+- Share the threshold across mouse, keyboard, controller and touch. Preserve touch drag aiming and inspection release without casting; omit the redundant successful-cast text banner.
+
 ## [0.30.0] - 2026-09-29
 
 ### Expanded standard roster

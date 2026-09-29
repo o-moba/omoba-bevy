@@ -15,10 +15,7 @@ use crate::ui::{
     kit_assets::Icon,
     theme::{self, Form, TextStyle},
     tokens::{TextRole, border, color, radius, size, space},
-    widgets::{
-        game::{self, AbilityView},
-        surfaces::TOOLTIP_DELAY,
-    },
+    widgets::game::{self, AbilityView},
 };
 use bevy::prelude::*;
 use shared::{
@@ -71,7 +68,7 @@ pub(super) struct SkillRankLabel {
 /// A hotbar slot's ability button (its [`AbilityView`] follows the kit).
 #[derive(Component)]
 pub(super) struct SkillSlotButton {
-    slot: usize,
+    pub(super) slot: usize,
 }
 
 /// Ability-name carrier on a hotbar slot (not drawn; names live in the
@@ -518,17 +515,13 @@ pub(super) fn update_skill_bar_system(
     }
 }
 
-/// The desktop ability tooltip: shown after the tooltip delay on a hovered
-/// slot (moving between slots swaps it at once), live while open, hidden
-/// when the pointer leaves, a cast starts or play is gated; a controller
-/// never focuses the bar, so it never shows one.
+/// Show a skill card only for a deliberate held skill; touch has its own card.
 #[allow(clippy::type_complexity, clippy::too_many_arguments)]
 pub(super) fn update_skill_tooltip(
-    time: Res<Time>,
+    inspection: Res<super::inspection::SkillInspection>,
     windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
     ui_scale: Option<Res<UiScale>>,
     context: Res<GameplayInputContext>,
-    gamepad: Option<Res<crate::gamepad::GamepadControls>>,
     local: Query<
         (
             &PlayerProgression,
@@ -558,30 +551,14 @@ pub(super) fn update_skill_tooltip(
     keys: Query<(&SkillSlotButton, &crate::ui::widgets::game::AbilityParts)>,
     key_texts: Query<&Text>,
     mut tooltips: Query<(&mut SkillCardView, &mut Node), With<SkillTooltip>>,
-    mut hovered: Local<Option<(usize, f32)>>,
 ) {
     let (team_selection, cooldowns, pending, target, game) = state;
     let Ok((mut view, mut node)) = tooltips.single_mut() else {
         return;
     };
-    let now = time.elapsed_secs();
-    let pointer = slots
-        .iter()
-        .find(|(_, interaction, ..)| **interaction != Interaction::None)
-        .map(|(slot, ..)| slot.slot);
-    let pad = gamepad.as_ref().is_some_and(|pad| pad.active);
-    let casting = pending.request.is_some();
-    *hovered = match (pointer, *hovered) {
-        (Some(slot), Some((was, since))) if was == slot => Some((slot, since)),
-        // Moving between slots while one is shown swaps without delay.
-        (Some(slot), Some(_)) if view.visible => Some((slot, now - TOOLTIP_DELAY.as_secs_f32())),
-        (Some(slot), _) => Some((slot, now)),
-        (None, _) => None,
-    };
-    let shown = hovered
-        .filter(|(_, since)| now - since >= TOOLTIP_DELAY.as_secs_f32())
-        .map(|(slot, _)| slot)
-        .filter(|_| !pad && !casting && context.gameplay_allowed());
+    let shown = inspection
+        .slot
+        .filter(|_| !inspection.touch && context.gameplay_allowed());
     let Some(slot) = shown else {
         if view.visible {
             view.visible = false;
