@@ -5,7 +5,7 @@ The screen map, scripts/ui_screen_map.json, lists every UI screen: how a player
 reaches it, which harness run captures it (with its env), the frame name and
 the profiles it exists on, plus the screens no harness reaches yet (gaps).
 
-    # capture all runs on both profiles into a dated folder
+    # capture all mapped run/profile combinations into a dated folder
     python3 scripts/capture_ui_audit.py --build --output ../omoba-ui/captures/2026-09-27
     # one run / one profile with prebuilt binaries
     python3 scripts/capture_ui_audit.py --client-bin ... --server-bin ... --output /tmp/a --run shell --profile phone
@@ -16,8 +16,8 @@ the profiles it exists on, plus the screens no harness reaches yet (gaps).
 
 Output: <output>/<profile>/<NN-area>/<frame>.png, <output>/index.json (every
 frame with its screen id, title, route and fixture note) and raw harness output
-under <output>/raw/<profile>/<run>/. Phone frames are the phone UI rendered by a
-desktop development build (OMOBA_TOUCH_CONTROLS=1).
+under <output>/raw/<profile>/<run>/. Phone and tablet frames are viewport
+simulations rendered by a desktop development build (OMOBA_TOUCH_CONTROLS=1).
 """
 import argparse
 import datetime
@@ -141,6 +141,8 @@ def capture(run_name, run, profile, binaries, assets, raw, timeout, screen_map):
     processes = []
     with tempfile.TemporaryDirectory(prefix=f"omoba-ui-audit-{run_name}-") as workdir:
         env = base_env(dict(size=(width, height), profile=profile), assets, workdir, raw)
+        if profile == "tablet":
+            env["OMOBA_TOUCH_CONTROLS"] = "1"
         switches = dict(run["env"], **(run.get("phone_env", {}) if profile == "phone" else {}))
         env.update({key: value.format(out=raw) for key, value in switches.items()})
         try:
@@ -182,11 +184,13 @@ def capture(run_name, run, profile, binaries, assets, raw, timeout, screen_map):
 
 
 def main():
+    screen_map = load_map()
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--output", type=Path)
     parser.add_argument("--run", action="append", help="repeatable; default: every run in the map")
-    parser.add_argument("--profile", action="append", choices=["desktop", "phone"], help="repeatable; default: both")
-    parser.add_argument("--viewport", help="Override capture viewport, e.g. 1180x820 with --profile phone for iPad touch UI")
+    parser.add_argument("--profile", action="append", choices=list(screen_map["profiles"]),
+                        help="repeatable; default: every mapped profile")
+    parser.add_argument("--viewport", help="Override capture viewport, e.g. 1280x800 with --profile tablet")
     parser.add_argument("--build", action="store_true", help="cargo build the dev workspace first")
     parser.add_argument("--client-bin", type=Path)
     parser.add_argument("--server-bin", type=Path)
@@ -195,7 +199,6 @@ def main():
     parser.add_argument("--check", action="store_true", help="static map check only (no game)")
     parser.add_argument("--write-doc", action="store_true", help=f"regenerate {DOC_PATH.relative_to(ROOT)}")
     args = parser.parse_args()
-    screen_map = load_map()
     if args.viewport:
         if not re.fullmatch(r"[0-9]+x[0-9]+", args.viewport):
             parser.error("--viewport must be WIDTHxHEIGHT")
@@ -219,6 +222,11 @@ def main():
     unknown = set(args.run or []) - set(screen_map["runs"])
     if unknown:
         parser.error(f"unknown run(s): {', '.join(sorted(unknown))}; see {MAP_PATH.name}")
+    selected_profiles = args.profile or list(screen_map["profiles"])
+    selected_runs = args.run or list(screen_map["runs"])
+    if not any(expected_frames(screen_map, name, profile)
+               for profile in selected_profiles for name in selected_runs):
+        parser.error("the selected runs have no mapped screens on the selected profiles")
     if args.build:
         from package_native import build_executables
         binaries = build_executables("dev")
@@ -233,9 +241,12 @@ def main():
     index.update(schema_version=2, generator="scripts/capture_ui_audit.py",
                  captured_on=datetime.date.today().isoformat(), source=source_identity(),
                  profiles=screen_map["profiles"], gaps=screen_map["gaps"],
-                 phone_note="Phone frames are the phone UI rendered by a desktop development build.")
-    for profile in args.profile or list(screen_map["profiles"]):
-        for name in args.run or list(screen_map["runs"]):
+                 phone_note="Phone frames are the phone UI rendered by a desktop development build.",
+                 tablet_note="Tablet frames are viewport simulations rendered by a desktop development build with touch controls; sizes are recorded in profiles.")
+    for profile in selected_profiles:
+        for name in selected_runs:
+            if not expected_frames(screen_map, name, profile):
+                continue
             run = screen_map["runs"][name]
             print(f"[ui-audit] {profile}/{name} ...", flush=True)
             record, frames = capture(name, run, profile, binaries, args.assets.resolve(),

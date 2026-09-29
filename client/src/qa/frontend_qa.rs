@@ -21,6 +21,7 @@ use bevy::{
 use crate::frontend::{AppScreen, ScreenDriverPaused, preview::AvatarPreview};
 
 mod avatar;
+mod party;
 
 /// Frames each screen is given to lay out. The collection also waits for a
 /// glTF to load, so it gets its own budget.
@@ -66,6 +67,10 @@ impl Plugin for FrontendQaPlugin {
         else {
             return;
         };
+        if std::env::var("OMOBA_PARTY_QA").as_deref() == Ok("1") {
+            app.add_plugins(party::PartyQaPlugin { directory });
+            return;
+        }
         if std::env::var("OMOBA_AVATAR_QA").is_ok_and(|value| value == "1") {
             app.add_plugins(avatar::AvatarQaPlugin { directory });
             return;

@@ -19,11 +19,28 @@ class UiScreenMapTest(unittest.TestCase):
         self.assertEqual(DOC_PATH.read_text(), render_doc(self.map),
                          "run: python3 scripts/capture_ui_audit.py --write-doc")
 
-    def test_every_run_expects_frames_on_both_profiles(self):
+    def test_every_run_and_profile_have_mapped_frames(self):
         for run in self.map["runs"]:
-            for profile in self.map["profiles"]:
-                with self.subTest(run=run, profile=profile):
-                    self.assertTrue(expected_frames(self.map, run, profile))
+            with self.subTest(run=run):
+                self.assertTrue(any(expected_frames(self.map, run, profile)
+                                    for profile in self.map["profiles"]))
+        for profile in self.map["profiles"]:
+            with self.subTest(profile=profile):
+                self.assertTrue(any(expected_frames(self.map, run, profile)
+                                    for run in self.map["runs"]))
+
+    def test_party_stage_maps_all_eight_frames_on_each_supported_viewport(self):
+        expected = {
+            "01-party-solo.png", "02-party-three.png", "03-party-five.png",
+            "04-party-rotated.png", "05-party-social-scroll.png", "06-party-draft.png",
+            "07-party-countdown.png", "08-party-loading.png",
+        }
+        self.assertEqual(self.map["profiles"]["tablet"], [1180, 820])
+        for profile in ["desktop", "phone", "tablet"]:
+            with self.subTest(profile=profile):
+                self.assertEqual(set(expected_frames(self.map, "party-stage", profile)), expected)
+        self.assertFalse(expected_frames(self.map, "shell", "tablet"),
+                         "party captures must not imply tablet coverage for the older shell run")
 
     def test_phone_hud_frames_use_the_phone_height(self):
         frames = expected_frames(self.map, "match", "phone")

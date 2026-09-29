@@ -354,10 +354,10 @@ fn scale_menus_to_the_window(
             || career.as_ref().is_some_and(|state| state.modal_open())
             || server.as_ref().is_some_and(|state| state.open)
             || help.as_ref().is_some_and(|state| state.0));
-    // Draft/loading have their own real-pixel compact layout and 44px controls.
+    // Draft/loading/party own their viewport layout and touch controls.
     let shared_prematch = matches!(
         screen.get(),
-        AppScreen::Draft | AppScreen::Loading | AppScreen::Collection
+        AppScreen::Draft | AppScreen::Loading | AppScreen::Collection | AppScreen::Lobby
     );
     let unscaled_pause = pause.as_ref().is_some_and(|state| state.open);
     let wanted = if !phone {
@@ -604,7 +604,7 @@ mod tests {
                 "{width}x{height} in match"
             );
             // Draft and loading lay out from the real window width.
-            for prematch in [AppScreen::Draft, AppScreen::Loading] {
+            for prematch in [AppScreen::Draft, AppScreen::Loading, AppScreen::Lobby] {
                 app.world_mut()
                     .resource_mut::<NextState<AppScreen>>()
                     .set(prematch);

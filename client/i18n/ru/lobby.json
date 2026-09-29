@@ -1,10 +1,10 @@
 {
   "lobby.title": "ГРУППА",
   "lobby.subtitle": "Соберите группу · Одна команда · Играйте вместе",
-  "lobby.button.friends": "Список друзей",
+  "lobby.button.friends": "Добавить",
   "lobby.button.leave": "Покинуть группу",
   "lobby.stage.count": "ВАША ГРУППА · {count}/{max}",
-  "lobby.solo_hint": "Одиночная игра · пригласите друга, чтобы играть вместе",
+  "lobby.solo_hint": "Ваш герой · пригласите друзей",
   "lobby.button.play_bots": "ИГРАТЬ ПРОТИВ БОТОВ",
   "lobby.button.quick_match": "Быстрый матч",
   "lobby.waiting_for": "Ожидание начала матча от {leader}…",
@@ -16,7 +16,7 @@
   "lobby.button.accept": "Принять",
   "lobby.button.decline": "Отклонить",
   "lobby.online.title": "ОНЛАЙН НА ЭТОМ СЕРВЕРЕ",
-  "lobby.online.unavailable": "Этот сервер не поддерживает группы (или недоступен). Обновите сервер или переподключитесь.",
+  "lobby.online.unavailable": "Друзья недоступны: нет связи с сервером.",
   "lobby.online.empty": "Здесь пока никого нет. Попросите друга подключиться к \n{addr}",
   "lobby.plate.you": "{name} (вы)",
   "lobby.plate.leader": "★ Лидер · {status}",
@@ -33,5 +33,13 @@
   "lobby.server.hint": "Введите адрес сервера · Enter: подключиться · Esc: отмена",
   "lobby.server.invalid": "Используйте host:port, например 192.168.1.20:4000",
   "lobby.server.connect": "Подключиться",
-  "lobby.server.change": "Изменить"
+  "lobby.server.change": "Изменить",
+  "lobby.status.in_lobby": "В лобби",
+  "lobby.stage.rotate": "Потяните, чтобы повернуть",
+  "lobby.stage.leader": "Лидер группы",
+  "lobby.stage.you": "Вы",
+  "lobby.social.title": "ДРУЗЬЯ",
+  "lobby.social.members": "ВАША ГРУППА",
+  "lobby.social.full": "Группа собрана · все пять мест заняты",
+  "lobby.online.empty_short": "Друзья появятся здесь, когда подключатся к этому серверу."
 }

@@ -5,8 +5,8 @@ use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 
 use shared::prematch::{
-    COUNTDOWN_MS, DraftPlayer, LOADING_TIMEOUT_MS, PrematchAction, PrematchPhase, PrematchRequest,
-    PrematchSnapshot, Role,
+    COUNTDOWN_MS, DRAFT_SELECTION_MS, DraftPlayer, LOADING_TIMEOUT_MS, PrematchAction,
+    PrematchPhase, PrematchRequest, PrematchSnapshot, Role,
 };
 use shared::wire::{ClientPacket, GameState};
 
@@ -118,10 +118,38 @@ impl ServerRuntime {
         match self.prematch.phase.unwrap_or(PrematchPhase::Draft) {
             PrematchPhase::Draft => {
                 self.world.game_state = GameState::Forming { ready, needed };
-                // A launched party holds the countdown (bounded) until its
-                // members, still picking heroes, have joined.
+                // Give the complete roster its own selection window. A
+                // launched party also holds that window while it gathers.
                 let gathering = self.match_service.worker().is_none() && self.party_gathering(now);
-                if ready >= needed && all(|d| d.locked) && !gathering {
+                if ready < needed || gathering {
+                    self.prematch.deadline = None;
+                    return true;
+                }
+                let deadline = *self
+                    .prematch
+                    .deadline
+                    .get_or_insert(now + Duration::from_millis(DRAFT_SELECTION_MS.into()));
+                let expired = now >= deadline;
+                // Expiry may freeze only server-admitted choices. Even an
+                // ownership check invalidated by a roster reset must finish
+                // before we freeze the next generation's roster.
+                let pending_admission = !self.prematch.pending.is_empty()
+                    || self.world.players.iter().any(|(addr, p)| {
+                        p.joined && p.draft.capable && self.passport_admissions.is_pending(*addr)
+                    });
+                if !pending_admission && (all(|d| d.locked) || expired) {
+                    if expired {
+                        for player in self
+                            .world
+                            .players
+                            .values_mut()
+                            .filter(|p| p.joined && p.draft.capable && !p.hero.identity.is_bot)
+                        {
+                            // The live identity contains the last accepted
+                            // selection, including the admitted Join defaults.
+                            player.draft.locked = true;
+                        }
+                    }
                     self.prematch.phase = Some(PrematchPhase::Countdown);
                     self.prematch.deadline = Some(now + Duration::from_millis(COUNTDOWN_MS.into()));
                     self.world.game_state = GameState::Starting {

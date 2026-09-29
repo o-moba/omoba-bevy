@@ -1,10 +1,10 @@
 {
   "lobby.title": "队伍",
   "lobby.subtitle": "组队 · 同一队伍 · 一起开黑",
-  "lobby.button.friends": "好友列表",
+  "lobby.button.friends": "加为好友",
   "lobby.button.leave": "离开队伍",
   "lobby.stage.count": "你的队伍 · {count}/{max}",
-  "lobby.solo_hint": "单人 · 邀请好友一起组队",
+  "lobby.solo_hint": "你的英雄 · 邀请好友",
   "lobby.button.play_bots": "对战电脑玩家",
   "lobby.button.quick_match": "快速对局",
   "lobby.waiting_for": "等待 {leader} 开始对局…",
@@ -16,7 +16,7 @@
   "lobby.button.accept": "接受",
   "lobby.button.decline": "拒绝",
   "lobby.online.title": "本服务器在线玩家",
-  "lobby.online.unavailable": "此服务器不支持组队（或无响应）。请更新服务器或重新连接。",
+  "lobby.online.unavailable": "服务器未连接，暂时无法显示好友。",
   "lobby.online.empty": "这里还没有其他人。\n请好友连接到：\n{addr}",
   "lobby.plate.you": "{name}（你）",
   "lobby.plate.leader": "★ 队长 · {status}",
@@ -33,5 +33,13 @@
   "lobby.server.hint": "输入主机地址 · Enter 连接 · Esc 取消",
   "lobby.server.invalid": "请使用 host:port 格式，例如 192.168.1.20:4000",
   "lobby.server.connect": "连接",
-  "lobby.server.change": "更改"
+  "lobby.server.change": "更改",
+  "lobby.status.in_lobby": "在大厅",
+  "lobby.stage.rotate": "拖动英雄以旋转",
+  "lobby.stage.leader": "队长",
+  "lobby.stage.you": "你",
+  "lobby.social.title": "好友",
+  "lobby.social.members": "队伍成员",
+  "lobby.social.full": "队伍已满 · 五个位置均已加入",
+  "lobby.online.empty_short": "好友连接此服务器后将显示在这里。"
 }

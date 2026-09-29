@@ -13,11 +13,8 @@
 use bevy::input::keyboard::{Key, KeyboardInput};
 use bevy::prelude::*;
 
-use super::{AppScreen, widgets};
-use crate::i18n::tr;
+use super::AppScreen;
 use crate::net::SessionUiCommand;
-use crate::ui::theme::{self, ButtonKind};
-use crate::ui::widgets::screen_button;
 use crate::ui::{Activated, UiActionAppExt, UiSet};
 
 /// Longest address the field accepts (a DNS name plus a port).
@@ -151,85 +148,6 @@ fn field_actions(
             }
         }
     }
-}
-
-/// The SERVER block of the lobby's social column.
-pub(crate) fn spawn_server_field(
-    parent: &mut ChildSpawnerCommands,
-    field: &ServerField,
-    current: &str,
-) {
-    parent.spawn(widgets::label(tr("lobby.server.title"), 12.0, theme::GOLD));
-    parent
-        .spawn((
-            Node {
-                flex_direction: FlexDirection::Column,
-                row_gap: Val::Px(6.0),
-                padding: UiRect::axes(Val::Px(10.0), Val::Px(8.0)),
-                border: UiRect::all(Val::Px(1.0)),
-                border_radius: BorderRadius::all(Val::Px(8.0)),
-                ..default()
-            },
-            BackgroundColor(theme::TILE),
-            BorderColor::all(if field.editing {
-                theme::GOLD
-            } else {
-                theme::PANEL_EDGE
-            }),
-            Name::new("LobbyServerField"),
-        ))
-        .with_children(|block| {
-            if field.editing {
-                block.spawn(widgets::label(
-                    &format!("{}▏", field.text),
-                    16.0,
-                    theme::IVORY,
-                ));
-                block.spawn(widgets::label(tr("lobby.server.hint"), 11.0, theme::MUTED));
-                if let Some(error) = &field.error {
-                    block.spawn(widgets::label(tr(error), 12.0, theme::DANGER_HOVER));
-                }
-                block
-                    .spawn(Node {
-                        column_gap: Val::Px(8.0),
-                        ..default()
-                    })
-                    .with_children(|row| {
-                        screen_button(
-                            row,
-                            tr("lobby.server.connect"),
-                            ButtonKind::Secondary,
-                            ServerFieldAction::Connect,
-                            "LobbyServerConnect",
-                        );
-                        screen_button(
-                            row,
-                            tr("common.cancel"),
-                            ButtonKind::Secondary,
-                            ServerFieldAction::Cancel,
-                            "LobbyServerCancel",
-                        );
-                    });
-            } else {
-                block
-                    .spawn(Node {
-                        justify_content: JustifyContent::SpaceBetween,
-                        align_items: AlignItems::Center,
-                        column_gap: Val::Px(8.0),
-                        ..default()
-                    })
-                    .with_children(|row| {
-                        row.spawn(widgets::label(current, 15.0, theme::IVORY));
-                        screen_button(
-                            row,
-                            tr("lobby.server.change"),
-                            ButtonKind::Secondary,
-                            ServerFieldAction::Edit,
-                            "LobbyServerChange",
-                        );
-                    });
-            }
-        });
 }
 
 #[cfg(test)]

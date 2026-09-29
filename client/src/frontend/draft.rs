@@ -11,6 +11,8 @@ use shared::{
 };
 
 use super::{AppScreen, widgets};
+
+pub(super) mod stage;
 use crate::{
     i18n::{Locale, data, tr, trf},
     net::{ClientSession, GameStateSnapshot, NetworkCommand, SessionUiCommand},
@@ -62,7 +64,8 @@ impl Plugin for DraftScreenPlugin {
             .add_systems(Update, send_requests.in_set(DraftSet::Send))
             .add_systems(
                 Update,
-                render_draft
+                (render_draft, update_selection_clock)
+                    .chain()
                     .in_set(DraftSet::Draw)
                     .run_if(in_state(AppScreen::Draft)),
             )
@@ -564,6 +567,7 @@ fn render_draft(
     assets: Res<AssetServer>,
     scroll: Res<DraftScrollMemory>,
     locale: Option<Res<Locale>>,
+    mut party_stage: Option<ResMut<super::party_stage::PartyStage>>,
     mut last: Local<String>,
 ) {
     let Ok(window) = windows.single() else {
@@ -572,10 +576,16 @@ fn render_draft(
     let Some(draft) = &game.prematch else {
         return;
     };
+    if let Some(stage) = party_stage.as_mut() {
+        stage::sync_members(stage, draft, game.your_id);
+    }
     let catalogue = crate::passport::avatar_catalogue();
+    // A ticking server clock must not tear down an active picker/drag.
+    let mut render_snapshot = draft.clone();
+    render_snapshot.remaining_ms = 0;
     let key = format!(
         "{}:{:?}:{:?}:{:?}:{}:{}:{}",
-        serde_json::to_string(draft).unwrap_or_default(),
+        serde_json::to_string(&render_snapshot).unwrap_or_default(),
         state.choice,
         state.desired_lock,
         state.notice,
@@ -605,16 +615,11 @@ fn render_draft(
     let compact = window.height() < 500.0;
     let side = if compact { 32.0 } else { 28.0 };
     let available = window.width() - side * 2.0;
-    let roster_width = if compact {
-        (available * 0.31).max(185.0)
-    } else {
-        330.0
-    };
+    let roster_width = (available * if compact { 0.51 } else { 0.56 }).min(740.0);
     let picker_width = available - roster_width - 12.0;
     let local = draft.players.iter().find(|p| p.player_id == game.your_id);
     let choice = state.choice.as_ref();
     let locked = local.is_some_and(|p| p.locked);
-    let team = local.map(|p| p.team);
     let message = state
         .notice
         .clone()
@@ -655,6 +660,9 @@ fn render_draft(
                 header
                     .spawn(Node {
                         flex_direction: FlexDirection::Column,
+                        min_width: Val::Px(0.0),
+                        max_width: Val::Px((available - 250.0).max(180.0)),
+                        overflow: Overflow::clip(),
                         ..default()
                     })
                     .with_children(|title| {
@@ -662,15 +670,17 @@ fn render_draft(
                             tr("draft.title"),
                             if compact { 20.0 } else { 28.0 },
                         ));
-                        title.spawn(widgets::label(
-                            &trf(
-                                "draft.subtitle",
-                                &[("count", &draft.players.len()), ("needed", &draft.needed)],
-                            ),
-                            12.0,
-                            theme::MUTED,
+                        title.spawn((
+                            widgets::label(tr("draft.subtitle"), 12.0, theme::MUTED),
+                            TextLayout::new_with_justify(Justify::Left)
+                                .with_linebreak(LineBreak::NoWrap),
                         ));
                     });
+                header.spawn((
+                    widgets::label("", if compact { 17.0 } else { 23.0 }, theme::GOLD),
+                    SelectionClock,
+                    Name::new("DraftSelectionClock"),
+                ));
                 action_button(
                     header,
                     tr("common.cancel"),
@@ -691,31 +701,20 @@ fn render_draft(
                 body.spawn(Node {
                     width: Val::Px(roster_width),
                     min_width: Val::Px(roster_width),
-                    flex_direction: FlexDirection::Column,
-                    row_gap: Val::Px(6.0),
+                    height: Val::Percent(100.0),
                     ..default()
                 })
                 .with_children(|roster| {
-                    roster.spawn(widgets::label(tr("draft.your_team"), 12.0, theme::GOLD));
-                    roster
-                        .spawn((
-                            Node {
-                                flex_grow: 1.0,
-                                min_height: Val::Px(0.0),
-                                flex_direction: FlexDirection::Column,
-                                overflow: Overflow::scroll_y(),
-                                row_gap: Val::Px(5.0),
-                                ..default()
-                            },
-                            ScrollPosition(Vec2::new(0.0, *scroll.0.get(&0).unwrap_or(&0.0))),
-                            draft_pane(0),
-                            Name::new("DraftTeamRoster"),
-                        ))
-                        .with_children(|rows| {
-                            for player in draft.players.iter().filter(|p| Some(p.team) == team) {
-                                roster_row(rows, player, game.your_id, &thumbnails, false, compact);
-                            }
-                        });
+                    stage::spawn_team_stage(
+                        roster,
+                        draft,
+                        game.your_id,
+                        party_stage.as_deref(),
+                        roster_width,
+                        (window.height() - if compact { 136.0 } else { 152.0 }).max(180.0),
+                        false,
+                        compact,
+                    );
                 });
                 body.spawn(Node {
                     flex_grow: 1.0,
@@ -960,6 +959,31 @@ fn render_draft(
                 );
             });
         });
+}
+
+#[derive(Component)]
+struct SelectionClock;
+
+fn update_selection_clock(
+    game: Res<GameStateSnapshot>,
+    mut clocks: Query<&mut Text, With<SelectionClock>>,
+) {
+    let Some(draft) = &game.prematch else {
+        return;
+    };
+    let value = if draft.remaining_ms == 0 {
+        tr("draft.timer.gathering").to_owned()
+    } else {
+        trf(
+            "draft.timer.remaining",
+            &[("seconds", &draft.remaining_ms.div_ceil(1000))],
+        )
+    };
+    for mut text in &mut clocks {
+        if text.0 != value {
+            text.0.clone_from(&value);
+        }
+    }
 }
 
 /// Rebuilt panes reopen at the offset they had (`render_draft` and the
@@ -1382,7 +1406,25 @@ mod tests {
                 .iter()
                 .any(|text| text == "Assemble your team")
         );
-        assert!(texts(&mut app).iter().any(|text| text == "Warrior · Mid"));
+        let plate_texts = |app: &mut App| -> Vec<String> {
+            let plate = app
+                .world_mut()
+                .query::<(Entity, &Name)>()
+                .iter(app.world())
+                .find(|(_, name)| name.as_str() == "PrematchStagePlayer-7")
+                .map(|(entity, _)| entity)
+                .expect("local identity plate");
+            app.world()
+                .get::<Children>(plate)
+                .unwrap()
+                .iter()
+                .filter_map(|entity| app.world().get::<Text>(entity).map(|text| text.0.clone()))
+                .collect()
+        };
+        assert_eq!(
+            plate_texts(&mut app),
+            ["Local · YOU", "Warrior", "Mid", "PICKING"]
+        );
         app.world_mut()
             .resource_mut::<crate::i18n::Locale>()
             .set(LocaleId::parse("zh-Hans").unwrap());
@@ -1396,7 +1438,11 @@ mod tests {
         );
         let shown = texts(&mut app);
         assert!(shown.iter().any(|text| text == "组建你的队伍"), "{shown:?}");
-        assert!(shown.iter().any(|text| text == "战士 · 中路"), "{shown:?}");
+        let plate = plate_texts(&mut app);
+        assert!(plate[0].starts_with("Local"), "{plate:?}");
+        assert_eq!(plate[1], "战士");
+        assert_eq!(plate[2], "中路");
+        assert!(!plate.iter().any(|text| text == "Warrior" || text == "Mid"));
         assert!(!shown.iter().any(|text| text == "Assemble your team"));
     }
 

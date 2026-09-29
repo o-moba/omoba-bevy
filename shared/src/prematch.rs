@@ -3,6 +3,7 @@ use crate::wire::CharacterChoice;
 use crate::{HeroClass, map::Team};
 use serde::{Deserialize, Serialize};
 
+pub const DRAFT_SELECTION_MS: u32 = 30_000;
 pub const COUNTDOWN_MS: u32 = 3_000;
 pub const LOADING_TIMEOUT_MS: u32 = 30_000;
 
@@ -92,6 +93,8 @@ pub struct DraftPlayer {
 pub struct PrematchSnapshot {
     pub generation: u64,
     pub phase: PrematchPhase,
+    /// Server-owned phase deadline. Draft is zero while gathering the roster
+    /// or when the selection window expired but avatar admission is pending.
     pub remaining_ms: u32,
     pub needed: u32,
     pub players: Vec<DraftPlayer>,

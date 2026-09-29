@@ -598,12 +598,21 @@ fn render_loading(
     locale: Option<Res<Locale>>,
     mobile: Option<Res<MobileControls>>,
     latch: Option<Res<LoadingLatch>>,
+    mut party_stage: Option<ResMut<super::party_stage::PartyStage>>,
     mut last: Local<String>,
 ) {
     let Ok(window) = windows.single() else {
         return;
     };
-    let form = Form::from_mobile(mobile.as_deref());
+    // Tablets retain the roomy stage; landscape phones get compact controls.
+    let form = if window.height() < 500.0 {
+        Form::Phone
+    } else {
+        Form::Desktop
+    };
+    if let (Some(stage), Some(prematch)) = (party_stage.as_mut(), game.prematch.as_ref()) {
+        draft::stage::sync_members(stage, prematch, game.your_id);
+    }
     let phase = game.prematch.as_ref().map(|p| p.phase);
     let roster_key = game.prematch.as_ref().map(|p| (&p.players, &p.error));
     let key = format!(
@@ -676,7 +685,16 @@ fn render_loading(
             }
             let body = match &game.prematch {
                 Some(prematch) => {
-                    spawn_roster(root, &shell, prematch, game.your_id, &thumbnails, &scroll);
+                    spawn_roster(
+                        root,
+                        &shell,
+                        prematch,
+                        game.your_id,
+                        &thumbnails,
+                        &scroll,
+                        party_stage.as_deref(),
+                        Vec2::new(window.width(), window.height()),
+                    );
                     ShellParts::default()
                 }
                 None => spawn_connecting_body(root, &shell),
@@ -924,6 +942,7 @@ fn spawn_countdown_ring(root: &mut ChildSpawnerCommands, shell: &Shell) -> Entit
 
 /// The 5v5 roster body (loading-teams.md is P1: the rows stay as they were,
 /// inside the new shell; the countdown ring keeps the right gutter free).
+#[allow(clippy::too_many_arguments)]
 fn spawn_roster(
     root: &mut ChildSpawnerCommands,
     shell: &Shell,
@@ -931,16 +950,24 @@ fn spawn_roster(
     your_id: u64,
     thumbnails: &AvatarThumbnails,
     scroll: &DraftScrollMemory,
+    stage: Option<&super::party_stage::PartyStage>,
+    viewport: Vec2,
 ) {
     let compact = !shell.desktop();
-    // Desktop: x 40–1092, y 104 to the footer (the right gutter holds the
-    // countdown ring). Phone: 50 below the header line (y 62 at the
-    // reference safe top 0), 64 above the bottom edge (the footer line).
     let (left, right, top, bottom) = if shell.desktop() {
         (shell.left, 188.0, 104.0, 112.0)
     } else {
         (shell.left, shell.right, shell.top + 50.0, 64.0)
     };
+    let available = viewport.x - left - right;
+    let opponents_width = if compact { 208.0 } else { 250.0 };
+    let stage_width = (available - opponents_width - 12.0).max(180.0);
+    let body_height = (viewport.y - top - bottom).max(180.0);
+    let own_team = prematch
+        .players
+        .iter()
+        .find(|p| p.player_id == your_id)
+        .map(|p| p.team);
     root.spawn((
         Node {
             column_gap: Val::Px(12.0),
@@ -949,56 +976,51 @@ fn spawn_roster(
         Name::new("LoadingRoster"),
     ))
     .with_children(|teams| {
-        let own_team = prematch
-            .players
-            .iter()
-            .find(|p| p.player_id == your_id)
-            .map(|p| p.team);
-        for (index, team) in [shared::map::Team::Green, shared::map::Team::Blue]
-            .into_iter()
-            .enumerate()
-        {
-            teams
-                .spawn(Node {
-                    flex_grow: 1.0,
-                    flex_basis: Val::Px(0.0),
-                    min_width: Val::Px(0.0),
-                    flex_direction: FlexDirection::Column,
-                    row_gap: Val::Px(6.0),
-                    ..default()
-                })
-                .with_children(|column| {
-                    column.spawn((
-                        Text::new(if Some(team) == own_team {
-                            tr("loading.your_team")
-                        } else {
-                            tr("loading.opponents")
-                        }),
-                        theme::role_text(TextRole::Eyebrow),
-                        TextColor(color::TEXT_GOLD),
-                    ));
-                    let id = index as u8 + 2;
-                    column
-                        .spawn((
-                            Node {
-                                flex_grow: 1.0,
-                                min_height: Val::Px(0.0),
-                                flex_direction: FlexDirection::Column,
-                                overflow: Overflow::scroll_y(),
-                                row_gap: Val::Px(5.0),
-                                ..default()
-                            },
-                            ScrollPosition(Vec2::new(0.0, *scroll.0.get(&id).unwrap_or(&0.0))),
-                            draft::draft_pane(id),
-                            Name::new(format!("LoadingTeam-{index}")),
-                        ))
-                        .with_children(|rows| {
-                            for player in prematch.players.iter().filter(|p| p.team == team) {
-                                draft::roster_row(rows, player, your_id, thumbnails, true, compact);
-                            }
-                        });
-                });
-        }
+        draft::stage::spawn_team_stage(
+            teams,
+            prematch,
+            your_id,
+            stage,
+            stage_width,
+            body_height,
+            prematch.phase == PrematchPhase::Loading,
+            compact,
+        );
+        teams
+            .spawn(Node {
+                width: Val::Px(opponents_width),
+                min_width: Val::Px(opponents_width),
+                min_height: Val::Px(0.0),
+                flex_direction: FlexDirection::Column,
+                row_gap: Val::Px(6.0),
+                ..default()
+            })
+            .with_children(|opponents| {
+                opponents.spawn((
+                    Text::new(tr("loading.opponents")),
+                    theme::role_text(TextRole::Eyebrow),
+                    TextColor(color::TEXT_GOLD),
+                ));
+                opponents
+                    .spawn((
+                        Node {
+                            flex_grow: 1.0,
+                            min_height: Val::Px(0.0),
+                            flex_direction: FlexDirection::Column,
+                            overflow: Overflow::scroll_y(),
+                            row_gap: Val::Px(5.0),
+                            ..default()
+                        },
+                        ScrollPosition(Vec2::new(0.0, *scroll.0.get(&3).unwrap_or(&0.0))),
+                        draft::draft_pane(3),
+                        Name::new("LoadingOpponents"),
+                    ))
+                    .with_children(|rows| {
+                        for player in prematch.players.iter().filter(|p| Some(p.team) != own_team) {
+                            draft::roster_row(rows, player, your_id, thumbnails, true, compact);
+                        }
+                    });
+            });
     });
 }
 

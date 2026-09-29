@@ -116,6 +116,7 @@ fn two_peers_share_selection_countdown_and_wait_for_every_asset_ack() {
     for i in 1..=2 {
         join(&mut rt, address(i), &format!("peer-{i}"), now, true);
     }
+    assert_eq!(view(&rt, address(1), now).remaining_ms, DRAFT_SELECTION_MS);
     send(
         &mut rt,
         address(1),
@@ -146,6 +147,7 @@ fn two_peers_share_selection_countdown_and_wait_for_every_asset_ack() {
         PrematchAction::Lock { locked: true },
         now,
     );
+    assert_eq!(view(&rt, address(1), now).phase, PrematchPhase::Countdown);
     assert_eq!(view(&rt, address(1), now).remaining_ms, 3000);
     assert_eq!(
         view(&rt, address(1), now).remaining_ms,
@@ -188,6 +190,211 @@ fn two_peers_share_selection_countdown_and_wait_for_every_asset_ack() {
         rt.world.players[&address(1)].hero.identity.hero_class,
         HeroClass::Mage
     );
+}
+
+#[test]
+fn selection_expiry_freezes_accepted_choices_and_defaults_but_waits_for_assets() {
+    let (mut rt, now) = fixture(MatchMode::Release, 1);
+    for i in 1..=2 {
+        join(&mut rt, address(i), &format!("peer-{i}"), now, true);
+    }
+    send(
+        &mut rt,
+        address(1),
+        1,
+        select(Role::Jungle, HeroClass::Mage),
+        now,
+    );
+    let expired = now + Duration::from_millis(DRAFT_SELECTION_MS.into());
+    rt.tick_prematch(expired - Duration::from_millis(1));
+    assert_eq!(
+        view(&rt, address(1), expired - Duration::from_millis(1)).remaining_ms,
+        1
+    );
+    assert!(!rt.world.players[&address(1)].draft.locked);
+    rt.tick_prematch(expired);
+    let state = view(&rt, address(1), expired);
+    assert_eq!(state.phase, PrematchPhase::Countdown);
+    assert_eq!(state.remaining_ms, COUNTDOWN_MS);
+    assert!(state.players.iter().all(|p| p.locked));
+    assert_eq!(
+        rt.world.players[&address(1)].hero.identity.hero_class,
+        HeroClass::Mage
+    );
+    assert_eq!(rt.world.players[&address(1)].draft.role, Role::Jungle);
+    assert_eq!(
+        rt.world.players[&address(2)].hero.identity.character,
+        CharacterChoice::Cube
+    );
+    assert_eq!(
+        rt.world.players[&address(2)].hero.identity.hero_class,
+        HeroClass::Warrior
+    );
+    assert!(rt.match_started_at.is_none());
+
+    // A Loaded message during countdown does not acknowledge the asset barrier.
+    for player in rt.world.players.values_mut() {
+        player.last_seen = expired;
+    }
+    send(&mut rt, address(1), 2, PrematchAction::Loaded, expired);
+    assert!(!rt.world.players[&address(1)].draft.loaded);
+    let loading = expired + Duration::from_millis(COUNTDOWN_MS.into());
+    rt.tick_prematch(loading);
+    assert_eq!(view(&rt, address(1), loading).phase, PrematchPhase::Loading);
+    send(&mut rt, address(1), 3, PrematchAction::Loaded, loading);
+    assert!(rt.match_started_at.is_none());
+    send(&mut rt, address(2), 1, PrematchAction::Loaded, loading);
+    assert_eq!(rt.world.game_state, GameState::Running);
+}
+
+#[test]
+fn incomplete_roster_does_not_consume_the_selection_window() {
+    let (mut rt, now) = fixture(MatchMode::Release, 1);
+    join(&mut rt, address(1), "one", now, true);
+    assert_eq!(view(&rt, address(1), now).remaining_ms, 0);
+    let complete = now + Duration::from_secs(45);
+    rt.tick_prematch(complete);
+    assert_eq!(view(&rt, address(1), complete).remaining_ms, 0);
+    assert!(!rt.world.players[&address(1)].draft.locked);
+    rt.world.players.get_mut(&address(1)).unwrap().last_seen = complete;
+    join(&mut rt, address(2), "two", complete, true);
+    let state = view(&rt, address(1), complete);
+    assert_eq!(state.phase, PrematchPhase::Draft);
+    assert_eq!(state.remaining_ms, DRAFT_SELECTION_MS);
+}
+
+#[test]
+fn party_gathering_finishes_before_the_selection_window_starts() {
+    use shared::match_service::MatchPreference;
+    use shared::party::PartyCommand;
+
+    let (mut rt, now) = fixture(MatchMode::Practice, 5);
+    for i in 1..=2 {
+        rt.handle_packet(
+            address(i),
+            ClientPacket::Party {
+                command: PartyCommand::Presence {
+                    nickname: format!("Party {i}"),
+                    avatar: None,
+                },
+            },
+            now,
+        );
+    }
+    let leader = rt.world.players[&address(1)].hero.identity.id;
+    let friend = rt.world.players[&address(2)].hero.identity.id;
+    let party_id = rt.party.invite(leader, friend, now).unwrap();
+    rt.party.accept(friend, party_id, now).unwrap();
+    rt.party
+        .launch(leader, MatchPreference::BotPractice, now)
+        .unwrap();
+    join(&mut rt, address(1), "leader", now, true);
+    assert!(rt.party_gathering(now));
+    assert_eq!(view(&rt, address(1), now).remaining_ms, 0);
+    let halfway = now + Duration::from_secs(30);
+    rt.tick_prematch(halfway);
+    assert_eq!(view(&rt, address(1), halfway).phase, PrematchPhase::Draft);
+    assert_eq!(view(&rt, address(1), halfway).remaining_ms, 0);
+    assert!(!rt.world.players[&address(1)].draft.locked);
+
+    // The existing bounded party gather expires first; the full draft window
+    // then belongs to the remaining roster, rather than expiring retroactively.
+    let gathered = now + crate::party::LAUNCH_GATHER;
+    rt.tick_prematch(gathered);
+    assert_eq!(
+        view(&rt, address(1), gathered).remaining_ms,
+        DRAFT_SELECTION_MS
+    );
+    rt.tick_prematch(gathered + Duration::from_millis(DRAFT_SELECTION_MS.into()));
+    assert_eq!(
+        view(&rt, address(1), gathered).phase,
+        PrematchPhase::Countdown
+    );
+}
+
+#[test]
+fn roster_change_restarts_a_complete_selection_window() {
+    let (mut rt, now) = fixture(MatchMode::Dev, 2);
+    join(&mut rt, address(1), "one", now, true);
+    let generation = rt.prematch.generation;
+    let changed = now + Duration::from_secs(29);
+    rt.world.players.get_mut(&address(1)).unwrap().last_seen = changed;
+    join(&mut rt, address(2), "two", changed, true);
+    let state = view(&rt, address(1), changed);
+    assert!(state.generation > generation);
+    assert_eq!(state.remaining_ms, DRAFT_SELECTION_MS);
+    let old_expiry = now + Duration::from_millis(DRAFT_SELECTION_MS.into());
+    rt.tick_prematch(old_expiry);
+    assert_eq!(
+        view(&rt, address(1), old_expiry).phase,
+        PrematchPhase::Draft
+    );
+    assert_eq!(
+        view(&rt, address(1), old_expiry).remaining_ms,
+        DRAFT_SELECTION_MS - 1_000
+    );
+    rt.tick_prematch(changed + Duration::from_millis(DRAFT_SELECTION_MS.into()));
+    assert_eq!(
+        view(&rt, address(1), changed).phase,
+        PrematchPhase::Countdown
+    );
+}
+
+#[test]
+fn selection_expiry_waits_for_pending_avatar_admission_before_freezing() {
+    for allowed in [false, true] {
+        let (mut rt, now) = fixture(MatchMode::Dev, 1);
+        join(&mut rt, address(1), "one", now, true);
+        let request = PrematchRequest {
+            server_epoch: rt.server_epoch,
+            match_id: rt.match_id,
+            generation: rt.prematch.generation,
+            request_id: 1,
+            action: select(Role::Support, HeroClass::Cleric),
+        };
+        // Deterministic admission completion seam, as in the generation test.
+        // Registry verification itself is covered in passport_admission tests.
+        rt.prematch.pending.insert(
+            address(1),
+            (rt.world.players[&address(1)].hero.identity.id, 1),
+        );
+        rt.world
+            .players
+            .get_mut(&address(1))
+            .unwrap()
+            .draft
+            .request_id = 1;
+        let after_expiry = now + Duration::from_secs(45);
+        rt.tick_prematch(after_expiry);
+        let waiting = view(&rt, address(1), after_expiry);
+        assert_eq!(waiting.phase, PrematchPhase::Draft);
+        assert_eq!(waiting.remaining_ms, 0);
+        assert_eq!(waiting.last_request_id, 0);
+        assert!(!rt.world.players[&address(1)].draft.locked);
+        assert!(rt.match_started_at.is_none());
+
+        rt.complete_prematch_admission(address(1), request, allowed, after_expiry);
+        rt.tick_prematch(after_expiry);
+        let state = view(&rt, address(1), after_expiry);
+        assert_eq!(state.phase, PrematchPhase::Countdown);
+        assert_eq!(state.remaining_ms, COUNTDOWN_MS);
+        assert_eq!(state.last_request_id, 1);
+        assert!(rt.world.players[&address(1)].draft.locked);
+        assert_eq!(
+            rt.world.players[&address(1)].hero.identity.hero_class,
+            if allowed {
+                HeroClass::Cleric
+            } else {
+                HeroClass::Warrior
+            }
+        );
+        assert_eq!(
+            rt.world.players[&address(1)].draft.role,
+            if allowed { Role::Support } else { Role::Mid }
+        );
+        assert_eq!(state.error.is_some(), !allowed);
+        assert!(rt.match_started_at.is_none());
+    }
 }
 #[test]
 fn stale_namespace_sequence_generation_and_unknown_avatar_preserve_choice() {
@@ -306,6 +513,13 @@ fn practice_bots_auto_ready_and_loading_timeout_returns_to_draft() {
     assert!(state.generation > generation);
     assert!(state.error.unwrap().contains("timed out"));
     assert!(!rt.world.players[&address(1)].draft.locked);
+    let retry = now + Duration::from_secs(35);
+    rt.tick_prematch(retry);
+    assert_eq!(
+        view(&rt, address(1), retry).remaining_ms,
+        DRAFT_SELECTION_MS
+    );
+    assert!(!rt.world.players[&address(1)].draft.loaded);
 }
 #[test]
 fn real_udp_peers_negotiate_and_replicate_draft_without_client_fixtures() {

@@ -4,6 +4,15 @@ All notable changes to this repository should be documented in this file.
 
 The canonical repository version lives in `Cargo.toml` under `[workspace.package].version` and follows SemVer.
 
+## [0.28.5] - 2026-09-29
+
+### Party and prematch presentation
+- Arrange up to five live avatars on a shared 3D stand: your hero in front, teammates in two rear pairs, independently of party leadership. Drag with a mouse or finger to turn the heroes; the formation stays in place.
+- Give the lobby a painted arena backdrop, dedicated scrolling social panel, stable presence refreshes, viewer-centred nameplates and clear group play controls on desktop, phone and tablet. Preserve real invites, leadership, friend access and bot/quick-match launch paths.
+- Reuse the stand during draft, countdown and loading, with each teammate's accepted class, avatar, lane and confirmation/loading state. Teammates appear on their stands after confirmation; your own live selection remains visible while choosing.
+- Give the server-owned draft a 30-second selection window after the team gathers. All locks can finish early; expiry freezes accepted choices after pending avatar checks resolve, then retains the shared countdown and asset-ready barrier.
+- Refresh downloaded avatar fallbacks on the stand and retain independent idle animations.
+
 ## [0.28.4] - 2026-09-29
 
 ### First impression polish

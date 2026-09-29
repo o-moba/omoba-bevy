@@ -9,7 +9,7 @@
 use bevy::prelude::*;
 
 use super::AppScreen;
-use crate::ui::theme::{BACKDROP, IVORY, PANEL_EDGE, PANEL_OPAQUE, SCREEN_Z};
+use crate::ui::theme::{BACKDROP, IVORY, SCREEN_Z};
 use crate::ui::widgets::{MenuControl, MenuTypography};
 
 pub struct FrontendWidgetsPlugin;
@@ -72,22 +72,6 @@ pub fn screen_root(screen: AppScreen, name: &str) -> impl Bundle {
         ZIndex(SCREEN_Z),
         bevy::state::state_scoped::DespawnOnExit(screen),
         Name::new(name.to_owned()),
-    )
-}
-
-/// A short labelled strip inside a column (used for "last match" on home).
-pub fn panel_row() -> impl Bundle {
-    (
-        Node {
-            flex_direction: FlexDirection::Column,
-            row_gap: Val::Px(2.0),
-            padding: UiRect::axes(Val::Px(12.0), Val::Px(8.0)),
-            border: UiRect::all(Val::Px(1.0)),
-            border_radius: BorderRadius::all(Val::Px(8.0)),
-            ..default()
-        },
-        BackgroundColor(PANEL_OPAQUE),
-        BorderColor::all(PANEL_EDGE),
     )
 }
 

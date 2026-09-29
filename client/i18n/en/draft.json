@@ -15,7 +15,7 @@
   "draft.roster.locked": "LOCKED",
   "draft.roster.picking": "PICKING",
   "draft.title": "Assemble your team",
-  "draft.subtitle": "{count} / {needed} players · your side is assigned automatically",
+  "draft.subtitle": "Hero · class · lane · 30 seconds to choose",
   "draft.your_team": "YOUR TEAM",
   "draft.avatars.included": "INCLUDED HEROES",
   "draft.avatars.studio": "EKZA STUDIO · LIBRARY",
@@ -23,5 +23,8 @@
   "draft.button.connect_ekza": "Connect Ekza",
   "draft.button.syncing": "Syncing…",
   "draft.button.unlock": "Unlock choice",
-  "draft.button.lock_in": "Lock in"
+  "draft.button.lock_in": "Lock in",
+  "draft.timer.remaining": "LOCK IN · {seconds}s",
+  "draft.timer.gathering": "Waiting for team…",
+  "draft.stage.rotate": "Drag to rotate"
 }

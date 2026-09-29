@@ -15,7 +15,7 @@
   "draft.roster.locked": "ЗАБЛОКИРОВАН",
   "draft.roster.picking": "ВЫБОР",
   "draft.title": "Соберите команду",
-  "draft.subtitle": "{count} / {needed} игроков · сторона назначается автоматически",
+  "draft.subtitle": "Герой · класс · линия · 30 секунд на выбор",
   "draft.your_team": "ВАША КОМАНДА",
   "draft.avatars.included": "ВСТРОЕННЫЕ ГЕРОИ",
   "draft.avatars.studio": "EKZA STUDIO · БИБЛИОТЕКА",
@@ -23,5 +23,8 @@
   "draft.button.connect_ekza": "Подключить Ekza",
   "draft.button.syncing": "Синхронизация…",
   "draft.button.unlock": "Изменить выбор",
-  "draft.button.lock_in": "Подтвердить выбор"
+  "draft.button.lock_in": "Подтвердить выбор",
+  "draft.timer.remaining": "ВЫБОР · {seconds}с",
+  "draft.timer.gathering": "Ожидаем команду…",
+  "draft.stage.rotate": "Потяни, чтобы повернуть"
 }

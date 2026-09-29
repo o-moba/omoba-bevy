@@ -9,6 +9,10 @@
     "phone": [
       844,
       390
+    ],
+    "tablet": [
+      1180,
+      820
     ]
   },
   "runs": {
@@ -112,6 +116,19 @@
       "note": "Offline practice from Home: hero picker, match, target, game menu, settings. Logical size without a scale override, so HiDPI displays give 2x frames; its pass flag also checks the saved server endpoint.",
       "sources": [
         "client/src/qa/offline_qa.rs"
+      ]
+    },
+    "party-stage": {
+      "area": "09-party-stage",
+      "harness": "client/src/qa/frontend_qa/party.rs",
+      "server": null,
+      "env": {
+        "OMOBA_PARTY_QA": "1",
+        "OMOBA_FRONTEND_QA_OUTPUT": "{out}"
+      },
+      "note": "Production party and prematch rendering with clearly labelled synthetic PartyView and GameStateSnapshot data; no live party or draft progression is implied. Desktop 1280×720, phone 844×390 and tablet 1180×820 are desktop-build viewport simulations. Rotation and social scrolling use scripted raw touch input, not physical device input.",
+      "sources": [
+        "client/src/qa/frontend_qa/party.rs"
       ]
     }
   },
@@ -795,6 +812,126 @@
       ],
       "route": "Game menu → Exit to home",
       "source": "client/src/frontend/home.rs"
+    },
+    {
+      "id": "party-stage-solo",
+      "title": "Party stage · solo",
+      "run": "party-stage",
+      "frame": "01-party-solo.png",
+      "profiles": [
+        "desktop",
+        "phone",
+        "tablet"
+      ],
+      "route": "Home → Party & friends",
+      "source": "client/src/frontend/lobby.rs",
+      "app_screen": "Lobby",
+      "fixture": "synthetic PartyView, labelled; production solo stage and empty seats"
+    },
+    {
+      "id": "party-stage-three",
+      "title": "Party stage · three members",
+      "run": "party-stage",
+      "frame": "02-party-three.png",
+      "profiles": [
+        "desktop",
+        "phone",
+        "tablet"
+      ],
+      "route": "Party → accept an invitation",
+      "source": "client/src/frontend/lobby.rs",
+      "app_screen": "Lobby",
+      "fixture": "synthetic PartyView, labelled; three members with the local nonleader in the centre"
+    },
+    {
+      "id": "party-stage-five",
+      "title": "Party stage · five members",
+      "run": "party-stage",
+      "frame": "03-party-five.png",
+      "profiles": [
+        "desktop",
+        "phone",
+        "tablet"
+      ],
+      "route": "Party → invite friends until full",
+      "source": "client/src/frontend/lobby.rs",
+      "app_screen": "Lobby",
+      "fixture": "synthetic PartyView, labelled; five members and long multilingual names"
+    },
+    {
+      "id": "party-stage-rotated",
+      "title": "Party stage · heroes rotated",
+      "run": "party-stage",
+      "frame": "04-party-rotated.png",
+      "profiles": [
+        "desktop",
+        "phone",
+        "tablet"
+      ],
+      "route": "Party → drag the heroes",
+      "source": "client/src/frontend/lobby.rs",
+      "app_screen": "Lobby",
+      "fixture": "synthetic PartyView, labelled; scripted raw touch rotation, not physical device input"
+    },
+    {
+      "id": "party-stage-social-scroll",
+      "title": "Party stage · social panel scrolled",
+      "run": "party-stage",
+      "frame": "05-party-social-scroll.png",
+      "profiles": [
+        "desktop",
+        "phone",
+        "tablet"
+      ],
+      "route": "Party → scroll the social panel",
+      "source": "client/src/frontend/lobby.rs",
+      "app_screen": "Lobby",
+      "fixture": "synthetic PartyView, labelled; scripted raw touch scrolling, not physical device input"
+    },
+    {
+      "id": "party-stage-draft",
+      "title": "Party stage · team draft",
+      "run": "party-stage",
+      "frame": "06-party-draft.png",
+      "profiles": [
+        "desktop",
+        "phone",
+        "tablet"
+      ],
+      "route": "Party leader → play → team draft",
+      "source": "client/src/frontend/draft.rs",
+      "app_screen": "Draft",
+      "fixture": "synthetic GameStateSnapshot, labelled; production five-member draft rendering, no server timer exercised"
+    },
+    {
+      "id": "party-stage-countdown",
+      "title": "Party stage · shared countdown",
+      "run": "party-stage",
+      "frame": "07-party-countdown.png",
+      "profiles": [
+        "desktop",
+        "phone",
+        "tablet"
+      ],
+      "route": "Draft → all locked or selection deadline expires",
+      "source": "client/src/frontend/loading.rs",
+      "app_screen": "Loading",
+      "fixture": "synthetic GameStateSnapshot, labelled; production five-member countdown rendering, no live progression"
+    },
+    {
+      "id": "party-stage-loading",
+      "title": "Party stage · asset loading",
+      "run": "party-stage",
+      "frame": "08-party-loading.png",
+      "profiles": [
+        "desktop",
+        "phone",
+        "tablet"
+      ],
+      "route": "Countdown → wait for asset readiness",
+      "source": "client/src/frontend/loading.rs",
+      "app_screen": "Loading",
+      "fixture": "synthetic GameStateSnapshot, labelled; production five-member loading rendering, no live asset-ready barrier exercised"
     }
   ],
   "gaps": [
@@ -807,10 +944,10 @@
     },
     {
       "id": "party-lobby-members",
-      "title": "Party lobby with members and invites",
+      "title": "Party lobby with live peers and invitations",
       "route": "Party → invite a friend",
       "source": "client/src/frontend/lobby.rs",
-      "needs": "a scripted friend peer for OMOBA_FRONTEND_QA_ACCEPT_PARTY"
+      "needs": "a scripted friend peer for OMOBA_FRONTEND_QA_ACCEPT_PARTY; party-stage captures synthetic party layouts, not live invitation delivery"
     },
     {
       "id": "searching-real",

@@ -121,12 +121,29 @@ Harness: `client/src/qa/offline_qa.rs`; server: none; env: `OMOBA_OFFLINE_SMOKE_
 | Offline · settings (bottom) | `07-settings-bottom.png` | desktop, phone | Settings, scrolled | `client/src/pause_menu.rs` |  |
 | Offline · back home | `08-return-home.png` | desktop, phone | Game menu → Exit to home | `client/src/frontend/home.rs` |  |
 
+## 09-party-stage · `party-stage`
+
+Production party and prematch rendering with clearly labelled synthetic PartyView and GameStateSnapshot data; no live party or draft progression is implied. Desktop 1280×720, phone 844×390 and tablet 1180×820 are desktop-build viewport simulations. Rotation and social scrolling use scripted raw touch input, not physical device input.
+
+Harness: `client/src/qa/frontend_qa/party.rs`; server: none; env: `OMOBA_PARTY_QA=1 OMOBA_FRONTEND_QA_OUTPUT={out}`
+
+| Screen | Frame | Profiles | How a player gets there | Code | Note |
+| --- | --- | --- | --- | --- | --- |
+| Party stage · solo | `01-party-solo.png` | desktop, phone, tablet | Home → Party & friends | `client/src/frontend/lobby.rs` | synthetic PartyView, labelled; production solo stage and empty seats |
+| Party stage · three members | `02-party-three.png` | desktop, phone, tablet | Party → accept an invitation | `client/src/frontend/lobby.rs` | synthetic PartyView, labelled; three members with the local nonleader in the centre |
+| Party stage · five members | `03-party-five.png` | desktop, phone, tablet | Party → invite friends until full | `client/src/frontend/lobby.rs` | synthetic PartyView, labelled; five members and long multilingual names |
+| Party stage · heroes rotated | `04-party-rotated.png` | desktop, phone, tablet | Party → drag the heroes | `client/src/frontend/lobby.rs` | synthetic PartyView, labelled; scripted raw touch rotation, not physical device input |
+| Party stage · social panel scrolled | `05-party-social-scroll.png` | desktop, phone, tablet | Party → scroll the social panel | `client/src/frontend/lobby.rs` | synthetic PartyView, labelled; scripted raw touch scrolling, not physical device input |
+| Party stage · team draft | `06-party-draft.png` | desktop, phone, tablet | Party leader → play → team draft | `client/src/frontend/draft.rs` | synthetic GameStateSnapshot, labelled; production five-member draft rendering, no server timer exercised |
+| Party stage · shared countdown | `07-party-countdown.png` | desktop, phone, tablet | Draft → all locked or selection deadline expires | `client/src/frontend/loading.rs` | synthetic GameStateSnapshot, labelled; production five-member countdown rendering, no live progression |
+| Party stage · asset loading | `08-party-loading.png` | desktop, phone, tablet | Countdown → wait for asset readiness | `client/src/frontend/loading.rs` | synthetic GameStateSnapshot, labelled; production five-member loading rendering, no live asset-ready barrier exercised |
+
 ## Not captured yet
 
 | Screen | How a player gets there | Code | What a capture needs |
 | --- | --- | --- | --- |
 | Settings · Language (English / 简体中文) | Game menu → Settings → Language | `client/src/pause_menu.rs` | PR #62 (i18n, 0.26.0) merged; then map it under the shell run and capture with OMOBA_LANGUAGE for each locale |
-| Party lobby with members and invites | Party → invite a friend | `client/src/frontend/lobby.rs` | a scripted friend peer for OMOBA_FRONTEND_QA_ACCEPT_PARTY |
+| Party lobby with live peers and invitations | Party → invite a friend | `client/src/frontend/lobby.rs` | a scripted friend peer for OMOBA_FRONTEND_QA_ACCEPT_PARTY; party-stage captures synthetic party layouts, not live invitation delivery |
 | Searching with a real queue | PLAY → Find match (release mode) | `client/src/frontend/searching.rs` | a release-mode server and queue peers |
 | Post-match with a real result | Finish a match | `client/src/frontend/postmatch.rs` | a harness that plays a short match to the end |
 | Game menu debug tools page, debug console, debug HUD | Game menu → Practice tools; OMOBA_DEBUG_UI=1 | `client/src/debug/tools_page.rs` | a harness run with OMOBA_DEBUG_UI=1 that opens the page |

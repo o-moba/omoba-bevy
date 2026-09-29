@@ -1,5 +1,11 @@
 # Feature Inventory
 
+## Party and prematch stage (0.28.5)
+
+The party lobby displays up to five live avatars, with the viewer in the centre foreground and teammates staggered behind. Mouse or touch dragging turns the heroes without moving the formation. Desktop, phone and tablet have a separate scrolling social panel for invitations, party members and online players. Current server presence is shown as “In lobby”; there is no invented ready vote. Bot practice and public quick match keep the existing leader-controlled party flow.
+
+The same renderer serves the authoritative draft and shared countdown/loading preview. Class, avatar, lane and lock/readiness labels come from server snapshots. The local hero stays visible while choosing; teammates' models appear on confirmation, with empty stands labelled PICKING beforehand. Once the roster has gathered, selection lasts up to 30 seconds and can end early when everyone locks. At expiry, accepted selections lock after any pending avatar-admission check finishes; loading still waits for every client's assets. This does not add cross-server invitations, late joining or new matchmaking rules.
+
 ## First impression UI (0.28.4)
 
 Home owns a unified, inset header on desktop and tablets, including its touch utility controls, with the build label retained inside the footer. Hero Select includes the selected 3D character on compact phones, larger portrait tiles, class icons, touch catalogue scrolling and a separate admission notice. Settings uses a shared icon rail, aligned cards, real volume/lighting sliders and fixed close/back actions. Touch scrolling does not change slider values. Background paintings reveal even when their window is unfocused.

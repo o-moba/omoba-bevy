@@ -15,7 +15,7 @@
   "draft.roster.locked": "已锁定",
   "draft.roster.picking": "选择中",
   "draft.title": "组建你的队伍",
-  "draft.subtitle": "{count} / {needed} 名玩家 · 阵营自动分配",
+  "draft.subtitle": "英雄 · 职业 · 路线 · 30秒选择时间",
   "draft.your_team": "你的队伍",
   "draft.avatars.included": "内置英雄",
   "draft.avatars.studio": "EKZA STUDIO · 收藏库",
@@ -23,5 +23,8 @@
   "draft.button.connect_ekza": "连接 Ekza",
   "draft.button.syncing": "同步中…",
   "draft.button.unlock": "解除锁定",
-  "draft.button.lock_in": "锁定"
+  "draft.button.lock_in": "锁定",
+  "draft.timer.remaining": "锁定倒计时 · {seconds}秒",
+  "draft.timer.gathering": "等待队伍…",
+  "draft.stage.rotate": "拖动旋转"
 }
