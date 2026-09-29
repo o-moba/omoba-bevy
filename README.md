@@ -297,8 +297,9 @@ identifiers remain separate from display handles and avatar ownership proofs.
 
 ## Licenses
 
-Server source: **AGPL-3.0-only**. Client and reusable original source:
-**MPL-2.0**. Original documentation and identified Verdant art:
+Server and `common` combat source: **AGPL-3.0-only**. Original client and
+`shared` source files: **MPL-2.0**. The client links `common` for Offline Practice;
+see the license map for combined distribution. Original documentation and identified Verdant art:
 **CC-BY-4.0**. Existing CC0/OFL and other dependency/asset terms remain unchanged.
 Commercial forks are welcome under the applicable terms.
 

@@ -19,7 +19,7 @@ use crate::vision;
 
 /// Each defending lane unlocks front-to-back. A base unlocks when any
 /// configured nonempty lane is cleared; an arena with no lane towers is open.
-pub(crate) fn structure_is_protected(structures: &HashMap<u64, Structure>, target_id: u64) -> bool {
+pub fn structure_is_protected(structures: &HashMap<u64, Structure>, target_id: u64) -> bool {
     let Some(target) = structures.get(&target_id) else {
         return false;
     };
@@ -53,7 +53,7 @@ pub(crate) fn structure_is_protected(structures: &HashMap<u64, Structure>, targe
     }
 }
 
-pub(crate) fn apply_structure_damage(
+pub fn apply_structure_damage(
     structures: &mut HashMap<u64, Structure>,
     target_id: u64,
     damage: f32,
@@ -86,7 +86,7 @@ pub(crate) fn apply_structure_damage(
     )
 }
 
-pub(crate) fn simulate_tower_attacks(world: &mut GameWorld, now: Instant) -> Vec<CombatEvent> {
+pub fn simulate_tower_attacks(world: &mut GameWorld, now: Instant) -> Vec<CombatEvent> {
     if !matches!(world.game_state, GameState::Running) {
         return Vec::new();
     }

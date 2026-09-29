@@ -28,6 +28,9 @@ struct Qa {
     hit: bool,
     restored: bool,
     expected_server: String,
+    target_id: u64,
+    kit_feedback: bool,
+    reentered: bool,
 }
 impl Plugin for OfflineQaPlugin {
     fn build(&self, app: &mut App) {
@@ -44,6 +47,9 @@ impl Plugin for OfflineQaPlugin {
             moved: 0.0,
             hit: false,
             restored: false,
+            target_id: 0,
+            kit_feedback: false,
+            reentered: false,
             expected_server: std::env::var("GAME_SERVER_ADDR").unwrap_or_default(),
         })
         .insert_resource(bevy::winit::WinitSettings::continuous())
@@ -63,6 +69,10 @@ fn focus(windows: Query<Entity, With<PrimaryWindow>>, _main: bevy::ecs::system::
     });
 }
 fn capture(world: &mut World, qa: &Qa, name: &str) {
+    // Reuse already verified states when resuming a failed smoke in this directory.
+    if qa.directory.join(name).exists() {
+        return;
+    }
     world
         .spawn(Screenshot::primary_window())
         .observe(save_to_disk(qa.directory.join(name)));
@@ -131,7 +141,7 @@ fn drive(world: &mut World) {
             advance = press(world, "HomeOfflinePractice");
         }
         2 if age > 4.0 && screen == AppScreen::HeroSelect => {
-            press(world, "ClassButton-mage");
+            press(world, "ClassButton-dawnweaver");
             advance = true;
         }
         3 if age > 2.0 => {
@@ -151,6 +161,16 @@ fn drive(world: &mut World) {
                 world.entity_mut(entity).insert(MovementTarget {
                     target: destination,
                 });
+                world.write_message(NetworkCommand::Debug(
+                    shared::debug::DebugCommand::Practice(
+                        shared::practice::PracticeCommand::ClearBots,
+                    ),
+                ));
+                world.write_message(NetworkCommand::Debug(
+                    shared::debug::DebugCommand::Practice(
+                        shared::practice::PracticeCommand::SpawnDummy,
+                    ),
+                ));
                 capture(world, &qa, "03-practice.png");
                 advance = true;
             }
@@ -162,41 +182,46 @@ fn drive(world: &mut World) {
             {
                 qa.moved = t.translation.distance(qa.origin);
             }
-            // Select the bot like a click would, so the hero target plate
-            // shows it (VARIANTS.md `offline-target`).
-            let bot = world
-                .query::<(Entity, &NetworkPlayerId)>()
+            let dummy = world
+                .query::<(
+                    Entity,
+                    &NetworkPlayerId,
+                    &Transform,
+                    &crate::combat::CombatStats,
+                )>()
                 .iter(world)
-                .find(|(_, id)| id.0 == 2)
-                .map(|(entity, _)| entity);
-            if let Some(bot) = bot {
+                .find(|(_, id, _, stats)| id.0 != 1 && stats.max_hp >= shared::debug::DUMMY_MAX_HP)
+                .map(|(e, id, t, _)| (e, id.0, t.translation));
+            if let Some((entity, id, position)) = dummy {
+                qa.target_id = id;
                 let mut target = world.resource_mut::<crate::combat::TargetState>();
-                target.selected_entity = Some(bot);
+                target.selected_entity = Some(entity);
                 target.selected_target = Some(TargetId {
                     kind: TargetKind::Player,
-                    id: 2,
+                    id,
+                });
+                world.write_message(NetworkCommand::CastSkill {
+                    slot: 0,
+                    aim: Vec2::new(position.x, position.z),
                 });
             }
-            world.write_message(NetworkCommand::BasicAttack {
-                target: TargetId {
-                    kind: TargetKind::Player,
-                    id: 2,
-                },
-            });
-            world.write_message(NetworkCommand::Cast {
-                target: TargetId {
-                    kind: TargetKind::Player,
-                    id: 2,
-                },
-                slot: 0,
-            });
             advance = true;
         }
         7 if age > 1.0 => {
             qa.hit = world
                 .query::<(&NetworkPlayerId, &crate::combat::CombatStats)>()
                 .iter(world)
-                .any(|(id, c)| id.0 == 2 && c.hp < c.max_hp);
+                .any(|(id, c)| id.0 == qa.target_id && c.hp < c.max_hp);
+            qa.kit_feedback = world
+                .query::<(
+                    &NetworkPlayerId,
+                    &crate::net::PlayerLoadout,
+                    &crate::net::PlayerSkillCooldowns,
+                )>()
+                .iter(world)
+                .any(|(id, kit, cooldowns)| {
+                    id.0 == 1 && kit.0.is_some() && cooldowns.remaining_secs[0] > 0.0
+                });
             capture(world, &qa, "04-attacked-target.png");
             advance = true;
         }
@@ -209,27 +234,16 @@ fn drive(world: &mut World) {
             advance = true;
         }
         10 if age > 0.5 => {
-            world.resource_mut::<PauseMenuState>().in_settings = true;
-            advance = true;
+            advance = press(world, "PauseMenuPracticeButton");
         }
         11 if age > 1.0 => {
-            capture(world, &qa, "06-settings-top.png");
+            capture(world, &qa, "06-practice-controls.png");
             advance = true;
         }
         12 if age > 0.5 => {
-            // Layout is genuine; separate real-layout tests exercise touch gestures.
-            for (name, mut scroll) in world
-                .query::<(&Name, &mut ScrollPosition)>()
-                .iter_mut(world)
-            {
-                if name.as_str() == "PauseMenuSettingsSection" {
-                    scroll.y = 100000.0;
-                }
-            }
-            advance = true;
+            advance = press(world, "PauseMenuPracticeGodModeButton");
         }
-        13 if age > 1.0 => {
-            capture(world, &qa, "07-settings-bottom.png");
+        13 if age > 0.5 => {
             advance = true;
         }
         14 if age > 0.5 => {
@@ -248,22 +262,48 @@ fn drive(world: &mut World) {
             capture(world, &qa, "08-return-home.png");
             advance = true;
         }
-        16 if age > 2.0 => {
+        16 if age > 0.5 => {
+            advance = press(world, "HomeOfflinePractice");
+        }
+        17 if age > 2.0 && screen == AppScreen::HeroSelect => {
+            press(world, "ClassButton-wildspark");
+            advance = true;
+        }
+        18 if age > 1.0 => {
+            advance = press(world, "FindMatchButton");
+        }
+        19 if age > 5.0 && screen == AppScreen::InMatch => {
+            qa.reentered = world.resource::<ClientSession>().is_offline()
+                && world.resource::<ClientSession>().join_confirmed()
+                && world
+                    .query_filtered::<&crate::net::NetworkHeroClass, With<Player>>()
+                    .iter(world)
+                    .any(|class| class.0 == shared::HeroClass::Wildspark);
+            capture(world, &qa, "09-reentered-wildspark.png");
+            advance = true;
+        }
+        20 if age > 1.0 => {
+            world.write_message(SessionUiCommand::LeaveMatch);
+            advance = true;
+        }
+        21 if age > 2.0 && screen == AppScreen::Home => {
             let files = [
                 "01-home.png",
                 "02-hero-picker.png",
                 "03-practice.png",
                 "04-attacked-target.png",
                 "05-game-menu.png",
-                "06-settings-top.png",
-                "07-settings-bottom.png",
+                "06-practice-controls.png",
+                "09-reentered-wildspark.png",
                 "08-return-home.png",
             ];
             let passed = qa.moved > 1.0
                 && qa.hit
                 && qa.restored
+                && qa.kit_feedback
+                && qa.reentered
                 && files.iter().all(|f| qa.directory.join(f).is_file());
-            let report = serde_json::json!({"pass":passed,"moved_metres":qa.moved,"target_damaged":qa.hit,"returned_home_and_restored_online":qa.restored,"screenshots":files,"expected_online_endpoint":qa.expected_server,"restored_online_endpoint":world.resource::<ClientSession>().server_addr(),"physical_ipad_verified":false,"method":"Native renderer, production UI and local packet handlers, synthetic actions; scroll offset for visual capture; touch gestures tested separately against actual UI layout."});
+            let report = serde_json::json!({"pass":passed,"standard_kit_cooldown_feedback":qa.kit_feedback,"reentered_wildspark":qa.reentered,"moved_metres":qa.moved,"target_damaged":qa.hit,"returned_home_and_restored_online":qa.restored,"screenshots":files,"expected_online_endpoint":qa.expected_server,"restored_online_endpoint":world.resource::<ClientSession>().server_addr(),"physical_ipad_verified":false,"method":"Native renderer, production UI and local packet handlers, synthetic actions; one English 852x393 viewport."});
             std::fs::write(
                 qa.directory.join("result.json"),
                 serde_json::to_vec_pretty(&report).unwrap(),

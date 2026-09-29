@@ -626,3 +626,113 @@ fn blink_uses_legal_landing_and_advances_authoritative_movement_sequence() {
     );
     assert!(w.players[&addr(1)].hero.utility.dash_sequence > sequence);
 }
+
+/// Every public standard slot must produce combat state, beyond paying a cost
+/// or recording an accepted request. Named tests above pin each effect's rules.
+#[test]
+fn every_standard_slot_produces_its_actual_effect_or_status() {
+    for class in HeroClass::ALL.into_iter().filter(|c| c.is_standard()) {
+        for slot in 0..4 {
+            let (mut world, now, _) = fixture(class);
+            // Nearby targets exercise targeted, radial and directional skills.
+            world.players.get_mut(&addr(1)).unwrap().hero.x = 10.0;
+            world.players.get_mut(&addr(2)).unwrap().hero.x = 13.0;
+            add_player(
+                &mut world,
+                3,
+                HeroClass::Warrior,
+                Team::Green,
+                [12.0, 0.0],
+                now,
+            );
+            let before = world.players[&addr(1)].hero.skills.clone();
+            let before_pos = [
+                world.players[&addr(1)].hero.x,
+                world.players[&addr(1)].hero.z,
+            ];
+            cast(&mut world, addr(1), slot, [13.0, 0.0], 1, now);
+            let after = &world.players[&addr(1)].hero;
+            let mut a = after.skills.clone();
+            let mut b = before;
+            // These prove admission only, not that a skill did anything.
+            a.request_id = 0;
+            b.request_id = 0;
+            a.recovery_until = None;
+            b.recovery_until = None;
+            a.advanced.last_combat = None;
+            b.advanced.last_combat = None;
+            let immediate = !world.skill_runtime.effects.is_empty()
+                || a != b
+                || before_pos != [after.x, after.z]
+                || world.players[&addr(2)].hero.hp < 1000.0;
+            let events = advance(&mut world, now, 1.0);
+            let prepared_curse = if class == HeroClass::Veilstalker && slot == 1 {
+                advance(&mut world, now, 2.6);
+                let owner = world.players[&addr(1)].hero.identity.id;
+                let victim = world.players[&addr(2)].hero.identity.id;
+                strike(&mut world, owner, victim, now + duration(2.7));
+                world.players[&addr(2)].hero.skills.advanced.charm.is_some()
+            } else {
+                false
+            };
+            assert!(
+                immediate || !events.is_empty() || prepared_curse,
+                "{class:?} slot {slot} produced no combat effect"
+            );
+        }
+    }
+}
+
+#[test]
+fn clockwork_passive_stacks_real_bonus_damage_and_resets_on_expiry() {
+    let (mut w, now, victim) = fixture(HeroClass::Orbitwright);
+    let owner = w.players[&addr(1)].hero.identity.id;
+    let first: f32 = strike(&mut w, owner, victim, now)
+        .iter()
+        .map(|e| e.amount)
+        .sum();
+    let second: f32 = strike(&mut w, owner, victim, now + duration(0.2))
+        .iter()
+        .map(|e| e.amount)
+        .sum();
+    assert!(second > first);
+    assert_eq!(w.players[&addr(1)].hero.skills.advanced.stacks, 2);
+    let expired: f32 = strike(&mut w, owner, victim, now + duration(5.0))
+        .iter()
+        .map(|e| e.amount)
+        .sum();
+    assert_eq!(expired, first);
+    assert_eq!(w.players[&addr(1)].hero.skills.advanced.stacks, 1);
+}
+#[test]
+fn essence_and_souls_passives_consume_actual_lethal_receipts_once() {
+    for class in [HeroClass::Emberveil, HeroClass::Chainkeeper] {
+        let (mut w, now, victim) = fixture(class);
+        let owner = w.players[&addr(1)].hero.identity.id;
+        w.players.get_mut(&addr(1)).unwrap().hero.hp = 100.0;
+        w.players.get_mut(&addr(2)).unwrap().hero.hp = 1.0;
+        let events = strike(&mut w, owner, victim, now);
+        assert!(events.iter().any(|e| e.killed));
+        observe(&mut w, &events, now);
+        observe(&mut w, &events, now);
+        if class == HeroClass::Emberveil {
+            assert_eq!(w.players[&addr(1)].hero.hp, 140.0);
+        } else {
+            assert_eq!(
+                effects(&w, now)
+                    .iter()
+                    .filter(|e| e.kind == EffectVisualKind::Soul)
+                    .count(),
+                1
+            );
+            w.players.get_mut(&addr(1)).unwrap().hero.x = 6.0;
+            advance(&mut w, now, 0.1);
+            assert_eq!(w.players[&addr(1)].hero.skills.advanced.souls, 1);
+            assert!(
+                !effects(&w, now + duration(0.1))
+                    .iter()
+                    .any(|e| e.kind == EffectVisualKind::Soul)
+            );
+        }
+    }
+}

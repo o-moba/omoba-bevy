@@ -17,7 +17,7 @@ use crate::game_world::GameWorld;
 use crate::{hero_stats, hero_timers, vision};
 
 /// Spends a skill point on the given slot, capped by the class ability's max rank.
-pub(crate) fn apply_skill_upgrade(player: &mut ConnectedPlayer, slot: u8) {
+pub fn apply_skill_upgrade(player: &mut ConnectedPlayer, slot: u8) {
     let Some(skill_slot) = SkillSlot::from_index(slot) else {
         return;
     };
@@ -36,7 +36,7 @@ pub(crate) fn apply_skill_upgrade(player: &mut ConnectedPlayer, slot: u8) {
     }
 }
 
-pub(crate) fn handle_cast_request(
+pub fn handle_cast_request(
     world: &mut GameWorld,
     caster_addr: SocketAddr,
     target: TargetId,
@@ -206,7 +206,7 @@ pub(crate) fn handle_cast_request(
     );
 }
 
-pub(crate) fn record_player_action(player: &mut ConnectedPlayer, slot: SkillSlot) {
+pub fn record_player_action(player: &mut ConnectedPlayer, slot: SkillSlot) {
     player.hero.last_action.sequence = player.hero.last_action.sequence.wrapping_add(1);
     if player.hero.last_action.sequence == 0 {
         player.hero.last_action.sequence = 1;

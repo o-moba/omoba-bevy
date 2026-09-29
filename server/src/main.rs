@@ -62,3 +62,6 @@ use std::io;
 fn main() -> io::Result<()> {
     runtime::run()
 }
+
+#[cfg(test)]
+mod offline_parity_tests;

@@ -1,3 +1,4 @@
+use shared::vision::*;
 use std::net::{SocketAddr, UdpSocket};
 use std::time::{Duration, Instant};
 
@@ -420,7 +421,8 @@ fn launched_homing_hits_after_concealment_without_replication_leak() {
 fn bots_minions_and_towers_do_not_acquire_or_keep_concealed_heroes() {
     let (mut rt, a, b, now) = fixture();
     assert!(
-        rt.bot_target(Team::Green, [-18.0, -8.0], Lane::Mid, now)
+        rt.combat_host()
+            .bot_target(Team::Green, [-18.0, -8.0], Lane::Mid, now)
             .is_none()
     );
     rt.world
@@ -450,7 +452,8 @@ fn bots_minions_and_towers_do_not_acquire_or_keep_concealed_heroes() {
     );
     rt.world.players.get_mut(&a).unwrap().hero.x = -20.0;
     assert!(
-        rt.bot_target(Team::Green, [-20.0, -8.0], Lane::Mid, now)
+        rt.combat_host()
+            .bot_target(Team::Green, [-20.0, -8.0], Lane::Mid, now)
             .is_some()
     );
     simulate_tower_attacks(&mut rt.world, now);

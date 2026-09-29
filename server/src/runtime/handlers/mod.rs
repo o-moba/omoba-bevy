@@ -7,10 +7,6 @@
 //! career registration), `Break` returns before it, exactly where the old
 //! single `match` returned early.
 
-mod combat;
 mod join;
-mod movement;
 mod session;
-mod shop;
 mod tools;
-mod utility;

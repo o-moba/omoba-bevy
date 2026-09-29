@@ -24,7 +24,7 @@ use crate::sim::towers::{apply_structure_damage, structure_is_protected};
 use crate::vision;
 use crate::world::structure_radius;
 
-pub(crate) fn apply_minion_damage(
+pub fn apply_minion_damage(
     players: &mut HashMap<SocketAddr, ConnectedPlayer>,
     minions: &mut HashMap<u64, Minion>,
     target_id: u64,
@@ -59,7 +59,7 @@ pub(crate) fn apply_minion_damage(
     )
 }
 
-pub(crate) fn award_minion_kill_rewards(
+pub fn award_minion_kill_rewards(
     players: &mut HashMap<SocketAddr, ConnectedPlayer>,
     attacker_team: Team,
 ) {
@@ -98,7 +98,7 @@ pub(crate) fn award_minion_kill_rewards(
     }
 }
 
-pub(crate) fn simulate_minions(world: &mut GameWorld, tick: TickCtx) -> Vec<CombatEvent> {
+pub fn simulate_minions(world: &mut GameWorld, tick: TickCtx) -> Vec<CombatEvent> {
     let TickCtx { now, dt } = tick;
     if !matches!(world.game_state, GameState::Running) {
         return Vec::new();

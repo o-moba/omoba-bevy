@@ -6,6 +6,7 @@ edition.workspace = true
 license = "AGPL-3.0-only"
 
 [dependencies]
+common = { path = "../common" }
 tokio = { version = "1.49.0", features = ["rt", "time", "sync", "macros"] }
 ed25519-dalek = "2.2.0"
 getrandom = "0.3.4"
@@ -17,6 +18,7 @@ omoba-career-store = { path = "../career-store" }
 omoba-passport = { path = "../passport" }
 
 [dev-dependencies]
+common = { path = "../common", features = ["test-support"] }
 # Only the PostgreSQL fixtures query the database directly; production code
 # reaches it through omoba-career-store.
 sqlx = { version = "0.8.6", default-features = false, features = ["postgres", "runtime-tokio-rustls", "json"] }

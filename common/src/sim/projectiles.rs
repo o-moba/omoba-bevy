@@ -15,15 +15,15 @@ use crate::game_world::{GameWorld, TickCtx};
 /// Flies every projectile one step and resolves the impacts. The tick still
 /// runs the minion-targeted and the other projectiles as two filtered passes
 /// at their historical points in the frame; tests exercise the whole path.
-#[cfg(test)]
-pub(crate) fn simulate_projectiles(world: &mut GameWorld, tick: TickCtx) -> Vec<CombatEvent> {
+#[cfg(any(test, feature = "test-support"))]
+pub fn simulate_projectiles(world: &mut GameWorld, tick: TickCtx) -> Vec<CombatEvent> {
     simulate_projectiles_filtered(world, tick, |_| true)
 }
 
 /// Flies only the projectiles whose target kind passes `targets`; the others
 /// are left untouched. The tick uses it to keep the minion-targeted pass at
 /// its historical point in the frame, ahead of the rest of the simulation.
-pub(crate) fn simulate_projectiles_filtered(
+pub fn simulate_projectiles_filtered(
     world: &mut GameWorld,
     tick: TickCtx,
     targets: impl Fn(TargetKind) -> bool,
@@ -228,7 +228,7 @@ fn step_homing(
     swept_sphere_intersects_target(start, end, target_pos, projectile.radius + target_radius)
 }
 
-pub(crate) fn swept_sphere_intersects_target(
+pub fn swept_sphere_intersects_target(
     start: Vec3f,
     end: Vec3f,
     target: Vec3f,

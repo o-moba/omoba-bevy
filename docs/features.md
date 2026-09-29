@@ -1,5 +1,11 @@
 # Feature Inventory
 
+## Full-roster Offline Practice (0.31.0)
+
+Home → Offline Practice accepts all 16 classes without a server, account, matchmaking or gameplay socket. The internal `common` crate owns the same authoritative combat used online: all skills/passives, targeting, cooldowns/resources, projectiles, minions, towers, neutrals and bosses. Practice starts at level 6 with normal skill ranks and a 5v5 lane-bot roster. Debug tools can clear/restore bots, spawn a nearby stationary dummy, configure a same-class duel, or toggle god mode and speed. Snapshots use the normal HUD and effects; leaving clears local combat and restores the saved online address. Practice produces no saved career result or account rewards.
+
+The extracted engine retains its AGPL-3.0-only source license. Database, passport admission, authentication and transport hosting remain outside it. See [the extraction note](progress/2026-09-29-common-offline.md).
+
 ## Deliberate skill inspection (0.30.1)
 
 Skill descriptions open after holding the same skill for 1.5 seconds using a hotbar press, Q/W/E/R, a controller skill binding, or a stationary touch. Hover, short presses and basic attacks keep the combat view clear. Releasing the hold or opening a menu hides descriptions immediately. The standard-kit explanation panel follows the same rule; ordinary casting remains unchanged.
@@ -14,7 +20,7 @@ Eleven modular presets now cover the standard roster. The nine additions are **C
 
 The shared catalogue now separates 44 reusable skill definitions from eleven four-slot presets. Versioned `BuildRecipe` data chooses a core, passive and skills; a pure resolver checks slot and attack-profile compatibility before the server executes effects. Mixed recipes are tested internally. The public constructor, persistent user recipes and website synchronization are still deferred; the game exposes the eleven fixed presets. Numbers are initial tuning values, not a competitive balance guarantee.
 
-Server-authoritative aim, cooldowns, costs, control, shields, weapon modes, effect lifetimes and fog-filtered snapshots use protocol 4. New peers reject incompatible protocol versions explicitly. Desktop, touch and controller paths share aimed casts; original icons and English/Russian/Chinese text accompany the hotbar, recast/mode/status feedback and effect geometry. New kits work in authoritative matches and local server practice; in-process offline practice offers only its five supported classes. See [implementation, architecture and remaining TODO](progress/2026-09-29-standard-kits.md).
+Server-authoritative aim, cooldowns, costs, control, shields, weapon modes, effect lifetimes and fog-filtered snapshots use protocol 4. New peers reject incompatible protocol versions explicitly. Desktop, touch and controller paths share aimed casts; original icons and English/Russian/Chinese text accompany the hotbar, recast/mode/status feedback and effect geometry. As of 0.31.0, every kit also runs in socket-free Offline Practice through the same authoritative engine. See [implementation, architecture and remaining TODO](progress/2026-09-29-standard-kits.md).
 
 ## iPad phone-layout preview (0.28.6)
 

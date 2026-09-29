@@ -224,7 +224,7 @@ pub(crate) fn run() -> io::Result<()> {
     {
         return Err(io::Error::other("Public roles require OMOBA_DATABASE_URL"));
     }
-    let mut match_config = MatchConfig::from_env();
+    let mut match_config = crate::match_rules::from_env();
     if let Some(worker) = match_service.worker() {
         if worker.manifest.bind != bind_addr {
             return Err(io::Error::other("Worker bind differs from allocation"));

@@ -3,15 +3,15 @@ use super::*;
 use shared::loadout::Technique;
 
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct Recast {
-    pub(crate) until: Instant,
+pub struct Recast {
+    pub until: Instant,
     target: Option<TargetId>,
     victims: Vec<TargetId>,
-    pub(crate) uses: u8,
+    pub uses: u8,
 }
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct Orb {
-    pub(crate) pos: [f32; 2],
+pub struct Orb {
+    pub pos: [f32; 2],
     end: [f32; 2],
     pub(super) attached: Option<u64>,
     moving: bool,
@@ -20,58 +20,58 @@ pub(crate) struct Orb {
     scale: f32,
 }
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct Challenge {
+pub struct Challenge {
     pub(super) target: TargetId,
     pub(super) sides: u8,
     until: Instant,
 }
 #[derive(Debug, Clone, Default, PartialEq)]
-pub(crate) struct HeroState {
-    pub(crate) recasts: [Option<Recast>; 4],
-    pub(crate) speed_until: Option<Instant>,
-    pub(crate) parry_until: Option<Instant>,
-    pub(crate) parried_control: bool,
-    pub(crate) untargetable_until: Option<Instant>,
-    pub(crate) unstoppable_until: Option<Instant>,
-    pub(crate) defense_until: Option<Instant>,
-    pub(crate) defense: f32,
-    pub(crate) weakened_until: Option<Instant>,
-    pub(crate) concussion_stacks: u8,
-    pub(crate) brittle_until: Option<Instant>,
-    pub(crate) intercept_until: Option<Instant>,
-    pub(crate) intercept_direction: [f32; 2],
-    pub(crate) intercepted: bool,
-    pub(crate) last_combat: Option<Instant>,
-    pub(crate) sustain_until: Option<Instant>,
-    pub(crate) empowered_until: Option<Instant>,
-    pub(crate) empowered: u8,
-    pub(crate) flow_attacks: u8,
-    pub(crate) flow_until: Option<Instant>,
-    pub(crate) stacks: u8,
-    pub(crate) stacks_until: Option<Instant>,
-    pub(crate) last_target: Option<TargetId>,
-    pub(crate) last_attack: Option<Instant>,
-    pub(crate) souls: u16,
-    pub(crate) essence: u8,
-    pub(crate) orb: Option<Orb>,
-    pub(crate) challenge: Option<Challenge>,
-    pub(crate) charm: Option<([f32; 2], Instant)>,
-    pub(crate) forged: bool,
-    pub(crate) forge_ready: bool,
-    pub(crate) forge_since: Option<Instant>,
+pub struct HeroState {
+    pub recasts: [Option<Recast>; 4],
+    pub speed_until: Option<Instant>,
+    pub parry_until: Option<Instant>,
+    pub parried_control: bool,
+    pub untargetable_until: Option<Instant>,
+    pub unstoppable_until: Option<Instant>,
+    pub defense_until: Option<Instant>,
+    pub defense: f32,
+    pub weakened_until: Option<Instant>,
+    pub concussion_stacks: u8,
+    pub brittle_until: Option<Instant>,
+    pub intercept_until: Option<Instant>,
+    pub intercept_direction: [f32; 2],
+    pub intercepted: bool,
+    pub last_combat: Option<Instant>,
+    pub sustain_until: Option<Instant>,
+    pub empowered_until: Option<Instant>,
+    pub empowered: u8,
+    pub flow_attacks: u8,
+    pub flow_until: Option<Instant>,
+    pub stacks: u8,
+    pub stacks_until: Option<Instant>,
+    pub last_target: Option<TargetId>,
+    pub last_attack: Option<Instant>,
+    pub souls: u16,
+    pub essence: u8,
+    pub orb: Option<Orb>,
+    pub challenge: Option<Challenge>,
+    pub charm: Option<([f32; 2], Instant)>,
+    pub forged: bool,
+    pub forge_ready: bool,
+    pub forge_since: Option<Instant>,
 }
 impl HeroState {
-    pub(crate) fn reset(&mut self) {
+    pub fn reset(&mut self) {
         *self = Self {
             souls: self.souls,
             forged: self.forged,
             ..Self::default()
         };
     }
-    pub(crate) fn immune(&self, now: Instant) -> bool {
+    pub fn immune(&self, now: Instant) -> bool {
         remaining(self.parry_until, now) > 0.0 || remaining(self.untargetable_until, now) > 0.0
     }
-    pub(crate) fn attack_rate(&self, now: Instant) -> f32 {
+    pub fn attack_rate(&self, now: Instant) -> f32 {
         1.0 + if remaining(self.flow_until, now) > 0.0 && self.flow_attacks > 0 {
             0.4
         } else {
@@ -114,7 +114,7 @@ struct Pillar {
     until: Instant,
 }
 #[derive(Default)]
-pub(crate) struct WorldState {
+pub struct WorldState {
     npc_charms: Vec<(TargetId, [f32; 2], Instant)>,
     seen_deaths: BTreeSet<TargetKey>,
     healing: Vec<(u64, Team, [f32; 2], Instant)>,
@@ -234,7 +234,7 @@ fn mark(
         });
     }
 }
-pub(crate) fn terrain(w: &GameWorld, now: Instant) -> Vec<shared::navigation::Disc> {
+pub fn terrain(w: &GameWorld, now: Instant) -> Vec<shared::navigation::Disc> {
     w.skill_runtime
         .advanced
         .pillars
@@ -365,7 +365,7 @@ fn recast(
     });
 }
 
-pub(crate) fn cast(w: &mut GameWorld, addr: SocketAddr, slot: u8, aim: [f32; 2], now: Instant) {
+pub fn cast(w: &mut GameWorld, addr: SocketAddr, slot: u8, aim: [f32; 2], now: Instant) {
     if let Some(p) = w.players.get_mut(&addr) {
         ensure_orb(p);
     }
@@ -1714,7 +1714,7 @@ pub(super) fn on_hit(
     }
     out
 }
-pub(crate) fn camouflaged(p: &ConnectedPlayer, now: Instant) -> bool {
+pub fn camouflaged(p: &ConnectedPlayer, now: Instant) -> bool {
     p.hero
         .skills
         .loadout
@@ -1728,7 +1728,7 @@ pub(crate) fn camouflaged(p: &ConnectedPlayer, now: Instant) -> bool {
             .is_none_or(|at| now.saturating_duration_since(at) >= duration(4.0))
 }
 /// Returns a shield holder and remaining damage multiplier for a swept projectile.
-pub(crate) fn intercept(
+pub fn intercept(
     w: &mut GameWorld,
     team: Team,
     from: [f32; 2],
@@ -1738,7 +1738,7 @@ pub(crate) fn intercept(
 ) -> Option<(u64, f32)> {
     intercept_players(&mut w.players, team, from, to, radius, now)
 }
-pub(crate) fn intercept_players(
+pub fn intercept_players(
     players: &mut std::collections::HashMap<SocketAddr, ConnectedPlayer>,
     team: Team,
     from: [f32; 2],
@@ -1784,7 +1784,7 @@ pub(crate) fn intercept_players(
     Some((selected, factor))
 }
 
-pub(crate) fn tick(w: &mut GameWorld, t: TickCtx, out: &mut Vec<CombatEvent>) {
+pub fn tick(w: &mut GameWorld, t: TickCtx, out: &mut Vec<CombatEvent>) {
     let now = t.now;
     w.skill_runtime
         .advanced
@@ -1994,7 +1994,7 @@ pub(crate) fn tick(w: &mut GameWorld, t: TickCtx, out: &mut Vec<CombatEvent>) {
         }
     }
 }
-pub(crate) fn observe(w: &mut GameWorld, events: &[CombatEvent], now: Instant) {
+pub fn observe(w: &mut GameWorld, events: &[CombatEvent], now: Instant) {
     let mut object_budget = MAX_EFFECTS.saturating_sub(active_count(w) + 1);
     for event in events {
         if event.killed {
@@ -2089,7 +2089,7 @@ pub(crate) fn observe(w: &mut GameWorld, events: &[CombatEvent], now: Instant) {
         }
     }
 }
-pub(crate) fn clear_actor(w: &mut GameWorld, id: u64) {
+pub fn clear_actor(w: &mut GameWorld, id: u64) {
     w.skill_runtime
         .advanced
         .healing
@@ -2110,13 +2110,7 @@ pub(crate) fn clear_actor(w: &mut GameWorld, id: u64) {
         .retain(|(owner, _, _)| *owner != id);
 }
 
-pub(crate) fn interact(
-    w: &mut GameWorld,
-    addr: SocketAddr,
-    object: u64,
-    request: u64,
-    now: Instant,
-) {
+pub fn interact(w: &mut GameWorld, addr: SocketAddr, object: u64, request: u64, now: Instant) {
     let Some(p) = w.players.get_mut(&addr) else {
         return;
     };
@@ -2251,7 +2245,7 @@ fn control(
     }
 }
 
-pub(crate) fn ensure_orb(p: &mut ConnectedPlayer) {
+pub fn ensure_orb(p: &mut ConnectedPlayer) {
     if p.hero.hp <= 0.0 || p.hero.skills.advanced.orb.is_some() {
         return;
     }

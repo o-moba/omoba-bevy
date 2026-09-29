@@ -19,7 +19,7 @@ use crate::neutrals::{
 use crate::progression::grant_player_xp;
 use crate::shop::award_gold;
 
-pub(crate) fn apply_neutral_damage(
+pub fn apply_neutral_damage(
     players: &mut HashMap<SocketAddr, ConnectedPlayer>,
     neutrals: &mut HashMap<u64, Neutral>,
     team_buffs: &mut TeamBuffs,
@@ -89,7 +89,7 @@ pub(crate) fn apply_neutral_damage(
     )
 }
 
-pub(crate) fn award_neutral_kill_to_player(
+pub fn award_neutral_kill_to_player(
     players: &mut HashMap<SocketAddr, ConnectedPlayer>,
     killer_id: u64,
     camp_type: NeutralCampType,
@@ -116,13 +116,13 @@ pub(crate) fn award_neutral_kill_to_player(
     }
 }
 
-pub(crate) fn neutral_horizontal_distance_sq_from_anchor(anchor: Vec3f, player: &Hero) -> f32 {
+pub fn neutral_horizontal_distance_sq_from_anchor(anchor: Vec3f, player: &Hero) -> f32 {
     let dx = anchor.x - player.x;
     let dz = anchor.z - player.z;
     dx * dx + dz * dz
 }
 
-pub(crate) fn simulate_neutrals(world: &mut GameWorld, tick: TickCtx) -> Vec<CombatEvent> {
+pub fn simulate_neutrals(world: &mut GameWorld, tick: TickCtx) -> Vec<CombatEvent> {
     let TickCtx { now, dt } = tick;
     if !matches!(world.game_state, GameState::Running) {
         return Vec::new();

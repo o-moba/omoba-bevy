@@ -10,7 +10,9 @@ use crate::maps::MapLayout;
 use crate::model_scale::NormalizeModelScale;
 use crate::sprite::PlayerVisualMode;
 use bevy::prelude::*;
-pub use shared::hero_balance::{DEBUG_SPEED_MULTIPLIER, PLAYER_SPEED};
+pub use shared::hero_balance::DEBUG_SPEED_MULTIPLIER;
+#[cfg(test)]
+use shared::hero_balance::PLAYER_SPEED;
 
 #[cfg(any(test, feature = "qa"))]
 pub(crate) use animation::PlayerAnimationBinding;

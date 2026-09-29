@@ -1557,12 +1557,6 @@ fn team_select_ui_system(
                 }
             }
             HeroSelectAction::Class(class) => {
-                if client_session.is_offline() && class.is_standard() {
-                    if let Some(notice) = notice.as_deref_mut() {
-                        notice.0 = Some(tr("error.join.offline_kit_unsupported").into());
-                    }
-                    continue;
-                }
                 selection.hero_class = *class;
                 selection_changed = true;
             }

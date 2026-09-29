@@ -6,7 +6,7 @@ Open Moba is an open-source MOBA and reusable engine project. You may study, mod
 
 | Material | License / scope |
 | --- | --- |
-| Original source in `server/`, `career-store/` and `account-api/` | [AGPL-3.0-only](LICENSES/AGPL-3.0-only.txt) |
+| Original source in `server/`, `common/`, `career-store/` and `account-api/` | [AGPL-3.0-only](LICENSES/AGPL-3.0-only.txt) |
 | Original source in `client/`, `shared/`, `passport/`, `harness/`, `arena-sync/`; original scripts, mobile scaffolding and configuration elsewhere | [MPL-2.0](LICENSES/MPL-2.0.txt) |
 | Original standalone project documentation, including this guide and the mission/contribution/brand policy text | [CC-BY-4.0](LICENSES/CC-BY-4.0.txt) |
 | Original Verdant Confluence `.blend`/`.glb` visual assets and rendered stills in `art/verdant-confluence/` and `client/assets/verdant/` | [CC-BY-4.0](LICENSES/CC-BY-4.0.txt) |
@@ -26,7 +26,7 @@ AGPL protects reciprocity for the authoritative server. A modified version made 
 
 MPL protects the source files of the client and reusable engine components when copies are distributed. Modified covered files, including new files containing covered code, stay under MPL. Separately authored additions may have other licenses. MPL allows different terms for executable distribution while preserving recipients' rights to covered source (sections 3.1–3.3), which suits desktop and mobile distribution. This is not a guarantee of approval by any app store.
 
-The server is **not** offered as `MPL-2.0 OR AGPL-3.0-only`. Client and server are separate programs communicating over the protocol. Do not copy AGPL-only server code into an MPL client and assume a directory name changes its license. Shared MPL files do not carry an Exhibit B incompatibility notice; MPL section 3.3 allows combining eligible files with AGPL software while meeting the applicable terms. Keep the original MPL notices and make the shared source available accordingly.
+The server is **not** offered as `MPL-2.0 OR AGPL-3.0-only`. Online client and server communicate over the protocol. Since 0.31.0 the client also links the AGPL-only `common` combat engine for Offline Practice; that extracted source keeps its AGPL license, and the combined executable must be distributed under the applicable combined-work terms. Existing MPL source-file notices remain in place. Do not copy AGPL-only server code into an MPL client and assume a directory name changes its license. Shared MPL files do not carry an Exhibit B incompatibility notice; MPL section 3.3 allows combining eligible files with AGPL software while meeting the applicable terms. Keep the original MPL notices and make the shared source available accordingly.
 
 These licenses do not require someone to share our mission, prevent an independently written competitor, or guarantee development funding. We express our direction through [MISSION.md](MISSION.md), project decisions and the official service. Those aspirations do not add non-commercial, field-of-use, pay-to-fork or anti-competition restrictions to the licenses.
 

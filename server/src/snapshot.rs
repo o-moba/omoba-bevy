@@ -3,10 +3,9 @@
 use std::time::{Duration, Instant};
 use std::{fmt, io};
 
-use shared::wire::{GameState, PlayerState, ServerPacket};
+use shared::wire::{GameState, ServerPacket};
 
 use crate::balance::VICTORY_REMATCH_DELAY;
-use crate::game_world::GameWorld;
 use crate::runtime::ports::Transport;
 use crate::runtime::{RateLimitedDiagnostic, ServerRuntime};
 use crate::sim::towers::structure_is_protected;
@@ -83,37 +82,12 @@ pub(crate) fn validate_snapshot_payload_size(
     Ok(())
 }
 
-/// Replicated player list for the recipient with hero id `recipient`: their
-/// own entry is the `owner_view`, everyone else (teammates included) the
-/// redacted `public_view`; `None` redacts every entry. Only joined players
-/// are visible to clients. Pre-join endpoints are still addressable (public
-/// lobby views, standalone status replies) but must not appear in the world
-/// as ghost players.
-pub(crate) fn build_players_snapshot(
-    world: &GameWorld,
-    recipient: Option<u64>,
-    now: Instant,
-) -> Vec<PlayerState> {
-    let mut snapshot = world
-        .players
-        .values()
-        .filter(|player| player.joined)
-        .map(|player| {
-            if recipient == Some(player.hero.identity.id) {
-                player.owner_view(now, &world.map_layout, &world.game_state)
-            } else {
-                player.public_view(now, &world.map_layout, &world.game_state)
-            }
-        })
-        .collect::<Vec<_>>();
-    snapshot.sort_unstable_by_key(|player| player.id);
-    snapshot
-}
+pub(crate) use common::snapshot::build_players_snapshot;
 
 impl ServerRuntime {
     /// The replicated view of one player at `now`, as the broadcast builds it.
     #[cfg(test)]
-    pub(crate) fn player_view(&self, addr: SocketAddr, now: Instant) -> PlayerState {
+    pub(crate) fn player_view(&self, addr: SocketAddr, now: Instant) -> shared::wire::PlayerState {
         self.world.players[&addr].owner_view(now, &self.world.map_layout, &self.world.game_state)
     }
 

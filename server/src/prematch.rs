@@ -4,9 +4,11 @@ use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 
+#[cfg(test)]
+use shared::prematch::Role;
 use shared::prematch::{
     COUNTDOWN_MS, DRAFT_SELECTION_MS, DraftPlayer, LOADING_TIMEOUT_MS, PrematchAction,
-    PrematchPhase, PrematchRequest, PrematchSnapshot, Role,
+    PrematchPhase, PrematchRequest, PrematchSnapshot,
 };
 use shared::wire::{ClientPacket, GameState};
 
@@ -17,16 +19,7 @@ use crate::passport_admission;
 use crate::runtime::ServerRuntime;
 use crate::session::reset_player_round;
 
-#[derive(Default)]
-pub(super) struct DraftState {
-    pub capable: bool,
-    pub role: Role,
-    pub locked: bool,
-    pub loaded: bool,
-    pub request_id: u64,
-    pub acknowledged_request_id: u64,
-    pub error: Option<String>,
-}
+pub(crate) use common::prematch::DraftState;
 
 #[derive(Default)]
 pub(super) struct PrematchRuntime {

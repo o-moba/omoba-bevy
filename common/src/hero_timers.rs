@@ -1,0 +1,176 @@
+//! Authoritative hero clocks and the pure reads over them.
+//!
+//! The instants live on `ConnectedPlayer`; every remaining-seconds number the
+//! request handlers gate on, the sandbox telemetry shows or the replicated
+//! `PlayerState` view carries is computed here from those instants and the
+//! tick's `now`. `normalize_hero_timers` is the one place that rewrites the
+//! instants from derived conditions (death, sandbox `no_cooldowns`).
+
+use std::time::{Duration, Instant};
+
+use shared::SkillSlot;
+
+use crate::balance::MOVEMENT_POSITION_TOLERANCE;
+use crate::entities::ConnectedPlayer;
+use crate::game_world::GameWorld;
+use crate::hero_stats;
+
+/// The instants a hero's gameplay clocks are measured from. Every
+/// remaining-seconds number is derived from these and the tick's `now`.
+#[derive(Debug, Clone, Copy)]
+pub struct HeroTimers {
+    /// Last accepted movement, dash or teleport; bounds the next move.
+    pub last_movement_at: Instant,
+    /// Unspent position tolerance carried between `Transform` packets, in
+    /// world units, never above `MOVEMENT_POSITION_TOLERANCE`. Movement is a
+    /// time budget: each packet may cover the distance its elapsed time
+    /// earns plus this slack, so a flood of packets cannot collect the
+    /// tolerance once per packet.
+    pub movement_slack: f32,
+    /// Per-slot cast timestamps (Q/W/E/R); each ability cools down independently.
+    pub last_cast_at: [Option<Instant>; 4],
+    /// Independent of Q/W/E/R and never charged against mana.
+    pub last_basic_attack_at: Option<Instant>,
+    pub dash_ready_at: Option<Instant>,
+    pub haste_ready_at: Option<Instant>,
+    pub haste_expires_at: Option<Instant>,
+    pub respawn_at: Option<Instant>,
+}
+
+impl HeroTimers {
+    pub fn new(now: Instant) -> Self {
+        Self {
+            last_movement_at: now,
+            movement_slack: MOVEMENT_POSITION_TOLERANCE,
+            last_cast_at: [None; 4],
+            last_basic_attack_at: None,
+            dash_ready_at: None,
+            haste_ready_at: None,
+            haste_expires_at: None,
+            respawn_at: None,
+        }
+    }
+
+    /// Every cooldown reads as ready; active haste and the respawn clock stay.
+    pub fn clear_cooldowns(&mut self) {
+        self.last_cast_at = [None; 4];
+        self.last_basic_attack_at = None;
+        self.dash_ready_at = None;
+        self.haste_ready_at = None;
+    }
+}
+
+fn remaining_until(deadline: Option<Instant>, now: Instant) -> f32 {
+    deadline.map_or(0.0, |until| {
+        until.saturating_duration_since(now).as_secs_f32()
+    })
+}
+
+fn remaining_of(started: Option<Instant>, duration: Duration, now: Instant) -> f32 {
+    started.map_or(0.0, |at| {
+        duration
+            .saturating_sub(now.saturating_duration_since(at))
+            .as_secs_f32()
+    })
+}
+
+fn no_cooldowns(player: &ConnectedPlayer) -> bool {
+    player.modifiers.no_cooldowns
+}
+
+/// Dead heroes and sandbox actors without cooldowns report every combat
+/// clock as ready.
+fn combat_clocks_suspended(player: &ConnectedPlayer) -> bool {
+    player.hero.hp <= 0.0 || no_cooldowns(player)
+}
+
+pub fn basic_attack_remaining(player: &ConnectedPlayer, now: Instant) -> f32 {
+    if combat_clocks_suspended(player) {
+        return 0.0;
+    }
+    remaining_of(
+        player.timers.last_basic_attack_at,
+        hero_stats::basic_attack_cooldown_at(player, now),
+        now,
+    )
+}
+
+/// Cooldown left on `slot` regardless of death; the sandbox telemetry keeps
+/// showing a dead actor's clocks.
+pub fn skill_cooldown_left(player: &ConnectedPlayer, slot: SkillSlot, now: Instant) -> f32 {
+    remaining_of(
+        player.timers.last_cast_at[slot.index()],
+        hero_stats::ability_cooldown(player, slot),
+        now,
+    )
+}
+
+pub fn skill_cooldown_remaining(player: &ConnectedPlayer, slot: SkillSlot, now: Instant) -> f32 {
+    if combat_clocks_suspended(player) {
+        return 0.0;
+    }
+    skill_cooldown_left(player, slot, now)
+}
+
+/// Shared inter-skill recovery window, measured from the latest cast.
+pub fn skill_recovery_remaining(player: &ConnectedPlayer, now: Instant) -> f32 {
+    if player.hero.skills.loadout.is_some() {
+        return if combat_clocks_suspended(player) {
+            0.0
+        } else {
+            remaining_until(player.hero.skills.recovery_until, now)
+        };
+    }
+    if combat_clocks_suspended(player) {
+        return 0.0;
+    }
+    remaining_of(
+        player.timers.last_cast_at.iter().flatten().max().copied(),
+        hero_stats::skill_recovery(player),
+        now,
+    )
+}
+
+pub fn dash_remaining(player: &ConnectedPlayer, now: Instant) -> f32 {
+    if no_cooldowns(player) {
+        return 0.0;
+    }
+    remaining_until(player.timers.dash_ready_at, now)
+}
+
+pub fn haste_remaining(player: &ConnectedPlayer, now: Instant) -> f32 {
+    if no_cooldowns(player) {
+        return 0.0;
+    }
+    remaining_until(player.timers.haste_ready_at, now)
+}
+
+pub fn haste_active(player: &ConnectedPlayer, now: Instant) -> f32 {
+    if player.hero.hp <= 0.0 {
+        return 0.0;
+    }
+    remaining_until(player.timers.haste_expires_at, now)
+}
+
+/// Clears the clocks that derived conditions make meaningless: a dead hero or
+/// a sandbox actor without cooldowns has no pending basic strike, a sandbox
+/// actor without cooldowns has no utility cooldowns and a dead hero has no
+/// running haste. Runs once per tick after the simulation, before the views
+/// are built; the reads above already treat these cases as ready, so this
+/// only keeps the stored instants from outliving their meaning.
+pub fn normalize_hero_timers(world: &mut GameWorld) {
+    for player in world.players.values_mut() {
+        let dead = player.hero.hp <= 0.0;
+        let free = no_cooldowns(player);
+        if dead || free {
+            player.timers.last_basic_attack_at = None;
+        }
+        if free {
+            player.timers.dash_ready_at = None;
+            player.timers.haste_ready_at = None;
+        }
+        if dead {
+            player.timers.haste_expires_at = None;
+        }
+    }
+}

@@ -44,7 +44,7 @@ def settings(env: dict[str, str]) -> dict:
 def source_identity() -> dict:
     def git(*args):
         return subprocess.check_output(['git', *args], cwd=ROOT, text=True).strip()
-    return {'revision': git('rev-parse', 'HEAD'), 'tracked_diff': git('diff', 'HEAD', '--', 'Cargo.toml', 'Cargo.lock', 'client', 'shared', 'passport', 'skills', 'mobile/ios', 'scripts')}
+    return {'revision': git('rev-parse', 'HEAD'), 'tracked_diff': git('diff', 'HEAD', '--', 'Cargo.toml', 'Cargo.lock', 'client', 'common', 'shared', 'passport', 'skills', 'mobile/ios', 'scripts')}
 
 
 def ekza_build_settings(env: dict[str, str], root: Path = ROOT) -> dict[str, str]:

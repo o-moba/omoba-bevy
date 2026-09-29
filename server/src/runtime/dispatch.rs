@@ -276,66 +276,22 @@ impl ServerRuntime {
             ClientPacket::Hello { protocol_version } => {
                 self.handle_hello(addr, protocol_version, now)
             }
-            ClientPacket::Transform {
-                x,
-                y,
-                z,
-                yaw,
-                dash_sequence,
-            } => self.handle_transform(addr, x, y, z, yaw, dash_sequence, now),
-            ClientPacket::Cast { target, slot } => self.handle_cast(addr, target, slot, now),
-            ClientPacket::Interact {
-                object_id,
-                server_epoch,
-                match_id,
-                request_id,
-            } => {
-                if server_epoch == self.server_epoch && match_id == self.match_id {
-                    crate::skills::advanced::interact(
-                        &mut self.world,
-                        addr,
-                        object_id,
-                        request_id,
-                        now,
-                    );
-                }
-                ControlFlow::Continue(())
-            }
-            ClientPacket::CastSkill {
-                slot,
-                aim,
-                server_epoch,
-                match_id,
-                request_id,
-            } => {
-                if server_epoch != self.server_epoch || match_id != self.match_id {
-                    ControlFlow::Break(())
-                } else {
-                    crate::skills::cast(&mut self.world, addr, slot, aim, request_id, now);
-                    ControlFlow::Continue(())
-                }
-            }
-            ClientPacket::Utility {
-                action,
-                direction,
-                server_epoch,
-                match_id,
-                request_id,
-            } => self.handle_utility(
+            packet @ (ClientPacket::Transform { .. }
+            | ClientPacket::Cast { .. }
+            | ClientPacket::CastSkill { .. }
+            | ClientPacket::Interact { .. }
+            | ClientPacket::Utility { .. }
+            | ClientPacket::BasicAttack { .. }
+            | ClientPacket::UpgradeSkill { .. }
+            | ClientPacket::BuyItem { .. }) => common::command::apply(
+                &mut self.world,
                 addr,
-                action,
-                direction,
-                server_epoch,
-                match_id,
-                request_id,
+                &packet,
+                self.server_epoch,
+                self.match_id,
                 now,
-            ),
-            ClientPacket::BasicAttack {
-                target,
-                server_epoch,
-                match_id,
-                request_id,
-            } => self.handle_basic_attack(addr, target, server_epoch, match_id, request_id, now),
+            )
+            .expect("gameplay command"),
             ClientPacket::Join {
                 prematch,
                 team,
@@ -362,13 +318,6 @@ impl ServerRuntime {
             ClientPacket::SetGodMode { .. } | ClientPacket::SetSpeedBoost { .. } => {
                 self.dispatch_debug(addr, &packet, now)
             }
-            ClientPacket::UpgradeSkill { slot } => self.handle_upgrade_skill(addr, slot, now),
-            ClientPacket::BuyItem {
-                item_id,
-                request_id,
-                match_id,
-                server_epoch,
-            } => self.handle_buy_item(addr, item_id, request_id, match_id, server_epoch, now),
             ClientPacket::Career { .. }
             | ClientPacket::Social { .. }
             | ClientPacket::Party { .. }

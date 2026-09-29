@@ -1,6 +1,7 @@
 import os
 from pathlib import Path
 import plistlib
+import subprocess
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -97,6 +98,32 @@ class XcodeBridgeTests(unittest.TestCase):
                  patch.object(xb.subprocess,'run'),patch.object(xb,'inspect_macho',return_value={}), \
                  patch.object(xb,'validate_dsym',return_value={}):
                 with self.assertRaisesRegex(ValueError,'Source changed'): xb.build(env)
+            self.assertFalse((root/'products').exists())
+
+    def test_common_combat_edit_invalidates_build_without_a_new_commit(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root/'common/src/lib.rs'
+            source.parent.mkdir(parents=True)
+            source.write_text('pub const DAMAGE: u32 = 10;\n')
+            subprocess.run(['git', 'init', '-q'], cwd=root, check=True)
+            subprocess.run(['git', 'add', 'common'], cwd=root, check=True)
+            subprocess.run(['git', '-c', 'user.name=Build Test',
+                            '-c', 'user.email=build-test@example.invalid',
+                            '-c', 'commit.gpgsign=false', 'commit', '-qm', 'fixture'],
+                           cwd=root, check=True)
+            with patch.object(xb, 'ROOT', root):
+                before = xb.source_identity()
+                source.write_text('pub const DAMAGE: u32 = 20;\n')
+                after = xb.source_identity()
+            self.assertEqual(before['revision'], after['revision'])
+            self.assertNotEqual(before['tracked_diff'], after['tracked_diff'])
+            with patch.object(xb, 'source_identity', side_effect=[before, after]), \
+                 patch.object(xb.subprocess, 'run'), \
+                 patch.object(xb, 'inspect_macho', return_value={}), \
+                 patch.object(xb, 'validate_dsym', return_value={}):
+                with self.assertRaisesRegex(ValueError, 'Source changed'):
+                    xb.build(self.env(root))
             self.assertFalse((root/'products').exists())
 
 

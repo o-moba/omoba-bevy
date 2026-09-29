@@ -4,6 +4,15 @@ All notable changes to this repository should be documented in this file.
 
 The canonical repository version lives in `Cargo.toml` under `[workspace.package].version` and follows SemVer.
 
+## [0.31.0] - 2026-09-29
+
+### Shared combat in Offline Practice
+
+- Extract the authoritative combat engine into the internal AGPL-3.0-only `common` crate. Online hosting and socket-free practice share commands, timed skills/passives, bots, projectiles, world entities and damage rules.
+- Enable all 16 classes in Offline Practice, including all eleven standard kits. Keep bundled-avatar admission, local debug controls, configured duels, normal snapshots and online-address restoration.
+- Replace the reduced offline combat and lane simulation with an in-process host. Practice starts at level 6 with authoritative ranks and a lane-bot roster; dummy and duel controls provide nearby and configured opponents.
+- Include shared combat sources in iOS package freshness checks. Add deterministic online/offline roster parity and lifecycle/entity regression coverage.
+
 ## [0.30.2] - 2026-09-29
 
 ### Illustrated skill actions

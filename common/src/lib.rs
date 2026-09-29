@@ -1,0 +1,31 @@
+//! Authoritative OMOBA combat, shared by network hosting and socket-free practice.
+//! Extracted from the AGPL-3.0-only server; no transport, authentication or persistence.
+pub mod balance;
+pub mod basic_attack;
+pub mod bots;
+pub mod combat_feedback;
+pub mod command;
+pub mod entities;
+pub mod forest_pickups;
+pub mod formation;
+pub mod game_world;
+pub mod hero;
+pub mod hero_stats;
+pub mod hero_timers;
+pub mod host;
+pub mod match_rules;
+pub mod match_stats;
+pub mod neutrals;
+pub mod offline;
+pub mod practice;
+pub mod prematch;
+pub mod progression;
+pub mod session;
+pub mod shop;
+pub mod sim;
+pub mod skills;
+pub mod snapshot;
+pub mod tick;
+pub mod utility;
+pub mod vision;
+pub mod world;
