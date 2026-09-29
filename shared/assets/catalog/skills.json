@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "revision": "standard-kits-1",
+  "revision": "standard-kits-2",
   "skills": [
     {
       "id": "dawn_bind",
@@ -168,6 +168,726 @@
         "min_damage_multiplier": 0.5,
         "max_distance": 20,
         "missing_health_ratio": 0.25
+      }
+    },
+    {
+      "id": "fault_line",
+      "slot": "q",
+      "name": "Fault Line",
+      "description": "Fracture the ground; a delayed solid pillar rises at the endpoint.",
+      "targeting": "direction",
+      "mana_cost": 18,
+      "cooldown_secs": 9,
+      "cast_range": 15,
+      "windup_secs": 0.0,
+      "damage_type": "magic",
+      "effect": {
+        "kind": "technique",
+        "action": "terrain_line",
+        "damage": 26,
+        "radius": 1,
+        "duration_secs": 5,
+        "speed": 22
+      }
+    },
+    {
+      "id": "furnace_breath",
+      "slot": "w",
+      "name": "Furnace Breath",
+      "description": "Breathe fire while resisting displacement; the final blast applies Brittle.",
+      "targeting": "direction",
+      "mana_cost": 24,
+      "cooldown_secs": 12,
+      "cast_range": 7,
+      "windup_secs": 0.0,
+      "damage_type": "magic",
+      "effect": {
+        "kind": "technique",
+        "action": "cone_brittle",
+        "damage": 38,
+        "radius": 3,
+        "duration_secs": 1,
+        "speed": 0
+      }
+    },
+    {
+      "id": "anvil_charge",
+      "slot": "e",
+      "name": "Anvil Charge",
+      "description": "Charge forward; terrain impact knocks up nearby enemies.",
+      "targeting": "direction",
+      "mana_cost": 24,
+      "cooldown_secs": 14,
+      "cast_range": 10,
+      "windup_secs": 0.0,
+      "damage_type": "magic",
+      "effect": {
+        "kind": "technique",
+        "action": "collision_charge",
+        "damage": 32,
+        "radius": 3,
+        "duration_secs": 1,
+        "speed": 25
+      }
+    },
+    {
+      "id": "mountain_echo",
+      "slot": "r",
+      "name": "Mountain Echo",
+      "description": "Call an incoming colossus; recast nearby to redirect it and knock enemies up.",
+      "targeting": "direction",
+      "mana_cost": 45,
+      "cooldown_secs": 48,
+      "cast_range": 28,
+      "windup_secs": 0.0,
+      "damage_type": "magic",
+      "effect": {
+        "kind": "technique",
+        "action": "returning_colossus",
+        "damage": 65,
+        "radius": 2,
+        "duration_secs": 5,
+        "speed": 12
+      }
+    },
+    {
+      "id": "edge_lunge",
+      "slot": "q",
+      "name": "Edge Lunge",
+      "description": "Lunge and strike the nearest enemy; a hit refunds part of the cooldown.",
+      "targeting": "point",
+      "mana_cost": 16,
+      "cooldown_secs": 7,
+      "cast_range": 5,
+      "windup_secs": 0.0,
+      "damage_type": "physical",
+      "effect": {
+        "kind": "technique",
+        "action": "lunge",
+        "damage": 25,
+        "radius": 2,
+        "duration_secs": 1,
+        "speed": 22
+      }
+    },
+    {
+      "id": "mirror_guard",
+      "slot": "w",
+      "name": "Mirror Guard",
+      "description": "Parry damage and control, then counterattack; blocked immobilization empowers the counter.",
+      "targeting": "direction",
+      "mana_cost": 20,
+      "cooldown_secs": 15,
+      "cast_range": 10,
+      "windup_secs": 0.0,
+      "damage_type": "physical",
+      "effect": {
+        "kind": "technique",
+        "action": "parry",
+        "damage": 30,
+        "radius": 0.8,
+        "duration_secs": 0.75,
+        "speed": 22
+      }
+    },
+    {
+      "id": "twin_tempo",
+      "slot": "e",
+      "name": "Twin Tempo",
+      "description": "Empower two attacks: the first slows, the second deals critical damage.",
+      "targeting": "self_target",
+      "mana_cost": 18,
+      "cooldown_secs": 11,
+      "cast_range": 0,
+      "windup_secs": 0.0,
+      "damage_type": "physical",
+      "effect": {
+        "kind": "technique",
+        "action": "double_strike",
+        "damage": 20,
+        "radius": 1,
+        "duration_secs": 5,
+        "speed": 0
+      }
+    },
+    {
+      "id": "fourfold_duel",
+      "slot": "r",
+      "name": "Fourfold Duel",
+      "description": "Expose four directional vitals; complete the challenge to create an allied healing field.",
+      "targeting": "point",
+      "mana_cost": 40,
+      "cooldown_secs": 45,
+      "cast_range": 10,
+      "windup_secs": 0.0,
+      "damage_type": "physical",
+      "effect": {
+        "kind": "technique",
+        "action": "vital_challenge",
+        "damage": 24,
+        "radius": 5,
+        "duration_secs": 8,
+        "speed": 0
+      }
+    },
+    {
+      "id": "echo_strike",
+      "slot": "q",
+      "name": "Echo Strike",
+      "description": "Mark the first enemy hit; recast to dash to that exact target.",
+      "targeting": "direction",
+      "mana_cost": 50,
+      "cooldown_secs": 9,
+      "cast_range": 18,
+      "windup_secs": 0.0,
+      "damage_type": "physical",
+      "effect": {
+        "kind": "technique",
+        "action": "echo_strike",
+        "damage": 28,
+        "radius": 0.5,
+        "duration_secs": 3,
+        "speed": 24
+      }
+    },
+    {
+      "id": "anchor_step",
+      "slot": "w",
+      "name": "Anchor Step",
+      "description": "Leap to an ally or place a short-lived anchor; recast for lifesteal.",
+      "targeting": "point",
+      "mana_cost": 50,
+      "cooldown_secs": 12,
+      "cast_range": 9,
+      "windup_secs": 0.0,
+      "damage_type": "physical",
+      "effect": {
+        "kind": "technique",
+        "action": "guard_leap",
+        "damage": 25,
+        "radius": 1,
+        "duration_secs": 3,
+        "speed": 0
+      }
+    },
+    {
+      "id": "thunder_pulse",
+      "slot": "e",
+      "name": "Thunder Pulse",
+      "description": "Damage and reveal nearby enemies; recast to slow those victims.",
+      "targeting": "self_target",
+      "mana_cost": 50,
+      "cooldown_secs": 10,
+      "cast_range": 0,
+      "windup_secs": 0.0,
+      "damage_type": "physical",
+      "effect": {
+        "kind": "technique",
+        "action": "reveal_pulse",
+        "damage": 28,
+        "radius": 5,
+        "duration_secs": 3,
+        "speed": 0
+      }
+    },
+    {
+      "id": "thunder_kick",
+      "slot": "r",
+      "name": "Thunder Kick",
+      "description": "Kick an enemy away, damaging and lifting other enemies along its path.",
+      "targeting": "point",
+      "mana_cost": 0,
+      "cooldown_secs": 40,
+      "cast_range": 5,
+      "windup_secs": 0.0,
+      "damage_type": "physical",
+      "effect": {
+        "kind": "technique",
+        "action": "chain_kick",
+        "damage": 60,
+        "radius": 1.2,
+        "duration_secs": 1,
+        "speed": 22
+      }
+    },
+    {
+      "id": "thorn_volley",
+      "slot": "q",
+      "name": "Thorn Volley",
+      "description": "Launch a marking spike followed by up to three priority-target recasts.",
+      "targeting": "direction",
+      "mana_cost": 18,
+      "cooldown_secs": 7,
+      "cast_range": 13,
+      "windup_secs": 0.0,
+      "damage_type": "magic",
+      "effect": {
+        "kind": "technique",
+        "action": "spike_volley",
+        "damage": 20,
+        "radius": 0.45,
+        "duration_secs": 3,
+        "speed": 24
+      }
+    },
+    {
+      "id": "patient_curse",
+      "slot": "w",
+      "name": "Patient Curse",
+      "description": "Curse a visible target; let the mark mature before hitting to charm and weaken it.",
+      "targeting": "point",
+      "mana_cost": 18,
+      "cooldown_secs": 13,
+      "cast_range": 15,
+      "windup_secs": 0.0,
+      "damage_type": "magic",
+      "effect": {
+        "kind": "technique",
+        "action": "curse",
+        "damage": 0,
+        "radius": 1,
+        "duration_secs": 4,
+        "speed": 0
+      }
+    },
+    {
+      "id": "shadow_lash",
+      "slot": "e",
+      "name": "Shadow Lash",
+      "description": "Whip a nearby target and gain speed; shroud empowers the approach.",
+      "targeting": "point",
+      "mana_cost": 20,
+      "cooldown_secs": 9,
+      "cast_range": 5,
+      "windup_secs": 0.0,
+      "damage_type": "magic",
+      "effect": {
+        "kind": "technique",
+        "action": "lash",
+        "damage": 35,
+        "radius": 2,
+        "duration_secs": 2,
+        "speed": 0
+      }
+    },
+    {
+      "id": "nightfall",
+      "slot": "r",
+      "name": "Nightfall",
+      "description": "Strike a frontal area, execute wounded enemies and retreat while briefly untargetable.",
+      "targeting": "direction",
+      "mana_cost": 45,
+      "cooldown_secs": 48,
+      "cast_range": 8,
+      "windup_secs": 0.0,
+      "damage_type": "magic",
+      "effect": {
+        "kind": "technique",
+        "action": "execute_retreat",
+        "damage": 65,
+        "radius": 5,
+        "duration_secs": 0.65,
+        "speed": 0
+      }
+    },
+    {
+      "id": "wandering_ember",
+      "slot": "q",
+      "name": "Wandering Ember",
+      "description": "Send an orb out and back to your moving position; the return deals true damage.",
+      "targeting": "direction",
+      "mana_cost": 20,
+      "cooldown_secs": 8,
+      "cast_range": 17,
+      "windup_secs": 0.0,
+      "damage_type": "magic",
+      "effect": {
+        "kind": "technique",
+        "action": "return_orb",
+        "damage": 27,
+        "radius": 0.6,
+        "duration_secs": 3,
+        "speed": 22
+      }
+    },
+    {
+      "id": "kindled_wisps",
+      "slot": "w",
+      "name": "Kindled Wisps",
+      "description": "Gain speed and launch three guided flames at nearby enemies.",
+      "targeting": "self_target",
+      "mana_cost": 18,
+      "cooldown_secs": 10,
+      "cast_range": 9,
+      "windup_secs": 0.0,
+      "damage_type": "magic",
+      "effect": {
+        "kind": "technique",
+        "action": "guided_fires",
+        "damage": 15,
+        "radius": 1,
+        "duration_secs": 2,
+        "speed": 0
+      }
+    },
+    {
+      "id": "heart_tether",
+      "slot": "e",
+      "name": "Heart Tether",
+      "description": "The first enemy hit walks helplessly toward you.",
+      "targeting": "direction",
+      "mana_cost": 24,
+      "cooldown_secs": 12,
+      "cast_range": 18,
+      "windup_secs": 0.0,
+      "damage_type": "magic",
+      "effect": {
+        "kind": "technique",
+        "action": "charm_bolt",
+        "damage": 25,
+        "radius": 0.5,
+        "duration_secs": 1.5,
+        "speed": 22
+      }
+    },
+    {
+      "id": "flame_dance",
+      "slot": "r",
+      "name": "Flame Dance",
+      "description": "Dash and fire guided bolts; up to three casts, with a bounded takedown refund.",
+      "targeting": "point",
+      "mana_cost": 40,
+      "cooldown_secs": 42,
+      "cast_range": 7,
+      "windup_secs": 0.0,
+      "damage_type": "magic",
+      "effect": {
+        "kind": "technique",
+        "action": "spirit_dash",
+        "damage": 22,
+        "radius": 9,
+        "duration_secs": 7,
+        "speed": 0
+      }
+    },
+    {
+      "id": "orbital_command",
+      "slot": "q",
+      "name": "Orbital Command",
+      "description": "Move your persistent orb, damaging enemies along its path.",
+      "targeting": "point",
+      "mana_cost": 16,
+      "cooldown_secs": 5,
+      "cast_range": 15,
+      "windup_secs": 0.0,
+      "damage_type": "magic",
+      "effect": {
+        "kind": "technique",
+        "action": "ball_move",
+        "damage": 28,
+        "radius": 0.65,
+        "duration_secs": 15,
+        "speed": 18
+      }
+    },
+    {
+      "id": "orbital_field",
+      "slot": "w",
+      "name": "Orbital Field",
+      "description": "At the orb, burst damage and create a field that hastens allies and slows enemies.",
+      "targeting": "self_target",
+      "mana_cost": 24,
+      "cooldown_secs": 10,
+      "cast_range": 0,
+      "windup_secs": 0.0,
+      "damage_type": "magic",
+      "effect": {
+        "kind": "technique",
+        "action": "ball_field",
+        "damage": 32,
+        "radius": 4,
+        "duration_secs": 3,
+        "speed": 0
+      }
+    },
+    {
+      "id": "orbital_guard",
+      "slot": "e",
+      "name": "Orbital Guard",
+      "description": "Send the orb to an ally, damaging the path and granting a shield and defensive aura.",
+      "targeting": "point",
+      "mana_cost": 20,
+      "cooldown_secs": 10,
+      "cast_range": 15,
+      "windup_secs": 0.0,
+      "damage_type": "magic",
+      "effect": {
+        "kind": "technique",
+        "action": "ball_guard",
+        "damage": 28,
+        "radius": 0.65,
+        "duration_secs": 4,
+        "speed": 20
+      }
+    },
+    {
+      "id": "orbital_collapse",
+      "slot": "r",
+      "name": "Orbital Collapse",
+      "description": "After a visible delay, the orb damages and pulls nearby enemies inward.",
+      "targeting": "self_target",
+      "mana_cost": 45,
+      "cooldown_secs": 45,
+      "cast_range": 0,
+      "windup_secs": 0.0,
+      "damage_type": "magic",
+      "effect": {
+        "kind": "technique",
+        "action": "ball_pull",
+        "damage": 65,
+        "radius": 5,
+        "duration_secs": 0.7,
+        "speed": 0
+      }
+    },
+    {
+      "id": "rift_needle",
+      "slot": "q",
+      "name": "Rift Needle",
+      "description": "First-hit shot applies attack effects and reduces your active cooldowns on hit.",
+      "targeting": "direction",
+      "mana_cost": 14,
+      "cooldown_secs": 6,
+      "cast_range": 22,
+      "windup_secs": 0.0,
+      "damage_type": "physical",
+      "effect": {
+        "kind": "technique",
+        "action": "on_hit_bolt",
+        "damage": 28,
+        "radius": 0.4,
+        "duration_secs": 1,
+        "speed": 30
+      }
+    },
+    {
+      "id": "rift_seal",
+      "slot": "w",
+      "name": "Rift Seal",
+      "description": "Mark the first hero or structure; only your own attack or spell can detonate it.",
+      "targeting": "direction",
+      "mana_cost": 18,
+      "cooldown_secs": 11,
+      "cast_range": 20,
+      "windup_secs": 0.0,
+      "damage_type": "physical",
+      "effect": {
+        "kind": "technique",
+        "action": "detonation_mark",
+        "damage": 34,
+        "radius": 0.65,
+        "duration_secs": 4,
+        "speed": 22
+      }
+    },
+    {
+      "id": "rift_step",
+      "slot": "e",
+      "name": "Rift Step",
+      "description": "Blink to a legal location and fire at a nearby enemy, prioritizing your seal.",
+      "targeting": "point",
+      "mana_cost": 25,
+      "cooldown_secs": 15,
+      "cast_range": 7,
+      "windup_secs": 0.0,
+      "damage_type": "physical",
+      "effect": {
+        "kind": "technique",
+        "action": "blink_shot",
+        "damage": 28,
+        "radius": 9,
+        "duration_secs": 1,
+        "speed": 0
+      }
+    },
+    {
+      "id": "horizon_wave",
+      "slot": "r",
+      "name": "Horizon Wave",
+      "description": "Wind up a piercing arena-range wave; non-heroes take reduced damage.",
+      "targeting": "direction",
+      "mana_cost": 45,
+      "cooldown_secs": 45,
+      "cast_range": 256,
+      "windup_secs": 0.7,
+      "damage_type": "physical",
+      "effect": {
+        "kind": "technique",
+        "action": "piercing_wave",
+        "damage": 80,
+        "radius": 1.2,
+        "duration_secs": 9,
+        "speed": 38
+      }
+    },
+    {
+      "id": "iron_hook",
+      "slot": "q",
+      "name": "Iron Hook",
+      "description": "Catch and hold the first enemy, then recast to approach the hooked target.",
+      "targeting": "direction",
+      "mana_cost": 22,
+      "cooldown_secs": 13,
+      "cast_range": 18,
+      "windup_secs": 0.0,
+      "damage_type": "magic",
+      "effect": {
+        "kind": "technique",
+        "action": "hook",
+        "damage": 28,
+        "radius": 0.5,
+        "duration_secs": 2,
+        "speed": 22
+      }
+    },
+    {
+      "id": "guiding_lantern",
+      "slot": "w",
+      "name": "Guiding Lantern",
+      "description": "Place a shielding lantern; a nearby ally can explicitly interact to travel to you.",
+      "targeting": "point",
+      "mana_cost": 24,
+      "cooldown_secs": 16,
+      "cast_range": 13,
+      "windup_secs": 0.0,
+      "damage_type": "magic",
+      "effect": {
+        "kind": "technique",
+        "action": "lantern",
+        "damage": 32,
+        "radius": 2,
+        "duration_secs": 6,
+        "speed": 0
+      }
+    },
+    {
+      "id": "chain_sweep",
+      "slot": "e",
+      "name": "Chain Sweep",
+      "description": "Sweep enemies in your aimed direction; attacks charge while you wait.",
+      "targeting": "direction",
+      "mana_cost": 20,
+      "cooldown_secs": 10,
+      "cast_range": 6,
+      "windup_secs": 0.0,
+      "damage_type": "magic",
+      "effect": {
+        "kind": "technique",
+        "action": "sweep",
+        "damage": 32,
+        "radius": 3,
+        "duration_secs": 0.7,
+        "speed": 0
+      }
+    },
+    {
+      "id": "iron_boundary",
+      "slot": "r",
+      "name": "Iron Boundary",
+      "description": "Raise five boundary segments; each breaks on enemy contact and slows its victim.",
+      "targeting": "self_target",
+      "mana_cost": 45,
+      "cooldown_secs": 45,
+      "cast_range": 0,
+      "windup_secs": 0.0,
+      "damage_type": "magic",
+      "effect": {
+        "kind": "technique",
+        "action": "segment_cage",
+        "damage": 55,
+        "radius": 5,
+        "duration_secs": 5,
+        "speed": 0
+      }
+    },
+    {
+      "id": "winter_shard",
+      "slot": "q",
+      "name": "Winter Shard",
+      "description": "Slow the first enemy and apply Concussion; allied attacks complete the stun.",
+      "targeting": "direction",
+      "mana_cost": 18,
+      "cooldown_secs": 8,
+      "cast_range": 18,
+      "windup_secs": 0.0,
+      "damage_type": "physical",
+      "effect": {
+        "kind": "technique",
+        "action": "concussive_bolt",
+        "damage": 26,
+        "radius": 0.6,
+        "duration_secs": 1.5,
+        "speed": 23
+      }
+    },
+    {
+      "id": "sheltering_leap",
+      "slot": "w",
+      "name": "Sheltering Leap",
+      "description": "Leap to an allied hero or minion; protect yourself and the ally.",
+      "targeting": "point",
+      "mana_cost": 20,
+      "cooldown_secs": 12,
+      "cast_range": 10,
+      "windup_secs": 0.0,
+      "damage_type": "physical",
+      "effect": {
+        "kind": "technique",
+        "action": "ally_leap",
+        "damage": 28,
+        "radius": 1,
+        "duration_secs": 3,
+        "speed": 0
+      }
+    },
+    {
+      "id": "northwall",
+      "slot": "e",
+      "name": "Northwall",
+      "description": "Intercept incoming frontal projectiles: negate the first and reduce later hits.",
+      "targeting": "direction",
+      "mana_cost": 24,
+      "cooldown_secs": 14,
+      "cast_range": 8,
+      "windup_secs": 0.0,
+      "damage_type": "physical",
+      "effect": {
+        "kind": "technique",
+        "action": "intercept_shield",
+        "damage": 0,
+        "radius": 2.5,
+        "duration_secs": 3,
+        "speed": 0
+      }
+    },
+    {
+      "id": "winter_divide",
+      "slot": "r",
+      "name": "Winter Divide",
+      "description": "Raise a fissure that knocks up enemies and leaves a slowing trail.",
+      "targeting": "direction",
+      "mana_cost": 45,
+      "cooldown_secs": 45,
+      "cast_range": 20,
+      "windup_secs": 0.0,
+      "damage_type": "physical",
+      "effect": {
+        "kind": "technique",
+        "action": "glacial_fissure",
+        "damage": 58,
+        "radius": 2,
+        "duration_secs": 4,
+        "speed": 25
       }
     }
   ]

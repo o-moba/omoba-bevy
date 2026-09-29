@@ -172,10 +172,19 @@ pub enum HeroClass {
     Warden,
     Dawnweaver,
     Wildspark,
+    Cinderforge,
+    Edgeweaver,
+    Stormfist,
+    Veilstalker,
+    Emberveil,
+    Orbitwright,
+    Riftshot,
+    Chainkeeper,
+    Frostguard,
 }
 
 impl HeroClass {
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 16] = [
         Self::Warrior,
         Self::Mage,
         Self::Ranger,
@@ -183,6 +192,15 @@ impl HeroClass {
         Self::Warden,
         Self::Dawnweaver,
         Self::Wildspark,
+        Self::Cinderforge,
+        Self::Edgeweaver,
+        Self::Stormfist,
+        Self::Veilstalker,
+        Self::Emberveil,
+        Self::Orbitwright,
+        Self::Riftshot,
+        Self::Chainkeeper,
+        Self::Frostguard,
     ];
 
     pub const LEGACY: [Self; 5] = [
@@ -195,7 +213,10 @@ impl HeroClass {
 
     /// Selection compatibility only; effect execution uses the resolved skills.
     pub const fn is_standard(self) -> bool {
-        matches!(self, Self::Dawnweaver | Self::Wildspark)
+        !matches!(
+            self,
+            Self::Warrior | Self::Mage | Self::Ranger | Self::Cleric | Self::Warden
+        )
     }
 
     /// Stable wire/UI identifier (snake_case).
@@ -208,6 +229,15 @@ impl HeroClass {
             Self::Warden => "warden",
             Self::Dawnweaver => "dawnweaver",
             Self::Wildspark => "wildspark",
+            Self::Cinderforge => "cinderforge",
+            Self::Edgeweaver => "edgeweaver",
+            Self::Stormfist => "stormfist",
+            Self::Veilstalker => "veilstalker",
+            Self::Emberveil => "emberveil",
+            Self::Orbitwright => "orbitwright",
+            Self::Riftshot => "riftshot",
+            Self::Chainkeeper => "chainkeeper",
+            Self::Frostguard => "frostguard",
         }
     }
 
@@ -385,9 +415,18 @@ mod tests {
                         assert!(def.projectile_damage.is_some(), "{}", def.id);
                         assert!(def.cast_range > 0.0, "{}", def.id);
                     }
-                    TargetingMode::SelfTarget => {
+                    TargetingMode::SelfTarget if !class.is_standard() => {
                         assert!(def.projectile_damage.is_none(), "{}", def.id);
                         assert_eq!(def.cast_range, 0.0, "{}", def.id);
+                    }
+                    TargetingMode::SelfTarget => {
+                        // Modular self buffs may author empowered-hit damage;
+                        // guided effects also need a bounded acquisition range.
+                        // The strict skill parser validates each effect schema.
+                        let id = loadout::SkillId::from_id(def.id).unwrap();
+                        let resolved = loadout::skill(id);
+                        assert_eq!(resolved.ability.targeting, TargetingMode::SelfTarget);
+                        assert!(def.cast_range.is_finite() && def.cast_range >= 0.0);
                     }
                     TargetingMode::Direction | TargetingMode::Point => {
                         assert!(class.is_standard() && def.cast_range > 0.0);

@@ -530,7 +530,7 @@ mod tests {
             heroes_with(|v| {
                 v["classes"].as_array_mut().unwrap().pop();
             }),
-            "6 classes, expected one per HeroClass (7)",
+            "15 classes, expected one per HeroClass (16)",
         );
         assert_rejected(
             items_with(|v| v["items"].as_array_mut().unwrap().swap(1, 2)),

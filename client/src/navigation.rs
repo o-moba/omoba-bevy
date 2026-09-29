@@ -19,11 +19,21 @@ pub(crate) fn structure_collision_radius(kind: StructureKind) -> f32 {
 
 /// Plan once per order; waypoints exclude the start and retain its height.
 /// Custom test arenas get their own empty static map instead of global trees.
+#[cfg(test)]
 pub(crate) fn plan_route(
     layout: &MapLayout,
     start: Vec3,
     destination: Vec3,
     structures: &[(Vec3, StructureKind)],
+) -> Option<Vec<Vec3>> {
+    plan_route_with_terrain(layout, start, destination, structures, &[])
+}
+pub(crate) fn plan_route_with_terrain(
+    layout: &MapLayout,
+    start: Vec3,
+    destination: Vec3,
+    structures: &[(Vec3, StructureKind)],
+    terrain: &[Disc],
 ) -> Option<Vec<Vec3>> {
     if !start.is_finite()
         || !destination.is_finite()
@@ -59,13 +69,14 @@ pub(crate) fn plan_route(
             return None;
         }
     };
-    let dynamic: Vec<_> = structures
+    let mut dynamic: Vec<_> = structures
         .iter()
         .map(|&(position, kind)| Disc {
             center: [position.x, position.z],
             radius: structure_collision_radius(kind) - HERO_RADIUS,
         })
         .collect();
+    dynamic.extend_from_slice(terrain);
     map.plan_route([start.x, start.z], [destination.x, destination.z], &dynamic)
         .map(|route| {
             route
@@ -73,6 +84,41 @@ pub(crate) fn plan_route(
                 .map(|point| Vec3::new(point[0], start.y, point[1]))
                 .collect()
         })
+}
+
+/// Temporary terrain uses the same discs for prediction, route planning and
+/// authoritative movement. Only armed, visible server objects participate.
+pub(crate) fn skill_terrain(game: Option<&crate::net::GameStateSnapshot>) -> Vec<Disc> {
+    game.into_iter()
+        .flat_map(|g| g.skill_effects.iter())
+        .filter(|e| {
+            e.armed
+                && e.remaining_secs > 0.0
+                && matches!(
+                    shared::loadout::skill(e.skill).effect,
+                    shared::loadout::SkillEffect::Technique {
+                        action: shared::loadout::Technique::TerrainLine,
+                        ..
+                    }
+                )
+        })
+        .map(|e| Disc {
+            center: e.position,
+            radius: e.radius,
+        })
+        .collect()
+}
+pub(crate) fn clip_skill_terrain(
+    from: Vec3,
+    to: Vec3,
+    game: Option<&crate::net::GameStateSnapshot>,
+) -> Vec3 {
+    let p = shared::navigation::clip_discs(
+        from.xz().to_array(),
+        to.xz().to_array(),
+        &skill_terrain(game),
+    );
+    Vec3::new(p[0], to.y, p[1])
 }
 
 #[cfg(test)]

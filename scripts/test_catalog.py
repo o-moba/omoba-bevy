@@ -10,7 +10,9 @@ import catalog
 
 class CatalogTests(unittest.TestCase):
     def test_shipped_catalog_lists_every_class_in_enum_order(self):
-        self.assertEqual(catalog.hero_ids(), ('warrior', 'mage', 'ranger', 'cleric', 'warden', 'dawnweaver', 'wildspark'))
+        self.assertEqual(catalog.hero_ids(), ('warrior', 'mage', 'ranger', 'cleric', 'warden', 'dawnweaver', 'wildspark',
+            'cinderforge', 'edgeweaver', 'stormfist', 'veilstalker', 'emberveil',
+            'orbitwright', 'riftshot', 'chainkeeper', 'frostguard'))
         for hero in catalog.heroes():
             self.assertEqual(len(hero['abilities']), 4, hero['id'])
             self.assertEqual(sorted(hero['recommended_items']), sorted(catalog.item_costs()), hero['id'])
@@ -24,13 +26,23 @@ class CatalogTests(unittest.TestCase):
 
     def test_projectile_styles_and_offensive_slots_follow_the_kits(self):
         self.assertEqual(catalog.projectile_styles(), {'warrior': 'crescent', 'mage': 'arcane', 'ranger': 'arrow',
-                                                       'cleric': 'holy', 'warden': 'claw', 'dawnweaver': 'holy', 'wildspark': 'arrow'})
+                                                       'cleric': 'holy', 'warden': 'claw', 'dawnweaver': 'holy', 'wildspark': 'arrow',
+            'cinderforge': 'crescent', 'edgeweaver': 'crescent', 'stormfist': 'crescent',
+            'veilstalker': 'claw', 'emberveil': 'arcane', 'orbitwright': 'holy',
+            'riftshot': 'arrow', 'chainkeeper': 'holy', 'frostguard': 'crescent'})
         slots = catalog.offensive_slots()
         self.assertEqual(slots['cleric'], {0})
         for class_id in ('warrior', 'mage', 'ranger', 'warden'):
             self.assertEqual(slots[class_id], {0, 2, 3}, class_id)
         self.assertEqual(slots['dawnweaver'], {0, 2, 3})
         self.assertEqual(slots['wildspark'], {1, 2, 3})
+        for hero, expected in {
+            'cinderforge': {0, 1, 2, 3}, 'edgeweaver': {0, 1},
+            'stormfist': {0, 2, 3}, 'veilstalker': {0, 2, 3},
+            'emberveil': {0, 1, 2, 3}, 'orbitwright': {0, 1, 2, 3},
+            'riftshot': {0, 2, 3}, 'chainkeeper': {0, 2, 3}, 'frostguard': {0, 3},
+        }.items():
+            self.assertEqual(slots[hero], expected, hero)
         # Reusable shield/toggle effects never become fake offensive casts.
         styles = {hero['id']: hero for hero in catalog.heroes()}
         self.assertEqual(styles['dawnweaver']['abilities'][1]['effect']['kind'], 'returning_shield')

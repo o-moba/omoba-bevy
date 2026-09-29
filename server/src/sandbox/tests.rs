@@ -380,15 +380,12 @@ fn sandbox_ai_modes_forced_cast_and_all_heroes() {
             .accepted
         );
         if hero.is_standard() {
-            let view = crate::skills::state(
-                &rt.world.players[&ENEMY_ADDR],
-                rt.sandbox.as_ref().unwrap().now,
-            )
-            .unwrap();
-            assert!(
-                view.weapon_mode == shared::loadout::WeaponMode::Rockets
-                    || !crate::skills::effects(&rt.world, now).is_empty()
+            // Instant lunges and buffs need not leave a world effect.
+            assert_eq!(
+                rt.world.players[&ENEMY_ADDR].hero.last_action.slot, 0,
+                "forced Q cast for {hero:?}"
             );
+            assert!(rt.world.players[&ENEMY_ADDR].timers.last_cast_at[0].is_some());
         } else {
             assert!(!rt.world.projectiles.is_empty());
         }

@@ -18,6 +18,8 @@ use crate::entities::ConnectedPlayer;
 use crate::game_world::{GameWorld, TickCtx};
 use crate::hero_stats;
 
+pub(crate) mod advanced;
+
 const MAX_EFFECTS: usize = shared::loadout::MAX_ACTIVE_EFFECTS;
 const MAX_OWNER_EFFECTS: usize = shared::loadout::MAX_EFFECTS_PER_OWNER;
 const MAX_STATUS_SOURCES: usize = 32;
@@ -70,13 +72,14 @@ struct Slow {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub(crate) struct ControlState {
     pub(crate) root_until: Option<Instant>,
+    pub(crate) stun_until: Option<Instant>,
     slows: Vec<Slow>,
     pub(crate) reveal_until: Option<Instant>,
     revealed_to: [Option<Instant>; 2],
 }
 impl ControlState {
     pub(crate) fn movement(&self, now: Instant) -> f32 {
-        if remaining(self.root_until, now) > 0.0 {
+        if remaining(self.root_until, now).max(remaining(self.stun_until, now)) > 0.0 {
             return 0.0;
         }
         self.slows
@@ -109,6 +112,7 @@ impl ControlState {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub(crate) struct HeroSkills {
     pub(crate) loadout: Option<ResolvedLoadout>,
+    pub(crate) advanced: advanced::HeroState,
     pub(crate) request_id: u64,
     pub(crate) control: ControlState,
     pub(crate) shields: Vec<Shield>,
@@ -134,6 +138,7 @@ impl HeroSkills {
         left
     }
     pub(crate) fn transient_reset(&mut self) {
+        self.advanced.reset();
         self.control = ControlState::default();
         self.shields.clear();
         self.stacks = 0;
@@ -146,6 +151,11 @@ impl HeroSkills {
     }
     pub(crate) fn movement(&self, now: Instant) -> f32 {
         self.control.movement(now)
+            * if remaining(self.advanced.speed_until, now) > 0.0 {
+                1.3
+            } else {
+                1.0
+            }
             * if remaining(self.momentum_until, now) > 0.0 {
                 momentum_parameters(self).1
             } else {
@@ -160,7 +170,8 @@ impl HeroSkills {
             0
         };
         let step = self.loadout.as_ref().and_then(toggle).map_or(0.0, |t| t.5);
-        (1.0 + stacks as f32 * step)
+        self.advanced.attack_rate(now)
+            * (1.0 + stacks as f32 * step)
             * if remaining(self.momentum_until, now) > 0.0 {
                 momentum_parameters(self).2
             } else {
@@ -233,6 +244,9 @@ pub(crate) fn attack_modifiers(p: &ConnectedPlayer) -> (f32, f32, f32, f32, f32)
     (base, 1.0, 1.0, 0.0, 0.0)
 }
 pub(crate) fn accepted_basic(p: &mut ConnectedPlayer, now: Instant) {
+    p.hero.skills.advanced.last_combat = Some(now);
+    p.hero.skills.advanced.forge_ready = false;
+    p.hero.skills.advanced.forge_since = None;
     if p.hero.skills.mode == WeaponMode::Repeater {
         if let Some(t) = p.hero.skills.loadout.as_ref().and_then(toggle) {
             if remaining(p.hero.skills.stacks_until, now) == 0.0 {
@@ -255,20 +269,51 @@ pub(crate) fn state(p: &ConnectedPlayer, now: Instant) -> Option<LoadoutState> {
         && shields == 0.0
         && s.control.movement(now) == 1.0
         && remaining(s.marked_until, now) == 0.0
+        && s.advanced.concussion_stacks == 0
+        && remaining(s.advanced.brittle_until, now) == 0.0
     {
         return None;
     }
     let atk = attack_modifiers(p);
     Some(LoadoutState {
+        concussion_stacks: s.advanced.concussion_stacks,
+        brittle: remaining(s.advanced.brittle_until, now) > 0.0,
+        vital_rotation: s.advanced.essence % 4,
+        challenge_target: s.advanced.challenge.as_ref().map(|c| c.target.id),
+        challenge_sides: s.advanced.challenge.as_ref().map_or(0, |c| c.sides),
+        forge_ready: s.advanced.forge_ready,
+        forge_remaining_secs: s.advanced.forge_since.map_or(0.0, |at| {
+            (3.0 - now.saturating_duration_since(at).as_secs_f32()).max(0.0)
+        }),
+        energy: s
+            .loadout
+            .is_some_and(|l| l.core() == shared::loadout::CoreId::Stormfist),
+        camouflaged: advanced::camouflaged(p, now),
+        parrying: remaining(s.advanced.parry_until, now) > 0.0,
+        souls: s.advanced.souls,
+        orb_position: s.advanced.orb.as_ref().map(|o| o.pos),
+        forged: s.advanced.forged,
         recipe: s.loadout.as_ref().map(|l| l.recipe().clone()),
         slots: std::array::from_fn(|i| SkillSlotState {
-            can_recast: s.zones[i].is_some_and(|(_, end)| now < end),
-            recast_remaining_secs: s.zones[i].map_or(0.0, |(_, end)| remaining(Some(end), now)),
+            can_recast: s.zones[i].is_some_and(|(_, end)| now < end)
+                || s.advanced.recasts[i]
+                    .as_ref()
+                    .is_some_and(|r| r.until > now && r.uses > 0),
+            recast_remaining_secs: s.zones[i].map_or_else(
+                || {
+                    s.advanced.recasts[i]
+                        .as_ref()
+                        .filter(|r| r.uses > 0)
+                        .map_or(0.0, |r| remaining(Some(r.until), now))
+                },
+                |(_, end)| remaining(Some(end), now),
+            ),
             active: s.zones[i].is_some_and(|(_, end)| now < end),
         }),
         weapon_mode: s.mode,
         shield_hp: shields,
-        root_remaining_secs: remaining(s.control.root_until, now),
+        root_remaining_secs: remaining(s.control.root_until, now)
+            .max(remaining(s.control.stun_until, now)),
         slow_multiplier: s
             .control
             .slows
@@ -318,6 +363,7 @@ struct Mark {
 #[derive(Default)]
 pub(crate) struct SkillWorld {
     effects: BTreeMap<u64, ActiveEffect>,
+    advanced: advanced::WorldState,
     next_id: u64,
     pub(crate) npc_controls: BTreeMap<TargetKey, ControlState>,
     marks: BTreeMap<(TargetKey, u64), Mark>,
@@ -331,6 +377,11 @@ impl SkillWorld {
     fn id(&mut self) -> u64 {
         self.next_id = self.next_id.saturating_add(1);
         self.next_id
+    }
+    pub(crate) fn npc_stunned(&self, t: TargetId, now: Instant) -> bool {
+        self.npc_controls
+            .get(&key(t))
+            .is_some_and(|s| remaining(s.stun_until, now) > 0.0)
     }
     pub(crate) fn npc_movement(&self, t: TargetId, now: Instant) -> f32 {
         self.npc_controls
@@ -543,6 +594,13 @@ pub(crate) fn apply_hit(
     } else {
         0.0
     };
+    if target.kind == TargetKind::Player
+        && w.players
+            .values()
+            .any(|p| p.hero.identity.id == target.id && p.hero.skills.advanced.immune(now))
+    {
+        return Vec::new();
+    }
     let mut events = Vec::new();
     if (basic || consume) && radiance {
         if let Some(m) = w
@@ -563,6 +621,9 @@ pub(crate) fn apply_hit(
         }
     }
     events.extend(raw_damage(w, target, amount, kind, src, team, now));
+    if src.entity.kind == CombatEntityKind::Player && amount > 0.0 {
+        events.extend(advanced::on_hit(w, c, amount, src, team, basic, now));
+    }
     if mark
         && radiance
         && c.target.kind != TargetKind::Structure
@@ -654,6 +715,13 @@ fn control(
             .values_mut()
             .find(|p| p.hero.identity.id == c.target.id && p.hero.hp > 0.0 && !p.modifiers.god_mode)
         {
+            if remaining(p.hero.skills.advanced.parry_until, now) > 0.0 {
+                p.hero.skills.advanced.parried_control |= root > 0.0;
+                return;
+            }
+            if p.hero.skills.advanced.immune(now) {
+                return;
+            }
             p.hero
                 .skills
                 .control
@@ -671,7 +739,11 @@ fn control(
             *until = Some(until.unwrap_or(now).max(now + duration(reveal)));
         }
     }
+    if root > 0.0 {
+        advanced::consume_brittle(w, c, now);
+    }
 }
+
 fn shield(w: &mut GameWorld, target: u64, owner: u64, amount: f32, secs: f32, now: Instant) {
     if let Some(p) = w
         .players
@@ -701,6 +773,7 @@ pub(crate) fn cast(
     request: u64,
     now: Instant,
 ) {
+    let live_effect_count = advanced::active_count(w);
     let Some(p) = w.players.get_mut(&addr) else {
         return;
     };
@@ -716,6 +789,10 @@ pub(crate) fn cast(
     {
         return;
     }
+    if remaining(p.hero.skills.control.stun_until, now) > 0.0 || p.hero.skills.advanced.immune(now)
+    {
+        return;
+    }
     let Some(loadout) = &p.hero.skills.loadout else {
         return;
     };
@@ -723,6 +800,18 @@ pub(crate) fn cast(
     let d = skill(id);
     let rank = p.hero.progress.ranks[slot as usize].clamp(1, d.ability.max_rank);
     if !p.modifiers.unlock_all && !unlocked_slots_for_level(p.hero.progress.level)[slot as usize] {
+        return;
+    }
+    if matches!(d.effect, SkillEffect::Technique { .. }) {
+        advanced::cast(w, addr, slot, aim, now);
+        return;
+    }
+    if p.hero
+        .skills
+        .advanced
+        .charm
+        .is_some_and(|(_, until)| until > now)
+    {
         return;
     }
     if let Some((zone, expires)) = p.hero.skills.zones[slot as usize] {
@@ -797,7 +886,7 @@ pub(crate) fn cast(
         SkillEffect::TrapLine { count, .. } => count as usize,
         _ => usize::from(!is_toggle),
     };
-    if w.skill_runtime.effects.len() + count > MAX_EFFECTS
+    if live_effect_count + count > MAX_EFFECTS
         || w.skill_runtime
             .effects
             .values()
@@ -947,9 +1036,13 @@ pub(crate) fn tick(w: &mut GameWorld, t: TickCtx) -> Vec<CombatEvent> {
     }
     let now = t.now;
     let mut out = std::mem::take(&mut w.skill_runtime.pending);
+    advanced::tick(w, t, &mut out);
     w.skill_runtime.marks.retain(|_, m| m.expires > now);
-    let mut effects = std::mem::take(&mut w.skill_runtime.effects);
-    for (_, mut e) in std::mem::take(&mut effects) {
+    let ids: Vec<_> = w.skill_runtime.effects.keys().copied().collect();
+    for id in ids {
+        let Some(mut e) = w.skill_runtime.effects.remove(&id) else {
+            continue;
+        };
         let def = skill(e.skill);
         let cs = candidates(w);
         let mut keep = now < e.expires;
@@ -960,6 +1053,7 @@ pub(crate) fn tick(w: &mut GameWorld, t: TickCtx) -> Vec<CombatEvent> {
             continue;
         }
         match def.effect {
+            SkillEffect::Technique { .. } => keep = advanced::effect_tick(w, &mut e, t, &mut out),
             SkillEffect::LinearProjectile {
                 speed,
                 radius,
@@ -972,6 +1066,26 @@ pub(crate) fn tick(w: &mut GameWorld, t: TickCtx) -> Vec<CombatEvent> {
             } => {
                 let travel = (speed * t.dt).min(distance(e.pos, e.end));
                 let to = add(e.pos, e.direction, travel);
+                if let Some((holder, factor)) =
+                    advanced::intercept(w, e.team, e.pos, to, radius, now)
+                {
+                    out.extend(apply_hit(
+                        w,
+                        TargetId {
+                            kind: TargetKind::Player,
+                            id: holder,
+                        },
+                        damage * e.scale * factor,
+                        def.damage_type,
+                        source(e.owner, e.slot),
+                        e.team,
+                        false,
+                        true,
+                        false,
+                        now,
+                    ));
+                    continue;
+                }
                 for c in hits(&cs, e.pos, to, radius)
                     .into_iter()
                     .filter(|c| hostile(c, e.team))
@@ -1169,6 +1283,26 @@ pub(crate) fn tick(w: &mut GameWorld, t: TickCtx) -> Vec<CombatEvent> {
             } => {
                 let travel = (speed * t.dt).min(distance(e.pos, e.end));
                 let to = add(e.pos, e.direction, travel);
+                if let Some((holder, factor)) =
+                    advanced::intercept(w, e.team, e.pos, to, radius, now)
+                {
+                    out.extend(apply_hit(
+                        w,
+                        TargetId {
+                            kind: TargetKind::Player,
+                            id: holder,
+                        },
+                        damage * e.scale * factor,
+                        def.damage_type,
+                        source(e.owner, e.slot),
+                        e.team,
+                        false,
+                        true,
+                        false,
+                        now,
+                    ));
+                    continue;
+                }
                 if let Some(c) = hits(&cs, e.pos, to, radius)
                     .into_iter()
                     .find(|c| c.target.kind == TargetKind::Player && hostile(c, e.team))
@@ -1214,11 +1348,30 @@ pub(crate) fn tick(w: &mut GameWorld, t: TickCtx) -> Vec<CombatEvent> {
 }
 
 pub(crate) fn effects(w: &GameWorld, now: Instant) -> Vec<SkillEffectState> {
-    w.skill_runtime
+    let mut result: Vec<_> = w
+        .skill_runtime
         .effects
         .values()
         .map(|e| {
             let (kind, radius) = match skill(e.skill).effect {
+                SkillEffect::Technique { action, radius, .. } => (
+                    match action {
+                        shared::loadout::Technique::TerrainLine => EffectVisualKind::Trap,
+                        shared::loadout::Technique::Lantern => EffectVisualKind::Lantern,
+                        shared::loadout::Technique::SegmentCage => EffectVisualKind::Cage,
+                        shared::loadout::Technique::BallField => EffectVisualKind::Field,
+                        shared::loadout::Technique::InterceptShield => EffectVisualKind::ShieldWall,
+                        shared::loadout::Technique::Parry => EffectVisualKind::Barrier,
+                        shared::loadout::Technique::PiercingWave if now < e.armed_at => {
+                            EffectVisualKind::BeamWarning
+                        }
+                        shared::loadout::Technique::GlacialFissure
+                        | shared::loadout::Technique::ConeBrittle
+                        | shared::loadout::Technique::BallPull => EffectVisualKind::BeamWarning,
+                        _ => EffectVisualKind::Bolt,
+                    },
+                    radius,
+                ),
                 SkillEffect::LinearProjectile { radius, .. } => (EffectVisualKind::Bolt, radius),
                 SkillEffect::ReturningShield { radius, .. } => (EffectVisualKind::Barrier, radius),
                 SkillEffect::RecastZone { radius, .. } => (EffectVisualKind::Field, radius),
@@ -1252,12 +1405,21 @@ pub(crate) fn effects(w: &GameWorld, now: Instant) -> Vec<SkillEffectState> {
                 radius,
                 remaining_secs: remaining(Some(e.expires), now),
                 armed: now >= e.armed_at,
+                consumed_segments: if kind == EffectVisualKind::Cage {
+                    e.hit_count
+                } else {
+                    0
+                },
             }
         })
-        .collect()
+        .collect();
+    result.extend(advanced::visuals(w, now));
+    result.truncate(shared::loadout::MAX_ACTIVE_EFFECTS);
+    result
 }
 /// Called exactly once for each accepted receipt stream, before cosmetic retention.
 pub(crate) fn observe(w: &mut GameWorld, events: &[CombatEvent], now: Instant) {
+    advanced::observe(w, events, now);
     for event in events {
         let kind = match event.target.kind {
             CombatEntityKind::Player => TargetKind::Player,
@@ -1409,6 +1571,7 @@ mod tests;
 /// A sandbox actor edit starts a fresh local combat incarnation, not a new
 /// network request sequence. Ordinary death intentionally preserves in-flight effects.
 pub(crate) fn clear_actor(w: &mut GameWorld, id: u64) {
+    advanced::clear_actor(w, id);
     w.skill_runtime.effects.retain(|_, e| e.owner != id);
     w.skill_runtime
         .marks

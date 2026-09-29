@@ -192,6 +192,7 @@ pub(crate) fn bot_avatar(class: HeroClass, slot: u16) -> Option<&'static str> {
         HeroClass::Mage | HeroClass::Dawnweaver => ["agnes", "stitch-witch"],
         HeroClass::Cleric => ["anna", "mega-angel"],
         HeroClass::Warden => ["cool-tiger", "lady-koi"],
+        _ => ["good-knight", "agnes"],
     };
     let variant = ((slot.saturating_sub(1) / 4) % 2) as usize;
     [preferred[variant], preferred[1 - variant], "agnes", "anna"]
@@ -607,7 +608,7 @@ impl ServerRuntime {
         }
         let mut addresses: Vec<_> = self.bots.controllers.keys().copied().collect();
         addresses.sort_unstable();
-        let discs: Vec<_> = self
+        let mut discs: Vec<_> = self
             .world
             .structures
             .values()
@@ -617,6 +618,7 @@ impl ServerRuntime {
                 radius: structure_collision_radius(s.state.kind),
             })
             .collect();
+        discs.extend(crate::skills::advanced::terrain(&self.world, now));
         for addr in addresses {
             if !matches!(self.world.game_state, GameState::Running) {
                 break;
@@ -743,15 +745,28 @@ impl ServerRuntime {
                                 {
                                     continue;
                                 }
+                                let mut aim = [position.x, position.z];
+                                if matches!(
+                                    definition.effect,
+                                    shared::loadout::SkillEffect::Technique {
+                                        action: shared::loadout::Technique::AllyLeap
+                                            | shared::loadout::Technique::BallGuard
+                                            | shared::loadout::Technique::GuardLeap,
+                                        ..
+                                    }
+                                ) {
+                                    aim = [p.hero.x, p.hero.z];
+                                } else if definition.ability.targeting == TargetingMode::Point {
+                                    let dx = aim[0] - p.hero.x;
+                                    let dz = aim[1] - p.hero.z;
+                                    let dist = dx.hypot(dz);
+                                    if dist > definition.ability.cast_range {
+                                        let f = definition.ability.cast_range / dist;
+                                        aim = [p.hero.x + dx * f, p.hero.z + dz * f];
+                                    }
+                                }
                                 let request = p.hero.skills.request_id.saturating_add(1);
-                                crate::skills::cast(
-                                    &mut self.world,
-                                    addr,
-                                    slot,
-                                    [position.x, position.z],
-                                    request,
-                                    now,
-                                );
+                                crate::skills::cast(&mut self.world, addr, slot, aim, request, now);
                             }
                         }
                     }

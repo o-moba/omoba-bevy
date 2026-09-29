@@ -263,6 +263,9 @@ impl ConnectedPlayer {
         let mut view = self.owner_view(now, map, phase);
         if let Some(loadout) = &mut view.loadout {
             loadout.cast_request_id = 0;
+            loadout.orb_position = None;
+            loadout.challenge_target = None;
+            loadout.challenge_sides = 0;
         }
         PlayerState {
             gold: 0,

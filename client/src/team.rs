@@ -209,6 +209,15 @@ fn class_keys(class: HeroClass) -> (&'static str, &'static str) {
         HeroClass::Warden => ("hero.warden.name", "hero.warden.tagline"),
         HeroClass::Dawnweaver => ("hero.dawnweaver.name", "hero.dawnweaver.tagline"),
         HeroClass::Wildspark => ("hero.wildspark.name", "hero.wildspark.tagline"),
+        HeroClass::Cinderforge => ("hero.cinderforge.name", "hero.cinderforge.tagline"),
+        HeroClass::Edgeweaver => ("hero.edgeweaver.name", "hero.edgeweaver.tagline"),
+        HeroClass::Stormfist => ("hero.stormfist.name", "hero.stormfist.tagline"),
+        HeroClass::Veilstalker => ("hero.veilstalker.name", "hero.veilstalker.tagline"),
+        HeroClass::Emberveil => ("hero.emberveil.name", "hero.emberveil.tagline"),
+        HeroClass::Orbitwright => ("hero.orbitwright.name", "hero.orbitwright.tagline"),
+        HeroClass::Riftshot => ("hero.riftshot.name", "hero.riftshot.tagline"),
+        HeroClass::Chainkeeper => ("hero.chainkeeper.name", "hero.chainkeeper.tagline"),
+        HeroClass::Frostguard => ("hero.frostguard.name", "hero.frostguard.tagline"),
     }
 }
 
@@ -1920,11 +1929,7 @@ fn layout_spacious_picker(
                 } else {
                     FlexWrap::Wrap
                 };
-                node.overflow = if phone {
-                    Overflow::scroll_y()
-                } else {
-                    Overflow::default()
-                };
+                node.overflow = Overflow::scroll_y();
             }
             "AvatarSelectTitle" => absolute(&mut node, grid_x, grid_y - 24.0, grid_w, 20.0),
             "RendererStatus" => node.display = Display::None,
@@ -2064,7 +2069,7 @@ impl PickerLayout {
         };
         let class_y = top + if phone { 72.0 } else { 104.0 };
         let grid_x = if phone { inset + left_w + 12.0 } else { inset };
-        let class_rows = HeroClass::ALL.len().div_ceil(4) as f32;
+        let class_rows = HeroClass::ALL.len().div_ceil(4).min(2) as f32;
         let grid_y = if phone {
             class_y
         } else {

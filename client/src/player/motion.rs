@@ -112,6 +112,8 @@ pub(super) fn move_player(
                 desired = map_layout.clamp_position(desired);
             }
             desired = clip_static_movement(current_pos, desired);
+            desired =
+                crate::navigation::clip_skill_terrain(current_pos, desired, game_state.as_deref());
             transform.translation.x = desired.x;
             transform.translation.z = desired.z;
             // Do not cut corners by advancing before the actual collision-
@@ -131,6 +133,8 @@ pub(super) fn move_player(
                 desired = map_layout.clamp_position(desired);
             }
             desired = clip_static_movement(current_pos, desired);
+            desired =
+                crate::navigation::clip_skill_terrain(current_pos, desired, game_state.as_deref());
             transform.translation.x = desired.x;
             transform.translation.z = desired.z;
 

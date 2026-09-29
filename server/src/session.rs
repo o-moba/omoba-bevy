@@ -251,6 +251,8 @@ pub(crate) fn reset_player_round(
     player.hero.last_action = Default::default();
     player.hero.skills = crate::skills::HeroSkills::default();
     player.hero.skills.loadout = shared::loadout::preset_for_class(player.hero.identity.hero_class);
+    player.hero.max_mana = hero_stats::max_mana(player);
+    player.hero.mana = player.hero.max_mana;
     player.timers.dash_ready_at = None;
     player.timers.haste_ready_at = None;
     player.timers.haste_expires_at = None;

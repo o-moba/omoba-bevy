@@ -59,7 +59,13 @@ def heroes(directory: Path = CATALOG_DIR) -> tuple:
                     raise ValueError(f'unknown skill reference {identifier!r}')
                 ability = dict(skills[identifier])
                 damage = ability['effect'].get('damage')
-                if damage is not None:
+                # These techniques author shield, delayed mark or buff strength,
+                # not an immediate damaging cast for the transport QA consumer.
+                support = ability['effect'].get('action') in {
+                    'double_strike', 'vital_challenge', 'guard_leap', 'curse',
+                    'detonation_mark', 'lantern', 'ally_leap', 'intercept_shield',
+                }
+                if damage is not None and damage > 0 and not support:
                     ability['projectile_damage'] = damage
                 abilities.append(ability)
             hero['abilities'] = abilities

@@ -4,6 +4,15 @@ All notable changes to this repository should be documented in this file.
 
 The canonical repository version lives in `Cargo.toml` under `[workspace.package].version` and follows SemVer.
 
+## [0.30.0] - 2026-09-29
+
+### Expanded standard roster
+
+- Add Cinderforge, Edgeweaver, Stormfist, Veilstalker, Emberveil, Orbitwright, Riftshot, Chainkeeper and Frostguard: nine original presets, 36 skills and nine passives on the reusable recipe runtime.
+- Add staged recasts, parry, charm, camouflage, Energy, persistent orbs, temporary terrain, forging, collectible souls, allied lantern interaction and directional projectile interception. Protocol 4 and `standard-kits-2` explicitly separate this contract from older clients.
+- Add original glyphs, English/Russian/Chinese skill descriptions, a scrolling roster, combat feedback and shared desktop/touch/controller interaction. Offline practice remains limited to legacy classes.
+- Track implemented mechanics, adaptations, verification and remaining constructor/balance work in [the roster progress note](docs/progress/2026-09-29-remaining-roster.md).
+
 ## [0.29.0] - 2026-09-29
 
 ### Standard combat kits and reusable skills

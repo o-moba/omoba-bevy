@@ -84,6 +84,14 @@ pub(crate) fn combat_bonuses(player: &ConnectedPlayer) -> ItemBonuses {
     bonuses.damage_multiplier = bonuses.damage_multiplier.max(1.0) * player.modifiers.damage_mult;
     bonuses.attack_speed_multiplier =
         bonuses.attack_speed_multiplier.max(1.0) * player.modifiers.attack_speed_mult;
+    if player
+        .hero
+        .skills
+        .loadout
+        .is_some_and(|l| l.passive() == shared::loadout::PassiveId::Souls)
+    {
+        bonuses.damage_multiplier *= 1.0 + player.hero.skills.advanced.souls as f32 * 0.002;
+    }
     bonuses
 }
 
@@ -197,6 +205,14 @@ pub(crate) fn max_hp(player: &ConnectedPlayer) -> f32 {
 
 /// Full mana pool: the shared base, level growth and item mana.
 pub(crate) fn max_mana(player: &ConnectedPlayer) -> f32 {
+    if player
+        .hero
+        .skills
+        .loadout
+        .is_some_and(|l| l.core() == shared::loadout::CoreId::Stormfist)
+    {
+        return 200.0;
+    }
     MAX_MANA
         + player.hero.progress.level.saturating_sub(1) as f32 * LEVEL_UP_MANA_BONUS
         + player.economy.item_bonuses.max_mana
@@ -220,7 +236,18 @@ pub(crate) fn mitigate(player: &ConnectedPlayer, damage: f32, magical: bool) -> 
     } else {
         player.modifiers.armor
     };
-    damage * 100.0 / (100.0 + mitigation)
+    let s = &player.hero.skills.advanced;
+    let passive = player.hero.skills.loadout.map(|l| l.passive());
+    let extra = if passive == Some(shared::loadout::PassiveId::Tempered) {
+        20.0
+    } else {
+        0.0
+    } + if passive == Some(shared::loadout::PassiveId::Souls) && !magical {
+        s.souls as f32 * 0.5
+    } else {
+        0.0
+    } + if s.forged { 15.0 } else { 0.0 };
+    damage * 100.0 / (100.0 + mitigation + extra)
 }
 
 /// Mode and passive timing apply after the shared class/gear baseline.

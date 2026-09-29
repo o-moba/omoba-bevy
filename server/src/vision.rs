@@ -80,6 +80,11 @@ pub(crate) fn player_visible(
     now: Instant,
 ) -> bool {
     player.joined
+        && (!crate::skills::advanced::camouflaged(player, now)
+            || revealed(player, now)
+            || sight.iter().any(|s| {
+                (s.position[0] - player.hero.x).hypot(s.position[1] - player.hero.z) <= 5.0
+            }))
         && (player
             .hero
             .skills

@@ -113,6 +113,12 @@ pub enum ClientPacket {
     },
     /// Version-three modular skill cast. Aim is a world XZ point; the server
     /// derives trajectories and validates stage/cost from the frozen loadout.
+    Interact {
+        object_id: u64,
+        server_epoch: u64,
+        match_id: u64,
+        request_id: u64,
+    },
     CastSkill {
         slot: u8,
         aim: [f32; 2],
@@ -882,6 +888,7 @@ mod tests {
             radius: 0.7,
             remaining_secs: 1.0,
             armed: true,
+            consumed_segments: 0,
         });
         let json = serde_json::to_string(&packet).unwrap();
         let again: ServerPacket = serde_json::from_str(&json).unwrap();

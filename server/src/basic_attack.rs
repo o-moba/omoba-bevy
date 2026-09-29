@@ -102,6 +102,22 @@ pub(crate) fn handle_basic_attack_request(
     if !matches!(world.game_state, GameState::Running) || attacker.hero.hp <= 0.0 {
         return;
     }
+    if attacker
+        .hero
+        .skills
+        .control
+        .stun_until
+        .is_some_and(|until| until > now)
+        || attacker
+            .hero
+            .skills
+            .advanced
+            .charm
+            .is_some_and(|(_, until)| until > now)
+        || attacker.hero.skills.advanced.immune(now)
+    {
+        return;
+    }
     let (range, mode_damage, _, mana_cost, splash) = crate::skills::attack_modifiers(attacker);
     if !attacker.modifiers.infinite_resource && attacker.hero.mana < mana_cost {
         return;

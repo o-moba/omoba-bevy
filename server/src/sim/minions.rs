@@ -164,6 +164,15 @@ pub(crate) fn simulate_minions(world: &mut GameWorld, tick: TickCtx) -> Vec<Comb
     let minion_vision_sq = MINION_VISION_RANGE * MINION_VISION_RANGE;
 
     for minion in minions.values_mut() {
+        if skill_runtime.npc_stunned(
+            TargetId {
+                kind: TargetKind::Minion,
+                id: minion.state.id,
+            },
+            now,
+        ) {
+            continue;
+        }
         if minion.state.hp <= 0.0 {
             minion.state.state = MinionBrainState::Dead;
             minion.state.target_kind = None;

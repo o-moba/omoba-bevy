@@ -1323,7 +1323,11 @@ pub(crate) fn class_icon(class: shared::HeroClass) -> Icon {
         HeroClass::Cleric => Icon::ClassCleric,
         HeroClass::Warden => Icon::ClassWarden,
         HeroClass::Dawnweaver => Icon::ClassCleric,
-        HeroClass::Wildspark => Icon::ClassRanger,
+        HeroClass::Wildspark | HeroClass::Riftshot => Icon::ClassRanger,
+        HeroClass::Cinderforge | HeroClass::Edgeweaver | HeroClass::Stormfist => Icon::ClassWarrior,
+        HeroClass::Veilstalker => Icon::ClassWarden,
+        HeroClass::Emberveil | HeroClass::Orbitwright => Icon::ClassMage,
+        HeroClass::Chainkeeper | HeroClass::Frostguard => Icon::ClassCleric,
     }
 }
 

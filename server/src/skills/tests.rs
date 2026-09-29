@@ -825,3 +825,6 @@ fn public_loadout_preserves_combat_state_but_redacts_cast_request_sequence() {
     assert_eq!(public.loadout, Some(expected));
     assert_eq!(player.hero.skills.request_id, 42);
 }
+
+#[path = "roster_tests.rs"]
+mod roster_tests;

@@ -137,6 +137,15 @@ pub(crate) fn simulate_neutrals(world: &mut GameWorld, tick: TickCtx) -> Vec<Com
     let mut player_damage_events: Vec<(u64, f32, HitSource)> = Vec::new();
 
     for neutral in neutrals.values_mut() {
+        if skill_runtime.npc_stunned(
+            shared::wire::TargetId {
+                kind: shared::wire::TargetKind::Neutral,
+                id: neutral.state.id,
+            },
+            now,
+        ) {
+            continue;
+        }
         if let Some(dead_until) = neutral.dead_until {
             if now >= dead_until {
                 let template = neutral_template(neutral.state.camp_type);

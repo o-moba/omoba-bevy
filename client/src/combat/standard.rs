@@ -41,6 +41,29 @@ pub(crate) fn movement_factor(loadout: Option<&PlayerLoadout>) -> f32 {
 pub(super) struct StandardStatus;
 
 pub(super) fn setup(mut commands: Commands, assets: Res<AssetServer>) {
+    commands
+        .spawn((
+            Button,
+            InteractButton,
+            Node {
+                position_type: PositionType::Absolute,
+                right: Val::Px(24.0),
+                bottom: Val::Px(230.0),
+                padding: UiRect::all(Val::Px(12.0)),
+                display: Display::None,
+                ..default()
+            },
+            BackgroundColor(crate::ui::theme::BACKDROP),
+            Name::new("LanternInteract"),
+        ))
+        .with_child((
+            Text::new(tr("combat.standard.interact")),
+            TextFont {
+                font_size: 16.0,
+                ..default()
+            },
+            TextColor(Color::WHITE),
+        ));
     commands.spawn((
         Text::default(),
         TextFont {
@@ -84,6 +107,15 @@ pub(super) fn update_status(
     let passive = match state.recipe.as_ref().unwrap().passive {
         shared::loadout::PassiveId::Radiance => tr("combat.standard.radiance"),
         shared::loadout::PassiveId::Momentum => tr("combat.standard.momentum"),
+        shared::loadout::PassiveId::Tempered => tr("combat.standard.tempered"),
+        shared::loadout::PassiveId::Vitals => tr("combat.standard.vitals"),
+        shared::loadout::PassiveId::Flow => tr("combat.standard.flow"),
+        shared::loadout::PassiveId::Shroud => tr("combat.standard.shroud"),
+        shared::loadout::PassiveId::Essence => tr("combat.standard.essence"),
+        shared::loadout::PassiveId::Clockwork => tr("combat.standard.clockwork"),
+        shared::loadout::PassiveId::Resonance => tr("combat.standard.resonance"),
+        shared::loadout::PassiveId::Souls => tr("combat.standard.souls_passive"),
+        shared::loadout::PassiveId::Concussion => tr("combat.standard.concussion_passive"),
     };
     let mut lines = vec![format!("{} · {}", data::hero_name(class.0), passive)];
     if !mobile.enabled && !pad.active {
@@ -104,6 +136,39 @@ pub(super) fn update_status(
                 ("cost", &format!("{:.0}", state.basic_attack_mana_cost)),
             ],
         ));
+    }
+    if state.forge_remaining_secs > 0.0 {
+        lines.push(trf(
+            "combat.standard.forging",
+            &[("seconds", &format!("{:.1}", state.forge_remaining_secs))],
+        ));
+    }
+    if state.forge_ready {
+        lines.push(tr("combat.standard.forge_ready").into());
+    }
+    if state.concussion_stacks > 0 {
+        lines.push(trf(
+            "combat.standard.concussion",
+            &[("count", &state.concussion_stacks)],
+        ));
+    }
+    if state.brittle {
+        lines.push(tr("combat.standard.brittle").into());
+    }
+    if state.energy {
+        lines.push(tr("combat.standard.energy").into());
+    }
+    if state.camouflaged {
+        lines.push(tr("combat.standard.camouflaged").into());
+    }
+    if state.parrying {
+        lines.push(tr("combat.standard.parrying").into());
+    }
+    if state.forged {
+        lines.push(tr("combat.standard.forged").into());
+    }
+    if state.souls > 0 {
+        lines.push(trf("combat.standard.souls", &[("count", &state.souls)]));
     }
     if state.shield_hp > 0.0 {
         lines.push(trf(
@@ -277,7 +342,8 @@ pub(super) fn draw_aim(
         }
         _ => {
             let radius = match def.effect {
-                shared::loadout::SkillEffect::LinearProjectile { radius, .. }
+                shared::loadout::SkillEffect::Technique { radius, .. }
+                | shared::loadout::SkillEffect::LinearProjectile { radius, .. }
                 | shared::loadout::SkillEffect::ReturningShield { radius, .. }
                 | shared::loadout::SkillEffect::ImpactRocket { radius, .. } => radius,
                 shared::loadout::SkillEffect::Beam { width, .. } => width,
@@ -302,7 +368,13 @@ pub(super) fn draw_effects(
     mode: Res<PlayerVisualMode>,
     map: Option<Res<crate::maps::MapLayout>>,
     local: Query<&crate::team::Team, With<Player>>,
-    actors: Query<(&Transform, &PlayerLoadout, Option<&NetworkHeroClass>)>,
+    actors: Query<(
+        &Transform,
+        &PlayerLoadout,
+        Option<&NetworkHeroClass>,
+        Option<&crate::net::NetworkPlayerId>,
+        Option<&crate::team::Team>,
+    )>,
 ) {
     let Some(game) = game else {
         return;
@@ -326,7 +398,38 @@ pub(super) fn draw_effects(
         };
         let radius = e.radius.clamp(0.05, 256.0);
         match e.kind {
-            EffectVisualKind::Field | EffectVisualKind::Trap => {
+            EffectVisualKind::Cage => {
+                for i in 0..5 {
+                    if e.consumed_segments & (1 << i) != 0 {
+                        continue;
+                    }
+                    let a = i as f32 * std::f32::consts::TAU / 5.0;
+                    let b = (i + 1) as f32 * std::f32::consts::TAU / 5.0;
+                    gizmos.line(
+                        point(p + Vec2::new(a.cos(), a.sin()) * radius, *mode, map),
+                        point(p + Vec2::new(b.cos(), b.sin()) * radius, *mode, map),
+                        color,
+                    );
+                }
+            }
+            EffectVisualKind::ShieldWall => {
+                let d = (end - p).normalize_or_zero();
+                let center = p + d;
+                let side = Vec2::new(-d.y, d.x) * radius;
+                gizmos.line(
+                    point(center - side, *mode, map),
+                    point(center + side, *mode, map),
+                    color,
+                );
+            }
+
+            EffectVisualKind::Field
+            | EffectVisualKind::Trap
+            | EffectVisualKind::Healing
+            | EffectVisualKind::Anchor
+            | EffectVisualKind::Soul
+            | EffectVisualKind::Orb
+            | EffectVisualKind::Lantern => {
                 ring(&mut gizmos, p, radius, *mode, map, color);
                 ring(
                     &mut gizmos,
@@ -389,11 +492,80 @@ pub(super) fn draw_effects(
             }
         }
     }
-    for (pose, loadout, class) in &actors {
+    let duelist = actors
+        .iter()
+        .find(|(_, _, _, id, _)| id.is_some_and(|id| id.0 == game.your_id))
+        .and_then(|(_, l, _, _, team)| {
+            l.0.as_ref()
+                .filter(|s| {
+                    s.recipe
+                        .as_ref()
+                        .is_some_and(|r| r.passive == shared::loadout::PassiveId::Vitals)
+                        || s.challenge_target.is_some()
+                })
+                .map(|s| (s, team))
+        });
+    for (pose, loadout, class, id, team) in &actors {
+        if let (Some((duel, own_team)), Some(id)) = (duelist, id) {
+            if team != own_team {
+                let p = pose.translation.xz();
+                let challenge = duel.challenge_target == Some(id.0);
+                for side in 0..4 {
+                    if challenge || side == (id.0 as u8).wrapping_add(duel.vital_rotation) % 4 {
+                        let a = side as f32 * std::f32::consts::FRAC_PI_2;
+                        let color = if challenge && duel.challenge_sides & (1 << side) != 0 {
+                            Color::srgb(0.3, 0.35, 0.4)
+                        } else {
+                            Color::srgb(1.0, 0.75, 0.2)
+                        };
+                        ring(
+                            &mut gizmos,
+                            p + Vec2::new(a.cos(), a.sin()) * 1.4,
+                            0.3,
+                            *mode,
+                            map,
+                            color,
+                        );
+                    }
+                }
+            }
+        }
         let Some(state) = &loadout.0 else {
             continue;
         };
         let p = pose.translation.xz();
+        if let Some(orb) = state.orb_position {
+            let orb = Vec2::from_array(orb);
+            ring(
+                &mut gizmos,
+                orb,
+                0.65,
+                *mode,
+                map,
+                Color::srgb(0.9, 0.7, 1.0),
+            );
+            gizmos.line(
+                point(p, *mode, map),
+                point(orb, *mode, map),
+                Color::srgba(0.8, 0.7, 1.0, 0.3),
+            );
+        }
+        for i in 0..state.concussion_stacks.min(4) {
+            ring(
+                &mut gizmos,
+                p + Vec2::new(-0.6 + i as f32 * 0.4, 1.4),
+                0.12,
+                *mode,
+                map,
+                Color::srgb(0.6, 0.9, 1.0),
+            );
+        }
+        if state.brittle {
+            ring(&mut gizmos, p, 1.2, *mode, map, Color::srgb(1.0, 0.6, 0.1));
+        }
+        if state.parrying {
+            ring(&mut gizmos, p, 1.4, *mode, map, Color::WHITE);
+        }
         if state.shield_hp > 0.0 {
             ring(&mut gizmos, p, 0.95, *mode, map, Color::srgb(0.5, 0.9, 1.0));
         }
@@ -442,5 +614,65 @@ mod tests {
             bounded_aim(Vec2::ONE, Vec2::ZERO, TargetingMode::SelfTarget, 0.0),
             Vec2::ONE
         );
+    }
+}
+
+#[derive(Component)]
+pub(super) struct InteractButton;
+
+/// One explicit action for keyboard, touch and the controller's left-stick click.
+pub(super) fn interact(
+    game: Option<Res<GameStateSnapshot>>,
+    context: Res<crate::input_context::GameplayInputContext>,
+    local: Query<(&Transform, &crate::team::Team, &super::CombatStats), With<Player>>,
+    keys: Res<ButtonInput<KeyCode>>,
+    pad: Res<crate::gamepad::GamepadControls>,
+    mut held: Local<bool>,
+    mut buttons: Query<(&mut Node, &Interaction, Ref<Interaction>), With<InteractButton>>,
+    mut commands: MessageWriter<crate::net::NetworkCommand>,
+) {
+    let down = pad.active
+        && pad
+            .raw
+            .is_some_and(|p| p.buttons & crate::gamepad::snapshot::L3 != 0);
+    let pressed = down && !*held;
+    *held = down;
+    let nearest = game.as_ref().and_then(|game| {
+        local
+            .single()
+            .ok()
+            .filter(|(_, _, stats)| stats.is_alive() && context.gameplay_allowed())
+            .and_then(|(pose, team, _)| {
+                game.skill_effects
+                    .iter()
+                    .filter(|e| {
+                        e.owner_team == *team
+                            && e.owner_id != game.your_id
+                            && matches!(
+                                shared::loadout::skill(e.skill).effect,
+                                shared::loadout::SkillEffect::Technique {
+                                    action: shared::loadout::Technique::Lantern,
+                                    ..
+                                }
+                            )
+                            && Vec2::from_array(e.position).distance(pose.translation.xz()) <= 3.0
+                    })
+                    .min_by_key(|e| e.id)
+                    .map(|e| e.id)
+            })
+    });
+    let mut clicked = false;
+    for (mut node, interaction, changed) in &mut buttons {
+        node.display = if nearest.is_some() {
+            Display::Flex
+        } else {
+            Display::None
+        };
+        clicked |= changed.is_changed() && *interaction == Interaction::Pressed;
+    }
+    if let Some(object_id) =
+        nearest.filter(|_| keys.just_pressed(KeyCode::KeyF) || pressed || clicked)
+    {
+        commands.write(crate::net::NetworkCommand::Interact { object_id });
     }
 }

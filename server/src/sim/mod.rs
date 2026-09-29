@@ -31,8 +31,18 @@ pub(crate) fn regenerate_mana(players: &mut HashMap<SocketAddr, ConnectedPlayer>
         if player.hero.max_mana <= 0.0 {
             player.hero.max_mana = MAX_MANA;
         }
-        player.hero.mana =
-            (player.hero.mana + MANA_REGEN_PER_SECOND * dt).clamp(0.0, player.hero.max_mana);
+        player.hero.mana = (player.hero.mana
+            + if player
+                .hero
+                .skills
+                .loadout
+                .is_some_and(|l| l.core() == shared::loadout::CoreId::Stormfist)
+            {
+                20.0
+            } else {
+                MANA_REGEN_PER_SECOND
+            } * dt)
+            .clamp(0.0, player.hero.max_mana);
     }
 }
 

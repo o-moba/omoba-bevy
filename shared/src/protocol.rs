@@ -6,9 +6,9 @@ mod wire_enums;
 
 use serde::{Deserialize, Serialize};
 
-// Version 3 adds modular aimed casts, their runtime state and free effect geometry.
+// Version 4 expands the roster and adds explicit allied-object interaction.
 // Reject older peers rather than showing invisible threats or the wrong skills.
-pub const PROTOCOL_VERSION: u16 = 3;
+pub const PROTOCOL_VERSION: u16 = 4;
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]

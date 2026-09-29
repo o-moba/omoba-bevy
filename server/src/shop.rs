@@ -25,7 +25,9 @@ fn inside_own_shop(hero: &Hero, map: &MapLayoutState) -> bool {
 }
 
 pub(crate) fn shop_is_available(hero: &Hero, map: &MapLayoutState, phase: &GameState) -> bool {
-    hero.hp > 0.0 && phase_allows_shop(phase) && inside_own_shop(hero, map)
+    hero.hp > 0.0
+        && phase_allows_shop(phase)
+        && (inside_own_shop(hero, map) || hero.skills.advanced.forge_ready)
 }
 
 pub(crate) fn handle_purchase(
@@ -45,7 +47,7 @@ pub(crate) fn handle_purchase(
         Some(PurchaseError::Unavailable)
     } else if player.hero.hp <= 0.0 {
         Some(PurchaseError::Dead)
-    } else if !inside_own_shop(&player.hero, map) {
+    } else if !inside_own_shop(&player.hero, map) && !player.hero.skills.advanced.forge_ready {
         Some(PurchaseError::OutsideBase)
     } else if let Some(id) = item_id {
         if player.economy.inventory.len() >= INVENTORY_CAPACITY {
@@ -67,7 +69,16 @@ pub(crate) fn handle_purchase(
         player.economy.inventory.push(id);
         player.economy.item_bonuses = item_bonuses(&player.economy.inventory);
         let hp_bonus = player.economy.item_bonuses.max_hp - old.max_hp;
-        let mana_bonus = player.economy.item_bonuses.max_mana - old.max_mana;
+        let mana_bonus = if player
+            .hero
+            .skills
+            .loadout
+            .is_some_and(|l| l.core() == shared::loadout::CoreId::Stormfist)
+        {
+            0.0
+        } else {
+            player.economy.item_bonuses.max_mana - old.max_mana
+        };
         player.hero.max_hp += hp_bonus;
         player.hero.hp = (player.hero.hp + hp_bonus).min(player.hero.max_hp);
         player.hero.max_mana += mana_bonus;

@@ -71,6 +71,7 @@ impl Plugin for CombatPlugin {
                 Update,
                 (
                     standard::update_status,
+                    standard::interact,
                     standard::draw_effects,
                     standard::draw_aim,
                 ),

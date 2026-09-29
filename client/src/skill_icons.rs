@@ -36,7 +36,9 @@ const STANDARD_ABILITIES: [&str; 8] = [
     "wild_rocket",
 ];
 pub(crate) fn atlas_path(ability: &str) -> &'static str {
-    if STANDARD_ABILITIES.contains(&ability) {
+    if shared::loadout::SkillId::from_id(ability).is_some_and(|id| id as usize >= 8) {
+        "ui/skills/roster-skills.png"
+    } else if STANDARD_ABILITIES.contains(&ability) {
         "ui/skills/standard-skills.png"
     } else {
         ATLAS_PATH
@@ -47,7 +49,11 @@ const ROWS: usize = ABILITIES.len() / COLUMNS;
 
 /// Pixel rectangles support any atlas resolution, including odd-sized source art.
 pub(crate) fn icon_rect(ability: &str, size: Vec2) -> Option<Rect> {
-    let (index, rows) = if let Some(i) = STANDARD_ABILITIES.iter().position(|id| *id == ability) {
+    let (index, rows) = if let Some(id) =
+        shared::loadout::SkillId::from_id(ability).filter(|id| *id as usize >= 8)
+    {
+        (id as usize - 8, 9)
+    } else if let Some(i) = STANDARD_ABILITIES.iter().position(|id| *id == ability) {
         (i, 2)
     } else {
         (ABILITIES.iter().position(|id| *id == ability)?, ROWS)

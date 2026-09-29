@@ -23,7 +23,7 @@ import subprocess
 import time
 
 
-PROTOCOL = 3
+PROTOCOL = 4
 HEADER = struct.Struct('<4sHQQHHI')
 MAX_SNAPSHOT = 65507
 CHUNK = 1170

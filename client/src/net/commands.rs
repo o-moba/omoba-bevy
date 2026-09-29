@@ -33,6 +33,9 @@ pub enum NetworkCommand {
     BasicAttack {
         target: TargetId,
     },
+    Interact {
+        object_id: u64,
+    },
     CastSkill {
         slot: u8,
         aim: Vec2,
@@ -328,6 +331,33 @@ pub(in crate::net) fn send_network_commands(
                 *basic_sequence = request_id;
                 let _ = channels.outgoing.try_send(ClientPacket::BasicAttack {
                     target: *target,
+                    server_epoch: meta.server_epoch,
+                    match_id: meta.match_id,
+                    request_id,
+                });
+            }
+            NetworkCommand::Interact { object_id } => {
+                if !client_session.join_confirmed() {
+                    continue;
+                }
+                let Some(meta) = snapshot
+                    .as_ref()
+                    .map(|s| s.meta)
+                    .filter(|m| m.server_epoch != 0 && m.match_id != 0)
+                else {
+                    continue;
+                };
+                let ack = loadout
+                    .single()
+                    .ok()
+                    .and_then(|s| s.0.as_ref())
+                    .map_or(0, |s| s.cast_request_id);
+                let Some(request_id) = (*skill_sequence).max(ack).checked_add(1) else {
+                    continue;
+                };
+                *skill_sequence = request_id;
+                let _ = channels.outgoing.try_send(ClientPacket::Interact {
+                    object_id: *object_id,
                     server_epoch: meta.server_epoch,
                     match_id: meta.match_id,
                     request_id,

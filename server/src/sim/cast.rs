@@ -55,6 +55,22 @@ pub(crate) fn handle_cast_request(
     if !caster.joined || caster.hero.hp <= 0.0 || caster.hero.skills.loadout.is_some() {
         return;
     }
+    if caster
+        .hero
+        .skills
+        .control
+        .stun_until
+        .is_some_and(|until| until > now)
+        || caster
+            .hero
+            .skills
+            .advanced
+            .charm
+            .is_some_and(|(_, until)| until > now)
+        || caster.hero.skills.advanced.immune(now)
+    {
+        return;
+    }
     // Authoritative kit resolution: class + slot -> ability definition.
     let def = ability_for_class_slot(caster.hero.identity.hero_class, skill_slot);
     if !caster.modifiers.unlock_all

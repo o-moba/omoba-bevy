@@ -114,7 +114,30 @@ pub(crate) fn simulate_projectiles_filtered(
             }
         };
 
-        if step_homing(projectile, target_pos, target_radius, dt) {
+        let from = [projectile.state.x, projectile.state.z];
+        let impact = step_homing(projectile, target_pos, target_radius, dt);
+        let to = [projectile.state.x, projectile.state.z];
+        if let Some((holder, factor)) = crate::skills::advanced::intercept_players(
+            players,
+            projectile.state.owner_team,
+            from,
+            to,
+            projectile.radius,
+            now,
+        ) {
+            damage_events.push((
+                projectile.state.id,
+                TargetId {
+                    kind: TargetKind::Player,
+                    id: holder,
+                },
+                projectile.damage * factor,
+                projectile.state.owner_team,
+                HitSource::projectile(&projectile.state),
+            ));
+            return false;
+        }
+        if impact {
             damage_events.push((
                 projectile.state.id,
                 projectile.target,

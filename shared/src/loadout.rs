@@ -7,7 +7,7 @@ use crate::{AbilityDefinition, HeroClass, MAX_ABILITY_RANK, SkillSlot, Targeting
 use serde::{Deserialize, Serialize};
 use std::sync::LazyLock;
 
-pub const CATALOG_REVISION: &str = "standard-kits-1";
+pub const CATALOG_REVISION: &str = "standard-kits-2";
 pub const RECIPE_SCHEMA_VERSION: u16 = 1;
 pub const MAX_ACTIVE_EFFECTS: usize = 128;
 pub const MAX_EFFECTS_PER_OWNER: usize = 16;
@@ -18,6 +18,15 @@ pub const MAX_AIM_COORDINATE: f32 = 4096.0;
 pub enum CoreId {
     Dawnweaver,
     Wildspark,
+    Cinderforge,
+    Edgeweaver,
+    Stormfist,
+    Veilstalker,
+    Emberveil,
+    Orbitwright,
+    Riftshot,
+    Chainkeeper,
+    Frostguard,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -31,9 +40,45 @@ pub enum SkillId {
     WildZap,
     WildTraps,
     WildRocket,
+    FaultLine,
+    FurnaceBreath,
+    AnvilCharge,
+    MountainEcho,
+    EdgeLunge,
+    MirrorGuard,
+    TwinTempo,
+    FourfoldDuel,
+    EchoStrike,
+    AnchorStep,
+    ThunderPulse,
+    ThunderKick,
+    ThornVolley,
+    PatientCurse,
+    ShadowLash,
+    Nightfall,
+    WanderingEmber,
+    KindledWisps,
+    HeartTether,
+    FlameDance,
+    OrbitalCommand,
+    OrbitalField,
+    OrbitalGuard,
+    OrbitalCollapse,
+    RiftNeedle,
+    RiftSeal,
+    RiftStep,
+    HorizonWave,
+    IronHook,
+    GuidingLantern,
+    ChainSweep,
+    IronBoundary,
+    WinterShard,
+    ShelteringLeap,
+    Northwall,
+    WinterDivide,
 }
 impl SkillId {
-    pub const ALL: [Self; 8] = [
+    pub const ALL: [Self; 44] = [
         Self::DawnBind,
         Self::DawnBarrier,
         Self::DawnField,
@@ -42,6 +87,42 @@ impl SkillId {
         Self::WildZap,
         Self::WildTraps,
         Self::WildRocket,
+        Self::FaultLine,
+        Self::FurnaceBreath,
+        Self::AnvilCharge,
+        Self::MountainEcho,
+        Self::EdgeLunge,
+        Self::MirrorGuard,
+        Self::TwinTempo,
+        Self::FourfoldDuel,
+        Self::EchoStrike,
+        Self::AnchorStep,
+        Self::ThunderPulse,
+        Self::ThunderKick,
+        Self::ThornVolley,
+        Self::PatientCurse,
+        Self::ShadowLash,
+        Self::Nightfall,
+        Self::WanderingEmber,
+        Self::KindledWisps,
+        Self::HeartTether,
+        Self::FlameDance,
+        Self::OrbitalCommand,
+        Self::OrbitalField,
+        Self::OrbitalGuard,
+        Self::OrbitalCollapse,
+        Self::RiftNeedle,
+        Self::RiftSeal,
+        Self::RiftStep,
+        Self::HorizonWave,
+        Self::IronHook,
+        Self::GuidingLantern,
+        Self::ChainSweep,
+        Self::IronBoundary,
+        Self::WinterShard,
+        Self::ShelteringLeap,
+        Self::Northwall,
+        Self::WinterDivide,
     ];
     pub const fn id(self) -> &'static str {
         match self {
@@ -53,6 +134,42 @@ impl SkillId {
             Self::WildZap => "wild_zap",
             Self::WildTraps => "wild_traps",
             Self::WildRocket => "wild_rocket",
+            Self::FaultLine => "fault_line",
+            Self::FurnaceBreath => "furnace_breath",
+            Self::AnvilCharge => "anvil_charge",
+            Self::MountainEcho => "mountain_echo",
+            Self::EdgeLunge => "edge_lunge",
+            Self::MirrorGuard => "mirror_guard",
+            Self::TwinTempo => "twin_tempo",
+            Self::FourfoldDuel => "fourfold_duel",
+            Self::EchoStrike => "echo_strike",
+            Self::AnchorStep => "anchor_step",
+            Self::ThunderPulse => "thunder_pulse",
+            Self::ThunderKick => "thunder_kick",
+            Self::ThornVolley => "thorn_volley",
+            Self::PatientCurse => "patient_curse",
+            Self::ShadowLash => "shadow_lash",
+            Self::Nightfall => "nightfall",
+            Self::WanderingEmber => "wandering_ember",
+            Self::KindledWisps => "kindled_wisps",
+            Self::HeartTether => "heart_tether",
+            Self::FlameDance => "flame_dance",
+            Self::OrbitalCommand => "orbital_command",
+            Self::OrbitalField => "orbital_field",
+            Self::OrbitalGuard => "orbital_guard",
+            Self::OrbitalCollapse => "orbital_collapse",
+            Self::RiftNeedle => "rift_needle",
+            Self::RiftSeal => "rift_seal",
+            Self::RiftStep => "rift_step",
+            Self::HorizonWave => "horizon_wave",
+            Self::IronHook => "iron_hook",
+            Self::GuidingLantern => "guiding_lantern",
+            Self::ChainSweep => "chain_sweep",
+            Self::IronBoundary => "iron_boundary",
+            Self::WinterShard => "winter_shard",
+            Self::ShelteringLeap => "sheltering_leap",
+            Self::Northwall => "northwall",
+            Self::WinterDivide => "winter_divide",
         }
     }
     pub fn from_id(id: &str) -> Option<Self> {
@@ -65,11 +182,21 @@ impl SkillId {
 pub enum PassiveId {
     Radiance,
     Momentum,
+    Tempered,
+    Vitals,
+    Flow,
+    Shroud,
+    Essence,
+    Clockwork,
+    Resonance,
+    Souls,
+    Concussion,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AttackProfileId {
+    Melee,
     LightBolt,
     Repeater,
 }
@@ -140,16 +267,116 @@ impl CoreId {
         match self {
             Self::Dawnweaver => HeroClass::Dawnweaver,
             Self::Wildspark => HeroClass::Wildspark,
+            Self::Cinderforge => HeroClass::Cinderforge,
+            Self::Edgeweaver => HeroClass::Edgeweaver,
+            Self::Stormfist => HeroClass::Stormfist,
+            Self::Veilstalker => HeroClass::Veilstalker,
+            Self::Emberveil => HeroClass::Emberveil,
+            Self::Orbitwright => HeroClass::Orbitwright,
+            Self::Riftshot => HeroClass::Riftshot,
+            Self::Chainkeeper => HeroClass::Chainkeeper,
+            Self::Frostguard => HeroClass::Frostguard,
         }
     }
     pub const fn attack_profile(self) -> AttackProfileId {
         match self {
             Self::Dawnweaver => AttackProfileId::LightBolt,
             Self::Wildspark => AttackProfileId::Repeater,
+            Self::Cinderforge => AttackProfileId::Melee,
+            Self::Edgeweaver => AttackProfileId::Melee,
+            Self::Stormfist => AttackProfileId::Melee,
+            Self::Veilstalker => AttackProfileId::Melee,
+            Self::Emberveil => AttackProfileId::LightBolt,
+            Self::Orbitwright => AttackProfileId::LightBolt,
+            Self::Riftshot => AttackProfileId::LightBolt,
+            Self::Chainkeeper => AttackProfileId::LightBolt,
+            Self::Frostguard => AttackProfileId::Melee,
         }
     }
     pub fn preset(self) -> BuildRecipe {
         let (passive, skills) = match self {
+            Self::Cinderforge => (
+                PassiveId::Tempered,
+                [
+                    SkillId::FaultLine,
+                    SkillId::FurnaceBreath,
+                    SkillId::AnvilCharge,
+                    SkillId::MountainEcho,
+                ],
+            ),
+            Self::Edgeweaver => (
+                PassiveId::Vitals,
+                [
+                    SkillId::EdgeLunge,
+                    SkillId::MirrorGuard,
+                    SkillId::TwinTempo,
+                    SkillId::FourfoldDuel,
+                ],
+            ),
+            Self::Stormfist => (
+                PassiveId::Flow,
+                [
+                    SkillId::EchoStrike,
+                    SkillId::AnchorStep,
+                    SkillId::ThunderPulse,
+                    SkillId::ThunderKick,
+                ],
+            ),
+            Self::Veilstalker => (
+                PassiveId::Shroud,
+                [
+                    SkillId::ThornVolley,
+                    SkillId::PatientCurse,
+                    SkillId::ShadowLash,
+                    SkillId::Nightfall,
+                ],
+            ),
+            Self::Emberveil => (
+                PassiveId::Essence,
+                [
+                    SkillId::WanderingEmber,
+                    SkillId::KindledWisps,
+                    SkillId::HeartTether,
+                    SkillId::FlameDance,
+                ],
+            ),
+            Self::Orbitwright => (
+                PassiveId::Clockwork,
+                [
+                    SkillId::OrbitalCommand,
+                    SkillId::OrbitalField,
+                    SkillId::OrbitalGuard,
+                    SkillId::OrbitalCollapse,
+                ],
+            ),
+            Self::Riftshot => (
+                PassiveId::Resonance,
+                [
+                    SkillId::RiftNeedle,
+                    SkillId::RiftSeal,
+                    SkillId::RiftStep,
+                    SkillId::HorizonWave,
+                ],
+            ),
+            Self::Chainkeeper => (
+                PassiveId::Souls,
+                [
+                    SkillId::IronHook,
+                    SkillId::GuidingLantern,
+                    SkillId::ChainSweep,
+                    SkillId::IronBoundary,
+                ],
+            ),
+            Self::Frostguard => (
+                PassiveId::Concussion,
+                [
+                    SkillId::WinterShard,
+                    SkillId::ShelteringLeap,
+                    SkillId::Northwall,
+                    SkillId::WinterDivide,
+                ],
+            ),
+
             Self::Dawnweaver => (
                 PassiveId::Radiance,
                 [
@@ -185,6 +412,7 @@ pub enum LoadoutError {
     CatalogRevision,
     WrongSlot { slot: SkillSlot, skill: SkillId },
     RequiresRepeater { skill: SkillId },
+    RequiresOrbController { skill: SkillId },
 }
 impl std::fmt::Display for LoadoutError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -206,6 +434,23 @@ pub fn resolve(recipe: &BuildRecipe) -> Result<ResolvedLoadout, LoadoutError> {
         if def.slot != slot {
             return Err(LoadoutError::WrongSlot { slot, skill: id });
         }
+        if matches!(
+            def.effect,
+            SkillEffect::Technique {
+                action: Technique::BallField | Technique::BallPull,
+                ..
+            }
+        ) && !recipe.skills.iter().any(|id| {
+            matches!(
+                skill(*id).effect,
+                SkillEffect::Technique {
+                    action: Technique::BallMove | Technique::BallGuard,
+                    ..
+                }
+            )
+        }) {
+            return Err(LoadoutError::RequiresOrbController { skill: id });
+        }
         if matches!(def.effect, SkillEffect::WeaponToggle { .. })
             && attack_profile != AttackProfileId::Repeater
         {
@@ -224,6 +469,16 @@ pub fn preset_for_class(class: HeroClass) -> Option<ResolvedLoadout> {
     let core = match class {
         HeroClass::Dawnweaver => CoreId::Dawnweaver,
         HeroClass::Wildspark => CoreId::Wildspark,
+        HeroClass::Cinderforge => CoreId::Cinderforge,
+        HeroClass::Edgeweaver => CoreId::Edgeweaver,
+        HeroClass::Stormfist => CoreId::Stormfist,
+        HeroClass::Veilstalker => CoreId::Veilstalker,
+        HeroClass::Emberveil => CoreId::Emberveil,
+        HeroClass::Orbitwright => CoreId::Orbitwright,
+        HeroClass::Riftshot => CoreId::Riftshot,
+        HeroClass::Chainkeeper => CoreId::Chainkeeper,
+        HeroClass::Frostguard => CoreId::Frostguard,
+
         _ => return None,
     };
     Some(resolve(&core.preset()).expect("embedded preset is valid"))
@@ -234,9 +489,57 @@ pub fn valid_aim(aim: [f32; 2]) -> bool {
         .all(|v| v.is_finite() && v.abs() <= MAX_AIM_COORDINATE)
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Technique {
+    TerrainLine,
+    ConeBrittle,
+    CollisionCharge,
+    ReturningColossus,
+    Lunge,
+    Parry,
+    DoubleStrike,
+    VitalChallenge,
+    EchoStrike,
+    GuardLeap,
+    RevealPulse,
+    ChainKick,
+    SpikeVolley,
+    Curse,
+    Lash,
+    ExecuteRetreat,
+    ReturnOrb,
+    GuidedFires,
+    CharmBolt,
+    SpiritDash,
+    BallMove,
+    BallField,
+    BallGuard,
+    BallPull,
+    OnHitBolt,
+    DetonationMark,
+    BlinkShot,
+    PiercingWave,
+    Hook,
+    Lantern,
+    Sweep,
+    SegmentCage,
+    ConcussiveBolt,
+    AllyLeap,
+    InterceptShield,
+    GlacialFissure,
+}
+
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum SkillEffect {
+    Technique {
+        action: Technique,
+        damage: f32,
+        radius: f32,
+        duration_secs: f32,
+        speed: f32,
+    },
     LinearProjectile {
         speed: f32,
         radius: f32,
@@ -296,7 +599,8 @@ pub enum SkillEffect {
 impl SkillEffect {
     pub const fn damage(self) -> Option<f32> {
         match self {
-            Self::LinearProjectile { damage, .. }
+            Self::Technique { damage, .. }
+            | Self::LinearProjectile { damage, .. }
             | Self::RecastZone { damage, .. }
             | Self::Beam { damage, .. }
             | Self::TrapLine { damage, .. }
@@ -309,6 +613,18 @@ impl SkillEffect {
         let nonnegative = |v: f32| v.is_finite() && (0.0..=4096.0).contains(&v);
         let multiplier = |v: f32| v.is_finite() && (0.0..=1.0).contains(&v);
         match self {
+            Self::Technique {
+                damage,
+                radius,
+                duration_secs,
+                speed,
+                ..
+            } => {
+                nonnegative(damage)
+                    && positive(radius)
+                    && positive(duration_secs)
+                    && nonnegative(speed)
+            }
             Self::LinearProjectile {
                 speed,
                 radius,
@@ -415,6 +731,7 @@ pub struct SkillDefinition {
 
 #[derive(Debug, Clone, Copy)]
 pub enum PassiveEffect {
+    Advanced(PassiveId),
     Radiance {
         mark_duration_secs: f32,
         bonus_damage: f32,
@@ -428,6 +745,15 @@ pub enum PassiveEffect {
 }
 pub fn passive(id: PassiveId) -> PassiveEffect {
     match id {
+        PassiveId::Tempered
+        | PassiveId::Vitals
+        | PassiveId::Flow
+        | PassiveId::Shroud
+        | PassiveId::Essence
+        | PassiveId::Clockwork
+        | PassiveId::Resonance
+        | PassiveId::Souls
+        | PassiveId::Concussion => PassiveEffect::Advanced(id),
         PassiveId::Radiance => PassiveEffect::Radiance {
             mark_duration_secs: 6.0,
             bonus_damage: 18.0,
@@ -491,6 +817,11 @@ fn parse_skills(json: &str) -> Result<Vec<SkillDefinition>, String> {
             return Err(format!("invalid definition for {}", expected.id()));
         }
         let targeting_valid = match r.effect {
+            SkillEffect::Technique { .. } => {
+                matches!(r.targeting, TargetingMode::Direction | TargetingMode::Point)
+                    && r.cast_range > 0.0
+                    || r.targeting == TargetingMode::SelfTarget
+            }
             SkillEffect::WeaponToggle { .. } => {
                 r.targeting == TargetingMode::SelfTarget && r.cast_range == 0.0
             }
@@ -543,6 +874,20 @@ pub struct SkillSlotState {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct LoadoutState {
+    pub concussion_stacks: u8,
+    pub brittle: bool,
+    pub vital_rotation: u8,
+    pub challenge_target: Option<u64>,
+    pub challenge_sides: u8,
+    pub forge_ready: bool,
+    #[serde(default)]
+    pub forge_remaining_secs: f32,
+    pub energy: bool,
+    pub camouflaged: bool,
+    pub parrying: bool,
+    pub souls: u16,
+    pub orb_position: Option<[f32; 2]>,
+    pub forged: bool,
     pub recipe: Option<BuildRecipe>,
     pub slots: [SkillSlotState; 4],
     pub weapon_mode: WeaponMode,
@@ -560,6 +905,19 @@ pub struct LoadoutState {
 impl Default for LoadoutState {
     fn default() -> Self {
         Self {
+            concussion_stacks: 0,
+            brittle: false,
+            vital_rotation: 0,
+            challenge_target: None,
+            challenge_sides: 0,
+            forge_ready: false,
+            forge_remaining_secs: 0.0,
+            energy: false,
+            camouflaged: false,
+            parrying: false,
+            souls: 0,
+            orb_position: None,
+            forged: false,
             recipe: None,
             slots: [SkillSlotState::default(); 4],
             weapon_mode: WeaponMode::Repeater,
@@ -580,6 +938,13 @@ impl Default for LoadoutState {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum EffectVisualKind {
+    Orb,
+    Soul,
+    Anchor,
+    Healing,
+    ShieldWall,
+    Cage,
+    Lantern,
     Bolt,
     Barrier,
     Field,
@@ -602,6 +967,9 @@ pub struct SkillEffectState {
     pub radius: f32,
     pub remaining_secs: f32,
     pub armed: bool,
+    /// Consumed cage walls; lower five bits, zero for other effects.
+    #[serde(default)]
+    pub consumed_segments: u8,
 }
 
 #[cfg(test)]
@@ -670,6 +1038,6 @@ mod tests {
         let mut bad = good;
         bad["skills"][0]["effect"]["script"] = serde_json::json!("run()");
         assert!(parse_skills(&bad.to_string()).is_err());
-        assert_eq!(parse_skills(SKILLS_JSON).unwrap().len(), 8);
+        assert_eq!(parse_skills(SKILLS_JSON).unwrap().len(), SkillId::ALL.len());
     }
 }
