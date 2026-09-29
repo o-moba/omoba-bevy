@@ -8,5 +8,9 @@
   "hero.cleric.name": "Жрец",
   "hero.cleric.tagline": "Поддержка: умеренный урон и сильное исцеление",
   "hero.warden.name": "Хранитель",
-  "hero.warden.tagline": "Лесник: быстро зачищает лагеря и получает больше золота в лесу"
+  "hero.warden.tagline": "Лесник: быстро зачищает лагеря и получает больше золота в лесу",
+  "hero.dawnweaver.name": "Ткач рассвета",
+  "hero.dawnweaver.tagline": "Маг света: путы, щит, поле и луч",
+  "hero.wildspark.name": "Дикая искра",
+  "hero.wildspark.tagline": "Взрывной стрелок: режимы огня, ловушки и ускорение после добивания"
 }

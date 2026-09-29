@@ -379,7 +379,19 @@ fn sandbox_ai_modes_forced_cast_and_all_heroes() {
             )
             .accepted
         );
-        assert!(!rt.world.projectiles.is_empty());
+        if hero.is_standard() {
+            let view = crate::skills::state(
+                &rt.world.players[&ENEMY_ADDR],
+                rt.sandbox.as_ref().unwrap().now,
+            )
+            .unwrap();
+            assert!(
+                view.weapon_mode == shared::loadout::WeaponMode::Rockets
+                    || !crate::skills::effects(&rt.world, now).is_empty()
+            );
+        } else {
+            assert!(!rt.world.projectiles.is_empty());
+        }
         rt.world.projectiles.clear();
         c.enemy.behavior = BotBehavior::Fight;
         c.enemy.actor.no_cooldowns = true;

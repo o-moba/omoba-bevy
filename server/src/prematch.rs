@@ -331,6 +331,16 @@ impl ServerRuntime {
                 role,
                 ..
             } if self.prematch.phase == Some(PrematchPhase::Draft) && !player.draft.locked => {
+                if hero_class.is_standard()
+                    && (!player.framed_snapshots || !player.protocol_compatible)
+                {
+                    player.draft.error = Some(
+                        shared::protocol::JoinRejection::ProtocolMismatch
+                            .message()
+                            .into(),
+                    );
+                    return;
+                }
                 let normalized = omoba_passport::avatars::normalize_avatar_slug(avatar.as_deref());
                 if avatar.is_some() && normalized.is_none() {
                     player.draft.error = Some(

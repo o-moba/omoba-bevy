@@ -10,6 +10,8 @@ use shared::{HeroClass, SkillSlot};
 #[derive(Resource, Default)]
 pub struct LocalCastCooldown {
     pub remaining_secs: [f32; 4],
+    pub(crate) recast: [bool; 4],
+    pub(crate) recast_secs: [f32; 4],
     /// Total duration last applied to each active cooldown. Lets an equipment
     /// or rank update change the deadline without rescaling elapsed time.
     pub(super) total_secs: [f32; 4],
@@ -63,12 +65,13 @@ pub(super) fn sync_authoritative_cooldown_durations(
             &NetworkHeroClass,
             &crate::net::PlayerEquipment,
             Option<Ref<crate::net::PlayerSkillCooldowns>>,
+            Option<&crate::net::PlayerLoadout>,
         ),
         With<Player>,
     >,
     mut cooldowns: ResMut<LocalCastCooldown>,
 ) {
-    let Ok((progression, class, equipment, authoritative)) = player.single() else {
+    let Ok((progression, class, equipment, authoritative, loadout)) = player.single() else {
         return;
     };
     let sandbox_actor = game
@@ -93,6 +96,17 @@ pub(super) fn sync_authoritative_cooldown_durations(
     }
     if let Some(actor) = sandbox_actor {
         cooldowns.remaining_secs = actor.cooldowns;
+    }
+    cooldowns.recast = [false; 4];
+    cooldowns.recast_secs = [0.0; 4];
+    if let Some(state) = loadout.and_then(|l| l.0.as_ref()) {
+        for (i, slot) in state.slots.iter().enumerate() {
+            cooldowns.recast[i] = slot.can_recast;
+            cooldowns.recast_secs[i] = slot.recast_remaining_secs;
+            if slot.can_recast {
+                cooldowns.remaining_secs[i] = 0.0;
+            }
+        }
     }
     for slot in SkillSlot::ALL {
         let index = slot.index();

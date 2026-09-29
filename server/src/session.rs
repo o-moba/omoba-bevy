@@ -249,6 +249,8 @@ pub(crate) fn reset_player_round(
     player.hero.mana = player.hero.max_mana;
     player.hero.utility = Default::default();
     player.hero.last_action = Default::default();
+    player.hero.skills = crate::skills::HeroSkills::default();
+    player.hero.skills.loadout = shared::loadout::preset_for_class(player.hero.identity.hero_class);
     player.timers.dash_ready_at = None;
     player.timers.haste_ready_at = None;
     player.timers.haste_expires_at = None;
@@ -300,6 +302,11 @@ pub(crate) fn handle_transform_request_with_structures(
         return;
     }
 
+    if player.hero.hp <= 0.0 || player.hero.skills.control.movement(now) == 0.0 {
+        player.timers.last_movement_at = now;
+        player.timers.movement_slack = 0.0;
+        return;
+    }
     let requested = map_layout.clamp_player_position(Vec3f::new(x, y, z));
     let current = Vec3f::new(player.hero.x, PLAYER_GROUND_Y, player.hero.z);
     let dx = requested.x - current.x;
@@ -385,6 +392,7 @@ pub(crate) fn handle_respawns(world: &mut GameWorld, now: Instant) {
         player.hero.y = PLAYER_GROUND_Y;
         player.hero.z = spawn.z;
         player.hero.yaw = 0.0;
+        player.hero.skills.transient_reset();
         player.hero.hp = player.hero.max_hp;
         player.hero.mana = player.hero.max_mana;
         player.timers.respawn_at = None;
@@ -403,6 +411,7 @@ impl GameWorld {
         self.structures = build_configured_structures(&self.map_config);
         self.minions.clear();
         self.projectiles.clear();
+        self.skill_runtime = crate::skills::SkillWorld::default();
         let mut next_neutral_id = 9_001;
         self.neutrals = build_neutral_camps(&mut next_neutral_id);
         self.neutrals

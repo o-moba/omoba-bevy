@@ -7,7 +7,7 @@ use std::time::Instant;
 use shared::combat::{CombatEntityKind, ProjectileStyle};
 use shared::map::Team;
 use shared::wire::{GameState, ProjectileState, TargetId, TargetKind};
-use shared::{BASIC_ATTACK_ACTION_SLOT, PlayerActionKind, basic_attack_for_class};
+use shared::{BASIC_ATTACK_ACTION_SLOT, PlayerActionKind};
 
 use crate::balance::{
     AIM_HEIGHT, CAST_SPAWN_HEIGHT, MINION_RADIUS, NEUTRAL_RADIUS, PLAYER_HIT_RADIUS,
@@ -19,6 +19,8 @@ use crate::sim::towers::structure_is_protected;
 use crate::world::structure_radius;
 use crate::{hero_stats, vision};
 
+#[cfg(test)]
+use shared::basic_attack_for_class;
 #[cfg(test)]
 use shared::shop::basic_attack_cooldown;
 
@@ -100,8 +102,11 @@ pub(crate) fn handle_basic_attack_request(
     if !matches!(world.game_state, GameState::Running) || attacker.hero.hp <= 0.0 {
         return;
     }
-    let definition = basic_attack_for_class(attacker.hero.identity.hero_class);
-    let cooldown = hero_stats::basic_attack_cooldown(attacker);
+    let (range, mode_damage, _, mana_cost, splash) = crate::skills::attack_modifiers(attacker);
+    if !attacker.modifiers.infinite_resource && attacker.hero.mana < mana_cost {
+        return;
+    }
+    let cooldown = hero_stats::basic_attack_cooldown_at(attacker, now);
     if !attacker.modifiers.no_cooldowns
         && attacker
             .timers
@@ -117,8 +122,9 @@ pub(crate) fn handle_basic_attack_request(
         attacker.hero.y + CAST_SPAWN_HEIGHT,
         attacker.hero.z,
     );
-    let damage =
-        hero_stats::basic_attack_damage(attacker) * world.team_buffs.damage_multiplier(team, now);
+    let damage = hero_stats::basic_attack_damage(attacker)
+        * mode_damage
+        * world.team_buffs.damage_multiplier(team, now);
     if !bypass_vision && !vision::target_visible(team, target, world, now) {
         return;
     }
@@ -133,7 +139,7 @@ pub(crate) fn handle_basic_attack_request(
         return;
     };
     let distance = ((position.x - origin.x).powi(2) + (position.z - origin.z).powi(2)).sqrt();
-    if !distance.is_finite() || distance > definition.range + radius {
+    if !distance.is_finite() || distance > range + radius {
         return;
     }
     let direction = Vec3f::new(
@@ -146,12 +152,19 @@ pub(crate) fn handle_basic_attack_request(
         return;
     }
     let attacker = world.players.get_mut(&addr).unwrap();
+    if !attacker.modifiers.infinite_resource {
+        attacker.hero.mana -= mana_cost;
+    }
+    crate::skills::accepted_basic(attacker, now);
     attacker.timers.last_basic_attack_at = Some(now);
     attacker.hero.last_action.sequence = attacker.hero.last_action.sequence.wrapping_add(1).max(1);
     attacker.hero.last_action.kind = PlayerActionKind::Attack;
     attacker.hero.last_action.slot = BASIC_ATTACK_ACTION_SLOT;
     let id = world.next_projectile_id;
     world.next_projectile_id += 1;
+    if splash > 0.0 {
+        world.skill_runtime.attack_splash.insert(id, splash);
+    }
     world.projectiles.insert(
         id,
         Projectile {

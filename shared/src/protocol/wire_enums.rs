@@ -27,7 +27,7 @@ use std::path::Path;
 use crate::protocol::PROTOCOL_VERSION;
 
 /// The protocol version this variant list was last reviewed for.
-const POLICY_PROTOCOL_VERSION: u16 = 2;
+const POLICY_PROTOCOL_VERSION: u16 = 3;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Decoding {
@@ -62,7 +62,7 @@ macro_rules! wire_enums {
 }
 
 wire_enums! {
-    crate::protocol::wire::ClientPacket => Strict [Sandbox, Leave, Social, Party, Career, Hello, Transform, Cast, Utility, BasicAttack, Join, Prematch, Ping, RequestRematch, SetGodMode, SetSpeedBoost, Practice, UpgradeSkill, BuyItem],
+    crate::protocol::wire::ClientPacket => Strict [Sandbox, Leave, Social, Party, Career, Hello, Transform, Cast, CastSkill, Utility, BasicAttack, Join, Prematch, Ping, RequestRematch, SetGodMode, SetSpeedBoost, Practice, UpgradeSkill, BuyItem],
     crate::protocol::wire::ServerPacket => Strict [Party, Social, Career, Snapshot],
     crate::party::PartyCommand => Strict [Presence, Invite, Accept, Decline, Leave, Kick, Launch],
     crate::public_transport::PublicClientDatagram => Strict [TransportProbe, TransportProof, TransportBootstrap, SignedCommand],
@@ -70,9 +70,14 @@ wire_enums! {
     crate::career::CareerRequest => Strict [FindMatch, SupporterStatus, EquipSupporterAura, Social, Challenge, Authenticate, History, Detail, Friends, Friend, Profile, LookupPlayer, Rename, Authorized, CancelQueue],
     crate::utility::UtilityAction => Strict [Dash, Haste],
     crate::map::Team => Strict [Green, Blue],
-    crate::HeroClass => Tolerant [Warrior, Mage, Ranger, Cleric, Warden],
+    crate::HeroClass => Tolerant [Warrior, Mage, Ranger, Cleric, Warden, Dawnweaver, Wildspark],
+    crate::loadout::CoreId => Strict [Dawnweaver, Wildspark],
+    crate::loadout::SkillId => Strict [DawnBind, DawnBarrier, DawnField, DawnRay, WildSwitch, WildZap, WildTraps, WildRocket],
+    crate::loadout::PassiveId => Strict [Radiance, Momentum],
+    crate::loadout::WeaponMode => Strict [Repeater, Rockets],
+    crate::loadout::EffectVisualKind => Strict [Bolt, Barrier, Field, BeamWarning, Beam, Trap, Rocket],
     crate::practice::PracticeCommand => Tolerant [Roster, ClearBots, SpawnDummy, StartDuel, Unsupported],
-    crate::protocol::JoinRejection => Strict [MatchFull, SessionActive, ProtocolMismatch, MapGeometryMismatch, AvatarNotAuthorized],
+    crate::protocol::JoinRejection => Strict [MatchFull, SessionActive, ProtocolMismatch, MapGeometryMismatch, AvatarNotAuthorized, OfflineKitUnsupported],
     crate::protocol::wire::GameState => Strict [Lobby, Forming, Starting, Running, Victory],
     crate::sandbox::SandboxCommand => Strict [ApplyConfig, Refill, ResetCooldowns, Teleport, ResetActor, AddXp, GrantItem, ResetDuel, ResetAnalytics, SpawnWave, FrameStep, ForceCast],
     crate::social::SocialCommand => Strict [Subscribe, Chat, Reaction],
@@ -119,6 +124,12 @@ const NOT_UDP_WIRE: &[(&str, &str)] = &[
     ("Placement", "map configuration file"),
     ("SkillSlot", "hero catalog data"),
     ("TargetingMode", "hero catalog data"),
+    (
+        "AttackProfileId",
+        "resolved gameplay profile, not serialized in recipes",
+    ),
+    ("DamageType", "effect catalog data"),
+    ("SkillEffect", "effect catalog data"),
 ];
 
 fn short_name(path: &str) -> &str {

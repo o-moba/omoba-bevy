@@ -83,6 +83,7 @@ fn assert_view(rt: &ServerRuntime, addr: SocketAddr, now: Instant, step: &str, e
     let hero = &player.hero;
     let economy = &player.economy;
     let want = PlayerState {
+        loadout: None,
         supporter_aura: hero.identity.supporter_aura,
         is_bot: hero.identity.is_bot,
         id: hero.identity.id,

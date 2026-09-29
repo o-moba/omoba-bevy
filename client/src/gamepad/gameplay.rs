@@ -109,6 +109,7 @@ pub(crate) fn pad_combat(
             &CombatStats,
             Option<&NetworkHeroClass>,
             Option<&PlayerProgression>,
+            Option<&crate::net::PlayerLoadout>,
         ),
         With<Player>,
     >,
@@ -127,7 +128,7 @@ pub(crate) fn pad_combat(
     if !pad.active {
         return;
     }
-    let (Ok((position, team, stats, class, progression)), Ok((camera, camera_transform))) =
+    let (Ok((position, team, stats, class, progression, loadout)), Ok((camera, camera_transform))) =
         (local.single(), camera.single())
     else {
         basic.cancel();
@@ -140,7 +141,7 @@ pub(crate) fn pad_combat(
     }
     let class = class.map_or(selection.hero_class, |c| c.0);
     let prog = progression.copied().unwrap_or_default();
-    let attack_range = shared::basic_attack_for_class(class).range;
+    let attack_range = crate::combat::standard::attack_range(class, loadout);
     let slot = pad.aiming_slot.or(pad.cast);
     let skill_range = slot.and_then(|slot| {
         SkillSlot::from_index(slot as u8)
@@ -252,6 +253,26 @@ pub(crate) fn pad_combat(
         let Some(skill) = SkillSlot::from_index(slot as u8) else {
             return;
         };
+        if shared::loadout::preset_for_class(class).is_some() {
+            let definition = ability_for_class_slot(class, skill);
+            let range = scaled_cast_range(definition, prog.ranks[slot].max(1));
+            let direction = pad
+                .aim
+                .map(|screen| {
+                    crate::player::mobile_screen_direction(screen, camera_transform, *mode).xz()
+                })
+                .unwrap_or_else(|| position.forward().xz())
+                .normalize_or_zero();
+            let extent = if pad.aim.is_some() {
+                pad.raw
+                    .map_or(1.0, |raw| raw.right.length().clamp(0.15, 1.0))
+            } else {
+                1.0
+            };
+            queue_cast_request(slot, class, &target, &mut pending, &mut feedback);
+            pending.aim = Some(position.translation.xz() + direction * range * extent);
+            return;
+        }
         if ability_for_class_slot(class, skill).targeting == TargetingMode::UnitTarget {
             // The adapter just resolved the displayed candidate (or the lock).
             let Some((entity, id)) =

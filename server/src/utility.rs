@@ -43,6 +43,9 @@ pub(crate) fn handle_utility_request(
     if !matches!(phase, GameState::Running) || player.hero.hp <= 0.0 {
         return;
     }
+    if player.hero.skills.loadout.is_some() || player.hero.skills.control.movement(now) == 0.0 {
+        return;
+    }
     match action {
         UtilityAction::Dash => {
             if hero_timers::dash_remaining(player, now) > 0.0

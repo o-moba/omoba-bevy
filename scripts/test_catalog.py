@@ -10,7 +10,7 @@ import catalog
 
 class CatalogTests(unittest.TestCase):
     def test_shipped_catalog_lists_every_class_in_enum_order(self):
-        self.assertEqual(catalog.hero_ids(), ('warrior', 'mage', 'ranger', 'cleric', 'warden'))
+        self.assertEqual(catalog.hero_ids(), ('warrior', 'mage', 'ranger', 'cleric', 'warden', 'dawnweaver', 'wildspark'))
         for hero in catalog.heroes():
             self.assertEqual(len(hero['abilities']), 4, hero['id'])
             self.assertEqual(sorted(hero['recommended_items']), sorted(catalog.item_costs()), hero['id'])
@@ -24,13 +24,17 @@ class CatalogTests(unittest.TestCase):
 
     def test_projectile_styles_and_offensive_slots_follow_the_kits(self):
         self.assertEqual(catalog.projectile_styles(), {'warrior': 'crescent', 'mage': 'arcane', 'ranger': 'arrow',
-                                                       'cleric': 'holy', 'warden': 'claw'})
+                                                       'cleric': 'holy', 'warden': 'claw', 'dawnweaver': 'holy', 'wildspark': 'arrow'})
         slots = catalog.offensive_slots()
         self.assertEqual(slots['cleric'], {0})
         for class_id in ('warrior', 'mage', 'ranger', 'warden'):
             self.assertEqual(slots[class_id], {0, 2, 3}, class_id)
-        # Q opens with damage for every class.
-        self.assertTrue(all(0 in s for s in slots.values()))
+        self.assertEqual(slots['dawnweaver'], {0, 2, 3})
+        self.assertEqual(slots['wildspark'], {1, 2, 3})
+        # Reusable shield/toggle effects never become fake offensive casts.
+        styles = {hero['id']: hero for hero in catalog.heroes()}
+        self.assertEqual(styles['dawnweaver']['abilities'][1]['effect']['kind'], 'returning_shield')
+        self.assertEqual(styles['wildspark']['abilities'][0]['effect']['kind'], 'weapon_toggle')
 
     def test_catalog_directory_resolves_from_any_working_directory(self):
         self.assertTrue((catalog.CATALOG_DIR / 'heroes.json').is_file())

@@ -8,12 +8,9 @@ use crate::balance::{
     AIM_HEIGHT, BASE_TOWER_SIZE, MINION_RADIUS, NEUTRAL_RADIUS, PLAYER_HIT_RADIUS,
     PROJECTILE_SPEED, TOWER_SIZE,
 };
-use crate::combat_feedback::{HitSource, apply_player_damage_typed};
+use crate::combat_feedback::HitSource;
 use crate::entities::{Projectile, Vec3f};
 use crate::game_world::{GameWorld, TickCtx};
-use crate::sim::minions::apply_minion_damage;
-use crate::sim::neutrals::apply_neutral_damage;
-use crate::sim::towers::apply_structure_damage;
 
 /// Flies every projectile one step and resolves the impacts. The tick still
 /// runs the minion-targeted and the other projectiles as two filtered passes
@@ -37,7 +34,6 @@ pub(crate) fn simulate_projectiles_filtered(
         structures,
         minions,
         neutrals,
-        team_buffs,
         projectiles,
         game_state,
         ..
@@ -135,35 +131,41 @@ pub(crate) fn simulate_projectiles_filtered(
     // Apply impacts in projectile creation order and retain the final blow receipt.
     damage_events.sort_unstable_by_key(|(id, ..)| *id);
     let mut receipts = Vec::new();
-    for (_, target, damage, attacker_team, source) in damage_events {
-        if !matches!(game_state, GameState::Running) {
+    for (id, target, damage, attacker_team, source) in damage_events {
+        if !matches!(world.game_state, GameState::Running) {
             break;
         }
-        let event = match target.kind {
-            TargetKind::Player => apply_player_damage_typed(
-                players,
-                target.id,
+        if source.entity.kind == shared::combat::CombatEntityKind::Player
+            && source.action_slot == Some(shared::BASIC_ATTACK_ACTION_SLOT)
+        {
+            receipts.extend(crate::skills::basic_impact(
+                world,
+                target,
                 damage,
+                source,
+                attacker_team,
+                id,
                 now,
-                source.action_slot.is_some_and(|slot| slot < 4),
-            ),
-            TargetKind::Minion => {
-                apply_minion_damage(players, minions, target.id, damage, attacker_team)
-            }
-            TargetKind::Structure => {
-                apply_structure_damage(structures, target.id, damage, attacker_team, game_state)
-            }
-            TargetKind::Neutral => apply_neutral_damage(
-                players,
-                neutrals,
-                team_buffs,
-                target.id,
+            ));
+        } else {
+            let kind = if source.action_slot.is_some_and(|slot| slot < 4) {
+                shared::loadout::DamageType::Magic
+            } else {
+                shared::loadout::DamageType::Physical
+            };
+            receipts.extend(crate::skills::apply_hit(
+                world,
+                target,
                 damage,
-                source.entity.id,
+                kind,
+                source,
+                attacker_team,
+                false,
+                false,
+                false,
                 now,
-            ),
-        };
-        receipts.extend(event.map(|event| source.annotate(event)));
+            ));
+        }
     }
     receipts
 }

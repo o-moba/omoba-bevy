@@ -60,10 +60,17 @@ pub(crate) fn sources(team: Team, world: &GameWorld) -> Vec<VisionSource> {
 pub(crate) fn revealed(player: &ConnectedPlayer, now: Instant) -> bool {
     let recent =
         |at: Instant| now.saturating_duration_since(at).as_secs_f32() < HOSTILE_REVEAL_SECS;
-    player.timers.last_basic_attack_at.is_some_and(recent)
+    player
+        .hero
+        .skills
+        .control
+        .reveal_until
+        .is_some_and(|until| now < until)
+        || player.timers.last_basic_attack_at.is_some_and(recent)
         || SkillSlot::ALL.into_iter().any(|slot| {
-            ability_for_class_slot(player.hero.identity.hero_class, slot).targeting
-                == TargetingMode::UnitTarget
+            (player.hero.skills.loadout.is_some()
+                || ability_for_class_slot(player.hero.identity.hero_class, slot).targeting
+                    == TargetingMode::UnitTarget)
                 && player.timers.last_cast_at[slot.index()].is_some_and(recent)
         })
 }
@@ -73,11 +80,17 @@ pub(crate) fn player_visible(
     now: Instant,
 ) -> bool {
     player.joined
-        && point_visible(
-            sight,
-            [player.hero.x, player.hero.z],
-            !revealed(player, now),
-        )
+        && (player
+            .hero
+            .skills
+            .control
+            .reveal_until
+            .is_some_and(|until| now < until)
+            || point_visible(
+                sight,
+                [player.hero.x, player.hero.z],
+                !revealed(player, now),
+            ))
 }
 pub(crate) fn target_visible(
     team: Team,
@@ -99,14 +112,17 @@ pub(crate) fn target_visible(
             .find(|p| p.hero.identity.id == target.id)
             .is_some_and(|p| p.hero.identity.team == team || player_visible(&sight, p, now)),
         TargetKind::Minion => minions.get(&target.id).is_some_and(|p| {
-            p.state.team == team || point_visible(&sight, [p.state.x, p.state.z], false)
+            p.state.team == team
+                || world.skill_runtime.npc_revealed(target, team, now)
+                || point_visible(&sight, [p.state.x, p.state.z], false)
         }),
         TargetKind::Structure => structures.get(&target.id).is_some_and(|p| {
             p.state.team == team || point_visible(&sight, [p.state.x, p.state.z], false)
         }),
-        TargetKind::Neutral => neutrals
-            .get(&target.id)
-            .is_some_and(|p| point_visible(&sight, [p.state.x, p.state.z], false)),
+        TargetKind::Neutral => neutrals.get(&target.id).is_some_and(|p| {
+            world.skill_runtime.npc_revealed(target, team, now)
+                || point_visible(&sight, [p.state.x, p.state.z], false)
+        }),
     }
 }
 
@@ -131,6 +147,7 @@ pub(crate) fn filter_snapshot(
         minions,
         neutrals,
         projectiles,
+        skill_effects,
         combat_events,
         forest_pickups,
         game_state,
@@ -182,9 +199,28 @@ pub(crate) fn filter_snapshot(
     });
     minions.retain(|p| {
         viewer.joined
-            && (p.team == viewer.hero.identity.team || point_visible(&sight, [p.x, p.z], false))
+            && (p.team == viewer.hero.identity.team
+                || world.skill_runtime.npc_revealed(
+                    TargetId {
+                        kind: TargetKind::Minion,
+                        id: p.id,
+                    },
+                    viewer.hero.identity.team,
+                    now,
+                )
+                || point_visible(&sight, [p.x, p.z], false))
     });
-    neutrals.retain(|p| point_visible(&sight, [p.x, p.z], false));
+    neutrals.retain(|p| {
+        viewer.joined
+            && (world.skill_runtime.npc_revealed(
+                TargetId {
+                    kind: TargetKind::Neutral,
+                    id: p.id,
+                },
+                viewer.hero.identity.team,
+                now,
+            ) || point_visible(&sight, [p.x, p.z], false))
+    });
     let visible = |kind: CombatEntityKind, id: u64| match kind {
         CombatEntityKind::Player => players.iter().any(|p| p.id == id),
         CombatEntityKind::Minion => minions.iter().any(|p| p.id == id),
@@ -192,6 +228,28 @@ pub(crate) fn filter_snapshot(
         CombatEntityKind::Neutral => neutrals.iter().any(|p| p.id == id),
         CombatEntityKind::Unknown => false,
     };
+    skill_effects.retain_mut(|effect| {
+        if viewer.joined && effect.owner_team == viewer.hero.identity.team {
+            return true;
+        }
+        if !visible(CombatEntityKind::Player, effect.owner_id) {
+            effect.owner_id = 0;
+        }
+        if matches!(
+            effect.kind,
+            shared::loadout::EffectVisualKind::BeamWarning
+                | shared::loadout::EffectVisualKind::Beam
+        ) {
+            let Some((start, end)) = visible_beam_segment(&sight, effect.position, effect.end)
+            else {
+                return false;
+            };
+            effect.position = start;
+            effect.end = end;
+            return true;
+        }
+        point_visible(&sight, effect.position, false)
+    });
     projectiles.retain(|p| {
         point_visible(&sight, [p.x, p.z], false)
             && visible(p.source_kind, p.owner_id)
@@ -267,3 +325,40 @@ pub(crate) fn filter_snapshot(
 
 #[cfg(test)]
 mod tests;
+
+/// Publish only the part of an enemy beam intersecting team sight. The full
+/// server geometry remains authoritative; a hidden origin is never replicated.
+fn visible_beam_segment(
+    sight: &[VisionSource],
+    start: [f32; 2],
+    end: [f32; 2],
+) -> Option<([f32; 2], [f32; 2])> {
+    let d = [end[0] - start[0], end[1] - start[1]];
+    let a = d[0] * d[0] + d[1] * d[1];
+    if a <= 0.000001 {
+        return point_visible(sight, start, false).then_some((start, end));
+    }
+    let mut lo = 1.0_f32;
+    let mut hi = 0.0_f32;
+    let mut found = false;
+    for source in sight {
+        let m = [start[0] - source.position[0], start[1] - source.position[1]];
+        let b = m[0] * d[0] + m[1] * d[1];
+        let c = m[0] * m[0] + m[1] * m[1] - source.radius * source.radius;
+        let discriminant = b * b - a * c;
+        if discriminant < 0.0 {
+            continue;
+        }
+        let from = ((-b - discriminant.sqrt()) / a).max(0.0);
+        let to = ((-b + discriminant.sqrt()) / a).min(1.0);
+        if from <= to {
+            found = true;
+            lo = lo.min(from);
+            hi = hi.max(to);
+        }
+    }
+    found.then_some((
+        [start[0] + d[0] * lo, start[1] + d[1] * lo],
+        [start[0] + d[0] * hi, start[1] + d[1] * hi],
+    ))
+}

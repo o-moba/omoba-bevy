@@ -30,6 +30,7 @@ pub(super) fn move_player(
                 Option<&crate::net::PlayerUtility>,
                 Option<&crate::net::NetworkHeroClass>,
                 Option<&crate::net::PlayerProgression>,
+                Option<&crate::net::PlayerLoadout>,
             ),
             (With<Player>, With<MovementTarget>),
         >,
@@ -58,8 +59,17 @@ pub(super) fn move_player(
         .collect::<Vec<_>>();
 
     let mut player_query = transform_sets.p0();
-    for (entity, mut transform, mut route, stats, equipment, utility, class, progression) in
-        player_query.iter_mut()
+    for (
+        entity,
+        mut transform,
+        mut route,
+        stats,
+        equipment,
+        utility,
+        class,
+        progression,
+        loadout,
+    ) in player_query.iter_mut()
     {
         if !stats.is_alive() {
             commands
@@ -90,7 +100,8 @@ pub(super) fn move_player(
                     equipment.item_bonuses.move_speed_multiplier
                 })
                 * hero_movement_multiplier(class, progression),
-        ) * utility.map_or(1.0, |u| u.state.movement_multiplier());
+        ) * utility.map_or(1.0, |u| u.state.movement_multiplier())
+            * crate::combat::standard::movement_factor(loadout);
         let move_delta =
             speed * time.delta_secs() * crate::sandbox::time_scale(game_state.as_deref());
 

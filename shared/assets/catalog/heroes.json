@@ -265,6 +265,68 @@
         }
       ],
       "recommended_items": ["swift_grip", "vitality_gem", "ember_blade", "trail_boots", "guardian_crest", "focus_charm"]
+    },
+    {
+      "id": "dawnweaver",
+      "display_name": "Dawnweaver",
+      "tagline": "Light mage: bind, shield, field and beam",
+      "role": "mid",
+      "base_hp": 180,
+      "growth": {
+        "basic_damage_cap": 1.6,
+        "attack_rate_cap": 1.6
+      },
+      "basic_attack": {
+        "range": 10,
+        "damage": 12,
+        "cooldown_secs": 1.2
+      },
+      "projectile_style": "holy",
+      "skills": [
+        "dawn_bind",
+        "dawn_barrier",
+        "dawn_field",
+        "dawn_ray"
+      ],
+      "recommended_items": [
+        "ember_blade",
+        "focus_charm",
+        "trail_boots",
+        "vitality_gem",
+        "guardian_crest",
+        "swift_grip"
+      ]
+    },
+    {
+      "id": "wildspark",
+      "display_name": "Wildspark",
+      "tagline": "Explosive marksman: weapon modes, traps and takedown momentum",
+      "role": "carry",
+      "base_hp": 190,
+      "growth": {
+        "basic_damage_cap": 1.6,
+        "attack_rate_cap": 1.6
+      },
+      "basic_attack": {
+        "range": 11.5,
+        "damage": 18,
+        "cooldown_secs": 1.0
+      },
+      "projectile_style": "arrow",
+      "skills": [
+        "wild_switch",
+        "wild_zap",
+        "wild_traps",
+        "wild_rocket"
+      ],
+      "recommended_items": [
+        "ember_blade",
+        "focus_charm",
+        "trail_boots",
+        "vitality_gem",
+        "guardian_crest",
+        "swift_grip"
+      ]
     }
   ]
 }

@@ -146,6 +146,10 @@ impl Simulation {
                 if !self.players.is_empty() {
                     return;
                 }
+                if hero_class.is_standard() {
+                    self.error = Some(JoinRejection::OfflineKitUnsupported);
+                    return;
+                }
                 if !shipped_avatar(avatar.as_deref()) {
                     self.error = Some(JoinRejection::AvatarNotAuthorized);
                     return;
@@ -364,7 +368,7 @@ impl Simulation {
     }
     fn spawn_ring(&mut self) {
         let [x, z] = shared::map::geometry().home;
-        for (i, class) in HeroClass::ALL.into_iter().enumerate() {
+        for (i, class) in HeroClass::LEGACY.into_iter().enumerate() {
             let avatar = omoba_passport::avatars::avatar_roster()
                 .iter()
                 .filter(|a| a.passport.is_none())
@@ -709,6 +713,7 @@ impl Simulation {
     fn snapshot(&mut self) -> ServerPacket {
         self.tick += 1;
         ServerPacket::Snapshot {
+            skill_effects: Vec::new(),
             meta: SnapshotMeta::new(u64::MAX, 1, self.tick),
             geometry_id: shared::map::GEOMETRY_ID.into(),
             map_profile: "verdant".into(),
@@ -890,10 +895,19 @@ mod tests {
         }
     }
     #[test]
+    fn standard_styles_are_explicitly_rejected_without_spawning_a_false_simulation() {
+        for class in [HeroClass::Dawnweaver, HeroClass::Wildspark] {
+            let sim = joined(class);
+            assert!(sim.players.is_empty());
+            assert_eq!(sim.error, Some(JoinRejection::OfflineKitUnsupported));
+            assert!(sim.bots.is_empty());
+        }
+    }
+    #[test]
     fn every_class_can_move_cast_attack_and_recover_targets_without_io() {
-        for class in HeroClass::ALL {
+        for class in HeroClass::LEGACY {
             let mut sim = joined(class);
-            assert_eq!(sim.players.len(), 1 + HeroClass::ALL.len());
+            assert_eq!(sim.players.len(), 1 + HeroClass::LEGACY.len());
             assert_eq!(sim.players[0].avatar.as_deref(), Some("agnes"));
             let (x, y, z) = (sim.players[1].x, sim.players[1].y, sim.players[1].z - 2.0);
             sim.command(ClientPacket::Transform {
@@ -957,7 +971,7 @@ mod tests {
             assert_eq!(game_state, GameState::Running);
             assert_eq!(match_mode, "offline_practice");
             let board = scoreboard.expect("offline rounds keep a live scoreboard");
-            assert_eq!(board.players.len(), 1 + HeroClass::ALL.len());
+            assert_eq!(board.players.len(), 1 + HeroClass::LEGACY.len());
             assert!(board.players.iter().any(|p| p.player_id == LOCAL_ID));
             sim.command(ClientPacket::Leave);
             assert!(sim.players.is_empty());
@@ -970,7 +984,7 @@ mod tests {
     #[test]
     fn offline_formulas_match_the_server() {
         let mut healed = false;
-        for class in HeroClass::ALL {
+        for class in HeroClass::LEGACY {
             let mut sim = joined(class);
             for p in &sim.players {
                 assert_eq!(
@@ -1193,7 +1207,7 @@ mod tests {
         sim.command(ClientPacket::Practice {
             command: PracticeCommand::Roster,
         });
-        assert_eq!(sim.players.len(), 1 + HeroClass::ALL.len());
+        assert_eq!(sim.players.len(), 1 + HeroClass::LEGACY.len());
         assert!(
             sim.bots
                 .values()

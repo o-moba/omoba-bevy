@@ -10,5 +10,6 @@
   "error.purchase.insufficient_gold": "You need more gold.",
   "error.purchase.already_owned": "You already own this item.",
   "error.purchase.inventory_full": "All six inventory slots are full.",
-  "error.purchase.unknown_item": "This item is not in the current catalog."
+  "error.purchase.unknown_item": "This item is not in the current catalog.",
+  "error.join.offline_kit_unsupported": "Connect to play this fighting style, or choose another style for offline practice."
 }

@@ -21,7 +21,10 @@ pub(crate) fn apply_skill_upgrade(player: &mut ConnectedPlayer, slot: u8) {
     let Some(skill_slot) = SkillSlot::from_index(slot) else {
         return;
     };
-    let def = ability_for_class_slot(player.hero.identity.hero_class, skill_slot);
+    let def = player.hero.skills.loadout.as_ref().map_or_else(
+        || ability_for_class_slot(player.hero.identity.hero_class, skill_slot),
+        |l| &l.skill(skill_slot).ability,
+    );
     let s = skill_slot.index();
     if player.hero.progress.skill_points > 0 && player.hero.progress.ranks[s] < def.max_rank {
         player.hero.progress.ranks[s] += 1;
@@ -49,7 +52,7 @@ pub(crate) fn handle_cast_request(
     let Some(caster) = world.players.get(&caster_addr) else {
         return;
     };
-    if !caster.joined || caster.hero.hp <= 0.0 {
+    if !caster.joined || caster.hero.hp <= 0.0 || caster.hero.skills.loadout.is_some() {
         return;
     }
     // Authoritative kit resolution: class + slot -> ability definition.

@@ -38,5 +38,21 @@
   "ability.hunters_mark.name": "猎人印记",
   "ability.hunters_mark.desc": "投出长矛，在中距离钉住猎物。",
   "ability.primal_maul.name": "原始重击",
-  "ability.primal_maul.desc": "野蛮的终结技，专治野怪和离开兵线的英雄。"
+  "ability.primal_maul.desc": "野蛮的终结技，专治野怪和离开兵线的英雄。",
+  "ability.dawn_bind.name": "光耀束缚",
+  "ability.dawn_bind.desc": "瞄准发射的光束禁锢命中的前两个敌人。",
+  "ability.dawn_barrier.name": "回返庇护",
+  "ability.dawn_barrier.desc": "往返的光芒在两个方向上为盟友提供护盾。",
+  "ability.dawn_field.name": "辉光领域",
+  "ability.dawn_field.desc": "放置减速区域；再次施放使其爆炸。",
+  "ability.dawn_ray.name": "天际光束",
+  "ability.dawn_ray.desc": "预警后发射光束，引爆辉光印记并重新施加印记。",
+  "ability.wild_switch.name": "切换火力",
+  "ability.wild_switch.desc": "切换快速连射和消耗法力的远程火箭。",
+  "ability.wild_zap.name": "震荡射线",
+  "ability.wild_zap.desc": "瞄准射击，减速并显露首个命中的敌人。",
+  "ability.wild_traps.name": "连环陷阱",
+  "ability.wild_traps.desc": "放置三个陷阱，启动后禁锢敌方英雄。",
+  "ability.wild_rocket.name": "终焉火花",
+  "ability.wild_rocket.desc": "远程火箭命中英雄后爆炸，对受伤敌人威胁更大。"
 }

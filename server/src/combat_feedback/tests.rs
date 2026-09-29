@@ -61,6 +61,11 @@ fn projectiles(rt: &mut ServerRuntime, now: Instant, dt: f32) -> Vec<CombatEvent
 fn every_class_keeps_basic_and_skill_travel_with_confirmed_source_style_and_slot() {
     for class in HeroClass::ALL {
         for slot in [None, Some(0)] {
+            // Standard aimed skills have separate geometry/effect tests; their
+            // basic strikes still use this same authoritative travel contract.
+            if slot.is_some() && class.is_standard() {
+                continue;
+            }
             let (mut rt, a, b, now) = fixture();
             rt.world
                 .players
@@ -552,6 +557,7 @@ fn cosmetic_history_yields_space_to_gameplay_and_keeps_newest_receipts() {
         players: vec![player],
         scoreboard: None,
         prematch: None,
+        skill_effects: Vec::new(),
         projectiles: vec![],
         combat_events: vec![],
         structures: vec![],

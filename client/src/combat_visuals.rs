@@ -509,7 +509,7 @@ mod tests {
     #[test]
     fn embedded_classes_are_distinct_and_legacy_style_has_fallback() {
         let registry = CombatVisualRegistry::default();
-        let shapes: std::collections::HashSet<_> = HeroClass::ALL
+        let shapes: std::collections::HashSet<_> = HeroClass::LEGACY
             .into_iter()
             .map(|class| {
                 registry
@@ -518,6 +518,16 @@ mod tests {
             })
             .collect();
         assert_eq!(shapes.len(), 4);
+        // Resolved skill effects use their own bounded geometry; basic shots
+        // retain a usable style fallback independent of the chosen avatar.
+        for class in [HeroClass::Dawnweaver, HeroClass::Wildspark] {
+            assert_eq!(
+                registry
+                    .resolve(Some(class), ProjectileStyle::Standard, None, None, None)
+                    .shape,
+                ProjectileShape::Bolt
+            );
+        }
         assert_eq!(
             registry.resolve_style(ProjectileStyle::Standard).shape,
             ProjectileShape::Bolt

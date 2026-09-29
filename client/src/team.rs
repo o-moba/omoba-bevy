@@ -207,6 +207,8 @@ fn class_keys(class: HeroClass) -> (&'static str, &'static str) {
         HeroClass::Ranger => ("hero.ranger.name", "hero.ranger.tagline"),
         HeroClass::Cleric => ("hero.cleric.name", "hero.cleric.tagline"),
         HeroClass::Warden => ("hero.warden.name", "hero.warden.tagline"),
+        HeroClass::Dawnweaver => ("hero.dawnweaver.name", "hero.dawnweaver.tagline"),
+        HeroClass::Wildspark => ("hero.wildspark.name", "hero.wildspark.tagline"),
     }
 }
 
@@ -599,6 +601,9 @@ pub fn spawn_team_select_ui(
                         ..default()
                     },
                     Name::new("ClassButtonsRow"),
+                    crate::ui::ScrollArea::wheel(48.0)
+                        .touch_drag(8.0)
+                        .keyed(0x434c4153),
                 ))
                 .with_children(|row| {
                     for class in HeroClass::ALL {
@@ -1543,6 +1548,12 @@ fn team_select_ui_system(
                 }
             }
             HeroSelectAction::Class(class) => {
+                if client_session.is_offline() && class.is_standard() {
+                    if let Some(notice) = notice.as_deref_mut() {
+                        notice.0 = Some(tr("error.join.offline_kit_unsupported").into());
+                    }
+                    continue;
+                }
                 selection.hero_class = *class;
                 selection_changed = true;
             }
@@ -1827,7 +1838,7 @@ fn layout_spacious_picker(
             node.display = Display::None; continue;
         }
         if class.is_some() {
-            node.width = Val::Px(if phone { left_w } else { (left_w - 32.0) / 5.0 });
+            node.width = Val::Px(if phone { left_w } else { (left_w - 24.0) / 4.0 });
             node.height = Val::Px(if phone {
                 ((bottom - class_y - 24.0) / 5.0).clamp(40.0, 48.0)
             } else {
@@ -1890,7 +1901,11 @@ fn layout_spacious_picker(
                     inset,
                     class_y,
                     left_w,
-                    if phone { bottom - class_y } else { 64.0 },
+                    if phone {
+                        bottom - class_y
+                    } else {
+                        layout.class_height()
+                    },
                 );
                 node.flex_direction = if phone {
                     FlexDirection::Column
@@ -1900,7 +1915,16 @@ fn layout_spacious_picker(
                 node.justify_content = JustifyContent::FlexStart;
                 node.column_gap = Val::Px(8.0);
                 node.row_gap = Val::Px(6.0);
-                node.flex_wrap = FlexWrap::NoWrap;
+                node.flex_wrap = if phone {
+                    FlexWrap::NoWrap
+                } else {
+                    FlexWrap::Wrap
+                };
+                node.overflow = if phone {
+                    Overflow::scroll_y()
+                } else {
+                    Overflow::default()
+                };
             }
             "AvatarSelectTitle" => absolute(&mut node, grid_x, grid_y - 24.0, grid_w, 20.0),
             "RendererStatus" => node.display = Display::None,
@@ -2040,7 +2064,12 @@ impl PickerLayout {
         };
         let class_y = top + if phone { 72.0 } else { 104.0 };
         let grid_x = if phone { inset + left_w + 12.0 } else { inset };
-        let grid_y = if phone { class_y } else { class_y + 104.0 };
+        let class_rows = HeroClass::ALL.len().div_ceil(4) as f32;
+        let grid_y = if phone {
+            class_y
+        } else {
+            class_y + class_rows * 64.0 + (class_rows - 1.0) * 6.0 + 40.0
+        };
         let grid_w = if phone {
             stage_x - grid_x - 12.0
         } else {
@@ -2073,6 +2102,10 @@ impl PickerLayout {
         let columns = if self.phone { 3.0 } else { 8.0 };
         let padding = if self.phone { 8.0 } else { 24.0 };
         ((self.grid_w - padding - (columns - 1.0) * 8.0) / columns).floor()
+    }
+
+    fn class_height(self) -> f32 {
+        self.grid_y - self.class_y - 40.0
     }
 }
 

@@ -25,13 +25,34 @@ const ABILITIES: [&str; 20] = [
     "hunters_mark",
     "primal_maul",
 ];
+const STANDARD_ABILITIES: [&str; 8] = [
+    "dawn_bind",
+    "dawn_barrier",
+    "dawn_field",
+    "dawn_ray",
+    "wild_switch",
+    "wild_zap",
+    "wild_traps",
+    "wild_rocket",
+];
+pub(crate) fn atlas_path(ability: &str) -> &'static str {
+    if STANDARD_ABILITIES.contains(&ability) {
+        "ui/skills/standard-skills.png"
+    } else {
+        ATLAS_PATH
+    }
+}
 const COLUMNS: usize = 4;
 const ROWS: usize = ABILITIES.len() / COLUMNS;
 
 /// Pixel rectangles support any atlas resolution, including odd-sized source art.
 pub(crate) fn icon_rect(ability: &str, size: Vec2) -> Option<Rect> {
-    let index = ABILITIES.iter().position(|id| *id == ability)?;
-    let cell = size / Vec2::new(COLUMNS as f32, ROWS as f32);
+    let (index, rows) = if let Some(i) = STANDARD_ABILITIES.iter().position(|id| *id == ability) {
+        (i, 2)
+    } else {
+        (ABILITIES.iter().position(|id| *id == ability)?, ROWS)
+    };
+    let cell = size / Vec2::new(COLUMNS as f32, rows as f32);
     let min = Vec2::new((index % COLUMNS) as f32, (index / COLUMNS) as f32) * cell;
     Some(Rect::from_corners(min, min + cell))
 }
@@ -47,9 +68,9 @@ mod tests {
             for slot in shared::SkillSlot::ALL {
                 let id = shared::ability_for_class_slot(class, slot).id;
                 let rect = icon_rect(id, ATLAS_SIZE).expect(id);
-                assert!(!cells.contains(&rect));
+                assert!(!cells.contains(&(atlas_path(id), rect)));
                 assert!(rect.max.cmple(ATLAS_SIZE).all());
-                cells.push(rect);
+                cells.push((atlas_path(id), rect));
             }
         }
         assert_eq!(cells.len(), shared::HeroClass::ALL.len() * 4);

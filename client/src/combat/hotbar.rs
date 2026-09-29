@@ -285,6 +285,17 @@ fn slot_status(
             ),
             StatusTone::Muted,
         )
+    } else if cooldowns.recast[slot] {
+        (
+            trf(
+                "combat.standard.recast",
+                &[
+                    ("key", &["Q", "W", "E", "R"][slot]),
+                    ("seconds", &format!("{:.1}", cooldowns.recast_secs[slot])),
+                ],
+            ),
+            StatusTone::Ready,
+        )
     } else if cooldowns.remaining_secs[slot] > 0.0 {
         (
             trf(
@@ -343,6 +354,7 @@ pub(super) fn update_skill_bar_system(
     mut rank_labels: Query<(&SkillRankLabel, &mut Text), Without<SkillNameLabel>>,
     mut name_labels: Query<(&SkillNameLabel, &mut Text), Without<SkillRankLabel>>,
     images: Option<Res<Assets<Image>>>,
+    assets: Option<Res<AssetServer>>,
     mut icons: Query<(&DesktopSkillIcon, &mut ImageNode, &mut Node), Without<SkillUpgradeButton>>,
     mut upgrade_buttons: Query<
         (&SkillUpgradeButton, &mut Node),
@@ -369,6 +381,9 @@ pub(super) fn update_skill_bar_system(
             continue;
         };
         let definition = ability_for_class_slot(class, slot);
+        if let Some(assets) = assets.as_ref() {
+            image.image = assets.load(crate::skill_icons::atlas_path(definition.id));
+        }
         image.rect = images
             .as_ref()
             .and_then(|images| images.get(&image.image))
@@ -381,8 +396,9 @@ pub(super) fn update_skill_bar_system(
         let rank = prog.ranks[icon.slot].max(1);
         let available = prog.unlocked()[icon.slot]
             && cooldowns.remaining_secs[icon.slot] <= 0.0
-            && local
-                .is_none_or(|(_, _, stats, _)| stats.mana >= scaled_mana_cost(definition, rank));
+            && local.is_none_or(|(_, _, stats, _)| {
+                cooldowns.recast[icon.slot] || stats.mana >= scaled_mana_cost(definition, rank)
+            });
         image.color = if available {
             Color::WHITE
         } else {
@@ -420,7 +436,11 @@ pub(super) fn update_skill_bar_system(
         let rank = prog.ranks.get(label.slot).copied().unwrap_or(1).max(1);
         let slot = SkillSlot::from_index(label.slot as u8).expect("hotbar slot");
         let definition = ability_for_class_slot(class, slot);
-        let cost = scaled_mana_cost(definition, rank);
+        let cost = if cooldowns.recast[label.slot] {
+            0.0
+        } else {
+            scaled_mana_cost(definition, rank)
+        };
         let (status, _) = slot_status(
             label.slot,
             &prog,
@@ -448,7 +468,11 @@ pub(super) fn update_skill_bar_system(
     for (button, mut view) in &mut slots {
         let rank = prog.ranks[button.slot].max(1);
         let definition = ability_for_class_slot(class, SkillSlot::ALL[button.slot]);
-        let cost = scaled_mana_cost(definition, rank);
+        let cost = if cooldowns.recast[button.slot] {
+            0.0
+        } else {
+            scaled_mana_cost(definition, rank)
+        };
         let remaining = cooldowns.remaining_secs[button.slot];
         let unlocked = prog.unlocked()[button.slot];
         // hud.md § States, Dead: every ability is veiled (no lock, no level).
@@ -583,6 +607,10 @@ pub(super) fn update_skill_tooltip(
         )
     };
     let mut next = SkillCardView::of(class, prog, slot, stats.mana, duration);
+    if cooldowns.recast[slot] {
+        next.mana = 0;
+        next.no_mana = false;
+    }
     let definition = ability_for_class_slot(class, SkillSlot::ALL[slot]);
     let out_of_range = target
         .selected_entity

@@ -38,5 +38,21 @@
   "ability.hunters_mark.name": "Hunter's Mark",
   "ability.hunters_mark.desc": "Thrown spear that pins prey at medium range.",
   "ability.primal_maul.name": "Primal Maul",
-  "ability.primal_maul.desc": "Savage finisher for monsters and heroes caught out of lane."
+  "ability.primal_maul.desc": "Savage finisher for monsters and heroes caught out of lane.",
+  "ability.dawn_bind.name": "Gleaming Snare",
+  "ability.dawn_bind.desc": "Aimed light binds the first two enemies it hits.",
+  "ability.dawn_barrier.name": "Returning Aegis",
+  "ability.dawn_barrier.desc": "A returning light shields allies on both journeys.",
+  "ability.dawn_field.name": "Luminous Field",
+  "ability.dawn_field.desc": "Place a slowing field; cast again to detonate it.",
+  "ability.dawn_ray.name": "Horizon Ray",
+  "ability.dawn_ray.desc": "A warned beam detonates Radiance marks and applies them again.",
+  "ability.wild_switch.name": "Switchfire",
+  "ability.wild_switch.desc": "Toggle rapid repeater fire and longer-range rockets that spend Mana.",
+  "ability.wild_zap.name": "Shockline",
+  "ability.wild_zap.desc": "Aimed shot slows and reveals the first enemy hit.",
+  "ability.wild_traps.name": "Snapline",
+  "ability.wild_traps.desc": "Place three traps that arm, then root enemy heroes.",
+  "ability.wild_rocket.name": "Last Spark",
+  "ability.wild_rocket.desc": "A long-range rocket explodes on a hero, punishing wounded enemies."
 }

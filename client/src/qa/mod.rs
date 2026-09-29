@@ -28,6 +28,7 @@ mod offline_qa;
 mod record_qa;
 mod result_qa;
 mod social_qa;
+mod standard_kits_qa;
 mod supporter;
 mod targeting_qa;
 mod team_vision_qa;
@@ -52,6 +53,7 @@ impl PluginGroup for QaPlugins {
             .add(career_visual_qa::CareerVisualQaPlugin)
             .add(map_qa::MapQaPlugin)
             .add(combat_qa::CombatQaPlugin)
+            .add(standard_kits_qa::StandardKitsQaPlugin)
             .add(forest_pickup_qa::ForestPickupQaPlugin)
             .add(targeting_qa::TargetingQaPlugin)
             .add(record_qa::RecordQaPlugin)

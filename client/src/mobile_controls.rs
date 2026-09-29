@@ -60,6 +60,7 @@ pub(crate) struct MobileLayout {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct MobileCastIntent {
     pub slot: usize,
+    pub extent: f32,
     pub aim: Option<Vec2>,
 }
 
@@ -154,6 +155,7 @@ pub(crate) struct MobileControls {
     pub upgrades: Vec<usize>,
     pub category_attacks: Vec<TargetKind>,
     pub utilities: Vec<(UtilityAction, Option<Vec2>)>,
+    utilities_available: bool,
     upgrade_mode: bool,
     captures: HashMap<u64, Capture>,
     upgrade_enabled: [bool; 4],
@@ -183,6 +185,7 @@ impl Default for MobileControls {
             upgrades: Vec::new(),
             category_attacks: Vec::new(),
             utilities: Vec::new(),
+            utilities_available: true,
             upgrade_mode: false,
             captures: HashMap::new(),
             upgrade_enabled: [false; 4],
@@ -290,7 +293,9 @@ impl MobileControls {
             .into_iter()
             .enumerate()
         {
-            if point.distance(l.utility_centers[index]) <= l.auxiliary_radius {
+            if self.utilities_available
+                && point.distance(l.utility_centers[index]) <= l.auxiliary_radius
+            {
                 return Some((Control::Utility(action), l.utility_centers[index]));
             }
         }
@@ -432,6 +437,9 @@ impl MobileControls {
                             Control::Ability(slot) if !capture.inspecting => {
                                 self.casts.push(MobileCastIntent {
                                     slot,
+                                    extent: ((capture.position - capture.origin).length()
+                                        / (ATTACK_DRAG_REACH * self.combat_scale()))
+                                    .clamp(0.15, 1.0),
                                     aim: aim_vector(
                                         capture.position - capture.origin,
                                         self.combat_scale(),
@@ -486,6 +494,21 @@ impl MobileControls {
                 .captures
                 .values()
                 .any(|capture| matches!(capture.control, Control::Ability(_)))
+    }
+
+    pub(crate) fn aimed_skill(&self) -> Option<MobileCastIntent> {
+        self.captures.values().find_map(|c| match c.control {
+            Control::Ability(slot) if c.dragged && !c.canceled && !c.inspecting => {
+                Some(MobileCastIntent {
+                    slot,
+                    aim: aim_vector(c.position - c.origin, self.combat_scale()),
+                    extent: ((c.position - c.origin).length()
+                        / (ATTACK_DRAG_REACH * self.combat_scale()))
+                    .clamp(0.15, 1.0),
+                })
+            }
+            _ => None,
+        })
     }
 
     pub(crate) fn attack_pressed(&self) -> bool {
@@ -681,7 +704,14 @@ fn read_mobile_controls(
     touches: Res<Touches>,
     window: Query<(Entity, &Window), With<PrimaryWindow>>,
     context: Res<GameplayInputContext>,
-    local: Query<(&CombatStats, Option<&PlayerProgression>), With<Player>>,
+    local: Query<
+        (
+            &CombatStats,
+            Option<&PlayerProgression>,
+            Option<&NetworkHeroClass>,
+        ),
+        With<Player>,
+    >,
     mut mobile: ResMut<MobileControls>,
     mut session_events: MessageReader<SessionEvent>,
     gamepad: Option<Res<crate::gamepad::GamepadControls>>,
@@ -698,7 +728,12 @@ fn read_mobile_controls(
         mobile.clear();
         mobile.layout_changed = true;
     }
-    let alive = local.single().is_ok_and(|(stats, _)| stats.is_alive());
+    let alive = local.single().is_ok_and(|(stats, _, _)| stats.is_alive());
+    mobile.utilities_available = local
+        .single()
+        .ok()
+        .and_then(|(_, _, class)| class)
+        .is_none_or(|class| !class.0.is_standard());
     // A controller that owns input hides the touch HUD; the first touch
     // takes ownership back before this runs, so no finger is lost.
     let controller = gamepad.as_ref().is_some_and(|pad| pad.active);
@@ -714,7 +749,7 @@ fn read_mobile_controls(
         events.clear();
         return;
     }
-    if let Ok((_, prog)) = local.single() {
+    if let Ok((_, prog, _)) = local.single() {
         let prog = prog.copied().unwrap_or_default();
         mobile.upgrade_enabled = std::array::from_fn(|slot| {
             prog.skill_points > 0
@@ -1327,7 +1362,11 @@ fn draw_mobile_controls(
             MobileVisual::Ability(slot) => {
                 let def = ability_for_class_slot(class, SkillSlot::from_index(slot as u8).unwrap());
                 let rank = prog.ranks[slot].max(1);
-                let cost = scaled_mana_cost(def, rank);
+                let cost = if cooldown.recast[slot] {
+                    0.0
+                } else {
+                    scaled_mana_cost(def, rank)
+                };
                 let remaining = cooldown.remaining_secs[slot];
                 let fraction = cooldown.remaining_fraction(slot);
                 if let Some(children) = children {
@@ -1441,7 +1480,7 @@ fn draw_mobile_controls(
                 (
                     layout.utility_centers[index],
                     Vec2::splat(layout.auxiliary_radius * 2.0),
-                    visible,
+                    visible && shared::loadout::preset_for_class(class).is_none(),
                 )
             }
             MobileVisual::AimHint => {
@@ -1494,6 +1533,10 @@ fn draw_mobile_controls(
                     let mut next = crate::combat::skill_card::SkillCardView::of(
                         class, &prog, slot, mana, duration,
                     );
+                    if cooldown.recast[slot] {
+                        next.mana = 0;
+                        next.no_mana = false;
+                    }
                     next.hint = true;
                     next.visible = visible;
                     if *card != next {
@@ -1824,6 +1867,7 @@ mod tests {
             m.casts,
             [MobileCastIntent {
                 slot: 0,
+                extent: (50.0 / (ATTACK_DRAG_REACH * m.combat_scale())).clamp(0.15, 1.0),
                 aim: Some(Vec2::NEG_X)
             }]
         );
@@ -1873,7 +1917,14 @@ mod tests {
             m.event(2, TouchPhase::Started, layout.ability_centers[slot]);
             assert_eq!(m.casts.len(), slot);
             m.event(2, TouchPhase::Ended, layout.ability_centers[slot]);
-            assert_eq!(m.casts[slot], MobileCastIntent { slot, aim: None });
+            assert_eq!(
+                m.casts[slot],
+                MobileCastIntent {
+                    slot,
+                    aim: None,
+                    extent: 0.15
+                }
+            );
             assert!(m.attacks.is_empty());
         }
     }
@@ -1965,7 +2016,14 @@ mod tests {
         assert_eq!(m.movement, Vec2::X);
         m.event(3, TouchPhase::Ended, layout.ability_centers[0]);
         m.event(4, TouchPhase::Ended, layout.ability_centers[1]);
-        assert_eq!(m.casts, [MobileCastIntent { slot: 0, aim: None }]);
+        assert_eq!(
+            m.casts,
+            [MobileCastIntent {
+                slot: 0,
+                aim: None,
+                extent: 0.15
+            }]
+        );
         assert!(!m.held_basic_attack(), "skill release wins this frame");
         m.casts.clear();
         assert!(
@@ -2045,6 +2103,7 @@ mod tests {
             m.casts,
             [MobileCastIntent {
                 slot: 2,
+                extent: (60.0 / (ATTACK_DRAG_REACH * m.combat_scale())).clamp(0.15, 1.0),
                 aim: Some(Vec2::NEG_Y)
             }]
         );
@@ -2489,6 +2548,20 @@ mod tests {
         m.upgrade_mode = true;
         m.clear();
         assert!(!m.upgrade_mode);
+    }
+
+    #[test]
+    fn unavailable_utilities_do_not_own_invisible_touch_regions() {
+        let mobile = MobileControls {
+            utilities_available: false,
+            ..default()
+        };
+        for point in mobile.layout().utility_centers {
+            assert!(!matches!(
+                mobile.hit_control(point),
+                Some((Control::Utility(_), _))
+            ));
+        }
     }
 
     #[test]

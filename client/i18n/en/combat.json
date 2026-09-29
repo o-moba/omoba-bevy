@@ -38,5 +38,16 @@
   "combat.feedback.no_route": "No walkable route to that point.",
   "combat.skill.mana": "{mana} mana",
   "combat.skill.cooldown": "{seconds}s cooldown",
-  "combat.skill.hint_touch": "Release to close · tap or drag to cast"
+  "combat.skill.hint_touch": "Release to close · tap or drag to cast",
+  "combat.standard.not_ready": "Skill is cooling down.",
+  "combat.standard.radiance": "Radiance · spell marks empower attacks",
+  "combat.standard.momentum": "Momentum · takedowns grant acceleration",
+  "combat.standard.repeater": "Repeater",
+  "combat.standard.rockets": "Rockets",
+  "combat.standard.weapon": "{mode} · {stacks} stacks · {cost} Mana per attack",
+  "combat.standard.shield": "Shield {value}",
+  "combat.standard.rooted": "Rooted",
+  "combat.standard.acceleration": "Acceleration {seconds}s",
+  "combat.standard.recast": "{key}: detonate · {seconds}s",
+  "combat.standard.aim_hint": "Hold Q/W/E/R to aim · release to cast · Esc cancels"
 }

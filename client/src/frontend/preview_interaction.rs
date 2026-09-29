@@ -16,33 +16,6 @@ pub(super) struct Gesture {
     dragged: bool,
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn double_tap_is_consumed_but_a_drag_or_long_press_is_not_a_tap() {
-        let mut world = World::new();
-        world.init_resource::<Assets<Image>>();
-        let mut preview = AvatarPreview::from_world(&mut world);
-        let mut gesture = Gesture::default();
-        gesture.held = Some((Some(1), Vec2::ZERO, Vec2::ZERO, 1.0));
-        gesture.end(Vec2::ZERO, 1.1, &mut preview);
-        assert!(gesture.tap.is_some());
-        gesture.held = Some((Some(1), Vec2::ZERO, Vec2::ZERO, 1.2));
-        gesture.end(Vec2::ZERO, 1.3, &mut preview);
-        assert!(gesture.tap.is_none());
-        gesture.held = Some((Some(1), Vec2::ZERO, Vec2::ZERO, 2.0));
-        gesture.dragged = true; // dragged away and back to its origin
-        gesture.end(Vec2::ZERO, 2.1, &mut preview);
-        assert!(gesture.tap.is_none());
-        gesture.dragged = false;
-        gesture.held = Some((Some(1), Vec2::ZERO, Vec2::ZERO, 3.0));
-        gesture.end(Vec2::ZERO, 3.8, &mut preview);
-        assert!(gesture.tap.is_none());
-    }
-}
-
 impl Gesture {
     fn end(&mut self, position: Vec2, now: f64, preview: &mut AvatarPreview) {
         if let Some((_, start, _, began)) = self.held.take() {
@@ -138,5 +111,34 @@ pub(super) fn interact(
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn double_tap_is_consumed_but_a_drag_or_long_press_is_not_a_tap() {
+        let mut world = World::new();
+        world.init_resource::<Assets<Image>>();
+        let mut preview = AvatarPreview::from_world(&mut world);
+        let mut gesture = Gesture {
+            held: Some((Some(1), Vec2::ZERO, Vec2::ZERO, 1.0)),
+            ..Default::default()
+        };
+        gesture.end(Vec2::ZERO, 1.1, &mut preview);
+        assert!(gesture.tap.is_some());
+        gesture.held = Some((Some(1), Vec2::ZERO, Vec2::ZERO, 1.2));
+        gesture.end(Vec2::ZERO, 1.3, &mut preview);
+        assert!(gesture.tap.is_none());
+        gesture.held = Some((Some(1), Vec2::ZERO, Vec2::ZERO, 2.0));
+        gesture.dragged = true; // dragged away and back to its origin
+        gesture.end(Vec2::ZERO, 2.1, &mut preview);
+        assert!(gesture.tap.is_none());
+        gesture.dragged = false;
+        gesture.held = Some((Some(1), Vec2::ZERO, Vec2::ZERO, 3.0));
+        gesture.end(Vec2::ZERO, 3.8, &mut preview);
+        assert!(gesture.tap.is_none());
     }
 }

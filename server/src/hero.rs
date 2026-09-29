@@ -119,6 +119,7 @@ pub(crate) struct Hero {
     pub(crate) progress: HeroProgress,
     pub(crate) utility: HeroUtility,
     pub(crate) last_action: HeroAction,
+    pub(crate) skills: crate::skills::HeroSkills,
 }
 
 impl Hero {
@@ -148,6 +149,7 @@ impl Hero {
             progress: HeroProgress::starting(),
             utility: HeroUtility::default(),
             last_action: HeroAction::default(),
+            skills: crate::skills::HeroSkills::default(),
         }
     }
 }

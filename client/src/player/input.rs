@@ -173,6 +173,7 @@ pub(super) fn move_player_analog(
                 Option<&crate::net::PlayerUtility>,
                 Option<&crate::net::NetworkHeroClass>,
                 Option<&crate::net::PlayerProgression>,
+                Option<&crate::net::PlayerLoadout>,
             ),
             With<Player>,
         >,
@@ -208,7 +209,7 @@ pub(super) fn move_player_analog(
         .ok()
         .map(|camera| mobile_screen_direction(movement, camera, *mode))
         .unwrap_or(Vec3::ZERO);
-    for (entity, mut transform, stats, equipment, utility, class, progression) in
+    for (entity, mut transform, stats, equipment, utility, class, progression, loadout) in
         &mut transforms.p0()
     {
         commands.entity(entity).remove::<Jumping>();
@@ -239,7 +240,8 @@ pub(super) fn move_player_analog(
                 }
                 * equipment.map_or(1.0, |e| e.item_bonuses.move_speed_multiplier)
                 * hero_movement_multiplier(class, progression),
-        ) * utility.map_or(1.0, |u| u.state.movement_multiplier());
+        ) * utility.map_or(1.0, |u| u.state.movement_multiplier())
+            * crate::combat::standard::movement_factor(loadout);
         // Bound a resumed/hitched frame; the server movement envelope remains authoritative.
         let desired = current
             + direction

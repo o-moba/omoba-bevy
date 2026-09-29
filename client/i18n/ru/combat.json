@@ -38,5 +38,16 @@
   "combat.feedback.no_route": "Нет проходимого пути к этой точке.",
   "combat.skill.mana": "{mana} маны",
   "combat.skill.cooldown": "Перезарядка: {seconds} с",
-  "combat.skill.hint_touch": "Отпустите, чтобы закрыть · нажмите или потяните, чтобы применить"
+  "combat.skill.hint_touch": "Отпустите, чтобы закрыть · нажмите или потяните, чтобы применить",
+  "combat.standard.not_ready": "Умение перезаряжается.",
+  "combat.standard.radiance": "Сияние · метки усиливают атаки",
+  "combat.standard.momentum": "Разгон · добивания дают ускорение",
+  "combat.standard.repeater": "Скорострельный режим",
+  "combat.standard.rockets": "Ракеты",
+  "combat.standard.weapon": "{mode} · зарядов: {stacks} · {cost} маны за атаку",
+  "combat.standard.shield": "Щит {value}",
+  "combat.standard.rooted": "Обездвижен",
+  "combat.standard.acceleration": "Ускорение {seconds} с",
+  "combat.standard.recast": "{key}: взорвать · {seconds} с",
+  "combat.standard.aim_hint": "Удерживайте Q/W/E/R для прицеливания · отпустите для применения · Esc отменяет"
 }

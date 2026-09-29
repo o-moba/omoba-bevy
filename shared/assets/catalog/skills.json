@@ -1,0 +1,174 @@
+{
+  "schema_version": 1,
+  "revision": "standard-kits-1",
+  "skills": [
+    {
+      "id": "dawn_bind",
+      "slot": "q",
+      "name": "Gleaming Snare",
+      "description": "Aimed light binds the first two enemies it hits.",
+      "targeting": "direction",
+      "mana_cost": 15,
+      "cooldown_secs": 8,
+      "cast_range": 18,
+      "windup_secs": 0,
+      "damage_type": "magic",
+      "effect": {
+        "kind": "linear_projectile",
+        "speed": 22,
+        "radius": 0.35,
+        "damage": 24,
+        "max_hits": 2,
+        "root_secs": 1.25,
+        "slow_multiplier": 1,
+        "slow_secs": 0,
+        "reveal_secs": 0
+      }
+    },
+    {
+      "id": "dawn_barrier",
+      "slot": "w",
+      "name": "Returning Aegis",
+      "description": "A returning light shields allies on both journeys.",
+      "targeting": "direction",
+      "mana_cost": 18,
+      "cooldown_secs": 12,
+      "cast_range": 15,
+      "windup_secs": 0,
+      "damage_type": "magic",
+      "effect": {
+        "kind": "returning_shield",
+        "speed": 18,
+        "radius": 0.7,
+        "amount": 30,
+        "duration_secs": 2.5
+      }
+    },
+    {
+      "id": "dawn_field",
+      "slot": "e",
+      "name": "Luminous Field",
+      "description": "Place a slowing field; cast again to detonate it.",
+      "targeting": "point",
+      "mana_cost": 24,
+      "cooldown_secs": 10,
+      "cast_range": 16,
+      "windup_secs": 0,
+      "damage_type": "magic",
+      "effect": {
+        "kind": "recast_zone",
+        "radius": 3,
+        "damage": 32,
+        "duration_secs": 5,
+        "slow_multiplier": 0.7
+      }
+    },
+    {
+      "id": "dawn_ray",
+      "slot": "r",
+      "name": "Horizon Ray",
+      "description": "A warned beam detonates Radiance marks and applies them again.",
+      "targeting": "direction",
+      "mana_cost": 40,
+      "cooldown_secs": 40,
+      "cast_range": 45,
+      "windup_secs": 0.8,
+      "damage_type": "magic",
+      "effect": {
+        "kind": "beam",
+        "width": 0.8,
+        "damage": 72
+      }
+    },
+    {
+      "id": "wild_switch",
+      "slot": "q",
+      "name": "Switchfire",
+      "description": "Toggle rapid repeater fire and longer-range rockets that spend Mana.",
+      "targeting": "self_target",
+      "mana_cost": 0,
+      "cooldown_secs": 0.25,
+      "cast_range": 0,
+      "windup_secs": 0,
+      "damage_type": "physical",
+      "effect": {
+        "kind": "weapon_toggle",
+        "rocket_range": 16,
+        "rocket_damage_multiplier": 1.1,
+        "rocket_cooldown_multiplier": 1.2,
+        "rocket_mana_cost": 4,
+        "splash_radius": 2,
+        "minigun_stack_attack_speed": 0.12,
+        "stack_duration_secs": 2.5,
+        "max_stacks": 3
+      }
+    },
+    {
+      "id": "wild_zap",
+      "slot": "w",
+      "name": "Shockline",
+      "description": "Aimed shot slows and reveals the first enemy hit.",
+      "targeting": "direction",
+      "mana_cost": 20,
+      "cooldown_secs": 8,
+      "cast_range": 24,
+      "windup_secs": 0,
+      "damage_type": "physical",
+      "effect": {
+        "kind": "linear_projectile",
+        "speed": 30,
+        "radius": 0.3,
+        "damage": 30,
+        "max_hits": 1,
+        "root_secs": 0,
+        "slow_multiplier": 0.65,
+        "slow_secs": 1.5,
+        "reveal_secs": 2
+      }
+    },
+    {
+      "id": "wild_traps",
+      "slot": "e",
+      "name": "Snapline",
+      "description": "Place three traps that arm, then root enemy heroes.",
+      "targeting": "point",
+      "mana_cost": 24,
+      "cooldown_secs": 14,
+      "cast_range": 13,
+      "windup_secs": 0,
+      "damage_type": "magic",
+      "effect": {
+        "kind": "trap_line",
+        "count": 3,
+        "spacing": 1.5,
+        "radius": 0.8,
+        "damage": 20,
+        "root_secs": 1.5,
+        "arm_secs": 0.6,
+        "duration_secs": 5
+      }
+    },
+    {
+      "id": "wild_rocket",
+      "slot": "r",
+      "name": "Last Spark",
+      "description": "A long-range rocket explodes on a hero, punishing wounded enemies.",
+      "targeting": "direction",
+      "mana_cost": 40,
+      "cooldown_secs": 45,
+      "cast_range": 256,
+      "windup_secs": 0,
+      "damage_type": "physical",
+      "effect": {
+        "kind": "impact_rocket",
+        "speed": 45,
+        "radius": 0.7,
+        "blast_radius": 3,
+        "damage": 84,
+        "min_damage_multiplier": 0.5,
+        "max_distance": 20,
+        "missing_health_ratio": 0.25
+      }
+    }
+  ]
+}

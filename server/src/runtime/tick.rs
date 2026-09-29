@@ -50,6 +50,7 @@ impl ServerRuntime {
                 simulate_projectiles_filtered(&mut self.world, TickCtx { now, dt }, |kind| {
                     kind == TargetKind::Minion
                 });
+            crate::skills::observe(&mut self.world, &minion_hits, now);
             self.combat_log.extend(now, minion_hits);
         }
         if self.match_service.is_lobby() {
@@ -94,6 +95,10 @@ impl ServerRuntime {
             tick_match_formation(&mut self.world, self.rules, dt, now);
         }
         self.track_round_start(now);
+        crate::skills::normalize(&mut self.world, now);
+        let skill_events = crate::skills::tick(&mut self.world, TickCtx { now, dt });
+        crate::skills::observe(&mut self.world, &skill_events, now);
+        self.combat_log.extend(now, skill_events);
         self.simulate_bots(now, dt);
         self.simulate_sandbox(now, dt);
         let sandbox_minions_running = self
@@ -107,10 +112,13 @@ impl ServerRuntime {
 
         if !self.targeting_qa && sandbox_minions_running && sandbox_simulating {
             spawn_minion_waves_if_due(world, now);
-            self.combat_log.extend(now, simulate_minions(world, tick));
+            let events = simulate_minions(world, tick);
+            crate::skills::observe(world, &events, now);
+            self.combat_log.extend(now, events);
         }
         if !self.targeting_qa && sandbox_simulating {
             let tower_events = simulate_tower_attacks(world, now);
+            crate::skills::observe(world, &tower_events, now);
             self.combat_log.extend(now, tower_events);
         }
         let projectile_events = if sandbox_simulating {
@@ -118,9 +126,12 @@ impl ServerRuntime {
         } else {
             Vec::new()
         };
+        crate::skills::observe(world, &projectile_events, now);
         self.combat_log.extend(now, projectile_events);
         if !self.targeting_qa && sandbox_simulating {
-            self.combat_log.extend(now, simulate_neutrals(world, tick));
+            let events = simulate_neutrals(world, tick);
+            crate::skills::observe(world, &events, now);
+            self.combat_log.extend(now, events);
         }
         if sandbox_simulating {
             world
@@ -131,6 +142,7 @@ impl ServerRuntime {
         regenerate_base_hp(world, dt);
         accrue_passive_gold(&mut world.players, &world.game_state, gold_dt);
         restore_god_mode_players(world);
+        crate::skills::normalize(world, now);
         handle_respawns(world, now);
         hero_timers::normalize_hero_timers(world);
 

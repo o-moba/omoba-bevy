@@ -38,5 +38,21 @@
   "ability.hunters_mark.name": "Метка охотника",
   "ability.hunters_mark.desc": "Брошенное копье, обездвиживающее цель на средней дистанции.",
   "ability.primal_maul.name": "Первобытная ярость",
-  "ability.primal_maul.desc": "Жестокий финиш для монстров и героев, вырвавшихся из линии."
+  "ability.primal_maul.desc": "Жестокий финиш для монстров и героев, вырвавшихся из линии.",
+  "ability.dawn_bind.name": "Сияющие путы",
+  "ability.dawn_bind.desc": "Прицельный свет обездвиживает первых двух задетых врагов.",
+  "ability.dawn_barrier.name": "Возвратный эгид",
+  "ability.dawn_barrier.desc": "Свет возвращается, защищая союзников щитом на обоих участках пути.",
+  "ability.dawn_field.name": "Световое поле",
+  "ability.dawn_field.desc": "Создаёт замедляющую область; повторное применение взрывает её.",
+  "ability.dawn_ray.name": "Луч горизонта",
+  "ability.dawn_ray.desc": "Луч с предупреждением взрывает метки Сияния и накладывает их вновь.",
+  "ability.wild_switch.name": "Смена огня",
+  "ability.wild_switch.desc": "Переключает скоростной огонь и дальнобойные ракеты, расходующие ману.",
+  "ability.wild_zap.name": "Грозовая линия",
+  "ability.wild_zap.desc": "Прицельный выстрел замедляет и раскрывает первого задетого врага.",
+  "ability.wild_traps.name": "Линия капканов",
+  "ability.wild_traps.desc": "Три ловушки взводятся и обездвиживают вражеских героев.",
+  "ability.wild_rocket.name": "Последняя искра",
+  "ability.wild_rocket.desc": "Дальняя ракета взрывается при попадании в героя, особенно опасна для раненых."
 }

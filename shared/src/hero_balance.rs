@@ -97,7 +97,7 @@ pub fn ability_cooldown(
     bonuses: ItemBonuses,
 ) -> Duration {
     let def = ability_for_class_slot(class, slot);
-    let rate = if slot == SkillSlot::Q {
+    let rate = if slot == SkillSlot::Q && !class.is_standard() {
         attack_rate_multiplier(class, level) * bonuses.attack_speed_multiplier.max(0.1)
     } else {
         spell_haste_multiplier(class, level) * bonuses.spell_haste_multiplier.max(1.0)
@@ -108,6 +108,37 @@ pub fn ability_cooldown(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn modular_q_uses_spell_haste_and_fixed_geometry_while_legacy_q_keeps_attack_speed() {
+        let attack = ItemBonuses {
+            attack_speed_multiplier: 2.0,
+            ..ItemBonuses::NONE
+        };
+        let haste = ItemBonuses {
+            spell_haste_multiplier: 2.0,
+            ..ItemBonuses::NONE
+        };
+        for class in [HeroClass::Dawnweaver, HeroClass::Wildspark] {
+            let base = ability_cooldown(class, 1, 1, SkillSlot::Q, ItemBonuses::NONE);
+            assert_eq!(ability_cooldown(class, 1, 1, SkillSlot::Q, attack), base);
+            assert_eq!(
+                ability_cooldown(class, 1, 1, SkillSlot::Q, haste),
+                base.div_f32(2.0)
+            );
+            for slot in SkillSlot::ALL {
+                let def = class.ability(slot);
+                assert_eq!(
+                    crate::scaled_cast_range(def, 1),
+                    crate::scaled_cast_range(def, 3)
+                );
+            }
+        }
+        let base = ability_cooldown(HeroClass::Warrior, 1, 1, SkillSlot::Q, ItemBonuses::NONE);
+        assert_eq!(
+            ability_cooldown(HeroClass::Warrior, 1, 1, SkillSlot::Q, attack),
+            base.div_f32(2.0)
+        );
+    }
     #[test]
     fn xp_thresholds_and_hp_growth_follow_the_level_curve() {
         assert_eq!(

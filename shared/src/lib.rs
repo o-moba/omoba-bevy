@@ -16,6 +16,7 @@ pub mod forest_pickups;
 pub mod hero_balance;
 pub mod jungle;
 pub mod live_score;
+pub mod loadout;
 pub mod map;
 pub mod match_service;
 pub mod math;
@@ -130,6 +131,10 @@ pub enum TargetingMode {
     UnitTarget,
     /// Ignores target; effect applies to the caster only.
     SelfTarget,
+    /// Aim toward a world point; the projectile/beam travels in that direction.
+    Direction,
+    /// Place an effect at a bounded world point.
+    Point,
 }
 
 /// Definition of one ability: id, costs and UX text. The values come from the
@@ -165,16 +170,33 @@ pub enum HeroClass {
     Ranger,
     Cleric,
     Warden,
+    Dawnweaver,
+    Wildspark,
 }
 
 impl HeroClass {
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 7] = [
+        Self::Warrior,
+        Self::Mage,
+        Self::Ranger,
+        Self::Cleric,
+        Self::Warden,
+        Self::Dawnweaver,
+        Self::Wildspark,
+    ];
+
+    pub const LEGACY: [Self; 5] = [
         Self::Warrior,
         Self::Mage,
         Self::Ranger,
         Self::Cleric,
         Self::Warden,
     ];
+
+    /// Selection compatibility only; effect execution uses the resolved skills.
+    pub const fn is_standard(self) -> bool {
+        matches!(self, Self::Dawnweaver | Self::Wildspark)
+    }
 
     /// Stable wire/UI identifier (snake_case).
     pub const fn id(self) -> &'static str {
@@ -184,6 +206,8 @@ impl HeroClass {
             Self::Ranger => "ranger",
             Self::Cleric => "cleric",
             Self::Warden => "warden",
+            Self::Dawnweaver => "dawnweaver",
+            Self::Wildspark => "wildspark",
         }
     }
 
@@ -200,8 +224,7 @@ impl HeroClass {
         catalog::hero(self).tagline
     }
 
-    /// The draft duty this kit is built for. Every class owns a distinct role,
-    /// so one of each fills a five-player team. Players may still pick any role.
+    /// The draft duty this kit is built for. Several kits may share a role.
     pub fn primary_role(self) -> prematch::Role {
         catalog::hero(self).role
     }
@@ -256,6 +279,9 @@ pub fn scaled_cooldown(def: &AbilityDefinition, rank: u8) -> Duration {
 
 #[inline]
 pub fn scaled_cast_range(def: &AbilityDefinition, rank: u8) -> f32 {
+    if loadout::SkillId::from_id(def.id).is_some() {
+        return def.cast_range;
+    }
     if def.cast_range <= 0.0 {
         0.0
     } else {
@@ -349,7 +375,11 @@ mod tests {
                     def.self_heal.is_some(),
                     def.self_mana_restore.is_some(),
                 ];
-                assert_eq!(effects.iter().filter(|&&x| x).count(), 1, "{}", def.id);
+                if !class.is_standard() {
+                    assert_eq!(effects.iter().filter(|&&x| x).count(), 1, "{}", def.id);
+                } else {
+                    assert!(loadout::SkillId::from_id(def.id).is_some());
+                }
                 match def.targeting {
                     TargetingMode::UnitTarget => {
                         assert!(def.projectile_damage.is_some(), "{}", def.id);
@@ -358,6 +388,9 @@ mod tests {
                     TargetingMode::SelfTarget => {
                         assert!(def.projectile_damage.is_none(), "{}", def.id);
                         assert_eq!(def.cast_range, 0.0, "{}", def.id);
+                    }
+                    TargetingMode::Direction | TargetingMode::Point => {
+                        assert!(class.is_standard() && def.cast_range > 0.0);
                     }
                 }
             }
@@ -371,7 +404,7 @@ mod tests {
 
     #[test]
     fn five_classes_fill_five_distinct_roles() {
-        let roles: Vec<_> = HeroClass::ALL.map(HeroClass::primary_role).into();
+        let roles: Vec<_> = HeroClass::LEGACY.map(HeroClass::primary_role).into();
         for role in prematch::Role::ALL {
             assert_eq!(roles.iter().filter(|r| **r == role).count(), 1, "{role:?}");
         }
@@ -391,8 +424,8 @@ mod tests {
                 "slot {slot:?} must differ across classes"
             );
         }
-        // Every class has a usable Q at level 1 (UnitTarget damage opener).
-        for class in HeroClass::ALL {
+        // Legacy classes retain their level-one targeted damage opener.
+        for class in HeroClass::LEGACY {
             assert_eq!(
                 class.ability(SkillSlot::Q).targeting,
                 TargetingMode::UnitTarget

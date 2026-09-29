@@ -105,6 +105,12 @@ impl SandboxRuntime {
             respawns: !p.hero.identity.is_bot,
         };
         p.hero.identity.hero_class = c.hero;
+        if changed_hero || reset {
+            let sequence = p.hero.skills.request_id;
+            p.hero.skills = crate::skills::HeroSkills::default();
+            p.hero.skills.loadout = shared::loadout::preset_for_class(c.hero);
+            p.hero.skills.request_id = sequence;
+        }
         if changed_hero || changed_avatar || c.avatar.is_some() {
             p.hero.identity.avatar = c
                 .avatar
@@ -631,6 +637,7 @@ impl ServerRuntime {
         }
         if reset {
             let id = self.world.players[&addr].hero.identity.id;
+            crate::skills::clear_actor(&mut self.world, id);
             self.world.projectiles.retain(|_, p| {
                 p.state.owner_id != id
                     && p.target
@@ -653,6 +660,7 @@ impl ServerRuntime {
             if let Some(c) = s.actor_config(p) {
                 let id = p.hero.identity.id;
                 s.apply_actor(p, &c, true, now);
+                crate::skills::clear_actor(&mut self.world, id);
                 self.world.projectiles.retain(|_, p| {
                     p.state.owner_id != id
                         && p.target
@@ -701,7 +709,19 @@ impl ServerRuntime {
                 .ok_or("No living hostile target")?
         };
         let before = p.hero.last_action.sequence;
-        handle_cast_request(&mut self.world, addr, target, slot, now);
+        if p.hero.skills.loadout.is_some() {
+            let request = p.hero.skills.request_id.saturating_add(1);
+            let aim = self
+                .world
+                .players
+                .values()
+                .find(|p| p.hero.identity.id == target.id)
+                .map(|p| [p.hero.x, p.hero.z])
+                .ok_or("Target vanished")?;
+            crate::skills::cast(&mut self.world, addr, slot, aim, request, now);
+        } else {
+            handle_cast_request(&mut self.world, addr, target, slot, now);
+        }
         if self.world.players[&addr].hero.last_action.sequence == before {
             Err("Ability rejected: check range, unlock, health, mana and cooldown".into())
         } else {

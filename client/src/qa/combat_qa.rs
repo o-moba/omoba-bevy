@@ -136,7 +136,7 @@ fn label(mut commands: Commands) {
 }
 // Ask the actual OS window for focus; never spoof Window.focused or input gates.
 // This is bounded and only installed for an explicitly requested native QA run.
-fn focus_capture_window(
+pub(super) fn focus_capture_window(
     windows: Query<Entity, With<PrimaryWindow>>,
     mut retry: Local<(u8, Option<Instant>)>,
     _main_thread: NonSendMarker,

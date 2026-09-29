@@ -45,6 +45,7 @@ mod sandbox;
 mod session;
 mod shop;
 mod sim;
+mod skills;
 mod snapshot;
 mod social;
 mod targeting_qa;

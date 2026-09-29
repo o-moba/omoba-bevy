@@ -20,6 +20,210 @@ use crate::team::{Team, TeamSelection};
 use bevy::{input::mouse::MouseButton, window::PrimaryWindow};
 use shared::{HeroClass, SkillSlot, ability_for_class_slot};
 
+fn standard_cast_app(class: HeroClass, slot: usize, recast: bool) -> App {
+    let mut app = App::new();
+    app.init_resource::<TeamSelection>()
+        .init_resource::<PendingCast>()
+        .init_resource::<LocalCastCooldown>()
+        .init_resource::<ActionFeedback>()
+        .init_resource::<GameplayInputContext>()
+        .add_message::<NetworkCommand>()
+        .add_systems(Update, resolve_pending_cast_system);
+    let mut state = shared::loadout::LoadoutState {
+        recipe: shared::loadout::preset_for_class(class).map(|p| p.recipe()),
+        ..default()
+    };
+    state.slots[slot].can_recast = recast;
+    state.slots[slot].recast_remaining_secs = if recast { 3.0 } else { 0.0 };
+    let mut stats = CombatStats::default();
+    if recast {
+        stats.mana = 0.0;
+    }
+    app.world_mut().spawn((
+        Player,
+        Transform::default(),
+        stats,
+        PlayerProgression {
+            level: 10,
+            ..default()
+        },
+        NetworkPlayerId(1),
+        Team::Green,
+        NetworkHeroClass(class),
+        crate::net::PlayerLoadout(Some(state)),
+    ));
+    app.world_mut().resource_mut::<PendingCast>().request = Some(PendingCastRequest {
+        slot,
+        target_entity: None,
+        target: None,
+        approach_announced: false,
+    });
+    app.world_mut().resource_mut::<PendingCast>().aim = Some(Vec2::new(30.0, 0.0));
+    if recast {
+        app.world_mut()
+            .resource_mut::<LocalCastCooldown>()
+            .remaining_secs[slot] = 8.0;
+    }
+    app
+}
+
+#[test]
+fn standard_skills_send_world_aim_without_a_selected_unit() {
+    for class in [HeroClass::Dawnweaver, HeroClass::Wildspark] {
+        for slot in 0..4 {
+            let mut app = standard_cast_app(class, slot, false);
+            app.update();
+            let sent = app
+                .world_mut()
+                .resource_mut::<Messages<NetworkCommand>>()
+                .drain()
+                .collect::<Vec<_>>();
+            assert!(
+                matches!(sent.as_slice(), [NetworkCommand::CastSkill { slot: sent_slot, aim }]
+                if *sent_slot as usize == slot && aim.is_finite()),
+                "{class:?} {slot}: {sent:?}"
+            );
+            assert!(!app.world().resource::<PendingCast>().is_pending());
+        }
+    }
+}
+
+#[test]
+fn dawn_field_recast_bypasses_mana_recovery_and_running_base_cooldown() {
+    let mut app = standard_cast_app(HeroClass::Dawnweaver, 2, true);
+    app.world_mut()
+        .resource_mut::<LocalCastCooldown>()
+        .recovery_secs = 0.5;
+    app.update();
+    let sent = app
+        .world_mut()
+        .resource_mut::<Messages<NetworkCommand>>()
+        .drain()
+        .collect::<Vec<_>>();
+    assert!(matches!(
+        sent.as_slice(),
+        [NetworkCommand::CastSkill { slot: 2, .. }]
+    ));
+    assert_eq!(
+        app.world().resource::<LocalCastCooldown>().remaining_secs[2],
+        8.0
+    );
+}
+
+#[test]
+fn standard_keyboard_holds_before_cast_and_cancels_when_context_is_lost() {
+    for canceled in [false, true] {
+        let mut app = standard_cast_app(HeroClass::Dawnweaver, 0, false);
+        app.world_mut().resource_mut::<PendingCast>().cancel();
+        app.init_resource::<ButtonInput<KeyCode>>()
+            .init_resource::<TargetState>()
+            .add_systems(
+                Update,
+                cast_spell_system.before(resolve_pending_cast_system),
+            );
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::KeyQ);
+        app.update();
+        assert_eq!(
+            app.world_mut()
+                .resource_mut::<Messages<NetworkCommand>>()
+                .drain()
+                .count(),
+            0,
+            "holding only previews"
+        );
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .clear();
+        if canceled {
+            app.world_mut()
+                .resource_mut::<GameplayInputContext>()
+                .modal_open = true;
+            app.update();
+            app.world_mut()
+                .resource_mut::<GameplayInputContext>()
+                .modal_open = false;
+        }
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .release(KeyCode::KeyQ);
+        app.update();
+        let sent = app
+            .world_mut()
+            .resource_mut::<Messages<NetworkCommand>>()
+            .drain()
+            .collect::<Vec<_>>();
+        if canceled {
+            assert!(
+                sent.is_empty(),
+                "a canceled hold cannot cast after the menu closes"
+            );
+        } else {
+            assert!(matches!(
+                sent.as_slice(),
+                [NetworkCommand::CastSkill { slot: 0, .. }]
+            ));
+        }
+    }
+}
+
+#[test]
+fn standard_cast_predicts_recovery_and_preserves_the_next_aimed_input_until_ready() {
+    let mut app = standard_cast_app(HeroClass::Dawnweaver, 0, false);
+    app.init_resource::<Time>().add_systems(
+        Update,
+        tick_local_cast_cooldown.before(resolve_pending_cast_system),
+    );
+    app.update();
+    assert_eq!(
+        app.world_mut()
+            .resource_mut::<Messages<NetworkCommand>>()
+            .drain()
+            .count(),
+        1
+    );
+    assert_eq!(
+        app.world().resource::<LocalCastCooldown>().recovery_secs,
+        0.15
+    );
+    {
+        let mut pending = app.world_mut().resource_mut::<PendingCast>();
+        pending.request = Some(PendingCastRequest {
+            slot: 1,
+            target_entity: None,
+            target: None,
+            approach_announced: false,
+        });
+        pending.aim = Some(Vec2::new(4.0, 5.0));
+    }
+    app.world_mut()
+        .resource_mut::<Time>()
+        .advance_by(std::time::Duration::from_millis(100));
+    app.update();
+    assert_eq!(
+        app.world_mut()
+            .resource_mut::<Messages<NetworkCommand>>()
+            .drain()
+            .count(),
+        0
+    );
+    assert!(app.world().resource::<PendingCast>().is_pending());
+    app.world_mut()
+        .resource_mut::<Time>()
+        .advance_by(std::time::Duration::from_millis(60));
+    app.update();
+    let sent = app
+        .world_mut()
+        .resource_mut::<Messages<NetworkCommand>>()
+        .drain()
+        .collect::<Vec<_>>();
+    assert!(
+        matches!(sent.as_slice(), [NetworkCommand::CastSkill {slot:1,aim}] if *aim==Vec2::new(4.0,5.0))
+    );
+    assert!(!app.world().resource::<PendingCast>().is_pending());
+}
+
 #[test]
 fn balanced_skill_recovery_buffers_next_slot_and_uses_level_cooldowns() {
     let mut app = App::new();

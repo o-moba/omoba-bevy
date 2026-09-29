@@ -33,6 +33,10 @@ pub enum NetworkCommand {
     BasicAttack {
         target: TargetId,
     },
+    CastSkill {
+        slot: u8,
+        aim: Vec2,
+    },
     Cast {
         target: TargetId,
         /// Hotbar slot index (0=Q .. 3=R).
@@ -128,6 +132,8 @@ pub(in crate::net) fn send_network_commands(
     utility: Query<&PlayerUtility, With<Player>>,
     mut utility_sequence: Local<u64>,
     mut basic_sequence: Local<u64>,
+    mut skill_sequence: Local<u64>,
+    loadout: Query<&super::PlayerLoadout, With<Player>>,
     mut career_identity: Option<ResMut<crate::career_identity::CareerIdentity>>,
     mut career_client: Option<ResMut<crate::career::CareerClient>>,
     mut social_client: Option<ResMut<crate::social::SocialClient>>,
@@ -269,6 +275,14 @@ pub(in crate::net) fn send_network_commands(
                 }
             }
             NetworkCommand::Utility { action, direction } => {
+                if loadout
+                    .single()
+                    .ok()
+                    .and_then(|s| s.0.as_ref())
+                    .is_some_and(|s| s.recipe.is_some())
+                {
+                    continue;
+                }
                 if !client_session.join_confirmed() {
                     continue;
                 }
@@ -314,6 +328,34 @@ pub(in crate::net) fn send_network_commands(
                 *basic_sequence = request_id;
                 let _ = channels.outgoing.try_send(ClientPacket::BasicAttack {
                     target: *target,
+                    server_epoch: meta.server_epoch,
+                    match_id: meta.match_id,
+                    request_id,
+                });
+            }
+            NetworkCommand::CastSkill { slot, aim } => {
+                if !client_session.join_confirmed() || !aim.is_finite() {
+                    continue;
+                }
+                let Some(meta) = snapshot
+                    .as_ref()
+                    .map(|s| s.meta)
+                    .filter(|m| m.server_epoch != 0 && m.match_id != 0)
+                else {
+                    continue;
+                };
+                let ack = loadout
+                    .single()
+                    .ok()
+                    .and_then(|s| s.0.as_ref())
+                    .map_or(0, |s| s.cast_request_id);
+                let Some(request_id) = (*skill_sequence).max(ack).checked_add(1) else {
+                    continue;
+                };
+                *skill_sequence = request_id;
+                let _ = channels.outgoing.try_send(ClientPacket::CastSkill {
+                    slot: *slot,
+                    aim: aim.to_array(),
                     server_epoch: meta.server_epoch,
                     match_id: meta.match_id,
                     request_id,

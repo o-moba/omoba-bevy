@@ -4,6 +4,15 @@ All notable changes to this repository should be documented in this file.
 
 The canonical repository version lives in `Cargo.toml` under `[workspace.package].version` and follows SemVer.
 
+## [0.29.0] - 2026-09-29
+
+### Standard combat kits and reusable skills
+
+- Add Dawnweaver (marks, a two-target snare, returning shields, a recastable slowing field and a warned beam) and Wildspark (repeater/rocket weapons, takedown momentum, a slowing shot, armed traps and a long-range finisher), independently of avatar selection.
+- Define eight reusable skills, two passives and validated, revisioned loadout recipes. Fixed presets are available now; compatible mixed recipes execute in server tests, while a public constructor and website save/equip remain future work.
+- Resolve aimed casts, resources, replay protection, damage, shields, control, effect lifetimes and fog visibility on the server. Protocol 3 explicitly rejects incompatible peers. Existing five classes retain their combat path.
+- Add original ability icons, localized descriptions, aim previews, mode/recast indicators and replicated combat effects. New kits require a server, including local bot practice; offline practice keeps its five supported classes.
+
 ## [0.28.6] - 2026-09-29
 
 ### iPad layout preview

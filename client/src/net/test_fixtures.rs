@@ -219,8 +219,9 @@ pub(in crate::net) fn network_hero_entity(app: &mut App, id: u64) -> Entity {
 }
 
 pub(in crate::net) fn exact_size_snapshot_fixture(size: usize, sentinel: u64) -> Vec<u8> {
-    let prefix = String::from(
-        r#"{"type":"snapshot","protocol_version":2,"server_epoch":1,"match_id":1,"snapshot_tick":2,"your_id":7,"padding":""#,
+    let prefix = format!(
+        r#"{{"type":"snapshot","protocol_version":{},"server_epoch":1,"match_id":1,"snapshot_tick":2,"your_id":7,"padding":""#,
+        shared::protocol::PROTOCOL_VERSION,
     );
     let suffix = format!(
         r#"","players":[],"structures":[{{"id":808,"kind":"tower","team":"blue","x":1.0,"y":2.0,"z":3.0,"hp":4.0,"max_hp":5.0}}],"minions":[{{"id":909,"team":"green","lane":"bot","x":6.0,"y":0.5,"z":7.0,"yaw":0.0,"hp":8.0,"max_hp":9.0,"state":"marching","target_kind":null,"target_id":null}}],"rematch_in_secs":{sentinel}}}"#

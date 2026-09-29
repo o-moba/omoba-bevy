@@ -40,6 +40,9 @@ pub(crate) fn apply_neutral_damage(
         .values()
         .find(|player| player.hero.identity.id == attacker_player_id)
         .map_or(damage, |player| {
+            if player.hero.skills.loadout.is_some() {
+                return damage;
+            }
             damage
                 * shared::jungle::neutral_damage_multiplier(
                     player.hero.identity.hero_class,
@@ -125,7 +128,10 @@ pub(crate) fn simulate_neutrals(world: &mut GameWorld, tick: TickCtx) -> Vec<Com
         return Vec::new();
     }
     let GameWorld {
-        players, neutrals, ..
+        players,
+        neutrals,
+        skill_runtime,
+        ..
     } = world;
 
     let mut player_damage_events: Vec<(u64, f32, HitSource)> = Vec::new();
@@ -222,7 +228,13 @@ pub(crate) fn simulate_neutrals(world: &mut GameWorld, tick: TickCtx) -> Vec<Com
             chase_neutral(
                 neutral,
                 [target_hit.x, target_hit.z],
-                dt,
+                dt * skill_runtime.npc_movement(
+                    shared::wire::TargetId {
+                        kind: shared::wire::TargetKind::Neutral,
+                        id: neutral.state.id,
+                    },
+                    now,
+                ),
                 shared::navigation::world_navigation(),
             );
         }

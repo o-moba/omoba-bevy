@@ -50,6 +50,7 @@ pub(super) fn reset_round_input_state(
                 command,
                 NetworkCommand::BasicAttack { .. }
                     | NetworkCommand::Cast { .. }
+                    | NetworkCommand::CastSkill { .. }
                     | NetworkCommand::UpgradeSkill { .. }
                     | NetworkCommand::Utility { .. }
                     | NetworkCommand::BuyItem { .. }

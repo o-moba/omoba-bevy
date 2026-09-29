@@ -1,3 +1,4 @@
+//! Legacy homing-kit benchmark; aimed fixed kits have outcome tests in skills.
 //! Controlled balance measurements through the ordinary authoritative combat path.
 //! No sandbox/god mode/unlimited mana. See docs/balance-tuning.md for limitations.
 
@@ -236,14 +237,14 @@ fn measured_balance_matrix() {
     let mut rows = vec![];
     let mut supplements = vec![];
     for level in [1, 5, 10] {
-        for a in HeroClass::ALL {
-            for b in HeroClass::ALL {
+        for a in HeroClass::LEGACY {
+            for b in HeroClass::LEGACY {
                 rows.push(measure(a, b, level, "all_in", [3, 2, 0], None));
             }
         }
     }
     for level in [1, 10] {
-        for a in HeroClass::ALL {
+        for a in HeroClass::LEGACY {
             for policy in ["basic_only", "q_only"] {
                 supplements.push(measure(a, a, level, policy, [3, 2, 0], None));
             }
@@ -251,7 +252,7 @@ fn measured_balance_matrix() {
             supplements.push(measure(a, a, level, "all_in", [3, 2, 0], Some(0.5)));
         }
     }
-    let report = serde_json::json!({"version":env!("CARGO_PKG_VERSION"),"setup":{"distance":3.0,"dt":1.0/120.0,"timeout":60,"items":[],"sandbox":false,"victim":"stationary; no healing except labeled bidirectional supplement","rank_policy":"spend normally available points in Q Q W W E E R R order, unlocked slots only","request_order":"basic then R E Q; retry every simulation step; self mana restore when meaningful","ttk_start":"first request, includes travel","repeatability_tolerance":1.0/120.0},"matrix":rows,"supplements":supplements,"sustain":HeroClass::ALL.map(sustain)});
+    let report = serde_json::json!({"version":env!("CARGO_PKG_VERSION"),"setup":{"distance":3.0,"dt":1.0/120.0,"timeout":60,"items":[],"sandbox":false,"victim":"stationary; no healing except labeled bidirectional supplement","rank_policy":"spend normally available points in Q Q W W E E R R order, unlocked slots only","request_order":"basic then R E Q; retry every simulation step; self mana restore when meaningful","ttk_start":"first request, includes travel","repeatability_tolerance":1.0/120.0},"matrix":rows,"supplements":supplements,"sustain":HeroClass::LEGACY.map(sustain)});
     if let Ok(path) = std::env::var("OMOBA_BALANCE_REPORT") {
         std::fs::write(path, serde_json::to_vec_pretty(&report).unwrap()).unwrap();
     }
@@ -270,8 +271,8 @@ fn measured_balance_matrix() {
 fn every_damaging_skill_opening_preserves_response_windows() {
     let mut rows = Vec::new();
     for level in [1, 10] {
-        for attacker in HeroClass::ALL {
-            for defender in HeroClass::ALL {
+        for attacker in HeroClass::LEGACY {
+            for defender in HeroClass::LEGACY {
                 for order in [
                     [0, 2, 3],
                     [0, 3, 2],

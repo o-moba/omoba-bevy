@@ -178,6 +178,25 @@ pub(crate) fn apply_player_damage_typed(
     now: Instant,
     magical: bool,
 ) -> Option<CombatEvent> {
+    apply_player_damage_kind(
+        players,
+        target_id,
+        damage,
+        now,
+        if magical {
+            shared::loadout::DamageType::Magic
+        } else {
+            shared::loadout::DamageType::Physical
+        },
+    )
+}
+pub(crate) fn apply_player_damage_kind(
+    players: &mut HashMap<SocketAddr, ConnectedPlayer>,
+    target_id: u64,
+    damage: f32,
+    now: Instant,
+    kind: shared::loadout::DamageType,
+) -> Option<CombatEvent> {
     if !damage.is_finite() || damage <= 0.0 {
         return None;
     }
@@ -188,7 +207,12 @@ pub(crate) fn apply_player_damage_typed(
             && !player.modifiers.god_mode
     })?;
     let before = player.hero.hp;
-    let damage = hero_stats::mitigate(player, damage, magical);
+    let damage = if kind == shared::loadout::DamageType::True {
+        damage
+    } else {
+        hero_stats::mitigate(player, damage, kind == shared::loadout::DamageType::Magic)
+    };
+    let damage = player.hero.skills.absorb(damage, now);
     player.hero.hp = if player.modifiers.infinite_hp {
         before
     } else {

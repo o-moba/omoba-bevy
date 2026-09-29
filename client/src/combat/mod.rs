@@ -9,6 +9,7 @@ mod mobile;
 mod round_reset;
 mod selection;
 pub(crate) mod skill_card;
+pub(crate) mod standard;
 pub(crate) mod targeting;
 
 pub use crate::domain::{CombatStats, MAX_HP};
@@ -65,7 +66,15 @@ impl Plugin for CombatPlugin {
                     .after(crate::net::ClientNetPipeline::ApplySnapshot)
                     .before(InputContextSet::Modal),
             )
-            .add_systems(Startup, setup_combat_visual_assets)
+            .add_systems(Startup, (setup_combat_visual_assets, standard::setup))
+            .add_systems(
+                Update,
+                (
+                    standard::update_status,
+                    standard::draw_effects,
+                    standard::draw_aim,
+                ),
+            )
             .add_systems(
                 Startup,
                 (setup_combat_ui, crate::targeting::setup_targeting_ui),

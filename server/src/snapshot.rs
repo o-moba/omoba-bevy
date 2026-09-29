@@ -251,6 +251,7 @@ impl ServerRuntime {
                     self.rules,
                     now,
                 ),
+                skill_effects: crate::skills::effects(world, now),
                 projectiles: projectiles_snapshot.clone(),
                 combat_events: self.combat_log.snapshot(now),
                 structures: structures_snapshot.clone(),

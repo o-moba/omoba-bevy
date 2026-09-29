@@ -89,7 +89,12 @@ pub(crate) fn combat_bonuses(player: &ConnectedPlayer) -> ItemBonuses {
 
 pub(crate) fn basic_attack_damage(player: &ConnectedPlayer) -> f32 {
     shared::hero_balance::basic_damage(
-        player.hero.identity.hero_class,
+        player
+            .hero
+            .skills
+            .loadout
+            .as_ref()
+            .map_or(player.hero.identity.hero_class, |l| l.core().class()),
         player.hero.progress.level,
         combat_bonuses(player),
     )
@@ -97,13 +102,30 @@ pub(crate) fn basic_attack_damage(player: &ConnectedPlayer) -> f32 {
 
 pub(crate) fn basic_attack_cooldown(player: &ConnectedPlayer) -> Duration {
     shared::hero_balance::basic_cooldown(
-        player.hero.identity.hero_class,
+        player
+            .hero
+            .skills
+            .loadout
+            .as_ref()
+            .map_or(player.hero.identity.hero_class, |l| l.core().class()),
         player.hero.progress.level,
         combat_bonuses(player),
     )
 }
 
 pub(crate) fn ability_cooldown(player: &ConnectedPlayer, slot: SkillSlot) -> Duration {
+    if let Some(loadout) = &player.hero.skills.loadout {
+        let def = loadout.skill(slot);
+        let rate = shared::hero_balance::spell_haste_multiplier(
+            player.hero.identity.hero_class,
+            player.hero.progress.level,
+        ) * combat_bonuses(player).spell_haste_multiplier.max(1.0);
+        return shared::scaled_cooldown(
+            &def.ability,
+            player.hero.progress.ranks[slot.index()].clamp(1, def.ability.max_rank),
+        )
+        .div_f32(rate);
+    }
     shared::hero_balance::ability_cooldown(
         player.hero.identity.hero_class,
         player.hero.progress.level,
@@ -153,7 +175,11 @@ pub(crate) fn movement_envelope(player: &ConnectedPlayer, now: Instant, elapsed:
             player.hero.identity.hero_class,
             player.hero.progress.level,
         );
-    PLAYER_SPEED * multiplier * player.economy.item_bonuses.move_speed_multiplier * elapsed
+    PLAYER_SPEED
+        * multiplier
+        * player.economy.item_bonuses.move_speed_multiplier
+        * player.hero.skills.movement(now)
+        * elapsed
         + player.timers.movement_slack
 }
 
@@ -195,4 +221,11 @@ pub(crate) fn mitigate(player: &ConnectedPlayer, damage: f32, magical: bool) -> 
         player.modifiers.armor
     };
     damage * 100.0 / (100.0 + mitigation)
+}
+
+/// Mode and passive timing apply after the shared class/gear baseline.
+pub(crate) fn basic_attack_cooldown_at(player: &ConnectedPlayer, now: Instant) -> Duration {
+    basic_attack_cooldown(player)
+        .mul_f32(crate::skills::attack_modifiers(player).2)
+        .div_f32(player.hero.skills.attack_rate(now))
 }

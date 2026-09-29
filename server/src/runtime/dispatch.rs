@@ -259,6 +259,7 @@ impl ServerRuntime {
             }
             ClientPacket::Transform { .. }
             | ClientPacket::Cast { .. }
+            | ClientPacket::CastSkill { .. }
             | ClientPacket::BasicAttack { .. }
             | ClientPacket::Utility { .. }
                 if self
@@ -282,6 +283,20 @@ impl ServerRuntime {
                 dash_sequence,
             } => self.handle_transform(addr, x, y, z, yaw, dash_sequence, now),
             ClientPacket::Cast { target, slot } => self.handle_cast(addr, target, slot, now),
+            ClientPacket::CastSkill {
+                slot,
+                aim,
+                server_epoch,
+                match_id,
+                request_id,
+            } => {
+                if server_epoch != self.server_epoch || match_id != self.match_id {
+                    ControlFlow::Break(())
+                } else {
+                    crate::skills::cast(&mut self.world, addr, slot, aim, request_id, now);
+                    ControlFlow::Continue(())
+                }
+            }
             ClientPacket::Utility {
                 action,
                 direction,

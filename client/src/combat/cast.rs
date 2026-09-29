@@ -31,6 +31,7 @@ pub(super) struct PendingCastRequest {
 #[derive(Resource, Default)]
 pub(crate) struct PendingCast {
     pub(super) request: Option<PendingCastRequest>,
+    pub(crate) aim: Option<Vec2>,
 }
 
 impl PendingCast {
@@ -40,6 +41,7 @@ impl PendingCast {
 
     pub(crate) fn cancel(&mut self) {
         self.request = None;
+        self.aim = None;
     }
 
     #[cfg(test)]
@@ -51,6 +53,7 @@ impl PendingCast {
                 target: None,
                 approach_announced: true,
             }),
+            aim: None,
         }
     }
 
@@ -142,12 +145,15 @@ fn try_cast_slot(
             id: id.0,
         }),
         TargetingMode::UnitTarget => selected_target,
+        TargetingMode::Direction | TargetingMode::Point => None,
     };
     let Some(target) = target else {
         report_plain(
             feedback,
             match def.targeting {
-                TargetingMode::UnitTarget => "combat.cast.no_target",
+                TargetingMode::UnitTarget | TargetingMode::Direction | TargetingMode::Point => {
+                    "combat.cast.no_target"
+                }
                 TargetingMode::SelfTarget => "combat.cast.not_connected",
             },
         );
@@ -188,7 +194,7 @@ pub(crate) fn queue_cast_request(
     };
     let def = ability_for_class_slot(class, slot);
     let (target_entity, target) = match def.targeting {
-        TargetingMode::SelfTarget => (None, None),
+        TargetingMode::SelfTarget | TargetingMode::Direction | TargetingMode::Point => (None, None),
         TargetingMode::UnitTarget => {
             let (Some(entity), Some(target)) =
                 (target_state.selected_entity, target_state.selected_target)
@@ -199,6 +205,7 @@ pub(crate) fn queue_cast_request(
             (Some(entity), Some(target))
         }
     };
+    pending_cast.aim = None;
     pending_cast.request = Some(PendingCastRequest {
         slot: slot_index,
         target_entity,
@@ -224,8 +231,10 @@ pub(super) fn cast_spell_system(
     mut pending_cast: ResMut<PendingCast>,
     mut feedback: ResMut<ActionFeedback>,
     context: Res<GameplayInputContext>,
+    mut aimed: Local<[bool; 4]>,
 ) {
     if !context.gameplay_allowed() {
+        *aimed = [false; 4];
         return;
     }
 
@@ -234,17 +243,33 @@ pub(super) fn cast_spell_system(
             return;
         }
     }
-    let Some(slot_index) = SKILL_CAST_KEYS
-        .iter()
-        .position(|key| keyboard_input.just_pressed(*key))
-    else {
-        return;
-    };
-
     let Ok((_stats, _prog, _net_id, class)) = local_player.single() else {
         return;
     };
     let class = local_hero_class(Some(class), &team_selection);
+    let slot_index = if class.is_standard() {
+        let mut released = None;
+        for (slot, key) in SKILL_CAST_KEYS.iter().enumerate() {
+            if keyboard_input.just_pressed(*key) {
+                aimed[slot] = true;
+            }
+            if keyboard_input.just_released(*key) {
+                if aimed[slot] {
+                    released = Some(slot);
+                }
+                aimed[slot] = false;
+            }
+        }
+        released
+    } else {
+        *aimed = [false; 4];
+        SKILL_CAST_KEYS
+            .iter()
+            .position(|key| keyboard_input.just_pressed(*key))
+    };
+    let Some(slot_index) = slot_index else {
+        return;
+    };
     queue_cast_request(
         slot_index,
         class,
@@ -283,6 +308,12 @@ pub(super) fn resolve_pending_cast_system(
     ),
     validity: crate::targeting::TargetValidity,
     game: Option<Res<GameStateSnapshot>>,
+    loadouts: Query<&crate::net::PlayerLoadout, With<Player>>,
+    aim_view: (
+        Query<&Window, With<bevy::window::PrimaryWindow>>,
+        Query<(&Camera, &GlobalTransform), With<crate::camera::MainCamera>>,
+        Option<Res<crate::sprite::PlayerVisualMode>>,
+    ),
 ) {
     // Touch and controller casts never walk to an out-of-range target.
     let touch_mode = sticks.0.as_ref().is_some_and(|mobile| mobile.enabled)
@@ -309,6 +340,112 @@ pub(super) fn resolve_pending_cast_system(
     let definition = ability_for_class_slot(class, slot);
     let prog = progression.copied().unwrap_or_default();
     let rank = prog.ranks[slot.index()].clamp(1, definition.max_rank);
+    if let Some(preset) = shared::loadout::preset_for_class(class) {
+        let state = loadouts.single().ok().and_then(|s| s.0.as_ref());
+        let cursor = aim_view
+            .0
+            .single()
+            .ok()
+            .filter(|w| w.focused)
+            .and_then(|w| w.cursor_position())
+            .and_then(|p| {
+                let (camera, pose) = aim_view.1.single().ok()?;
+                crate::player::viewport_to_simulation_world(
+                    camera,
+                    pose,
+                    p,
+                    aim_view
+                        .2
+                        .as_deref()
+                        .copied()
+                        .unwrap_or(crate::sprite::PlayerVisualMode::Models3d),
+                    0.0,
+                )
+            })
+            .map(|p| p.xz());
+        let aim = pending_cast.aim.or(cursor).unwrap_or_else(|| {
+            player_transform.translation.xz() + player_transform.forward().xz() * 10.0
+        });
+        let recast = state.is_some_and(|s| s.slots[slot.index()].can_recast);
+        if !stats.is_alive() || !prog.unlocked()[slot.index()] || !aim.is_finite() {
+            pending_cast.cancel();
+            return;
+        }
+        if !recast && cast_cd.recovery_secs > 0.0 {
+            return;
+        }
+        if !recast
+            && (cast_cd.remaining_secs[slot.index()] > 0.0
+                || stats.mana < scaled_mana_cost(definition, rank))
+        {
+            report_plain(
+                &mut feedback,
+                if stats.mana < scaled_mana_cost(definition, rank) {
+                    "combat.hotbar.need_mana"
+                } else {
+                    "combat.standard.not_ready"
+                },
+            );
+            pending_cast.cancel();
+            return;
+        }
+        let aim = super::standard::bounded_aim(
+            player_transform.translation.xz(),
+            aim,
+            definition.targeting,
+            scaled_cast_range(definition, rank),
+        );
+        command_writer.write(NetworkCommand::CastSkill {
+            slot: slot.index() as u8,
+            aim,
+        });
+        commands
+            .entity(player_entity)
+            .remove::<(MovementTarget, crate::player::MovementRoute)>();
+        if !recast {
+            let no_cooldowns = game
+                .as_ref()
+                .and_then(|g| g.sandbox.as_ref())
+                .is_some_and(|s| s.config.player.no_cooldowns);
+            let skill = preset.skill(slot);
+            cast_cd.recovery_secs = if no_cooldowns {
+                0.0
+            } else {
+                skill.windup_secs.max(
+                    if matches!(
+                        skill.effect,
+                        shared::loadout::SkillEffect::WeaponToggle { .. }
+                    ) {
+                        0.0
+                    } else {
+                        0.15
+                    },
+                )
+            };
+            let bonuses = equipment
+                .single()
+                .map(|e| e.item_bonuses)
+                .unwrap_or_default();
+            let duration = if no_cooldowns {
+                0.0
+            } else {
+                effective_cast_duration(
+                    class,
+                    prog.level,
+                    rank,
+                    slot,
+                    bonuses,
+                    game.as_ref().is_some_and(|g| g.sandbox.is_some()),
+                )
+            };
+            cast_cd.remaining_secs[slot.index()] = duration;
+            cast_cd.total_secs[slot.index()] = duration;
+            cast_cd.pending_slot = Some(slot.index());
+            cast_cd.prediction_grace_secs = 0.3;
+        }
+        pending_cast.cancel();
+        return;
+    }
     let rejection = if !stats.is_alive() {
         Some(tr("combat.cast.wait_respawn").to_string())
     } else if !prog.unlocked()[slot.index()] {

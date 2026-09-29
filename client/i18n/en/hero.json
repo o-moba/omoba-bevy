@@ -8,5 +8,9 @@
   "hero.cleric.name": "Cleric",
   "hero.cleric.tagline": "Support: modest damage, strong heals",
   "hero.warden.name": "Warden",
-  "hero.warden.tagline": "Jungler: fast camp clears, bonus forest gold"
+  "hero.warden.tagline": "Jungler: fast camp clears, bonus forest gold",
+  "hero.dawnweaver.name": "Dawnweaver",
+  "hero.dawnweaver.tagline": "Light mage: bind, shield, field and beam",
+  "hero.wildspark.name": "Wildspark",
+  "hero.wildspark.tagline": "Explosive marksman: weapon modes, traps and takedown momentum"
 }

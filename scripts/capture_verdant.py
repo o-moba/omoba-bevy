@@ -12,6 +12,7 @@ This is a bounded automated renderer scenario, not an interactive gameplay certi
 import argparse
 import hashlib
 import json
+import catalog
 import math
 import os
 from pathlib import Path
@@ -150,7 +151,7 @@ class ScenarioPeer:
     def update(self, now):
         if now - self.last_hello >= 1.0:
             self.last_hello = now
-            self.send(dict(type="hello", protocol_version=2))
+            self.send(dict(type="hello", protocol_version=catalog.protocol_version()))
             if not self.joined:
                 self.send(dict(type="join", team="green" if self.index % 2 == 0 else "blue",
                                character="cube", hero_class="warrior", avatar="agnes",
@@ -213,7 +214,7 @@ class SnapshotObserver:
     def update(self, now):
         if now - self.last_hello >= 1.0:
             self.last_hello = now
-            self.socket.send(b'{"type":"hello","protocol_version":2}')
+            self.socket.send(json.dumps(dict(type="hello", protocol_version=catalog.protocol_version())).encode())
         self.pending = {key: value for key, value in self.pending.items() if now - value[0] < 2.0}
         while True:
             try:

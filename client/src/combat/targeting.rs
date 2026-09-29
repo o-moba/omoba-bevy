@@ -301,6 +301,7 @@ pub(crate) fn resolve_basic_attack(
             Option<&PlayerEquipment>,
             Option<&crate::net::PlayerProgression>,
             Has<MovementTarget>,
+            Option<&crate::net::PlayerLoadout>,
         ),
         With<Player>,
     >,
@@ -317,7 +318,7 @@ pub(crate) fn resolve_basic_attack(
     mut feedback: ResMut<ActionFeedback>,
 ) {
     basic.facing = None;
-    let Ok((player, transform, stats, team, class, equipment, progression, moving)) =
+    let Ok((player, transform, stats, team, class, equipment, progression, moving, loadout)) =
         local.single()
     else {
         basic.cancel();
@@ -349,7 +350,6 @@ pub(crate) fn resolve_basic_attack(
         return;
     };
     let class = class.map_or(selection.hero_class, |c| c.0);
-    let definition = shared::basic_attack_for_class(class);
     let bonuses = equipment.map_or_else(Default::default, |e| e.item_bonuses);
     let radius = match order.target.kind {
         TargetKind::Player => shared::PLAYER_TARGET_RADIUS,
@@ -360,7 +360,15 @@ pub(crate) fn resolve_basic_attack(
         }
         TargetKind::Structure => shared::TOWER_TARGET_RADIUS,
     };
-    let range = definition.range + radius - 0.08;
+    let range = super::standard::attack_range(class, loadout) + radius - 0.08;
+    if loadout
+        .and_then(|s| s.0.as_ref())
+        .is_some_and(|s| stats.mana < s.basic_attack_mana_cost)
+    {
+        feedback.push_line(tr("combat.hotbar.need_mana"));
+        basic.cancel();
+        return;
+    }
     let distance = transform
         .translation
         .xz()
@@ -603,7 +611,16 @@ pub(crate) fn pick_mobile(
 pub(crate) fn mobile_basic_attack(
     mut mobile: Option<ResMut<MobileControls>>,
     context: Res<GameplayInputContext>,
-    local: Query<(&Transform, &Team, &CombatStats, Option<&NetworkHeroClass>), With<Player>>,
+    local: Query<
+        (
+            &Transform,
+            &Team,
+            &CombatStats,
+            Option<&NetworkHeroClass>,
+            Option<&crate::net::PlayerLoadout>,
+        ),
+        With<Player>,
+    >,
     camera: Query<(&Camera, &GlobalTransform), With<MainCamera>>,
     mode: Res<PlayerVisualMode>,
     selection: Res<TeamSelection>,
@@ -620,7 +637,7 @@ pub(crate) fn mobile_basic_attack(
         return;
     };
     let category = mobile.category_attacks.drain(..).next_back();
-    let Ok((position, team, stats, class)) = local.single() else {
+    let Ok((position, team, stats, class, loadout)) = local.single() else {
         mobile.attacks.clear();
         return;
     };
@@ -634,7 +651,7 @@ pub(crate) fn mobile_basic_attack(
         return;
     };
     let class = class.map_or(selection.hero_class, |c| c.0);
-    let range = shared::basic_attack_for_class(class).range;
+    let range = super::standard::attack_range(class, loadout);
     if let Some(aim) = mobile.attack_aim() {
         basic.cancel();
         if let (Some(origin), Some(viewport)) = (
@@ -1072,6 +1089,7 @@ mod tests {
                 shared::HeroClass::Ranger => 1.8,
                 shared::HeroClass::Cleric => 1.55,
                 shared::HeroClass::Warden => 1.65,
+                _ => shared::hero_balance::attack_rate_multiplier(class, 10),
             };
             assert!((duration - base / (rate * 1.12)).abs() < 0.0001);
         }

@@ -8,5 +8,9 @@
   "hero.cleric.name": "牧师",
   "hero.cleric.tagline": "辅助：伤害一般，治疗强大",
   "hero.warden.name": "守林人",
-  "hero.warden.tagline": "打野：快速清理野怪营地，额外获得森林金币"
+  "hero.warden.tagline": "打野：快速清理野怪营地，额外获得森林金币",
+  "hero.dawnweaver.name": "织晓者",
+  "hero.dawnweaver.tagline": "光之法师：束缚、护盾、领域与光束",
+  "hero.wildspark.name": "狂野星火",
+  "hero.wildspark.tagline": "爆破射手：火力切换、陷阱和击杀加速"
 }
