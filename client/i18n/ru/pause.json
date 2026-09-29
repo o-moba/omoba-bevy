@@ -33,5 +33,8 @@
   "pause.settings.model": "Модель",
   "pause.model.scale": "Масштаб",
   "pause.credits.icons": "Иконки созданы Delapouite, Lorc, Sbed, Zeromancer с сайта https://game-icons.net, CC BY 3.0. Иконки интерфейса: Lucide (ISC). Шрифты: Cinzel, Inter, Barlow Condensed, Noto Serif SC, Noto Sans CJK SC (SIL OFL 1.1).",
-  "pause.button.leave_match": "Покинуть матч"
+  "pause.button.leave_match": "Покинуть матч",
+  "pause.preview.iphone16": "Интерфейс iPhone 16",
+  "pause.preview.hint": "Временно показывает телефонную вёрстку на iPad. Кнопка «Вернуться к iPad» над игрой вернёт полный экран.",
+  "pause.preview.return": "Вернуться к iPad"
 }

@@ -4,6 +4,13 @@ All notable changes to this repository should be documented in this file.
 
 The canonical repository version lives in `Cargo.toml` under `[workspace.package].version` and follows SemVer.
 
+## [0.28.6] - 2026-09-29
+
+### iPad layout preview
+
+- Settings → Graphics offers an iPhone 16 layout preview on eligible landscape iPads. The native game window becomes a centred 852×393-point rectangle, using the existing phone rendering and touch paths.
+- A native Return to iPad button stays above the game. Preview is temporary and restores on backgrounding, rotation or invalid window geometry; actual phones, Android and desktops cannot enable it.
+
 ## [0.28.5] - 2026-09-29
 
 ### Party and prematch presentation

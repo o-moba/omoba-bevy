@@ -43,6 +43,7 @@ mod party;
 mod passport;
 mod pause_menu;
 mod persistence;
+mod phone_layout_preview;
 mod platform;
 mod player;
 mod plugins;

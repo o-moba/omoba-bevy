@@ -173,6 +173,7 @@ impl PluginGroup for UiPlugins {
             .add(ShopPlugin)
             .add(HelpOverlayPlugin)
             .add(PauseMenuPlugin)
+            .add(crate::phone_layout_preview::PhoneLayoutPreviewPlugin)
             .add(SocialPlugin)
             .add(PartyPlugin)
             .add(CareerPlugin)

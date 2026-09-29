@@ -256,7 +256,7 @@ impl MobileControls {
         }
     }
 
-    fn clear(&mut self) {
+    pub(crate) fn clear(&mut self) {
         self.attack_canceled_this_frame |= self
             .captures
             .values()

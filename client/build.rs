@@ -46,6 +46,7 @@ fn main() {
     println!("cargo:rerun-if-changed=../mobile/ios/SupporterStoreKit.swift");
     println!("cargo:rerun-if-changed=../mobile/ios/BrowserBridge.swift");
     println!("cargo:rerun-if-changed=../mobile/ios/OmobaGameController.swift");
+    println!("cargo:rerun-if-changed=../mobile/ios/PhoneLayoutPreview.swift");
     println!("cargo:rerun-if-env-changed=IPHONEOS_DEPLOYMENT_TARGET");
     if env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("ios") {
         build_ios_bridges();
@@ -233,6 +234,7 @@ fn build_ios_bridges() {
         .arg("../mobile/ios/SupporterStoreKit.swift")
         .arg("../mobile/ios/BrowserBridge.swift")
         .arg("../mobile/ios/OmobaGameController.swift")
+        .arg("../mobile/ios/PhoneLayoutPreview.swift")
         .arg("-o")
         .arg(&library)
         .output()

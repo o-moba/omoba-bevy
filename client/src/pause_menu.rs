@@ -303,6 +303,7 @@ pub(crate) enum PauseAction {
     /// Switch to the next shipped language.
     CycleLanguage,
     ToggleReduceMotion,
+    TogglePhoneLayoutPreview,
     SettingsTab(SettingsTab),
 }
 
@@ -1191,6 +1192,33 @@ fn setup_pause_menu_ui(mut commands: Commands, platform: Option<Res<crate::ui::U
                                     },
                                     Name::new("PauseMenuReduceMotionHint"),
                                 ));
+                                settings
+                                    .spawn((
+                                        Node {
+                                            display: Display::None,
+                                            width: Val::Percent(100.0),
+                                            flex_direction: FlexDirection::Column,
+                                            row_gap: Val::Px(8.0),
+                                            margin: UiRect::top(Val::Px(12.0)),
+                                            ..default()
+                                        },
+                                        crate::phone_layout_preview::PhonePreviewSettings,
+                                        Name::new("PhonePreviewSettings"),
+                                    ))
+                                    .with_children(|preview| {
+                                        widgets::controls::toggle(
+                                            preview,
+                                            Localized::new("pause.preview.iphone16"),
+                                            false,
+                                            PauseAction::TogglePhoneLayoutPreview,
+                                            "PhonePreviewToggle",
+                                        );
+                                        preview.spawn((
+                                            Localized::new("pause.preview.hint").into_text(),
+                                            theme::role_text(TextRole::Caption),
+                                            TextColor(theme::MUTED),
+                                        ));
+                                    });
                             });
                             settings_group(settings, SettingsTab::Language, |settings| {
                                 settings.spawn((

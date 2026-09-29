@@ -33,5 +33,8 @@
   "pause.settings.model": "Model",
   "pause.model.scale": "Scale",
   "pause.credits.icons": "Icons made by Delapouite, Lorc, Sbed, Zeromancer from https://game-icons.net, CC BY 3.0. Interface icons: Lucide (ISC). Fonts: Cinzel, Inter, Barlow Condensed, Noto Serif SC, Noto Sans CJK SC (SIL OFL 1.1).",
-  "pause.button.leave_match": "Leave match"
+  "pause.button.leave_match": "Leave match",
+  "pause.preview.iphone16": "iPhone 16 layout preview",
+  "pause.preview.hint": "Temporarily shows the phone layout on this iPad. Use Return to iPad above the game to restore the full screen.",
+  "pause.preview.return": "Return to iPad"
 }
