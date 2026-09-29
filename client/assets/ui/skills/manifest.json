@@ -1,26 +1,362 @@
 {
-  "path": "ui/skills/skills-atlas.png",
-  "sha256": "a0b0d1541aebc9982ebea81e3c013a0eb8f6880b37390eff73f70ed0ef0a498c",
-  "width": 1254,
-  "height": 1568,
-  "columns": 4,
-  "rows": 5,
-  "generator": "OpenAI imagegen",
-  "date": "2026-09-16",
+  "schema_version": 2,
+  "generator": "Higgsfield",
+  "model": "gpt_image_2_5",
+  "variant": "flare",
+  "quality": "high",
+  "resolution": "2k",
+  "date": "2026-09-29",
   "license": "CC-BY-4.0",
-  "source_image": "exec-5d663a4c-5d9c-4d62-840b-b4d2d630cc2c.png",
-  "additions": [
+  "cell_size": 256,
+  "processing": "Split each 2x2 source in Q/W/E/R reading order; Lanczos resize to 256px; antialiased circular alpha mask with 2px inset; pack four columns. No AI generation in build script.",
+  "atlases": [
     {
-      "rows": "5",
-      "generator": "Higgsfield gpt_image_2_5",
-      "date": "2026-09-24",
-      "style_reference": "downscaled rows 1-4 of this atlas",
-      "jobs": [
-        "86b657bf-42ba-4a44-b1f3-7c2b6a569d39",
-        "d36ce25b-0303-4769-816c-ebe678cc4270",
-        "68bff653-65d3-4c57-8990-1e91d98a48d7",
-        "3da12464-1b97-4576-982f-0fdf0c3e0620"
+      "path": "ui/skills/skills-atlas.png",
+      "columns": 4,
+      "rows": 5,
+      "classes": [
+        "warrior",
+        "mage",
+        "ranger",
+        "cleric",
+        "warden"
+      ],
+      "width": 1024,
+      "height": 1280,
+      "sha256": "5202892b200f57c1f92d9ae24d91c9f57275572f30214365f5de869a95c9b136"
+    },
+    {
+      "path": "ui/skills/standard-skills.png",
+      "columns": 4,
+      "rows": 2,
+      "classes": [
+        "dawnweaver",
+        "wildspark"
+      ],
+      "width": 1024,
+      "height": 512,
+      "sha256": "651bb8bea17b7c72742cf9033f980469d30c10582d51a53e4bd36b995925f872"
+    },
+    {
+      "path": "ui/skills/roster-skills.png",
+      "columns": 4,
+      "rows": 9,
+      "classes": [
+        "cinderforge",
+        "edgeweaver",
+        "stormfist",
+        "veilstalker",
+        "emberveil",
+        "orbitwright",
+        "riftshot",
+        "chainkeeper",
+        "frostguard"
+      ],
+      "width": 1024,
+      "height": 2304,
+      "sha256": "b28a211ec00bd1fded811f6ff736996dd73c842c9283902c51f81e9082755d70"
+    }
+  ],
+  "sources": [
+    {
+      "class_id": "warrior",
+      "file": "source-00.png",
+      "sha256": "96c5d8560a4d91d498e29048f5b44c776906aa133d262f28137f6121806e16f5",
+      "dimensions": [
+        2048,
+        2048
+      ],
+      "job_id": "c33cf7cc-5a53-4f42-a175-a5c5cad9b33d",
+      "prompt": "Create a premium hand-painted fantasy MOBA ability icon sheet for OMOBA. EXACT 2 by 2 grid of FOUR equally sized square standalone illustrations, touching at x=50% and y=50%, no gaps, no outer margin. Reading order TOP LEFT, TOP RIGHT, BOTTOM LEFT, BOTTOM RIGHT. Each quadrant must be a separate complete game icon, NOT one continuous scene. Painterly dramatic lighting, rich material texture, sculptural large shapes, deliberate silhouettes, crisp bright focal object against very dark desaturated midnight teal background. Readable at 48px. Action vignettes, polished collectible game art, NOT thin line glyphs, NOT flat vector logos, NOT photorealism. Main subject and essential action entirely within the central 72% of its own square, corners dark and quiet to survive circular UI clipping. Different strong composition for every skill. No frames, circles around the entire icon, text, letters, numbers, badges, logos, watermarks, UI or hotkeys. No recognizable existing game characters. Class family: Warrior. Palette: tempered steel, warm copper, crimson accents.\nTOP LEFT: A heavy battered kite shield smashing forward into an enemy weapon, bright impact sparks at shield edge.\nTOP RIGHT: An armored fist held against a breastplate as warm restorative green-gold energy mends cracks in the armor.\nBOTTOM LEFT: A massive sword carving a single downward diagonal blow, focused gold impact flare.\nBOTTOM RIGHT: Two heavy battle axes in a violent crossing cleave with a red shockwave, brutal close-range finisher.",
+      "abilities": [
+        "shield_bash",
+        "battle_rally",
+        "heroic_strike",
+        "rampage"
       ]
+    },
+    {
+      "class_id": "mage",
+      "file": "source-01.png",
+      "sha256": "7c84da358e55df361d687c1c641dc61f0ca6289a96c0bd91361ad2a37f1bbbaa",
+      "dimensions": [
+        2048,
+        2048
+      ],
+      "job_id": "e13b4918-f713-425a-98d4-63cc79c71d5b",
+      "prompt": "Create a premium hand-painted fantasy MOBA ability icon sheet for OMOBA. EXACT 2 by 2 grid of FOUR equally sized square standalone illustrations, touching at x=50% and y=50%, no gaps, no outer margin. Reading order TOP LEFT, TOP RIGHT, BOTTOM LEFT, BOTTOM RIGHT. Each quadrant must be a separate complete game icon, NOT one continuous scene. Painterly dramatic lighting, rich material texture, sculptural large shapes, deliberate silhouettes, crisp bright focal object against very dark desaturated midnight teal background. Readable at 48px. Action vignettes, polished collectible game art, NOT thin line glyphs, NOT flat vector logos, NOT photorealism. Main subject and essential action entirely within the central 72% of its own square, corners dark and quiet to survive circular UI clipping. Different strong composition for every skill. No frames, circles around the entire icon, text, letters, numbers, badges, logos, watermarks, UI or hotkeys. No recognizable existing game characters. Class family: Mage. Palette: indigo arcane light, cyan ice, orange fire.\nTOP LEFT: A twisting violet lightning bolt bending toward a small distant target, homing arcane projectile.\nTOP RIGHT: A faceted blue crystal refilling with luminous liquid energy swirling inward, mana restoration.\nBOTTOM LEFT: A long sharp ice lance flying diagonally with a frosty shock cone.\nBOTTOM RIGHT: A huge molten fireball with a white-hot core and rolling orange flame tail.",
+      "abilities": [
+        "arc_bolt",
+        "mana_surge",
+        "frost_lance",
+        "pyroblast"
+      ]
+    },
+    {
+      "class_id": "ranger",
+      "file": "source-02.png",
+      "sha256": "8e1c73c37bd021c12b7ddaa6ad251d476b405eaa218d9ac90dfd3bd019405dbd",
+      "dimensions": [
+        2048,
+        2048
+      ],
+      "job_id": "7340a4c7-4869-48f5-92c9-eb85af222952",
+      "prompt": "Create a premium hand-painted fantasy MOBA ability icon sheet for OMOBA. EXACT 2 by 2 grid of FOUR equally sized square standalone illustrations, touching at x=50% and y=50%, no gaps, no outer margin. Reading order TOP LEFT, TOP RIGHT, BOTTOM LEFT, BOTTOM RIGHT. Each quadrant must be a separate complete game icon, NOT one continuous scene. Painterly dramatic lighting, rich material texture, sculptural large shapes, deliberate silhouettes, crisp bright focal object against very dark desaturated midnight teal background. Readable at 48px. Action vignettes, polished collectible game art, NOT thin line glyphs, NOT flat vector logos, NOT photorealism. Main subject and essential action entirely within the central 72% of its own square, corners dark and quiet to survive circular UI clipping. Different strong composition for every skill. No frames, circles around the entire icon, text, letters, numbers, badges, logos, watermarks, UI or hotkeys. No recognizable existing game characters. Class family: Ranger. Palette: forest green, ivory fletching, worn bronze.\nTOP LEFT: A slim feathered arrow flying fast, three tight green speed trails.\nTOP RIGHT: A hand wrapping a fresh linen bandage around a wounded forearm with soft herbal green healing light.\nBOTTOM LEFT: A thick broadhead arrow punching through a steel plate with shards breaking outward.\nBOTTOM RIGHT: A taut elegant longbow aiming along a long receding luminous arrow trail, distant precise shot.",
+      "abilities": [
+        "quick_shot",
+        "field_dressing",
+        "piercing_arrow",
+        "longshot"
+      ]
+    },
+    {
+      "class_id": "cleric",
+      "file": "source-03.png",
+      "sha256": "401d6e4968145c2b9e516c177dccca6652731a25d0b80098e08defadeec96782",
+      "dimensions": [
+        2048,
+        2048
+      ],
+      "job_id": "8244a181-b927-4b32-aac7-6da61bbb6f96",
+      "prompt": "Create a premium hand-painted fantasy MOBA ability icon sheet for OMOBA. EXACT 2 by 2 grid of FOUR equally sized square standalone illustrations, touching at x=50% and y=50%, no gaps, no outer margin. Reading order TOP LEFT, TOP RIGHT, BOTTOM LEFT, BOTTOM RIGHT. Each quadrant must be a separate complete game icon, NOT one continuous scene. Painterly dramatic lighting, rich material texture, sculptural large shapes, deliberate silhouettes, crisp bright focal object against very dark desaturated midnight teal background. Readable at 48px. Action vignettes, polished collectible game art, NOT thin line glyphs, NOT flat vector logos, NOT photorealism. Main subject and essential action entirely within the central 72% of its own square, corners dark and quiet to survive circular UI clipping. Different strong composition for every skill. No frames, circles around the entire icon, text, letters, numbers, badges, logos, watermarks, UI or hotkeys. No recognizable existing game characters. Class family: Cleric. Palette: ivory gold, emerald healing, sapphire mana.\nTOP LEFT: A spear of sacred golden light striking downward with a star-shaped impact.\nTOP RIGHT: Two hands cradling a small warm green-gold healing flame as a scar closes.\nBOTTOM LEFT: An ornate chalice pouring sapphire magic upward into a luminous crystal, faith converted to mana.\nBOTTOM RIGHT: Protective luminous wings encircling a radiant restored heart, powerful restorative miracle.",
+      "abilities": [
+        "smite",
+        "renew",
+        "divine_favor",
+        "guardians_blessing"
+      ]
+    },
+    {
+      "class_id": "warden",
+      "file": "source-04.png",
+      "sha256": "c156e7f2d43087a6e572209ce024e494c21c65d1ee28edffe40e9dbec97f8f45",
+      "dimensions": [
+        2048,
+        2048
+      ],
+      "job_id": "44c938d1-5789-4f42-83eb-279d4a01b834",
+      "prompt": "Create a premium hand-painted fantasy MOBA ability icon sheet for OMOBA. EXACT 2 by 2 grid of FOUR equally sized square standalone illustrations, touching at x=50% and y=50%, no gaps, no outer margin. Reading order TOP LEFT, TOP RIGHT, BOTTOM LEFT, BOTTOM RIGHT. Each quadrant must be a separate complete game icon, NOT one continuous scene. Painterly dramatic lighting, rich material texture, sculptural large shapes, deliberate silhouettes, crisp bright focal object against very dark desaturated midnight teal background. Readable at 48px. Action vignettes, polished collectible game art, NOT thin line glyphs, NOT flat vector logos, NOT photorealism. Main subject and essential action entirely within the central 72% of its own square, corners dark and quiet to survive circular UI clipping. Different strong composition for every skill. No frames, circles around the entire icon, text, letters, numbers, badges, logos, watermarks, UI or hotkeys. No recognizable existing game characters. Class family: Warden. Palette: deep moss green, amber sap, primal ivory.\nTOP LEFT: A beast paw slashing diagonally with three huge ivory claws and bright claw trails.\nTOP RIGHT: A forearm transforming into thick oak bark, glowing healing sap filling cracks.\nBOTTOM LEFT: A thrown wooden hunting spear driving into a glowing amber prey mark.\nBOTTOM RIGHT: A ferocious spectral forest bear lunging forward jaws and claws extended in a crushing maul.",
+      "abilities": [
+        "feral_swipe",
+        "barkskin",
+        "hunters_mark",
+        "primal_maul"
+      ]
+    },
+    {
+      "class_id": "dawnweaver",
+      "file": "source-05.png",
+      "sha256": "f9640da57af8b0449666156032a05ac42558434effb222418723c9917f26d56e",
+      "dimensions": [
+        2048,
+        2048
+      ],
+      "job_id": "3badd518-ea44-4007-8d1f-b55bbf84dafc",
+      "prompt": "Create a premium hand-painted fantasy MOBA ability icon sheet for OMOBA. EXACT 2 by 2 grid of FOUR equally sized square standalone illustrations, touching at x=50% and y=50%, no gaps, no outer margin. Reading order TOP LEFT, TOP RIGHT, BOTTOM LEFT, BOTTOM RIGHT. Each quadrant must be a separate complete game icon, NOT one continuous scene. Painterly dramatic lighting, rich material texture, sculptural large shapes, deliberate silhouettes, crisp bright focal object against very dark desaturated midnight teal background. Readable at 48px. Action vignettes, polished collectible game art, NOT thin line glyphs, NOT flat vector logos, NOT photorealism. Main subject and essential action entirely within the central 72% of its own square, corners dark and quiet to survive circular UI clipping. Different strong composition for every skill. No frames, circles around the entire icon, text, letters, numbers, badges, logos, watermarks, UI or hotkeys. No recognizable existing game characters. Class family: Dawnweaver. Palette: warm dawn gold, ivory light, rose highlights.\nTOP LEFT: Two small shadow silhouettes caught one behind another in a bright braided tether of light, binding projectile.\nTOP RIGHT: A luminous crystal spindle flying in a curved return arc and forming two translucent ally shields along its path.\nBOTTOM LEFT: A suspended luminous orb over a circular golden slowing field, a bright expanding detonation ring.\nBOTTOM RIGHT: A brilliant focused horizontal ivory-gold laser cutting the dark horizon, strongest beam silhouette.",
+      "abilities": [
+        "dawn_bind",
+        "dawn_barrier",
+        "dawn_field",
+        "dawn_ray"
+      ]
+    },
+    {
+      "class_id": "wildspark",
+      "file": "source-06.png",
+      "sha256": "0018774ff417a71c6b5b70dabd81c79df073551ed6a8099a1bd6aedbd98975f0",
+      "dimensions": [
+        2048,
+        2048
+      ],
+      "job_id": "a83d6821-5339-4426-9ada-f0c71e418506",
+      "prompt": "Create a premium hand-painted fantasy MOBA ability icon sheet for OMOBA. EXACT 2 by 2 grid of FOUR equally sized square standalone illustrations, touching at x=50% and y=50%, no gaps, no outer margin. Reading order TOP LEFT, TOP RIGHT, BOTTOM LEFT, BOTTOM RIGHT. Each quadrant must be a separate complete game icon, NOT one continuous scene. Painterly dramatic lighting, rich material texture, sculptural large shapes, deliberate silhouettes, crisp bright focal object against very dark desaturated midnight teal background. Readable at 48px. Action vignettes, polished collectible game art, NOT thin line glyphs, NOT flat vector logos, NOT photorealism. Main subject and essential action entirely within the central 72% of its own square, corners dark and quiet to survive circular UI clipping. Different strong composition for every skill. No frames, circles around the entire icon, text, letters, numbers, badges, logos, watermarks, UI or hotkeys. No recognizable existing game characters. Class family: Wildspark. Palette: electric magenta, hot orange, gunmetal and cyan sparks.\nTOP LEFT: A compact rotary repeater and a chunky rocket launcher crossing, one rotating transition arc between two distinct gun silhouettes.\nTOP RIGHT: A narrow electric-blue projectile tearing a jagged shock line across darkness and striking a target.\nBOTTOM LEFT: Exactly three mechanical snap traps with open serrated jaws and bright magenta cores set across the foreground.\nBOTTOM RIGHT: A massive orange-nosed rocket roaring diagonally forward with a huge violet-orange exhaust flame and explosive tip.",
+      "abilities": [
+        "wild_switch",
+        "wild_zap",
+        "wild_traps",
+        "wild_rocket"
+      ]
+    },
+    {
+      "class_id": "cinderforge",
+      "file": "source-07.png",
+      "sha256": "6589af4e68e7e3e046543089d296e40210db73cdc6e0f34cafb22775e11eff2b",
+      "dimensions": [
+        2048,
+        2048
+      ],
+      "job_id": "c4dcb70a-1e87-4d5e-b870-44fe38d500c0",
+      "prompt": "Create a premium hand-painted fantasy MOBA ability icon sheet for OMOBA. EXACT 2 by 2 grid of FOUR equally sized square standalone illustrations, touching at x=50% and y=50%, no gaps, no outer margin. Reading order TOP LEFT, TOP RIGHT, BOTTOM LEFT, BOTTOM RIGHT. Each quadrant must be a separate complete game icon, NOT one continuous scene. Painterly dramatic lighting, rich material texture, sculptural large shapes, deliberate silhouettes, crisp bright focal object against very dark desaturated midnight teal background. Readable at 48px. Action vignettes, polished collectible game art, NOT thin line glyphs, NOT flat vector logos, NOT photorealism. Main subject and essential action entirely within the central 72% of its own square, corners dark and quiet to survive circular UI clipping. Different strong composition for every skill. No frames, circles around the entire icon, text, letters, numbers, badges, logos, watermarks, UI or hotkeys. No recognizable existing game characters. Class family: Cinderforge. Palette: coal black rock, molten orange, heated bronze.\nTOP LEFT: A glowing crack splitting stone ground and ending at a single towering jagged basalt pillar.\nTOP RIGHT: An armored furnace jaw exhaling a wide cone of orange fire, sparks and glowing heat.\nBOTTOM LEFT: A heavy armored shoulder charging into a stone wall, stone fragments and an upward impact shockwave.\nBOTTOM RIGHT: A huge horned magma-stone colossus charging through smoke, a curling fiery return trail showing its redirected rush.",
+      "abilities": [
+        "fault_line",
+        "furnace_breath",
+        "anvil_charge",
+        "mountain_echo"
+      ]
+    },
+    {
+      "class_id": "edgeweaver",
+      "file": "source-08.png",
+      "sha256": "ef289ed8ebfe84c203d6a2237f8cfae8dc1a9af980c24b0fdfcf3097b0935de0",
+      "dimensions": [
+        2048,
+        2048
+      ],
+      "job_id": "694ca582-8320-44e9-a86c-c4301d009835",
+      "prompt": "Create a premium hand-painted fantasy MOBA ability icon sheet for OMOBA. EXACT 2 by 2 grid of FOUR equally sized square standalone illustrations, touching at x=50% and y=50%, no gaps, no outer margin. Reading order TOP LEFT, TOP RIGHT, BOTTOM LEFT, BOTTOM RIGHT. Each quadrant must be a separate complete game icon, NOT one continuous scene. Painterly dramatic lighting, rich material texture, sculptural large shapes, deliberate silhouettes, crisp bright focal object against very dark desaturated midnight teal background. Readable at 48px. Action vignettes, polished collectible game art, NOT thin line glyphs, NOT flat vector logos, NOT photorealism. Main subject and essential action entirely within the central 72% of its own square, corners dark and quiet to survive circular UI clipping. Different strong composition for every skill. No frames, circles around the entire icon, text, letters, numbers, badges, logos, watermarks, UI or hotkeys. No recognizable existing game characters. Class family: Edgeweaver. Palette: silver rapier, amethyst, pale rose highlights.\nTOP LEFT: A slim rapier thrusting forward with a sharp diagonal lunge trail.\nTOP RIGHT: A rapier parrying an incoming blade against a bright mirrored barrier, sparks bouncing backward.\nBOTTOM LEFT: Two sequential rapier cuts, first a pale violet arc, second a larger white-gold critical strike.\nBOTTOM RIGHT: A central shadow opponent surrounded by exactly four bright diamond-shaped vulnerable points north east south west, a faint healing ring below.",
+      "abilities": [
+        "edge_lunge",
+        "mirror_guard",
+        "twin_tempo",
+        "fourfold_duel"
+      ]
+    },
+    {
+      "class_id": "stormfist",
+      "file": "source-09.png",
+      "sha256": "f0093476071b1d1ff1c486a960a8821b037908fcc53bd06687297b74aa6067e0",
+      "dimensions": [
+        2048,
+        2048
+      ],
+      "job_id": "1587a587-ed31-4b8a-a495-f3448d257b2e",
+      "prompt": "Create a premium hand-painted fantasy MOBA ability icon sheet for OMOBA. EXACT 2 by 2 grid of FOUR equally sized square standalone illustrations, touching at x=50% and y=50%, no gaps, no outer margin. Reading order TOP LEFT, TOP RIGHT, BOTTOM LEFT, BOTTOM RIGHT. Each quadrant must be a separate complete game icon, NOT one continuous scene. Painterly dramatic lighting, rich material texture, sculptural large shapes, deliberate silhouettes, crisp bright focal object against very dark desaturated midnight teal background. Readable at 48px. Action vignettes, polished collectible game art, NOT thin line glyphs, NOT flat vector logos, NOT photorealism. Main subject and essential action entirely within the central 72% of its own square, corners dark and quiet to survive circular UI clipping. Different strong composition for every skill. No frames, circles around the entire icon, text, letters, numbers, badges, logos, watermarks, UI or hotkeys. No recognizable existing game characters. Class family: Stormfist. Palette: storm cyan, jade fabric, amber lightning.\nTOP LEFT: A glowing sonic fist projectile hitting an enemy silhouette and a second fist dash trail toward the same mark.\nTOP RIGHT: A martial artist silhouette leaping toward a small glowing jade anchor beside an ally, protective spherical aura.\nBOTTOM LEFT: A clenched fist striking ground and releasing a wide circular cyan thunder shockwave revealing shadow forms.\nBOTTOM RIGHT: A large boot in a powerful spinning kick, one enemy silhouette hurled backward into two others.",
+      "abilities": [
+        "echo_strike",
+        "anchor_step",
+        "thunder_pulse",
+        "thunder_kick"
+      ]
+    },
+    {
+      "class_id": "veilstalker",
+      "file": "source-10.png",
+      "sha256": "6be58c1134f377fdff6b3755aa6024164aed07919018c8122311fe1c5a45865f",
+      "dimensions": [
+        2048,
+        2048
+      ],
+      "job_id": "14a9795a-6048-47d1-9b50-49e869eb063e",
+      "prompt": "Create a premium hand-painted fantasy MOBA ability icon sheet for OMOBA. EXACT 2 by 2 grid of FOUR equally sized square standalone illustrations, touching at x=50% and y=50%, no gaps, no outer margin. Reading order TOP LEFT, TOP RIGHT, BOTTOM LEFT, BOTTOM RIGHT. Each quadrant must be a separate complete game icon, NOT one continuous scene. Painterly dramatic lighting, rich material texture, sculptural large shapes, deliberate silhouettes, crisp bright focal object against very dark desaturated midnight teal background. Readable at 48px. Action vignettes, polished collectible game art, NOT thin line glyphs, NOT flat vector logos, NOT photorealism. Main subject and essential action entirely within the central 72% of its own square, corners dark and quiet to survive circular UI clipping. Different strong composition for every skill. No frames, circles around the entire icon, text, letters, numbers, badges, logos, watermarks, UI or hotkeys. No recognizable existing game characters. Class family: Veilstalker. Palette: deep violet, poisonous pink, midnight blue.\nTOP LEFT: A long violet thorn projectile leading three smaller pink spikes toward a marked shadow target.\nTOP RIGHT: A thorned rose heart sigil suspended above a shadow target, petals closing inward as the curse matures.\nBOTTOM LEFT: A curved shadow whip sweeping around a nearby target, luminous violet lash tip.\nBOTTOM RIGHT: A broad purple crescent execution slash in the foreground, assassin dissolving backward into a dark escape trail.",
+      "abilities": [
+        "thorn_volley",
+        "patient_curse",
+        "shadow_lash",
+        "nightfall"
+      ]
+    },
+    {
+      "class_id": "emberveil",
+      "file": "source-11.png",
+      "sha256": "74c965562223df1d313aaa277c4b6bbe9db0cdd764b0856ab17275bae1d27974",
+      "dimensions": [
+        2048,
+        2048
+      ],
+      "job_id": "a3ba4bdd-af38-4f39-b23a-2bd68a38313a",
+      "prompt": "Create a premium hand-painted fantasy MOBA ability icon sheet for OMOBA. EXACT 2 by 2 grid of FOUR equally sized square standalone illustrations, touching at x=50% and y=50%, no gaps, no outer margin. Reading order TOP LEFT, TOP RIGHT, BOTTOM LEFT, BOTTOM RIGHT. Each quadrant must be a separate complete game icon, NOT one continuous scene. Painterly dramatic lighting, rich material texture, sculptural large shapes, deliberate silhouettes, crisp bright focal object against very dark desaturated midnight teal background. Readable at 48px. Action vignettes, polished collectible game art, NOT thin line glyphs, NOT flat vector logos, NOT photorealism. Main subject and essential action entirely within the central 72% of its own square, corners dark and quiet to survive circular UI clipping. Different strong composition for every skill. No frames, circles around the entire icon, text, letters, numbers, badges, logos, watermarks, UI or hotkeys. No recognizable existing game characters. Class family: Emberveil. Palette: ember orange, coral pink, cool teal shadows.\nTOP LEFT: A bright orange orb on a sweeping outgoing-and-returning curved trajectory with two distinct light trails.\nTOP RIGHT: Exactly three small living flame wisps orbiting and launching away from a central ember.\nBOTTOM LEFT: A rosy heart-shaped magical flame tether drawing a shadow silhouette toward its source.\nBOTTOM RIGHT: A flowing dancer silhouette dashing between three bright flame afterimages with guided sparks.",
+      "abilities": [
+        "wandering_ember",
+        "kindled_wisps",
+        "heart_tether",
+        "flame_dance"
+      ]
+    },
+    {
+      "class_id": "orbitwright",
+      "file": "source-12.png",
+      "sha256": "3cdf76436181c94da01270c522d51a8cdf08d6b4b0c84abaf47c806b94ce001d",
+      "dimensions": [
+        2048,
+        2048
+      ],
+      "job_id": "f759fcc5-4d47-4c45-81f2-7f699f97f926",
+      "prompt": "Create a premium hand-painted fantasy MOBA ability icon sheet for OMOBA. EXACT 2 by 2 grid of FOUR equally sized square standalone illustrations, touching at x=50% and y=50%, no gaps, no outer margin. Reading order TOP LEFT, TOP RIGHT, BOTTOM LEFT, BOTTOM RIGHT. Each quadrant must be a separate complete game icon, NOT one continuous scene. Painterly dramatic lighting, rich material texture, sculptural large shapes, deliberate silhouettes, crisp bright focal object against very dark desaturated midnight teal background. Readable at 48px. Action vignettes, polished collectible game art, NOT thin line glyphs, NOT flat vector logos, NOT photorealism. Main subject and essential action entirely within the central 72% of its own square, corners dark and quiet to survive circular UI clipping. Different strong composition for every skill. No frames, circles around the entire icon, text, letters, numbers, badges, logos, watermarks, UI or hotkeys. No recognizable existing game characters. Class family: Orbitwright. Palette: brushed brass, lavender crystal, blue-violet energy.\nTOP LEFT: A brass mechanical orb with a violet core flying on a straight commanded trail.\nTOP RIGHT: The brass violet-core orb hovering over a wide concentric energy field, outward rippling rings.\nBOTTOM LEFT: The same brass orb above an ally silhouette inside a clear blue protective shield dome.\nBOTTOM RIGHT: The brass orb at the center of a crushing purple vortex, nearby fragments and shadow enemies pulled inward.",
+      "abilities": [
+        "orbital_command",
+        "orbital_field",
+        "orbital_guard",
+        "orbital_collapse"
+      ]
+    },
+    {
+      "class_id": "riftshot",
+      "file": "source-13.png",
+      "sha256": "213fb7d3450f760f666261f9a20639a18cc2fcf57bb25dffb1d39dadebe6ff04",
+      "dimensions": [
+        2048,
+        2048
+      ],
+      "job_id": "6a7e8820-5bf5-4345-8d38-4e473f1204d0",
+      "prompt": "Create a premium hand-painted fantasy MOBA ability icon sheet for OMOBA. EXACT 2 by 2 grid of FOUR equally sized square standalone illustrations, touching at x=50% and y=50%, no gaps, no outer margin. Reading order TOP LEFT, TOP RIGHT, BOTTOM LEFT, BOTTOM RIGHT. Each quadrant must be a separate complete game icon, NOT one continuous scene. Painterly dramatic lighting, rich material texture, sculptural large shapes, deliberate silhouettes, crisp bright focal object against very dark desaturated midnight teal background. Readable at 48px. Action vignettes, polished collectible game art, NOT thin line glyphs, NOT flat vector logos, NOT photorealism. Main subject and essential action entirely within the central 72% of its own square, corners dark and quiet to survive circular UI clipping. Different strong composition for every skill. No frames, circles around the entire icon, text, letters, numbers, badges, logos, watermarks, UI or hotkeys. No recognizable existing game characters. Class family: Riftshot. Palette: turquoise energy, pale gold mechanisms, midnight blue.\nTOP LEFT: A thin sharp cyan energy needle shooting from a small golden gauntlet, bright focused tip.\nTOP RIGHT: A luminous golden circular seal attached to a shadow target, cyan energy spark igniting its center.\nBOTTOM LEFT: A figure stepping through a torn turquoise rift with a bright exit flash and a small aimed bolt.\nBOTTOM RIGHT: A huge broad crescent of cyan-gold energy sweeping across the horizon, piercing wave.",
+      "abilities": [
+        "rift_needle",
+        "rift_seal",
+        "rift_step",
+        "horizon_wave"
+      ]
+    },
+    {
+      "class_id": "chainkeeper",
+      "file": "source-14.png",
+      "sha256": "417604fdbc2d44d4ed500d96948ef29158dceaebc2b4ad1c76c2baaa005de072",
+      "dimensions": [
+        2048,
+        2048
+      ],
+      "job_id": "16b5d4a8-e1d4-475d-9242-80109d455666",
+      "prompt": "Create a premium hand-painted fantasy MOBA ability icon sheet for OMOBA. EXACT 2 by 2 grid of FOUR equally sized square standalone illustrations, touching at x=50% and y=50%, no gaps, no outer margin. Reading order TOP LEFT, TOP RIGHT, BOTTOM LEFT, BOTTOM RIGHT. Each quadrant must be a separate complete game icon, NOT one continuous scene. Painterly dramatic lighting, rich material texture, sculptural large shapes, deliberate silhouettes, crisp bright focal object against very dark desaturated midnight teal background. Readable at 48px. Action vignettes, polished collectible game art, NOT thin line glyphs, NOT flat vector logos, NOT photorealism. Main subject and essential action entirely within the central 72% of its own square, corners dark and quiet to survive circular UI clipping. Different strong composition for every skill. No frames, circles around the entire icon, text, letters, numbers, badges, logos, watermarks, UI or hotkeys. No recognizable existing game characters. Class family: Chainkeeper. Palette: spectral jade, aged iron, pale mint.\nTOP LEFT: A heavy hooked iron chain shooting forward and snagging a shadow silhouette.\nTOP RIGHT: A glowing jade lantern tethered by light to an ally hand reaching for rescue.\nBOTTOM LEFT: A wide sweeping iron chain curving across foreground and pushing shadow figures to one side.\nBOTTOM RIGHT: Exactly five spectral iron wall segments forming a pentagonal prison viewed from above at an angle.",
+      "abilities": [
+        "iron_hook",
+        "guiding_lantern",
+        "chain_sweep",
+        "iron_boundary"
+      ]
+    },
+    {
+      "class_id": "frostguard",
+      "file": "source-15.png",
+      "sha256": "17220479600c1bf60d52611ce12e405e856d80cc8891c247171984cb30abf471",
+      "dimensions": [
+        2048,
+        2048
+      ],
+      "job_id": "d5abb208-7541-4d63-8b07-160a4d3ebdb4",
+      "prompt": "Create a premium hand-painted fantasy MOBA ability icon sheet for OMOBA. EXACT 2 by 2 grid of FOUR equally sized square standalone illustrations, touching at x=50% and y=50%, no gaps, no outer margin. Reading order TOP LEFT, TOP RIGHT, BOTTOM LEFT, BOTTOM RIGHT. Each quadrant must be a separate complete game icon, NOT one continuous scene. Painterly dramatic lighting, rich material texture, sculptural large shapes, deliberate silhouettes, crisp bright focal object against very dark desaturated midnight teal background. Readable at 48px. Action vignettes, polished collectible game art, NOT thin line glyphs, NOT flat vector logos, NOT photorealism. Main subject and essential action entirely within the central 72% of its own square, corners dark and quiet to survive circular UI clipping. Different strong composition for every skill. No frames, circles around the entire icon, text, letters, numbers, badges, logos, watermarks, UI or hotkeys. No recognizable existing game characters. Class family: Frostguard. Palette: glacial cyan, deep navy, frost-white.\nTOP LEFT: A thick pointed shard of ice fired forward with a blue impact burst.\nTOP RIGHT: A broad shield-bearing protector leaping beside a smaller ally under a protective ice arc.\nBOTTOM LEFT: A massive upright ice shield blocking incoming bright arrows that shatter against its front face.\nBOTTOM RIGHT: A long jagged ice fissure splitting ground into raised spikes, shadow figures thrown upward.",
+      "abilities": [
+        "winter_shard",
+        "sheltering_leap",
+        "northwall",
+        "winter_divide"
+      ]
+    }
+  ],
+  "overrides": [
+    {
+      "ability_id": "longshot",
+      "file": "source-16.png",
+      "sha256": "48983292c99e772df47eece956d1104670cc1456071559ac38ff821814b6343b",
+      "dimensions": [
+        1024,
+        1024
+      ],
+      "job_id": "e69834cc-4928-4e3b-8ae3-0a0511a65895",
+      "prompt": "One single square premium painted fantasy MOBA skill icon for OMOBA, not a sheet. Dark midnight teal background, bold readable silhouette and bright focal action, rich hand-painted material texture, dramatic lighting. Main subject entirely in central 75% so a circular crop preserves it. No letters, text, labels, frames, badges, hotkeys or existing game characters. Must read clearly at 48px. LONGSHOT. A complete elegant bronze-and-wood recurved longbow seen clearly from the side, centered and floating diagonally. The full recognizable bow silhouette, taut glowing string and one long luminous ivory arrow aiming to upper right fill most of the center. Emerald aiming energy focuses at the arrowhead, a narrow receding flight trail implies tremendous range. Close-up of the weapon itself, no archer, no hands, no landscape, no distant tiny target. The BOW must dominate the icon.",
+      "resolution": "1k",
+      "reason": "Improve action silhouette after the 64px circular-crop review"
+    },
+    {
+      "ability_id": "sheltering_leap",
+      "file": "source-17.png",
+      "sha256": "911d49182152065a47c4939db351c478707eae882ac17923acef8b961d525d81",
+      "dimensions": [
+        1024,
+        1024
+      ],
+      "job_id": "7c2f014a-e8f4-40dd-8a60-dbf35a3c924d",
+      "prompt": "One single square premium painted fantasy MOBA skill icon for OMOBA, not a sheet. Dark midnight teal background, bold readable silhouette and bright focal action, rich hand-painted material texture, dramatic lighting. Main subject entirely in central 75% so a circular crop preserves it. No letters, text, labels, frames, badges, hotkeys or existing game characters. Must read clearly at 48px. SHELTERING LEAP. A broad heavy armored ice guardian with a large blue shield is visibly IN MID-AIR, leaping diagonally from upper left to lower right, knees tucked behind, toward one smaller ally standing in lower right. A bright curved glacial cyan trajectory behind the guardian and a newly forming protective ice dome over the ally clearly communicate leap-to-ally protection. Show simplified WHOLE BODY ACTION silhouettes from side three-quarter view, not a portrait, no face closeup. The guardian shield, airborne pose, smaller ally and single arc are the four large shapes. Frost-white rim light.",
+      "resolution": "1k",
+      "reason": "Improve action silhouette after the 64px circular-crop review"
     }
   ]
 }

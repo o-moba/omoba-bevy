@@ -4,6 +4,15 @@ All notable changes to this repository should be documented in this file.
 
 The canonical repository version lives in `Cargo.toml` under `[workspace.package].version` and follows SemVer.
 
+## [0.30.2] - 2026-09-29
+
+### Illustrated skill actions
+
+- Replace all 64 active skill icons across the 16 classes with original Higgsfield GPT Image 2.5 illustrations. Each image depicts its action, including returning shields, weapon switching, traps, parries, leaps and persistent orb commands.
+- Use consistent 256px cells with circular alpha masks in the existing three atlases. Preserve ability IDs, gameplay, cooldown overlays and input behavior.
+- Record approved generation prompts, jobs and asset hashes; replace the placeholder glyph generator with a reproducible atlas packer and validator.
+- Fix native screenshot helpers rejecting current snapshot frames: read the shared protocol version instead of the obsolete hard-coded version 2. The combat capture observer joins a team for normal shared vision instead of checking empty prejoin snapshots.
+
 ## [0.30.1] - 2026-09-29
 
 ### Quiet combat descriptions
