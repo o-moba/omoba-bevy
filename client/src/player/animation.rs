@@ -263,6 +263,30 @@ pub(super) fn start_hero_animation(
     }
 }
 
+/// Fade outgoing clips without changing authoritative action timing or root movement.
+fn blend_hero_animation(player: &mut AnimationPlayer, current: AnimationNodeIndex, delta: f32) {
+    let step = (delta / 0.12).clamp(0.0, 1.0);
+    let mut remove = Vec::new();
+    let mut outgoing = 0.0;
+    for (node, active) in player.playing_animations_mut() {
+        if *node == current {
+            continue;
+        }
+        let weight = (active.weight() - step).max(0.0);
+        active.set_weight(weight);
+        outgoing += weight;
+        if weight == 0.0 {
+            remove.push(*node);
+        }
+    }
+    for node in remove {
+        player.stop(node);
+    }
+    if let Some(active) = player.animation_mut(current) {
+        active.set_weight((1.0 - outgoing).clamp(0.0, 1.0));
+    }
+}
+
 fn setup_player_animation_library(
     mut library: ResMut<PlayerAnimationLibrary>,
     cosmetics: Option<Res<crate::combat_visuals::CombatVisualRegistry>>,
@@ -798,6 +822,7 @@ pub(super) fn sync_player_animation_state(
             &CombatStats,
             Option<&PlayerCosmeticAction>,
             Option<&crate::net::PlayerLoadout>,
+            Option<&crate::net::NetworkHeroClass>,
         ),
         Or<(With<Player>, With<RemotePlayer>)>,
     >,
@@ -833,7 +858,8 @@ pub(super) fn sync_player_animation_state(
         }
     }
     for (mut animation_player, mut binding, mut graph_handle) in &mut animation_query {
-        let Ok((owner_transform, stats, action, loadout)) = player_state_query.get(binding.owner)
+        let Ok((owner_transform, stats, action, loadout, class)) =
+            player_state_query.get(binding.owner)
         else {
             continue;
         };
@@ -874,6 +900,20 @@ pub(super) fn sync_player_animation_state(
                     .as_ref()
                     .map_or(&[], |g| g.skill_effects.as_slice()),
             )
+            .or_else(|| {
+                let profile = registry.action_profile(
+                    class?.0,
+                    loadout.and_then(|l| l.0.as_ref()),
+                    action.slot,
+                )?;
+                profile
+                    .windup
+                    .is_none()
+                    .then(|| crate::skill_presentation::MotionCue {
+                        motion: profile.release.clone(),
+                        hold: false,
+                    })
+            })
         });
         let requires_phase = skill_profiles
             .as_deref()
@@ -1031,9 +1071,32 @@ pub(super) fn sync_player_animation_state(
             || *graph_handle != expected_graph_handle
             || !animation_player.is_playing_animation(set.node(binding.playback.state))
         {
+            let hard_cut = key_changed
+                || round_changed
+                || *graph_handle != expected_graph_handle
+                || paused
+                || preview.is_some()
+                || binding.playback.state == HeroAnimationState::Death;
             *graph_handle = expected_graph_handle;
-            start_hero_animation(&mut animation_player, set, binding.playback.state);
+            if hard_cut {
+                start_hero_animation(&mut animation_player, set, binding.playback.state);
+            } else {
+                let node = set.node(binding.playback.state);
+                let weight = animation_player.animation(node).map_or(0.0, |a| a.weight());
+                let active = animation_player.start(node).set_weight(weight);
+                if matches!(
+                    binding.playback.state,
+                    HeroAnimationState::Idle | HeroAnimationState::Run | HeroAnimationState::Walk
+                ) {
+                    active.repeat();
+                }
+            }
         }
+        blend_hero_animation(
+            &mut animation_player,
+            set.node(binding.playback.state),
+            simulation_delta,
+        );
         let duration = animation_clip_duration(
             set,
             binding.playback.state,

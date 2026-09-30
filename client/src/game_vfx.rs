@@ -219,6 +219,7 @@ impl Plugin for GameVfxPlugin {
                     (
                         pickup_feedback,
                         emit_projectile_particles,
+                        emit_skill_cast_particles,
                         animate_particles,
                     )
                         .chain(),
@@ -1015,6 +1016,97 @@ fn animate_butterflies(
         *global = GlobalTransform::from(*transform);
     }
 }
+/// Cast accents are distinct from impact feedback. Only a new accepted action emits them;
+/// a miss still casts, but it never manufactures an impact on another character.
+fn emit_skill_cast_particles(
+    game: Option<Res<crate::net::GameStateSnapshot>>,
+    profiles: Option<Res<crate::skill_presentation::SkillPresentation>>,
+    mode: Res<PlayerVisualMode>,
+    actors: Query<(
+        Entity,
+        &Transform,
+        &InheritedVisibility,
+        &crate::net::PlayerCosmeticAction,
+        &crate::net::NetworkHeroClass,
+        Option<&crate::net::PlayerLoadout>,
+        &crate::combat::CombatStats,
+    )>,
+    mut receipts: Local<(Option<(u64, u64)>, std::collections::HashMap<Entity, u64>)>,
+    mut output: MessageWriter<FlightParticles>,
+) {
+    let (Some(game), Some(profiles)) = (game, profiles) else {
+        return;
+    };
+    let round = Some((game.meta.server_epoch, game.meta.match_id));
+    if receipts.0 != round {
+        receipts.0 = round;
+        receipts.1.clear();
+    }
+    receipts.1.retain(|entity, _| actors.contains(*entity));
+    for (entity, pose, visibility, action, class, loadout, stats) in &actors {
+        let previous = receipts.1.get(&entity).copied();
+        receipts
+            .1
+            .insert(entity, previous.unwrap_or(0).max(action.sequence));
+        if !cast_is_new(previous, action.sequence)
+            || !visibility.get()
+            || !stats.is_alive()
+            || !matches!(game.state, crate::net::GameState::Running)
+        {
+            continue;
+        }
+        let Some(profile) =
+            profiles.action_profile(class.0, loadout.and_then(|l| l.0.as_ref()), action.slot)
+        else {
+            continue;
+        };
+        // Long windups already have a server-owned warning; avoid implying immediate release.
+        if profile.windup.is_some() {
+            continue;
+        }
+        let p = if *mode == PlayerVisualMode::Sprite2d {
+            Vec3::new(pose.translation.x, 0.0, pose.translation.y)
+        } else {
+            pose.translation
+        };
+        let forward = pose.rotation * Vec3::Z;
+        let origin = p + Vec3::Y * 0.8;
+        use crate::skill_presentation::EffectStyle as S;
+        let (shape, count, size) = match profile.effect {
+            S::Slash => (Shape::Slash, 5, 1.6),
+            S::Needle | S::Lance | S::Shock | S::Repeater => (Shape::Streak, 4, 1.1),
+            S::Aegis | S::Pulse | S::Field | S::Wall => (Shape::Ring, 7, 1.4),
+            _ => (Shape::Glow, 7, 1.0),
+        };
+        let color = Color::srgb_from_array(profile.color);
+        output.write(FlightParticles(
+            (0..count)
+                .map(|i| {
+                    let angle = i as f32 * std::f32::consts::TAU / count as f32;
+                    Particle {
+                        event_id: action.sequence,
+                        origin,
+                        velocity: if i == 0 {
+                            Vec3::ZERO
+                        } else {
+                            Vec3::new(angle.cos(), 0.3, angle.sin()) * 1.8
+                        },
+                        age: 0.0,
+                        lifetime: if i == 0 { 0.4 } else { 0.28 },
+                        size: if i == 0 { size } else { 0.24 },
+                        angle: forward.z.atan2(forward.x),
+                        color,
+                        shape: if i == 0 { shape } else { Shape::Glow },
+                    }
+                })
+                .collect(),
+        ));
+    }
+}
+fn cast_is_new(previous: Option<u64>, current: u64) -> bool {
+    previous.is_some_and(|previous| current > previous)
+}
+
 /// Short tails sample authoritative positions; no stationary projectile invents a hit.
 fn emit_projectile_particles(
     time: Res<Time>,
@@ -1298,6 +1390,13 @@ fn pickup_feedback(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn cast_receipts_do_not_replay_initial_duplicate_or_older_actions() {
+        assert!(!cast_is_new(None, 12));
+        assert!(!cast_is_new(Some(12), 12));
+        assert!(!cast_is_new(Some(12), 11));
+        assert!(cast_is_new(Some(12), 13));
+    }
     #[test]
     fn pickup_receipts_seed_once_ignore_rollbacks_and_respect_hidden_collectors() {
         use crate::net::{GameState, GameStateSnapshot, NetworkPlayerId};

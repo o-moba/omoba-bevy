@@ -725,3 +725,43 @@ fn public_loadout_preserves_combat_state_but_redacts_cast_request_sequence() {
 
 #[path = "roster_tests.rs"]
 mod roster_tests;
+
+#[test]
+fn accepted_action_facing_is_stable_across_movement_and_rejected_casts() {
+    for class in [
+        HeroClass::Dawnweaver,
+        HeroClass::Riftshot,
+        HeroClass::Warrior,
+    ] {
+        let (mut w, now, victim) = fixture(class);
+        let p = w.players.get_mut(&addr(1)).unwrap();
+        p.modifiers.bypass_vision = true;
+        if class.is_standard() {
+            cast(&mut w, addr(1), 0, [18.0, 0.0], 1, now);
+        } else {
+            crate::sim::cast::handle_cast_request(&mut w, addr(1), target(victim), 0, now);
+        }
+        let accepted = w.players[&addr(1)].hero.last_action;
+        assert_eq!(accepted.sequence, 1, "{}", class.id());
+        let yaw = accepted.yaw.unwrap();
+        assert!((yaw - shared::math::hero_yaw_towards(1.0, 0.0)).abs() < 1e-5);
+        // A later locomotion update must not change the direction of this action.
+        w.players.get_mut(&addr(1)).unwrap().hero.yaw = 1.25;
+        if class.is_standard() {
+            cast(&mut w, addr(1), 0, [-18.0, 0.0], 2, now);
+        } else {
+            crate::sim::cast::handle_cast_request(&mut w, addr(1), target(victim), 0, now);
+        }
+        assert_eq!(
+            w.players[&addr(1)].hero.last_action,
+            accepted,
+            "rejected cooldown cast must not turn the model"
+        );
+        let p = w.players.get_mut(&addr(1)).unwrap();
+        crate::sim::cast::record_player_action(p, SkillSlot::W);
+        assert_eq!(
+            p.hero.last_action.yaw, None,
+            "self actions clear previous aim"
+        );
+    }
+}

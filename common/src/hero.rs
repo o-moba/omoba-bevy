@@ -86,6 +86,7 @@ pub struct HeroAction {
     pub kind: PlayerActionKind,
     /// Q/W/E/R index, or `BASIC_ATTACK_ACTION_SLOT` for a basic strike.
     pub slot: u8,
+    pub yaw: Option<f32>,
 }
 
 /// Who the hero is: set at join (or reconnect) and never by the simulation.

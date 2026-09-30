@@ -183,6 +183,31 @@
       "sha256": "4b4f72de7c0af8f8cbdf5f232e630f86e1c6684498640095de8b0ab92f1210a5",
       "source": "scripts/build_standard_skill_models.py",
       "provenance": "original project-authored geometry"
+    },
+    "cosmetics/standard/hook.glb": {
+      "sha256": "c4eafd6b3115397c68d12273fc704591dee549fa1653269d462fee478d21e4c5",
+      "source": "scripts/build_roster_skill_models.py",
+      "provenance": "original project-authored geometry"
+    },
+    "cosmetics/standard/lantern.glb": {
+      "sha256": "55163dcb048fad3f771ba3baeb3fbc2a6f3f14337f1210be73abca31b37365f5",
+      "source": "scripts/build_roster_skill_models.py",
+      "provenance": "original project-authored geometry"
+    },
+    "cosmetics/standard/orb.glb": {
+      "sha256": "bcb5fb56998b893e8f0fa106d1c0e2711d52936e47359b9ade2f808bcc6f5cf1",
+      "source": "scripts/build_roster_skill_models.py",
+      "provenance": "original project-authored geometry"
+    },
+    "cosmetics/standard/pillar.glb": {
+      "sha256": "4dbd452e8f6e2f9448ee5a96b02d57675376c2584c807d619c51b92fc0fe8e8b",
+      "source": "scripts/build_roster_skill_models.py",
+      "provenance": "original project-authored geometry"
+    },
+    "cosmetics/standard/colossus.glb": {
+      "sha256": "dcbd67b296d5c13363e3edda27dcf8739f6344e9322d8c909190ff345e3e6b93",
+      "source": "scripts/build_roster_skill_models.py",
+      "provenance": "original project-authored geometry"
     }
   }
 }

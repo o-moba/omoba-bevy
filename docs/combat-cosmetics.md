@@ -6,13 +6,13 @@ implementation order and acceptance checks. Its required design supports future
 hybrid recipes, including four ultimate abilities or different weapon attacks:
 presentation belongs to the skill, independently of class and input slot. It
 separates existing mechanics from planned presentation work; arbitrary slot
-assignment is not implemented by the current registry or loadout resolver.
+assignment is supported by presentation; the server loadout resolver still enforces its existing slot rules.
 
 ## Skill presentation pilot
 
 [`config/skills.skillfx`](../client/assets/config/skills.skillfx) now owns the
-eight Dawnweaver / Wildspark skill presentations. Its schema is separate from
-the legacy projectile cosmetics below. Fields are `release`, optional `windup`,
+64 skill presentations: all 44 modular skills plus the 20 canonical legacy
+ability IDs. Legacy projectile shapes use the complementary registry below. Fields are `release`, optional `windup`,
 `effect`, RGB `color`, and optional `hdr_gain` (linear brightness, 1–8,
 default 3); unknown fields, skills and motion IDs are rejected.
 The packaged file applies once per launch. Restart after editing it. Missing
@@ -47,8 +47,8 @@ current `WrongSlot` restriction or public class editor has been removed.
 | Wild Rocket | `pistol_shoot` | Blender rocket with exhaust streaks |
 
 Repeater basic attacks use `pistol_shoot`. Confirmed hit particles use the
-visible caster's skill color; hidden sources keep generic feedback. The eight
-skills retain server damage, range, cooldown and movement behavior. In 2D the
+visible caster's skill color; hidden sources keep generic feedback. All skills
+retain server damage, range, cooldown and movement behavior. In 2D the
 existing renderer stays active.
 
 World effects retain replicated IDs, follow received positions (including fog
@@ -61,9 +61,10 @@ The Blender sources and deterministic exporter are in
 Ray preparation can arrive after the action and holds until the real beam.
 Warning disappearance never fabricates a release. Repeated snapshots do not
 restart the clip, and death/respawn take priority. Additional phase types,
-body masks, smooth transitions, playback-rate alignment, hand sockets and
+body masks, playback-rate alignment, hand sockets and
 weapon grips are still TODO. Teleport/jump/fly movement policies and a generic
-timeline editor are not implemented by this pilot.
+timeline editor are not implemented. Normal animation changes now blend over
+120 ms; death, round/model changes and sandbox previews cut immediately.
 
 Reproduce the native English 1280×720 scripted sandbox check:
 
@@ -86,6 +87,77 @@ work artifacts). Client tests: 806 passed, zero failed, one existing ignored.
 The nine motion-export tests, thirty candidate-asset tests,
 deterministic exporter check and both GLB inspections passed. No full release
 package, additional viewport/language or physical mobile performance was tested.
+
+## Full roster presentation pass
+
+Each remaining class has four skill-owned profiles in `skills.skillfx`, with
+reusable silhouettes instead of 64 independent model files. Accepted recipes
+always win over class defaults. The five legacy classes resolve canonical
+ability IDs when no modular recipe exists. A four-ultimate presentation fixture
+covers slot independence without changing server validation.
+
+| Class | Added presentation |
+| --- | --- |
+| Chainkeeper | Blender hook and lantern, green cast sweep, five cage sides with consumed-side removal; souls stay separate from hooks |
+| Frostguard | Narrow ice bolt, defensive cast ring, directional crystal wall, immediately visible full-length fissure borders |
+| Orbitwright | Blender sphere follows replicated position, orbital field, guard gesture, inward collapse ring |
+| Cinderforge | Delayed basalt pillar, fire cone and embers, charge accent, moving Blender colossus |
+| Edgeweaver | Blade slash, parry rings, second-strike accent, challenge cast pulse; existing vital markers retained |
+| Stormfist | Punch motion and blue strike, anchor shield, pulse, heavy strike accent |
+| Veilstalker | Violet needles, curse pulse, lash and retreat slash |
+| Emberveil | Pulsing ember, wisp accent, tether lance, roll follow-through for dash |
+| Riftshot | Thin blue needle, seal rings, blink-shot accent, real warning → travelling wave |
+| Warrior | Warm shield accent, rally ring, separate strike/ultimate projectile profiles |
+| Mage | Violet orb, resource pulse, cyan lance, orange fireball |
+| Ranger | Green arrow profiles with distinct reach silhouettes/trails, dressing gesture |
+| Cleric | Gold smite, renew pulse, favor rings, blessing pulse |
+| Warden | Green claw, defensive ring, mark projectile, heavy maul accent |
+
+The shared CC0 motion library has 16 clips. `punch`, `guard`, `shoulder_drive`
+and `roll` come from Quaternius Punch_Cross, Punch_Enter, Punch_Jab and Roll.
+The guard and heavy strike are reusable gesture fallbacks, not bespoke shield
+or kick animations. They are retargeted semantically to the existing VRM rigs;
+avatar GLBs are unchanged.
+
+Instant actions emit one small cast accent from a new server-confirmed action
+sequence. First-seen, duplicate, older, hidden and dead actor states do not
+replay it. These accents share the existing 256-particle budget with trails;
+they never fabricate damage or an impact on the target. Windup skills keep
+server warnings. Auxiliary world objects choose their actual silhouette from
+the replicated effect kind, not the source ability's primary silhouette.
+
+Run the remaining 14 classes in the same desktop camera:
+
+```sh
+python3 scripts/capture_standard_skills.py --roster --client-bin /path/to/client --server-bin /path/to/server --assets client/assets --output /tmp/roster-skills
+```
+
+This uses a live development sandbox and checks accepted Q/W/E/R sequences,
+PNG readbacks and actual effect entities. It resets the sandbox between skills,
+uses infinite resources/cooldowns and an invulnerable stationary enemy. Ally-only
+skills target the caster in this harness; this verifies their accepted cast,
+not an ally-to-ally travel sequence. It does not certify recast combos,
+physical mobile performance, all skins visually, or manual multiplayer play.
+
+Hand weapons, grip/IK corrections, dedicated bow/kick clips and a generic
+server-driven jump/flight timeline remain separate tasks. No synthetic flight
+or new cast delay is added to the currently instantaneous movement mechanics.
+
+### Facing the accepted attack
+
+The server records optional `action_yaw` alongside the accepted action sequence,
+using the basic attack target or the skill's resolved target/aim. Locomotion yaw
+stays separate. Rejected casts cannot change it; self casts clear the previous
+direction. Older packets without this optional field remain readable.
+
+In 3D, both local and remote heroes face that direction after movement and
+network interpolation, before transform propagation: 450 ms for basic attacks,
+700 ms for skills. An authoritative Dawn Ray/Horizon Wave warning keeps the
+preparation facing active until release. This changes rotation only, respects
+sandbox visual time, and does not steer movement or change damage. Initial and
+duplicate snapshots do not replay it; death and round changes clear it. Sprite2d
+keeps its existing behavior. Both client and server must be rebuilt/restarted
+to transmit and display the new direction.
 
 ## Contrast and glow
 

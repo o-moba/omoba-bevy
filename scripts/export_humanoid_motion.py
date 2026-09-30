@@ -37,6 +37,10 @@ CLIPS = (
     ("pistol_reload", "Pistol_Reload", False),
     ("pistol_aim", "Pistol_Aim_Neutral", False),
     ("interact", "Interact", False),
+    ("punch", "Punch_Cross", False),
+    ("guard", "Punch_Enter", False),
+    ("shoulder_drive", "Punch_Jab", False),
+    ("roll", "Roll", False),
 )
 REQUIRED = (
     "hips", "spine", "head", "leftUpperArm", "leftLowerArm", "leftHand",

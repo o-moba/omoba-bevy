@@ -173,14 +173,14 @@ fn collect_hits(
         );
         // Resolve only a visible caster's accepted recipe. Hidden sources retain generic feedback.
         let impact_color = owner
-            .and_then(|(_, _, _, _, loadout)| {
-                let skill = crate::skill_presentation::equipped_skill(
-                    loadout?.0.as_ref(),
-                    event.action_slot?,
-                )?;
+            .and_then(|(_, class, _, _, loadout)| {
                 skills
                     .as_ref()?
-                    .profile(skill)
+                    .action_profile(
+                        class.0,
+                        loadout.and_then(|l| l.0.as_ref()),
+                        event.action_slot?,
+                    )
                     .map(|p| Color::srgb_from_array(p.color))
             })
             .unwrap_or_else(|| profile.impact.color());

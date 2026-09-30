@@ -29,6 +29,19 @@ pub(crate) enum EffectStyle {
     Shock,
     Trap,
     Rocket,
+    Orb,
+    Hook,
+    Lantern,
+    Pillar,
+    Colossus,
+    Wall,
+    Cage,
+    Fissure,
+    Cone,
+    Slash,
+    Pulse,
+    Needle,
+    Ember,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -65,7 +78,13 @@ impl SkillPresentation {
             "../assets/animations/humanoid-motion-v1.json"
         ))?;
         for (id, profile) in &config.skills {
-            if SkillId::from_id(id).is_none() {
+            if SkillId::from_id(id).is_none()
+                && !shared::HeroClass::LEGACY.iter().any(|class| {
+                    shared::SkillSlot::ALL
+                        .iter()
+                        .any(|slot| class.ability(*slot).id == id)
+                })
+            {
                 return Err(format!("Unknown skill {id}"));
             }
             for name in std::iter::once(&profile.release).chain(profile.windup.iter()) {
@@ -85,6 +104,22 @@ impl SkillPresentation {
             }
         }
         Ok(config)
+    }
+    /// Accepted recipes take precedence; legacy ability IDs share the same registry.
+    pub(crate) fn action_profile(
+        &self,
+        class: shared::HeroClass,
+        loadout: Option<&LoadoutState>,
+        slot: u8,
+    ) -> Option<&SkillProfile> {
+        if let Some(skill) = equipped_skill(loadout, slot) {
+            return self.profile(skill);
+        }
+        if !shared::HeroClass::LEGACY.contains(&class) {
+            return None;
+        }
+        self.skills
+            .get(class.ability(shared::SkillSlot::from_index(slot)?).id)
     }
     pub(crate) fn profile(&self, skill: SkillId) -> Option<&SkillProfile> {
         self.skills.get(skill.id())
@@ -133,7 +168,7 @@ pub(crate) fn motion_cue(
                 && e.skill == skill
                 && matches!(
                     e.kind,
-                    EffectVisualKind::BeamWarning | EffectVisualKind::Beam
+                    EffectVisualKind::BeamWarning | EffectVisualKind::Beam | EffectVisualKind::Bolt
                 )
         })?;
         return Some(MotionCue {

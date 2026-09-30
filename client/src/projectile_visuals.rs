@@ -52,7 +52,8 @@ struct ProjectileAssets {
 
 fn material(color: Color) -> StandardMaterial {
     StandardMaterial {
-        base_color: color,
+        base_color: crate::game_vfx::hdr_tint(color, 2.8),
+        fog_enabled: false,
         unlit: true,
         alpha_mode: AlphaMode::Blend,
         ..default()

@@ -34,12 +34,15 @@ impl Plugin for StandardKitsQaPlugin {
         let class = std::env::var("OMOBA_STANDARD_QA_CLASS")
             .ok()
             .and_then(|s| HeroClass::from_id(&s))
-            .filter(|c| c.is_standard())
             .unwrap_or(HeroClass::Dawnweaver);
         app.insert_resource(Qa {
             directory,
             class,
             stage: 0,
+            roster: std::env::var_os("OMOBA_ROSTER_SKILLS_QA").is_some(),
+            slot: 0,
+            action_before: 0,
+            last_cast_simulation: -10.0,
             prepared: false,
             frames: 0,
             aim_ack: 0,
@@ -73,6 +76,10 @@ struct Qa {
     directory: PathBuf,
     class: HeroClass,
     stage: u8,
+    roster: bool,
+    slot: u8,
+    action_before: u64,
+    last_cast_simulation: f64,
     prepared: bool,
     frames: u32,
     aim_ack: u64,
@@ -162,6 +169,7 @@ fn observe(
             &NetworkHeroClass,
             &PlayerProgression,
             &PlayerLoadout,
+            &crate::net::PlayerCosmeticAction,
         ),
         With<Player>,
     >,
@@ -173,7 +181,7 @@ fn observe(
     assets: Res<AssetServer>,
     scenes: Query<&SceneRoot>,
     context: Res<crate::input_context::GameplayInputContext>,
-    (animations, vfx, palette, camera, map_materials, materials, windows): (
+    (animations, vfx, palette, camera, map_materials, materials, windows, facings): (
         Res<crate::sandbox::AnimationReadout>,
         Query<(
             &Name,
@@ -194,6 +202,11 @@ fn observe(
         )>,
         Res<Assets<StandardMaterial>>,
         Query<Entity, With<PrimaryWindow>>,
+        Query<(
+            &crate::net::NetworkPlayerId,
+            &Transform,
+            &crate::net::PlayerActionFacing,
+        )>,
     ),
 ) {
     if qa.stage == 255 {
@@ -226,6 +239,9 @@ fn observe(
         "gameplay_allowed": context.gameplay_allowed(),
         "scripted_aim_held": matches!(qa.stage, 9 | 10),
         "effects": snapshot.skill_effects,
+        "action": local.single().ok().map(|(_,_,_,_,a)| serde_json::json!({"sequence":a.sequence,"slot":a.slot})),
+        "roster_slot": qa.slot,
+        "facings": facings.iter().map(|(id, pose, facing)| serde_json::json!({"id":id.0,"sequence":facing.sequence,"action_yaw":facing.yaw,"visual_forward":(pose.rotation * Vec3::NEG_Z).to_array()})).collect::<Vec<_>>(),
         "animations": animations.0,
         "rendering": {
             "environment_palette_materials": palette.as_ref().map_or(0, |p| p.count()),
@@ -240,7 +256,7 @@ fn observe(
             "name":name.as_str(), "visible":*visibility != Visibility::Hidden,
             "effect_id":visual.id, "model_ready":visual.model_ready,
         })).collect::<Vec<_>>(),
-        "loadout": local.single().ok().and_then(|(_,_,_,l)| l.0.as_ref()),
+        "loadout": local.single().ok().and_then(|(_,_,_,l,_)| l.0.as_ref()),
         "nodes": nodes.iter().filter(|(n,_,_)| n.as_str().starts_with("ClassButton") || n.as_str()=="StandardKitStatus")
             .map(|(n,c,v)| serde_json::json!({"name":n.as_str(),"size":c.size().to_array(),"visible":v.get()})).collect::<Vec<_>>()
     });
@@ -255,6 +271,68 @@ fn observe(
         capture(&mut commands, &mut qa, 5, frame.clone());
     }
     match qa.stage {
+        20 if local
+            .single()
+            .is_ok_and(|(_, _, _, _, a)| a.sequence > qa.action_before && a.slot == qa.slot) =>
+        {
+            qa.last_cast_simulation = snapshot.sandbox.as_ref().map_or(0.0, |s| s.simulation_secs);
+            qa.stage = 21;
+            qa.frames = 0;
+        }
+        21 if qa.frames >= 2
+            && snapshot.sandbox.as_ref().is_some_and(|s| {
+                s.simulation_secs
+                    >= qa.last_cast_simulation
+                        + if qa.class == HeroClass::Cinderforge && qa.slot == 3 {
+                            1.75
+                        } else {
+                            0.06
+                        }
+            })
+            && (qa.class != HeroClass::Cinderforge
+                || qa.slot != 0
+                || snapshot
+                    .skill_effects
+                    .iter()
+                    .any(|e| e.skill == shared::loadout::SkillId::FaultLine && e.armed)) =>
+        {
+            let index = usize::from(qa.slot) + 1;
+            capture(&mut commands, &mut qa, index, frame);
+            qa.stage = 22;
+        }
+        22 if qa.readbacks.contains(&(usize::from(qa.slot) + 1)) => {
+            if qa.slot < 3 {
+                qa.slot += 1;
+                qa.stage = 2;
+            } else {
+                if qa.class == HeroClass::Riftshot && !qa.readbacks.contains(&5) {
+                    if !qa.captures.iter().any(|c| c["file"] == "06-release.png")
+                        && snapshot.skill_effects.iter().any(|e| {
+                            e.skill == shared::loadout::SkillId::HorizonWave
+                                && e.kind == EffectVisualKind::Bolt
+                        })
+                    {
+                        capture(&mut commands, &mut qa, 5, frame);
+                    }
+                    return;
+                }
+                let summary = serde_json::json!({"pass":true,"scenario":"roster_skills","class":qa.class.id(),"locale":"en","pixels":[1280,720],"manual_interaction_verified":false,"physical_device_verified":false,"setup":"live sandbox; level 10; infinite resources/cooldowns; stationary invulnerable enemy; ally-only casts target self","requests":qa.requests,"captures":qa.captures});
+                if std::fs::write(
+                    qa.directory.join("qa-summary.json"),
+                    serde_json::to_vec_pretty(&summary).unwrap(),
+                )
+                .is_err()
+                {
+                    fail(&mut qa, &mut exit, "Cannot write roster evidence");
+                    return;
+                }
+                qa.stage = 255;
+                if let Ok(window) = windows.single() {
+                    commands.entity(window).despawn();
+                }
+                exit.write(AppExit::Success);
+            }
+        }
         0 if *screen.get() == AppScreen::HeroSelect && qa.frames >= 120 && !help.0 => {
             if scenes.is_empty()
                 || !scenes.iter().all(|root| {
@@ -300,6 +378,16 @@ fn observe(
             };
             config.dummy.enabled = true;
             config.dummy.position = [-2.0, -8.0];
+            if qa.roster {
+                config.player.infinite_resource = true;
+                config.player.no_cooldowns = true;
+                config.player.god_mode = true;
+                config.enemy.enabled = true;
+                config.enemy.actor.position = [-3.0, -8.0];
+                config.enemy.actor.god_mode = true;
+                config.enemy.actor.avatar = Some("agnes".into());
+                config.dummy.enabled = false;
+            }
             let request = SandboxRequest {
                 server_epoch: snapshot.meta.server_epoch,
                 match_id: snapshot.meta.match_id,
@@ -313,7 +401,7 @@ fn observe(
             qa.frames = 0;
         }
         3 => {
-            let Ok((pose, class, progression, _)) = local.single() else {
+            let Ok((pose, class, progression, _, action)) = local.single() else {
                 return;
             };
             if class.0 != qa.class
@@ -322,6 +410,79 @@ fn observe(
                 || help.0
                 || !context.gameplay_allowed()
             {
+                return;
+            }
+            if qa.roster {
+                if snapshot
+                    .sandbox
+                    .as_ref()
+                    .is_none_or(|s| s.simulation_secs < qa.last_cast_simulation + 1.2)
+                {
+                    return;
+                }
+                qa.action_before = action.sequence;
+                let slot = qa.slot;
+                let self_target = matches!(
+                    (qa.class, slot),
+                    (HeroClass::Frostguard, 1) | (HeroClass::Orbitwright, 2)
+                );
+                let range = qa
+                    .class
+                    .ability(shared::SkillSlot::from_index(slot).unwrap())
+                    .cast_range;
+                let target_position = snapshot
+                    .sandbox
+                    .as_ref()
+                    .and_then(|s| {
+                        s.actors
+                            .iter()
+                            .find(|a| a.actor == shared::sandbox::SandboxActor::Enemy)
+                    })
+                    .map_or(pose.translation.xz() + Vec2::X * 5.0, |a| {
+                        Vec2::from_array(a.position)
+                    });
+                let delta = target_position - pose.translation.xz();
+                let aim = if self_target {
+                    pose.translation.xz()
+                } else if delta.length() < 0.1 {
+                    pose.translation.xz() + Vec2::X
+                } else {
+                    pose.translation.xz() + delta.normalize() * delta.length().min(range.max(0.1))
+                };
+                if qa.class.is_standard() {
+                    cast(
+                        &mut qa,
+                        &mut outgoing,
+                        slot,
+                        aim,
+                        snapshot.meta.snapshot_tick,
+                    );
+                } else {
+                    let target = if qa
+                        .class
+                        .ability(shared::SkillSlot::from_index(slot).unwrap())
+                        .targeting
+                        == shared::TargetingMode::SelfTarget
+                    {
+                        snapshot.your_id
+                    } else {
+                        let Some(target) = snapshot.sandbox.as_ref().and_then(|s| {
+                            s.actors
+                                .iter()
+                                .find(|a| a.actor == shared::sandbox::SandboxActor::Enemy)
+                        }) else {
+                            return;
+                        };
+                        target.id
+                    };
+                    outgoing.write(NetworkCommand::Cast {
+                        slot,
+                        target: shared::wire::TargetId::player(target),
+                    });
+                    qa.requests.push(serde_json::json!({"command":"cast","slot":slot,"target":target,"snapshot_tick":snapshot.meta.snapshot_tick}));
+                }
+                qa.stage = 20;
+                qa.frames = 0;
                 return;
             }
             cast(
@@ -349,7 +510,7 @@ fn observe(
             {
                 return;
             }
-            let Ok((pose, _, _, _)) = local.single() else {
+            let Ok((pose, _, _, _, _)) = local.single() else {
                 return;
             };
             let slot = if qa.class == HeroClass::Dawnweaver {
@@ -376,7 +537,7 @@ fn observe(
                 local
                     .single()
                     .ok()
-                    .and_then(|(_, _, _, l)| l.0.as_ref())
+                    .and_then(|(_, _, _, l, _)| l.0.as_ref())
                     .is_some_and(|s| s.weapon_mode == WeaponMode::Rockets)
             };
             if ready {
@@ -388,7 +549,7 @@ fn observe(
             if !cooldowns.single().is_ok_and(|cd| cd.recovery_secs <= 0.0) {
                 return;
             }
-            let Ok((pose, _, _, _)) = local.single() else {
+            let Ok((pose, _, _, _, _)) = local.single() else {
                 return;
             };
             cast(
@@ -428,7 +589,7 @@ fn observe(
             qa.aim_ack = local
                 .single()
                 .ok()
-                .and_then(|(_, _, _, l)| l.0.as_ref())
+                .and_then(|(_, _, _, l, _)| l.0.as_ref())
                 .map_or(0, |l| l.cast_request_id);
             let key = if qa.class == HeroClass::Dawnweaver {
                 "Q"
@@ -457,7 +618,7 @@ fn observe(
         }) && local
             .single()
             .ok()
-            .and_then(|(_, _, _, l)| l.0.as_ref())
+            .and_then(|(_, _, _, l, _)| l.0.as_ref())
             .is_some_and(|l| l.cast_request_id > qa.aim_ack) =>
         {
             capture(&mut commands, &mut qa, 4, frame);
@@ -514,11 +675,23 @@ const FILES: [&str; 6] = [
 #[derive(Component)]
 struct Shot(usize);
 fn capture(commands: &mut Commands, qa: &mut Qa, index: usize, mut frame: serde_json::Value) {
-    frame["file"] = FILES[index].into();
+    let file = if qa.roster {
+        [
+            "01-selection.png",
+            "02-q.png",
+            "03-w.png",
+            "04-e.png",
+            "05-r.png",
+            "06-release.png",
+        ][index]
+    } else {
+        FILES[index]
+    };
+    frame["file"] = file.into();
     qa.captures.push(frame);
     commands
         .spawn((Screenshot::primary_window(), Shot(index)))
-        .observe(save_to_disk(qa.directory.join(FILES[index])))
+        .observe(save_to_disk(qa.directory.join(file)))
         .observe(readback);
 }
 fn readback(event: On<ScreenshotCaptured>, shots: Query<&Shot>, mut qa: ResMut<Qa>) {

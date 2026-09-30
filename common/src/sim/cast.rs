@@ -165,6 +165,7 @@ pub fn handle_cast_request(
     }
     caster_mut.timers.last_cast_at[skill_slot.index()] = Some(now);
     record_player_action(caster_mut, skill_slot);
+    face_player_action(caster_mut, direction.x, direction.z);
 
     // Higher invested rank = proportionally more projectile damage; active
     // boss team buffs multiply the outgoing ability damage authoritatively.
@@ -213,4 +214,11 @@ pub fn record_player_action(player: &mut ConnectedPlayer, slot: SkillSlot) {
     }
     player.hero.last_action.kind = PlayerActionKind::for_cast(slot);
     player.hero.last_action.slot = slot.index() as u8;
+    player.hero.last_action.yaw = None;
+}
+
+/// Cosmetic direction is captured only after acceptance. Movement cannot overwrite it.
+pub fn face_player_action(player: &mut ConnectedPlayer, dx: f32, dz: f32) {
+    player.hero.last_action.yaw = (dx.is_finite() && dz.is_finite() && dx * dx + dz * dz > 1e-6)
+        .then(|| shared::math::hero_yaw_towards(dx, dz));
 }

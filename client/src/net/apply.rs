@@ -399,6 +399,7 @@ fn local_hero_components(state: &PlayerState, your_id: u64) -> impl Bundle {
             NetworkAvatar(state.avatar.clone()),
             NetworkSpriteCharacter(state.sprite_character.clone()),
             PlayerCosmeticAction::from(state),
+            PlayerActionFacing::from(state),
             NetworkHeroClass(state.hero_class),
             PlayerLoadout(state.loadout.clone()),
             crate::supporter::NetworkSupporterAura(state.supporter_aura),
@@ -512,6 +513,9 @@ fn apply_snapshot_local_player(
                     PlayerUtility::from(local_player_state),
                 ),
             ));
+            commands
+                .entity(local_entity)
+                .insert(PlayerActionFacing::from(local_player_state));
             let next_action = PlayerCosmeticAction::from(local_player_state);
             if action_query.get(local_entity).ok().flatten().copied() != Some(next_action) {
                 commands.entity(local_entity).insert(next_action);
@@ -720,6 +724,7 @@ fn apply_snapshot_remote_players(
                 NetworkSpriteCharacter(player.sprite_character.clone()),
                 NetworkHeroClass(player.hero_class),
                 PlayerLoadout(player.loadout.clone()),
+                PlayerActionFacing::from(player),
                 crate::supporter::NetworkSupporterAura(player.supporter_aura),
                 player_state_to_combat_stats(player),
                 player_state_to_progression(player),
@@ -760,6 +765,7 @@ fn apply_snapshot_remote_players(
             (
                 NetworkHeroClass(player.hero_class),
                 PlayerLoadout(player.loadout.clone()),
+                PlayerActionFacing::from(player),
             ),
             player_state_to_combat_stats(player),
             player_state_to_progression(player),

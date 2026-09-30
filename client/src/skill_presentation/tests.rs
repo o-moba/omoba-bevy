@@ -57,7 +57,7 @@ fn hidden_or_other_caster_warning_does_not_drive_this_hero() {
 #[test]
 fn malformed_profile_cannot_introduce_gameplay_or_unknown_motion() {
     let valid = include_str!("../../assets/config/skills.skillfx");
-    assert_eq!(profiles().skills.len(), 8);
+    assert_eq!(profiles().skills.len(), 64);
     assert!(SkillPresentation::parse(&valid.replace("pistol_shoot", "missing_clip")).is_err());
     assert!(
         SkillPresentation::parse(&valid.replace(
@@ -86,4 +86,71 @@ fn hdr_gain_is_bounded_and_older_manifests_keep_a_default() {
         .remove("hdr_gain");
     let parsed = SkillPresentation::parse(&config.to_string()).unwrap();
     assert_eq!(parsed.profile(SkillId::DawnBind).unwrap().hdr_gain, 3.0);
+}
+
+#[test]
+fn all_roster_abilities_have_profiles_and_recipes_override_class_and_slot() {
+    let registry = profiles();
+    for class in shared::HeroClass::ALL {
+        let loadout = shared::loadout::preset_for_class(class).map(|recipe| LoadoutState {
+            recipe: Some(recipe.recipe()),
+            ..default()
+        });
+        for slot in 0..4 {
+            assert!(
+                registry
+                    .action_profile(class, loadout.as_ref(), slot)
+                    .is_some(),
+                "{} / {slot}",
+                class.id()
+            );
+        }
+    }
+    let mut recipe = shared::loadout::CoreId::Wildspark.preset();
+    recipe.skills = [
+        SkillId::IronBoundary,
+        SkillId::WinterDivide,
+        SkillId::MountainEcho,
+        SkillId::HorizonWave,
+    ];
+    let state = LoadoutState {
+        recipe: Some(recipe),
+        ..default()
+    };
+    for slot in 0..4 {
+        let a = registry
+            .action_profile(shared::HeroClass::Warrior, Some(&state), slot)
+            .unwrap();
+        let b = registry
+            .profile(state.recipe.as_ref().unwrap().skills[slot as usize])
+            .unwrap();
+        assert_eq!(a.effect, b.effect);
+        assert_eq!(a.release, b.release);
+    }
+    assert!(
+        registry
+            .action_profile(shared::HeroClass::Warrior, None, 255)
+            .is_none()
+    );
+}
+
+#[test]
+fn horizon_release_needs_the_authoritative_projectile_not_a_missing_warning() {
+    let state = LoadoutState {
+        recipe: Some(shared::loadout::CoreId::Riftshot.preset()),
+        ..default()
+    };
+    let warning = effect(SkillId::HorizonWave, EffectVisualKind::BeamWarning);
+    assert!(
+        motion_cue(&profiles(), Some(&state), 3, 7, &[warning])
+            .unwrap()
+            .hold
+    );
+    let bolt = effect(SkillId::HorizonWave, EffectVisualKind::Bolt);
+    assert!(
+        !motion_cue(&profiles(), Some(&state), 3, 7, &[bolt])
+            .unwrap()
+            .hold
+    );
+    assert!(motion_cue(&profiles(), Some(&state), 3, 7, &[]).is_none());
 }

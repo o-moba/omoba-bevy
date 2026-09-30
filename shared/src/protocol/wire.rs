@@ -325,6 +325,9 @@ pub struct PlayerState {
     /// Q/W/E/R index, or BASIC_ATTACK_ACTION_SLOT for a basic strike.
     #[serde(default)]
     pub action_slot: u8,
+    /// Facing of the last accepted action, independent of later movement yaw.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub action_yaw: Option<f32>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -723,6 +726,7 @@ mod tests {
                 action_sequence: 6,
                 action_kind: PlayerActionKind::Cast,
                 action_slot: 3,
+                action_yaw: None,
             }],
             scoreboard: None,
             prematch: None,
