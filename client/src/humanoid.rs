@@ -26,6 +26,8 @@ pub(crate) struct RuntimeHumanoidClips {
     pub attack: Handle<AnimationClip>,
     pub cast: Handle<AnimationClip>,
     pub death: Handle<AnimationClip>,
+    /// Additional, validated library motions addressed by stable authored ID.
+    pub actions: std::collections::BTreeMap<String, Handle<AnimationClip>>,
 }
 
 struct RuntimeRig {
@@ -75,7 +77,7 @@ impl HumanoidRuntimeLibrary {
             .into_iter()
             .map(|(name, clip)| (name, clips.add(clip)))
             .collect();
-        // retarget_all validates all six states before adding any engine asset.
+        // Validate the whole library before adding any engine asset.
         let mut take = |name: &str| handles.remove(name).expect("validated shared motion state");
         let result = RuntimeHumanoidClips {
             idle: take("idle"),
@@ -84,6 +86,11 @@ impl HumanoidRuntimeLibrary {
             attack: take("attack"),
             cast: take("cast"),
             death: take("death"),
+            actions: Default::default(),
+        };
+        let result = RuntimeHumanoidClips {
+            actions: handles.into_iter().collect(),
+            ..result
         };
         self.models.insert(
             model.id(),

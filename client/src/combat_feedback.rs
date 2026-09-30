@@ -102,6 +102,7 @@ fn collect_hits(
     time: Res<Time>,
     snapshot: Res<GameStateSnapshot>,
     registry: Res<CombatVisualRegistry>,
+    skills: Option<Res<crate::skill_presentation::SkillPresentation>>,
     mut feedback: ResMut<CombatFeedback>,
     mut bursts: MessageWriter<crate::game_vfx::ImpactBurst>,
     mut resets: MessageWriter<crate::game_vfx::ClearCombatVfx>,
@@ -111,6 +112,7 @@ fn collect_hits(
         &NetworkHeroClass,
         Option<&NetworkAvatar>,
         Option<&NetworkSpriteCharacter>,
+        Option<&crate::net::PlayerLoadout>,
     )>,
     local: Query<&NetworkPlayerId, With<Player>>,
     positions: Query<(&NetworkPlayerId, &Transform)>,
@@ -156,15 +158,32 @@ fn collect_hits(
             continue;
         }
         let owner = (event.source.kind == CombatEntityKind::Player)
-            .then(|| heroes.iter().find(|(id, _, _, _)| id.0 == event.source.id))
+            .then(|| {
+                heroes
+                    .iter()
+                    .find(|(id, _, _, _, _)| id.0 == event.source.id)
+            })
             .flatten();
         let profile = registry.resolve(
-            owner.map(|(_, class, _, _)| class.0),
+            owner.map(|(_, class, _, _, _)| class.0),
             event.style,
             event.action_slot,
-            owner.and_then(|(_, _, avatar, _)| avatar.and_then(|v| v.0.as_deref())),
-            owner.and_then(|(_, _, _, sprite)| sprite.and_then(|v| v.0.as_deref())),
+            owner.and_then(|(_, _, avatar, _, _)| avatar.and_then(|v| v.0.as_deref())),
+            owner.and_then(|(_, _, _, sprite, _)| sprite.and_then(|v| v.0.as_deref())),
         );
+        // Resolve only a visible caster's accepted recipe. Hidden sources retain generic feedback.
+        let impact_color = owner
+            .and_then(|(_, _, _, _, loadout)| {
+                let skill = crate::skill_presentation::equipped_skill(
+                    loadout?.0.as_ref(),
+                    event.action_slot?,
+                )?;
+                skills
+                    .as_ref()?
+                    .profile(skill)
+                    .map(|p| Color::srgb_from_array(p.color))
+            })
+            .unwrap_or_else(|| profile.impact.color());
         let source_position = positions
             .iter()
             .find(|(id, _)| {
@@ -184,7 +203,7 @@ fn collect_hits(
         bursts.write(crate::game_vfx::ImpactBurst {
             position,
             direction,
-            color: profile.impact.color(),
+            color: impact_color,
             scale: profile.impact.scale,
             lifetime: profile.impact.lifetime,
             kind: crate::game_vfx::BurstKind::for_style(event.style),
@@ -198,7 +217,7 @@ fn collect_hits(
             age: 0.0,
             lifetime: profile.impact.lifetime.clamp(0.08, 1.2),
             scale: profile.impact.scale.clamp(0.1, 2.0),
-            color: profile.impact.color(),
+            color: impact_color,
         });
         if number_count >= MAX_NUMBERS {
             continue;

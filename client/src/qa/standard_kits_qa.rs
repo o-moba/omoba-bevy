@@ -173,6 +173,28 @@ fn observe(
     assets: Res<AssetServer>,
     scenes: Query<&SceneRoot>,
     context: Res<crate::input_context::GameplayInputContext>,
+    (animations, vfx, palette, camera, map_materials, materials, windows): (
+        Res<crate::sandbox::AnimationReadout>,
+        Query<(
+            &Name,
+            &Visibility,
+            &crate::skill_presentation::SkillEffectVisual,
+        )>,
+        Option<Res<crate::verdant3d::VerdantPaletteMaterials>>,
+        Query<
+            (
+                &bevy::core_pipeline::tonemapping::Tonemapping,
+                &bevy::post_process::bloom::Bloom,
+            ),
+            With<crate::camera::MainCamera>,
+        >,
+        Query<(
+            &bevy::gltf::GltfMaterialName,
+            &MeshMaterial3d<StandardMaterial>,
+        )>,
+        Res<Assets<StandardMaterial>>,
+        Query<Entity, With<PrimaryWindow>>,
+    ),
 ) {
     if qa.stage == 255 {
         return;
@@ -186,7 +208,52 @@ fn observe(
         return;
     }
     qa.frames += 1;
-    let frame = serde_json::json!({"snapshot_tick":snapshot.meta.snapshot_tick,"server_epoch":snapshot.meta.server_epoch,"match_id":snapshot.meta.match_id,"screen":format!("{:?}", screen.get()),"gameplay_allowed":context.gameplay_allowed(),"scripted_aim_held":matches!(qa.stage,9|10),"effects":snapshot.skill_effects,"loadout":local.single().ok().and_then(|(_,_,_,l)|l.0.as_ref()),"nodes":nodes.iter().filter(|(n,_,_)| n.as_str().starts_with("ClassButton") || n.as_str()=="StandardKitStatus").map(|(n,c,v)|serde_json::json!({"name":n.as_str(),"size":c.size().to_array(),"visible":v.get()})).collect::<Vec<_>>()});
+    let paving = map_materials
+        .iter()
+        .find(|(name, _)| name.0 == "VC / worn ceremonial paving")
+        .and_then(|(_, binding)| {
+            let color = materials.get(&binding.0)?.base_color.to_linear();
+            Some(serde_json::json!({
+                "linear_rgba": [color.red, color.green, color.blue, color.alpha],
+                "tuned_binding": palette.as_ref().is_some_and(|p| p.contains_tuned(&binding.0)),
+            }))
+        });
+    let frame = serde_json::json!({
+        "snapshot_tick": snapshot.meta.snapshot_tick,
+        "server_epoch": snapshot.meta.server_epoch,
+        "match_id": snapshot.meta.match_id,
+        "screen": format!("{:?}", screen.get()),
+        "gameplay_allowed": context.gameplay_allowed(),
+        "scripted_aim_held": matches!(qa.stage, 9 | 10),
+        "effects": snapshot.skill_effects,
+        "animations": animations.0,
+        "rendering": {
+            "environment_palette_materials": palette.as_ref().map_or(0, |p| p.count()),
+            "paving_material": paving,
+            "postprocess": camera.single().ok().map(|(tonemapping, bloom)| serde_json::json!({
+                "tonemapping": format!("{tonemapping:?}"),
+                "bloom_intensity": bloom.intensity,
+                "bloom_threshold": bloom.prefilter.threshold,
+            })),
+        },
+        "skill_vfx": vfx.iter().map(|(name,visibility,visual)| serde_json::json!({
+            "name":name.as_str(), "visible":*visibility != Visibility::Hidden,
+            "effect_id":visual.id, "model_ready":visual.model_ready,
+        })).collect::<Vec<_>>(),
+        "loadout": local.single().ok().and_then(|(_,_,_,l)| l.0.as_ref()),
+        "nodes": nodes.iter().filter(|(n,_,_)| n.as_str().starts_with("ClassButton") || n.as_str()=="StandardKitStatus")
+            .map(|(n,c,v)| serde_json::json!({"name":n.as_str(),"size":c.size().to_array(),"visible":v.get()})).collect::<Vec<_>>()
+    });
+    if qa.stage == 8
+        && qa.class == HeroClass::Dawnweaver
+        && !qa.captures.iter().any(|c| c["file"] == FILES[5])
+        && snapshot
+            .skill_effects
+            .iter()
+            .any(|e| e.kind == EffectVisualKind::Beam)
+    {
+        capture(&mut commands, &mut qa, 5, frame.clone());
+    }
     match qa.stage {
         0 if *screen.get() == AppScreen::HeroSelect && qa.frames >= 120 && !help.0 => {
             if scenes.is_empty()
@@ -332,6 +399,7 @@ fn observe(
                 snapshot.meta.snapshot_tick,
             );
             qa.stage = 7;
+            qa.frames = 0;
         }
         7 => {
             let kind = if qa.class == HeroClass::Dawnweaver {
@@ -339,12 +407,21 @@ fn observe(
             } else {
                 EffectVisualKind::Rocket
             };
-            if snapshot.skill_effects.iter().any(|e| e.kind == kind) {
+            if qa.frames >= 3
+                && snapshot.skill_effects.iter().any(|e| {
+                    e.kind == kind
+                        && (qa.class == HeroClass::Dawnweaver
+                            || vfx
+                                .iter()
+                                .any(|(_, _, visual)| visual.id == e.id && visual.model_ready))
+                })
+            {
                 capture(&mut commands, &mut qa, 2, frame);
                 qa.stage = 8;
             }
         }
         8 if qa.readbacks.contains(&2)
+            && (qa.class != HeroClass::Dawnweaver || qa.readbacks.contains(&5))
             && context.gameplay_allowed()
             && cooldowns.single().is_ok_and(|cd| cd.recovery_secs <= 0.0) =>
         {
@@ -381,10 +458,24 @@ fn observe(
             .single()
             .ok()
             .and_then(|(_, _, _, l)| l.0.as_ref())
-            .is_some_and(|l| l.cast_request_id > qa.aim_ack)
-            && qa.readbacks.len() == 4
+            .is_some_and(|l| l.cast_request_id > qa.aim_ack) =>
+        {
+            capture(&mut commands, &mut qa, 4, frame);
+            qa.stage = 12;
+        }
+        12 if qa.readbacks.len()
+            == if qa.class == HeroClass::Dawnweaver {
+                6
+            } else {
+                5
+            }
             && FILES
                 .iter()
+                .take(if qa.class == HeroClass::Dawnweaver {
+                    6
+                } else {
+                    5
+                })
                 .all(|f| qa.directory.join(f).metadata().is_ok_and(|m| m.len() > 32)) =>
         {
             let summary = serde_json::json!({"pass":true,"scenario":"standard_kits","class":qa.class.id(),"locale":"en","pixels":[1280,720],"scripted_commands":true,"scripted_key_release_accepted":true,"manual_interaction_verified":false,"physical_device_verified":false,"setup":"live development sandbox; level 10; rank 1; stationary infinite-health dummy; normal costs, cooldowns and time","requests":qa.requests,"captures":qa.captures});
@@ -398,6 +489,11 @@ fn observe(
                 return;
             }
             qa.stage = 255;
+            // Match the production Exit button and the other native capture
+            // harnesses: release the window's render surface before AppExit.
+            if let Ok(window) = windows.single() {
+                commands.entity(window).despawn();
+            }
             exit.write(AppExit::Success);
         }
         _ => {}
@@ -407,11 +503,13 @@ fn cast(qa: &mut Qa, outgoing: &mut MessageWriter<NetworkCommand>, slot: u8, aim
     qa.requests.push(serde_json::json!({"command":"cast_skill","slot":slot,"aim":aim.to_array(),"snapshot_tick":tick}));
     outgoing.write(NetworkCommand::CastSkill { slot, aim });
 }
-const FILES: [&str; 4] = [
+const FILES: [&str; 6] = [
     "01-selection.png",
     "02-persistent-effects.png",
     "03-ultimate-flight.png",
     "04-held-aim.png",
+    "05-skill-flight.png",
+    "06-ray-release.png",
 ];
 #[derive(Component)]
 struct Shot(usize);

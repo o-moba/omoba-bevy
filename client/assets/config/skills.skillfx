@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "skills": {
+    "dawn_bind":    {"release":"cast",          "effect":"lance",    "color":[1.0,0.65,0.10], "hdr_gain":3.5},
+    "dawn_barrier": {"release":"interact",      "effect":"aegis",    "color":[0.12,1.0,0.72], "hdr_gain":3.0},
+    "dawn_field":   {"release":"spell_finish",  "effect":"field",    "color":[1.0,0.60,0.08], "hdr_gain":3.0},
+    "dawn_ray":     {"windup":"spell_prepare", "release":"cast",    "effect":"beam", "color":[1.0,0.72,0.16], "hdr_gain":4.0},
+    "wild_switch":  {"release":"pistol_reload", "effect":"repeater", "color":[1.0,0.40,0.05], "hdr_gain":3.0},
+    "wild_zap":     {"release":"pistol_shoot",  "effect":"shock",    "color":[0.04,0.72,1.0], "hdr_gain":4.0},
+    "wild_traps":   {"release":"interact",      "effect":"trap",     "color":[1.0,0.35,0.04], "hdr_gain":3.0},
+    "wild_rocket":  {"release":"pistol_shoot",  "effect":"rocket",   "color":[1.0,0.28,0.02], "hdr_gain":4.0}
+  }
+}

@@ -36,7 +36,21 @@ fn all_fifteen_shipped_rigs_retarget_actual_run_with_separate_walk_and_all_state
         let slug = avatar["slug"].as_str().unwrap();
         let rig = rig(slug);
         let (clips, animated_nodes) = retarget::retarget_all(&rig, &motion).unwrap();
-        assert_eq!(clips.len(), 6, "{slug}");
+        assert_eq!(clips.len(), motion.clips.len(), "{slug}");
+        for (name, source) in &motion.clips {
+            assert_eq!(clips[name].duration(), source.duration, "{slug}/{name}");
+            for sample in [0, source.times.len() / 2, source.times.len() - 1] {
+                let (rotations, hips) =
+                    retarget::sample_frame(&rig, &motion, name, sample).unwrap();
+                assert!(hips.is_finite(), "{slug}/{name}: invalid hips");
+                assert!(
+                    rotations
+                        .iter()
+                        .all(|q| q.is_finite() && (q.length_squared() - 1.0).abs() < 0.001),
+                    "{slug}/{name}: invalid joint pose"
+                );
+            }
+        }
         assert_eq!(clips["run"].duration(), motion.clips["run"].duration);
         let first = retarget::sample_frame(&rig, &motion, "run", 0).unwrap();
         let last =
@@ -299,6 +313,7 @@ fn actual_ecs_clipless_binding_survives_async_readiness_scene_refresh_and_despaw
         attack: handles.remove("attack").unwrap(),
         cast: handles.remove("cast").unwrap(),
         death: handles.remove("death").unwrap(),
+        actions: handles.into_iter().collect(),
     };
     app.world_mut()
         .resource_mut::<HumanoidRuntimeLibrary>()

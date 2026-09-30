@@ -18,6 +18,7 @@ use bevy::{
 use shared::combat::ProjectileStyle;
 
 const PARTICLE_BUDGET: usize = 256;
+const PARTICLE_HDR_GAIN: f32 = 2.5;
 const BUTTERFLY_BUDGET: usize = shared::forest_pickups::FOREST_PICKUP_COUNT * 3;
 /// World distance a hasted hero travels between two speed streaks.
 const HASTE_STREAK_SPACING: f32 = 0.42;
@@ -27,6 +28,18 @@ const DASH_COLOR: Color = Color::srgb(0.55, 0.9, 1.0);
 const DASH_CORE_COLOR: Color = Color::srgb(0.92, 0.98, 1.0);
 const HASTE_COLOR: Color = Color::srgb(1.0, 0.78, 0.28);
 const HASTE_CORE_COLOR: Color = Color::srgb(1.0, 0.93, 0.7);
+
+/// Unlit materials use base color directly, so HDR energy belongs in its RGB,
+/// while alpha keeps controlling coverage and the particle's lifetime fade.
+pub(crate) fn hdr_tint(color: Color, gain: f32) -> Color {
+    let linear = color.to_linear();
+    Color::linear_rgba(
+        linear.red * gain,
+        linear.green * gain,
+        linear.blue * gain,
+        linear.alpha,
+    )
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum BurstKind {
@@ -325,6 +338,7 @@ fn setup(
     for _ in 0..PARTICLE_BUDGET {
         let material = materials.add(StandardMaterial {
             unlit: true,
+            fog_enabled: false,
             alpha_mode: AlphaMode::Add,
             base_color_texture: Some(glow.clone()),
             cull_mode: None,
@@ -869,7 +883,7 @@ fn animate_particles(
         let texture =
             matches!(p.shape, Shape::Glow | Shape::Streak).then(|| assets.glow_texture.clone());
         if let Some(m) = materials.get_mut(&slot.material) {
-            m.base_color = p.color;
+            m.base_color = hdr_tint(p.color, PARTICLE_HDR_GAIN);
             m.base_color_texture = texture.clone();
             m.alpha_mode = AlphaMode::Blend;
         }
@@ -903,7 +917,8 @@ fn animate_particles(
         *inherited = InheritedVisibility::VISIBLE;
         let opacity = (1. - p.age / p.lifetime).max(0.);
         if let Some(m) = materials.get_mut(&slot.material) {
-            m.base_color = p.color.with_alpha(p.color.alpha() * opacity);
+            m.base_color =
+                hdr_tint(p.color, PARTICLE_HDR_GAIN).with_alpha(p.color.alpha() * opacity);
         }
         if let Some(m) = flats.get_mut(&slot.flat) {
             m.color = p.color.with_alpha(p.color.alpha() * opacity);
@@ -1406,6 +1421,85 @@ mod tests {
             lifetime: 1.,
             kind: BurstKind::Magic,
             seed: 1,
+        }
+    }
+    #[test]
+    fn fading_particles_keep_hdr_energy_without_changing_flat_color_or_alpha() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+                std::time::Duration::from_millis(16),
+            ))
+            .init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<Image>>()
+            .init_resource::<Assets<StandardMaterial>>()
+            .init_resource::<Assets<ColorMaterial>>()
+            .init_resource::<PlayerVisualMode>()
+            .init_resource::<MapLayout>()
+            .add_plugins(GameVfxPlugin);
+        app.update();
+        let color = Color::srgba(1.0, 0.5, 0.25, 0.4);
+        for mode in [PlayerVisualMode::Models3d, PlayerVisualMode::Sprite2d] {
+            app.world_mut().insert_resource(mode);
+            app.world_mut()
+                .write_message(FlightParticles(vec![Particle {
+                    event_id: 0,
+                    origin: Vec3::ZERO,
+                    velocity: Vec3::ZERO,
+                    age: 0.0,
+                    lifetime: 10.0,
+                    size: 1.0,
+                    angle: 0.0,
+                    color,
+                    shape: Shape::Glow,
+                }]));
+            app.update();
+            for mut slot in app
+                .world_mut()
+                .query::<&mut ParticleSlot>()
+                .iter_mut(app.world_mut())
+            {
+                if let Some(particle) = &mut slot.active {
+                    particle.age = 5.0;
+                }
+            }
+            app.update();
+            let (material, flat, age, is_3d, is_2d) = app
+                .world_mut()
+                .query::<(&ParticleSlot, Option<&Mesh3d>, Option<&Mesh2d>)>()
+                .iter(app.world())
+                .find_map(|(slot, mesh_3d, mesh_2d)| {
+                    slot.active.as_ref().map(|particle| {
+                        (
+                            slot.material.clone(),
+                            slot.flat.clone(),
+                            particle.age,
+                            mesh_3d.is_some(),
+                            mesh_2d.is_some(),
+                        )
+                    })
+                })
+                .expect("The particle remains alive halfway through its fade");
+            assert_eq!(is_3d, mode == PlayerVisualMode::Models3d);
+            assert_eq!(is_2d, mode == PlayerVisualMode::Sprite2d);
+            let expected_alpha = color.alpha() * (1.0 - age / 10.0);
+            assert!((0.19..0.21).contains(&expected_alpha));
+            let material = app
+                .world()
+                .resource::<Assets<StandardMaterial>>()
+                .get(&material)
+                .unwrap();
+            let hdr = material.base_color.to_linear();
+            assert!((hdr.red - 2.5).abs() < 0.0001);
+            assert!((hdr.green - color.to_linear().green * 2.5).abs() < 0.0001);
+            assert!((hdr.alpha - expected_alpha).abs() < 0.0001);
+            assert!(!material.fog_enabled);
+            let flat = app
+                .world()
+                .resource::<Assets<ColorMaterial>>()
+                .get(&flat)
+                .unwrap();
+            assert_eq!(flat.color, color.with_alpha(expected_alpha));
         }
     }
     #[test]

@@ -105,6 +105,14 @@ class CandidateAssetGateTests(unittest.TestCase):
         self.assertTrue(any(fragment in error for error in result["errors"]), result)
         return result
 
+    def test_missing_skill_prop_is_rejected(self):
+        self.remove("cosmetics/standard/rocket.glb")
+        self.expect_failure("missing approved skill model")
+
+    def test_replaced_skill_prop_is_rejected(self):
+        self.write("cosmetics/standard/rocket.glb", (self.assets / "cosmetics/standard/trap.glb").read_bytes())
+        self.expect_failure("unreviewed skill model hash")
+
     def replace_actor_json(self, mutate):
         relative = "avatars/agnes.glb"
         data = (self.assets / relative).read_bytes()

@@ -12,6 +12,7 @@ client/assets/*
 !client/assets/bosses/
 !client/assets/minions/
 !client/assets/config/
+!client/assets/cosmetics/
 !client/assets/sprites/
 !client/assets/presentation2d/
 !client/assets/world2d/

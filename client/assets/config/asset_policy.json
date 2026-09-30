@@ -172,5 +172,17 @@
       "source": "art/verdant-confluence/library/tree_sage_elder.glb",
       "license": "CC-BY-4.0"
     }
+  },
+  "approved_skill_models": {
+    "cosmetics/standard/rocket.glb": {
+      "sha256": "9b8ecef314aa746463aecc7c986eca5c6fb3139733da4883acacfcf46c3a577a",
+      "source": "scripts/build_standard_skill_models.py",
+      "provenance": "original project-authored geometry"
+    },
+    "cosmetics/standard/trap.glb": {
+      "sha256": "4b4f72de7c0af8f8cbdf5f232e630f86e1c6684498640095de8b0ab92f1210a5",
+      "source": "scripts/build_standard_skill_models.py",
+      "provenance": "original project-authored geometry"
+    }
   }
 }

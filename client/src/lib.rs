@@ -1,4 +1,5 @@
 use bevy::{asset::AssetPlugin, prelude::*};
+mod skill_presentation;
 
 mod audio_settings;
 mod battlefield_atmosphere;

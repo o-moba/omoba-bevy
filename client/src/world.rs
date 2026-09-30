@@ -2,8 +2,9 @@ use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::ecs::system::SystemParam;
 use bevy::gltf::{Gltf, GltfLoaderSettings};
 use bevy::light::CascadeShadowConfigBuilder;
+use bevy::post_process::bloom::{Bloom, BloomCompositeMode, BloomPrefilter};
 use bevy::prelude::*;
-use bevy::render::view::Hdr;
+use bevy::render::view::{ColorGrading, ColorGradingGlobal, Hdr};
 use bevy::scene::SceneRoot;
 #[cfg(not(target_os = "android"))]
 use ekza_bevy_sdk::bevy::EkzaModelCatalog;
@@ -301,7 +302,9 @@ fn setup_scene(
         Transform::from_rotation(Quat::from_euler(EulerRot::YXZ, yaw_rad, -pitch_rad, 0.0));
     commands.spawn((
         DirectionalLight {
-            color: Color::srgb(1.0, 0.88, 0.72),
+            // Near-neutral daylight preserves the cool slate floor and the
+            // distinction between warm spell cores and cyan electricity.
+            color: Color::srgb(1.0, 0.98, 0.94),
             illuminance: lighting_settings
                 .illuminance
                 .clamp(MIN_LIGHT_ILLUMINANCE, MAX_LIGHT_ILLUMINANCE),
@@ -368,7 +371,27 @@ fn setup_main_camera(
             ..default()
         },
         Hdr,
-        Tonemapping::AgX,
+        Tonemapping::TonyMcMapface,
+        ColorGrading {
+            global: ColorGradingGlobal {
+                post_saturation: 1.08,
+                ..default()
+            },
+            ..default()
+        },
+        // Only HDR skill cores/rims feed the glow. Broad LDR floor and field
+        // fills stay readable; increasing global exposure would wash them out.
+        Bloom {
+            intensity: 0.12,
+            low_frequency_boost: 0.10,
+            high_pass_frequency: 0.75,
+            prefilter: BloomPrefilter {
+                threshold: 1.0,
+                threshold_softness: 0.15,
+            },
+            composite_mode: BloomCompositeMode::Additive,
+            ..default()
+        },
         DistanceFog {
             color: Color::srgb(0.32, 0.46, 0.46),
             falloff: FogFalloff::Linear {
@@ -728,6 +751,13 @@ mod tests {
         let mut app = camera_app(PlayerVisualMode::Sprite2d);
         assert_eq!(
             app.world_mut()
+                .query_filtered::<Entity, Or<(With<Hdr>, With<Bloom>, With<ColorGrading>)>>()
+                .iter(app.world())
+                .count(),
+            0
+        );
+        assert_eq!(
+            app.world_mut()
                 .query::<&Camera2d>()
                 .iter(app.world())
                 .count(),
@@ -770,6 +800,15 @@ mod tests {
     #[test]
     fn models3d_startup_is_mutually_exclusive() {
         let mut app = camera_app(PlayerVisualMode::Models3d);
+        let (bloom, tonemapping) = app
+            .world_mut()
+            .query_filtered::<(&Bloom, &Tonemapping), (With<MainCamera>, With<Hdr>)>()
+            .single(app.world())
+            .unwrap();
+        assert_eq!(*tonemapping, Tonemapping::TonyMcMapface);
+        assert!(bloom.prefilter.threshold >= 1.0);
+        assert!(bloom.intensity > 0.0 && bloom.intensity <= 0.15);
+        assert!(bloom.low_frequency_boost <= 0.15);
         assert_eq!(
             app.world_mut()
                 .query::<&Camera3d>()

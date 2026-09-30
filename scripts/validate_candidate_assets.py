@@ -172,12 +172,31 @@ def validate(asset_root, policy_path=POLICY):
                 continue
             if sha(path) != approved["sha256"]:
                 errors.append(f"unreviewed prop model hash: {relative}")
-        expected_models = set(actors) | environment_models | set(props)
+        skill_models = policy.get("approved_skill_models", {})
+        for relative, approved in skill_models.items():
+            path = safe_path(root, relative)
+            if approved.get("provenance") != "original project-authored geometry" or approved.get("source") != "scripts/build_standard_skill_models.py":
+                errors.append(f"missing skill prop provenance: {relative}")
+            if not path.is_file():
+                errors.append(f"missing approved skill model: {relative}")
+                continue
+            if sha(path) != approved["sha256"]:
+                errors.append(f"unreviewed skill model hash: {relative}")
+            model = glb_json(path)
+            if len(model.get("scenes", [])) != 1 or model.get("scene", 0) != 0:
+                errors.append(f"skill model must contain exactly Scene0: {relative}")
+            elif not model["scenes"][0].get("nodes") or not model.get("meshes"):
+                errors.append(f"empty skill model scene: {relative}")
+            for collection in ("buffers", "images"):
+                if any(entry.get("uri") and not entry["uri"].startswith("data:") for entry in model.get(collection, [])):
+                    errors.append(f"external skill model dependency: {relative}")
+        expected_models = set(actors) | environment_models | set(props) | set(skill_models)
         for relative in sorted(actual_models - expected_models):
             errors.append(f"unknown model: {relative}")
         checks = ["denied filenames and hashes across every packaged file", "reviewed model inventory and SHA-256",
                   "manifest references, previews and provenance", "embedded actor permissions", "reviewed original environment manifest",
-                  "reviewed original prop inventory, provenance and SHA-256"]
+                  "reviewed original prop inventory, provenance and SHA-256",
+                  "reviewed skill prop inventory, provenance, SHA-256 and embedded dependencies"]
     # JSON with unexpected object/array shapes must still return a closed gate.
     except (OSError, ValueError, KeyError, TypeError, AttributeError, struct.error) as error:
         errors.append(f"invalid or incomplete asset inventory: {error}")
