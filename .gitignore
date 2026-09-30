@@ -13,6 +13,9 @@ client/assets/*
 !client/assets/minions/
 !client/assets/config/
 !client/assets/cosmetics/
+!client/assets/weapons/
+client/assets/weapons/imported/
+client/assets/weapons/ekza-manifest.json
 !client/assets/sprites/
 !client/assets/presentation2d/
 !client/assets/world2d/
@@ -92,6 +95,10 @@ client/assets/avatars/passport-manifest.json
 
 # Contributor-facing combat cosmetics schema and examples.
 !docs/combat-cosmetics.md
+!docs/handheld-weapons.md
+!docs/profiles/
+docs/profiles/*
+!docs/profiles/handheld-glb-v1.json
 
 # Versioned map tuning and packaged reusable prop models.
 !shared/assets/maps/

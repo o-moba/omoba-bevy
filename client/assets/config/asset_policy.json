@@ -208,6 +208,21 @@
       "sha256": "dcbd67b296d5c13363e3edda27dcf8739f6344e9322d8c909190ff345e3e6b93",
       "source": "scripts/build_roster_skill_models.py",
       "provenance": "original project-authored geometry"
+    },
+    "weapons/dawn-scepter.glb": {
+      "sha256": "2d7ef62704dfd39d3b17ed3b7d7e01064978ed3d13ef06e3d930b028dcb000cb",
+      "source": "scripts/build_handheld_models.py",
+      "provenance": "original project-authored geometry"
+    },
+    "weapons/forge-sword.glb": {
+      "sha256": "a3ce6addf6d75faebd3de130e87031bf85231f8e1a3124dd3d7dc4d9de1a2162",
+      "source": "scripts/build_handheld_models.py",
+      "provenance": "original project-authored geometry"
+    },
+    "weapons/forge-hammer.glb": {
+      "sha256": "cb7d098f277b3016e6472f85c1f9178368a0eaa52a811c481a9ffc445622f659",
+      "source": "scripts/build_handheld_models.py",
+      "provenance": "original project-authored geometry"
     }
   }
 }

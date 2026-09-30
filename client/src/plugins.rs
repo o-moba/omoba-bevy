@@ -132,6 +132,7 @@ impl PluginGroup for PresentationPlugins {
             .add(ModelScalePlugin)
             .add(CombatVisualsPlugin)
             .add(crate::skill_presentation::SkillPresentationPlugin)
+            .add(crate::held_weapons::HeldWeaponsPlugin)
             .add(CombatFeedbackPlugin)
             .add(GameVfxPlugin)
             .add(ReactionVisualsPlugin)

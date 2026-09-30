@@ -175,7 +175,7 @@ def validate(asset_root, policy_path=POLICY):
         skill_models = policy.get("approved_skill_models", {})
         for relative, approved in skill_models.items():
             path = safe_path(root, relative)
-            if approved.get("provenance") != "original project-authored geometry" or approved.get("source") not in {"scripts/build_standard_skill_models.py", "scripts/build_roster_skill_models.py"}:
+            if approved.get("provenance") != "original project-authored geometry" or approved.get("source") not in {"scripts/build_standard_skill_models.py", "scripts/build_roster_skill_models.py", "scripts/build_handheld_models.py"}:
                 errors.append(f"missing skill prop provenance: {relative}")
             if not path.is_file():
                 errors.append(f"missing approved skill model: {relative}")

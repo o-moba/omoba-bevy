@@ -83,6 +83,7 @@ wire_enums! {
     crate::social::SocialCommand => Strict [Subscribe, Chat, Reaction],
     crate::match_service::MatchPreference => Strict [Quick, HumansOnly, BotPractice],
     crate::supporter::AuraStyle => Strict [Solar, Lunar, Verdant],
+    crate::handheld::HandheldSelection => Strict [ClassDefault, Unequipped, Item],
     crate::career::FriendAction => Strict [Request, Accept, Reject, Cancel, Remove],
     crate::career::CareerAction => Strict [FindMatch, SupporterStatus, EquipSupporterAura, Social, History, Detail, Friends, Friend, Profile, LookupPlayer, Rename, CancelQueue],
     crate::protocol::wire::TargetKind => Strict [Player, Minion, Structure, Neutral],

@@ -4,6 +4,14 @@ All notable changes to this repository should be documented in this file.
 
 The canonical repository version lives in `Cargo.toml` under `[workspace.package].version` and follows SemVer.
 
+## [Unreleased]
+
+### Handheld weapon pilot
+
+- Add original Blender sword, hammer and scepter props attached to semantic VRM hand bones, independently of class and avatar. Warrior defaults to the sword; Combat Test supports replicated equip/unequip choices.
+- Import approved free static props through the existing Ekza SDK with bounded downloads, SHA-256 verification and embedded grip metadata. Include the `handheld-glb-v1` profile and registry builder adapter; public Space publication and paid ownership remain pending.
+- Fix sandbox avatar replacement recreating the previous model and moving the camera between snapshots. Verify the Warrior pilot on Agnes and Orion, including an SDK-imported scepter.
+
 ## [0.31.0] - 2026-09-29
 
 ### Shared combat in Offline Practice

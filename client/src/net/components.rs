@@ -349,3 +349,6 @@ mod tests {
         assert_eq!(decoded.ranks, [1; 4]);
     }
 }
+
+#[derive(Component, Clone, Debug, Default)]
+pub struct PlayerHandheld(pub shared::handheld::HandheldSelection);

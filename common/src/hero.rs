@@ -103,6 +103,7 @@ pub struct HeroIdentity {
     pub sprite_character: Option<String>,
     /// Cosmetic only, authorized from persisted profile grants.
     pub supporter_aura: Option<shared::supporter::AuraStyle>,
+    pub handheld: shared::handheld::HandheldSelection,
 }
 
 /// Authoritative hero core: what the simulation reads and writes.
@@ -130,6 +131,7 @@ impl Hero {
     pub fn new(id: u64, spawn: Vec3f) -> Self {
         Self {
             identity: HeroIdentity {
+                handheld: Default::default(),
                 id,
                 is_bot: false,
                 team: Team::Green,

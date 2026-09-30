@@ -10,7 +10,7 @@ import time
 from capture_showcase import base_env, free_address, run_until_exit, sha256, source_identity, stop
 
 
-def capture(hero, client, server, assets, output, timeout=135, roster=False):
+def capture(hero, client, server, assets, output, timeout=135, roster=False, handhelds=False, sdk_weapon=None):
     output.mkdir(parents=True)
     children = []
     result = dict(hero=hero, source=source_identity(), client_sha256=sha256(client),
@@ -31,8 +31,12 @@ def capture(hero, client, server, assets, output, timeout=135, roster=False):
                     raise RuntimeError("Local server did not start")
                 time.sleep(.05)
             env.update(OMOBA_STANDARD_QA_DIR=str(output), OMOBA_STANDARD_QA_CLASS=hero)
-            if roster:
+            if roster or handhelds:
                 env["OMOBA_ROSTER_SKILLS_QA"] = "1"
+            if handhelds:
+                env["OMOBA_HANDHELD_QA"] = "1"
+                if sdk_weapon:
+                    env["OMOBA_HANDHELD_QA_IMPORT"] = sdk_weapon
             with (output / "client.log").open("w") as log:
                 process = subprocess.Popen([str(client)], cwd=isolated, env=env,
                                            stdout=log, stderr=subprocess.STDOUT)
@@ -63,6 +67,7 @@ def main():
     parser.add_argument("--output", type=Path, required=True)
     roster_heroes = ["chainkeeper", "frostguard", "orbitwright", "cinderforge", "edgeweaver", "stormfist", "veilstalker", "emberveil", "riftshot", "warrior", "mage", "ranger", "cleric", "warden"]
     parser.add_argument("--hero", action="append", choices=["dawnweaver", "wildspark"] + roster_heroes)
+    parser.add_argument("--handhelds", action="store_true", help="Warrior: equip sword/hammer/scepter, run, attack, swap avatar, unequip")
     parser.add_argument("--roster", action="store_true", help="Capture all remaining classes, each Q/W/E/R accepted by live server")
     parser.add_argument("--timeout", type=float, default=135,
                         help="Per-client deadline in seconds (default: 135)")
@@ -73,10 +78,10 @@ def main():
                                     (args.client_bin, args.server_bin, args.assets, args.output)]
     if not client.is_file() or not server.is_file() or not assets.is_dir():
         parser.error("Binaries and assets must exist")
-    heroes = args.hero or (roster_heroes if args.roster else ["dawnweaver", "wildspark"])
+    heroes = ["warrior"] if args.handhelds else args.hero or (roster_heroes if args.roster else ["dawnweaver", "wildspark"])
     if any((output / hero).exists() for hero in heroes):
         parser.error("Use a new output directory to preserve evidence")
-    results = [capture(hero, client, server, assets, output / hero, args.timeout, args.roster or hero not in ["dawnweaver", "wildspark"]) for hero in heroes]
+    results = [capture(hero, client, server, assets, output / hero, args.timeout, args.roster or hero not in ["dawnweaver", "wildspark"], args.handhelds) for hero in heroes]
     print(json.dumps(results, indent=2))
     raise SystemExit(0 if all(r["pass"] for r in results) else 1)
 

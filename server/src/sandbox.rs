@@ -105,6 +105,7 @@ impl SandboxRuntime {
             respawns: !p.hero.identity.is_bot,
         };
         p.hero.identity.hero_class = c.hero;
+        p.hero.identity.handheld = c.handheld.clone();
         if changed_hero || reset {
             let sequence = p.hero.skills.request_id;
             p.hero.skills = crate::skills::HeroSkills::default();
@@ -243,6 +244,15 @@ fn validate_position(position: [f32; 2]) -> Result<(), String> {
     Ok(())
 }
 fn validate_actor(c: &ActorConfig) -> Result<(), String> {
+    if let shared::handheld::HandheldSelection::Item(id) = &c.handheld {
+        if !omoba_passport::weapons::catalog()
+            .items
+            .iter()
+            .any(|item| &item.id == id)
+        {
+            return Err("Unknown handheld item; install its approved rendition first".into());
+        }
+    }
     if c.avatar.as_ref().is_some_and(|a| {
         omoba_passport::avatars::avatar_definition(a).is_none_or(|d| d.passport.is_some())
     }) {

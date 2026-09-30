@@ -127,6 +127,7 @@ fn assert_view(rt: &ServerRuntime, addr: SocketAddr, now: Instant, step: &str, e
         action_kind: hero.last_action.kind,
         action_slot: hero.last_action.slot,
         action_yaw: hero.last_action.yaw,
+        handheld: hero.identity.handheld.clone(),
     };
     let view = rt.player_view(addr, now);
     assert_eq!(

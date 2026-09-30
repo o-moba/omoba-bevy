@@ -61,8 +61,9 @@ The Blender sources and deterministic exporter are in
 Ray preparation can arrive after the action and holds until the real beam.
 Warning disappearance never fabricates a release. Repeated snapshots do not
 restart the clip, and death/respawn take priority. Additional phase types,
-body masks, playback-rate alignment, hand sockets and
-weapon grips are still TODO. Teleport/jump/fly movement policies and a generic
+body masks and playback-rate alignment are still TODO. Semantic hand sockets
+now have a [Warrior handheld pilot](handheld-weapons.md); finger posing, two-handed
+grips and IK remain open. Teleport/jump/fly movement policies and a generic
 timeline editor are not implemented. Normal animation changes now blend over
 120 ms; death, round/model changes and sandbox previews cut immediately.
 
@@ -139,8 +140,10 @@ skills target the caster in this harness; this verifies their accepted cast,
 not an ally-to-ally travel sequence. It does not certify recast combos,
 physical mobile performance, all skins visually, or manual multiplayer play.
 
-Hand weapons, grip/IK corrections, dedicated bow/kick clips and a generic
-server-driven jump/flight timeline remain separate tasks. No synthetic flight
+The [handheld pilot](handheld-weapons.md) adds sword/hammer/scepter props, semantic
+VRM sockets and a shared built-in/Ekza SDK import contract. Grip/IK corrections,
+dedicated bow/kick clips and a generic server-driven jump/flight timeline remain
+separate tasks. No synthetic flight
 or new cast delay is added to the currently instantaneous movement mechanics.
 
 ### Facing the accepted attack

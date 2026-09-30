@@ -7,6 +7,7 @@ mod binding;
 mod embedded;
 mod motion;
 mod retarget;
+mod sockets;
 
 #[cfg(feature = "qa")]
 pub(crate) use binding::RuntimeHumanoidBindingError;
@@ -34,6 +35,7 @@ struct RuntimeRig {
     clips: RuntimeHumanoidClips,
     rig: HumanoidRig,
     animated_nodes: Vec<usize>,
+    hand_sockets: HashMap<String, (usize, Transform)>,
 }
 
 /// Cache identity is the loaded model asset, never a mutable display name/slug.
@@ -96,11 +98,28 @@ impl HumanoidRuntimeLibrary {
             model.id(),
             RuntimeRig {
                 clips: result.clone(),
+                hand_sockets: ["leftHand", "rightHand"]
+                    .into_iter()
+                    .filter_map(|hand| {
+                        Some((
+                            hand.to_owned(),
+                            (*rig.bones.get(hand)?, sockets::grip_frame(&rig, hand)?),
+                        ))
+                    })
+                    .collect(),
                 rig,
                 animated_nodes,
             },
         );
         Ok(result)
+    }
+
+    pub(crate) fn hand_socket(
+        &self,
+        model: AssetId<Gltf>,
+        hand: &str,
+    ) -> Option<(usize, Transform)> {
+        self.models.get(&model)?.hand_sockets.get(hand).copied()
     }
 
     /// Preserve an explicitly selected source GLTF clip when the scene is now

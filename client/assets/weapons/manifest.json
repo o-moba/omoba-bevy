@@ -1,0 +1,62 @@
+{
+  "schema_version": 1,
+  "items": [
+    {
+      "id": "forge-sword",
+      "name": "Forge Sword",
+      "model": "weapons/forge-sword.glb",
+      "grip": {
+        "bone": "rightHand",
+        "offset": [
+          0,
+          0,
+          0
+        ],
+        "rotation_degrees": [
+          0,
+          0,
+          0
+        ],
+        "scale": 1
+      }
+    },
+    {
+      "id": "forge-hammer",
+      "name": "Forge Hammer",
+      "model": "weapons/forge-hammer.glb",
+      "grip": {
+        "bone": "rightHand",
+        "offset": [
+          0,
+          0,
+          0
+        ],
+        "rotation_degrees": [
+          0,
+          0,
+          0
+        ],
+        "scale": 1
+      }
+    },
+    {
+      "id": "dawn-scepter",
+      "name": "Dawn Scepter",
+      "model": "weapons/dawn-scepter.glb",
+      "grip": {
+        "bone": "rightHand",
+        "offset": [
+          0,
+          0,
+          0
+        ],
+        "rotation_degrees": [
+          0,
+          0,
+          0
+        ],
+        "scale": 1
+      }
+    }
+  ]
+}

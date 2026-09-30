@@ -5,7 +5,7 @@ use bevy::ecs::schedule::ScheduleConfigs;
 use bevy::ecs::system::ScheduleSystem;
 use bevy::prelude::*;
 use bevy::scene::SceneRoot;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 use shared::protocol::SnapshotMeta;
 use shared::wire::{MinionState, NeutralState, PlayerState, ProjectileState, StructureState};
@@ -55,25 +55,27 @@ pub(in crate::net) fn respawn_players_with_new_store_models(
     }
 }
 
-// Replace the loaded scene as well as its cosmetic component when a developer
-// changes appearance. The ordinary next snapshot reconstructs the actor.
+// Replace appearance in the same update that applies the new snapshot. Leaving
+// a gap lets the legacy world fallback recreate an old scene at the team spawn.
 pub(in crate::net) fn respawn_sandbox_models(
     mut commands: Commands,
-    game: Res<GameStateSnapshot>,
+    pending: Res<PendingServerSnapshotFrame>,
     mut state: ResMut<NetworkState>,
     players: Query<(Entity, &NetworkPlayerId, &NetworkAvatar)>,
-    mut seen: Local<HashMap<u64, Option<String>>>,
 ) {
-    if game.sandbox.is_none() {
-        seen.clear();
+    let Some(frame) = pending
+        .frame
+        .as_ref()
+        .filter(|frame| frame.sandbox.is_some())
+    else {
         return;
-    }
-    seen.retain(|id, _| players.iter().any(|(_, current, _)| current.0 == *id));
+    };
     for (entity, id, avatar) in &players {
-        let changed = seen
-            .insert(id.0, avatar.0.clone())
-            .is_some_and(|old| old != avatar.0);
-        if changed {
+        if frame
+            .players
+            .iter()
+            .any(|p| p.id == id.0 && p.avatar != avatar.0)
+        {
             state.remote_players.remove(&id.0);
             commands.entity(entity).despawn();
         }
@@ -400,6 +402,7 @@ fn local_hero_components(state: &PlayerState, your_id: u64) -> impl Bundle {
             NetworkSpriteCharacter(state.sprite_character.clone()),
             PlayerCosmeticAction::from(state),
             PlayerActionFacing::from(state),
+            PlayerHandheld(state.handheld.clone()),
             NetworkHeroClass(state.hero_class),
             PlayerLoadout(state.loadout.clone()),
             crate::supporter::NetworkSupporterAura(state.supporter_aura),
@@ -513,9 +516,10 @@ fn apply_snapshot_local_player(
                     PlayerUtility::from(local_player_state),
                 ),
             ));
-            commands
-                .entity(local_entity)
-                .insert(PlayerActionFacing::from(local_player_state));
+            commands.entity(local_entity).insert((
+                PlayerActionFacing::from(local_player_state),
+                PlayerHandheld(local_player_state.handheld.clone()),
+            ));
             let next_action = PlayerCosmeticAction::from(local_player_state);
             if action_query.get(local_entity).ok().flatten().copied() != Some(next_action) {
                 commands.entity(local_entity).insert(next_action);
@@ -724,7 +728,10 @@ fn apply_snapshot_remote_players(
                 NetworkSpriteCharacter(player.sprite_character.clone()),
                 NetworkHeroClass(player.hero_class),
                 PlayerLoadout(player.loadout.clone()),
-                PlayerActionFacing::from(player),
+                (
+                    PlayerActionFacing::from(player),
+                    PlayerHandheld(player.handheld.clone()),
+                ),
                 crate::supporter::NetworkSupporterAura(player.supporter_aura),
                 player_state_to_combat_stats(player),
                 player_state_to_progression(player),
@@ -765,7 +772,10 @@ fn apply_snapshot_remote_players(
             (
                 NetworkHeroClass(player.hero_class),
                 PlayerLoadout(player.loadout.clone()),
-                PlayerActionFacing::from(player),
+                (
+                    PlayerActionFacing::from(player),
+                    PlayerHandheld(player.handheld.clone()),
+                ),
             ),
             player_state_to_combat_stats(player),
             player_state_to_progression(player),
@@ -1440,6 +1450,66 @@ mod tests {
                 ((tick - 1) as u32, 0, tick as u32)
             );
             assert_eq!(own.player_id, game.your_id);
+        }
+    }
+
+    #[test]
+    fn sandbox_avatar_swap_replaces_root_within_snapshot_without_fallback_gap() {
+        let (mut app, incoming) = snapshot_app();
+        app.add_systems(
+            Update,
+            respawn_sandbox_models
+                .after(ClientNetPipeline::IngestSnapshot)
+                .before(ClientNetPipeline::ApplySnapshot),
+        );
+        let mut previous = None;
+        for tick in 1..=2 {
+            let mut snapshot =
+                serde_json::to_value(admission_snapshot(1, tick, true, None)).unwrap();
+            let mut hero = snapshot["players"][0].clone();
+            // Unknown appearance IDs use the primitive test model; native QA
+            // separately checks that shipped avatar swaps bind the actual GLTF.
+            hero["avatar"] = json!(format!("test-appearance-{tick}"));
+            snapshot["players"] = json!([hero]);
+            snapshot["sandbox"] = serde_json::to_value(shared::sandbox::SandboxSnapshot {
+                config: default(),
+                ack: None,
+                last_request_id: tick,
+                actors: vec![],
+                analytics: default(),
+                simulation_secs: tick as f64,
+                frame: tick,
+            })
+            .unwrap();
+            for field in ["structures", "minions", "neutrals", "projectiles"] {
+                snapshot[field] = json!([]);
+            }
+            incoming
+                .send(serde_json::from_value(snapshot).unwrap())
+                .unwrap();
+            app.update();
+            let (entity, id, avatar) = app
+                .world_mut()
+                .query_filtered::<(Entity, &NetworkPlayerId, &NetworkAvatar), With<Player>>()
+                .single(app.world())
+                .map(|(e, id, a)| (e, id.0, a.0.clone()))
+                .unwrap();
+            assert_eq!(id, 1);
+            assert_eq!(avatar, Some(format!("test-appearance-{tick}")));
+            if let Some(old) = previous {
+                assert_ne!(old, entity);
+                assert!(app.world().get_entity(old).is_err());
+            }
+            previous = Some(entity);
+            // Between packets, keep this authoritative root and its children.
+            app.update();
+            assert_eq!(
+                app.world_mut()
+                    .query_filtered::<Entity, With<Player>>()
+                    .single(app.world())
+                    .unwrap(),
+                entity
+            );
         }
     }
 

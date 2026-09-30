@@ -181,6 +181,7 @@ impl Plugin for NetworkingPlugin {
                     respawn_players_with_new_store_models,
                     respawn_sandbox_models,
                 )
+                    .after(ClientNetPipeline::IngestSnapshot)
                     .before(ClientNetPipeline::ApplySnapshot),
             )
             .add_systems(

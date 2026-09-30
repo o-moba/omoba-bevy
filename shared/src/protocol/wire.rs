@@ -328,6 +328,11 @@ pub struct PlayerState {
     /// Facing of the last accepted action, independent of later movement yaw.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub action_yaw: Option<f32>,
+    #[serde(
+        default,
+        skip_serializing_if = "crate::handheld::HandheldSelection::is_default"
+    )]
+    pub handheld: crate::handheld::HandheldSelection,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -727,6 +732,7 @@ mod tests {
                 action_kind: PlayerActionKind::Cast,
                 action_slot: 3,
                 action_yaw: None,
+                handheld: Default::default(),
             }],
             scoreboard: None,
             prematch: None,

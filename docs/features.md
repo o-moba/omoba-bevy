@@ -1,5 +1,11 @@
 # Feature Inventory
 
+## Handheld weapon pilot (unreleased)
+
+Warrior uses a built-in sword. Combat Test can equip a sword, hammer, scepter or installed Ekza handheld on any class, or leave its hands empty. Props follow semantic VRM hand bones through idle, running and attacks; choices replicate to other actors and persist in sandbox presets. They do not alter damage or skills.
+
+The existing Ekza SDK imports explicitly approved free `handheld-glb-v1` renditions with SHA-256/size checks and grip metadata. Native verification covers Agnes, Orion and an independently equipped opponent using a local HTTP catalog. Public Space profile registration/publication, paid ownership, production equipment UI, finger posing and two-handed weapons remain future work. See [the contract](handheld-weapons.md) and [verification results](progress/2026-10-01-handheld-pilot.md).
+
 ## Full-roster Offline Practice (0.31.0)
 
 Home → Offline Practice accepts all 16 classes without a server, account, matchmaking or gameplay socket. The internal `common` crate owns the same authoritative combat used online: all skills/passives, targeting, cooldowns/resources, projectiles, minions, towers, neutrals and bosses. Practice starts at level 6 with normal skill ranks and a 5v5 lane-bot roster. Debug tools can clear/restore bots, spawn a nearby stationary dummy, configure a same-class duel, or toggle god mode and speed. Snapshots use the normal HUD and effects; leaving clears local combat and restores the saved online address. Practice produces no saved career result or account rewards.

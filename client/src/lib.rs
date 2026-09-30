@@ -21,6 +21,7 @@ mod game_audio;
 mod game_state;
 mod game_vfx;
 mod gamepad;
+mod held_weapons;
 mod help_overlay;
 mod hud_layout;
 mod humanoid;
