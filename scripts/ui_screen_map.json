@@ -113,7 +113,7 @@
         "OMOBA_OFFLINE_SMOKE_DIR": "{out}",
         "GAME_SERVER_ADDR": "127.0.0.1:49999"
       },
-      "note": "Offline practice from Home: hero picker, match, target, game menu, settings. Logical size without a scale override, so HiDPI displays give 2x frames; its pass flag also checks the saved server endpoint.",
+      "note": "Offline practice from Home: hero picker, match, target, game menu, practice controls, return home and re-entry as Wildspark. Logical size without a scale override, so HiDPI displays give 2x frames; its pass flag also checks the saved server endpoint.",
       "sources": [
         "client/src/qa/offline_qa.rs"
       ]
@@ -778,27 +778,15 @@
       "source": "client/src/pause_menu.rs"
     },
     {
-      "id": "offline-settings-top",
-      "title": "Offline · settings (top)",
+      "id": "offline-practice-controls",
+      "title": "Offline · practice controls",
       "run": "offline",
-      "frame": "06-settings-top.png",
+      "frame": "06-practice-controls.png",
       "profiles": [
         "desktop",
         "phone"
       ],
-      "route": "Game menu → Settings",
-      "source": "client/src/pause_menu.rs"
-    },
-    {
-      "id": "offline-settings-bottom",
-      "title": "Offline · settings (bottom)",
-      "run": "offline",
-      "frame": "07-settings-bottom.png",
-      "profiles": [
-        "desktop",
-        "phone"
-      ],
-      "route": "Settings, scrolled",
+      "route": "Game menu → Practice controls",
       "source": "client/src/pause_menu.rs"
     },
     {
@@ -812,6 +800,18 @@
       ],
       "route": "Game menu → Exit to home",
       "source": "client/src/frontend/home.rs"
+    },
+    {
+      "id": "offline-reentered-wildspark",
+      "title": "Offline · re-enter as Wildspark",
+      "run": "offline",
+      "frame": "09-reentered-wildspark.png",
+      "profiles": [
+        "desktop",
+        "phone"
+      ],
+      "route": "Home → Offline practice → Wildspark → start",
+      "source": "client/src/match_hud.rs"
     },
     {
       "id": "party-stage-solo",
