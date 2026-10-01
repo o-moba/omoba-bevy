@@ -1,5 +1,9 @@
 # Feature Inventory
 
+## Local SDK Twenty collection (unreleased)
+
+A developer launcher serves 20 additional curated avatars through the real Ekza SDK, with persistent downloads, existing humanoid animation retargeting and independent server admission. Generated models remain separate from bundled game assets. This is a local catalog, not public Space publication. See [build/play instructions](../assets-src/sdk-avatar-pack/README.md) and [verification status](progress/2026-10-01-sdk-avatar-pack.md).
+
 ## Handheld weapon pilot (unreleased)
 
 Warrior uses a built-in sword. Combat Test can equip a sword, hammer, scepter or installed Ekza handheld on any class, or leave its hands empty. Props follow semantic VRM hand bones through idle, running and attacks; choices replicate to other actors and persist in sandbox presets. They do not alter damage or skills.

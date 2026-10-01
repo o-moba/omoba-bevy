@@ -28,6 +28,7 @@ mod offline_qa;
 mod record_qa;
 mod result_qa;
 mod roster_qa;
+mod sdk_pack_qa;
 mod social_qa;
 mod standard_kits_qa;
 mod supporter;
@@ -47,6 +48,7 @@ impl PluginGroup for QaPlugins {
             .add(frontend_qa::FrontendQaPlugin)
             .add(visual_qa::VisualQaPlugin)
             .add(social_qa::SocialQaPlugin)
+            .add(sdk_pack_qa::SdkPackQaPlugin)
             .add(supporter::SupporterQaPlugin)
             .add(team_vision_qa::TeamVisionQaPlugin)
             .add(audio_qa::AudioQaPlugin)

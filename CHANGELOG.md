@@ -6,6 +6,11 @@ The canonical repository version lives in `Cargo.toml` under `[workspace.package
 
 ## [Unreleased]
 
+### Local SDK avatar collection
+
+- Add a reproducible 20-avatar developer catalog from pinned Open Source Avatars sources, using the existing Ekza SDK download/store and humanoid rendition pipeline. Keep model binaries out of the shipped avatar manifest.
+- Add a local play launcher, cold-install validator, real-server admission checks and an opt-in native preview/gameplay capture runner. Public Space publication remains separate; see the session note for verification status.
+
 ### Handheld weapon pilot
 
 - Add original Blender sword, hammer and scepter props attached to semantic VRM hand bones, independently of class and avatar. Warrior defaults to the sword; Combat Test supports replicated equip/unequip choices.
