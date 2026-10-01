@@ -2,23 +2,27 @@
 
 This is an operator/creator runbook, not a deployment or publication performed by the local collection task. The local catalog is only a consumer-path proof. Production Studio must assign real avatar IDs and manage revisions, processing and game approval; do not upload the developer `catalog.json` as the production catalog.
 
-## Observed public service state
+## Observed public service state — 2026-10-01
 
-Read-only checks on 2026-10-01 against `https://registry.ekza.io` returned:
+Studio is now live at **https://registry.ekza.io/studio**. Health, Studio status,
+profiles and the public v2 catalogue return 200. The first original **EYEWizard**
+has completed authenticated upload, fresh Mac Blender conversion, curator
+publication, Omoba GLB preparation and project approval. The actual Rust SDK cold
+install and real UDP server admission/withdrawal/reapproval passed. Native visual
+acceptance is pending an unlocked Mac; phones and the remaining nineteen are
+not certified. See the maintained
+[live evidence](https://github.com/ekza-space/docs/blob/main/docs/developers/demo-readiness.md)
+and [deployment controls](https://github.com/ekza-space/ekza-registry/blob/main/deploy/hosted-pilot.md).
 
-| Endpoint | HTTP |
-| --- | --- |
-| `/healthz` | 200 |
-| `/v1/studio/status` | 404 |
-| `/v1/profiles` | 404 |
-| `/v2/avatars?project=omoba&platform=desktop&profile=humanoid-glb-v1` | 404 |
-| `/studio` | 404 |
-
-The existing registry is reachable, but these checks do not establish a deployed account-first Studio service. A separate public Studio frontend origin has not been verified. The routes below are relative to the operator's deployed Studio origin, not a claim that `/studio` exists on the API origin today.
+The twenty-model local developer catalogue remains separate from this one hosted
+publication. The new pipeline currently stores bytes in Supabase Storage; paid
+IPFS publication is still pending. Several original R3 files have unaligned JSON
+chunks and require a documented re-export before the strict Studio validator
+will accept them; preserve source hashes/provenance rather than relaxing validation.
 
 ## 1. Operator: make the real pipeline available
 
-Use the Registry release procedure in the sibling repository's `docs/stabilization-release.md`. This requires a separately approved deployment, including its database migration and configuration steps.
+Use the Registry release procedure in the sibling repository's `docs/stabilization-release.md`. The first deployment is complete; use the live runbook above for maintenance and rollback.
 
 - Release compatible Registry API, Studio frontend, Supabase migrations/Auth/private Storage, and the trusted worker. Public upload ingress must accept representative VRMs, not only small test requests.
 - Configure the isolated processor image and read-only builder assets. Set the Omoba rendition builder to `scripts/ekza_build_rendition.py` from the intended Omoba revision. Do not use the single-model cached rehearsal converter for this twenty-model batch.
@@ -75,4 +79,4 @@ Once this live pilot passes, repeat publication/preparation/approval for the rem
 
 ## Current proof boundary
 
-The local twenty-model task verified rendition construction, content hashes, actual SDK cold installs and authoritative server admission for all twenty. Native visual verification stopped because the Mac was locked. Neither public Studio publication nor iPhone/Android visual/performance acceptance was completed by that task.
+The local twenty-model task verified rendition construction, content hashes, actual SDK cold installs and authoritative server admission for all twenty. Native visual verification stopped because the Mac was locked. That earlier task did not perform hosted publication. The 2026-10-01 live pilot now proves the hosted EYEWizard data/admission lifecycle; iPhone/Android visual/performance acceptance remains pending.
