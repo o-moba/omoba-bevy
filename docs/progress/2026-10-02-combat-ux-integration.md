@@ -21,7 +21,9 @@ validation use existing PR CI: another session holds the primary checkout and
 its shared build caches. No third Cargo cache is created.
 
 - [x] Audit main for prior integration and resolve overlaps.
-- [ ] Pass integrated-revision PR checks and merge via PR.
+- [x] Publish [integration PR #68](https://github.com/o-moba/omoba-bevy/pull/68).
+  Its checks and merge record are the authoritative delivery status; merge is
+  gated on green CI. Local format plus 155 script and 44 iOS tooling tests pass.
 - [ ] Physical iPad/iPhone touch and human team-match playtest (follow-up).
 
 Earlier native tablet captures in the original task document the pre-integration
