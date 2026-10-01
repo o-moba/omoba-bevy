@@ -778,28 +778,28 @@
       "source": "client/src/pause_menu.rs"
     },
     {
-      "id": "offline-settings-top",
-      "title": "Offline · settings (top)",
+      "id": "offline-practice-controls",
+      "title": "Offline · practice controls",
       "run": "offline",
-      "frame": "06-settings-top.png",
+      "frame": "06-practice-controls.png",
       "profiles": [
         "desktop",
         "phone"
       ],
-      "route": "Game menu → Settings",
-      "source": "client/src/pause_menu.rs"
+      "route": "Game menu → Practice",
+      "source": "client/src/debug/tools_page.rs"
     },
     {
-      "id": "offline-settings-bottom",
-      "title": "Offline · settings (bottom)",
+      "id": "offline-reentered-wildspark",
+      "title": "Offline · reentered Wildspark",
       "run": "offline",
-      "frame": "07-settings-bottom.png",
+      "frame": "09-reentered-wildspark.png",
       "profiles": [
         "desktop",
         "phone"
       ],
-      "route": "Settings, scrolled",
-      "source": "client/src/pause_menu.rs"
+      "route": "Home → Offline Practice → Wildspark",
+      "source": "client/src/net/offline.rs"
     },
     {
       "id": "offline-return-home",

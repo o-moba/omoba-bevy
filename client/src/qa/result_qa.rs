@@ -163,7 +163,9 @@ const YOUR_ID: u64 = 11;
 
 fn live_row(team: shared::map::Team) -> LiveScoreboard {
     LiveScoreboard {
+        kills: Vec::new(),
         players: vec![LiveScorePlayer {
+            avatar: None,
             player_id: YOUR_ID,
             nickname: "Guest".into(), // i18n-allow: fixture nickname
             team,

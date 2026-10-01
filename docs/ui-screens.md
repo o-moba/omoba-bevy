@@ -117,8 +117,8 @@ Harness: `client/src/qa/offline_qa.rs`; server: none; env: `OMOBA_OFFLINE_SMOKE_
 | Offline · practice match | `03-practice.png` | desktop, phone | Offline practice → start | `client/src/match_hud.rs` |  |
 | Offline · attacked target | `04-attacked-target.png` | desktop, phone | Attack the practice dummy | `client/src/edge_hud.rs` |  |
 | Offline · game menu | `05-game-menu.png` | desktop, phone | Escape in practice | `client/src/pause_menu.rs` |  |
-| Offline · settings (top) | `06-settings-top.png` | desktop, phone | Game menu → Settings | `client/src/pause_menu.rs` |  |
-| Offline · settings (bottom) | `07-settings-bottom.png` | desktop, phone | Settings, scrolled | `client/src/pause_menu.rs` |  |
+| Offline · practice controls | `06-practice-controls.png` | desktop, phone | Game menu → Practice | `client/src/debug/tools_page.rs` |  |
+| Offline · reentered Wildspark | `09-reentered-wildspark.png` | desktop, phone | Home → Offline Practice → Wildspark | `client/src/net/offline.rs` |  |
 | Offline · back home | `08-return-home.png` | desktop, phone | Game menu → Exit to home | `client/src/frontend/home.rs` |  |
 
 ## 09-party-stage · `party-stage`

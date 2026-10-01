@@ -85,7 +85,7 @@ impl CombatHost<'_> {
                 self.bots.sandbox = true;
                 println!("Practice sandbox: bots cleared by player {requester}");
             }
-            PracticeCommand::SpawnDummy => {
+            PracticeCommand::SpawnDummy | PracticeCommand::SpawnMovingDummy => {
                 if !matches!(self.world.game_state, GameState::Running) {
                     return;
                 }
@@ -93,7 +93,12 @@ impl CombatHost<'_> {
                     .world
                     .players
                     .iter()
-                    .filter(|(a, _)| matches!(self.bots.kind(**a), Some(BotKind::Dummy { .. })))
+                    .filter(|(a, _)| {
+                        matches!(
+                            self.bots.kind(**a),
+                            Some(BotKind::Dummy { .. } | BotKind::MovingDummy { .. })
+                        )
+                    })
                     .map(|(a, p)| (p.hero.identity.id, *a))
                     .collect();
                 dummies.sort_unstable();
@@ -109,7 +114,15 @@ impl CombatHost<'_> {
                 let Some(bot) = self.spawn_bot(
                     opposite_team(team),
                     Some(HeroClass::Warrior),
-                    BotKind::Dummy { anchor },
+                    if command == PracticeCommand::SpawnMovingDummy {
+                        BotKind::MovingDummy {
+                            anchor,
+                            started: now,
+                            respawning: false,
+                        }
+                    } else {
+                        BotKind::Dummy { anchor }
+                    },
                     now,
                 ) else {
                     return;

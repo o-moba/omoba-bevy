@@ -59,7 +59,8 @@ pub(super) fn handle_player_input(
 ) {
     let (_touches, mobile) = touch_input;
     let (mut pending_cast, mut basic) = orders;
-    if mobile.as_ref().is_some_and(|mobile| mobile.enabled) {
+    let minimap_target = minimap_nav.as_ref().and_then(|nav| nav.movement_target);
+    if mobile.as_ref().is_some_and(|mobile| mobile.enabled) && minimap_target.is_none() {
         return;
     }
     if let Some(game_state) = game_state.as_ref() {
@@ -78,11 +79,13 @@ pub(super) fn handle_player_input(
     }
 
     let secondary_move = secondary_move_pressed(&mouse_button_input, &keyboard);
-    if !secondary_move || pointer_state.consumed_secondary_press {
+    if keyboard.any_pressed([KeyCode::AltLeft, KeyCode::AltRight]) {
         return;
     }
-    let minimap_target = minimap_nav.as_ref().and_then(|nav| nav.movement_target);
-    let target = if let Some(target) = minimap_target.filter(|_| secondary_move) {
+    if (minimap_target.is_none() && !secondary_move) || pointer_state.consumed_secondary_press {
+        return;
+    }
+    let target = if let Some(target) = minimap_target {
         // The minimap is deliberately a UI surface. Its bounds and input gate
         // were checked before world picking; never raycast through it.
         Some(target)

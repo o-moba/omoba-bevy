@@ -11,6 +11,7 @@ mod round_reset;
 mod selection;
 pub(crate) mod skill_card;
 pub(crate) mod standard;
+mod tactical_hud;
 pub(crate) mod targeting;
 
 pub use crate::domain::{CombatStats, MAX_HP};
@@ -53,68 +54,101 @@ pub struct CombatPlugin;
 impl Plugin for CombatPlugin {
     fn build(&self, app: &mut App) {
         use crate::ui::UiActionAppExt;
-        app.add_ui_action::<hotbar::HotbarAction>()
-            .init_resource::<TargetState>()
-            .init_resource::<BasicAttackState>()
-            .init_resource::<TargetAimPreview>()
-            .init_resource::<LocalCastCooldown>()
-            .init_resource::<WorldPointerState>()
-            .init_resource::<PendingCast>()
-            .init_resource::<ActionFeedback>()
-            .init_resource::<inspection::SkillInspection>()
-            .add_systems(
-                Update,
-                reset_round_input_state
-                    .after(crate::net::ClientNetPipeline::ApplySnapshot)
-                    .before(InputContextSet::Modal),
+        app.insert_gizmo_config(
+            standard::SkillAimGizmos,
+            bevy::gizmos::config::GizmoConfig {
+                line: bevy::gizmos::config::GizmoLineConfig {
+                    width: 5.0,
+                    ..default()
+                },
+                depth_bias: -0.01,
+                ..default()
+            },
+        )
+        .insert_gizmo_config(
+            standard::SkillEffectGizmos,
+            bevy::gizmos::config::GizmoConfig {
+                line: bevy::gizmos::config::GizmoLineConfig {
+                    width: 3.5,
+                    ..default()
+                },
+                depth_bias: -0.005,
+                ..default()
+            },
+        )
+        .init_resource::<standard::SkillAimVector>()
+        .init_resource::<tactical_hud::TacticalHud>()
+        .add_systems(
+            Update,
+            tactical_hud::update_tactical_hud.after(crate::net::ClientNetPipeline::ApplySnapshot),
+        )
+        .add_systems(
+            PostUpdate,
+            (standard::draw_minimap_aim, standard::draw_minimap_traps)
+                .before(bevy::ui::UiSystems::Layout),
+        )
+        .add_ui_action::<hotbar::HotbarAction>()
+        .init_resource::<TargetState>()
+        .init_resource::<BasicAttackState>()
+        .init_resource::<TargetAimPreview>()
+        .init_resource::<LocalCastCooldown>()
+        .init_resource::<WorldPointerState>()
+        .init_resource::<PendingCast>()
+        .init_resource::<ActionFeedback>()
+        .init_resource::<inspection::SkillInspection>()
+        .add_systems(
+            Update,
+            reset_round_input_state
+                .after(crate::net::ClientNetPipeline::ApplySnapshot)
+                .before(InputContextSet::Modal),
+        )
+        .add_systems(Startup, (setup_combat_visual_assets, standard::setup))
+        .add_systems(
+            Update,
+            (
+                standard::interact,
+                standard::draw_effects,
+                standard::draw_aim.after(InputContextSet::Actions),
+            ),
+        )
+        .add_systems(
+            Startup,
+            (setup_combat_ui, crate::targeting::setup_targeting_ui),
+        )
+        .add_systems(
+            Update,
+            select_target_system
+                .in_set(CombatPointerInputSet)
+                .in_set(InputContextSet::Actions),
+        )
+        .add_systems(
+            Update,
+            (
+                tick_local_cast_cooldown,
+                crate::targeting::tick_basic_attack,
+                sync_authoritative_cooldown_durations,
+                update_action_feedback,
+                crate::targeting::clear_invalid_selection,
+                cast_spell_system,
+                skill_button_system,
+                mobile_cast_system,
+                mobile_utility_system,
+                crate::targeting::mobile_basic_attack,
+                crate::targeting::resolve_basic_attack,
+                crate::targeting::face_attack_target,
+                resolve_pending_cast_system,
+                skill_upgrade_input_system,
+                update_skill_bar_system,
+                inspection::update_inspection,
+                update_skill_tooltip,
+                standard::update_status,
+                sync_skill_key_labels,
+                crate::targeting::draw_targeting_ui,
             )
-            .add_systems(Startup, (setup_combat_visual_assets, standard::setup))
-            .add_systems(
-                Update,
-                (
-                    standard::interact,
-                    standard::draw_effects,
-                    standard::draw_aim,
-                ),
-            )
-            .add_systems(
-                Startup,
-                (setup_combat_ui, crate::targeting::setup_targeting_ui),
-            )
-            .add_systems(
-                Update,
-                select_target_system
-                    .in_set(CombatPointerInputSet)
-                    .in_set(InputContextSet::Actions),
-            )
-            .add_systems(
-                Update,
-                (
-                    tick_local_cast_cooldown,
-                    crate::targeting::tick_basic_attack,
-                    sync_authoritative_cooldown_durations,
-                    update_action_feedback,
-                    crate::targeting::clear_invalid_selection,
-                    cast_spell_system,
-                    skill_button_system,
-                    mobile_cast_system,
-                    mobile_utility_system,
-                    crate::targeting::mobile_basic_attack,
-                    crate::targeting::resolve_basic_attack,
-                    crate::targeting::face_attack_target,
-                    resolve_pending_cast_system,
-                    skill_upgrade_input_system,
-                    update_skill_bar_system,
-                    inspection::update_inspection,
-                    update_skill_tooltip,
-                    standard::update_status,
-                    sync_skill_key_labels,
-                    crate::targeting::draw_targeting_ui,
-                )
-                    .chain()
-                    .after(WorldMovementInputSet)
-                    .in_set(InputContextSet::Actions),
-            );
+                .chain()
+                .after(WorldMovementInputSet)
+                .in_set(InputContextSet::Actions),
+        );
         app.add_systems(
             Update,
             skill_card::paint_skill_card.in_set(crate::ui::UiSet::Paint),
@@ -126,6 +160,7 @@ impl Plugin for CombatPlugin {
                 spawn_combat_bars_system,
                 update_combat_bars_system,
                 sync_combat_bar_transforms_system,
+                tactical_hud::update_overhead,
             )
                 .chain(),
         );

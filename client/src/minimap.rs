@@ -65,6 +65,18 @@ pub struct MinimapNavigationState {
     pub movement_target: Option<Vec3>,
     /// Only a finger that started on the map may pan it.
     touch_id: Option<u64>,
+    touch_start: Vec2,
+    touch_dragged: bool,
+    mouse_dragging: bool,
+    world_touch: Option<WorldPan>,
+}
+struct WorldPan {
+    id: u64,
+    start: Vec2,
+    origin: Vec3,
+    focus: Vec3,
+    camera: GlobalTransform,
+    dragged: bool,
 }
 #[derive(Resource, Default)]
 struct MinimapUiState {
@@ -392,11 +404,17 @@ fn handle_minimap_navigation_system(
     mut camera: ResMut<CameraState>,
     mut navigation: ResMut<MinimapNavigationState>,
     context: Res<crate::input_context::GameplayInputContext>,
+    mobile: Option<Res<crate::mobile_controls::MobileControls>>,
+    camera_query: Query<(&Camera, &GlobalTransform), With<MainCamera>>,
+    mode: Option<Res<PlayerVisualMode>>,
+    ui: Query<&Interaction, With<Button>>,
 ) {
     navigation.consumed_primary_click = false;
     navigation.movement_target = None;
     if !context.gameplay_allowed() {
         navigation.touch_id = None;
+        navigation.mouse_dragging = false;
+        navigation.world_touch = None;
         return;
     }
     let (Ok(window), Ok((node, transform))) = (windows.single(), containers.single()) else {
@@ -416,31 +434,118 @@ fn handle_minimap_navigation_system(
         }
         if mouse.just_pressed(MouseButton::Left) && target.is_some() {
             navigation.consumed_primary_click = true;
+            navigation.mouse_dragging = true;
         }
-        if mouse.pressed(MouseButton::Left) {
+        if mouse.pressed(MouseButton::Left) && navigation.mouse_dragging {
             if let Some(target) = target {
                 navigation.focus_target = Some(target);
                 camera.locked = true;
             }
         }
     }
+    if !mouse.pressed(MouseButton::Left) {
+        navigation.mouse_dragging = false;
+    }
     if let Some(id) = navigation.touch_id {
         if let Some(touch) = touches.get_pressed(id) {
-            if let Some(target) = minimap_cursor_to_world(*layout, rect, touch.position()) {
-                navigation.focus_target = Some(target);
-                camera.locked = true;
+            navigation.touch_dragged |= touch.position().distance(navigation.touch_start) > 8.0;
+            if navigation.touch_dragged {
+                if let Some(target) = minimap_cursor_to_world(*layout, rect, touch.position()) {
+                    navigation.focus_target = Some(target);
+                    camera.locked = true;
+                }
             }
         } else {
+            // A canceled gesture never orders movement. Only a released tap does.
+            if let Some(touch) = touches.get_released(id)
+                && !navigation.touch_dragged
+                && touch.position().distance(navigation.touch_start) <= 8.0
+            {
+                navigation.movement_target =
+                    minimap_cursor_to_world(*layout, rect, touch.position());
+                navigation.focus_target = None;
+                camera.locked = true;
+            }
             navigation.touch_id = None;
         }
     } else {
         for touch in touches.iter_just_pressed() {
-            if let Some(target) = minimap_cursor_to_world(*layout, rect, touch.position()) {
+            if minimap_cursor_to_world(*layout, rect, touch.position()).is_some() {
                 navigation.consumed_primary_click = true;
                 navigation.touch_id = Some(touch.id());
-                navigation.focus_target = Some(target);
-                camera.locked = true;
+                navigation.touch_start = touch.position();
+                navigation.touch_dragged = false;
                 break;
+            }
+        }
+    }
+    if mobile.as_ref().is_some_and(|m| m.enabled) && navigation.touch_id.is_none() {
+        let visual = mode
+            .as_deref()
+            .copied()
+            .unwrap_or(PlayerVisualMode::Models3d);
+        if let Ok((cam, pose)) = camera_query.single() {
+            if let Some(mut pan) = navigation.world_touch.take() {
+                if let Some(touch) = touches.get_pressed(pan.id) {
+                    pan.dragged |= touch.position().distance(pan.start) > 8.0;
+                    if pan.dragged
+                        && let Some(world) = crate::player::viewport_to_simulation_world(
+                            cam,
+                            &pan.camera,
+                            touch.position(),
+                            visual,
+                            0.0,
+                        )
+                    {
+                        navigation.focus_target =
+                            Some(layout.clamp_position(pan.focus + pan.origin - world));
+                        camera.locked = true;
+                    }
+                    navigation.world_touch = Some(pan);
+                } else if let Some(touch) = touches.get_released(pan.id)
+                    && !pan.dragged
+                    && touch.position().distance(pan.start) <= 8.0
+                {
+                    navigation.movement_target = Some(layout.clamp_position(pan.origin));
+                    navigation.focus_target = None;
+                    camera.locked = true;
+                }
+            } else if !ui.iter().any(|i| *i != Interaction::None) {
+                for touch in touches.iter_just_pressed() {
+                    if rect.contains(touch.position())
+                        || mobile
+                            .as_ref()
+                            .is_some_and(|m| m.owns_control_point(touch.position()))
+                    {
+                        continue;
+                    }
+                    if let (Some(origin), Some(focus)) = (
+                        crate::player::viewport_to_simulation_world(
+                            cam,
+                            pose,
+                            touch.position(),
+                            visual,
+                            0.0,
+                        ),
+                        crate::player::viewport_to_simulation_world(
+                            cam,
+                            pose,
+                            Vec2::new(window.width(), window.height()) * 0.5,
+                            visual,
+                            0.0,
+                        ),
+                    ) {
+                        navigation.world_touch = Some(WorldPan {
+                            id: touch.id(),
+                            start: touch.position(),
+                            origin,
+                            focus,
+                            camera: *pose,
+                            dragged: false,
+                        });
+                        break;
+                    }
+                }
             }
         }
     }
@@ -920,7 +1025,7 @@ fn ray_ground_point(origin: Vec3, direction: Vec3) -> Option<Vec3> {
     (distance >= 0.0 && point.is_finite()).then_some(point)
 }
 /// Liang–Barsky clipping preserves rotated camera edges at the arena border.
-fn clip_map_segment(a: Vec2, b: Vec2) -> Option<(Vec2, Vec2)> {
+pub(crate) fn clip_map_segment(a: Vec2, b: Vec2) -> Option<(Vec2, Vec2)> {
     if !a.is_finite() || !b.is_finite() {
         return None;
     }
@@ -1671,5 +1776,87 @@ mod tests {
                 .resource::<MinimapNavigationState>()
                 .consumed_primary_click
         );
+    }
+    #[test]
+    fn touch_map_taps_move_drags_pan_and_cancellations_do_neither() {
+        use bevy::input::touch::{TouchInput, TouchPhase, touch_screen_input_system};
+        for gesture in 0..3 {
+            let mut app = App::new();
+            app.init_resource::<ButtonInput<MouseButton>>()
+                .init_resource::<ButtonInput<KeyCode>>()
+                .init_resource::<Touches>()
+                .init_resource::<MapLayout>()
+                .init_resource::<CameraState>()
+                .init_resource::<MinimapNavigationState>()
+                .init_resource::<GameplayInputContext>()
+                .add_message::<TouchInput>()
+                .add_systems(PreUpdate, touch_screen_input_system)
+                .add_systems(Update, handle_minimap_navigation_system);
+            let window = app
+                .world_mut()
+                .spawn((Window::default(), bevy::window::PrimaryWindow))
+                .id();
+            app.world_mut().spawn((
+                MinimapContainer,
+                ComputedNode {
+                    size: Vec2::splat(232.0),
+                    ..default()
+                },
+                UiGlobalTransform::from_translation(Vec2::splat(142.0)),
+            ));
+            let send = |app: &mut App, phase, position| {
+                app.world_mut().write_message(TouchInput {
+                    window,
+                    phase,
+                    position,
+                    force: None,
+                    id: 7,
+                });
+                app.update();
+            };
+            send(&mut app, TouchPhase::Started, Vec2::splat(142.0));
+            assert!(
+                app.world()
+                    .resource::<MinimapNavigationState>()
+                    .movement_target
+                    .is_none()
+            );
+            let end = if gesture == 1 {
+                Vec2::splat(170.0)
+            } else {
+                Vec2::splat(142.0)
+            };
+            send(&mut app, TouchPhase::Moved, end);
+            assert_eq!(
+                app.world()
+                    .resource::<MinimapNavigationState>()
+                    .focus_target
+                    .is_some(),
+                gesture == 1
+            );
+            send(
+                &mut app,
+                if gesture == 2 {
+                    TouchPhase::Canceled
+                } else {
+                    TouchPhase::Ended
+                },
+                end,
+            );
+            assert_eq!(
+                app.world()
+                    .resource::<MinimapNavigationState>()
+                    .movement_target
+                    .is_some(),
+                gesture == 0
+            );
+            app.update();
+            assert!(
+                app.world()
+                    .resource::<MinimapNavigationState>()
+                    .movement_target
+                    .is_none()
+            );
+        }
     }
 }

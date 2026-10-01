@@ -496,6 +496,7 @@ fn sync_gameplay_hud_visibility(
                     && name != "MatchObjectiveRoot"
                     // Desktop: inventory + quick-buy plate; phone: the row.
                     && !(name == "EquipmentHud" && phone)
+                    && !(name == "MatchHudColumn" && touch_hud)
                     && (name != "QuickBuyHud" || phone)
                     && !(name == "SkillBarRoot" && touch_hud);
                 let display = if displayed {

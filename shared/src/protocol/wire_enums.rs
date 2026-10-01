@@ -76,7 +76,7 @@ wire_enums! {
     crate::loadout::PassiveId => Strict [Radiance, Momentum, Tempered, Vitals, Flow, Shroud, Essence, Clockwork, Resonance, Souls, Concussion],
     crate::loadout::WeaponMode => Strict [Repeater, Rockets],
     crate::loadout::EffectVisualKind => Strict [Orb, Soul, Anchor, Healing, ShieldWall, Cage, Lantern, Bolt, Barrier, Field, BeamWarning, Beam, Trap, Rocket],
-    crate::practice::PracticeCommand => Tolerant [Roster, ClearBots, SpawnDummy, StartDuel, Unsupported],
+    crate::practice::PracticeCommand => Tolerant [Roster, ClearBots, SpawnDummy, SpawnMovingDummy, StartDuel, Unsupported],
     crate::protocol::JoinRejection => Strict [MatchFull, SessionActive, ProtocolMismatch, MapGeometryMismatch, AvatarNotAuthorized, OfflineKitUnsupported],
     crate::protocol::wire::GameState => Strict [Lobby, Forming, Starting, Running, Victory],
     crate::sandbox::SandboxCommand => Strict [ApplyConfig, Refill, ResetCooldowns, Teleport, ResetActor, AddXp, GrantItem, ResetDuel, ResetAnalytics, SpawnWave, FrameStep, ForceCast],
