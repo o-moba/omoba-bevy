@@ -105,7 +105,8 @@ fn prepare(
     }
     qa.frames += 1;
     if qa.stage < 10 {
-        next.set(AppScreen::Collection);
+        // Bevy 0.18 re-enters identical states with set(), resetting the preview.
+        next.as_mut().set_if_neq(AppScreen::Collection);
     }
     if qa.stage == 0 {
         if preview.slug.as_deref() == Some(&qa.items[qa.index].slug) {
@@ -304,7 +305,9 @@ fn observe(
             qa.stage = 13;
         }
         13 if qa.readback => {
-            let report = serde_json::json!({"pass":true,"local_developer_catalog":true,"public_studio":false,"locale":"en","pixels":[1280,720],"captures":qa.captures});
+            let public_studio =
+                std::env::var("OMOBA_SDK_PACK_QA_LIVE_REGISTRY").is_ok_and(|value| value == "1");
+            let report = serde_json::json!({"pass":true,"local_developer_catalog":!public_studio,"public_studio":public_studio,"locale":"en","pixels":[1280,720],"captures":qa.captures});
             std::fs::write(
                 qa.directory.join("qa-summary.json"),
                 serde_json::to_vec_pretty(&report).unwrap(),

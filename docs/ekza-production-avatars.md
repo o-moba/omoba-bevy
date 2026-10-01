@@ -8,9 +8,10 @@ Studio is now live at **https://studio.ekza.io/studio**. Health, Studio status,
 profiles and the public v2 catalogue return 200. The first original **EYEWizard**
 has completed authenticated upload, fresh Mac Blender conversion, curator
 publication, Omoba GLB preparation and project approval. The actual Rust SDK cold
-install and real UDP server admission/withdrawal/reapproval passed. Native visual
-acceptance is pending an unlocked Mac; phones and the remaining nineteen are
-not certified. See the maintained
+install and real UDP server admission/withdrawal/reapproval passed. Native desktop
+preview/download, equip and rendered-match smoke also passed (English, 1280 × 720).
+The captured preview is still in T-pose despite an available idle clip, so animation
+quality, phones and the remaining nineteen are not certified. See the maintained
 [live evidence](https://github.com/ekza-space/docs/blob/main/docs/developers/demo-readiness.md)
 and [deployment controls](https://github.com/ekza-space/ekza-registry/blob/main/deploy/hosted-pilot.md).
 
@@ -79,4 +80,4 @@ Once this live pilot passes, repeat publication/preparation/approval for the rem
 
 ## Current proof boundary
 
-The local twenty-model task verified rendition construction, content hashes, actual SDK cold installs and authoritative server admission for all twenty. Native visual verification stopped because the Mac was locked. That earlier task did not perform hosted publication. The 2026-10-01 live pilot now proves the hosted EYEWizard data/admission lifecycle; iPhone/Android visual/performance acceptance remains pending.
+The local twenty-model task verified rendition construction, content hashes, actual SDK cold installs and authoritative server admission for all twenty. Native visual verification stopped because the Mac was locked. That earlier task did not perform hosted publication. The 2026-10-01 live pilot now proves the hosted EYEWizard data/admission lifecycle and a single-client desktop rendered match with movement and attached sword. [Native evidence](progress/2026-10-01-hosted-avatar-smoke.json) records the binary, rendition and capture results. Preview T-pose, complete animation quality, second-client appearance, cached relaunch and iPhone/Android visual/performance acceptance remain pending.

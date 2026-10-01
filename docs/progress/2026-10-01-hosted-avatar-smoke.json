@@ -1,0 +1,88 @@
+{
+  "registry": "https://registry.ekza.io",
+  "slug": "ekza-fb00f73b815e4d6bfa564a694cdefa0b8b68bf53208e0407b06a6d0fe30b4d2a",
+  "game_revision": "67a4592b758cd7403ed0c6e5aaed6e7a58968c51",
+  "client_sha256": "689bcef18c172f16d1f7adcbec9e33a4187c16c7df901150a6b2f484385e111a",
+  "admission": {
+    "slug": "ekza-fb00f73b815e4d6bfa564a694cdefa0b8b68bf53208e0407b06a6d0fe30b4d2a",
+    "admitted": true,
+    "player_id": 1,
+    "tick": 24
+  },
+  "unknown": {
+    "slug": "ekza-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "admitted": false,
+    "rejection": "avatar_not_authorized"
+  },
+  "native": {
+    "previews": 1,
+    "gameplay_avatar": "EYEWizard",
+    "attachment_error": 0.0
+  },
+  "pass": true,
+  "qa_summary": {
+    "captures": [
+      {
+        "clips": [
+          "idle",
+          "attack",
+          "cast",
+          "death",
+          "walk"
+        ],
+        "file": "01-eyewizard.png",
+        "model": "ekza://avatars/ekza-fb00f73b815e4d6bfa564a694cdefa0b8b68bf53208e0407b06a6d0fe30b4d2a.glb",
+        "name": "EYEWizard",
+        "scene_loaded": true,
+        "slug": "ekza-fb00f73b815e4d6bfa564a694cdefa0b8b68bf53208e0407b06a6d0fe30b4d2a",
+        "store_ready": true
+      },
+      {
+        "animation": "Run",
+        "attachment_error": 0.0,
+        "bound_to_model": true,
+        "distance": 0.5078122019767761,
+        "file": "21-gameplay-running.png",
+        "model": "ekza://avatars/ekza-fb00f73b815e4d6bfa564a694cdefa0b8b68bf53208e0407b06a6d0fe30b4d2a.glb",
+        "name": "EYEWizard",
+        "player_id": 4,
+        "scene_loaded": true,
+        "server_admitted": true,
+        "slug": "ekza-fb00f73b815e4d6bfa564a694cdefa0b8b68bf53208e0407b06a6d0fe30b4d2a",
+        "weapon": "forge-sword"
+      }
+    ],
+    "local_developer_catalog": false,
+    "locale": "en",
+    "pass": true,
+    "pixels": [
+      1280,
+      720
+    ],
+    "public_studio": true
+  },
+  "source_note": "Client rebuilt from 67a4592 plus QA-only collection set_if_neq fix and explicit live-registry evidence label; source was uncommitted during capture. Formatting afterward only.",
+  "server_sha256": "262025d850968186d7dd28b5117808c239823a658856a71d8658e0199fc587a8",
+  "qa_source_sha256": "8daf3733bb4e8c10e13e23fab9282e85d56f25cfc626b0279f826c44b34c5597",
+  "capture_directory": "/Users/wotori/git/ekza/.agent/tasks/EKZA-STUDIO-DNS-20261001/hosted-native-164451",
+  "screenshots": [
+    {
+      "file": "01-eyewizard.png",
+      "sha256": "9f96d1a0df1cfa9263e0f70e3b984fd448c9f1d60ae51f7f53af08e7d1067880"
+    },
+    {
+      "file": "21-gameplay-running.png",
+      "sha256": "d38b487b8f143b3a8423da3af48f4fd6f690791e65f339525984a6a7aad29e29"
+    }
+  ],
+  "visual_review": {
+    "collection_model_visible": true,
+    "match_model_and_sword_visible": true,
+    "preview_t_pose_observed": true,
+    "full_animation_quality": "pending",
+    "phones": "not tested",
+    "second_rendered_client": "not tested",
+    "cached_relaunch": "not tested"
+  },
+  "build": "cargo build --locked -p client: PASS"
+}
