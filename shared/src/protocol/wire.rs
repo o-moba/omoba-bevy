@@ -140,7 +140,10 @@ pub enum ClientPacket {
         request_id: u64,
     },
     Join {
-        #[serde(default)]
+        #[serde(
+            default,
+            skip_serializing_if = "crate::handheld::HandheldSelection::is_default"
+        )]
         handheld: crate::handheld::HandheldSelection,
         #[serde(default)]
         prematch: bool,
@@ -815,6 +818,37 @@ mod tests {
     const GOLDEN_BASIC_ATTACK: &str = r#"{"type":"basic_attack","target":{"kind":"minion","id":9},"server_epoch":7,"match_id":3,"request_id":11}"#;
     const GOLDEN_JOIN: &str = r#"{"type":"join","prematch":true,"team":"green","character":"ipfs","hero_class":"warden","avatar":"agnes","sprite_character":null,"session_id":"session-1","passport_ticket":null}"#;
     const GOLDEN_SOCIAL: &str = r#"{"type":"social","server_epoch":7,"match_id":3,"sequence":2,"social":{"events":[],"request_id":null,"error":null,"allowed_reactions":[]}}"#;
+
+    #[test]
+    fn join_equipment_is_additive_and_nondefault_values_are_preserved() {
+        use crate::handheld::HandheldSelection;
+        let mut packet: ClientPacket = serde_json::from_str(GOLDEN_JOIN).unwrap();
+        assert!(matches!(
+            &packet,
+            ClientPacket::Join {
+                handheld: HandheldSelection::ClassDefault,
+                ..
+            }
+        ));
+        assert_eq!(serde_json::to_string(&packet).unwrap(), GOLDEN_JOIN);
+        const ITEM: &str = r#"{"type":"join","handheld":{"mode":"item","id":"forge-hammer"},"prematch":true,"team":"green","character":"ipfs","hero_class":"warden","avatar":"agnes","sprite_character":null,"session_id":"session-1","passport_ticket":null}"#;
+        const EMPTY: &str = r#"{"type":"join","handheld":{"mode":"unequipped"},"prematch":true,"team":"green","character":"ipfs","hero_class":"warden","avatar":"agnes","sprite_character":null,"session_id":"session-1","passport_ticket":null}"#;
+        for (selection, golden) in [
+            (HandheldSelection::Item("forge-hammer".into()), ITEM),
+            (HandheldSelection::Unequipped, EMPTY),
+        ] {
+            let ClientPacket::Join { handheld, .. } = &mut packet else {
+                unreachable!()
+            };
+            *handheld = selection.clone();
+            assert_eq!(serde_json::to_string(&packet).unwrap(), golden);
+            let decoded: ClientPacket = serde_json::from_str(golden).unwrap();
+            let ClientPacket::Join { handheld, .. } = decoded else {
+                panic!("not a join")
+            };
+            assert_eq!(handheld, selection);
+        }
+    }
 
     #[test]
     fn every_client_packet_variant_round_trips() {

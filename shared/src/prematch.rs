@@ -50,7 +50,10 @@ pub struct PrematchRequest {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum PrematchAction {
     Select {
-        #[serde(default)]
+        #[serde(
+            default,
+            skip_serializing_if = "crate::handheld::HandheldSelection::is_default"
+        )]
         handheld: crate::handheld::HandheldSelection,
         character: CharacterChoice,
         hero_class: HeroClass,
@@ -76,7 +79,10 @@ pub enum PrematchPhase {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DraftPlayer {
-    #[serde(default)]
+    #[serde(
+        default,
+        skip_serializing_if = "crate::handheld::HandheldSelection::is_default"
+    )]
     pub handheld: crate::handheld::HandheldSelection,
     pub player_id: u64,
     pub nickname: String,
@@ -109,6 +115,49 @@ pub struct PrematchSnapshot {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn equipment_preserves_legacy_draft_shapes_and_nondefault_choices() {
+        use crate::handheld::HandheldSelection;
+        const SELECT: &str = r#"{"kind":"select","character":"ipfs","hero_class":"warrior","avatar":null,"sprite_character":null,"role":"jungle","passport_ticket":null}"#;
+        const PLAYER: &str = r#"{"player_id":7,"nickname":"Pilot","team":"green","character":"ipfs","hero_class":"warrior","avatar":null,"sprite_character":null,"role":"jungle","is_bot":false,"locked":false,"loaded":false}"#;
+        let mut action: PrematchAction = serde_json::from_str(SELECT).unwrap();
+        let mut player: DraftPlayer = serde_json::from_str(PLAYER).unwrap();
+        assert!(matches!(
+            &action,
+            PrematchAction::Select {
+                handheld: HandheldSelection::ClassDefault,
+                ..
+            }
+        ));
+        assert_eq!(player.handheld, HandheldSelection::ClassDefault);
+        assert_eq!(serde_json::to_string(&action).unwrap(), SELECT);
+        assert_eq!(serde_json::to_string(&player).unwrap(), PLAYER);
+        for selection in [
+            HandheldSelection::Unequipped,
+            HandheldSelection::Item("forge-sword".into()),
+        ] {
+            let PrematchAction::Select { handheld, .. } = &mut action else {
+                unreachable!()
+            };
+            *handheld = selection.clone();
+            player.handheld = selection.clone();
+            let action_value = serde_json::to_value(&action).unwrap();
+            let player_value = serde_json::to_value(&player).unwrap();
+            assert_eq!(
+                action_value["handheld"],
+                serde_json::to_value(&selection).unwrap()
+            );
+            assert_eq!(player_value["handheld"], action_value["handheld"]);
+            let decoded_action: PrematchAction = serde_json::from_value(action_value).unwrap();
+            let decoded_player: DraftPlayer = serde_json::from_value(player_value).unwrap();
+            let PrematchAction::Select { handheld, .. } = decoded_action else {
+                panic!("not a selection")
+            };
+            assert_eq!(handheld, selection);
+            assert_eq!(decoded_player.handheld, selection);
+        }
+    }
+
     #[test]
     fn request_roundtrip_retains_namespace_and_role() {
         let request = PrematchRequest {
