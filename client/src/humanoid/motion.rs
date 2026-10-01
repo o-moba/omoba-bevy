@@ -50,10 +50,22 @@ impl SharedHumanoidMotion {
             return Err("Shared motion bone list is empty or too large".into());
         }
         for name in STATES {
-            let clip = self
-                .clips
-                .get(name)
-                .ok_or_else(|| format!("Shared humanoid motion lacks {name}"))?;
+            if !self.clips.contains_key(name) {
+                return Err(format!("Shared humanoid motion lacks {name}"));
+            }
+        }
+        if self.clips.len() > 64 {
+            return Err("Shared humanoid motion has too many clips".into());
+        }
+        for (name, clip) in &self.clips {
+            if name.is_empty()
+                || name.len() > 64
+                || !name
+                    .bytes()
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'_')
+            {
+                return Err("Invalid shared motion ID".into());
+            }
             let count = clip.times.len();
             if clip.source_clip.is_empty()
                 || !clip.duration.is_finite()
@@ -89,7 +101,7 @@ impl SharedHumanoidMotion {
                     return Err(format!("Shared motion {name}/{bone} has invalid rotations"));
                 }
             }
-            if matches!(name, "idle" | "walk" | "run") && !clip.looping {
+            if matches!(name.as_str(), "idle" | "walk" | "run") && !clip.looping {
                 return Err(format!("Shared locomotion {name} must loop"));
             }
         }

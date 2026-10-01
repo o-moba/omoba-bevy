@@ -86,6 +86,7 @@ pub struct HeroAction {
     pub kind: PlayerActionKind,
     /// Q/W/E/R index, or `BASIC_ATTACK_ACTION_SLOT` for a basic strike.
     pub slot: u8,
+    pub yaw: Option<f32>,
 }
 
 /// Who the hero is: set at join (or reconnect) and never by the simulation.
@@ -102,6 +103,7 @@ pub struct HeroIdentity {
     pub sprite_character: Option<String>,
     /// Cosmetic only, authorized from persisted profile grants.
     pub supporter_aura: Option<shared::supporter::AuraStyle>,
+    pub handheld: shared::handheld::HandheldSelection,
 }
 
 /// Authoritative hero core: what the simulation reads and writes.
@@ -129,6 +131,7 @@ impl Hero {
     pub fn new(id: u64, spawn: Vec3f) -> Self {
         Self {
             identity: HeroIdentity {
+                handheld: Default::default(),
                 id,
                 is_bot: false,
                 team: Team::Green,

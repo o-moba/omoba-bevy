@@ -106,7 +106,7 @@ Harness: `client/src/qa/supporter.rs`; server: none; env: `OMOBA_SUPPORTER_QA_DI
 
 ## 07-offline-practice · `offline`
 
-Offline practice from Home: hero picker, match, target, game menu, settings. Logical size without a scale override, so HiDPI displays give 2x frames; its pass flag also checks the saved server endpoint.
+Offline practice from Home: hero picker, match, target, game menu, practice controls, return home and re-entry as Wildspark. Logical size without a scale override, so HiDPI displays give 2x frames; its pass flag also checks the saved server endpoint.
 
 Harness: `client/src/qa/offline_qa.rs`; server: none; env: `OMOBA_OFFLINE_SMOKE_DIR={out} GAME_SERVER_ADDR=127.0.0.1:49999`
 
@@ -117,9 +117,9 @@ Harness: `client/src/qa/offline_qa.rs`; server: none; env: `OMOBA_OFFLINE_SMOKE_
 | Offline · practice match | `03-practice.png` | desktop, phone | Offline practice → start | `client/src/match_hud.rs` |  |
 | Offline · attacked target | `04-attacked-target.png` | desktop, phone | Attack the practice dummy | `client/src/edge_hud.rs` |  |
 | Offline · game menu | `05-game-menu.png` | desktop, phone | Escape in practice | `client/src/pause_menu.rs` |  |
-| Offline · practice controls | `06-practice-controls.png` | desktop, phone | Game menu → Practice | `client/src/debug/tools_page.rs` |  |
-| Offline · reentered Wildspark | `09-reentered-wildspark.png` | desktop, phone | Home → Offline Practice → Wildspark | `client/src/net/offline.rs` |  |
+| Offline · practice controls | `06-practice-controls.png` | desktop, phone | Game menu → Practice controls | `client/src/pause_menu.rs` |  |
 | Offline · back home | `08-return-home.png` | desktop, phone | Game menu → Exit to home | `client/src/frontend/home.rs` |  |
+| Offline · re-enter as Wildspark | `09-reentered-wildspark.png` | desktop, phone | Home → Offline practice → Wildspark → start | `client/src/match_hud.rs` |  |
 
 ## 09-party-stage · `party-stage`
 
@@ -176,3 +176,4 @@ Harness: `client/src/qa/frontend_qa/party.rs`; server: none; env: `OMOBA_PARTY_Q
 - `client/src/qa/help_qa.rs`: controls guide controller focus and Settings → Controls return (OMOBA_HELP_QA_SHOTS); frames duplicate hud-help/home-help/settings, not new screens
 - `client/src/qa/standard_kits_qa.rs`: Focused standard-kit selection, effects and held-aim proof from a live local sandbox (OMOBA_STANDARD_QA_DIR, OMOBA_STANDARD_QA_CLASS); one English desktop viewport, scripted input, no device matrix.
 - `client/src/qa/roster_qa.rs`: Focused remaining roster selection and live skill states (OMOBA_ROSTER_QA_DIR); OMOBA_ROSTER_QA_INSPECTION adds short/long/released skill holds. English 1280x720, scripted input; no device matrix.
+- `client/src/qa/sdk_pack_qa.rs`: Focused local SDK collection proof (OMOBA_SDK_PACK_QA_OUTPUT): 20 live avatar previews plus representative server-admitted running avatars and hand mounts. English 1280x720, scripted selection; not public Studio publication or a device matrix.

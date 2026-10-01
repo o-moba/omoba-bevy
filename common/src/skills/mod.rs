@@ -904,6 +904,9 @@ pub fn cast(
     p.hero.skills.recovery_until =
         Some(now + duration(d.windup_secs.max(if is_toggle { 0.0 } else { 0.15 })));
     crate::sim::cast::record_player_action(p, SkillSlot::from_index(slot).unwrap());
+    if !is_toggle {
+        crate::sim::cast::face_player_action(p, dir[0], dir[1]);
+    }
     let owner = p.hero.identity.id;
     let team = p.hero.identity.team;
     let scale = shared::rank_effect_scale(rank)

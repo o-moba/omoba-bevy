@@ -1,7 +1,4 @@
-use super::{
-    SharedHumanoidMotion, humanoid_target_id,
-    motion::{MotionClip, STATES},
-};
+use super::{SharedHumanoidMotion, humanoid_target_id, motion::MotionClip};
 use bevy::{animation::animated_field, math::curve::UnevenSampleAutoCurve, prelude::*};
 use omoba_passport::humanoid::{HumanoidRig, VrmVersion};
 use std::collections::BTreeMap;
@@ -170,8 +167,7 @@ pub(super) fn retarget_all(
 ) -> Result<(BTreeMap<String, AnimationClip>, Vec<usize>), String> {
     let basis = RetargetBasis::new(rig, motion)?;
     let mut clips = BTreeMap::new();
-    for name in STATES {
-        let source = &motion.clips[name];
+    for (name, source) in &motion.clips {
         let frames: Vec<_> = (0..source.times.len())
             .map(|sample| basis.frame(rig, source, sample))
             .collect();
@@ -210,7 +206,7 @@ pub(super) fn retarget_all(
             AnimatableCurve::new(animated_field!(Transform::translation), curve),
         );
         clip.set_duration(source.duration);
-        clips.insert(name.into(), clip);
+        clips.insert(name.clone(), clip);
     }
     Ok((clips, basis.streams.keys().copied().collect()))
 }

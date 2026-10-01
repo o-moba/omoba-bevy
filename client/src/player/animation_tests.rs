@@ -24,6 +24,142 @@ fn action(sequence: u64, kind: PlayerActionKind) -> PlayerCosmeticAction {
 }
 
 #[test]
+fn skill_motion_waits_for_phase_deduplicates_and_respects_cancel_death_respawn() {
+    use shared::loadout::{CoreId, EffectVisualKind, LoadoutState, SkillEffectState, SkillId};
+    let mut app = App::new();
+    let mut set = animation_set();
+    set.motion_nodes
+        .push(("spell_prepare".into(), set.attack_node.unwrap()));
+    let mut library = PlayerAnimationLibrary::default();
+    library
+        .sets
+        .insert(AvatarKey::Roster("agnes".into()), set.clone());
+    let profiles: crate::skill_presentation::SkillPresentation =
+        serde_json::from_str(include_str!("../../assets/config/skills.skillfx")).unwrap();
+    app.insert_resource(Time::<()>::default())
+        .insert_resource(library)
+        .insert_resource(profiles)
+        .init_resource::<GameStateSnapshot>()
+        .add_systems(
+            Update,
+            (bind_player_animation_players, sync_player_animation_state).chain(),
+        );
+    // Deliberately move R into Q in an already accepted recipe: presentation is skill-owned.
+    let mut recipe = CoreId::Wildspark.preset();
+    recipe.skills[0] = SkillId::DawnRay;
+    let owner = app
+        .world_mut()
+        .spawn((
+            Player,
+            Transform::default(),
+            CombatStats::default(),
+            NetworkCharacterChoice(CharacterChoice::Cube),
+            NetworkAvatar(Some("agnes".into())),
+            crate::net::NetworkPlayerId(7),
+            PlayerCosmeticAction::default(),
+            crate::net::PlayerLoadout(Some(LoadoutState {
+                recipe: Some(recipe),
+                ..default()
+            })),
+        ))
+        .id();
+    let child = app
+        .world_mut()
+        .spawn((AnimationPlayer::default(), ChildOf(owner)))
+        .id();
+    let state = |app: &App| {
+        app.world()
+            .get::<PlayerAnimationBinding>(child)
+            .unwrap()
+            .playback
+            .state
+    };
+    app.update();
+    app.world_mut()
+        .entity_mut(owner)
+        .insert(action(1, PlayerActionKind::Attack));
+    app.update();
+    assert_eq!(
+        state(&app),
+        HeroAnimationState::Idle,
+        "no guessed release before warning arrives"
+    );
+    app.world_mut()
+        .resource_mut::<GameStateSnapshot>()
+        .skill_effects
+        .push(SkillEffectState {
+            id: 9,
+            owner_id: 7,
+            owner_team: shared::map::Team::Green,
+            skill: SkillId::DawnRay,
+            kind: EffectVisualKind::BeamWarning,
+            position: [0.0; 2],
+            end: [10.0, 0.0],
+            radius: 0.8,
+            remaining_secs: 0.8,
+            armed: false,
+            consumed_segments: 0,
+        });
+    app.update();
+    assert_eq!(state(&app), HeroAnimationState::Motion(0));
+    app.world_mut()
+        .get_mut::<AnimationPlayer>(child)
+        .unwrap()
+        .animation_mut(set.attack_node.unwrap())
+        .unwrap()
+        .seek_to(0.4);
+    app.update();
+    assert_eq!(
+        app.world()
+            .get::<AnimationPlayer>(child)
+            .unwrap()
+            .animation(set.attack_node.unwrap())
+            .unwrap()
+            .seek_time(),
+        0.4
+    );
+    let mut beam = app
+        .world_mut()
+        .resource_mut::<GameStateSnapshot>()
+        .skill_effects
+        .remove(0);
+    app.update();
+    assert_eq!(
+        state(&app),
+        HeroAnimationState::Idle,
+        "cancelled preparation returns to locomotion"
+    );
+    beam.kind = EffectVisualKind::Beam;
+    app.world_mut()
+        .resource_mut::<GameStateSnapshot>()
+        .skill_effects
+        .push(beam);
+    app.update();
+    assert_eq!(
+        state(&app),
+        HeroAnimationState::Cast,
+        "release requires a server beam"
+    );
+    app.world_mut().get_mut::<CombatStats>(owner).unwrap().hp = 0.0;
+    app.world_mut()
+        .entity_mut(owner)
+        .insert(action(2, PlayerActionKind::Attack));
+    app.update();
+    assert_eq!(state(&app), HeroAnimationState::Death);
+    app.world_mut().get_mut::<CombatStats>(owner).unwrap().hp = 100.0;
+    app.world_mut()
+        .entity_mut(owner)
+        .insert(action(3, PlayerActionKind::Attack));
+    app.update();
+    app.update();
+    assert_eq!(
+        state(&app),
+        HeroAnimationState::Idle,
+        "stale phase must not replay after respawn"
+    );
+}
+
+#[test]
 fn combat_animation_transitions_deduplicate_restart_and_hold_death() {
     let mut playback = HeroAnimationPlayback::new(0);
     let attack = action(1, PlayerActionKind::Attack);
@@ -154,6 +290,7 @@ fn animation_set() -> CharacterAnimationSet {
         attack_node: Some(nodes[2]),
         cast_node: Some(nodes[3]),
         death_node: Some(nodes[4]),
+        motion_nodes: Vec::new(),
     }
 }
 
@@ -393,6 +530,7 @@ fn sandbox_animation_app() -> (App, CharacterAnimationSet, Vec<(Entity, Entity)>
         attack_node: Some(nodes[3]),
         cast_node: Some(nodes[4]),
         death_node: Some(nodes[5]),
+        motion_nodes: Vec::new(),
     };
     let mut library = PlayerAnimationLibrary::default();
     library

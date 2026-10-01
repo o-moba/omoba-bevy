@@ -156,6 +156,21 @@ impl From<&PlayerState> for PlayerCosmeticAction {
     }
 }
 
+/// Direction belongs to a confirmed action, never the transform's latest movement packet.
+#[derive(Component, Clone, Copy, Debug, Default)]
+pub struct PlayerActionFacing {
+    pub sequence: u64,
+    pub yaw: Option<f32>,
+}
+impl From<&PlayerState> for PlayerActionFacing {
+    fn from(player: &PlayerState) -> Self {
+        Self {
+            sequence: player.action_sequence,
+            yaw: player.action_yaw.filter(|v| v.is_finite()),
+        }
+    }
+}
+
 /// Authoritative hero class replicated from the server.
 #[derive(Component, Clone, Debug, Default)]
 pub struct PlayerLoadout(pub Option<shared::loadout::LoadoutState>);
@@ -334,3 +349,6 @@ mod tests {
         assert_eq!(decoded.ranks, [1; 4]);
     }
 }
+
+#[derive(Component, Clone, Debug, Default)]
+pub struct PlayerHandheld(pub shared::handheld::HandheldSelection);

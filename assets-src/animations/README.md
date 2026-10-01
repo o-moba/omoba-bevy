@@ -31,6 +31,12 @@ needed to regenerate it.
 | `attack` | `Sword_Attack` | No | Shared attack fallback |
 | `cast` | `Spell_Simple_Shoot` | No | Shared cast fallback |
 | `death` | `Death01` | No | Shared death fallback |
+| `spell_prepare` | `Spell_Simple_Enter` | No | Dawn ray preparation; hold last pose until authoritative release |
+| `spell_finish` | `Spell_Simple_Exit` | No | Dawn field gesture |
+| `pistol_shoot` | `Pistol_Shoot` | No | Wildspark shooting and Repeater basic attacks |
+| `pistol_reload` | `Pistol_Reload` | No | Wildspark weapon-mode switch |
+| `pistol_aim` | `Pistol_Aim_Neutral` | No | Available aim pose for profile authoring |
+| `interact` | `Interact` | No | Barrier / trap placement gesture |
 
 `A_TPose` is the reference pose. Sprint has 17 keys over approximately 0.667
 seconds, while Walk has 33 keys over approximately 1.333 seconds. Idle, Walk
@@ -63,7 +69,7 @@ GLB-writing functions. Do not rerun legacy baking to add Run to models.
 
 ## Shared asset contract (version 1)
 
-The JSON resource is roughly 495 KiB and contains six motions for 52 semantic
+The JSON resource is roughly 794 KiB and contains twelve motions for 52 semantic
 bones. Its schema uses glTF right-handed, Y-up coordinates and `[x, y, z, w]`
 unit quaternions. Numeric values are rounded to seven decimal places.
 
@@ -78,10 +84,12 @@ unit quaternions. Numeric values are rounded to seven decimal places.
 - `bones`: sorted semantic bone names in VRM 0 convention. For VRM 1 thumbs,
   `Metacarpal`, `Proximal`, `Distal` correspond to the source `Proximal`,
   `Intermediate`, `Distal`; the runtime adapter resolves this difference.
-- `clips`: maps `idle`, `walk`, `run`, `attack`, `cast`, `death` to objects with
+- `clips`: maps motion IDs to objects with
   `source_clip`, `duration`, `looping`, strictly increasing `times`,
   `world_rotation_deltas` (bone to quaternion array), and `hips_world_deltas`
   (position array in source metres). Every channel has one value per time.
+  The six base states remain required. Up to 64 named motions are accepted;
+  all extra motions receive the same validation, retargeting and model cache.
 
 A rotation delta is `source_world(t) * inverse(source_reference_world)`.
 For facing alignment `A`, the target world rotation is

@@ -6,6 +6,14 @@ Status: implemented engine-side skeletal capability in 0.21.0-rc.5. External Stu
 
 A skin supplies geometry, skinning, humanoid bone indices and a rest pose. The engine supplies movement and action motions. One shared CC0 library contains Idle, Walk, Run, Attack, Cast and Death. Normal hero movement selects Run, sourced from Quaternius `Sprint_Loop`; Walk is retained for a future explicit debuff policy. Movement speed, navigation and server combat rules are unchanged.
 
+The Dawnweaver / Wildspark pilot extends that library with six named skill
+motions. `config/skills.skillfx` selects them by skill ID in the accepted
+recipe; Q/W/E/R are input slots. Runtime retargeting caches every named motion
+and instances play independently. Dawn Ray preparation/release follows its
+replicated warning/beam, with cancellation and death priority. See
+[combat cosmetics](combat-cosmetics.md#skill-presentation-pilot) for the current
+contract and remaining phase/weapon work.
+
 ```mermaid
 flowchart LR
     A[Verified VRM skin] --> B[Validated humanoid rig]

@@ -7,6 +7,7 @@ mod binding;
 mod embedded;
 mod motion;
 mod retarget;
+mod sockets;
 
 #[cfg(feature = "qa")]
 pub(crate) use binding::RuntimeHumanoidBindingError;
@@ -26,12 +27,15 @@ pub(crate) struct RuntimeHumanoidClips {
     pub attack: Handle<AnimationClip>,
     pub cast: Handle<AnimationClip>,
     pub death: Handle<AnimationClip>,
+    /// Additional, validated library motions addressed by stable authored ID.
+    pub actions: std::collections::BTreeMap<String, Handle<AnimationClip>>,
 }
 
 struct RuntimeRig {
     clips: RuntimeHumanoidClips,
     rig: HumanoidRig,
     animated_nodes: Vec<usize>,
+    hand_sockets: HashMap<String, (usize, Transform)>,
 }
 
 /// Cache identity is the loaded model asset, never a mutable display name/slug.
@@ -75,7 +79,7 @@ impl HumanoidRuntimeLibrary {
             .into_iter()
             .map(|(name, clip)| (name, clips.add(clip)))
             .collect();
-        // retarget_all validates all six states before adding any engine asset.
+        // Validate the whole library before adding any engine asset.
         let mut take = |name: &str| handles.remove(name).expect("validated shared motion state");
         let result = RuntimeHumanoidClips {
             idle: take("idle"),
@@ -84,16 +88,38 @@ impl HumanoidRuntimeLibrary {
             attack: take("attack"),
             cast: take("cast"),
             death: take("death"),
+            actions: Default::default(),
+        };
+        let result = RuntimeHumanoidClips {
+            actions: handles.into_iter().collect(),
+            ..result
         };
         self.models.insert(
             model.id(),
             RuntimeRig {
                 clips: result.clone(),
+                hand_sockets: ["leftHand", "rightHand"]
+                    .into_iter()
+                    .filter_map(|hand| {
+                        Some((
+                            hand.to_owned(),
+                            (*rig.bones.get(hand)?, sockets::grip_frame(&rig, hand)?),
+                        ))
+                    })
+                    .collect(),
                 rig,
                 animated_nodes,
             },
         );
         Ok(result)
+    }
+
+    pub(crate) fn hand_socket(
+        &self,
+        model: AssetId<Gltf>,
+        hand: &str,
+    ) -> Option<(usize, Transform)> {
+        self.models.get(&model)?.hand_sockets.get(hand).copied()
     }
 
     /// Preserve an explicitly selected source GLTF clip when the scene is now

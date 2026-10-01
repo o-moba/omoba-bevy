@@ -81,6 +81,7 @@ pub(super) struct CharacterAnimationSet {
     pub(super) attack_node: Option<AnimationNodeIndex>,
     pub(super) cast_node: Option<AnimationNodeIndex>,
     pub(super) death_node: Option<AnimationNodeIndex>,
+    pub(super) motion_nodes: Vec<(String, AnimationNodeIndex)>,
 }
 
 /// Grace period before Run falls back to Idle. Remote players advance in
@@ -99,6 +100,8 @@ pub(crate) struct PlayerAnimationBinding {
     sandbox_preview: Option<u64>,
     sandbox_paused: bool,
     sandbox_time: Option<((u64, u64), f64)>,
+    skill_motion: Option<(u64, crate::skill_presentation::MotionCue)>,
+    skill_phase_sequence: Option<u64>,
 }
 
 impl PlayerAnimationBinding {
@@ -117,6 +120,7 @@ pub(super) enum HeroAnimationState {
     Attack,
     Cast,
     Death,
+    Motion(u16),
 }
 
 impl CharacterAnimationSet {
@@ -128,6 +132,10 @@ impl CharacterAnimationSet {
             HeroAnimationState::Attack => self.attack_node.unwrap_or(self.idle_node),
             HeroAnimationState::Cast => self.cast_node.unwrap_or(self.idle_node),
             HeroAnimationState::Death => self.death_node.unwrap_or(self.idle_node),
+            HeroAnimationState::Motion(index) => self
+                .motion_nodes
+                .get(index as usize)
+                .map_or(self.idle_node, |(_, node)| *node),
         }
     }
 
@@ -137,7 +145,26 @@ impl CharacterAnimationSet {
             HeroAnimationState::Cast => self.cast_node.is_some(),
             HeroAnimationState::Death => self.death_node.is_some(),
             HeroAnimationState::Walk => self.walk_node.is_some(),
+            HeroAnimationState::Motion(index) => (index as usize) < self.motion_nodes.len(),
             _ => true,
+        }
+    }
+
+    fn motion(&self, name: &str) -> HeroAnimationState {
+        match name {
+            "idle" => HeroAnimationState::Idle,
+            "walk" => HeroAnimationState::Walk,
+            "run" => HeroAnimationState::Run,
+            "death" => HeroAnimationState::Death,
+            "attack" => HeroAnimationState::Attack,
+            "cast" => HeroAnimationState::Cast,
+            _ => self
+                .motion_nodes
+                .iter()
+                .position(|(id, _)| id == name)
+                .map_or(HeroAnimationState::Cast, |i| {
+                    HeroAnimationState::Motion(i as u16)
+                }),
         }
     }
 }
@@ -204,7 +231,7 @@ impl HeroAnimationPlayback {
             action_state.unwrap_or(locomotion)
         } else if matches!(
             self.state,
-            HeroAnimationState::Attack | HeroAnimationState::Cast
+            HeroAnimationState::Attack | HeroAnimationState::Cast | HeroAnimationState::Motion(_)
         ) && !finished
             && available(self.state)
         {
@@ -233,6 +260,30 @@ pub(super) fn start_hero_animation(
     } else if state == HeroAnimationState::Death && !set.available(state) {
         // A missing death clip freezes a safe pose until authoritative respawn.
         active.pause();
+    }
+}
+
+/// Fade outgoing clips without changing authoritative action timing or root movement.
+fn blend_hero_animation(player: &mut AnimationPlayer, current: AnimationNodeIndex, delta: f32) {
+    let step = (delta / 0.12).clamp(0.0, 1.0);
+    let mut remove = Vec::new();
+    let mut outgoing = 0.0;
+    for (node, active) in player.playing_animations_mut() {
+        if *node == current {
+            continue;
+        }
+        let weight = (active.weight() - step).max(0.0);
+        active.set_weight(weight);
+        outgoing += weight;
+        if weight == 0.0 {
+            remove.push(*node);
+        }
+    }
+    for node in remove {
+        player.stop(node);
+    }
+    if let Some(active) = player.animation_mut(current) {
+        active.set_weight((1.0 - outgoing).clamp(0.0, 1.0));
     }
 }
 
@@ -367,14 +418,19 @@ fn setup_player_animation_library(
                     apply_alias("attack", aliases.map(|a| &a.attack), &mut motion.attack);
                     apply_alias("cast", aliases.map(|a| &a.cast), &mut motion.cast);
                     apply_alias("death", aliases.map(|a| &a.death), &mut motion.death);
-                    let (graph, nodes) = AnimationGraph::from_clips([
-                        motion.idle,
-                        motion.run,
-                        motion.walk,
-                        motion.attack,
-                        motion.cast,
-                        motion.death,
-                    ]);
+                    let action_names: Vec<_> = motion.actions.keys().cloned().collect();
+                    let (graph, nodes) = AnimationGraph::from_clips(
+                        [
+                            motion.idle,
+                            motion.run,
+                            motion.walk,
+                            motion.attack,
+                            motion.cast,
+                            motion.death,
+                        ]
+                        .into_iter()
+                        .chain(motion.actions.into_values()),
+                    );
                     library.sets.insert(
                         key.clone(),
                         CharacterAnimationSet {
@@ -386,6 +442,10 @@ fn setup_player_animation_library(
                             attack_node: Some(nodes[3]),
                             cast_node: Some(nodes[4]),
                             death_node: Some(nodes[5]),
+                            motion_nodes: action_names
+                                .into_iter()
+                                .zip(nodes[6..].iter().copied())
+                                .collect(),
                         },
                     );
                     info!(
@@ -477,6 +537,7 @@ fn setup_player_animation_library(
                     attack_node: optional_indices[0].and_then(|index| nodes.get(index).copied()),
                     cast_node: optional_indices[1].and_then(|index| nodes.get(index).copied()),
                     death_node: optional_indices[2].and_then(|index| nodes.get(index).copied()),
+                    motion_nodes: Vec::new(),
                 },
             );
             info!(
@@ -632,6 +693,8 @@ pub(super) fn bind_player_animation_players(
                 sandbox_preview: None,
                 sandbox_paused: false,
                 sandbox_time: None,
+                skill_motion: None,
+                skill_phase_sequence: None,
             },
         ));
     }
@@ -743,6 +806,7 @@ pub(super) fn sync_player_animation_state(
     graphs: Option<Res<Assets<AnimationGraph>>>,
     clips: Option<Res<Assets<AnimationClip>>>,
     library: Res<PlayerAnimationLibrary>,
+    skill_profiles: Option<Res<crate::skill_presentation::SkillPresentation>>,
     character_query: Query<
         (
             &NetworkCharacterChoice,
@@ -753,7 +817,13 @@ pub(super) fn sync_player_animation_state(
     >,
     local_movement_query: Query<(Option<&MovementTarget>, Option<&Jumping>), With<Player>>,
     player_state_query: Query<
-        (&Transform, &CombatStats, Option<&PlayerCosmeticAction>),
+        (
+            &Transform,
+            &CombatStats,
+            Option<&PlayerCosmeticAction>,
+            Option<&crate::net::PlayerLoadout>,
+            Option<&crate::net::NetworkHeroClass>,
+        ),
         Or<(With<Player>, With<RemotePlayer>)>,
     >,
     mut animation_query: Query<(
@@ -788,7 +858,9 @@ pub(super) fn sync_player_animation_state(
         }
     }
     for (mut animation_player, mut binding, mut graph_handle) in &mut animation_query {
-        let Ok((owner_transform, stats, action)) = player_state_query.get(binding.owner) else {
+        let Ok((owner_transform, stats, action, loadout, class)) =
+            player_state_query.get(binding.owner)
+        else {
             continue;
         };
         let action = action.copied().unwrap_or_default();
@@ -814,6 +886,45 @@ pub(super) fn sync_player_animation_state(
         let Some(set) = library.get_set(&binding.key) else {
             continue;
         };
+        if round_changed || key_changed {
+            binding.skill_motion = None;
+            binding.skill_phase_sequence = None;
+        }
+        let skill_cue = skill_profiles.as_deref().and_then(|registry| {
+            crate::skill_presentation::motion_cue(
+                registry,
+                loadout.and_then(|l| l.0.as_ref()),
+                action.slot,
+                id.unwrap_or(0),
+                game_state
+                    .as_ref()
+                    .map_or(&[], |g| g.skill_effects.as_slice()),
+            )
+            .or_else(|| {
+                let profile = registry.action_profile(
+                    class?.0,
+                    loadout.and_then(|l| l.0.as_ref()),
+                    action.slot,
+                )?;
+                profile
+                    .windup
+                    .is_none()
+                    .then(|| crate::skill_presentation::MotionCue {
+                        motion: profile.release.clone(),
+                        hold: false,
+                    })
+            })
+        });
+        let requires_phase = skill_profiles
+            .as_deref()
+            .and_then(|registry| {
+                let skill = crate::skill_presentation::equipped_skill(
+                    loadout.and_then(|l| l.0.as_ref()),
+                    action.slot,
+                )?;
+                registry.profile(skill)
+            })
+            .is_some_and(|profile| profile.windup.is_some());
         let sim_time = game_state.as_ref().and_then(|g| {
             g.sandbox
                 .as_ref()
@@ -882,19 +993,61 @@ pub(super) fn sync_player_animation_state(
                 graphs.as_deref(),
                 clips.as_deref(),
             );
-            let finished = active.is_none_or(|active| {
-                active.is_finished()
-                    || ((!paused || step_delta > 0.0)
-                        && duration.is_some_and(|duration| active.seek_time() >= duration)
-                        && active.repeat_mode() == bevy::animation::RepeatAnimation::Never)
-            });
-            let restart = binding.playback.advance(
+            let holding = binding
+                .skill_motion
+                .as_ref()
+                .is_some_and(|(seq, cue)| *seq == action.sequence && cue.hold)
+                && skill_cue.as_ref().is_some_and(|cue| cue.hold);
+            let cancelled = requires_phase
+                && skill_cue.is_none()
+                && binding
+                    .skill_motion
+                    .as_ref()
+                    .is_some_and(|(_, cue)| cue.hold);
+            let finished = cancelled
+                || (!holding
+                    && active.is_none_or(|active| {
+                        active.is_finished()
+                            || ((!paused || step_delta > 0.0)
+                                && duration.is_some_and(|duration| active.seek_time() >= duration)
+                                && active.repeat_mode() == bevy::animation::RepeatAnimation::Never)
+                    }));
+            let incoming = action.sequence > binding.playback.last_action_sequence;
+            let respawned = !binding.playback.alive && stats.is_alive();
+            if incoming {
+                binding.skill_phase_sequence =
+                    (requires_phase && stats.is_alive() && !respawned).then_some(action.sequence);
+            }
+            if !stats.is_alive() || respawned {
+                binding.skill_phase_sequence = None;
+            }
+            let phase_changed = binding.skill_phase_sequence == Some(action.sequence)
+                && requires_phase
+                && skill_cue.is_some()
+                && binding.skill_motion.as_ref().is_none_or(|(seq, cue)| {
+                    *seq == action.sequence && Some(cue) != skill_cue.as_ref()
+                });
+            let mut confirmed_action = action;
+            if requires_phase && skill_cue.is_none() {
+                confirmed_action.kind = shared::PlayerActionKind::None;
+            }
+            let mut restart = binding.playback.advance(
                 stats.is_alive(),
                 moving_by_intent || moved || moved_recently,
-                action,
+                confirmed_action,
                 finished,
                 |state| set.available(state),
             );
+            if stats.is_alive() && !respawned && (incoming || phase_changed) {
+                binding.skill_motion = skill_cue.clone().map(|cue| (action.sequence, cue));
+                if let Some(cue) = &skill_cue {
+                    binding.playback.state = set.motion(&cue.motion);
+                    restart = true;
+                }
+            }
+            if !stats.is_alive() || cancelled || respawned {
+                binding.skill_motion = None;
+            }
             (
                 restart || ended_preview,
                 if binding.playback.state == HeroAnimationState::Death
@@ -902,7 +1055,12 @@ pub(super) fn sync_player_animation_state(
                 {
                     "Death → Idle (clip unavailable; frozen)".into()
                 } else {
-                    format!("{:?}", binding.playback.state)
+                    match binding.playback.state {
+                        HeroAnimationState::Motion(index) => {
+                            set.motion_nodes[index as usize].0.clone()
+                        }
+                        state => format!("{state:?}"),
+                    }
                 },
             )
         };
@@ -913,9 +1071,32 @@ pub(super) fn sync_player_animation_state(
             || *graph_handle != expected_graph_handle
             || !animation_player.is_playing_animation(set.node(binding.playback.state))
         {
+            let hard_cut = key_changed
+                || round_changed
+                || *graph_handle != expected_graph_handle
+                || paused
+                || preview.is_some()
+                || binding.playback.state == HeroAnimationState::Death;
             *graph_handle = expected_graph_handle;
-            start_hero_animation(&mut animation_player, set, binding.playback.state);
+            if hard_cut {
+                start_hero_animation(&mut animation_player, set, binding.playback.state);
+            } else {
+                let node = set.node(binding.playback.state);
+                let weight = animation_player.animation(node).map_or(0.0, |a| a.weight());
+                let active = animation_player.start(node).set_weight(weight);
+                if matches!(
+                    binding.playback.state,
+                    HeroAnimationState::Idle | HeroAnimationState::Run | HeroAnimationState::Walk
+                ) {
+                    active.repeat();
+                }
+            }
         }
+        blend_hero_animation(
+            &mut animation_player,
+            set.node(binding.playback.state),
+            simulation_delta,
+        );
         let duration = animation_clip_duration(
             set,
             binding.playback.state,

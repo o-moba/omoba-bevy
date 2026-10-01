@@ -1,0 +1,30 @@
+{
+  "projectId": "omoba",
+  "platform": "desktop",
+  "profile": "handheld-glb-v1",
+  "format": "glb",
+  "builder": "omoba-handheld-v1",
+  "requirements": {
+    "source": { "minBytes": 20, "maxBytes": 8388608, "humanoid": false },
+    "rendition": {
+      "format": "glb",
+      "minBytes": 20,
+      "maxBytes": 8388608,
+      "selfContained": true,
+      "animations": { "required": [] }
+    }
+  },
+  "consumerContract": {
+    "staticOnly": true,
+    "scenes": 1,
+    "maxNodes": 64,
+    "maxMeshes": 16,
+    "metadata": "asset.extras.ekza_handheld_v1",
+    "bones": ["rightHand", "leftHand"],
+    "gripOrigin": "palm centre",
+    "shaftAxis": "+Y",
+    "fingerAxis": "+Z",
+    "units": "metres",
+    "validator": "omoba_passport::weapons::validate_model"
+  }
+}

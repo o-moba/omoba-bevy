@@ -21,6 +21,12 @@ pub(crate) struct RuntimeHumanoidPlayer {
     targets: HashMap<usize, Entity>,
 }
 
+impl RuntimeHumanoidPlayer {
+    pub(crate) fn joint(&self, node: usize) -> Option<Entity> {
+        self.targets.get(&node).copied()
+    }
+}
+
 #[derive(Component, Clone, Debug)]
 pub(crate) struct RuntimeHumanoidBindingError(pub String);
 

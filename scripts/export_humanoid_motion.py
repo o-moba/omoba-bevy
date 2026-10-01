@@ -31,6 +31,16 @@ CLIPS = (
     ("attack", "Sword_Attack", False),
     ("cast", "Spell_Simple_Shoot", False),
     ("death", "Death01", False),
+    ("spell_prepare", "Spell_Simple_Enter", False),
+    ("spell_finish", "Spell_Simple_Exit", False),
+    ("pistol_shoot", "Pistol_Shoot", False),
+    ("pistol_reload", "Pistol_Reload", False),
+    ("pistol_aim", "Pistol_Aim_Neutral", False),
+    ("interact", "Interact", False),
+    ("punch", "Punch_Cross", False),
+    ("guard", "Punch_Enter", False),
+    ("shoulder_drive", "Punch_Jab", False),
+    ("roll", "Roll", False),
 )
 REQUIRED = (
     "hips", "spine", "head", "leftUpperArm", "leftLowerArm", "leftHand",

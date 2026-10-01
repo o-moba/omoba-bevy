@@ -171,6 +171,7 @@ pub fn handle_basic_attack_request(
     attacker.hero.last_action.sequence = attacker.hero.last_action.sequence.wrapping_add(1).max(1);
     attacker.hero.last_action.kind = PlayerActionKind::Attack;
     attacker.hero.last_action.slot = BASIC_ATTACK_ACTION_SLOT;
+    crate::sim::cast::face_player_action(attacker, direction.x, direction.z);
     let id = world.next_projectile_id;
     world.next_projectile_id += 1;
     if splash > 0.0 {

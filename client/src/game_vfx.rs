@@ -18,6 +18,7 @@ use bevy::{
 use shared::combat::ProjectileStyle;
 
 const PARTICLE_BUDGET: usize = 256;
+const PARTICLE_HDR_GAIN: f32 = 2.5;
 const BUTTERFLY_BUDGET: usize = shared::forest_pickups::FOREST_PICKUP_COUNT * 3;
 /// World distance a hasted hero travels between two speed streaks.
 const HASTE_STREAK_SPACING: f32 = 0.42;
@@ -27,6 +28,18 @@ const DASH_COLOR: Color = Color::srgb(0.55, 0.9, 1.0);
 const DASH_CORE_COLOR: Color = Color::srgb(0.92, 0.98, 1.0);
 const HASTE_COLOR: Color = Color::srgb(1.0, 0.78, 0.28);
 const HASTE_CORE_COLOR: Color = Color::srgb(1.0, 0.93, 0.7);
+
+/// Unlit materials use base color directly, so HDR energy belongs in its RGB,
+/// while alpha keeps controlling coverage and the particle's lifetime fade.
+pub(crate) fn hdr_tint(color: Color, gain: f32) -> Color {
+    let linear = color.to_linear();
+    Color::linear_rgba(
+        linear.red * gain,
+        linear.green * gain,
+        linear.blue * gain,
+        linear.alpha,
+    )
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum BurstKind {
@@ -206,6 +219,7 @@ impl Plugin for GameVfxPlugin {
                     (
                         pickup_feedback,
                         emit_projectile_particles,
+                        emit_skill_cast_particles,
                         animate_particles,
                     )
                         .chain(),
@@ -325,6 +339,7 @@ fn setup(
     for _ in 0..PARTICLE_BUDGET {
         let material = materials.add(StandardMaterial {
             unlit: true,
+            fog_enabled: false,
             alpha_mode: AlphaMode::Add,
             base_color_texture: Some(glow.clone()),
             cull_mode: None,
@@ -869,7 +884,7 @@ fn animate_particles(
         let texture =
             matches!(p.shape, Shape::Glow | Shape::Streak).then(|| assets.glow_texture.clone());
         if let Some(m) = materials.get_mut(&slot.material) {
-            m.base_color = p.color;
+            m.base_color = hdr_tint(p.color, PARTICLE_HDR_GAIN);
             m.base_color_texture = texture.clone();
             m.alpha_mode = AlphaMode::Blend;
         }
@@ -903,7 +918,8 @@ fn animate_particles(
         *inherited = InheritedVisibility::VISIBLE;
         let opacity = (1. - p.age / p.lifetime).max(0.);
         if let Some(m) = materials.get_mut(&slot.material) {
-            m.base_color = p.color.with_alpha(p.color.alpha() * opacity);
+            m.base_color =
+                hdr_tint(p.color, PARTICLE_HDR_GAIN).with_alpha(p.color.alpha() * opacity);
         }
         if let Some(m) = flats.get_mut(&slot.flat) {
             m.color = p.color.with_alpha(p.color.alpha() * opacity);
@@ -1000,6 +1016,97 @@ fn animate_butterflies(
         *global = GlobalTransform::from(*transform);
     }
 }
+/// Cast accents are distinct from impact feedback. Only a new accepted action emits them;
+/// a miss still casts, but it never manufactures an impact on another character.
+fn emit_skill_cast_particles(
+    game: Option<Res<crate::net::GameStateSnapshot>>,
+    profiles: Option<Res<crate::skill_presentation::SkillPresentation>>,
+    mode: Res<PlayerVisualMode>,
+    actors: Query<(
+        Entity,
+        &Transform,
+        &InheritedVisibility,
+        &crate::net::PlayerCosmeticAction,
+        &crate::net::NetworkHeroClass,
+        Option<&crate::net::PlayerLoadout>,
+        &crate::combat::CombatStats,
+    )>,
+    mut receipts: Local<(Option<(u64, u64)>, std::collections::HashMap<Entity, u64>)>,
+    mut output: MessageWriter<FlightParticles>,
+) {
+    let (Some(game), Some(profiles)) = (game, profiles) else {
+        return;
+    };
+    let round = Some((game.meta.server_epoch, game.meta.match_id));
+    if receipts.0 != round {
+        receipts.0 = round;
+        receipts.1.clear();
+    }
+    receipts.1.retain(|entity, _| actors.contains(*entity));
+    for (entity, pose, visibility, action, class, loadout, stats) in &actors {
+        let previous = receipts.1.get(&entity).copied();
+        receipts
+            .1
+            .insert(entity, previous.unwrap_or(0).max(action.sequence));
+        if !cast_is_new(previous, action.sequence)
+            || !visibility.get()
+            || !stats.is_alive()
+            || !matches!(game.state, crate::net::GameState::Running)
+        {
+            continue;
+        }
+        let Some(profile) =
+            profiles.action_profile(class.0, loadout.and_then(|l| l.0.as_ref()), action.slot)
+        else {
+            continue;
+        };
+        // Long windups already have a server-owned warning; avoid implying immediate release.
+        if profile.windup.is_some() {
+            continue;
+        }
+        let p = if *mode == PlayerVisualMode::Sprite2d {
+            Vec3::new(pose.translation.x, 0.0, pose.translation.y)
+        } else {
+            pose.translation
+        };
+        let forward = pose.rotation * Vec3::Z;
+        let origin = p + Vec3::Y * 0.8;
+        use crate::skill_presentation::EffectStyle as S;
+        let (shape, count, size) = match profile.effect {
+            S::Slash => (Shape::Slash, 5, 1.6),
+            S::Needle | S::Lance | S::Shock | S::Repeater => (Shape::Streak, 4, 1.1),
+            S::Aegis | S::Pulse | S::Field | S::Wall => (Shape::Ring, 7, 1.4),
+            _ => (Shape::Glow, 7, 1.0),
+        };
+        let color = Color::srgb_from_array(profile.color);
+        output.write(FlightParticles(
+            (0..count)
+                .map(|i| {
+                    let angle = i as f32 * std::f32::consts::TAU / count as f32;
+                    Particle {
+                        event_id: action.sequence,
+                        origin,
+                        velocity: if i == 0 {
+                            Vec3::ZERO
+                        } else {
+                            Vec3::new(angle.cos(), 0.3, angle.sin()) * 1.8
+                        },
+                        age: 0.0,
+                        lifetime: if i == 0 { 0.4 } else { 0.28 },
+                        size: if i == 0 { size } else { 0.24 },
+                        angle: forward.z.atan2(forward.x),
+                        color,
+                        shape: if i == 0 { shape } else { Shape::Glow },
+                    }
+                })
+                .collect(),
+        ));
+    }
+}
+fn cast_is_new(previous: Option<u64>, current: u64) -> bool {
+    previous.is_some_and(|previous| current > previous)
+}
+
 /// Short tails sample authoritative positions; no stationary projectile invents a hit.
 fn emit_projectile_particles(
     time: Res<Time>,
@@ -1284,6 +1391,13 @@ fn pickup_feedback(
 mod tests {
     use super::*;
     #[test]
+    fn cast_receipts_do_not_replay_initial_duplicate_or_older_actions() {
+        assert!(!cast_is_new(None, 12));
+        assert!(!cast_is_new(Some(12), 12));
+        assert!(!cast_is_new(Some(12), 11));
+        assert!(cast_is_new(Some(12), 13));
+    }
+    #[test]
     fn pickup_receipts_seed_once_ignore_rollbacks_and_respect_hidden_collectors() {
         use crate::net::{GameState, GameStateSnapshot, NetworkPlayerId};
         let mut app = App::new();
@@ -1406,6 +1520,85 @@ mod tests {
             lifetime: 1.,
             kind: BurstKind::Magic,
             seed: 1,
+        }
+    }
+    #[test]
+    fn fading_particles_keep_hdr_energy_without_changing_flat_color_or_alpha() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+                std::time::Duration::from_millis(16),
+            ))
+            .init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<Image>>()
+            .init_resource::<Assets<StandardMaterial>>()
+            .init_resource::<Assets<ColorMaterial>>()
+            .init_resource::<PlayerVisualMode>()
+            .init_resource::<MapLayout>()
+            .add_plugins(GameVfxPlugin);
+        app.update();
+        let color = Color::srgba(1.0, 0.5, 0.25, 0.4);
+        for mode in [PlayerVisualMode::Models3d, PlayerVisualMode::Sprite2d] {
+            app.world_mut().insert_resource(mode);
+            app.world_mut()
+                .write_message(FlightParticles(vec![Particle {
+                    event_id: 0,
+                    origin: Vec3::ZERO,
+                    velocity: Vec3::ZERO,
+                    age: 0.0,
+                    lifetime: 10.0,
+                    size: 1.0,
+                    angle: 0.0,
+                    color,
+                    shape: Shape::Glow,
+                }]));
+            app.update();
+            for mut slot in app
+                .world_mut()
+                .query::<&mut ParticleSlot>()
+                .iter_mut(app.world_mut())
+            {
+                if let Some(particle) = &mut slot.active {
+                    particle.age = 5.0;
+                }
+            }
+            app.update();
+            let (material, flat, age, is_3d, is_2d) = app
+                .world_mut()
+                .query::<(&ParticleSlot, Option<&Mesh3d>, Option<&Mesh2d>)>()
+                .iter(app.world())
+                .find_map(|(slot, mesh_3d, mesh_2d)| {
+                    slot.active.as_ref().map(|particle| {
+                        (
+                            slot.material.clone(),
+                            slot.flat.clone(),
+                            particle.age,
+                            mesh_3d.is_some(),
+                            mesh_2d.is_some(),
+                        )
+                    })
+                })
+                .expect("The particle remains alive halfway through its fade");
+            assert_eq!(is_3d, mode == PlayerVisualMode::Models3d);
+            assert_eq!(is_2d, mode == PlayerVisualMode::Sprite2d);
+            let expected_alpha = color.alpha() * (1.0 - age / 10.0);
+            assert!((0.19..0.21).contains(&expected_alpha));
+            let material = app
+                .world()
+                .resource::<Assets<StandardMaterial>>()
+                .get(&material)
+                .unwrap();
+            let hdr = material.base_color.to_linear();
+            assert!((hdr.red - 2.5).abs() < 0.0001);
+            assert!((hdr.green - color.to_linear().green * 2.5).abs() < 0.0001);
+            assert!((hdr.alpha - expected_alpha).abs() < 0.0001);
+            assert!(!material.fog_enabled);
+            let flat = app
+                .world()
+                .resource::<Assets<ColorMaterial>>()
+                .get(&flat)
+                .unwrap();
+            assert_eq!(flat.color, color.with_alpha(expected_alpha));
         }
     }
     #[test]

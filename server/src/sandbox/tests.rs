@@ -1040,3 +1040,21 @@ fn reclaimed_actor_keeps_ack_and_sequence_after_address_change() {
     );
     assert_eq!(rt.sandbox.as_ref().unwrap().sequences[&id], 2);
 }
+
+#[test]
+fn handheld_choices_are_cosmetic_and_unknown_imports_are_rejected() {
+    for hero in shared::HeroClass::ALL {
+        let mut actor = shared::sandbox::ActorConfig {
+            hero,
+            handheld: shared::handheld::HandheldSelection::Item("forge-hammer".into()),
+            ..Default::default()
+        };
+        assert!(super::validate_actor(&actor).is_ok());
+        actor.handheld = shared::handheld::HandheldSelection::Unequipped;
+        assert!(super::validate_actor(&actor).is_ok());
+        actor.handheld = shared::handheld::HandheldSelection::Item(
+            "https://unapproved.example/weapon.glb".into(),
+        );
+        assert!(super::validate_actor(&actor).is_err());
+    }
+}

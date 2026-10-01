@@ -418,6 +418,7 @@ pub(super) fn draw_aim(
 /// Bounded, snapshot-driven geometry. Effects do not depend on a visible owner.
 pub(super) fn draw_effects(
     mut gizmos: Gizmos<SkillEffectGizmos>,
+    profiles: Option<Res<crate::skill_presentation::SkillPresentation>>,
     game: Option<Res<GameStateSnapshot>>,
     mode: Res<PlayerVisualMode>,
     map: Option<Res<crate::maps::MapLayout>>,
@@ -443,6 +444,15 @@ pub(super) fn draw_effects(
             continue;
         }
         let p = Vec2::from_array(e.position);
+        // Keep the tactical trap outline over the newer 3D trap model.
+        if *mode == PlayerVisualMode::Models3d
+            && e.kind != EffectVisualKind::Trap
+            && profiles
+                .as_ref()
+                .is_some_and(|r| r.profile(e.skill).is_some())
+        {
+            continue;
+        }
         let end = Vec2::from_array(e.end);
         let friendly = local.single().is_ok_and(|t| *t == e.owner_team);
         let color = if e.kind == EffectVisualKind::Trap {

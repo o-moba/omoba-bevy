@@ -25,6 +25,11 @@ pub struct ActorConfig {
     #[serde(deserialize_with = "strict_hero")]
     pub hero: HeroClass,
     pub avatar: Option<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "crate::handheld::HandheldSelection::is_default"
+    )]
+    pub handheld: crate::handheld::HandheldSelection,
     pub level: u32,
     pub xp: u32,
     pub ranks: [u8; 4],
@@ -47,6 +52,7 @@ impl Default for ActorConfig {
         Self {
             hero: HeroClass::Warrior,
             avatar: None,
+            handheld: Default::default(),
             level: 1,
             xp: 0,
             ranks: [1; 4],

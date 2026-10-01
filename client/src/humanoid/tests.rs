@@ -36,7 +36,21 @@ fn all_fifteen_shipped_rigs_retarget_actual_run_with_separate_walk_and_all_state
         let slug = avatar["slug"].as_str().unwrap();
         let rig = rig(slug);
         let (clips, animated_nodes) = retarget::retarget_all(&rig, &motion).unwrap();
-        assert_eq!(clips.len(), 6, "{slug}");
+        assert_eq!(clips.len(), motion.clips.len(), "{slug}");
+        for (name, source) in &motion.clips {
+            assert_eq!(clips[name].duration(), source.duration, "{slug}/{name}");
+            for sample in [0, source.times.len() / 2, source.times.len() - 1] {
+                let (rotations, hips) =
+                    retarget::sample_frame(&rig, &motion, name, sample).unwrap();
+                assert!(hips.is_finite(), "{slug}/{name}: invalid hips");
+                assert!(
+                    rotations
+                        .iter()
+                        .all(|q| q.is_finite() && (q.length_squared() - 1.0).abs() < 0.001),
+                    "{slug}/{name}: invalid joint pose"
+                );
+            }
+        }
         assert_eq!(clips["run"].duration(), motion.clips["run"].duration);
         let first = retarget::sample_frame(&rig, &motion, "run", 0).unwrap();
         let last =
@@ -299,6 +313,7 @@ fn actual_ecs_clipless_binding_survives_async_readiness_scene_refresh_and_despaw
         attack: handles.remove("attack").unwrap(),
         cast: handles.remove("cast").unwrap(),
         death: handles.remove("death").unwrap(),
+        actions: handles.into_iter().collect(),
     };
     app.world_mut()
         .resource_mut::<HumanoidRuntimeLibrary>()
@@ -307,6 +322,15 @@ fn actual_ecs_clipless_binding_survives_async_readiness_scene_refresh_and_despaw
             model.id(),
             RuntimeRig {
                 clips: runtime_clips.clone(),
+                hand_sockets: ["leftHand", "rightHand"]
+                    .into_iter()
+                    .filter_map(|hand| {
+                        Some((
+                            hand.to_owned(),
+                            (*rig.bones.get(hand)?, sockets::grip_frame(&rig, hand)?),
+                        ))
+                    })
+                    .collect(),
                 rig: rig.clone(),
                 animated_nodes: animated_nodes.clone(),
             },
@@ -581,4 +605,28 @@ fn embedded_alias_preserves_curves_with_safe_runtime_ids_and_rejects_partial_rem
     );
     assert!(embedded::remap(&rig, &animated_nodes, &names, &original).is_err());
     assert_eq!(original.curves().len(), 2); // Immutable original clip is retained.
+}
+
+#[test]
+fn semantic_hand_sockets_cover_shipped_rigs_without_bone_names() {
+    for avatar in omoba_passport::avatars::avatar_roster()
+        .iter()
+        .filter(|a| a.passport.is_none())
+    {
+        let r = rig(&avatar.slug);
+        for hand in ["leftHand", "rightHand"] {
+            let frame =
+                sockets::grip_frame(&r, hand).unwrap_or_else(|| panic!("{} {hand}", avatar.slug));
+            assert!(
+                frame.translation.is_finite()
+                    && frame.rotation.is_finite()
+                    && frame.scale.is_finite()
+            );
+            assert!((frame.rotation.length() - 1.).abs() < 1e-4);
+            assert!(frame.scale.min_element() > 0.);
+            let mut missing = r.clone();
+            missing.bones.remove(hand);
+            assert!(sockets::grip_frame(&missing, hand).is_none());
+        }
+    }
 }

@@ -4,7 +4,9 @@ All notable changes to this repository should be documented in this file.
 
 The canonical repository version lives in `Cargo.toml` under `[workspace.package].version` and follows SemVer.
 
-## [0.32.0] - 2026-09-29
+## [Unreleased]
+
+## [0.32.0] - 2026-10-02
 
 ### Combat readability and practice controls
 
@@ -21,6 +23,24 @@ The canonical repository version lives in `Cargo.toml` under `[workspace.package
   feed and round/replay deduplication; no hidden combat coordinates are exposed.
 - Add a nearby nonattacking circular target to practice tools, alongside the
   stationary target, sharing the online/offline practice command path.
+
+## [0.31.1] - 2026-10-01
+
+### Ekza demo integration
+
+- Pin the shared Ekza SDK to the integrated main revision, preserving scoped account restoration, complete-catalogue outage handling and explicit debug-only LAN support.
+- Record the live Studio publication gate; local SDK collection checks do not certify cloud publication or phone acceptance.
+
+### Local SDK avatar collection
+
+- Add a reproducible 20-avatar developer catalog from pinned Open Source Avatars sources, using the existing Ekza SDK download/store and humanoid rendition pipeline. Keep model binaries out of the shipped avatar manifest.
+- Add a local play launcher, cold-install validator, real-server admission checks and an opt-in native preview/gameplay capture runner. Public Space publication remains separate; see the session note for verification status.
+
+### Handheld weapon pilot
+
+- Add original Blender sword, hammer and scepter props attached to semantic VRM hand bones, independently of class and avatar. Warrior defaults to the sword; Combat Test supports replicated equip/unequip choices.
+- Import approved free static props through the existing Ekza SDK with bounded downloads, SHA-256 verification and embedded grip metadata. Include the `handheld-glb-v1` profile and registry builder adapter; public Space publication and paid ownership remain pending.
+- Fix sandbox avatar replacement recreating the previous model and moving the camera between snapshots. Verify the Warrior pilot on Agnes and Orion, including an SDK-imported scepter.
 
 ## [0.31.0] - 2026-09-29
 

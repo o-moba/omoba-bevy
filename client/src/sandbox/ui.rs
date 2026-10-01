@@ -246,6 +246,7 @@ enum Action {
     Step(Field, f32),
     Hero(shared::HeroClass),
     Avatar(String),
+    Handheld(shared::handheld::HandheldSelection),
     Stage(u32),
     Xp(i32),
     Command(SandboxCommand),
@@ -283,6 +284,7 @@ impl Action {
             ),
             Self::Hero(hero) => format!("CombatTestHero-{}", hero.id()),
             Self::Avatar(slug) => format!("CombatTestAvatar-{slug}"),
+            Self::Handheld(choice) => format!("CombatTestHandheld-{choice:?}"),
             Self::Stage(level) => format!("CombatTestStage-{level}"),
             Self::Xp(amount) => format!("CombatTestXp{amount:+}"),
             Self::Command(SandboxCommand::ForceCast { slot, .. }) => {
@@ -465,6 +467,7 @@ fn build_panel(
                 }
                 p.spawn(row()).with_children(|r|for i in 0..4{button(r,format!("Cast {}",["Q","W","E","R"][i]),Action::Command(SandboxCommand::ForceCast{actor:state.actor,slot:i as u8,target_id:None}));});
                 heading(p,"Grant equipment");p.spawn(row()).with_children(|r|{for item in shared::shop::items(){button(r,item.name,Action::Item(item.id));}button(r,"Clear inventory",Action::ClearItems);});
+                heading(p,"Handheld appearance");p.spawn(row()).with_children(|r|{button(r,"Class default",Action::Handheld(Default::default()));button(r,"Empty hands",Action::Handheld(shared::handheld::HandheldSelection::Unequipped));for item in &omoba_passport::weapons::catalog().items {button(r,&item.name,Action::Handheld(shared::handheld::HandheldSelection::Item(item.id.clone())));}});
                 heading(p,"Shipped appearances");p.spawn(row()).with_children(|r|for avatar in omoba_passport::avatars::avatar_roster().iter().filter(|a|a.passport.is_none()){button(r,&avatar.slug,Action::Avatar(avatar.slug.clone()));});
             },
             Tab::Dummy=>{
@@ -575,6 +578,10 @@ fn actions(
             }
             Action::Hero(hero) => {
                 s.actor_config_mut().hero = *hero;
+                s.apply();
+            }
+            Action::Handheld(choice) => {
+                s.actor_config_mut().handheld = choice.clone();
                 s.apply();
             }
             Action::Avatar(slug) => {

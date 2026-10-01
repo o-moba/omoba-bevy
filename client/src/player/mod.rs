@@ -1,4 +1,5 @@
 mod animation;
+mod facing;
 mod input;
 mod motion;
 mod respawn_ui;
@@ -74,6 +75,12 @@ impl Plugin for PlayerPlugin {
         )
         .add_systems(Update, resolve_player_structure_overlap.after(move_player))
         .add_systems(PostUpdate, apply_gravity)
+        .add_systems(
+            PostUpdate,
+            facing::face_confirmed_actions
+                .after(apply_gravity)
+                .before(bevy::transform::TransformSystems::Propagate),
+        )
         .init_resource::<RespawnCountdown>()
         // Local movement reads the speed boost; `DebugPlugins` also inits it.
         .init_resource::<crate::debug::DebugToggles>()

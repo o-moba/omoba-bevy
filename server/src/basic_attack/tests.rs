@@ -499,3 +499,19 @@ fn explicit_sandbox_no_cooldowns_bypasses_inter_skill_recovery() {
     assert_eq!(view.skill_recovery_remaining_secs, 0.0);
     assert_eq!(view.skill_cooldown_remaining_secs, [0.0; 4]);
 }
+
+#[test]
+fn accepted_basic_attack_records_target_facing_separately_from_movement_yaw() {
+    let (mut rt, a, _, target, now) = fixture();
+    strike(&mut rt, a, target, 1, now);
+    let expected = shared::math::hero_yaw_towards(1.0, 0.0);
+    let player = rt.world.players.get_mut(&a).unwrap();
+    assert_eq!(player.hero.last_action.yaw, Some(expected));
+    player.hero.yaw = 0.75;
+    let view = player.owner_view(now, &rt.world.map_layout, &rt.world.game_state);
+    assert_eq!(view.yaw, 0.75);
+    assert_eq!(view.action_yaw, Some(expected));
+    strike(&mut rt, a, target, 2, now);
+    assert_eq!(rt.world.players[&a].hero.last_action.sequence, 1);
+    assert_eq!(rt.world.players[&a].hero.last_action.yaw, Some(expected));
+}

@@ -240,6 +240,8 @@ impl ConnectedPlayer {
             action_sequence: hero.last_action.sequence,
             action_kind: hero.last_action.kind,
             action_slot: hero.last_action.slot,
+            action_yaw: hero.last_action.yaw,
+            handheld: hero.identity.handheld.clone(),
         }
     }
 

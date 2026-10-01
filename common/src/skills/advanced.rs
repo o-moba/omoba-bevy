@@ -549,6 +549,10 @@ pub fn cast(w: &mut GameWorld, addr: SocketAddr, slot: u8, aim: [f32; 2], now: I
         r.uses = r.uses.saturating_sub(1);
     }
     crate::sim::cast::record_player_action(p, SkillSlot::from_index(slot).unwrap());
+    if def.ability.targeting != shared::TargetingMode::SelfTarget {
+        let facing = picked.map_or(aim, |c| c.pos);
+        crate::sim::cast::face_player_action(p, facing[0] - origin[0], facing[1] - origin[1]);
+    }
     let mut e = ActiveEffect {
         id: w.skill_runtime.id(),
         owner,
