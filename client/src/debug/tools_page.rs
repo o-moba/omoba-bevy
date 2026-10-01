@@ -118,6 +118,7 @@ pub(crate) enum PracticeAction {
     Roster,
     ClearBots,
     SpawnDummy,
+    SpawnMovingDummy,
     StartDuel,
     LevelDown,
     LevelUp,
@@ -221,6 +222,13 @@ pub(crate) fn spawn_practice_section(panel: &mut ChildSpawnerCommands) {
                     ButtonKind::Secondary,
                     PracticeAction::SpawnDummy,
                     "PauseMenuPracticeDummyButton",
+                );
+                widgets::button(
+                    bots,
+                    "Spawn moving target (circle)",
+                    ButtonKind::Secondary,
+                    PracticeAction::SpawnMovingDummy,
+                    "PauseMenuPracticeMovingDummyButton",
                 );
                 bots.spawn((
                     Text::new("1v1 opponent"),
@@ -371,6 +379,7 @@ fn apply_practice_actions(
                 PracticeAction::Roster
                 | PracticeAction::ClearBots
                 | PracticeAction::SpawnDummy
+                | PracticeAction::SpawnMovingDummy
                 | PracticeAction::StartDuel
                 | PracticeAction::LevelDown
                 | PracticeAction::LevelUp
@@ -427,6 +436,12 @@ fn apply_practice_actions(
                     PracticeCommand::ClearBots,
                 )));
                 say("All bots removed.");
+            }
+            PracticeAction::SpawnMovingDummy => {
+                commands.write(NetworkCommand::Debug(DebugCommand::Practice(
+                    PracticeCommand::SpawnMovingDummy,
+                )));
+                say("Moving target placed near you.");
             }
             PracticeAction::SpawnDummy => {
                 commands.write(NetworkCommand::Debug(DebugCommand::Practice(

@@ -6,6 +6,24 @@ The canonical repository version lives in `Cargo.toml` under `[workspace.package
 
 ## [Unreleased]
 
+## [0.32.0] - 2026-10-02
+
+### Combat readability and practice controls
+
+- Restore shared dash and haste for standard classes, retaining server cooldown,
+  replay, control and collision rules, including temporary skill terrain.
+- Add thick blue terrain-following aim corridors, direction chevrons and clipped
+  minimap previews for long-range skills; strengthen traps and their map markers.
+- Keep camera orientation stable while panning. Touch taps order movement and
+  drags pan; touch world gestures avoid captured controls and interactive UI.
+- Increase the tablet minimap by 20% while keeping phone sizing. Mobile hero
+  name/level/HP/resource plates sit above their heads; allied portraits and HP
+  sit beside the map. The redundant mobile status panel is hidden.
+- Publish bounded identity-only hero kill notices, with timed portrait/name/team
+  feed and round/replay deduplication; no hidden combat coordinates are exposed.
+- Add a nearby nonattacking circular target to practice tools, alongside the
+  stationary target, sharing the online/offline practice command path.
+
 ## [0.31.1] - 2026-10-01
 
 ### Ekza demo integration

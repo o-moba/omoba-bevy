@@ -1,5 +1,19 @@
 # Feature Inventory
 
+## Combat UX (0.32.0)
+
+Standard classes share dash and haste utilities again. Long skill aim uses blue
+terrain-following corridors and a clipped minimap vector; traps have stronger
+outlines and map markers. Camera panning keeps a stable heading. Touch map taps
+and world taps issue routes, drags pan, and the stick overrides an active route.
+Tablet minimaps are 20% larger; phone size stays unchanged. Mobile hero plates
+show level, nickname, HP and resource above the character. Allied portraits/HP
+sit beside the minimap; confirmed hero kills appear in a bounded timed feed using
+public identities without exposing fog-hidden locations. Practice tools include
+stationary and circular-moving nearby targets. See the [task TODO and evidence
+scope](progress/2026-09-29-combat-ux.md).
+
+
 ## Ekza demo integration (0.31.1)
 
 Client and server use the same pinned Ekza SDK main revision. The live publication procedure and remaining deployment gates are in [the demo progress note](progress/2026-10-01-ekza-demo-main.md). A local twenty-avatar catalogue is verified separately from real Studio publication.
@@ -110,7 +124,7 @@ All 15 shipped playable 3D avatars use the engine's shared Run motion during nor
 
 Validated VRM0/VRM1 skinned humanoids receive runtime clips adapted to their bone map and rest pose, including models with no embedded clips. Original skin bytes remain unchanged. This is skeletal compatibility for a documented subset, not complete VRM materials/face/hair support. Approved Studio models gain runtime Run through normal verified loading; accepting externally published clipless models still requires a versioned profile rollout. See [architecture, import and limits](humanoid-motion.md).
 
-Canonical version: `0.29.0`
+Canonical version: `0.32.0`
 
 ## Team draft and shared loading
 

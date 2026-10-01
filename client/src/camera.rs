@@ -376,16 +376,25 @@ fn update_camera(
             let mut offset = Quat::from_rotation_y(cam_state.orbit_yaw)
                 * locked_camera_offset_for_team(zoom, team);
             offset.y *= cam_state.orbit_height;
-            let target_position = target + offset;
+            let mut target_position = target + offset;
+            // A small travel lift preserves the overview without turning towards movement.
+            if focus_override.is_some() {
+                target_position.y += ((target_position - camera_transform.translation)
+                    .xz()
+                    .length()
+                    * 0.08)
+                    .min(2.5);
+            }
             let lerp_factor = (time.delta_secs() * 2.0).min(1.0);
             camera_transform.translation = camera_transform
                 .translation
                 .lerp(target_position, lerp_factor);
             let look_target = Vec3::new(target.x, PLAYER_SIZE / 2.0, target.z);
-            let look_direction = look_target - camera_transform.translation;
+            let look_direction = look_target - target_position;
             if look_direction.length_squared() > 0.0001 {
-                let target_transform = Transform::from_translation(camera_transform.translation)
-                    .looking_at(look_target, Vec3::Y);
+                // Orient from the ideal offset, not the lagging position.
+                let target_transform =
+                    Transform::from_translation(target_position).looking_at(look_target, Vec3::Y);
                 camera_transform.rotation = camera_transform
                     .rotation
                     .slerp(target_transform.rotation, lerp_factor);
@@ -730,5 +739,49 @@ mod tests {
                 .focus_target
                 .is_none()
         );
+    }
+    #[test]
+    fn minimap_pan_reversal_keeps_heading_while_position_interpolates() {
+        let mut app = App::new();
+        app.init_resource::<Time>()
+            .init_resource::<CameraState>()
+            .init_resource::<MapLayout>()
+            .init_resource::<MinimapNavigationState>()
+            .init_resource::<GameplayInputContext>()
+            .insert_resource(PlayerVisualMode::Models3d)
+            .init_resource::<ButtonInput<KeyCode>>()
+            .init_resource::<ButtonInput<MouseButton>>()
+            .add_message::<MouseMotion>()
+            .add_message::<MouseWheel>()
+            .add_systems(Update, update_camera);
+        let offset = locked_camera_offset(1.0);
+        let initial = Transform::from_translation(offset)
+            .looking_at(Vec3::new(0.0, PLAYER_SIZE / 2.0, 0.0), Vec3::Y);
+        let camera = app
+            .world_mut()
+            .spawn((
+                MainCamera,
+                Camera::default(),
+                Projection::Perspective(default()),
+                initial,
+            ))
+            .id();
+        app.world_mut()
+            .spawn((Player, Team::Blue, Transform::default()));
+        for target in [Vec3::new(80.0, 0.0, 80.0), Vec3::new(-80.0, 0.0, -80.0)] {
+            app.world_mut()
+                .resource_mut::<MinimapNavigationState>()
+                .focus_target = Some(target);
+            app.world_mut()
+                .resource_mut::<Time>()
+                .advance_by(std::time::Duration::from_millis(50));
+            app.update();
+            let pose = app.world().get::<Transform>(camera).unwrap();
+            let heading = pose.forward().xz().normalize();
+            let original_heading = initial.forward().xz().normalize();
+            assert!(heading.distance(original_heading) < 0.001);
+            assert!(pose.translation.y > initial.translation.y);
+            assert!(pose.translation.distance(initial.translation) > 0.1);
+        }
     }
 }

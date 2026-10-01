@@ -282,3 +282,26 @@ fn dash_sweeps_static_obstacles_and_honors_world_bounds() {
     );
     assert!(rt.world.players[&addr].hero.x <= edge.x);
 }
+
+#[test]
+fn standard_kits_retain_shared_utility_cooldowns_and_replay_protection() {
+    for class in [
+        HeroClass::Dawnweaver,
+        HeroClass::Wildspark,
+        HeroClass::Stormfist,
+    ] {
+        let (mut rt, addr, now) = fixture();
+        let p = rt.world.players.get_mut(&addr).unwrap();
+        p.hero.identity.hero_class = class;
+        p.hero.skills.loadout = shared::loadout::preset_for_class(class);
+        request(&mut rt, addr, UtilityAction::Dash, [1.0, 0.0], 1, now);
+        assert_eq!(rt.world.players[&addr].hero.utility.dash_sequence, 1);
+        request(&mut rt, addr, UtilityAction::Dash, [1.0, 0.0], 1, now);
+        assert_eq!(rt.world.players[&addr].hero.utility.dash_sequence, 1);
+        request(&mut rt, addr, UtilityAction::Haste, [0.0, 0.0], 2, now);
+        assert_eq!(
+            hero_timers::haste_active(&rt.world.players[&addr], now),
+            HASTE_DURATION_SECS
+        );
+    }
+}

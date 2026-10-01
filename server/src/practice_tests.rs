@@ -1745,3 +1745,54 @@ fn match_metrics_do_not_settle_the_round() {
     let result = rt.career_view(addr(1), now).last_result.unwrap();
     assert_eq!(result.outcome, shared::career::MatchOutcome::Completed);
 }
+
+#[test]
+fn practice_moving_dummy_circles_without_attacking_and_returns_after_respawn() {
+    use shared::practice::PracticeCommand;
+    let mut rt = runtime(2);
+    let mut now = Instant::now();
+    rt.handle_packet(addr(1), join("moving-range"), now);
+    rt.handle_packet(addr(1), practice_command(PracticeCommand::ClearBots), now);
+    rt.handle_packet(
+        addr(1),
+        practice_command(PracticeCommand::SpawnMovingDummy),
+        now,
+    );
+    let bot = *bots_of(&rt).first().unwrap();
+    let original = rt.world.players[&bot].hero.clone();
+    let mut traveled = 0.0;
+    for _ in 0..60 {
+        let before = rt.world.players[&bot].hero.clone();
+        now += Duration::from_millis(50);
+        rt.handle_packet(addr(1), ClientPacket::Ping, now);
+        rt.tick(now, 0.05);
+        let after = &rt.world.players[&bot].hero;
+        let dx = after.x - before.x;
+        let dz = after.z - before.z;
+        let step = dx.hypot(dz);
+        traveled += step;
+        if step > 0.001 {
+            assert!(
+                (-after.yaw.sin() * dx - after.yaw.cos() * dz) / step > 0.99,
+                "moving target faces its motion"
+            );
+        }
+        assert!((after.x - original.x).hypot(after.z - original.z) < 6.0);
+    }
+    assert!(traveled > 1.0, "circle target must move");
+    assert!(
+        rt.world
+            .projectiles
+            .values()
+            .all(|p| p.state.owner_id != original.identity.id)
+    );
+    apply_player_damage(&mut rt.world.players, original.identity.id, 10000.0, now);
+    for _ in 0..(RESPAWN_DELAY.as_millis() / 50 + 4) {
+        now += Duration::from_millis(50);
+        rt.handle_packet(addr(1), ClientPacket::Ping, now);
+        rt.tick(now, 0.05);
+    }
+    let back = &rt.world.players[&bot].hero;
+    assert!(back.hp > 0.0);
+    assert!((back.x - original.x).hypot(back.z - original.z) < 1.0);
+}

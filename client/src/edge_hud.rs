@@ -1843,7 +1843,9 @@ mod tests {
         app.world_mut()
             .resource_mut::<GameStateSnapshot>()
             .scoreboard = Some(LiveScoreboard {
+            kills: Vec::new(),
             players: vec![LiveScorePlayer {
+                avatar: None,
                 player_id: 7,
                 nickname: "DarkSentinel".into(),
                 team: Team::Blue,
@@ -2048,6 +2050,7 @@ mod tests {
     #[test]
     fn live_score_totals_use_both_teams_and_distinguish_missing_data() {
         let player = |id, team, kills| LiveScorePlayer {
+            avatar: None,
             player_id: id,
             nickname: "Player".into(),
             team,
@@ -2060,6 +2063,7 @@ mod tests {
             connected: true,
         };
         let board = LiveScoreboard {
+            kills: Vec::new(),
             players: vec![
                 player(1, Team::Green, 4),
                 player(2, Team::Green, 5),

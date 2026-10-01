@@ -631,3 +631,26 @@ fn controller_moves_the_hero_on_desktop_and_an_idle_pad_preserves_a_click_route(
         full
     );
 }
+
+#[test]
+fn mobile_map_tap_routes_without_mouse_and_idle_stick_preserves_the_order() {
+    let (mut app, player) = navigation_input_app();
+    let mut mobile = crate::mobile_controls::MobileControls::default();
+    mobile.enabled = true;
+    mobile.focused = true;
+    mobile.landscape = true;
+    app.insert_resource(mobile);
+    app.world_mut()
+        .resource_mut::<MinimapNavigationState>()
+        .movement_target = Some(Vec3::new(8.0, 0.0, 0.0));
+    app.update();
+    assert!(app.world().get::<MovementRoute>(player).is_some());
+    assert_eq!(
+        app.world()
+            .get::<MovementRoute>(player)
+            .unwrap()
+            .destination
+            .xz(),
+        Vec2::new(8.0, 0.0)
+    );
+}

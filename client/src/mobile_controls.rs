@@ -729,11 +729,7 @@ fn read_mobile_controls(
         mobile.layout_changed = true;
     }
     let alive = local.single().is_ok_and(|(stats, _, _)| stats.is_alive());
-    mobile.utilities_available = local
-        .single()
-        .ok()
-        .and_then(|(_, _, class)| class)
-        .is_none_or(|class| !class.0.is_standard());
+    mobile.utilities_available = true;
     // A controller that owns input hides the touch HUD; the first touch
     // takes ownership back before this runs, so no finger is lost.
     let controller = gamepad.as_ref().is_some_and(|pad| pad.active);
@@ -1480,7 +1476,7 @@ fn draw_mobile_controls(
                 (
                     layout.utility_centers[index],
                     Vec2::splat(layout.auxiliary_radius * 2.0),
-                    visible && shared::loadout::preset_for_class(class).is_none(),
+                    visible,
                 )
             }
             MobileVisual::AimHint => {
