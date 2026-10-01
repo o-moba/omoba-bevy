@@ -1,5 +1,9 @@
 # Feature Inventory
 
+## Ekza demo integration (0.31.1)
+
+Client and server use the same pinned Ekza SDK main revision. The live publication procedure and remaining deployment gates are in [the demo progress note](progress/2026-10-01-ekza-demo-main.md). A local twenty-avatar catalogue is verified separately from real Studio publication.
+
 ## Local SDK Twenty collection (unreleased)
 
 A developer launcher serves 20 additional curated avatars through the real Ekza SDK, with persistent downloads, existing humanoid animation retargeting and independent server admission. Generated models remain separate from bundled game assets. This is a local catalog, not public Space publication. See [build/play instructions](../assets-src/sdk-avatar-pack/README.md) and [verification status](progress/2026-10-01-sdk-avatar-pack.md).

@@ -6,6 +6,13 @@ The canonical repository version lives in `Cargo.toml` under `[workspace.package
 
 ## [Unreleased]
 
+## [0.31.1] - 2026-10-01
+
+### Ekza demo integration
+
+- Pin the shared Ekza SDK to the integrated main revision, preserving scoped account restoration, complete-catalogue outage handling and explicit debug-only LAN support.
+- Record the live Studio publication gate; local SDK collection checks do not certify cloud publication or phone acceptance.
+
 ### Local SDK avatar collection
 
 - Add a reproducible 20-avatar developer catalog from pinned Open Source Avatars sources, using the existing Ekza SDK download/store and humanoid rendition pipeline. Keep model binaries out of the shipped avatar manifest.
