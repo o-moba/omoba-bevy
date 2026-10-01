@@ -4,7 +4,7 @@ This is an operator/creator runbook, not a deployment or publication performed b
 
 ## Observed public service state — 2026-10-01
 
-Studio is now live at **https://registry.ekza.io/studio**. Health, Studio status,
+Studio is now live at **https://studio.ekza.io/studio**. Health, Studio status,
 profiles and the public v2 catalogue return 200. The first original **EYEWizard**
 has completed authenticated upload, fresh Mac Blender conversion, curator
 publication, Omoba GLB preparation and project approval. The actual Rust SDK cold
