@@ -240,6 +240,7 @@ fn practice_runtime(size: u32) -> (ServerRuntime, ManualClock) {
 
 fn join(session: &str, prematch: bool) -> ClientPacket {
     ClientPacket::Join {
+        handheld: Default::default(),
         prematch,
         team: Team::Green,
         character: CharacterChoice::Cube,

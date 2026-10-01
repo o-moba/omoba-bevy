@@ -538,6 +538,7 @@ fn direct(
                     return;
                 }
                 network.write(NetworkCommand::Join {
+                    handheld: Default::default(),
                     team: crate::team::Team::Green,
                     character: selection.character,
                     hero_class: selection.hero_class,

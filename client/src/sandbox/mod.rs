@@ -226,6 +226,7 @@ fn autojoin(
     selection.hero_class = hero;
     selection.team = Some(crate::team::Team::Green);
     commands.write(NetworkCommand::Join {
+        handheld: Default::default(),
         team: crate::team::Team::Green,
         character: selection.character,
         hero_class: hero,

@@ -24,6 +24,7 @@ mod tests {
 
     fn join(team: Team, session: &str) -> ClientPacket {
         ClientPacket::Join {
+            handheld: Default::default(),
             prematch: false,
             team,
             character: CharacterChoice::Ipfs,

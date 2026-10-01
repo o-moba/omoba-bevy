@@ -654,6 +654,7 @@ fn prepare_join(selection: &mut TeamSelection, mode: PlayerVisualMode) -> Networ
     selection.hero_class = shared::HeroClass::Mage;
     selection.avatar = Some("agnes".into());
     NetworkCommand::Join {
+        handheld: Default::default(),
         team: Team::Green,
         character: selection.character,
         hero_class: selection.hero_class,

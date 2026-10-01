@@ -194,6 +194,7 @@ fn a_joined_player_still_gets_full_snapshots_beside_unjoined_strangers() {
     let (mut rt, transport, clock) = runtime();
     let player: SocketAddr = "127.0.0.1:54101".parse().unwrap();
     let join = ClientPacket::Join {
+        handheld: Default::default(),
         prematch: false,
         team: Team::Green,
         character: CharacterChoice::Ipfs,

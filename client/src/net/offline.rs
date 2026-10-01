@@ -214,6 +214,7 @@ mod tests {
                 app.add_systems(Update, step);
                 commands
                     .send(ClientPacket::Join {
+                        handheld: Default::default(),
                         prematch: false,
                         team: shared::map::Team::Green,
                         character: shared::wire::CharacterChoice::Ipfs,

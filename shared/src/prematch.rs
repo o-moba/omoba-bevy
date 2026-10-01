@@ -50,6 +50,8 @@ pub struct PrematchRequest {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum PrematchAction {
     Select {
+        #[serde(default)]
+        handheld: crate::handheld::HandheldSelection,
         character: CharacterChoice,
         hero_class: HeroClass,
         avatar: Option<String>,
@@ -74,6 +76,8 @@ pub enum PrematchPhase {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DraftPlayer {
+    #[serde(default)]
+    pub handheld: crate::handheld::HandheldSelection,
     pub player_id: u64,
     pub nickname: String,
     pub team: Team,
@@ -113,6 +117,7 @@ mod tests {
             generation: 4,
             request_id: 9,
             action: PrematchAction::Select {
+                handheld: Default::default(),
                 character: CharacterChoice::Ipfs,
                 hero_class: HeroClass::default(),
                 avatar: None,

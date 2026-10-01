@@ -32,6 +32,7 @@ fn fixture() -> (ServerRuntime, SocketAddr, Instant) {
     rt.handle_packet(
         addr,
         ClientPacket::Join {
+            handheld: Default::default(),
             prematch: false,
             team: Team::Green,
             character: CharacterChoice::Cube,
@@ -469,6 +470,7 @@ fn sandbox_second_human_config_is_independent() {
     rt.handle_packet(
         b,
         ClientPacket::Join {
+            handheld: Default::default(),
             prematch: false,
             team: Team::Green,
             character: CharacterChoice::Cube,

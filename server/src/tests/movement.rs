@@ -203,6 +203,7 @@ fn budget_runtime(
     );
     let addr: SocketAddr = format!("127.0.0.1:{port}").parse().unwrap();
     let join = shared::wire::ClientPacket::Join {
+        handheld: Default::default(),
         prematch: false,
         team: Team::Green,
         character: CharacterChoice::Ipfs,

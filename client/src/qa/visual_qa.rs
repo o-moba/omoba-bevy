@@ -358,6 +358,7 @@ fn prepare_qa(
         selection.hero_class = shared::HeroClass::Warrior;
         selection.avatar = Some(avatar.clone());
         writer.write(NetworkCommand::Join {
+            handheld: Default::default(),
             team: Team::Green,
             character: CharacterChoice::Cube,
             hero_class: shared::HeroClass::Warrior,

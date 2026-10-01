@@ -4,6 +4,15 @@ All notable changes to this repository should be documented in this file.
 
 The canonical repository version lives in `Cargo.toml` under `[workspace.package].version` and follows SemVer.
 
+## [0.32.0] - 2026-10-01
+
+### Hosted avatar and weapon lifecycle
+
+- Discover explicitly approved free handhelds through the typed Ekza SDK catalogue, download validated GLBs into the writable user cache and attach them to compatible VRM hands.
+- Add equipment selection in Collection and draft, persist the choice, replicate normal join/draft equipment and independently validate game approval on the server. Withdrawn entries disappear on refresh; new admission rechecks approval within five minutes.
+- Share gameplay humanoid motion with avatar previews and repair refreshed animation players. Native QA now requires animation time and actual skeletal movement, with an optional hosted weapon ID.
+
+
 ## [Unreleased]
 
 ## [0.31.1] - 2026-10-01

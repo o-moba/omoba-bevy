@@ -80,6 +80,7 @@ impl Plugin for DraftScreenPlugin {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct Choice {
+    handheld: shared::handheld::HandheldSelection,
     character: CharacterChoice,
     hero_class: HeroClass,
     avatar: Option<String>,
@@ -99,6 +100,7 @@ impl Choice {
 impl From<&DraftPlayer> for Choice {
     fn from(player: &DraftPlayer) -> Self {
         Self {
+            handheld: player.handheld.clone(),
             character: player.character,
             hero_class: player.hero_class,
             avatar: player.avatar.clone(),
@@ -153,13 +155,28 @@ impl DraftClient {
     }
 }
 
-fn sync_draft(game: Res<GameStateSnapshot>, mut state: ResMut<DraftClient>) {
+fn sync_draft(
+    game: Res<GameStateSnapshot>,
+    mut state: ResMut<DraftClient>,
+    mut selection: Option<ResMut<crate::team::TeamSelection>>,
+    mut session: Option<ResMut<ClientSession>>,
+) {
     let Some(draft) = &game.prematch else {
         state.reset();
         return;
     };
     let namespace = (game.meta.server_epoch, game.meta.match_id, draft.generation);
     let local = draft.players.iter().find(|p| p.player_id == game.your_id);
+    if let Some(local) = local {
+        if let Some(selection) = selection.as_mut() {
+            if selection.handheld != local.handheld {
+                selection.handheld = local.handheld.clone();
+            }
+        }
+        if let Some(session) = session.as_mut() {
+            session.remember_handheld(&local.handheld);
+        }
+    }
     if state.namespace != Some(namespace) {
         state.reset();
         state.namespace = Some(namespace);
@@ -196,6 +213,7 @@ enum DraftAction {
     Class(HeroClass),
     Role(Role),
     Avatar(String),
+    Handheld(shared::handheld::HandheldSelection),
     Lock,
     Leave,
     Refresh,
@@ -227,7 +245,10 @@ fn draft_actions(
                 state.reset();
                 session.write(SessionUiCommand::LeaveMatch);
             }
-            DraftAction::Refresh => crate::passport::refresh_avatar_catalogue(),
+            DraftAction::Refresh => {
+                crate::passport::refresh_avatar_catalogue();
+                omoba_passport::weapon_store::refresh(true);
+            }
             DraftAction::Connect => crate::passport::connect_account(),
             DraftAction::Lock if draft.phase == PrematchPhase::Draft => {
                 state.notice = None;
@@ -253,6 +274,18 @@ fn draft_actions(
                     choice.pick_class(*class);
                 }
                 state.notice = None;
+            }
+            DraftAction::Handheld(value) => {
+                if let shared::handheld::HandheldSelection::Item(id) = value {
+                    if !omoba_passport::weapon_store::eligible(id) {
+                        continue;
+                    }
+                    omoba_passport::weapon_store::model_state(id);
+                }
+                state
+                    .choice
+                    .get_or_insert_with(|| Choice::from(local))
+                    .handheld = value.clone();
             }
             DraftAction::Role(role) => {
                 if let Some(choice) = &mut state.choice {
@@ -323,6 +356,7 @@ fn send_requests(
             };
             state.notice = None;
             Some(PrematchAction::Select {
+                handheld: choice.handheld.clone(),
                 character: choice.character,
                 hero_class: choice.hero_class,
                 avatar: choice.avatar,
@@ -594,7 +628,8 @@ fn render_draft(
         window.width()
     );
     let key = format!(
-        "{key}:{}:{}",
+        "{key}:{}:{}:{}",
+        omoba_passport::weapon_store::snapshot().0,
         window.height(),
         locale.as_ref().map_or(0, |locale| locale.generation())
     );
@@ -724,6 +759,38 @@ fn render_draft(
                     ..default()
                 })
                 .with_children(|picker| {
+                    picker.spawn(widgets::label(tr("collection.weapons"), 12.0, theme::MUTED));
+                    if let Some(status) = choice
+                        .and_then(|choice| super::collection::handheld_status(&choice.handheld))
+                    {
+                        picker.spawn((
+                            widgets::label(status, 12.0, theme::GOLD),
+                            Name::new("DraftWeaponStatus"),
+                        ));
+                    }
+                    picker
+                        .spawn(Node {
+                            flex_wrap: FlexWrap::Wrap,
+                            column_gap: Val::Px(4.0),
+                            row_gap: Val::Px(4.0),
+                            max_height: Val::Px(84.0),
+                            overflow: Overflow::scroll_y(),
+                            ..default()
+                        })
+                        .with_children(|row| {
+                            for (value, name, id) in super::collection::handheld_choices() {
+                                let selected = choice.is_some_and(|c| c.handheld == value);
+                                action_button(
+                                    row,
+                                    &name,
+                                    DraftAction::Handheld(value),
+                                    &format!("Draft-{id}"), // i18n-allow: stable ECS/test identity, never displayed
+                                    (picker_width - 8.0) / 3.0,
+                                    false,
+                                    selected,
+                                );
+                            }
+                        });
                     picker
                         .spawn(Node {
                             column_gap: Val::Px(4.0),
@@ -1137,6 +1204,7 @@ mod tests {
             last_request_id: 0,
             error: None,
             players: vec![DraftPlayer {
+                handheld: Default::default(),
                 player_id: 7,
                 nickname: "Local".into(),
                 team: shared::map::Team::Green,
@@ -1178,6 +1246,7 @@ mod tests {
     #[test]
     fn picking_a_class_proposes_its_role_but_keeps_a_deliberate_one() {
         let mut choice = Choice {
+            handheld: Default::default(),
             character: CharacterChoice::default(),
             hero_class: HeroClass::Mage,
             avatar: None,
@@ -1319,6 +1388,7 @@ mod tests {
     #[test]
     fn composition_warnings_are_advisory_and_do_not_impose_class_uniqueness() {
         let player = |id| DraftPlayer {
+            handheld: Default::default(),
             player_id: id,
             nickname: format!("P{id}"),
             team: shared::map::Team::Green,
@@ -1361,6 +1431,7 @@ mod tests {
             last_request_id: 0,
             error: None,
             players: vec![DraftPlayer {
+                handheld: Default::default(),
                 player_id: 7,
                 nickname: "Local".into(),
                 team: shared::map::Team::Green,

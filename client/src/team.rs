@@ -59,6 +59,7 @@ enum HeroSelectAction {
 
 #[derive(Resource)]
 pub struct TeamSelection {
+    pub handheld: shared::handheld::HandheldSelection,
     pub team: Option<Team>,
     /// Legacy SDK character; used as the model when no roster avatar is picked.
     pub character: CharacterChoice,
@@ -73,6 +74,7 @@ pub struct TeamSelection {
 impl Default for TeamSelection {
     fn default() -> Self {
         Self {
+            handheld: Default::default(),
             team: None,
             character: CharacterChoice::default(),
             hero_class: HeroClass::default(),
@@ -1677,6 +1679,7 @@ fn lock_in(
     let sprite_character = Some(selection.sprite_character.clone());
     let command = if sandbox || offline {
         NetworkCommand::Join {
+            handheld: selection.handheld.clone(),
             team,
             character: selection.character,
             hero_class: selection.hero_class,
@@ -1685,6 +1688,7 @@ fn lock_in(
         }
     } else {
         NetworkCommand::JoinPrematch {
+            handheld: selection.handheld.clone(),
             character: selection.character,
             hero_class: selection.hero_class,
             avatar: selection.avatar.clone(),
@@ -1734,6 +1738,15 @@ fn autojoin_from_env(
     };
     let sprite_character = shared::normalize_sprite_character_id(parts.next()).to_owned();
 
+    // QA/operator launch chooses the same normal loadout as the equipment UI;
+    // the server remains responsible for live catalogue approval.
+    if let Ok(id) = std::env::var("OMOBA_AUTOJOIN_WEAPON") {
+        selection.handheld = match id.as_str() {
+            "empty" => shared::handheld::HandheldSelection::Unequipped,
+            "default" => shared::handheld::HandheldSelection::ClassDefault,
+            _ => shared::handheld::HandheldSelection::Item(id),
+        };
+    }
     selection.hero_class = class;
     selection.avatar = avatar.clone();
     selection.team = Some(team);
@@ -1745,6 +1758,7 @@ fn autojoin_from_env(
         avatar
     );
     command_writer.write(NetworkCommand::Join {
+        handheld: selection.handheld.clone(),
         team,
         character: selection.character,
         hero_class: class,

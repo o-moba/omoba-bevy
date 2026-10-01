@@ -316,6 +316,7 @@ mod tests {
 
     fn lock_in() -> NetworkCommand {
         NetworkCommand::JoinPrematch {
+            handheld: Default::default(),
             character: crate::team::CharacterChoice::default(),
             hero_class: shared::HeroClass::Mage,
             avatar: Some("agnes".into()),

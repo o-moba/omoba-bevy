@@ -10,6 +10,7 @@ pub mod entitlements;
 pub mod humanoid;
 pub mod store;
 pub mod supporter_account;
+pub mod weapon_store;
 pub mod weapons;
 pub mod web_account;
 

@@ -55,7 +55,7 @@ impl JoinRejection {
                 "This server uses a different map geometry. Install the matching map release."
             }
             Self::AvatarNotAuthorized => {
-                "Purchased avatar approval failed. Reconnect your wallet or choose a free avatar."
+                "Avatar or weapon approval failed. Refresh Studio, select approved equipment and retry."
             }
             Self::OfflineKitUnsupported => {
                 "Connect to play this fighting style, or choose another style for offline practice."

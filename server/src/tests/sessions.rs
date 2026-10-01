@@ -209,6 +209,7 @@ fn runtime_on_memory_transport_and_manual_clock_times_out_a_silent_endpoint() {
     );
     let player: SocketAddr = "127.0.0.1:53101".parse().unwrap();
     let packet = ClientPacket::Join {
+        handheld: Default::default(),
         prematch: false,
         team: Team::Green,
         character: CharacterChoice::Ipfs,

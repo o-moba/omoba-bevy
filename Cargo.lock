@@ -184,7 +184,7 @@ dependencies = [
 
 [[package]]
 name = "arena-sync"
-version = "0.31.1"
+version = "0.32.0"
 dependencies = [
  "base64",
  "reqwest",
@@ -1867,7 +1867,7 @@ dependencies = [
 
 [[package]]
 name = "client"
-version = "0.31.1"
+version = "0.32.0"
 dependencies = [
  "bevy",
  "common",
@@ -1905,7 +1905,7 @@ dependencies = [
 
 [[package]]
 name = "common"
-version = "0.31.1"
+version = "0.32.0"
 dependencies = [
  "shared",
 ]
@@ -2395,8 +2395,8 @@ dependencies = [
 
 [[package]]
 name = "ekza-bevy-sdk"
-version = "0.7.0"
-source = "git+https://github.com/ekza-space/ekza-bevy-sdk?rev=cef1d6ad43e364ad0a116dc7be74122854ee8b7e#cef1d6ad43e364ad0a116dc7be74122854ee8b7e"
+version = "0.8.0"
+source = "git+https://github.com/ekza-space/ekza-bevy-sdk?rev=927fc0d4efd1b6e04ca3d331c53eb812baad403d#927fc0d4efd1b6e04ca3d331c53eb812baad403d"
 dependencies = [
  "bevy",
  "reqwest",
@@ -2995,7 +2995,7 @@ dependencies = [
 
 [[package]]
 name = "harness"
-version = "0.31.1"
+version = "0.32.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -4264,7 +4264,7 @@ dependencies = [
 
 [[package]]
 name = "omoba-account-api"
-version = "0.31.1"
+version = "0.32.0"
 dependencies = [
  "axum",
  "ed25519-dalek",
@@ -4282,7 +4282,7 @@ dependencies = [
 
 [[package]]
 name = "omoba-career-store"
-version = "0.31.1"
+version = "0.32.0"
 dependencies = [
  "getrandom 0.3.4",
  "serde_json",
@@ -4293,7 +4293,7 @@ dependencies = [
 
 [[package]]
 name = "omoba-passport"
-version = "0.31.1"
+version = "0.32.0"
 dependencies = [
  "ekza-bevy-sdk",
  "reqwest",
@@ -5157,7 +5157,7 @@ dependencies = [
 
 [[package]]
 name = "server"
-version = "0.31.1"
+version = "0.32.0"
 dependencies = [
  "common",
  "ed25519-dalek",
@@ -5205,7 +5205,7 @@ dependencies = [
 
 [[package]]
 name = "shared"
-version = "0.31.1"
+version = "0.32.0"
 dependencies = [
  "serde",
  "serde_json",

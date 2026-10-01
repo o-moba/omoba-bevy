@@ -25,6 +25,7 @@ fn fixture() -> (ServerRuntime, SocketAddr, Instant) {
     rt.handle_packet(
         addr,
         ClientPacket::Join {
+            handheld: Default::default(),
             prematch: false,
             team: Team::Green,
             character: CharacterChoice::Cube,

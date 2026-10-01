@@ -15,6 +15,7 @@ use shared::{
 use std::time::{Duration, Instant};
 fn join(class: HeroClass) -> ClientPacket {
     ClientPacket::Join {
+        handheld: Default::default(),
         prematch: false,
         team: Team::Green,
         character: CharacterChoice::Ipfs,

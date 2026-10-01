@@ -3,7 +3,7 @@
   "error.join.session_active": "此会话正在另一个客户端中使用。请先关闭它，然后重试。",
   "error.join.protocol_mismatch": "客户端与服务器版本不一致。请使用相同的发行版本。",
   "error.join.map_geometry_mismatch": "该服务器使用了不同的地图几何数据。请安装匹配的地图版本。",
-  "error.join.avatar_not_authorized": "已购买形象的授权失败。请重新连接钱包，或选择免费形象。",
+  "error.join.avatar_not_authorized": "形象或手持装备未获批准。请刷新 Studio，选择已审核的装备后重试。",
   "error.purchase.unavailable": "加入对局后才能使用商店。",
   "error.purchase.dead": "请等待复活后再购买。",
   "error.purchase.outside_base": "回到基地才能购买。",

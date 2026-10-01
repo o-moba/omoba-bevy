@@ -35,6 +35,7 @@ pub(in crate::net) fn admission_app() -> (
     .insert_resource(ClientSession {
         state: ClientConnectionState::Connected,
         last_join: Some(CommittedJoin {
+            handheld: Default::default(),
             prematch: false,
             team: crate::team::Team::Green,
             character: crate::team::CharacterChoice::Ipfs,

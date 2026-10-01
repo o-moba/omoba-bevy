@@ -190,6 +190,7 @@ fn prepare(
         selection.character = crate::team::CharacterChoice::Cube;
         selection.avatar = Some("agnes".into());
         outgoing.write(NetworkCommand::Join {
+            handheld: Default::default(),
             team: Team::Green,
             character: crate::team::CharacterChoice::Cube,
             hero_class: qa.class,

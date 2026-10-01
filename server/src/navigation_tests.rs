@@ -41,6 +41,7 @@ fn transform_packets_cannot_tunnel_through_trees_but_a_legal_route_arrives() {
     runtime.handle_packet(
         address,
         ClientPacket::Join {
+            handheld: Default::default(),
             prematch: false,
             team: Team::Green,
             character: CharacterChoice::Cube,

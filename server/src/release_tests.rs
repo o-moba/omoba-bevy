@@ -45,6 +45,7 @@ fn addr(port: u16) -> SocketAddr {
 
 fn join(session: &str, team: Team) -> ClientPacket {
     ClientPacket::Join {
+        handheld: Default::default(),
         prematch: false,
         team,
         character: CharacterChoice::Ipfs,

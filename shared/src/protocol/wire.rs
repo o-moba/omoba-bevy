@@ -141,6 +141,8 @@ pub enum ClientPacket {
     },
     Join {
         #[serde(default)]
+        handheld: crate::handheld::HandheldSelection,
+        #[serde(default)]
         prematch: bool,
         team: Team,
         #[serde(default = "default_character_choice")]
@@ -955,6 +957,7 @@ mod tests {
         );
         assert_eq!(
             serde_json::to_string(&ClientPacket::Join {
+                handheld: Default::default(),
                 prematch: true,
                 team: Team::Green,
                 character: CharacterChoice::Ipfs,

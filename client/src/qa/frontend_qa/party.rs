@@ -195,6 +195,7 @@ fn prematch_fixture(stage: usize) -> PrematchSnapshot {
         error: None,
         players: (0..10)
             .map(|index| DraftPlayer {
+                handheld: Default::default(),
                 player_id: index as u64 + 1,
                 nickname: if index < 5 {
                     nickname(index, false)

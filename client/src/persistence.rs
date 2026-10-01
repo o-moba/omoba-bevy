@@ -89,6 +89,8 @@ pub(crate) struct SavedLanguage(Option<crate::i18n::LocaleId>);
 
 #[derive(Debug, Serialize, Deserialize)]
 struct ClientPreferencesFile {
+    #[serde(default)]
+    handheld: shared::handheld::HandheldSelection,
     #[serde(default = "default_schema_version")]
     schema_version: u32,
     #[serde(default)]
@@ -346,6 +348,7 @@ pub(crate) fn load_persistent_client_settings(
         initial_save_pending.0 = true;
     }
 
+    team.handheld = disk.handheld;
     if let Some(ch) = disk.character {
         team.character = ch;
     }
@@ -389,6 +392,7 @@ fn build_file_from_state(
     camera: &CameraSettings,
 ) -> ClientPreferencesFile {
     ClientPreferencesFile {
+        handheld: Default::default(),
         schema_version: SCHEMA_VERSION,
         game_server_addr: Some(game_server_addr.to_string()),
         client_session_id: Some(client_session_id.to_string()),
@@ -428,6 +432,7 @@ pub(crate) fn save_client_preferences_to_disk(
     camera: &CameraSettings,
     motion: &MotionSettings,
     language: Option<crate::i18n::LocaleId>,
+    handheld: Option<&shared::handheld::HandheldSelection>,
 ) -> io::Result<()> {
     let Some(path) = preferences_path() else {
         return Err(io::Error::new(
@@ -450,6 +455,10 @@ pub(crate) fn save_client_preferences_to_disk(
         audio,
         camera,
     );
+    prefs.handheld = handheld
+        .cloned()
+        .or_else(|| read_preferences_file(&path).ok().map(|p| p.handheld))
+        .unwrap_or_default();
     prefs.reduce_motion = motion.reduce;
     prefs.language = language.map(|language| language.code().to_owned());
     write_preferences_file(&path, &prefs)
@@ -502,6 +511,7 @@ fn save_client_preferences_on_change(
         camera.as_ref(),
         motion.as_ref(),
         language_to_save(locale.as_deref(), &saved_language),
+        Some(&team.handheld),
     ) {
         warn!("Failed to save client preferences: {e}");
     }
@@ -536,6 +546,7 @@ pub(crate) fn reset_graphics_to_defaults(
         camera,
         motion,
         language,
+        None,
     ) {
         warn!("Failed to save preferences after reset: {e}");
     }
@@ -759,10 +770,14 @@ mod tests {
             &CameraSettings::default(),
             &MotionSettings { reduce: true },
             language_to_save(Some(&picked), &SavedLanguage::default()),
+            Some(&shared::handheld::HandheldSelection::Item(
+                "forge-hammer".into(),
+            )),
         )
         .unwrap();
         let written: serde_json::Value =
             serde_json::from_slice(&fs::read(dir.join(PREFS_FILENAME)).unwrap()).unwrap();
+        assert_eq!(written["handheld"]["id"], "forge-hammer");
         assert_eq!(written["language"], "zh-Hans");
         assert_eq!(written["reduce_motion"], true);
         assert_eq!(saved_language(), Some(zh));

@@ -438,6 +438,7 @@ fn observe(
         }
         1 if qa.readbacks.contains(&0) && session.is_connected() => {
             outgoing.write(NetworkCommand::Join {
+                handheld: Default::default(),
                 team: Team::Green,
                 character: CharacterChoice::Cube,
                 hero_class: qa.class,

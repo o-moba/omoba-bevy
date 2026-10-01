@@ -295,6 +295,7 @@ mod runtime_tests {
             terminal_at: None,
         });
         let join = ClientPacket::Join {
+            handheld: Default::default(),
             prematch: false,
             team: Team::Green,
             character: default_character_choice(),

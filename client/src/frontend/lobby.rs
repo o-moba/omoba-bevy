@@ -101,6 +101,8 @@ pub(crate) fn stage_members(
 ) -> Vec<StageMember> {
     if view.party.is_none() {
         return vec![StageMember {
+            hero_class: Default::default(),
+            handheld: shared::handheld::HandheldSelection::Unequipped,
             avatar: own_avatar,
             character,
             leader: true,
@@ -110,6 +112,8 @@ pub(crate) fn stage_members(
     ordered_members(view)
         .iter()
         .map(|member| StageMember {
+            hero_class: Default::default(),
+            handheld: shared::handheld::HandheldSelection::Unequipped,
             avatar: member.avatar.clone().or_else(|| {
                 (member.player_id == view.you)
                     .then(|| own_avatar.clone())
@@ -1204,6 +1208,8 @@ mod tests {
         assert_eq!(
             stage_members(&solo, Some("agnes".into()), default()),
             vec![StageMember {
+                hero_class: Default::default(),
+                handheld: shared::handheld::HandheldSelection::Unequipped,
                 avatar: Some("agnes".into()),
                 leader: true,
                 revealed: true,

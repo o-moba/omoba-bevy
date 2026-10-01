@@ -29,6 +29,8 @@ const STAGE_FOV: f32 = std::f32::consts::FRAC_PI_4;
 /// One real member. Index zero is always the viewer, independently of who leads.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StageMember {
+    pub hero_class: shared::HeroClass,
+    pub handheld: shared::handheld::HandheldSelection,
     pub avatar: Option<String>,
     pub character: CharacterChoice,
     pub leader: bool,
@@ -110,12 +112,14 @@ pub struct PartyStagePlugin;
 impl Plugin for PartyStagePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<PartyStage>()
+            .init_resource::<crate::humanoid::HumanoidRuntimeLibrary>()
             .add_systems(Startup, setup_stage)
             .add_systems(
                 Update,
                 (
                     release_stage_off_screen,
                     sync_stage,
+                    sync_stage_equipment,
                     sync_model_visibility,
                     tag_stage_layers,
                     interact,
@@ -129,7 +133,9 @@ impl Plugin for PartyStagePlugin {
                 // SceneSpawner may replace imported players after Update.
                 // Validate the binding after those writes, before pose evaluation.
                 PostUpdate,
-                play_idle.before(bevy::app::AnimationSystems),
+                play_idle
+                    .after(crate::humanoid::bind_runtime_humanoids)
+                    .before(bevy::app::AnimationSystems),
             );
     }
 }
@@ -420,6 +426,29 @@ fn sync_stage(
     stage.spawned = Some(snapshot);
 }
 
+/// Equipment changes reuse the existing rig instead of restarting its idle.
+fn sync_stage_equipment(
+    mut commands: Commands,
+    stage: Res<PartyStage>,
+    screen: Res<State<AppScreen>>,
+    selection: Res<crate::team::TeamSelection>,
+) {
+    for (index, (slot, member)) in stage.slots.iter().zip(&stage.members).enumerate() {
+        if slot.model == slot.pivot {
+            continue;
+        }
+        let (class, handheld) = if *screen.get() == AppScreen::Lobby && index == 0 {
+            (selection.hero_class, &selection.handheld)
+        } else {
+            (member.hero_class, &member.handheld)
+        };
+        commands.entity(slot.model).insert((
+            crate::net::NetworkHeroClass(class),
+            crate::net::PlayerHandheld(handheld.clone()),
+        ));
+    }
+}
+
 /// Conceal only unconfirmed heroes. Plinths remain visible and hidden scenes
 /// continue loading/animating, so lock-in reveals the same warmed-up instance.
 fn sync_model_visibility(stage: Res<PartyStage>, mut visibility: Query<&mut Visibility>) {
@@ -472,6 +501,9 @@ fn play_idle(
     gltfs: Res<Assets<Gltf>>,
     children: Query<&Children>,
     mut players: Query<(&mut AnimationPlayer, Option<&AnimationGraphHandle>)>,
+    mut runtime: ResMut<crate::humanoid::HumanoidRuntimeLibrary>,
+    mut clips: ResMut<Assets<AnimationClip>>,
+    runtime_players: Query<&crate::humanoid::RuntimeHumanoidPlayer>,
 ) {
     for slot in &mut stage.slots {
         if slot.bound {
@@ -498,7 +530,21 @@ fn play_idle(
         let Some(gltf) = slot.gltf.as_ref().and_then(|h| gltfs.get(h)) else {
             continue;
         };
-        if gltf.animations.is_empty() {
+        let runtime_idle = slot
+            .gltf
+            .as_ref()
+            .and_then(|handle| runtime.ensure(handle, gltf, &mut clips).ok())
+            .map(|motion| motion.idle);
+        if runtime_idle.is_some() {
+            commands
+                .entity(slot.model)
+                .insert(crate::humanoid::RuntimeHumanoidRequest {
+                    model: slot.gltf.as_ref().unwrap().clone(),
+                });
+            if runtime_players.get(slot.model).is_err() {
+                continue;
+            }
+        } else if gltf.animations.is_empty() {
             slot.bound = true;
             continue;
         }
@@ -517,15 +563,16 @@ fn play_idle(
             continue;
         };
         slot.bound = true;
-        let clip = gltf
-            .named_animations
-            .iter()
-            .min_by_key(|(name, _)| {
-                let lower = name.to_ascii_lowercase();
-                (!lower.contains("idle"), lower)
-            })
-            .map(|(_, clip)| clip.clone())
-            .or_else(|| gltf.animations.first().cloned());
+        let clip = runtime_idle.or_else(|| {
+            gltf.named_animations
+                .iter()
+                .min_by_key(|(name, _)| {
+                    let lower = name.to_ascii_lowercase();
+                    (!lower.contains("idle"), lower)
+                })
+                .map(|(_, clip)| clip.clone())
+                .or_else(|| gltf.animations.first().cloned())
+        });
         let Some(clip) = clip else {
             continue;
         };
@@ -704,6 +751,8 @@ mod tests {
 
     fn member() -> StageMember {
         StageMember {
+            hero_class: Default::default(),
+            handheld: shared::handheld::HandheldSelection::Unequipped,
             avatar: Some("agnes".into()),
             character: CharacterChoice::default(),
             leader: false,
@@ -816,6 +865,77 @@ mod tests {
     }
 
     #[test]
+    fn draft_equipment_changes_reuse_the_model_and_lobby_uses_local_choice() {
+        use shared::handheld::HandheldSelection;
+        let mut app = App::new();
+        app.init_resource::<Assets<Image>>()
+            .init_resource::<PartyStage>()
+            .init_resource::<crate::team::TeamSelection>()
+            .insert_resource(State::new(AppScreen::Draft))
+            .add_systems(Update, sync_stage_equipment);
+        let pivot = app.world_mut().spawn_empty().id();
+        let model = app.world_mut().spawn(ChildOf(pivot)).id();
+        let mut accepted = member();
+        accepted.handheld = HandheldSelection::Item("forge-sword".into());
+        let before = StageSnapshot {
+            members: vec![accepted.clone()],
+            store_states: vec![None],
+        };
+        {
+            let mut stage = app.world_mut().resource_mut::<PartyStage>();
+            stage.members = vec![accepted];
+            stage.slots.push(Slot {
+                root: pivot,
+                pivot,
+                model,
+                gltf: None,
+                bound: false,
+                idle: None,
+            });
+        }
+        app.update();
+        assert_eq!(
+            app.world()
+                .get::<crate::net::PlayerHandheld>(model)
+                .unwrap()
+                .0,
+            HandheldSelection::Item("forge-sword".into())
+        );
+        app.world_mut().resource_mut::<PartyStage>().members[0].handheld =
+            HandheldSelection::Unequipped;
+        app.update();
+        let stage = app.world().resource::<PartyStage>();
+        assert_eq!(stage.slots[0].model, model);
+        let after = StageSnapshot {
+            members: stage.members.clone(),
+            store_states: vec![None],
+        };
+        assert!(
+            before.same_models(&after),
+            "cosmetic choice must not recreate the animated rig"
+        );
+        assert_eq!(
+            app.world()
+                .get::<crate::net::PlayerHandheld>(model)
+                .unwrap()
+                .0,
+            HandheldSelection::Unequipped
+        );
+        app.insert_resource(State::new(AppScreen::Lobby));
+        app.world_mut()
+            .resource_mut::<crate::team::TeamSelection>()
+            .handheld = HandheldSelection::Item("forge-hammer".into());
+        app.update();
+        assert_eq!(
+            app.world()
+                .get::<crate::net::PlayerHandheld>(model)
+                .unwrap()
+                .0,
+            HandheldSelection::Item("forge-hammer".into())
+        );
+    }
+
+    #[test]
     fn confirmation_reveals_only_the_hero_without_replacing_its_loaded_instance() {
         let mut app = App::new();
         app.init_resource::<Assets<Image>>()
@@ -896,6 +1016,7 @@ mod tests {
             .init_resource::<Assets<AnimationClip>>()
             .init_resource::<Assets<AnimationGraph>>()
             .init_resource::<PartyStage>()
+            .init_resource::<crate::humanoid::HumanoidRuntimeLibrary>()
             .add_systems(PostUpdate, play_idle.before(bevy::app::AnimationSystems));
         let clip = app
             .world_mut()

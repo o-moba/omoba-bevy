@@ -1136,6 +1136,7 @@ impl ServerRuntime {
         let player = self.world.players.get_mut(&addr).unwrap();
         player.joined = false;
         let packet = ClientPacket::Join {
+            handheld: Default::default(),
             prematch: player.draft.capable,
             team: player.hero.identity.team,
             character: player.hero.identity.character,

@@ -115,6 +115,7 @@ fn prepare(
         selection.character = CharacterChoice::Cube;
         selection.avatar = Some("agnes".into());
         outgoing.write(NetworkCommand::Join {
+            handheld: Default::default(),
             team: Team::Green,
             character: CharacterChoice::Cube,
             hero_class: shared::HeroClass::Ranger,

@@ -227,6 +227,7 @@ pub fn initialize_store() -> Option<std::path::PathBuf> {
     std::fs::create_dir_all(root.join("avatars")).ok()?;
     ekza_account::initialize(root.join("account/session.json"));
     store::initialize(root.clone(), SESSION.get().is_some());
+    omoba_passport::weapon_store::initialize(root.clone());
     Some(root)
 }
 

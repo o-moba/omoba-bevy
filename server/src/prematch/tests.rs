@@ -31,6 +31,7 @@ fn join(rt: &mut ServerRuntime, addr: SocketAddr, session: &str, now: Instant, e
     rt.handle_packet(
         addr,
         ClientPacket::Join {
+            handheld: Default::default(),
             prematch: enabled,
             team: Team::Blue,
             character: CharacterChoice::Cube,
@@ -55,6 +56,7 @@ fn send(rt: &mut ServerRuntime, addr: SocketAddr, id: u64, action: PrematchActio
 }
 fn select(role: Role, class: HeroClass) -> PrematchAction {
     PrematchAction::Select {
+        handheld: Default::default(),
         character: CharacterChoice::Ipfs,
         hero_class: class,
         avatar: None,

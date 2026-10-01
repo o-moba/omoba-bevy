@@ -1,5 +1,9 @@
 # Feature Inventory
 
+## Hosted cosmetic equipment (0.32.0)
+
+Avatars → Weapons and the pre-match draft expose class-default, empty hands, shipped props and approved free Studio weapons. The typed SDK downloads each exact approved rendition into the writable Ekza cache, verifies its hash/size and static attachment profile, and mounts it through the same asset source on desktop/mobile. Normal joins and draft choices carry the cosmetic item ID; server-owned catalogue reads authorize it independently. Other clients install the replicated item on demand. Equipment never changes combat statistics. See [the lifecycle implementation](progress/2026-10-01-asset-lifecycle.md) for acceptance evidence and limits.
+
 ## Ekza demo integration (0.31.1)
 
 Client and server use the same pinned Ekza SDK main revision. The live publication procedure and remaining deployment gates are in [the demo progress note](progress/2026-10-01-ekza-demo-main.md). A local twenty-avatar catalogue is verified separately from real Studio publication.
@@ -12,7 +16,7 @@ A developer launcher serves 20 additional curated avatars through the real Ekza 
 
 Warrior uses a built-in sword. Combat Test can equip a sword, hammer, scepter or installed Ekza handheld on any class, or leave its hands empty. Props follow semantic VRM hand bones through idle, running and attacks; choices replicate to other actors and persist in sandbox presets. They do not alter damage or skills.
 
-The existing Ekza SDK imports explicitly approved free `handheld-glb-v1` renditions with SHA-256/size checks and grip metadata. Native verification covers Agnes, Orion and an independently equipped opponent using a local HTTP catalog. Public Space profile registration/publication, paid ownership, production equipment UI, finger posing and two-handed weapons remain future work. See [the contract](handheld-weapons.md) and [verification results](progress/2026-10-01-handheld-pilot.md).
+The existing Ekza SDK imports explicitly approved free `handheld-glb-v1` renditions with SHA-256/size checks and grip metadata. Native verification covers Agnes, Orion and an independently equipped opponent using a local HTTP catalog. The 0.32.0 runtime extends this pilot with a normal equipment picker and typed hosted catalogue. Paid ownership, finger posing and two-handed weapons remain future work. See [the contract](handheld-weapons.md) and [verification results](progress/2026-10-01-handheld-pilot.md).
 
 ## Full-roster Offline Practice (0.31.0)
 

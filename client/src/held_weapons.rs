@@ -53,11 +53,7 @@ fn sync_held_weapons(
             let Some(id) = selection.0.resolve(class.0) else {
                 continue;
             };
-            let Some(def) = omoba_passport::weapons::catalog()
-                .items
-                .iter()
-                .find(|w| w.id == id)
-            else {
+            let Some(def) = omoba_passport::weapon_store::definition(id) else {
                 continue;
             };
             let Some((node, frame)) = library.hand_socket(rig.model, &def.grip.bone) else {

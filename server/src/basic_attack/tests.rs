@@ -33,6 +33,7 @@ fn fixture() -> (ServerRuntime, SocketAddr, SocketAddr, TargetId, Instant) {
         runtime.handle_packet(
             addr,
             ClientPacket::Join {
+                handheld: Default::default(),
                 prematch: false,
                 team,
                 character: CharacterChoice::Ipfs,
@@ -341,6 +342,7 @@ fn actual_udp_receiver_accepts_the_basic_wire_contract_once() {
     rt.handle_packet(
         addr,
         ClientPacket::Join {
+            handheld: Default::default(),
             prematch: false,
             team: Team::Green,
             character: CharacterChoice::Ipfs,

@@ -162,6 +162,7 @@ mod tests {
             );
             let addr: SocketAddr = "127.0.0.1:58990".parse().unwrap();
             let join = ClientPacket::Join {
+                handheld: Default::default(),
                 prematch: false,
                 team: Team::Green,
                 character: CharacterChoice::Ipfs,

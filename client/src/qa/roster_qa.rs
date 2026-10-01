@@ -182,6 +182,7 @@ fn step(
         }
         2 if qa.readbacks.len() == 1 && session.is_connected() => {
             outgoing.write(NetworkCommand::Join {
+                handheld: Default::default(),
                 team: Team::Green,
                 character: CharacterChoice::Cube,
                 hero_class: qa.classes[0],

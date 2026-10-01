@@ -14,6 +14,7 @@ fn cast_protocol_rejects_old_round_and_requires_hello_for_standard_admission() {
     let mut rt = crate::runtime::ServerRuntime::new(socket, crate::match_rules::MatchConfig::dev());
     let now = Instant::now();
     let join = shared::wire::ClientPacket::Join {
+        handheld: Default::default(),
         prematch: false,
         team: Team::Green,
         character: CharacterChoice::Ipfs,

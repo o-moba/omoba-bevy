@@ -2,6 +2,11 @@
 
 Original project-authored low-poly sword, hammer and scepter; no downloaded
 geometry or textures. `handheld-pilot.blend` is the editable source scene.
+The visual source and its three exported props are **CC-BY-4.0**, credited to
+**Open Moba contributors**. See the [scoped handheld license](../../client/assets/weapons/LICENSE.md)
+and [repository license map](../../LICENSING.md). The generator script and
+manifest metadata retain MPL-2.0; imported or downloaded assets keep their own terms.
+
 Regenerate with:
 
 ```sh

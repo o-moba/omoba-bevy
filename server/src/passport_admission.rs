@@ -18,6 +18,39 @@ const FREE_TTL: Duration = Duration::from_secs(300);
 /// registry.
 const FREE_RETRY: Duration = Duration::from_secs(10);
 
+type FetchWeapons = fn(&str) -> Result<Vec<ekza_bevy_sdk::assets::StoreAsset>, String>;
+
+#[derive(Default)]
+struct WeaponCatalogue {
+    items: HashSet<String>,
+    fetched: Option<Instant>,
+    attempted: Option<Instant>,
+}
+impl WeaponCatalogue {
+    fn apply(
+        &mut self,
+        result: Result<Vec<ekza_bevy_sdk::assets::StoreAsset>, String>,
+        now: Instant,
+    ) {
+        self.attempted = Some(now);
+        if let Ok(items) = result {
+            self.items = items
+                .into_iter()
+                .filter(|item| {
+                    ekza_bevy_sdk::assets::validate_item(
+                        item,
+                        ekza_bevy_sdk::assets::AssetKind::Weapon,
+                        &omoba_passport::weapon_store::selector(),
+                    )
+                    .is_ok()
+                })
+                .map(|item| item.slug)
+                .collect();
+            self.fetched = Some(now);
+        }
+    }
+}
+
 type FetchFree = fn(&str) -> Result<Vec<StoreAvatar>, String>;
 
 /// Free avatars approved for Omoba, as read by THIS server from the registry.
@@ -81,9 +114,14 @@ pub(super) struct CompletedAdmission {
     pub addr: SocketAddr,
     pub packet: ClientPacket,
     pub allowed: bool,
+    weapon_only: bool,
+    resume_session: Option<String>,
+    skip_avatar: bool,
 }
 
 pub(super) struct PassportAdmissions {
+    weapons: Arc<Mutex<WeaponCatalogue>>,
+    fetch_weapons: FetchWeapons,
     api: Option<PassportApi>,
     free: Arc<Mutex<FreeCatalogue>>,
     fetch_free: FetchFree,
@@ -97,6 +135,8 @@ impl Default for PassportAdmissions {
     fn default() -> Self {
         let (sender, receiver) = mpsc::channel();
         Self {
+            weapons: Arc::default(),
+            fetch_weapons: omoba_passport::weapon_store::fetch_approved,
             api: PassportApi::from_env().ok(),
             free: Arc::default(),
             fetch_free: omoba_passport::community::fetch_free,
@@ -123,6 +163,90 @@ impl PassportAdmissions {
         packet: &ClientPacket,
         session: Option<&str>,
     ) -> Admission {
+        self.begin_loadout(addr, packet, session, false)
+    }
+
+    pub fn begin_loadout(
+        &mut self,
+        addr: SocketAddr,
+        packet: &ClientPacket,
+        session: Option<&str>,
+        skip_avatar: bool,
+    ) -> Admission {
+        let handheld = match packet {
+            ClientPacket::Join { handheld, .. } => Some(handheld),
+            ClientPacket::Prematch {
+                request:
+                    shared::prematch::PrematchRequest {
+                        action: shared::prematch::PrematchAction::Select { handheld, .. },
+                        ..
+                    },
+            } => Some(handheld),
+            _ => None,
+        };
+        if let Some(shared::handheld::HandheldSelection::Item(id)) = handheld {
+            // Only shipped props bypass hosted approval. Operator imports are
+            // useful for local sandbox rehearsal but do not grant online use.
+            let shipped = omoba_passport::weapons::Catalog::parse(include_bytes!(
+                "../../client/assets/weapons/manifest.json"
+            ))
+            .expect("shipped props");
+            if !shipped.items.iter().any(|item| item.id == *id) {
+                if id.len() != 37
+                    || !id.starts_with("ekza-")
+                    || !id[5..].bytes().all(|b| b.is_ascii_hexdigit())
+                {
+                    return Admission::Denied;
+                }
+                let cache = self.weapons.lock().unwrap();
+                let fresh = cache.fetched.is_some_and(|at| at.elapsed() < FREE_TTL);
+                let known = cache.items.contains(id);
+                if !(known
+                    && (fresh || cache.attempted.is_some_and(|at| at.elapsed() < FREE_RETRY)))
+                {
+                    if cache.attempted.is_some_and(|at| at.elapsed() < FREE_RETRY) {
+                        return Admission::Denied;
+                    }
+                    drop(cache);
+                    if self.pending.contains(&addr) {
+                        return Admission::Pending;
+                    }
+                    if self.pending.len() >= MAX_PENDING {
+                        return Admission::Denied;
+                    }
+                    self.pending.insert(addr);
+                    let (cache, fetch, registry, sender, id, packet, resume_session) = (
+                        self.weapons.clone(),
+                        self.fetch_weapons,
+                        self.registry.clone(),
+                        self.sender.clone(),
+                        id.clone(),
+                        packet.clone(),
+                        session.map(str::to_owned),
+                    );
+                    std::thread::spawn(move || {
+                        let result = fetch(&registry);
+                        let allowed = {
+                            let mut cache = cache.lock().unwrap();
+                            cache.apply(result, Instant::now());
+                            cache.items.contains(&id)
+                        };
+                        let _ = sender.send(CompletedAdmission {
+                            addr,
+                            packet,
+                            allowed,
+                            weapon_only: true,
+                            resume_session,
+                            skip_avatar,
+                        });
+                    });
+                    return Admission::Pending;
+                }
+            }
+        }
+        if skip_avatar {
+            return Admission::Free;
+        }
         let draft_session = session.map(str::to_owned);
         let (avatar, passport_ticket, session_id) = match packet {
             ClientPacket::Join {
@@ -184,6 +308,9 @@ impl PassportAdmissions {
                             addr,
                             packet,
                             allowed,
+                            weapon_only: false,
+                            resume_session: None,
+                            skip_avatar: false,
                         });
                     });
                     return Admission::Pending;
@@ -242,6 +369,9 @@ impl PassportAdmissions {
                 addr,
                 packet,
                 allowed,
+                weapon_only: false,
+                resume_session: None,
+                skip_avatar: false,
             });
         });
         Admission::Pending
@@ -249,10 +379,26 @@ impl PassportAdmissions {
 
     pub fn completed(&mut self) -> Vec<CompletedAdmission> {
         let responses: Vec<_> = self.receiver.lock().unwrap().try_iter().collect();
-        for response in &responses {
+        let mut completed = Vec::new();
+        for mut response in responses {
             self.pending.remove(&response.addr);
+            if response.weapon_only && response.allowed {
+                // Complete the same immutable request through avatar admission;
+                // a weapon approval must never bypass the avatar's own gate.
+                match self.begin_loadout(
+                    response.addr,
+                    &response.packet,
+                    response.resume_session.as_deref(),
+                    response.skip_avatar,
+                ) {
+                    Admission::Free => {}
+                    Admission::Denied => response.allowed = false,
+                    Admission::Pending => continue,
+                }
+            }
+            completed.push(response);
         }
-        responses
+        completed
     }
 }
 
@@ -414,6 +560,7 @@ mod tests {
     }
     fn join(avatar: &str) -> ClientPacket {
         ClientPacket::Join {
+            handheld: Default::default(),
             prematch: false,
             team: Team::Green,
             character: CharacterChoice::Ipfs,
@@ -447,6 +594,7 @@ mod tests {
         rt.handle_packet(
             addr,
             ClientPacket::Join {
+                handheld: Default::default(),
                 prematch: true,
                 team: Team::Blue,
                 character: CharacterChoice::Ipfs,
@@ -474,6 +622,7 @@ mod tests {
             false,
         );
         let action = |slug: String| PrematchAction::Select {
+            handheld: Default::default(),
             character: CharacterChoice::Ipfs,
             hero_class: HeroClass::Cleric,
             avatar: Some(slug),
@@ -489,7 +638,16 @@ mod tests {
             action,
         };
         let approved_request = request(1, action(free.slug.clone()));
-        let denied_request = request(2, action(owned.slug));
+        let mut denied_request = request(2, action(owned.slug));
+        if let PrematchAction::Select {
+            hero_class,
+            handheld,
+            ..
+        } = &mut denied_request.action
+        {
+            *hero_class = HeroClass::Warrior;
+            *handheld = shared::handheld::HandheldSelection::Unequipped;
+        }
         rt.handle_packet(
             addr,
             ClientPacket::Prematch {
@@ -567,13 +725,19 @@ mod tests {
             rt.world.players[&addr].hero.identity.avatar.as_deref(),
             Some(free.slug.as_str())
         );
-        assert!(
-            rt.world.players[&addr]
-                .draft
-                .error
-                .as_deref()
-                .unwrap()
-                .contains("ownership")
+        let retained = &rt.world.players[&addr];
+        assert_eq!(retained.hero.identity.hero_class, HeroClass::Cleric);
+        assert_eq!(
+            retained.hero.identity.handheld,
+            shared::handheld::HandheldSelection::ClassDefault
+        );
+        assert_eq!(retained.draft.acknowledged_request_id, 2);
+        assert!(!rt.passport_admissions.is_pending(addr));
+        assert_eq!(
+            retained.draft.error.as_deref(),
+            Some(
+                "This avatar or weapon is unavailable. Refresh Studio and choose approved equipment."
+            )
         );
     }
 
@@ -821,5 +985,285 @@ mod tests {
         }))
         .unwrap();
         assert!(matches!(gate.begin(addr, &free), Admission::Free));
+    }
+}
+
+#[cfg(test)]
+mod weapon_tests {
+    use super::*;
+    use ekza_bevy_sdk::{
+        assets::{AssetKind, StoreAsset, asset_slug},
+        passport::{ProjectSupport, Rendition},
+    };
+    use shared::{HeroClass, handheld::HandheldSelection, map::Team, wire::CharacterChoice};
+    fn item() -> StoreAsset {
+        let id = "ekza:weapon:1c366765-3f44-4d36-b14c-acaba3bfce53".to_string();
+        let hash = "b".repeat(64);
+        StoreAsset {
+            slug: asset_slug(AssetKind::Weapon, &id, &hash),
+            asset_id: id,
+            asset_kind: AssetKind::Weapon,
+            name: "Approved hammer".into(),
+            author: None,
+            license: None,
+            thumbnail_url: None,
+            free: true,
+            support: ProjectSupport {
+                project_id: "omoba".into(),
+                platform: "desktop".into(),
+                profile: omoba_passport::weapons::PROFILE.into(),
+                status: "approved".into(),
+                rendition: Rendition {
+                    id: "weapon-r1".into(),
+                    url: "https://example.test/hammer.glb".into(),
+                    sha256: hash,
+                    size_bytes: 128,
+                    format: "glb".into(),
+                },
+            },
+        }
+    }
+    fn approved(_: &str) -> Result<Vec<StoreAsset>, String> {
+        Ok(vec![item()])
+    }
+    fn join(weapon: &str, avatar: Option<&str>) -> ClientPacket {
+        ClientPacket::Join {
+            handheld: HandheldSelection::Item(weapon.into()),
+            prematch: false,
+            team: Team::Green,
+            character: CharacterChoice::default(),
+            hero_class: HeroClass::Warrior,
+            avatar: avatar.map(str::to_owned),
+            sprite_character: None,
+            session_id: Some("weapon-test".into()),
+            passport_ticket: None,
+        }
+    }
+    fn settle(gate: &mut PassportAdmissions) -> CompletedAdmission {
+        for _ in 0..200 {
+            if let Some(result) = gate.completed().pop() {
+                return result;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        panic!("weapon admission did not finish")
+    }
+    #[test]
+    fn approved_weapon_is_independently_admitted_but_cannot_bypass_avatar_gate() {
+        let mut gate = PassportAdmissions {
+            api: None,
+            fetch_weapons: approved,
+            fetch_free: |_| Ok(vec![]),
+            ..Default::default()
+        };
+        let addr = "127.0.0.1:50111".parse().unwrap();
+        assert!(matches!(
+            gate.begin(addr, &join(&item().slug, None)),
+            Admission::Pending
+        ));
+        let admitted = settle(&mut gate);
+        assert!(admitted.allowed);
+        assert!(
+            matches!(admitted.packet,ClientPacket::Join{handheld:HandheldSelection::Item(ref id),..} if id==&item().slug)
+        );
+        assert!(matches!(
+            gate.begin(
+                addr,
+                &join(&item().slug, Some(&format!("ekza-{}", "a".repeat(64))))
+            ),
+            Admission::Pending
+        ));
+        assert!(
+            !settle(&mut gate).allowed,
+            "weapon approval must not authorize an unknown avatar"
+        );
+        assert!(matches!(
+            gate.begin(addr, &join(&format!("ekza-{}", "c".repeat(32)), None)),
+            Admission::Denied
+        ));
+    }
+    #[test]
+    fn healthy_empty_revokes_future_weapon_use_and_outage_preserves_previous_catalogue() {
+        let now = Instant::now();
+        let mut cache = WeaponCatalogue::default();
+        cache.apply(approved(""), now);
+        assert!(cache.items.contains(&item().slug));
+        cache.apply(Err("offline".into()), now);
+        assert!(cache.items.contains(&item().slug));
+        cache.apply(Ok(vec![]), now);
+        assert!(!cache.items.contains(&item().slug));
+        let mut gate = PassportAdmissions::default();
+        *gate.weapons.lock().unwrap() = cache;
+        assert!(matches!(
+            gate.begin(
+                "127.0.0.1:50112".parse().unwrap(),
+                &join(&item().slug, None)
+            ),
+            Admission::Denied
+        ));
+    }
+    #[test]
+    fn ordinary_join_replicates_weapon_and_draft_rejection_preserves_last_equipment() {
+        use crate::{match_rules::MatchConfig, prematch, runtime::ServerRuntime};
+        use shared::prematch::{PrematchAction, PrematchRequest, Role};
+        let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+        socket.set_nonblocking(true).unwrap();
+        let mut rt = ServerRuntime::new(socket, MatchConfig::dev());
+        rt.passport_admissions.fetch_weapons = approved;
+        let owner: SocketAddr = "127.0.0.1:50211".parse().unwrap();
+        let peer: SocketAddr = "127.0.0.1:50212".parse().unwrap();
+        let now = Instant::now();
+        let mut packet = join(&item().slug, None);
+        if let ClientPacket::Join { prematch, .. } = &mut packet {
+            *prematch = true
+        }
+        rt.handle_packet(owner, packet, now);
+        for _ in 0..200 {
+            rt.receive_packets();
+            if rt.world.players[&owner].joined {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(rt.world.players[&owner].joined);
+        assert_eq!(
+            rt.world.players[&owner].hero.identity.handheld,
+            HandheldSelection::Item(item().slug)
+        );
+        let mut peer_join = join("forge-hammer", None);
+        if let ClientPacket::Join {
+            session_id,
+            prematch,
+            ..
+        } = &mut peer_join
+        {
+            *session_id = Some("weapon-peer".into());
+            *prematch = true
+        }
+        rt.handle_packet(peer, peer_join, now);
+        let view = prematch::snapshot(
+            &rt.prematch,
+            &rt.world.players,
+            &rt.world.players[&peer],
+            rt.rules,
+            now,
+        )
+        .unwrap();
+        assert_eq!(
+            view.players
+                .iter()
+                .find(|p| p.player_id == rt.world.players[&owner].hero.identity.id)
+                .unwrap()
+                .handheld,
+            HandheldSelection::Item(item().slug)
+        );
+        let hp = rt.world.players[&owner].hero.max_hp;
+        rt.passport_admissions
+            .weapons
+            .lock()
+            .unwrap()
+            .apply(Ok(vec![]), Instant::now());
+        let request = |request_id, handheld| PrematchRequest {
+            server_epoch: rt.server_epoch,
+            match_id: rt.match_id,
+            generation: view.generation,
+            request_id,
+            action: PrematchAction::Select {
+                handheld,
+                character: CharacterChoice::default(),
+                hero_class: HeroClass::Warrior,
+                avatar: None,
+                sprite_character: None,
+                role: Role::Mid,
+                passport_ticket: None,
+            },
+        };
+        let denied = request(1, HandheldSelection::Item(item().slug));
+        let unequip = request(2, HandheldSelection::Unequipped);
+        rt.handle_packet(owner, ClientPacket::Prematch { request: denied }, now);
+        assert!(rt.world.players[&owner].draft.error.is_some());
+        assert_eq!(
+            rt.world.players[&owner].hero.identity.handheld,
+            HandheldSelection::Item(item().slug)
+        );
+        rt.handle_packet(owner, ClientPacket::Prematch { request: unequip }, now);
+        assert!(rt.world.players[&owner].draft.error.is_none());
+        assert_eq!(
+            rt.world.players[&owner].hero.identity.handheld,
+            HandheldSelection::Unequipped
+        );
+        assert_eq!(rt.world.players[&owner].hero.max_hp, hp);
+    }
+
+    #[test]
+    fn revoked_weapon_reconnect_can_unequip_without_restoring_revoked_prop() {
+        use crate::{match_rules::MatchConfig, runtime::ServerRuntime};
+        for fallback in [
+            HandheldSelection::Unequipped,
+            HandheldSelection::ClassDefault,
+        ] {
+            let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+            socket.set_nonblocking(true).unwrap();
+            let mut rt = ServerRuntime::new(socket, MatchConfig::dev());
+            rt.passport_admissions.fetch_weapons = approved;
+            let owner: SocketAddr = "127.0.0.1:50311".parse().unwrap();
+            let resumed: SocketAddr = "127.0.0.1:50312".parse().unwrap();
+            let now = Instant::now();
+            rt.handle_packet(owner, join(&item().slug, None), now);
+            for _ in 0..200 {
+                rt.receive_packets();
+                if rt.world.players[&owner].joined {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            assert!(rt.world.players[&owner].joined);
+            rt.world.players.get_mut(&owner).unwrap().last_seen = now - Duration::from_secs(6);
+            let id = rt.world.players[&owner].hero.identity.id;
+            let hp = rt.world.players[&owner].hero.hp;
+            rt.passport_admissions
+                .weapons
+                .lock()
+                .unwrap()
+                .apply(Ok(vec![]), Instant::now());
+            rt.handle_packet(resumed, join(&item().slug, None), now);
+            assert!(
+                !rt.world.players[&resumed].joined,
+                "revoked ID cannot reclaim a session"
+            );
+            let mut packet = join(&item().slug, None);
+            if let ClientPacket::Join { handheld, .. } = &mut packet {
+                *handheld = fallback.clone();
+            }
+            rt.handle_packet(resumed, packet, now);
+            let player = &rt.world.players[&resumed];
+            assert!(player.joined);
+            assert_eq!(player.hero.identity.id, id);
+            assert_eq!(player.hero.hp, hp);
+            assert_eq!(player.hero.identity.handheld, fallback);
+            assert!(!rt.world.players.contains_key(&owner));
+        }
+    }
+
+    #[test]
+    fn wrong_kind_profile_pending_and_owned_items_never_authorize_weapons() {
+        let mut variants = vec![];
+        let mut bad = item();
+        bad.support.status = "pending".into();
+        variants.push(bad);
+        let mut bad = item();
+        bad.free = false;
+        variants.push(bad);
+        let mut bad = item();
+        bad.asset_kind = AssetKind::Avatar;
+        variants.push(bad);
+        let mut bad = item();
+        bad.support.profile = "humanoid-glb-v1".into();
+        variants.push(bad);
+        for bad in variants {
+            let mut cache = WeaponCatalogue::default();
+            cache.apply(Ok(vec![bad]), Instant::now());
+            assert!(cache.items.is_empty());
+        }
     }
 }

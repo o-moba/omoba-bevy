@@ -33,5 +33,17 @@
   "collection.catalogue.empty": "Одобренных аватаров Studio для OMOBA пока нет",
   "collection.catalogue.ready": "Одобренные бесплатные аватары и ваша сохраненная или приобретенная библиотека",
   "collection.catalogue.unavailable": "Studio недоступна · обновите для повторной попытки",
-  "collection.catalogue.unavailable_cached": "Studio недоступна · отображается сохраненный каталог"
+  "collection.catalogue.unavailable_cached": "Studio недоступна · отображается сохраненный каталог",
+  "collection.weapons": "Оружие",
+  "collection.weapons_hint": "Внешний вид оружия • для любого совместимого аватара",
+  "collection.weapons_loading": "Загрузка одобренного оружия…",
+  "collection.weapons_empty": "Оружие Studio пока не одобрено",
+  "collection.weapons_unavailable": "Studio недоступна • сохранённые варианты",
+  "collection.weapons_ready": "Одобренное бесплатное оружие Studio",
+  "collection.weapon_default": "По классу",
+  "collection.weapon_empty": "Без оружия",
+  "collection.weapon_download_pending": "Загружаем выбранное оружие…",
+  "collection.weapon_download_failed": "Не удалось загрузить оружие. Нажмите «Обновить», чтобы повторить.",
+  "collection.weapon_download_ready": "Выбранное оружие готово.",
+  "collection.weapon_not_available": "Выбранное оружие недоступно. Обновите Studio или выберите другой предмет."
 }

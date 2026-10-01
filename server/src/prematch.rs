@@ -235,10 +235,8 @@ impl ServerRuntime {
         if let PrematchAction::Select { avatar, .. } = &request.action {
             // Re-selecting the already admitted exact avatar (e.g. changing an
             // intended role) needs no second single-use ownership ticket.
-            if avatar.as_deref().map(str::trim) == player.hero.identity.avatar.as_deref() {
-                self.apply_prematch(addr, request, now);
-                return;
-            }
+            let same_avatar =
+                avatar.as_deref().map(str::trim) == player.hero.identity.avatar.as_deref();
             if self.passport_admissions.is_pending(addr) {
                 player.draft.error = Some(
                     "Wait for avatar ownership verification, then retry your selection.".into(),
@@ -250,13 +248,15 @@ impl ServerRuntime {
             let packet = ClientPacket::Prematch {
                 request: request.clone(),
             };
-            match self
-                .passport_admissions
-                .begin_with_session(addr, &packet, session.as_deref())
-            {
+            match self.passport_admissions.begin_loadout(
+                addr,
+                &packet,
+                session.as_deref(),
+                same_avatar,
+            ) {
                 passport_admission::Admission::Denied => {
                     player.draft.error = Some(
-                        "This avatar is unavailable or requires ownership verification.".into(),
+                        "This avatar or weapon is unavailable. Refresh Studio and choose approved equipment.".into(),
                     );
                     return;
                 }
@@ -305,7 +305,7 @@ impl ServerRuntime {
             self.apply_prematch(addr, request, now);
         } else {
             self.world.players.get_mut(&addr).unwrap().draft.error =
-                Some("This avatar is unavailable or requires ownership verification.".into());
+                Some("This avatar or weapon is unavailable. Refresh Studio and choose approved equipment.".into());
         }
     }
 
@@ -321,6 +321,7 @@ impl ServerRuntime {
                 hero_class,
                 avatar,
                 sprite_character,
+                handheld,
                 role,
                 ..
             } if self.prematch.phase == Some(PrematchPhase::Draft) && !player.draft.locked => {
@@ -341,6 +342,7 @@ impl ServerRuntime {
                     );
                     return;
                 }
+                player.hero.identity.handheld = handheld;
                 player.hero.identity.character = character;
                 player.hero.identity.hero_class = hero_class;
                 player.hero.identity.avatar = normalized.map(str::to_owned);
@@ -394,6 +396,7 @@ pub(super) fn snapshot(
         .values()
         .filter(|p| p.joined)
         .map(|p| DraftPlayer {
+            handheld: p.hero.identity.handheld.clone(),
             player_id: p.hero.identity.id,
             nickname: p.career_profile.as_ref().map_or_else(
                 || {

@@ -28,6 +28,8 @@ fn stage_members(prematch: &PrematchSnapshot, your_id: u64) -> Vec<StageMember> 
     own_team(prematch, your_id)
         .into_iter()
         .map(|player| StageMember {
+            hero_class: player.hero_class,
+            handheld: player.handheld.clone(),
             avatar: player.avatar.clone(),
             character: player.character,
             leader: false,
@@ -249,6 +251,7 @@ mod tests {
     fn stage_keeps_server_choices_and_centres_a_blue_viewer_among_five_teammates() {
         let players = (1..=10)
             .map(|id| DraftPlayer {
+                handheld: Default::default(),
                 player_id: id,
                 nickname: format!("Player {id}"),
                 team: if id <= 5 { Team::Green } else { Team::Blue },

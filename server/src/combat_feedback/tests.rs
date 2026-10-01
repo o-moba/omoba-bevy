@@ -35,6 +35,7 @@ fn fixture() -> (ServerRuntime, SocketAddr, SocketAddr, Instant) {
         rt.handle_packet(
             addr,
             ClientPacket::Join {
+                handheld: Default::default(),
                 prematch: false,
                 team,
                 character: CharacterChoice::Ipfs,

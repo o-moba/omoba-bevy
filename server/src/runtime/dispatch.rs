@@ -173,14 +173,16 @@ impl ServerRuntime {
                             .as_ref()
                             .and_then(|session| self.world.disconnected_sessions.get(session))
                             .map(|saved| &saved.player)
+                    });
+                if retained
+                    .and_then(|player| player.hero.identity.avatar.as_deref())
+                    .is_some_and(|slug| {
+                        (slug.starts_with("ekza-")
+                            || omoba_passport::avatars::avatar_definition(slug)
+                                .is_some_and(|entry| entry.passport.is_some()))
+                            && avatar.as_deref().map(str::trim) != Some(slug)
                     })
-                    .and_then(|player| player.hero.identity.avatar.as_deref());
-                if retained.is_some_and(|slug| {
-                    (slug.starts_with("ekza-")
-                        || omoba_passport::avatars::avatar_definition(slug)
-                            .is_some_and(|entry| entry.passport.is_some()))
-                        && avatar.as_deref().map(str::trim) != Some(slug)
-                }) {
+                {
                     self.world.ensure_connected(addr, now);
                     self.world.players.get_mut(&addr).unwrap().join_error =
                         Some(shared::protocol::JoinRejection::AvatarNotAuthorized);
@@ -301,6 +303,7 @@ impl ServerRuntime {
                 sprite_character,
                 session_id,
                 passport_ticket: _,
+                handheld,
             } => self.handle_join(
                 addr,
                 allocated_team,
@@ -310,6 +313,7 @@ impl ServerRuntime {
                 hero_class,
                 avatar,
                 sprite_character,
+                handheld,
                 session_id,
                 now,
             ),

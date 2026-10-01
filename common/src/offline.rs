@@ -88,6 +88,7 @@ impl PracticeSession {
         }
         match packet {
             ClientPacket::Join {
+                handheld,
                 team,
                 character,
                 hero_class,
@@ -116,6 +117,7 @@ impl PracticeSession {
                     &self.world.map_layout,
                     self.now,
                 );
+                p.hero.identity.handheld = handheld;
                 // Explicit practice configuration: all four slots available; authoritative stats/ranks.
                 while p.hero.progress.level < START_LEVEL {
                     let xp = p.hero.progress.next_level_xp;
@@ -148,6 +150,7 @@ impl PracticeSession {
                 };
                 let identity = &player.hero.identity;
                 let join = ClientPacket::Join {
+                    handheld: identity.handheld.clone(),
                     prematch: false,
                     team: identity.team,
                     character: identity.character,
@@ -317,6 +320,7 @@ mod tests {
     };
     fn join(class: HeroClass) -> ClientPacket {
         ClientPacket::Join {
+            handheld: Default::default(),
             prematch: false,
             team: Team::Green,
             character: CharacterChoice::Ipfs,

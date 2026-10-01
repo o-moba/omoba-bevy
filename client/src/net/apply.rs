@@ -1831,6 +1831,7 @@ mod tests {
         let (mut app, incoming) = snapshot_app();
         let draft = |tick: u64, hero_class: shared::HeroClass| {
             let own = shared::prematch::DraftPlayer {
+                handheld: Default::default(),
                 player_id: 1,
                 nickname: "me".into(),
                 team: shared::map::Team::Green,

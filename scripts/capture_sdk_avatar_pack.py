@@ -69,23 +69,35 @@ class Peer:
             self.sock.close()
 
 
-def verify_native(directory, entries, match_index, previews):
+def verify_native(directory, entries, match_index, previews, weapon='forge-sword', remote_weapon=None):
     summary = json.loads((directory / 'qa-summary.json').read_text())
     frames = summary['captures']
-    assert summary['pass'] and len(frames) == previews + 1
+    assert summary['pass'] and len(frames) == previews + 1 + int(remote_weapon is not None)
+    preview_frames = frames[:previews]
     if previews:
-        assert {f['slug'] for f in frames[:-1]} == {e['slug'] for e in entries}
-        for frame in frames[:-1]:
-            assert frame['store_ready'] and frame['scene_loaded']
+        assert {f['slug'] for f in preview_frames} == {e['slug'] for e in entries}
+        for frame in preview_frames:
+            assert frame['store_ready'] and frame['scene_loaded'] and frame['preview_bound']
+            assert frame['animation_advance_secs'] >= .15 and frame['bone_rotation_delta'] >= .0001
             assert frame['model'] == f"ekza://avatars/{frame['slug']}.glb"
             assert {'idle', 'walk', 'attack', 'cast', 'death'} <= set(frame['clips'])
-    game = frames[-1]
+    game = frames[previews]
     assert game['slug'] == entries[match_index]['slug'] and game['bound_to_model']
     assert game['scene_loaded'] and game['server_admitted'] and game['animation'] == 'Run'
-    assert game['weapon'] == 'forge-sword' and game['attachment_error'] < 1e-4 and game['distance'] >= .2
+    assert game['weapon'] == weapon and game['attachment_error'] < 1e-4 and game['distance'] >= .2
+    result = dict(previews=previews, gameplay_avatar=game['name'], attachment_error=game['attachment_error'])
+    if remote_weapon is not None:
+        peer=frames[-1]
+        assert peer['remote_player_id'] != peer['local_player_id']
+        assert peer['weapon']==remote_weapon and peer['replicated_selection_verified'] and peer['scene_loaded'] and peer['bound_to_model']
+        assert peer['model']==f"ekza://avatars/{peer['slug']}.glb"
+        assert peer['weapon_model']==f"ekza://weapons/{remote_weapon}.glb"
+        assert peer['animation_advance_secs'] >= .15 and peer['bone_rotation_delta'] >= .0001 and peer['distance'] >= .1
+        assert peer['attachment_error'] < 1e-4
+        result['remote']=peer
     for frame in frames:
         assert (directory / frame['file']).is_file()
-    return dict(previews=previews, gameplay_avatar=game['name'], attachment_error=game['attachment_error'])
+    return result
 
 
 def main():

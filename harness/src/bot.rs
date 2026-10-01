@@ -129,6 +129,7 @@ impl Bot {
         session_id: Option<String>,
     ) {
         self.send(&ClientPacket::Join {
+            handheld: Default::default(),
             prematch: true,
             team: Team::Green,
             character,
@@ -171,6 +172,7 @@ impl Bot {
         sprite_character: Option<&str>,
     ) {
         self.send(&ClientPacket::Join {
+            handheld: Default::default(),
             prematch: false,
             team,
             character,

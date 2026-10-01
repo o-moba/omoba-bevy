@@ -317,6 +317,7 @@ fn prepare_controls(
     // negotiates the coordinated draft, covered by frontend_flow_qa.
     if qa.stage == 1 && session.is_connected() && !session.has_committed_join() {
         network.write(crate::net::NetworkCommand::Join {
+            handheld: Default::default(),
             team: if std::env::var("OMOBA_QA_TEAM").as_deref() == Ok("blue") {
                 crate::team::Team::Blue
             } else {

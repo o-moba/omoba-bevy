@@ -107,6 +107,7 @@ pub struct NetIncomingDisconnected(pub bool);
 /// dumping an already-joined player back onto the select screen (TASK-25).
 #[derive(Clone)]
 pub struct CommittedJoin {
+    pub handheld: shared::handheld::HandheldSelection,
     pub prematch: bool,
     pub team: Team,
     pub character: CharacterChoice,
@@ -119,6 +120,7 @@ pub struct CommittedJoin {
 impl CommittedJoin {
     pub(crate) fn for_test() -> Self {
         Self {
+            handheld: Default::default(),
             prematch: false,
             team: Team::Green,
             character: CharacterChoice::default(),
@@ -242,6 +244,13 @@ fn should_attempt_reconnect(
 }
 
 impl ClientSession {
+    /// Keep reconnect equipment aligned with a server-confirmed draft choice.
+    pub(crate) fn remember_handheld(&mut self, handheld: &shared::handheld::HandheldSelection) {
+        if let Some(join) = self.last_join.as_mut() {
+            join.handheld = handheld.clone();
+        }
+    }
+
     pub(crate) fn is_offline(&self) -> bool {
         self.offline_return_addr.is_some()
     }
@@ -530,6 +539,7 @@ pub(in crate::net) fn send_join_attempt(
         }
     };
     let result = channels.outgoing.try_send(ClientPacket::Join {
+        handheld: join.handheld.clone(),
         prematch: join.prematch,
         team: join.team.into(),
         character: join.character,
@@ -1743,6 +1753,7 @@ mod tests {
             state: ClientConnectionState::Connected,
             admitted: true,
             last_join: Some(CommittedJoin {
+                handheld: Default::default(),
                 prematch: false,
                 team: Team::Green,
                 character: CharacterChoice::Ipfs,

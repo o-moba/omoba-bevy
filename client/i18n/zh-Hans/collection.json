@@ -33,5 +33,17 @@
   "collection.catalogue.empty": "暂无为 OMOBA 审核通过的 Studio 形象",
   "collection.catalogue.ready": "已审核的免费形象，以及你保存或购买的收藏",
   "collection.catalogue.unavailable": "Studio 暂不可用 · 请刷新重试",
-  "collection.catalogue.unavailable_cached": "Studio 暂不可用 · 正在显示已保存的目录"
+  "collection.catalogue.unavailable_cached": "Studio 暂不可用 · 正在显示已保存的目录",
+  "collection.weapons": "手持装备",
+  "collection.weapons_hint": "外观装备 • 适用于支持此装备的角色",
+  "collection.weapons_loading": "正在加载已审核的手持装备…",
+  "collection.weapons_empty": "尚无已审核的 Studio 手持装备",
+  "collection.weapons_unavailable": "Studio 暂不可用 • 显示已保存的装备",
+  "collection.weapons_ready": "已审核的免费 Studio 手持装备",
+  "collection.weapon_default": "职业默认",
+  "collection.weapon_empty": "空手",
+  "collection.weapon_download_pending": "正在下载所选手持装备…",
+  "collection.weapon_download_failed": "无法加载手持装备。请刷新后重试。",
+  "collection.weapon_download_ready": "所选手持装备已就绪。",
+  "collection.weapon_not_available": "所选手持装备不可用。请刷新 Studio 或选择其他装备。"
 }

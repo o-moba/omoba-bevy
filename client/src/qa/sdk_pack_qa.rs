@@ -41,6 +41,8 @@ struct Qa {
     readback: bool,
     captures: Vec<serde_json::Value>,
     start: Option<Vec3>,
+    preview_pose: Option<(Entity, Vec<Quat>, f32)>,
+    remote_pose: Option<(Entity, Vec3, Vec<Quat>, f32)>,
 }
 #[derive(Component)]
 struct Shot;
@@ -76,6 +78,8 @@ impl Plugin for SdkPackQaPlugin {
             readback: false,
             captures: vec![],
             start: None,
+            preview_pose: None,
+            remote_pose: None,
         })
         .insert_resource(ScreenDriverPaused(true))
         .insert_resource(bevy::winit::WinitSettings::continuous())
@@ -134,6 +138,26 @@ fn observe(
     mut selection: ResMut<TeamSelection>,
     mut next: ResMut<NextState<AppScreen>>,
     mut exit: MessageWriter<AppExit>,
+    preview_rigs: Query<(
+        Entity,
+        &Name,
+        &crate::humanoid::RuntimeHumanoidPlayer,
+        &AnimationPlayer,
+    )>,
+    humanoids: Res<crate::humanoid::HumanoidRuntimeLibrary>,
+    remote_actors: Query<
+        (
+            Entity,
+            &Transform,
+            &NetworkAvatar,
+            &crate::model_scale::ModelScaleSource,
+            &crate::humanoid::RuntimeHumanoidPlayer,
+            &crate::net::PlayerHandheld,
+            &crate::net::NetworkPlayerId,
+            &AnimationPlayer,
+        ),
+        With<crate::net::RemotePlayer>,
+    >,
     (models, actors, held, bones, animations): (
         Query<(&Name, &crate::model_scale::ModelScaleSource, &SceneRoot)>,
         Query<
@@ -182,6 +206,18 @@ fn observe(
             Some(bevy::asset::RecursiveDependencyLoadState::Loaded)
         )
     };
+    // The faster client keeps moving through its readback/overlap period so
+    // the other rendered client can still measure replicated skeletal motion.
+    if matches!(qa.stage, 14 | 15) && qa.frames.is_multiple_of(60) {
+        if let Ok((entity, pose, _, _, _)) = actors.single() {
+            commands
+                .entity(entity)
+                .insert(crate::player::MovementTarget {
+                    target: pose.translation
+                        + Vec3::new(if (qa.frames / 60) % 2 == 0 { 2.0 } else { -2.0 }, 0.0, 0.0),
+                });
+        }
+    }
     match qa.stage {
         1 if qa.frames >= 45 && preview.status == PreviewStatus::Ready => {
             let item = &qa.items[qa.index];
@@ -201,6 +237,63 @@ fn observe(
             }) {
                 return;
             }
+            let Some((entity, _, rig, player)) = preview_rigs.iter().find(|(_, name, _, _)| {
+                name.as_str() == format!("AvatarPreviewModel-{}", item.slug)
+            }) else {
+                return;
+            };
+            let Some(node) = preview.selected_clip().map(|clip| clip.node) else {
+                return;
+            };
+            let Some(animation) = player.animation(node) else {
+                return;
+            };
+            let elapsed = animation.elapsed();
+            let Some((_, source, _)) = models
+                .iter()
+                .find(|(name, _, _)| name.as_str() == format!("AvatarPreviewModel-{}", item.slug))
+            else {
+                return;
+            };
+            let Some(semantic) = humanoids.semantic_nodes(&source.gltf) else {
+                return;
+            };
+            let pose: Vec<_> = [
+                "hips",
+                "leftUpperArm",
+                "rightUpperArm",
+                "leftUpperLeg",
+                "rightUpperLeg",
+            ]
+            .iter()
+            .filter_map(|name| rig.joint(*semantic.get(*name)?))
+            .filter_map(|joint| {
+                bones
+                    .get(joint)
+                    .ok()
+                    .map(|t| t.compute_transform().rotation)
+            })
+            .collect();
+            if pose.len() != 5 {
+                return;
+            }
+            let Some((old_entity, old_pose, old_elapsed)) = qa.preview_pose.as_ref() else {
+                qa.preview_pose = Some((entity, pose, elapsed));
+                return;
+            };
+            if *old_entity != entity {
+                qa.preview_pose = Some((entity, pose, elapsed));
+                return;
+            }
+            let advance = elapsed - old_elapsed;
+            let rotation_delta = pose
+                .iter()
+                .zip(old_pose)
+                .map(|(a, b)| a.angle_between(*b).abs())
+                .sum::<f32>();
+            if advance < 0.15 || rotation_delta < 0.0001 {
+                return;
+            }
             let clips: Vec<_> = preview.clips.iter().map(|c| c.name.clone()).collect();
             if !["idle", "walk", "attack", "cast", "death"]
                 .iter()
@@ -213,12 +306,13 @@ fn observe(
                 qa.index + 1,
                 item.name.to_lowercase().replace(' ', "-")
             );
-            let frame = serde_json::json!({"file":file,"name":item.name,"slug":item.slug,"model":expected,"clips":clips,"store_ready":true,"scene_loaded":true});
+            let frame = serde_json::json!({"file":file,"name":item.name,"slug":item.slug,"model":expected,"clips":clips,"store_ready":true,"scene_loaded":true,"preview_bound":true,"animation_advance_secs":advance,"bone_rotation_delta":rotation_delta});
             capture(&mut commands, &mut qa, &file, frame);
             qa.stage = 2;
         }
         2 if qa.readback => {
             qa.index += 1;
+            qa.preview_pose = None;
             qa.frames = 0;
             qa.stage = if qa.index == qa.items.len() { 10 } else { 0 };
         }
@@ -228,10 +322,19 @@ fn observe(
             {
                 return;
             }
+            if let Ok(id) = std::env::var("OMOBA_SDK_PACK_QA_WEAPON") {
+                if omoba_passport::weapon_store::model_state(&id)
+                    != omoba_passport::store::ModelState::Ready
+                {
+                    return;
+                }
+                selection.handheld = shared::handheld::HandheldSelection::Item(id);
+            }
             selection.hero_class = shared::HeroClass::Warrior;
             selection.avatar = Some(slug.clone());
             selection.character = CharacterChoice::Cube;
             outgoing.write(NetworkCommand::Join {
+                handheld: selection.handheld.clone(),
                 team: Team::Green,
                 character: CharacterChoice::Cube,
                 hero_class: shared::HeroClass::Warrior,
@@ -255,17 +358,21 @@ fn observe(
             {
                 return;
             }
-            if !held
-                .iter()
-                .any(|(w, _, _, scene)| w.owner == entity && w.id == "forge-sword" && loaded(scene))
-            {
+            if !held.iter().any(|(w, _, _, scene)| {
+                w.owner == entity
+                    && w.id
+                        == std::env::var("OMOBA_SDK_PACK_QA_WEAPON")
+                            .unwrap_or_else(|_| "forge-sword".into())
+                    && loaded(scene)
+            }) {
                 return;
             }
             qa.start = Some(pose.translation);
             commands
                 .entity(entity)
                 .insert(crate::player::MovementTarget {
-                    target: pose.translation + Vec3::new(3., 0., 3.),
+                    target: pose.translation
+                        + Vec3::new(3., 0., if snapshot.your_id % 2 == 0 { -3. } else { 3. }),
                 });
             qa.stage = 12;
             qa.frames = 0;
@@ -299,12 +406,120 @@ fn observe(
                 "animation":"Run","distance":pose.translation.distance(qa.start.unwrap()),"weapon":weapon.id,
                 "attachment_error":error,"scene_loaded":loaded(scene),"server_admitted":session.join_confirmed(),"player_id":snapshot.your_id});
             capture(&mut commands, &mut qa, "21-gameplay-running.png", frame);
-            commands
-                .entity(entity)
-                .remove::<(crate::player::MovementTarget, crate::player::MovementRoute)>();
+            if std::env::var_os("OMOBA_SDK_PACK_QA_REMOTE_WEAPON").is_none() {
+                commands
+                    .entity(entity)
+                    .remove::<(crate::player::MovementTarget, crate::player::MovementRoute)>();
+            }
             qa.stage = 13;
         }
-        13 if qa.readback => {
+        13 if qa.readback && std::env::var_os("OMOBA_SDK_PACK_QA_REMOTE_WEAPON").is_some() => {
+            qa.stage = 14;
+            qa.frames = 0;
+        }
+        14 => {
+            let Ok(expected_weapon) = std::env::var("OMOBA_SDK_PACK_QA_REMOTE_WEAPON") else {
+                return;
+            };
+            let Some((entity,pose,avatar,source,rig,selection,id,player))=remote_actors.iter().find(|(_,_,_,_,_,selection,_,_)|matches!(&selection.0,shared::handheld::HandheldSelection::Item(value) if *value==expected_weapon)) else{return};
+            let Some(slug) = avatar.0.as_deref() else {
+                return;
+            };
+            if omoba_passport::store::model_state(slug) != omoba_passport::store::ModelState::Ready
+                || rig.model != source.gltf.id()
+                || assets
+                    .get_path(source.gltf.id())
+                    .is_none_or(|p| p.to_string() != omoba_passport::store::model_asset_path(slug))
+            {
+                return;
+            }
+            let Some((weapon, local, world, scene)) = held.iter().find(|(weapon, _, _, scene)| {
+                weapon.owner == entity && weapon.id == expected_weapon && loaded(scene)
+            }) else {
+                return;
+            };
+            let Some(definition) = omoba_passport::weapon_store::definition(&expected_weapon)
+            else {
+                return;
+            };
+            if !definition.model.starts_with("ekza://weapons/")
+                || assets
+                    .get_path(scene.0.id())
+                    .is_none_or(|p| p.to_string() != format!("{}#Scene0", definition.model))
+            {
+                return;
+            }
+            let Some(semantic) = humanoids.semantic_nodes(&source.gltf) else {
+                return;
+            };
+            let rotations: Vec<_> = [
+                "hips",
+                "leftUpperArm",
+                "rightUpperArm",
+                "leftUpperLeg",
+                "rightUpperLeg",
+            ]
+            .iter()
+            .filter_map(|name| rig.joint(*semantic.get(*name)?))
+            .filter_map(|joint| {
+                bones
+                    .get(joint)
+                    .ok()
+                    .map(|t| t.compute_transform().rotation)
+            })
+            .collect();
+            if rotations.len() != 5 {
+                return;
+            }
+            let elapsed = player
+                .playing_animations()
+                .map(|(_, animation)| animation.elapsed())
+                .fold(0.0_f32, f32::max);
+            let Some((old_entity, old_position, old_rotation, old_elapsed)) =
+                qa.remote_pose.as_ref()
+            else {
+                qa.remote_pose = Some((entity, pose.translation, rotations, elapsed));
+                return;
+            };
+            if *old_entity != entity {
+                qa.remote_pose = Some((entity, pose.translation, rotations, elapsed));
+                return;
+            }
+            let distance = pose.translation.distance(*old_position);
+            let rotation_delta = rotations
+                .iter()
+                .zip(old_rotation)
+                .map(|(a, b)| a.angle_between(*b).abs())
+                .sum::<f32>();
+            if elapsed < *old_elapsed {
+                qa.remote_pose = Some((entity, pose.translation, rotations, elapsed));
+                return;
+            }
+            let advance = elapsed - old_elapsed;
+            if advance < 0.15 || distance < 0.1 || rotation_delta < 0.0001 {
+                return;
+            }
+            let Ok(hand) = bones.get(weapon.hand) else {
+                return;
+            };
+            let error = hand
+                .mul_transform(*local)
+                .translation()
+                .distance(world.translation());
+            if error > 0.0001 {
+                return;
+            }
+            if id.0 == snapshot.your_id
+                || selection.0 != shared::handheld::HandheldSelection::Item(expected_weapon.clone())
+            {
+                return;
+            }
+            let frame = serde_json::json!({"file":"22-remote-equipped.png","remote_player_id":id.0,"local_player_id":snapshot.your_id,"slug":slug,"model":omoba_passport::store::model_asset_path(slug),"weapon":weapon.id,"weapon_model":definition.model,"scene_loaded":true,"bound_to_model":true,"replicated_selection_verified":true,"distance":distance,"animation_advance_secs":advance,"bone_rotation_delta":rotation_delta,"attachment_error":error});
+            capture(&mut commands, &mut qa, "22-remote-equipped.png", frame);
+            qa.stage = 15;
+            qa.frames = 0;
+        }
+        13 | 15 if qa.readback && (qa.stage == 13 || qa.frames >= 120) => {
             let public_studio =
                 std::env::var("OMOBA_SDK_PACK_QA_LIVE_REGISTRY").is_ok_and(|value| value == "1");
             let report = serde_json::json!({"pass":true,"local_developer_catalog":!public_studio,"public_studio":public_studio,"locale":"en","pixels":[1280,720],"captures":qa.captures});

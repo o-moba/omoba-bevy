@@ -194,12 +194,14 @@ pub struct AvatarPreviewPlugin;
 impl Plugin for AvatarPreviewPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<AvatarPreview>()
+            .init_resource::<crate::humanoid::HumanoidRuntimeLibrary>()
             .add_systems(Startup, setup_preview)
             .add_systems(
                 Update,
                 (
                     release_preview_off_screen,
                     sync_preview_model,
+                    sync_preview_equipment,
                     tag_preview_layers,
                     bind_preview_animations,
                     super::preview_interaction::interact,
@@ -388,6 +390,19 @@ fn sync_preview_model(
     preview.status = PreviewStatus::Loading;
 }
 
+fn sync_preview_equipment(
+    mut commands: Commands,
+    preview: Res<AvatarPreview>,
+    selection: Res<crate::team::TeamSelection>,
+) {
+    if let Some(model) = preview.model {
+        commands.entity(model).insert((
+            crate::net::NetworkHeroClass(selection.hero_class),
+            crate::net::PlayerHandheld(selection.handheld.clone()),
+        ));
+    }
+}
+
 fn preview_model_changed(
     selected: &Option<String>,
     spawned: &Option<String>,
@@ -408,11 +423,10 @@ fn tag_preview_layers(
     let Some(model) = preview.model else {
         return;
     };
+    // Equipment may finish downloading long after the avatar scene loaded.
+    // Tag late descendants too, so a new prop stays on the preview camera.
     if preview.scene_ready {
-        if preview.tag_frames == 0 {
-            return;
-        }
-        preview.tag_frames -= 1;
+        preview.tag_frames = preview.tag_frames.saturating_sub(1);
     }
     let mut stack = vec![model];
     while let Some(entity) = stack.pop() {
@@ -427,8 +441,8 @@ fn tag_preview_layers(
     }
 }
 
-/// Builds one animation graph from every clip the avatar's glTF declares, so
-/// the viewer can switch between all of them, not a fixed five.
+/// Humanoids share the match runtime; supported extra authored clips are
+/// remapped into that namespace. Other models retain their embedded graph.
 fn bind_preview_animations(
     mut commands: Commands,
     mut preview: ResMut<AvatarPreview>,
@@ -436,10 +450,36 @@ fn bind_preview_animations(
     gltfs: Res<Assets<Gltf>>,
     asset_server: Res<AssetServer>,
     children: Query<&Children>,
-    mut players: Query<&mut AnimationPlayer>,
+    mut players: Query<(&mut AnimationPlayer, Option<&AnimationGraphHandle>)>,
+    mut runtime: ResMut<crate::humanoid::HumanoidRuntimeLibrary>,
+    mut clips: ResMut<Assets<AnimationClip>>,
+    runtime_players: Query<&crate::humanoid::RuntimeHumanoidPlayer>,
 ) {
-    if preview.bound || preview.model.is_none() {
+    if preview.model.is_none() {
         return;
+    }
+    if preview.bound {
+        if let (Some(player), Some(graph)) = (preview.player, preview.graph.as_ref()) {
+            if let Ok((mut active, current)) = players.get_mut(player) {
+                if current.is_none_or(|current| current.0 != *graph) {
+                    commands
+                        .entity(player)
+                        .insert(AnimationGraphHandle(graph.clone()));
+                }
+                if let Some(clip) = preview.selected_clip() {
+                    if preview.gesture.is_none() && !active.is_playing_animation(clip.node) {
+                        active.stop_all();
+                        active.play(clip.node).repeat();
+                    }
+                }
+                return;
+            }
+            preview.bound = false;
+            preview.player = None;
+            preview.graph = None;
+        } else {
+            return;
+        }
     }
     if preview.gltf.as_ref().is_some_and(|handle| {
         matches!(
@@ -456,7 +496,22 @@ fn bind_preview_animations(
     let Some(model) = preview.model else {
         return;
     };
-    // Find the `AnimationPlayer` the scene spawned under the model root.
+    // Humanoid preview uses the exact semantic motion/binding path used in
+    // matches. Embedded clips remain a fallback for non-humanoid models.
+    let runtime_clips = preview
+        .gltf
+        .as_ref()
+        .and_then(|handle| runtime.ensure(handle, gltf, &mut clips).ok());
+    if runtime_clips.is_some() {
+        commands
+            .entity(model)
+            .insert(crate::humanoid::RuntimeHumanoidRequest {
+                model: preview.gltf.as_ref().unwrap().clone(),
+            });
+        if runtime_players.get(model).is_err() {
+            return;
+        }
+    }
     let mut stack = vec![model];
     let mut target = None;
     while let Some(entity) = stack.pop() {
@@ -476,11 +531,37 @@ fn bind_preview_animations(
         }
         return;
     };
-    let mut names: Vec<(String, Handle<AnimationClip>)> = gltf
-        .named_animations
-        .iter()
-        .map(|(name, handle)| (name.to_string(), handle.clone()))
-        .collect();
+    let mut names: Vec<(String, Handle<AnimationClip>)> = if let Some(motion) = runtime_clips {
+        let mut names: Vec<(String, Handle<AnimationClip>)> = vec![
+            ("idle".into(), motion.idle),
+            ("walk".into(), motion.walk),
+            ("run".into(), motion.run),
+            ("attack".into(), motion.attack),
+            ("cast".into(), motion.cast),
+            ("death".into(), motion.death),
+        ];
+        for (name, handle) in &gltf.named_animations {
+            if names
+                .iter()
+                .any(|(known, _)| known.eq_ignore_ascii_case(name))
+            {
+                continue;
+            }
+            if let Some(clip) = clips.get(handle).cloned() {
+                if let Ok(remapped) =
+                    runtime.remap_embedded_clip(preview.gltf.as_ref().unwrap(), gltf, &clip)
+                {
+                    names.push((name.to_string(), clips.add(remapped)));
+                }
+            }
+        }
+        names
+    } else {
+        gltf.named_animations
+            .iter()
+            .map(|(name, handle)| (name.to_string(), handle.clone()))
+            .collect()
+    };
     if names.is_empty() {
         preview.status = PreviewStatus::NoAnimations;
         preview.bound = true;
@@ -506,7 +587,7 @@ fn bind_preview_animations(
     commands
         .entity(target)
         .insert(AnimationGraphHandle(handle.clone()));
-    if let Ok(mut player) = players.get_mut(target)
+    if let Ok((mut player, _)) = players.get_mut(target)
         && let Some(clip) = preview.clips.first()
     {
         player.stop_all();

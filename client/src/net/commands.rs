@@ -47,12 +47,14 @@ pub enum NetworkCommand {
     },
     Prematch(shared::prematch::PrematchRequest),
     JoinPrematch {
+        handheld: shared::handheld::HandheldSelection,
         character: CharacterChoice,
         hero_class: HeroClass,
         avatar: Option<String>,
         sprite_character: Option<String>,
     },
     Join {
+        handheld: shared::handheld::HandheldSelection,
         team: Team,
         character: CharacterChoice,
         hero_class: HeroClass,
@@ -408,6 +410,7 @@ pub(in crate::net) fn send_network_commands(
                 }
             }
             NetworkCommand::JoinPrematch {
+                handheld,
                 character,
                 hero_class,
                 avatar,
@@ -419,6 +422,7 @@ pub(in crate::net) fn send_network_commands(
                 client_session.clear_join_attempt();
                 client_session.join_flow_committed = true;
                 client_session.last_join = Some(CommittedJoin {
+                    handheld: handheld.clone(),
                     prematch: true,
                     team: Team::Green,
                     character: *character,
@@ -429,6 +433,7 @@ pub(in crate::net) fn send_network_commands(
                 send_join_attempt(&channels, &mut client_session, &client_session_id);
             }
             NetworkCommand::Join {
+                handheld,
                 team,
                 character,
                 hero_class,
@@ -441,6 +446,7 @@ pub(in crate::net) fn send_network_commands(
                 client_session.clear_join_attempt();
                 client_session.join_flow_committed = true;
                 client_session.last_join = Some(CommittedJoin {
+                    handheld: handheld.clone(),
                     prematch: false,
                     team: *team,
                     character: *character,

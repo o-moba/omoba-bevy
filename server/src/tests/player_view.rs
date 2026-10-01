@@ -40,6 +40,7 @@ fn fixture() -> (ServerRuntime, SocketAddr, SocketAddr, Instant) {
         rt.handle_packet(
             addr,
             ClientPacket::Join {
+                handheld: Default::default(),
                 prematch: false,
                 team,
                 character: CharacterChoice::Ipfs,
@@ -405,6 +406,7 @@ fn owner_view_reproduces_the_replicated_clocks_for_sandbox_actors() {
     rt.handle_packet(
         a,
         ClientPacket::Join {
+            handheld: Default::default(),
             prematch: false,
             team: Team::Green,
             character: CharacterChoice::Cube,

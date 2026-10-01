@@ -33,5 +33,17 @@
   "collection.catalogue.empty": "No Studio avatars approved for OMOBA yet",
   "collection.catalogue.ready": "Approved free avatars and your saved or purchased library",
   "collection.catalogue.unavailable": "Studio is unavailable · refresh to try again",
-  "collection.catalogue.unavailable_cached": "Studio is unavailable · showing the saved catalogue"
+  "collection.catalogue.unavailable_cached": "Studio is unavailable · showing the saved catalogue",
+  "collection.weapons": "Weapons",
+  "collection.weapons_hint": "Cosmetic equipment • works with any compatible avatar",
+  "collection.weapons_loading": "Loading approved weapons…",
+  "collection.weapons_empty": "No Studio weapons approved yet",
+  "collection.weapons_unavailable": "Studio unavailable • showing saved choices",
+  "collection.weapons_ready": "Approved free Studio weapons",
+  "collection.weapon_default": "Class default",
+  "collection.weapon_empty": "Empty hands",
+  "collection.weapon_download_pending": "Downloading selected weapon…",
+  "collection.weapon_download_failed": "Weapon could not load. Refresh to retry.",
+  "collection.weapon_download_ready": "Selected weapon is ready.",
+  "collection.weapon_not_available": "Selected weapon is unavailable. Refresh Studio or choose another item."
 }

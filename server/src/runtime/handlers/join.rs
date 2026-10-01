@@ -29,6 +29,7 @@ impl ServerRuntime {
         hero_class: HeroClass,
         avatar: Option<String>,
         sprite_character: Option<String>,
+        handheld: shared::handheld::HandheldSelection,
         session_id: Option<String>,
         now: Instant,
     ) -> ControlFlow<()> {
@@ -66,6 +67,10 @@ impl ServerRuntime {
                 player.join_error = Some(shared::protocol::JoinRejection::ProtocolMismatch);
                 return ControlFlow::Break(());
             }
+            // The ordinary admission gate checked this exact requested item.
+            // Preserve round state but reconcile cosmetic equipment, otherwise
+            // choosing empty hands could silently restore a revoked old prop.
+            player.hero.identity.handheld = handheld;
             player.join_error = None;
             self.register_career_participant(addr);
             self.fill_practice_bots(now);
@@ -128,6 +133,7 @@ impl ServerRuntime {
         if let Some(player) = world.players.get_mut(&addr) {
             player.join_error = None;
             player.draft.capable = prematch;
+            player.hero.identity.handheld = handheld;
             handle_join_request_with_sprite(
                 player,
                 assigned_team,
