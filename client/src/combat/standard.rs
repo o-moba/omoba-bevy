@@ -1,6 +1,16 @@
 //! Presentation and input helpers for resolved skills. No hit or resource authority.
 // i18n-strict
+use bevy::gizmos::config::GizmoConfigGroup;
 use bevy::prelude::*;
+
+#[derive(Default, Reflect, GizmoConfigGroup)]
+pub(super) struct SkillAimGizmos;
+#[derive(Default, Reflect, GizmoConfigGroup)]
+pub(super) struct SkillEffectGizmos;
+
+#[derive(Resource, Default)]
+pub(super) struct SkillAimVector(pub Option<(Vec2, Vec2)>);
+
 use shared::loadout::{EffectVisualKind, WeaponMode};
 use shared::{HeroClass, TargetingMode};
 
@@ -215,34 +225,48 @@ fn point(p: Vec2, mode: PlayerVisualMode, map: Option<&crate::maps::MapLayout>) 
     }
 }
 
-fn ring(
-    gizmos: &mut Gizmos,
+fn ground_line<G: GizmoConfigGroup>(
+    gizmos: &mut Gizmos<G>,
+    a: Vec2,
+    b: Vec2,
+    mode: PlayerVisualMode,
+    map: Option<&crate::maps::MapLayout>,
+    color: Color,
+) {
+    let steps = (a.distance(b) / 1.5).ceil().clamp(1.0, 192.0) as usize;
+    gizmos.linestrip(
+        (0..=steps).map(|i| point(a.lerp(b, i as f32 / steps as f32), mode, map)),
+        color,
+    );
+}
+
+fn ring<G: GizmoConfigGroup>(
+    gizmos: &mut Gizmos<G>,
     p: Vec2,
     radius: f32,
     mode: PlayerVisualMode,
     map: Option<&crate::maps::MapLayout>,
     color: Color,
 ) {
-    let rotation = if mode == PlayerVisualMode::Sprite2d {
-        Quat::IDENTITY
-    } else {
-        Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)
-    };
-    gizmos.circle(
-        Isometry3d::new(point(p, mode, map), rotation),
-        radius,
+    gizmos.linestrip(
+        (0..=48).map(|i| {
+            let angle = i as f32 * std::f32::consts::TAU / 48.0;
+            point(p + Vec2::new(angle.cos(), angle.sin()) * radius, mode, map)
+        }),
         color,
     );
 }
 
 /// Authored aim geometry while a key, touch drag or controller button is held.
 pub(super) fn draw_aim(
-    mut gizmos: Gizmos,
+    mut gizmos: Gizmos<SkillAimGizmos>,
+    mut vector: ResMut<SkillAimVector>,
     local: Query<
         (
             &Transform,
             &NetworkHeroClass,
             &crate::net::PlayerProgression,
+            &super::CombatStats,
         ),
         With<Player>,
     >,
@@ -255,12 +279,16 @@ pub(super) fn draw_aim(
     mobile: Option<Res<crate::mobile_controls::MobileControls>>,
     pad: Option<Res<crate::gamepad::GamepadControls>>,
 ) {
+    vector.0 = None;
     if !context.gameplay_allowed() {
         return;
     }
-    let Ok((pose, class, progression)) = local.single() else {
+    let Ok((pose, class, progression, stats)) = local.single() else {
         return;
     };
+    if !stats.is_alive() {
+        return;
+    }
     let Some(preset) = shared::loadout::preset_for_class(class.0) else {
         return;
     };
@@ -321,7 +349,7 @@ pub(super) fn draw_aim(
     };
     let aim = bounded_aim(origin, aim, def.ability.targeting, range);
     let direction = (aim - origin).normalize_or_zero();
-    let color = Color::srgb(0.94, 0.84, 0.43);
+    let color = Color::linear_rgb(0.015, 0.8, 5.0);
     let map = map.as_deref();
     match def.effect {
         shared::loadout::SkillEffect::RecastZone { radius, .. } => {
@@ -356,11 +384,32 @@ pub(super) fn draw_aim(
             };
             let side = Vec2::new(-direction.y, direction.x) * radius;
             for sign in [-1.0, 1.0] {
-                gizmos.line(
-                    point(origin + side * sign, *mode, map),
-                    point(origin + direction * range + side * sign, *mode, map),
+                ground_line(
+                    &mut gizmos,
+                    origin + side * sign,
+                    origin + direction * range + side * sign,
+                    *mode,
+                    map,
                     color,
                 );
+            }
+            if direction.length_squared() > 0.5 {
+                if range >= 35.0 {
+                    vector.0 = Some((origin, origin + direction * range));
+                }
+                let distance = range.min(14.0);
+                let tip = origin + direction * distance;
+                let wing = Vec2::new(-direction.y, direction.x) * radius.max(0.5);
+                for sign in [-1.0, 1.0] {
+                    ground_line(
+                        &mut gizmos,
+                        tip - direction * 1.5 + wing * sign,
+                        tip,
+                        *mode,
+                        map,
+                        color,
+                    );
+                }
             }
         }
     }
@@ -368,7 +417,7 @@ pub(super) fn draw_aim(
 
 /// Bounded, snapshot-driven geometry. Effects do not depend on a visible owner.
 pub(super) fn draw_effects(
-    mut gizmos: Gizmos,
+    mut gizmos: Gizmos<SkillEffectGizmos>,
     profiles: Option<Res<crate::skill_presentation::SkillPresentation>>,
     game: Option<Res<GameStateSnapshot>>,
     mode: Res<PlayerVisualMode>,
@@ -395,7 +444,9 @@ pub(super) fn draw_effects(
             continue;
         }
         let p = Vec2::from_array(e.position);
+        // Keep the tactical trap outline over the newer 3D trap model.
         if *mode == PlayerVisualMode::Models3d
+            && e.kind != EffectVisualKind::Trap
             && profiles
                 .as_ref()
                 .is_some_and(|r| r.profile(e.skill).is_some())
@@ -404,7 +455,13 @@ pub(super) fn draw_effects(
         }
         let end = Vec2::from_array(e.end);
         let friendly = local.single().is_ok_and(|t| *t == e.owner_team);
-        let color = if friendly {
+        let color = if e.kind == EffectVisualKind::Trap {
+            if friendly {
+                Color::linear_rgb(0.015, 0.8, 5.0)
+            } else {
+                Color::linear_rgb(5.0, 0.16, 0.015)
+            }
+        } else if friendly {
             Color::srgb(0.35, 0.95, 0.8)
         } else {
             Color::srgb(1.0, 0.3, 0.28)
@@ -458,7 +515,11 @@ pub(super) fn draw_effects(
                         gizmos.line(
                             point(p + Vec2::new(-offset, sign * offset), *mode, map),
                             point(p + Vec2::new(offset, -sign * offset), *mode, map),
-                            color.with_alpha(if e.armed { 1.0 } else { 0.35 }),
+                            if e.armed {
+                                Color::WHITE
+                            } else {
+                                Color::srgb(1.0, 0.75, 0.15)
+                            },
                         );
                     }
                 }
@@ -687,5 +748,106 @@ pub(super) fn interact(
         nearest.filter(|_| keys.just_pressed(KeyCode::KeyF) || pressed || clicked)
     {
         commands.write(crate::net::NetworkCommand::Interact { object_id });
+    }
+}
+
+/// A pooled, clipped preview on the map shares the exact world aim vector.
+#[derive(Component)]
+pub(super) struct MinimapAimLine;
+pub(super) fn draw_minimap_aim(
+    mut commands: Commands,
+    vector: Res<SkillAimVector>,
+    layout: Res<crate::maps::MapLayout>,
+    container: Query<Entity, With<crate::minimap::MinimapContainer>>,
+    mut lines: Query<(&mut Node, &mut UiTransform), With<MinimapAimLine>>,
+) {
+    use crate::minimap::{clip_map_segment, line_node, map_point};
+    let segment = vector.0.and_then(|(a, b)| {
+        clip_map_segment(
+            map_point(*layout, Vec3::new(a.x, 0.0, a.y)),
+            map_point(*layout, Vec3::new(b.x, 0.0, b.y)),
+        )
+    });
+    if let Ok((mut node, mut transform)) = lines.single_mut() {
+        if let Some((a, b)) = segment {
+            let (n, t) = line_node(a, b, 5.0);
+            *node = n;
+            *transform = t;
+        } else {
+            node.display = Display::None;
+        }
+    } else if let (Some((a, b)), Ok(parent)) = (segment, container.single()) {
+        let (node, transform) = line_node(a, b, 5.0);
+        commands.spawn((
+            node,
+            transform,
+            BackgroundColor(Color::srgb(0.12, 0.65, 1.0)),
+            ZIndex(30),
+            MinimapAimLine,
+            Name::new("MinimapSkillVector"),
+            ChildOf(parent),
+        ));
+    }
+}
+
+pub(super) fn draw_minimap_traps(
+    mut commands: Commands,
+    game: Res<GameStateSnapshot>,
+    layout: Res<crate::maps::MapLayout>,
+    container: Query<Entity, With<crate::minimap::MinimapContainer>>,
+    local: Query<&crate::team::Team, With<Player>>,
+    mut pool: Local<Vec<Entity>>,
+) {
+    let Ok(parent) = container.single() else {
+        return;
+    };
+    let traps: Vec<_> = game
+        .skill_effects
+        .iter()
+        .filter(|e| e.kind == EffectVisualKind::Trap && e.position.into_iter().all(f32::is_finite))
+        .take(32)
+        .collect();
+    for (i, e) in traps.iter().enumerate() {
+        let p = crate::minimap::map_point(*layout, Vec3::new(e.position[0], 0.0, e.position[1]));
+        let color = if local.single().is_ok_and(|t| *t == e.owner_team) {
+            Color::srgb(0.12, 0.65, 1.0)
+        } else {
+            Color::srgb(1.0, 0.22, 0.08)
+        };
+        let node = Node {
+            position_type: PositionType::Absolute,
+            left: Val::Px(p.x - 4.0),
+            top: Val::Px(p.y - 4.0),
+            width: Val::Px(8.0),
+            height: Val::Px(8.0),
+            border: UiRect::all(Val::Px(2.0)),
+            border_radius: BorderRadius::MAX,
+            ..default()
+        };
+        let fill = BackgroundColor(if e.armed { color } else { Color::BLACK });
+        if let Some(id) = pool.get(i) {
+            commands
+                .entity(*id)
+                .insert((node, fill, BorderColor::all(color)));
+        } else {
+            pool.push(
+                commands
+                    .spawn((
+                        node,
+                        fill,
+                        BorderColor::all(color),
+                        ZIndex(12),
+                        ChildOf(parent),
+                        Name::new("MinimapTrap"),
+                    ))
+                    .id(),
+            );
+        }
+    }
+    for id in pool.iter().skip(traps.len()) {
+        commands.entity(*id).insert(Node {
+            display: Display::None,
+            ..default()
+        });
     }
 }

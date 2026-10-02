@@ -38,6 +38,8 @@ impl Plugin for StandardKitsQaPlugin {
         app.insert_resource(Qa {
             directory,
             class,
+            ux: std::env::var_os("OMOBA_COMBAT_UX_QA").is_some(),
+            hud: std::env::var_os("OMOBA_COMBAT_UX_HUD_QA").is_some(),
             stage: 0,
             roster: std::env::var_os("OMOBA_ROSTER_SKILLS_QA").is_some(),
             weapons: std::env::var_os("OMOBA_HANDHELD_QA").is_some(),
@@ -76,6 +78,8 @@ impl Plugin for StandardKitsQaPlugin {
 struct Qa {
     directory: PathBuf,
     class: HeroClass,
+    ux: bool,
+    hud: bool,
     stage: u8,
     roster: bool,
     weapons: bool,
@@ -90,9 +94,13 @@ struct Qa {
     readbacks: Vec<usize>,
     requests: Vec<serde_json::Value>,
 }
-fn label(mut commands: Commands) {
+fn label(mut commands: Commands, qa: Res<Qa>) {
     commands.spawn((
-        Text::new("QA · live sandbox · scripted commands and held-key input"),
+        Text::new(if qa.hud {
+            "QA · live practice · authoritative bots and kill notices"
+        } else {
+            "QA · live sandbox · scripted commands and held-key input"
+        }),
         TextFont {
             font_size: 10.0,
             ..default()
@@ -131,12 +139,15 @@ fn prepare(
     }
     if let Ok(mut window) = windows.single_mut() {
         window.resolution.set_scale_factor_override(Some(1.0));
-        if window.physical_width() != 1280 || window.physical_height() != 720 {
-            window.resolution.set_physical_resolution(1280, 720);
+        let (width, height) = if qa.ux { (1180, 820) } else { (1280, 720) };
+        if window.physical_width() != width || window.physical_height() != height {
+            window.resolution.set_physical_resolution(width, height);
         }
         if (9..=11).contains(&qa.stage) {
             window.set_cursor_position(Some(Vec2::new(850.0, 300.0)));
-            let key = if qa.class == HeroClass::Dawnweaver {
+            let key = if qa.ux {
+                KeyCode::KeyR
+            } else if qa.class == HeroClass::Dawnweaver {
                 KeyCode::KeyQ
             } else {
                 KeyCode::KeyW
@@ -308,7 +319,7 @@ fn observe(
             "effect_id":visual.id, "model_ready":visual.model_ready,
         })).collect::<Vec<_>>(),
         "loadout": local.single().ok().and_then(|(_,_,_,l,_)| l.0.as_ref()),
-        "nodes": nodes.iter().filter(|(n,_,_)| n.as_str().starts_with("ClassButton") || n.as_str()=="StandardKitStatus")
+        "nodes": nodes.iter().filter(|(n,_,_)| n.as_str().starts_with("ClassButton") || ["StandardKitStatus","HeroOverheadPlate","AlliedVitals","MinimapSkillVector","KillFeed","MinimapTrap"].contains(&n.as_str()))
             .map(|(n,c,v)| serde_json::json!({"name":n.as_str(),"size":c.size().to_array(),"visible":v.get()})).collect::<Vec<_>>()
     });
     if qa.stage == 8
@@ -452,6 +463,11 @@ fn observe(
             qa.stage = 2;
         }
         2 if session.join_confirmed() && local.single().is_ok() => {
+            if qa.hud {
+                qa.stage = 40;
+                qa.frames = 0;
+                return;
+            }
             let Some(sandbox) = snapshot.sandbox.as_ref() else {
                 return;
             };
@@ -460,6 +476,7 @@ fn observe(
                     hero: qa.class,
                     avatar: Some("agnes".into()),
                     level: 10,
+                    no_cooldowns: qa.ux,
                     position: [-8.0, -8.0],
                     max_hp: shared::hero_balance::base_hp(qa.class),
                     ..default()
@@ -513,6 +530,7 @@ fn observe(
             if class.0 != qa.class
                 || progression.level != 10
                 || qa.frames < 60
+                || (qa.ux && qa.started.elapsed() < Duration::from_secs(14))
                 || help.0
                 || !context.gameplay_allowed()
             {
@@ -741,7 +759,9 @@ fn observe(
                 .ok()
                 .and_then(|(_, _, _, l, _)| l.0.as_ref())
                 .map_or(0, |l| l.cast_request_id);
-            let key = if qa.class == HeroClass::Dawnweaver {
+            let key = if qa.ux {
+                "R"
+            } else if qa.class == HeroClass::Dawnweaver {
                 "Q"
             } else {
                 "W"
@@ -760,11 +780,14 @@ fn observe(
             qa.stage = 11;
         }
         11 if snapshot.skill_effects.iter().any(|e| {
-            e.kind == EffectVisualKind::Bolt
-                && matches!(
-                    e.skill,
-                    shared::loadout::SkillId::DawnBind | shared::loadout::SkillId::WildZap
-                )
+            (qa.ux
+                && ((qa.class == HeroClass::Wildspark && e.kind == EffectVisualKind::Rocket)
+                    || (qa.class == HeroClass::Dawnweaver && e.kind == EffectVisualKind::Beam)))
+                || e.kind == EffectVisualKind::Bolt
+                    && matches!(
+                        e.skill,
+                        shared::loadout::SkillId::DawnBind | shared::loadout::SkillId::WildZap
+                    )
         }) && local
             .single()
             .ok()
@@ -789,7 +812,7 @@ fn observe(
                 })
                 .all(|f| qa.directory.join(f).metadata().is_ok_and(|m| m.len() > 32)) =>
         {
-            let summary = serde_json::json!({"pass":true,"scenario":"standard_kits","class":qa.class.id(),"locale":"en","pixels":[1280,720],"scripted_commands":true,"scripted_key_release_accepted":true,"manual_interaction_verified":false,"physical_device_verified":false,"setup":"live development sandbox; level 10; rank 1; stationary infinite-health dummy; normal costs, cooldowns and time","requests":qa.requests,"captures":qa.captures});
+            let summary = serde_json::json!({"pass":true,"scenario":"standard_kits","class":qa.class.id(),"locale":"en","pixels":if qa.ux {vec![1180,820]} else {vec![1280,720]},"touch_hud":qa.ux,"scripted_commands":true,"scripted_key_release_accepted":true,"manual_interaction_verified":false,"physical_device_verified":false,"setup":if qa.ux {"live sandbox; level 10; rank 1; infinite dummy; cooldowns disabled; keyboard-held aim on touch HUD"} else {"live development sandbox; level 10; rank 1; stationary infinite-health dummy; normal costs, cooldowns and time"},"requests":qa.requests,"captures":qa.captures});
             if std::fs::write(
                 qa.directory.join("qa-summary.json"),
                 serde_json::to_vec_pretty(&summary).unwrap(),
@@ -802,6 +825,39 @@ fn observe(
             qa.stage = 255;
             // Match the production Exit button and the other native capture
             // harnesses: release the window's render surface before AppExit.
+            if let Ok(window) = windows.single() {
+                commands.entity(window).despawn();
+            }
+            exit.write(AppExit::Success);
+        }
+        40 if qa.frames > 90
+            && nodes
+                .iter()
+                .any(|(n, c, v)| n.as_str() == "AlliedVitals" && v.get() && c.size().x > 0.0) =>
+        {
+            capture(&mut commands, &mut qa, 1, frame);
+            qa.stage = 41;
+        }
+        41 if qa.readbacks.contains(&1)
+            && nodes
+                .iter()
+                .any(|(n, c, v)| n.as_str() == "KillFeed" && v.get() && c.size().y > 0.0) =>
+        {
+            capture(&mut commands, &mut qa, 2, frame);
+            qa.stage = 42;
+        }
+        42 if qa.readbacks.contains(&2) => {
+            let summary = serde_json::json!({"pass":true,"scenario":"combat_ux_hud",
+                "locale":"en","pixels":[1180,820],"touch_hud":true,
+                "physical_device_verified":false,"manual_interaction_verified":false,
+                "setup":"ordinary practice; authoritative lane bots; real hero kills; no synthetic damage or HUD state",
+                "captures":qa.captures,"scoreboard":snapshot.scoreboard});
+            std::fs::write(
+                qa.directory.join("qa-summary.json"),
+                serde_json::to_vec_pretty(&summary).unwrap(),
+            )
+            .unwrap();
+            qa.stage = 255;
             if let Ok(window) = windows.single() {
                 commands.entity(window).despawn();
             }
@@ -856,8 +912,8 @@ fn capture(commands: &mut Commands, qa: &mut Qa, index: usize, mut frame: serde_
 }
 fn readback(event: On<ScreenshotCaptured>, shots: Query<&Shot>, mut qa: ResMut<Qa>) {
     if let Ok(shot) = shots.get(event.entity)
-        && event.image.width() == 1280
-        && event.image.height() == 720
+        && event.image.width() == if qa.ux { 1180 } else { 1280 }
+        && event.image.height() == if qa.ux { 820 } else { 720 }
         && !qa.readbacks.contains(&shot.0)
     {
         qa.readbacks.push(shot.0);

@@ -230,7 +230,14 @@ impl HudLayout {
         // runtime's conservative 12 px inset that is the same 12, so the
         // quick-buy row still ends above the protected passage (y 242).
         let top = safe.top.max(space::S12);
-        let minimap = rect(left, top, Vec2::splat(size::MINIMAP.phone));
+        let map_size = size::MINIMAP.phone
+            * if viewport.min_element() >= 600.0 {
+                1.2
+            } else {
+                1.0
+            };
+        let map_extra = map_size - size::MINIMAP.phone;
+        let minimap = rect(left, top, Vec2::splat(map_size));
         let icons = icon_row_width(form);
         let icon_row_x = right - icons;
         let score = plate::SCORE_STRIP_PHONE;
@@ -284,11 +291,15 @@ impl HudLayout {
             ),
             upgrade_chip: chip,
             ability_bar: bar,
-            player_status: rect(left, top + PHONE_STATUS_TOP, plate::PLAYER_STATUS_PHONE),
+            player_status: rect(
+                left,
+                top + PHONE_STATUS_TOP + map_extra,
+                plate::PLAYER_STATUS_PHONE,
+            ),
             equipment: Rect::default(),
             quick_buy: rect(
                 left,
-                top + PHONE_QUICK_BUY_TOP,
+                top + PHONE_QUICK_BUY_TOP + map_extra,
                 Vec2::new(3.0 * slot + 2.0 * space::S8, slot),
             ),
             legend: Rect::default(),
@@ -627,5 +638,16 @@ mod tests {
             Vec2::new(1280.0, 720.0)
         );
         assert_eq!(ui_viewport(&window, None), Vec2::new(1920.0, 1080.0));
+    }
+    #[test]
+    fn tablet_map_is_twenty_percent_larger_without_changing_phone_map() {
+        let mut mobile = MobileControls::default();
+        mobile.viewport = Vec2::new(852.0, 393.0);
+        let phone = HudLayout::phone(&mobile);
+        mobile.viewport = Vec2::new(1180.0, 820.0);
+        let tablet = HudLayout::phone(&mobile);
+        assert!((tablet.minimap.width() / phone.minimap.width() - 1.2).abs() < 0.001);
+        assert!(tablet.player_status.min.y > tablet.minimap.max.y);
+        assert!(tablet.quick_buy.min.y > tablet.player_status.max.y);
     }
 }

@@ -24,6 +24,8 @@ pub enum PracticeCommand {
     /// A stationary enemy target in front of the requester. It never moves
     /// or attacks and returns to its spot after each respawn.
     SpawnDummy,
+    /// Nonattacking nearby target following a bounded circular route.
+    SpawnMovingDummy,
     /// Clear the bots and send one enemy lane bot down mid at `level`, with
     /// its skills ranked for that level and `gold` spent on items at base.
     StartDuel { level: u32, gold: u32 },

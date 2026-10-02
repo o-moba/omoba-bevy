@@ -1788,7 +1788,9 @@ mod tests {
                 winner: shared::map::Team::Green,
             };
             game.scoreboard = Some(shared::live_score::LiveScoreboard {
+                kills: Vec::new(),
                 players: vec![LiveScorePlayer {
+                    avatar: None,
                     player_id: 11,
                     nickname: "Guest".into(),
                     team: shared::map::Team::Blue,

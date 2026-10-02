@@ -316,6 +316,9 @@ pub(super) fn sync_combat_bar_transforms_system(
     normalized_query: Query<&NormalizeModelScale>,
     mut bar_query: Query<(Entity, &CombatBarAnchor, &mut Transform), With<CombatBarRoot>>,
     mode: Res<PlayerVisualMode>,
+    mobile: Option<Res<crate::mobile_controls::MobileControls>>,
+    heroes: Query<(), With<crate::net::NetworkPlayerId>>,
+    mut visibility: Query<&mut Visibility, With<CombatBarRoot>>,
 ) {
     let Ok(camera_transform) = camera_query.single() else {
         return;
@@ -323,6 +326,14 @@ pub(super) fn sync_combat_bar_transforms_system(
     let camera_rotation = camera_transform.compute_transform().rotation;
 
     for (bar_entity, anchor, mut bar_transform) in bar_query.iter_mut() {
+        if let Ok(mut visible) = visibility.get_mut(bar_entity) {
+            *visible =
+                if mobile.as_ref().is_some_and(|m| m.enabled) && heroes.contains(anchor.target) {
+                    Visibility::Hidden
+                } else {
+                    Visibility::Inherited
+                };
+        }
         let Ok(target_transform) = global_query.get(anchor.target) else {
             commands
                 .entity(bar_entity)

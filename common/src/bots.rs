@@ -230,6 +230,11 @@ pub enum BotKind {
     /// Sandbox target: stands at `anchor`, never moves or attacks, and walks
     /// back to the anchor after every respawn.
     Dummy { anchor: [f32; 2] },
+    MovingDummy {
+        anchor: [f32; 2],
+        started: Instant,
+        respawning: bool,
+    },
 }
 
 struct Controller {
@@ -494,6 +499,58 @@ impl CombatHost<'_> {
             let Some(player) = self.world.players.get(&addr) else {
                 continue;
             };
+            if let BotKind::MovingDummy {
+                anchor,
+                started,
+                respawning,
+            } = controller.kind
+            {
+                if player.hero.hp > 0.0 {
+                    if respawning {
+                        let dummy = self.world.players.get_mut(&addr).unwrap();
+                        place_dummy(dummy, anchor, anchor, now);
+                        controller.kind = BotKind::MovingDummy {
+                            anchor,
+                            started: now,
+                            respawning: false,
+                        };
+                        self.bots.controllers.insert(addr, controller);
+                        continue;
+                    }
+                    let phase = now.saturating_duration_since(started).as_secs_f32() * 0.8;
+                    let goal = [
+                        anchor[0] + 2.5 * (phase.cos() - 1.0),
+                        anchor[1] + 2.5 * phase.sin(),
+                    ];
+                    let from = [player.hero.x, player.hero.z];
+                    let distance = (goal[0] - from[0]).hypot(goal[1] - from[1]);
+                    let control = player.hero.skills.movement(now);
+                    let step = (3.0 * dt * control).min(distance);
+                    if distance > 0.001 && step > 0.0 {
+                        let desired = [
+                            from[0] + (goal[0] - from[0]) / distance * step,
+                            from[1] + (goal[1] - from[1]) / distance * step,
+                        ];
+                        let clipped =
+                            shared::navigation::world_navigation().clip_movement(from, desired);
+                        let clipped = shared::navigation::clip_discs(from, clipped, &discs);
+                        let dummy = self.world.players.get_mut(&addr).unwrap();
+                        dummy.hero.x = clipped[0];
+                        dummy.hero.z = clipped[1];
+                        dummy.hero.yaw = hero_yaw_towards(goal[0] - from[0], goal[1] - from[1]);
+                        dummy.timers.last_movement_at = now;
+                    }
+                } else {
+                    // Respawn continues from the practice anchor, without lane AI.
+                    controller.kind = BotKind::MovingDummy {
+                        anchor,
+                        started: now,
+                        respawning: true,
+                    };
+                }
+                self.bots.controllers.insert(addr, controller);
+                continue;
+            }
             if let BotKind::Dummy { anchor } = controller.kind {
                 // Never thinks, moves or attacks. After a respawn at base it
                 // is put back on its anchor so target practice continues.

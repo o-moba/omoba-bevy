@@ -25,6 +25,7 @@ pub struct RoundLedger {
     /// of match duration or hit frequency; cleared for each defeated victim.
     contributors: BTreeMap<PlayerId, BTreeMap<PlayerId, Instant>>,
     last_event_id: u64,
+    kills: Vec<shared::live_score::KillNotice>,
     started: bool,
     frozen: bool,
     /// Ids already logged as missing a row; bounded by the players seen.
@@ -137,6 +138,7 @@ impl RoundLedger {
 
     pub fn live_scoreboard(&self) -> Option<shared::live_score::LiveScoreboard> {
         self.started.then(|| shared::live_score::LiveScoreboard {
+            kills: self.kills.clone(),
             players: self
                 .participants
                 .values()
@@ -145,6 +147,7 @@ impl RoundLedger {
                     shared::live_score::LiveScorePlayer {
                         player_id: p.player_id,
                         nickname: p.nickname.clone(),
+                        avatar: p.avatar.clone(),
                         team: p.team,
                         hero_class: p.hero_class,
                         kills: p.stats.kills,
@@ -220,6 +223,14 @@ impl RoundLedger {
                     stats.damage_to_heroes += amount;
                     if event.killed {
                         stats.kills = stats.kills.saturating_add(1);
+                        self.kills.push(shared::live_score::KillNotice {
+                            event_id: event.id,
+                            killer_id: attacker.0,
+                            victim_id: victim.0,
+                        });
+                        if self.kills.len() > 8 {
+                            self.kills.remove(0);
+                        }
                     }
                     self.contributors
                         .entry(victim)
@@ -875,5 +886,28 @@ mod tests {
             (p.kills, p.deaths, p.assists, p.earned_gold, p.level),
             (0, 0, 0, 0, 1)
         );
+    }
+    #[test]
+    fn public_kill_notices_are_bounded_and_deduplicated() {
+        let mut ledger = ledger();
+        let now = Instant::now();
+        for id in 1..=12 {
+            let event = hit(
+                id,
+                CombatEntityKind::Player,
+                1,
+                CombatEntityKind::Player,
+                3,
+                100.0,
+                true,
+            );
+            ledger.record(now, &event);
+            ledger.record(now, &event);
+        }
+        let board = ledger.live_scoreboard().unwrap();
+        assert_eq!(board.kills.len(), 8);
+        assert_eq!(board.kills.last().unwrap().event_id, 12);
+        assert_eq!(board.kills[0].killer_id, 1);
+        assert_eq!(board.kills[0].victim_id, 3);
     }
 }
