@@ -23,10 +23,28 @@ use std::time::Duration;
 /// Safe local fallback even when a developer supplies an invalid build-time endpoint.
 pub const FALLBACK_GAME_SERVER_ADDR: &str = "127.0.0.1:4000";
 
+/// Public beta lobby. Match workers are allocated by this endpoint.
+pub const BETA_GAME_SERVER_ADDR: &str = "77.246.105.57:4000";
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ServerPreset {
+    Beta,
+    Local,
+}
+
+impl ServerPreset {
+    pub(crate) fn address(self) -> &'static str {
+        match self {
+            Self::Beta => BETA_GAME_SERVER_ADDR,
+            Self::Local => FALLBACK_GAME_SERVER_ADDR,
+        }
+    }
+}
+
 /// Default UDP server address when env and saved preferences do not supply one.
 pub const DEFAULT_GAME_SERVER_ADDR: &str = match option_env!("OMOBA_DEFAULT_GAME_SERVER_ADDR") {
     Some(address) => address,
-    None => FALLBACK_GAME_SERVER_ADDR,
+    None => BETA_GAME_SERVER_ADDR,
 };
 
 /// Outbound keepalive / retry interval while waiting for the first qualifying snapshot (P1).
@@ -86,7 +104,7 @@ mod tests {
         assert_eq!(TRANSPORT_CONSECUTIVE_SEND_ERRORS, 6);
         assert_eq!(
             DEFAULT_GAME_SERVER_ADDR,
-            option_env!("OMOBA_DEFAULT_GAME_SERVER_ADDR").unwrap_or("127.0.0.1:4000")
+            option_env!("OMOBA_DEFAULT_GAME_SERVER_ADDR").unwrap_or(BETA_GAME_SERVER_ADDR)
         );
     }
 }

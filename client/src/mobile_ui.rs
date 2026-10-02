@@ -28,11 +28,6 @@ pub(crate) struct MobileUiLayout;
 impl Plugin for MobileUiPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<MobileControls>();
-        if !app.world().resource::<MobileControls>().enabled {
-            // Desktop keeps its own HUD and keyboard/IME ownership. Do not
-            // install phone-only overlays or address-entry systems there.
-            return;
-        }
         app.init_resource::<ServerEntry>()
             .add_ui_action::<PhoneAction>()
             .add_systems(Startup, setup_phone_ui)
@@ -87,8 +82,8 @@ impl ServerEntry {
             return;
         }
         self.open = true;
-        self.address = if session.server_addr() == "127.0.0.1:4000" {
-            String::new()
+        self.address = if session.server_addr().is_empty() {
+            crate::session_config::DEFAULT_GAME_SERVER_ADDR.to_owned()
         } else {
             session.server_addr().to_owned()
         };
@@ -104,6 +99,7 @@ enum PhoneAction {
     Help,
     Server,
     Connect,
+    Preset(crate::session_config::ServerPreset),
     Close,
     Key(char),
     Backspace,
@@ -146,36 +142,38 @@ fn phone_button(
         });
 }
 
-fn setup_phone_ui(mut commands: Commands) {
-    commands
-        .spawn((
-            Node {
-                position_type: PositionType::Absolute,
-                display: Display::None,
-                column_gap: Val::Px(6.0),
-                ..default()
-            },
-            // Above the front-end screens: on a phone this bar is the only way
-            // to settings and to the server address (there is no Escape key).
-            ZIndex(crate::ui::theme::SCREEN_Z + 10),
-            PhoneBar,
-            Name::new("PhoneMenuBar"),
-        ))
-        .with_children(|bar| {
-            phone_button(bar, "?", "LegacyPhoneHelpButton", PhoneAction::Help);
-            phone_button(
-                bar,
-                Localized::new("phone.bar.menu"),
-                "LegacyPhoneMenuButton",
-                PhoneAction::Menu,
-            );
-            phone_button(
-                bar,
-                Localized::new("phone.bar.server"),
-                "LegacyPhoneServerButton",
-                PhoneAction::Server,
-            );
-        });
+fn setup_phone_ui(mut commands: Commands, mobile: Res<MobileControls>) {
+    if mobile.enabled {
+        commands
+            .spawn((
+                Node {
+                    position_type: PositionType::Absolute,
+                    display: Display::None,
+                    column_gap: Val::Px(6.0),
+                    ..default()
+                },
+                // Above the front-end screens: on a phone this bar is the only way
+                // to settings and to the server address (there is no Escape key).
+                ZIndex(crate::ui::theme::SCREEN_Z + 10),
+                PhoneBar,
+                Name::new("PhoneMenuBar"),
+            ))
+            .with_children(|bar| {
+                phone_button(bar, "?", "LegacyPhoneHelpButton", PhoneAction::Help);
+                phone_button(
+                    bar,
+                    Localized::new("phone.bar.menu"),
+                    "LegacyPhoneMenuButton",
+                    PhoneAction::Menu,
+                );
+                phone_button(
+                    bar,
+                    Localized::new("phone.bar.server"),
+                    "LegacyPhoneServerButton",
+                    PhoneAction::Server,
+                );
+            });
+    }
     commands
         .spawn((
             Node {
@@ -201,6 +199,8 @@ fn setup_phone_ui(mut commands: Commands) {
                     Node {
                         width: Val::Px(640.0),
                         max_width: Val::Percent(90.0),
+                        max_height: Val::Percent(92.0),
+                        overflow: Overflow::scroll_y(),
                         padding: UiRect::all(Val::Px(14.0)),
                         flex_direction: FlexDirection::Column,
                         row_gap: Val::Px(8.0),
@@ -209,6 +209,7 @@ fn setup_phone_ui(mut commands: Commands) {
                     BackgroundColor(ui::PANEL),
                     BorderColor::all(ui::EDGE),
                     Name::new("ServerEntryPanel"),
+                    ScrollArea::phone_panel(),
                 ))
                 .with_children(|panel| {
                     panel.spawn((
@@ -221,6 +222,25 @@ fn setup_phone_ui(mut commands: Commands) {
                         ui::text(14.0),
                         TextColor(ui::MUTED),
                     ));
+                    panel
+                        .spawn(Node {
+                            column_gap: Val::Px(8.0),
+                            ..default()
+                        })
+                        .with_children(|row| {
+                            phone_button(
+                                row,
+                                Localized::new("phone.server.beta"),
+                                "ServerPresetBeta",
+                                PhoneAction::Preset(crate::session_config::ServerPreset::Beta),
+                            );
+                            phone_button(
+                                row,
+                                Localized::new("phone.server.local"),
+                                "ServerPresetLocal",
+                                PhoneAction::Preset(crate::session_config::ServerPreset::Local),
+                            );
+                        });
                     panel.spawn((
                         Node {
                             padding: UiRect::all(Val::Px(10.0)),
@@ -309,7 +329,7 @@ fn edit_address(address: &mut String, text: &str) {
 
 fn phone_menu_actions(
     mut activated: MessageReader<Activated<PhoneAction>>,
-    mobile: Res<MobileControls>,
+    _mobile: Res<MobileControls>,
     session: Res<ClientSession>,
     mut entry: ResMut<ServerEntry>,
     mut pause: ResMut<crate::pause_menu::PauseMenuState>,
@@ -317,9 +337,6 @@ fn phone_menu_actions(
     mut requests: MessageWriter<SessionUiCommand>,
 ) {
     let presses: Vec<PhoneAction> = activated.read().map(|a| a.action).collect();
-    if !mobile.enabled {
-        return;
-    }
     for action in presses {
         match action {
             PhoneAction::Menu => pause.open = !pause.open,
@@ -336,6 +353,10 @@ fn phone_menu_actions(
             PhoneAction::Backspace if entry.open => {
                 entry.address.pop();
             }
+            PhoneAction::Preset(preset) if entry.open => {
+                entry.address = preset.address().to_owned();
+                entry.error = None;
+            }
             PhoneAction::Connect if entry.open => {
                 if let Some(address) = crate::persistence::validate_game_server_addr(&entry.address)
                 {
@@ -351,14 +372,12 @@ fn phone_menu_actions(
     }
 }
 
-/// A non-keyboard back (a gamepad's East) closes the address entry before the
-/// pause menu under it reads the press. `Esc` still closes the entry through
-/// `address_keyboard`, unchanged.
+/// The frontmost editor consumes keyboard/gamepad back before the pause menu.
 pub(crate) fn close_server_entry_on_back(
     mut back: crate::ui::BackInput,
     mut entry: ResMut<ServerEntry>,
 ) {
-    if entry.open && back.just_pressed() && !back.pressed_on_keyboard() {
+    if entry.open && back.just_pressed() {
         entry.open = false;
         back.consume();
     }
@@ -369,10 +388,15 @@ pub(crate) fn address_keyboard(
     mut input: MessageReader<KeyboardInput>,
     mut ime: MessageReader<Ime>,
     mut windows: Query<&mut Window, With<PrimaryWindow>>,
+    mut owned_ime: Local<bool>,
 ) {
-    if let Ok(mut window) = windows.single_mut() {
+    // A closed shared server editor must not disable another desktop field's IME.
+    if (entry.open || *owned_ime)
+        && let Ok(mut window) = windows.single_mut()
+    {
         window.ime_enabled = entry.open && entry.keyboard;
     }
+    *owned_ime = entry.open;
     for event in ime.read() {
         if entry.open
             && let Ime::Commit { value, .. } = event
@@ -388,7 +412,7 @@ pub(crate) fn address_keyboard(
             Key::Backspace => {
                 entry.address.pop();
             }
-            Key::Escape => entry.open = false,
+            Key::Escape => {}
             _ => {
                 let text = event.text.as_deref().or_else(|| match &event.logical_key {
                     Key::Character(text) => Some(text.as_str()),
@@ -435,9 +459,6 @@ fn sync_phone_ui(
     let scale = metric::ui_scale(ui_scale.as_ref().map_or(1.0, |scale| scale.0));
     if mobile.enabled && !entry.initialized && !session.server_addr().is_empty() {
         entry.initialized = true;
-        if session.server_addr() == "127.0.0.1:4000" {
-            entry.open = true;
-        }
     }
     // Home now owns its Help/Settings/Server controls inside the header;
     // the picker owns Back. Keep the editor, hide the legacy floating bar.
@@ -482,7 +503,7 @@ fn sync_phone_ui(
         }
     }
     for mut node in &mut overlay {
-        node.display = if mobile.enabled && entry.open && mobile.landscape {
+        node.display = if entry.open && (!mobile.enabled || mobile.landscape) {
             Display::Flex
         } else {
             Display::None
@@ -826,6 +847,107 @@ mod tests {
     /// A gamepad back over the server entry closes the entry only; the pause
     /// menu under it stays open until the next back.
     #[test]
+    fn shared_editor_presets_do_not_connect_and_invalid_input_keeps_it_open() {
+        let mut app = App::new();
+        let mut mobile = MobileControls::default();
+        mobile.enabled = false;
+        app.insert_resource(mobile)
+            .init_resource::<ClientSession>()
+            .init_resource::<ServerEntry>()
+            .init_resource::<crate::pause_menu::PauseMenuState>()
+            .init_resource::<crate::help_overlay::HelpOverlayVisible>()
+            .add_message::<Activated<PhoneAction>>()
+            .add_message::<SessionUiCommand>()
+            .add_systems(Update, phone_menu_actions);
+        app.world_mut().resource_mut::<ServerEntry>().open = true;
+        for preset in [
+            crate::session_config::ServerPreset::Beta,
+            crate::session_config::ServerPreset::Local,
+        ] {
+            app.world_mut().write_message(Activated {
+                action: PhoneAction::Preset(preset),
+                source: Entity::PLACEHOLDER,
+            });
+            app.update();
+            assert_eq!(
+                app.world().resource::<ServerEntry>().address,
+                preset.address()
+            );
+            assert!(
+                app.world()
+                    .resource::<Messages<SessionUiCommand>>()
+                    .is_empty()
+            );
+        }
+        app.world_mut().resource_mut::<ServerEntry>().address = "bad address".into();
+        app.world_mut().write_message(Activated {
+            action: PhoneAction::Connect,
+            source: Entity::PLACEHOLDER,
+        });
+        app.update();
+        assert!(app.world().resource::<ServerEntry>().open);
+        assert!(app.world().resource::<ServerEntry>().error.is_some());
+        assert!(
+            app.world()
+                .resource::<Messages<SessionUiCommand>>()
+                .is_empty()
+        );
+        app.world_mut().resource_mut::<ServerEntry>().address = "other.example:4999".into();
+        app.world_mut().write_message(Activated {
+            action: PhoneAction::Connect,
+            source: Entity::PLACEHOLDER,
+        });
+        app.update();
+        let events: Vec<_> = app
+            .world_mut()
+            .resource_mut::<Messages<SessionUiCommand>>()
+            .drain()
+            .collect();
+        assert!(
+            matches!(events.as_slice(), [SessionUiCommand::ConnectTo(address)] if address == "other.example:4999")
+        );
+        assert!(!app.world().resource::<ServerEntry>().open);
+    }
+
+    #[test]
+    fn escape_closes_only_the_frontmost_server_editor() {
+        for pause_open in [false, true] {
+            let mut app = App::new();
+            app.init_resource::<ButtonInput<KeyCode>>()
+                .init_resource::<ServerEntry>()
+                .init_resource::<crate::pause_menu::PauseMenuState>()
+                .add_systems(
+                    Update,
+                    (
+                        close_server_entry_on_back,
+                        crate::pause_menu::toggle_pause_menu,
+                    )
+                        .chain(),
+                );
+            app.world_mut()
+                .resource_mut::<crate::pause_menu::PauseMenuState>()
+                .open = pause_open;
+            app.world_mut().resource_mut::<ServerEntry>().open = true;
+            app.world_mut()
+                .resource_mut::<ButtonInput<KeyCode>>()
+                .press(KeyCode::Escape);
+            app.update();
+            assert!(!app.world().resource::<ServerEntry>().open);
+            assert_eq!(
+                app.world()
+                    .resource::<crate::pause_menu::PauseMenuState>()
+                    .open,
+                pause_open
+            );
+            assert!(
+                !app.world()
+                    .resource::<ButtonInput<KeyCode>>()
+                    .just_pressed(KeyCode::Escape)
+            );
+        }
+    }
+
+    #[test]
     fn pad_back_closes_the_server_entry_before_the_pause_menu_under_it() {
         let mut app = App::new();
         app.init_resource::<ButtonInput<KeyCode>>()
@@ -974,7 +1096,7 @@ mod tests {
             })
             .collect();
         found.sort();
-        assert_eq!(found, ["HelpBody", "ShopCards"]);
+        assert_eq!(found, ["HelpBody", "ServerEntryPanel", "ShopCards"]);
         let mut roots = app.world_mut().query::<(&Name, &ModalRoot)>();
         assert!(roots.iter(app.world()).any(
             |(name, root)| name.as_str() == "ServerEntryRoot" && root.0 == ModalId::ServerEntry
@@ -982,11 +1104,12 @@ mod tests {
     }
 
     #[test]
-    fn desktop_does_not_install_phone_forms_or_change_keyboard_ime() {
+    fn closed_server_editor_does_not_change_another_fields_ime() {
         let mut app = App::new();
-        let mut controls = MobileControls::default();
-        controls.enabled = false;
-        app.insert_resource(controls).add_plugins(MobileUiPlugin);
+        app.init_resource::<ServerEntry>()
+            .add_message::<KeyboardInput>()
+            .add_message::<Ime>()
+            .add_systems(Update, address_keyboard);
         let window = app
             .world_mut()
             .spawn((
@@ -999,14 +1122,6 @@ mod tests {
             .id();
         app.update();
         assert!(app.world().get::<Window>(window).unwrap().ime_enabled);
-        assert!(!app.world().contains_resource::<ServerEntry>());
-        assert_eq!(
-            app.world_mut()
-                .query::<&PhoneBar>()
-                .iter(app.world())
-                .count(),
-            0
-        );
     }
 
     #[test]

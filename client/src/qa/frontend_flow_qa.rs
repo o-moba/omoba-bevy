@@ -251,7 +251,14 @@ fn drive_flow(
             }
             // Keep pressing until the screen actually changes: the UI focus
             // pass clears a synthetic press that no system read that frame.
-            press(&mut buttons, "HomePlay");
+            press(
+                &mut buttons,
+                if std::env::var("OMOBA_BETA_FLOW_QA").as_deref() == Ok("1") {
+                    "HomeBotPractice"
+                } else {
+                    "HomePlay"
+                },
+            );
             if current == AppScreen::HeroSelect {
                 qa.step = FlowStep::HeroSelect;
                 qa.frames = 0;
@@ -260,7 +267,12 @@ fn drive_flow(
         FlowStep::HeroSelect => {
             // The lock-in is what commits the join; once it lands, the session
             // owns the flow and this step is done.
-            if session.join_in_flight() {
+            if session.join_in_flight()
+                || matches!(
+                    current,
+                    AppScreen::Searching | AppScreen::Draft | AppScreen::Loading
+                )
+            {
                 qa.step = FlowStep::AwaitMatch;
                 qa.frames = 0;
                 return;
@@ -307,7 +319,16 @@ fn drive_flow(
                 .metadata()
                 .is_ok_and(|file| file.len() > 32)
             {
-                qa.step = if std::env::var("OMOBA_FRONTEND_QA_PEER").as_deref() == Ok("1") {
+                if std::env::var("OMOBA_BETA_FLOW_QA").as_deref() == Ok("1") {
+                    let _ = std::fs::write(qa.directory.join("remote-session.json"), serde_json::to_vec_pretty(&serde_json::json!({
+                        "endpoint":session.server_addr(), "server_epoch":snapshot.meta.server_epoch,
+                        "match_id":snapshot.meta.match_id, "protocol":snapshot.meta.protocol_version,
+                        "your_id":snapshot.your_id, "local_hero_entities":players.iter().count(), "state":format!("{:?}", snapshot.state),
+                    })).unwrap());
+                }
+                qa.step = if std::env::var("OMOBA_FRONTEND_QA_PEER").as_deref() == Ok("1")
+                    || std::env::var("OMOBA_BETA_FLOW_QA").as_deref() == Ok("1")
+                {
                     FlowStep::Done
                 } else {
                     FlowStep::Leave
@@ -337,7 +358,14 @@ fn drive_flow(
                 );
                 return;
             }
-            press(&mut buttons, "HomePlay");
+            press(
+                &mut buttons,
+                if std::env::var("OMOBA_BETA_FLOW_QA").as_deref() == Ok("1") {
+                    "HomeBotPractice"
+                } else {
+                    "HomePlay"
+                },
+            );
             if current == AppScreen::HeroSelect {
                 qa.step = FlowStep::SecondSelect;
                 qa.frames = 0;

@@ -220,9 +220,6 @@ fn spawn_home_utilities(
             "PhoneServerButton",
         ),
     ] {
-        if matches!(action, HomeAction::Server) && !mobile {
-            continue;
-        }
         let button = kit::controls::sized_icon_button(
             parent,
             icon,

@@ -31,6 +31,7 @@ pub struct ServerField {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ServerFieldAction {
     Edit,
+    Preset(crate::session_config::ServerPreset),
     Connect,
     Cancel,
 }
@@ -141,6 +142,11 @@ fn field_actions(
                 field.error = None;
                 field.text = session.server_addr().to_owned();
             }
+            ServerFieldAction::Preset(preset) => {
+                field.editing = true;
+                field.error = None;
+                field.text = preset.address().to_owned();
+            }
             ServerFieldAction::Connect => connect(&mut field, &mut commands),
             ServerFieldAction::Cancel => {
                 field.editing = false;
@@ -153,6 +159,49 @@ fn field_actions(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn presets_only_prefill_then_manual_edit_and_connect_uses_the_edited_address() {
+        let mut app = App::new();
+        app.init_resource::<ServerField>()
+            .init_resource::<crate::net::ClientSession>()
+            .add_message::<Activated<ServerFieldAction>>()
+            .add_message::<SessionUiCommand>()
+            .add_systems(Update, field_actions);
+        for preset in [
+            crate::session_config::ServerPreset::Beta,
+            crate::session_config::ServerPreset::Local,
+        ] {
+            app.world_mut().write_message(Activated {
+                action: ServerFieldAction::Preset(preset),
+                source: Entity::PLACEHOLDER,
+            });
+            app.update();
+            let field = app.world().resource::<ServerField>();
+            assert_eq!(field.text, preset.address());
+            assert!(field.editing);
+            assert!(
+                app.world()
+                    .resource::<Messages<SessionUiCommand>>()
+                    .is_empty()
+            );
+        }
+        app.world_mut().resource_mut::<ServerField>().text = "my-server.example:4999".into();
+        app.world_mut().write_message(Activated {
+            action: ServerFieldAction::Connect,
+            source: Entity::PLACEHOLDER,
+        });
+        app.update();
+        let events: Vec<_> = app
+            .world_mut()
+            .resource_mut::<Messages<SessionUiCommand>>()
+            .drain()
+            .collect();
+        assert!(
+            matches!(events.as_slice(), [SessionUiCommand::ConnectTo(address)] if address == "my-server.example:4999")
+        );
+        assert!(!app.world().resource::<ServerField>().editing);
+    }
 
     #[test]
     fn only_address_characters_are_typed_and_the_length_is_bounded() {

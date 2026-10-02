@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.34.0 — Public beta server selection
+
+- New installations connect to the hosted OMOBA beta lobby; existing custom server preferences and environment/build overrides are preserved.
+- Home exposes an editable server selector on desktop and mobile. OMOBA Beta/Localhost buttons prefill the address; Connect applies and saves it. Desktop party lobby offers the same presets.
+- Add a bounded, supervised Linux VPS deployment for two public match workers with dedicated PostgreSQL roles/state and a rollback runbook.
+
 All notable changes to this repository should be documented in this file.
 
 The canonical repository version lives in `Cargo.toml` under `[workspace.package].version` and follows SemVer.

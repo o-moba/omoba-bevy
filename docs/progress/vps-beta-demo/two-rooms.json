@@ -1,0 +1,116 @@
+{
+  "started_at": "2026-10-02T05:14:46.487Z",
+  "endpoint": "77.246.105.57:4000",
+  "protocol": 4,
+  "clients": [
+    {
+      "index": 0,
+      "stage": "running",
+      "active": true,
+      "port": 41000,
+      "world_snapshots": 703,
+      "bootstrap_snapshots": 25,
+      "join_attempts": 3,
+      "profile": "459d587d3b734812abab0fb4a997c2a4ea95e39874f94c6dbb2c3d30ae2fa2b9",
+      "allocation": {
+        "allocation_id": "a3aee4e8f5958c70114ad940caffb956",
+        "endpoint": "77.246.105.57:41000",
+        "preference": "bot_practice",
+        "team": "green",
+        "human_count": 1,
+        "bot_count": 9,
+        "rated": false,
+        "join_deadline_ms": 1790918269155
+      },
+      "career_error": null,
+      "match_service": null,
+      "game_state": {
+        "type": "running"
+      },
+      "prematch": null,
+      "packets": 7388,
+      "bytes": 8367565,
+      "sent_packets": 776,
+      "sent_bytes": 416350,
+      "transforms_sent": 636,
+      "input_hz_observed": 19.997782633894378,
+      "snapshots": 628,
+      "errors": [],
+      "snapshot_gap_p95_ms": 87.94362499999988
+    },
+    {
+      "index": 1,
+      "stage": "running",
+      "active": true,
+      "port": 41001,
+      "world_snapshots": 701,
+      "bootstrap_snapshots": 28,
+      "join_attempts": 4,
+      "profile": "47337f188ab14a04a537febb3862172d3b268a25181343358947d71206389c5f",
+      "allocation": {
+        "allocation_id": "0858c506e87585fb027c25491c0aff9d",
+        "endpoint": "77.246.105.57:41001",
+        "preference": "bot_practice",
+        "team": "green",
+        "human_count": 1,
+        "bot_count": 9,
+        "rated": false,
+        "join_deadline_ms": 1790918269160
+      },
+      "career_error": null,
+      "match_service": null,
+      "game_state": {
+        "type": "running"
+      },
+      "prematch": null,
+      "packets": 7231,
+      "bytes": 8193511,
+      "sent_packets": 772,
+      "sent_bytes": 414019,
+      "transforms_sent": 630,
+      "input_hz_observed": 19.99176070889035,
+      "snapshots": 622,
+      "errors": [],
+      "snapshot_gap_p95_ms": 90.67570799999885
+    },
+    {
+      "index": 2,
+      "stage": "queued",
+      "active": true,
+      "port": 4000,
+      "world_snapshots": 0,
+      "bootstrap_snapshots": 31,
+      "join_attempts": 0,
+      "profile": "16a638c526c24c48abab5982ed7953fbe5668fe0be3443d1934abf6d8b793aaf",
+      "career_error": null,
+      "match_service": {
+        "state": "waiting",
+        "preference": "bot_practice",
+        "humans": 1,
+        "needed": 1,
+        "elapsed_secs": 29,
+        "bot_fill_after_secs": null,
+        "capacity_wait": true
+      },
+      "game_state": {
+        "type": "lobby"
+      },
+      "prematch": null,
+      "packets": 161,
+      "bytes": 132498,
+      "sent_packets": 117,
+      "sent_bytes": 55312,
+      "transforms_sent": 0,
+      "input_hz_observed": 0,
+      "snapshots": 0,
+      "errors": [],
+      "snapshot_gap_p95_ms": null
+    }
+  ],
+  "status": "PASS",
+  "input_model": "signed_current_pose_transform",
+  "limits": "stationary synthetic inputs, two bot-heavy matches; not human combat or SLA",
+  "two_rooms_started_at": "2026-10-02T05:14:56.587Z",
+  "capacity_wait": true,
+  "finished_at": "2026-10-02T05:15:29.052Z"
+}

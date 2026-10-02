@@ -1,0 +1,13 @@
+{
+  "host": "vds-eternal (77.246.105.57)",
+  "during_two_running_bot_rooms": {
+    "lobby_rss_kib": 10752,
+    "worker_rss_kib": [13052, 13312],
+    "process_cpu_percent_since_start": [0.7, 3.3, 3.4],
+    "cgroup_memory_current_bytes": 10203136,
+    "host_mem_available_mib": 1064,
+    "qualification": "Single point observations, RSS includes shared pages and differs from cgroup charging; CPU ps averages since process start, not a peak or SLA."
+  },
+  "after_probe": {"service_restarts": 0, "studio_and_registry": "running; Registry healthy", "test_workers": "retired after synthetic players left; durable interrupted-result IDs recorded"},
+  "public_udp_proof": "two distinct ports41000/41001, third capacity_wait=true, approved Studio avatar and hammer on both players"
+}

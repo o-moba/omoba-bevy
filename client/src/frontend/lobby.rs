@@ -898,6 +898,37 @@ fn spawn_social(parent: &mut ChildSpawnerCommands, sig: &LobbySignature, phone: 
                                     theme::MUTED,
                                 ));
                                 if sig.field.editing {
+                                    server
+                                        .spawn(Node {
+                                            column_gap: Val::Px(6.0),
+                                            flex_wrap: FlexWrap::Wrap,
+                                            ..default()
+                                        })
+                                        .with_children(|row| {
+                                            for (preset, key, id) in [
+                                                (
+                                                    crate::session_config::ServerPreset::Beta,
+                                                    "phone.server.beta",
+                                                    "LobbyServerBeta",
+                                                ),
+                                                (
+                                                    crate::session_config::ServerPreset::Local,
+                                                    "phone.server.local",
+                                                    "LobbyServerLocal",
+                                                ),
+                                            ] {
+                                                button(
+                                                    row,
+                                                    tr(key),
+                                                    112.0,
+                                                    ButtonKind::Secondary,
+                                                    super::server_field::ServerFieldAction::Preset(
+                                                        preset,
+                                                    ),
+                                                    id,
+                                                );
+                                            }
+                                        });
                                     server.spawn(label(
                                         tr("lobby.server.hint"),
                                         11.0,

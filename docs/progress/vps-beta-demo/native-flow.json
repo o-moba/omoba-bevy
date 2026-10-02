@@ -1,0 +1,36 @@
+{
+  "coordinated_peer_run": false,
+  "in_match_capture": "07-in-match.png",
+  "join_committed_from_the_menus": false,
+  "local_hero_before_lock_in": false,
+  "manual_input_verified": false,
+  "method": "synthetic presses (SyntheticPress on UI-kit buttons) on the real buttons, live UDP server",
+  "prematch_captures": [
+    {
+      "exists": true,
+      "file": "04-team-draft.png"
+    },
+    {
+      "exists": true,
+      "file": "05-team-countdown.png"
+    },
+    {
+      "exists": true,
+      "file": "06-team-loading.png"
+    }
+  ],
+  "reason": null,
+  "rejoined_after_leave": false,
+  "scenario": "frontend-flow",
+  "screen_trace": [
+    "Home",
+    "HeroSelect",
+    "Searching",
+    "Draft",
+    "Loading",
+    "InMatch"
+  ],
+  "status": "passed",
+  "step": "Done",
+  "version": "0.34.0"
+}

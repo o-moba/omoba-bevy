@@ -94,7 +94,11 @@ impl Plugin for FrontendQaPlugin {
                 dimension("OMOBA_QA_WIDTH", 1280),
                 dimension("OMOBA_QA_HEIGHT", 720),
             ),
-            stage: 0,
+            stage: if std::env::var("OMOBA_SERVER_ENTRY_QA").as_deref() == Ok("1") {
+                10
+            } else {
+                0
+            },
             applied_stage: None,
             settled: 0,
             in_flight: false,
@@ -229,6 +233,7 @@ fn result_fixture_label(mut commands: Commands) {
 }
 
 fn drive(
+    session: Res<crate::net::ClientSession>,
     mut qa: ResMut<FrontendQa>,
     screen: Res<State<AppScreen>>,
     mut next: ResMut<NextState<AppScreen>>,
@@ -278,7 +283,11 @@ fn drive(
         crate::pause_menu::SettingsTab::Sound
     };
     if let Some(mut server) = server {
-        server.open = qa.stage == 10;
+        if qa.stage == 10 && !server.open {
+            server.open_for(&session);
+        } else if qa.stage != 10 {
+            server.open = false;
+        }
     }
     for (name, node, mut scroll) in &mut scrolls {
         if name.as_str() == "PauseMenuSettingsSection" {
@@ -390,9 +399,11 @@ fn observe(
         qa.stage += 1;
         qa.in_flight = false;
         qa.applied_stage = None;
-        // The hosted-server form and the phone help overlay are phone-only
-        // surfaces: desktop goes straight on to the party lobby.
-        if qa.stage == 10 && !mobile.enabled {
+        if std::env::var("OMOBA_SERVER_ENTRY_QA").as_deref() == Ok("1") {
+            qa.stage = VIEWS.len();
+        } else if qa.stage == 11 && !mobile.enabled {
+            // The shared server editor is available on desktop too; phone help
+            // transitions still use phone-specific controls.
             qa.stage = VIEWS.len() - 1;
         }
         if qa.stage == VIEWS.len() {
@@ -531,6 +542,8 @@ fn observe(
             "BackButton",
         ],
         10 => &[
+            "ServerPresetBeta",
+            "ServerPresetLocal",
             "ServerConnectButton",
             "ServerCloseButton",
             "ServerKeyboardButton",

@@ -1,0 +1,45 @@
+[Unit]
+Description=OMOBA beta lobby and bounded match workers
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+StartLimitIntervalSec=120
+StartLimitBurst=6
+
+[Service]
+Type=simple
+User=omoba
+Group=omoba
+WorkingDirectory=/var/lib/omoba
+EnvironmentFile=/opt/omoba/database.env
+Environment=SERVER_ADDR=0.0.0.0:4000
+Environment=OMOBA_SERVER_ROLE=lobby
+Environment=OMOBA_MATCH_MODE=release
+Environment=OMOBA_TEAM_SIZE=5
+Environment=OMOBA_MATCH_ROOT=/var/lib/omoba/matches
+Environment=OMOBA_CAREER_OUTBOX=/var/lib/omoba/lobby-outbox
+Environment=OMOBA_MATCH_BIND_IP=0.0.0.0
+Environment=OMOBA_MATCH_PUBLIC_HOST=77.246.105.57
+Environment=OMOBA_MATCH_FIRST_PORT=41000
+Environment=OMOBA_MATCH_CAPACITY=2
+Environment=OMOBA_MATCH_EXECUTABLE=/opt/omoba/current/server
+Environment=OMOBA_REGISTRY_URL=https://registry.ekza.io
+ExecStart=/opt/omoba/current/server
+Restart=on-failure
+RestartSec=5
+KillMode=control-group
+TimeoutStopSec=20
+MemoryHigh=600M
+MemoryMax=700M
+CPUQuota=150%
+TasksMax=128
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/omoba
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+
+[Install]
+WantedBy=multi-user.target

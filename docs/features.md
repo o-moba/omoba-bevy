@@ -931,3 +931,9 @@ wards and true invisibility are outside this iteration; 2D presentation is pause
 ### Visible build identification
 
 Home shows a compact, noninteractive build label at the lower-left on desktop/mobile: `v0.28.1 (14) · 52bf02d · Debug`, for example. Version and Debug/Release come from the executable; Xcode build number and source commit come from its bundled `assets/legal/XCODE-BUILD.json`. `*` marks a build with modified tracked sources. A desktop/unpackaged build or unavailable/mismatched receipt shows version and mode only. The label is available without connecting to a server. Existing installed builds need an app update to gain the label.
+
+## Hosted beta and server selection (0.34)
+
+Fresh clients default to `77.246.105.57:4000`. Home's server-link button opens the address editor on desktop and mobile. **OMOBA Beta** and **Localhost** prefill an editable host:port; **Connect** validates, reconnects and saves. Existing manual selections retain priority, as do explicit runtime/build overrides. Desktop party lobby also provides prefill buttons. Match-worker handoff remains temporary and never replaces the saved lobby address.
+
+The beta lobby on `vds-eternal` supervises at most two independent matches on UDP41000–41001, with PostgreSQL-backed game profiles and durable match receipts. Studio/Registry and Ekza Space remain separate services. See [VPS operations](../ops/vps/README.md); physical mobile performance and capacity beyond two rooms are not certified by this rollout.

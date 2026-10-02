@@ -2,10 +2,12 @@
   "phone.bar.menu": "菜单",
   "phone.bar.server": "服务器",
   "phone.server.title": "加入主机的对局",
-  "phone.server.hint": "输入主机分享的地址，例如 192.168.1.20:4000",
+  "phone.server.hint": "选择服务器或编辑主机:端口，然后连接。",
   "phone.server.delete": "删除",
   "phone.server.connect": "连接",
   "phone.server.close": "关闭",
   "phone.server.keyboard": "键盘",
-  "phone.server.invalid": "请输入主机地址和端口，例如 192.168.1.20:4000"
+  "phone.server.invalid": "请输入主机地址和端口，例如 192.168.1.20:4000",
+  "phone.server.beta": "OMOBA 测试服",
+  "phone.server.local": "本机"
 }
