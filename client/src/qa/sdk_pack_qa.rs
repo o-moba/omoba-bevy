@@ -43,6 +43,7 @@ struct Qa {
     start: Option<Vec3>,
     preview_pose: Option<(Entity, Vec<Quat>, f32)>,
     remote_pose: Option<(Entity, Vec3, Vec<Quat>, f32)>,
+    collection_step: u8,
 }
 #[derive(Component)]
 struct Shot;
@@ -80,6 +81,7 @@ impl Plugin for SdkPackQaPlugin {
             start: None,
             preview_pose: None,
             remote_pose: None,
+            collection_step: 0,
         })
         .insert_resource(ScreenDriverPaused(true))
         .insert_resource(bevy::winit::WinitSettings::continuous())
@@ -96,6 +98,7 @@ fn prepare(
     mut windows: Query<&mut Window, With<PrimaryWindow>>,
     mut buttons: super::TestIdPresses,
     preview: Res<AvatarPreview>,
+    selection: Res<TeamSelection>,
     help: Res<crate::help_overlay::HelpOverlayVisible>,
     mut camera: ResMut<crate::camera::CameraState>,
     mut settings: ResMut<crate::camera::CameraSettings>,
@@ -117,7 +120,31 @@ fn prepare(
             qa.stage = 1;
             qa.frames = 0;
         } else if qa.frames.is_multiple_of(15) {
-            buttons.press(&format!("CollectionTile-{}", qa.items[qa.index].slug));
+            // Exercise the ordinary equipment buttons, then the visible Studio
+            // filter; its avatar tile is below the included roster in All.
+            let weapon = std::env::var("OMOBA_SDK_PACK_QA_WEAPON").ok();
+            match (qa.collection_step, weapon.as_deref()) {
+                (0, Some(_)) => {
+                    if buttons.press("CollectionWeapons") {
+                        qa.collection_step = 1;
+                    }
+                }
+                (1, Some(id)) => {
+                    if selection.handheld == shared::handheld::HandheldSelection::Item(id.into()) {
+                        qa.collection_step = 2;
+                    } else {
+                        buttons.press(&format!("Handheld-{id}"));
+                    }
+                }
+                (0 | 2, _) => {
+                    if buttons.press("CollectionStudio") {
+                        qa.collection_step = 3;
+                    }
+                }
+                _ => {
+                    buttons.press(&format!("CollectionTile-{}", qa.items[qa.index].slug));
+                }
+            }
         }
     }
     if qa.stage >= 10 {
@@ -185,7 +212,9 @@ fn observe(
     }
     if qa.frames.is_multiple_of(120) {
         let progress = serde_json::json!({"stage":qa.stage,"index":qa.index,"preview":preview.slug,
-            "clips":preview.clips.iter().map(|c|&c.name).collect::<Vec<_>>()});
+            "clips":preview.clips.iter().map(|c|&c.name).collect::<Vec<_>>(),
+            "player_id":snapshot.your_id,"animation":animations.0.get(&snapshot.your_id),
+            "distance":actors.single().ok().and_then(|(_,pose,_,_,_)|qa.start.map(|start|pose.translation.distance(start)))});
         let _ = std::fs::write(qa.directory.join("progress.json"), progress.to_string());
     }
     if qa.started.elapsed() > Duration::from_secs(240) {
@@ -208,7 +237,7 @@ fn observe(
     };
     // The faster client keeps moving through its readback/overlap period so
     // the other rendered client can still measure replicated skeletal motion.
-    if matches!(qa.stage, 14 | 15) && qa.frames.is_multiple_of(60) {
+    if matches!(qa.stage, 12 | 14 | 15) && qa.frames.is_multiple_of(60) {
         if let Ok((entity, pose, _, _, _)) = actors.single() {
             commands
                 .entity(entity)
@@ -306,7 +335,7 @@ fn observe(
                 qa.index + 1,
                 item.name.to_lowercase().replace(' ', "-")
             );
-            let frame = serde_json::json!({"file":file,"name":item.name,"slug":item.slug,"model":expected,"clips":clips,"store_ready":true,"scene_loaded":true,"preview_bound":true,"animation_advance_secs":advance,"bone_rotation_delta":rotation_delta});
+            let frame = serde_json::json!({"file":file,"name":item.name,"slug":item.slug,"model":expected,"clips":clips,"store_ready":true,"scene_loaded":true,"preview_bound":true,"animation_advance_secs":advance,"bone_rotation_delta":rotation_delta,"equipment_selected_through_ui":qa.collection_step==3,"handheld":selection.handheld});
             capture(&mut commands, &mut qa, &file, frame);
             qa.stage = 2;
         }
@@ -523,11 +552,20 @@ fn observe(
             let public_studio =
                 std::env::var("OMOBA_SDK_PACK_QA_LIVE_REGISTRY").is_ok_and(|value| value == "1");
             let report = serde_json::json!({"pass":true,"local_developer_catalog":!public_studio,"public_studio":public_studio,"locale":"en","pixels":[1280,720],"captures":qa.captures});
-            std::fs::write(
-                qa.directory.join("qa-summary.json"),
-                serde_json::to_vec_pretty(&report).unwrap(),
-            )
-            .expect("save evidence");
+            let summary = qa.directory.join("qa-summary.json");
+            if !summary.exists() {
+                std::fs::write(&summary, serde_json::to_vec_pretty(&report).unwrap())
+                    .expect("save evidence");
+            }
+            // Keep the real actor alive and moving until the independent peer
+            // has finished its own rendering assertions. Fixed frame overlap
+            // races network downloads and slow rendering on the second client.
+            if qa.stage == 15
+                && std::env::var_os("OMOBA_SDK_PACK_QA_HOLD_FOR_PEER").is_some()
+                && !qa.directory.join("peer-complete").exists()
+            {
+                return;
+            }
             qa.stage = 255;
             exit.write(AppExit::Success);
         }

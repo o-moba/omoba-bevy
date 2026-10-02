@@ -69,7 +69,8 @@ class Peer:
             self.sock.close()
 
 
-def verify_native(directory, entries, match_index, previews, weapon='forge-sword', remote_weapon=None):
+def verify_native(directory, entries, match_index, previews, weapon='forge-sword', remote_weapon=None,
+                  require_equipment_ui=False):
     summary = json.loads((directory / 'qa-summary.json').read_text())
     frames = summary['captures']
     assert summary['pass'] and len(frames) == previews + 1 + int(remote_weapon is not None)
@@ -77,6 +78,9 @@ def verify_native(directory, entries, match_index, previews, weapon='forge-sword
     if previews:
         assert {f['slug'] for f in preview_frames} == {e['slug'] for e in entries}
         for frame in preview_frames:
+            if require_equipment_ui:
+                assert frame.get('equipment_selected_through_ui') is True
+                assert frame.get('handheld') == {'mode': 'item', 'id': weapon}
             assert frame['store_ready'] and frame['scene_loaded'] and frame['preview_bound']
             assert frame['animation_advance_secs'] >= .15 and frame['bone_rotation_delta'] >= .0001
             assert frame['model'] == f"ekza://avatars/{frame['slug']}.glb"
