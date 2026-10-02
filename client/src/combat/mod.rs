@@ -80,7 +80,9 @@ impl Plugin for CombatPlugin {
         .init_resource::<tactical_hud::TacticalHud>()
         .add_systems(
             Update,
-            tactical_hud::update_tactical_hud.after(crate::net::ClientNetPipeline::ApplySnapshot),
+            tactical_hud::update_tactical_hud
+                .after(crate::net::ClientNetPipeline::ApplySnapshot)
+                .after(crate::mobile_controls::MobileControlsSet::Input),
         )
         .add_systems(
             PostUpdate,

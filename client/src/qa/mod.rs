@@ -16,6 +16,7 @@ pub(crate) mod animation_qa;
 mod audio_qa;
 mod beta_ui_qa;
 mod career_visual_qa;
+mod combat_polish_qa;
 mod combat_qa;
 mod demo_qa;
 mod forest_pickup_qa;
@@ -56,6 +57,7 @@ impl PluginGroup for QaPlugins {
             .add(career_visual_qa::CareerVisualQaPlugin)
             .add(map_qa::MapQaPlugin)
             .add(combat_qa::CombatQaPlugin)
+            .add(combat_polish_qa::CombatPolishQaPlugin)
             .add(standard_kits_qa::StandardKitsQaPlugin)
             .add(roster_qa::RosterQaPlugin)
             .add(forest_pickup_qa::ForestPickupQaPlugin)

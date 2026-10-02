@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.34.1] - 2026-10-02
+
+- Keep overhead HP and mana in fixed rows so long nicknames cannot squeeze them out.
+- Show all surviving towers on the minimap. Rockets carry temporary team sight and have a minimap marker, ground light and brighter exhaust.
+- Make mobile skill + badges directly tappable with 44-point touch targets; capture their gestures before world navigation and preserve cancellation.
+- Keep basic attacks quiet when no target is available and remove the recurring attack instruction panel. Skill feedback and aiming visuals remain.
+- Anchor kill notifications below the top-right HUD inside the safe area.
+- Fade the local 3D avatar and handheld while the server reports concealment; restore original materials on reveal without changing shared assets or other heroes.
+
 ## 0.34.0 — Public beta server selection
 
 - New installations connect to the hosted OMOBA beta lobby; existing custom server preferences and environment/build overrides are preserved.

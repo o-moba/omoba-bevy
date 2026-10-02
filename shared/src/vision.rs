@@ -5,6 +5,8 @@ pub const HERO_SIGHT_RADIUS: f32 = 32.0;
 pub const MINION_SIGHT_RADIUS: f32 = 22.0;
 pub const TOWER_SIGHT_RADIUS: f32 = 28.0;
 pub const BASE_SIGHT_RADIUS: f32 = 34.0;
+/// Temporary team sight carried by a flying impact rocket.
+pub const ROCKET_SIGHT_RADIUS: f32 = 8.0;
 pub const HOSTILE_REVEAL_SECS: f32 = 2.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]

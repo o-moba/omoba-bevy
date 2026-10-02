@@ -48,6 +48,7 @@ pub fn sources(team: Team, world: &GameWorld) -> Vec<VisionSource> {
                 },
             }),
     );
+    result.extend(world.skill_runtime.rocket_sight(team));
     result.sort_by(|a, b| {
         a.position[0]
             .total_cmp(&b.position[0])
@@ -189,10 +190,9 @@ pub fn filter_snapshot(
                     .find(|live| live.hero.identity.id == p.id)
                     .is_some_and(|live| player_visible(&sight, live, now)))
     });
-    structures.retain(|p| {
-        viewer.joined
-            && (p.team == viewer.hero.identity.team || point_visible(&sight, [p.x, p.z], false))
-    });
+    // Towers are public map landmarks, including their destruction state. Combat
+    // still requires target_visible; public map knowledge does not grant sight.
+    structures.retain(|_| viewer.joined);
     minions.retain(|p| {
         viewer.joined
             && (p.team == viewer.hero.identity.team

@@ -49,6 +49,7 @@ impl Plugin for MinimapPlugin {
                 PostUpdate,
                 (
                     update_minimap_icons_system,
+                    update_rocket_markers,
                     sync_minimap_visibility_for_session,
                     update_camera_footprint.after(bevy::camera::CameraUpdateSystems),
                 )
@@ -85,6 +86,7 @@ struct MinimapUiState {
     structure_icons: HashMap<Entity, Entity>,
     minion_icons: HashMap<Entity, Entity>,
     camp_icons: [Option<Entity>; 6],
+    rockets: HashMap<u64, [Entity; 3]>,
 }
 #[derive(Component)]
 struct MinimapRoot;
@@ -870,6 +872,88 @@ fn update_minimap_icons_system(
         }
     }
 }
+/// Uses only effects received after server visibility filtering. The short tail
+/// indicates current direction; it never predicts the impact point or victim.
+fn update_rocket_markers(
+    mut commands: Commands,
+    mut state: ResMut<MinimapUiState>,
+    layout: Res<MapLayout>,
+    game: Option<Res<crate::net::GameStateSnapshot>>,
+) {
+    let Some(container) = state.container else {
+        return;
+    };
+    let mut seen = HashSet::new();
+    if let Some(game) = game.filter(|game| matches!(game.state, crate::net::GameState::Running)) {
+        for effect in game
+            .skill_effects
+            .iter()
+            .take(shared::loadout::MAX_ACTIVE_EFFECTS)
+        {
+            if effect.kind != shared::loadout::EffectVisualKind::Rocket
+                || !effect
+                    .position
+                    .into_iter()
+                    .chain(effect.end)
+                    .all(f32::is_finite)
+                || !effect.remaining_secs.is_finite()
+                || effect.remaining_secs <= 0.0
+            {
+                continue;
+            }
+            seen.insert(effect.id);
+            let ids = *state.rockets.entry(effect.id).or_insert_with(|| {
+                ["MinimapRocketGlow", "MinimapRocketTail", "MinimapRocket"].map(|name| {
+                    commands
+                        .spawn((
+                            Node::default(),
+                            ZIndex(25),
+                            ChildOf(container),
+                            Name::new(name),
+                            Pickable::IGNORE,
+                        ))
+                        .id()
+                })
+            });
+            let color = team_color(effect.owner_team.into());
+            let point = map_point(
+                *layout,
+                Vec3::new(effect.position[0], 0.0, effect.position[1]),
+            );
+            let forward = map_point(*layout, Vec3::new(effect.end[0], 0.0, effect.end[1]));
+            let direction = (forward - point).normalize_or_zero();
+            let halo =
+                2.0 * shared::vision::ROCKET_SIGHT_RADIUS / layout.size().x * MINIMAP_INNER_SIZE;
+            commands.entity(ids[0]).insert((
+                marker_node(point, halo.max(14.0)),
+                BackgroundColor(color.with_alpha(0.28)),
+            ));
+            let tail =
+                (point - direction * 12.0).clamp(Vec2::ZERO, Vec2::splat(MINIMAP_INNER_SIZE));
+            let (node, transform) = line_node(tail, point, 3.0);
+            commands
+                .entity(ids[1])
+                .insert((node, transform, BackgroundColor(color)));
+            let mut head = marker_node(point, 8.0);
+            head.border = UiRect::all(Val::Px(2.0));
+            commands.entity(ids[2]).insert((
+                head,
+                BackgroundColor(Color::WHITE),
+                BorderColor::all(color),
+            ));
+        }
+    }
+    state.rockets.retain(|id, entities| {
+        if seen.contains(id) {
+            return true;
+        }
+        for entity in entities {
+            commands.entity(*entity).despawn();
+        }
+        false
+    });
+}
+
 fn hero_marker_visible(
     local_team: Option<Team>,
     team: Team,
@@ -1055,6 +1139,54 @@ pub(crate) fn clip_map_segment(a: Vec2, b: Vec2) -> Option<(Vec2, Vec2)> {
 mod tests {
     use super::*;
     use crate::input_context::GameplayInputContext;
+
+    #[test]
+    fn rocket_marker_tracks_received_position_and_disappears_with_the_effect() {
+        let mut app = App::new();
+        app.init_resource::<MinimapUiState>()
+            .init_resource::<MapLayout>()
+            .insert_resource(crate::net::GameStateSnapshot {
+                state: crate::net::GameState::Running,
+                ..default()
+            })
+            .add_systems(Update, update_rocket_markers);
+        let container = app.world_mut().spawn(Node::default()).id();
+        app.world_mut().resource_mut::<MinimapUiState>().container = Some(container);
+        let effect = shared::loadout::SkillEffectState {
+            id: 7,
+            owner_id: 0,
+            owner_team: shared::map::Team::Blue,
+            skill: shared::loadout::SkillId::WildRocket,
+            kind: shared::loadout::EffectVisualKind::Rocket,
+            position: [0.0, 0.0],
+            end: [1.0, 0.0],
+            radius: 2.5,
+            remaining_secs: 2.0,
+            armed: true,
+            consumed_segments: 0,
+        };
+        app.world_mut()
+            .resource_mut::<crate::net::GameStateSnapshot>()
+            .skill_effects
+            .push(effect);
+        app.update();
+        let ids = app.world().resource::<MinimapUiState>().rockets[&7];
+        let initial = app.world().get::<Node>(ids[2]).unwrap().top;
+        app.world_mut()
+            .resource_mut::<crate::net::GameStateSnapshot>()
+            .skill_effects[0]
+            .position = [20.0, 0.0];
+        app.update();
+        assert_eq!(app.world().resource::<MinimapUiState>().rockets[&7], ids);
+        assert_ne!(app.world().get::<Node>(ids[2]).unwrap().top, initial);
+        app.world_mut()
+            .resource_mut::<crate::net::GameStateSnapshot>()
+            .skill_effects
+            .clear();
+        app.update();
+        assert!(app.world().resource::<MinimapUiState>().rockets.is_empty());
+        assert!(ids.iter().all(|id| app.world().get_entity(*id).is_err()));
+    }
 
     #[test]
     fn desktop_map_keeps_click_shield_on_its_scaled_upper_left_frame() {

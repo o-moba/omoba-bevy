@@ -1117,6 +1117,55 @@ fn clip_display(name: &str) -> String {
         .map_or_else(|| AvatarPreview::clip_label(name), str::to_owned)
 }
 
+/// Identical cosmetic choices in the collection and the authoritative draft.
+pub(super) fn handheld_choices() -> Vec<(shared::handheld::HandheldSelection, String, String)> {
+    use shared::handheld::HandheldSelection as H;
+    let mut result = vec![
+        (
+            H::ClassDefault,
+            tr("collection.weapon_default").into(),
+            "Handheld-default".into(), // i18n-allow: stable test id, never displayed
+        ),
+        (
+            H::Unequipped,
+            tr("collection.weapon_empty").into(),
+            "Handheld-empty".into(), // i18n-allow: stable test id, never displayed
+        ),
+    ];
+    result.extend(omoba_passport::weapons::catalog().items.iter().map(|w| {
+        (
+            H::Item(w.id.clone()),
+            w.name.clone(),
+            format!("Handheld-{}", w.id), // i18n-allow: stable test id, never displayed
+        )
+    }));
+    result.extend(
+        omoba_passport::weapon_store::snapshot()
+            .2
+            .into_iter()
+            .map(|w| (H::Item(w.id.clone()), w.name, format!("Handheld-{}", w.id))), // i18n-allow: stable test id, never displayed
+    );
+    result
+}
+
+/// Selection feedback shares the same installer state used by the renderer.
+pub(super) fn handheld_status(
+    choice: &shared::handheld::HandheldSelection,
+) -> Option<&'static str> {
+    use omoba_passport::store::ModelState;
+    let shared::handheld::HandheldSelection::Item(id) = choice else {
+        return None;
+    };
+    if !omoba_passport::weapon_store::eligible(id) {
+        return Some(tr("collection.weapon_not_available"));
+    }
+    Some(tr(match omoba_passport::weapon_store::model_state(id) {
+        ModelState::Pending => "collection.weapon_download_pending",
+        ModelState::Unavailable => "collection.weapon_download_failed",
+        ModelState::Ready => "collection.weapon_download_ready",
+    }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1656,53 +1705,4 @@ mod tests {
         );
         assert_eq!(clip_display("walk_cycle"), "Walk Cycle");
     }
-}
-
-/// Identical cosmetic choices in the collection and the authoritative draft.
-pub(super) fn handheld_choices() -> Vec<(shared::handheld::HandheldSelection, String, String)> {
-    use shared::handheld::HandheldSelection as H;
-    let mut result = vec![
-        (
-            H::ClassDefault,
-            tr("collection.weapon_default").into(),
-            "Handheld-default".into(),
-        ),
-        (
-            H::Unequipped,
-            tr("collection.weapon_empty").into(),
-            "Handheld-empty".into(),
-        ),
-    ];
-    result.extend(omoba_passport::weapons::catalog().items.iter().map(|w| {
-        (
-            H::Item(w.id.clone()),
-            w.name.clone(),
-            format!("Handheld-{}", w.id),
-        )
-    }));
-    result.extend(
-        omoba_passport::weapon_store::snapshot()
-            .2
-            .into_iter()
-            .map(|w| (H::Item(w.id.clone()), w.name, format!("Handheld-{}", w.id))),
-    );
-    result
-}
-
-/// Selection feedback shares the same installer state used by the renderer.
-pub(super) fn handheld_status(
-    choice: &shared::handheld::HandheldSelection,
-) -> Option<&'static str> {
-    use omoba_passport::store::ModelState;
-    let shared::handheld::HandheldSelection::Item(id) = choice else {
-        return None;
-    };
-    if !omoba_passport::weapon_store::eligible(id) {
-        return Some(tr("collection.weapon_not_available"));
-    }
-    Some(tr(match omoba_passport::weapon_store::model_state(id) {
-        ModelState::Pending => "collection.weapon_download_pending",
-        ModelState::Unavailable => "collection.weapon_download_failed",
-        ModelState::Ready => "collection.weapon_download_ready",
-    }))
 }

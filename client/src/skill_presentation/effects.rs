@@ -85,6 +85,7 @@ enum Part {
     Satellite(u8),
     Streak(u8),
     Model,
+    GroundGlow,
 }
 struct Instance {
     root: Entity,
@@ -225,6 +226,21 @@ fn spawn_instance(
                 );
             }
         }
+    }
+    if style == EffectStyle::Rocket {
+        part(Part::GroundGlow, &geometry.disc, &fill);
+        commands.spawn((
+            PointLight {
+                color: Color::srgb(1.0, 0.48, 0.12),
+                intensity: 65_000.0,
+                range: 8.0,
+                shadows_enabled: false,
+                ..default()
+            },
+            Transform::from_xyz(0.0, 0.6, -0.6),
+            ChildOf(root),
+            Name::new("RocketFlightLight"),
+        ));
     }
     let model = match style {
         EffectStyle::Rocket => Some(geometry.rocket.clone()),
@@ -524,6 +540,17 @@ fn sync(
             let mut visibility = Visibility::Inherited;
             let mut t = Transform::default();
             match (style, role) {
+                (EffectStyle::Rocket, Part::GroundGlow) => {
+                    // Keep the glow above the existing ground telegraph plane.
+                    t.translation.y = -0.65;
+                    t.rotation = ground_ring;
+                    t.scale = Vec3::splat(2.6);
+                }
+                (EffectStyle::Rocket, Part::Streak(i)) => {
+                    t.translation.z = -1.1 - i as f32 * 0.85;
+                    let width = 0.3 - i as f32 * 0.06;
+                    t.scale = Vec3::new(width, width, 1.6);
+                }
                 (_, Part::Model) => {
                     visibility = if model_ready {
                         Visibility::Inherited

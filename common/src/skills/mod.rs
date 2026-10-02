@@ -374,6 +374,22 @@ pub struct SkillWorld {
     seen_deaths: BTreeSet<TargetKey>,
 }
 impl SkillWorld {
+    pub(crate) fn rocket_sight(
+        &self,
+        team: Team,
+    ) -> impl Iterator<Item = shared::vision::VisionSource> + '_ {
+        self.effects
+            .values()
+            .filter(move |effect| {
+                effect.team == team
+                    && matches!(skill(effect.skill).effect, SkillEffect::ImpactRocket { .. })
+            })
+            .map(|effect| shared::vision::VisionSource {
+                position: effect.pos,
+                radius: shared::vision::ROCKET_SIGHT_RADIUS,
+            })
+    }
+
     fn id(&mut self) -> u64 {
         self.next_id = self.next_id.saturating_add(1);
         self.next_id

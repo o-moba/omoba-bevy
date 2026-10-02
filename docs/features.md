@@ -1,5 +1,9 @@
 # Feature Inventory
 
+## iPad combat polish (0.34.1)
+
+Skill + badges directly upgrade eligible abilities and own a 44-point touch target, preventing world taps beneath them. Basic attacks no longer show routine no-target or aiming instruction panels. The timed kill feed sits below the top-right HUD. HP and mana retain fixed heights below the nickname. All surviving towers are public map landmarks, while attack visibility rules remain unchanged. A flying impact rocket carries eight metres of temporary team sight and a minimap marker, ground light and brighter exhaust. Server-confirmed concealment makes the local 3D avatar and handheld translucent; reveal restores their original materials. Shared avatar assets and opponents remain unchanged. Verification status: [session note](progress/2026-10-02-ipad-combat-polish.md).
+
 ## Hosted cosmetic equipment (0.33.0)
 
 Avatars → Weapons and the pre-match draft expose class-default, empty hands, shipped props and approved free Studio weapons. The typed SDK downloads each exact approved rendition into the writable Ekza cache, verifies its hash/size and static attachment profile, and mounts it through the same asset source on desktop/mobile. Normal joins and draft choices carry the cosmetic item ID; server-owned catalogue reads authorize it independently. Other clients install the replicated item on demand. Equipment never changes combat statistics. See [the lifecycle implementation](progress/2026-10-01-asset-lifecycle.md) for acceptance evidence and limits.

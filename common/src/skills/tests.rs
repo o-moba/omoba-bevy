@@ -765,3 +765,97 @@ fn accepted_action_facing_is_stable_across_movement_and_rejected_casts() {
         );
     }
 }
+
+#[test]
+fn rocket_carries_temporary_team_sight_at_its_real_position_until_impact() {
+    let (mut w, now, _) = fixture(HeroClass::Wildspark);
+    w.players.get_mut(&addr(2)).unwrap().hero.x = 100.0;
+    cast(&mut w, addr(1), 3, [256.0, 0.0], 1, now);
+    advance(&mut w, now, 1.0);
+    let at = now + duration(1.0);
+    let rocket = effects(&w, at)
+        .into_iter()
+        .find(|e| e.kind == EffectVisualKind::Rocket)
+        .unwrap();
+    assert!(rocket.position[0] > shared::vision::HERO_SIGHT_RADIUS);
+    let green = crate::vision::sources(Team::Green, &w);
+    let light = green
+        .iter()
+        .find(|s| s.radius == shared::vision::ROCKET_SIGHT_RADIUS)
+        .unwrap();
+    assert_eq!(light.position, rocket.position);
+    assert!(shared::vision::point_visible(
+        &green,
+        [rocket.position[0] + 3.0, rocket.position[1]],
+        false
+    ));
+    assert!(
+        !crate::vision::sources(Team::Blue, &w)
+            .iter()
+            .any(|s| s.radius == shared::vision::ROCKET_SIGHT_RADIUS)
+    );
+    w.players.get_mut(&addr(2)).unwrap().hero.x = rocket.position[0] + 3.0;
+    advance(&mut w, at, 0.2);
+    assert!(effects(&w, at + duration(0.2)).is_empty());
+    assert!(
+        !crate::vision::sources(Team::Green, &w)
+            .iter()
+            .any(|s| s.radius == shared::vision::ROCKET_SIGHT_RADIUS)
+    );
+}
+
+#[test]
+fn all_towers_are_public_map_landmarks_without_granting_attack_vision() {
+    let now = Instant::now();
+    let mut w = GameWorld::new(shared::map::ResolvedMap::default(), now);
+    add_player(
+        &mut w,
+        1,
+        HeroClass::Wildspark,
+        Team::Green,
+        [-100.0, -100.0],
+        now,
+    );
+    let viewer = &w.players[&addr(1)];
+    let mut packet = shared::wire::ServerPacket::Snapshot {
+        vision: None,
+        sandbox: None,
+        debug_access: None,
+        match_mode: "dev".into(),
+        geometry_id: shared::map::GEOMETRY_ID.into(),
+        map_profile: "verdant_default".into(),
+        meta: Default::default(),
+        join_error: None,
+        your_id: viewer.hero.identity.id,
+        players: crate::snapshot::build_players_snapshot(&w, Some(viewer.hero.identity.id), now),
+        scoreboard: None,
+        prematch: None,
+        skill_effects: effects(&w, now),
+        projectiles: Vec::new(),
+        combat_events: Vec::new(),
+        structures: w.structures.values().map(|s| s.state.clone()).collect(),
+        minions: Vec::new(),
+        neutrals: Vec::new(),
+        team_buffs: Vec::new(),
+        forest_pickups: Vec::new(),
+        game_state: GameState::Running,
+        rematch_in_secs: None,
+    };
+    crate::vision::filter_snapshot(&mut packet, viewer, &w, now);
+    let shared::wire::ServerPacket::Snapshot { structures, .. } = packet else {
+        panic!("snapshot")
+    };
+    assert_eq!(structures.len(), w.structures.len());
+    assert!(structures.iter().any(|s| s.team == Team::Blue));
+    assert!(structures.iter().any(|s| s.team == Team::Green));
+    let far = structures.iter().find(|s| s.team == Team::Blue).unwrap();
+    assert!(!crate::vision::target_visible(
+        Team::Green,
+        TargetId {
+            kind: TargetKind::Structure,
+            id: far.id
+        },
+        &w,
+        now
+    ));
+}

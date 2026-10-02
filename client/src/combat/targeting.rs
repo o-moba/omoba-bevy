@@ -800,13 +800,8 @@ pub(crate) fn mobile_basic_attack(
             } else {
                 "combat.attack.no_structure"
             }));
-        } else if intent.is_some() {
-            feedback.push_line(tr(if aim.is_some() {
-                "combat.attack.no_enemy_direction"
-            } else {
-                "combat.attack.no_enemy"
-            }));
         }
+        // A basic attack with no target is a normal, silent no-op.
     }
 }
 
@@ -1500,6 +1495,31 @@ mod tests {
             [0.0; 4]
         );
     }
+    #[test]
+    fn empty_basic_attack_taps_and_aimed_releases_are_silent() {
+        for aim in [
+            None,
+            Some(crate::mobile_controls::MobileAttackAim {
+                direction: Vec2::X,
+                extent: 1.0,
+            }),
+        ] {
+            let (mut app, _, enemy) = attack_app(shared::HeroClass::Mage, vec![], true);
+            app.world_mut().despawn(enemy);
+            app.insert_resource(PlayerVisualMode::Models3d)
+                .add_systems(Update, mobile_basic_attack.before(resolve_basic_attack));
+            app.world_mut()
+                .spawn((MainCamera, Camera::default(), GlobalTransform::IDENTITY));
+            app.world_mut()
+                .resource_mut::<MobileControls>()
+                .attacks
+                .push(crate::mobile_controls::MobileAttackIntent { aim, gesture: 1 });
+            app.update();
+            assert!(app.world().resource::<ActionFeedback>().text.is_empty());
+            assert!(commands(&mut app).is_empty());
+        }
+    }
+
     #[test]
     fn drag_release_never_substitutes_a_new_enemy_for_the_preview() {
         use crate::mobile_controls::MobileAttackIntent;

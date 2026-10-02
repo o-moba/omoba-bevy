@@ -274,8 +274,24 @@ impl MobileControls {
         self.utilities.clear();
     }
 
+    fn upgrade_badge_center(&self, slot: usize) -> Vec2 {
+        let layout = self.layout();
+        layout.ability_centers[slot] + Vec2::new(1.0, -1.0) * (layout.ability_radii[slot] - 6.0)
+    }
+
+    fn upgrade_badge_hit(&self, slot: usize, point: Vec2) -> bool {
+        // A 44-point touch target around the smaller visible badge.
+        self.upgrade_enabled[slot] && point.distance(self.upgrade_badge_center(slot)) <= 22.0
+    }
+
     fn hit_control(&self, point: Vec2) -> Option<(Control, Vec2)> {
         let l = self.layout();
+        // Badges take priority over the ability face and own the entire gesture.
+        for slot in 0..4 {
+            if self.upgrade_badge_hit(slot, point) {
+                return Some((Control::Upgrade(slot), self.upgrade_badge_center(slot)));
+            }
+        }
         if self.upgrade_enabled.iter().any(|enabled| *enabled)
             && point.distance(l.upgrade_center) <= l.upgrade_radius
         {
@@ -448,8 +464,11 @@ impl MobileControls {
                             }
                             Control::Upgrade(slot)
                                 if self.upgrade_enabled[slot]
-                                    && position.distance(self.layout().ability_centers[slot])
-                                        <= self.layout().ability_radii[slot] =>
+                                    && (self.upgrade_badge_hit(slot, position)
+                                        || (self.upgrade_mode
+                                            && position.distance(
+                                                self.layout().ability_centers[slot],
+                                            ) <= self.layout().ability_radii[slot])) =>
                             {
                                 self.upgrades.push(slot);
                                 self.upgrade_mode = false;
@@ -802,9 +821,9 @@ enum MobileVisual {
     UpgradeMode,
     CategoryAttack(usize),
     Utility(usize),
-    /// Rank mode: the + badge (and, in rank mode, the gold rim) over an
-    /// upgradable ability.
+    /// Gold rim around an upgradable ability in rank mode.
     RankRing(usize),
+    UpgradeBadge(usize),
     AimHint,
     SkillDescription,
     Rotate,
@@ -817,8 +836,6 @@ enum DiscPart {
     Seconds,
     Icon,
     Label,
-    /// The rank ring's + badge.
-    Plus,
 }
 
 /// How a touch disc is drawn at rest (`hud.md` phone § combat-cluster,
@@ -886,6 +903,7 @@ fn visual_name(visual: &MobileVisual) -> String {
         }
         MobileVisual::Utility(index) => ["MobileDash", "MobileHaste"][*index].to_owned(),
         MobileVisual::RankRing(slot) => format!("MobileRankRing-{slot}"),
+        MobileVisual::UpgradeBadge(slot) => format!("MobileUpgrade-{slot}"),
         MobileVisual::AimHint => "MobileAimHint".to_owned(),
         MobileVisual::SkillDescription => "MobileSkillDescription".to_owned(),
         MobileVisual::Rotate => "MobileRotatePrompt".to_owned(),
@@ -895,7 +913,7 @@ fn visual_name(visual: &MobileVisual) -> String {
 fn setup_mobile_controls(mut commands: Commands) {
     use crate::ui::{
         theme::{self, TextStyle},
-        tokens::{TextRole, border, color, radius, size, space},
+        tokens::{TextRole, border, color, radius, size},
         widgets::{game, icon_node},
     };
     let hidden = || Node {
@@ -1116,48 +1134,41 @@ fn setup_mobile_controls(mut commands: Commands) {
                     game::AbilityFace::default(),
                 );
             });
-        commands
-            .spawn((
-                Node {
-                    border: UiRect::all(Val::Px(border::FRAME)),
-                    border_radius: BorderRadius::all(Val::Px(radius::PILL)),
-                    ..hidden()
-                },
-                UiTransform::default(),
-                BackgroundColor(Color::NONE),
-                BorderColor::all(Color::NONE),
-                ZIndex(31),
-                FocusPolicy::Pass,
-                Pickable::IGNORE,
-                MobileVisual::RankRing(slot),
-                Name::new(visual_name(&MobileVisual::RankRing(slot))),
-            ))
-            .with_children(|ring| {
-                // The + badge: 22 px, top-right (−4/−6), emerald.400 with a
-                // 2 px gold.400 rim (a hint; tapping it needs rank mode).
-                ring.spawn((
-                    Node {
-                        position_type: PositionType::Absolute,
-                        right: Val::Px(-(space::S4 + border::FRAME)),
-                        top: Val::Px(-(space::S4 + border::FRAME)),
-                        width: Val::Px(game::ABILITY_UPGRADE),
-                        height: Val::Px(game::ABILITY_UPGRADE),
-                        justify_content: JustifyContent::Center,
-                        align_items: AlignItems::Center,
-                        border: UiRect::all(Val::Px(border::FRAME)),
-                        border_radius: BorderRadius::all(Val::Px(radius::PILL)),
-                        ..default()
-                    },
-                    BackgroundColor(color::EMERALD_400),
-                    BorderColor::all(color::GOLD_400),
-                    DiscPart::Plus,
-                    children![icon_node(
-                        Icon::NavPlus,
-                        game::ABILITY_UPGRADE_GLYPH,
-                        color::TEXT_ON_PRIMARY,
-                    )],
-                ));
-            });
+        commands.spawn((
+            Node {
+                border: UiRect::all(Val::Px(border::FRAME)),
+                border_radius: BorderRadius::all(Val::Px(radius::PILL)),
+                ..hidden()
+            },
+            UiTransform::default(),
+            BackgroundColor(Color::NONE),
+            BorderColor::all(Color::NONE),
+            ZIndex(31),
+            FocusPolicy::Pass,
+            Pickable::IGNORE,
+            MobileVisual::RankRing(slot),
+            Name::new(visual_name(&MobileVisual::RankRing(slot))),
+        ));
+        commands.spawn((
+            Node {
+                border: UiRect::all(Val::Px(border::FRAME)),
+                border_radius: BorderRadius::all(Val::Px(radius::PILL)),
+                ..hidden()
+            },
+            UiTransform::default(),
+            BackgroundColor(color::EMERALD_400),
+            BorderColor::all(color::GOLD_400),
+            ZIndex(32),
+            FocusPolicy::Pass,
+            Pickable::IGNORE,
+            MobileVisual::UpgradeBadge(slot),
+            Name::new(visual_name(&MobileVisual::UpgradeBadge(slot))),
+            children![icon_node(
+                Icon::NavPlus,
+                game::ABILITY_UPGRADE_GLYPH,
+                color::TEXT_ON_PRIMARY
+            )],
+        ));
     }
     // The hold card (`skill-description.md`, phone): the shared tooltip.
     crate::combat::skill_card::spawn_skill_card(
@@ -1425,6 +1436,11 @@ fn draw_mobile_controls(
                     visible && mobile.upgrade_enabled[slot],
                 )
             }
+            MobileVisual::UpgradeBadge(slot) => (
+                mobile.upgrade_badge_center(slot),
+                Vec2::splat(crate::ui::widgets::game::ABILITY_UPGRADE),
+                visible && !dead && mobile.upgrade_enabled[slot],
+            ),
             MobileVisual::UpgradeMode => {
                 label = if mobile.upgrade_mode {
                     tr("touch.rank.back").into()
@@ -1506,7 +1522,9 @@ fn draw_mobile_controls(
                 (
                     Vec2::new(slot.center().x, slot.min.y),
                     Vec2::ZERO,
-                    visible && aiming.is_some() && inspected.is_none(),
+                    visible
+                        && aiming.is_some_and(|c| c.control != Control::Attack)
+                        && inspected.is_none(),
                 )
             }
             MobileVisual::SkillDescription => {
@@ -1676,9 +1694,9 @@ fn draw_mobile_controls(
                         }
                     }
                 }
-                DiscPart::Icon | DiscPart::Label | DiscPart::Plus => {
+                DiscPart::Icon | DiscPart::Label => {
                     // Icon and label step aside while the sweep shows seconds.
-                    let next = if cooldown_state.is_some() && part != DiscPart::Plus {
+                    let next = if cooldown_state.is_some() {
                         Visibility::Hidden
                     } else {
                         Visibility::Inherited
@@ -1702,6 +1720,104 @@ fn draw_mobile_controls(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn ipad_upgrade_badges_capture_taps_without_casting_or_moving() {
+        for slot in 0..4 {
+            for offset in [Vec2::ZERO, Vec2::X * 21.0, Vec2::NEG_Y * 21.0] {
+                let mut m = controls();
+                m.viewport = Vec2::new(1180.0, 820.0);
+                m.upgrade_enabled = [true; 4];
+                let point = m.upgrade_badge_center(slot) + offset;
+                // The map's world-touch gate uses this same ownership predicate.
+                assert!(m.owns_control_point(point));
+                m.event(1, TouchPhase::Started, point);
+                assert_eq!(m.captures[&1].control, Control::Upgrade(slot));
+                m.event(1, TouchPhase::Ended, point);
+                assert_eq!(m.upgrades, [slot]);
+                assert!(m.casts.is_empty() && m.attacks.is_empty());
+                assert_eq!(m.movement, Vec2::ZERO);
+                assert!(!m.has_active_gesture());
+            }
+        }
+    }
+
+    #[test]
+    fn upgrade_badges_cancel_and_do_not_steal_the_joystick_or_another_finger() {
+        let mut m = controls();
+        m.viewport = Vec2::new(1180.0, 820.0);
+        m.upgrade_enabled = [true; 4];
+        let l = m.layout();
+        m.event(9, TouchPhase::Started, l.joystick_center);
+        m.event(
+            9,
+            TouchPhase::Moved,
+            l.joystick_center + Vec2::X * l.joystick_radius,
+        );
+        let point = m.upgrade_badge_center(0);
+        m.event(1, TouchPhase::Started, point);
+        m.event(2, TouchPhase::Started, point);
+        m.event(2, TouchPhase::Ended, point);
+        assert!(m.upgrades.is_empty());
+        m.event(1, TouchPhase::Canceled, point);
+        assert!(m.upgrades.is_empty());
+        m.event(1, TouchPhase::Started, point);
+        m.event(1, TouchPhase::Ended, Vec2::new(500.0, 300.0));
+        assert!(m.upgrades.is_empty());
+        m.event(1, TouchPhase::Started, point);
+        m.upgrade_enabled[0] = false; // Authoritative points/rank changed mid-touch.
+        m.event(1, TouchPhase::Ended, point);
+        assert!(m.upgrades.is_empty() && m.casts.is_empty() && m.attacks.is_empty());
+        assert_eq!(m.movement, Vec2::X);
+    }
+
+    #[test]
+    fn attack_aim_hint_is_hidden_but_skill_aim_hint_remains() {
+        let mut app = App::new();
+        let mut m = controls();
+        m.viewport = Vec2::new(1180.0, 820.0);
+        m.event(1, TouchPhase::Started, m.layout().attack_center);
+        app.insert_resource(m)
+            .init_resource::<GameplayInputContext>()
+            .init_resource::<TeamSelection>()
+            .init_resource::<LocalCastCooldown>()
+            .add_systems(Update, draw_mobile_controls);
+        app.world_mut().spawn((Player, CombatStats::default()));
+        let hint = app
+            .world_mut()
+            .spawn((
+                MobileVisual::AimHint,
+                Node::default(),
+                UiTransform::default(),
+            ))
+            .id();
+        let cancel = app
+            .world_mut()
+            .spawn((
+                MobileVisual::Cancel,
+                Node::default(),
+                UiTransform::default(),
+            ))
+            .id();
+        app.update();
+        assert_eq!(
+            app.world().get::<Node>(hint).unwrap().display,
+            Display::None
+        );
+        assert_eq!(
+            app.world().get::<Node>(cancel).unwrap().display,
+            Display::Flex
+        );
+        let mut m = app.world_mut().resource_mut::<MobileControls>();
+        m.clear();
+        let p = m.layout().ability_centers[0];
+        m.event(2, TouchPhase::Started, p);
+        app.update();
+        assert_eq!(
+            app.world().get::<Node>(hint).unwrap().display,
+            Display::Flex
+        );
+    }
+
     /// The hold card is the shared skill card (`skill-description.md`;
     /// `touch.skill.card` was one composed string): its cooldown follows
     /// level, items and the sandbox exactly as before.
@@ -2614,7 +2730,7 @@ mod tests {
     }
 
     /// hud.md phone § Level-up: the + badge sits on every upgradable
-    /// ability (a hint outside rank mode) and the gold rim only in rank mode
+    /// ability (a direct upgrade control) and the gold rim only in rank mode
     /// (the procedural rank-capacity ring of 0.26 is gone: no pips on phone).
     #[test]
     fn rank_rings_badge_upgradable_abilities_and_rim_them_in_rank_mode() {

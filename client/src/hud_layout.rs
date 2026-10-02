@@ -307,6 +307,15 @@ impl HudLayout {
         }
     }
 
+    /// Three short kill rows below the top-right HUD, inside the safe edge.
+    pub(crate) fn kill_feed(&self) -> Rect {
+        rect(
+            (self.icon_buttons.max.x - 280.0).max(space::S16),
+            self.social_status.max.y + space::S12,
+            Vec2::new(280.0, 98.0),
+        )
+    }
+
     /// The rectangle of a tagged region (sub-cells of the icon row included).
     pub(crate) fn region(&self, region: HudRegion) -> Rect {
         let button = size::ICON_BUTTON.at(self.form);
@@ -495,6 +504,21 @@ impl Plugin for HudLayoutPlugin {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ipad_kill_feed_uses_the_right_safe_edge_below_top_controls() {
+        let mut mobile = MobileControls::default();
+        mobile.viewport = Vec2::new(1180.0, 820.0);
+        let layout = HudLayout::phone(&mobile);
+        let feed = layout.kill_feed();
+        assert_eq!(feed.max.x, layout.icon_buttons.max.x);
+        assert!(feed.min.x > mobile.viewport.x * 0.5);
+        assert!(feed.min.y > layout.social_status.max.y);
+        assert!(feed.max.x <= mobile.viewport.x - mobile.safe.right);
+        assert!(
+            feed.max.y < mobile.layout().ability_centers[3].y - mobile.layout().ability_radii[3]
+        );
+    }
 
     fn at(rect: Rect) -> (f32, f32, f32, f32) {
         (rect.min.x, rect.min.y, rect.width(), rect.height())

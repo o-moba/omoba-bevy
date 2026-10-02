@@ -31,6 +31,7 @@ impl Plugin for TeamVisionPlugin {
                 Update,
                 (sync_visibility, attach_minimap_mask, animate_brush),
             )
+            .add_systems(PostUpdate, sync_concealed_materials)
             .add_systems(
                 PostUpdate,
                 update_mask
@@ -62,6 +63,70 @@ struct BrushArt;
 struct GrassTuft {
     phase: f32,
     yaw: f32,
+}
+
+/// Per-mesh overrides keep shared avatar/weapon assets untouched. Dropping the
+/// override on reveal lets Bevy reclaim the temporary material with the handle.
+#[derive(Component)]
+struct ConcealedMaterial {
+    original: Handle<StandardMaterial>,
+    faded: Handle<StandardMaterial>,
+}
+
+fn sync_concealed_materials(
+    mut commands: Commands,
+    game: Option<Res<GameStateSnapshot>>,
+    mode: Res<PlayerVisualMode>,
+    players: Query<(), With<crate::player::Player>>,
+    parents: Query<&ChildOf>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut meshes: Query<(
+        Entity,
+        &mut MeshMaterial3d<StandardMaterial>,
+        Option<&ConcealedMaterial>,
+    )>,
+) {
+    let hidden = *mode == PlayerVisualMode::Models3d
+        && game.as_ref().is_some_and(|game| {
+            matches!(game.state, GameState::Running)
+                && game
+                    .vision
+                    .as_ref()
+                    .is_some_and(|vision| vision.local_hidden)
+        });
+    for (entity, mut binding, previous) in &mut meshes {
+        let local = hidden
+            && (players.contains(entity)
+                || parents
+                    .iter_ancestors(entity)
+                    .any(|ancestor| players.contains(ancestor)));
+        if let Some(previous) = previous {
+            if binding.0 == previous.faded {
+                if local {
+                    continue;
+                }
+                binding.0 = previous.original.clone();
+            }
+            // A new scene/equipment binding must never restore a stale asset.
+            commands.entity(entity).remove::<ConcealedMaterial>();
+        }
+        if !local {
+            continue;
+        }
+        // Retry unloaded assets next frame; new scene descendants are covered too.
+        let Some(source) = materials.get(&binding.0) else {
+            continue;
+        };
+        let mut faded = source.clone();
+        faded.base_color = faded.base_color.with_alpha(faded.base_color.alpha() * 0.45);
+        faded.alpha_mode = AlphaMode::Blend;
+        let faded = materials.add(faded);
+        commands.entity(entity).insert(ConcealedMaterial {
+            original: binding.0.clone(),
+            faded: faded.clone(),
+        });
+        binding.0 = faded;
+    }
 }
 
 fn mask_image(width: u32, height: u32) -> Image {
@@ -470,6 +535,138 @@ fn update_mask(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn concealment_is_local_restores_bindings_and_handles_late_weapon_meshes() {
+        let mut app = App::new();
+        app.init_resource::<Assets<StandardMaterial>>()
+            .insert_resource(PlayerVisualMode::Models3d)
+            .insert_resource(GameStateSnapshot {
+                state: GameState::Running,
+                vision: Some(shared::vision::TeamVision {
+                    local_hidden: true,
+                    local_brush: Some(1),
+                    ..default()
+                }),
+                ..default()
+            })
+            .add_systems(Update, sync_concealed_materials);
+        let source = app
+            .world_mut()
+            .resource_mut::<Assets<StandardMaterial>>()
+            .add(StandardMaterial {
+                base_color: Color::srgba(0.3, 0.5, 0.8, 0.8),
+                alpha_mode: AlphaMode::Mask(0.3),
+                ..default()
+            });
+        let root = app.world_mut().spawn(crate::player::Player).id();
+        let joint = app.world_mut().spawn(ChildOf(root)).id();
+        let body = app
+            .world_mut()
+            .spawn((MeshMaterial3d(source.clone()), ChildOf(joint)))
+            .id();
+        let other = app.world_mut().spawn(MeshMaterial3d(source.clone())).id();
+        app.update();
+        let faded = app
+            .world()
+            .get::<MeshMaterial3d<StandardMaterial>>(body)
+            .unwrap()
+            .0
+            .clone();
+        assert_ne!(faded, source);
+        assert_eq!(
+            app.world()
+                .get::<MeshMaterial3d<StandardMaterial>>(other)
+                .unwrap()
+                .0,
+            source
+        );
+        let materials = app.world().resource::<Assets<StandardMaterial>>();
+        assert_eq!(
+            materials.get(&source).unwrap().alpha_mode,
+            AlphaMode::Mask(0.3)
+        );
+        assert_eq!(materials.get(&source).unwrap().base_color.alpha(), 0.8);
+        assert_eq!(materials.get(&faded).unwrap().alpha_mode, AlphaMode::Blend);
+        assert!((materials.get(&faded).unwrap().base_color.alpha() - 0.36).abs() < 0.001);
+        let weapon = app
+            .world_mut()
+            .spawn((MeshMaterial3d(source.clone()), ChildOf(joint)))
+            .id();
+        app.update();
+        assert_eq!(
+            app.world()
+                .get::<MeshMaterial3d<StandardMaterial>>(body)
+                .unwrap()
+                .0,
+            faded
+        );
+        assert_ne!(
+            app.world()
+                .get::<MeshMaterial3d<StandardMaterial>>(weapon)
+                .unwrap()
+                .0,
+            source
+        );
+        // Being in grass is insufficient when the server reports revealed.
+        app.world_mut()
+            .resource_mut::<GameStateSnapshot>()
+            .vision
+            .as_mut()
+            .unwrap()
+            .local_hidden = false;
+        app.update();
+        for entity in [body, weapon] {
+            assert_eq!(
+                app.world()
+                    .get::<MeshMaterial3d<StandardMaterial>>(entity)
+                    .unwrap()
+                    .0,
+                source
+            );
+            assert!(app.world().get::<ConcealedMaterial>(entity).is_none());
+        }
+        app.world_mut()
+            .resource_mut::<GameStateSnapshot>()
+            .vision
+            .as_mut()
+            .unwrap()
+            .local_hidden = true;
+        app.update();
+        // Replacing equipment while hidden uses the new source and restores it.
+        let replacement = app
+            .world_mut()
+            .resource_mut::<Assets<StandardMaterial>>()
+            .add(StandardMaterial::default());
+        app.world_mut()
+            .entity_mut(weapon)
+            .insert(MeshMaterial3d(replacement.clone()));
+        app.update();
+        assert_eq!(
+            app.world()
+                .get::<ConcealedMaterial>(weapon)
+                .unwrap()
+                .original,
+            replacement
+        );
+        app.world_mut().resource_mut::<GameStateSnapshot>().vision = None;
+        app.update();
+        assert_eq!(
+            app.world()
+                .get::<MeshMaterial3d<StandardMaterial>>(weapon)
+                .unwrap()
+                .0,
+            replacement
+        );
+        assert_eq!(
+            app.world()
+                .get::<MeshMaterial3d<StandardMaterial>>(body)
+                .unwrap()
+                .0,
+            source
+        );
+    }
+
     #[test]
     fn feathered_fog_tracks_radial_sight_and_brush_without_invalid_pixels() {
         let brush = brush_layout()[0];

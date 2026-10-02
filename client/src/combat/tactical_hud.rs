@@ -111,6 +111,83 @@ fn portrait(
     }
 }
 
+fn overhead_plate_node() -> Node {
+    Node {
+        position_type: PositionType::Absolute,
+        width: Val::Px(104.0),
+        height: Val::Px(36.0),
+        ..default()
+    }
+}
+
+fn overhead_fill_node(fraction: f32) -> Node {
+    Node {
+        position_type: PositionType::Absolute,
+        left: Val::Px(0.0),
+        top: Val::Px(0.0),
+        bottom: Val::Px(0.0),
+        width: Val::Percent(fraction * 100.0),
+        ..default()
+    }
+}
+
+fn spawn_overhead_plate(commands: &mut Commands) -> [Entity; 4] {
+    let root = commands
+        .spawn((
+            overhead_plate_node(),
+            BackgroundColor(Color::srgba(0.015, 0.03, 0.05, 0.88)),
+            ZIndex(10),
+            Name::new("HeroOverheadPlate"),
+        ))
+        .id();
+    // Independent rows prevent a long or tall nickname from shrinking the bars.
+    let text = commands
+        .spawn((
+            label(String::new(), 11.0, Color::WHITE),
+            TextLayout::new_with_no_wrap(),
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(2.0),
+                top: Val::Px(2.0),
+                width: Val::Px(100.0),
+                height: Val::Px(14.0),
+                overflow: Overflow::clip(),
+                ..default()
+            },
+            ChildOf(root),
+        ))
+        .id();
+    let fills = [
+        (18.0, 8.0, Color::srgb(0.3, 1.0, 0.3), "HeroOverheadHp"),
+        (28.0, 4.0, Color::srgb(0.12, 0.55, 1.0), "HeroOverheadMana"),
+    ]
+    .map(|(top, height, color, name)| {
+        let track = commands
+            .spawn((
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: Val::Px(2.0),
+                    top: Val::Px(top),
+                    width: Val::Px(100.0),
+                    height: Val::Px(height),
+                    ..default()
+                },
+                BackgroundColor(Color::srgb(0.08, 0.1, 0.14)),
+                Name::new(name),
+                ChildOf(root),
+            ))
+            .id();
+        commands
+            .spawn((
+                overhead_fill_node(1.0),
+                BackgroundColor(color),
+                ChildOf(track),
+            ))
+            .id()
+    });
+    [root, text, fills[0], fills[1]]
+}
+
 /// Screen-pixel-sized plates remain readable at every camera distance.
 pub(super) fn update_overhead(
     mut commands: Commands,
@@ -156,67 +233,11 @@ pub(super) fn update_overhead(
         } else {
             None
         };
-        let ids = *state.plates.entry(anchor.target).or_insert_with(|| {
-            let root = commands
-                .spawn((
-                    Node {
-                        position_type: PositionType::Absolute,
-                        width: Val::Px(104.0),
-                        height: Val::Px(32.0),
-                        flex_direction: FlexDirection::Column,
-                        padding: UiRect::all(Val::Px(2.0)),
-                        row_gap: Val::Px(2.0),
-                        ..default()
-                    },
-                    BackgroundColor(Color::srgba(0.015, 0.03, 0.05, 0.88)),
-                    ZIndex(10),
-                    Name::new("HeroOverheadPlate"),
-                ))
-                .id();
-            let text = commands
-                .spawn((label(String::new(), 11.0, Color::WHITE), ChildOf(root)))
-                .id();
-            let mut fills = Vec::new();
-            for (height, color) in [
-                (6.0, Color::srgb(0.3, 1.0, 0.3)),
-                (3.0, Color::srgb(0.12, 0.55, 1.0)),
-            ] {
-                let bg = commands
-                    .spawn((
-                        Node {
-                            width: Val::Percent(100.0),
-                            height: Val::Px(height),
-                            ..default()
-                        },
-                        BackgroundColor(Color::srgb(0.08, 0.1, 0.14)),
-                        ChildOf(root),
-                    ))
-                    .id();
-                fills.push(
-                    commands
-                        .spawn((
-                            Node {
-                                width: Val::Percent(100.0),
-                                height: Val::Percent(100.0),
-                                ..default()
-                            },
-                            BackgroundColor(color),
-                            ChildOf(bg),
-                        ))
-                        .id(),
-                );
-            }
-            [root, text, fills[0], fills[1]]
-        });
-        let mut node = Node {
-            position_type: PositionType::Absolute,
-            width: Val::Px(104.0),
-            height: Val::Px(34.0),
-            padding: UiRect::all(Val::Px(2.0)),
-            row_gap: Val::Px(2.0),
-            flex_direction: FlexDirection::Column,
-            ..default()
-        };
+        let ids = *state
+            .plates
+            .entry(anchor.target)
+            .or_insert_with(|| spawn_overhead_plate(&mut commands));
+        let mut node = overhead_plate_node();
         if let Some(p) = position {
             node.left = Val::Px(p.x - 52.0);
             node.top = Val::Px(p.y - 36.0);
@@ -244,11 +265,7 @@ pub(super) fn update_overhead(
             (ids[2], ratio(stats.hp, stats.max_hp)),
             (ids[3], ratio(stats.mana, stats.max_mana)),
         ] {
-            commands.entity(entity).insert(Node {
-                width: Val::Percent(value * 100.0),
-                height: Val::Percent(100.0),
-                ..default()
-            });
+            commands.entity(entity).insert(overhead_fill_node(value));
         }
         commands.entity(ids[2]).insert(BackgroundColor(if local {
             Color::srgb(0.3, 1.0, 0.3)
@@ -362,7 +379,7 @@ pub(super) fn update_tactical_hud(
             state.allies = Some(root);
         }
     }
-    let key = format!("{show}:{:?}:{viewport:?}", state.feed.entries);
+    let key = format!("{show}:{:?}:{:?}", state.feed.entries, layout.kill_feed());
     if key != state.feed_key {
         if let Some(root) = state.feed_root.take() {
             commands.entity(root).despawn();
@@ -373,9 +390,9 @@ pub(super) fn update_tactical_hud(
                 .spawn((
                     Node {
                         position_type: PositionType::Absolute,
-                        left: Val::Px(layout.minimap.max.x + 8.0),
-                        top: Val::Px(layout.minimap.max.y + 12.0),
-                        width: Val::Px(280.0),
+                        left: Val::Px(layout.kill_feed().min.x),
+                        top: Val::Px(layout.kill_feed().min.y),
+                        width: Val::Px(layout.kill_feed().width()),
                         flex_direction: FlexDirection::Column,
                         row_gap: Val::Px(4.0),
                         ..default()
@@ -432,6 +449,77 @@ pub(super) fn update_tactical_hud(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn ipad_overhead_layout_keeps_hp_and_mana_visible_under_long_names() {
+        use bevy::camera::{ComputedCameraValues, RenderTargetInfo};
+        let mut app = App::new();
+        app.add_plugins((
+            MinimalPlugins,
+            bevy::asset::AssetPlugin::default(),
+            bevy::image::ImagePlugin::default(),
+            bevy::text::TextPlugin,
+            bevy::transform::TransformPlugin,
+            bevy::input::InputPlugin,
+            bevy::ui::UiPlugin,
+            bevy::camera::visibility::VisibilityPlugin,
+            bevy::picking::PickingPlugin,
+            bevy::picking::InteractionPlugin,
+        ));
+        app.init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<TextureAtlasLayout>>();
+        let mut window = Window::default();
+        window.resolution.set_scale_factor_override(Some(1.0));
+        window.resolution.set(1180.0, 820.0);
+        app.world_mut().spawn((window, bevy::window::PrimaryWindow));
+        app.world_mut().spawn((
+            Camera2d,
+            Camera {
+                computed: ComputedCameraValues {
+                    target_info: Some(RenderTargetInfo {
+                        physical_size: UVec2::new(1180, 820),
+                        scale_factor: 1.0,
+                    }),
+                    ..default()
+                },
+                ..default()
+            },
+        ));
+        let ids = spawn_overhead_plate(&mut app.world_mut().commands());
+        app.world_mut().flush();
+        app.world_mut()
+            .entity_mut(ids[1])
+            .insert(Text::new("20  WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW"));
+        app.finish();
+        app.cleanup();
+        for fraction in [1.0, 0.5, 0.0] {
+            for id in [ids[2], ids[3]] {
+                app.world_mut()
+                    .entity_mut(id)
+                    .insert(overhead_fill_node(fraction));
+            }
+            for _ in 0..4 {
+                app.update();
+            }
+            let world = app.world();
+            assert_eq!(
+                world.get::<ComputedNode>(ids[0]).unwrap().size(),
+                Vec2::new(104.0, 36.0)
+            );
+            assert_eq!(world.get::<ComputedNode>(ids[1]).unwrap().size().y, 14.0);
+            for (id, height) in [(ids[2], 8.0), (ids[3], 4.0)] {
+                let track = world.get::<ChildOf>(id).unwrap().parent();
+                assert_eq!(
+                    world.get::<ComputedNode>(track).unwrap().size(),
+                    Vec2::new(100.0, height)
+                );
+                assert_eq!(
+                    world.get::<ComputedNode>(id).unwrap().size(),
+                    Vec2::new(100.0 * fraction, height)
+                );
+            }
+        }
+    }
+
     #[test]
     fn kills_are_global_identity_only_deduplicated_expire_and_reset() {
         let player = |id, team| LiveScorePlayer {
