@@ -1,0 +1,156 @@
+{
+  "schema": "ekza.asset.native-warm-proof.v1",
+  "pass": true,
+  "started_at": "2026-10-02T04:21:33.325908+00:00",
+  "cold_evidence": {
+    "path": "/Users/wotori/git/ekza/.agent/tasks/EKZA-ASSET-LIFECYCLE-20261001/native-two-clients-20261002T041716Z-84975/evidence.json",
+    "sha256": "92d8636678ab11cbd437e5d250010aac5fec9c830d96a0d12cd53212d0ac9770"
+  },
+  "source": {
+    "directory": "/Users/wotori/git/ekza/_workspace/worktrees/asset-lifecycle-game",
+    "commit": "518f982adf4bfd49b67091d048a720a16315064d",
+    "dirty": false,
+    "tracked_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "binaries": {
+    "client": {
+      "path": "/Users/wotori/git/ekza/omoba-bevy/target/debug/client",
+      "sha256": "cc3cf446e8bf13f13f4e935afed82b7635a2520915da26f8f9826cf871d2d47a",
+      "mtime_ns": 1790914607794350092
+    },
+    "server": {
+      "path": "/Users/wotori/git/ekza/omoba-bevy/target/debug/server",
+      "sha256": "b1227e5df9daceec9715da121405de914bfe52b40bb4444910877319cc84fdef",
+      "mtime_ns": 1790913580257432158
+    }
+  },
+  "assets": "/Users/wotori/git/ekza/_workspace/worktrees/asset-lifecycle-game/client/assets",
+  "registry": "https://registry.ekza.io",
+  "public_studio": true,
+  "local_developer_catalog": false,
+  "native_client_count": 1,
+  "config": "/Users/wotori/git/ekza/.agent/tasks/EKZA-ASSET-LIFECYCLE-20261001/native-two-clients-20261002T041716Z-84975/client-a/config",
+  "cache_before": {
+    "avatar": {
+      "path": "/Users/wotori/git/ekza/.agent/tasks/EKZA-ASSET-LIFECYCLE-20261001/native-two-clients-20261002T041716Z-84975/client-a/config/ekza-store/avatars/ekza-fb00f73b815e4d6bfa564a694cdefa0b8b68bf53208e0407b06a6d0fe30b4d2a.glb",
+      "sha256": "af5a15879488b1859f1a6a3db4516a241eee49320886961487879d04d2861ba1",
+      "bytes": 2103820,
+      "inode": 128360464,
+      "device": 16777233,
+      "mtime_ns": 1790914716974443321
+    },
+    "weapon": {
+      "path": "/Users/wotori/git/ekza/.agent/tasks/EKZA-ASSET-LIFECYCLE-20261001/native-two-clients-20261002T041716Z-84975/client-a/config/ekza-store/weapons/ekza-64a577b6a472c3bacbf809a045c6327d.glb",
+      "sha256": "cb7d098f277b3016e6472f85c1f9178368a0eaa52a811c481a9ffc445622f659",
+      "bytes": 26180,
+      "inode": 128350611,
+      "device": 16777233,
+      "mtime_ns": 1790914648229512475
+    }
+  },
+  "limitations": [
+    "desktop only; remote rendering is proved separately by the referenced cold run",
+    "QA selects the same asset IDs; saved loadout preference persistence is not tested",
+    "HTTP model requests are not instrumented; no zero-network claim"
+  ],
+  "avatar": {
+    "id": "ekza:avatar:c99325d8-4c89-4245-b7ff-12cfa756ecb6",
+    "slug": "ekza-fb00f73b815e4d6bfa564a694cdefa0b8b68bf53208e0407b06a6d0fe30b4d2a",
+    "name": "EYEWizard — hosted pilot",
+    "sha256": "af5a15879488b1859f1a6a3db4516a241eee49320886961487879d04d2861ba1",
+    "size_bytes": 2103820,
+    "profile": "humanoid-glb-v1"
+  },
+  "weapon": {
+    "id": "ekza:weapon:38a9903e-b3ec-4b12-a5f8-83516c77ba8b",
+    "slug": "ekza-64a577b6a472c3bacbf809a045c6327d",
+    "name": "Forge Hammer — Studio to OMOBA pilot",
+    "sha256": "cb7d098f277b3016e6472f85c1f9178368a0eaa52a811c481a9ffc445622f659",
+    "size_bytes": 26180,
+    "profile": "handheld-glb-v1"
+  },
+  "catalogue_urls": [
+    "https://registry.ekza.io/v2/avatars?project=omoba&platform=desktop&profile=humanoid-glb-v1",
+    "https://registry.ekza.io/v2/assets?project=omoba&platform=desktop&profile=handheld-glb-v1&kind=weapon"
+  ],
+  "server_address": "127.0.0.1:51574",
+  "admission": {
+    "approved": {
+      "accepted": true,
+      "avatar": "ekza-fb00f73b815e4d6bfa564a694cdefa0b8b68bf53208e0407b06a6d0fe30b4d2a",
+      "weapon": "ekza-64a577b6a472c3bacbf809a045c6327d",
+      "player_id": 1
+    },
+    "unknown_weapon": {
+      "accepted": false,
+      "rejection": "avatar_not_authorized"
+    },
+    "unknown_avatar": {
+      "accepted": false,
+      "rejection": "avatar_not_authorized"
+    }
+  },
+  "native": {
+    "previews": 1,
+    "gameplay_avatar": "EYEWizard — hosted pilot",
+    "attachment_error": 0.0
+  },
+  "screenshots": [
+    {
+      "file": "01-eyewizard-—-hosted-pilot.png",
+      "pixels": [
+        1280,
+        720
+      ],
+      "sha256": "94e555524de526282aaedab24627383a1703a769be793396848032b7f0f79367",
+      "bytes": 826060
+    },
+    {
+      "file": "21-gameplay-running.png",
+      "pixels": [
+        1280,
+        720
+      ],
+      "sha256": "a8045f1f7d1059897411ba09fad6e9fdfd95054ff259357073ed8c44fc38ec58",
+      "bytes": 904780
+    }
+  ],
+  "cache_after": {
+    "avatar": {
+      "path": "/Users/wotori/git/ekza/.agent/tasks/EKZA-ASSET-LIFECYCLE-20261001/native-two-clients-20261002T041716Z-84975/client-a/config/ekza-store/avatars/ekza-fb00f73b815e4d6bfa564a694cdefa0b8b68bf53208e0407b06a6d0fe30b4d2a.glb",
+      "sha256": "af5a15879488b1859f1a6a3db4516a241eee49320886961487879d04d2861ba1",
+      "bytes": 2103820,
+      "inode": 128360464,
+      "device": 16777233,
+      "mtime_ns": 1790914716974443321
+    },
+    "weapon": {
+      "path": "/Users/wotori/git/ekza/.agent/tasks/EKZA-ASSET-LIFECYCLE-20261001/native-two-clients-20261002T041716Z-84975/client-a/config/ekza-store/weapons/ekza-64a577b6a472c3bacbf809a045c6327d.glb",
+      "sha256": "cb7d098f277b3016e6472f85c1f9178368a0eaa52a811c481a9ffc445622f659",
+      "bytes": 26180,
+      "inode": 128350611,
+      "device": 16777233,
+      "mtime_ns": 1790914648229512475
+    }
+  },
+  "installed_models_unchanged": true,
+  "request_evidence": {
+    "public_catalogue_preflight": [
+      "https://registry.ekza.io/v2/avatars?project=omoba&platform=desktop&profile=humanoid-glb-v1",
+      "https://registry.ekza.io/v2/assets?project=omoba&platform=desktop&profile=handheld-glb-v1&kind=weapon"
+    ],
+    "model_http_requests": "not instrumented",
+    "installed_file_identity": "same SHA-256, size, inode, device and mtime"
+  },
+  "processes": [
+    {
+      "pid": 87914,
+      "returncode": -15
+    },
+    {
+      "pid": 87918,
+      "returncode": 0
+    }
+  ],
+  "finished_at": "2026-10-02T04:21:40.736066+00:00"
+}

@@ -1,0 +1,43 @@
+{
+  "captures": [
+    {
+      "animation": "Run",
+      "attachment_error": 0.0,
+      "bound_to_model": true,
+      "distance": 0.9081986546516418,
+      "file": "21-gameplay-running.png",
+      "model": "ekza://avatars/ekza-fb00f73b815e4d6bfa564a694cdefa0b8b68bf53208e0407b06a6d0fe30b4d2a.glb",
+      "name": "EYEWizard — hosted pilot",
+      "native_focused": true,
+      "player_id": 6,
+      "scene_loaded": true,
+      "server_admitted": true,
+      "slug": "ekza-fb00f73b815e4d6bfa564a694cdefa0b8b68bf53208e0407b06a6d0fe30b4d2a",
+      "weapon": "ekza-64a577b6a472c3bacbf809a045c6327d"
+    },
+    {
+      "animation_advance_secs": 0.5497612357139587,
+      "attachment_error": 0.0,
+      "bone_rotation_delta": 3.4697582721710205,
+      "bound_to_model": true,
+      "distance": 0.12194737792015076,
+      "file": "22-remote-equipped.png",
+      "local_player_id": 6,
+      "model": "ekza://avatars/ekza-fb00f73b815e4d6bfa564a694cdefa0b8b68bf53208e0407b06a6d0fe30b4d2a.glb",
+      "remote_player_id": 5,
+      "replicated_selection_verified": true,
+      "scene_loaded": true,
+      "slug": "ekza-fb00f73b815e4d6bfa564a694cdefa0b8b68bf53208e0407b06a6d0fe30b4d2a",
+      "weapon": "ekza-64a577b6a472c3bacbf809a045c6327d",
+      "weapon_model": "ekza://weapons/ekza-64a577b6a472c3bacbf809a045c6327d.glb"
+    }
+  ],
+  "local_developer_catalog": false,
+  "locale": "en",
+  "pass": true,
+  "pixels": [
+    1280,
+    720
+  ],
+  "public_studio": true
+}

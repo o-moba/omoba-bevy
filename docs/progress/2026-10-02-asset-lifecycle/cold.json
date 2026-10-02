@@ -1,0 +1,193 @@
+{
+  "schema": "ekza.asset.native-proof.v1",
+  "pass": true,
+  "started_at": "2026-10-02T04:17:16.967038+00:00",
+  "public_studio": true,
+  "local_developer_catalog": false,
+  "registry": "https://registry.ekza.io",
+  "viewport": [
+    1280,
+    720
+  ],
+  "locale": "en",
+  "native_client_count": 2,
+  "limitations": [
+    "desktop development build; physical phones not tested",
+    "creator/reviewer/withdrawal actions are separate hosted evidence"
+  ],
+  "source": {
+    "directory": "/Users/wotori/git/ekza/_workspace/worktrees/asset-lifecycle-game",
+    "commit": "518f982adf4bfd49b67091d048a720a16315064d",
+    "dirty": false,
+    "tracked_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "binaries": {
+    "client": {
+      "path": "/Users/wotori/git/ekza/omoba-bevy/target/debug/client",
+      "sha256": "cc3cf446e8bf13f13f4e935afed82b7635a2520915da26f8f9826cf871d2d47a",
+      "mtime_ns": 1790914607794350092
+    },
+    "server": {
+      "path": "/Users/wotori/git/ekza/omoba-bevy/target/debug/server",
+      "sha256": "b1227e5df9daceec9715da121405de914bfe52b40bb4444910877319cc84fdef",
+      "mtime_ns": 1790913580257432158
+    }
+  },
+  "avatar": {
+    "id": "ekza:avatar:c99325d8-4c89-4245-b7ff-12cfa756ecb6",
+    "slug": "ekza-fb00f73b815e4d6bfa564a694cdefa0b8b68bf53208e0407b06a6d0fe30b4d2a",
+    "name": "EYEWizard — hosted pilot",
+    "sha256": "af5a15879488b1859f1a6a3db4516a241eee49320886961487879d04d2861ba1",
+    "size_bytes": 2103820,
+    "profile": "humanoid-glb-v1"
+  },
+  "weapon": {
+    "id": "ekza:weapon:38a9903e-b3ec-4b12-a5f8-83516c77ba8b",
+    "slug": "ekza-64a577b6a472c3bacbf809a045c6327d",
+    "name": "Forge Hammer — Studio to OMOBA pilot",
+    "sha256": "cb7d098f277b3016e6472f85c1f9178368a0eaa52a811c481a9ffc445622f659",
+    "size_bytes": 26180,
+    "profile": "handheld-glb-v1"
+  },
+  "catalogue_urls": [
+    "https://registry.ekza.io/v2/avatars?project=omoba&platform=desktop&profile=humanoid-glb-v1",
+    "https://registry.ekza.io/v2/assets?project=omoba&platform=desktop&profile=handheld-glb-v1&kind=weapon"
+  ],
+  "admission": {
+    "approved": {
+      "accepted": true,
+      "avatar": "ekza-fb00f73b815e4d6bfa564a694cdefa0b8b68bf53208e0407b06a6d0fe30b4d2a",
+      "weapon": "ekza-64a577b6a472c3bacbf809a045c6327d",
+      "player_id": 1
+    },
+    "unknown_weapon": {
+      "accepted": false,
+      "rejection": "avatar_not_authorized"
+    },
+    "unknown_avatar": {
+      "accepted": false,
+      "rejection": "avatar_not_authorized"
+    }
+  },
+  "server_address": "127.0.0.1:50233",
+  "native": {
+    "client-a": {
+      "previews": 1,
+      "gameplay_avatar": "EYEWizard — hosted pilot",
+      "attachment_error": 0.0,
+      "remote": {
+        "animation_advance_secs": 0.9675604701042175,
+        "attachment_error": 0.0,
+        "bone_rotation_delta": 3.530109405517578,
+        "bound_to_model": true,
+        "distance": 0.11014418303966522,
+        "file": "22-remote-equipped.png",
+        "local_player_id": 5,
+        "model": "ekza://avatars/ekza-fb00f73b815e4d6bfa564a694cdefa0b8b68bf53208e0407b06a6d0fe30b4d2a.glb",
+        "remote_player_id": 6,
+        "replicated_selection_verified": true,
+        "scene_loaded": true,
+        "slug": "ekza-fb00f73b815e4d6bfa564a694cdefa0b8b68bf53208e0407b06a6d0fe30b4d2a",
+        "weapon": "ekza-64a577b6a472c3bacbf809a045c6327d",
+        "weapon_model": "ekza://weapons/ekza-64a577b6a472c3bacbf809a045c6327d.glb"
+      },
+      "screenshots": [
+        {
+          "file": "01-eyewizard-—-hosted-pilot.png",
+          "pixels": [
+            1280,
+            720
+          ],
+          "sha256": "e334a9cd15eac6d7b7771be39cbb0f7c6f22241a0df219b87defff049874e818",
+          "bytes": 845445
+        },
+        {
+          "file": "21-gameplay-running.png",
+          "pixels": [
+            1280,
+            720
+          ],
+          "sha256": "fe7b9073aa13982bd587a764ed91fe6fe9f4eebd27a6ec372f4ab02a394138ba",
+          "bytes": 902139
+        },
+        {
+          "file": "22-remote-equipped.png",
+          "pixels": [
+            1280,
+            720
+          ],
+          "sha256": "c6b7a3dd65a473a3474b12e920eae40ba858556a26cc7da1c679be2710f1bf6f",
+          "bytes": 900144
+        }
+      ],
+      "cache_files": {
+        "avatar": "/Users/wotori/git/ekza/.agent/tasks/EKZA-ASSET-LIFECYCLE-20261001/native-two-clients-20261002T041716Z-84975/client-a/config/ekza-store/avatars/ekza-fb00f73b815e4d6bfa564a694cdefa0b8b68bf53208e0407b06a6d0fe30b4d2a.glb",
+        "weapon": "/Users/wotori/git/ekza/.agent/tasks/EKZA-ASSET-LIFECYCLE-20261001/native-two-clients-20261002T041716Z-84975/client-a/config/ekza-store/weapons/ekza-64a577b6a472c3bacbf809a045c6327d.glb"
+      }
+    },
+    "client-b": {
+      "previews": 0,
+      "gameplay_avatar": "EYEWizard — hosted pilot",
+      "attachment_error": 0.0,
+      "remote": {
+        "animation_advance_secs": 0.5497612357139587,
+        "attachment_error": 0.0,
+        "bone_rotation_delta": 3.4697582721710205,
+        "bound_to_model": true,
+        "distance": 0.12194737792015076,
+        "file": "22-remote-equipped.png",
+        "local_player_id": 6,
+        "model": "ekza://avatars/ekza-fb00f73b815e4d6bfa564a694cdefa0b8b68bf53208e0407b06a6d0fe30b4d2a.glb",
+        "remote_player_id": 5,
+        "replicated_selection_verified": true,
+        "scene_loaded": true,
+        "slug": "ekza-fb00f73b815e4d6bfa564a694cdefa0b8b68bf53208e0407b06a6d0fe30b4d2a",
+        "weapon": "ekza-64a577b6a472c3bacbf809a045c6327d",
+        "weapon_model": "ekza://weapons/ekza-64a577b6a472c3bacbf809a045c6327d.glb"
+      },
+      "screenshots": [
+        {
+          "file": "21-gameplay-running.png",
+          "pixels": [
+            1280,
+            720
+          ],
+          "sha256": "041ff1beae74772ed4da2a5405f95e97e8146af030f48ef54711349d7f963195",
+          "bytes": 913434
+        },
+        {
+          "file": "22-remote-equipped.png",
+          "pixels": [
+            1280,
+            720
+          ],
+          "sha256": "0da965b45f52bb654490fe424ed84626231e3c76dac5ad248f04f26afe09518e",
+          "bytes": 931666
+        }
+      ],
+      "cache_files": {
+        "avatar": "/Users/wotori/git/ekza/.agent/tasks/EKZA-ASSET-LIFECYCLE-20261001/native-two-clients-20261002T041716Z-84975/client-b/config/ekza-store/avatars/ekza-fb00f73b815e4d6bfa564a694cdefa0b8b68bf53208e0407b06a6d0fe30b4d2a.glb",
+        "weapon": "/Users/wotori/git/ekza/.agent/tasks/EKZA-ASSET-LIFECYCLE-20261001/native-two-clients-20261002T041716Z-84975/client-b/config/ekza-store/weapons/ekza-64a577b6a472c3bacbf809a045c6327d.glb"
+      }
+    }
+  },
+  "independent_player_ids": [
+    5,
+    6
+  ],
+  "processes": [
+    {
+      "pid": 84994,
+      "returncode": -15
+    },
+    {
+      "pid": 85012,
+      "returncode": 0
+    },
+    {
+      "pid": 85013,
+      "returncode": 0
+    }
+  ],
+  "finished_at": "2026-10-02T04:18:44.785408+00:00"
+}
