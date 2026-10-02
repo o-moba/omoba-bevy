@@ -1,4 +1,4 @@
-# Hosted asset lifecycle: OMOBA 0.32.0
+# Hosted asset lifecycle: OMOBA 0.33.0
 
 Avatar and weapon publication share Studio revision/rendition/project-review primitives. OMOBA keeps separate validators and selectors: avatars use `humanoid-glb-v1`; static free weapons use `handheld-glb-v1`. `/v2/avatars` remains the legacy avatar route, while the new typed SDK queries `/v2/assets?kind=weapon&project=omoba&platform=desktop&profile=handheld-glb-v1`.
 
@@ -19,4 +19,13 @@ Native hosted harness accepts `OMOBA_SDK_PACK_QA_WEAPON=<approved-sdk-item-id>` 
 
 ## Two-client native proof hook
 
-Run the same SDK-pack QA on two native clients against one ordinary server, each with a separate `OMOBA_CLIENT_CONFIG_DIR`, `OMOBA_SDK_PACK_QA_OUTPUT` and session. Both receive the hosted one-entry avatar manifest, `OMOBA_SDK_PACK_QA_WEAPON=<approved weapon slug>` and `OMOBA_SDK_PACK_QA_REMOTE_WEAPON=<same slug>`. The second may use `OMOBA_SDK_PACK_QA_MATCH_ONLY=1`; both mount their own initially empty cache. Each waits for the other's replicated equipment, verified hosted model paths, loaded prop, advancing animation, skeletal motion, movement and matching hand attachment. They capture `22-remote-equipped.png` and leave an overlap period before exit. `verify_native(..., weapon=slug, remote_weapon=slug)` validates the added evidence. `OMOBA_AUTOJOIN_WEAPON` is also available for ordinary non-QA observer launches (`default`, `empty` or item ID); it never bypasses server admission.
+Run the same SDK-pack QA on two native clients against one ordinary server, each with a separate `OMOBA_CLIENT_CONFIG_DIR`, `OMOBA_SDK_PACK_QA_OUTPUT` and session. Both receive the hosted one-entry avatar manifest, `OMOBA_SDK_PACK_QA_WEAPON=<approved weapon slug>` and `OMOBA_SDK_PACK_QA_REMOTE_WEAPON=<same slug>`. The second may use `OMOBA_SDK_PACK_QA_MATCH_ONLY=1`; both mount their own initially empty cache. Each waits for the other's replicated equipment, verified hosted model paths, loaded prop, advancing animation, skeletal motion, movement and matching hand attachment. They capture `22-remote-equipped.png`. The coordinator sets `OMOBA_SDK_PACK_QA_HOLD_FOR_PEER=1`; each stays alive and moving until both independent summaries exist, then the coordinator writes `peer-complete` in their fresh output directories. Fixed frame overlap is insufficient when downloads finish at different times. `verify_native(..., weapon=slug, remote_weapon=slug)` validates the added evidence. `OMOBA_AUTOJOIN_WEAPON` is also available for ordinary non-QA observer launches (`default`, `empty` or item ID); it never bypasses server admission.
+
+The native coordinator also hands real OS focus between the two windows: A until
+its local capture, B until its local capture plus A's remote capture, then A until
+B's remote capture. Only the granted client has a `focus-active` marker. The QA
+uses the native window focus API and records `native_focused`; local movement
+captures require it. Production focus-loss cancellation, navigation, collision
+and server validation remain unchanged. Remote observations continue while the
+observer is unfocused. UI transitions retry until actual selection acknowledges
+them, because asynchronous catalogue refresh can replace a pressed button.

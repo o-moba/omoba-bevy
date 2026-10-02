@@ -10,6 +10,7 @@ use crate::{
 };
 use bevy::{
     app::AppExit,
+    ecs::system::NonSendMarker,
     prelude::*,
     render::view::screenshot::{Screenshot, ScreenshotCaptured, save_to_disk},
     window::PrimaryWindow,
@@ -44,6 +45,9 @@ struct Qa {
     preview_pose: Option<(Entity, Vec<Quat>, f32)>,
     remote_pose: Option<(Entity, Vec3, Vec<Quat>, f32)>,
     collection_step: u8,
+    motion_changed: Instant,
+    motion_direction: u32,
+    native_focused: bool,
 }
 #[derive(Component)]
 struct Shot;
@@ -82,15 +86,50 @@ impl Plugin for SdkPackQaPlugin {
             preview_pose: None,
             remote_pose: None,
             collection_step: 0,
+            motion_changed: Instant::now(),
+            motion_direction: 0,
+            native_focused: false,
         })
         .insert_resource(ScreenDriverPaused(true))
         .insert_resource(bevy::winit::WinitSettings::continuous())
-        .add_systems(PreUpdate, prepare.after(bevy::input::InputSystems))
+        .add_systems(
+            PreUpdate,
+            (focus_capture_window, prepare)
+                .chain()
+                .after(bevy::input::InputSystems),
+        )
         .add_systems(
             PostUpdate,
             observe.after(bevy::transform::TransformSystems::Propagate),
         );
     }
+}
+// A single desktop can focus only one native window. The two-client harness
+// hands off real OS focus after each local/remote capture; never fake focus or
+// bypass the production background-input cancellation policy.
+fn focus_capture_window(
+    mut qa: ResMut<Qa>,
+    windows: Query<Entity, With<PrimaryWindow>>,
+    mut last_request: Local<Option<Instant>>,
+    _main: NonSendMarker,
+) {
+    let Ok(entity) = windows.single() else {
+        return;
+    };
+    let allowed = std::env::var_os("OMOBA_SDK_PACK_QA_REMOTE_WEAPON").is_none()
+        || qa.directory.join("focus-active").exists();
+    bevy::winit::WINIT_WINDOWS.with_borrow(|windows| {
+        if let Some(window) = windows.get_window(entity) {
+            qa.native_focused = window.has_focus();
+            if allowed
+                && !qa.native_focused
+                && last_request.is_none_or(|t| t.elapsed() >= Duration::from_secs(1))
+            {
+                window.focus_window();
+                *last_request = Some(Instant::now());
+            }
+        }
+    });
 }
 fn prepare(
     mut qa: ResMut<Qa>,
@@ -116,34 +155,28 @@ fn prepare(
         next.as_mut().set_if_neq(AppScreen::Collection);
     }
     if qa.stage == 0 {
-        if preview.slug.as_deref() == Some(&qa.items[qa.index].slug) {
+        let weapon = std::env::var("OMOBA_SDK_PACK_QA_WEAPON").ok();
+        let equipment_ready = weapon.as_ref().is_none_or(|id| {
+            selection.handheld == shared::handheld::HandheldSelection::Item(id.clone())
+        });
+        if equipment_ready && preview.slug.as_deref() == Some(&qa.items[qa.index].slug) {
+            qa.collection_step = if weapon.is_some() { 3 } else { 0 };
             qa.stage = 1;
             qa.frames = 0;
         } else if qa.frames.is_multiple_of(15) {
-            // Exercise the ordinary equipment buttons, then the visible Studio
-            // filter; its avatar tile is below the included roster in All.
-            let weapon = std::env::var("OMOBA_SDK_PACK_QA_WEAPON").ok();
-            match (qa.collection_step, weapon.as_deref()) {
-                (0, Some(_)) => {
-                    if buttons.press("CollectionWeapons") {
-                        qa.collection_step = 1;
-                    }
+            // Catalogue/selection refresh can replace a pressed tab in the
+            // same frame. Retry visible navigation until the actual selection
+            // acknowledges it; queuing SyntheticPress is not an acknowledgement.
+            if !equipment_ready {
+                if qa.frames.is_multiple_of(30) {
+                    buttons.press("CollectionWeapons");
+                } else if let Some(id) = weapon {
+                    buttons.press(&format!("Handheld-{id}"));
                 }
-                (1, Some(id)) => {
-                    if selection.handheld == shared::handheld::HandheldSelection::Item(id.into()) {
-                        qa.collection_step = 2;
-                    } else {
-                        buttons.press(&format!("Handheld-{id}"));
-                    }
-                }
-                (0 | 2, _) => {
-                    if buttons.press("CollectionStudio") {
-                        qa.collection_step = 3;
-                    }
-                }
-                _ => {
-                    buttons.press(&format!("CollectionTile-{}", qa.items[qa.index].slug));
-                }
+            } else if qa.frames.is_multiple_of(30) {
+                buttons.press("CollectionStudio");
+            } else {
+                buttons.press(&format!("CollectionTile-{}", qa.items[qa.index].slug));
             }
         }
     }
@@ -172,6 +205,14 @@ fn observe(
         &AnimationPlayer,
     )>,
     humanoids: Res<crate::humanoid::HumanoidRuntimeLibrary>,
+    routes: Query<
+        (
+            Option<&crate::player::MovementTarget>,
+            Option<&crate::player::MovementRoute>,
+        ),
+        With<Player>,
+    >,
+    context: Res<crate::input_context::GameplayInputContext>,
     remote_actors: Query<
         (
             Entity,
@@ -214,6 +255,10 @@ fn observe(
         let progress = serde_json::json!({"stage":qa.stage,"index":qa.index,"preview":preview.slug,
             "clips":preview.clips.iter().map(|c|&c.name).collect::<Vec<_>>(),
             "player_id":snapshot.your_id,"animation":animations.0.get(&snapshot.your_id),
+            "position":actors.single().ok().map(|(_,p,_,_,_)|p.translation.to_array()),
+            "movement":routes.single().ok().map(|(t,r)|serde_json::json!({"target":t.map(|t|t.target.to_array()),"waypoints":r.map(|r|r.waypoints.len())})),
+            "gameplay_allowed":context.gameplay_allowed(),
+            "native_focused":qa.native_focused,
             "distance":actors.single().ok().and_then(|(_,pose,_,_,_)|qa.start.map(|start|pose.translation.distance(start)))});
         let _ = std::fs::write(qa.directory.join("progress.json"), progress.to_string());
     }
@@ -237,13 +282,18 @@ fn observe(
     };
     // The faster client keeps moving through its readback/overlap period so
     // the other rendered client can still measure replicated skeletal motion.
-    if matches!(qa.stage, 12 | 14 | 15) && qa.frames.is_multiple_of(60) {
+    if matches!(qa.stage, 12 | 14 | 15) && qa.motion_changed.elapsed() >= Duration::from_secs(1) {
         if let Ok((entity, pose, _, _, _)) = actors.single() {
+            // Try different normal navigation targets around the spawn base.
+            // Frame-count alternation can reverse before a slow client moves,
+            // and repeatedly asking for ±X can point both ways into geometry.
+            let angle = qa.motion_direction as f32 * std::f32::consts::FRAC_PI_4;
+            qa.motion_direction = (qa.motion_direction + 1) % 8;
+            qa.motion_changed = Instant::now();
             commands
                 .entity(entity)
                 .insert(crate::player::MovementTarget {
-                    target: pose.translation
-                        + Vec3::new(if (qa.frames / 60) % 2 == 0 { 2.0 } else { -2.0 }, 0.0, 0.0),
+                    target: pose.translation + Vec3::new(angle.cos() * 3.0, 0.0, angle.sin() * 3.0),
                 });
         }
     }
@@ -406,7 +456,7 @@ fn observe(
             qa.stage = 12;
             qa.frames = 0;
         }
-        12 if qa.frames >= 12 => {
+        12 if qa.frames >= 12 && qa.native_focused => {
             let Ok((entity, pose, avatar, source, rig)) = actors.single() else {
                 return;
             };
@@ -433,7 +483,7 @@ fn observe(
             let frame = serde_json::json!({"file":"21-gameplay-running.png","name":qa.items[qa.match_index].name,"slug":avatar.0,
                 "model":assets.get_path(source.gltf.id()).map(|p|p.to_string()),"bound_to_model":rig.model==source.gltf.id(),
                 "animation":"Run","distance":pose.translation.distance(qa.start.unwrap()),"weapon":weapon.id,
-                "attachment_error":error,"scene_loaded":loaded(scene),"server_admitted":session.join_confirmed(),"player_id":snapshot.your_id});
+                "attachment_error":error,"scene_loaded":loaded(scene),"server_admitted":session.join_confirmed(),"player_id":snapshot.your_id,"native_focused":qa.native_focused});
             capture(&mut commands, &mut qa, "21-gameplay-running.png", frame);
             if std::env::var_os("OMOBA_SDK_PACK_QA_REMOTE_WEAPON").is_none() {
                 commands

@@ -88,6 +88,8 @@ def verify_native(directory, entries, match_index, previews, weapon='forge-sword
     game = frames[previews]
     assert game['slug'] == entries[match_index]['slug'] and game['bound_to_model']
     assert game['scene_loaded'] and game['server_admitted'] and game['animation'] == 'Run'
+    if require_equipment_ui:
+        assert game.get('native_focused') is True
     assert game['weapon'] == weapon and game['attachment_error'] < 1e-4 and game['distance'] >= .2
     result = dict(previews=previews, gameplay_avatar=game['name'], attachment_error=game['attachment_error'])
     if remote_weapon is not None:
