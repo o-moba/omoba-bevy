@@ -27,3 +27,13 @@ The first fixture placed invisible roster actors near the hero and consequently 
 Protocol 5 introduces recall commands and requires matching server and client releases. The hosted Beta still runs protocol 4 until a separately approved coordinated deployment. No production server or TestFlight release is changed by this task. The existing Android 0.34.2 universal APK predates these gameplay changes.
 
 Detailed command results, screenshots and acceptance evidence are kept in `.agent/tasks/IPHONE-GAMEPLAY-UX-20261003/`. Final verification results are recorded there after the native capture pass.
+
+## Release — 2026-10-03
+
+Implementation merged and pushed to `main` as `ab24903`. Signed iOS **0.35.0 (17)** archived successfully and uploaded through Xcode Organizer; the UI confirmed “App upload complete”. The archive declares exempt encryption and includes matching arm64 dSYM UUID `8735C66E-7A84-361F-A211-29D9E85E1D22`. CLI export still reports “Failed to Use Accounts”; Organizer reused the existing signed-in account successfully.
+
+Beta now runs `/opt/omoba/releases/0.35.0-beta-ab24903` (protocol 5). A real authenticated UDP client passed lobby allocation and entered a running match on port 41000, receiving all eight structures. Server SHA256: `90b45c0d9c3005baa3ffd545d92b5f4eb4d7a1506ece83a0966d3d789f283a34`. Previous `/opt/omoba/releases/0.34.1-beta-f1d32f5` remains for rollback. No database migration, credentials or service configuration changed. Protocol-4 clients require the new client update.
+
+Apple processing and tester availability were not verified: browser access to App Store Connect was denied by its permission policy. Upload success must not be interpreted as a confirmed install or physical-device smoke test.
+
+Local archive: `builds/mobile-0.35.0-17/Omoba.xcarchive`. Upload screenshot, logs, server identity and remote admission report: `.agent/tasks/TESTFLIGHT-0350-17/`. Previous UX evidence moved to the primary checkout at `.agent/tasks/IPHONE-GAMEPLAY-UX-20261003/`. The merged worktree and temporary Rust Docker image were removed; reusable platform build caches retained. The preceding primary-checkout 0.34.2 edits remain backed up in a named Git stash and are incorporated in this release.
