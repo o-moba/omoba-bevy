@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.35.0] - 2026-10-03
+
+- Add an authoritative seven-second return to base, canceled by movement, combat, damage, death or disconnection. Phone controls expose its countdown; desktop uses B.
+- Add persistent 60/120 FPS preferences, a measured frame-rate readout, and native iOS display-link pacing.
+- Compact the phone HUD: top allied portraits with tap-to-follow, centered target health, smaller menu/chat, a bottom kill feed, and minion/tower controls continuing the skill circle at a uniform angular step. Preserve skill sizes, order and height; shift the combat group left just enough to fit the added right-side targets.
+- Remove attack instruction boxes, stabilize drag targeting, speed up touch camera panning, and add directional dash dragging with immediate camera recovery after a dash.
+- Add a crossed-eye concealment marker alongside the local avatar fade. Open reactions by tapping the hero and render a placeholder while confirmed reaction images load.
+- Add saved joystick/combat-group positioning and reset controls in Settings.
+- Keep wide avatar previews grounded on the Home pedestal while fitting their actual vertex silhouette; MegaAngel no longer floats above the platform when the camera zooms out.
+- Bump the wire protocol to 5 for recall commands. Online clients and servers must be upgraded together.
+
+## [0.34.2] - 2026-10-03
+
+- Fit avatar previews to measured model bounds, including wide silhouettes, tall heads and offset pivots; preserve framing throughout turntable rotation.
+
+- Include the reviewed exempt-encryption declaration in iOS packages so future TestFlight uploads do not repeat the encryption questionnaire for the current game functionality.
+
 ## [0.34.1] - 2026-10-02
 
 - Keep overhead HP and mana in fixed rows so long nicknames cannot squeeze them out.

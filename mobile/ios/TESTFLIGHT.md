@@ -142,7 +142,10 @@ fresh output path; there is no third-party artwork or additional package depende
    access is an explicit account-owner step; never revoke certificates as an
    automatic repair. Run Apple's validation before upload.
 4. Complete the encryption/export-compliance questions for the actual application.
-   This script intentionally does not guess `ITSAppUsesNonExemptEncryption`.
+   New packages inherit `ITSAppUsesNonExemptEncryption = false` from the common
+   plist for the reviewed game-only crypto use; see [the assessment](EXPORT-COMPLIANCE.md).
+   The archive preparer preserves the input app declaration and does not retrofit
+   it onto old packages. Reassess the declaration when crypto functionality changes.
    Review any Apple validation/privacy findings before releasing the build.
 5. After upload processing succeeds, open **TestFlight → Internal Testing**, create
    or select a group, include the app owner's App Store Connect user, and assign

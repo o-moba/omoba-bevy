@@ -129,6 +129,17 @@ impl Wheel {
         }
         None
     }
+    fn released_tap(&self, id: u64, phase: TouchPhase, position: Vec2, scale: f32) -> Option<Vec2> {
+        self.pending
+            .as_ref()
+            .filter(|hold| {
+                phase == TouchPhase::Ended
+                    && hold.id == id
+                    && hold.elapsed < HOLD_SECONDS
+                    && hold.origin.distance(position) <= MOVE_SLOP * scale
+            })
+            .map(|hold| hold.origin)
+    }
     fn advance(&mut self, delta: f32, viewport: Vec2, scale: f32) {
         if let Some(hold) = self.pending.as_mut() {
             hold.elapsed += delta.max(0.0);
@@ -781,11 +792,18 @@ fn input(
             social.wheel.pending = None;
         }
         let was_open = social.wheel.center.is_some();
+        let tap_origin = social
+            .wheel
+            .released_tap(event.id, event.phase, event.position, scale);
         if let Some(index) = social
             .wheel
             .event(event.id, event.phase, event.position, start, scale)
         {
             social.send_reaction(index, &mut out);
+        }
+        if let Some(origin) = tap_origin {
+            social.wheel.open(origin, viewport, scale);
+            social.blocked_frame = true;
         }
         if was_open && social.wheel.center.is_none() {
             social.blocked_frame = true;
@@ -1444,7 +1462,7 @@ fn render(
                 let chat = crate::ui::widgets::controls::sized_icon_button(
                     p,
                     crate::ui::kit_assets::Icon::NavMessageCircle,
-                    form,
+                    crate::ui::theme::Form::Desktop,
                     ButtonKind::Secondary,
                     SocialAction::Chat,
                     "SocialOpenChat",
@@ -1455,7 +1473,7 @@ fn render(
                         title: None,
                         body: "social.entry.chat",
                     });
-                if matches!(world.snapshot.state, GameState::Running) {
+                if !phone && matches!(world.snapshot.state, GameState::Running) {
                     let wheel = crate::ui::widgets::controls::sized_icon_button(
                         p,
                         crate::ui::kit_assets::Icon::NavSmile,
@@ -1760,9 +1778,7 @@ fn render_bubbles(
             let SocialEventKind::Reaction { reaction_id } = &event.kind else {
                 continue;
             };
-            let Some(image) = assets.as_ref().and_then(|a| a.image(reaction_id, &images)) else {
-                continue;
-            };
+            let image = assets.as_ref().and_then(|a| a.image(reaction_id, &images));
             desired.push(BubbleDraw {
                 node: Node {
                     position_type: PositionType::Absolute,
@@ -1772,7 +1788,7 @@ fn render_bubbles(
                     height: Val::Px(56.0),
                     ..default()
                 },
-                image: Some(image),
+                image,
                 key: SocialBubble {
                     event_id: event.id,
                     player_id: id.0,
@@ -1831,6 +1847,21 @@ fn reconcile_bubbles(
                     Name::new("SocialReactionBubble"),
                 ))
                 .id()
+        } else if draw.key.event_id != 0 {
+            // A server-confirmed reaction must remain visible while its image
+            // loads. Never treat a missing texture as an absent network event.
+            commands
+                .spawn((
+                    crate::ui::kit_assets::KitImage::icon(
+                        crate::ui::kit_assets::Icon::NavMessageCircle,
+                        ui::GOLD,
+                    ),
+                    FocusPolicy::Pass,
+                    ZIndex(80),
+                    draw.key,
+                    Name::new("SocialReactionBubble"),
+                ))
+                .id()
         } else {
             commands
                 .spawn((
@@ -1849,7 +1880,10 @@ fn reconcile_bubbles(
         retained.insert(entity);
         commands.entity(entity).insert(draw.node);
         if let Some(image) = draw.image {
-            commands.entity(entity).insert(image);
+            commands
+                .entity(entity)
+                .remove::<crate::ui::kit_assets::KitImage>()
+                .insert(image);
         }
     }
     for (entity, _) in current {
@@ -1870,6 +1904,25 @@ fn channel_label(channel: SocialChannel) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn avatar_tap_opens_reaction_picker_but_drag_and_cancel_do_not() {
+        let mut wheel = Wheel::default();
+        wheel.event(1, TouchPhase::Started, Vec2::new(200.0, 180.0), true, 1.0);
+        assert_eq!(
+            wheel.released_tap(1, TouchPhase::Ended, Vec2::new(204.0, 182.0), 1.0),
+            Some(Vec2::new(200.0, 180.0))
+        );
+        assert_eq!(
+            wheel.released_tap(1, TouchPhase::Canceled, Vec2::new(200.0, 180.0), 1.0),
+            None
+        );
+        wheel.event(1, TouchPhase::Moved, Vec2::new(245.0, 180.0), true, 1.0);
+        assert_eq!(
+            wheel.released_tap(1, TouchPhase::Ended, Vec2::new(200.0, 180.0), 1.0),
+            None
+        );
+    }
+
     /// The shared crate's fixed chat/request messages (also sent by the
     /// server) are shown through their keys; unknown server prose as sent.
     #[test]

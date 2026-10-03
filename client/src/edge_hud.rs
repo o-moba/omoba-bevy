@@ -179,7 +179,7 @@ impl TargetAnatomy {
                 },
                 portrait_at: space::S4,
                 column_x: 48.0,
-                column_w: 164.0,
+                column_w: 128.0,
                 name_top_hero: 3.0,
                 name_top: 3.0,
                 name_h: 18.0,
@@ -242,7 +242,11 @@ fn setup(mut commands: Commands, mobile: Option<Res<MobileControls>>) {
                             ] {
                                 let mut text = scores.spawn((
                                     Text::new(if label.is_some() { "—" } else { ":" }),
-                                    ui::role_text(TextRole::NumberLg),
+                                    ui::role_text(if form == Form::Phone {
+                                        TextRole::NumberSm
+                                    } else {
+                                        TextRole::NumberLg
+                                    }),
                                     TextColor(ink),
                                     TextLayout::new_with_no_wrap(),
                                 ));
@@ -298,7 +302,7 @@ fn setup(mut commands: Commands, mobile: Option<Res<MobileControls>>) {
             let menu = controls::sized_icon_button(
                 root,
                 Icon::NavMenu,
-                form,
+                Form::Desktop,
                 ButtonKind::Secondary,
                 EdgeAction::Menu,
                 "MatchMenuButton",

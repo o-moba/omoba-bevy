@@ -72,6 +72,7 @@ pub(in crate::net) fn age_utility_timers(
         state.dash_remaining_secs = (state.dash_remaining_secs - elapsed).max(0.0);
         state.haste_remaining_secs = (state.haste_remaining_secs - elapsed).max(0.0);
         state.haste_active_secs = (state.haste_active_secs - elapsed).max(0.0);
+        state.recall_remaining_secs = (state.recall_remaining_secs - elapsed).max(0.0);
     }
 }
 
@@ -283,6 +284,8 @@ mod tests {
                     haste_active_secs: shared::utility::HASTE_DURATION_SECS,
                     last_request_id: 8,
                     dash_sequence: 3,
+                    recall_remaining_secs: shared::utility::RECALL_CHANNEL_SECS,
+                    recall_sequence: 2,
                 },
             })
             .id();
@@ -298,7 +301,18 @@ mod tests {
             if frame >= 6 {
                 assert_eq!(state.movement_multiplier(), 1.0);
             }
-            assert_eq!((state.last_request_id, state.dash_sequence), (8, 3));
+            assert_eq!(
+                (
+                    state.last_request_id,
+                    state.dash_sequence,
+                    state.recall_sequence
+                ),
+                (8, 3, 2)
+            );
+            assert_eq!(
+                state.recall_remaining_secs,
+                (7.0 - frame as f32 * 0.5).max(0.0)
+            );
         }
         let state = app.world().get::<PlayerUtility>(player).unwrap().state;
         assert_eq!(

@@ -12,7 +12,7 @@ use super::{GRAVITY, GROUND_EPSILON, JUMP_HEIGHT, PLAYER_SIZE, ground_origin_y};
 use crate::debug::DebugToggles;
 
 #[derive(Component)]
-pub(super) struct Jumping {
+pub(crate) struct Jumping {
     pub(super) timer: Timer,
 }
 

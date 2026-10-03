@@ -9,6 +9,10 @@
     <key>CFBundleShortVersionString</key><string>0.18.0</string>
     <key>CFBundleVersion</key><string>1</string>
     <key>MinimumOSVersion</key><string>15.0</string>
+    <!-- Reviewed game-only crypto use: see EXPORT-COMPLIANCE.md. Reassess when crypto features change. -->
+    <key>ITSAppUsesNonExemptEncryption</key><false/>
+    <!-- Allow the user-selected 120 FPS ceiling on supported ProMotion phones. -->
+    <key>CADisableMinimumFrameDurationOnPhone</key><true/>
     <key>LSRequiresIPhoneOS</key><true/>
     <key>GCSupportsControllerUserInteraction</key><true/>
     <key>GCSupportedGameControllers</key><array>

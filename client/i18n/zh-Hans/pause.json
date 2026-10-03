@@ -36,5 +36,15 @@
   "pause.button.leave_match": "离开对局",
   "pause.preview.iphone16": "iPhone 16 界面预览",
   "pause.preview.hint": "在 iPad 上显示手机界面。点击游戏上方的“返回 iPad”恢复全屏。",
-  "pause.preview.return": "返回 iPad"
+  "pause.preview.return": "返回 iPad",
+  "pause.settings.render": "帧率",
+  "pause.render.limit": "帧率上限",
+  "pause.render.hint": "120 FPS 需要支持的屏幕。实际帧率取决于负载和电源模式。",
+  "pause.settings.hud": "按钮布局",
+  "pause.hud.hint": "每次移动 8 点。X 向右，Y 向下。移动范围受屏幕安全区域限制。",
+  "pause.hud.joystick_x": "摇杆 · 水平位置",
+  "pause.hud.joystick_y": "摇杆 · 垂直位置",
+  "pause.hud.combat_x": "技能 · 水平位置",
+  "pause.hud.combat_y": "技能 · 垂直位置",
+  "pause.hud.reset": "重置按钮位置"
 }

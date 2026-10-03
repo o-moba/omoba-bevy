@@ -13,5 +13,6 @@
   "touch.aim.skill": "Drag to aim · release to use\nMove to × to cancel",
   "touch.skill.rank": "Rank {rank}",
   "touch.skill.unlocks": "Unlocks at level {level}",
-  "touch.rotate": "Rotate your phone\nPlay Omoba in landscape"
+  "touch.rotate": "Rotate your phone\nPlay Omoba in landscape",
+  "touch.recall": "RECALL"
 }

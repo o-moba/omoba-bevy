@@ -20,6 +20,7 @@ pub mod offline;
 pub mod practice;
 pub mod prematch;
 pub mod progression;
+pub mod recall;
 pub mod session;
 pub mod shop;
 pub mod sim;

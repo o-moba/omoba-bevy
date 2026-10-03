@@ -1047,6 +1047,6 @@
     "client/src/qa/standard_kits_qa.rs": "Focused standard-kit selection, effects and held-aim proof from a live local sandbox (OMOBA_STANDARD_QA_DIR, OMOBA_STANDARD_QA_CLASS); one English desktop viewport, scripted input, no device matrix.",
     "client/src/qa/roster_qa.rs": "Focused remaining roster selection and live skill states (OMOBA_ROSTER_QA_DIR); OMOBA_ROSTER_QA_INSPECTION adds short/long/released skill holds. English 1280x720, scripted input; no device matrix.",
     "client/src/qa/sdk_pack_qa.rs": "Focused local SDK collection proof (OMOBA_SDK_PACK_QA_OUTPUT): 20 live avatar previews plus representative server-admitted running avatars and hand mounts. English 1280x720, scripted selection; not public Studio publication or a device matrix.",
-    "client/src/qa/combat_polish_qa.rs": "Focused synthetic iPad combat presentation fixtures (OMOBA_COMBAT_POLISH_QA_DIR): vitals, upgrades, held attack, kill feed, concealment and rocket. English 1180x820; not physical-device or multiplayer proof."
+    "client/src/qa/combat_polish_qa.rs": "Focused synthetic iPad combat presentation fixtures (OMOBA_COMBAT_POLISH_QA_DIR): vitals, upgrades, held attack, kill feed, concealment and rocket. English 1180x820 by default; OMOBA_IPHONE_UX_QA=1 selects focused 852x393 iPhone gameplay, empty attack, concealment, dash aim, recall and FPS/HUD settings with checked UI readback. Not physical-device or multiplayer proof."
   }
 }

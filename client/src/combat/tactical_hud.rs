@@ -12,6 +12,9 @@ use bevy::prelude::*;
 use shared::live_score::{LiveScorePlayer, LiveScoreboard};
 use std::collections::HashMap;
 
+#[derive(Component)]
+pub(super) struct AlliedPortrait(u64);
+
 #[derive(Default, Resource)]
 pub(super) struct TacticalHud {
     plates: HashMap<Entity, [Entity; 4]>,
@@ -86,6 +89,7 @@ fn portrait(
         Node {
             width: Val::Px(size),
             height: Val::Px(size),
+            flex_shrink: 0.0,
             border: UiRect::all(Val::Px(2.0)),
             border_radius: BorderRadius::MAX,
             justify_content: JustifyContent::Center,
@@ -287,7 +291,19 @@ pub(super) fn update_tactical_hud(
     scale: Option<Res<UiScale>>,
     actors: Query<(&NetworkPlayerId, &CombatStats)>,
     local: Query<&Team, With<Player>>,
+    pressed_allies: Query<(&Interaction, &AlliedPortrait), Changed<Interaction>>,
+    mut focus: ResMut<crate::camera::AllyCameraFocus>,
+    mut navigation: ResMut<crate::minimap::MinimapNavigationState>,
+    context: Res<crate::input_context::GameplayInputContext>,
 ) {
+    if context.gameplay_allowed() {
+        for (interaction, ally) in &pressed_allies {
+            if *interaction == Interaction::Pressed {
+                focus.player_id = Some(ally.0);
+                navigation.focus_target = None;
+            }
+        }
+    }
     let viewport = windows
         .iter()
         .next()
@@ -318,7 +334,7 @@ pub(super) fn update_tactical_hud(
             allies.push((player, hp));
         }
     }
-    let key = format!("{allies:?}:{:?}", layout.minimap);
+    let key = format!("{allies:?}:{:?}:{:?}", layout.allies, focus.player_id);
     if key != state.allies_key {
         if let Some(root) = state.allies.take() {
             commands.entity(root).despawn();
@@ -329,32 +345,52 @@ pub(super) fn update_tactical_hud(
                 .spawn((
                     Node {
                         position_type: PositionType::Absolute,
-                        left: Val::Px(layout.minimap.max.x + 8.0),
-                        top: Val::Px(layout.minimap.min.y + 50.0),
-                        column_gap: Val::Px(5.0),
+                        left: Val::Px(layout.allies.min.x),
+                        top: Val::Px(layout.allies.min.y),
+                        column_gap: Val::Px(2.0),
                         ..default()
                     },
                     Name::new("AlliedVitals"),
                     ZIndex(12),
                 ))
                 .id();
+            let cell = ((layout.allies.width() - 6.0) / 4.0).clamp(32.0, 44.0);
             for (p, hp) in allies {
                 let col = commands
                     .spawn((
                         Node {
-                            width: Val::Px(32.0),
+                            width: Val::Px(cell),
+                            height: Val::Px(44.0),
+                            align_items: AlignItems::Center,
+                            border: UiRect::all(Val::Px(1.0)),
+                            border_radius: BorderRadius::all(Val::Px(6.0)),
                             flex_direction: FlexDirection::Column,
                             row_gap: Val::Px(3.0),
                             ..default()
                         },
+                        Button,
+                        Interaction::None,
+                        AlliedPortrait(p.player_id),
+                        crate::ui::TestId::new(format!("AllyCamera-{}", p.player_id)),
+                        BorderColor::all(if focus.player_id == Some(p.player_id) {
+                            crate::ui::tokens::color::GOLD_400
+                        } else {
+                            Color::NONE
+                        }),
                         ChildOf(root),
                     ))
                     .id();
-                portrait(&mut commands, col, p, thumbs.as_deref(), 32.0);
+                portrait(
+                    &mut commands,
+                    col,
+                    p,
+                    thumbs.as_deref(),
+                    (cell - 2.0).min(32.0),
+                );
                 let bg = commands
                     .spawn((
                         Node {
-                            width: Val::Px(32.0),
+                            width: Val::Px((cell - 2.0).min(32.0)),
                             height: Val::Px(5.0),
                             ..default()
                         },
@@ -394,33 +430,47 @@ pub(super) fn update_tactical_hud(
                         top: Val::Px(layout.kill_feed().min.y),
                         width: Val::Px(layout.kill_feed().width()),
                         flex_direction: FlexDirection::Column,
-                        row_gap: Val::Px(4.0),
+                        row_gap: Val::Px(3.0),
+                        overflow: Overflow::clip(),
                         ..default()
                     },
+                    Pickable::IGNORE,
                     ZIndex(20),
                     Name::new("KillFeed"),
                 ))
                 .id();
+            let phone = mobile.as_ref().is_some_and(|m| m.enabled);
+            let portrait_size = if phone { 20.0 } else { 24.0 };
+            let font_size = if phone { 10.0 } else { 11.0 };
             for (killer, victim, _) in state.feed.entries.iter().rev() {
                 let row = commands
                     .spawn((
                         Node {
-                            column_gap: Val::Px(5.0),
+                            column_gap: Val::Px(3.0),
+                            width: Val::Percent(100.0),
                             align_items: AlignItems::Center,
-                            padding: UiRect::all(Val::Px(3.0)),
+                            padding: UiRect::all(Val::Px(2.0)),
                             ..default()
                         },
                         BackgroundColor(Color::srgba(0.01, 0.02, 0.04, 0.85)),
                         ChildOf(root),
                     ))
                     .id();
-                portrait(&mut commands, row, killer, thumbs.as_deref(), 24.0);
+                portrait(&mut commands, row, killer, thumbs.as_deref(), portrait_size);
                 commands.spawn((
                     label(
                         killer.nickname.chars().take(12).collect(),
-                        11.0,
+                        font_size,
                         team_color(killer.team.into()),
                     ),
+                    TextLayout::new_with_no_wrap(),
+                    Node {
+                        min_width: Val::Px(0.0),
+                        width: Val::Px(0.0),
+                        flex_grow: 1.0,
+                        overflow: Overflow::clip(),
+                        ..default()
+                    },
                     ChildOf(row),
                 ));
                 commands.spawn((
@@ -431,13 +481,21 @@ pub(super) fn update_tactical_hud(
                     ),
                     ChildOf(row),
                 ));
-                portrait(&mut commands, row, victim, thumbs.as_deref(), 24.0);
+                portrait(&mut commands, row, victim, thumbs.as_deref(), portrait_size);
                 commands.spawn((
                     label(
                         victim.nickname.chars().take(12).collect(),
-                        11.0,
+                        font_size,
                         team_color(victim.team.into()),
                     ),
+                    TextLayout::new_with_no_wrap(),
+                    Node {
+                        min_width: Val::Px(0.0),
+                        width: Val::Px(0.0),
+                        flex_grow: 1.0,
+                        overflow: Overflow::clip(),
+                        ..default()
+                    },
                     ChildOf(row),
                 ));
             }

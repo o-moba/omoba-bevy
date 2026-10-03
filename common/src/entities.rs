@@ -215,6 +215,8 @@ impl ConnectedPlayer {
                 haste_active_secs: hero_timers::haste_active(self, now),
                 last_request_id: hero.utility.last_request_id,
                 dash_sequence: hero.utility.dash_sequence,
+                recall_remaining_secs: crate::recall::remaining(self, now),
+                recall_sequence: hero.utility.recall_sequence,
             },
             inventory: economy.inventory.clone(),
             item_bonuses: hero_stats::combat_bonuses(self),

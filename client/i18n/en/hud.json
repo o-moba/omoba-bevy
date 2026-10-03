@@ -15,5 +15,6 @@
   "hud.buff.wendigo": "Wendigo's Favor: +15% ability damage - {secs}s",
   "hud.buff.mutatio": "Mutatio's Might: +25% ability damage, +2 HP/s - {secs}s",
   "hud.brush.concealed": "BRUSH · CONCEALED",
-  "hud.brush.revealed": "BRUSH · REVEALED"
+  "hud.brush.revealed": "BRUSH · REVEALED",
+  "hud.fps": "{value} FPS"
 }

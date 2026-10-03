@@ -500,7 +500,7 @@ fn handle_minimap_navigation_system(
                         )
                     {
                         navigation.focus_target =
-                            Some(layout.clamp_position(pan.focus + pan.origin - world));
+                            Some(layout.clamp_position(pan.focus + (pan.origin - world) * 2.25));
                         camera.locked = true;
                     }
                     navigation.world_touch = Some(pan);

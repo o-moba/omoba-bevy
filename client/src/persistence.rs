@@ -13,6 +13,8 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::audio_settings::AudioSettings;
+use crate::mobile_controls::HudPositionSettings;
+use crate::render_settings::RenderSettings;
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
@@ -30,7 +32,7 @@ use crate::world::{
     MIN_LIGHT_YAW_DEG,
 };
 
-const SCHEMA_VERSION: u32 = 6;
+const SCHEMA_VERSION: u32 = 7;
 const LEGACY_DEFAULT_MODEL_TARGET_HEIGHT: f32 = 1.15;
 const SCHEMA_3_DEFAULT_MODEL_TARGET_HEIGHT: f32 = 1.45;
 const PREFS_FILENAME: &str = "client_preferences.json";
@@ -60,6 +62,8 @@ impl Plugin for ClientPersistencePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<FileGameServerAddr>()
             .init_resource::<AudioSettings>()
+            .init_resource::<RenderSettings>()
+            .init_resource::<HudPositionSettings>()
             .init_resource::<CameraSettings>()
             .init_resource::<MotionSettings>()
             .init_resource::<ResolvedServerAddressForPrefs>()
@@ -111,6 +115,10 @@ struct ClientPreferencesFile {
     light_yaw_deg: Option<f32>,
     #[serde(default)]
     audio: AudioSettings,
+    #[serde(default)]
+    render: RenderSettings,
+    #[serde(default)]
+    hud_position: HudPositionSettings,
     /// Follow-camera distance multiplier; absent in files written before it existed.
     #[serde(default)]
     camera_zoom: Option<f32>,
@@ -286,6 +294,8 @@ pub(crate) fn load_persistent_client_settings(
     mut initial_save_pending: ResMut<ClientPreferencesInitialSavePending>,
     mut gate: ResMut<ClientPrefsSaveGate>,
     mut audio: ResMut<AudioSettings>,
+    mut render: ResMut<RenderSettings>,
+    mut hud_position: ResMut<HudPositionSettings>,
     mut camera: ResMut<CameraSettings>,
     mut motion: ResMut<MotionSettings>,
     mut saved_language: ResMut<SavedLanguage>,
@@ -323,6 +333,8 @@ pub(crate) fn load_persistent_client_settings(
     // queue the migrated schema so the one-time default migration is persisted.
     initial_save_pending.0 = disk.schema_version < SCHEMA_VERSION;
     *audio = disk.audio.sanitized();
+    *render = disk.render.sanitized();
+    *hud_position = disk.hud_position.sanitized();
     motion.reduce = disk.reduce_motion;
     saved_language.0 = stored_language(disk.language.as_deref());
     if let Some(zoom) = disk.camera_zoom {
@@ -403,6 +415,8 @@ fn build_file_from_state(
         light_pitch_deg: Some(lighting.light_pitch_deg),
         light_yaw_deg: Some(lighting.light_yaw_deg),
         audio: audio.sanitized(),
+        render: RenderSettings::default(),
+        hud_position: HudPositionSettings::default(),
         camera_zoom: Some(camera.sanitized().zoom),
         reduce_motion: false,
         language: None,
@@ -433,6 +447,8 @@ pub(crate) fn save_client_preferences_to_disk(
     motion: &MotionSettings,
     language: Option<crate::i18n::LocaleId>,
     handheld: Option<&shared::handheld::HandheldSelection>,
+    render: Option<&RenderSettings>,
+    hud_position: Option<&HudPositionSettings>,
 ) -> io::Result<()> {
     let Some(path) = preferences_path() else {
         return Err(io::Error::new(
@@ -455,9 +471,20 @@ pub(crate) fn save_client_preferences_to_disk(
         audio,
         camera,
     );
+    let previous = read_preferences_file(&path).ok();
+    prefs.render = render
+        .copied()
+        .or_else(|| previous.as_ref().map(|p| p.render))
+        .unwrap_or_default()
+        .sanitized();
+    prefs.hud_position = hud_position
+        .copied()
+        .or_else(|| previous.as_ref().map(|p| p.hud_position))
+        .unwrap_or_default()
+        .sanitized();
     prefs.handheld = handheld
         .cloned()
-        .or_else(|| read_preferences_file(&path).ok().map(|p| p.handheld))
+        .or_else(|| previous.map(|p| p.handheld))
         .unwrap_or_default();
     prefs.reduce_motion = motion.reduce;
     prefs.language = language.map(|language| language.code().to_owned());
@@ -473,6 +500,8 @@ fn save_client_preferences_on_change(
     resolved_addr: Res<ResolvedServerAddressForPrefs>,
     client_session_id: Res<ClientSessionId>,
     audio: Res<AudioSettings>,
+    render: Res<RenderSettings>,
+    hud_position: Res<HudPositionSettings>,
     camera: Res<CameraSettings>,
     motion: Res<MotionSettings>,
     locale: Option<Res<crate::i18n::Locale>>,
@@ -489,6 +518,8 @@ fn save_client_preferences_on_change(
         || resolved_addr.is_changed()
         || client_session_id.is_changed()
         || audio.is_changed()
+        || render.is_changed()
+        || hud_position.is_changed()
         || camera.is_changed()
         || motion.is_changed()
         || crate::i18n::locale_changed(&locale);
@@ -512,6 +543,8 @@ fn save_client_preferences_on_change(
         motion.as_ref(),
         language_to_save(locale.as_deref(), &saved_language),
         Some(&team.handheld),
+        Some(&render),
+        Some(&hud_position),
     ) {
         warn!("Failed to save client preferences: {e}");
     }
@@ -546,6 +579,8 @@ pub(crate) fn reset_graphics_to_defaults(
         camera,
         motion,
         language,
+        None,
+        None,
         None,
     ) {
         warn!("Failed to save preferences after reset: {e}");
@@ -773,6 +808,8 @@ mod tests {
             Some(&shared::handheld::HandheldSelection::Item(
                 "forge-hammer".into(),
             )),
+            None,
+            None,
         )
         .unwrap();
         let written: serde_json::Value =
@@ -787,6 +824,86 @@ mod tests {
         assert_eq!(crate::i18n::active(), zh);
         assert_eq!(crate::i18n::tr("pause.title"), "游戏菜单");
         assert_eq!(app.world().resource::<crate::i18n::Locale>().id(), zh);
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn render_and_hud_preferences_round_trip_with_legacy_defaults() {
+        let legacy: ClientPreferencesFile =
+            serde_json::from_str(r#"{"schema_version":6}"#).unwrap();
+        assert_eq!(legacy.render, RenderSettings::default());
+        assert_eq!(legacy.hud_position, HudPositionSettings::default());
+        let mut stored = legacy;
+        stored.render.fps_limit = 120;
+        stored.hud_position.joystick_offset = Vec2::new(-16.0, -24.0);
+        stored.hud_position.combat_offset = Vec2::new(-8.0, -16.0);
+        let round_trip: ClientPreferencesFile =
+            serde_json::from_slice(&serde_json::to_vec(&stored).unwrap()).unwrap();
+        assert_eq!(round_trip.render.fps_limit, 120);
+        assert_eq!(round_trip.hud_position, stored.hud_position);
+        assert_eq!(round_trip.hud_position.sanitized(), stored.hud_position);
+    }
+
+    #[test]
+    fn render_and_hud_settings_reload_save_changes_and_survive_graphics_reset() {
+        if crate::i18n::testing::isolated(
+            "persistence::tests::render_and_hud_settings_reload_save_changes_and_survive_graphics_reset",
+        ) {
+            return;
+        }
+        let dir = scratch_dir("render-hud");
+        // SAFETY: this test runs in its own subprocess, isolated above.
+        unsafe {
+            std::env::set_var("OMOBA_CLIENT_CONFIG_DIR", &dir);
+        }
+        let mut prefs = build_file_from_state(
+            &LightingSettings::default(),
+            &ModelScaleSettings::default(),
+            CharacterChoice::Paco,
+            "game.local:4000",
+            "render-hud-relaunch",
+            &AudioSettings::default(),
+            &CameraSettings::default(),
+        );
+        prefs.render.fps_limit = 120;
+        prefs.hud_position.combat_offset = Vec2::new(-24.0, -16.0);
+        write_preferences_file(&dir.join(PREFS_FILENAME), &prefs).unwrap();
+        let mut app = App::new();
+        app.init_resource::<LightingSettings>()
+            .init_resource::<ModelScaleSettings>()
+            .init_resource::<crate::team::TeamSelection>()
+            .add_plugins(ClientPersistencePlugin);
+        for _ in 0..4 {
+            app.update();
+        }
+        assert_eq!(app.world().resource::<RenderSettings>().fps_limit, 120);
+        assert_eq!(
+            app.world().resource::<HudPositionSettings>().combat_offset,
+            Vec2::new(-24.0, -16.0)
+        );
+        app.world_mut().resource_mut::<RenderSettings>().fps_limit = 60;
+        app.world_mut()
+            .resource_mut::<HudPositionSettings>()
+            .joystick_offset = Vec2::new(8.0, -8.0);
+        app.update();
+        let saved = read_preferences_file(&dir.join(PREFS_FILENAME)).unwrap();
+        assert_eq!(saved.render.fps_limit, 60);
+        assert_eq!(saved.hud_position.joystick_offset, Vec2::new(8.0, -8.0));
+        reset_graphics_to_defaults(
+            &mut LightingSettings::default(),
+            &mut ModelScaleSettings::default(),
+            &mut CameraSettings::default(),
+            &mut ClientPrefsSaveGate::default(),
+            CharacterChoice::Paco,
+            "game.local:4000",
+            "render-hud-relaunch",
+            &AudioSettings::default(),
+            &MotionSettings::default(),
+            None,
+        );
+        let reset = read_preferences_file(&dir.join(PREFS_FILENAME)).unwrap();
+        assert_eq!(reset.render, saved.render);
+        assert_eq!(reset.hud_position, saved.hud_position);
         fs::remove_dir_all(&dir).unwrap();
     }
 

@@ -29,9 +29,21 @@ impl Plugin for TeamVisionPlugin {
         app.add_systems(Startup, setup)
             .add_systems(
                 Update,
-                (sync_visibility, attach_minimap_mask, animate_brush),
+                (
+                    sync_visibility.after(crate::input_context::InputContextSet::Resolve),
+                    attach_minimap_mask,
+                    animate_brush,
+                ),
             )
             .add_systems(PostUpdate, sync_concealed_materials)
+            .add_systems(
+                PostUpdate,
+                update_hidden_icon
+                    .after(crate::net::NetworkGroundingSet)
+                    .after(bevy::camera::CameraUpdateSystems)
+                    .before(bevy::ui::UiSystems::Prepare)
+                    .before(bevy::transform::TransformSystems::Propagate),
+            )
             .add_systems(
                 PostUpdate,
                 update_mask
@@ -57,6 +69,66 @@ struct FogOverlay;
 struct MinimapFog;
 #[derive(Component)]
 struct BrushStatus;
+#[derive(Component)]
+struct HiddenOverheadIcon;
+
+fn update_hidden_icon(
+    game: Option<Res<GameStateSnapshot>>,
+    context: Option<Res<crate::input_context::GameplayInputContext>>,
+    pause: Option<Res<crate::pause_menu::PauseMenuState>>,
+    mode: Res<PlayerVisualMode>,
+    local: Query<
+        (
+            Entity,
+            &crate::domain::CombatStats,
+            Option<&crate::model_scale::NormalizeModelScale>,
+        ),
+        With<crate::player::Player>,
+    >,
+    camera: Query<(Entity, &Camera), With<MainCamera>>,
+    transforms: bevy::transform::helper::TransformHelper,
+    ui_scale: Option<Res<UiScale>>,
+    mut icons: Query<&mut Node, With<HiddenOverheadIcon>>,
+) {
+    for mut node in &mut icons {
+        node.display = Display::None;
+        if !gameplay_badges_visible(context.as_deref(), pause.as_deref())
+            || !game.as_ref().is_some_and(|g| {
+                matches!(g.state, GameState::Running)
+                    && g.vision.as_ref().is_some_and(|v| v.local_hidden)
+            })
+        {
+            continue;
+        }
+        let (Ok((player, stats, scale)), Ok((camera_entity, camera))) =
+            (local.single(), camera.single())
+        else {
+            continue;
+        };
+        if !stats.is_alive() {
+            continue;
+        }
+        let (Ok(hero), Ok(camera_pose)) = (
+            transforms.compute_global_transform(player),
+            transforms.compute_global_transform(camera_entity),
+        ) else {
+            continue;
+        };
+        let position = hero.translation();
+        let anchor = if *mode == PlayerVisualMode::Models3d {
+            position + Vec3::Y * (scale.and_then(|s| s.head_local_y).unwrap_or(2.1) + 0.2)
+        } else {
+            (crate::world2d::simulation_xz_to_render_xy(position) + Vec2::Y * 2.5).extend(0.0)
+        };
+        let Ok(point) = camera.world_to_viewport(&camera_pose, anchor) else {
+            continue;
+        };
+        let point = crate::hud_layout::world_to_ui(point, ui_scale.as_deref());
+        node.left = Val::Px(point.x + 35.0);
+        node.top = Val::Px(point.y - 23.0);
+        node.display = Display::Flex;
+    }
+}
 #[derive(Component)]
 struct BrushArt;
 #[derive(Component)]
@@ -180,6 +252,24 @@ fn setup(
         GlobalZIndex(-90),
         FocusPolicy::Pass,
         Pickable::IGNORE,
+    ));
+    commands.spawn((
+        HiddenOverheadIcon,
+        crate::ui::kit_assets::KitImage::icon(
+            crate::ui::kit_assets::Icon::NavEyeOff,
+            Color::srgb(0.60, 0.95, 0.76),
+        ),
+        Node {
+            position_type: PositionType::Absolute,
+            width: Val::Px(22.0),
+            height: Val::Px(22.0),
+            display: Display::None,
+            ..default()
+        },
+        GlobalZIndex(12),
+        FocusPolicy::Pass,
+        Pickable::IGNORE,
+        Name::new("HiddenOverheadIcon"),
     ));
     // hud.md `brush-chip`: a badge centred under the target frame, muted
     // while concealed, danger while revealed; `type.caption` semibold.
@@ -345,8 +435,19 @@ fn attach_minimap_mask(
         Pickable::IGNORE,
     ));
 }
+/// Modal panels own the overlay plane, while the underlying world keeps its
+/// authoritative fog and concealed materials unchanged.
+fn gameplay_badges_visible(
+    context: Option<&crate::input_context::GameplayInputContext>,
+    pause: Option<&crate::pause_menu::PauseMenuState>,
+) -> bool {
+    context.is_none_or(|context| context.gameplay_allowed())
+        && pause.is_none_or(|pause| !pause.open)
+}
 fn sync_visibility(
     game: Option<Res<GameStateSnapshot>>,
+    context: Option<Res<crate::input_context::GameplayInputContext>>,
+    pause: Option<Res<crate::pause_menu::PauseMenuState>>,
     mode: Res<PlayerVisualMode>,
     mut art: ResMut<VisionPresentation>,
     mut overlay: Query<
@@ -382,7 +483,9 @@ fn sync_visibility(
     }
     for (mut text, mut node, mut color, mut fill) in &mut status {
         let vision = game.as_ref().and_then(|g| g.vision.as_ref());
-        let show = art.active && vision.is_some_and(|v| v.local_brush.is_some());
+        let show = art.active
+            && gameplay_badges_visible(context.as_deref(), pause.as_deref())
+            && vision.is_some_and(|v| v.local_brush.is_some());
         node.display = if show { Display::Flex } else { Display::None };
         if let Some(vision) = vision.filter(|_| show) {
             let line = crate::i18n::tr(if vision.local_hidden {
@@ -750,6 +853,42 @@ mod tests {
             .single(app.world())
             .unwrap();
         assert_eq!(*pick, Pickable::IGNORE);
+        app.insert_resource(crate::pause_menu::PauseMenuState {
+            open: true,
+            in_settings: true,
+        });
+        app.update();
+        let status_display = |app: &mut App| {
+            app.world_mut()
+                .query_filtered::<&Node, With<BrushStatus>>()
+                .single(app.world())
+                .unwrap()
+                .display
+        };
+        assert_eq!(status_display(&mut app), Display::None);
+        assert!(
+            app.world().resource::<VisionPresentation>().active,
+            "settings hide badges, not world fog"
+        );
+        app.world_mut()
+            .resource_mut::<crate::pause_menu::PauseMenuState>()
+            .open = false;
+        app.insert_resource(crate::input_context::GameplayInputContext {
+            modal_open: true,
+            ..default()
+        });
+        app.update();
+        assert_eq!(status_display(&mut app), Display::None);
+        assert!(app.world().resource::<VisionPresentation>().active);
+        app.world_mut()
+            .resource_mut::<crate::input_context::GameplayInputContext>()
+            .modal_open = false;
+        app.update();
+        assert_eq!(
+            status_display(&mut app),
+            Display::Flex,
+            "closing the modal restores the brush badge"
+        );
         app.world_mut().resource_mut::<GameStateSnapshot>().state = GameState::Lobby;
         app.update();
         assert!(!app.world().resource::<VisionPresentation>().active);

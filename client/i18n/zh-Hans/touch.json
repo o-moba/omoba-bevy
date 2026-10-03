@@ -13,5 +13,6 @@
   "touch.aim.skill": "拖动瞄准 · 松开施放\n移到 × 取消",
   "touch.skill.rank": "{rank} 级",
   "touch.skill.unlocks": "{level} 级解锁",
-  "touch.rotate": "请横置手机\n横屏游玩 Omoba"
+  "touch.rotate": "请横置手机\n横屏游玩 Omoba",
+  "touch.recall": "回城"
 }

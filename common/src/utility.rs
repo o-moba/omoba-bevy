@@ -40,13 +40,22 @@ pub fn handle_utility_request(
     // Failed requests are consumed too; a cooldown/death replay cannot activate later.
     player.hero.utility.last_request_id = request_id;
     player.last_seen = now;
+    if action == UtilityAction::CancelRecall {
+        crate::recall::cancel(player);
+        return;
+    }
     if !matches!(phase, GameState::Running) || player.hero.hp <= 0.0 {
         return;
+    }
+    if action != UtilityAction::Recall {
+        crate::recall::cancel(player);
     }
     if player.hero.skills.control.movement(now) == 0.0 {
         return;
     }
     match action {
+        UtilityAction::Recall => crate::recall::start(player, now),
+        UtilityAction::CancelRecall => unreachable!("handled before action gates"),
         UtilityAction::Dash => {
             if hero_timers::dash_remaining(player, now) > 0.0
                 || !direction.iter().all(|x| x.is_finite())

@@ -36,5 +36,15 @@
   "pause.button.leave_match": "Покинуть матч",
   "pause.preview.iphone16": "Интерфейс iPhone 16",
   "pause.preview.hint": "Временно показывает телефонную вёрстку на iPad. Кнопка «Вернуться к iPad» над игрой вернёт полный экран.",
-  "pause.preview.return": "Вернуться к iPad"
+  "pause.preview.return": "Вернуться к iPad",
+  "pause.settings.render": "Частота кадров",
+  "pause.render.limit": "Ограничение FPS",
+  "pause.render.hint": "120 FPS требует подходящего экрана. Частота зависит от нагрузки и режима питания.",
+  "pause.settings.hud": "Расположение кнопок",
+  "pause.hud.hint": "Сдвиг кнопок по 8 точек. X — вправо; Y — вниз. Края экрана ограничивают сдвиг.",
+  "pause.hud.joystick_x": "Стик · по горизонтали",
+  "pause.hud.joystick_y": "Стик · по вертикали",
+  "pause.hud.combat_x": "Скиллы · по горизонтали",
+  "pause.hud.combat_y": "Скиллы · по вертикали",
+  "pause.hud.reset": "Сбросить положение кнопок"
 }

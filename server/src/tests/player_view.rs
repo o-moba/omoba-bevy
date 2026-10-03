@@ -105,6 +105,8 @@ fn assert_view(rt: &ServerRuntime, addr: SocketAddr, now: Instant, step: &str, e
             haste_active_secs: expected.haste_active,
             last_request_id: hero.utility.last_request_id,
             dash_sequence: hero.utility.dash_sequence,
+            recall_remaining_secs: common::recall::remaining(player, now),
+            recall_sequence: hero.utility.recall_sequence,
         },
         inventory: economy.inventory.clone(),
         item_bonuses: hero_stats::combat_bonuses(player),

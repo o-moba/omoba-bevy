@@ -702,6 +702,7 @@ mod tests {
                     haste_active_secs: 2.5,
                     last_request_id: 4,
                     dash_sequence: 2,
+                    ..Default::default()
                 },
                 inventory: vec![ItemId::EmberBlade],
                 item_bonuses: ItemBonuses {
@@ -811,13 +812,41 @@ mod tests {
     // Captured from `server/src/main.rs` (0.23.0-rc.6) before the wire types
     // moved here: the exact bytes the authoritative server emitted. Changing
     // any of these strings changes the protocol.
-    const GOLDEN_SNAPSHOT: &str = r#"{"type":"snapshot","vision":null,"sandbox":null,"match_mode":"dev","geometry_id":"verdant","map_profile":"verdant_default","protocol_version":2,"server_epoch":7,"match_id":3,"snapshot_tick":42,"join_error":"match_full","your_id":1,"players":[{"supporter_aura":"solar","is_bot":true,"id":1,"x":1.5,"y":0.5,"z":-2.25,"yaw":0.75,"team":"blue","hp":90.5,"max_hp":210.0,"mana":40.25,"max_mana":100.0,"gold":350,"earned_gold":125,"utility":{"dash_remaining_secs":1.5,"haste_remaining_secs":0.0,"haste_active_secs":2.5,"last_request_id":4,"dash_sequence":2},"inventory":["ember_blade"],"item_bonuses":{"damage_multiplier":1.25,"attack_speed_multiplier":1.0,"move_speed_multiplier":1.0,"spell_haste_multiplier":1.0,"max_hp":20.0,"max_mana":0.0},"shop_available":true,"last_purchase":{"request_id":5,"match_id":3,"item_id":"ember_blade","error":null},"basic_attack_cooldown_secs":1.25,"basic_attack_remaining_secs":0.5,"skill_cooldown_remaining_secs":[0.0,1.5,0.0,12.0],"skill_recovery_remaining_secs":0.25,"basic_attack_request_id":9,"xp":45,"level":2,"next_level_xp":180,"skill_points":1,"ranks":[2,1,1,1],"character":"ipfs","hero_class":"warden","avatar":"agnes","sprite_character":"cathedral-moth-bellringer","action_sequence":6,"action_kind":"cast","action_slot":3}],"scoreboard":null,"prematch":null,"projectiles":[{"source_kind":"player","style":"claw","action_slot":0,"direction":[0.0,0.0,1.0],"id":20,"owner_id":1,"owner_team":"blue","x":2.0,"y":1.0,"z":-3.0}],"combat_events":[],"structures":[{"protected":true,"map_key":"green_top_t1","visual_profile":"verdant_tower","lane":"top","tier":1,"id":30,"kind":"tower","team":"green","x":10.0,"y":3.0,"z":-20.0,"hp":240.0,"max_hp":240.0}],"minions":[{"kind":"caster","attack_sequence":3,"id":40,"team":"green","lane":"mid","x":4.0,"y":0.5,"z":-6.0,"yaw":2.75,"hp":65.0,"max_hp":65.0,"state":"chasing","target_kind":"structure","target_id":30}],"neutrals":[{"id":50,"camp_type":"king_mutatio_boss","x":60.0,"y":0.0,"z":60.0,"yaw":0.0,"hp":1200.0,"max_hp":1500.0,"ai_state":"aggro"}],"team_buffs":[{"team":"blue","kind":"wendigo_favor","remaining_secs":30.5}],"forest_pickups":[],"game_state":{"type":"victory","winner":"blue"},"rematch_in_secs":5}"#;
+    const GOLDEN_SNAPSHOT: &str = r#"{"type":"snapshot","vision":null,"sandbox":null,"match_mode":"dev","geometry_id":"verdant","map_profile":"verdant_default","protocol_version":2,"server_epoch":7,"match_id":3,"snapshot_tick":42,"join_error":"match_full","your_id":1,"players":[{"supporter_aura":"solar","is_bot":true,"id":1,"x":1.5,"y":0.5,"z":-2.25,"yaw":0.75,"team":"blue","hp":90.5,"max_hp":210.0,"mana":40.25,"max_mana":100.0,"gold":350,"earned_gold":125,"utility":{"dash_remaining_secs":1.5,"haste_remaining_secs":0.0,"haste_active_secs":2.5,"last_request_id":4,"dash_sequence":2,"recall_remaining_secs":0.0,"recall_sequence":0},"inventory":["ember_blade"],"item_bonuses":{"damage_multiplier":1.25,"attack_speed_multiplier":1.0,"move_speed_multiplier":1.0,"spell_haste_multiplier":1.0,"max_hp":20.0,"max_mana":0.0},"shop_available":true,"last_purchase":{"request_id":5,"match_id":3,"item_id":"ember_blade","error":null},"basic_attack_cooldown_secs":1.25,"basic_attack_remaining_secs":0.5,"skill_cooldown_remaining_secs":[0.0,1.5,0.0,12.0],"skill_recovery_remaining_secs":0.25,"basic_attack_request_id":9,"xp":45,"level":2,"next_level_xp":180,"skill_points":1,"ranks":[2,1,1,1],"character":"ipfs","hero_class":"warden","avatar":"agnes","sprite_character":"cathedral-moth-bellringer","action_sequence":6,"action_kind":"cast","action_slot":3}],"scoreboard":null,"prematch":null,"projectiles":[{"source_kind":"player","style":"claw","action_slot":0,"direction":[0.0,0.0,1.0],"id":20,"owner_id":1,"owner_team":"blue","x":2.0,"y":1.0,"z":-3.0}],"combat_events":[],"structures":[{"protected":true,"map_key":"green_top_t1","visual_profile":"verdant_tower","lane":"top","tier":1,"id":30,"kind":"tower","team":"green","x":10.0,"y":3.0,"z":-20.0,"hp":240.0,"max_hp":240.0}],"minions":[{"kind":"caster","attack_sequence":3,"id":40,"team":"green","lane":"mid","x":4.0,"y":0.5,"z":-6.0,"yaw":2.75,"hp":65.0,"max_hp":65.0,"state":"chasing","target_kind":"structure","target_id":30}],"neutrals":[{"id":50,"camp_type":"king_mutatio_boss","x":60.0,"y":0.0,"z":60.0,"yaw":0.0,"hp":1200.0,"max_hp":1500.0,"ai_state":"aggro"}],"team_buffs":[{"team":"blue","kind":"wendigo_favor","remaining_secs":30.5}],"forest_pickups":[],"game_state":{"type":"victory","winner":"blue"},"rematch_in_secs":5}"#;
     const GOLDEN_SET_GOD_MODE: &str = r#"{"type":"set_god_mode","enabled":true}"#;
     const GOLDEN_TRANSFORM: &str =
         r#"{"type":"transform","dash_sequence":3,"x":1.5,"y":0.0,"z":-2.25,"yaw":0.5}"#;
     const GOLDEN_BASIC_ATTACK: &str = r#"{"type":"basic_attack","target":{"kind":"minion","id":9},"server_epoch":7,"match_id":3,"request_id":11}"#;
     const GOLDEN_JOIN: &str = r#"{"type":"join","prematch":true,"team":"green","character":"ipfs","hero_class":"warden","avatar":"agnes","sprite_character":null,"session_id":"session-1","passport_ticket":null}"#;
     const GOLDEN_SOCIAL: &str = r#"{"type":"social","server_epoch":7,"match_id":3,"sequence":2,"social":{"events":[],"request_id":null,"error":null,"allowed_reactions":[]}}"#;
+
+    #[test]
+    fn recall_commands_round_trip_and_legacy_utility_defaults_have_no_channel() {
+        let legacy: crate::utility::UtilityState = serde_json::from_value(json!({
+            "dash_remaining_secs": 2.0, "last_request_id": 4, "dash_sequence": 2
+        }))
+        .unwrap();
+        assert_eq!(legacy.recall_remaining_secs, 0.0);
+        assert_eq!(legacy.recall_sequence, 0);
+        for action in ["recall", "cancel_recall"] {
+            let encoded = json!({"type":"utility","action":action,"direction":[0.0,0.0],
+                "server_epoch":7,"match_id":3,"request_id":5});
+            let decoded: ClientPacket = serde_json::from_value(encoded.clone()).unwrap();
+            assert_eq!(serde_json::to_value(decoded).unwrap(), encoded);
+        }
+        let state = crate::utility::UtilityState {
+            recall_remaining_secs: 6.5,
+            recall_sequence: 3,
+            ..Default::default()
+        };
+        assert_eq!(
+            serde_json::from_value::<crate::utility::UtilityState>(
+                serde_json::to_value(state).unwrap()
+            )
+            .unwrap(),
+            state
+        );
+    }
 
     #[test]
     fn join_equipment_is_additive_and_nondefault_values_are_preserved() {

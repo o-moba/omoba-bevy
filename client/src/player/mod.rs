@@ -22,6 +22,7 @@ pub(crate) use input::{mobile_screen_direction, viewport_to_simulation_world};
 
 use animation::{PlayerAnimationLibrary, sync_jump_fallback_mode};
 use input::{handle_player_input, move_player_analog, plan_movement_routes};
+pub(crate) use motion::Jumping;
 use motion::{animate_jump, apply_gravity, move_player, resolve_player_structure_overlap};
 use respawn_ui::{RespawnCountdown, respawn_countdown_system, setup_respawn_ui};
 

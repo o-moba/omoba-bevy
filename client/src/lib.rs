@@ -12,6 +12,7 @@ mod combat;
 mod combat_feedback;
 mod combat_visuals;
 mod creatures3d;
+mod dash_preview;
 mod debug;
 mod decor;
 mod domain;
@@ -55,6 +56,8 @@ mod projectile_visuals;
 #[cfg(feature = "qa")]
 mod qa;
 mod reaction_visuals;
+mod recall;
+mod render_settings;
 mod sandbox;
 mod session_config;
 mod shop;

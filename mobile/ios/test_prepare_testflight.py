@@ -23,7 +23,8 @@ class ArchiveTests(unittest.TestCase):
         (self.app / "assets/legal").mkdir(parents=True)
         (self.app / "assets/legal/SOURCE-REVISION.json").write_text("{}")
         self.info = {"CFBundleIdentifier": "space.ekza.omoba.beta", "CFBundleExecutable": "client",
-                     "CFBundleShortVersionString": "0.20.0", "MinimumOSVersion": "15.0"}
+                     "CFBundleShortVersionString": "0.20.0", "MinimumOSVersion": "15.0",
+                     "ITSAppUsesNonExemptEncryption": False}
         (self.app / "Info.plist").write_bytes(plistlib.dumps(self.info))
         (self.app / "client").write_bytes(macho())
         self.dsym = dsym_fixture(self.root)
@@ -164,6 +165,8 @@ class ArchiveTests(unittest.TestCase):
         self.assertEqual((retained / "Contents/Resources/DWARF/client").read_bytes(),
                          (self.dsym / "Contents/Resources/DWARF/client").read_bytes())
         self.assertEqual(before, {p: p.read_bytes() for p in before})
+        packaged = plistlib.loads((self.output / "Products/Applications/OmobaBeta.app/Info.plist").read_bytes())
+        self.assertIs(packaged["ITSAppUsesNonExemptEncryption"], False)
         report = json.loads((self.output / "preparation.json").read_text())
         self.assertEqual(report["debug_symbols"]["uuids"], {"arm64": UUID})
         self.assertTrue(any(item["path"].startswith("dSYMs/") for item in report["files"]))

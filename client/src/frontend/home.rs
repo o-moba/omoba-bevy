@@ -396,7 +396,7 @@ fn spawn_home(
         - (viewport.y - reference.y * fit) * 0.5)
         / fit;
     let hero_height = if phone { 250.0 } else { 440.0 };
-    let hero_top = stage_y - hero_height * 0.87;
+    let hero_top = stage_y - hero_height * super::preview::PREVIEW_GROUND_ANCHOR;
     let party_line = signature(
         &career,
         &session,

@@ -23,6 +23,9 @@ pub(crate) use super::preview_interaction::InteractivePreview;
 pub const PREVIEW_LAYER: usize = 28;
 const PREVIEW_WIDTH: u32 = 460;
 const PREVIEW_HEIGHT: u32 = 620;
+/// The painted Home platform meets the preview at this fraction of its height.
+/// Camera fitting must preserve this ground line when a wide model zooms out.
+pub(super) const PREVIEW_GROUND_ANCHOR: f32 = 0.87;
 /// Frames the layer tagging keeps running *after* the scene reported ready, to
 /// catch entities inserted by post-load systems. Before that it runs for as
 /// long as the scene takes, however slow the load is.
@@ -208,6 +211,7 @@ impl Plugin for AvatarPreviewPlugin {
                     apply_clip_selection,
                     spin_preview,
                     toggle_preview_camera,
+                    frame_preview_camera,
                 )
                     .chain(),
             );
@@ -694,6 +698,140 @@ fn toggle_preview_camera(
     }
 }
 
+const PREVIEW_FRAME_LIMIT: f32 = 0.9;
+
+/// Exact rotational envelope of the authored vertices. A wing's radius must
+/// not also become the radius of an imaginary foot at the same AABB corner.
+struct PreviewFit {
+    tan_y: f32,
+    horizontal_factor: f32,
+    distance: f32,
+    vertices: usize,
+}
+
+impl PreviewFit {
+    fn new(fov: f32, aspect: f32) -> Self {
+        let tan_y = (fov * 0.5).tan();
+        Self {
+            tan_y,
+            // max over yaw of z + |x| / horizontal_tangent, for a vertex
+            // orbit of radius r, is r * sqrt(1 + 1 / tangent^2).
+            horizontal_factor: (1.0 + (1.0 / (PREVIEW_FRAME_LIMIT * tan_y * aspect)).powi(2))
+                .sqrt(),
+            distance: 0.1,
+            vertices: 0,
+        }
+    }
+
+    /// The normalized model is grounded first, so y=0 is the platform plane.
+    fn include(&mut self, point: Vec3) {
+        if !point.is_finite() {
+            return;
+        }
+        let ground_ndc = 2.0 * PREVIEW_GROUND_ANCHOR - 1.0;
+        let radius = point.xz().length();
+        // Solve the upper/lower frustum inequalities at this vertex's actual
+        // height, for its nearest possible depth during a complete turn.
+        self.distance = self
+            .distance
+            .max(radius * self.horizontal_factor)
+            .max(
+                (point.y / self.tan_y + PREVIEW_FRAME_LIMIT * radius)
+                    / (PREVIEW_FRAME_LIMIT + ground_ndc),
+            )
+            .max(
+                (PREVIEW_FRAME_LIMIT * radius - point.y / self.tan_y)
+                    / (PREVIEW_FRAME_LIMIT - ground_ndc),
+            );
+        self.vertices += 1;
+    }
+
+    fn frame(&self) -> (Vec3, f32) {
+        let distance = self.distance * 1.001;
+        let camera_y = (2.0 * PREVIEW_GROUND_ANCHOR - 1.0) * distance * self.tan_y;
+        (Vec3::new(0.0, camera_y, 0.0), distance)
+    }
+}
+
+#[derive(PartialEq)]
+struct PreviewFrameKey {
+    model: Entity,
+    asset: AssetId<Gltf>,
+    transform: Transform,
+    fov: f32,
+    aspect: f32,
+}
+
+struct PreviewFrameCache {
+    key: PreviewFrameKey,
+    frame: (Vec3, f32),
+}
+
+fn frame_preview_camera(
+    preview: Res<AvatarPreview>,
+    gltfs: Res<Assets<Gltf>>,
+    nodes: Res<Assets<bevy::gltf::GltfNode>>,
+    gltf_meshes: Res<Assets<bevy::gltf::GltfMesh>>,
+    meshes: Res<Assets<Mesh>>,
+    mut models: Query<(&mut Transform, &NormalizeModelScale), Without<PreviewCamera>>,
+    mut cameras: Query<(&mut Transform, &Projection), With<PreviewCamera>>,
+    mut cached: Local<Option<PreviewFrameCache>>,
+) {
+    let (Some(model), Some(handle)) = (preview.model, preview.gltf.as_ref()) else {
+        return;
+    };
+    let Ok((mut model_transform, normalization)) = models.get_mut(model) else {
+        return;
+    };
+    let Some(foot_y) = normalization.foot_local_y() else {
+        return;
+    };
+    // Imported models can have a centered or offset origin. Ground them at the
+    // preview pivot, just as the match renderer does, without changing scale or
+    // applying an avatar-specific correction. This also aligns the 3D pedestal.
+    if model_transform.translation.y != -foot_y {
+        model_transform.translation.y = -foot_y;
+    }
+    for (mut transform, projection) in &mut cameras {
+        let Projection::Perspective(projection) = projection else {
+            continue;
+        };
+        let key = PreviewFrameKey {
+            model,
+            asset: handle.id(),
+            transform: *model_transform,
+            fov: projection.fov,
+            aspect: PREVIEW_WIDTH as f32 / PREVIEW_HEIGHT as f32,
+        };
+        if cached.as_ref().is_none_or(|cache| cache.key != key) {
+            let Some(gltf) = gltfs.get(handle) else {
+                continue;
+            };
+            let mut fit = PreviewFit::new(key.fov, key.aspect);
+            if crate::model_scale::visit_gltf_mesh_vertices(
+                gltf,
+                &nodes,
+                &gltf_meshes,
+                &meshes,
+                |point| fit.include(key.transform.transform_point(point)),
+            )
+            .is_none()
+                || fit.vertices == 0
+            {
+                continue;
+            }
+            *cached = Some(PreviewFrameCache {
+                key,
+                frame: fit.frame(),
+            });
+        }
+        let (center, distance) = cached.as_ref().unwrap().frame;
+        let center = PREVIEW_ORIGIN + center;
+        *transform =
+            Transform::from_translation(center + Vec3::Z * distance).looking_at(center, Vec3::Y);
+    }
+}
+
 #[derive(Component)]
 struct PreviewPedestal;
 
@@ -715,6 +853,116 @@ fn release_preview_off_screen(screen: Res<State<AppScreen>>, mut preview: ResMut
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn box_vertices(min: Vec3, max: Vec3) -> Vec<Vec3> {
+        let mut vertices = Vec::new();
+        for x in [min.x, max.x] {
+            for y in [min.y, max.y] {
+                for z in [min.z, max.z] {
+                    vertices.push(Vec3::new(x, y - min.y, z));
+                }
+            }
+        }
+        vertices
+    }
+
+    fn fit_vertices(vertices: &[Vec3], fov: f32, aspect: f32) -> (Vec3, f32) {
+        let mut fit = PreviewFit::new(fov, aspect);
+        for point in vertices {
+            fit.include(*point);
+        }
+        fit.frame()
+    }
+
+    fn assert_full_rotation_fits(vertices: &[Vec3], fov: f32, aspect: f32) {
+        let (center, distance) = fit_vertices(vertices, fov, aspect);
+        let ground_y = -center.y / (distance * (fov * 0.5).tan());
+        assert!(((1.0 - ground_y) * 0.5 - PREVIEW_GROUND_ANCHOR).abs() < 1e-6);
+        for degrees in 0..360 {
+            let rotation = Quat::from_rotation_y((degrees as f32).to_radians());
+            for vertex in vertices {
+                let point = rotation * *vertex - center;
+                let depth = distance - point.z;
+                assert!(depth > 0.0);
+                assert!(point.x.abs() / (depth * (fov * 0.5).tan() * aspect) < 0.9);
+                assert!(point.y.abs() / (depth * (fov * 0.5).tan()) < 0.9);
+            }
+        }
+    }
+
+    #[test]
+    fn framing_contains_tall_wide_and_offset_avatars_at_every_rotation() {
+        let fov = std::f32::consts::FRAC_PI_4;
+        let aspect = PREVIEW_WIDTH as f32 / PREVIEW_HEIGHT as f32;
+        for (min, max) in [
+            (Vec3::new(-0.4, 0.0, -0.2), Vec3::new(0.4, 3.6, 0.2)),
+            (Vec3::new(-2.0, 0.0, -0.5), Vec3::new(2.0, 2.1, 0.5)),
+            (Vec3::new(-0.3, -1.2, -0.6), Vec3::new(1.4, 1.5, 0.4)),
+            (Vec3::new(-3.0, 0.0, -1.5), Vec3::new(3.0, 1.2, 1.5)),
+        ] {
+            assert_full_rotation_fits(&box_vertices(min, max), fov, aspect);
+        }
+    }
+
+    #[test]
+    fn broad_upper_silhouette_with_narrow_feet_stays_large_and_grounded() {
+        // Wings belong to the upper body, not to a box stretched down to the
+        // feet. This catches the overly distant full-cylinder lower constraint.
+        let vertices = [
+            Vec3::new(-0.1, 0.0, -0.09),
+            Vec3::new(0.1, 0.0, 0.09),
+            Vec3::new(-1.075, 1.5, 0.1),
+            Vec3::new(1.075, 1.5, 0.1),
+            Vec3::new(0.0, 1.7, 0.793),
+            Vec3::new(0.0, 2.1, 0.0),
+        ];
+        for fov in [35_f32, 45.0, 60.0].map(f32::to_radians) {
+            for aspect in [PREVIEW_WIDTH as f32 / PREVIEW_HEIGHT as f32, 1.0] {
+                assert_full_rotation_fits(&vertices, fov, aspect);
+            }
+        }
+        let (camera, distance) = fit_vertices(
+            &vertices,
+            std::f32::consts::FRAC_PI_4,
+            PREVIEW_WIDTH as f32 / PREVIEW_HEIGHT as f32,
+        );
+        assert!(distance < 4.3, "upper wings must not invent wide feet");
+        let projected_height = 2.1 / (distance * (std::f32::consts::PI / 8.0).tan()) * 125.0;
+        assert!(
+            projected_height > 145.0,
+            "readable silhouette in the 250px Home panel"
+        );
+        assert!((camera.y / distance / (std::f32::consts::PI / 8.0).tan() - 0.74).abs() < 1e-6);
+    }
+
+    #[test]
+    fn fitted_feet_stay_on_home_platform_on_phone_and_desktop() {
+        let fov = std::f32::consts::FRAC_PI_4;
+        let aspect = PREVIEW_WIDTH as f32 / PREVIEW_HEIGHT as f32;
+        // Home centers the image inside its authored panel; the fractional
+        // image dimensions introduce less than one logical pixel of slack.
+        for (panel_height, image_width) in [(250.0, 185.0), (440.0, 326.0)] {
+            let image_height = image_width / 0.742;
+            let stage_y = 500.0;
+            let panel_top = stage_y - panel_height * PREVIEW_GROUND_ANCHOR;
+            let image_top = panel_top + (panel_height - image_height) * 0.5;
+            for (height, width, depth, bottom) in [
+                (2.3, 0.8, 0.4, 0.0),
+                (2.3, 4.0, 1.0, 0.0),
+                (4.6, 1.0, 0.8, -1.2),
+            ] {
+                let min = Vec3::new(-width * 0.5, bottom, -depth * 0.5);
+                let max = Vec3::new(width * 0.5, bottom + height, depth * 0.5);
+                let (camera, distance) = fit_vertices(&box_vertices(min, max), fov, aspect);
+                let foot_ndc = -camera.y / (distance * (fov * 0.5).tan());
+                let foot_y = image_top + (1.0 - foot_ndc) * 0.5 * image_height;
+                assert!(
+                    (foot_y - stage_y).abs() < 0.5,
+                    "feet must meet the platform after fitting {width}x{height}: {foot_y} vs {stage_y}"
+                );
+            }
+        }
+    }
 
     #[test]
     fn greeting_selects_real_expressive_clips_and_can_replay() {

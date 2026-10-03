@@ -399,7 +399,9 @@ fn observe(
         qa.stage += 1;
         qa.in_flight = false;
         qa.applied_stage = None;
-        if std::env::var("OMOBA_SERVER_ENTRY_QA").as_deref() == Ok("1") {
+        if std::env::var("OMOBA_SERVER_ENTRY_QA").as_deref() == Ok("1")
+            || std::env::var("OMOBA_HOME_ONLY_QA").as_deref() == Ok("1")
+        {
             qa.stage = VIEWS.len();
         } else if qa.stage == 11 && !mobile.enabled {
             // The shared server editor is available on desktop too; phone help
@@ -433,6 +435,16 @@ fn observe(
         return;
     }
     if qa.applied_stage != Some(qa.stage) || *screen.get() != VIEWS[qa.stage].1 {
+        return;
+    }
+    if qa.stage == 0
+        && std::env::var("OMOBA_HOME_ONLY_QA").as_deref() == Ok("1")
+        && !matches!(
+            preview.status,
+            crate::frontend::preview::PreviewStatus::Ready
+                | crate::frontend::preview::PreviewStatus::NoAnimations
+        )
+    {
         return;
     }
     qa.settled += 1;

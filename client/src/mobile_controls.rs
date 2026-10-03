@@ -53,6 +53,8 @@ pub(crate) struct MobileLayout {
     pub category_centers: [Vec2; 2],
     pub utility_centers: [Vec2; 2],
     pub auxiliary_radius: f32,
+    pub category_radius: f32,
+    pub recall_center: Vec2,
     pub upgrade_center: Vec2,
     pub upgrade_radius: f32,
 }
@@ -83,11 +85,13 @@ const ATTACK_DRAG_DEAD_ZONE: f32 = 12.0;
 const ATTACK_DRAG_REACH: f32 = 96.0;
 const SKILL_DESCRIPTION_SECONDS: f32 = crate::combat::inspection::HOLD_SECONDS as f32;
 const SKILL_DRAG_DEAD_ZONE: f32 = 20.0;
-/// The combat group of `hud.md` (phone): ATK 96 anchored 76 px inside the
-/// safe bottom-right corner, the four abilities (64) on an inner arc and the
-/// utilities (48) on an outer arc, both centred on ATK. Angles are clockwise
-/// from +x with y down (screen axes).
-const ATTACK_INSET: f32 = 76.0;
+/// ATK 96 is anchored 124px from safe right and 76px from safe bottom.
+/// Four abilities and two compact category targets share one R104 arc;
+/// utilities (48) use the outer R168 arc, both centred on ATK. Angles are
+/// clockwise from +x with y down (screen axes).
+/// The 48px horizontal shift fits MINION's complete 44px touch target:
+/// 104 * cos(12°) + 22 = 123.727px. Skill heights and relative positions stay.
+const ATTACK_INSET: Vec2 = Vec2::new(124.0, 76.0);
 const ATTACK_RADIUS: f32 = crate::ui::tokens::size::ABILITY_ATTACK_PHONE * 0.5;
 const ABILITY_RADIUS: f32 = crate::ui::tokens::size::ABILITY.phone * 0.5;
 const UTILITY_RADIUS: f32 = crate::ui::tokens::size::ABILITY_UTILITY_PHONE * 0.5;
@@ -95,13 +99,21 @@ const ABILITY_ORBIT: f32 = crate::ui::tokens::size::COMBAT_ORBIT_ABILITY_PHONE;
 const UTILITY_ORBIT: f32 = crate::ui::tokens::size::COMBAT_ORBIT_UTILITY_PHONE;
 /// Q W E R, 42° apart (≥ 10 px between rims).
 const SKILL_ORBIT_ANGLES: [f32; 4] = [162.0, 204.0, 246.0, 288.0];
-/// DASH, HASTE, CANCEL (aiming only), RANK (skill points), MIN, TWR — 22° apart.
+/// Continue the skills' shared arc at equal 42° intervals: R288, TOWER330,
+/// MINION372 (12°). Storage order follows TargetKind: MINION, TOWER.
+const CATEGORY_ORBIT_ANGLES: [f32; 2] = [372.0, 330.0];
+/// DASH, HASTE, CANCEL (aiming only), RANK (skill points), RECALL — 22° apart.
 const DASH_ANGLE: f32 = 166.0;
 const HASTE_ANGLE: f32 = 188.0;
 const CANCEL_ANGLE: f32 = 210.0;
 const RANK_ANGLE: f32 = 232.0;
-const MINION_ANGLE: f32 = 254.0;
-const TOWER_ANGLE: f32 = 276.0;
+const RECALL_ANGLE: f32 = 254.0;
+/// Narrow phones tuck HASTE between Q/W and move DASH out enough to retain
+/// separate 48px controls, leaving the hero neighborhood clear.
+const COMPACT_UTILITY_WIDTH: f32 = 700.0;
+const COMPACT_DASH_ORBIT: f32 = 176.0;
+const COMPACT_HASTE_ORBIT: f32 = 150.0;
+const COMPACT_HASTE_ANGLE: f32 = 182.6;
 /// Joystick centre: safe left + 68, safe bottom − 65; base r 52, knob r 24;
 /// the capture circle is 1.3 × r.
 const JOYSTICK_INSET: Vec2 = Vec2::new(68.0, 65.0);
@@ -109,10 +121,17 @@ const JOYSTICK_RADIUS: f32 = crate::ui::tokens::size::JOYSTICK_PHONE * 0.5;
 const JOYSTICK_CAPTURE: f32 = 1.3;
 pub(crate) const KNOB_RADIUS: f32 = crate::ui::tokens::size::JOYSTICK_KNOB_PHONE * 0.5;
 /// Width the group needs at scale 1: the joystick capture circle from the
-/// safe left edge to DASH's left rim from the safe right edge.
-fn combat_group_span() -> f32 {
-    JOYSTICK_INSET.x + JOYSTICK_RADIUS * JOYSTICK_CAPTURE + ATTACK_INSET
-        - UTILITY_ORBIT * DASH_ANGLE.to_radians().cos()
+/// safe left edge to the leftmost utility's rim.
+fn combat_group_span(compact: bool) -> f32 {
+    let utility_left = if compact {
+        -COMPACT_DASH_ORBIT * DASH_ANGLE.to_radians().cos()
+    } else {
+        -UTILITY_ORBIT * HASTE_ANGLE.to_radians().cos()
+    };
+    JOYSTICK_INSET.x
+        + JOYSTICK_RADIUS * JOYSTICK_CAPTURE
+        + ATTACK_INSET.x
+        + utility_left
         + UTILITY_RADIUS
 }
 
@@ -140,11 +159,37 @@ struct Capture {
     gesture: u64,
 }
 
+/// Player adjustments are bounded and applied to each whole control group.
+#[derive(
+    Resource, Debug, Default, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize,
+)]
+#[serde(default)]
+pub(crate) struct HudPositionSettings {
+    pub joystick_offset: Vec2,
+    pub combat_offset: Vec2,
+}
+impl HudPositionSettings {
+    pub(crate) fn sanitized(self) -> Self {
+        let clean = |v: Vec2| {
+            if v.is_finite() {
+                v.clamp(Vec2::splat(-60.0), Vec2::splat(60.0))
+            } else {
+                Vec2::ZERO
+            }
+        };
+        Self {
+            joystick_offset: clean(self.joystick_offset),
+            combat_offset: clean(self.combat_offset),
+        }
+    }
+}
+
 #[derive(Resource)]
 pub(crate) struct MobileControls {
     /// Chosen from the compiled platform once; resizing never changes this.
     pub enabled: bool,
     pub viewport: Vec2,
+    pub hud_position: HudPositionSettings,
     pub landscape: bool,
     pub safe: MobileSafeInsets,
     pub focused: bool,
@@ -156,6 +201,7 @@ pub(crate) struct MobileControls {
     pub category_attacks: Vec<TargetKind>,
     pub utilities: Vec<(UtilityAction, Option<Vec2>)>,
     utilities_available: bool,
+    recall_active: bool,
     upgrade_mode: bool,
     captures: HashMap<u64, Capture>,
     upgrade_enabled: [bool; 4],
@@ -171,6 +217,7 @@ impl Default for MobileControls {
             // `MobileControlsPlugin` copies the platform in; tests set it.
             enabled: false,
             viewport: Vec2::new(844.0, 390.0),
+            hud_position: HudPositionSettings::default(),
             landscape: true,
             safe: MobileSafeInsets {
                 left: 32.0,
@@ -186,6 +233,7 @@ impl Default for MobileControls {
             category_attacks: Vec::new(),
             utilities: Vec::new(),
             utilities_available: true,
+            recall_active: false,
             upgrade_mode: false,
             captures: HashMap::new(),
             upgrade_enabled: [false; 4],
@@ -213,12 +261,16 @@ impl MobileControls {
     /// (today's rule, ≥ 1). Keep this separate from frontend scale: small
     /// phones still need full-size controls, while menu typography and panels
     /// may use the smaller UI scale.
+    fn compact_utilities(&self) -> bool {
+        self.viewport.x - self.safe.left - self.safe.right < COMPACT_UTILITY_WIDTH
+    }
+
     pub(crate) fn combat_scale(&self) -> f32 {
         let usable_width = self.viewport.x - self.safe.left - self.safe.right;
         // Preserve at least 48px between the joystick's expanded hit circle
         // and the leftmost utility on narrow landscape viewports.
         self.scale()
-            .min((usable_width - 48.0) / combat_group_span())
+            .min((usable_width - 48.0) / combat_group_span(self.compact_utilities()))
             .max(1.0)
     }
 
@@ -230,7 +282,7 @@ impl MobileControls {
         let s = self.combat_scale();
         let right = self.viewport.x - self.safe.right;
         let bottom = self.viewport.y - self.safe.bottom;
-        let attack_center = Vec2::new(right - ATTACK_INSET * s, bottom - ATTACK_INSET * s);
+        let attack_center = Vec2::new(right, bottom) - ATTACK_INSET * s;
         let arc = |radius: f32| {
             move |angle: f32| {
                 let (sin, cos) = angle.to_radians().sin_cos();
@@ -239,7 +291,7 @@ impl MobileControls {
         };
         let inner = arc(ABILITY_ORBIT);
         let outer = arc(UTILITY_ORBIT);
-        MobileLayout {
+        let mut layout = MobileLayout {
             joystick_center: Vec2::new(
                 self.safe.left + JOYSTICK_INSET.x * s,
                 bottom - JOYSTICK_INSET.y * s,
@@ -251,12 +303,85 @@ impl MobileControls {
             cancel_radius: UTILITY_RADIUS * s,
             ability_centers: SKILL_ORBIT_ANGLES.map(inner),
             ability_radii: [ABILITY_RADIUS * s; 4],
-            category_centers: [outer(MINION_ANGLE), outer(TOWER_ANGLE)],
-            utility_centers: [outer(DASH_ANGLE), outer(HASTE_ANGLE)],
+            category_centers: CATEGORY_ORBIT_ANGLES.map(inner),
+            category_radius: 22.0 * s,
+            recall_center: outer(RECALL_ANGLE),
+            utility_centers: if self.compact_utilities() {
+                [
+                    arc(COMPACT_DASH_ORBIT)(DASH_ANGLE),
+                    arc(COMPACT_HASTE_ORBIT)(COMPACT_HASTE_ANGLE),
+                ]
+            } else {
+                [outer(DASH_ANGLE), outer(HASTE_ANGLE)]
+            },
             auxiliary_radius: UTILITY_RADIUS * s,
             upgrade_center: outer(RANK_ANGLE),
             upgrade_radius: UTILITY_RADIUS * s,
+        };
+        let settings = self.hud_position.sanitized();
+        let safe_min = Vec2::new(self.safe.left, self.safe.top);
+        let safe_max = self.viewport - Vec2::new(self.safe.right, self.safe.bottom);
+        let clamp_shift = |requested: Vec2, min: Vec2, max: Vec2| {
+            requested.clamp(
+                (safe_min - min).min(Vec2::ZERO),
+                (safe_max - max).max(Vec2::ZERO),
+            )
+        };
+        layout.joystick_center += clamp_shift(
+            settings.joystick_offset,
+            layout.joystick_center - Vec2::splat(layout.joystick_radius),
+            layout.joystick_center + Vec2::splat(layout.joystick_radius),
+        );
+        let circles = layout
+            .ability_centers
+            .into_iter()
+            .zip(layout.ability_radii)
+            .chain(
+                layout
+                    .utility_centers
+                    .into_iter()
+                    .map(|c| (c, layout.auxiliary_radius)),
+            )
+            .chain(
+                layout
+                    .category_centers
+                    .into_iter()
+                    .map(|c| (c, layout.category_radius)),
+            )
+            .chain([
+                (layout.attack_center, layout.attack_radius),
+                (layout.cancel_center, layout.cancel_radius),
+                (layout.upgrade_center, layout.upgrade_radius),
+                (layout.recall_center, layout.auxiliary_radius),
+            ]);
+        let (min, max) = circles.fold(
+            (Vec2::splat(f32::INFINITY), Vec2::splat(f32::NEG_INFINITY)),
+            |(min, max), (center, radius)| {
+                (
+                    min.min(center - Vec2::splat(radius)),
+                    max.max(center + Vec2::splat(radius)),
+                )
+            },
+        );
+        let mut shift = clamp_shift(settings.combat_offset, min, max);
+        // Keep a passage between two independently adjusted thumb groups.
+        shift.x = shift.x.max(
+            (layout.joystick_center.x + layout.joystick_radius * JOYSTICK_CAPTURE + 32.0 - min.x)
+                .min(0.0),
+        );
+        layout.attack_center += shift;
+        layout.cancel_center += shift;
+        layout.upgrade_center += shift;
+        layout.recall_center += shift;
+        for center in layout
+            .ability_centers
+            .iter_mut()
+            .chain(layout.utility_centers.iter_mut())
+            .chain(layout.category_centers.iter_mut())
+        {
+            *center += shift;
         }
+        layout
     }
 
     pub(crate) fn clear(&mut self) {
@@ -301,7 +426,7 @@ impl MobileControls {
             .into_iter()
             .enumerate()
         {
-            if point.distance(l.category_centers[index]) <= l.auxiliary_radius {
+            if point.distance(l.category_centers[index]) <= l.category_radius {
                 return Some((Control::CategoryAttack(kind), l.category_centers[index]));
             }
         }
@@ -314,6 +439,16 @@ impl MobileControls {
             {
                 return Some((Control::Utility(action), l.utility_centers[index]));
             }
+        }
+        if self.utilities_available && point.distance(l.recall_center) <= l.auxiliary_radius {
+            return Some((
+                Control::Utility(if self.recall_active {
+                    UtilityAction::CancelRecall
+                } else {
+                    UtilityAction::Recall
+                }),
+                l.recall_center,
+            ));
         }
         if point.distance(l.attack_center) <= l.attack_radius {
             return Some((Control::Attack, l.attack_center));
@@ -406,8 +541,10 @@ impl MobileControls {
                     capture.position = position;
                     capture.dragged |= position.distance(capture.origin)
                         > control_drag_dead_zone(capture.control) * scale;
-                    capture.canceled =
-                        position.distance(layout.cancel_center) <= layout.cancel_radius;
+                    capture.canceled = position.distance(layout.cancel_center)
+                        <= layout.cancel_radius
+                        || (capture.control == Control::Utility(UtilityAction::Dash)
+                            && position.distance(capture.origin) > ATTACK_DRAG_REACH * scale * 2.0);
                 }
             }
             TouchPhase::Ended | TouchPhase::Canceled => {
@@ -418,7 +555,10 @@ impl MobileControls {
                     capture.dragged |= position.distance(capture.origin)
                         > control_drag_dead_zone(capture.control) * self.combat_scale();
                     capture.canceled = position.distance(self.layout().cancel_center)
-                        <= self.layout().cancel_radius;
+                        <= self.layout().cancel_radius
+                        || (capture.control == Control::Utility(UtilityAction::Dash)
+                            && position.distance(capture.origin)
+                                > ATTACK_DRAG_REACH * self.combat_scale() * 2.0);
                     self.attack_canceled_this_frame |= capture.control == Control::Attack
                         && (phase == TouchPhase::Canceled
                             || capture.canceled
@@ -479,6 +619,9 @@ impl MobileControls {
                             Control::CategoryAttack(kind) if !capture.dragged => {
                                 self.category_attacks.push(kind);
                             }
+                            Control::Utility(
+                                UtilityAction::Recall | UtilityAction::CancelRecall,
+                            ) if capture.dragged => {}
                             Control::Utility(action) => {
                                 self.utilities.push((
                                     action,
@@ -513,6 +656,17 @@ impl MobileControls {
                 .captures
                 .values()
                 .any(|capture| matches!(capture.control, Control::Ability(_)))
+    }
+
+    /// Screen direction for the dash preview, following the same axes as skill aiming.
+    pub(crate) fn dash_aim(&self) -> Option<Vec2> {
+        self.captures.values().find_map(|capture| {
+            (capture.control == Control::Utility(UtilityAction::Dash)
+                && capture.dragged
+                && !capture.canceled)
+                .then(|| aim_vector(capture.position - capture.origin, self.combat_scale()))
+                .flatten()
+        })
     }
 
     pub(crate) fn aimed_skill(&self) -> Option<MobileCastIntent> {
@@ -658,7 +812,8 @@ fn attack_aim_vector(delta: Vec2, scale: f32) -> Option<MobileAttackAim> {
 pub(crate) struct MobileControlsPlugin;
 impl Plugin for MobileControlsPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<MobileControls>();
+        app.init_resource::<MobileControls>()
+            .init_resource::<HudPositionSettings>();
         if let Some(platform) = app.world().get_resource::<crate::ui::UiPlatform>() {
             let enabled = platform.is_mobile();
             app.world_mut().resource_mut::<MobileControls>().enabled = enabled;
@@ -690,6 +845,7 @@ impl Plugin for MobileControlsPlugin {
 fn refresh_mobile_layout(
     window: Query<&Window, With<PrimaryWindow>>,
     mut mobile: ResMut<MobileControls>,
+    settings: Option<Res<HudPositionSettings>>,
     mut focus_events: MessageReader<WindowFocused>,
     mut lifecycle: MessageReader<AppLifecycle>,
 ) {
@@ -697,7 +853,9 @@ fn refresh_mobile_layout(
         return;
     };
     let viewport = Vec2::new(window.width(), window.height());
-    mobile.layout_changed = viewport != mobile.viewport
+    let position = settings.as_deref().copied().unwrap_or_default().sanitized();
+    mobile.layout_changed = position != mobile.hud_position
+        || viewport != mobile.viewport
         || focus_events.read().any(|event| !event.focused)
         || lifecycle.read().any(|event| {
             matches!(
@@ -705,6 +863,7 @@ fn refresh_mobile_layout(
                 AppLifecycle::WillSuspend | AppLifecycle::Suspended | AppLifecycle::WillResume
             )
         });
+    mobile.hud_position = position;
     mobile.viewport = viewport;
     mobile.landscape = viewport.x >= viewport.y;
     mobile.focused = window.focused;
@@ -734,7 +893,11 @@ fn read_mobile_controls(
     mut mobile: ResMut<MobileControls>,
     mut session_events: MessageReader<SessionEvent>,
     gamepad: Option<Res<crate::gamepad::GamepadControls>>,
+    utilities: Query<&crate::net::PlayerUtility, With<Player>>,
 ) {
+    mobile.recall_active = utilities
+        .single()
+        .is_ok_and(|utility| utility.state.recall_remaining_secs > 0.0);
     mobile.begin_input_frame();
     // A new round (`net` skips zero ids and same-round reconnects) releases
     // every held finger, like a layout change. The event is written at the
@@ -816,6 +979,9 @@ enum MobileVisual {
     Attack,
     AttackVector,
     AttackThumb,
+    DashVector,
+    DashThumb,
+    Recall,
     Cancel,
     Ability(usize),
     UpgradeMode,
@@ -865,6 +1031,7 @@ fn disc_look(visual: &MobileVisual) -> Option<DiscLook> {
             icon: Some(Icon::HudAttack),
             icon_size: size::ICON_XL,
         },
+        MobileVisual::Recall => utility(Icon::HudRecall),
         MobileVisual::Utility(0) => utility(Icon::HudDash),
         MobileVisual::Utility(_) => utility(Icon::HudHaste),
         MobileVisual::CategoryAttack(0) => utility(Icon::HudMinion),
@@ -904,6 +1071,9 @@ fn visual_name(visual: &MobileVisual) -> String {
         MobileVisual::Utility(index) => ["MobileDash", "MobileHaste"][*index].to_owned(),
         MobileVisual::RankRing(slot) => format!("MobileRankRing-{slot}"),
         MobileVisual::UpgradeBadge(slot) => format!("MobileUpgrade-{slot}"),
+        MobileVisual::Recall => "MobileRecall".to_owned(),
+        MobileVisual::DashVector => "MobileDashVector".to_owned(),
+        MobileVisual::DashThumb => "MobileDashThumb".to_owned(),
         MobileVisual::AimHint => "MobileAimHint".to_owned(),
         MobileVisual::SkillDescription => "MobileSkillDescription".to_owned(),
         MobileVisual::Rotate => "MobileRotatePrompt".to_owned(),
@@ -928,6 +1098,9 @@ fn setup_mobile_controls(mut commands: Commands) {
         MobileVisual::Thumb,
         MobileVisual::AttackVector,
         MobileVisual::AttackThumb,
+        MobileVisual::DashVector,
+        MobileVisual::DashThumb,
+        MobileVisual::Recall,
         MobileVisual::Attack,
         MobileVisual::Cancel,
         MobileVisual::UpgradeMode,
@@ -941,6 +1114,10 @@ fn setup_mobile_controls(mut commands: Commands) {
         let name = visual_name(&visual);
         let z = ZIndex(match visual {
             MobileVisual::Rotate => 250,
+            // A held finger can cross another skill. Keep the gesture above
+            // every control and upgrade badge, independent of spawn order.
+            MobileVisual::AttackVector | MobileVisual::DashVector => 40,
+            MobileVisual::AttackThumb | MobileVisual::DashThumb => 41,
             _ => 30,
         });
         let policy = if matches!(visual, MobileVisual::Rotate) {
@@ -980,9 +1157,21 @@ fn setup_mobile_controls(mut commands: Commands) {
                     BorderColor::all(color::GOLD_500),
                 ));
             }
-            MobileVisual::AttackVector | MobileVisual::AttackThumb => {
+            MobileVisual::AttackVector
+            | MobileVisual::AttackThumb
+            | MobileVisual::DashVector
+            | MobileVisual::DashThumb => {
+                let thumb = matches!(visual, MobileVisual::AttackThumb | MobileVisual::DashThumb);
                 root.insert((
-                    BackgroundColor(color::EMERALD_400),
+                    Node {
+                        border: UiRect::all(Val::Px(if thumb { 2.0 } else { 0.0 })),
+                        ..hidden()
+                    },
+                    BackgroundColor(if thumb {
+                        color::EMERALD_600
+                    } else {
+                        color::GOLD_400
+                    }),
                     BorderColor::all(color::GOLD_400),
                 ));
             }
@@ -1275,6 +1464,11 @@ fn draw_mobile_controls(
     let drag = attack
         .filter(|capture| capture.dragged)
         .map(|capture| (capture.position - capture.origin).clamp_length_max(ATTACK_DRAG_REACH * s));
+    let dash_drag = mobile
+        .captures
+        .values()
+        .find(|c| c.control == Control::Utility(UtilityAction::Dash) && c.dragged && !c.canceled)
+        .map(|c| (c.position - c.origin).clamp_length_max(ATTACK_DRAG_REACH * s));
     let inspected = mobile.inspected_skill();
     let utility = utilities
         .single()
@@ -1345,13 +1539,43 @@ fn draw_mobile_controls(
                 };
                 look_fill = Some(if mobile.attack_cancelled() {
                     color::STATE_DANGER
+                } else if vector {
+                    color::GOLD_400
                 } else {
-                    color::EMERALD_400
+                    color::EMERALD_600
                 });
                 (
                     center,
                     size,
                     visible && drag.is_some() && !mobile.skill_aiming(),
+                )
+            }
+            MobileVisual::DashVector | MobileVisual::DashThumb => {
+                let vector = matches!(visual, MobileVisual::DashVector);
+                let reach = dash_drag.unwrap_or_default();
+                (
+                    layout.utility_centers[0] + reach * if vector { 0.5 } else { 1.0 },
+                    if vector {
+                        Vec2::new(reach.length(), 3.0 * s)
+                    } else {
+                        Vec2::splat(28.0 * s)
+                    },
+                    visible && dash_drag.is_some(),
+                )
+            }
+            MobileVisual::Recall => {
+                label = tr("touch.recall").into();
+                if utility.recall_remaining_secs > 0.0 {
+                    cooldown_state = Some((
+                        utility.recall_remaining_secs,
+                        shared::utility::RECALL_CHANNEL_SECS,
+                    ));
+                    look_fill = Some(color::EMERALD_600);
+                }
+                (
+                    layout.recall_center,
+                    Vec2::splat(layout.auxiliary_radius * 2.0),
+                    visible,
                 )
             }
             MobileVisual::Cancel => {
@@ -1462,7 +1686,7 @@ fn draw_mobile_controls(
                 label = tr(["touch.target.minion", "touch.target.tower"][index]).into();
                 (
                     layout.category_centers[index],
-                    Vec2::splat(layout.auxiliary_radius * 2.0),
+                    Vec2::splat(36.0 * s),
                     visible,
                 )
             }
@@ -1495,38 +1719,9 @@ fn draw_mobile_controls(
                     visible,
                 )
             }
-            MobileVisual::AimHint => {
-                // hud.md § States, Aiming: the hint sits in the
-                // action-feedback slot under the target frame.
-                label = aiming
-                    .map(|c| {
-                        if c.canceled || (c.control == Control::Attack && mobile.attack_cancelled())
-                        {
-                            tr("touch.aim.cancel")
-                        } else if c.control == Control::Attack {
-                            tr("touch.aim.attack")
-                        } else {
-                            tr("touch.aim.skill")
-                        }
-                    })
-                    .unwrap_or("")
-                    .into();
-                let slot = crate::hud_layout::HudLayout::phone(&mobile).action_feedback;
-                node.max_width = Val::Px(slot.width());
-                node.padding = UiRect::axes(
-                    Val::Px(crate::ui::tokens::space::S12),
-                    Val::Px(crate::ui::tokens::space::S8),
-                );
-                node.border = UiRect::all(Val::Px(crate::ui::tokens::border::HAIRLINE));
-                node.border_radius = BorderRadius::all(Val::Px(crate::ui::tokens::radius::MD));
-                (
-                    Vec2::new(slot.center().x, slot.min.y),
-                    Vec2::ZERO,
-                    visible
-                        && aiming.is_some_and(|c| c.control != Control::Attack)
-                        && inspected.is_none(),
-                )
-            }
+            // Directional gestures communicate through vectors. Error feedback remains
+            // in the skill feedback layer; never add a tutorial box over combat.
+            MobileVisual::AimHint => (Vec2::ZERO, Vec2::ZERO, false),
             MobileVisual::SkillDescription => {
                 let slot = inspected;
                 let Some(mut card) = card else { continue };
@@ -1601,8 +1796,16 @@ fn draw_mobile_controls(
             }
             _ => place(&mut node, center, size),
         }
-        let rotation = if matches!(visual, MobileVisual::AttackVector) {
-            let delta = drag.unwrap_or_default();
+        let rotation = if matches!(
+            visual,
+            MobileVisual::AttackVector | MobileVisual::DashVector
+        ) {
+            let delta = if matches!(visual, MobileVisual::DashVector) {
+                dash_drag
+            } else {
+                drag
+            }
+            .unwrap_or_default();
             Rot2::radians(delta.y.atan2(delta.x))
         } else {
             Rot2::IDENTITY
@@ -1612,7 +1815,10 @@ fn draw_mobile_controls(
         }
         let round = !matches!(
             visual,
-            MobileVisual::AimHint | MobileVisual::Rotate | MobileVisual::AttackVector
+            MobileVisual::AimHint
+                | MobileVisual::Rotate
+                | MobileVisual::AttackVector
+                | MobileVisual::DashVector
         );
         if round {
             let corner = BorderRadius::all(Val::Percent(50.0));
@@ -1771,7 +1977,53 @@ mod tests {
     }
 
     #[test]
-    fn attack_aim_hint_is_hidden_but_skill_aim_hint_remains() {
+    fn gesture_overlay_stays_above_skills_and_upgrade_badges() {
+        let mut app = App::new();
+        app.add_systems(Startup, setup_mobile_controls);
+        app.update();
+        let mut nodes = app.world_mut().query::<(&MobileVisual, &ZIndex, &Node)>();
+        let control_z = nodes
+            .iter(app.world())
+            .filter_map(|(visual, z, _)| {
+                matches!(
+                    visual,
+                    MobileVisual::Ability(_)
+                        | MobileVisual::RankRing(_)
+                        | MobileVisual::UpgradeBadge(_)
+                        | MobileVisual::Attack
+                        | MobileVisual::CategoryAttack(_)
+                        | MobileVisual::Utility(_)
+                        | MobileVisual::Cancel
+                        | MobileVisual::Recall
+                )
+                .then_some(z.0)
+            })
+            .max()
+            .unwrap();
+        let mut overlays = 0;
+        for (visual, z, node) in nodes.iter(app.world()) {
+            if matches!(
+                visual,
+                MobileVisual::AttackVector
+                    | MobileVisual::DashVector
+                    | MobileVisual::AttackThumb
+                    | MobileVisual::DashThumb
+            ) {
+                assert!(
+                    z.0 > control_z,
+                    "finger preview must stay visible over another control"
+                );
+                if matches!(visual, MobileVisual::AttackThumb | MobileVisual::DashThumb) {
+                    assert_eq!(node.border, UiRect::all(Val::Px(2.0)));
+                }
+                overlays += 1;
+            }
+        }
+        assert_eq!(overlays, 4);
+    }
+
+    #[test]
+    fn directional_gestures_never_show_instruction_boxes() {
         let mut app = App::new();
         let mut m = controls();
         m.viewport = Vec2::new(1180.0, 820.0);
@@ -1814,7 +2066,7 @@ mod tests {
         app.update();
         assert_eq!(
             app.world().get::<Node>(hint).unwrap().display,
-            Display::Flex
+            Display::None
         );
     }
 
@@ -2408,6 +2660,77 @@ mod tests {
     }
 
     #[test]
+    fn hud_position_settings_preserve_skill_shape_and_clamp_to_safe_edges() {
+        let baseline = controls().layout();
+        let mut m = controls();
+        m.hud_position = HudPositionSettings {
+            joystick_offset: Vec2::splat(60.0),
+            combat_offset: Vec2::new(-60.0, 60.0),
+        };
+        let adjusted = m.layout();
+        let shift = adjusted.attack_center - baseline.attack_center;
+        for slot in 0..4 {
+            assert!(
+                (adjusted.ability_centers[slot] - baseline.ability_centers[slot] - shift).length()
+                    < 0.001
+            );
+        }
+        assert!(
+            adjusted.joystick_center.y + adjusted.joystick_radius
+                <= m.viewport.y - m.safe.bottom + 0.001
+        );
+        for center in adjusted.category_centers {
+            assert!(center.y + adjusted.category_radius <= m.viewport.y - m.safe.bottom + 0.001);
+            assert!(center.x + adjusted.category_radius <= m.viewport.x - m.safe.right + 0.001);
+        }
+        assert_eq!(
+            HudPositionSettings {
+                joystick_offset: Vec2::splat(f32::NAN),
+                combat_offset: Vec2::splat(1e6)
+            }
+            .sanitized(),
+            HudPositionSettings {
+                joystick_offset: Vec2::ZERO,
+                combat_offset: Vec2::splat(60.0)
+            }
+        );
+    }
+
+    #[test]
+    fn dash_drag_previews_direction_and_cancel_never_fires() {
+        let mut m = controls();
+        let center = m.layout().utility_centers[0];
+        m.event(1, TouchPhase::Started, center);
+        m.event(1, TouchPhase::Moved, center + Vec2::NEG_Y * 70.0);
+        assert_eq!(m.dash_aim(), Some(Vec2::NEG_Y));
+        m.event(1, TouchPhase::Ended, center + Vec2::NEG_Y * 70.0);
+        assert_eq!(m.utilities, [(UtilityAction::Dash, Some(Vec2::NEG_Y))]);
+        m.utilities.clear();
+        for end in [center + Vec2::X * 220.0, m.layout().cancel_center] {
+            m.event(2, TouchPhase::Started, center);
+            m.event(2, TouchPhase::Moved, end);
+            assert!(m.dash_aim().is_none());
+            m.event(2, TouchPhase::Ended, end);
+            assert!(m.utilities.is_empty());
+        }
+    }
+
+    #[test]
+    fn recall_tap_starts_or_cancels_without_stealing_other_controls() {
+        let mut m = controls();
+        let center = m.layout().recall_center;
+        for (active, expected) in [
+            (false, UtilityAction::Recall),
+            (true, UtilityAction::CancelRecall),
+        ] {
+            m.recall_active = active;
+            m.event(1, TouchPhase::Started, center);
+            m.event(1, TouchPhase::Ended, center);
+            assert_eq!(m.utilities.pop(), Some((expected, None)));
+        }
+    }
+
+    #[test]
     fn phone_controls_and_rank_mode_fit_safe_area_without_overlap() {
         for viewport in [
             Vec2::new(693.0, 320.0),
@@ -2432,11 +2755,16 @@ mod tests {
                         .map(|radius| radius + 3.0 * m.combat_scale()),
                 )
                 .chain(
-                    l.category_centers
+                    l.utility_centers
                         .iter()
-                        .chain(l.utility_centers.iter())
                         .copied()
-                        .map(|p| (p, l.auxiliary_radius)),
+                        .map(|p| (p, l.auxiliary_radius))
+                        .chain(
+                            l.category_centers
+                                .iter()
+                                .copied()
+                                .map(|p| (p, 18.0 * m.combat_scale())),
+                        ),
                 )
                 .chain([
                     // Touch ownership extends beyond the visible joystick disc.
@@ -2447,7 +2775,8 @@ mod tests {
                 ])
                 .collect();
             for (i, (center, radius)) in circles.iter().enumerate() {
-                assert!(*radius * 2.0 >= 44.0);
+                assert!(*radius * 2.0 >= 36.0);
+                assert!(l.category_radius * 2.0 >= 44.0);
                 // hud.md places the joystick at safe bottom − 65 with a
                 // 1.3 × r capture circle, 2.6 px past the safe bottom: the
                 // visible base stays inside the safe area, the capture
@@ -2486,20 +2815,21 @@ mod tests {
             }
         }
         // hud.md at the runtime insets 32/32/12/20 (844 × 390): joystick at
-        // safe left + 68, safe bottom − 65; ATK 76 inside the corner.
+        // safe left + 68, safe bottom − 65; ATK at right −124, bottom −76.
         let l = controls().layout();
         assert!(l.joystick_center.distance(Vec2::new(100.0, 305.0)) < 0.01);
-        assert!(l.attack_center.distance(Vec2::new(736.0, 294.0)) < 0.01);
-        let dash = Vec2::new(736.0, 294.0) + 168.0 * Vec2::from_angle(166f32.to_radians());
+        assert!(l.attack_center.distance(Vec2::new(688.0, 294.0)) < 0.01);
+        let dash = Vec2::new(688.0, 294.0) + 168.0 * Vec2::from_angle(166f32.to_radians());
         assert!(l.utility_centers[0].distance(dash) < 0.01);
     }
 
     /// hud-phone redline at the reference safe area (47/47/0/21, 844 × 390):
-    /// every centre within ±2 px, ATK 96 / abilities 64 / utilities 48,
-    /// abilities on the inner arc (R 104) and utilities on the outer (R 168)
-    /// around ATK, and at least 8 px between neighbouring rims.
+    /// Skill heights stay within ±2px of the original layout; the entire
+    /// combat group moves 48px left so category targets extend its R104 arc.
+    /// ATK 96 / abilities 64 / utilities 48 retain their original dimensions,
+    /// and non-category controls retain at least 8px between rims.
     #[test]
-    fn combat_group_matches_the_phone_redline_on_two_arcs() {
+    fn combat_group_preserves_skill_heights_and_continues_categories_on_the_same_arc() {
         let mut m = controls();
         m.safe = MobileSafeInsets {
             left: 47.0,
@@ -2509,29 +2839,31 @@ mod tests {
         };
         let l = m.layout();
         let near = |a: Vec2, x: f32, y: f32| a.distance(Vec2::new(x, y)) <= 2.0;
-        assert!(near(l.attack_center, 721.0, 293.0));
+        assert!(near(l.attack_center, 673.0, 293.0));
         assert!(near(l.joystick_center, 115.0, 304.0));
         for (center, (x, y)) in l.ability_centers.into_iter().zip([
-            (622.0, 325.0),
-            (626.0, 251.0),
-            (679.0, 198.0),
-            (753.0, 194.0),
+            (574.0, 325.0),
+            (578.0, 251.0),
+            (631.0, 198.0),
+            (705.0, 194.0),
         ]) {
             assert!(near(center, x, y), "{center:?} vs ({x}, {y})");
         }
-        assert!(near(l.utility_centers[0], 558.0, 334.0), "DASH");
-        assert!(near(l.utility_centers[1], 555.0, 270.0), "HASTE");
-        assert!(near(l.cancel_center, 576.0, 209.0), "CANCEL");
-        assert!(near(l.upgrade_center, 618.0, 161.0), "RANK");
-        assert!(near(l.category_centers[0], 675.0, 132.0), "MIN");
-        assert!(near(l.category_centers[1], 739.0, 126.0), "TWR");
+        assert!(near(l.utility_centers[0], 510.0, 334.0), "DASH");
+        assert!(near(l.utility_centers[1], 507.0, 270.0), "HASTE");
+        assert!(near(l.cancel_center, 528.0, 209.0), "CANCEL");
+        assert!(near(l.upgrade_center, 570.0, 161.0), "RANK");
+        assert!(near(l.category_centers[0], 774.73, 314.62), "MIN");
+        assert!(near(l.category_centers[1], 763.07, 241.0), "TWR");
         assert_eq!(l.attack_radius * 2.0, 96.0);
         assert_eq!(l.ability_radii, [32.0; 4]);
         assert_eq!(l.auxiliary_radius * 2.0, 48.0);
         assert_eq!(l.joystick_radius * 2.0, 104.0);
         for viewport in [
+            Vec2::new(568.0, 320.0),
             Vec2::new(693.0, 320.0),
             Vec2::new(844.0, 390.0),
+            Vec2::new(852.0, 393.0),
             Vec2::new(932.0, 430.0),
             Vec2::new(1280.0, 720.0),
         ] {
@@ -2547,11 +2879,15 @@ mod tests {
             let outer: Vec<Vec2> = l
                 .utility_centers
                 .into_iter()
-                .chain(l.category_centers)
-                .chain([l.upgrade_center, l.cancel_center])
+                .chain([l.recall_center, l.upgrade_center, l.cancel_center])
                 .collect();
-            for center in &outer {
-                assert!((center.distance(l.attack_center) - 168.0 * s).abs() < 0.01);
+            for (index, center) in outer.iter().enumerate() {
+                let orbit = if m.compact_utilities() && index < 2 {
+                    [176.0, 150.0][index]
+                } else {
+                    168.0
+                };
+                assert!((center.distance(l.attack_center) - orbit * s).abs() < 0.01);
             }
             let discs: Vec<(Vec2, f32)> = l
                 .ability_centers
@@ -2562,12 +2898,68 @@ mod tests {
                 .collect();
             for (i, (a, ra)) in discs.iter().enumerate() {
                 for (b, rb) in &discs[i + 1..] {
+                    let gap = if m.compact_utilities()
+                        && *a == l.utility_centers[0]
+                        && *b == l.utility_centers[1]
+                    {
+                        5.0
+                    } else {
+                        8.0
+                    };
                     assert!(
-                        a.distance(*b) - ra - rb >= 8.0 * s - 0.01,
-                        "rims closer than 8 px at {viewport:?}: {a:?} {b:?}"
+                        a.distance(*b) - ra - rb >= gap * s - 0.01,
+                        "rims closer than {gap}px at {viewport:?}: {a:?} {b:?}"
                     );
                 }
             }
+            let [minion, tower] = l.category_centers;
+            assert!(minion.y > l.attack_center.y && tower.y < l.attack_center.y);
+            let sequence: Vec<_> = l
+                .ability_centers
+                .into_iter()
+                .chain([tower, minion])
+                .collect();
+            for (center, angle) in sequence.iter().zip([162_f32, 204., 246., 288., 330., 372.]) {
+                let offset = *center - l.attack_center;
+                assert!((offset.length() - 104.0 * s).abs() < 0.01);
+                assert!(offset.distance(Vec2::from_angle(angle.to_radians()) * 104.0 * s) < 0.01);
+            }
+            let step = 2.0 * 104.0 * s * 21_f32.to_radians().sin();
+            for pair in sequence.windows(2) {
+                assert!((pair[0].distance(pair[1]) - step).abs() < 0.01);
+            }
+            // The shared arc only moves left from the original anchor.
+            let original_attack = Vec2::new(
+                viewport.x - m.safe.right - 76.0 * s,
+                viewport.y - m.safe.bottom - 76.0 * s,
+            );
+            assert!(
+                (l.attack_center - original_attack - Vec2::new(-48.0 * s, 0.0)).length() < 0.01
+            );
+            // The full 44px targets fit the safe corner at the amended
+            // anchor. Check ownership around every target's perimeter,
+            // including the sides closest to ATK and the upper-right skill.
+            for (center, kind) in l
+                .category_centers
+                .into_iter()
+                .zip([TargetKind::Minion, TargetKind::Structure])
+            {
+                assert!(center.x + l.category_radius <= viewport.x - m.safe.right + 0.001);
+                assert!(center.y + l.category_radius <= viewport.y - m.safe.bottom + 0.001);
+                for (other, radius) in &discs {
+                    assert!(center.distance(*other) >= l.category_radius + radius - 0.01);
+                }
+                for step in 0..16 {
+                    let edge = center
+                        + Vec2::from_angle(step as f32 * std::f32::consts::TAU / 16.0)
+                            * (l.category_radius - 0.01);
+                    assert!(
+                        matches!(m.hit_control(edge), Some((Control::CategoryAttack(actual), _)) if actual == kind),
+                        "category hit stolen at {viewport:?}: {edge:?}"
+                    );
+                }
+            }
+            assert!(minion.distance(tower) >= l.category_radius * 2.0);
             // Geometry used by drawing and input is the same at every size.
             assert!(matches!(
                 m.hit_control(l.attack_center),
@@ -2599,16 +2991,79 @@ mod tests {
         assert_eq!(m.combat_scale(), 1.0);
         // `size.ability.utility.phone` (44 before the hud.md sizes).
         assert_eq!(m.layout().auxiliary_radius * 2.0, 48.0);
+        let compact = m.layout();
+        assert!((compact.utility_centers[0].distance(compact.attack_center) - 176.0).abs() < 0.01);
+        assert!(
+            (compact.utility_centers[1]
+                - compact.attack_center
+                - Vec2::from_angle(182.6_f32.to_radians()) * 150.0)
+                .length()
+                < 0.01
+        );
+        // The compact HASTE rect sits wholly below the protected hero box,
+        // also with the phone reference's 21px bottom safe area.
+        assert!(
+            compact.utility_centers[1].y - compact.auxiliary_radius >= m.viewport.y * 0.60 + 1.0
+        );
+        let normal = MobileControls {
+            viewport: Vec2::new(852.0, 393.0),
+            ..controls()
+        };
+        let normal_layout = normal.layout();
+        for (center, angle) in normal_layout
+            .utility_centers
+            .into_iter()
+            .zip([166_f32, 188.])
+        {
+            assert!(
+                (center
+                    - normal_layout.attack_center
+                    - Vec2::from_angle(angle.to_radians()) * 168.0 * normal.combat_scale())
+                .length()
+                    < 0.01
+            );
+        }
         let narrow = MobileControls {
             viewport: Vec2::new(568.0, 430.0),
             ..controls()
         };
         let layout = narrow.layout();
-        let opening = layout.utility_centers[0].x
+        let opening = layout
+            .utility_centers
+            .iter()
+            .map(|center| center.x)
+            .fold(f32::INFINITY, f32::min)
             - layout.auxiliary_radius
             - layout.joystick_center.x
             - layout.joystick_radius * 1.3;
         assert!(opening >= 48.0 - 0.001);
+        // Even an unusually wide pair of landscape safe insets on a 568px
+        // viewport retains separate 44px targets at the minimum scale.
+        let extra_safe = MobileControls {
+            safe: MobileSafeInsets {
+                left: 47.0,
+                right: 47.0,
+                ..narrow.safe
+            },
+            ..narrow
+        };
+        let layout = extra_safe.layout();
+        assert_eq!(extra_safe.combat_scale(), 1.0);
+        let opening = layout
+            .utility_centers
+            .iter()
+            .map(|center| center.x)
+            .fold(f32::INFINITY, f32::min)
+            - layout.auxiliary_radius
+            - layout.joystick_center.x
+            - layout.joystick_radius * JOYSTICK_CAPTURE;
+        assert!(opening >= 19.5);
+        for center in layout.category_centers {
+            assert!(
+                center.x + layout.category_radius
+                    <= extra_safe.viewport.x - extra_safe.safe.right + 0.001
+            );
+        }
     }
 
     #[test]
@@ -2716,13 +3171,17 @@ mod tests {
         for center in [
             l.upgrade_center,
             l.category_centers[0],
+            l.category_centers[1],
             l.utility_centers[0],
         ] {
             let edge = center + Vec2::X * 21.0;
             m.event(1, TouchPhase::Started, edge);
             m.event(1, TouchPhase::Ended, edge);
         }
-        assert_eq!(m.category_attacks, [TargetKind::Minion]);
+        assert_eq!(
+            m.category_attacks,
+            [TargetKind::Minion, TargetKind::Structure]
+        );
         assert_eq!(m.utilities, [(UtilityAction::Dash, None)]);
         m.event(1, TouchPhase::Started, l.upgrade_center + Vec2::X * 21.0);
         m.event(1, TouchPhase::Ended, l.upgrade_center + Vec2::X * 21.0);

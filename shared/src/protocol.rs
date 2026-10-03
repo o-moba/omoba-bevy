@@ -6,9 +6,9 @@ mod wire_enums;
 
 use serde::{Deserialize, Serialize};
 
-// Version 4 expands the roster and adds explicit allied-object interaction.
-// Reject older peers rather than showing invisible threats or the wrong skills.
-pub const PROTOCOL_VERSION: u16 = 4;
+// Version 5 adds strict Recall/CancelRecall utility commands. Roll out client
+// and host together rather than silently dropping the new actions.
+pub const PROTOCOL_VERSION: u16 = 5;
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]

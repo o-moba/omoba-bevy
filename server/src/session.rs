@@ -34,7 +34,8 @@ impl ServerRuntime {
             .any(|addr| self.world.players.get(addr).is_some_and(|p| p.joined));
         for addr in expired {
             self.disconnect_career_player(addr, now);
-            let player = self.world.players.remove(&addr).unwrap();
+            let mut player = self.world.players.remove(&addr).unwrap();
+            common::recall::cancel(&mut player);
             let disconnected_at = player.last_seen + PLAYER_TIMEOUT;
             if player.joined {
                 println!(

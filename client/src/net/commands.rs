@@ -84,6 +84,7 @@ pub(in crate::net) struct LocalStateSendTimer(pub(in crate::net) Timer);
 pub(in crate::net) fn send_local_state(
     time: Res<Time>,
     mut timer: ResMut<LocalStateSendTimer>,
+    mut commands: MessageReader<NetworkCommand>,
     channels: Option<Res<NetworkChannels>>,
     client_session: Res<ClientSession>,
     player_query: Query<(&Transform, Option<&PlayerUtility>), With<Player>>,
@@ -96,8 +97,20 @@ pub(in crate::net) fn send_local_state(
         return;
     }
 
+    // Recall must begin at the final stopped position, even between the
+    // ordinary 20Hz movement sends. This system runs before SendCommands.
+    let recalling = commands.read().fold(false, |recalling, command| {
+        recalling
+            | matches!(
+                command,
+                NetworkCommand::Utility {
+                    action: shared::utility::UtilityAction::Recall,
+                    ..
+                }
+            )
+    });
     timer.0.tick(time.delta());
-    if !timer.0.just_finished() {
+    if !recalling && !timer.0.just_finished() {
         return;
     }
 
@@ -578,6 +591,67 @@ mod tests {
             received.try_recv().is_err(),
             "pre-admission strike cannot leave the client"
         );
+    }
+
+    #[test]
+    fn recall_flushes_stopped_position_before_request_between_movement_send_ticks() {
+        let (outgoing, received) = crossbeam_channel::unbounded();
+        let (_, incoming) = crossbeam_channel::unbounded();
+        let (_, signals) = crossbeam_channel::unbounded();
+        let mut app = App::new();
+        app.add_message::<NetworkCommand>()
+            .init_resource::<Time>()
+            .insert_resource(LocalStateSendTimer(Timer::from_seconds(
+                0.05,
+                TimerMode::Repeating,
+            )))
+            .insert_resource(NetworkChannels {
+                gameplay_signer: Default::default(),
+                outgoing,
+                incoming,
+                signals,
+            })
+            .insert_resource(ClientSession::admitted_for_test())
+            .init_resource::<ClientSessionId>()
+            .insert_resource(GameStateSnapshot {
+                meta: SnapshotMeta::new(17, 3, 9),
+                state: GameState::Running,
+                ..default()
+            })
+            .add_systems(Update, (send_local_state, send_network_commands).chain());
+        app.world_mut().spawn((
+            Player,
+            Transform::from_xyz(3.5, 0.5, -2.0),
+            PlayerUtility::default(),
+        ));
+        app.update();
+        assert!(
+            received.try_recv().is_err(),
+            "normal transform is throttled"
+        );
+        app.world_mut().write_message(NetworkCommand::Utility {
+            action: shared::utility::UtilityAction::Recall,
+            direction: Vec2::ZERO,
+        });
+        app.update();
+        assert!(matches!(
+            received.try_recv().unwrap(),
+            ClientPacket::Transform {
+                x: 3.5,
+                z: -2.0,
+                ..
+            }
+        ));
+        assert!(matches!(
+            received.try_recv().unwrap(),
+            ClientPacket::Utility {
+                action: shared::utility::UtilityAction::Recall,
+                server_epoch: 17,
+                match_id: 3,
+                ..
+            }
+        ));
+        assert!(received.try_recv().is_err());
     }
 
     #[test]

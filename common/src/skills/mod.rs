@@ -798,6 +798,7 @@ pub fn cast(
     }
     p.hero.skills.request_id = request;
     p.last_seen = now;
+    crate::recall::cancel(p);
     if !matches!(w.game_state, GameState::Running)
         || p.hero.hp <= 0.0
         || slot >= 4

@@ -76,6 +76,7 @@ pub fn apply(
             world.ensure_connected(addr, now);
             if let Some(p) = world.players.get_mut(&addr) {
                 p.last_seen = now;
+                crate::recall::cancel(p);
             }
             crate::sim::cast::handle_cast_request(world, addr, *target, *slot, now);
         }

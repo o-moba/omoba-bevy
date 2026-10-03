@@ -64,7 +64,7 @@ class XcodeBridgeTests(unittest.TestCase):
             (bundle/'Info.plist').write_bytes(b'xcode-owned');(bundle/'Assets.car').write_bytes(b'compiled-icon')
             model=root/'hero.glb';model.write_bytes(b'current-model')
             source={'revision':'test-revision','tracked_diff':''}
-            info={'CFBundleShortVersionString':'0.22.0','CFBundleExecutable':'client'}
+            info=xb.app_info(xb.ROOT, {'minimum_os':'15.0.0'}, 'space.ekza.omoba.beta')
             with patch.object(xb,'source_identity',return_value=source), patch.object(xb.subprocess,'run') as cargo, \
                  patch.object(xb,'inspect_macho',return_value={'sdk':'26.0'}), \
                  patch.object(xb,'validate_dsym',return_value={'uuid_match_verified':True}) as validate, \
@@ -86,6 +86,8 @@ class XcodeBridgeTests(unittest.TestCase):
             self.assertEqual((bundle/'Info.plist').read_bytes(),b'xcode-owned')
             self.assertEqual((bundle/'Assets.car').read_bytes(),b'compiled-icon')
             self.assertEqual(plistlib.loads((root/'derived/Omoba-Info.plist').read_bytes())['CFBundleVersion'],'12')
+            generated = plistlib.loads((root/'derived/Omoba-Info.plist').read_bytes())
+            self.assertIs(generated['ITSAppUsesNonExemptEncryption'], False)
             self.assertEqual(validate.call_count,4)
             command=cargo.call_args.args[0];self.assertIn('--locked',command)
             self.assertEqual(cargo.call_args.kwargs['env']['SDKROOT'],env['SDKROOT'])

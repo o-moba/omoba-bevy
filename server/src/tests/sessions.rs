@@ -252,3 +252,109 @@ fn runtime_on_memory_transport_and_manual_clock_times_out_a_silent_endpoint() {
     assert!(rt.world.disconnected_sessions.contains_key("manual-clock"));
     assert!(transport.take_outbound().is_empty());
 }
+
+/// A seven-second recall must not mature inside the thirty-second retained
+/// session after the endpoint goes silent at five seconds.
+#[test]
+fn recall_disconnect_retention_and_reconnect_never_complete_the_old_channel() {
+    let now = Instant::now();
+    let transport = MemoryTransport::new("127.0.0.1:4000".parse().unwrap());
+    let mut rt = ServerRuntime::for_test(
+        transport,
+        ManualClock::new(now),
+        career_backend::MemoryCareer::disabled(53120),
+        MatchConfig::dev(),
+    );
+    let old: SocketAddr = "127.0.0.1:53121".parse().unwrap();
+    let new: SocketAddr = "127.0.0.1:53122".parse().unwrap();
+    rt.world
+        .ensure_player_for_join(old, Some("recall-retained".into()), now);
+    handle_join_request(
+        rt.world.players.get_mut(&old).unwrap(),
+        Team::Green,
+        CharacterChoice::Ipfs,
+        HeroClass::Mage,
+        None,
+        &rt.world.map_layout,
+        now,
+    );
+    rt.world.game_state = GameState::Running;
+    let player = rt.world.players.get_mut(&old).unwrap();
+    player.hero.x = 10.0;
+    player.hero.z = -10.0;
+    let identity = player.hero.identity.id;
+    common::recall::start(player, now);
+    assert_eq!(common::recall::remaining(player, now), 7.0);
+
+    rt.maintain_roster(now + PLAYER_TIMEOUT + Duration::from_millis(1));
+    assert!(!rt.world.players.contains_key(&old));
+    assert!(
+        rt.world.disconnected_sessions["recall-retained"]
+            .player
+            .timers
+            .recall
+            .is_none(),
+        "disconnect drops the channel before retaining the session"
+    );
+    let after_deadline = now + Duration::from_secs(8);
+    assert!(
+        rt.world
+            .ensure_player_for_join(new, Some("recall-retained".into()), after_deadline)
+    );
+    common::recall::tick(&mut rt.world, after_deadline);
+    let player = &rt.world.players[&new];
+    assert_eq!(player.hero.identity.id, identity);
+    assert_eq!([player.hero.x, player.hero.z], [10.0, -10.0]);
+    assert_eq!(player.hero.utility.recall_sequence, 0);
+    assert!(player.timers.recall.is_none());
+}
+
+#[test]
+fn recall_both_reclaim_paths_defensively_discard_stale_channels() {
+    for retained in [false, true] {
+        let now = Instant::now();
+        let mut world = GameWorld::empty();
+        let old: SocketAddr = "127.0.0.1:53131".parse().unwrap();
+        let new: SocketAddr = "127.0.0.1:53132".parse().unwrap();
+        world.ensure_player_for_join(old, Some("recall-reclaim".into()), now);
+        handle_join_request(
+            world.players.get_mut(&old).unwrap(),
+            Team::Blue,
+            CharacterChoice::Ipfs,
+            HeroClass::Mage,
+            None,
+            &world.map_layout,
+            now,
+        );
+        let player = world.players.get_mut(&old).unwrap();
+        player.hero.x = -10.0;
+        player.hero.z = 10.0;
+        player.hero.hp = 31.0;
+        player.economy.gold = 311;
+        player.hero.utility.last_request_id = 9;
+        common::recall::start(player, now);
+        let before = player.hero.clone();
+        if retained {
+            // Exercise the defense independently of maintain_roster clearing it.
+            let player = world.players.remove(&old).unwrap();
+            world.disconnected_sessions.insert(
+                "recall-reclaim".into(),
+                DisconnectedSession {
+                    player,
+                    disconnected_at: now + PLAYER_TIMEOUT,
+                },
+            );
+        }
+        let after_deadline = now + Duration::from_secs(8);
+        assert!(world.ensure_player_for_join(new, Some("recall-reclaim".into()), after_deadline));
+        assert!(world.players[&new].timers.recall.is_none());
+        common::recall::tick(&mut world, after_deadline);
+        let player = &world.players[&new];
+        assert_eq!(
+            player.hero, before,
+            "reclaim preserves gameplay state but not the interrupted channel"
+        );
+        assert_eq!(player.economy.gold, 311);
+        assert_eq!(player.hero.utility.recall_sequence, 0);
+    }
+}

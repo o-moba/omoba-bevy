@@ -41,6 +41,7 @@ impl Plugin for CameraPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<CameraState>()
             .init_resource::<CameraSettings>()
+            .init_resource::<AllyCameraFocus>()
             .add_systems(
                 Update,
                 (
@@ -51,6 +52,8 @@ impl Plugin for CameraPlugin {
                     store_camera_zoom,
                 )
                     .chain()
+                    .after(crate::mobile_controls::MobileControlsSet::Input)
+                    .after(crate::input_context::WorldMovementInputSet)
                     .in_set(InputContextSet::Actions),
             );
     }
@@ -121,6 +124,22 @@ fn store_camera_zoom(cam_state: Res<CameraState>, mut settings: ResMut<CameraSet
 
 #[derive(Component)]
 pub struct MainCamera;
+
+/// A friendly portrait selects a live actor, rather than a one-time map point.
+#[derive(Resource, Default)]
+pub(crate) struct AllyCameraFocus {
+    pub player_id: Option<u64>,
+}
+
+/// Frame-rate-independent follow. A confirmed dash/teleport catches up in the
+/// same frame; normal movement stays smooth with a short, bounded lag.
+fn follow_factor(delta: f32, discontinuity: bool) -> f32 {
+    if discontinuity {
+        1.0
+    } else {
+        1.0 - (-12.0 * delta.max(0.0)).exp()
+    }
+}
 
 #[derive(Resource)]
 pub struct CameraState {
@@ -261,8 +280,74 @@ fn update_camera(
         Option<Res<crate::gamepad::GamepadControls>>,
     ),
     sandbox: Option<Res<crate::sandbox::SandboxClient>>,
+    follow: (
+        Option<ResMut<AllyCameraFocus>>,
+        Query<
+            (
+                &Transform,
+                &crate::net::NetworkPlayerId,
+                &Team,
+                &crate::domain::CombatStats,
+            ),
+            (Without<Player>, Without<MainCamera>),
+        >,
+        Query<(Entity, &crate::net::PlayerUtility), With<Player>>,
+        Local<Option<(Entity, u64)>>,
+    ),
 ) {
+    let (mut ally_focus, allies, utilities, mut last_dash) = follow;
     let (mobile, gamepad) = sticks;
+    let dash = utilities
+        .single()
+        .ok()
+        .map(|(entity, utility)| (entity, utility.state.dash_sequence));
+    let dashed = dash
+        .zip(*last_dash)
+        .is_some_and(|(next, old)| next.0 == old.0 && next.1 != old.1);
+    *last_dash = dash;
+    if dashed {
+        if let Some(nav) = minimap_nav.as_deref_mut() {
+            nav.focus_target = None;
+        }
+    }
+    let moved = mobile
+        .as_ref()
+        .is_some_and(|m| m.movement.length_squared() > 0.001)
+        || gamepad
+            .as_ref()
+            .is_some_and(|pad| pad.active && pad.movement.length_squared() > 0.001);
+    if let Some(focus) = ally_focus.as_deref_mut() {
+        if moved
+            || dashed
+            || keyboard_input.just_pressed(KeyCode::Space)
+            || keyboard_input.just_pressed(KeyCode::KeyY)
+            || minimap_nav
+                .as_deref()
+                .is_some_and(|nav| nav.focus_target.is_some())
+        {
+            focus.player_id = None;
+        }
+    }
+    let ally_target = ally_focus
+        .as_deref()
+        .and_then(|focus| focus.player_id)
+        .and_then(|id| {
+            let local_team = player_team.single().ok()?;
+            allies
+                .iter()
+                .find(|(_, player, team, stats)| {
+                    player.0 == id && *team == local_team && stats.is_alive()
+                })
+                .map(|(pose, ..)| pose.translation)
+        });
+    if ally_target.is_some() {
+        cam_state.locked = true;
+    }
+    if ally_target.is_none() {
+        if let Some(focus) = ally_focus.as_deref_mut() {
+            focus.player_id = None;
+        }
+    }
     let Ok((camera, mut projection, mut camera_transform)) = camera_query.single_mut() else {
         return;
     };
@@ -334,6 +419,8 @@ fn update_camera(
             minimap_nav.as_deref_mut(),
             &mut mouse_wheel_events,
             &keyboard_input,
+            ally_target,
+            dashed,
         );
         return;
     }
@@ -362,7 +449,9 @@ fn update_camera(
             cam_state.zoom = (cam_state.zoom - scroll_delta * CAMERA_ZOOM_SPEED)
                 .clamp(CAMERA_MIN_ZOOM, CAMERA_MAX_ZOOM);
         }
-        let follow_target = if let Some(override_target) = focus_override {
+        let follow_target = if let Some(ally) = ally_target {
+            Some(ally)
+        } else if let Some(override_target) = focus_override {
             Some(override_target)
         } else {
             player_query
@@ -385,7 +474,15 @@ fn update_camera(
                     * 0.08)
                     .min(2.5);
             }
-            let lerp_factor = (time.delta_secs() * 2.0).min(1.0);
+            let catch_up = dashed
+                || (focus_override.is_none()
+                    && ally_target.is_none()
+                    && camera_transform
+                        .translation
+                        .xz()
+                        .distance(target_position.xz())
+                        > 7.0);
+            let lerp_factor = follow_factor(time.delta_secs(), catch_up);
             camera_transform.translation = camera_transform
                 .translation
                 .lerp(target_position, lerp_factor);
@@ -477,6 +574,8 @@ fn update_camera_2d(
     mut minimap_nav: Option<&mut MinimapNavigationState>,
     mouse_wheel_events: &mut MessageReader<MouseWheel>,
     keyboard_input: &ButtonInput<KeyCode>,
+    ally_target: Option<Vec3>,
+    dashed: bool,
 ) {
     let Projection::Orthographic(orthographic) = projection else {
         return;
@@ -505,9 +604,8 @@ fn update_camera_2d(
 
     let mut desired = camera_transform.translation.xy();
     if cam_state.locked {
-        let focus = minimap_nav
-            .as_deref()
-            .and_then(|nav| nav.focus_target)
+        let focus = ally_target
+            .or_else(|| minimap_nav.as_deref().and_then(|nav| nav.focus_target))
             .or_else(|| {
                 player_query
                     .single()
@@ -516,7 +614,7 @@ fn update_camera_2d(
             });
         if let Some(simulation_focus) = focus {
             let target = simulation_xz_to_render_xy(simulation_focus);
-            let factor = (time.delta_secs() * 8.0).min(1.0);
+            let factor = follow_factor(time.delta_secs(), dashed);
             desired = desired.lerp(target, factor);
         }
     } else {
@@ -553,6 +651,119 @@ mod tests {
     use super::*;
 
     #[test]
+    fn follow_is_frame_rate_independent_and_dash_snaps_immediately() {
+        let remaining60 = (1.0 - follow_factor(1.0 / 60.0, false)).powi(60);
+        let remaining120 = (1.0 - follow_factor(1.0 / 120.0, false)).powi(120);
+        assert!((remaining60 - remaining120).abs() < 0.0001);
+        assert!(remaining60 < 0.0001);
+        assert_eq!(follow_factor(1.0 / 120.0, true), 1.0);
+    }
+
+    #[test]
+    fn accepted_dash_recenters_a_panned_phone_camera_without_stick_movement() {
+        for mode in [PlayerVisualMode::Models3d, PlayerVisualMode::Sprite2d] {
+            let mut app = App::new();
+            let mut mobile = crate::mobile_controls::MobileControls::default();
+            mobile.enabled = true;
+            let panned = Vec3::new(40.0, 0.5, 40.0);
+            app.init_resource::<Time>()
+                .init_resource::<CameraState>()
+                .init_resource::<AllyCameraFocus>()
+                .init_resource::<MapLayout>()
+                .init_resource::<MinimapNavigationState>()
+                .init_resource::<GameplayInputContext>()
+                .init_resource::<ButtonInput<KeyCode>>()
+                .init_resource::<ButtonInput<MouseButton>>()
+                .insert_resource(mode)
+                .insert_resource(mobile)
+                .add_message::<MouseMotion>()
+                .add_message::<MouseWheel>()
+                .add_systems(Update, update_camera);
+            app.world_mut()
+                .resource_mut::<Time>()
+                .advance_by(std::time::Duration::from_secs_f64(1.0 / 60.0));
+            app.world_mut()
+                .resource_mut::<MinimapNavigationState>()
+                .focus_target = Some(panned);
+            let projection = if mode == PlayerVisualMode::Sprite2d {
+                Projection::Orthographic(OrthographicProjection::default_2d())
+            } else {
+                Projection::Perspective(default())
+            };
+            let camera = app
+                .world_mut()
+                .spawn((
+                    Camera::default(),
+                    projection,
+                    MainCamera,
+                    Transform::from_xyz(40.0, 40.0, 40.0),
+                ))
+                .id();
+            let hero = app
+                .world_mut()
+                .spawn((
+                    Player,
+                    Team::Green,
+                    crate::net::PlayerUtility::default(),
+                    Transform::from_xyz(0.0, 0.5, 0.0),
+                ))
+                .id();
+            app.update();
+            assert_eq!(
+                app.world()
+                    .resource::<MinimapNavigationState>()
+                    .focus_target,
+                Some(panned)
+            );
+            // Model an accepted server relocation, with no joystick input that
+            // could incidentally clear the remote camera target for us.
+            let landed = Vec3::new(6.0, 0.5, 4.0);
+            app.world_mut()
+                .get_mut::<Transform>(hero)
+                .unwrap()
+                .translation = landed;
+            app.world_mut()
+                .get_mut::<crate::net::PlayerUtility>(hero)
+                .unwrap()
+                .state
+                .dash_sequence = 1;
+            app.update();
+            assert_eq!(
+                app.world()
+                    .resource::<MinimapNavigationState>()
+                    .focus_target,
+                None
+            );
+            assert_eq!(
+                app.world()
+                    .resource::<crate::mobile_controls::MobileControls>()
+                    .movement,
+                Vec2::ZERO
+            );
+            let actual = app.world().get::<Transform>(camera).unwrap().translation;
+            if mode == PlayerVisualMode::Sprite2d {
+                assert!((actual.xy() - simulation_xz_to_render_xy(landed)).length() < 0.001);
+            } else {
+                assert!(
+                    (actual - (landed + locked_camera_offset_for_team(1.0, Team::Green))).length()
+                        < 0.001
+                );
+            }
+            // With no second sequence change, manual panning remains available.
+            app.world_mut()
+                .resource_mut::<MinimapNavigationState>()
+                .focus_target = Some(panned);
+            app.update();
+            assert_eq!(
+                app.world()
+                    .resource::<MinimapNavigationState>()
+                    .focus_target,
+                Some(panned)
+            );
+        }
+    }
+
+    #[test]
     fn camera_settings_clamp_round_and_follow_the_wheel() {
         let mut settings = CameraSettings { zoom: f32::NAN }.sanitized();
         assert_eq!(settings, CameraSettings::default());
@@ -570,6 +781,7 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .init_resource::<CameraState>()
             .init_resource::<CameraSettings>()
+            .init_resource::<AllyCameraFocus>()
             .add_systems(Update, (apply_camera_settings, store_camera_zoom).chain());
         app.world_mut().resource_mut::<CameraSettings>().zoom = 0.7;
         app.update();

@@ -2275,6 +2275,7 @@ fn render(
         .is_some_and(|game| matches!(game.state, GameState::Running))
         && !front_end_menu;
     let show_entry = !front_end_menu
+        && pause.as_ref().is_none_or(|pause| !pause.in_settings)
         && (selection_recovery
             || queue_text(&career.view.queue).is_some()
             || !game
@@ -3159,6 +3160,51 @@ mod tests {
             .0;
         assert!(modal_layer > entry_layer);
     }
+    #[test]
+    fn career_navigation_hides_only_inside_settings_and_returns_to_pause() {
+        let mut app = render_app(UiProfile::Mobile, CareerModal::Closed);
+        app.insert_resource(GameStateSnapshot {
+            state: GameState::Running,
+            ..default()
+        });
+        app.insert_resource(crate::pause_menu::PauseMenuState {
+            open: true,
+            in_settings: false,
+        });
+        let nav_count = |app: &mut App| {
+            app.world_mut()
+                .query::<&TestId>()
+                .iter(app.world())
+                .filter(|name| {
+                    matches!(
+                        name.0.as_ref(),
+                        "CareerProfileButton" | "CareerHistoryButton" | "CareerFriendsButton"
+                    )
+                })
+                .count()
+        };
+        app.update();
+        assert_eq!(
+            nav_count(&mut app),
+            3,
+            "normal pause keeps career navigation"
+        );
+        app.world_mut()
+            .resource_mut::<crate::pause_menu::PauseMenuState>()
+            .in_settings = true;
+        app.update();
+        assert_eq!(
+            nav_count(&mut app),
+            0,
+            "settings own the panel without floating career buttons"
+        );
+        app.world_mut()
+            .resource_mut::<crate::pause_menu::PauseMenuState>()
+            .in_settings = false;
+        app.update();
+        assert_eq!(nav_count(&mut app), 3);
+    }
+
     #[test]
     fn escape_closes_career_without_toggling_the_underlying_pause_menu() {
         let mut app = App::new();

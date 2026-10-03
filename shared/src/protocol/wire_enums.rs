@@ -27,7 +27,7 @@ use std::path::Path;
 use crate::protocol::PROTOCOL_VERSION;
 
 /// The protocol version this variant list was last reviewed for.
-const POLICY_PROTOCOL_VERSION: u16 = 4;
+const POLICY_PROTOCOL_VERSION: u16 = 5;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Decoding {
@@ -68,7 +68,7 @@ wire_enums! {
     crate::public_transport::PublicClientDatagram => Strict [TransportProbe, TransportProof, TransportBootstrap, SignedCommand],
     crate::public_transport::PublicServerDatagram => Strict [TransportChallenge],
     crate::career::CareerRequest => Strict [FindMatch, SupporterStatus, EquipSupporterAura, Social, Challenge, Authenticate, History, Detail, Friends, Friend, Profile, LookupPlayer, Rename, Authorized, CancelQueue],
-    crate::utility::UtilityAction => Strict [Dash, Haste],
+    crate::utility::UtilityAction => Strict [Dash, Haste, Recall, CancelRecall],
     crate::map::Team => Strict [Green, Blue],
     crate::HeroClass => Tolerant [Warrior, Mage, Ranger, Cleric, Warden, Dawnweaver, Wildspark, Cinderforge, Edgeweaver, Stormfist, Veilstalker, Emberveil, Orbitwright, Riftshot, Chainkeeper, Frostguard],
     crate::loadout::CoreId => Strict [Dawnweaver, Wildspark, Cinderforge, Edgeweaver, Stormfist, Veilstalker, Emberveil, Orbitwright, Riftshot, Chainkeeper, Frostguard],

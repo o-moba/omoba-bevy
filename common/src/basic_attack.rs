@@ -94,6 +94,7 @@ pub fn handle_basic_attack_request(
     // into range, recovering from death, or waiting out the cooldown.
     attacker.economy.basic_attack_request_id = request_id;
     attacker.last_seen = now;
+    crate::recall::cancel(attacker);
     if !matches!(world.game_state, GameState::Running) || attacker.hero.hp <= 0.0 {
         return;
     }

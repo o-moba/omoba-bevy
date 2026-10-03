@@ -322,6 +322,21 @@ fn measure_gltf_bind_pose(
     gltf_meshes: &Assets<GltfMesh>,
     meshes: &Assets<Mesh>,
 ) -> Option<Option<ModelMeasurement>> {
+    measure_gltf_bounds(gltf, nodes, gltf_meshes, meshes).map(|bounds| {
+        bounds.map(|(min, max)| ModelMeasurement {
+            min_y: min.y,
+            max_y: max.y,
+        })
+    })
+}
+
+/// Stable model-space bounds for presentation framing, independent of animation.
+pub(crate) fn measure_gltf_bounds(
+    gltf: &Gltf,
+    nodes: &Assets<GltfNode>,
+    gltf_meshes: &Assets<GltfMesh>,
+    meshes: &Assets<Mesh>,
+) -> Option<Option<(Vec3, Vec3)>> {
     let mut child_ids: HashSet<AssetId<GltfNode>> = HashSet::new();
     for handle in &gltf.nodes {
         let node = nodes.get(handle)?;
@@ -350,10 +365,64 @@ fn measure_gltf_bind_pose(
         )?;
     }
 
-    Some(has_bounds.then_some(ModelMeasurement {
-        min_y: min.y,
-        max_y: max.y,
-    }))
+    Some(has_bounds.then_some((min, max)))
+}
+
+/// Visit actual bind-pose positions in model-root space, including nested node
+/// transforms. Presentation callers cache their result; normalization continues
+/// to use its existing bounds measurement. `None` means a sub-asset is pending.
+pub(crate) fn visit_gltf_mesh_vertices(
+    gltf: &Gltf,
+    nodes: &Assets<GltfNode>,
+    gltf_meshes: &Assets<GltfMesh>,
+    meshes: &Assets<Mesh>,
+    mut visit: impl FnMut(Vec3),
+) -> Option<()> {
+    let mut child_ids = HashSet::new();
+    for handle in &gltf.nodes {
+        child_ids.extend(nodes.get(handle)?.children.iter().map(Handle::id));
+    }
+    for handle in &gltf.nodes {
+        if !child_ids.contains(&handle.id()) {
+            visit_node_mesh_vertices(
+                handle,
+                Affine3A::IDENTITY,
+                nodes,
+                gltf_meshes,
+                meshes,
+                &mut visit,
+            )?;
+        }
+    }
+    Some(())
+}
+
+fn visit_node_mesh_vertices(
+    handle: &Handle<GltfNode>,
+    parent: Affine3A,
+    nodes: &Assets<GltfNode>,
+    gltf_meshes: &Assets<GltfMesh>,
+    meshes: &Assets<Mesh>,
+    visit: &mut impl FnMut(Vec3),
+) -> Option<()> {
+    let node = nodes.get(handle)?;
+    let world = parent * node.transform.compute_affine();
+    if let Some(mesh_handle) = &node.mesh {
+        for primitive in &gltf_meshes.get(mesh_handle)?.primitives {
+            let mesh = meshes.get(&primitive.mesh)?;
+            if let Some(bevy::mesh::VertexAttributeValues::Float32x3(positions)) =
+                mesh.attribute(Mesh::ATTRIBUTE_POSITION)
+            {
+                for position in positions {
+                    visit(world.transform_point3(Vec3::from_array(*position)));
+                }
+            }
+        }
+    }
+    for child in &node.children {
+        visit_node_mesh_vertices(child, world, nodes, gltf_meshes, meshes, visit)?;
+    }
+    Some(())
 }
 
 #[expect(clippy::too_many_arguments, reason = "internal recursive helper")]
@@ -734,6 +803,92 @@ mod tests {
         let wild = ModelScaleSettings { target_height: 9.0 };
         assert!(
             (effective_target_height(&wild, &player, 1.0) - MAX_MODEL_TARGET_HEIGHT).abs() < 1e-6
+        );
+    }
+
+    #[test]
+    fn preview_vertex_visit_preserves_geometry_and_nested_transforms() {
+        let mut meshes = Assets::<Mesh>::default();
+        let mut gltf_meshes = Assets::<GltfMesh>::default();
+        let mut nodes = Assets::<GltfNode>::default();
+        let positions = [[0.0, 0.0, 0.0], [-2.0, 2.0, 0.1], [2.0, 2.0, 0.1]];
+        let mesh = meshes.add(
+            Mesh::new(
+                bevy::mesh::PrimitiveTopology::TriangleList,
+                bevy::asset::RenderAssetUsages::MAIN_WORLD,
+            )
+            .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, positions.to_vec()),
+        );
+        let geometry = gltf_meshes.add(GltfMesh {
+            index: 0,
+            name: "wings".to_owned(),
+            primitives: vec![bevy::gltf::GltfPrimitive {
+                index: 0,
+                parent_mesh_index: 0,
+                name: "triangle".to_owned(),
+                mesh: mesh.clone(),
+                material: None,
+                extras: None,
+                material_extras: None,
+            }],
+            extras: None,
+        });
+        let local = Transform::from_xyz(0.0, -0.3, 0.0).with_rotation(Quat::from_rotation_y(0.3));
+        let child = nodes.add(GltfNode {
+            index: 1,
+            name: "body".to_owned(),
+            children: Vec::new(),
+            mesh: Some(geometry),
+            skin: None,
+            transform: local,
+            is_animation_root: false,
+            extras: None,
+        });
+        let parent = Transform::from_xyz(1.0, 2.0, 3.0).with_scale(Vec3::splat(1.5));
+        let root = nodes.add(GltfNode {
+            index: 0,
+            name: "root".to_owned(),
+            children: vec![child],
+            mesh: None,
+            skin: None,
+            transform: parent,
+            is_animation_root: false,
+            extras: None,
+        });
+        let mut visited = Vec::new();
+        assert!(
+            visit_node_mesh_vertices(
+                &root,
+                Affine3A::IDENTITY,
+                &nodes,
+                &gltf_meshes,
+                &meshes,
+                &mut |point| visited.push(point),
+            )
+            .is_some()
+        );
+        assert_eq!(
+            visited.len(),
+            3,
+            "no imaginary AABB corners below the wings"
+        );
+        for (actual, position) in visited.iter().zip(positions) {
+            let expected =
+                parent.transform_point(local.transform_point(Vec3::from_array(position)));
+            assert!(actual.distance(expected) < 1e-5);
+        }
+        meshes.remove(mesh.id());
+        assert!(
+            visit_node_mesh_vertices(
+                &root,
+                Affine3A::IDENTITY,
+                &nodes,
+                &gltf_meshes,
+                &meshes,
+                &mut |_| {},
+            )
+            .is_none(),
+            "a pending mesh must not produce a partial cached fit"
         );
     }
 

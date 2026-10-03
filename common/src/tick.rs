@@ -92,6 +92,8 @@ pub fn finish(
             .forest_pickups
             .tick(&mut world.players, &world.game_state, now);
     }
+    // Resolve after this tick's incoming damage and before regeneration.
+    crate::recall::tick(world, now);
     regenerate_team_buff_hp(world, tick);
     regenerate_base_hp(world, dt);
     accrue_passive_gold(&mut world.players, &world.game_state, gold_dt);

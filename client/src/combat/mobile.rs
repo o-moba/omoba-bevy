@@ -44,6 +44,7 @@ pub(super) fn mobile_utility_system(
         let remaining = match action {
             UtilityAction::Dash => utility.state.dash_remaining_secs,
             UtilityAction::Haste => utility.state.haste_remaining_secs,
+            UtilityAction::Recall | UtilityAction::CancelRecall => 0.0,
         };
         if remaining > 0.0 {
             continue;

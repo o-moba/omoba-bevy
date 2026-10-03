@@ -145,7 +145,6 @@ impl Plugin for CombatPlugin {
                 update_skill_tooltip,
                 standard::update_status,
                 sync_skill_key_labels,
-                crate::targeting::draw_targeting_ui,
             )
                 .chain()
                 .after(WorldMovementInputSet)
@@ -178,6 +177,8 @@ fn configure_target_presentation(app: &mut App) {
         (
             update_target_marker_system,
             crate::targeting::draw_locked_target,
+            crate::targeting::refresh_aim_projection,
+            crate::targeting::draw_targeting_ui.after(crate::targeting::refresh_aim_projection),
         )
             .after(crate::net::NetworkGroundingSet)
             .after(bevy::camera::CameraUpdateSystems)

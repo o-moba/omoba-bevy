@@ -351,6 +351,7 @@ pub(super) fn circle(name: &str) -> bool {
             | "MobileTowerAttack"
             | "MobileDash"
             | "MobileHaste"
+            | "MobileRecall"
             | "MobileRankMode"
     ) || name.starts_with("MobileAbility-")
 }
@@ -369,6 +370,7 @@ pub(super) fn tracked(name: &str) -> bool {
                 | "MobileTowerAttack"
                 | "MobileDash"
                 | "MobileHaste"
+                | "MobileRecall"
                 | "MobileAttackCancel"
         )
 }
@@ -405,6 +407,7 @@ pub(super) fn mobile_geometry_valid(
         "MobileTowerAttack",
         "MobileDash",
         "MobileHaste",
+        "MobileRecall",
         "MobileRankMode",
         "MobileAttackCancel",
     ] {
@@ -414,7 +417,11 @@ pub(super) fn mobile_geometry_valid(
             }
             return false;
         };
-        if rect.width().min(rect.height()) < 43.5 || (rect.width() - rect.height()).abs() > 1.0 {
+        let category = matches!(name, "MobileMinionAttack" | "MobileTowerAttack");
+        let minimum_visual = if category { 35.5 } else { 43.5 };
+        if rect.width().min(rect.height()) < minimum_visual
+            || (rect.width() - rect.height()).abs() > 1.0
+        {
             return false;
         }
         let center = rect.center();
@@ -428,6 +435,7 @@ pub(super) fn mobile_geometry_valid(
             "MobileTowerAttack" => Some(layout.category_centers[1]),
             "MobileDash" => Some(layout.utility_centers[0]),
             "MobileHaste" => Some(layout.utility_centers[1]),
+            "MobileRecall" => Some(layout.recall_center),
             "MobileRankMode" => Some(layout.upgrade_center),
             "MobileAttackCancel" => Some(layout.cancel_center),
             _ => name
@@ -438,24 +446,22 @@ pub(super) fn mobile_geometry_valid(
         if expected.is_some_and(|expected| expected.distance(center) > 1.0) {
             return false;
         }
-        // hud.md phone: abilities on the inner arc (R 104), the utilities,
-        // MIN / TWR, RANK and CANCEL on the outer arc (R 168), both on ATK.
+        // All six skills/category controls share the 104px arc. Compact phones
+        // move Dash/Haste around the protected hero region; the remaining
+        // utilities keep their 168px arc. Check that contract independently of
+        // the exact rendered-vs-layout center comparison above.
         let inner = name.starts_with("MobileAbility-");
-        let outer = matches!(
-            name,
-            "MobileMinionAttack"
-                | "MobileTowerAttack"
-                | "MobileDash"
-                | "MobileHaste"
-                | "MobileRankMode"
-                | "MobileAttackCancel"
-        );
-        let orbit = if inner {
+        let compact = mobile.viewport.x - mobile.safe.left - mobile.safe.right < 700.0;
+        let orbit = if inner || category {
             Some(crate::ui::tokens::size::COMBAT_ORBIT_ABILITY_PHONE)
-        } else if outer {
-            Some(crate::ui::tokens::size::COMBAT_ORBIT_UTILITY_PHONE)
         } else {
-            None
+            match name {
+                "MobileDash" if compact => Some(176.0),
+                "MobileHaste" if compact => Some(150.0),
+                "MobileDash" | "MobileHaste" | "MobileRecall" | "MobileRankMode"
+                | "MobileAttackCancel" => Some(crate::ui::tokens::size::COMBAT_ORBIT_UTILITY_PHONE),
+                _ => None,
+            }
         };
         if orbit.is_some_and(|orbit| (center.distance(attack.center()) - orbit * scale).abs() > 1.0)
         {
@@ -471,6 +477,12 @@ pub(super) fn mobile_geometry_valid(
             }
         }
         let visible_radius = radius;
+        if category {
+            if layout.category_radius * 2.0 < 43.5 {
+                return false;
+            }
+            radius = layout.category_radius;
+        }
         if name == "MobileJoystick" {
             // The capture circle (1.3 × r) may pass the safe bottom by the
             // redline's 2.6 px; the visible base stays inside.
@@ -490,13 +502,20 @@ pub(super) fn mobile_geometry_valid(
         ) {
             return false;
         }
-        circles.push((center, radius));
+        circles.push((center, radius, visible_radius));
     }
-    circles.iter().enumerate().all(|(index, (center, radius))| {
-        circles[index + 1..].iter().all(|(other, other_radius)| {
-            center.distance(*other) >= radius + other_radius + 3.5 * scale - 1.0
+    circles
+        .iter()
+        .enumerate()
+        .all(|(index, (center, touch_radius, visible_radius))| {
+            circles[index + 1..]
+                .iter()
+                .all(|(other, other_touch, other_visible)| {
+                    let separation = center.distance(*other);
+                    separation >= touch_radius + other_touch - 0.1
+                        && separation >= visible_radius + other_visible + 3.5 * scale - 1.0
+                })
         })
-    })
 }
 
 pub(super) fn validate(
@@ -576,12 +595,12 @@ mod tests {
             (
                 "MobileMinionAttack".to_owned(),
                 layout.category_centers[0],
-                layout.auxiliary_radius,
+                18.0 * mobile.combat_scale(),
             ),
             (
                 "MobileTowerAttack".to_owned(),
                 layout.category_centers[1],
-                layout.auxiliary_radius,
+                18.0 * mobile.combat_scale(),
             ),
             (
                 "MobileDash".to_owned(),
@@ -591,6 +610,11 @@ mod tests {
             (
                 "MobileHaste".to_owned(),
                 layout.utility_centers[1],
+                layout.auxiliary_radius,
+            ),
+            (
+                "MobileRecall".to_owned(),
+                layout.recall_center,
                 layout.auxiliary_radius,
             ),
             (
@@ -633,6 +657,8 @@ mod tests {
     fn rendered_radial_guard_checks_orbit_art_and_expanded_touch_bounds() {
         for viewport in [
             Vec2::new(693.0, 320.0),
+            Vec2::new(763.0, 390.0),
+            Vec2::new(764.0, 390.0),
             Vec2::new(844.0, 390.0),
             Vec2::new(932.0, 430.0),
         ] {
@@ -640,7 +666,11 @@ mod tests {
             mobile.viewport = viewport;
             let nodes = rendered_control_fixture(&mobile);
             assert!(mobile_geometry_valid(&nodes, &mobile));
-            for (name, axis, delta) in [("MobileTowerAttack", 0, 3.0), ("MobileJoystick", 1, 6.0)] {
+            for (name, axis, delta) in [
+                ("MobileTowerAttack", 0, 3.0),
+                ("MobileJoystick", 1, 6.0),
+                ("MobileDash", 0, 3.0),
+            ] {
                 let mut displaced = nodes.clone();
                 let node = displaced
                     .iter_mut()

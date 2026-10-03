@@ -206,6 +206,8 @@ pub fn apply_player_damage_kind(
     if player.hero.skills.advanced.immune(now) {
         return None;
     }
+    // A real hostile hit interrupts recall even when a shield absorbs it.
+    crate::recall::cancel(player);
     player.hero.skills.advanced.last_combat = Some(now);
     player.hero.skills.advanced.forge_ready = false;
     player.hero.skills.advanced.forge_since = None;

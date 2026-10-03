@@ -430,7 +430,10 @@ fn apply_snapshot_local_player(
     mut staged: ResMut<StagedSnapshot>,
     client_session: Res<ClientSession>,
     mut network_state: ResMut<NetworkState>,
-    local_player_query: Query<(Entity, Option<&NetworkPlayerId>), With<Player>>,
+    local_player_query: Query<
+        (Entity, Option<&NetworkPlayerId>, Option<&PlayerUtility>),
+        With<Player>,
+    >,
     mut local_transforms: Query<&mut Transform, (With<Player>, Without<MainCamera>)>,
     mut camera_transforms: Query<&mut Transform, (With<MainCamera>, Without<Player>)>,
     action_query: Query<Option<&PlayerCosmeticAction>>,
@@ -451,7 +454,7 @@ fn apply_snapshot_local_player(
 
     // Spawn the final roster only once frozen; redraft discards old models.
     if *gate == ApplyOutcome::Draft {
-        for (entity, _) in &local_player_query {
+        for (entity, _, _) in &local_player_query {
             commands
                 .entity(entity)
                 .despawn_related::<Children>()
@@ -469,7 +472,7 @@ fn apply_snapshot_local_player(
     let local_player_state = data.players.iter().find(|player| player.id == your_id);
     let local_players = local_player_query
         .iter()
-        .map(|(entity, maybe_id)| (entity, maybe_id.map(|id| id.0)))
+        .map(|(entity, maybe_id, _)| (entity, maybe_id.map(|id| id.0)))
         .collect::<Vec<_>>();
     // IMPORTANT: we must tolerate temporary duplication of `Player` entities (e.g. during loading /
     // restart races). Many gameplay systems use `Query::single()` and will break if we allow >1.
@@ -499,6 +502,13 @@ fn apply_snapshot_local_player(
         // Only apply character/team/stats once we actually have a state entry for our id.
         // Otherwise we'd oscillate between the locally selected character and the server default.
         if let Some(local_player_state) = local_player_state {
+            let recalled = local_player_query
+                .get(local_entity)
+                .ok()
+                .and_then(|(_, _, u)| u)
+                .is_some_and(|u| {
+                    local_player_state.utility.recall_sequence > u.state.recall_sequence
+                });
             commands.entity(local_entity).insert((
                 Team::from(local_player_state.team),
                 player_state_to_combat_stats(local_player_state),
@@ -536,7 +546,12 @@ fn apply_snapshot_local_player(
             if dash_accepted {
                 commands
                     .entity(local_entity)
-                    .remove::<(crate::player::MovementTarget, crate::player::MovementRoute)>();
+                    .remove::<(
+                        crate::player::MovementTarget,
+                        crate::player::MovementRoute,
+                        crate::player::Jumping,
+                    )>()
+                    .insert(VerticalVelocity::default());
             }
             let mut corrected = false;
             if let Ok(mut local_transform) = local_transforms.get_mut(local_entity) {
@@ -549,7 +564,7 @@ fn apply_snapshot_local_player(
                 } else {
                     LOCAL_SNAP_DISTANCE
                 };
-                if dash_accepted {
+                if dash_accepted && !recalled {
                     utility_vfx.write(crate::game_vfx::UtilityVfx::Dash {
                         from: local_transform.translation,
                         to: server_translation,
@@ -707,7 +722,11 @@ fn apply_snapshot_remote_players(
                 let dashed =
                     utility.is_some_and(|u| player.utility.dash_sequence > u.state.dash_sequence);
                 if dashed {
-                    if let Some(from) = interpolation.latest_translation() {
+                    if let Some(from) = interpolation.latest_translation().filter(|_| {
+                        utility.is_none_or(|u| {
+                            player.utility.recall_sequence == u.state.recall_sequence
+                        })
+                    }) {
                         utility_vfx.write(crate::game_vfx::UtilityVfx::Dash {
                             from,
                             to: translation,

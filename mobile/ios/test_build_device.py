@@ -82,6 +82,11 @@ class DeviceTests(unittest.TestCase):
         self.assertFalse(info.get("GCRequiresControllerUserInteraction", False))
         self.assertNotIn("game-controller", info["UIRequiredDeviceCapabilities"])
 
+    def test_packaged_game_declares_exempt_encryption_as_boolean(self):
+        info = device.app_info(device.ROOT, device.inspect_macho(self.binary), device.BUNDLE_ID)
+        self.assertIs(info["ITSAppUsesNonExemptEncryption"], False)
+        self.assertNotIn("ITSEncryptionExportComplianceCode", info)
+
     def test_same_arm64_simulator_is_rejected(self):
         self.binary.write_bytes(macho(platform=7))
         with self.assertRaisesRegex(ValueError, "physical iOS"):

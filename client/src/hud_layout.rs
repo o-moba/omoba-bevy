@@ -21,7 +21,7 @@ pub(crate) mod plate {
     pub const BUFF_CHIPS: Vec2 = Vec2::new(344.0, 52.0);
     pub const BRUSH_CHIP: Vec2 = Vec2::new(144.0, 24.0);
     pub const SCORE_STRIP_DESKTOP: Vec2 = Vec2::new(176.0, 40.0);
-    pub const SCORE_STRIP_PHONE: Vec2 = Vec2::new(150.0, 44.0);
+    pub const SCORE_STRIP_PHONE: Vec2 = Vec2::new(124.0, 44.0);
     pub const SOCIAL_STATUS_DESKTOP: Vec2 = Vec2::new(184.0, 24.0);
     pub const FEEDBACK_DESKTOP: Vec2 = Vec2::new(344.0, 52.0);
     pub const FEEDBACK_PHONE: Vec2 = Vec2::new(220.0, 40.0);
@@ -69,7 +69,11 @@ const TOOLTIP_BOTTOM_WITHOUT_CHIP: f32 = ABILITY_FROM_BOTTOM + space::S8;
 
 /// Width of the three icon buttons (chat, reactions, menu) with their gaps.
 pub(crate) fn icon_row_width(form: Form) -> f32 {
-    3.0 * size::ICON_BUTTON.at(form) + 2.0 * space::S8
+    if form == Form::Phone {
+        2.0 * 44.0 + space::S8
+    } else {
+        3.0 * size::ICON_BUTTON.at(form) + 2.0 * space::S8
+    }
 }
 
 /// A point projected by a camera (`world_to_viewport`: logical window
@@ -95,6 +99,8 @@ pub(crate) struct HudLayout {
     pub minimap: Rect,
     pub buff_chips: Rect,
     pub target_frame: Rect,
+    pub allies: Rect,
+    pub kill_feed: Rect,
     pub brush_chip: Rect,
     pub score_strip: Rect,
     pub icon_buttons: Rect,
@@ -151,6 +157,16 @@ impl HudLayout {
         Self {
             form,
             viewport,
+            allies: rect(
+                inset + size::MINIMAP.desktop + 8.0,
+                inset + 50.0,
+                Vec2::new(176.0, 44.0),
+            ),
+            kill_feed: rect(
+                (w - inset - 280.0).max(space::S16),
+                SOCIAL_STATUS_TOP + plate::SOCIAL_STATUS_DESKTOP.y + space::S12,
+                Vec2::new(280.0, 98.0),
+            ),
             minimap: rect(inset, inset, Vec2::splat(size::MINIMAP.desktop)),
             // Max 344 wide; narrow windows cap it at the protected centre
             // (30 % of the width), where long chips clip.
@@ -242,9 +258,9 @@ impl HudLayout {
         let icon_row_x = right - icons;
         let score = plate::SCORE_STRIP_PHONE;
         let score_x = icon_row_x - space::S8 - score.x;
-        // Centred between the minimap and the score strip, not the screen.
-        let target_w = size::TARGET_FRAME_WIDTH.phone;
-        let between = (minimap.max.x + score_x) * 0.5;
+        // A compact plate centred on the screen leaves a top row for allies.
+        let target_w = 184.0;
+        let between = (safe.left + viewport.x - safe.right) * 0.5;
         let target = rect(
             between - target_w * 0.5,
             top,
@@ -266,9 +282,27 @@ impl HudLayout {
             bar.min.y - space::S8 - plate::UPGRADE_CHIP.y,
             plate::UPGRADE_CHIP,
         );
+        let controls = mobile.layout();
+        let feed_left = controls.joystick_center.x + controls.joystick_radius * 1.3 + 12.0;
+        let feed_right = controls.utility_centers[0].x - controls.auxiliary_radius - 12.0;
+        let feed_width = (feed_right - feed_left).clamp(0.0, 280.0);
+        let feed = rect(
+            (feed_left + feed_right - feed_width) * 0.5,
+            viewport.y - safe.bottom - 82.0,
+            Vec2::new(feed_width, 78.0),
+        );
         Self {
             form,
             viewport,
+            allies: rect(
+                minimap.max.x + 6.0,
+                top,
+                Vec2::new(
+                    (target.min.x - minimap.max.x - 12.0).clamp(88.0, 188.0),
+                    44.0,
+                ),
+            ),
+            kill_feed: feed,
             minimap,
             buff_chips: Rect::default(),
             target_frame: target,
@@ -278,7 +312,7 @@ impl HudLayout {
                 plate::BRUSH_CHIP,
             ),
             score_strip: rect(score_x, top, score),
-            icon_buttons: rect(icon_row_x, top, Vec2::new(icons, size::ICON_BUTTON.phone)),
+            icon_buttons: rect(icon_row_x, top, Vec2::new(icons, 44.0)),
             social_status: rect(
                 icon_row_x,
                 top + PHONE_SOCIAL_STATUS_TOP,
@@ -307,18 +341,18 @@ impl HudLayout {
         }
     }
 
-    /// Three short kill rows below the top-right HUD, inside the safe edge.
+    /// Compact phone notices use the free bottom corridor between the thumbs.
     pub(crate) fn kill_feed(&self) -> Rect {
-        rect(
-            (self.icon_buttons.max.x - 280.0).max(space::S16),
-            self.social_status.max.y + space::S12,
-            Vec2::new(280.0, 98.0),
-        )
+        self.kill_feed
     }
 
     /// The rectangle of a tagged region (sub-cells of the icon row included).
     pub(crate) fn region(&self, region: HudRegion) -> Rect {
-        let button = size::ICON_BUTTON.at(self.form);
+        let button = if self.form == Form::Phone {
+            44.0
+        } else {
+            size::ICON_BUTTON.at(self.form)
+        };
         match region {
             HudRegion::BuffChips | HudRegion::PracticeBadge => self.buff_chips,
             HudRegion::TargetFrame => self.target_frame,
@@ -326,7 +360,15 @@ impl HudLayout {
             HudRegion::ScoreStrip => self.score_strip,
             HudRegion::SocialEntry => Rect::from_corners(
                 self.icon_buttons.min,
-                self.icon_buttons.min + Vec2::new(2.0 * button + space::S8, button),
+                self.icon_buttons.min
+                    + Vec2::new(
+                        if self.form == Form::Phone {
+                            button
+                        } else {
+                            2.0 * button + space::S8
+                        },
+                        button,
+                    ),
             ),
             HudRegion::MenuButton => Rect::from_corners(
                 self.icon_buttons.max - Vec2::splat(button),
@@ -506,18 +548,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn ipad_kill_feed_uses_the_right_safe_edge_below_top_controls() {
+    fn phone_kill_feed_and_top_chrome_avoid_control_targets() {
         let mut mobile = MobileControls::default();
-        mobile.viewport = Vec2::new(1180.0, 820.0);
+        mobile.viewport = Vec2::new(852.0, 393.0);
         let layout = HudLayout::phone(&mobile);
+        let controls = mobile.layout();
         let feed = layout.kill_feed();
-        assert_eq!(feed.max.x, layout.icon_buttons.max.x);
-        assert!(feed.min.x > mobile.viewport.x * 0.5);
-        assert!(feed.min.y > layout.social_status.max.y);
-        assert!(feed.max.x <= mobile.viewport.x - mobile.safe.right);
-        assert!(
-            feed.max.y < mobile.layout().ability_centers[3].y - mobile.layout().ability_radii[3]
-        );
+        assert!(feed.min.x > controls.joystick_center.x + controls.joystick_radius * 1.3);
+        assert!(feed.max.x < controls.utility_centers[0].x - controls.auxiliary_radius);
+        assert!(feed.max.y <= mobile.viewport.y - mobile.safe.bottom);
+        assert_eq!(layout.target_frame.center().x, mobile.viewport.x * 0.5);
+        assert_eq!(layout.allies.min.y, layout.minimap.min.y);
+        assert!(layout.allies.max.x < layout.target_frame.min.x);
+        assert!(layout.target_frame.max.x < layout.score_strip.min.x);
     }
 
     fn at(rect: Rect) -> (f32, f32, f32, f32) {
@@ -626,12 +669,12 @@ mod tests {
         assert_eq!(at(l.minimap), (63.0, 12.0, 120.0, 120.0));
         assert_eq!(at(l.player_status), (63.0, 140.0, 200.0, 48.0));
         assert_eq!(at(l.quick_buy), (63.0, 196.0, 148.0, 44.0));
-        assert_eq!(at(l.target_frame), (219.0, 12.0, 220.0, 44.0));
-        assert_eq!(at(l.brush_chip), (257.0, 64.0, 144.0, 24.0));
-        assert_eq!(at(l.action_feedback), (219.0, 92.0, 220.0, 40.0));
-        assert_eq!(at(l.score_strip), (475.0, 12.0, 150.0, 44.0));
-        assert_eq!(at(l.icon_buttons), (633.0, 12.0, 148.0, 44.0));
-        assert_eq!(at(l.social_status), (633.0, 60.0, 148.0, 24.0));
+        assert_eq!(at(l.target_frame), (330.0, 12.0, 184.0, 44.0));
+        assert_eq!(at(l.brush_chip), (350.0, 64.0, 144.0, 24.0));
+        assert_eq!(at(l.action_feedback), (330.0, 92.0, 220.0, 40.0));
+        assert_eq!(at(l.score_strip), (553.0, 12.0, 124.0, 44.0));
+        assert_eq!(at(l.icon_buttons), (685.0, 12.0, 96.0, 44.0));
+        assert_eq!(at(l.social_status), (685.0, 60.0, 96.0, 24.0));
         assert_eq!(at(l.skill_card), (282.0, 64.0, 280.0, 148.0));
         // Quick-buy ends above the protected passage (y 242), also at the
         // runtime's conservative insets (32/32/12/20).

@@ -1,5 +1,17 @@
 # Feature Inventory
 
+## iPhone gameplay controls (0.35.0)
+
+The compact phone HUD places skills and smaller minion/tower controls on one circle around attack, with a uniform 42-degree step. Skill sizes, order and vertical positions remain unchanged; the whole combat group moves 48 logical points left at normal scale to fit the additional right-side 44-point targets. Allied portraits sit beside the top of the map, the selected target is centered, and the bottom gap holds compact kill notices. Tap an allied portrait to follow that actor; movement, manual navigation and recentering return camera control. Finger panning is faster. Attack targeting has no instructional box, uses the current camera projection, and dash supports press-drag-release direction selection with a landing preview and camera recovery.
+
+Return to base is a separate seven-second server-authoritative utility. Movement, damage, combat, death and disconnection interrupt it; successful completion preserves health, resources and cooldowns. Phone controls show channel time, while desktop uses B. The new commands require protocol 5 on both client and host.
+
+Settings save a 60/120 FPS ceiling and bounded joystick/combat-group offsets, with a separate layout reset. iOS uses CADisplayLink; the OS and hardware can lower the requested rate. The small FPS label measures actual app frame cadence. Hidden local heroes retain their material fade and gain a crossed-eye marker. Tapping the hero opens the reaction wheel; server-confirmed reactions remain visible while an image loads. The [account-owned sticker contract](sticker-assets.md) records the future SDK/Studio integration separately from existing reaction entitlements.
+
+## iOS export metadata (0.34.2)
+
+The common iOS plist declares the reviewed game encryption exemption. Device packaging, Xcode archives and prepared TestFlight archives preserve the Boolean declaration. Previously uploaded builds still require their own App Store Connect answer. See [the assessment and reassessment triggers](../mobile/ios/EXPORT-COMPLIANCE.md).
+
 ## iPad combat polish (0.34.1)
 
 Skill + badges directly upgrade eligible abilities and own a 44-point touch target, preventing world taps beneath them. Basic attacks no longer show routine no-target or aiming instruction panels. The timed kill feed sits below the top-right HUD. HP and mana retain fixed heights below the nickname. All surviving towers are public map landmarks, while attack visibility rules remain unchanged. A flying impact rocket carries eight metres of temporary team sight and a minimap marker, ground light and brighter exhaust. Server-confirmed concealment makes the local 3D avatar and handheld translucent; reveal restores their original materials. Shared avatar assets and opponents remain unchanged. Verification status: [session note](progress/2026-10-02-ipad-combat-polish.md).
@@ -941,3 +953,7 @@ Home shows a compact, noninteractive build label at the lower-left on desktop/mo
 Fresh clients default to `77.246.105.57:4000`. Home's server-link button opens the address editor on desktop and mobile. **OMOBA Beta** and **Localhost** prefill an editable host:port; **Connect** validates, reconnects and saves. Existing manual selections retain priority, as do explicit runtime/build overrides. Desktop party lobby also provides prefill buttons. Match-worker handoff remains temporary and never replaces the saved lobby address.
 
 The beta lobby on `vds-eternal` supervises at most two independent matches on UDP41000–41001, with PostgreSQL-backed game profiles and durable match receipts. Studio/Registry and Ekza Space remain separate services. See [VPS operations](../ops/vps/README.md); physical mobile performance and capacity beyond two rooms are not certified by this rollout.
+
+### Avatar preview framing (0.34.2)
+
+The Home, collection and selection preview camera fits the actual glTF vertex silhouette after model normalization. In 0.35.0, a cached rotational envelope keeps the ground line at the Home platform while accounting for model width/depth, height and vertical origin without changing gameplay scale or colliders. Wide upper wings do not introduce an imaginary wide foot that would unnecessarily shrink the avatar. The opt-in `OMOBA_HOME_ONLY_QA=1` screenshot check waits for the avatar and captures only Home. Bind-pose geometry plus padding cover normal idle motion; extreme animation excursions and separately attached props are not dynamically measured.

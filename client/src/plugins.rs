@@ -128,6 +128,8 @@ impl PluginGroup for PresentationPlugins {
         PluginGroupBuilder::start::<Self>()
             // Shared by both backends.
             .add(CameraPlugin)
+            .add(crate::dash_preview::DashPreviewPlugin)
+            .add(crate::recall::RecallPlugin)
             .add(SetupPlugin)
             .add(ModelScalePlugin)
             .add(CombatVisualsPlugin)
@@ -163,6 +165,7 @@ impl PluginGroup for UiPlugins {
     fn build(self) -> PluginGroupBuilder {
         PluginGroupBuilder::start::<Self>()
             .add(UiKitPlugin)
+            .add(crate::render_settings::RenderSettingsPlugin)
             .add(MobileControlsPlugin)
             .add(MobileUiPlugin)
             .add(FrontendPlugin)

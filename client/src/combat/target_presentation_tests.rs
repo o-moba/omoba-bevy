@@ -17,6 +17,7 @@ fn fixture(mode: PlayerVisualMode) -> (App, Entity, Entity, Entity, Entity) {
         .insert_resource(mode)
         .init_resource::<crate::maps::MapLayout>()
         .init_resource::<TargetState>()
+        .init_resource::<crate::targeting::TargetAimPreview>()
         .init_resource::<BasicAttackState>();
     configure_target_presentation(&mut app);
     app.world_mut().spawn((Player, Team::Green));
@@ -67,6 +68,28 @@ fn fixture(mode: PlayerVisualMode) -> (App, Entity, Entity, Entity, Entity) {
         marker_entity: Some(marker),
     };
     (app, enemy, camera, marker, frame)
+}
+
+#[test]
+fn touch_target_keeps_the_frame_without_a_locked_instruction_label() {
+    let (mut app, _, _, _, frame) = fixture(PlayerVisualMode::Models3d);
+    let mut mobile = crate::mobile_controls::MobileControls::default();
+    mobile.enabled = true;
+    app.insert_resource(mobile);
+    app.update();
+    assert_ne!(
+        app.world().get::<Node>(frame).unwrap().display,
+        Display::None
+    );
+    let mut labels = app
+        .world_mut()
+        .query_filtered::<&Node, With<LockedTargetLabel>>();
+    assert_eq!(labels.single(app.world()).unwrap().display, Display::None);
+    app.world_mut()
+        .resource_mut::<crate::mobile_controls::MobileControls>()
+        .enabled = false;
+    app.update();
+    assert_ne!(labels.single(app.world()).unwrap().display, Display::None);
 }
 
 #[test]

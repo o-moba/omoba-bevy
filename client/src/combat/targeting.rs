@@ -819,10 +819,18 @@ pub(crate) fn draw_locked_target(
     poses: bevy::transform::helper::TransformHelper,
     mode: Res<PlayerVisualMode>,
     settings: Option<Res<crate::model_scale::ModelScaleSettings>>,
-    mut indicator: Query<&mut Node, With<LockedTargetIndicator>>,
-    mut label: Query<&mut Text, With<LockedTargetLabel>>,
+    mut indicator: Query<&mut Node, (With<LockedTargetIndicator>, Without<LockedTargetLabel>)>,
+    mut label: Query<
+        (&mut Text, &mut Node),
+        (With<LockedTargetLabel>, Without<LockedTargetIndicator>),
+    >,
     ui_scale: Option<Res<UiScale>>,
+    mobile: Option<Res<crate::mobile_controls::MobileControls>>,
 ) {
+    let phone = mobile.as_ref().is_some_and(|controls| controls.enabled);
+    for (_, mut node) in &mut label {
+        node.display = if phone { Display::None } else { Display::Flex };
+    }
     let Ok(mut node) = indicator.single_mut() else {
         return;
     };
@@ -881,7 +889,7 @@ pub(crate) fn draw_locked_target(
         border_radius: BorderRadius::all(Val::Px(7.0)),
         ..default()
     };
-    if let Ok(mut label) = label.single_mut() {
+    if let Ok((mut label, _)) = label.single_mut() {
         label.0 = tr(if basic.order.is_some_and(|order| order.target == id) {
             "combat.marker.attack"
         } else {
@@ -931,6 +939,7 @@ pub(crate) fn setup_targeting_ui(mut commands: Commands) {
                 },
                 FocusPolicy::Pass,
                 LockedTargetLabel,
+                Name::new("LockedTargetLabel"),
             ));
         });
 
@@ -967,6 +976,39 @@ pub(crate) fn setup_targeting_ui(mut commands: Commands) {
         }
     }
 }
+/// Reproject using this frame's poses, after camera follow and grounding. The
+/// input system selects the target; presentation must not mix last-frame
+/// GlobalTransforms with the hero's current local Transform while running.
+pub(crate) fn refresh_aim_projection(
+    mut preview: ResMut<TargetAimPreview>,
+    local: Query<Entity, With<Player>>,
+    camera: Query<(Entity, &Camera), With<MainCamera>>,
+    transforms: bevy::transform::helper::TransformHelper,
+    mode: Res<PlayerVisualMode>,
+) {
+    if !preview.active {
+        return;
+    }
+    let (Ok(player), Ok((camera_entity, camera))) = (local.single(), camera.single()) else {
+        return;
+    };
+    let (Ok(hero), Ok(pose)) = (
+        transforms.compute_global_transform(player),
+        transforms.compute_global_transform(camera_entity),
+    ) else {
+        return;
+    };
+    if let Some(origin) = screen_position(camera, &pose, *mode, hero.translation()) {
+        let vector = preview.cursor - preview.origin;
+        preview.origin = origin;
+        preview.cursor = origin + vector;
+    }
+    preview.candidate_screen = preview
+        .candidate
+        .and_then(|entity| transforms.compute_global_transform(entity).ok())
+        .and_then(|target| screen_position(camera, &pose, *mode, target.translation()));
+}
+
 pub(crate) fn draw_targeting_ui(
     preview: Res<TargetAimPreview>,
     gamepad: Option<Res<crate::gamepad::GamepadControls>>,
@@ -997,6 +1039,10 @@ pub(crate) fn draw_targeting_ui(
         *border = BorderColor::all(tint);
         match part {
             AimVisual::Label => {
+                // Touch aiming is visual: no instructional black box on attack.
+                if !gamepad.as_ref().is_some_and(|pad| pad.active) {
+                    continue;
+                }
                 *node = Node {
                     position_type: PositionType::Absolute,
                     left: Val::Px((cursor.x - 65.0).max(8.0)),

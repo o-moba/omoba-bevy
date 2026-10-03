@@ -74,8 +74,9 @@ impl HeroProgress {
 pub struct HeroUtility {
     /// High-water request mark, including rejected requests in this round.
     pub last_request_id: u64,
-    /// Advances only on an accepted dash, including fully blocked dashes.
+    /// Monotonic movement correction barrier for dash and other teleports.
     pub dash_sequence: u64,
+    pub recall_sequence: u64,
 }
 
 /// The last accepted cosmetic action, replicated so clients can play it.

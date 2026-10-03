@@ -55,6 +55,7 @@ docs/*
 !docs/player-handles.md
 !docs/playtest-script.md
 !docs/ui-screens.md
+!docs/sticker-assets.md
 !docs/ekza-avatar-demo.md
 !docs/ekza-production-avatars.md
 !docs/bug-report-template.md

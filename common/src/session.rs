@@ -130,6 +130,8 @@ impl GameWorld {
                 player.last_seen = now;
                 player.timers.last_movement_at = now;
                 player.timers.movement_slack = MOVEMENT_POSITION_TOLERANCE;
+                // A channel cannot survive the gap between live endpoints.
+                crate::recall::cancel(&mut player);
                 players.insert(addr, player);
                 return true;
             }
@@ -149,6 +151,8 @@ impl GameWorld {
                 disconnected.player.last_seen = now;
                 disconnected.player.timers.last_movement_at = now;
                 disconnected.player.timers.movement_slack = MOVEMENT_POSITION_TOLERANCE;
+                // Defensive for retained state created before disconnect cleanup.
+                crate::recall::cancel(&mut disconnected.player);
                 players.insert(addr, disconnected.player);
                 return true;
             }
@@ -257,6 +261,7 @@ pub fn reset_player_round(player: &mut ConnectedPlayer, map_layout: &MapLayoutSt
     player.timers.last_cast_at = [None; 4];
     player.timers.last_basic_attack_at = None;
     player.timers.respawn_at = None;
+    player.timers.recall = None;
 }
 
 #[cfg(any(test, feature = "test-support"))]
@@ -310,6 +315,11 @@ pub fn handle_transform_request_with_structures(
     let dx = requested.x - current.x;
     let dz = requested.z - current.z;
     let distance = (dx * dx + dz * dz).sqrt();
+    // Unchanged heartbeat transforms never cancel a channel. Directional
+    // movement intent cancels even if collision subsequently blocks the step.
+    if distance > crate::recall::MOVEMENT_CANCEL_DISTANCE {
+        crate::recall::cancel(player);
+    }
     let elapsed = now
         .duration_since(player.timers.last_movement_at)
         .as_secs_f32()
@@ -394,6 +404,7 @@ pub fn handle_respawns(world: &mut GameWorld, now: Instant) {
         player.hero.hp = player.hero.max_hp;
         player.hero.mana = player.hero.max_mana;
         player.timers.respawn_at = None;
+        player.timers.recall = None;
         player.timers.haste_expires_at = None;
         player.timers.last_movement_at = now;
         player.timers.last_cast_at = [None; 4];

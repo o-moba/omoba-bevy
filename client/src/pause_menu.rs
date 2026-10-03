@@ -12,6 +12,7 @@ use bevy::{
 use crate::audio_settings::AudioSettings;
 use crate::camera::{CAMERA_ZOOM_STEP, CameraSettings};
 use crate::i18n::{Locale, Localized, tr, trf};
+use crate::mobile_controls::HudPositionSettings;
 use crate::model_scale::{
     DEFAULT_MODEL_TARGET_HEIGHT, MAX_MODEL_TARGET_HEIGHT, MIN_MODEL_TARGET_HEIGHT,
     ModelScaleSettings,
@@ -20,6 +21,7 @@ use crate::net::{ClientConnectionState, ClientSession, GameState, GameStateSnaps
 use crate::persistence::{
     ClientPrefsSaveGate, ClientSessionId, ResolvedServerAddressForPrefs, reset_graphics_to_defaults,
 };
+use crate::render_settings::RenderSettings;
 use crate::session_config::DEFAULT_GAME_SERVER_ADDR;
 use crate::team::TeamSelection;
 use crate::ui::living_background::{
@@ -65,6 +67,8 @@ impl Plugin for PauseMenuPlugin {
         app.init_resource::<PauseMenuState>()
             .init_resource::<SettingsTab>()
             .init_resource::<AudioSettings>()
+            .init_resource::<RenderSettings>()
+            .init_resource::<HudPositionSettings>()
             .init_resource::<crate::help_overlay::HelpOverlayVisible>()
             .init_resource::<SettingsHelpReturn>()
             .add_ui_action::<PauseAction>()
@@ -100,10 +104,13 @@ impl Plugin for PauseMenuPlugin {
                     apply_pause_navigation,
                     return_to_settings_after_help.after(apply_pause_navigation),
                     apply_pause_settings,
+                    apply_render_and_hud_settings,
                     apply_pause_audio,
                     apply_pause_session,
                     apply_pause_language,
-                    update_setting_labels.after(apply_pause_settings),
+                    update_setting_labels
+                        .after(apply_pause_settings)
+                        .after(apply_render_and_hud_settings),
                     update_language_value.after(apply_pause_language),
                     sync_pause_menu_visibility,
                     sync_pause_menu_sections,
@@ -147,6 +154,7 @@ pub(crate) enum SettingsTab {
     Sound,
     Graphics,
     Camera,
+    Hud,
     Language,
 }
 
@@ -273,6 +281,11 @@ struct PauseLivingBackground;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Setting {
     CameraZoom,
+    RenderFps,
+    JoystickX,
+    JoystickY,
+    CombatX,
+    CombatY,
     ModelScale,
     Light,
     Ambient,
@@ -296,6 +309,7 @@ pub(crate) enum PauseAction {
     LeavePractice,
     LeaveMatch,
     ResetGraphics,
+    ResetHud,
     /// One step of a setting; the sign is the direction.
     Step(Setting, i8),
     Audio(AudioButton),
@@ -935,6 +949,12 @@ fn setup_pause_menu_ui(mut commands: Commands, platform: Option<Res<crate::ui::U
                                     "SettingsTabCamera",
                                 ),
                                 (
+                                    SettingsTab::Hud,
+                                    "pause.settings.hud",
+                                    Icon::SettingsMonitor,
+                                    "SettingsTabHud",
+                                ),
+                                (
                                     SettingsTab::Language,
                                     "pause.settings.language",
                                     Icon::SettingsLanguages,
@@ -1248,6 +1268,70 @@ fn setup_pause_menu_ui(mut commands: Commands, platform: Option<Res<crate::ui::U
                                     },
                                     Name::new("PauseMenuCredits"),
                                 ));
+                            });
+                            settings_group(settings, SettingsTab::Graphics, |settings| {
+                                section_title(
+                                    settings,
+                                    "pause.settings.render",
+                                    "PauseMenuRenderTitle",
+                                );
+                                setting_row(
+                                    settings,
+                                    Localized::new("pause.render.limit"),
+                                    "60".to_owned(),
+                                    Setting::RenderFps,
+                                    "PauseMenuRenderFpsControls",
+                                );
+                                settings.spawn((
+                                    Localized::new("pause.render.hint").into_text(),
+                                    theme::role_text(TextRole::Caption),
+                                    TextColor(theme::MUTED),
+                                ));
+                            });
+                            settings_group(settings, SettingsTab::Hud, |settings| {
+                                section_title(settings, "pause.settings.hud", "PauseMenuHudTitle");
+                                settings.spawn((
+                                    Localized::new("pause.hud.hint").into_text(),
+                                    theme::role_text(TextRole::Caption),
+                                    TextColor(theme::MUTED),
+                                ));
+                                for (key, setting, id) in [
+                                    (
+                                        "pause.hud.joystick_x",
+                                        Setting::JoystickX,
+                                        "PauseMenuHudJoystickX",
+                                    ),
+                                    (
+                                        "pause.hud.joystick_y",
+                                        Setting::JoystickY,
+                                        "PauseMenuHudJoystickY",
+                                    ),
+                                    (
+                                        "pause.hud.combat_x",
+                                        Setting::CombatX,
+                                        "PauseMenuHudCombatX",
+                                    ),
+                                    (
+                                        "pause.hud.combat_y",
+                                        Setting::CombatY,
+                                        "PauseMenuHudCombatY",
+                                    ),
+                                ] {
+                                    setting_row(
+                                        settings,
+                                        Localized::new(key),
+                                        "0".to_owned(),
+                                        setting,
+                                        id,
+                                    );
+                                }
+                                widgets::button(
+                                    settings,
+                                    Localized::new("pause.hud.reset"),
+                                    ButtonKind::Secondary,
+                                    PauseAction::ResetHud,
+                                    "PauseMenuResetHudButton",
+                                );
                             });
                             settings_group(settings, SettingsTab::Graphics, |settings| {
                                 section_title(
@@ -1617,6 +1701,11 @@ fn apply_pause_settings(
                 let sign = f32::from(direction.signum());
                 match setting {
                     Setting::CameraZoom => camera.adjust(sign * CAMERA_ZOOM_STEP),
+                    Setting::RenderFps
+                    | Setting::JoystickX
+                    | Setting::JoystickY
+                    | Setting::CombatX
+                    | Setting::CombatY => {}
                     Setting::ModelScale => {
                         model.target_height = (model.target_height + sign * SCALE_STEP)
                             .clamp(MIN_MODEL_TARGET_HEIGHT, MAX_MODEL_TARGET_HEIGHT);
@@ -1660,6 +1749,55 @@ fn apply_pause_settings(
                 );
             }
             PauseAction::ToggleReduceMotion => motion.reduce = !motion.reduce,
+            _ => {}
+        }
+    }
+}
+
+/// Group offsets preserve the four skill buttons' relative arrangement. The
+/// regular settings modal owns all touches while editing, so they cannot move
+/// the hero. The live layout applies its final safe-area clamp independently.
+fn apply_render_and_hud_settings(
+    mut activated: MessageReader<Activated<PauseAction>>,
+    menu: Res<PauseMenuState>,
+    career: Option<Res<crate::career::CareerClient>>,
+    social: Option<Res<crate::social::SocialClient>>,
+    mut render: ResMut<RenderSettings>,
+    mut hud: ResMut<HudPositionSettings>,
+) {
+    let allowed = menu.open
+        && menu.in_settings
+        && !career.as_ref().is_some_and(|career| career.modal_open())
+        && !social
+            .as_ref()
+            .is_some_and(|social| social.blocks_gameplay());
+    for Activated { action, .. } in activated.read() {
+        if !allowed {
+            continue;
+        }
+        match *action {
+            PauseAction::Step(Setting::RenderFps, direction) => {
+                render.fps_limit = if direction > 0 { 120 } else { 60 };
+            }
+            PauseAction::Step(
+                setting @ (Setting::JoystickX
+                | Setting::JoystickY
+                | Setting::CombatX
+                | Setting::CombatY),
+                direction,
+            ) => {
+                *hud = hud.sanitized();
+                let delta = f32::from(direction.signum()) * 8.0;
+                match setting {
+                    Setting::JoystickX => hud.joystick_offset.x += delta,
+                    Setting::JoystickY => hud.joystick_offset.y += delta,
+                    Setting::CombatX => hud.combat_offset.x += delta,
+                    Setting::CombatY => hud.combat_offset.y += delta,
+                    _ => unreachable!(),
+                }
+                *hud = hud.sanitized();
+            }
+            PauseAction::ResetHud => *hud = HudPositionSettings::default(),
             _ => {}
         }
     }
@@ -1806,6 +1944,8 @@ fn reset_pause_scroll_on_navigation(
 /// Value labels follow their settings, including changes made elsewhere
 /// (wheel zoom writes the camera setting back).
 fn update_setting_labels(
+    render: Option<Res<RenderSettings>>,
+    hud: Option<Res<HudPositionSettings>>,
     camera: Res<CameraSettings>,
     model: Res<ModelScaleSettings>,
     lighting: Res<LightingSettings>,
@@ -1813,6 +1953,25 @@ fn update_setting_labels(
 ) {
     for (label, mut text) in &mut labels {
         let next = match label.0 {
+            Setting::RenderFps => render
+                .as_ref()
+                .map(|s| s.sanitized().fps_limit)
+                .unwrap_or(60)
+                .to_string(),
+            setting @ (Setting::JoystickX
+            | Setting::JoystickY
+            | Setting::CombatX
+            | Setting::CombatY) => {
+                let hud = hud.as_ref().map(|s| s.sanitized()).unwrap_or_default();
+                let value = match setting {
+                    Setting::JoystickX => hud.joystick_offset.x,
+                    Setting::JoystickY => hud.joystick_offset.y,
+                    Setting::CombatX => hud.combat_offset.x,
+                    Setting::CombatY => hud.combat_offset.y,
+                    _ => unreachable!(),
+                };
+                format!("{value:+.0}")
+            }
             Setting::CameraZoom if camera.is_changed() => camera.percent_label(),
             Setting::ModelScale if model.is_changed() => format!("{:.2}", model.target_height),
             Setting::Light if lighting.is_changed() => format!("{:.0}", lighting.illuminance),
@@ -3145,6 +3304,57 @@ mod tests {
         assert!(app.world().resource::<MotionSettings>().reduce);
         app.update();
         assert!(app.world().resource::<MotionSettings>().reduce);
+    }
+
+    #[test]
+    fn render_and_hud_controls_require_settings_and_clamp_and_reset_offsets() {
+        let mut app = App::new();
+        app.init_resource::<PauseMenuState>()
+            .init_resource::<RenderSettings>()
+            .init_resource::<HudPositionSettings>()
+            .add_message::<Activated<PauseAction>>()
+            .add_systems(Update, apply_render_and_hud_settings);
+        let press = |app: &mut App, action| {
+            app.world_mut().write_message(Activated {
+                action,
+                source: Entity::PLACEHOLDER,
+            });
+            app.update();
+        };
+        press(&mut app, PauseAction::Step(Setting::RenderFps, 1));
+        assert_eq!(app.world().resource::<RenderSettings>().fps_limit, 60);
+        *app.world_mut().resource_mut::<PauseMenuState>() = PauseMenuState {
+            open: true,
+            in_settings: true,
+        };
+        press(&mut app, PauseAction::Step(Setting::RenderFps, 1));
+        assert_eq!(app.world().resource::<RenderSettings>().fps_limit, 120);
+        for _ in 0..20 {
+            press(&mut app, PauseAction::Step(Setting::CombatX, -1));
+        }
+        assert_eq!(
+            app.world()
+                .resource::<HudPositionSettings>()
+                .combat_offset
+                .x,
+            -60.0
+        );
+        press(&mut app, PauseAction::Step(Setting::JoystickY, -1));
+        assert_eq!(
+            app.world()
+                .resource::<HudPositionSettings>()
+                .joystick_offset
+                .y,
+            -8.0
+        );
+        press(&mut app, PauseAction::ResetHud);
+        assert_eq!(
+            *app.world().resource::<HudPositionSettings>(),
+            HudPositionSettings::default()
+        );
+        assert_eq!(app.world().resource::<RenderSettings>().fps_limit, 120);
+        press(&mut app, PauseAction::Step(Setting::RenderFps, -1));
+        assert_eq!(app.world().resource::<RenderSettings>().fps_limit, 60);
     }
 
     /// R6.5: Controls opened from Settings closes back into Settings (the

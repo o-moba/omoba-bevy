@@ -35,6 +35,7 @@ pub struct HeroTimers {
     pub haste_ready_at: Option<Instant>,
     pub haste_expires_at: Option<Instant>,
     pub respawn_at: Option<Instant>,
+    pub recall: Option<crate::recall::RecallChannel>,
 }
 
 impl HeroTimers {
@@ -48,6 +49,7 @@ impl HeroTimers {
             haste_ready_at: None,
             haste_expires_at: None,
             respawn_at: None,
+            recall: None,
         }
     }
 
@@ -170,6 +172,7 @@ pub fn normalize_hero_timers(world: &mut GameWorld) {
             player.timers.haste_ready_at = None;
         }
         if dead {
+            player.timers.recall = None;
             player.timers.haste_expires_at = None;
         }
     }

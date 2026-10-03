@@ -337,6 +337,16 @@ fn real_udp_filters_team_messages_and_preserves_fragmented_social_payloads() {
         std::thread::sleep(Duration::from_millis(2));
     }
     assert_eq!(runtime.social.events.len(), 2);
+    peers[0].send(&serde_json::to_vec(&serde_json::json!({"type":"social","request":{
+        "request_id":4,"server_epoch":runtime.server_epoch,"match_id":runtime.match_id,"session_id":"s0",
+        "command":{"kind":"reaction","reaction_id":"thumbs_up"}
+    }})).unwrap()).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while runtime.social.events.len() < 3 && Instant::now() < deadline {
+        runtime.receive_packets();
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    assert_eq!(runtime.social.events.len(), 3);
     runtime.send_social_views(Instant::now());
     for (index, peer) in peers.iter().enumerate() {
         let mut assembler = shared::transport::SnapshotAssembler::default();
@@ -362,7 +372,8 @@ fn real_udp_filters_team_messages_and_preserves_fragmented_social_payloads() {
             }
         }
         let view = received.expect("real Social datagram");
-        assert_eq!(view.events.len(), if index == 2 { 1 } else { 2 });
+        assert_eq!(view.events.len(), if index == 2 { 2 } else { 3 });
+        assert!(view.events.iter().any(|e| matches!(&e.kind, SocialEventKind::Reaction { reaction_id } if reaction_id == "thumbs_up")), "server echoes the reaction to every eligible peer");
         assert!(view.events.iter().all(|e| {
             e.player_id
                 == runtime.world.players[&peers[0].local_addr().unwrap()]

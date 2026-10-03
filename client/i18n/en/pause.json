@@ -36,5 +36,15 @@
   "pause.button.leave_match": "Leave match",
   "pause.preview.iphone16": "iPhone 16 layout preview",
   "pause.preview.hint": "Temporarily shows the phone layout on this iPad. Use Return to iPad above the game to restore the full screen.",
-  "pause.preview.return": "Return to iPad"
+  "pause.preview.return": "Return to iPad",
+  "pause.settings.render": "Frame rate",
+  "pause.render.limit": "FPS limit",
+  "pause.render.hint": "120 FPS requires a supported display. Actual FPS depends on load and power mode.",
+  "pause.settings.hud": "HUD layout",
+  "pause.hud.hint": "Move controls in 8-point steps. X: right; Y: down. Safe-area limits apply.",
+  "pause.hud.joystick_x": "Joystick · horizontal",
+  "pause.hud.joystick_y": "Joystick · vertical",
+  "pause.hud.combat_x": "Skills · horizontal",
+  "pause.hud.combat_y": "Skills · vertical",
+  "pause.hud.reset": "Reset button positions"
 }
