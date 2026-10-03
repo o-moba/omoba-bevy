@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.36.0] - 2026-10-04
+
+- Restore online dash, haste and recall for recipe-based classes; retain server authority, cooldowns and replay protection.
+- Add tap-to-target portraits for nearby visible enemies, remove the remaining routine attack hint boxes, and place gold and quick-buy directly below the minimap. Offline item purchases now reach the local combat engine.
+- Always offer Offline Practice alongside server bot matches, with a clear no-history/progress notice. Local debug chat and reactions work without a server; chat lines, bubbles and errors expire, and delivery acknowledgements no longer leave a status banner.
+- Render a magical recall channel tied to the real timer and cancellation state. Request the selected supported iOS display cadence without a lower 30 FPS preferred-range floor; the counter continues to report actual frames.
+- Give allocated matches a bounded three-minute reconnect grace and recover cleanly from terminal or abandoned matches, including stale Running snapshots and fresh matchmaking after a retired allocation.
+- Enlarge the Home hero by up to 35% while preserving framing and pedestal grounding; reduce phone navigation buttons and add gaps.
+- Keep wire protocol 5; no new production dependencies. Client and server must both be updated to receive all lifecycle fixes.
+
 ## [0.35.0] - 2026-10-03
 
 - Add an authoritative seven-second return to base, canceled by movement, combat, damage, death or disconnection. Phone controls expose its countdown; desktop uses B.

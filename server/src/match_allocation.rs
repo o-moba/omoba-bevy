@@ -162,7 +162,7 @@ impl ServerRuntime {
         let Some(worker) = self.match_service.worker() else {
             return true;
         };
-        if worker.recovery || self.allocated_team(addr, packet).is_none() {
+        if worker.recovery || worker.aborted || self.allocated_team(addr, packet).is_none() {
             return false;
         }
         let ClientPacket::Join { session_id, .. } = packet else {
@@ -493,6 +493,79 @@ mod runtime_tests {
         assert!(!rt.match_service.worker().unwrap().aborted);
         assert_eq!(rt.world.game_state, GameState::Running);
     }
+    #[test]
+    fn mobile_background_reclaims_within_three_minutes_but_not_after_expiry() {
+        use crate::balance::SESSION_RECLAIM_WINDOW;
+        for elapsed in [
+            Duration::from_secs(120),
+            SESSION_RECLAIM_WINDOW + Duration::from_secs(2),
+        ] {
+            let (mut rt, addr, join) = fixture();
+            let now = Instant::now();
+            rt.handle_packet(addr, join.clone(), now);
+            let id = rt.world.players[&addr].hero.identity.id;
+            rt.begin_career_round(now);
+            let result = rt.career_allocation_for_test().unwrap();
+            rt.career.backend.test_ack_start(&result.result_id);
+            assert!(rt.begin_career_round(now));
+            rt.world.game_state = GameState::Running;
+            rt.match_started_at = Some(now);
+            rt.world.players.get_mut(&addr).unwrap().hero.hp = 47.0;
+            common::recall::start(rt.world.players.get_mut(&addr).unwrap(), now);
+            rt.maintain_roster(now + PLAYER_TIMEOUT + Duration::from_millis(1));
+            let resume = now + PLAYER_TIMEOUT + elapsed;
+            let new_addr: SocketAddr = "127.0.0.1:60209".parse().unwrap();
+            rt.career.backend.test_authenticated(
+                new_addr,
+                shared::career::ProfileSummary::new("a".repeat(64), "Alice".into()),
+                "seat-a",
+            );
+            rt.handle_packet(new_addr, join, resume);
+            if elapsed <= SESSION_RECLAIM_WINDOW {
+                let player = &rt.world.players[&new_addr];
+                assert!(player.joined);
+                assert_eq!(player.hero.identity.id, id);
+                assert_eq!(player.hero.hp, 47.0);
+                assert_eq!(common::recall::remaining(player, resume), 0.0);
+                assert!(!rt.match_service.worker().unwrap().aborted);
+            } else {
+                assert!(!rt.world.players.get(&new_addr).is_some_and(|p| p.joined));
+                assert!(rt.world.disconnected_sessions.is_empty());
+                assert!(rt.match_service.worker().unwrap().aborted);
+            }
+        }
+    }
+
+    #[test]
+    fn deliberate_last_leave_does_not_wait_the_mobile_reclaim_window() {
+        let (mut rt, addr, join) = fixture();
+        let now = Instant::now();
+        rt.handle_packet(addr, join, now);
+        rt.begin_career_round(now);
+        let result = rt.career_allocation_for_test().unwrap();
+        rt.career.backend.test_ack_start(&result.result_id);
+        assert!(rt.begin_career_round(now));
+        rt.world.game_state = GameState::Running;
+        rt.match_started_at = Some(now);
+        rt.handle_packet(addr, ClientPacket::Leave, now);
+        rt.maintain_roster(now);
+        assert!(rt.world.disconnected_sessions.is_empty());
+        rt.maintain_roster(now + crate::balance::EMPTY_ROSTER_GRACE);
+        assert!(rt.match_service.worker().unwrap().aborted);
+    }
+
+    #[test]
+    fn aborted_worker_never_reopens_its_retained_roster() {
+        let (mut rt, addr, join) = fixture();
+        let now = Instant::now();
+        rt.handle_packet(addr, join.clone(), now);
+        rt.match_started_at = Some(now);
+        if let crate::match_service::MatchService::Worker(worker) = &mut rt.match_service {
+            worker.aborted = true;
+        }
+        assert!(!rt.authorize_allocated_join(addr, &join));
+    }
+
     #[test]
     fn saved_worker_repeats_victory_udp_snapshots_after_first_frame_is_lost() {
         use shared::public_transport::{PublicClientDatagram, PublicServerDatagram};

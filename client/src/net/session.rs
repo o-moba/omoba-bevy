@@ -137,6 +137,17 @@ pub struct ReconnectState {
     pub active: bool,
     pub attempts: u32,
     pub last_attempt: Option<Instant>,
+    /// Wall-clock start of lost contact; retained across transport retries.
+    pub started_at: Option<Instant>,
+}
+
+impl ReconnectState {
+    fn expired(&self, now: Instant) -> bool {
+        self.active
+            && self.started_at.is_some_and(|since| {
+                now.saturating_duration_since(since) >= common::balance::SESSION_RECLAIM_WINDOW
+            })
+    }
 }
 
 /// Session controller: owns lifecycle flags and join idempotency (single ownership vs UI/net).
@@ -279,6 +290,7 @@ impl ClientSession {
                 active: true,
                 attempts: 0,
                 last_attempt: None,
+                started_at: Some(Instant::now()),
             },
             ..default()
         }
@@ -670,6 +682,13 @@ pub(in crate::net) fn perform_network_teardown(
             active: true,
             attempts: 0,
             last_attempt: None,
+            // Background suspension can prevent all app updates. Count the
+            // real gap since the last snapshot, not frames since foregrounding.
+            started_at: Some(
+                client_session
+                    .last_qualifying_snapshot_wall
+                    .unwrap_or_else(Instant::now),
+            ),
         };
     }
 
@@ -730,7 +749,14 @@ pub(in crate::net) fn update_session_lifecycle(
         player_query,
     } = &queries;
     let mut retried_this_frame = false;
-    for event in session_ui.read() {
+    let ui_requests: Vec<_> = session_ui.read().cloned().collect();
+    // A worker can retire without delivering its result to a suspended phone.
+    // Use the same complete cleanup and Home/lobby return as an explicit Leave.
+    // Never turn an ordinary unjoined Home connection into an automatic leave.
+    let recovery_exit = (ui_requests.is_empty()
+        && client_session.reconnect.expired(Instant::now()))
+    .then_some(SessionUiCommand::LeaveMatch);
+    for event in ui_requests.iter().chain(recovery_exit.iter()) {
         match event {
             SessionUiCommand::StartOffline => {
                 if client_session.has_committed_join() || client_session.is_offline() {
@@ -1417,6 +1443,51 @@ mod tests {
     }
 
     #[test]
+    fn reconnect_budget_counts_wall_gap_and_never_expires_a_home_connection() {
+        let now = Instant::now();
+        let budget = common::balance::SESSION_RECLAIM_WINDOW;
+        let mut reconnect = ReconnectState {
+            active: true,
+            started_at: Some(now),
+            ..default()
+        };
+        assert!(!reconnect.expired(now + budget - Duration::from_millis(1)));
+        assert!(reconnect.expired(now + budget));
+        reconnect.active = false;
+        assert!(!reconnect.expired(now + budget + Duration::from_secs(60)));
+
+        // A resumed joined client already absent for more than the budget
+        // must not start a fresh three-minute timer on its first app frame.
+        let (mut app, _) = snapshot_app();
+        let last_snapshot = now - budget - Duration::from_secs(1);
+        {
+            let mut session = app.world_mut().resource_mut::<ClientSession>();
+            session.last_join = Some(CommittedJoin::for_test());
+            session.last_qualifying_snapshot_wall = Some(last_snapshot);
+        }
+        tear_down(
+            &mut app,
+            TeardownReason::StaleSnapshot {
+                elapsed_secs: 181.0,
+            },
+        );
+        let reconnect = app.world().resource::<ClientSession>().reconnect;
+        assert_eq!(reconnect.started_at, Some(last_snapshot));
+        assert!(reconnect.expired(Instant::now()));
+
+        // No first server response on Home is not a lost gameplay session.
+        let (mut app, _) = snapshot_app();
+        app.world_mut()
+            .resource_mut::<ClientSession>()
+            .last_qualifying_snapshot_wall = None;
+        tear_down(&mut app, TeardownReason::ServerWaitTimeout);
+        let reconnect = app.world().resource::<ClientSession>().reconnect;
+        assert!(!reconnect.active);
+        assert!(reconnect.started_at.is_none());
+        assert!(!reconnect.expired(now + budget));
+    }
+
+    #[test]
     fn offline_leave_restores_saved_endpoint_and_next_join_uses_real_udp_transport() {
         use crate::world::{AvatarAssetCache, PlayerModelCatalog};
         use bevy::{asset::AssetApp, ecs::system::RunSystemOnce};
@@ -1615,7 +1686,7 @@ mod tests {
     }
 
     #[test]
-    fn allocated_handoff_retry_and_leave_preserve_saved_lobby_and_clear_old_scene() {
+    fn allocated_handoff_retry_and_expired_reconnect_restore_lobby_and_home() {
         let lobby = UdpSocket::bind("127.0.0.1:0").unwrap();
         let arena = UdpSocket::bind("127.0.0.1:0").unwrap();
         let lobby_address = lobby.local_addr().unwrap().to_string();
@@ -1647,8 +1718,18 @@ mod tests {
             .init_resource::<GameStateSnapshot>()
             .init_resource::<TeamSelection>()
             .init_resource::<CameraState>()
+            .init_resource::<crate::frontend::PendingScreen>()
             .add_message::<SessionUiCommand>()
-            .add_systems(Update, update_session_lifecycle);
+            .add_message::<SessionEvent>()
+            .add_systems(
+                Update,
+                (
+                    update_session_lifecycle,
+                    flush_session_events,
+                    crate::frontend::return_home_on_leave,
+                )
+                    .chain(),
+            );
         let old_player = app.world_mut().spawn(Player).id();
         app.world_mut()
             .write_message(SessionUiCommand::ConnectAllocated(arena_address.clone()));
@@ -1670,8 +1751,33 @@ mod tests {
             app.world().resource::<ResolvedServerAddressForPrefs>().0,
             lobby_address
         );
-        app.world_mut().write_message(SessionUiCommand::LeaveMatch);
+        {
+            let mut session = app.world_mut().resource_mut::<ClientSession>();
+            session.last_join = Some(CommittedJoin::for_test());
+            session.reconnect = ReconnectState {
+                active: true,
+                started_at: Some(
+                    Instant::now()
+                        - common::balance::SESSION_RECLAIM_WINDOW
+                        - Duration::from_secs(1),
+                ),
+                ..default()
+            };
+        }
+        // No terminal receipt and no user action: the bounded reconnect uses
+        // LeaveMatch's complete cleanup instead of retaining an obsolete worker.
         app.update();
+        assert!(!app.world().resource::<ClientSession>().has_committed_join());
+        assert!(
+            app.world()
+                .resource::<crate::match_service::MatchServiceClient>()
+                .allocation
+                .is_none()
+        );
+        assert_eq!(
+            app.world().resource::<crate::frontend::PendingScreen>().0,
+            Some(crate::frontend::AppScreen::Home)
+        );
         assert_eq!(
             app.world().resource::<ClientSession>().server_addr_display,
             lobby_address

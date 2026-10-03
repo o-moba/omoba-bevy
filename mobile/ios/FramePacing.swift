@@ -30,9 +30,10 @@ private final class OmobaFramePacer: NSObject {
             link = displayLink
         }
         let limit = min(requested == 120 ? 120 : 60, UIScreen.main.maximumFramesPerSecond)
-        // The OS may choose less in Low Power Mode or under thermal pressure.
+        // Request the selected cadence, rather than permitting an unintended 30 Hz
+        // floor during gameplay. The OS may still reduce it for power/thermal limits.
         link?.preferredFrameRateRange = CAFrameRateRange(
-            minimum: Float(min(30, limit)), maximum: Float(limit), preferred: Float(limit)
+            minimum: Float(limit), maximum: Float(limit), preferred: Float(limit)
         )
         link?.isPaused = UIApplication.shared.applicationState != .active
     }

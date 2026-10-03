@@ -755,9 +755,9 @@
     },
     {
       "id": "offline-target",
-      "title": "Offline · attacked target",
+      "title": "Offline · target lock and recall",
       "run": "offline",
-      "frame": "04-attacked-target.png",
+      "frame": "04-target-recall.png",
       "profiles": [
         "desktop",
         "phone"
@@ -932,6 +932,17 @@
       "source": "client/src/frontend/loading.rs",
       "app_screen": "Loading",
       "fixture": "synthetic GameStateSnapshot, labelled; production five-member loading rendering, no live asset-ready barrier exercised"
+    },
+    {
+      "id": "offline-local-chat",
+      "title": "Offline · local chat and reaction",
+      "run": "offline",
+      "frame": "03-local-chat.png",
+      "profiles": [
+        "phone"
+      ],
+      "route": "Send a local debug message and reaction",
+      "source": "client/src/social.rs"
     }
   ],
   "gaps": [

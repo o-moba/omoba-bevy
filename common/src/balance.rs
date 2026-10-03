@@ -75,7 +75,9 @@ pub const PLAYER_GROUND_Y: f32 = 0.5;
 pub const MOVEMENT_POSITION_TOLERANCE: f32 = 0.10;
 pub const MOVEMENT_MAX_DELTA_SECONDS: f32 = 0.5;
 pub const EMPTY_ROSTER_GRACE: Duration = Duration::from_secs(10);
-pub const SESSION_RECLAIM_WINDOW: Duration = Duration::from_secs(30);
+// Brief mobile app switches retain the existing identity and authoritative state.
+// This is bounded; disconnect still cancels channels and never pauses a match.
+pub const SESSION_RECLAIM_WINDOW: Duration = Duration::from_secs(180);
 
 // --- Level curve & stat growth ---
 // Growth, speed and XP live in `shared::hero_balance` so client prediction,

@@ -253,7 +253,7 @@ fn runtime_on_memory_transport_and_manual_clock_times_out_a_silent_endpoint() {
     assert!(transport.take_outbound().is_empty());
 }
 
-/// A seven-second recall must not mature inside the thirty-second retained
+/// A seven-second recall must not mature inside the bounded retained
 /// session after the endpoint goes silent at five seconds.
 #[test]
 fn recall_disconnect_retention_and_reconnect_never_complete_the_old_channel() {

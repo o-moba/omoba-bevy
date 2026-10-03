@@ -180,7 +180,6 @@ pub(in crate::net) fn send_network_commands(
                 NetworkCommand::Career(_)
                     | NetworkCommand::Social { .. }
                     | NetworkCommand::Party(_)
-                    | NetworkCommand::BuyItem { .. }
             )
         {
             continue;
@@ -293,14 +292,8 @@ pub(in crate::net) fn send_network_commands(
                 }
             }
             NetworkCommand::Utility { action, direction } => {
-                if loadout
-                    .single()
-                    .ok()
-                    .and_then(|s| s.0.as_ref())
-                    .is_some_and(|s| s.recipe.is_some())
-                {
-                    continue;
-                }
+                // Universal utilities remain available with roster/custom skill
+                // recipes. The authoritative utility handler owns their gates.
                 if !client_session.join_confirmed() {
                     continue;
                 }
@@ -677,6 +670,10 @@ mod tests {
             .add_systems(Update, send_network_commands);
         app.world_mut().spawn((
             Player,
+            super::super::PlayerLoadout(Some(shared::loadout::LoadoutState {
+                recipe: Some(shared::loadout::CoreId::Dawnweaver.preset()),
+                ..default()
+            })),
             PlayerUtility {
                 state: shared::utility::UtilityState {
                     last_request_id: 8,
@@ -694,6 +691,22 @@ mod tests {
             encoded,
             json!({"type":"utility","action":"dash","direction":[1.0,0.0],"server_epoch":17,"match_id":3,"request_id":9})
         );
+        for (action, request_id) in [
+            (shared::utility::UtilityAction::Haste, 10),
+            (shared::utility::UtilityAction::Recall, 11),
+            (shared::utility::UtilityAction::CancelRecall, 12),
+        ] {
+            app.world_mut().write_message(NetworkCommand::Utility {
+                action,
+                direction: Vec2::ZERO,
+            });
+            app.update();
+            assert!(matches!(
+                received.try_recv().unwrap(),
+                ClientPacket::Utility { action: sent, request_id: id, .. }
+                    if sent == action && id == request_id
+            ));
+        }
         app.world_mut().resource_mut::<GameStateSnapshot>().state = GameState::Lobby;
         app.world_mut().write_message(NetworkCommand::Utility {
             action: shared::utility::UtilityAction::Haste,
@@ -708,6 +721,46 @@ mod tests {
             direction: Vec2::ZERO,
         });
         app.update();
+        assert!(received.try_recv().is_err());
+    }
+
+    #[test]
+    fn offline_purchase_reaches_local_authority_but_account_commands_do_not() {
+        let (outgoing, received) = crossbeam_channel::unbounded();
+        let (_, incoming) = crossbeam_channel::unbounded();
+        let (_, signals) = crossbeam_channel::unbounded();
+        let mut app = App::new();
+        let mut session = ClientSession::admitted_for_test();
+        session.offline_return_addr = Some("127.0.0.1:4000".into());
+        app.add_message::<NetworkCommand>()
+            .insert_resource(NetworkChannels {
+                gameplay_signer: Default::default(),
+                outgoing,
+                incoming,
+                signals,
+            })
+            .insert_resource(session)
+            .init_resource::<ClientSessionId>()
+            .add_systems(Update, send_network_commands);
+        app.world_mut().write_message(NetworkCommand::Career(
+            shared::career::CareerRequest::CancelQueue,
+        ));
+        app.world_mut().write_message(NetworkCommand::BuyItem {
+            server_epoch: common::offline::EPOCH,
+            match_id: 1,
+            request_id: 7,
+            item_id: "boots".into(),
+        });
+        app.update();
+        assert!(matches!(
+            received.try_recv().unwrap(),
+            ClientPacket::BuyItem {
+                server_epoch: common::offline::EPOCH,
+                match_id: 1,
+                request_id: 7,
+                ..
+            }
+        ));
         assert!(received.try_recv().is_err());
     }
 

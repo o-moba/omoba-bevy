@@ -278,4 +278,31 @@ mod tests {
         }
         assert!((measured.value.unwrap() - 120.0).abs() < 0.01);
     }
+    #[test]
+    fn readout_counts_real_frames_not_fixed_simulation_ticks_or_requested_cap() {
+        let mut app = App::new();
+        app.init_resource::<Time<Real>>()
+            .init_resource::<Time<Virtual>>()
+            .init_resource::<MeasuredFps>()
+            .insert_resource(RenderSettings { fps_limit: 120 })
+            .add_systems(Update, measure_fps);
+        for _ in 0..120 {
+            app.world_mut()
+                .resource_mut::<Time<Real>>()
+                .advance_by(Duration::from_secs_f64(1.0 / 120.0));
+            app.world_mut()
+                .resource_mut::<Time<Virtual>>()
+                .advance_by(Duration::from_secs_f64(1.0 / 30.0));
+            app.update();
+        }
+        assert!((app.world().resource::<MeasuredFps>().value.unwrap() - 120.0).abs() < 0.1);
+        // A genuine slow renderer must still report its measured rate, not 120.
+        for _ in 0..150 {
+            app.world_mut()
+                .resource_mut::<Time<Real>>()
+                .advance_by(Duration::from_secs_f64(1.0 / 30.0));
+            app.update();
+        }
+        assert!((app.world().resource::<MeasuredFps>().value.unwrap() - 30.0).abs() < 0.1);
+    }
 }

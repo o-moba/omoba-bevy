@@ -134,6 +134,22 @@ impl MatchService {
             (session.clone(), request_id, now),
         );
         lobby.errors.remove(&profile.profile_id);
+        // A new request can arrive between worker settlement and the lobby's
+        // periodic pruning. Never bind it to the completed allocation.
+        if let Some(slot) = lobby
+            .assignments
+            .get(&profile.profile_id)
+            .and_then(|id| lobby.pool.slots.get_mut(id))
+        {
+            slot.refresh_status();
+        }
+        if lobby
+            .assignments
+            .get(&profile.profile_id)
+            .is_some_and(|id| lobby.pool.slots.get(id).is_none_or(|slot| slot.terminal()))
+        {
+            lobby.assignments.remove(&profile.profile_id);
+        }
         if lobby.assignments.contains_key(&profile.profile_id) {
             return;
         }
@@ -762,6 +778,72 @@ mod tests {
                 })
                 .collect(),
             join_deadline_ms: 0,
+        }
+    }
+
+    #[test]
+    fn fresh_queue_request_cannot_reuse_settling_or_terminal_allocation() {
+        let now = Instant::now();
+        let entry = w(1, MatchPreference::BotPractice, now);
+        let mut pool = crate::match_pool::Pool::for_test();
+        let id = pool
+            .allocate(manifest_for(std::slice::from_ref(&entry)))
+            .unwrap();
+        let mut receipt = Status {
+            allocation_id: id.clone(),
+            server_epoch: 7,
+            heartbeat_ms: unix_ms(),
+            phase: Phase::Running,
+            result_id: Some("finished-round".into()),
+        };
+        pool.slots.get_mut(&id).unwrap().status = Some(receipt.clone());
+        // Worker writes between lobby polls. Its cache deliberately stays Running.
+        receipt.phase = Phase::Settling;
+        pool.write_status_for_test(&id, &receipt);
+        let mut service = MatchService::Lobby(Lobby {
+            pool,
+            waiting: vec![],
+            assignments: HashMap::from([(entry.profile.profile_id.clone(), id.clone())]),
+            errors: HashMap::new(),
+            requests: HashMap::new(),
+            order: 1,
+            last_poll: Some(now),
+        });
+        assert!(
+            matches!(
+                service.view(&entry.profile.profile_id, &entry.session, now),
+                Some(MatchServiceView::Allocating)
+            ),
+            "settling workers must never accept a fresh handoff"
+        );
+        if let MatchService::Lobby(lobby) = &mut service {
+            assert_eq!(
+                lobby.pool.slots[&id].status.as_ref().unwrap().phase,
+                Phase::Running
+            );
+            receipt.phase = Phase::Failed;
+            lobby.pool.write_status_for_test(&id, &receipt);
+        }
+        // No tick/pruning between settlement and the user's next FindMatch.
+        service.enqueue(
+            entry.profile.clone(),
+            entry.session.clone(),
+            2,
+            entry.preference,
+            None,
+            now,
+        );
+        assert_eq!(
+            service.request_id(&entry.profile.profile_id, &entry.session),
+            Some(2)
+        );
+        assert!(matches!(
+            service.view(&entry.profile.profile_id, &entry.session, now),
+            Some(MatchServiceView::Waiting { .. })
+        ));
+        if let MatchService::Lobby(lobby) = service {
+            assert!(!lobby.assignments.contains_key(&entry.profile.profile_id));
+            assert_eq!(lobby.waiting.len(), 1);
         }
     }
 

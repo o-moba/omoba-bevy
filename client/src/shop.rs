@@ -133,6 +133,8 @@ impl Plugin for ShopPlugin {
                     update_equipment_slots,
                 )
                     .chain()
+                    .after(crate::combat::CombatPointerInputSet)
+                    .before(crate::combat::WorldMovementInputSet)
                     .in_set(InputContextSet::Actions),
             );
     }
@@ -1067,11 +1069,20 @@ fn purchase_buttons(
     mut activated: MessageReader<Activated<ShopAction>>,
     context: Option<Res<crate::input_context::GameplayInputContext>>,
     mut feedback: Option<ResMut<ActionFeedback>>,
+    mut pointer: Option<ResMut<crate::combat::WorldPointerState>>,
     mut outgoing: MessageWriter<NetworkCommand>,
 ) {
     // Every press is read, so one made while a purchase is pending cannot
     // fire when it resolves.
     let presses: Vec<ShopAction> = activated.read().map(|activated| activated.action).collect();
+    // The HUD owns even an unavailable/pending offer's tap. Buying cannot
+    // also issue a movement command later in this frame.
+    if !presses.is_empty()
+        && let Some(pointer) = pointer.as_deref_mut()
+    {
+        pointer.consumed_primary_press = true;
+        pointer.consumed_secondary_press = true;
+    }
     if state.pending.is_some() {
         return;
     }
@@ -1467,6 +1478,7 @@ mod tests {
             .init_resource::<PauseMenuState>()
             .init_resource::<ShopState>()
             .init_resource::<ActionFeedback>()
+            .init_resource::<crate::combat::WorldPointerState>()
             .init_resource::<Time>()
             .add_message::<NetworkCommand>()
             .add_ui_action::<ShopAction>()
@@ -1817,6 +1829,8 @@ mod tests {
         assert!(
             matches!(&sent[..],[NetworkCommand::BuyItem {item_id,..}] if item_id=="vitality_gem")
         );
+        let pointer = app.world().resource::<crate::combat::WorldPointerState>();
+        assert!(pointer.consumed_primary_press && pointer.consumed_secondary_press);
         let before = app.world().get::<PlayerEquipment>(hero).unwrap();
         assert_eq!(before.gold, 80);
         assert_eq!(

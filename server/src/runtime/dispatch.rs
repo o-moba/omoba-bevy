@@ -209,6 +209,9 @@ impl ServerRuntime {
         mut packet: ClientPacket,
         now: Instant,
     ) {
+        // Expire retained seats and settle an empty worker before deciding
+        // whether this join may reclaim its frozen roster identity.
+        self.maintain_roster(now);
         if matches!(packet, ClientPacket::Join { .. })
             && !self.authorize_allocated_join(addr, &packet)
         {
@@ -221,7 +224,6 @@ impl ServerRuntime {
                 *prematch = true;
             }
         }
-        self.maintain_roster(now);
         if self
             .world
             .players

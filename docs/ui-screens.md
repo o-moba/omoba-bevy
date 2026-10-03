@@ -115,11 +115,12 @@ Harness: `client/src/qa/offline_qa.rs`; server: none; env: `OMOBA_OFFLINE_SMOKE_
 | Offline · home | `01-home.png` | desktop, phone | Launch without a server | `client/src/frontend/home.rs` |  |
 | Offline · hero picker | `02-hero-picker.png` | desktop, phone | Home → Offline practice | `client/src/team.rs` |  |
 | Offline · practice match | `03-practice.png` | desktop, phone | Offline practice → start | `client/src/match_hud.rs` |  |
-| Offline · attacked target | `04-attacked-target.png` | desktop, phone | Attack the practice dummy | `client/src/edge_hud.rs` |  |
+| Offline · target lock and recall | `04-target-recall.png` | desktop, phone | Attack the practice dummy | `client/src/edge_hud.rs` |  |
 | Offline · game menu | `05-game-menu.png` | desktop, phone | Escape in practice | `client/src/pause_menu.rs` |  |
 | Offline · practice controls | `06-practice-controls.png` | desktop, phone | Game menu → Practice controls | `client/src/pause_menu.rs` |  |
 | Offline · back home | `08-return-home.png` | desktop, phone | Game menu → Exit to home | `client/src/frontend/home.rs` |  |
 | Offline · re-enter as Wildspark | `09-reentered-wildspark.png` | desktop, phone | Home → Offline practice → Wildspark → start | `client/src/match_hud.rs` |  |
+| Offline · local chat and reaction | `03-local-chat.png` | phone | Send a local debug message and reaction | `client/src/social.rs` |  |
 
 ## 09-party-stage · `party-stage`
 

@@ -104,6 +104,7 @@ enum PostMatchAction {
 #[derive(Resource, Clone, Default, Debug)]
 pub(crate) struct PostMatchLatch {
     winner: Option<Team>,
+    namespace: Option<(u64, u64)>,
     local_team: Option<Team>,
     live: Option<LiveScorePlayer>,
     avatar: Option<String>,
@@ -323,7 +324,7 @@ fn progress_model(
     }
 }
 
-fn current_result<'a>(
+pub(super) fn current_result<'a>(
     career: &'a CareerClient,
     game: &GameStateSnapshot,
 ) -> Option<&'a MatchResult> {
@@ -332,11 +333,16 @@ fn current_result<'a>(
     })
 }
 
-/// Play again does something now: on a rematch server at once; on an
-/// allocated match or a career-flow server only once the result is saved
-/// (before that the press was ignored or refused). Pressed = waiting to leave.
-fn play_again_enabled(allocated: bool, career_flow: bool, saved: bool, pressed: bool) -> bool {
-    !pressed && (saved || !(allocated || career_flow))
+/// Navigation must not depend on persistence or a worker surviving retirement.
+/// Saving is server-owned; leaving the result screen cannot discard that job.
+fn play_again_enabled(pressed: bool) -> bool {
+    !pressed
+}
+
+impl PostMatchLatch {
+    pub(super) fn contains_round(&self, game: &GameStateSnapshot) -> bool {
+        self.namespace == Some((game.meta.server_epoch, game.meta.match_id))
+    }
 }
 
 // --- Status line ---
@@ -419,6 +425,7 @@ fn latch_post_match(
 ) {
     let local = local.iter().next();
     *latch = PostMatchLatch {
+        namespace: Some((game.meta.server_epoch, game.meta.match_id)),
         winner: match game.state {
             GameState::Victory { winner } => Some(winner.into()),
             _ => None,
@@ -1546,7 +1553,6 @@ fn sync_post_match(
     career: Res<CareerClient>,
     mobile: Option<Res<MobileControls>>,
     session: Option<Res<crate::net::ClientSession>>,
-    flow: Option<Res<crate::match_service::MatchServiceClient>>,
     mut latch: Option<ResMut<PostMatchLatch>>,
     roots: Query<(&PostMatchRoot, &PostMatchParts)>,
     mut lines: Query<&mut StatusLine>,
@@ -1569,7 +1575,6 @@ fn sync_post_match(
     let expects = expects_result(&latch, &career);
     // The receipt this screen shows (kept through a worker retirement).
     let result = root.0.as_ref();
-    let saved = result.is_some_and(|result| result.saved);
     let link = session
         .as_deref()
         .map_or(LinkStatus::Connected, crate::net::link_status);
@@ -1595,8 +1600,7 @@ fn sync_post_match(
             .with_children(|line| fill_status_line(line, &spec));
         line.0 = Some(spec);
     }
-    let allocated = flow.as_ref().is_some_and(|flow| flow.allocation.is_some());
-    let enabled = play_again_enabled(allocated, expects, saved, latch.play_again_pressed);
+    let enabled = play_again_enabled(latch.play_again_pressed);
     if let Ok(mut pressable) = pressables.get_mut(parts.play_again)
         && pressable.disabled == enabled
     {
@@ -1696,6 +1700,8 @@ fn post_match_actions(
     mut career: Option<ResMut<CareerClient>>,
     mut latch: Option<ResMut<PostMatchLatch>>,
     party: Option<Res<crate::party::PartyClient>>,
+    session: Option<Res<crate::net::ClientSession>>,
+    game: Option<Res<GameStateSnapshot>>,
     time: Option<Res<Time>>,
     roots: Query<&PostMatchRoot>,
 ) {
@@ -1714,28 +1720,45 @@ fn post_match_actions(
         }
         match action {
             PostMatchAction::PlayAgain => {
+                if latch.as_ref().is_some_and(|latch| latch.play_again_pressed) {
+                    continue;
+                }
                 if flow.as_ref().is_some_and(|flow| flow.allocation.is_some()) {
-                    if roots
-                        .single()
-                        .ok()
-                        .and_then(|root| root.0.as_ref())
-                        .is_some_and(|result| result.saved)
-                    {
-                        // DECISIONS R7.4: back on the lobby, queue again
-                        // with the same hero and preference. A party plays
-                        // together, so a member returns to Home and the
-                        // party.
-                        let solo = !party.as_ref().is_some_and(|party| party.in_party());
-                        if solo && let Some(flow) = flow.as_mut() {
-                            flow.request_requeue();
-                        }
-                        session_ui.write(SessionUiCommand::LeaveMatch);
-                        pressed(&mut latch);
+                    let solo = !party.as_ref().is_some_and(|party| party.in_party());
+                    if solo && let Some(flow) = flow.as_mut() {
+                        flow.request_requeue();
                     }
+                    // LeaveMatch clears the allocation before reconnecting to the
+                    // lobby. The next FindMatch therefore has a fresh request ID.
+                    session_ui.write(SessionUiCommand::LeaveMatch);
+                } else if session
+                    .as_ref()
+                    .is_some_and(|session| !session.join_confirmed())
+                    || (game
+                        .as_ref()
+                        .is_some_and(|game| matches!(game.state, GameState::Running))
+                        && roots.single().is_ok_and(|root| root.0.is_some()))
+                    || career.as_ref().is_some_and(|career| {
+                        let expects = latch
+                            .as_ref()
+                            .is_some_and(|latch| expects_result(latch, career));
+                        expects
+                            && !roots
+                                .single()
+                                .ok()
+                                .and_then(|root| root.0.as_ref())
+                                .is_some_and(|result| result.saved)
+                    })
+                {
+                    // Direct servers reject rematch while Running, including a
+                    // saved abandonment/interruption with a stale live snapshot.
+                    // Retired workers and pending saves cannot rematch either;
+                    // use complete LeaveMatch cleanup and a usable Home instead.
+                    session_ui.write(SessionUiCommand::LeaveMatch);
                 } else {
                     commands.write(NetworkCommand::RequestRematch);
-                    pressed(&mut latch);
                 }
+                pressed(&mut latch);
             }
             PostMatchAction::Details => {
                 if let Some(career) = career.as_mut() {
@@ -1890,7 +1913,7 @@ mod tests {
         );
     }
 
-    /// A career profile: finalizing skeletons, Play again and Details wait;
+    /// A career profile: finalizing skeletons and Details wait; Play again stays usable;
     /// the saved result fills the same boxes without replacing the buttons.
     #[test]
     fn the_career_result_fills_the_finalizing_screen_in_place() {
@@ -1922,7 +1945,7 @@ mod tests {
         );
         let play = by_id(&mut app, "PostMatchPlayAgain");
         let details = by_id(&mut app, "PostMatchDetails");
-        assert!(app.world().get::<Pressable>(play).unwrap().disabled);
+        assert!(!app.world().get::<Pressable>(play).unwrap().disabled);
         assert!(app.world().get::<Pressable>(details).unwrap().disabled);
         assert_eq!(
             app.world().get::<Visibility>(details),
@@ -2012,15 +2035,9 @@ mod tests {
     }
 
     #[test]
-    fn play_again_waits_for_the_saved_result_where_it_would_do_nothing() {
-        // Rematch server: at once.
-        assert!(play_again_enabled(false, false, false, false));
-        // Allocated or career flow: only once saved.
-        assert!(!play_again_enabled(true, true, false, false));
-        assert!(!play_again_enabled(false, true, false, false));
-        assert!(play_again_enabled(true, true, true, false));
-        // Pressed: waits for the screen to leave.
-        assert!(!play_again_enabled(false, false, false, true));
+    fn play_again_is_available_without_waiting_for_persistence() {
+        assert!(play_again_enabled(false));
+        assert!(!play_again_enabled(true));
         assert_eq!(result_ui_scale(1280.0, 720.0), 1.0);
         assert_eq!(result_ui_scale(1920.0, 1080.0), 1.5);
         assert_eq!(result_ui_scale(1024.0, 640.0), 0.8);
@@ -2076,8 +2093,15 @@ mod tests {
         let panel = app
             .world_mut()
             .spawn((
-                PostMatchRoot(Some(saved_receipt()), true),
-                Name::new("RetainedVictory"),
+                PostMatchRoot(
+                    Some(MatchResult {
+                        outcome: MatchOutcome::Abandoned,
+                        saved: false,
+                        ..saved_receipt()
+                    }),
+                    true,
+                ),
+                Name::new("RetainedTerminal"),
             ))
             .id();
         app.update();
@@ -2101,8 +2125,52 @@ mod tests {
         assert_eq!(
             app.world().resource::<Messages<SessionUiCommand>>().len(),
             1,
-            "the saved terminal receipt must still permit returning to the lobby"
+            "even a pending abandoned receipt must permit returning to the lobby"
         );
+    }
+
+    #[test]
+    fn saved_terminal_receipt_with_running_direct_server_returns_home_on_replay() {
+        for outcome in [MatchOutcome::Abandoned, MatchOutcome::Interrupted] {
+            let mut app = App::new();
+            app.add_message::<NetworkCommand>()
+                .add_message::<SessionUiCommand>()
+                .add_ui_action::<PostMatchAction>()
+                .init_resource::<PostMatchLatch>()
+                .insert_resource(crate::net::ClientSession::admitted_for_test())
+                .insert_resource(GameStateSnapshot {
+                    state: GameState::Running,
+                    meta: shared::protocol::SnapshotMeta::new(7, 1, 20),
+                    ..default()
+                })
+                .add_systems(Update, post_match_actions.after(UiSet::Dispatch));
+            app.world_mut().spawn(PostMatchRoot(
+                Some(MatchResult {
+                    outcome,
+                    saved: true,
+                    ..saved_receipt()
+                }),
+                true,
+            ));
+            app.world_mut().spawn((
+                Button,
+                Interaction::Pressed,
+                crate::ui::UiAction(PostMatchAction::PlayAgain),
+            ));
+            app.update();
+            let exits: Vec<_> = app
+                .world_mut()
+                .resource_mut::<Messages<SessionUiCommand>>()
+                .drain()
+                .collect();
+            assert!(matches!(exits.as_slice(), [SessionUiCommand::LeaveMatch]));
+            assert!(
+                app.world()
+                    .resource::<Messages<NetworkCommand>>()
+                    .is_empty(),
+                "a direct server rejects RequestRematch while its snapshot is Running"
+            );
+        }
     }
 
     #[test]

@@ -395,8 +395,12 @@ fn spawn_home(
         + 140.0 * cover * crate::ui::tokens::motion::LIVING_SCALE_PLATE
         - (viewport.y - reference.y * fit) * 0.5)
         / fit;
-    let hero_height = if phone { 250.0 } else { 440.0 };
+    // Enlarge the rendered panel without changing its ground anchor. The
+    // transparent camera padding permits a small panel overscan above the canvas.
+    let hero_height = (if phone { 250.0_f32 } else { 440.0_f32 } * 1.35)
+        .min((stage_y + 16.0) / super::preview::PREVIEW_GROUND_ANCHOR);
     let hero_top = stage_y - hero_height * super::preview::PREVIEW_GROUND_ANCHOR;
+    let hero_width = hero_height * (460.0 / 620.0);
     let party_line = signature(
         &career,
         &session,
@@ -552,10 +556,10 @@ fn spawn_home(
             root.spawn((
                 Node {
                     position_type: PositionType::Absolute,
-                    left: Val::Px(if phone { 300.0 * unit } else { 470.0 }),
+                    left: Val::Px(if phone { 420.0 } else { 640.0 } - hero_width * 0.5),
                     top: Val::Px(hero_top),
-                    width: Val::Px(if phone { 240.0 * unit } else { 340.0 }),
-                    height: Val::Px(if phone { 250.0 * unit } else { 440.0 }),
+                    width: Val::Px(hero_width),
+                    height: Val::Px(hero_height),
                     flex_direction: FlexDirection::Column,
                     justify_content: JustifyContent::Center,
                     align_items: AlignItems::Center,
@@ -568,9 +572,9 @@ fn spawn_home(
                 stage.spawn((
                     ImageNode::new(preview_image),
                     Node {
-                        width: Val::Px(if phone { 185.0 * unit } else { 326.0 }),
-                        aspect_ratio: Some(0.742),
-                        flex_shrink: 1.0,
+                        width: Val::Percent(100.0),
+                        aspect_ratio: Some(460.0 / 620.0),
+                        flex_shrink: 0.0,
                         ..default()
                     },
                     Name::new("HomeShowcaseImage"),
@@ -581,10 +585,13 @@ fn spawn_home(
                 Node {
                     position_type: PositionType::Absolute,
                     left: Val::Px(if phone { 330.0 * unit } else { 520.0 }),
-                    top: Val::Px(if phone { 270.0 * unit } else { stage_y + 28.0 }),
+                    top: Val::Px(if phone { 296.0 * unit } else { stage_y + 28.0 }),
                     width: Val::Px(if phone { 180.0 * unit } else { 240.0 }),
-                    height: Val::Px(if phone { 36.0 * unit } else { 64.0 }),
-                    padding: UiRect::axes(Val::Px(space::S12), Val::Px(space::S4)),
+                    height: Val::Px(if phone { 20.0 * unit } else { 64.0 }),
+                    padding: UiRect::axes(
+                        Val::Px(space::S12),
+                        Val::Px(if phone { 0.0 } else { space::S4 }),
+                    ),
                     flex_direction: if phone {
                         FlexDirection::Row
                     } else {
@@ -625,11 +632,11 @@ fn spawn_home(
                 Node {
                     position_type: PositionType::Absolute,
                     left: Val::Px(if phone { 561.0 * unit } else { 856.0 }),
-                    top: Val::Px(if phone { 130.0 * unit } else { 204.0 }),
+                    top: Val::Px(if phone { 108.0 * unit } else { 204.0 }),
                     width: Val::Px(if phone { 220.0 * unit } else { 360.0 }),
                     flex_direction: FlexDirection::Column,
                     align_items: AlignItems::Center,
-                    row_gap: Val::Px(if phone { 10.0 * unit } else { 8.0 }),
+                    row_gap: Val::Px(if phone { 6.0 * unit } else { 8.0 }),
                     ..default()
                 },
                 Name::new("HomePlayColumn"),
@@ -678,61 +685,82 @@ fn spawn_home(
                         theme::MUTED,
                     ));
                 }
-                let (secondary_label, secondary_action, secondary_id) =
-                    if career.view.match_service.is_some() {
-                        (
-                            tr("home.button.bot_practice"),
-                            HomeAction::BotPractice,
-                            "HomeBotPractice",
-                        )
-                    } else {
-                        (
-                            tr("home.button.offline_practice"),
-                            HomeAction::OfflinePractice,
-                            "HomeOfflinePractice",
-                        )
-                    };
-                kit::spawn_button(
-                    column,
+                // Local practice remains available even when a server advertises
+                // matchmaking. A server bot allocation and socket-free practice
+                // are distinct choices, with different progress guarantees.
+                for (label, action, id) in [
+                    (
+                        "home.button.bot_practice",
+                        HomeAction::BotPractice,
+                        "HomeBotPractice",
+                    ),
+                    (
+                        "home.button.offline_practice",
+                        HomeAction::OfflinePractice,
+                        "HomeOfflinePractice",
+                    ),
+                ] {
+                    if action == HomeAction::BotPractice && career.view.match_service.is_none() {
+                        continue;
+                    }
+                    let button = kit::spawn_button(
+                        column,
+                        Node {
+                            width: Val::Px(if phone { 220.0 * unit } else { 280.0 }),
+                            height: Val::Px(home_control_size(
+                                if phone { 44.0 * unit } else { 46.0 },
+                                platform.is_mobile(),
+                                fit,
+                            )),
+                            justify_content: JustifyContent::Center,
+                            align_items: AlignItems::Center,
+                            column_gap: Val::Px(space::S8 * unit),
+                            border_radius: BorderRadius::all(Val::Px(radius::MD * unit)),
+                            ..default()
+                        },
+                        tr(label),
+                        TextStyle::new(TextRole::Button),
+                        ButtonKind::Secondary,
+                        Some(Icon::NavBot),
+                        action,
+                        id.into(),
+                        (),
+                    );
+                    if action == HomeAction::BotPractice && !session.is_connected() {
+                        column.commands().entity(button).insert(Pressable {
+                            disabled: true,
+                            ..default()
+                        });
+                    }
+                }
+                column.spawn((
+                    widgets::label(
+                        tr("home.offline_hint"),
+                        if phone { 11.0 * unit } else { 12.0 },
+                        theme::IVORY,
+                    ),
+                    TextLayout::new_with_justify(Justify::Center),
                     Node {
-                        width: Val::Px(if phone { 180.0 * unit } else { 280.0 }),
-                        height: Val::Px(home_control_size(
-                            if phone { 44.0 * unit } else { 46.0 },
-                            platform.is_mobile(),
-                            fit,
-                        )),
-                        justify_content: JustifyContent::Center,
-                        align_items: AlignItems::Center,
-                        column_gap: Val::Px(space::S8 * unit),
-                        border_radius: BorderRadius::all(Val::Px(radius::MD * unit)),
+                        max_width: Val::Percent(100.0),
                         ..default()
                     },
-                    secondary_label,
-                    TextStyle::new(TextRole::Button),
-                    ButtonKind::Secondary,
-                    Some(Icon::NavBot),
-                    secondary_action,
-                    secondary_id.into(),
-                    (),
-                );
+                    BackgroundColor(theme::perceptual(color::SURFACE_GLASS_STRONG)),
+                    Name::new("HomeOfflineNotice"),
+                ));
             });
 
             root.spawn((
                 Node {
                     position_type: PositionType::Absolute,
-                    left: Val::Px(if phone { 63.0 * unit } else { 856.0 }),
-                    top: Val::Px(if phone { 313.0 * unit } else { 500.0 }),
-                    width: Val::Px(if phone { 718.0 * unit } else { 360.0 }),
-                    height: Val::Px(if phone { 56.0 * unit } else { 88.0 }),
-                    column_gap: Val::Px(if phone { 0.0 } else { space::S8 }),
+                    left: Val::Px(if phone { 92.0 * unit } else { 856.0 }),
+                    top: Val::Px(if phone { 317.0 * unit } else { 500.0 }),
+                    width: Val::Px(if phone { 660.0 * unit } else { 360.0 }),
+                    height: Val::Px(if phone { 52.0 * unit } else { 88.0 }),
+                    column_gap: Val::Px(if phone { 12.0 } else { space::S8 }),
                     border_radius: BorderRadius::all(Val::Px(radius::LG)),
                     ..default()
                 },
-                BackgroundColor(if phone {
-                    theme::perceptual(color::SURFACE_GLASS_STRONG)
-                } else {
-                    Color::NONE
-                }),
+                BackgroundColor(Color::NONE),
                 Name::new("HomeNavigation"),
             ))
             .with_children(|nav| {
@@ -1018,8 +1046,8 @@ fn spawn_home_nav(
     kit::spawn_button(
         parent,
         Node {
-            width: Val::Px(if phone { 179.5 * unit } else { 84.0 }),
-            height: Val::Px(if phone { 56.0 * unit } else { 88.0 }),
+            width: Val::Px(if phone { 156.0 * unit } else { 84.0 }),
+            height: Val::Px(if phone { 52.0 * unit } else { 88.0 }),
             flex_direction: FlexDirection::Column,
             justify_content: JustifyContent::Center,
             align_items: AlignItems::Center,
@@ -1446,6 +1474,63 @@ mod tests {
 
     /// The home screen is a render-key screen: a language change rebuilds it
     /// in the new language (buttons, headings and the status line).
+    #[test]
+    fn connected_home_offers_separate_server_and_socket_free_practice() {
+        use crate::ui::test_id::harness;
+        let mut app = harness::kit_app();
+        app.add_plugins(bevy::state::app::StatesPlugin)
+            .init_state::<AppScreen>()
+            .init_resource::<Assets<Image>>()
+            .init_resource::<super::super::preview::AvatarPreview>()
+            .init_resource::<CareerClient>()
+            .init_resource::<ClientSession>()
+            .init_resource::<ProfileCard>()
+            .init_resource::<AvatarThumbnails>()
+            .init_resource::<crate::party::PartyClient>()
+            .init_resource::<crate::match_service::MatchServiceClient>()
+            .insert_resource(crate::ui::UiPlatform(crate::platform::UiProfile::Desktop))
+            .add_message::<NetworkCommand>()
+            .add_message::<crate::net::SessionUiCommand>()
+            .add_ui_action::<HomeAction>()
+            .add_systems(Startup, spawn_home)
+            .add_systems(Update, home_actions.after(UiSet::Dispatch));
+        app.world_mut()
+            .resource_mut::<CareerClient>()
+            .view
+            .match_service = Some(shared::match_service::MatchServiceView::Idle);
+        app.world_mut()
+            .resource_mut::<ClientSession>()
+            .set_state_for_test(ClientConnectionState::Connected);
+        app.update();
+        for id in ["HomeBotPractice", "HomeOfflinePractice"] {
+            let button = harness::find(app.world_mut(), id).unwrap();
+            assert!(
+                !app.world()
+                    .get::<Pressable>(button)
+                    .is_some_and(|p| p.disabled)
+            );
+        }
+        assert!(
+            app.world_mut()
+                .query::<&Name>()
+                .iter(app.world())
+                .any(|name| name.as_str() == "HomeOfflineNotice")
+        );
+        harness::press(app.world_mut(), "HomeOfflinePractice");
+        app.update();
+        assert!(
+            app.world_mut()
+                .resource_mut::<Messages<crate::net::SessionUiCommand>>()
+                .drain()
+                .any(|command| matches!(command, crate::net::SessionUiCommand::StartOffline))
+        );
+        assert!(
+            app.world()
+                .resource::<Messages<NetworkCommand>>()
+                .is_empty()
+        );
+    }
+
     #[test]
     fn a_language_change_rebuilds_the_home_screen_in_that_language() {
         if crate::i18n::testing::isolated(

@@ -2,6 +2,7 @@
 mod bars;
 mod cast;
 mod cooldown;
+mod enemy_portraits;
 mod feedback;
 mod hotbar;
 pub(crate) mod inspection;
@@ -90,6 +91,21 @@ impl Plugin for CombatPlugin {
                 .before(bevy::ui::UiSystems::Layout),
         )
         .add_ui_action::<hotbar::HotbarAction>()
+        .add_ui_action::<enemy_portraits::EnemyPortraitAction>()
+        .add_systems(
+            Update,
+            enemy_portraits::sync_enemy_portraits
+                .after(crate::net::ClientNetPipeline::ApplySnapshot)
+                .after(crate::mobile_controls::MobileControlsSet::Layout)
+                .before(crate::ui::UiSet::Gesture),
+        )
+        .add_systems(
+            Update,
+            enemy_portraits::activate_enemy_portrait
+                .after(select_target_system)
+                .in_set(CombatPointerInputSet)
+                .in_set(InputContextSet::Actions),
+        )
         .init_resource::<TargetState>()
         .init_resource::<BasicAttackState>()
         .init_resource::<TargetAimPreview>()

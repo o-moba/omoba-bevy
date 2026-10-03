@@ -166,7 +166,6 @@ fn prepare(
                         max_hp: 100.0,
                         mana: 65.0,
                         max_mana: 100.0,
-                        ..default()
                     },
                     crate::net::NetworkPlayerId(id),
                     crate::net::NetworkHeroClass(shared::HeroClass::Wildspark),

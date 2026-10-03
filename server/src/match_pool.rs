@@ -185,8 +185,7 @@ impl Pool {
         let now = match_allocation::unix_ms();
         let mut recovery_launches = 0;
         for slot in self.slots.values_mut() {
-            slot.status =
-                read_status(&slot.directory, &slot.manifest.allocation_id).or(slot.status.take());
+            slot.refresh_status();
             let exited = slot
                 .child
                 .as_mut()
@@ -257,6 +256,14 @@ impl Drop for Pool {
     }
 }
 impl Slot {
+    fn latest_status(&self) -> Option<Status> {
+        read_status(&self.directory, &self.manifest.allocation_id).or_else(|| self.status.clone())
+    }
+
+    pub fn refresh_status(&mut self) {
+        self.status = self.latest_status();
+    }
+
     pub fn occupies_port(&self) -> bool {
         self.child.is_some()
             || !self.terminal()
@@ -276,11 +283,9 @@ impl Slot {
     pub fn ready(&self) -> bool {
         !self.recovering
             && !self.cancelled()
-            && self.status.as_ref().is_some_and(|s| {
-                matches!(
-                    s.phase,
-                    Phase::Ready | Phase::Forming | Phase::Running | Phase::Settling
-                ) && match_allocation::unix_ms().saturating_sub(s.heartbeat_ms) < 10_000
+            && self.latest_status().as_ref().is_some_and(|s| {
+                matches!(s.phase, Phase::Ready | Phase::Forming | Phase::Running)
+                    && match_allocation::unix_ms().saturating_sub(s.heartbeat_ms) < 10_000
             })
     }
 }
@@ -350,12 +355,13 @@ fn archive(root: &std::path::Path, directory: &std::path::Path, id: &str) {
 }
 
 #[cfg(test)]
-mod tests {
-    use shared::match_service::MatchPreference;
+impl Pool {
+    pub(crate) fn write_status_for_test(&self, id: &str, status: &Status) {
+        match_allocation::atomic_json(&self.slots[id].directory.join("status.json"), status)
+            .unwrap();
+    }
 
-    use super::*;
-    use crate::match_allocation::AllocatedHuman;
-    fn pool() -> Pool {
+    pub(crate) fn for_test() -> Pool {
         let mut random = [0; 16];
         getrandom::fill(&mut random).unwrap();
         let root = std::env::temp_dir().join(format!(
@@ -377,6 +383,14 @@ mod tests {
             first_port: 45000,
         }
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use shared::match_service::MatchPreference;
+
+    use super::*;
+    use crate::match_allocation::AllocatedHuman;
     fn manifest(id: char) -> Manifest {
         Manifest {
             version: 1,
@@ -394,7 +408,7 @@ mod tests {
     }
     #[test]
     fn only_one_coordinator_can_own_a_root_and_drop_releases_it() {
-        let p = pool();
+        let p = Pool::for_test();
         let root = p.root.clone();
         assert!(lock_root(&root).is_err());
         // Stand-in for a child another test thread forked while `p` was alive:
@@ -407,7 +421,7 @@ mod tests {
     }
     #[test]
     fn capacity_and_readiness_require_a_live_worker_receipt() {
-        let mut p = pool();
+        let mut p = Pool::for_test();
         let id = p.allocate(manifest('a')).unwrap();
         assert!(p.full());
         assert!(!p.slots[&id].ready());
@@ -430,7 +444,7 @@ mod tests {
     }
     #[test]
     fn cancellation_blocks_handoff_before_status_update() {
-        let mut p = pool();
+        let mut p = Pool::for_test();
         let id = p.allocate(manifest('a')).unwrap();
         let slot = p.slots.get_mut(&id).unwrap();
         slot.status = Some(Status {
@@ -454,7 +468,7 @@ mod tests {
     }
     #[test]
     fn running_assignment_cannot_be_cancelled_from_lobby() {
-        let mut p = pool();
+        let mut p = Pool::for_test();
         let id = p.allocate(manifest('a')).unwrap();
         let slot = p.slots.get_mut(&id).unwrap();
         slot.status = Some(Status {

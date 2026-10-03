@@ -1,4 +1,4 @@
-//! Recall input only: authority owns all channel timing and teleportation.
+//! Recall input and presentation: authority owns channel timing and teleportation.
 use bevy::prelude::*;
 use shared::utility::UtilityAction;
 
@@ -14,7 +14,21 @@ use crate::{
 pub(crate) struct RecallPlugin;
 impl Plugin for RecallPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<RecallInput>().add_systems(
+        #[cfg(feature = "qa")]
+        app.init_resource::<RecallVisualProof>();
+        app.insert_gizmo_config(
+            RecallGizmos,
+            bevy::gizmos::config::GizmoConfig {
+                line: bevy::gizmos::config::GizmoLineConfig {
+                    width: 3.5,
+                    ..default()
+                },
+                depth_bias: 0.0,
+                ..default()
+            },
+        )
+        .init_resource::<RecallInput>()
+        .add_systems(
             Update,
             (
                 prepare_recall_input
@@ -25,7 +39,108 @@ impl Plugin for RecallPlugin {
                     .after(InputContextSet::Actions)
                     .before(ClientNetPipeline::SendLocalState),
             ),
+        )
+        .add_systems(
+            PostUpdate,
+            draw_recall_channel
+                .after(crate::net::NetworkGroundingSet)
+                .before(bevy::transform::TransformSystems::Propagate),
         );
+    }
+}
+
+#[derive(Default, Reflect, bevy::gizmos::config::GizmoConfigGroup)]
+struct RecallGizmos;
+
+/// Opt-in QA records actual draw submissions, not merely a replicated timer.
+#[cfg(feature = "qa")]
+#[derive(Resource, Default)]
+pub(crate) struct RecallVisualProof {
+    pub drawn_heroes: usize,
+    pub max_remaining_secs: f32,
+}
+
+/// No persistent effect entity: cancellation/finish/fog removal stops drawing
+/// on the same frame that the authoritative channel disappears.
+fn recall_progress(remaining: f32, alive: bool, visible: bool) -> Option<f32> {
+    (alive && visible && remaining.is_finite() && remaining > 0.0)
+        .then(|| 1.0 - (remaining / shared::utility::RECALL_CHANNEL_SECS).clamp(0.0, 1.0))
+}
+
+fn draw_recall_channel(
+    mut gizmos: Gizmos<RecallGizmos>,
+    time: Res<Time<Real>>,
+    context: Res<GameplayInputContext>,
+    mode: Res<crate::sprite::PlayerVisualMode>,
+    map: Res<crate::maps::MapLayout>,
+    #[cfg(feature = "qa")] mut proof: ResMut<RecallVisualProof>,
+    heroes: Query<(
+        &Transform,
+        &CombatStats,
+        &PlayerUtility,
+        Option<&InheritedVisibility>,
+    )>,
+) {
+    #[cfg(feature = "qa")]
+    {
+        proof.drawn_heroes = 0;
+        proof.max_remaining_secs = 0.0;
+    }
+    if !context.running {
+        return;
+    }
+    let phase = time.elapsed_secs() * 1.8;
+    let cyan = Color::srgba(0.25, 1.0, 0.93, 0.96);
+    let gold = Color::srgba(1.0, 0.79, 0.3, 0.98);
+    let is_2d = *mode == crate::sprite::PlayerVisualMode::Sprite2d;
+    for (transform, stats, utility, visible) in &heroes {
+        let Some(progress) = recall_progress(
+            utility.state.recall_remaining_secs,
+            stats.is_alive(),
+            visible.is_none_or(|v| v.get()),
+        ) else {
+            continue;
+        };
+        #[cfg(feature = "qa")]
+        {
+            proof.drawn_heroes += 1;
+            proof.max_remaining_secs = proof
+                .max_remaining_secs
+                .max(utility.state.recall_remaining_secs);
+        }
+        let p = transform.translation;
+        let center = Vec3::new(p.x, map.terrain_height_3d(p.x, p.z) + 0.16, p.z);
+        let point = |angle: f32, radius: f32, height: f32| {
+            center + Vec3::new(angle.cos() * radius, height, angle.sin() * radius)
+        };
+        let mut line = |a: Vec3, b: Vec3, color: Color| {
+            if is_2d {
+                gizmos.line_2d(
+                    crate::world2d::simulation_xz_to_render_xy(a),
+                    crate::world2d::simulation_xz_to_render_xy(b),
+                    color,
+                );
+            } else {
+                gizmos.line(a, b, color);
+            }
+        };
+        // Outer rune circle and a gold arc filling toward the teleport.
+        for i in 0..64 {
+            let a = i as f32 * std::f32::consts::TAU / 64.0;
+            let b = (i + 1) as f32 * std::f32::consts::TAU / 64.0;
+            line(point(a, 2.1, 0.0), point(b, 2.1, 0.0), cyan);
+            if i as f32 / 64.0 <= progress {
+                line(point(a, 2.4, 0.02), point(b, 2.4, 0.02), gold);
+            }
+        }
+        // Eight rotating runes and rising sparks clearly identify a channel.
+        for i in 0..8 {
+            let a = phase + i as f32 * std::f32::consts::TAU / 8.0;
+            line(point(a - 0.10, 1.9, 0.02), point(a, 1.6, 0.02), gold);
+            line(point(a, 1.6, 0.02), point(a + 0.10, 1.9, 0.02), gold);
+            let h = ((time.elapsed_secs() * 0.8 + i as f32 * 0.17) % 1.0) * 2.4;
+            line(point(a, 0.75, h), point(a + 0.12, 0.72, h + 0.35), cyan);
+        }
     }
 }
 
@@ -259,5 +374,16 @@ mod tests {
             actions(&mut app).is_empty(),
             "held attack does not spam cancellation"
         );
+    }
+    #[test]
+    fn recall_visual_tracks_channel_and_disappears_on_cancel_death_or_fog() {
+        assert_eq!(recall_progress(7.0, true, true), Some(0.0));
+        assert_eq!(recall_progress(3.5, true, true), Some(0.5));
+        assert!(recall_progress(0.1, true, true).unwrap() > 0.98);
+        for remaining in [0.0, -1.0, f32::NAN, f32::INFINITY] {
+            assert_eq!(recall_progress(remaining, true, true), None);
+        }
+        assert_eq!(recall_progress(4.0, false, true), None);
+        assert_eq!(recall_progress(4.0, true, false), None);
     }
 }

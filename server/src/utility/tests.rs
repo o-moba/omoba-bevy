@@ -306,3 +306,105 @@ fn standard_kits_retain_shared_utility_cooldowns_and_replay_protection() {
         );
     }
 }
+
+#[test]
+fn signed_roster_dash_and_haste_dispatch_to_authority_and_replicate() {
+    use crate::public_transport::{Decision, PublicTransport};
+    use ed25519_dalek::{Signer, SigningKey};
+    use shared::public_transport::{
+        GameplayPrincipal, PublicClientDatagram, PublicServerDatagram, SignedCommand, hex,
+    };
+    let (mut rt, addr, now) = fixture();
+    rt.world.players.get_mut(&addr).unwrap().hero.skills.loadout =
+        Some(shared::loadout::resolve(&shared::loadout::CoreId::Dawnweaver.preset()).unwrap());
+    let mut gate = PublicTransport::default();
+    let probe = serde_json::to_vec(&PublicClientDatagram::TransportProbe {
+        protocol_version: shared::protocol::PROTOCOL_VERSION,
+        client_nonce: "a".repeat(32),
+        padding: "0".repeat(384),
+    })
+    .unwrap();
+    let Decision::Reply(reply) =
+        gate.receive(addr, &probe, rt.server_epoch, rt.match_id, false, None, now)
+    else {
+        panic!("missing path challenge");
+    };
+    let PublicServerDatagram::TransportChallenge { path_nonce, .. } =
+        serde_json::from_slice(&reply).unwrap();
+    let proof = serde_json::to_vec(&PublicClientDatagram::TransportProof {
+        server_epoch: rt.server_epoch,
+        path_nonce: path_nonce.clone(),
+    })
+    .unwrap();
+    assert!(matches!(
+        gate.receive(addr, &proof, rt.server_epoch, rt.match_id, false, None, now),
+        Decision::Dispatch(ClientPacket::Hello { .. })
+    ));
+    let key = SigningKey::from_bytes(&[19; 32]);
+    let principal = GameplayPrincipal {
+        public_key: hex(key.verifying_key().as_bytes()),
+        session_id: "utility-fixture".into(),
+        session_nonce: "c".repeat(64),
+    };
+    for (request_id, action) in [(1, UtilityAction::Dash), (2, UtilityAction::Haste)] {
+        let packet = ClientPacket::Utility {
+            action,
+            direction: [1.0, 0.0],
+            server_epoch: rt.server_epoch,
+            match_id: rt.match_id,
+            request_id,
+        };
+        let mut command = SignedCommand {
+            server_epoch: rt.server_epoch,
+            match_id: rt.match_id,
+            session_id: principal.session_id.clone(),
+            session_nonce: principal.session_nonce.clone(),
+            path_nonce: path_nonce.clone(),
+            sequence: request_id,
+            payload: serde_json::to_string(&packet).unwrap(),
+            signature: String::new(),
+        };
+        command.signature = hex(&key.sign(&command.signing_bytes()).to_bytes());
+        let bytes = serde_json::to_vec(&PublicClientDatagram::SignedCommand { command }).unwrap();
+        let Decision::Dispatch(packet) = gate.receive(
+            addr,
+            &bytes,
+            rt.server_epoch,
+            rt.match_id,
+            false,
+            Some(principal.clone()),
+            now,
+        ) else {
+            panic!("signed utility was not dispatched");
+        };
+        rt.handle_packet(addr, packet, now);
+        assert!(
+            matches!(
+                gate.receive(
+                    addr,
+                    &bytes,
+                    rt.server_epoch,
+                    rt.match_id,
+                    false,
+                    Some(principal.clone()),
+                    now
+                ),
+                Decision::Drop
+            ),
+            "signed replay cannot act twice"
+        );
+    }
+    // This is the exact state serialized into the owning client's snapshot.
+    let state = rt.player_view(addr, now);
+    assert!(state.loadout.unwrap().recipe.is_some());
+    assert!((state.x - DASH_DISTANCE).abs() < 0.001);
+    assert_eq!(state.utility.dash_sequence, 1);
+    assert_eq!(state.utility.last_request_id, 2);
+    assert_eq!(state.utility.dash_remaining_secs, DASH_COOLDOWN_SECS);
+    assert_eq!(state.utility.haste_remaining_secs, HASTE_COOLDOWN_SECS);
+    assert_eq!(state.utility.haste_active_secs, HASTE_DURATION_SECS);
+    assert_eq!(
+        utility_movement_multiplier(&rt.world.players[&addr], now),
+        HASTE_SPEED_MULTIPLIER
+    );
+}

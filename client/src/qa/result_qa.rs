@@ -7,6 +7,7 @@
 //! live score row and career receipt written into the client's own
 //! resources, nothing sent — through the production screen, systems and
 //! kit: finalizing, saved, a guest's defeat on a rematch server, abandoned.
+//! Set `OMOBA_RESULT_QA_ABANDONED_ONLY=1` for just the abandoned result.
 //! The loading frames are real: the connecting body while the session
 //! waits, then its failure once the session gives up (`T_WAIT_MAX`).
 //! Size and profile come from `OMOBA_QA_WIDTH`/`OMOBA_QA_HEIGHT` and
@@ -97,7 +98,11 @@ impl Plugin for ResultQaPlugin {
                 dimension("OMOBA_QA_HEIGHT", 720),
             ),
             started: Instant::now(),
-            stage: 0,
+            stage: if std::env::var("OMOBA_RESULT_QA_ABANDONED_ONLY").as_deref() == Ok("1") {
+                3
+            } else {
+                0
+            },
             entered: false,
             settled: 0,
             in_flight: false,
@@ -235,6 +240,8 @@ fn apply_fixture(
             career.view.last_result = Some(receipt(MatchOutcome::Completed, true));
         }
         Fixture::Abandoned => {
+            // Reproduce a terminal receipt arriving before a final Victory snapshot.
+            game.state = GameState::Running;
             career.view.last_result = Some(receipt(MatchOutcome::Abandoned, false));
         }
         Fixture::DefeatGuest => {
@@ -336,7 +343,11 @@ fn shoot(
             info!("RESULT_QA captured {file}");
             qa.in_flight = false;
             qa.entered = false;
-            qa.stage += 1;
+            qa.stage = if std::env::var("OMOBA_RESULT_QA_ABANDONED_ONLY").as_deref() == Ok("1") {
+                STAGES.len()
+            } else {
+                qa.stage + 1
+            };
             if qa.stage == STAGES.len() {
                 info!("RESULT_QA completed");
                 // Close the window first, as the real Exit button does: the

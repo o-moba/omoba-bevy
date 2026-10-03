@@ -34,6 +34,9 @@ pub(crate) struct MatchServiceClient {
     /// Play again was pressed after an allocated match: queue again once the
     /// client is back on this lobby.
     requeue: Option<Requeue>,
+    /// A fresh search must not re-enter a worker whose seat we already left.
+    /// Its terminal disk receipt can lag the client result or reconnect cutoff.
+    last_left_allocation: Option<String>,
 }
 
 /// A queued "Play again": the lobby to return to and the lock-in to send.
@@ -97,7 +100,11 @@ impl MatchServiceClient {
     }
 
     pub fn take_return_to_lobby(&mut self) -> Option<String> {
-        let destination = self.allocation.take().and(self.lobby_addr.take());
+        let allocation = self.allocation.take();
+        if let Some(allocation) = &allocation {
+            self.last_left_allocation = Some(allocation.allocation_id.clone());
+        }
+        let destination = allocation.and(self.lobby_addr.take());
         self.active = false;
         self.pending_join = None;
         self.last_request = None;
@@ -140,15 +147,12 @@ fn update_match_service(
         &session_id.0,
     );
     if let Some(allocation) = &flow.allocation {
-        // A durably completed worker will retire. It no longer needs reconnect
-        // retries; the result screen retains its validated receipt until leaving.
-        if matches!(snapshot.state, crate::net::GameState::Victory { .. })
-            && career.view.last_result.as_ref().is_some_and(|result| {
-                result.saved
-                    && result.server_epoch == snapshot.meta.server_epoch
-                    && result.match_id == snapshot.meta.match_id
-            })
-        {
+        // A terminal receipt ends gameplay even when its durable save is pending.
+        // Keep the transport for receipt updates, but never rejoin this round.
+        if career.view.last_result.as_ref().is_some_and(|result| {
+            result.server_epoch == snapshot.meta.server_epoch
+                && result.match_id == snapshot.meta.match_id
+        }) {
             session.abandon_join();
             return;
         }
@@ -162,6 +166,7 @@ fn update_match_service(
     }
     if career.view.match_service_request_id == Some(flow.request_id)
         && let Some(MatchServiceView::Assigned { allocation }) = &career.view.match_service
+        && flow.last_left_allocation.as_deref() != Some(allocation.allocation_id.as_str())
     {
         if crate::persistence::validate_game_server_addr(&allocation.endpoint).is_some() {
             flow.allocation = Some(allocation.clone());
@@ -438,6 +443,152 @@ mod tests {
                 .requeue
                 .is_none()
         );
+    }
+
+    #[test]
+    fn terminal_abandoned_allocation_stops_rejoin_without_a_victory_snapshot() {
+        use shared::career::{MatchOutcome, MatchResult};
+        let mut app = App::new();
+        app.init_resource::<CareerClient>()
+            .init_resource::<CareerIdentity>()
+            .init_resource::<ClientSessionId>()
+            .add_message::<NetworkCommand>()
+            .add_message::<SessionUiCommand>()
+            .insert_resource(ClientSession::reconnecting_for_test())
+            .insert_resource(MatchServiceClient {
+                active: true,
+                allocation: Some(allocation()),
+                pending_join: Some(lock_in()),
+                ..default()
+            })
+            .insert_resource(GameStateSnapshot {
+                meta: shared::protocol::SnapshotMeta::new(7, 2, 5),
+                state: crate::net::GameState::Running,
+                ..default()
+            })
+            .add_systems(Update, update_match_service);
+        let result = MatchResult {
+            result_id: "abandoned".into(),
+            server_epoch: 7,
+            match_id: 1,
+            started_at_ms: 0,
+            ended_at_ms: 1000,
+            duration_ms: 1000,
+            map_profile: "verdant_default".into(),
+            ruleset: "public-casual-v1".into(),
+            outcome: MatchOutcome::Abandoned,
+            winner: None,
+            rated: false,
+            unrated_reason: None,
+            participants: vec![],
+            saved: false,
+        };
+        app.world_mut()
+            .resource_mut::<CareerClient>()
+            .view
+            .last_result = Some(result);
+        app.update();
+        assert!(
+            app.world().resource::<ClientSession>().has_committed_join(),
+            "previous receipt must not stop a new match"
+        );
+        app.world_mut()
+            .resource_mut::<CareerClient>()
+            .view
+            .last_result
+            .as_mut()
+            .unwrap()
+            .match_id = 2;
+        app.update();
+        assert!(!app.world().resource::<ClientSession>().has_committed_join());
+        assert!(
+            app.world()
+                .resource::<MatchServiceClient>()
+                .allocation
+                .is_some(),
+            "Home/Play again still need the return address"
+        );
+        // The result can arrive before either the worker's disk receipt or the
+        // lobby cache leaves Running. Leaving also covers the client's 180s
+        // cutoff while the server still retains its seat until about 185s.
+        let lobby = "127.0.0.1:4000";
+        let lobby_view = CareerView {
+            match_service: Some(MatchServiceView::Idle),
+            ..default()
+        };
+        let request_id = {
+            let mut flow = app.world_mut().resource_mut::<MatchServiceClient>();
+            flow.lobby_addr = Some(lobby.into());
+            assert_eq!(flow.take_return_to_lobby().as_deref(), Some(lobby));
+            assert!(flow.intercept_join(&lobby_view, lobby, &lock_in()));
+            flow.request_id
+        };
+        app.insert_resource(CareerIdentity::authenticated_for_test(
+            lobby,
+            9,
+            "mobile-retired",
+        ));
+        app.insert_resource(ClientSessionId("mobile-retired".into()));
+        {
+            let mut session = app.world_mut().resource_mut::<ClientSession>();
+            session.set_server_addr_for_test(lobby);
+            session.set_state_for_test(crate::net::ClientConnectionState::Connected);
+        }
+        app.world_mut().resource_mut::<GameStateSnapshot>().meta =
+            shared::protocol::SnapshotMeta::new(9, 1, 1);
+        {
+            let mut career = app.world_mut().resource_mut::<CareerClient>();
+            career.view = CareerView {
+                match_service_request_id: Some(request_id),
+                match_service: Some(MatchServiceView::Assigned {
+                    allocation: allocation(),
+                }),
+                ..default()
+            };
+        }
+        for _ in 0..2 {
+            app.world_mut()
+                .resource_mut::<MatchServiceClient>()
+                .last_request = Some(Instant::now() - Duration::from_secs(3));
+            app.update();
+            assert!(
+                app.world()
+                    .resource::<MatchServiceClient>()
+                    .allocation
+                    .is_none()
+            );
+            assert!(app.world().resource::<MatchServiceClient>().is_searching());
+            assert!(
+                app.world()
+                    .resource::<Messages<SessionUiCommand>>()
+                    .is_empty(),
+                "old allocation must not get a handoff even with a matching request ID"
+            );
+            assert_eq!(app.world_mut().resource_mut::<Messages<NetworkCommand>>().drain()
+                .filter(|command| matches!(command, NetworkCommand::Career(shared::career::CareerRequest::FindMatch { request_id: id, .. }) if *id == request_id)).count(), 1,
+                "rejecting the old worker must keep retrying matchmaking");
+        }
+        let mut next_allocation = allocation();
+        next_allocation.allocation_id = "next-allocation".into();
+        // Worker ports are reused; allocation identity, not endpoint, is the boundary.
+        app.world_mut()
+            .resource_mut::<CareerClient>()
+            .view
+            .match_service = Some(MatchServiceView::Assigned {
+            allocation: next_allocation.clone(),
+        });
+        app.update();
+        assert_eq!(
+            app.world()
+                .resource::<MatchServiceClient>()
+                .allocation
+                .as_ref()
+                .unwrap()
+                .allocation_id,
+            next_allocation.allocation_id
+        );
+        assert!(app.world_mut().resource_mut::<Messages<SessionUiCommand>>().drain()
+            .any(|command| matches!(command, SessionUiCommand::ConnectAllocated(endpoint) if endpoint == next_allocation.endpoint)));
     }
 
     #[test]

@@ -278,7 +278,6 @@ pub(crate) fn pad_combat(
             let Some((entity, id)) =
                 pick.filter(|(entity, id)| validity.valid(*entity, *id, *team))
             else {
-                feedback.push_line(crate::i18n::tr("combat.attack.no_enemy_aimed"));
                 return;
             };
             let request_target = TargetState::for_request(entity, id);

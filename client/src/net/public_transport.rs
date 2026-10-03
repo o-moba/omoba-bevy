@@ -253,5 +253,36 @@ mod tests {
                 &Signature::from_bytes(&decode_hex::<64>(&command.signature).unwrap()),
             )
             .unwrap();
+        for (sequence, action) in [
+            (2, shared::utility::UtilityAction::Dash),
+            (3, shared::utility::UtilityAction::Haste),
+        ] {
+            let packet = ClientPacket::Utility {
+                action,
+                direction: [1.0, 0.0],
+                server_epoch: 7,
+                match_id: 2,
+                request_id: sequence,
+            };
+            transport.send(&sender, &packet, &signer).unwrap();
+            let (len, _) = receiver.recv_from(&mut buf).unwrap();
+            let PublicClientDatagram::SignedCommand { command } =
+                serde_json::from_slice(&buf[..len]).unwrap()
+            else {
+                panic!("utility must use the public signed path");
+            };
+            assert_eq!(command.sequence, sequence);
+            assert_eq!(command.server_epoch, 7);
+            assert_eq!(command.match_id, 2);
+            assert!(
+                matches!(serde_json::from_str::<ClientPacket>(&command.payload).unwrap(), ClientPacket::Utility { action: sent, .. } if sent == action)
+            );
+            verifying
+                .verify_strict(
+                    &command.signing_bytes(),
+                    &Signature::from_bytes(&decode_hex::<64>(&command.signature).unwrap()),
+                )
+                .unwrap();
+        }
     }
 }

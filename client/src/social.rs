@@ -1,4 +1,4 @@
-//! Ephemeral server-confirmed match communication and exclusive gesture ownership.
+//! Ephemeral match communication: local debug feedback offline, server authority online.
 // i18n-strict
 use crate::{
     camera::MainCamera,
@@ -29,10 +29,11 @@ use bevy::{
     window::PrimaryWindow,
 };
 use shared::social::{
-    SocialChannel, SocialCommand, SocialEvent, SocialEventKind, SocialView, normalize_chat_text,
+    SocialChannel, SocialCommand, SocialEvent, SocialEventKind, SocialTeam, SocialView,
+    normalize_chat_text,
 };
 use std::{
-    collections::{HashSet, VecDeque},
+    collections::{HashMap, HashSet, VecDeque},
     time::{Duration, Instant},
 };
 
@@ -40,6 +41,8 @@ const HOLD_SECONDS: f32 = 0.45;
 const MOVE_SLOP: f32 = 12.0;
 const REACTION_SECONDS: f32 = 2.8;
 const LOG_LIMIT: usize = 40;
+const CHAT_BUBBLE_SECONDS: f32 = 5.0;
+const STATUS_SECONDS: u64 = 4;
 fn chat_allowed(joined: bool, state: &GameState) -> bool {
     joined && matches!(state, GameState::Running | GameState::Victory { .. })
 }
@@ -229,6 +232,12 @@ struct PendingSend {
     started: Instant,
     next: Instant,
 }
+#[derive(Clone, Debug)]
+struct LocalSender {
+    player_id: u64,
+    nickname: String,
+    team: SocialTeam,
+}
 #[derive(Resource)]
 pub(crate) struct SocialClient {
     pub(crate) chat_open: bool,
@@ -251,6 +260,9 @@ pub(crate) struct SocialClient {
     pub(crate) reactions: Vec<(SocialEvent, Instant)>,
     allowed: Vec<String>,
     status: SocialStatus,
+    status_until: Option<Instant>,
+    event_started: HashMap<u64, Instant>,
+    local_sender: Option<LocalSender>,
     wheel_ids: [String; 4],
     last_viewport: Option<Vec2>,
     mute_all: bool,
@@ -291,6 +303,9 @@ impl Default for SocialClient {
             reactions: Vec::new(),
             allowed: Vec::new(),
             status: SocialStatus::None,
+            status_until: None,
+            event_started: HashMap::new(),
+            local_sender: None,
             wheel_ids: reaction_visuals::FREE_IDS.map(str::to_owned),
             last_viewport: None,
             mute_all: false,
@@ -338,14 +353,15 @@ impl SocialClient {
             && view.request_id == Some(pending.id)
         {
             if let Some(error) = view.error {
-                self.status = SocialStatus::from_text(error);
+                self.set_status(SocialStatus::from_text(error));
             } else {
                 if let SocialCommand::Chat { text, .. } = &pending.command
                     && self.draft.trim() == text
                 {
                     self.draft.clear();
+                    self.keyboard_requested = false;
                 }
-                self.status = SocialStatus::Key("social.status.delivered");
+                self.set_status(SocialStatus::None);
             }
             self.pending = None;
         }
@@ -355,25 +371,55 @@ impl SocialClient {
                 continue;
             }
             self.event_sequence = event.id;
-            match &event.kind {
-                SocialEventKind::Chat { .. } => {
-                    self.events.push_back(event);
-                    while self.events.len() > LOG_LIMIT {
-                        self.events.pop_front();
-                    }
-                }
-                SocialEventKind::Reaction { .. } => {
-                    if event.age_ms < (REACTION_SECONDS * 1000.0) as u32 {
-                        self.reactions
-                            .retain(|(old, _)| old.player_id != event.player_id);
-                        let age = Duration::from_millis(event.age_ms as u64);
-                        self.reactions.push((event, Instant::now() - age));
-                        if self.reactions.len() > shared::social::MAX_SOCIAL_EVENTS {
-                            self.reactions.remove(0);
-                        }
+            self.receive_event(event, Instant::now());
+        }
+    }
+    fn set_status(&mut self, status: SocialStatus) {
+        self.status_until =
+            (!status.is_empty()).then(|| Instant::now() + Duration::from_secs(STATUS_SECONDS));
+        self.status = status;
+    }
+    fn expire(&mut self, now: Instant) {
+        if self.status_until.is_some_and(|until| now >= until) {
+            self.status = SocialStatus::None;
+            self.status_until = None;
+        }
+        self.reactions.retain(|(_, start)| {
+            now.saturating_duration_since(*start).as_secs_f32() < REACTION_SECONDS
+        });
+        self.events.retain(|event| {
+            self.event_started.get(&event.id).is_some_and(|start| {
+                now.saturating_duration_since(*start)
+                    < Duration::from_millis(shared::social::SOCIAL_EVENT_TTL_MS as u64)
+            })
+        });
+        self.event_started
+            .retain(|id, _| self.events.iter().any(|event| event.id == *id));
+    }
+    fn receive_event(&mut self, event: SocialEvent, now: Instant) {
+        let age = Duration::from_millis(event.age_ms as u64);
+        let started = now.checked_sub(age).unwrap_or(now);
+        match &event.kind {
+            SocialEventKind::Chat { .. } if event.age_ms < shared::social::SOCIAL_EVENT_TTL_MS => {
+                self.event_started.insert(event.id, started);
+                self.events.push_back(event);
+                while self.events.len() > LOG_LIMIT {
+                    if let Some(old) = self.events.pop_front() {
+                        self.event_started.remove(&old.id);
                     }
                 }
             }
+            SocialEventKind::Reaction { .. }
+                if event.age_ms < (REACTION_SECONDS * 1000.0) as u32 =>
+            {
+                self.reactions
+                    .retain(|(old, _)| old.player_id != event.player_id);
+                self.reactions.push((event, started));
+                if self.reactions.len() > shared::social::MAX_SOCIAL_EVENTS {
+                    self.reactions.remove(0);
+                }
+            }
+            _ => {}
         }
     }
     pub(crate) fn request_failed(&mut self, request_id: u64, error: SocialStatus) {
@@ -383,12 +429,41 @@ impl SocialClient {
             .is_some_and(|pending| pending.id == request_id)
         {
             self.pending = None;
-            self.status = error;
+            self.set_status(error);
         }
     }
     fn send(&mut self, command: SocialCommand, out: &mut MessageWriter<NetworkCommand>) {
+        // Offline debug feedback never enters the network acknowledgement loop.
+        // This sender exists only for an admitted socket-free practice session.
+        if let Some(sender) = self.local_sender.clone() {
+            let kind = match command {
+                SocialCommand::Chat { channel, text } => {
+                    self.draft.clear();
+                    self.keyboard_requested = false;
+                    SocialEventKind::Chat { channel, text }
+                }
+                SocialCommand::Reaction { reaction_id } => {
+                    SocialEventKind::Reaction { reaction_id }
+                }
+                SocialCommand::Subscribe => return,
+            };
+            self.event_sequence = self.event_sequence.saturating_add(1);
+            self.receive_event(
+                SocialEvent {
+                    id: self.event_sequence,
+                    player_id: sender.player_id,
+                    nickname: sender.nickname,
+                    team: sender.team,
+                    age_ms: 0,
+                    kind,
+                },
+                Instant::now(),
+            );
+            self.set_status(SocialStatus::None);
+            return;
+        }
         if self.pending.is_some() {
-            self.status = SocialStatus::Key("social.status.busy");
+            self.set_status(SocialStatus::Key("social.status.busy"));
             return;
         }
         let Some(id) = self.request_sequence.checked_add(1) else {
@@ -402,7 +477,7 @@ impl SocialClient {
             started: now,
             next: now + Duration::from_secs(1),
         });
-        self.status = SocialStatus::Key("social.status.sending");
+        self.set_status(SocialStatus::Key("social.status.sending"));
         out.write(NetworkCommand::Social {
             request_id: id,
             command,
@@ -417,13 +492,13 @@ impl SocialClient {
                 },
                 out,
             ),
-            Err(error) => self.status = SocialStatus::from_text(error),
+            Err(error) => self.set_status(SocialStatus::from_text(error)),
         }
     }
     fn send_reaction(&mut self, index: usize, out: &mut MessageWriter<NetworkCommand>) {
         let id = self.wheel_ids[index].clone();
         if !self.allowed.iter().any(|allowed| allowed == &id) {
-            self.status = SocialStatus::Key("social.status.reaction_unavailable");
+            self.set_status(SocialStatus::Key("social.status.reaction_unavailable"));
             return;
         }
         self.send(SocialCommand::Reaction { reaction_id: id }, out);
@@ -451,6 +526,10 @@ impl SocialClient {
         self.opened_frame = true;
         self.draft = "QA: Привет 小明 — ready for practice!".into(); // i18n-allow: QA harness draft
         self.send_chat(out);
+    }
+    #[cfg(feature = "qa")]
+    pub(crate) fn qa_send_reaction(&mut self, out: &mut MessageWriter<NetworkCommand>) {
+        self.send_reaction(0, out);
     }
     #[cfg(feature = "qa")]
     pub(crate) fn qa_close(&mut self) {
@@ -482,6 +561,21 @@ impl SocialClient {
     }
     fn visible_sender(&self, id: u64) -> bool {
         !self.mute_all && !self.muted.contains(&id)
+    }
+    fn overhead_event(&self, player_id: u64, now: Instant) -> Option<&SocialEvent> {
+        self.events
+            .iter()
+            .filter(|event| {
+                self.event_started.get(&event.id).is_some_and(|start| {
+                    now.saturating_duration_since(*start).as_secs_f32() < CHAT_BUBBLE_SECONDS
+                })
+            })
+            .chain(self.reactions.iter().filter_map(|(event, start)| {
+                (now.saturating_duration_since(*start).as_secs_f32() < REACTION_SECONDS)
+                    .then_some(event)
+            }))
+            .filter(|event| event.player_id == player_id)
+            .max_by_key(|event| event.id)
     }
 }
 
@@ -641,9 +735,7 @@ fn input(
     social.blocked_frame = false;
     social.opened_frame = false;
     social.buttons = None;
-    social
-        .reactions
-        .retain(|(_, start)| start.elapsed().as_secs_f32() < REACTION_SECONDS);
+    social.expire(Instant::now());
     let Ok((window_id, window)) = world.window.single() else {
         social.close();
         touches.clear();
@@ -662,8 +754,36 @@ fn input(
         touches.clear();
         return;
     }
+    social.local_sender = if world.session.is_offline() {
+        world
+            .snapshot
+            .scoreboard
+            .as_ref()
+            .and_then(|board| {
+                board
+                    .players
+                    .iter()
+                    .find(|player| player.player_id == world.snapshot.your_id)
+            })
+            .map(|player| LocalSender {
+                player_id: player.player_id,
+                nickname: player.nickname.clone(),
+                team: match player.team {
+                    shared::map::Team::Green => SocialTeam::Green,
+                    shared::map::Team::Blue => SocialTeam::Blue,
+                },
+            })
+    } else {
+        None
+    };
+    if social.local_sender.is_some() {
+        social.wheel_ids = reaction_visuals::FREE_IDS.map(str::to_owned);
+        social.subscribed = true;
+        social.subscription = None;
+        social.allowed = reaction_visuals::FREE_IDS.map(str::to_owned).to_vec();
+    }
     // Subscription is transport capability negotiation, independent of an open chat draft.
-    if !social.subscribed && social.namespace.is_some() {
+    if !world.session.is_offline() && !social.subscribed && social.namespace.is_some() {
         let now = Instant::now();
         if social.subscription.is_none()
             && let Some(id) = social.request_sequence.checked_add(1)
@@ -819,7 +939,7 @@ fn input(
         let now = Instant::now();
         if now.duration_since(pending.started) >= Duration::from_secs(5) {
             social.pending = None;
-            social.status = SocialStatus::Key("social.status.no_confirmation");
+            social.set_status(SocialStatus::Key("social.status.no_confirmation"));
         } else if now >= pending.next {
             pending.next = now + Duration::from_secs(1);
             out.write(NetworkCommand::Social {
@@ -935,7 +1055,7 @@ fn chat_keyboard(
                 if is_chat_submit_text(value) {
                     social.send_chat(&mut out);
                 } else if let Err(error) = append_chat(&mut social.draft, value) {
-                    social.status = SocialStatus::Key(error);
+                    social.set_status(SocialStatus::Key(error));
                 }
                 social.preedit.clear();
                 committed = true;
@@ -968,7 +1088,7 @@ fn chat_keyboard(
                     .and_then(|text| append_chat(&mut social.draft, text.trim()))
                 {
                     Ok(()) => {}
-                    Err(error) => social.status = SocialStatus::Key(error),
+                    Err(error) => social.set_status(SocialStatus::Key(error)),
                 }
             }
             Key::Enter => social.send_chat(&mut out),
@@ -990,7 +1110,7 @@ fn chat_keyboard(
                     _ => None,
                 }) {
                     if let Err(error) = append_chat(&mut social.draft, text) {
-                        social.status = SocialStatus::Key(error);
+                        social.set_status(SocialStatus::Key(error));
                     }
                 }
             }
@@ -1146,8 +1266,9 @@ impl PhoneChatLayout {
             top: safe.top + 6.0,
             width,
             height: if keyboard {
-                // This is a conservative history budget, not an inferred OS inset.
-                (viewport.y * 0.4).max(112.0).min(available)
+                // Two fixed touch rows plus their gap and panel padding.
+                // History is hidden while typing instead of clipped to a sliver.
+                110.0_f32.min(available)
             } else {
                 available
             },
@@ -1299,7 +1420,18 @@ fn render_phone_chat(
                         Name::new("SocialSendStatus"),
                     ));
                 });
-                render_chat_log(p, social, old_scroll);
+                if !social.keyboard_requested {
+                    if social.local_sender.is_some() {
+                        text(
+                            p,
+                            tr("social.mode.offline"),
+                            11.0,
+                            ui::MUTED,
+                            "SocialLocalNotice",
+                        );
+                    }
+                    render_chat_log(p, social, old_scroll);
+                }
             });
         });
 }
@@ -1318,8 +1450,7 @@ fn render_chat_log(
             ..column()
         },
         old_scroll,
-        // Desktop wheel only, as before: the phone chat log does not scroll.
-        crate::ui::ScrollArea::default().desktop_wheel(28.0),
+        crate::ui::ScrollArea::menu(28.0).keyed(0x534F_4349_414C),
         Name::new("SocialChatLog"),
     ))
     .with_children(|p| {
@@ -1443,7 +1574,7 @@ fn render(
     if !social.chat_open && social.wheel.center.is_none() {
         // hud.md `icon-buttons`: chat and reactions are the first two round
         // icon buttons of the top-right row (the menu `≡` is the third);
-        // their names are tooltips. `social-status` is a glass chip under it.
+        // their names are tooltips; status feedback stays inside the composer.
         let form = crate::ui::theme::Form::of(phone);
         commands
             .spawn((
@@ -1490,42 +1621,8 @@ fn render(
                         });
                 }
             });
-        if !social.status.is_empty() {
-            let status_w = if phone {
-                crate::hud_layout::icon_row_width(form)
-            } else {
-                crate::hud_layout::plate::SOCIAL_STATUS_DESKTOP.x
-            };
-            commands.spawn((
-                Node {
-                    position_type: PositionType::Absolute,
-                    max_width: Val::Px(status_w),
-                    min_height: Val::Px(crate::hud_layout::plate::BRUSH_CHIP.y),
-                    padding: UiRect::axes(
-                        Val::Px(crate::ui::tokens::space::S8),
-                        Val::Px(crate::ui::tokens::space::S4),
-                    ),
-                    border: UiRect::all(Val::Px(crate::ui::tokens::border::HAIRLINE)),
-                    border_radius: BorderRadius::all(Val::Px(crate::ui::tokens::radius::MD)),
-                    ..default()
-                },
-                BackgroundColor(ui::perceptual(
-                    crate::ui::tokens::color::SURFACE_GLASS_STRONG,
-                )),
-                BorderColor::all(ui::perceptual(crate::ui::tokens::color::BORDER_HAIRLINE)),
-                Text::new(social.status.text()),
-                ui::styled_text(ui::TextStyle::keep_case(
-                    crate::ui::tokens::TextRole::Caption,
-                )),
-                TextColor(crate::ui::tokens::color::TEXT_PRIMARY),
-                TextLayout::new_with_justify(Justify::Right),
-                crate::hud_layout::HudRegion::SocialStatus,
-                ZIndex(85),
-                FocusPolicy::Pass,
-                SocialRoot,
-                Name::new("SocialStatus"),
-            ));
-        }
+        // Errors are transient composer feedback. Do not duplicate them in
+        // the match HUD, where they can cover enemy portraits and controls.
         return;
     }
     if social.chat_open && phone {
@@ -1584,7 +1681,9 @@ fn render(
                     });
                     text(
                         p,
-                        tr(if world.snapshot.match_mode == "practice" {
+                        tr(if world.session.is_offline() {
+                            "social.mode.offline"
+                        } else if world.snapshot.match_mode == "practice" {
                             "social.mode.practice"
                         } else {
                             "social.mode.match"
@@ -1715,6 +1814,8 @@ fn render_bubbles(
     )>,
     bubbles: Query<(Entity, &SocialBubble)>,
     ui_scale: Option<Res<UiScale>>,
+    mobile: Option<Res<MobileControls>>,
+    bars: Query<(&crate::combat::CombatBarAnchor, &Transform)>,
 ) {
     let current: Vec<_> = bubbles.iter().map(|(entity, key)| (entity, *key)).collect();
     let mut desired = Vec::new();
@@ -1763,6 +1864,7 @@ fn render_bubbles(
                     ..default()
                 },
                 image: None,
+                text: None,
                 key: SocialBubble {
                     event_id: 0,
                     player_id: id.0,
@@ -1772,23 +1874,51 @@ fn render_bubbles(
         if !social.visible_sender(id.0) {
             continue;
         }
-        if let Some((event, _)) = social.reactions.iter().find(|(event, start)| {
-            event.player_id == id.0 && start.elapsed().as_secs_f32() < REACTION_SECONDS
-        }) {
-            let SocialEventKind::Reaction { reaction_id } = &event.kind else {
-                continue;
-            };
+        // Use the same projected bar anchor as the vitals plate. Pixel clearance
+        // remains stable as the camera zooms or the hero model changes height.
+        let vitals = bars
+            .iter()
+            .find(|(bar, _)| bar.target == entity)
+            .and_then(|(_, pose)| {
+                camera
+                    .world_to_viewport(&camera_transform, pose.translation)
+                    .ok()
+            })
+            .map(|p| crate::hud_layout::world_to_ui(p, ui_scale.as_deref()))
+            .unwrap_or(point);
+        let plate_height = if mobile.as_ref().is_some_and(|m| m.enabled) {
+            36.0
+        } else {
+            12.0
+        };
+        let bottom = vitals.y - plate_height - 6.0;
+        // One current communication per hero avoids climbing into the HUD.
+        // Older chat remains in the transcript for its normal lifetime.
+        let Some(event) = social.overhead_event(id.0, Instant::now()) else {
+            continue;
+        };
+        if let SocialEventKind::Reaction { reaction_id } = &event.kind {
             let image = assets.as_ref().and_then(|a| a.image(reaction_id, &images));
             desired.push(BubbleDraw {
-                node: Node {
-                    position_type: PositionType::Absolute,
-                    left: Val::Px(point.x - 28.0),
-                    top: Val::Px(point.y - 48.0),
-                    width: Val::Px(56.0),
-                    height: Val::Px(56.0),
-                    ..default()
-                },
+                node: social_bubble_node(Vec2::new(vitals.x, bottom), Vec2::splat(56.0)),
                 image,
+                text: None,
+                key: SocialBubble {
+                    event_id: event.id,
+                    player_id: id.0,
+                },
+            });
+        }
+        if let SocialEventKind::Chat { text, .. } = &event.kind {
+            desired.push(BubbleDraw {
+                node: Node {
+                    padding: UiRect::all(Val::Px(5.0)),
+                    overflow: Overflow::clip(),
+                    border_radius: BorderRadius::all(Val::Px(6.0)),
+                    ..social_bubble_node(Vec2::new(vitals.x, bottom), Vec2::new(180.0, 42.0))
+                },
+                image: None,
+                text: Some(chat_bubble_preview(&event.nickname, text)),
                 key: SocialBubble {
                     event_id: event.id,
                     player_id: id.0,
@@ -1797,6 +1927,37 @@ fn render_bubbles(
         }
     }
     reconcile_bubbles(&mut commands, &current, desired);
+}
+
+fn social_bubble_node(bottom_center: Vec2, size: Vec2) -> Node {
+    Node {
+        position_type: PositionType::Absolute,
+        left: Val::Px(bottom_center.x - size.x * 0.5),
+        top: Val::Px(bottom_center.y - size.y),
+        width: Val::Px(size.x),
+        height: Val::Px(size.y),
+        ..default()
+    }
+}
+
+fn chat_bubble_preview(nickname: &str, message: &str) -> String {
+    // Bound this brief two-line preview; the scrollable log retains full text.
+    // Wide characters consume two cells and truncation stays on UTF-8 boundaries.
+    fn truncate(value: &str, cells: usize) -> String {
+        let mut used = 0;
+        let mut output = String::new();
+        for character in value.chars() {
+            let width = if character.is_ascii() { 1 } else { 2 };
+            if used + width > cells.saturating_sub(2) {
+                output.push('…');
+                return output;
+            }
+            output.push(character);
+            used += width;
+        }
+        output
+    }
+    format!("{}: {}", truncate(nickname, 16), truncate(message, 28))
 }
 
 fn social_head_anchor(
@@ -1824,6 +1985,7 @@ struct BubbleDraw {
     key: SocialBubble,
     node: Node,
     image: Option<ImageNode>,
+    text: Option<String>,
 }
 
 fn reconcile_bubbles(
@@ -1836,6 +1998,23 @@ fn reconcile_bubbles(
         let existing = current.iter().find(|(_, key)| *key == draw.key);
         let entity = if let Some((entity, _)) = existing {
             *entity
+        } else if let Some(text) = draw.text.clone() {
+            commands
+                .spawn((
+                    Text::new(text),
+                    TextLayout {
+                        justify: Justify::Center,
+                        linebreak: bevy::text::LineBreak::AnyCharacter,
+                    },
+                    ui::text(12.0),
+                    TextColor(ui::IVORY),
+                    BackgroundColor(ui::PANEL),
+                    FocusPolicy::Pass,
+                    ZIndex(80),
+                    draw.key,
+                    Name::new("SocialChatBubble"),
+                ))
+                .id()
         } else if let Some(image) = draw.image.clone() {
             commands
                 .spawn((
@@ -1905,6 +2084,152 @@ fn channel_label(channel: SocialChannel) -> &'static str {
 mod tests {
     use super::*;
     #[test]
+    fn offline_chat_and_reactions_are_ephemeral_without_network_acknowledgements() {
+        let mut app = App::new();
+        app.insert_resource(SocialClient {
+            local_sender: Some(LocalSender {
+                player_id: 7,
+                nickname: "Practice 7".into(),
+                team: SocialTeam::Green,
+            }),
+            draft: "  Hello 世界  ".into(),
+            allowed: reaction_visuals::FREE_IDS.map(str::to_owned).to_vec(),
+            ..default()
+        })
+        .add_message::<NetworkCommand>()
+        .add_systems(
+            Update,
+            |mut social: ResMut<SocialClient>, mut out: MessageWriter<NetworkCommand>| {
+                social.send_chat(&mut out);
+                social.send_reaction(0, &mut out);
+            },
+        );
+        app.update();
+        assert!(
+            app.world()
+                .resource::<Messages<NetworkCommand>>()
+                .is_empty()
+        );
+        let mut social = app.world_mut().resource_mut::<SocialClient>();
+        assert!(social.pending.is_none());
+        assert!(social.draft.is_empty());
+        assert!(!social.keyboard_requested);
+        assert!(social.status.is_empty());
+        assert_eq!(social.events.len(), 1);
+        assert_eq!(social.reactions.len(), 1);
+        assert!(
+            matches!(&social.events[0].kind, SocialEventKind::Chat { text, .. } if text == "Hello 世界")
+        );
+        social.expire(Instant::now() + Duration::from_secs(31));
+        assert!(social.events.is_empty());
+        assert!(social.reactions.is_empty());
+    }
+
+    #[test]
+    fn server_delivery_clears_status_and_errors_and_received_lines_expire() {
+        let mut social = SocialClient::default();
+        social.bind(7, 2);
+        let now = Instant::now();
+        social.pending = Some(PendingSend {
+            id: 1,
+            command: SocialCommand::Chat {
+                channel: SocialChannel::Team,
+                text: "hello".into(),
+            },
+            started: now,
+            next: now,
+        });
+        social.draft = "hello".into();
+        social.apply_view(
+            7,
+            2,
+            1,
+            SocialView {
+                request_id: Some(1),
+                ..default()
+            },
+        );
+        assert!(social.status.is_empty());
+        assert!(social.pending.is_none());
+        assert!(!social.keyboard_requested);
+        social.set_status(SocialStatus::Key("social.status.no_confirmation"));
+        social.receive_event(
+            SocialEvent {
+                id: 2,
+                player_id: 8,
+                nickname: "Teammate".into(),
+                team: SocialTeam::Green,
+                age_ms: shared::social::SOCIAL_EVENT_TTL_MS - 1000,
+                kind: SocialEventKind::Chat {
+                    channel: SocialChannel::Team,
+                    text: "confirmed".into(),
+                },
+            },
+            now,
+        );
+        social.expire(now + Duration::from_secs(5));
+        assert!(social.status.is_empty());
+        assert!(social.events.is_empty());
+        assert!(
+            social.local_sender.is_none(),
+            "online sends keep authoritative delivery"
+        );
+    }
+
+    #[test]
+    fn social_errors_render_only_inside_chat_never_over_the_gameplay_hud() {
+        for phone in [false, true] {
+            let mut app = App::new();
+            let mut mobile = MobileControls::default();
+            mobile.enabled = phone;
+            app.init_resource::<SocialClient>()
+                .init_resource::<Assets<Image>>()
+                .insert_resource(ClientSession::admitted_for_test())
+                .insert_resource(GameStateSnapshot {
+                    state: GameState::Running,
+                    ..default()
+                })
+                .insert_resource(mobile)
+                .insert_resource(PlayerVisualMode::Models3d)
+                .add_systems(Update, render);
+            app.world_mut().spawn((Window::default(), PrimaryWindow));
+            app.world_mut()
+                .resource_mut::<SocialClient>()
+                .set_status(SocialStatus::Key("social.status.no_confirmation"));
+            app.update();
+            assert!(
+                !app.world_mut()
+                    .query::<&Name>()
+                    .iter(app.world())
+                    .any(|name| name.as_str() == "SocialStatus")
+            );
+            app.world_mut().resource_mut::<SocialClient>().open_chat();
+            app.update();
+            assert!(
+                app.world_mut()
+                    .query::<(&Name, &Text)>()
+                    .iter(app.world())
+                    .any(|(name, text)| name.as_str() == "SocialSendStatus"
+                        && text.0.contains(tr("social.status.no_confirmation")))
+            );
+        }
+    }
+
+    #[test]
+    fn reaction_and_chat_bubbles_clear_the_entire_mobile_vitals_plate() {
+        let bar_y = 200.0;
+        let bottom = bar_y - 36.0 - 6.0;
+        for size in [Vec2::splat(56.0), Vec2::new(180.0, 42.0)] {
+            let node = social_bubble_node(Vec2::new(300.0, bottom), size);
+            let Val::Px(top) = node.top else {
+                panic!("pixel anchor");
+            };
+            assert_eq!(top + size.y, 158.0);
+            assert!(top + size.y < bar_y - 36.0);
+        }
+    }
+
+    #[test]
     fn avatar_tap_opens_reaction_picker_but_drag_and_cancel_do_not() {
         let mut wheel = Wheel::default();
         wheel.event(1, TouchPhase::Started, Vec2::new(200.0, 180.0), true, 1.0);
@@ -1973,10 +2298,10 @@ mod tests {
         assert_eq!(composer_preview("", "", 200.0), "给队友发消息…");
     }
     #[test]
-    fn chat_log_scrolls_by_wheel_on_desktop_only() {
+    fn chat_log_scrolls_by_desktop_wheel_or_phone_touch() {
         use crate::platform::UiProfile;
         use crate::ui::scroll::harness;
-        for (profile, expected) in [(UiProfile::Desktop, 28.0), (UiProfile::Mobile, 0.0)] {
+        for (profile, expected) in [(UiProfile::Desktop, 28.0), (UiProfile::Mobile, 60.0)] {
             let mut app = App::new();
             let window = harness::install(&mut app, profile);
             app.add_systems(Startup, |mut commands: Commands| {
@@ -2027,6 +2352,228 @@ mod tests {
         let preview = composer_preview("Привет 小明, this is a long draft", "中文", 128.0);
         assert!(preview.starts_with('…'));
         assert!(preview.ends_with("中文 |"));
+    }
+
+    #[test]
+    fn phone_sent_chat_has_unclipped_history_and_touch_scrolls_real_layout() {
+        use bevy::camera::{ComputedCameraValues, RenderTargetInfo};
+        use bevy::ecs::system::RunSystemOnce;
+        for (size, dpi) in [
+            (Vec2::new(568.0, 320.0), 1.0),
+            (Vec2::new(852.0, 393.0), 2.0),
+        ] {
+            let mut app = App::new();
+            app.add_plugins((
+                MinimalPlugins,
+                bevy::asset::AssetPlugin::default(),
+                bevy::image::ImagePlugin::default(),
+                bevy::text::TextPlugin,
+                bevy::transform::TransformPlugin,
+                bevy::input::InputPlugin,
+                bevy::ui::UiPlugin,
+                bevy::camera::visibility::VisibilityPlugin,
+                bevy::picking::PickingPlugin,
+                bevy::picking::InteractionPlugin,
+            ));
+            let mut mobile = MobileControls::default();
+            mobile.enabled = true;
+            mobile.focused = true;
+            mobile.landscape = true;
+            mobile.viewport = size;
+            mobile.safe = crate::mobile_controls::MobileSafeInsets {
+                left: 32.0,
+                right: 32.0,
+                top: 12.0,
+                bottom: 20.0,
+            };
+            app.init_resource::<Assets<bevy::mesh::Mesh>>()
+                .init_resource::<Assets<TextureAtlasLayout>>()
+                .insert_resource(ClientSession::admitted_for_test())
+                .insert_resource(GameStateSnapshot {
+                    state: GameState::Running,
+                    ..default()
+                })
+                .insert_resource(mobile)
+                .insert_resource(PlayerVisualMode::Models3d)
+                .insert_resource(SocialClient {
+                    chat_open: true,
+                    keyboard_requested: true,
+                    draft: "Hello team".into(),
+                    local_sender: Some(LocalSender {
+                        player_id: 7,
+                        nickname: "Practice 7".into(),
+                        team: SocialTeam::Green,
+                    }),
+                    ..default()
+                })
+                .add_message::<NetworkCommand>()
+                .add_systems(Update, (crate::ui::scroll::scroll_areas, render).chain());
+            let mut window = Window::default();
+            window.resolution.set_scale_factor_override(Some(dpi));
+            window.resolution.set(size.x, size.y);
+            let window = app.world_mut().spawn((window, PrimaryWindow)).id();
+            app.world_mut().spawn((
+                Camera2d,
+                Camera {
+                    computed: ComputedCameraValues {
+                        target_info: Some(RenderTargetInfo {
+                            physical_size: (size * dpi).as_uvec2(),
+                            scale_factor: dpi,
+                        }),
+                        ..default()
+                    },
+                    ..default()
+                },
+            ));
+            app.finish();
+            app.cleanup();
+            for _ in 0..5 {
+                app.update();
+            }
+            assert!(
+                !app.world_mut()
+                    .query::<&Name>()
+                    .iter(app.world())
+                    .any(|name| name.as_str() == "SocialChatLog")
+            );
+            app.world_mut()
+                .run_system_once(
+                    |mut social: ResMut<SocialClient>, mut out: MessageWriter<NetworkCommand>| {
+                        social.send_chat(&mut out)
+                    },
+                )
+                .unwrap();
+            for _ in 0..4 {
+                app.update();
+            }
+            let named = |app: &mut App, name: &str| {
+                app.world_mut()
+                    .query::<(Entity, crate::ui::test_id::NodeKey)>()
+                    .iter(app.world())
+                    .find(|(_, key)| key.as_str() == name)
+                    .unwrap()
+                    .0
+            };
+            let rect = |app: &App, entity: Entity, clipped: bool| {
+                crate::ui::gesture::logical_ui_rect(
+                    app.world().get::<ComputedNode>(entity).unwrap(),
+                    app.world().get::<UiGlobalTransform>(entity).unwrap(),
+                    if clipped {
+                        app.world().get::<bevy::ui::CalculatedClip>(entity)
+                    } else {
+                        None
+                    },
+                    dpi,
+                )
+            };
+            let log = named(&mut app, "SocialChatLog");
+            let message = named(&mut app, "SocialChatMessage");
+            let log_rect = rect(&app, log, true);
+            let message_rect = rect(&app, message, false);
+            assert!(log_rect.height() >= 72.0, "{size:?}: {log_rect:?}");
+            assert!(message_rect.height() >= 14.0);
+            assert_eq!(
+                message_rect,
+                rect(&app, message, true),
+                "sent message must not be clipped"
+            );
+            assert!(log_rect.contains(message_rect.min) && log_rect.contains(message_rect.max));
+            for control in [
+                "SocialSend",
+                "SocialClose",
+                "SocialChannel",
+                "SocialKeyboard",
+            ] {
+                let entity = named(&mut app, control);
+                assert!(rect(&app, entity, true).height() >= 44.0, "{control}");
+            }
+            // Overflow with real measured message rows, then drag the phone log.
+            for id in 2..14 {
+                app.world_mut()
+                    .resource_mut::<SocialClient>()
+                    .receive_event(
+                        event(
+                            id,
+                            SocialEventKind::Chat {
+                                channel: SocialChannel::Team,
+                                text: format!("Message {id}"),
+                            },
+                        ),
+                        Instant::now(),
+                    );
+            }
+            for _ in 0..3 {
+                app.update();
+            }
+            let log = named(&mut app, "SocialChatLog");
+            let log_rect = rect(&app, log, true);
+            crate::ui::scroll::harness::drag(&mut app, window, 7, log_rect.center(), 60.0);
+            assert!(app.world().get::<ScrollPosition>(log).unwrap().y > 40.0);
+        }
+    }
+
+    #[test]
+    fn chat_bubble_preview_includes_nickname_and_bounds_wide_text() {
+        assert_eq!(chat_bubble_preview("小明", "hello"), "小明: hello");
+        let preview = chat_bubble_preview("很长的昵称名字测试", "世界你好".repeat(40).as_str());
+        assert!(preview.contains(": ") && preview.ends_with('…'));
+        assert!(
+            preview
+                .chars()
+                .map(|c| if c.is_ascii() { 1 } else { 2 })
+                .sum::<usize>()
+                <= 46
+        );
+    }
+
+    #[test]
+    fn newest_chat_or_reaction_is_the_only_overhead_event_per_player() {
+        let mut social = SocialClient::default();
+        let now = Instant::now();
+        social.receive_event(
+            event(
+                1,
+                SocialEventKind::Chat {
+                    channel: SocialChannel::Team,
+                    text: "hello".into(),
+                },
+            ),
+            now,
+        );
+        assert_eq!(social.overhead_event(7, now).unwrap().id, 1);
+        social.receive_event(
+            event(
+                2,
+                SocialEventKind::Reaction {
+                    reaction_id: "heart".into(),
+                },
+            ),
+            now,
+        );
+        assert_eq!(social.overhead_event(7, now).unwrap().id, 2);
+        assert_eq!(social.events.len(), 1, "reaction preserves chat transcript");
+        social.receive_event(
+            event(
+                3,
+                SocialEventKind::Chat {
+                    channel: SocialChannel::Team,
+                    text: "newer".into(),
+                },
+            ),
+            now,
+        );
+        assert_eq!(social.overhead_event(7, now).unwrap().id, 3);
+        assert!(social.overhead_event(8, now).is_none());
+        assert!(
+            social
+                .overhead_event(7, now + Duration::from_secs(6))
+                .is_none()
+        );
+        assert_eq!(
+            social.events.len(),
+            2,
+            "overhead lifetime does not delete transcript"
+        );
     }
     #[test]
     fn phone_keyboard_can_hide_without_losing_draft_or_releasing_gameplay() {
@@ -2204,6 +2751,7 @@ mod tests {
                 ..default()
             },
             image: (key.event_id != 0).then(ImageNode::default),
+            text: None,
         };
         let apply = |world: &mut World, desired| {
             let current: Vec<_> = world

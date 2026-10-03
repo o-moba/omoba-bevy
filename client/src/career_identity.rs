@@ -205,6 +205,24 @@ pub(crate) struct GameplaySigner {
 }
 
 impl CareerIdentity {
+    #[cfg(test)]
+    pub(crate) fn authenticated_for_test(
+        server_addr: &str,
+        server_epoch: u64,
+        session_id: &str,
+    ) -> Self {
+        Self {
+            key: Some(SigningKey::from_bytes(&[7; 32])),
+            scope: Some(AuthScope {
+                server_addr: server_addr.into(),
+                server_epoch,
+                session_id: session_id.into(),
+            }),
+            auth_nonce: Some("a".repeat(64)),
+            ..default()
+        }
+    }
+
     /// Observe an ordered account reply before UI query filtering can hide an
     /// authorization error. Empty bootstrap views are not an authentication
     /// revocation: only an explicit loss of server authority starts a new login.

@@ -35,6 +35,7 @@
   "social.entry.reactions": "表情",
   "social.title": "对局聊天",
   "social.mode.practice": "练习 · 电脑玩家 · 无排位或生涯奖励",
-  "social.mode.match": "消息仅在本局中保留",
-  "social.bot": "电脑"
+  "social.mode.match": "消息将在30秒后消失",
+  "social.bot": "电脑",
+  "social.mode.offline": "本地调试聊天 · 仅本设备可见"
 }

@@ -73,9 +73,13 @@ impl ServerRuntime {
             || !self.world.disconnected_sessions.is_empty()
         {
             let empty_since = self.empty_since.get_or_insert(now);
-            let grace = if self.match_service.worker().is_some() {
+            let grace = if self.match_service.worker().is_some()
+                && !self.world.disconnected_sessions.is_empty()
+            {
                 SESSION_RECLAIM_WINDOW + Duration::from_secs(1)
             } else {
+                // Deliberate Leave removes its seat immediately. Only retained
+                // identities need the longer mobile reconnect window.
                 EMPTY_ROSTER_GRACE
             };
             if now.saturating_duration_since(*empty_since) >= grace {

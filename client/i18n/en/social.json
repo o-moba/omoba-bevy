@@ -35,6 +35,7 @@
   "social.entry.reactions": "Reactions",
   "social.title": "Match chat",
   "social.mode.practice": "Practice · bots · no ranked or career rewards",
-  "social.mode.match": "Messages last for this match",
-  "social.bot": "BOT"
+  "social.mode.match": "Messages disappear after 30 seconds",
+  "social.bot": "BOT",
+  "social.mode.offline": "Local debug chat · Only visible on this device"
 }

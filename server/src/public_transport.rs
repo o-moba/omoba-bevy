@@ -420,4 +420,56 @@ mod tests {
         }
         assert!(!gate.validated(address(2001), now + CHALLENGE_TTL + VALIDATED_TTL));
     }
+    #[test]
+    fn expired_mobile_path_requires_new_proof_and_rejects_old_signed_packets() {
+        let mut gate = PublicTransport::default();
+        let now = Instant::now();
+        let addr = address(1);
+        let old_path = validate(&mut gate, addr, now);
+        let key = SigningKey::from_bytes(&[17; 32]);
+        let principal = GameplayPrincipal {
+            public_key: hex(key.verifying_key().as_bytes()),
+            session_id: "mobile-player".into(),
+            session_nonce: "d".repeat(64),
+        };
+        let signed = |path_nonce: String| {
+            let mut command = SignedCommand {
+                server_epoch: 7,
+                match_id: 2,
+                session_id: principal.session_id.clone(),
+                session_nonce: principal.session_nonce.clone(),
+                path_nonce,
+                sequence: 1,
+                payload: serde_json::to_string(&ClientPacket::Ping).unwrap(),
+                signature: String::new(),
+            };
+            command.signature = hex(&key.sign(&command.signing_bytes()).to_bytes());
+            encode(PublicClientDatagram::SignedCommand { command })
+        };
+        let old = signed(old_path.clone());
+        let resume = now + Duration::from_secs(120);
+        assert!(matches!(
+            gate.receive(addr, &old, 7, 2, false, Some(principal.clone()), resume),
+            Decision::Drop
+        ));
+        assert!(!gate.validated(addr, resume));
+        let fresh_path = validate(&mut gate, addr, resume);
+        assert_ne!(fresh_path, old_path);
+        assert!(matches!(
+            gate.receive(addr, &old, 7, 2, false, Some(principal.clone()), resume),
+            Decision::Drop
+        ));
+        assert!(matches!(
+            gate.receive(
+                addr,
+                &signed(fresh_path),
+                7,
+                2,
+                false,
+                Some(principal.clone()),
+                resume
+            ),
+            Decision::Dispatch(ClientPacket::Ping)
+        ));
+    }
 }

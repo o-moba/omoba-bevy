@@ -470,6 +470,15 @@ impl MobileControls {
             .then_some((Control::Joystick, l.joystick_center))
     }
 
+    /// Only a fresh touch can capture gameplay. UI owns a gesture begun on
+    /// a visible button, including when a HUD adjustment overlaps the stick.
+    fn event_with_ui(&mut self, id: u64, phase: TouchPhase, position: Vec2, buttons: &[Rect]) {
+        if phase == TouchPhase::Started && buttons.iter().any(|rect| rect.contains(position)) {
+            return;
+        }
+        self.event(id, phase, position);
+    }
+
     fn event(&mut self, id: u64, phase: TouchPhase, position: Vec2) {
         if !position.is_finite() {
             if let Some(capture) = self.captures.remove(&id) {
@@ -894,6 +903,15 @@ fn read_mobile_controls(
     mut session_events: MessageReader<SessionEvent>,
     gamepad: Option<Res<crate::gamepad::GamepadControls>>,
     utilities: Query<&crate::net::PlayerUtility, With<Player>>,
+    buttons: Query<
+        (
+            &ComputedNode,
+            &UiGlobalTransform,
+            Option<&InheritedVisibility>,
+            Option<&bevy::ui::CalculatedClip>,
+        ),
+        With<Button>,
+    >,
 ) {
     mobile.recall_active = utilities
         .single()
@@ -941,10 +959,25 @@ fn read_mobile_controls(
         events.clear();
         return;
     };
+    let button_rects: Vec<_> = buttons
+        .iter()
+        .filter_map(|(node, transform, visibility, clip)| {
+            if visibility.is_some_and(|visible| !visible.get()) || node.size().min_element() <= 0.0
+            {
+                return None;
+            }
+            Some(crate::ui::gesture::logical_ui_rect(
+                node,
+                transform,
+                clip,
+                window.scale_factor(),
+            ))
+        })
+        .collect();
     mobile.advance_hold_time(time.delta_secs());
     for event in events.read() {
         if event.window == window_entity {
-            mobile.event(event.id, event.phase, event.position);
+            mobile.event_with_ui(event.id, event.phase, event.position, &button_rects);
         }
     }
     // Desktop QA only. On real touch devices synthesized mouse input is ignored,
@@ -957,7 +990,7 @@ fn read_mobile_controls(
         const MOUSE_ID: u64 = u64::MAX;
         if let Some(position) = window.cursor_position() {
             if mouse.just_pressed(MouseButton::Left) {
-                mobile.event(MOUSE_ID, TouchPhase::Started, position);
+                mobile.event_with_ui(MOUSE_ID, TouchPhase::Started, position, &button_rects);
             } else if mouse.pressed(MouseButton::Left) {
                 mobile.event(MOUSE_ID, TouchPhase::Moved, position);
             }
@@ -1926,6 +1959,24 @@ fn draw_mobile_controls(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn hud_button_owns_a_touch_even_when_adjusted_controls_overlap_it() {
+        let mut mobile = MobileControls::default();
+        let center = mobile.layout().joystick_center;
+        let buttons = [Rect::from_center_size(center, Vec2::splat(44.0))];
+        mobile.event_with_ui(7, TouchPhase::Started, center, &buttons);
+        mobile.event_with_ui(7, TouchPhase::Moved, center + Vec2::X * 50.0, &buttons);
+        mobile.event_with_ui(7, TouchPhase::Ended, center + Vec2::X * 50.0, &buttons);
+        assert!(!mobile.has_active_gesture());
+        assert_eq!(mobile.movement, Vec2::ZERO);
+        assert!(mobile.attacks.is_empty() && mobile.casts.is_empty());
+        // An already owned joystick keeps its independent finger while a
+        // second finger taps a HUD button.
+        mobile.event_with_ui(8, TouchPhase::Started, center - Vec2::X * 30.0, &buttons);
+        mobile.event_with_ui(8, TouchPhase::Moved, center, &buttons);
+        assert!(mobile.has_active_gesture());
+    }
+
     #[test]
     fn ipad_upgrade_badges_capture_taps_without_casting_or_moving() {
         for slot in 0..4 {

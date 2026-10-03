@@ -480,7 +480,7 @@ fn capture(
             "SocialWheelChoice2",
             "SocialWheelChoice3",
         ],
-        2 => vec!["SocialReactionBubble", "SocialEntry", "SocialStatus"],
+        2 => vec!["SocialReactionBubble", "SocialEntry"],
         _ => vec![
             "MobileSkillDescription",
             "MobileAbility-0",

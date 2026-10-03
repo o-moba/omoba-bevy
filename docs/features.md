@@ -1,5 +1,13 @@
 # Feature Inventory
 
+## Mobile playtest follow-up (0.36.0)
+
+Home always offers Offline Practice, including while connected. It runs the shared combat engine locally, produces no saved history or progression, and supports local debug chat, reactions and item purchases. Server bot matches remain a separate online option. Nearby alive enemies visible to the client have exact-identity targeting portraits; hidden enemies never enter this rail. Gold and quick-buy sit directly below the minimap. The remaining basic-attack instruction banners are removed.
+
+Recall draws a cyan/gold channel around the hero for the authoritative timer and disappears on interruption. Recipe-based heroes send dash, haste and recall through the same signed server command path as legacy kits. Chat lines expire after 30 seconds, overhead messages after five seconds, reactions after 2.8 seconds and errors after four seconds; successful delivery has no persistent status banner. On phones, successful send dismisses the keyboard and reveals readable, touch-scrollable history. Only the latest overhead chat or emote appears per hero.
+
+Allocated matches retain disconnected seats for up to three minutes without pausing combat. Expired reconnects return Home; terminal results block gameplay even when the final snapshot still says Running, and Play Again cannot reuse a retired allocation. The Home hero is larger with bounds-aware framing; phone navigation has smaller separated buttons. iOS requests the selected supported cadence, but actual FPS remains dependent on the device, workload and OS. See [implementation and verification](progress/2026-10-04-mobile-playtest.md).
+
 ## iPhone gameplay controls (0.35.0)
 
 The compact phone HUD places skills and smaller minion/tower controls on one circle around attack, with a uniform 42-degree step. Skill sizes, order and vertical positions remain unchanged; the whole combat group moves 48 logical points left at normal scale to fit the additional right-side 44-point targets. Allied portraits sit beside the top of the map, the selected target is centered, and the bottom gap holds compact kill notices. Tap an allied portrait to follow that actor; movement, manual navigation and recentering return camera control. Finger panning is faster. Attack targeting has no instructional box, uses the current camera projection, and dash supports press-drag-release direction selection with a landing preview and camera recovery.

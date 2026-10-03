@@ -118,9 +118,11 @@ fn resolve_input_context(
         && session
             .as_ref()
             .is_none_or(|session| session.join_confirmed());
-    // Every front-end screen is modal: the world keeps simulating behind it,
-    // but nothing the player does on a menu may reach gameplay.
-    let front_end_open = screen.as_ref().is_some_and(|screen| screen.get().is_menu());
+    // Every front-end screen owns input, including a terminal receipt whose
+    // last simulation snapshot still says Running (abandoned/interrupted).
+    let front_end_open = screen
+        .as_ref()
+        .is_some_and(|screen| *screen.get() != crate::frontend::AppScreen::InMatch);
     context.modal_open = modals.as_ref().is_some_and(|modals| modals.is_open())
         || sandbox.as_ref().is_some_and(|s| s.blocks_world())
         || front_end_open
@@ -144,6 +146,50 @@ fn resolve_input_context(
 mod tests {
     use super::*;
     use crate::pause_menu::PauseMenuState;
+
+    #[test]
+    fn post_match_blocks_gameplay_while_the_last_snapshot_is_still_running() {
+        use crate::frontend::AppScreen;
+        let mut app = App::new();
+        app.add_plugins(bevy::state::app::StatesPlugin)
+            .init_state::<AppScreen>()
+            .init_resource::<ButtonInput<KeyCode>>()
+            .insert_resource(GameStateSnapshot {
+                state: GameState::Running,
+                ..default()
+            })
+            .insert_resource(crate::net::ClientSession::admitted_for_test())
+            .add_plugins(InputContextPlugin);
+        app.world_mut()
+            .resource_mut::<NextState<AppScreen>>()
+            .set(AppScreen::InMatch);
+        app.update();
+        assert!(
+            app.world()
+                .resource::<GameplayInputContext>()
+                .gameplay_allowed()
+        );
+        app.world_mut()
+            .resource_mut::<NextState<AppScreen>>()
+            .set(AppScreen::PostMatch);
+        app.update();
+        let context = app.world().resource::<GameplayInputContext>();
+        assert!(
+            context.running,
+            "the terminal receipt need not change the snapshot"
+        );
+        assert!(!context.gameplay_allowed());
+        assert!(!context.camera_allowed());
+        app.world_mut()
+            .resource_mut::<NextState<AppScreen>>()
+            .set(AppScreen::InMatch);
+        app.update();
+        assert!(
+            app.world()
+                .resource::<GameplayInputContext>()
+                .gameplay_allowed()
+        );
+    }
 
     #[test]
     fn gameplay_and_camera_are_blocked_while_any_modal_is_open() {

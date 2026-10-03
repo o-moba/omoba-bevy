@@ -388,7 +388,6 @@ pub(crate) fn resolve_basic_attack(
                 .is_some_and(|pad| pad.movement.length_squared() > 0.0001));
     if distance > range {
         if (phone && steering) || controller {
-            feedback.push_line(tr("combat.attack.out_of_range"));
             basic.cancel();
         } else {
             let direction = (position.translation - transform.translation)
@@ -398,9 +397,6 @@ pub(crate) fn resolve_basic_attack(
             commands.entity(player).insert(MovementTarget {
                 target: destination,
             });
-            if !basic.chasing {
-                feedback.push_line(tr("combat.attack.approaching"));
-            }
             basic.chasing = true;
         }
         return;
@@ -630,7 +626,6 @@ pub(crate) fn mobile_basic_attack(
     mut preview: ResMut<TargetAimPreview>,
     mut basic: ResMut<BasicAttackState>,
     pending: Res<PendingCast>,
-    mut feedback: ResMut<ActionFeedback>,
 ) {
     let previous_preview = std::mem::take(&mut *preview);
     let Some(mobile) = mobile.as_deref_mut().filter(|m| m.enabled) else {
@@ -795,11 +790,6 @@ pub(crate) fn mobile_basic_attack(
         if category.is_some() {
             target.selected_entity = None;
             target.selected_target = None;
-            feedback.push_line(tr(if category == Some(TargetKind::Minion) {
-                "combat.attack.no_minion"
-            } else {
-                "combat.attack.no_structure"
-            }));
         }
         // A basic attack with no target is a normal, silent no-op.
     }
@@ -1352,6 +1342,7 @@ mod tests {
                             .is_none()
                     );
                     assert!(app.world().resource::<BasicAttackState>().order.is_none());
+                    assert!(app.world().resource::<ActionFeedback>().text.is_empty());
                 }
             }
         }
@@ -1718,6 +1709,7 @@ mod tests {
             order(&mut app, enemy);
             app.update();
             assert!(commands(&mut app).is_empty());
+            assert!(app.world().resource::<ActionFeedback>().text.is_empty());
             assert_eq!(
                 app.world().get::<MovementTarget>(player).is_some(),
                 chases,

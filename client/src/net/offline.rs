@@ -250,6 +250,69 @@ mod tests {
     }
 
     #[test]
+    fn offline_purchase_replicates_authoritative_receipt_inventory_and_bonus_once() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        let (commands, incoming) = crossbeam_channel::unbounded();
+        let (outgoing, snapshots) = crossbeam_channel::unbounded();
+        let (signals, _) = crossbeam_channel::unbounded();
+        app.insert_resource(LocalPractice::new(incoming, outgoing, signals));
+        app.add_systems(Update, step);
+        commands
+            .send(ClientPacket::Join {
+                handheld: Default::default(),
+                prematch: false,
+                team: shared::map::Team::Green,
+                character: shared::wire::CharacterChoice::Ipfs,
+                hero_class: shared::HeroClass::Mage,
+                avatar: None,
+                sprite_character: None,
+                session_id: None,
+                passport_ticket: None,
+            })
+            .unwrap();
+        app.update();
+        let ServerPacket::Snapshot {
+            players,
+            your_id,
+            meta,
+            ..
+        } = snapshots.try_recv().unwrap()
+        else {
+            panic!("local snapshot");
+        };
+        let before = players.iter().find(|p| p.id == your_id).unwrap();
+        let item = shared::shop::ItemId::VitalityGem;
+        let packet = ClientPacket::BuyItem {
+            item_id: item.id().into(),
+            request_id: 44,
+            match_id: meta.match_id,
+            server_epoch: meta.server_epoch,
+        };
+        commands.send(packet.clone()).unwrap();
+        app.update();
+        let ServerPacket::Snapshot { players, .. } = snapshots.try_recv().unwrap() else {
+            panic!("purchase snapshot");
+        };
+        let after = players.iter().find(|p| p.id == your_id).unwrap();
+        assert_eq!(after.inventory, vec![item]);
+        assert_eq!(after.gold, before.gold - shared::shop::item(item).cost);
+        assert_eq!(after.max_hp, before.max_hp + 30.0);
+        let receipt = after.last_purchase.as_ref().unwrap();
+        assert_eq!(receipt.request_id, 44);
+        assert!(receipt.error.is_none());
+        commands.send(packet).unwrap();
+        app.update();
+        let ServerPacket::Snapshot { players, .. } = snapshots.try_recv().unwrap() else {
+            panic!("repeated purchase snapshot");
+        };
+        let repeated = players.iter().find(|p| p.id == your_id).unwrap();
+        assert_eq!(repeated.gold, after.gold);
+        assert_eq!(repeated.inventory, after.inventory);
+        assert_eq!(repeated.last_purchase, after.last_purchase);
+    }
+
+    #[test]
     fn unknown_or_store_only_avatars_cannot_trigger_download_or_admission() {
         assert!(!shipped_avatar(Some("not-bundled")));
         assert!(shipped_avatar(None));

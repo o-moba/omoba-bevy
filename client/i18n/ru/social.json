@@ -35,6 +35,7 @@
   "social.entry.reactions": "Реакции",
   "social.title": "Чат матча",
   "social.mode.practice": "Тренировка · Боты · Без рейтинга и наград за прогресс",
-  "social.mode.match": "Сообщения сохраняются только на время этого матча",
-  "social.bot": "БОТ"
+  "social.mode.match": "Сообщения исчезают через 30 секунд",
+  "social.bot": "БОТ",
+  "social.mode.offline": "Локальный чат · Виден только на этом устройстве"
 }

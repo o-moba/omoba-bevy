@@ -219,6 +219,8 @@ fn drive_screen_from_session(
     local_player: Query<(), With<Player>>,
     mut uncommitted_frames: Local<u8>,
     matchmaking: Option<Res<crate::match_service::MatchServiceClient>>,
+    career: Option<Res<crate::career::CareerClient>>,
+    result_latch: Option<Res<postmatch::PostMatchLatch>>,
 ) {
     if paused.0 || automation_bypass() {
         return;
@@ -229,6 +231,26 @@ fn drive_screen_from_session(
     let in_world = !local_player.is_empty();
     if current != AppScreen::Searching {
         *uncommitted_frames = 0;
+    }
+    // Workers may report abandonment/interruption while their final snapshot
+    // still says Running. The scoped terminal receipt is the stronger verdict.
+    let terminal = career
+        .as_ref()
+        .is_some_and(|career| postmatch::current_result(career, &game).is_some());
+    if terminal
+        && matches!(
+            current,
+            AppScreen::Searching
+                | AppScreen::Draft
+                | AppScreen::Loading
+                | AppScreen::InMatch
+                | AppScreen::PostMatch
+        )
+    {
+        if current != AppScreen::PostMatch {
+            next.set(AppScreen::PostMatch);
+        }
+        return;
     }
     if committed
         && admitted
@@ -293,7 +315,14 @@ fn drive_screen_from_session(
             }
         }
         AppScreen::PostMatch => {
-            if matches!(game.state, GameState::Running) && in_world {
+            if matches!(game.state, GameState::Running)
+                && in_world
+                && committed
+                && admitted
+                && !result_latch
+                    .as_ref()
+                    .is_some_and(|latch| latch.contains_round(&game))
+            {
                 next.set(AppScreen::InMatch);
             }
         }
@@ -751,6 +780,49 @@ mod tests {
         };
         settle(&mut app);
         assert_eq!(screen(&app), AppScreen::PostMatch);
+    }
+
+    #[test]
+    fn abandoned_receipt_leaves_running_gameplay_and_does_not_poison_the_next_match() {
+        let mut app = driver_app();
+        app.init_resource::<crate::career::CareerClient>();
+        app.world_mut().spawn(Player);
+        {
+            let mut game = app.world_mut().resource_mut::<GameStateSnapshot>();
+            game.meta = shared::protocol::SnapshotMeta::new(7, 2, 20);
+            game.state = GameState::Running;
+        }
+        enter(
+            &mut app,
+            AppScreen::InMatch,
+            ClientSession::admitted_for_test(),
+        );
+        assert_eq!(screen(&app), AppScreen::InMatch);
+        app.world_mut()
+            .resource_mut::<crate::career::CareerClient>()
+            .view
+            .last_result = Some(
+            serde_json::from_value(serde_json::json!({
+                "result_id":"abandoned", "server_epoch":7, "match_id":2,
+                "started_at_ms":0,"ended_at_ms":1000,"duration_ms":1000,
+                "map_profile":"verdant_default","ruleset":"public-casual-v1",
+                "outcome":"abandoned","winner":null,"rated":false,
+                "unrated_reason":"abandoned","participants":[],"saved":true
+            }))
+            .unwrap(),
+        );
+        settle(&mut app);
+        assert_eq!(screen(&app), AppScreen::PostMatch);
+        // The old Running snapshot must not immediately push the result away.
+        settle(&mut app);
+        assert_eq!(screen(&app), AppScreen::PostMatch);
+        // A real new round has its own scope; an old receipt is irrelevant.
+        app.world_mut()
+            .resource_mut::<GameStateSnapshot>()
+            .meta
+            .match_id = 3;
+        settle(&mut app);
+        assert_eq!(screen(&app), AppScreen::InMatch);
     }
 
     #[test]

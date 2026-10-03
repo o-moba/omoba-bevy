@@ -22,7 +22,6 @@ pub(crate) mod plate {
     pub const BRUSH_CHIP: Vec2 = Vec2::new(144.0, 24.0);
     pub const SCORE_STRIP_DESKTOP: Vec2 = Vec2::new(176.0, 40.0);
     pub const SCORE_STRIP_PHONE: Vec2 = Vec2::new(124.0, 44.0);
-    pub const SOCIAL_STATUS_DESKTOP: Vec2 = Vec2::new(184.0, 24.0);
     pub const FEEDBACK_DESKTOP: Vec2 = Vec2::new(344.0, 52.0);
     pub const FEEDBACK_PHONE: Vec2 = Vec2::new(220.0, 40.0);
     pub const UPGRADE_CHIP: Vec2 = Vec2::new(148.0, 24.0);
@@ -53,13 +52,12 @@ const PROTECTED_LEFT: f32 = 0.30;
 /// Desktop rows below the top plates.
 const BRUSH_TOP: f32 = 80.0;
 const BUFF_TOP: f32 = 200.0;
-const SOCIAL_STATUS_TOP: f32 = 64.0;
-/// Phone column below the minimap (hud-phone: 140, 196 at safe top 0 + 12).
-const PHONE_STATUS_TOP: f32 = 128.0;
-const PHONE_QUICK_BUY_TOP: f32 = 184.0;
+const KILL_FEED_TOP: f32 = 100.0;
+/// The quick-buy row sits directly under the minimap; vitals follow it.
+const PHONE_QUICK_BUY_TOP: f32 = 128.0;
+const PHONE_STATUS_TOP: f32 = 180.0;
 const PHONE_BRUSH_TOP: f32 = 52.0;
 const PHONE_FEEDBACK_TOP: f32 = 80.0;
-const PHONE_SOCIAL_STATUS_TOP: f32 = 48.0;
 /// Phone skill hold card: `safe top + 64` (skill-description.md).
 const PHONE_CARD_TOP: f32 = 64.0;
 /// Desktop skill tooltip bottom: `space.8` above the upgrade chip (564 at
@@ -104,7 +102,6 @@ pub(crate) struct HudLayout {
     pub brush_chip: Rect,
     pub score_strip: Rect,
     pub icon_buttons: Rect,
-    pub social_status: Rect,
     pub action_feedback: Rect,
     pub upgrade_chip: Rect,
     pub ability_bar: Rect,
@@ -164,7 +161,7 @@ impl HudLayout {
             ),
             kill_feed: rect(
                 (w - inset - 280.0).max(space::S16),
-                SOCIAL_STATUS_TOP + plate::SOCIAL_STATUS_DESKTOP.y + space::S12,
+                KILL_FEED_TOP,
                 Vec2::new(280.0, 98.0),
             ),
             minimap: rect(inset, inset, Vec2::splat(size::MINIMAP.desktop)),
@@ -189,11 +186,6 @@ impl HudLayout {
                 icon_row_x,
                 inset,
                 Vec2::new(icons, size::ICON_BUTTON.desktop),
-            ),
-            social_status: rect(
-                w - inset - plate::SOCIAL_STATUS_DESKTOP.x,
-                SOCIAL_STATUS_TOP,
-                plate::SOCIAL_STATUS_DESKTOP,
             ),
             action_feedback: rect(bar_x, feedback_top, plate::FEEDBACK_DESKTOP),
             upgrade_chip: rect(
@@ -313,11 +305,6 @@ impl HudLayout {
             ),
             score_strip: rect(score_x, top, score),
             icon_buttons: rect(icon_row_x, top, Vec2::new(icons, 44.0)),
-            social_status: rect(
-                icon_row_x,
-                top + PHONE_SOCIAL_STATUS_TOP,
-                Vec2::new(icons, plate::BRUSH_CHIP.y),
-            ),
             action_feedback: rect(
                 target.min.x,
                 top + PHONE_FEEDBACK_TOP,
@@ -339,6 +326,31 @@ impl HudLayout {
             legend: Rect::default(),
             skill_card: rect(safe_centre - card.x * 0.5, safe.top + PHONE_CARD_TOP, card),
         }
+    }
+
+    /// Five hero targets fit the free right edge. On a phone two rows wrap
+    /// leftward above the skill orbit; the fifth uses only the top row.
+    pub(crate) fn enemy_portrait_slots(&self) -> [Rect; 5] {
+        let side = 44.0;
+        let step = side + space::S4;
+        let right = self.icon_buttons.max.x;
+        let top = if self.form == Form::Phone {
+            self.icon_buttons.max.y + space::S12
+        } else {
+            self.kill_feed.max.y + space::S12
+        };
+        std::array::from_fn(|slot| {
+            let (column, row) = if self.form == Form::Phone {
+                (slot / 2, slot % 2)
+            } else {
+                (0, slot)
+            };
+            rect(
+                right - side - column as f32 * step,
+                top + row as f32 * step,
+                Vec2::splat(side),
+            )
+        })
     }
 
     /// Compact phone notices use the free bottom corridor between the thumbs.
@@ -374,7 +386,6 @@ impl HudLayout {
                 self.icon_buttons.max - Vec2::splat(button),
                 self.icon_buttons.max,
             ),
-            HudRegion::SocialStatus => self.social_status,
             HudRegion::ActionFeedback => self.action_feedback,
             HudRegion::UpgradeChip => self.upgrade_chip,
             HudRegion::AbilityBar => self.ability_bar,
@@ -399,7 +410,6 @@ pub(crate) enum HudRegion {
     SocialEntry,
     /// The menu `≡`: the last cell of the icon row.
     MenuButton,
-    SocialStatus,
     ActionFeedback,
     UpgradeChip,
     AbilityBar,
@@ -415,8 +425,6 @@ enum Anchor {
     Box,
     /// Left/top; the content decides the size.
     TopLeft,
-    /// Right edge and top; the content hugs from the right.
-    TopRight,
     /// Horizontally centred on the region, top edge.
     TopCentre,
     /// Horizontally centred on the region, bottom edge (grows upward).
@@ -427,7 +435,6 @@ impl HudRegion {
     fn anchor(self, form: Form) -> Anchor {
         match self {
             HudRegion::QuickBuy | HudRegion::PracticeBadge => Anchor::TopLeft,
-            HudRegion::SocialStatus => Anchor::TopRight,
             HudRegion::BrushChip => Anchor::TopCentre,
             HudRegion::ActionFeedback if form == Form::Phone => Anchor::TopCentre,
             HudRegion::ActionFeedback => Anchor::BottomCentre,
@@ -472,15 +479,6 @@ pub(crate) fn place_hud_regions(
             Anchor::TopLeft => (
                 Val::Px(rect.min.x),
                 Val::Auto,
-                Val::Px(rect.min.y),
-                Val::Auto,
-                node.width,
-                node.height,
-                0.0,
-            ),
-            Anchor::TopRight => (
-                Val::Auto,
-                Val::Px(layout.viewport.x - rect.max.x),
                 Val::Px(rect.min.y),
                 Val::Auto,
                 node.width,
@@ -563,6 +561,50 @@ mod tests {
         assert!(layout.target_frame.max.x < layout.score_strip.min.x);
     }
 
+    #[test]
+    fn phone_shop_follows_minimap_and_enemy_portraits_avoid_the_skill_orbit() {
+        let mut mobile = MobileControls::default();
+        mobile.viewport = Vec2::new(852.0, 393.0);
+        let hud = HudLayout::phone(&mobile);
+        assert_eq!(hud.quick_buy.min.x, hud.minimap.min.x);
+        assert_eq!(hud.quick_buy.min.y, hud.minimap.max.y + space::S8);
+        assert_eq!(hud.player_status.min.y, hud.quick_buy.max.y + space::S8);
+        let controls = mobile.layout();
+        let circles: Vec<_> = controls
+            .ability_centers
+            .into_iter()
+            .zip(controls.ability_radii)
+            .chain(
+                controls
+                    .category_centers
+                    .into_iter()
+                    .map(|p| (p, controls.category_radius)),
+            )
+            .chain(
+                controls
+                    .utility_centers
+                    .into_iter()
+                    .map(|p| (p, controls.auxiliary_radius)),
+            )
+            .chain([
+                (controls.attack_center, controls.attack_radius),
+                (controls.recall_center, controls.auxiliary_radius),
+                (controls.upgrade_center, controls.upgrade_radius),
+            ])
+            .collect();
+        for rect in hud.enemy_portrait_slots() {
+            assert!(rect.max.x <= mobile.viewport.x - mobile.safe.right);
+            assert!(rect.min.y >= hud.icon_buttons.max.y);
+            for (center, radius) in &circles {
+                let nearest = center.clamp(rect.min, rect.max);
+                assert!(
+                    nearest.distance(*center) >= *radius,
+                    "portrait {rect:?} overlaps control at {center:?}"
+                );
+            }
+        }
+    }
+
     fn at(rect: Rect) -> (f32, f32, f32, f32) {
         (rect.min.x, rect.min.y, rect.width(), rect.height())
     }
@@ -577,7 +619,6 @@ mod tests {
         assert_eq!(at(l.brush_chip), (568.0, 80.0, 144.0, 24.0));
         assert_eq!(at(l.score_strip), (940.0, 16.0, 176.0, 40.0));
         assert_eq!(at(l.icon_buttons), (1128.0, 16.0, 136.0, 40.0));
-        assert_eq!(at(l.social_status), (1080.0, 64.0, 184.0, 24.0));
         assert_eq!(at(l.action_feedback), (468.0, 504.0, 344.0, 52.0));
         assert_eq!(at(l.upgrade_chip), (566.0, 564.0, 148.0, 24.0));
         assert_eq!(at(l.ability_bar), (468.0, 596.0, 344.0, 108.0));
@@ -667,14 +708,13 @@ mod tests {
         mobile.safe.bottom = 21.0;
         let l = HudLayout::phone(&mobile);
         assert_eq!(at(l.minimap), (63.0, 12.0, 120.0, 120.0));
-        assert_eq!(at(l.player_status), (63.0, 140.0, 200.0, 48.0));
-        assert_eq!(at(l.quick_buy), (63.0, 196.0, 148.0, 44.0));
+        assert_eq!(at(l.player_status), (63.0, 192.0, 200.0, 48.0));
+        assert_eq!(at(l.quick_buy), (63.0, 140.0, 148.0, 44.0));
         assert_eq!(at(l.target_frame), (330.0, 12.0, 184.0, 44.0));
         assert_eq!(at(l.brush_chip), (350.0, 64.0, 144.0, 24.0));
         assert_eq!(at(l.action_feedback), (330.0, 92.0, 220.0, 40.0));
         assert_eq!(at(l.score_strip), (553.0, 12.0, 124.0, 44.0));
         assert_eq!(at(l.icon_buttons), (685.0, 12.0, 96.0, 44.0));
-        assert_eq!(at(l.social_status), (685.0, 60.0, 96.0, 24.0));
         assert_eq!(at(l.skill_card), (282.0, 64.0, 280.0, 148.0));
         // Quick-buy ends above the protected passage (y 242), also at the
         // runtime's conservative insets (32/32/12/20).
@@ -714,7 +754,13 @@ mod tests {
         mobile.viewport = Vec2::new(1180.0, 820.0);
         let tablet = HudLayout::phone(&mobile);
         assert!((tablet.minimap.width() / phone.minimap.width() - 1.2).abs() < 0.001);
-        assert!(tablet.player_status.min.y > tablet.minimap.max.y);
-        assert!(tablet.quick_buy.min.y > tablet.player_status.max.y);
+        for layout in [phone, tablet] {
+            assert_eq!(layout.quick_buy.min.x, layout.minimap.min.x);
+            assert_eq!(layout.quick_buy.min.y, layout.minimap.max.y + space::S8);
+            assert_eq!(
+                layout.player_status.min.y,
+                layout.quick_buy.max.y + space::S8
+            );
+        }
     }
 }
