@@ -19,3 +19,11 @@ Acceptance criteria AC1–AC10 passed within the defined scope. Evidence and cap
 Final visual review also caught and repaired phone chat history clipping: successful send closes the keyboard, expands history, and permits touch scrolling. Only the newest overhead chat or reaction appears per hero; messages include a bounded nickname prefix. The final recall ring is larger and clearly cyan outside ordinary target markers. The Home nameplate sits below the visible feet, and the local-practice notice has a dark backing.
 
 Final verification used synthetic focus/actions for the native gameplay harness because macOS background focus intentionally blocks phone controls. The FPS values in these captures are not a physical-device performance claim. Beta deployment and TestFlight publication remain unchanged; both client and server updates are needed for all fixes. No new production dependency, database schema or wire-format change.
+
+## Release publication
+
+The implementation was committed, merged and pushed to `main` as `bcd4f55`. Signed iOS **0.36.0 (18)** was archived from that clean revision and uploaded through Xcode Organizer; Apple confirmed **App upload complete**. iPhone/iPad targets, exempt encryption declaration and matching arm64 dSYM UUID `64BDC105-AC39-36A9-8297-E125C90BAB76` were verified. Release proof is preserved in `.agent/tasks/TESTFLIGHT-0360-18/`; the final archive and symbols remain at `builds/mobile-0.36.0-18/Omoba.xcarchive`.
+
+Apple processing and tester assignment could not be checked because the saved browser permission blocks App Store Connect. The Beta server was not deployed as part of this TestFlight request; its update is still required for the complete reconnect and match-allocation lifecycle fixes. Physical iPhone/iPad behavior remains a tester verification step.
+
+The merged implementation worktree was removed after preserving its proof in the primary checkout. Four obsolete0.21 device-package directories were removed under prior cleanup authorization, reclaiming about4GB. The existing iOS Cargo cache was moved into the approved shared cache B (`target-b`) and reused without creating another cache. Previous TestFlight archives remain available.
