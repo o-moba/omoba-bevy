@@ -1,0 +1,9 @@
+# Frozen specification
+
+AC1: A small versioned JSON compatibility exchange precedes application traffic, independent of gameplay packet decoding. Compare protocol, skill catalogue, map geometry and an explicit gameplay revision; release version is informational. Missing or malformed responses never count as verified. Local offline practice bypasses networking.
+AC2: Public lobby, worker and standalone runtime answer bounded probes without creating players, sessions or matches. Validate nonce/size and rate limit replies; response cannot amplify traffic. Existing authentication remains intact. Legacy clients retain existing admission behavior for a server-first rollout.
+AC3: New clients gate outgoing gameplay and snapshots until verified. Incompatibility and unavailable verification have distinct actionable messages; confirmed incompatibility stops automatic reconnect. Retry/server switch/worker redirect repeat verification. Expose client/server contract details in diagnostics.
+AC4: A CLI generates an artifact contract manifest and probes an endpoint against that manifest, with machine-readable output and nonzero exit for mismatch/unverified. Document release sequence, compatibility bump policy, old-server behavior and rollback checks. Tests cover compatible patch versions, each mismatch, malformed/stale replies, timeout and bounds, plus real UDP exchange.
+AC5: Targeted tests and the repository gate pass after a fresh review. Update changelog/features/progress. One English phone-sized check of the affected status UI, with physical-device testing explicitly excluded; if desktop capture is unavailable, retain layout/status test evidence and record the limitation.
+
+Implementation must not equate release versions, claim authenticated server identity from a nonce, add production dependencies, modify CI or deploy. Gameplay revision is a maintained contract, not a claim of automatic semantic equivalence.

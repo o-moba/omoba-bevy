@@ -361,6 +361,10 @@ impl Pool {
             .unwrap();
     }
 
+    pub(crate) fn test_directory(&self) -> &std::path::Path {
+        &self.root
+    }
+
     pub(crate) fn for_test() -> Pool {
         let mut random = [0; 16];
         getrandom::fill(&mut random).unwrap();

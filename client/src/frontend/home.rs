@@ -247,6 +247,7 @@ struct HomeSignature {
     wins: u32,
     losses: u32,
     connection: ClientConnectionState,
+    compatibility_issue: Option<shared::compatibility::CompatibilityIssue>,
     card: ProfileCard,
     last_result: Option<String>,
     public_matchmaking: bool,
@@ -299,6 +300,7 @@ fn signature(
         wins: profile.map_or(0, |profile| profile.wins),
         losses: profile.map_or(0, |profile| profile.losses),
         connection: session.state(),
+        compatibility_issue: session.compatibility_issue,
         card: card.clone(),
         public_matchmaking: career.view.match_service.is_some(),
         last_result: career
@@ -344,6 +346,14 @@ pub fn last_match_line(result: &shared::career::MatchResult, profile_id: Option<
 
 /// Shared status line: the home header and the picker header both use it.
 pub(crate) fn connection_line(session: &ClientSession) -> (String, Color) {
+    if let Some(issue) = session.compatibility_issue {
+        let key = if issue == shared::compatibility::CompatibilityIssue::Unavailable {
+            "net.compatibility.unverified_short"
+        } else {
+            "net.compatibility.incompatible_short"
+        };
+        return (tr(key).to_owned(), color::TEXT_DANGER);
+    }
     match session.state() {
         ClientConnectionState::Connected => (tr("home.connection.online").to_owned(), theme::JADE),
         ClientConnectionState::Connecting | ClientConnectionState::WaitingForServer => {
@@ -687,6 +697,24 @@ fn spawn_home(
                         disabled: true,
                         ..default()
                     });
+                }
+                if session.compatibility_issue.is_some() {
+                    column.spawn((
+                        widgets::label(
+                            crate::net::link_status(&session)
+                                .detail()
+                                .unwrap_or_default(),
+                            if phone { 10.0 * unit } else { 13.0 },
+                            color::TEXT_DANGER,
+                        ),
+                        Node {
+                            width: Val::Percent(100.0),
+                            padding: UiRect::all(Val::Px(4.0 * unit)),
+                            ..default()
+                        },
+                        BackgroundColor(theme::PANEL),
+                        Name::new("HomeCompatibilityDetail"),
+                    ));
                 }
                 if !phone {
                     let mode = party_line.party.as_ref().and_then(|(_, leader, leads)| {

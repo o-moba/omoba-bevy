@@ -2009,11 +2009,23 @@ fn server_addr_for_prefs(resolved: &ResolvedServerAddressForPrefs) -> &str {
 }
 
 fn sync_settings_server_addr_label(
+    session: Option<Res<crate::net::ClientSession>>,
     resolved_addr: Res<ResolvedServerAddressForPrefs>,
     mut label_q: Query<&mut Text, With<SettingsServerAddrLabel>>,
 ) {
     let addr = server_addr_for_prefs(&resolved_addr);
-    let next = trf("pause.settings.server_hint", &[("addr", &addr)]);
+    let mut next = trf("pause.settings.server_hint", &[("addr", &addr)]);
+    if let Some(session) = session {
+        next.push('\n');
+        next.push_str(&session.compatibility_summary());
+        if let Some(detail) = crate::net::link_status(&session)
+            .detail()
+            .filter(|_| session.compatibility_issue.is_some())
+        {
+            next.push('\n');
+            next.push_str(&detail);
+        }
+    }
     if let Ok(mut text) = label_q.single_mut() {
         if text.0 != next {
             text.0 = next;
@@ -3251,7 +3263,7 @@ mod tests {
             text(&mut app, "PauseMenuMainTitle"),
             "菜单打开期间，对局仍在继续。"
         );
-        assert!(text(&mut app, "PauseMenuServerAddrHint").ends_with("设置会自动保存。"));
+        assert!(text(&mut app, "PauseMenuServerAddrHint").contains("设置会自动保存。"));
         let row = named(&mut app, "PauseMenuAudioMusicControls");
         let caption = app.world().get::<Children>(row).unwrap()[0];
         assert_eq!(app.world().get::<Text>(caption).unwrap().0, "音乐");

@@ -10,5 +10,16 @@
   "net.status.join_unconfirmed": "服务器未确认你的加入请求。请点击“重试”再试一次。",
   "net.practice.banner": "离线练习 · {level} 级 · 无奖励",
   "net.practice.you": "你",
-  "net.practice.bot": "电脑 {id}"
+  "net.practice.bot": "电脑 {id}",
+  "net.compatibility.handshake": "服务器的版本匹配检查已过时，请选择已更新的服务器。",
+  "net.compatibility.protocol": "网络版本不匹配。请更新游戏或选择其他服务器。",
+  "net.compatibility.catalog": "技能目录不同。请更新游戏或选择匹配的服务器。",
+  "net.compatibility.geometry": "地图版本不同。请更新游戏或选择匹配的服务器。",
+  "net.compatibility.gameplay": "战斗版本不同。请更新游戏或选择匹配的服务器。",
+  "net.compatibility.unavailable": "无法检查版本匹配。服务器可能离线或版本过时。请重试或选择其他服务器。",
+  "net.compatibility.verified": "匹配 · 游戏 {client} / 服务器 {server}",
+  "net.compatibility.failed": "不匹配 · 游戏 {client} / 服务器 {server}",
+  "net.compatibility.pending": "尚未验证版本匹配",
+  "net.compatibility.unverified_short": "未验证",
+  "net.compatibility.incompatible_short": "不匹配"
 }

@@ -49,7 +49,7 @@ impl JoinRejection {
                 "This session is active in another client. Close it, then retry."
             }
             Self::ProtocolMismatch => {
-                "Client and server versions differ. Use the same release build."
+                "Client and server network protocols differ. Update the game or choose a compatible server."
             }
             Self::MapGeometryMismatch => {
                 "This server uses a different map geometry. Install the matching map release."

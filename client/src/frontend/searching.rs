@@ -49,6 +49,11 @@ enum SearchingAction {
 /// One status line for the screen. The career queue is authoritative when the
 /// server runs ranked matchmaking; otherwise the match formation counters are.
 pub fn status_text(queue: &QueueView, game: &GameState, session: &ClientSession) -> String {
+    if session.compatibility_issue.is_some() {
+        return crate::net::link_status(session)
+            .detail()
+            .unwrap_or_default();
+    }
     if session.state() != crate::net::ClientConnectionState::Connected {
         return super::home::connection_line(session).0;
     }

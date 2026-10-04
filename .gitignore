@@ -50,6 +50,7 @@ docs/*
 !docs/controller.md
 !docs/party.md
 !docs/RELEASING.md
+!docs/release-compatibility.md
 !docs/bot-practice-and-social.md
 !docs/game-audio.md
 !docs/economy.md

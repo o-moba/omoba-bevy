@@ -782,6 +782,58 @@ mod tests {
     }
 
     #[test]
+    fn compatibility_dispatch_works_in_every_role_without_allocating_a_player() {
+        use crate::runtime::ports::{ManualClock, MemoryTransport};
+        use shared::compatibility::{CompatibilityProbe, ReleaseContract};
+        let now = Instant::now();
+        let pool = crate::match_pool::Pool::for_test();
+        let directory = pool.test_directory().to_path_buf();
+        let worker = Worker {
+            manifest: manifest_for(&[w(1, MatchPreference::BotPractice, now)]),
+            directory: directory.clone(),
+            recovery: false,
+            origin_epoch: 0,
+            aborted: false,
+            booted_at: now,
+            last_status: None,
+            terminal_at: None,
+        };
+        let lobby = Lobby {
+            pool,
+            waiting: vec![],
+            assignments: HashMap::new(),
+            errors: HashMap::new(),
+            requests: HashMap::new(),
+            order: 0,
+            last_poll: None,
+        };
+        for role in [
+            MatchService::Standalone,
+            MatchService::Lobby(lobby),
+            MatchService::Worker(worker),
+        ] {
+            let transport = MemoryTransport::new("127.0.0.1:4000".parse().unwrap());
+            let mut runtime = ServerRuntime::for_test(
+                transport.clone(),
+                ManualClock::new(now),
+                crate::career_backend::MemoryCareer::disabled(7),
+                crate::match_rules::MatchConfig::dev(),
+            );
+            runtime.match_service = role;
+            let mut client = ReleaseContract::current();
+            client.protocol += 1; // Must reply even when gameplay packets would be rejected.
+            let probe = CompatibilityProbe::new(client, "ab".repeat(16));
+            transport.push_inbound("127.0.0.1:60100".parse().unwrap(), probe.request());
+            runtime.receive_packets();
+            let sent = transport.take_outbound();
+            assert_eq!(sent.len(), 1);
+            assert_eq!(probe.accept(&sent[0].1), Some(ReleaseContract::current()));
+            assert!(runtime.world.players.is_empty());
+        }
+        let _ = std::fs::remove_dir_all(directory); // Only this test's unique fixture.
+    }
+
+    #[test]
     fn fresh_queue_request_cannot_reuse_settling_or_terminal_allocation() {
         let now = Instant::now();
         let entry = w(1, MatchPreference::BotPractice, now);

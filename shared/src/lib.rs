@@ -10,6 +10,7 @@ use std::time::Duration;
 pub mod career;
 pub mod catalog;
 pub mod combat;
+pub mod compatibility;
 pub mod debug;
 pub mod device_account;
 pub mod forest_pickups;

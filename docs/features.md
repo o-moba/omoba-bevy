@@ -1,5 +1,9 @@
 # Feature Inventory
 
+## Release compatibility (0.41.0)
+
+A stable pre-game check compares protocol, skill catalogue, map and gameplay revisions independently of release labels. Mismatches have an actionable explanation; unanswered checks remain unverified. All network endpoints are checked, while offline practice stays local. The release builder retains a contract manifest; the CLI compares artifacts and probes servers. [Contract, release sequence and rollout limits](release-compatibility.md).
+
 ## Retained online match seats (0.40.1)
 
 Career polling preserves a registered server-controlled human while its transport is disconnected. The authenticated owner can reclaim the same hero; ordinary unauthenticated endpoints still lose admission. Protocol 9 remains compatible with iOS 0.40.0 (19). See [the Beta patch and deployment evidence](progress/2026-10-04-beta-0401.md).

@@ -29,6 +29,20 @@ Nothing is published without an explicit step: GitHub releases are created as
 
 `make release-check` prints what the current machine can build.
 
+## Compatibility gate
+
+The release builder writes `compatibility.json` beside the packages. Before distribution,
+probe the target lobby **and** staged worker with that artifact's manifest. Different
+release labels can be compatible; matching labels alone are insufficient. See the
+[compatibility contract and server-first rollout procedure](release-compatibility.md).
+
+```sh
+make compatibility-check GAME_SERVER_ADDR=HOST:PORT COMPATIBILITY_MANIFEST=dist/v0.41.0/compatibility.json
+```
+
+A nonzero result blocks distribution until diagnosed; do not bypass an unverified
+server. Direct Xcode/server builds must retain a manifest from the same frozen source.
+
 ## Turnkey release
 
 1. Merge the release PR to `main` with CI green (`make check` locally first).

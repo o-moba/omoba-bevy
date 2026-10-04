@@ -277,12 +277,9 @@ fn drive_screen_from_session(
                 // Keep the reason, drop the dead join: the picker must be usable
                 // again and the player must know why they are back on it.
                 notice.0 = Some(
-                    session
-                        .join_rejection()
-                        .map_or(crate::i18n::tr("frontend.join.no_answer"), |rejection| {
-                            crate::i18n::data::join_rejection(rejection)
-                        })
-                        .to_owned(),
+                    crate::net::link_status(&session)
+                        .detail()
+                        .unwrap_or_else(|| crate::i18n::tr("frontend.join.no_answer").to_owned()),
                 );
                 session.abandon_join();
                 next.set(AppScreen::HeroSelect);
@@ -461,7 +458,17 @@ fn retry_connection_from_menus(
         return;
     }
     let offline = session.state() == crate::net::ClientConnectionState::Disconnected;
-    if !screen.get().is_menu() || !offline || session.has_committed_join() {
+    let incompatible = session
+        .compatibility_issue
+        .is_some_and(|issue| issue != shared::compatibility::CompatibilityIssue::Unavailable)
+        || matches!(
+            session.join_rejection(),
+            Some(
+                shared::protocol::JoinRejection::ProtocolMismatch
+                    | shared::protocol::JoinRejection::MapGeometryMismatch
+            )
+        );
+    if !screen.get().is_menu() || !offline || session.has_committed_join() || incompatible {
         *since_last = 0.0;
         return;
     }
@@ -475,6 +482,37 @@ fn retry_connection_from_menus(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn menu_retry_preserves_confirmed_incompatibility_but_retries_unavailable_servers() {
+        use shared::compatibility::CompatibilityIssue;
+        for issue in [
+            None,
+            Some(CompatibilityIssue::Unavailable),
+            Some(CompatibilityIssue::Catalog),
+            Some(CompatibilityIssue::Protocol),
+        ] {
+            let mut app = App::new();
+            let mut time: Time = Time::default();
+            time.advance_by(std::time::Duration::from_secs_f32(MENU_RETRY_SECS + 1.0));
+            let mut session = ClientSession::default();
+            session.set_state_for_test(crate::net::ClientConnectionState::Disconnected);
+            session.compatibility_issue = issue;
+            app.insert_resource(time)
+                .insert_resource(State::new(AppScreen::Home))
+                .insert_resource(session)
+                .add_message::<crate::net::SessionUiCommand>()
+                .add_systems(Update, retry_connection_from_menus);
+            app.update();
+            assert_eq!(
+                app.world()
+                    .resource::<Messages<crate::net::SessionUiCommand>>()
+                    .len(),
+                usize::from(issue.is_none() || issue == Some(CompatibilityIssue::Unavailable)),
+                "{issue:?}"
+            );
+        }
+    }
 
     #[test]
     fn menu_screens_hide_the_world_and_match_screens_do_not() {
