@@ -68,5 +68,6 @@
   "combat.standard.resonance": "Resonance: spell hits increase attack speed",
   "combat.standard.souls_passive": "Souls: collect permanent defensive power",
   "combat.standard.concussion_passive": "Concussion: four allied hits stun",
-  "combat.standard.forging": "Forging · {seconds}s"
+  "combat.standard.forging": "Forging · {seconds}s",
+  "combat.standard.dagger_mastery_passive": "Dagger Mastery: rear basic attacks deal 10% more damage"
 }

@@ -78,13 +78,19 @@ fn assert_receipt(packet: &ServerPacket, expected: &ResolvedMap) {
         assert_eq!(actual.y, if is_tower { 3.0 } else { 4.0 });
         assert_eq!(actual.hp, structure.stats.max_hp);
         assert_eq!(actual.max_hp, structure.stats.max_hp);
-        // Fresh outer towers can be attacked, inner towers and bases are gated.
-        assert_eq!(actual.protected, !is_tower || structure.tier > 0);
+        // The first active rank is attackable even when earlier ranks are disabled.
+        let protected = expected.structures.iter().any(|other| {
+            other.team == structure.team
+                && other.lane.is_some()
+                && (structure.lane.is_none()
+                    || (other.lane == structure.lane && other.tier < structure.tier))
+        });
+        assert_eq!(actual.protected, protected);
     }
 }
 
 #[test]
-fn default_map_is_eight_exact_authoritative_objects_over_udp() {
+fn default_map_is_twenty_exact_authoritative_objects_over_udp() {
     let config = ConfigurationFile::new(DEFAULT_JSON);
     let server = ServerProcess::spawn_with_env(&[
         ("OMOBA_MAP_CONFIG", config.path()),
@@ -94,7 +100,7 @@ fn default_map_is_eight_exact_authoritative_objects_over_udp() {
     observer.join(Team::Green, Character::Ipfs);
     let packet = receipt(&mut observer);
     let expected = ResolvedMap::default();
-    assert_eq!(expected.structures.len(), 8);
+    assert_eq!(expected.structures.len(), 20);
     assert_receipt(&packet, &expected);
     assert_eq!(
         packet
@@ -102,7 +108,7 @@ fn default_map_is_eight_exact_authoritative_objects_over_udp() {
             .iter()
             .filter(|s| s.kind == StructureKind::Tower)
             .count(),
-        6
+        18
     );
     assert!(
         packet
@@ -111,6 +117,31 @@ fn default_map_is_eight_exact_authoritative_objects_over_udp() {
             .filter(|s| s.kind == StructureKind::Tower)
             .all(|s| s.max_hp == 240.0)
     );
+}
+
+#[test]
+fn reduced_tower_tiers_publish_only_active_structures_over_udp() {
+    for (json, expected_count) in [
+        (
+            include_str!("../../examples/maps/two-towers-per-lane.json"),
+            14,
+        ),
+        (
+            include_str!("../../examples/maps/one-tower-per-lane.json"),
+            8,
+        ),
+    ] {
+        let expected = MapDefinition::from_json(json).unwrap().resolve().unwrap();
+        assert_eq!(expected.structures.len(), expected_count);
+        let config = ConfigurationFile::new(json);
+        let server = ServerProcess::spawn_with_env(&[
+            ("OMOBA_MAP_CONFIG", config.path()),
+            ("OMOBA_MATCH_MODE", "release"),
+        ]);
+        let mut observer = Bot::connect_framed(server.addr());
+        observer.join(Team::Green, Character::Ipfs);
+        assert_receipt(&receipt(&mut observer), &expected);
+    }
 }
 
 #[test]

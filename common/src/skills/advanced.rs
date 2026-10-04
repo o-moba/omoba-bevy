@@ -538,13 +538,7 @@ pub fn cast(w: &mut GameWorld, addr: SocketAddr, slot: u8, aim: [f32; 2], now: I
         p.timers.last_cast_at[slot as usize] = Some(now);
     }
     p.hero.skills.recovery_until = Some(now + duration(def.windup_secs.max(0.15)));
-    p.hero.skills.advanced.last_combat = Some(now);
-    p.hero.skills.advanced.forge_ready = false;
-    p.hero.skills.advanced.forge_since = None;
-    if l.passive() == PassiveId::Flow {
-        p.hero.skills.advanced.flow_attacks = 2;
-        p.hero.skills.advanced.flow_until = Some(now + duration(3.0));
-    }
+    accepted_technique(p, now);
     if let Some(r) = p.hero.skills.advanced.recasts[slot as usize].as_mut() {
         r.uses = r.uses.saturating_sub(1);
     }
@@ -580,6 +574,10 @@ pub fn cast(w: &mut GameWorld, addr: SocketAddr, slot: u8, aim: [f32; 2], now: I
     let mut out = Vec::new();
     let mut persistent = false;
     match action {
+        Technique::DaggerDeadlyBlow
+        | Technique::DaggerBluff
+        | Technique::DaggerBackstab
+        | Technique::DaggerLethalBlow => unreachable!("dagger dispatcher"),
         Technique::OnHitBolt
         | Technique::DetonationMark
         | Technique::CharmBolt

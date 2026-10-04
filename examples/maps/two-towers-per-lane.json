@@ -1,0 +1,32 @@
+{
+  "format_version": 1,
+  "geometry_id": "verdant-confluence-v1",
+  "map_profile": "verdant_two_towers_per_lane",
+  "disabled_tower_tiers": [1],
+  "profiles": {
+    "lane_tower": { "max_hp": 240.0, "attack_range": 20.0, "attack_damage": 14.0, "hero_damage_multiplier": 2.0, "attack_cooldown_ms": 900 },
+    "base": { "max_hp": 650.0, "attack_range": 24.0, "attack_damage": 18.0, "hero_damage_multiplier": 2.0, "attack_cooldown_ms": 850 }
+  },
+  "structures": [
+    { "id": 1, "key": "top_green_outer", "team": "green", "kind": "tower", "lane": "top", "t": 0.30, "profile": "lane_tower", "visual_profile": "tower_green" },
+    { "id": 2, "key": "top_blue_outer", "team": "blue", "kind": "tower", "lane": "top", "t": 0.70, "profile": "lane_tower", "visual_profile": "tower_blue" },
+    { "id": 3, "key": "mid_green_outer", "team": "green", "kind": "tower", "lane": "mid", "t": 0.30, "profile": "lane_tower", "visual_profile": "tower_green" },
+    { "id": 4, "key": "mid_blue_outer", "team": "blue", "kind": "tower", "lane": "mid", "t": 0.70, "profile": "lane_tower", "visual_profile": "tower_blue" },
+    { "id": 5, "key": "bot_green_outer", "team": "green", "kind": "tower", "lane": "bot", "t": 0.30, "profile": "lane_tower", "visual_profile": "tower_green" },
+    { "id": 6, "key": "bot_blue_outer", "team": "blue", "kind": "tower", "lane": "bot", "t": 0.70, "profile": "lane_tower", "visual_profile": "tower_blue" },
+    { "id": 7, "key": "base_green", "team": "green", "kind": "base", "profile": "base", "visual_profile": "base_green" },
+    { "id": 8, "key": "base_blue", "team": "blue", "kind": "base", "profile": "base", "visual_profile": "base_blue" },
+    { "id": 9, "key": "top_green_inner", "team": "green", "kind": "tower", "lane": "top", "t": 0.19, "profile": "lane_tower", "visual_profile": "tower_green" },
+    { "id": 10, "key": "top_blue_inner", "team": "blue", "kind": "tower", "lane": "top", "t": 0.79, "profile": "lane_tower", "visual_profile": "tower_blue" },
+    { "id": 11, "key": "mid_green_inner", "team": "green", "kind": "tower", "lane": "mid", "t": 0.19, "profile": "lane_tower", "visual_profile": "tower_green" },
+    { "id": 12, "key": "mid_blue_inner", "team": "blue", "kind": "tower", "lane": "mid", "t": 0.81, "profile": "lane_tower", "visual_profile": "tower_blue" },
+    { "id": 13, "key": "bot_green_inner", "team": "green", "kind": "tower", "lane": "bot", "t": 0.21, "profile": "lane_tower", "visual_profile": "tower_green" },
+    { "id": 14, "key": "bot_blue_inner", "team": "blue", "kind": "tower", "lane": "bot", "t": 0.81, "profile": "lane_tower", "visual_profile": "tower_blue" },
+    { "id": 15, "key": "top_green_nexus", "team": "green", "kind": "tower", "lane": "top", "t": 0.08, "profile": "lane_tower", "visual_profile": "tower_green" },
+    { "id": 16, "key": "top_blue_nexus", "team": "blue", "kind": "tower", "lane": "top", "t": 0.88, "profile": "lane_tower", "visual_profile": "tower_blue" },
+    { "id": 17, "key": "mid_green_nexus", "team": "green", "kind": "tower", "lane": "mid", "t": 0.08, "profile": "lane_tower", "visual_profile": "tower_green" },
+    { "id": 18, "key": "mid_blue_nexus", "team": "blue", "kind": "tower", "lane": "mid", "t": 0.92, "profile": "lane_tower", "visual_profile": "tower_blue" },
+    { "id": 19, "key": "bot_green_nexus", "team": "green", "kind": "tower", "lane": "bot", "t": 0.12, "profile": "lane_tower", "visual_profile": "tower_green" },
+    { "id": 20, "key": "bot_blue_nexus", "team": "blue", "kind": "tower", "lane": "bot", "t": 0.92, "profile": "lane_tower", "visual_profile": "tower_blue" }
+  ]
+}

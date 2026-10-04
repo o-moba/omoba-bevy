@@ -1,6 +1,10 @@
 {
   "schema_version": 1,
   "skills": {
+    "dagger_deadly_blow": {"release":"dagger_stab","effect":"needle","color":[0.55,0.95,1.0],"hdr_gain":3.2},
+    "dagger_bluff": {"release":"dagger_feint","effect":"pulse","color":[0.74,0.4,1.0],"hdr_gain":3.0},
+    "dagger_backstab": {"release":"dagger_backstab","effect":"slash","color":[1.0,0.28,0.35],"hdr_gain":3.8},
+    "dagger_lethal_blow": {"release":"dagger_heavy_thrust","effect":"lance","color":[1.0,0.75,0.22],"hdr_gain":4.0},
     "dawn_bind": {"release":"cast","effect":"lance","color":[1.0,0.65,0.1],"hdr_gain":3.5},
     "dawn_barrier": {"release":"interact","effect":"aegis","color":[0.12,1.0,0.72],"hdr_gain":3.0},
     "dawn_field": {"release":"spell_finish","effect":"field","color":[1.0,0.6,0.08],"hdr_gain":3.0},

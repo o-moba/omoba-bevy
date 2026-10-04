@@ -2,7 +2,7 @@
 use crate::navigation::Point;
 use serde::{Deserialize, Serialize};
 
-pub const FOREST_PICKUP_COUNT: usize = 6;
+pub const FOREST_PICKUP_COUNT: usize = 10;
 pub const PICKUP_RADIUS: f32 = 1.5;
 pub const HEAL_FRACTION: f32 = 0.05;
 pub const RESPAWN_SECS: f32 = 30.0;
@@ -17,6 +17,11 @@ pub fn pickup_layout() -> [Point; FOREST_PICKUP_COUNT] {
         [65.0, 40.0],
         [-39.0, -71.0],
         [39.0, 71.0],
+        // River approaches, away from the central lane crossing.
+        [-24.0, 24.0],
+        [24.0, -24.0],
+        [-52.0, 52.0],
+        [52.0, -52.0],
     ]
 }
 

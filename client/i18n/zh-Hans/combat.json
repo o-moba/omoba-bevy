@@ -68,5 +68,6 @@
   "combat.standard.resonance": "共鸣：技能命中提高攻速",
   "combat.standard.souls_passive": "灵魂：收集永久防御强化",
   "combat.standard.concussion_passive": "震荡：四次友军攻击触发眩晕",
-  "combat.standard.forging": "锻造 · {seconds}秒"
+  "combat.standard.forging": "锻造 · {seconds}秒",
+  "combat.standard.dagger_mastery_passive": "短刀精通：从背后普攻的伤害提高 10%"
 }

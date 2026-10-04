@@ -52,6 +52,8 @@ docs/*
 !docs/RELEASING.md
 !docs/bot-practice-and-social.md
 !docs/game-audio.md
+!docs/economy.md
+!docs/adventurer.md
 !docs/player-handles.md
 !docs/playtest-script.md
 !docs/ui-screens.md

@@ -46,5 +46,6 @@
   "pause.hud.joystick_y": "Стик · по вертикали",
   "pause.hud.combat_x": "Скиллы · по горизонтали",
   "pause.hud.combat_y": "Скиллы · по вертикали",
-  "pause.hud.reset": "Сбросить положение кнопок"
+  "pause.hud.reset": "Сбросить положение кнопок",
+  "pause.render.show_fps": "Показывать FPS"
 }

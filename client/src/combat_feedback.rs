@@ -19,13 +19,26 @@ const MAX_HITS: usize = 96;
 const MAX_NUMBERS: usize = 48;
 const NUMBER_LIFETIME: f32 = 0.95;
 
+fn vital_break(event: &CombatEvent, target_visible: bool) -> bool {
+    event.near_lethal
+        && target_visible
+        && event.target.kind == CombatEntityKind::Player
+        && !event.killed
+        && event.amount.is_finite()
+        && event.amount > 0.0
+}
+
 pub struct CombatFeedbackPlugin;
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) struct CollectCombatFeedback;
 impl Plugin for CombatFeedbackPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<CombatFeedback>()
             .add_systems(
                 Update,
-                collect_hits.after(crate::net::ClientNetPipeline::ApplySnapshot),
+                collect_hits
+                    .after(crate::net::ClientNetPipeline::ApplySnapshot)
+                    .in_set(CollectCombatFeedback),
             )
             .add_systems(
                 PostUpdate,
@@ -115,7 +128,7 @@ fn collect_hits(
         Option<&crate::net::PlayerLoadout>,
     )>,
     local: Query<&NetworkPlayerId, With<Player>>,
-    positions: Query<(&NetworkPlayerId, &Transform)>,
+    positions: Query<(&NetworkPlayerId, &Transform, &InheritedVisibility)>,
     cameras: Query<(&Camera, &Transform), With<MainCamera>>,
     mode: Res<PlayerVisualMode>,
 ) {
@@ -186,10 +199,10 @@ fn collect_hits(
             .unwrap_or_else(|| profile.impact.color());
         let source_position = positions
             .iter()
-            .find(|(id, _)| {
+            .find(|(id, _, _)| {
                 event.source.kind == CombatEntityKind::Player && id.0 == event.source.id
             })
-            .map(|(_, pose)| {
+            .map(|(_, pose, _)| {
                 if *mode == PlayerVisualMode::Sprite2d {
                     pose.translation.truncate()
                 } else {
@@ -200,13 +213,27 @@ fn collect_hits(
             .map(|source| Vec2::new(position.x, position.z) - source)
             .unwrap_or(Vec2::X)
             .normalize_or(Vec2::X);
+        let vital = vital_break(
+            &event,
+            positions
+                .iter()
+                .any(|(id, _, visible)| id.0 == event.target.id && visible.get()),
+        );
         bursts.write(crate::game_vfx::ImpactBurst {
             position,
             direction,
-            color: impact_color,
-            scale: profile.impact.scale,
-            lifetime: profile.impact.lifetime,
-            kind: crate::game_vfx::BurstKind::for_style(event.style),
+            color: if vital {
+                Color::srgb(1.0, 0.13, 0.43)
+            } else {
+                impact_color
+            },
+            scale: if vital { 1.25 } else { profile.impact.scale },
+            lifetime: if vital { 0.72 } else { profile.impact.lifetime },
+            kind: if vital {
+                crate::game_vfx::BurstKind::VitalBreak
+            } else {
+                crate::game_vfx::BurstKind::for_style(event.style)
+            },
             seed: event.id,
         });
         if feedback.impacts.len() == MAX_HITS {
@@ -366,6 +393,20 @@ fn draw_impacts(mut gizmos: Gizmos, mode: Res<PlayerVisualMode>, feedback: Res<C
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn vital_break_requires_a_visible_living_hero_damage_receipt() {
+        let mut event = hit(1, 40.0);
+        event.near_lethal = true;
+        assert!(!vital_break(&event, true)); // Minions never qualify.
+        event.target.kind = CombatEntityKind::Player;
+        assert!(vital_break(&event, true));
+        assert!(!vital_break(&event, false));
+        event.killed = true;
+        assert!(!vital_break(&event, true));
+        event.killed = false;
+        event.amount = 0.0;
+        assert!(!vital_break(&event, true));
+    }
     fn hit(id: u64, amount: f32) -> CombatEvent {
         CombatEvent {
             id,

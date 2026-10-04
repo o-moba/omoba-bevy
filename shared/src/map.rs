@@ -265,6 +265,10 @@ pub struct MapDefinition {
     pub map_profile: String,
     pub profiles: BTreeMap<String, StructureStats>,
     pub structures: Vec<StructureDefinition>,
+    /// Omit authored siege ranks from every lane after validating the full map.
+    /// Classic Verdant ranks are 0 outer, 1 inner, and 2 Nexus-side.
+    #[serde(default)]
+    pub disabled_tower_tiers: Vec<u8>,
 }
 #[derive(Clone, Debug)]
 pub struct ResolvedStructure {
@@ -272,7 +276,7 @@ pub struct ResolvedStructure {
     pub key: String,
     pub team: Team,
     pub lane: Option<Lane>,
-    /// Zero is the outermost tower. Higher tiers unlock toward the base.
+    /// Authored siege rank. Disabled ranks leave gaps; lower live ranks protect it.
     pub tier: u8,
     pub position: Point,
     pub stats: StructureStats,
@@ -488,6 +492,18 @@ impl MapDefinition {
                 }
             }
         }
+        let mut disabled = HashSet::new();
+        for &tier in &self.disabled_tower_tiers {
+            if !disabled.insert(tier) {
+                return Err(format!("disabled_tower_tiers repeats rank {tier}"));
+            }
+            if !resolved.iter().any(|s| s.lane.is_some() && s.tier == tier) {
+                return Err(format!(
+                    "disabled_tower_tiers rank {tier} has no authored tower"
+                ));
+            }
+        }
+        resolved.retain(|s| s.lane.is_none() || !disabled.contains(&s.tier));
         Ok(ResolvedMap {
             geometry_id: self.geometry_id.clone(),
             map_profile: self.map_profile.clone(),
@@ -524,10 +540,15 @@ mod tests {
     fn definition() -> MapDefinition {
         MapDefinition::from_json(DEFAULT_JSON).unwrap()
     }
+    fn legacy_definition() -> MapDefinition {
+        let mut map = definition();
+        map.structures.retain(|s| s.id <= 8);
+        map
+    }
     #[test]
     fn defaults_preserve_authored_anchors_and_canonical_collision_bounds() {
         let map = ResolvedMap::default();
-        assert_eq!(map.structures.len(), 8);
+        assert_eq!(map.structures.len(), 20);
         assert_eq!(map.map_profile, "verdant_default");
         for (id, x, z) in [
             (1, -96.54951, 29.5099),
@@ -547,7 +568,107 @@ mod tests {
             let points = minion_lane_points(lane);
             assert_eq!(points.first(), Some(&geometry().home));
             assert_eq!(points.last(), Some(&geometry().away));
+            for team in [Team::Green, Team::Blue] {
+                let mut towers: Vec<_> = map
+                    .structures
+                    .iter()
+                    .filter(|s| s.lane == Some(lane) && s.team == team)
+                    .collect();
+                towers.sort_by_key(|s| s.tier);
+                assert_eq!(towers.iter().map(|s| s.tier).collect::<Vec<_>>(), [0, 1, 2]);
+                let base = if team == Team::Green {
+                    geometry().home
+                } else {
+                    geometry().away
+                };
+                assert!(distance(towers[2].position, base) <= 25.0);
+                assert!(distance(towers[1].position, base) > 25.0);
+            }
         }
+    }
+
+    #[test]
+    fn disabled_tiers_preserve_surviving_identity_positions_and_authored_ranks() {
+        let full = ResolvedMap::default();
+        for mask in 0..8 {
+            let mut map = definition();
+            map.disabled_tower_tiers = (0..3).filter(|tier| mask & (1 << tier) != 0).collect();
+            // Config order has no bearing on authored rank or stable identity.
+            map.structures.reverse();
+            let resolved = map.resolve().unwrap();
+            assert_eq!(
+                resolved.structures.len(),
+                20 - 6 * map.disabled_tower_tiers.len()
+            );
+            for original in &full.structures {
+                let active = resolved.structures.iter().find(|s| s.id == original.id);
+                if original.lane.is_some() && map.disabled_tower_tiers.contains(&original.tier) {
+                    assert!(active.is_none());
+                } else {
+                    let active = active.unwrap();
+                    assert_eq!(active.key, original.key);
+                    assert_eq!(active.position, original.position);
+                    assert_eq!(active.tier, original.tier);
+                }
+            }
+        }
+        for (source, expected_count, expected_ranks) in [
+            (
+                include_str!("../../examples/maps/two-towers-per-lane.json"),
+                14,
+                vec![0, 2],
+            ),
+            (
+                include_str!("../../examples/maps/one-tower-per-lane.json"),
+                8,
+                vec![0],
+            ),
+        ] {
+            let resolved = MapDefinition::from_json(source).unwrap().resolve().unwrap();
+            assert_eq!(resolved.structures.len(), expected_count);
+            let ranks: Vec<_> = resolved
+                .structures
+                .iter()
+                .filter(|s| s.team == Team::Green && s.lane == Some(Lane::Mid))
+                .map(|s| s.tier)
+                .collect();
+            assert_eq!(ranks, expected_ranks);
+        }
+        let legacy =
+            MapDefinition::from_json(include_str!("../../examples/maps/two-tier.json")).unwrap();
+        assert!(legacy.disabled_tower_tiers.is_empty());
+        assert_eq!(legacy.resolve().unwrap().structures.len(), 10);
+    }
+
+    #[test]
+    fn invalid_disabled_tiers_and_invalid_disabled_placements_fail_closed() {
+        for disabled in [vec![0, 0], vec![3], vec![255]] {
+            let mut map = definition();
+            map.disabled_tower_tiers = disabled;
+            assert!(map.resolve().unwrap_err().contains("disabled_tower_tiers"));
+        }
+        for value in ["null", "{}", "[1.5]", "[-1]", "[256]", "[\"inner\"]"] {
+            let source = DEFAULT_JSON.replace(
+                "\"disabled_tower_tiers\": []",
+                &format!("\"disabled_tower_tiers\": {value}"),
+            );
+            assert!(
+                MapDefinition::from_json(&source).is_err(),
+                "accepted {value}"
+            );
+        }
+        let mut map = definition();
+        map.disabled_tower_tiers = vec![2];
+        map.structures
+            .iter_mut()
+            .find(|s| s.id == 19)
+            .unwrap()
+            .placement = Placement::Tower {
+            lane: Lane::Bot,
+            t: 0.08,
+            offset: [0.0; 2],
+        };
+        assert!(map.resolve().unwrap_err().contains("walked lane"));
     }
     #[test]
     fn invalid_identity_numeric_placement_profiles_and_overlap_fail_closed() {
@@ -598,7 +719,7 @@ mod tests {
                 }
             },
             |m| {
-                m.structures.pop();
+                m.structures.retain(|s| s.id != 8);
             },
             |m| m.structures[7].team = Team::Green,
             |m| m.structures = (0..33).map(|_| m.structures[0].clone()).collect(),
@@ -660,7 +781,7 @@ mod tests {
     fn offsets_cannot_reverse_physical_siege_order_but_perpendicular_adjustments_work() {
         let component = 2.12132;
         for (index, outer_t, inner_t, sign) in [(2, 0.30, 0.29, 1.0), (3, 0.70, 0.71, -1.0)] {
-            let mut map = definition();
+            let mut map = legacy_definition();
             map.structures[index].placement = Placement::Tower {
                 lane: Lane::Mid,
                 t: outer_t,
@@ -696,7 +817,7 @@ mod tests {
 
     #[test]
     fn siege_tiers_follow_lane_progress_independent_of_id_and_json_order() {
-        let mut map = definition();
+        let mut map = legacy_definition();
         let mut inner = map.structures[2].clone();
         inner.id = 100;
         inner.key = "inner".into();

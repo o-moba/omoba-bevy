@@ -419,6 +419,53 @@ fn launched_homing_hits_after_concealment_without_replication_leak() {
     assert!(combat_events.is_empty());
 }
 #[test]
+fn zero_damage_trap_activation_respects_authoritative_snapshot_visibility() {
+    let (mut rt, a, b, now) = fixture();
+    let target = &rt.world.players[&b].hero;
+    rt.combat_log.extend(
+        now,
+        [CombatEvent {
+            source: CombatEntity {
+                kind: CombatEntityKind::Player,
+                id: rt.world.players[&a].hero.identity.id,
+            },
+            target: CombatEntity {
+                kind: CombatEntityKind::Player,
+                id: target.identity.id,
+            },
+            x: target.x,
+            y: target.y,
+            z: target.z,
+            amount: 0.0,
+            action_slot: Some(2),
+            trap_triggered: true,
+            ..Default::default()
+        }],
+    );
+    // Sharing the brush makes both the victim and receipt position visible.
+    rt.world.players.get_mut(&a).unwrap().hero.x = -20.0;
+    let ServerPacket::Snapshot { combat_events, .. } = snapshot(&mut rt, a, now) else {
+        panic!()
+    };
+    assert_eq!(combat_events.len(), 1);
+    assert!(combat_events[0].id > 0 && combat_events[0].trap_triggered);
+    assert_eq!(combat_events[0].amount, 0.0);
+    let receipt = combat_events[0].clone();
+    // Leaving the brush hides the same retained event; the explicit trigger
+    // flag must not become a position/audio side channel through concealment.
+    rt.world.players.get_mut(&a).unwrap().hero.x = -18.0;
+    let ServerPacket::Snapshot { combat_events, .. } = snapshot(&mut rt, a, now) else {
+        panic!()
+    };
+    assert!(combat_events.is_empty());
+    rt.world.players.get_mut(&a).unwrap().hero.x = -20.0;
+    let ServerPacket::Snapshot { combat_events, .. } = snapshot(&mut rt, a, now) else {
+        panic!()
+    };
+    assert_eq!(combat_events, [receipt]);
+}
+
+#[test]
 fn bots_minions_and_towers_do_not_acquire_or_keep_concealed_heroes() {
     let (mut rt, a, b, now) = fixture();
     assert!(

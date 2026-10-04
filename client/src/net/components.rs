@@ -162,6 +162,10 @@ pub struct PlayerActionFacing {
     pub sequence: u64,
     pub yaw: Option<f32>,
 }
+
+/// Latest server pose yaw, separate from the retained last attack/cast yaw.
+#[derive(Component, Clone, Copy, Debug)]
+pub(crate) struct AuthoritativePlayerYaw(pub f32);
 impl From<&PlayerState> for PlayerActionFacing {
     fn from(player: &PlayerState) -> Self {
         Self {
@@ -258,6 +262,10 @@ pub struct NetworkStructure;
 
 #[derive(Component, Debug, Clone, Copy, Default)]
 pub struct NetworkStructureProtected(pub bool);
+
+/// Replicated attack radius; zero denotes an older server without this field.
+#[derive(Component, Debug, Clone, Copy, Default)]
+pub struct NetworkStructureAttackRange(pub f32);
 
 /// ECS tag for a replicated structure, like [`crate::team::Team`]. The wire
 /// enum is `shared::wire::StructureKind`; convert only at the network boundary.

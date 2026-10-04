@@ -116,7 +116,11 @@
       "note": "Offline practice from Home: hero picker, match, target, game menu, practice controls, return home and re-entry as Wildspark. Logical size without a scale override, so HiDPI displays give 2x frames; its pass flag also checks the saved server endpoint.",
       "sources": [
         "client/src/qa/offline_qa.rs"
-      ]
+      ],
+      "ignore": {
+        "01-shop-owned-component.png": "Only OMOBA_OFFLINE_SHOP_QA_ONLY=1: confirmed purchase and component-credit catalog.",
+        "02-shop-scrolled-upgrades.png": "Only OMOBA_OFFLINE_SHOP_QA_ONLY=1: raw-touch shop scroll to advanced items."
+      }
     },
     "party-stage": {
       "area": "09-party-stage",
@@ -126,7 +130,7 @@
         "OMOBA_PARTY_QA": "1",
         "OMOBA_FRONTEND_QA_OUTPUT": "{out}"
       },
-      "note": "Production party and prematch rendering with clearly labelled synthetic PartyView and GameStateSnapshot data; no live party or draft progression is implied. Desktop 1280×720, phone 844×390 and tablet 1180×820 are desktop-build viewport simulations. Rotation and social scrolling use scripted raw touch input, not physical device input.",
+      "note": "Production party and prematch rendering with clearly labelled synthetic PartyView and GameStateSnapshot data; no live party or draft progression is implied. Desktop 1280\u00d7720, phone 844\u00d7390 and tablet 1180\u00d7820 are desktop-build viewport simulations. Rotation and social scrolling use scripted raw touch input, not physical device input.",
       "sources": [
         "client/src/qa/frontend_qa/party.rs"
       ]
@@ -155,7 +159,7 @@
         "desktop",
         "phone"
       ],
-      "route": "Home → Customize card",
+      "route": "Home \u2192 Customize card",
       "source": "client/src/frontend/card.rs",
       "app_screen": "Card"
     },
@@ -168,7 +172,7 @@
         "desktop",
         "phone"
       ],
-      "route": "Home → Avatars",
+      "route": "Home \u2192 Avatars",
       "source": "client/src/frontend/collection.rs",
       "app_screen": "Collection"
     },
@@ -181,7 +185,7 @@
         "desktop",
         "phone"
       ],
-      "route": "Home → PLAY",
+      "route": "Home \u2192 PLAY",
       "source": "client/src/team.rs",
       "app_screen": "HeroSelect"
     },
@@ -194,7 +198,7 @@
         "desktop",
         "phone"
       ],
-      "route": "Hero select → Find match",
+      "route": "Hero select \u2192 Find match",
       "source": "client/src/frontend/searching.rs",
       "app_screen": "Searching",
       "fixture": "layout only, no queue behind it"
@@ -241,26 +245,26 @@
     },
     {
       "id": "settings-sound",
-      "title": "Settings · sound",
+      "title": "Settings \u00b7 sound",
       "run": "shell",
       "frame": "09-settings-sound.png",
       "profiles": [
         "desktop",
         "phone"
       ],
-      "route": "Game menu → Settings",
+      "route": "Game menu \u2192 Settings",
       "source": "client/src/pause_menu.rs"
     },
     {
       "id": "settings-graphics",
-      "title": "Settings · graphics (bottom)",
+      "title": "Settings \u00b7 graphics (bottom)",
       "run": "shell",
       "frame": "10-settings-graphics.png",
       "profiles": [
         "desktop",
         "phone"
       ],
-      "route": "Game menu → Settings, scrolled down",
+      "route": "Game menu \u2192 Settings, scrolled down",
       "source": "client/src/pause_menu.rs"
     },
     {
@@ -271,7 +275,7 @@
       "profiles": [
         "phone"
       ],
-      "route": "Home → SERVER (phone)",
+      "route": "Home \u2192 SERVER (phone)",
       "source": "client/src/frontend/server_field.rs"
     },
     {
@@ -282,7 +286,7 @@
       "profiles": [
         "phone"
       ],
-      "route": "Home → ? (phone)",
+      "route": "Home \u2192 ? (phone)",
       "source": "client/src/help_overlay.rs"
     },
     {
@@ -293,7 +297,7 @@
       "profiles": [
         "phone"
       ],
-      "route": "Home → ? → close (phone)",
+      "route": "Home \u2192 ? \u2192 close (phone)",
       "source": "client/src/frontend/home.rs"
     },
     {
@@ -305,7 +309,7 @@
         "desktop",
         "phone"
       ],
-      "route": "Home → Party & friends",
+      "route": "Home \u2192 Party & friends",
       "source": "client/src/frontend/lobby.rs",
       "app_screen": "Lobby"
     },
@@ -318,7 +322,7 @@
         "desktop",
         "phone"
       ],
-      "route": "PLAY → Find match (practice)",
+      "route": "PLAY \u2192 Find match (practice)",
       "source": "client/src/frontend/draft.rs",
       "app_screen": "Draft"
     },
@@ -331,7 +335,7 @@
         "desktop",
         "phone"
       ],
-      "route": "Draft → all locked",
+      "route": "Draft \u2192 all locked",
       "source": "client/src/frontend/loading.rs",
       "app_screen": "Loading"
     },
@@ -344,7 +348,7 @@
         "desktop",
         "phone"
       ],
-      "route": "Countdown → map load",
+      "route": "Countdown \u2192 map load",
       "source": "client/src/frontend/loading.rs",
       "app_screen": "Loading"
     },
@@ -357,7 +361,7 @@
         "desktop",
         "phone"
       ],
-      "route": "Loading → match",
+      "route": "Loading \u2192 match",
       "source": "client/src/match_hud.rs",
       "app_screen": "InMatch"
     },
@@ -406,7 +410,7 @@
         "desktop",
         "phone"
       ],
-      "route": "In match at base → gold / P",
+      "route": "In match at base \u2192 gold / P",
       "source": "client/src/shop.rs"
     },
     {
@@ -418,7 +422,7 @@
         "desktop",
         "phone"
       ],
-      "route": "Shop → buy Ember Blade",
+      "route": "Shop \u2192 buy Ember Blade",
       "source": "client/src/shop.rs"
     },
     {
@@ -430,7 +434,7 @@
         "desktop",
         "phone"
       ],
-      "route": "Shop → close",
+      "route": "Shop \u2192 close",
       "source": "client/src/match_hud.rs"
     },
     {
@@ -448,7 +452,7 @@
     },
     {
       "id": "target-hero",
-      "title": "Target frame · hero",
+      "title": "Target frame \u00b7 hero",
       "run": "match",
       "frame": "08-target-hero-fixture-{h}p.png",
       "profiles": [
@@ -460,7 +464,7 @@
     },
     {
       "id": "target-minion",
-      "title": "Target frame · minion",
+      "title": "Target frame \u00b7 minion",
       "run": "match",
       "frame": "09-target-minion-fixture-{h}p.png",
       "profiles": [
@@ -472,7 +476,7 @@
     },
     {
       "id": "target-structure",
-      "title": "Target frame · structure",
+      "title": "Target frame \u00b7 structure",
       "run": "match",
       "frame": "10-target-structure-fixture-{h}p.png",
       "profiles": [
@@ -484,7 +488,7 @@
     },
     {
       "id": "target-neutral",
-      "title": "Target frame · neutral",
+      "title": "Target frame \u00b7 neutral",
       "run": "match",
       "frame": "11-target-neutral-fixture-{h}p.png",
       "profiles": [
@@ -514,7 +518,7 @@
       "profiles": [
         "desktop"
       ],
-      "route": "Scoreboard → close",
+      "route": "Scoreboard \u2192 close",
       "source": "client/src/edge_hud.rs"
     },
     {
@@ -526,7 +530,7 @@
         "desktop",
         "phone"
       ],
-      "route": "In match → chat button",
+      "route": "In match \u2192 chat button",
       "source": "client/src/social.rs"
     },
     {
@@ -538,7 +542,7 @@
         "desktop",
         "phone"
       ],
-      "route": "In match → reaction button / T",
+      "route": "In match \u2192 reaction button / T",
       "source": "client/src/social.rs"
     },
     {
@@ -550,7 +554,7 @@
         "desktop",
         "phone"
       ],
-      "route": "Reaction wheel → pick",
+      "route": "Reaction wheel \u2192 pick",
       "source": "client/src/social.rs"
     },
     {
@@ -566,7 +570,7 @@
     },
     {
       "id": "career-profile",
-      "title": "Career · profile",
+      "title": "Career \u00b7 profile",
       "run": "career",
       "frame": "01-profile.png",
       "profiles": [
@@ -579,7 +583,7 @@
     },
     {
       "id": "career-friends-code",
-      "title": "Career · friend code",
+      "title": "Career \u00b7 friend code",
       "run": "career",
       "frame": "02-friends-code.png",
       "profiles": [
@@ -592,7 +596,7 @@
     },
     {
       "id": "career-friends-list",
-      "title": "Career · friends list",
+      "title": "Career \u00b7 friends list",
       "run": "career",
       "frame": "03-friends-list.png",
       "profiles": [
@@ -605,7 +609,7 @@
     },
     {
       "id": "career-history",
-      "title": "Career · match history",
+      "title": "Career \u00b7 match history",
       "run": "career",
       "frame": "04-history.png",
       "profiles": [
@@ -618,59 +622,59 @@
     },
     {
       "id": "career-result",
-      "title": "Career · match detail",
+      "title": "Career \u00b7 match detail",
       "run": "career",
       "frame": "05-result.png",
       "profiles": [
         "desktop",
         "phone"
       ],
-      "route": "History → Details / Last match",
+      "route": "History \u2192 Details / Last match",
       "source": "client/src/career.rs",
       "fixture": "fixture data, labelled"
     },
     {
       "id": "career-friend-profile",
-      "title": "Career · friend profile",
+      "title": "Career \u00b7 friend profile",
       "run": "career",
       "frame": "06-friend-profile.png",
       "profiles": [
         "desktop",
         "phone"
       ],
-      "route": "Friends → a friend",
+      "route": "Friends \u2192 a friend",
       "source": "client/src/career.rs",
       "fixture": "fixture data, labelled"
     },
     {
       "id": "career-website",
-      "title": "Career · website account",
+      "title": "Career \u00b7 website account",
       "run": "career",
       "frame": "07-website-account.png",
       "profiles": [
         "desktop",
         "phone"
       ],
-      "route": "Profile → Player website",
+      "route": "Profile \u2192 Player website",
       "source": "client/src/career_web.rs",
       "fixture": "fixture data, labelled"
     },
     {
       "id": "career-devices",
-      "title": "Career · devices",
+      "title": "Career \u00b7 devices",
       "run": "career",
       "frame": "08-devices.png",
       "profiles": [
         "desktop",
         "phone"
       ],
-      "route": "Profile → Link or recover account",
+      "route": "Profile \u2192 Link or recover account",
       "source": "client/src/career_devices.rs",
       "fixture": "fixture data, labelled"
     },
     {
       "id": "career-result-bottom",
-      "title": "Career · match detail (bottom)",
+      "title": "Career \u00b7 match detail (bottom)",
       "run": "career",
       "frame": "09-result-bottom.png",
       "profiles": [
@@ -683,43 +687,43 @@
     },
     {
       "id": "supporter-solar",
-      "title": "Supporter · Solar aura",
+      "title": "Supporter \u00b7 Solar aura",
       "run": "supporter",
       "frame": "solar-desktop.png",
       "profiles": [
         "desktop",
         "phone"
       ],
-      "route": "Profile → Support OMOBA",
+      "route": "Profile \u2192 Support OMOBA",
       "source": "client/src/supporter.rs"
     },
     {
       "id": "supporter-lunar",
-      "title": "Supporter · Lunar aura",
+      "title": "Supporter \u00b7 Lunar aura",
       "run": "supporter",
       "frame": "lunar-phone.png",
       "profiles": [
         "desktop",
         "phone"
       ],
-      "route": "Supporter → Lunar",
+      "route": "Supporter \u2192 Lunar",
       "source": "client/src/supporter.rs"
     },
     {
       "id": "supporter-verdant",
-      "title": "Supporter · Verdant aura",
+      "title": "Supporter \u00b7 Verdant aura",
       "run": "supporter",
       "frame": "verdant-phone.png",
       "profiles": [
         "desktop",
         "phone"
       ],
-      "route": "Supporter → Verdant",
+      "route": "Supporter \u2192 Verdant",
       "source": "client/src/supporter.rs"
     },
     {
       "id": "offline-home",
-      "title": "Offline · home",
+      "title": "Offline \u00b7 home",
       "run": "offline",
       "frame": "01-home.png",
       "profiles": [
@@ -731,31 +735,31 @@
     },
     {
       "id": "offline-hero-picker",
-      "title": "Offline · hero picker",
+      "title": "Offline \u00b7 hero picker",
       "run": "offline",
       "frame": "02-hero-picker.png",
       "profiles": [
         "desktop",
         "phone"
       ],
-      "route": "Home → Offline practice",
+      "route": "Home \u2192 Offline practice",
       "source": "client/src/team.rs"
     },
     {
       "id": "offline-practice",
-      "title": "Offline · practice match",
+      "title": "Offline \u00b7 practice match",
       "run": "offline",
       "frame": "03-practice.png",
       "profiles": [
         "desktop",
         "phone"
       ],
-      "route": "Offline practice → start",
+      "route": "Offline practice \u2192 start",
       "source": "client/src/match_hud.rs"
     },
     {
       "id": "offline-target",
-      "title": "Offline · target lock and recall",
+      "title": "Offline \u00b7 target lock and recall",
       "run": "offline",
       "frame": "04-target-recall.png",
       "profiles": [
@@ -767,7 +771,7 @@
     },
     {
       "id": "offline-game-menu",
-      "title": "Offline · game menu",
+      "title": "Offline \u00b7 game menu",
       "run": "offline",
       "frame": "05-game-menu.png",
       "profiles": [
@@ -779,43 +783,43 @@
     },
     {
       "id": "offline-practice-controls",
-      "title": "Offline · practice controls",
+      "title": "Offline \u00b7 practice controls",
       "run": "offline",
       "frame": "06-practice-controls.png",
       "profiles": [
         "desktop",
         "phone"
       ],
-      "route": "Game menu → Practice controls",
+      "route": "Game menu \u2192 Practice controls",
       "source": "client/src/pause_menu.rs"
     },
     {
       "id": "offline-return-home",
-      "title": "Offline · back home",
+      "title": "Offline \u00b7 back home",
       "run": "offline",
       "frame": "08-return-home.png",
       "profiles": [
         "desktop",
         "phone"
       ],
-      "route": "Game menu → Exit to home",
+      "route": "Game menu \u2192 Exit to home",
       "source": "client/src/frontend/home.rs"
     },
     {
       "id": "offline-reentered-wildspark",
-      "title": "Offline · re-enter as Wildspark",
+      "title": "Offline \u00b7 re-enter as Wildspark",
       "run": "offline",
       "frame": "09-reentered-wildspark.png",
       "profiles": [
         "desktop",
         "phone"
       ],
-      "route": "Home → Offline practice → Wildspark → start",
+      "route": "Home \u2192 Offline practice \u2192 Wildspark \u2192 start",
       "source": "client/src/match_hud.rs"
     },
     {
       "id": "party-stage-solo",
-      "title": "Party stage · solo",
+      "title": "Party stage \u00b7 solo",
       "run": "party-stage",
       "frame": "01-party-solo.png",
       "profiles": [
@@ -823,14 +827,14 @@
         "phone",
         "tablet"
       ],
-      "route": "Home → Party & friends",
+      "route": "Home \u2192 Party & friends",
       "source": "client/src/frontend/lobby.rs",
       "app_screen": "Lobby",
       "fixture": "synthetic PartyView, labelled; production solo stage and empty seats"
     },
     {
       "id": "party-stage-three",
-      "title": "Party stage · three members",
+      "title": "Party stage \u00b7 three members",
       "run": "party-stage",
       "frame": "02-party-three.png",
       "profiles": [
@@ -838,14 +842,14 @@
         "phone",
         "tablet"
       ],
-      "route": "Party → accept an invitation",
+      "route": "Party \u2192 accept an invitation",
       "source": "client/src/frontend/lobby.rs",
       "app_screen": "Lobby",
       "fixture": "synthetic PartyView, labelled; three members with the local nonleader in the centre"
     },
     {
       "id": "party-stage-five",
-      "title": "Party stage · five members",
+      "title": "Party stage \u00b7 five members",
       "run": "party-stage",
       "frame": "03-party-five.png",
       "profiles": [
@@ -853,14 +857,14 @@
         "phone",
         "tablet"
       ],
-      "route": "Party → invite friends until full",
+      "route": "Party \u2192 invite friends until full",
       "source": "client/src/frontend/lobby.rs",
       "app_screen": "Lobby",
       "fixture": "synthetic PartyView, labelled; five members and long multilingual names"
     },
     {
       "id": "party-stage-rotated",
-      "title": "Party stage · heroes rotated",
+      "title": "Party stage \u00b7 heroes rotated",
       "run": "party-stage",
       "frame": "04-party-rotated.png",
       "profiles": [
@@ -868,14 +872,14 @@
         "phone",
         "tablet"
       ],
-      "route": "Party → drag the heroes",
+      "route": "Party \u2192 drag the heroes",
       "source": "client/src/frontend/lobby.rs",
       "app_screen": "Lobby",
       "fixture": "synthetic PartyView, labelled; scripted raw touch rotation, not physical device input"
     },
     {
       "id": "party-stage-social-scroll",
-      "title": "Party stage · social panel scrolled",
+      "title": "Party stage \u00b7 social panel scrolled",
       "run": "party-stage",
       "frame": "05-party-social-scroll.png",
       "profiles": [
@@ -883,14 +887,14 @@
         "phone",
         "tablet"
       ],
-      "route": "Party → scroll the social panel",
+      "route": "Party \u2192 scroll the social panel",
       "source": "client/src/frontend/lobby.rs",
       "app_screen": "Lobby",
       "fixture": "synthetic PartyView, labelled; scripted raw touch scrolling, not physical device input"
     },
     {
       "id": "party-stage-draft",
-      "title": "Party stage · team draft",
+      "title": "Party stage \u00b7 team draft",
       "run": "party-stage",
       "frame": "06-party-draft.png",
       "profiles": [
@@ -898,14 +902,14 @@
         "phone",
         "tablet"
       ],
-      "route": "Party leader → play → team draft",
+      "route": "Party leader \u2192 play \u2192 team draft",
       "source": "client/src/frontend/draft.rs",
       "app_screen": "Draft",
       "fixture": "synthetic GameStateSnapshot, labelled; production five-member draft rendering, no server timer exercised"
     },
     {
       "id": "party-stage-countdown",
-      "title": "Party stage · shared countdown",
+      "title": "Party stage \u00b7 shared countdown",
       "run": "party-stage",
       "frame": "07-party-countdown.png",
       "profiles": [
@@ -913,14 +917,14 @@
         "phone",
         "tablet"
       ],
-      "route": "Draft → all locked or selection deadline expires",
+      "route": "Draft \u2192 all locked or selection deadline expires",
       "source": "client/src/frontend/loading.rs",
       "app_screen": "Loading",
       "fixture": "synthetic GameStateSnapshot, labelled; production five-member countdown rendering, no live progression"
     },
     {
       "id": "party-stage-loading",
-      "title": "Party stage · asset loading",
+      "title": "Party stage \u00b7 asset loading",
       "run": "party-stage",
       "frame": "08-party-loading.png",
       "profiles": [
@@ -928,14 +932,14 @@
         "phone",
         "tablet"
       ],
-      "route": "Countdown → wait for asset readiness",
+      "route": "Countdown \u2192 wait for asset readiness",
       "source": "client/src/frontend/loading.rs",
       "app_screen": "Loading",
       "fixture": "synthetic GameStateSnapshot, labelled; production five-member loading rendering, no live asset-ready barrier exercised"
     },
     {
       "id": "offline-local-chat",
-      "title": "Offline · local chat and reaction",
+      "title": "Offline \u00b7 local chat and reaction",
       "run": "offline",
       "frame": "03-local-chat.png",
       "profiles": [
@@ -948,22 +952,22 @@
   "gaps": [
     {
       "id": "settings-language",
-      "title": "Settings · Language (English / 简体中文)",
-      "route": "Game menu → Settings → Language",
+      "title": "Settings \u00b7 Language (English / \u7b80\u4f53\u4e2d\u6587)",
+      "route": "Game menu \u2192 Settings \u2192 Language",
       "source": "client/src/pause_menu.rs",
       "needs": "PR #62 (i18n, 0.26.0) merged; then map it under the shell run and capture with OMOBA_LANGUAGE for each locale"
     },
     {
       "id": "party-lobby-members",
       "title": "Party lobby with live peers and invitations",
-      "route": "Party → invite a friend",
+      "route": "Party \u2192 invite a friend",
       "source": "client/src/frontend/lobby.rs",
       "needs": "a scripted friend peer for OMOBA_FRONTEND_QA_ACCEPT_PARTY; party-stage captures synthetic party layouts, not live invitation delivery"
     },
     {
       "id": "searching-real",
       "title": "Searching with a real queue",
-      "route": "PLAY → Find match (release mode)",
+      "route": "PLAY \u2192 Find match (release mode)",
       "source": "client/src/frontend/searching.rs",
       "needs": "a release-mode server and queue peers"
     },
@@ -977,7 +981,7 @@
     {
       "id": "debug-tools",
       "title": "Game menu debug tools page, debug console, debug HUD",
-      "route": "Game menu → Practice tools; OMOBA_DEBUG_UI=1",
+      "route": "Game menu \u2192 Practice tools; OMOBA_DEBUG_UI=1",
       "source": "client/src/debug/tools_page.rs",
       "needs": "a harness run with OMOBA_DEBUG_UI=1 that opens the page"
     },
@@ -1054,10 +1058,11 @@
     "client/src/qa/animation_qa.rs": "animation helper, no frames",
     "client/src/qa/ui_gallery.rs": "UI kit gallery (developer screen, OMOBA_UI_GALLERY=1 / OMOBA_UI_GALLERY_OUTPUT): every kit component and state, not a player screen",
     "client/src/qa/result_qa.rs": "result screen states (finalizing, saved, defeat on a rematch server, abandoned) as labelled fixtures and the loading shell failure, OMOBA_RESULT_QA_OUTPUT; no server (gap post-match-real stays open)",
-    "client/src/qa/help_qa.rs": "controls guide controller focus and Settings → Controls return (OMOBA_HELP_QA_SHOTS); frames duplicate hud-help/home-help/settings, not new screens",
+    "client/src/qa/help_qa.rs": "controls guide controller focus and Settings \u2192 Controls return (OMOBA_HELP_QA_SHOTS); frames duplicate hud-help/home-help/settings, not new screens",
     "client/src/qa/standard_kits_qa.rs": "Focused standard-kit selection, effects and held-aim proof from a live local sandbox (OMOBA_STANDARD_QA_DIR, OMOBA_STANDARD_QA_CLASS); one English desktop viewport, scripted input, no device matrix.",
     "client/src/qa/roster_qa.rs": "Focused remaining roster selection and live skill states (OMOBA_ROSTER_QA_DIR); OMOBA_ROSTER_QA_INSPECTION adds short/long/released skill holds. English 1280x720, scripted input; no device matrix.",
     "client/src/qa/sdk_pack_qa.rs": "Focused local SDK collection proof (OMOBA_SDK_PACK_QA_OUTPUT): 20 live avatar previews plus representative server-admitted running avatars and hand mounts. English 1280x720, scripted selection; not public Studio publication or a device matrix.",
-    "client/src/qa/combat_polish_qa.rs": "Focused synthetic iPad combat presentation fixtures (OMOBA_COMBAT_POLISH_QA_DIR): vitals, upgrades, held attack, kill feed, concealment and rocket. English 1180x820 by default; OMOBA_IPHONE_UX_QA=1 selects focused 852x393 iPhone gameplay, empty attack, concealment, dash aim, recall and FPS/HUD settings with checked UI readback. Not physical-device or multiplayer proof."
+    "client/src/qa/combat_polish_qa.rs": "Focused synthetic iPad combat presentation fixtures (OMOBA_COMBAT_POLISH_QA_DIR): vitals, upgrades, held attack, kill feed, concealment and rocket. English 1180x820 by default; OMOBA_IPHONE_UX_QA=1 selects focused 852x393 iPhone gameplay, empty attack, concealment, dash aim, recall and FPS/HUD settings with checked UI readback. Not physical-device or multiplayer proof.",
+    "client/src/qa/dagger_qa.rs": "Focused Adventurer class preview and normal offline Q/W/E/R casts, plus clearly labelled synthetic rare-hit receipt presentation (OMOBA_DAGGER_QA_DIR). English852x393 only; optional synthetic focus, no raw-touch/device/RNG claims."
   }
 }

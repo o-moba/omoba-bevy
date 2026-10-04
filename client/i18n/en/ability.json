@@ -126,5 +126,13 @@
   "ability.northwall.name": "Northwall",
   "ability.northwall.desc": "Intercept incoming frontal projectiles: negate the first and reduce later hits.",
   "ability.winter_divide.name": "Winter Divide",
-  "ability.winter_divide.desc": "Raise a fissure that knocks up enemies and leaves a slowing trail."
+  "ability.winter_divide.desc": "Raise a fissure that knocks up enemies and leaves a slowing trail.",
+  "ability.dagger_deadly_blow.name": "Deadly Blow",
+  "ability.dagger_deadly_blow.desc": "A quick close-range dagger strike.",
+  "ability.dagger_bluff.name": "Bluff",
+  "ability.dagger_bluff.desc": "Stun a nearby enemy hero for 1 second and turn their back to you.",
+  "ability.dagger_backstab.name": "Backstab",
+  "ability.dagger_backstab.desc": "Strike for 2.5x damage from behind. A rear hit that wounds a surviving hero has a 2% chance to leave 1 HP.",
+  "ability.dagger_lethal_blow.name": "Lethal Blow",
+  "ability.dagger_lethal_blow.desc": "A heavy close-range dagger strike; 1.5x damage from behind."
 }

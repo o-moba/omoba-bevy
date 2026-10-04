@@ -47,6 +47,17 @@ class SharedHumanoidMotionTests(unittest.TestCase):
         walk_pose = walk["world_rotation_deltas"]["leftLowerLeg"][8]
         self.assertGreater(motion.angular_distance(run_pose, walk_pose), 0.25)
 
+    def test_dagger_skill_clips_are_distinct_in_place_and_retarget_to_vrm(self):
+        clips = [self.library['clips'][name] for name in motion.DAGGER_MOTIONS]
+        self.assertEqual(len({clip['duration'] for clip in clips}), 4)
+        for name, clip in zip(motion.DAGGER_MOTIONS, clips):
+            self.assertFalse(clip['looping'])
+            self.assertTrue(all(p[0] == p[2] == 0 for p in clip['hips_world_deltas']))
+            poses = motion.retarget_in_memory(self.library, self.document, self.humanoid, name)
+            hand = self.humanoid['rightHand']
+            excursion = max(motion.angular_distance(poses[0][hand][1], p[hand][1]) for p in poses)
+            self.assertGreater(excursion, .1)
+
     def test_idle_walk_run_are_closed_in_place_loops(self):
         for name in ("idle", "walk", "run"):
             clip = self.library["clips"][name]

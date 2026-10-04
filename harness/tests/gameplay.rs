@@ -55,11 +55,15 @@ fn walk_into_cast_range(observer: &mut Bot, mover: &mut Bot, observer_id: u64, m
     let mut routes: [BotNavigator; 2] = Default::default();
     let target_gap = SHORTEST_Q_CAST_RANGE - 4.0; // comfortably inside range
     let deadline = Instant::now() + Duration::from_secs(40);
+    let mut last_states = None;
+    let mut last_targets = [None; 2];
 
     loop {
         assert!(
             Instant::now() < deadline,
-            "players never converged into cast range"
+            "players never converged into cast range; \
+             authoritative ((observer x,z,hp),(mover x,z,hp),distance,mutual visibility)={last_states:?}; \
+             final route targets={last_targets:?}"
         );
 
         observer.ping();
@@ -75,16 +79,24 @@ fn walk_into_cast_range(observer: &mut Bot, mover: &mut Bot, observer_id: u64, m
         let (Some(a), Some(b)) = (packet.player(observer_id), mover_packet.player(mover_id)) else {
             continue;
         };
+        last_states = Some((
+            (a.x, a.z, a.hp),
+            (b.x, b.z, b.hp),
+            xz_distance(a, b),
+            packet.player(mover_id).is_some(),
+            mover_packet.player(observer_id).is_some(),
+        ));
         if xz_distance(a, b) <= target_gap
             && packet.player(mover_id).is_some()
             && mover_packet.player(observer_id).is_some()
         {
             break;
         }
+        // Public structures include both teams in each snapshot. Keep one copy
+        // so duplicate landmarks cannot exhaust the navigator's obstacle budget.
         let structures: Vec<_> = packet
             .structures()
             .iter()
-            .chain(mover_packet.structures().iter())
             .filter(|s| s.hp > 0.0)
             .map(|s| Disc {
                 center: [s.x, s.z],
@@ -95,8 +107,14 @@ fn walk_into_cast_range(observer: &mut Bot, mover: &mut Bot, observer_id: u64, m
                 },
             })
             .collect();
-        for ((route, bot), state) in routes.iter_mut().zip([&*observer, &*mover]).zip([a, b]) {
-            if let Some(next) = route.next([state.x, state.z], [0.0, 0.0], &structures) {
+        for (index, ((route, bot), state)) in routes
+            .iter_mut()
+            .zip([&*observer, &*mover])
+            .zip([a, b])
+            .enumerate()
+        {
+            last_targets[index] = route.next([state.x, state.z], [0.0, 0.0], &structures);
+            if let Some(next) = last_targets[index] {
                 bot.send_transform(
                     next[0],
                     GROUND_Y,
@@ -111,7 +129,7 @@ fn walk_into_cast_range(observer: &mut Bot, mover: &mut Bot, observer_id: u64, m
 #[test]
 fn join_produces_snapshot_with_player() {
     let server = ServerProcess::spawn();
-    let mut bot = Bot::connect(server.addr());
+    let mut bot = Bot::connect_framed(server.addr());
 
     bot.join(Team::Green, Character::Ipfs);
     let id = bot.my_id(POLL_TIMEOUT);
@@ -132,8 +150,8 @@ fn join_produces_snapshot_with_player() {
 #[test]
 fn god_mode_keeps_player_alive_under_damage() {
     let server = ServerProcess::spawn();
-    let mut victim = Bot::connect(server.addr()); // A (green)
-    let mut attacker = Bot::connect(server.addr()); // B (blue)
+    let mut victim = Bot::connect_framed(server.addr()); // A (green)
+    let mut attacker = Bot::connect_framed(server.addr()); // B (blue)
 
     victim.join(Team::Green, Character::Ipfs);
     attacker.join(Team::Blue, Character::Ipfs);
@@ -184,8 +202,8 @@ fn speed_boost_widens_movement_clamp() {
     let server = ServerProcess::spawn();
 
     // Two same-team bots so neither interferes with the other's movement.
-    let mut slow = Bot::connect(server.addr());
-    let mut fast = Bot::connect(server.addr());
+    let mut slow = Bot::connect_framed(server.addr());
+    let mut fast = Bot::connect_framed(server.addr());
     slow.join(Team::Green, Character::Ipfs);
     fast.join(Team::Green, Character::Ipfs);
 
@@ -210,19 +228,50 @@ fn speed_boost_widens_movement_clamp() {
     );
 }
 
-/// Request the distant center along the authored open midlane. Forest contact
-/// must not become the limiting factor in this speed-budget regression.
+/// Request oversized movement along a verified open corridor. Neither terrain
+/// nor a friendly tower may limit this speed-budget regression.
 fn drive_forward(bot: &mut Bot, id: u64) -> f32 {
-    let start = bot
-        .latest_player(id, POLL_TIMEOUT)
+    let snapshot = bot
+        .recv_snapshot(Instant::now() + POLL_TIMEOUT)
+        .expect("snapshot should be present before driving");
+    let start = snapshot
+        .player(id)
         .expect("player should be present before driving");
     let start_x = start.x;
     let start_z = start.z;
-    let destination = [0.0, 0.0];
-    assert!(
-        shared::navigation::world_navigation().segment_clear([start_x, start_z], destination),
-        "speed fixture must follow an open corridor"
-    );
+    let structures: Vec<_> = snapshot
+        .structures()
+        .iter()
+        .filter(|s| s.hp > 0.0)
+        .map(|s| Disc {
+            center: [s.x, s.z],
+            radius: if s.kind == StructureKind::BaseTower {
+                3.2
+            } else {
+                1.3
+            },
+        })
+        .collect();
+    let map = shared::navigation::world_navigation();
+    // The boosted probe travels under 32 units; its requested endpoint remains
+    // much farther away so movement authority must clamp every input.
+    let direction = (0..16)
+        .map(|index| {
+            let angle = index as f32 * std::f32::consts::TAU / 16.0;
+            [angle.cos(), angle.sin()]
+        })
+        .find(|direction| {
+            map.segment_clear_with_discs(
+                [start_x, start_z],
+                [start_x + direction[0] * 32.0, start_z + direction[1] * 32.0],
+                &structures,
+            )
+        })
+        .expect("speed fixture needs a straight 32-unit corridor clear of terrain and towers");
+    let destination = [
+        start_x + direction[0] * 128.0,
+        start_z + direction[1] * 128.0,
+    ];
 
     for _ in 0..30 {
         // Request a far target so the server is always the limiting factor.
@@ -236,7 +285,12 @@ fn drive_forward(bot: &mut Bot, id: u64) -> f32 {
     let end = bot
         .latest_player(id, POLL_TIMEOUT)
         .expect("player should still be present after driving");
-    (end.x - start_x).hypot(end.z - start_z)
+    let advanced = (end.x - start_x).hypot(end.z - start_z);
+    assert!(
+        advanced < 32.0,
+        "speed probe left its verified corridor: {advanced}"
+    );
+    advanced
 }
 
 /// Casts the given slot once and returns the caster's lowest observed own mana
@@ -257,8 +311,8 @@ fn cast_once_and_min_mana(bot: &mut Bot, own_id: u64, target_id: u64, slot: u8) 
 #[test]
 fn join_replicates_class_and_avatar_and_applies_distinct_kits() {
     let server = ServerProcess::spawn();
-    let mut mage = Bot::connect(server.addr());
-    let mut warrior = Bot::connect(server.addr());
+    let mut mage = Bot::connect_framed(server.addr());
+    let mut warrior = Bot::connect_framed(server.addr());
 
     // Two clients join with different class + avatar loadouts (AC2).
     mage.join_with_loadout(Team::Green, Character::Ipfs, HeroClass::Mage, Some("agnes"));
@@ -317,8 +371,8 @@ fn join_replicates_class_and_avatar_and_applies_distinct_kits() {
 #[test]
 fn locked_slots_are_rejected_authoritatively() {
     let server = ServerProcess::spawn();
-    let mut caster = Bot::connect(server.addr());
-    let mut victim = Bot::connect(server.addr());
+    let mut caster = Bot::connect_framed(server.addr());
+    let mut victim = Bot::connect_framed(server.addr());
 
     caster.join_with_loadout(Team::Green, Character::Ipfs, HeroClass::Warrior, None);
     victim.join_with_loadout(Team::Blue, Character::Wang, HeroClass::Warrior, None);
@@ -345,7 +399,7 @@ fn locked_slots_are_rejected_authoritatively() {
 #[test]
 fn malformed_class_and_avatar_fall_back_without_crashing_the_server() {
     let server = ServerProcess::spawn();
-    let mut bot = Bot::connect(server.addr());
+    let mut bot = Bot::connect_framed(server.addr());
 
     // Hostile loadout: unknown class id + path-traversal avatar slug.
     bot.send_raw(
@@ -367,7 +421,7 @@ fn malformed_class_and_avatar_fall_back_without_crashing_the_server() {
 #[test]
 fn upgrade_skill_without_points_is_noop() {
     let server = ServerProcess::spawn();
-    let mut bot = Bot::connect(server.addr());
+    let mut bot = Bot::connect_framed(server.addr());
 
     bot.join(Team::Green, Character::Ipfs);
     let id = bot.my_id(POLL_TIMEOUT);

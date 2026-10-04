@@ -126,5 +126,13 @@
   "ability.northwall.name": "Северная стена",
   "ability.northwall.desc": "Перехватывайте снаряды спереди: первый не наносит урона, последующие ослаблены.",
   "ability.winter_divide.name": "Зимний разлом",
-  "ability.winter_divide.desc": "Подбросьте врагов вдоль разлома и оставьте замедляющий след."
+  "ability.winter_divide.desc": "Подбросьте врагов вдоль разлома и оставьте замедляющий след.",
+  "ability.dagger_deadly_blow.name": "Смертельный выпад",
+  "ability.dagger_deadly_blow.desc": "Быстрый удар кинжалом в ближнем бою.",
+  "ability.dagger_bluff.name": "Блеф",
+  "ability.dagger_bluff.desc": "Оглушает вражеского героя рядом на 1 секунду и разворачивает его спиной к вам.",
+  "ability.dagger_backstab.name": "Удар в спину",
+  "ability.dagger_backstab.desc": "Удар в спину наносит урон ×2,5. Если он ранил героя, но не убил, с шансом 2% у цели остаётся 1 HP.",
+  "ability.dagger_lethal_blow.name": "Роковой выпад",
+  "ability.dagger_lethal_blow.desc": "Мощный удар кинжалом в ближнем бою. Урон со спины ×1,5."
 }

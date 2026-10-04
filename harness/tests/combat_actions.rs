@@ -21,6 +21,8 @@ fn walk_into_range(observer: &mut Bot, caster: &mut Bot, observer_id: u64, caste
     caster.set_speed_boost(true);
     let mut routes: [BotNavigator; 2] = Default::default();
     let deadline = Instant::now() + Duration::from_secs(40);
+    let mut last_states = None;
+    let mut last_targets = [None; 2];
     while Instant::now() < deadline {
         observer.ping();
         caster.ping();
@@ -37,6 +39,13 @@ fn walk_into_range(observer: &mut Bot, caster: &mut Bot, observer_id: u64, caste
         ) else {
             continue;
         };
+        last_states = Some((
+            (observer_state.x, observer_state.z, observer_state.hp),
+            (caster_state.x, caster_state.z, caster_state.hp),
+            distance(observer_state, caster_state),
+            snapshot.player(caster_id).is_some(),
+            caster_snapshot.player(observer_id).is_some(),
+        ));
         if distance(observer_state, caster_state) < 8.0
             && snapshot.player(caster_id).is_some()
             && caster_snapshot.player(observer_id).is_some()
@@ -46,10 +55,11 @@ fn walk_into_range(observer: &mut Bot, caster: &mut Bot, observer_id: u64, caste
         // The server clips live structure discs as well as authored terrain.
         // Follow waypoints from acknowledged positions instead of repeatedly
         // requesting the origin through the friendly midlane tower.
+        // Structures are public: one snapshot already contains both teams.
+        // Combining two copies would exceed the navigator's obstacle budget.
         let structures: Vec<_> = snapshot
             .structures()
             .iter()
-            .chain(caster_snapshot.structures().iter())
             .filter(|s| s.hp > 0.0)
             .map(|s| Disc {
                 center: [s.x, s.z],
@@ -60,12 +70,14 @@ fn walk_into_range(observer: &mut Bot, caster: &mut Bot, observer_id: u64, caste
                 },
             })
             .collect();
-        for ((route, bot), state) in routes
+        for (index, ((route, bot), state)) in routes
             .iter_mut()
             .zip([&*observer, &*caster])
             .zip([observer_state, caster_state])
+            .enumerate()
         {
-            if let Some(next) = route.next([state.x, state.z], [0.0, 0.0], &structures) {
+            last_targets[index] = route.next([state.x, state.z], [0.0, 0.0], &structures);
+            if let Some(next) = last_targets[index] {
                 bot.send_transform(
                     next[0],
                     GROUND_Y,
@@ -75,14 +87,18 @@ fn walk_into_range(observer: &mut Bot, caster: &mut Bot, observer_id: u64, caste
             }
         }
     }
-    panic!("players did not enter authoritative Q cast range");
+    panic!(
+        "players did not enter authoritative Q cast range; \
+         authoritative ((observer x,z,hp),(caster x,z,hp),distance,mutual visibility)={last_states:?}; \
+         final route targets={last_targets:?}"
+    );
 }
 
 #[test]
 fn two_clients_observe_sequential_accepted_casts_once_and_defaults_are_inert() {
     let server = ServerProcess::spawn();
-    let mut observer = Bot::connect(server.addr());
-    let mut caster = Bot::connect(server.addr());
+    let mut observer = Bot::connect_framed(server.addr());
+    let mut caster = Bot::connect_framed(server.addr());
     observer.join(Team::Green, Character::Ipfs);
     caster.join(Team::Blue, Character::Ipfs);
 

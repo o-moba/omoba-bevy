@@ -21,6 +21,7 @@ use crate::{
 
 #[derive(Resource, Default)]
 pub(crate) struct MatchServiceClient {
+    resume_scope: Option<(u64, u64)>,
     pub preference: MatchPreference,
     pub pending_join: Option<NetworkCommand>,
     pub lobby_addr: Option<String>,
@@ -52,6 +53,22 @@ pub(crate) struct Requeue {
 pub(crate) const REQUEUE_TIMEOUT: Duration = Duration::from_secs(20);
 
 impl MatchServiceClient {
+    pub(crate) fn restore_resume(&mut self, saved: &crate::net::recovery::SavedResume) {
+        self.allocation = Some(saved.allocation.clone());
+        self.lobby_addr = Some(saved.lobby.clone());
+        self.active = true;
+        self.resume_scope = Some((saved.server_epoch, saved.match_id));
+        self.pending_join = Some(NetworkCommand::JoinPrematch {
+            handheld: saved.join.handheld.clone(),
+            character: saved.join.character,
+            hero_class: saved.join.hero_class,
+            avatar: saved.join.avatar.clone(),
+            sprite_character: saved.join.sprite_character.clone(),
+        });
+        self.last_queue_join = self.pending_join.clone();
+        self.last_request = None;
+    }
+
     pub fn intercept_join(
         &mut self,
         view: &CareerView,
@@ -106,6 +123,7 @@ impl MatchServiceClient {
         }
         let destination = allocation.and(self.lobby_addr.take());
         self.active = false;
+        self.resume_scope = None;
         self.pending_join = None;
         self.last_request = None;
         self.lobby_addr = None;
@@ -116,15 +134,36 @@ impl MatchServiceClient {
 pub(crate) struct MatchServicePlugin;
 impl Plugin for MatchServicePlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<MatchServiceClient>().add_systems(
-            Update,
-            (
-                update_match_service.after(crate::net::ClientNetPipeline::ApplySnapshot),
-                resume_requeue
+        app.add_plugins(crate::net::recovery_ui::RecoveryUiPlugin)
+            .init_resource::<crate::net::recovery::ResumeMatchState>()
+            .add_systems(
+                Startup,
+                crate::net::recovery::load_resume
+                    .after(crate::persistence::load_persistent_client_settings),
+            )
+            .add_systems(
+                Update,
+                (
+                    crate::net::recovery::remember_resume,
+                    crate::net::recovery::resume_actions,
+                )
+                    .chain()
                     .after(crate::net::ClientNetPipeline::ApplySnapshot)
-                    .before(crate::frontend::FrontendSet),
-            ),
-        );
+                    .before(crate::net::ClientNetPipeline::SessionLifecycle),
+            )
+            .init_resource::<MatchServiceClient>()
+            .add_systems(
+                Update,
+                (
+                    update_match_service
+                        .after(crate::net::ClientNetPipeline::ApplySnapshot)
+                        .before(crate::net::ClientNetPipeline::SessionLifecycle)
+                        .before(crate::frontend::FrontendSet),
+                    resume_requeue
+                        .after(crate::net::ClientNetPipeline::ApplySnapshot)
+                        .before(crate::frontend::FrontendSet),
+                ),
+            );
     }
 }
 
@@ -137,6 +176,7 @@ fn update_match_service(
     session_id: Res<ClientSessionId>,
     mut requests: MessageWriter<NetworkCommand>,
     mut session_ui: MessageWriter<SessionUiCommand>,
+    mut resume: Option<ResMut<crate::net::recovery::ResumeMatchState>>,
 ) {
     if !flow.active {
         return;
@@ -147,6 +187,33 @@ fn update_match_service(
         &session_id.0,
     );
     if let Some(allocation) = &flow.allocation {
+        if session.server_addr() == allocation.endpoint
+            && session.is_connected()
+            && flow
+                .resume_scope
+                .is_some_and(|scope| scope != (snapshot.meta.server_epoch, snapshot.meta.match_id))
+        {
+            if let Some(resume) = resume.as_mut() {
+                resume.clear();
+            }
+            flow.pending_join = None;
+            session_ui.write(SessionUiCommand::LeaveMatch);
+            return;
+        }
+        if flow.resume_scope == Some((snapshot.meta.server_epoch, snapshot.meta.match_id))
+            && authenticated
+        {
+            session.defer_active_seat_rejection();
+        }
+        if flow.resume_scope.is_some() && session.join_blocked() {
+            // Return through the normal cleanup once. The saved record remains
+            // available for an explicit later attempt; no automatic loop from Home.
+            session.abandon_join();
+            flow.pending_join = None;
+            flow.active = false;
+            session_ui.write(SessionUiCommand::LeaveMatch);
+            return;
+        }
         // A terminal receipt ends gameplay even when its durable save is pending.
         // Keep the transport for receipt updates, but never rejoin this round.
         if career.view.last_result.as_ref().is_some_and(|result| {
@@ -442,6 +509,52 @@ mod tests {
                 .resource::<MatchServiceClient>()
                 .requeue
                 .is_none()
+        );
+    }
+
+    #[test]
+    fn saved_resume_rejects_reused_endpoint_before_sending_hero_join() {
+        let mut flow = MatchServiceClient {
+            active: true,
+            allocation: Some(allocation()),
+            pending_join: Some(lock_in()),
+            resume_scope: Some((7, 2)),
+            ..default()
+        };
+        let endpoint = flow.allocation.as_ref().unwrap().endpoint.clone();
+        flow.lobby_addr = Some("127.0.0.1:4000".into());
+        let mut session = ClientSession::queued_for_test();
+        session.set_server_addr_for_test(endpoint);
+        let mut app = App::new();
+        app.init_resource::<CareerClient>()
+            .init_resource::<CareerIdentity>()
+            .init_resource::<ClientSessionId>()
+            .add_message::<NetworkCommand>()
+            .add_message::<SessionUiCommand>()
+            .insert_resource(flow)
+            .insert_resource(session)
+            .insert_resource(GameStateSnapshot {
+                meta: shared::protocol::SnapshotMeta::new(8, 1, 1),
+                ..default()
+            })
+            .add_systems(Update, update_match_service);
+        app.update();
+        assert!(
+            app.world()
+                .resource::<Messages<NetworkCommand>>()
+                .is_empty()
+        );
+        assert!(
+            app.world()
+                .resource::<MatchServiceClient>()
+                .pending_join
+                .is_none()
+        );
+        assert!(
+            app.world_mut()
+                .resource_mut::<Messages<SessionUiCommand>>()
+                .drain()
+                .any(|event| matches!(event, SessionUiCommand::LeaveMatch))
         );
     }
 

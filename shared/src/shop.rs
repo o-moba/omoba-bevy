@@ -8,7 +8,10 @@ use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
 pub const STARTING_GOLD: u32 = 80;
-pub const GOLD_PER_SECOND: f32 = 1.0;
+pub const GOLD_PER_SECOND: f32 = 2.0;
+pub const HERO_KILL_GOLD: u32 = 500;
+pub const HERO_ASSIST_POOL: u32 = 100;
+pub const CRITICAL_DAMAGE_MULTIPLIER: f32 = 1.75;
 /// A rule, not the catalog size: the catalog may hold more items than a hero
 /// can carry.
 pub const INVENTORY_CAPACITY: usize = 6;
@@ -23,17 +26,37 @@ pub enum ItemId {
     VitalityGem,
     FocusCharm,
     GuardianCrest,
+    CritShard,
+    SiphonStone,
+    WindrunnerBoots,
+    DuelistEdge,
+    VampiricFang,
+    ArcaneFocus,
+    Bulwark,
+    TempestBlade,
+    Bloodreaver,
+    AetherCrown,
 }
 
 impl ItemId {
     /// Every item in catalog order (`shared/assets/catalog/items.json`).
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 16] = [
         Self::EmberBlade,
         Self::SwiftGrip,
         Self::TrailBoots,
         Self::VitalityGem,
         Self::FocusCharm,
         Self::GuardianCrest,
+        Self::CritShard,
+        Self::SiphonStone,
+        Self::WindrunnerBoots,
+        Self::DuelistEdge,
+        Self::VampiricFang,
+        Self::ArcaneFocus,
+        Self::Bulwark,
+        Self::TempestBlade,
+        Self::Bloodreaver,
+        Self::AetherCrown,
     ];
 
     pub const fn id(self) -> &'static str {
@@ -44,6 +67,16 @@ impl ItemId {
             Self::VitalityGem => "vitality_gem",
             Self::FocusCharm => "focus_charm",
             Self::GuardianCrest => "guardian_crest",
+            Self::CritShard => "crit_shard",
+            Self::SiphonStone => "siphon_stone",
+            Self::WindrunnerBoots => "windrunner_boots",
+            Self::DuelistEdge => "duelist_edge",
+            Self::VampiricFang => "vampiric_fang",
+            Self::ArcaneFocus => "arcane_focus",
+            Self::Bulwark => "bulwark",
+            Self::TempestBlade => "tempest_blade",
+            Self::Bloodreaver => "bloodreaver",
+            Self::AetherCrown => "aether_crown",
         }
     }
 
@@ -63,6 +96,13 @@ pub struct ItemBonuses {
     pub spell_haste_multiplier: f32,
     pub max_hp: f32,
     pub max_mana: f32,
+    #[serde(skip_serializing_if = "is_zero")]
+    pub crit_chance: f32,
+    #[serde(skip_serializing_if = "is_zero")]
+    pub lifesteal: f32,
+}
+fn is_zero(value: &f32) -> bool {
+    *value == 0.0
 }
 
 impl ItemBonuses {
@@ -73,6 +113,8 @@ impl ItemBonuses {
         spell_haste_multiplier: 1.0,
         max_hp: 0.0,
         max_mana: 0.0,
+        crit_chance: 0.0,
+        lifesteal: 0.0,
     };
 }
 
@@ -90,6 +132,9 @@ pub struct ItemDefinition {
     pub description: &'static str,
     pub cost: u32,
     pub bonuses: ItemBonuses,
+    /// Total price includes components; owned recipe components are consumed as credit.
+    pub components: &'static [ItemId],
+    pub tier: u8,
 }
 
 /// Every item definition, in `ItemId::ALL` order.
@@ -114,21 +159,34 @@ pub fn recommended_items(class: HeroClass) -> &'static [ItemId] {
 /// never fails a purchase check (given an `owned` without duplicates).
 pub fn plan_purchases(class: HeroClass, gold: u32, owned: &[ItemId]) -> Vec<ItemId> {
     let mut gold = gold;
-    let mut carried = owned.len();
+    let mut inventory = owned.to_vec();
     let mut plan = Vec::new();
     for id in recommended_items(class) {
-        if carried >= INVENTORY_CAPACITY {
-            break;
-        }
-        let cost = item(*id).cost;
-        if owned.contains(id) || gold < cost {
+        if inventory_covers(*id, &inventory) {
             continue;
         }
-        gold -= cost;
-        carried += 1;
+        let Ok(quote) = purchase_quote(*id, gold, &inventory) else {
+            continue;
+        };
+        gold -= quote.cost;
+        inventory.retain(|item| !quote.consumed.contains(item));
+        inventory.push(*id);
         plan.push(*id);
     }
     plan
+}
+
+/// Recommendations do not rebuy a component already represented by an upgrade.
+/// This is advisory only: manual purchases may still buy that component.
+pub fn inventory_covers(id: ItemId, owned: &[ItemId]) -> bool {
+    fn includes(root: ItemId, wanted: ItemId) -> bool {
+        root == wanted
+            || item(root)
+                .components
+                .iter()
+                .any(|child| includes(*child, wanted))
+    }
+    owned.iter().any(|root| includes(*root, id))
 }
 
 /// Different items add percentage points. A malformed duplicate never stacks.
@@ -142,9 +200,75 @@ pub fn item_bonuses(inventory: &[ItemId]) -> ItemBonuses {
             result.spell_haste_multiplier += def.bonuses.spell_haste_multiplier - 1.0;
             result.max_hp += def.bonuses.max_hp;
             result.max_mana += def.bonuses.max_mana;
+            result.crit_chance += def.bonuses.crit_chance;
+            result.lifesteal += def.bonuses.lifesteal;
         }
     }
+    result.crit_chance = result.crit_chance.min(0.75);
+    result.lifesteal = result.lifesteal.min(0.35);
+    result.move_speed_multiplier = result.move_speed_multiplier.min(1.30);
     result
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PurchaseQuote {
+    pub cost: u32,
+    pub consumed: Vec<ItemId>,
+}
+
+/// A recipe visits each owned item once. An owned intermediate consumes its
+/// branch, so its already-included leaves cannot also be credited.
+pub fn upgrade_quote(id: ItemId, owned: &[ItemId]) -> PurchaseQuote {
+    fn credit(id: ItemId, owned: &[ItemId], consumed: &mut Vec<ItemId>) -> u32 {
+        if consumed.contains(&id) {
+            return 0;
+        }
+        if owned.contains(&id) {
+            consumed.push(id);
+            item(id).cost
+        } else {
+            item(id)
+                .components
+                .iter()
+                .map(|child| credit(*child, owned, consumed))
+                .sum()
+        }
+    }
+    let mut consumed = Vec::new();
+    let credit: u32 = item(id)
+        .components
+        .iter()
+        .map(|child| credit(*child, owned, &mut consumed))
+        .sum();
+    PurchaseQuote {
+        cost: item(id).cost.saturating_sub(credit),
+        consumed,
+    }
+}
+
+pub fn purchase_quote(
+    id: ItemId,
+    gold: u32,
+    owned: &[ItemId],
+) -> Result<PurchaseQuote, PurchaseError> {
+    if owned.contains(&id) {
+        return Err(PurchaseError::AlreadyOwned);
+    }
+    let quote = upgrade_quote(id, owned);
+    if owned.len().saturating_sub(quote.consumed.len()) >= INVENTORY_CAPACITY {
+        return Err(PurchaseError::InventoryFull);
+    }
+    if gold < quote.cost {
+        return Err(PurchaseError::InsufficientGold);
+    }
+    Ok(quote)
+}
+
+/// Repeated defeats without a kill reduce feed value; kills reset the streak.
+pub fn hero_kill_bounty(death_streak: u32) -> u32 {
+    HERO_KILL_GOLD
+        .saturating_sub(death_streak.saturating_mul(100))
+        .max(250)
 }
 
 pub fn item_cooldown(
@@ -235,38 +359,32 @@ mod tests {
         assert!(plan_purchases(HeroClass::Ranger, STARTING_GOLD - 1, &[]).is_empty());
         for class in HeroClass::ALL {
             let recommended = recommended_items(class);
-            // Enough gold buys the whole order, up to the inventory size.
-            let everything = plan_purchases(class, u32::MAX, &[]);
-            assert_eq!(everything, recommended[..INVENTORY_CAPACITY].to_vec());
-            // Owned items are skipped, and a full inventory buys nothing.
-            let owned = &recommended[..2];
-            let rest = plan_purchases(class, u32::MAX, owned);
-            assert_eq!(rest.len(), INVENTORY_CAPACITY - owned.len());
-            assert!(rest.iter().all(|id| !owned.contains(id)));
-            assert!(plan_purchases(class, u32::MAX, &everything).is_empty());
-            // A dear item is passed over for a cheaper one further down.
-            let first = item(recommended[0]).cost;
-            let cheaper = recommended
-                .iter()
-                .find(|id| item(**id).cost < first)
-                .copied();
-            if let Some(cheaper) = cheaper {
-                assert_eq!(plan_purchases(class, first - 1, &[])[0], cheaper);
-            }
-            // The plan never spends more than the budget.
-            for gold in [0, 79, 80, 250, 1_000] {
-                let spent: u32 = plan_purchases(class, gold, &[])
-                    .iter()
-                    .map(|id| item(*id).cost)
-                    .sum();
-                assert!(spent <= gold, "{class:?} spent {spent} of {gold}");
+            // Simulate every planned authority quote, including consumed slots.
+            for gold in [0, 79, 80, 250, 1_000, u32::MAX] {
+                let mut wallet = gold;
+                let mut inventory = recommended[..2].to_vec();
+                for id in plan_purchases(class, gold, &inventory) {
+                    let quote = purchase_quote(id, wallet, &inventory).unwrap();
+                    wallet -= quote.cost;
+                    inventory.retain(|id| !quote.consumed.contains(id));
+                    inventory.push(id);
+                    assert!(inventory.len() <= INVENTORY_CAPACITY);
+                    assert_eq!(
+                        inventory
+                            .iter()
+                            .collect::<std::collections::HashSet<_>>()
+                            .len(),
+                        inventory.len()
+                    );
+                }
+                assert!(wallet <= gold);
             }
         }
     }
 
     #[test]
     fn bonuses_do_not_stack_duplicates_and_cooldown_rates_have_distinct_slots() {
-        let all: Vec<_> = items().iter().map(|item| item.id).collect();
+        let all: Vec<_> = items()[..6].iter().map(|item| item.id).collect();
         let bonuses = item_bonuses(&all);
         assert!((bonuses.damage_multiplier - 1.18).abs() < 0.0001);
         assert_eq!((bonuses.max_hp, bonuses.max_mana), (45.0, 20.0));
@@ -311,5 +429,57 @@ mod tests {
                     < 0.0001
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod recipe_tests {
+    use super::*;
+    use ItemId::*;
+
+    #[test]
+    fn intermediate_or_leaf_credit_never_double_counts_and_full_slots_can_upgrade() {
+        assert_eq!(
+            upgrade_quote(TempestBlade, &[EmberBlade, CritShard, SwiftGrip]).cost,
+            1_090
+        );
+        let quote = upgrade_quote(TempestBlade, &[DuelistEdge, EmberBlade, SwiftGrip]);
+        assert_eq!(quote.cost, 620);
+        assert_eq!(quote.consumed, [DuelistEdge, SwiftGrip]);
+        let full = [
+            EmberBlade,
+            CritShard,
+            SwiftGrip,
+            TrailBoots,
+            FocusCharm,
+            SiphonStone,
+        ];
+        assert!(purchase_quote(DuelistEdge, 470, &full).is_ok());
+        assert_eq!(
+            purchase_quote(DuelistEdge, 469, &full),
+            Err(PurchaseError::InsufficientGold)
+        );
+        assert_eq!(
+            purchase_quote(Bulwark, 9999, &full),
+            Err(PurchaseError::InventoryFull)
+        );
+    }
+
+    #[test]
+    fn item_budget_and_bounds_support_distinct_builds() {
+        assert_eq!(hero_kill_bounty(0), 500);
+        assert_eq!(hero_kill_bounty(100), 250);
+        assert!(item_bonuses(&[WindrunnerBoots]).move_speed_multiplier > 1.15);
+        assert!(item_bonuses(&[TempestBlade]).attack_speed_multiplier > 1.3);
+        assert!(item_bonuses(&[TempestBlade]).crit_chance >= 0.3);
+        assert!(item_bonuses(&[Bloodreaver]).lifesteal >= 0.22);
+        let all = item_bonuses(&ItemId::ALL);
+        assert!(
+            all.crit_chance <= 0.75 && all.lifesteal <= 0.35 && all.move_speed_multiplier <= 1.30
+        );
+        // 2g/s + a solo lane's 3 x 18g wave each minute, starting with80g.
+        let solo_income = GOLD_PER_SECOND * 60.0 + 54.0;
+        assert!((item(WindrunnerBoots).cost - STARTING_GOLD) as f32 / solo_income < 3.0);
+        assert!((item(TempestBlade).cost - STARTING_GOLD) as f32 / solo_income < 8.0);
     }
 }

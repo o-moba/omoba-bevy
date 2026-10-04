@@ -5,6 +5,34 @@ fn profiles() -> SkillPresentation {
 }
 
 #[test]
+fn dagger_skills_keep_distinct_motions_when_mixed_into_another_core() {
+    let mut recipe = shared::loadout::CoreId::Dawnweaver.preset();
+    recipe.skills = [
+        SkillId::DaggerLethalBlow,
+        SkillId::DaggerBackstab,
+        SkillId::DaggerBluff,
+        SkillId::DaggerDeadlyBlow,
+    ];
+    let state = LoadoutState {
+        recipe: Some(recipe),
+        ..default()
+    };
+    for (slot, expected) in [
+        "dagger_heavy_thrust",
+        "dagger_backstab",
+        "dagger_feint",
+        "dagger_stab",
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let cue = motion_cue(&profiles(), Some(&state), slot as u8, 7, &[]).unwrap();
+        assert_eq!(cue.motion, expected);
+        assert!(!cue.hold);
+    }
+}
+
+#[test]
 fn recipe_slot_selects_motion_even_when_skill_is_moved_to_another_button() {
     let mut recipe = shared::loadout::CoreId::Wildspark.preset();
     recipe.skills[0] = SkillId::DawnRay;
@@ -57,7 +85,7 @@ fn hidden_or_other_caster_warning_does_not_drive_this_hero() {
 #[test]
 fn malformed_profile_cannot_introduce_gameplay_or_unknown_motion() {
     let valid = include_str!("../../assets/config/skills.skillfx");
-    assert_eq!(profiles().skills.len(), 64);
+    assert_eq!(profiles().skills.len(), shared::HeroClass::ALL.len() * 4);
     assert!(SkillPresentation::parse(&valid.replace("pistol_shoot", "missing_clip")).is_err());
     assert!(
         SkillPresentation::parse(&valid.replace(

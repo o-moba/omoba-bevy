@@ -119,6 +119,9 @@ const COMPACT_HASTE_ANGLE: f32 = 182.6;
 const JOYSTICK_INSET: Vec2 = Vec2::new(68.0, 65.0);
 const JOYSTICK_RADIUS: f32 = crate::ui::tokens::size::JOYSTICK_PHONE * 0.5;
 const JOYSTICK_CAPTURE: f32 = 1.3;
+/// Full-speed travel matches the displayed thumb's limit. Using the whole
+/// base radius here used to make a reversal to that visible limit run at 64%.
+const JOYSTICK_TRAVEL: f32 = 0.7;
 pub(crate) const KNOB_RADIUS: f32 = crate::ui::tokens::size::JOYSTICK_KNOB_PHONE * 0.5;
 /// Width the group needs at scale 1: the joystick capture circle from the
 /// safe left edge to the leftmost utility's rim.
@@ -658,6 +661,17 @@ impl MobileControls {
             .unwrap_or(Vec2::ZERO);
     }
 
+    fn joystick_thumb_offset(&self) -> Vec2 {
+        self.captures
+            .values()
+            .find(|capture| capture.control == Control::Joystick)
+            .map(|capture| {
+                (capture.position - capture.origin)
+                    .clamp_length_max(self.layout().joystick_radius * JOYSTICK_TRAVEL)
+            })
+            .unwrap_or(Vec2::ZERO)
+    }
+
     /// Includes a skill release for the current frame even after combat drains casts.
     pub(crate) fn skill_aiming(&self) -> bool {
         self.skill_released_this_frame
@@ -783,6 +797,11 @@ impl MobileControls {
     }
 
     #[cfg(test)]
+    pub(crate) fn touch_for_test(&mut self, id: u64, phase: TouchPhase, position: Vec2) {
+        self.event(id, phase, position);
+    }
+
+    #[cfg(test)]
     pub(crate) fn start_attack_hold_for_test(&mut self) {
         self.event(1, TouchPhase::Started, self.layout().attack_center);
         self.advance_hold_time(ATTACK_HOLD_SECONDS);
@@ -796,7 +815,8 @@ fn joystick_vector(delta: Vec2, radius: f32) -> Vec2 {
     if distance <= dead_zone {
         return Vec2::ZERO;
     }
-    delta.normalize_or_zero() * ((distance - dead_zone) / (radius - dead_zone)).clamp(0.0, 1.0)
+    delta.normalize_or_zero()
+        * ((distance - dead_zone) / (radius * JOYSTICK_TRAVEL - dead_zone)).clamp(0.0, 1.0)
 }
 fn control_drag_dead_zone(control: Control) -> f32 {
     if matches!(control, Control::Ability(_)) {
@@ -1534,7 +1554,7 @@ fn draw_mobile_controls(
                 visible,
             ),
             MobileVisual::Thumb => (
-                layout.joystick_center + mobile.movement * layout.joystick_radius * 0.7,
+                layout.joystick_center + mobile.joystick_thumb_offset(),
                 Vec2::splat(KNOB_RADIUS * 2.0 * s),
                 visible,
             ),
@@ -2565,6 +2585,50 @@ mod tests {
             }
         }
     }
+    #[test]
+    fn joystick_visible_throw_is_full_speed_and_inner_throw_remains_analog() {
+        let mut m = controls();
+        m.viewport = Vec2::new(852.0, 393.0);
+        let l = m.layout();
+        let travel = l.joystick_radius * JOYSTICK_TRAVEL;
+        let dead = l.joystick_radius * 0.16;
+        m.event(1, TouchPhase::Started, l.joystick_center);
+        for axis in [
+            Vec2::X,
+            Vec2::Y,
+            Vec2::ONE.normalize(),
+            Vec2::new(1.0, -1.0).normalize(),
+        ] {
+            for sign in [1.0, -1.0] {
+                let direction = axis * sign;
+                for (distance, speed) in [
+                    (dead * 0.5, 0.0),
+                    ((dead + travel) * 0.5, 0.5),
+                    (travel, 1.0),
+                    (l.joystick_radius * 2.0, 1.0),
+                ] {
+                    let delta = direction * distance;
+                    m.event(1, TouchPhase::Moved, l.joystick_center + delta);
+                    assert!(
+                        m.movement.distance(direction * speed) < 0.00001,
+                        "{delta:?}: expected speed {speed}, got {:?}",
+                        m.movement
+                    );
+                    assert!(
+                        m.joystick_thumb_offset()
+                            .distance(direction * distance.min(travel))
+                            < 0.0001,
+                        "the visible thumb must track the finger up to its travel limit"
+                    );
+                }
+            }
+        }
+        // Releasing/canceling also centers the visual and prevents drift.
+        m.event(1, TouchPhase::Canceled, l.joystick_center);
+        assert_eq!(m.movement, Vec2::ZERO);
+        assert_eq!(m.joystick_thumb_offset(), Vec2::ZERO);
+    }
+
     #[test]
     fn dead_zone_clamping_and_capture_survive_crossing_controls() {
         let mut m = controls();

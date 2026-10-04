@@ -26,6 +26,7 @@ from capture_verdant import sha256, verify_beta_ui_profile
 ROOT = Path(__file__).resolve().parent.parent
 FILES_3D = ("01-map-overview.png", "02-prop-a.png", "03-prop-b.png", "04-prop-a-restored.png", "05-prop-b-repeated.png")
 FILES_2D = ("01-map-overview.png", "02-tower-detail.png")
+FILES_LANE_DEFENSE = ("01-map-overview.png", "02-lane-defense-brush.png")
 MODELS = ("map-props/lantern.glb#Scene0", "map-props/flowering_shrub.glb#Scene0")
 GEOMETRY_ID = "verdant-confluence-v1"
 # Pinned authored v1 geometry; bridge is terrain, not a replaceable prop.
@@ -94,6 +95,8 @@ def expected_map(config):
                             and other["team"] == item["team"] and other["lane"] == item["lane"]],
                            key=lambda other: other["t"], reverse=item["team"] == "green")
             tier = next(index for index, other in enumerate(peers) if other["id"] == item["id"])
+        if tower and tier in config.get("disabled_tower_tiers", []):
+            continue
         structures.append(dict(id=item["id"], map_key=item["key"], visual_profile=item["visual_profile"],
                                kind="tower" if tower else "base_tower", team=item["team"], lane=item.get("lane"), tier=tier,
                                position=[position[0] + offset[0], 3 if tower else 4, position[1] + offset[1]],
@@ -120,12 +123,13 @@ def valid_geometry(value):
 
 def verify_map(summary, snapshots, mobile, mode, expected):
     summary = summary if isinstance(summary, dict) else {}
-    files = FILES_3D if mode == "models3d" else FILES_2D
+    lane_defense = summary.get("lane_defense") is True
+    files = FILES_LANE_DEFENSE if lane_defense else (FILES_3D if mode == "models3d" else FILES_2D)
     profile = verify_beta_ui_profile(summary, mobile, files)
     errors = list(profile["errors"])
     if summary.get("pass") is not True or summary.get("scenario") != "map":
         errors.append("Missing successful native map summary")
-    for key, value in (("scripted_camera", True), ("scripted_cosmetic_registry", mode == "models3d"),
+    for key, value in (("scripted_camera", True), ("scripted_cosmetic_registry", mode == "models3d" and not lane_defense),
                        ("synthetic_structures", False), ("physical_device_verified", False), ("manual_interaction_verified", False)):
         if summary.get(key) is not value:
             errors.append(f"Missing precise provenance: {key}")
@@ -188,6 +192,22 @@ def verify_map(summary, snapshots, mobile, mode, expected):
                 errors.append(f"Stage {index}: actual 2D camera does not cover the ground depth bands")
         if mode == "models3d" and (frame.get("static_props_by_archetype") != STATIC_PROPS or frame.get("ready_static_props") != 942):
             errors.append(f"Stage {index}: incomplete authored prop inventory or missing real drawables")
+        if lane_defense:
+            brush = frame.get("brush", [])
+            if summary.get("shared_brush_count") != 16 or len(brush) != 16 or {b.get("id") for b in brush} != set(range(1, 17)):
+                errors.append(f"Stage {index}: incomplete shared lane brush")
+            for patch in brush:
+                center, position = patch.get("shared_center", []), patch.get("render_position", [])
+                geometry = patch.get("geometry")
+                if (patch.get("visible") is not True or not valid_geometry(geometry)
+                        or geometry.get("mesh_count") != 32 or len(center) != 2 or len(position) != 3
+                        or not near(center[0], position[0]) or not near(center[1], position[2])):
+                    errors.append(f"Stage {index}: brush {patch.get('id')} missing matching rendered geometry")
+            if len(expected_by_id) == 20:
+                for team in ("green", "blue"):
+                    for lane in ("top", "mid", "bot"):
+                        if {s.get("tier") for s in actual.values() if s.get("team") == team and s.get("lane") == lane} != {0, 1, 2}:
+                            errors.append(f"Stage {index}: missing {team}/{lane} tower tier")
         if mobile:
             nodes = {node.get("name") for node in frame.get("nodes", []) if node.get("visible") is True
                      and isinstance(node.get("size"), list) and len(node["size"]) == 2
@@ -245,7 +265,7 @@ def verify_existing(output):
     samples = [json.loads(line) for line in (output / "authoritative-snapshots.jsonl").read_text().splitlines() if line]
     expected = expected_map(json.loads((output / "map-config.json").read_text()))
     result["verification"] = verify_map(summary, samples, result["requested_profile"] == "mobile", result["mode"], expected)
-    files = FILES_3D if result["mode"] == "models3d" else FILES_2D
+    files = FILES_LANE_DEFENSE if summary.get("lane_defense") else (FILES_3D if result["mode"] == "models3d" else FILES_2D)
     images = image_proof(output, files)
     unchanged = images == result.get("images") and len(images) == len(files)
     result["capture_pass"] = bool(result.get("client_exit_code") == 0 and not result.get("timed_out") and not result.get("error") and result.get("binary_unchanged") is True and not result.get("runtime_errors") and unchanged and result["verification"]["pass"])
@@ -266,10 +286,13 @@ def main():
     parser.add_argument("--verify-existing", action="store_true")
     parser.add_argument("--mode", choices=("models3d", "sprite2d"), default="models3d")
     parser.add_argument("--touch-controls", action="store_true")
+    parser.add_argument("--lane-defense", action="store_true", help="Two focused 3D lane/brush captures; skip cosmetic swap sequence")
     parser.add_argument("--width", type=int, default=1280)
     parser.add_argument("--height", type=int, default=720)
     parser.add_argument("--timeout", type=int, default=180)
     args = parser.parse_args()
+    if args.lane_defense and args.mode != "models3d":
+        parser.error("--lane-defense currently verifies the 3D lane preview")
     if args.verify_existing:
         return verify_existing(args.output.resolve())
     if any(p is None for p in (args.client_bin, args.server_bin, args.assets)):
@@ -297,7 +320,7 @@ def main():
                   requested_profile="mobile" if args.touch_controls else "desktop", map_config_sha256=sha256(config),
                   map_profile=expected["map_profile"], geometry_id=expected["geometry_id"],
                   expected_structure_count=len(expected["structures"]), verifier_sha256=sha256(Path(__file__)),
-                  scripted_camera=True, scripted_cosmetic_registry=args.mode == "models3d",
+                  scripted_camera=True, scripted_join=True, scripted_cosmetic_registry=args.mode == "models3d" and not args.lane_defense,
                   synthetic_structures=False, physical_device_verified=False, manual_interaction_verified=False)
     children, observer = [], None
     started = time.monotonic()
@@ -308,6 +331,8 @@ def main():
                    OMOBA_QA_WIDTH=str(args.width), OMOBA_QA_HEIGHT=str(args.height), OMOBA_TOUCH_CONTROLS="1" if args.touch_controls else "0",
                    OMOBA_VISUAL_QA_DIR=str(output), OMOBA_VISUAL_QA_SCENARIO="map", OMOBA_VISUAL_QA_TIMEOUT=str(timeout - 10),
                    OMOBA_MAP_QA_EXPECTED_STRUCTURES=str(len(expected["structures"])))
+        env["OMOBA_MAP_QA_LANE_DEFENSE"] = "1" if args.lane_defense else "0"
+        env["OMOBA_LANGUAGE"] = "en"
         for key in ("OMOBA_AUTOJOIN", "OMOBA_MEASURE_MODELS", "OMOBA_AVATAR_MANIFEST", "OMOBA_TARGETING_QA", "OMOBA_TARGETING_QA_SCENARIO", "OMOBA_MAP_QA_PROP_KEY"):
             env.pop(key, None)
         try:
@@ -349,7 +374,7 @@ def main():
     except (OSError, ValueError):
         summary = {}
     result["verification"] = verify_map(summary, observer.samples if observer else [], args.touch_controls, args.mode, expected)
-    files = FILES_3D if args.mode == "models3d" else FILES_2D
+    files = FILES_LANE_DEFENSE if args.lane_defense else (FILES_3D if args.mode == "models3d" else FILES_2D)
     result["images"] = image_proof(output, files)
     result["binary_unchanged"] = result["binary_sha256"] == dict(client=sha256(client), server=sha256(server))
     log = (output / "client.log").read_text(errors="replace") if (output / "client.log").exists() else ""
@@ -448,6 +473,25 @@ def self_test():
     custom = expected_map(json.loads((ROOT / "examples/maps/two-tier.json").read_text()))
     assert len(custom["structures"]) == 10 and next(s for s in custom["structures"] if s["id"] == 9)["max_hp"] == 420
     checks += 1
+    for filename, count in [("two-towers-per-lane.json", 14), ("one-tower-per-lane.json", 8)]:
+        reduced = expected_map(json.loads((ROOT / "examples/maps" / filename).read_text()))
+        assert len(reduced["structures"]) == count
+        assert {s["id"] for s in reduced["structures"]} <= {s["id"] for s in expected["structures"]}
+        checks += 1
+    lane = copy.deepcopy(summary)
+    lane.update(lane_defense=True, scripted_cosmetic_registry=False, shared_brush_count=16, captures=lane["captures"][:2], operations=[])
+    for i, frame in enumerate(lane["captures"]):
+        frame.update(file=FILES_LANE_DEFENSE[i], selected_prop=None,
+                     brush=[dict(id=k, visible=True, shared_center=[k, k], render_position=[k, 0, k], geometry=dict(mesh, mesh_count=32, mesh_geometry_signatures=["brush"] * 32)) for k in range(1, 17)])
+    assert check(lane)
+    checks += 1
+    for mutate in [lambda s: s["captures"][0]["brush"].pop(),
+                   lambda s: s["captures"][1]["brush"][0].update(visible=False),
+                   lambda s: s["captures"][1]["brush"][0].update(render_position=[999, 0, 0])]:
+        invalid = copy.deepcopy(lane)
+        mutate(invalid)
+        assert not check(invalid)
+        checks += 1
     print(f"PASS {checks} map verifier checks; synthetic unit fixtures only, no native capture claims")
 
 

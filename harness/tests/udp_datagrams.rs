@@ -21,6 +21,28 @@ fn array_len(snapshot: &Value, field: &str) -> usize {
         .len()
 }
 
+// The default arena publishes both teams' fixed landmarks, but this does
+// not change the separate fog filtering assertions for live heroes/minions.
+fn assert_public_structures(snapshot: &Value) {
+    let structures = snapshot["structures"].as_array().unwrap();
+    assert_eq!(
+        structures
+            .iter()
+            .map(|actor| actor["id"].as_u64().unwrap())
+            .collect::<Vec<_>>(),
+        (1..=20).collect::<Vec<_>>()
+    );
+    for team in ["green", "blue"] {
+        assert_eq!(
+            structures
+                .iter()
+                .filter(|actor| actor["team"] == team)
+                .count(),
+            10
+        );
+    }
+}
+
 fn host_legacy_send_ceiling() -> usize {
     let receiver = UdpSocket::bind("127.0.0.1:0").unwrap();
     receiver
@@ -125,7 +147,7 @@ fn real_server_legacy_json_compatibility_survives_malformed_requests() {
             .iter()
             .all(|actor| actor["team"] == "green")
     );
-    assert_eq!(array_len(&snapshot, "structures"), 4);
+    assert_public_structures(&snapshot);
     assert_eq!(
         snapshot["protocol_version"],
         shared::protocol::PROTOCOL_VERSION
@@ -156,14 +178,14 @@ fn real_server_legacy_json_compatibility_survives_malformed_requests() {
             && array_len(&next, "players") == 1
             && next["snapshot_tick"].as_u64() > snapshot["snapshot_tick"].as_u64()
         {
-            assert_eq!(array_len(&next, "structures"), 4);
+            assert_public_structures(&next);
             break;
         }
     }
     eprintln!(
         "LEGACY_COMPATIBILITY_MEASUREMENT {}",
         serde_json::json!({
-            "snapshot_bytes": payload.len(), "players":1,"structures":4,"public_roster":2,"team_vision":true,
+            "snapshot_bytes": payload.len(), "players":1,"structures":20,"public_roster":2,"team_vision":true,
             "maximum_observed_host_send_bytes":host_ceiling,
             "complete_json":true, "malformed_request_recovery":true,
             "full_5v5_payload_budget":"measured separately by framed_snapshots; payloads above host ceiling cannot use legacy UDP",
@@ -247,7 +269,7 @@ fn real_server_framed_populated_snapshot_above_8_kib_survives_malformed_requests
         let running = snapshot["game_state"]["type"].as_str() == Some("running");
         if running
             && array_len(&snapshot, "players") == 5
-            && array_len(&snapshot, "structures") == 4
+            && array_len(&snapshot, "structures") == 20
             && array_len(&snapshot, "minions") == 9
             && payload.len() > OLD_CLIENT_BOUNDARY
         {
@@ -257,10 +279,10 @@ fn real_server_framed_populated_snapshot_above_8_kib_survives_malformed_requests
     }
 
     let (payload, snapshot) = qualifying.expect(
-        "real server never produced a complete >8 KiB 5v5 snapshot with 5 allied players, 4 structures and 9 minions",
+        "real server never produced a complete >8 KiB 5v5 snapshot with 5 allied players, 20 public structures and 9 minions",
     );
     eprintln!(
-        "received complete framed real-server snapshot: {} bytes (runtime-dependent; asserted {} < bytes <= {}), 5 allied players, 4 structures, 9 minions; each datagram <=1200 bytes",
+        "received complete framed real-server snapshot: {} bytes (runtime-dependent; asserted {} < bytes <= {}), 5 allied players, 20 public structures, 9 minions; each datagram <=1200 bytes",
         payload.len(),
         OLD_CLIENT_BOUNDARY,
         IPV4_UDP_MAX_PAYLOAD_BYTES,
@@ -270,7 +292,7 @@ fn real_server_framed_populated_snapshot_above_8_kib_survives_malformed_requests
     let vision: shared::vision::TeamVision =
         serde_json::from_value(snapshot["vision"].clone()).expect("authoritative team sight");
     assert!(!vision.sources.is_empty());
-    for field in ["players", "structures", "minions"] {
+    for field in ["players", "minions"] {
         assert!(
             snapshot[field]
                 .as_array()
@@ -282,7 +304,7 @@ fn real_server_framed_populated_snapshot_above_8_kib_survives_malformed_requests
     for player in snapshot["players"].as_array().expect("players array") {
         assert_eq!(player["avatar"].as_str(), Some(avatar.as_str()));
     }
-    assert_eq!(last_entity_id(&snapshot, "structures"), Some(7));
+    assert_public_structures(&snapshot);
     assert_eq!(last_entity_id(&snapshot, "minions"), Some(15));
 
     // Both a malformed request and a whole oversized request are rejected;
@@ -314,7 +336,7 @@ fn real_server_framed_populated_snapshot_above_8_kib_survives_malformed_requests
             break next;
         }
     };
-    assert_eq!(array_len(&recovered, "structures"), 4);
+    assert_public_structures(&recovered);
     assert_eq!(array_len(&recovered, "minions"), 9);
     assert_eq!(array_len(&recovered["scoreboard"], "players"), 10);
     assert!(recovered["vision"].is_object());

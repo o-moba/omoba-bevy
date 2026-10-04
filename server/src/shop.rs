@@ -157,6 +157,7 @@ mod tests {
                     player.economy.inventory = shared::shop::items()
                         .iter()
                         .map(|item| item.id)
+                        .filter(|id| *id != ItemId::EmberBlade)
                         .take(INVENTORY_CAPACITY)
                         .collect()
                 }
@@ -408,7 +409,7 @@ mod tests {
         for _ in 0..4 {
             accrue_passive_gold(&mut rt.world.players, &GameState::Running, 0.25);
         }
-        assert_eq!(rt.world.players[&addr].economy.gold, STARTING_GOLD + 1);
+        assert_eq!(rt.world.players[&addr].economy.gold, STARTING_GOLD + 2);
         assert_eq!(rt.world.players[&prejoin].economy.gold, STARTING_GOLD);
         for phase in [
             GameState::Lobby,
@@ -419,7 +420,7 @@ mod tests {
         ] {
             accrue_passive_gold(&mut rt.world.players, &phase, 10.0);
         }
-        assert_eq!(rt.world.players[&addr].economy.gold, STARTING_GOLD + 1);
+        assert_eq!(rt.world.players[&addr].economy.gold, STARTING_GOLD + 2);
     }
 
     #[test]
@@ -469,7 +470,7 @@ mod tests {
         accrue_passive_gold(&mut rt.world.players, &GameState::Running, 10.0);
         award_gold(rt.world.players.get_mut(&addr).unwrap(), 200);
         let earned = rt.world.players[&addr].economy.earned_gold;
-        assert_eq!(earned, 210);
+        assert_eq!(earned, 220);
         buy(&mut rt, addr, ItemId::TrailBoots, 1, now);
         assert_eq!(rt.world.players[&addr].economy.earned_gold, earned);
         assert_ne!(rt.world.players[&addr].economy.gold, STARTING_GOLD + earned);

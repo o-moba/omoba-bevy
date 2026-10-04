@@ -147,7 +147,48 @@ struct RiverManifest {
 
 #[derive(Debug, Deserialize)]
 struct AnchorManifest {
+    id: u64,
+    team: shared::map::Team,
+    lane: Option<shared::map::Lane>,
+    #[serde(default)]
+    tier: u8,
     xz: [f32; 2],
+}
+
+/// These anchors document the embedded default only. Live structure sprites
+/// always follow snapshots, including maps with disabled tower tiers.
+fn manifest_structures_match(topology: &TopologyManifest) -> bool {
+    let map = shared::map::ResolvedMap::default();
+    let anchors: Vec<_> = topology
+        .lane_towers
+        .iter()
+        .chain(&topology.base_objectives)
+        .collect();
+    anchors.len() == map.structures.len()
+        && topology
+            .lane_towers
+            .iter()
+            .all(|anchor| anchor.lane.is_some())
+        && topology
+            .base_objectives
+            .iter()
+            .all(|anchor| anchor.lane.is_none())
+        && map.structures.iter().all(|structure| {
+            anchors
+                .iter()
+                .filter(|anchor| anchor.id == structure.id)
+                .count()
+                == 1
+                && anchors.iter().any(|anchor| {
+                    anchor.id == structure.id
+                        && anchor.team == structure.team
+                        && anchor.lane == structure.lane
+                        && anchor.tier == structure.tier
+                        && Vec2::from_array(anchor.xz)
+                            .distance(Vec2::from_array(structure.position))
+                            < 0.001
+                })
+        })
 }
 
 #[derive(Debug, Deserialize)]
@@ -267,8 +308,7 @@ fn load_world2d_assets(
             .any(|(manifest_point, actual)| !topology_matches(*manifest_point, actual))
         || (topology.river.width - RIVER_WIDTH).abs() > f32::EPSILON
         || !topology.river.traversable
-        || topology.lane_towers.len() != 6
-        || topology.base_objectives.len() != 2
+        || !manifest_structures_match(topology)
         || topology
             .lane_towers
             .iter()
@@ -866,6 +906,7 @@ mod tests {
         let manifest: WorldManifest = serde_json::from_str(WORLD2D_MANIFEST).unwrap();
         let layout = MapLayout::default();
         assert_eq!(manifest.schema_version, 1);
+        assert!(manifest_structures_match(&manifest.topology));
         assert!((manifest.tile_world_size - WORLD_TILE_SIZE).abs() < f32::EPSILON);
         assert_eq!(manifest.generation.grid.columns, WORLD_TILE_COLUMNS);
         assert_eq!(manifest.generation.grid.rows, WORLD_TILE_ROWS);

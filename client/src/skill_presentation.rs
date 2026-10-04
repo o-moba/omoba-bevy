@@ -71,7 +71,7 @@ pub(crate) struct SkillPresentation {
 impl SkillPresentation {
     fn parse(json: &str) -> Result<Self, String> {
         let config: Self = serde_json::from_str(json).map_err(|e| e.to_string())?;
-        if config.schema_version != 1 || config.skills.len() > 64 {
+        if config.schema_version != 1 || config.skills.len() > 80 {
             return Err("Unsupported skill presentation schema/size".into());
         }
         let motion = crate::humanoid::SharedHumanoidMotion::parse(include_str!(
@@ -151,12 +151,17 @@ pub(crate) fn motion_cue(
 ) -> Option<MotionCue> {
     if slot == shared::BASIC_ATTACK_ACTION_SLOT {
         let recipe = loadout?.recipe.as_ref()?;
-        return (recipe.core.attack_profile() == shared::loadout::AttackProfileId::Repeater).then(
-            || MotionCue {
-                motion: "pistol_shoot".into(),
-                hold: false,
-            },
-        );
+        let motion = if recipe.core == shared::loadout::CoreId::Adventurer {
+            "dagger_stab"
+        } else if recipe.core.attack_profile() == shared::loadout::AttackProfileId::Repeater {
+            "pistol_shoot"
+        } else {
+            return None;
+        };
+        return Some(MotionCue {
+            motion: motion.into(),
+            hold: false,
+        });
     }
     let skill = equipped_skill(loadout, slot)?;
     let profile = registry.profile(skill)?;

@@ -85,14 +85,7 @@ pub(crate) fn item_desc(item: ItemId) -> &'static str {
 
 /// An item's one-word name for tight slots (`Blade`).
 pub(crate) fn item_short(item: ItemId) -> &'static str {
-    tr(match item {
-        ItemId::EmberBlade => "item.ember_blade.short",
-        ItemId::SwiftGrip => "item.swift_grip.short",
-        ItemId::TrailBoots => "item.trail_boots.short",
-        ItemId::VitalityGem => "item.vitality_gem.short",
-        ItemId::FocusCharm => "item.focus_charm.short",
-        ItemId::GuardianCrest => "item.guardian_crest.short",
-    })
+    lookup_composed("item.", item.id(), ".short").unwrap_or_else(|| item_name(item))
 }
 
 /// A draft role (`Solo`).
@@ -248,6 +241,32 @@ mod tests {
         lookup_in(zh, key).unwrap_or_else(|| panic!("{key} missing in zh-Hans"))
     }
 
+    #[test]
+    fn adventurer_descriptions_and_passive_cover_every_shipped_locale() {
+        for locale in ["en", "ru", "zh-Hans"] {
+            let locale = LocaleId::parse(locale).unwrap();
+            for key in [
+                "hero.adventurer.name",
+                "hero.adventurer.tagline",
+                "combat.standard.dagger_mastery_passive",
+            ] {
+                assert!(
+                    lookup_in(locale, key).is_some_and(|value| !value.trim().is_empty()),
+                    "{key}"
+                );
+            }
+            for ability in HeroClass::Adventurer.abilities() {
+                for field in ["name", "desc"] {
+                    let key = format!("ability.{}.{field}", ability.id);
+                    assert!(
+                        lookup_in(locale, &key).is_some_and(|value| !value.trim().is_empty()),
+                        "{key}"
+                    );
+                }
+            }
+        }
+    }
+
     /// AC4 for game data: the English dictionary is the catalog/enum text, and
     /// every id has a Chinese entry of its own.
     #[test]
@@ -282,7 +301,24 @@ mod tests {
         }
         assert_eq!(
             ItemId::ALL.map(item_short),
-            ["Blade", "Grip", "Boots", "Gem", "Charm", "Crest"]
+            [
+                "Blade",
+                "Grip",
+                "Boots",
+                "Gem",
+                "Charm",
+                "Crest",
+                "Crit",
+                "Siphon",
+                "Windrunner",
+                "Duelist",
+                "Vampiric",
+                "Arcane",
+                "Bulwark",
+                "Tempest",
+                "Bloodreaver",
+                "Aether"
+            ]
         );
         for value in Role::ALL {
             assert_eq!(role(value), value.label());

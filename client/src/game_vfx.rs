@@ -46,6 +46,7 @@ pub(crate) enum BurstKind {
     Melee,
     Magic,
     Ranged,
+    VitalBreak,
 }
 impl BurstKind {
     pub(crate) fn for_style(style: ProjectileStyle) -> Self {
@@ -206,6 +207,7 @@ impl Plugin for GameVfxPlugin {
         app.init_resource::<PickupReceipts>()
             .add_message::<ImpactBurst>()
             .add_message::<ClearCombatVfx>()
+            .add_message::<crate::game_audio::AudioCueRequest>()
             .add_message::<UtilityVfx>()
             .add_message::<FlightParticles>()
             .add_systems(Startup, setup)
@@ -490,6 +492,7 @@ fn burst_particles(burst: &ImpactBurst) -> Vec<Particle> {
             BurstKind::Magic => Shape::Ring,
             BurstKind::Melee => Shape::Slash,
             BurstKind::Ranged => Shape::Glow,
+            BurstKind::VitalBreak => Shape::Ring,
         },
     };
     let mut particles = vec![
@@ -505,7 +508,19 @@ fn burst_particles(burst: &ImpactBurst) -> Vec<Particle> {
         BurstKind::Magic => 10,
         BurstKind::Melee => 4,
         BurstKind::Ranged => 6,
+        BurstKind::VitalBreak => 10,
     };
+    if burst.kind == BurstKind::VitalBreak {
+        for turn in [-0.65, 0.65] {
+            particles.push(Particle {
+                shape: Shape::Streak,
+                angle: angle + turn,
+                size: size * 2.7,
+                color: Color::srgb(1.0, 0.83, 0.35),
+                ..first.clone()
+            });
+        }
+    }
     for i in 0..count {
         let phase =
             (burst.seed % 997) as f32 * 0.03 + i as f32 * std::f32::consts::TAU / count as f32;
@@ -1033,6 +1048,7 @@ fn emit_skill_cast_particles(
     )>,
     mut receipts: Local<(Option<(u64, u64)>, std::collections::HashMap<Entity, u64>)>,
     mut output: MessageWriter<FlightParticles>,
+    mut audio: MessageWriter<crate::game_audio::AudioCueRequest>,
 ) {
     let (Some(game), Some(profiles)) = (game, profiles) else {
         return;
@@ -1063,6 +1079,15 @@ fn emit_skill_cast_particles(
         // Long windups already have a server-owned warning; avoid implying immediate release.
         if profile.windup.is_some() {
             continue;
+        }
+        if crate::skill_presentation::equipped_skill(
+            loadout.and_then(|l| l.0.as_ref()),
+            action.slot,
+        ) == Some(shared::loadout::SkillId::DaggerBluff)
+        {
+            audio.write(crate::game_audio::AudioCueRequest(
+                crate::game_audio::AudioCue::Bluff,
+            ));
         }
         let p = if *mode == PlayerVisualMode::Sprite2d {
             Vec3::new(pose.translation.x, 0.0, pose.translation.y)
@@ -1329,6 +1354,7 @@ fn pickup_feedback(
         &crate::combat::CombatStats,
     )>,
     mut bursts: MessageWriter<ImpactBurst>,
+    mut audio: MessageWriter<crate::game_audio::AudioCueRequest>,
     mut feedback: Option<ResMut<crate::combat::ActionFeedback>>,
 ) {
     let Some(game) = game.filter(|g| matches!(g.state, crate::net::GameState::Running)) else {
@@ -1377,6 +1403,9 @@ fn pickup_feedback(
             seed: u64::MAX - pickup.id,
         });
         if pickup.last_collector_id == Some(game.your_id) {
+            audio.write(crate::game_audio::AudioCueRequest(
+                crate::game_audio::AudioCue::Butterfly,
+            ));
             if let Some(feedback) = feedback.as_deref_mut() {
                 feedback.push_line(crate::i18n::trf(
                     "combat.feedback.butterfly",
@@ -1403,6 +1432,7 @@ mod tests {
         let mut app = App::new();
         app.init_resource::<PickupReceipts>()
             .add_message::<ImpactBurst>()
+            .add_message::<crate::game_audio::AudioCueRequest>()
             .add_systems(Update, pickup_feedback);
         let actor = app
             .world_mut()
@@ -1436,6 +1466,15 @@ mod tests {
             .collection_sequence = 9;
         app.update();
         assert_eq!(app.world().resource::<Messages<ImpactBurst>>().len(), 1);
+        assert_eq!(
+            app.world()
+                .resource::<Messages<crate::game_audio::AudioCueRequest>>()
+                .len(),
+            1
+        );
+        app.world_mut()
+            .resource_mut::<Messages<crate::game_audio::AudioCueRequest>>()
+            .clear();
         app.world_mut()
             .resource_mut::<Messages<ImpactBurst>>()
             .clear();
@@ -1446,6 +1485,12 @@ mod tests {
                 .collection_sequence = sequence;
             app.update();
             assert_eq!(app.world().resource::<Messages<ImpactBurst>>().len(), 0);
+            assert_eq!(
+                app.world()
+                    .resource::<Messages<crate::game_audio::AudioCueRequest>>()
+                    .len(),
+                0
+            );
         }
         app.world_mut()
             .entity_mut(actor)

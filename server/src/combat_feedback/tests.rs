@@ -182,7 +182,12 @@ fn receipts_use_actual_damage_and_reject_overkill_repeats_protection_and_immunit
         .world
         .structures
         .values()
-        .find(|s| s.state.kind == StructureKind::Tower && s.state.team == Team::Blue)
+        .find(|s| {
+            s.state.kind == StructureKind::Tower
+                && s.state.team == Team::Blue
+                && s.state.lane == Some(Lane::Mid)
+                && s.state.tier == 0
+        })
         .unwrap()
         .state
         .id;

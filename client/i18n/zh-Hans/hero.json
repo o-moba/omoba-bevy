@@ -30,5 +30,7 @@
   "hero.chainkeeper.name": "锁链守望者",
   "hero.chainkeeper.tagline": "钩住敌人、拯救盟友、收集灵魂",
   "hero.frostguard.name": "霜卫",
-  "hero.frostguard.tagline": "保护盟友并拦截来袭弹体"
+  "hero.frostguard.tagline": "保护盟友并拦截来袭弹体",
+  "hero.adventurer.name": "寻宝者",
+  "hero.adventurer.tagline": "短刀刺客：转身计使敌人转身，背后攻击更强"
 }

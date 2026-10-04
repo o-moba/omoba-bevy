@@ -49,6 +49,7 @@ impl ServerRuntime {
         } else {
             now
         });
+        self.refresh_takeover_controllers(now);
         self.fill_practice_bots(now);
         // Formation's final interval belongs to the countdown, not earned income.
         let gold_dt = if matches!(self.world.game_state, GameState::Running) {

@@ -221,4 +221,7 @@ pub fn record_player_action(player: &mut ConnectedPlayer, slot: SkillSlot) {
 pub fn face_player_action(player: &mut ConnectedPlayer, dx: f32, dz: f32) {
     player.hero.last_action.yaw = (dx.is_finite() && dz.is_finite() && dx * dx + dz * dz > 1e-6)
         .then(|| shared::math::hero_yaw_towards(dx, dz));
+    if let Some(yaw) = player.hero.last_action.yaw {
+        player.hero.yaw = yaw;
+    }
 }

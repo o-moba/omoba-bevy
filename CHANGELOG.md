@@ -1,5 +1,46 @@
 # Changelog
 
+All notable changes are recorded here. The canonical version is
+`[workspace.package].version` in `Cargo.toml`.
+
+## [Unreleased]
+
+The 0.37.0–0.39.0 entries below record implemented changes prepared together
+for the next release. They do not indicate a server deployment or TestFlight
+upload. The combined client/server contract is **protocol 8**. Physical iPhone
+reconnect/120 Hz behavior, sustained worker capacity and competitive balance
+still require validation. See the [delivery note](docs/progress/2026-10-04-iteration-commit.md)
+and [completed work / refactoring TODO](docs/REFACTORING.md#post-programme-architecture-follow-ups--2026-10-04).
+
+## [0.39.0] - 2026-10-04
+
+- Make three defensive towers per team on each lane the default: outer, inner and base-side, with sequential protection and the existing two Nexus structures.
+- Add optional disabled tower tiers and ready one-/two-tower map configurations for shorter matches; retain stable IDs and omit disabled towers from simulation and snapshots.
+- Add six real lane brush pockets with shared concealment/visual geometry and keep clear minion paths.
+- Advance to protocol 8 so clients without the new brush geometry cannot join and encounter invisible hiding areas. Deploy matching clients and hosts together.
+- Keep brush inspection identifiers behind the QA/test feature boundary so builds without QA pass strict checks.
+- Run live gameplay fixtures over the current framed snapshot transport and route the lane-push bot around authoritative structures; retain separate legacy transport checks.
+- Refresh the refactoring tracker with completed foundations, prioritized follow-ups and explicit device/balance verification limits; retain the historical September architecture measurements.
+
+## [0.38.0] - 2026-10-04
+
+- Match mobile movement sensitivity to the visible thumb-stick travel, avoiding unintended slow running when reversing to the visible limit; preserve analog walking and authoritative speed modifiers.
+- Add Adventurer, a close-range dagger class with Deadly Blow, Bluff, Backstab and Lethal Blow, available as reusable skills in hybrid recipes.
+- Bluff stuns and turns an enemy away; rear attacks gain damage, and eligible Backstabs have a server-owned 2% chance to leave a surviving hero at 1 HP. Preserve resource, shield, immunity, replay and reward rules.
+- Add an original hand-attached dagger and skill-owned humanoid motions/effects; expose the new preset through normal selection, draft and Offline Practice.
+- Advance to protocol 7 and standard-kits-3 for the expanded strict recipe enums. Matching client/server deployment is required; no new production dependencies.
+
+## [0.37.0] - 2026-10-04
+
+- Aim quick-tapped projectile skills at nearby visible enemies, prioritizing locked/pursued targets; dragging keeps manual direction. Long-range aim marks intersected visible enemy portraits on the minimap.
+- Add nearby hostile turret range fills and make bots wait for allied minion cover before pushing into turret range.
+- Add four river butterfly spawns, visible pickup map markers, confirmed pickup sound and trap-trigger audio.
+- Show the authoritative match clock and compact numeric KDA/killfeed. Respawns grow from five seconds through minute two to 35 seconds at minute 22.
+- Expand the shop to 16 items with component-credit upgrades, movement/attack-speed/critical/lifesteal options and 500g hero bounties with repeated-death reduction. Results show both teams, individual KDA and gross earned gold.
+- Keep running allocated matches and disconnected heroes alive; persist a resume hint across app restarts, reclaim the same hero and let connected teammates vote for bot or idle control. Preserve a route Home during connection loss.
+- Fix draft avatar selection/phone scrolling, center the countdown and rotate only the touched preview hero. Add persistent FPS visibility and separate requested/app/display-link cadence diagnostics.
+- Use protocol 6 for the expanded inventory enum. Deploy the matching client and server together; older clients cannot decode the new items. No production dependencies added.
+
 ## [0.36.0] - 2026-10-04
 
 - Restore online dash, haste and recall for recipe-based classes; retain server authority, cooldowns and replay protection.
@@ -41,12 +82,6 @@
 - New installations connect to the hosted OMOBA beta lobby; existing custom server preferences and environment/build overrides are preserved.
 - Home exposes an editable server selector on desktop and mobile. OMOBA Beta/Localhost buttons prefill the address; Connect applies and saves it. Desktop party lobby offers the same presets.
 - Add a bounded, supervised Linux VPS deployment for two public match workers with dedicated PostgreSQL roles/state and a rollback runbook.
-
-All notable changes to this repository should be documented in this file.
-
-The canonical repository version lives in `Cargo.toml` under `[workspace.package].version` and follows SemVer.
-
-## [Unreleased]
 
 ## [0.33.0] - 2026-10-02
 

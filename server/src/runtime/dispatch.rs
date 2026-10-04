@@ -246,6 +246,9 @@ impl ServerRuntime {
                 return;
             }
         }
+        if let ClientPacket::Join { session_id, .. } = &packet {
+            self.prepare_detached_reclaim(session_id.as_deref(), now);
+        }
         let wall_now = now;
         let now = self.sandbox.as_ref().map_or(now, |s| s.now);
         // Arm order is the pre-check order: Leave, the career rematch,
@@ -253,6 +256,24 @@ impl ServerRuntime {
         // the tail; then a paused sandbox swallows movement and combat; then
         // the per-variant handlers run on the (sandbox) simulation clock.
         let flow = match packet {
+            ClientPacket::TakeoverVote {
+                server_epoch,
+                match_id,
+                player_id,
+                generation,
+                policy,
+            } => {
+                self.handle_takeover_vote(
+                    addr,
+                    server_epoch,
+                    match_id,
+                    player_id,
+                    generation,
+                    policy,
+                    wall_now,
+                );
+                ControlFlow::Break(())
+            }
             ClientPacket::Leave => self.handle_leave(addr, wall_now),
             ClientPacket::RequestRematch if self.career_flow_active() => {
                 self.handle_career_rematch(addr, wall_now)

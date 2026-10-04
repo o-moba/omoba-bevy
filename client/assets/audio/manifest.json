@@ -68,6 +68,22 @@
     "ui_confirm": {
       "path": "audio/sfx/ui_confirm.ogg",
       "gain": 0.45
+    },
+    "butterfly": {
+      "path": "audio/sfx/butterfly.ogg",
+      "gain": 0.7
+    },
+    "trap_trigger": {
+      "path": "audio/sfx/trap_trigger.ogg",
+      "gain": 0.72
+    },
+    "bluff": {
+      "path": "audio/sfx/bluff.ogg",
+      "gain": 0.65
+    },
+    "vital_break": {
+      "path": "audio/sfx/vital_break.ogg",
+      "gain": 0.65
     }
   }
 }

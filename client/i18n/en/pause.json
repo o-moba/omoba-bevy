@@ -46,5 +46,6 @@
   "pause.hud.joystick_y": "Joystick · vertical",
   "pause.hud.combat_x": "Skills · horizontal",
   "pause.hud.combat_y": "Skills · vertical",
-  "pause.hud.reset": "Reset button positions"
+  "pause.hud.reset": "Reset button positions",
+  "pause.render.show_fps": "Show FPS counter"
 }

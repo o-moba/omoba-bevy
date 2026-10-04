@@ -654,3 +654,120 @@ fn mobile_map_tap_routes_without_mouse_and_idle_stick_preserves_the_order() {
         Vec2::new(8.0, 0.0)
     );
 }
+
+#[test]
+fn phone_stick_reversal_at_visible_limit_keeps_full_world_speed() {
+    use super::*;
+    use crate::input_context::GameplayInputContext;
+    use crate::mobile_controls::MobileControls;
+    use bevy::input::touch::TouchPhase;
+
+    for fps in [30, 60, 120] {
+        for axis in [
+            Vec2::X,
+            Vec2::Y,
+            Vec2::ONE.normalize(),
+            Vec2::new(1.0, -1.0).normalize(),
+        ] {
+            let mut app = App::new();
+            let mut mobile = MobileControls::default();
+            mobile.enabled = true;
+            mobile.focused = true;
+            mobile.viewport = Vec2::new(852.0, 393.0);
+            let layout = mobile.layout();
+            mobile.touch_for_test(1, TouchPhase::Started, layout.joystick_center);
+            app.insert_resource(mobile)
+                .init_resource::<Time>()
+                .init_resource::<GameplayInputContext>()
+                .init_resource::<crate::debug::DebugToggles>()
+                .init_resource::<PendingCast>()
+                .init_resource::<BasicAttackState>()
+                .insert_resource(PlayerVisualMode::Models3d)
+                .add_systems(Update, input::move_player_analog);
+            app.world_mut()
+                .resource_mut::<Time>()
+                .advance_by(std::time::Duration::from_secs_f64(1.0 / f64::from(fps)));
+            let camera = GlobalTransform::from(
+                Transform::from_translation(crate::camera::locked_camera_offset(1.0))
+                    .looking_at(Vec3::ZERO, Vec3::Y),
+            );
+            let forward = mobile_screen_direction(axis, &camera, PlayerVisualMode::Models3d);
+            app.world_mut().spawn((crate::camera::MainCamera, camera));
+            let hero = app
+                .world_mut()
+                .spawn((Player, Transform::default(), CombatStats::default()))
+                .id();
+            // Overshoot while running forward, then reverse to the visible
+            // thumb's maximum travel (70% of the base radius), without lifting.
+            for (leg, displacement) in [
+                axis * layout.joystick_radius,
+                -axis * layout.joystick_radius * 0.7,
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                app.world_mut()
+                    .resource_mut::<MobileControls>()
+                    .touch_for_test(1, TouchPhase::Moved, layout.joystick_center + displacement);
+                for frame in 0..fps / 2 {
+                    let before = app.world().get::<Transform>(hero).unwrap().translation;
+                    app.update();
+                    let step = app.world().get::<Transform>(hero).unwrap().translation - before;
+                    let expected =
+                        forward * if leg == 0 { 1.0 } else { -1.0 } * PLAYER_SPEED / fps as f32;
+                    assert!(
+                        step.distance(expected) < 0.00001,
+                        "{fps}fps {axis:?} leg={leg} frame={frame}: step={step:?} expected={expected:?}"
+                    );
+                }
+            }
+            assert!(
+                app.world()
+                    .get::<Transform>(hero)
+                    .unwrap()
+                    .translation
+                    .length()
+                    < 0.0001
+            );
+            // A full stick still obeys authoritative slow, root/stun and haste.
+            for (multiplier, root, stun, haste, expected_factor) in [
+                (0.5, 0.0, 0.0, 0.0, 0.5),
+                (1.0, 1.0, 0.0, 0.0, 0.0),
+                (1.0, 1.0, 1.0, 0.0, 0.0),
+                (1.0, 0.0, 0.0, 2.0, shared::utility::HASTE_SPEED_MULTIPLIER),
+            ] {
+                app.world_mut().entity_mut(hero).insert((
+                    crate::net::PlayerLoadout(Some(shared::loadout::LoadoutState {
+                        movement_multiplier: multiplier,
+                        root_remaining_secs: root,
+                        stun_remaining_secs: stun,
+                        ..default()
+                    })),
+                    crate::net::PlayerUtility {
+                        state: shared::utility::UtilityState {
+                            haste_active_secs: haste,
+                            ..default()
+                        },
+                    },
+                ));
+                let before = app.world().get::<Transform>(hero).unwrap().translation;
+                app.update();
+                let step = app.world().get::<Transform>(hero).unwrap().translation - before;
+                let expected = -forward * PLAYER_SPEED / fps as f32 * expected_factor;
+                assert!(
+                    step.distance(expected) < 0.00001,
+                    "status factor {expected_factor}: {step:?} vs {expected:?}"
+                );
+            }
+            app.world_mut()
+                .resource_mut::<MobileControls>()
+                .touch_for_test(1, TouchPhase::Ended, layout.joystick_center);
+            let stopped = app.world().get::<Transform>(hero).unwrap().translation;
+            app.update();
+            assert_eq!(
+                app.world().get::<Transform>(hero).unwrap().translation,
+                stopped
+            );
+        }
+    }
+}

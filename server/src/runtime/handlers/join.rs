@@ -72,6 +72,7 @@ impl ServerRuntime {
             // choosing empty hands could silently restore a revoked old prop.
             player.hero.identity.handheld = handheld;
             player.join_error = None;
+            self.restore_manual_control(addr);
             self.register_career_participant(addr);
             self.fill_practice_bots(now);
             return ControlFlow::Break(());

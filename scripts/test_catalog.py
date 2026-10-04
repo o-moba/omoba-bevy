@@ -12,7 +12,7 @@ class CatalogTests(unittest.TestCase):
     def test_shipped_catalog_lists_every_class_in_enum_order(self):
         self.assertEqual(catalog.hero_ids(), ('warrior', 'mage', 'ranger', 'cleric', 'warden', 'dawnweaver', 'wildspark',
             'cinderforge', 'edgeweaver', 'stormfist', 'veilstalker', 'emberveil',
-            'orbitwright', 'riftshot', 'chainkeeper', 'frostguard'))
+            'orbitwright', 'riftshot', 'chainkeeper', 'frostguard', 'adventurer'))
         for hero in catalog.heroes():
             self.assertEqual(len(hero['abilities']), 4, hero['id'])
             self.assertEqual(sorted(hero['recommended_items']), sorted(catalog.item_costs()), hero['id'])
@@ -20,7 +20,10 @@ class CatalogTests(unittest.TestCase):
     def test_items_have_positive_costs_and_known_ids(self):
         costs = catalog.item_costs()
         self.assertEqual(list(costs), ['ember_blade', 'swift_grip', 'trail_boots',
-                                       'vitality_gem', 'focus_charm', 'guardian_crest'])
+                                       'vitality_gem', 'focus_charm', 'guardian_crest',
+                                       'crit_shard', 'siphon_stone', 'windrunner_boots',
+                                       'duelist_edge', 'vampiric_fang', 'arcane_focus',
+                                       'bulwark', 'tempest_blade', 'bloodreaver', 'aether_crown'])
         self.assertTrue(all(isinstance(cost, int) and cost > 0 for cost in costs.values()))
         self.assertEqual(costs['focus_charm'], 100)
 
@@ -29,7 +32,8 @@ class CatalogTests(unittest.TestCase):
                                                        'cleric': 'holy', 'warden': 'claw', 'dawnweaver': 'holy', 'wildspark': 'arrow',
             'cinderforge': 'crescent', 'edgeweaver': 'crescent', 'stormfist': 'crescent',
             'veilstalker': 'claw', 'emberveil': 'arcane', 'orbitwright': 'holy',
-            'riftshot': 'arrow', 'chainkeeper': 'holy', 'frostguard': 'crescent'})
+            'riftshot': 'arrow', 'chainkeeper': 'holy', 'frostguard': 'crescent',
+            'adventurer': 'crescent'})
         slots = catalog.offensive_slots()
         self.assertEqual(slots['cleric'], {0})
         for class_id in ('warrior', 'mage', 'ranger', 'warden'):
@@ -41,6 +45,7 @@ class CatalogTests(unittest.TestCase):
             'stormfist': {0, 2, 3}, 'veilstalker': {0, 2, 3},
             'emberveil': {0, 1, 2, 3}, 'orbitwright': {0, 1, 2, 3},
             'riftshot': {0, 2, 3}, 'chainkeeper': {0, 2, 3}, 'frostguard': {0, 3},
+            'adventurer': {0, 2, 3},
         }.items():
             self.assertEqual(slots[hero], expected, hero)
         # Reusable shield/toggle effects never become fake offensive casts.

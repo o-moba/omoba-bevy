@@ -289,7 +289,10 @@ impl PracticeSession {
             join_error: self.error,
             your_id,
             players: crate::snapshot::build_players_snapshot(world, Some(your_id), now),
-            scoreboard: self.combat_log.ledger.live_scoreboard(),
+            scoreboard: self.combat_log.ledger.live_scoreboard().map(|mut board| {
+                board.elapsed_secs = world.match_elapsed_secs.max(0.0) as u64;
+                board
+            }),
             prematch: None,
             skill_effects: crate::skills::effects(world, now),
             projectiles,
@@ -370,6 +373,93 @@ mod tests {
             assert!(debug_access.unwrap().practice);
         }
     }
+
+    #[test]
+    fn lane_brush_offline_authority_hides_reveals_and_clears_on_exit() {
+        use shared::vision::{HOSTILE_REVEAL_SECS, brush_layout};
+
+        for zone in brush_layout().iter().filter(|zone| zone.id >= 11) {
+            let mut p = joined(HeroClass::Ranger);
+            p.command(ClientPacket::Practice {
+                command: PracticeCommand::SpawnDummy,
+            });
+            let (&opponent, bot) = p
+                .world
+                .players
+                .iter()
+                .find(|(_, player)| player.hero.identity.is_bot)
+                .unwrap();
+            let bot_id = bot.hero.identity.id;
+            assert_eq!(bot.hero.identity.team, Team::Blue);
+            let outside = [zone.center[0] + zone.radius + 1.0, zone.center[1]];
+            let move_to = |p: &mut PracticeSession, addr, point: [f32; 2]| {
+                let player = p.world.players.get_mut(&addr).unwrap();
+                player.hero.x = point[0];
+                player.hero.z = point[1];
+            };
+            let state = |p: &mut PracticeSession| {
+                let ServerPacket::Snapshot {
+                    vision, players, ..
+                } = p.snapshot()
+                else {
+                    panic!("practice publishes a snapshot")
+                };
+                (
+                    vision.expect("practice publishes authoritative team vision"),
+                    players.iter().any(|player| player.id == bot_id),
+                )
+            };
+
+            // Keep the normal default structures alive: these new lane pockets
+            // are concealed without removing any tower's vision source.
+            move_to(&mut p, LOCAL_ADDR, zone.center);
+            move_to(&mut p, opponent, outside);
+            let (vision, opponent_visible) = state(&mut p);
+            assert_eq!(vision.local_brush, Some(zone.id));
+            assert!(vision.local_hidden, "brush {} hides its occupant", zone.id);
+            assert!(opponent_visible, "an occupant still sees outside the brush");
+
+            // A real admitted attack reveals its author until the normal
+            // hostile-action timeout; the fixture does not set reveal flags.
+            p.command(ClientPacket::BasicAttack {
+                target: TargetId {
+                    kind: TargetKind::Player,
+                    id: bot_id,
+                },
+                server_epoch: EPOCH,
+                match_id: 1,
+                request_id: 1,
+            });
+            assert!(
+                p.world.players[&LOCAL_ADDR]
+                    .timers
+                    .last_basic_attack_at
+                    .is_some()
+            );
+            assert!(!state(&mut p).0.local_hidden);
+            p.now += Duration::from_secs_f32(HOSTILE_REVEAL_SECS + 0.01);
+            assert!(state(&mut p).0.local_hidden);
+
+            move_to(&mut p, opponent, [zone.center[0] + 0.5, zone.center[1]]);
+            let (vision, opponent_visible) = state(&mut p);
+            assert_eq!(vision.local_brush, Some(zone.id));
+            assert!(!vision.local_hidden, "sharing brush reveals both occupants");
+            assert!(opponent_visible);
+
+            move_to(&mut p, LOCAL_ADDR, outside);
+            let (vision, opponent_visible) = state(&mut p);
+            assert_eq!(vision.local_brush, None);
+            assert!(!vision.local_hidden);
+            assert!(
+                !opponent_visible,
+                "brush {} removes the hidden enemy from the snapshot",
+                zone.id
+            );
+            move_to(&mut p, opponent, [outside[0] + 0.5, outside[1]]);
+            assert!(state(&mut p).1, "leaving brush restores enemy visibility");
+        }
+    }
+
     #[test]
     fn practice_controls_leave_reentry_and_manual_clock_are_clean() {
         let mut p = joined(HeroClass::Dawnweaver);
@@ -527,6 +617,81 @@ mod tests {
         });
         assert_eq!(p.world.players[&LOCAL_ADDR].hero.x, after);
     }
+    /// Direction and facing never enter the authoritative speed budget. Drive
+    /// actual practice commands/ticks with a live bot, isolating clear ground
+    /// from combat and collision so a sharp reversal must retain full speed.
+    #[test]
+    fn offline_authority_preserves_speed_on_sharp_reversal_at_30_60_120_hz() {
+        for fps in [30, 60, 120] {
+            let mut p = joined(HeroClass::Ranger);
+            p.command(ClientPacket::Practice {
+                command: PracticeCommand::SpawnDummy,
+            });
+            assert!(
+                p.world
+                    .players
+                    .values()
+                    .any(|player| player.hero.identity.is_bot)
+            );
+            // The dummy retains its real controller/anchor near the original
+            // base spawn. The local hero exercises a separate open corridor.
+            p.world.structures.clear();
+            p.world.neutrals.clear();
+            p.world.minions.clear();
+            p.world.last_wave_spawn_at = p.now;
+            let speed = crate::hero_stats::move_speed(&p.world.players[&LOCAL_ADDR]);
+            let origin = [-12.0, 0.0];
+            assert!(
+                shared::navigation::world_navigation()
+                    .segment_clear(origin, [origin[0] + speed, origin[1]])
+            );
+            let player = p.world.players.get_mut(&LOCAL_ADDR).unwrap();
+            player.hero.x = origin[0];
+            player.hero.z = origin[1];
+            player.timers.last_movement_at = p.now;
+            let dt = 1.0 / fps as f32;
+            let mut predicted_x = origin[0];
+            for direction in [1.0, -1.0] {
+                let leg_start = p.world.players[&LOCAL_ADDR].hero.x;
+                for frame in 0..fps {
+                    p.advance(dt);
+                    let before = p.world.players[&LOCAL_ADDR].hero.x;
+                    predicted_x += direction * speed * dt;
+                    let yaw = shared::math::hero_yaw_towards(direction, 0.0);
+                    p.command(ClientPacket::Transform {
+                        x: predicted_x,
+                        y: crate::balance::PLAYER_GROUND_Y,
+                        z: origin[1],
+                        yaw,
+                        dash_sequence: 0,
+                    });
+                    let hero = &p.world.players[&LOCAL_ADDR].hero;
+                    assert!(
+                        (hero.x - predicted_x).abs() < 0.001,
+                        "{fps}Hz direction {direction} frame {frame}: step clipped"
+                    );
+                    assert!(
+                        ((hero.x - before) * direction - speed * dt).abs() < 0.001,
+                        "{fps}Hz direction {direction} frame {frame}: speed changed"
+                    );
+                    assert_eq!(hero.yaw, yaw, "reversal is accepted on its first frame");
+                }
+                let distance = (p.world.players[&LOCAL_ADDR].hero.x - leg_start) * direction;
+                assert!(
+                    (distance - speed).abs() < 0.001,
+                    "{fps}Hz direction {direction}: one-second travel {distance}, expected {speed}"
+                );
+            }
+            assert!((p.world.players[&LOCAL_ADDR].hero.x - origin[0]).abs() < 0.001);
+            assert!(
+                p.world
+                    .players
+                    .values()
+                    .any(|player| player.hero.identity.is_bot)
+            );
+        }
+    }
+
     #[test]
     fn offline_authoritative_damage_and_death_reach_every_world_category() {
         for kind in [

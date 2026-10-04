@@ -37,6 +37,134 @@ const BOT_COMPOSITION: [(HeroClass, Lane, bool); 5] = [
 ];
 const HERO_SPACING: f32 = shared::PLAYER_TARGET_RADIUS * 2.0 + 0.08;
 
+/// Exactly the living minions the tower authority can prefer over a hero.
+/// A nearby wave outside its actual three-dimensional range is not cover.
+fn tower_has_minion_cover(
+    tower: &crate::entities::Structure,
+    team: Team,
+    minions: &HashMap<u64, crate::entities::Minion>,
+) -> bool {
+    let position = crate::entities::Vec3f::new(tower.state.x, tower.state.y, tower.state.z);
+    minions.values().any(|minion| {
+        minion.state.team == team
+            && minion.state.hp > 0.0
+            && position.distance_squared(crate::entities::Vec3f::new(
+                minion.state.x,
+                minion.state.y,
+                minion.state.z,
+            )) <= tower.attack_range.powi(2)
+    })
+}
+
+/// Autonomous mobility needs room for its actual displacement, which can run
+/// opposite the aim or follow a moving recast target. Withhold it before the
+/// authority spends resources; ordinary ranged damage remains available.
+fn bot_mobility_safe(
+    definition: &shared::loadout::SkillDefinition,
+    origin: [f32; 2],
+    recast: bool,
+    danger: &[shared::navigation::Disc],
+) -> bool {
+    use shared::loadout::{SkillEffect, Technique};
+    let SkillEffect::Technique { action, .. } = definition.effect else {
+        return true;
+    };
+    if !matches!(
+        action,
+        Technique::CollisionCharge
+            | Technique::Lunge
+            | Technique::EchoStrike
+            | Technique::Hook
+            | Technique::GuardLeap
+            | Technique::AllyLeap
+            | Technique::Lash
+            | Technique::ExecuteRetreat
+            | Technique::SpiritDash
+            | Technique::BlinkShot
+    ) {
+        return true;
+    }
+    // These recasts follow the earlier victim, which can have moved beyond the
+    // initial cast range; the AI has no safe fixed travel bound for that jump.
+    if recast && matches!(action, Technique::EchoStrike | Technique::Hook) {
+        return danger.is_empty();
+    }
+    // Seven covers the backwards execute; extra room covers target hitboxes
+    // and the one-unit landing offset used by targeted leaps.
+    let travel = definition.ability.cast_range.max(7.0) + 3.0;
+    danger.iter().all(|disc| {
+        (origin[0] - disc.center[0]).hypot(origin[1] - disc.center[1]) > disc.radius + travel
+    })
+}
+
+/// Stop on the approach side of the first unsupported lane objective. Routing
+/// around a danger disc must not let an idle pusher bypass its defended tower.
+fn lane_staging_destination(
+    world: &crate::game_world::GameWorld,
+    team: Team,
+    lane: Lane,
+    destination: [f32; 2],
+) -> [f32; 2] {
+    let path = build_minion_path(&world.map_layout, lane, team);
+    let progress = |point: [f32; 2]| {
+        let mut traversed = 0.0;
+        let mut best = (f32::INFINITY, 0.0);
+        for pair in path.windows(2) {
+            let delta = [pair[1].x - pair[0].x, pair[1].z - pair[0].z];
+            let length = delta[0].hypot(delta[1]);
+            if length <= 0.001 {
+                continue;
+            }
+            let along =
+                ((point[0] - pair[0].x) * delta[0] + (point[1] - pair[0].z) * delta[1]) / length;
+            let along = along.clamp(0.0, length);
+            let offset = (point[0] - pair[0].x - delta[0] / length * along)
+                .hypot(point[1] - pair[0].z - delta[1] / length * along);
+            if offset < best.0 {
+                best = (offset, traversed + along);
+            }
+            traversed += length;
+        }
+        best.1
+    };
+    let stop = world
+        .structures
+        .values()
+        .filter(|tower| {
+            tower.state.team != team
+                && tower.state.hp > 0.0
+                && tower.attack_range > 0.0
+                && tower.attack_damage > 0.0
+                && match tower.role {
+                    StructureRole::LaneTower { lane: tower_lane } => tower_lane == lane,
+                    StructureRole::BaseTower => true,
+                }
+                && !tower_has_minion_cover(tower, team, &world.minions)
+        })
+        .map(|tower| {
+            (progress([tower.state.x, tower.state.z])
+                - tower.attack_range
+                - shared::PLAYER_TARGET_RADIUS
+                - 1.5)
+                .max(0.0)
+        })
+        .min_by(f32::total_cmp);
+    let Some(mut remaining) = stop.filter(|stop| *stop < progress(destination)) else {
+        return destination;
+    };
+    for pair in path.windows(2) {
+        let length = (pair[1].x - pair[0].x).hypot(pair[1].z - pair[0].z);
+        if remaining <= length && length > 0.001 {
+            return [
+                pair[0].x + (pair[1].x - pair[0].x) * remaining / length,
+                pair[0].z + (pair[1].z - pair[0].z) * remaining / length,
+            ];
+        }
+        remaining -= length;
+    }
+    destination
+}
+
 /// Sweep a bot's whole step against living heroes. Existing spawn/respawn
 /// overlaps may recover outwards, but a step cannot enter a different hero.
 fn clip_hero_step(from: [f32; 2], to: [f32; 2], others: &[(u64, [f32; 2])]) -> [f32; 2] {
@@ -206,6 +334,34 @@ pub struct BotControllers {
 }
 
 impl BotControllers {
+    /// Attach AI to an existing retained human without changing its identity,
+    /// build, progression or the controller's current plan on repeated votes.
+    pub fn attach_existing(&mut self, addr: SocketAddr, class: HeroClass, now: Instant) {
+        let (_, lane, jungle) = BOT_COMPOSITION
+            .iter()
+            .copied()
+            .find(|(candidate, ..)| *candidate == class)
+            .unwrap_or((class, Lane::Mid, false));
+        self.controllers.entry(addr).or_insert_with(|| Controller {
+            kind: BotKind::Duelist,
+            lane,
+            jungle,
+            waypoint: 1,
+            route: VecDeque::new(),
+            goal: None,
+            next_route: now,
+            next_think: now,
+            next_retreat: now,
+            retreat_until: None,
+            target: None,
+            holding_range: false,
+        });
+    }
+
+    pub fn detach(&mut self, addr: SocketAddr) {
+        self.controllers.remove(&addr);
+    }
+
     pub fn clear(&mut self) {
         self.controllers.clear();
         self.sandbox = false;
@@ -470,10 +626,7 @@ impl CombatHost<'_> {
     }
 
     pub fn simulate_bots(&mut self, now: Instant, dt: f32) {
-        if !self.rules.fills_with_bots
-            || !matches!(self.world.game_state, GameState::Running)
-            || dt <= 0.0
-        {
+        if !matches!(self.world.game_state, GameState::Running) || dt <= 0.0 {
             return;
         }
         let mut addresses: Vec<_> = self.bots.controllers.keys().copied().collect();
@@ -499,6 +652,16 @@ impl CombatHost<'_> {
             let Some(player) = self.world.players.get(&addr) else {
                 continue;
             };
+            if player
+                .hero
+                .skills
+                .control
+                .stun_until
+                .is_some_and(|until| until > now)
+            {
+                self.bots.controllers.insert(addr, controller);
+                continue;
+            }
             if let BotKind::MovingDummy {
                 anchor,
                 started,
@@ -580,6 +743,42 @@ impl CombatHost<'_> {
             }
             let team = player.hero.identity.team;
             let origin = [player.hero.x, player.hero.z];
+            let danger: Vec<_> = self
+                .world
+                .structures
+                .values()
+                .filter(|tower| !tower_has_minion_cover(tower, team, &self.world.minions))
+                .filter(|tower| {
+                    tower.state.team != team
+                        && tower.state.hp > 0.0
+                        && tower.attack_range > 0.0
+                        && tower.attack_damage > 0.0
+                })
+                .map(|tower| shared::navigation::Disc {
+                    center: [tower.state.x, tower.state.z],
+                    radius: tower.attack_range + shared::PLAYER_TARGET_RADIUS + 0.75,
+                })
+                .collect();
+            let turret_retreat = danger
+                .iter()
+                .filter(|disc| {
+                    (origin[0] - disc.center[0]).hypot(origin[1] - disc.center[1]) < disc.radius
+                })
+                .min_by(|a, b| {
+                    (origin[0] - a.center[0])
+                        .hypot(origin[1] - a.center[1])
+                        .total_cmp(&(origin[0] - b.center[0]).hypot(origin[1] - b.center[1]))
+                });
+            if turret_retreat.is_some() {
+                // This check is per movement tick, not the slower target cadence.
+                controller.target = None;
+                controller.holding_range = false;
+                controller.route.clear();
+                controller.goal = None;
+                controller.next_think = now;
+            }
+            let mut safe_discs = discs.clone();
+            safe_discs.extend(danger.iter().copied());
             let low_health = player.hero.hp < player.hero.max_hp * 0.28;
             if low_health && now >= controller.next_retreat {
                 controller.retreat_until = Some(now + Duration::from_secs(6));
@@ -587,7 +786,8 @@ impl CombatHost<'_> {
                 controller.route.clear();
                 controller.next_route = now;
             }
-            let retreating = controller.retreat_until.is_some_and(|until| now < until);
+            let retreating = turret_retreat.is_some()
+                || controller.retreat_until.is_some_and(|until| now < until);
             if now >= controller.next_think {
                 controller.next_think = now + THINK_INTERVAL;
                 {
@@ -635,6 +835,20 @@ impl CombatHost<'_> {
                             }
                         })
                 };
+                controller.target = controller.target.filter(|target| {
+                    basic_attack::resolve_hostile_target(
+                        team,
+                        *target,
+                        &self.world.players,
+                        &self.world.minions,
+                        &self.world.structures,
+                        &self.world.neutrals,
+                    )
+                    .is_some_and(|(point, _)| {
+                        let goal = [point.x, point.z];
+                        shared::navigation::clip_discs(origin, goal, &danger) == goal
+                    })
+                });
                 if controller.target != previous_target {
                     controller.holding_range = false;
                     controller.route.clear();
@@ -650,7 +864,29 @@ impl CombatHost<'_> {
                             &self.world.structures,
                             &self.world.neutrals,
                         ) {
-                            for slot in 0..4 {
+                            let mut skill_order = [0, 1, 2, 3];
+                            skill_order.sort_by_key(|slot| {
+                                use shared::loadout::{SkillEffect, Technique};
+                                match self.world.players[&addr]
+                                    .hero
+                                    .skills
+                                    .loadout
+                                    .unwrap()
+                                    .skill(SkillSlot::from_index(*slot).unwrap())
+                                    .effect
+                                {
+                                    SkillEffect::Technique {
+                                        action: Technique::DaggerBluff,
+                                        ..
+                                    } => 0,
+                                    SkillEffect::Technique {
+                                        action: Technique::DaggerBackstab,
+                                        ..
+                                    } => 1,
+                                    _ => 2,
+                                }
+                            });
+                            for slot in skill_order {
                                 let p = &self.world.players[&addr];
                                 let definition = p
                                     .hero
@@ -686,6 +922,17 @@ impl CombatHost<'_> {
                                         let f = definition.ability.cast_range / dist;
                                         aim = [p.hero.x + dx * f, p.hero.z + dz * f];
                                     }
+                                }
+                                let recast = p.hero.skills.advanced.recasts[slot as usize]
+                                    .as_ref()
+                                    .is_some_and(|r| r.until > now && r.uses > 0);
+                                if !bot_mobility_safe(
+                                    definition,
+                                    [p.hero.x, p.hero.z],
+                                    recast,
+                                    &danger,
+                                ) {
+                                    continue;
                                 }
                                 let request = p.hero.skills.request_id.saturating_add(1);
                                 crate::skills::cast(self.world, addr, slot, aim, request, now);
@@ -728,6 +975,18 @@ impl CombatHost<'_> {
                     }
                 }
             }
+            // Mobility casts may displace the actor during this think tick.
+            // Replan from the authoritative endpoint instead of steering along
+            // a route and checking attack reach from the pre-cast position.
+            let current = &self.world.players[&addr].hero;
+            let current_origin = [current.x, current.z];
+            if current_origin != origin {
+                controller.route.clear();
+                controller.goal = None;
+                controller.holding_range = false;
+                controller.next_route = now;
+            }
+            let origin = current_origin;
             let target = controller
                 .target
                 .filter(|target| vision::target_visible(team, *target, self.world, now))
@@ -744,7 +1003,19 @@ impl CombatHost<'_> {
                 });
             let reach = crate::skills::attack_modifiers(&self.world.players[&addr]).0;
             let mut in_range = false;
-            let destination = if retreating {
+            let destination = if let Some(disc) = turret_retreat {
+                let spawn = spawn_position_for_team(&self.world.map_layout, team);
+                let mut away = [origin[0] - disc.center[0], origin[1] - disc.center[1]];
+                let mut length = away[0].hypot(away[1]);
+                if length < 0.001 {
+                    away = [spawn.x - disc.center[0], spawn.z - disc.center[1]];
+                    length = away[0].hypot(away[1]).max(0.001);
+                }
+                [
+                    disc.center[0] + away[0] / length * (disc.radius + 1.0),
+                    disc.center[1] + away[1] / length * (disc.radius + 1.0),
+                ]
+            } else if retreating {
                 let spawn = spawn_position_for_team(&self.world.map_layout, team);
                 [spawn.x, spawn.z]
             } else if let Some((target, position, radius)) = target {
@@ -787,10 +1058,12 @@ impl CombatHost<'_> {
                     controller.waypoint += 1;
                 }
                 let point = path[controller.waypoint.min(path.len() - 1)];
-                [point.x, point.z]
+                lane_staging_destination(self.world, team, controller.lane, [point.x, point.z])
             };
             let mut desired = origin;
-            if !in_range {
+            if turret_retreat.is_some() {
+                desired = destination;
+            } else if !in_range {
                 let goal_changed = controller
                     .goal
                     .is_none_or(|p| (p[0] - destination[0]).hypot(p[1] - destination[1]) > 2.0);
@@ -798,7 +1071,7 @@ impl CombatHost<'_> {
                     controller.next_route = now + ROUTE_INTERVAL;
                     controller.goal = Some(destination);
                     controller.route = shared::navigation::world_navigation()
-                        .plan_route(origin, destination, &discs)
+                        .plan_route(origin, destination, &safe_discs)
                         .unwrap_or_default()
                         .into();
                 }
@@ -829,6 +1102,7 @@ impl CombatHost<'_> {
                 * self.world.players[&addr].hero.skills.movement(now)
                 * dt;
             let accepted = steer_bot_step(id, origin, desired, step, &others, &discs);
+            let accepted = shared::navigation::clip_discs(origin, accepted, &danger);
             let movement = [accepted[0] - origin[0], accepted[1] - origin[1]];
             if movement[0].hypot(movement[1]) > 0.000_1 {
                 let player = self.world.players.get_mut(&addr).unwrap();
@@ -972,6 +1246,7 @@ impl CombatHost<'_> {
             .filter(|s| {
                 s.state.hp > 0.0
                     && s.state.team != team
+                    && tower_has_minion_cover(s, team, &self.world.minions)
                     && !structure_is_protected(&self.world.structures, s.state.id)
                     && match s.role {
                         StructureRole::BaseTower => true,
@@ -999,5 +1274,286 @@ impl CombatHost<'_> {
                 kind: TargetKind::Structure,
                 id: s.state.id,
             })
+    }
+}
+
+#[cfg(test)]
+mod turret_tests {
+    use super::*;
+    use crate::{
+        combat_feedback::CombatLog,
+        game_world::GameWorld,
+        match_rules::{MatchMode, MatchRules},
+    };
+    use shared::wire::StructureKind;
+
+    #[test]
+    fn dagger_bot_bluffs_before_backstab_and_stunned_bot_preserves_rear_facing() {
+        let now = Instant::now();
+        let mut world = GameWorld::empty();
+        let address: SocketAddr = "[::]:31101".parse().unwrap();
+        let enemy: SocketAddr = "[::]:31102".parse().unwrap();
+        for (addr, team, class, x) in [
+            (address, Team::Green, HeroClass::Adventurer, 0.0),
+            (enemy, Team::Blue, HeroClass::Warrior, 2.0),
+        ] {
+            world.ensure_connected(addr, now);
+            crate::session::handle_join_request(
+                world.players.get_mut(&addr).unwrap(),
+                team,
+                shared::wire::CharacterChoice::Ipfs,
+                class,
+                None,
+                &world.map_layout,
+                now,
+            );
+            let p = world.players.get_mut(&addr).unwrap();
+            p.hero.x = x;
+            p.hero.z = 0.0;
+            p.hero.hp = 1000.0;
+            p.hero.max_hp = 1000.0;
+            p.hero.mana = 500.0;
+            p.hero.max_mana = 500.0;
+            p.modifiers.unlock_all = true;
+            p.hero.progress.skill_points = 0;
+        }
+        let mut bots = BotControllers::default();
+        bots.attach_existing(address, HeroClass::Adventurer, now);
+        let mut log = CombatLog::default();
+        let mut host = CombatHost {
+            world: &mut world,
+            bots: &mut bots,
+            combat_log: &mut log,
+            rules: MatchRules::for_mode(MatchMode::Release, 1),
+            match_id: 1,
+        };
+        host.simulate_bots(now + Duration::from_millis(10), 0.01);
+        let p = &host.world.players[&address];
+        assert!(p.timers.last_cast_at[1].is_some(), "Bluff must be first");
+        assert!(p.timers.last_cast_at[0].is_none());
+        assert!(p.timers.last_cast_at[2].is_none());
+        let away = host.world.players[&enemy].hero.yaw;
+        host.bots.attach_existing(enemy, HeroClass::Warrior, now);
+        host.simulate_bots(now + Duration::from_millis(310), 0.01);
+        assert!(
+            host.world.players[&address].timers.last_cast_at[2].is_some(),
+            "follow Bluff with Backstab"
+        );
+        assert!(host.world.players[&enemy].hero.hp < 1000.0);
+        assert_eq!(host.world.players[&enemy].hero.yaw, away);
+        assert!(
+            host.world.players[&enemy]
+                .timers
+                .last_basic_attack_at
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn retained_advanced_bot_does_not_retreat_dash_into_an_uncovered_turret() {
+        let mut now = Instant::now();
+        let mut world = GameWorld::empty();
+        // Both attack approach and backwards retreat need a real terrain-clear
+        // corridor; a blocked dash would not exercise the turret hazard.
+        let nav = shared::navigation::world_navigation();
+        let origin = (-40..=40)
+            .step_by(5)
+            .flat_map(|x| (-40..=40).step_by(5).map(move |z| [x as f32, z as f32]))
+            .find(|p| nav.segment_clear([p[0] - 4.0, p[1]], [p[0] + 12.0, p[1]]))
+            .expect("map must provide a clear corridor for the retreat fixture");
+        let tower = [origin[0] + 12.0, origin[1]];
+        assert_eq!(
+            nav.clip_movement(origin, [origin[0] + 7.0, origin[1]]),
+            [origin[0] + 7.0, origin[1]]
+        );
+        let address: SocketAddr = "[::]:31001".parse().unwrap();
+        let enemy: SocketAddr = "127.0.0.1:31002".parse().unwrap();
+        for (addr, team, class, x) in [
+            (address, Team::Green, HeroClass::Veilstalker, origin[0]),
+            (enemy, Team::Blue, HeroClass::Warrior, origin[0] - 4.0),
+        ] {
+            world.ensure_connected(addr, now);
+            crate::session::handle_join_request(
+                world.players.get_mut(&addr).unwrap(),
+                team,
+                shared::wire::CharacterChoice::Ipfs,
+                class,
+                None,
+                &world.map_layout,
+                now,
+            );
+            let p = world.players.get_mut(&addr).unwrap();
+            p.hero.x = x;
+            p.hero.z = origin[1];
+            p.hero.hp = 1000.0;
+            p.hero.max_hp = 1000.0;
+            p.hero.mana = 500.0;
+            p.hero.max_mana = 500.0;
+            p.hero.progress.level = 10;
+            p.hero.progress.ranks = [3; 4];
+            p.hero.progress.skill_points = 0;
+        }
+        // Isolate the backwards retreat; other skills remain on cooldown.
+        world.players.get_mut(&address).unwrap().timers.last_cast_at =
+            [Some(now), Some(now), Some(now), None];
+        let mut next = 1;
+        crate::world::add_structure(
+            &mut world.structures,
+            &mut next,
+            StructureKind::Tower,
+            StructureRole::LaneTower { lane: Lane::Mid },
+            Team::Blue,
+            crate::entities::Vec3f::new(tower[0], 3.0, tower[1]),
+        );
+        world.structures.get_mut(&1).unwrap().attack_range = 8.0;
+        let mut bots = BotControllers::default();
+        bots.attach_existing(address, HeroClass::Veilstalker, now);
+        let mut log = CombatLog::default();
+        let mut host = CombatHost {
+            world: &mut world,
+            bots: &mut bots,
+            combat_log: &mut log,
+            rules: MatchRules::for_mode(MatchMode::Release, 1),
+            match_id: 1,
+        };
+        now += Duration::from_millis(50);
+        host.simulate_bots(now, 0.05);
+        let p = &host.world.players[&address];
+        assert!(
+            p.timers.last_cast_at[3].is_none(),
+            "unsafe displacement must be rejected before cast side effects"
+        );
+        assert!((p.hero.x - tower[0]).hypot(p.hero.z - tower[1]) > 8.0);
+        assert!(!p.hero.identity.is_bot);
+        crate::world::spawn_minion_wave_for_team_lane(
+            &host.world.map_layout,
+            &mut host.world.minions,
+            &mut host.world.next_minion_id,
+            Team::Green,
+            Lane::Mid,
+        );
+        for minion in host.world.minions.values_mut() {
+            minion.state.x = tower[0];
+            minion.state.z = tower[1] + 2.0;
+        }
+        host.world.players.get_mut(&address).unwrap().hero.x = origin[0];
+        host.world.players.get_mut(&address).unwrap().hero.z = origin[1];
+        now += Duration::from_millis(400);
+        host.simulate_bots(now, 0.05);
+        let p = &host.world.players[&address];
+        assert!(
+            p.timers.last_cast_at[3].is_some(),
+            "cover must permit the same mobility skill"
+        );
+        assert!(
+            (p.hero.x - tower[0]).hypot(p.hero.z - tower[1]) < 8.0,
+            "fixture must exercise an actual backwards dash toward the turret: origin={origin:?}, tower={tower:?}, actual={:?}",
+            [p.hero.x, p.hero.z]
+        );
+    }
+
+    #[test]
+    fn bots_wait_for_actual_turret_cover_and_retreat_on_the_first_unprotected_tick() {
+        let mut now = Instant::now();
+        let mut world = GameWorld::empty();
+        let address: SocketAddr = "[::]:30001".parse().unwrap();
+        world.ensure_connected(address, now);
+        let actor = world.players.get_mut(&address).unwrap();
+        actor.joined = true;
+        actor.hero.identity.team = Team::Green;
+        actor.hero.identity.hero_class = HeroClass::Warrior;
+        actor.hero.x = -16.0;
+        actor.hero.z = -8.0;
+        actor.hero.hp = actor.hero.max_hp;
+        let mut next = 1;
+        crate::world::add_structure(
+            &mut world.structures,
+            &mut next,
+            StructureKind::Tower,
+            StructureRole::LaneTower { lane: Lane::Top },
+            Team::Blue,
+            crate::entities::Vec3f::new(-4.0, 3.0, -8.0),
+        );
+        world.structures.get_mut(&1).unwrap().attack_range = 8.0;
+        let mut controllers = BotControllers::default();
+        controllers.attach_existing(address, HeroClass::Warrior, now);
+        controllers.attach_existing(address, HeroClass::Warrior, now);
+        assert_eq!(controllers.controllers.len(), 1);
+        let mut log = CombatLog::default();
+        let mut host = CombatHost {
+            world: &mut world,
+            bots: &mut controllers,
+            combat_log: &mut log,
+            rules: MatchRules::for_mode(MatchMode::Release, 1),
+            match_id: 1,
+        };
+        for _ in 0..100 {
+            now += Duration::from_millis(50);
+            host.simulate_bots(now, 0.05);
+            let hero = &host.world.players[&address].hero;
+            assert!(
+                (hero.x + 4.0).hypot(hero.z + 8.0) > 8.0,
+                "uncovered turret cannot be entered"
+            );
+        }
+        crate::world::spawn_minion_wave_for_team_lane(
+            &host.world.map_layout,
+            &mut host.world.minions,
+            &mut host.world.next_minion_id,
+            Team::Green,
+            Lane::Top,
+        );
+        for minion in host.world.minions.values_mut() {
+            minion.state.x = -4.0;
+            minion.state.z = -6.0;
+        }
+        assert!(tower_has_minion_cover(
+            &host.world.structures[&1],
+            Team::Green,
+            &host.world.minions
+        ));
+        // Reset only placement, keeping the same real controller and movement authority.
+        let hero = host.world.players.get_mut(&address).unwrap();
+        hero.hero.x = -16.0;
+        hero.hero.z = -8.0;
+        for _ in 0..160 {
+            now += Duration::from_millis(50);
+            host.simulate_bots(now, 0.05);
+        }
+        let hero = &host.world.players[&address].hero;
+        let before = (hero.x + 4.0).hypot(hero.z + 8.0);
+        assert!(
+            before < 8.0,
+            "living allied minions permit a push: {before}"
+        );
+        for minion in host.world.minions.values_mut() {
+            minion.state.hp = 0.0;
+        }
+        assert!(!tower_has_minion_cover(
+            &host.world.structures[&1],
+            Team::Green,
+            &host.world.minions
+        ));
+        let shots = host.world.next_projectile_id;
+        now += Duration::from_millis(50);
+        host.simulate_bots(now, 0.05);
+        let hero = &host.world.players[&address].hero;
+        assert!(
+            (hero.x + 4.0).hypot(hero.z + 8.0) > before,
+            "retreat begins immediately"
+        );
+        assert_eq!(
+            host.world.next_projectile_id, shots,
+            "retreat interrupts attack intent"
+        );
+        for _ in 0..100 {
+            now += Duration::from_millis(50);
+            host.simulate_bots(now, 0.05);
+        }
+        let hero = &host.world.players[&address].hero;
+        assert!((hero.x + 4.0).hypot(hero.z + 8.0) > 8.0);
+        assert!(!hero.identity.is_bot, "takeover retains human identity");
+        host.bots.detach(address);
+        assert!(host.bots.controllers.is_empty());
     }
 }

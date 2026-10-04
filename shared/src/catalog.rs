@@ -153,11 +153,18 @@ struct RawItemCatalog {
 struct RawItem {
     id: ItemId,
     name: String,
+    #[serde(default)]
+    components: Vec<ItemId>,
+    #[serde(default = "base_tier")]
+    tier: u8,
     description: String,
     cost: u32,
     /// A partial `ItemBonuses`: omitted fields keep their neutral value.
     #[serde(default)]
     bonuses: Map<String, Value>,
+}
+fn base_tier() -> u8 {
+    1
 }
 
 // --- Parsing and validation ---
@@ -433,11 +440,9 @@ fn parse_items(json: &str) -> Result<Vec<ItemDefinition>, String> {
         check_text(context, "name", &item.name)?;
         check_text(context, "description", &item.description)?;
         check(item.cost > 0, || format!("{context}: cost must be above 0"))?;
-        if let Some(unknown) = item
-            .bonuses
-            .keys()
-            .find(|key| !bonus_fields.contains_key(*key))
-        {
+        if let Some(unknown) = item.bonuses.keys().find(|key| {
+            !bonus_fields.contains_key(*key) && !matches!(key.as_str(), "crit_chance" | "lifesteal")
+        }) {
             return Err(format!("{context}: unknown bonus {unknown:?}"));
         }
         let bonuses: ItemBonuses = serde_json::from_value(Value::Object(item.bonuses))
@@ -452,12 +457,48 @@ fn parse_items(json: &str) -> Result<Vec<ItemDefinition>, String> {
         }
         check_at_least(context, "max_hp", bonuses.max_hp, 0.0)?;
         check_at_least(context, "max_mana", bonuses.max_mana, 0.0)?;
+        for (field, value) in [
+            ("crit_chance", bonuses.crit_chance),
+            ("lifesteal", bonuses.lifesteal),
+        ] {
+            check(value.is_finite() && (0.0..=0.75).contains(&value), || {
+                format!("{context}: {field} must be between 0 and 0.75")
+            })?;
+        }
+        check((1..=3).contains(&item.tier), || {
+            format!("{context}: tier must be 1..=3")
+        })?;
+        let mut unique = HashSet::new();
+        let mut component_cost = 0;
+        for component in &item.components {
+            let Some(definition) = items
+                .iter()
+                .find(|definition: &&ItemDefinition| definition.id == *component)
+            else {
+                return Err(format!(
+                    "{context}: recipe components must precede their upgrade (no cycles)"
+                ));
+            };
+            check(
+                unique.insert(*component) && definition.tier < item.tier,
+                || format!("{context}: components must be unique and lower tier"),
+            )?;
+            component_cost += definition.cost;
+        }
+        check(item.cost >= component_cost, || {
+            format!("{context}: total price must cover components")
+        })?;
+        check((item.tier == 1) == item.components.is_empty(), || {
+            format!("{context}: upgrades require components")
+        })?;
         items.push(ItemDefinition {
             id,
             name: leak(item.name),
             description: leak(item.description),
             cost: item.cost,
             bonuses,
+            components: Box::leak(item.components.into_boxed_slice()),
+            tier: item.tier,
         });
     }
     Ok(items)
@@ -530,7 +571,7 @@ mod tests {
             heroes_with(|v| {
                 v["classes"].as_array_mut().unwrap().pop();
             }),
-            "15 classes, expected one per HeroClass (16)",
+            "16 classes, expected one per HeroClass (17)",
         );
         assert_rejected(
             items_with(|v| v["items"].as_array_mut().unwrap().swap(1, 2)),
@@ -540,7 +581,7 @@ mod tests {
             items_with(|v| {
                 v["items"].as_array_mut().unwrap().pop();
             }),
-            "5 items, expected one per ItemId (6)",
+            "15 items, expected one per ItemId (16)",
         );
     }
 
@@ -689,22 +730,34 @@ mod tests {
                     .unwrap()
                     .pop();
             }),
-            "ranger: recommended_items lists \"focus_charm\" 0 times",
+            "ranger: recommended_items lists \"aether_crown\" 0 times",
         );
     }
 
     #[test]
-    fn starter_budget_opens_every_build_and_the_duel_budget_fills_the_inventory() {
+    fn starter_budget_opens_every_build_and_the_duel_budget_finishes_recommendations() {
         for class in HeroClass::ALL {
             let first = crate::shop::recommended_items(class)[0];
             assert!(
                 crate::shop::item(first).cost <= STARTING_GOLD,
                 "{class:?} cannot afford its first item"
             );
-            assert_eq!(
-                crate::shop::plan_purchases(class, STARTING_GOLD + DUEL_MAX_GOLD, &[]).len(),
-                INVENTORY_CAPACITY,
-                "{class:?}"
+            let mut owned = Vec::new();
+            let mut gold = STARTING_GOLD + DUEL_MAX_GOLD;
+            for id in crate::shop::plan_purchases(class, gold, &[]) {
+                let quote = crate::shop::purchase_quote(id, gold, &owned).unwrap();
+                gold -= quote.cost;
+                owned.retain(|id| !quote.consumed.contains(id));
+                owned.push(id);
+            }
+            assert!(owned.len() <= INVENTORY_CAPACITY, "{class:?}");
+            assert!(owned.len() >= 5, "{class:?}: {owned:?}");
+            assert!(
+                crate::shop::recommended_items(class).iter().all(|id| {
+                    crate::shop::inventory_covers(*id, &owned)
+                        || crate::shop::purchase_quote(*id, gold, &owned).is_err()
+                }),
+                "{class:?}: completed plan must not leave an affordable missing upgrade"
             );
         }
     }

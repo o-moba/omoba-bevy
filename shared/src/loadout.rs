@@ -7,7 +7,7 @@ use crate::{AbilityDefinition, HeroClass, MAX_ABILITY_RANK, SkillSlot, Targeting
 use serde::{Deserialize, Serialize};
 use std::sync::LazyLock;
 
-pub const CATALOG_REVISION: &str = "standard-kits-2";
+pub const CATALOG_REVISION: &str = "standard-kits-3";
 pub const RECIPE_SCHEMA_VERSION: u16 = 1;
 pub const MAX_ACTIVE_EFFECTS: usize = 128;
 pub const MAX_EFFECTS_PER_OWNER: usize = 16;
@@ -27,6 +27,7 @@ pub enum CoreId {
     Riftshot,
     Chainkeeper,
     Frostguard,
+    Adventurer,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -76,9 +77,13 @@ pub enum SkillId {
     ShelteringLeap,
     Northwall,
     WinterDivide,
+    DaggerDeadlyBlow,
+    DaggerBluff,
+    DaggerBackstab,
+    DaggerLethalBlow,
 }
 impl SkillId {
-    pub const ALL: [Self; 44] = [
+    pub const ALL: [Self; 48] = [
         Self::DawnBind,
         Self::DawnBarrier,
         Self::DawnField,
@@ -123,6 +128,10 @@ impl SkillId {
         Self::ShelteringLeap,
         Self::Northwall,
         Self::WinterDivide,
+        Self::DaggerDeadlyBlow,
+        Self::DaggerBluff,
+        Self::DaggerBackstab,
+        Self::DaggerLethalBlow,
     ];
     pub const fn id(self) -> &'static str {
         match self {
@@ -170,6 +179,10 @@ impl SkillId {
             Self::ShelteringLeap => "sheltering_leap",
             Self::Northwall => "northwall",
             Self::WinterDivide => "winter_divide",
+            Self::DaggerDeadlyBlow => "dagger_deadly_blow",
+            Self::DaggerBluff => "dagger_bluff",
+            Self::DaggerBackstab => "dagger_backstab",
+            Self::DaggerLethalBlow => "dagger_lethal_blow",
         }
     }
     pub fn from_id(id: &str) -> Option<Self> {
@@ -191,6 +204,7 @@ pub enum PassiveId {
     Resonance,
     Souls,
     Concussion,
+    DaggerMastery,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -276,6 +290,7 @@ impl CoreId {
             Self::Riftshot => HeroClass::Riftshot,
             Self::Chainkeeper => HeroClass::Chainkeeper,
             Self::Frostguard => HeroClass::Frostguard,
+            Self::Adventurer => HeroClass::Adventurer,
         }
     }
     pub const fn attack_profile(self) -> AttackProfileId {
@@ -291,6 +306,7 @@ impl CoreId {
             Self::Riftshot => AttackProfileId::LightBolt,
             Self::Chainkeeper => AttackProfileId::LightBolt,
             Self::Frostguard => AttackProfileId::Melee,
+            Self::Adventurer => AttackProfileId::Melee,
         }
     }
     pub fn preset(self) -> BuildRecipe {
@@ -377,6 +393,15 @@ impl CoreId {
                 ],
             ),
 
+            Self::Adventurer => (
+                PassiveId::DaggerMastery,
+                [
+                    SkillId::DaggerDeadlyBlow,
+                    SkillId::DaggerBluff,
+                    SkillId::DaggerBackstab,
+                    SkillId::DaggerLethalBlow,
+                ],
+            ),
             Self::Dawnweaver => (
                 PassiveId::Radiance,
                 [
@@ -478,6 +503,7 @@ pub fn preset_for_class(class: HeroClass) -> Option<ResolvedLoadout> {
         HeroClass::Riftshot => CoreId::Riftshot,
         HeroClass::Chainkeeper => CoreId::Chainkeeper,
         HeroClass::Frostguard => CoreId::Frostguard,
+        HeroClass::Adventurer => CoreId::Adventurer,
 
         _ => return None,
     };
@@ -528,6 +554,10 @@ pub enum Technique {
     AllyLeap,
     InterceptShield,
     GlacialFissure,
+    DaggerDeadlyBlow,
+    DaggerBluff,
+    DaggerBackstab,
+    DaggerLethalBlow,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq)]
@@ -753,7 +783,8 @@ pub fn passive(id: PassiveId) -> PassiveEffect {
         | PassiveId::Clockwork
         | PassiveId::Resonance
         | PassiveId::Souls
-        | PassiveId::Concussion => PassiveEffect::Advanced(id),
+        | PassiveId::Concussion
+        | PassiveId::DaggerMastery => PassiveEffect::Advanced(id),
         PassiveId::Radiance => PassiveEffect::Radiance {
             mark_duration_secs: 6.0,
             bonus_damage: 18.0,
@@ -893,6 +924,9 @@ pub struct LoadoutState {
     pub weapon_mode: WeaponMode,
     pub shield_hp: f32,
     pub root_remaining_secs: f32,
+    /// Stun alone freezes facing; ordinary roots only prevent translation.
+    #[serde(default, skip_serializing_if = "seconds_are_zero")]
+    pub stun_remaining_secs: f32,
     pub slow_multiplier: f32,
     pub movement_multiplier: f32,
     pub basic_attack_range: f32,
@@ -902,6 +936,10 @@ pub struct LoadoutState {
     pub mark_remaining_secs: f32,
     pub cast_request_id: u64,
 }
+fn seconds_are_zero(seconds: &f32) -> bool {
+    *seconds == 0.0
+}
+
 impl Default for LoadoutState {
     fn default() -> Self {
         Self {
@@ -923,6 +961,7 @@ impl Default for LoadoutState {
             weapon_mode: WeaponMode::Repeater,
             shield_hp: 0.0,
             root_remaining_secs: 0.0,
+            stun_remaining_secs: 0.0,
             slow_multiplier: 1.0,
             movement_multiplier: 1.0,
             basic_attack_range: 0.0,
@@ -1001,6 +1040,57 @@ mod tests {
             Err(LoadoutError::WrongSlot { .. })
         ));
     }
+    #[test]
+    fn adventurer_kit_and_each_dagger_skill_resolve_on_unrelated_cores() {
+        let adventurer = CoreId::Adventurer.preset();
+        let resolved = resolve(&adventurer).unwrap();
+        assert_eq!(resolved.core().class(), HeroClass::Adventurer);
+        assert_eq!(resolved.passive(), PassiveId::DaggerMastery);
+        assert_eq!(resolved.attack_profile(), AttackProfileId::Melee);
+        assert_eq!(
+            serde_json::from_str::<BuildRecipe>(&serde_json::to_string(&adventurer).unwrap())
+                .unwrap(),
+            adventurer
+        );
+        for (slot, skill) in SkillSlot::ALL.into_iter().zip(adventurer.skills) {
+            assert_eq!(resolved.skill(slot).id, skill);
+            assert_eq!(resolved.skill(slot).ability.targeting, TargetingMode::Point);
+            for core in [CoreId::Dawnweaver, CoreId::Wildspark, CoreId::Stormfist] {
+                let mut mixed = core.preset();
+                mixed.skills[slot.index()] = skill;
+                mixed.passive = PassiveId::DaggerMastery;
+                let resolved = resolve(&mixed).unwrap();
+                assert_eq!(resolved.skill(slot).id, skill);
+                assert_eq!(resolved.core(), core);
+            }
+        }
+        let mut fully_mixed = CoreId::Dawnweaver.preset();
+        fully_mixed.skills = adventurer.skills;
+        assert_eq!(resolve(&fully_mixed).unwrap().skills(), adventurer.skills);
+    }
+
+    #[test]
+    fn stun_presentation_state_is_distinct_from_root_and_legacy_absence_is_zero() {
+        let rooted = LoadoutState {
+            root_remaining_secs: 1.5,
+            ..Default::default()
+        };
+        let legacy = serde_json::to_value(&rooted).unwrap();
+        assert!(legacy.get("stun_remaining_secs").is_none());
+        let parsed: LoadoutState = serde_json::from_value(legacy).unwrap();
+        assert_eq!(parsed.stun_remaining_secs, 0.0);
+        assert_eq!(parsed.root_remaining_secs, 1.5);
+        let stunned = LoadoutState {
+            stun_remaining_secs: 0.7,
+            ..rooted
+        };
+        assert_eq!(
+            serde_json::from_value::<LoadoutState>(serde_json::to_value(&stunned).unwrap())
+                .unwrap(),
+            stunned
+        );
+    }
+
     #[test]
     fn untrusted_recipes_cannot_inject_numbers_scripts_unknown_skills_or_revision() {
         let recipe = CoreId::Dawnweaver.preset();

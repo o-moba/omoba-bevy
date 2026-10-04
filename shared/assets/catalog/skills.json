@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "revision": "standard-kits-2",
+  "revision": "standard-kits-3",
   "skills": [
     {
       "id": "dawn_bind",
@@ -888,6 +888,86 @@
         "radius": 2,
         "duration_secs": 4,
         "speed": 25
+      }
+    },
+    {
+      "id": "dagger_deadly_blow",
+      "slot": "q",
+      "name": "Deadly Blow",
+      "description": "A quick close-range dagger strike.",
+      "targeting": "point",
+      "mana_cost": 12,
+      "cooldown_secs": 5,
+      "cast_range": 2.6,
+      "windup_secs": 0.08,
+      "damage_type": "physical",
+      "effect": {
+        "kind": "technique",
+        "action": "dagger_deadly_blow",
+        "damage": 22,
+        "radius": 1.4,
+        "duration_secs": 0.35,
+        "speed": 0
+      }
+    },
+    {
+      "id": "dagger_bluff",
+      "slot": "w",
+      "name": "Bluff",
+      "description": "Stun a nearby enemy hero for 1 second and turn their back to you.",
+      "targeting": "point",
+      "mana_cost": 20,
+      "cooldown_secs": 14,
+      "cast_range": 2.8,
+      "windup_secs": 0.08,
+      "damage_type": "physical",
+      "effect": {
+        "kind": "technique",
+        "action": "dagger_bluff",
+        "damage": 0,
+        "radius": 1.4,
+        "duration_secs": 1,
+        "speed": 0
+      }
+    },
+    {
+      "id": "dagger_backstab",
+      "slot": "e",
+      "name": "Backstab",
+      "description": "Strike for 2.5x damage from behind. A rear hit that wounds a surviving hero has a 2% chance to leave 1 HP.",
+      "targeting": "point",
+      "mana_cost": 18,
+      "cooldown_secs": 9,
+      "cast_range": 2.6,
+      "windup_secs": 0.1,
+      "damage_type": "physical",
+      "effect": {
+        "kind": "technique",
+        "action": "dagger_backstab",
+        "damage": 16,
+        "radius": 1.4,
+        "duration_secs": 0.4,
+        "speed": 0
+      }
+    },
+    {
+      "id": "dagger_lethal_blow",
+      "slot": "r",
+      "name": "Lethal Blow",
+      "description": "A heavy close-range dagger strike; 1.5x damage from behind.",
+      "targeting": "point",
+      "mana_cost": 28,
+      "cooldown_secs": 22,
+      "cast_range": 2.6,
+      "windup_secs": 0.18,
+      "damage_type": "physical",
+      "effect": {
+        "kind": "technique",
+        "action": "dagger_lethal_blow",
+        "damage": 38,
+        "radius": 1.4,
+        "duration_secs": 0.5,
+        "speed": 0
       }
     }
   ]

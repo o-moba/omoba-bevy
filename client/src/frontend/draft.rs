@@ -116,11 +116,20 @@ struct PendingRequest {
     last_sent: f64,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum PickerTab {
+    #[default]
+    Avatars,
+    Classes,
+    Weapons,
+}
+
 #[derive(Resource, Default)]
 pub(super) struct DraftClient {
     namespace: Option<(u64, u64, u64)>,
     next_request_id: u64,
     choice: Option<Choice>,
+    picker_tab: PickerTab,
     pending: Option<PendingRequest>,
     desired_lock: Option<bool>,
     wants_loaded: bool,
@@ -210,6 +219,7 @@ fn sync_draft(
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum DraftAction {
+    Picker(PickerTab),
     Class(HeroClass),
     Role(Role),
     Avatar(String),
@@ -250,6 +260,7 @@ fn draft_actions(
                 omoba_passport::weapon_store::refresh(true);
             }
             DraftAction::Connect => crate::passport::connect_account(),
+            DraftAction::Picker(tab) => state.picker_tab = *tab,
             DraftAction::Lock if draft.phase == PrematchPhase::Draft => {
                 state.notice = None;
                 state.desired_lock = Some(!local.locked);
@@ -611,7 +622,19 @@ fn render_draft(
         return;
     };
     if let Some(stage) = party_stage.as_mut() {
-        stage::sync_members(stage, draft, game.your_id);
+        let mut preview_roster = draft.clone();
+        if let (Some(choice), Some(local)) = (
+            state.choice.as_ref(),
+            preview_roster
+                .players
+                .iter_mut()
+                .find(|p| p.player_id == game.your_id && !p.locked),
+        ) {
+            local.avatar = choice.avatar.clone();
+            local.hero_class = choice.hero_class;
+            local.handheld = choice.handheld.clone();
+        }
+        stage::sync_members(stage, &preview_roster, game.your_id);
     }
     let catalogue = crate::passport::avatar_catalogue();
     // A ticking server clock must not tear down an active picker/drag.
@@ -628,7 +651,8 @@ fn render_draft(
         window.width()
     );
     let key = format!(
-        "{key}:{}:{}:{}",
+        "{key}:{:?}:{}:{}:{}",
+        state.picker_tab,
         omoba_passport::weapon_store::snapshot().0,
         window.height(),
         locale.as_ref().map_or(0, |locale| locale.generation())
@@ -696,7 +720,7 @@ fn render_draft(
                     .spawn(Node {
                         flex_direction: FlexDirection::Column,
                         min_width: Val::Px(0.0),
-                        max_width: Val::Px((available - 250.0).max(180.0)),
+                        max_width: Val::Px(((available - 180.0) * 0.5).max(120.0)),
                         overflow: Overflow::clip(),
                         ..default()
                     })
@@ -714,6 +738,14 @@ fn render_draft(
                 header.spawn((
                     widgets::label("", if compact { 17.0 } else { 23.0 }, theme::GOLD),
                     SelectionClock,
+                    Node {
+                        position_type: PositionType::Absolute,
+                        left: Val::Percent(50.0),
+                        width: Val::Px(160.0),
+                        margin: UiRect::left(Val::Px(-80.0)),
+                        ..default()
+                    },
+                    TextLayout::new_with_justify(Justify::Center).with_linebreak(LineBreak::NoWrap),
                     Name::new("DraftSelectionClock"),
                 ));
                 action_button(
@@ -751,236 +783,278 @@ fn render_draft(
                         compact,
                     );
                 });
-                body.spawn(Node {
-                    flex_grow: 1.0,
-                    min_width: Val::Px(0.0),
-                    flex_direction: FlexDirection::Column,
-                    row_gap: Val::Px(5.0),
-                    ..default()
-                })
+                body.spawn((
+                    Node {
+                        flex_grow: 1.0,
+                        min_width: Val::Px(0.0),
+                        flex_direction: FlexDirection::Column,
+                        row_gap: Val::Px(5.0),
+                        min_height: Val::Px(0.0),
+                        overflow: Overflow::scroll_y(),
+                        ..default()
+                    },
+                    ScrollPosition(Vec2::new(0.0, *scroll.0.get(&3).unwrap_or(&0.0))),
+                    draft_pane(3),
+                    Name::new("DraftPicker"),
+                ))
                 .with_children(|picker| {
-                    picker.spawn(widgets::label(tr("collection.weapons"), 12.0, theme::MUTED));
-                    if let Some(status) = choice
-                        .and_then(|choice| super::collection::handheld_status(&choice.handheld))
-                    {
-                        picker.spawn((
-                            widgets::label(status, 12.0, theme::GOLD),
-                            Name::new("DraftWeaponStatus"),
-                        ));
-                    }
-                    picker
-                        .spawn(Node {
-                            flex_wrap: FlexWrap::Wrap,
-                            column_gap: Val::Px(4.0),
-                            row_gap: Val::Px(4.0),
-                            max_height: Val::Px(84.0),
-                            overflow: Overflow::scroll_y(),
-                            ..default()
-                        })
-                        .with_children(|row| {
-                            for (value, name, id) in super::collection::handheld_choices() {
-                                let selected = choice.is_some_and(|c| c.handheld == value);
-                                action_button(
-                                    row,
-                                    &name,
-                                    DraftAction::Handheld(value),
-                                    &format!("Draft-{id}"), // i18n-allow: stable ECS/test identity, never displayed
-                                    (picker_width - 8.0) / 3.0,
-                                    false,
-                                    selected,
-                                );
-                            }
-                        });
-                    picker
-                        .spawn(Node {
-                            column_gap: Val::Px(4.0),
-                            row_gap: Val::Px(4.0),
-                            flex_wrap: FlexWrap::Wrap,
-                            ..default()
-                        })
-                        .with_children(|classes| {
-                            for class in HeroClass::ALL {
-                                action_button(
-                                    classes,
-                                    data::hero_name(class),
-                                    DraftAction::Class(class),
-                                    &format!("DraftClass-{}", class.id()),
-                                    (picker_width - 12.0) / 4.0,
-                                    false,
-                                    choice.is_some_and(|c| c.hero_class == class),
-                                );
-                            }
-                        });
-                    picker
-                        .spawn(Node {
-                            column_gap: Val::Px(4.0),
-                            ..default()
-                        })
-                        .with_children(|roles| {
-                            for role in Role::ALL {
-                                action_button(
-                                    roles,
-                                    data::role(role),
-                                    DraftAction::Role(role),
-                                    // The TestId keeps the English label: ids never translate.
-                                    &format!("DraftRole-{}", role.label()),
-                                    (picker_width - 16.0) / 5.0,
-                                    false,
-                                    choice.is_some_and(|c| c.role == role),
-                                );
-                            }
-                        });
-                    picker
-                        .spawn((
-                            Node {
-                                flex_grow: 1.0,
-                                min_height: Val::Px(0.0),
-                                flex_direction: FlexDirection::Column,
-                                overflow: Overflow::scroll_y(),
-                                row_gap: Val::Px(6.0),
+                    if compact {
+                        picker
+                            .spawn(Node {
+                                column_gap: Val::Px(4.0),
+                                flex_shrink: 0.0,
                                 ..default()
-                            },
-                            ScrollPosition(Vec2::new(0.0, *scroll.0.get(&1).unwrap_or(&0.0))),
-                            draft_pane(1),
-                            Name::new("DraftAvatarCatalogue"),
-                        ))
-                        .with_children(|avatars| {
-                            for defaults in [true, false] {
-                                avatars.spawn((
-                                    widgets::label(
-                                        if defaults {
-                                            tr("draft.avatars.included")
-                                        } else {
-                                            tr("draft.avatars.studio")
-                                        },
-                                        12.0,
-                                        theme::GOLD,
-                                    ),
-                                    Name::new(if defaults {
-                                        "DraftIncludedHeading"
-                                    } else {
-                                        "DraftStudioHeading"
-                                    }),
-                                ));
-                                if !defaults {
+                            })
+                            .with_children(|tabs| {
+                                for (tab, key, id) in [
+                                    (PickerTab::Avatars, "draft.tab.avatars", "DraftTabAvatars"),
+                                    (PickerTab::Classes, "draft.tab.classes", "DraftTabClasses"),
+                                    (PickerTab::Weapons, "collection.weapons", "DraftTabWeapons"),
+                                ] {
+                                    action_button(
+                                        tabs,
+                                        tr(key),
+                                        DraftAction::Picker(tab),
+                                        id,
+                                        (picker_width - 8.0) / 3.0,
+                                        false,
+                                        state.picker_tab == tab,
+                                    );
+                                }
+                            });
+                    }
+                    if !compact || state.picker_tab == PickerTab::Weapons {
+                        picker.spawn(widgets::label(tr("collection.weapons"), 12.0, theme::MUTED));
+                        if let Some(status) = choice
+                            .and_then(|choice| super::collection::handheld_status(&choice.handheld))
+                        {
+                            picker.spawn((
+                                widgets::label(status, 12.0, theme::GOLD),
+                                Name::new("DraftWeaponStatus"),
+                            ));
+                        }
+                        picker
+                            .spawn(Node {
+                                flex_wrap: FlexWrap::Wrap,
+                                column_gap: Val::Px(4.0),
+                                row_gap: Val::Px(4.0),
+                                max_height: Val::Px(84.0),
+                                overflow: Overflow::scroll_y(),
+                                ..default()
+                            })
+                            .with_children(|row| {
+                                for (value, name, id) in super::collection::handheld_choices() {
+                                    let selected = choice.is_some_and(|c| c.handheld == value);
+                                    action_button(
+                                        row,
+                                        &name,
+                                        DraftAction::Handheld(value),
+                                        &format!("Draft-{id}"), // i18n-allow: stable ECS/test identity, never displayed
+                                        (picker_width - 8.0) / 3.0,
+                                        false,
+                                        selected,
+                                    );
+                                }
+                            });
+                    }
+                    if !compact || state.picker_tab == PickerTab::Classes {
+                        picker
+                            .spawn(Node {
+                                column_gap: Val::Px(4.0),
+                                row_gap: Val::Px(4.0),
+                                flex_wrap: FlexWrap::Wrap,
+                                ..default()
+                            })
+                            .with_children(|classes| {
+                                for class in HeroClass::ALL {
+                                    action_button(
+                                        classes,
+                                        data::hero_name(class),
+                                        DraftAction::Class(class),
+                                        &format!("DraftClass-{}", class.id()),
+                                        (picker_width - 12.0) / 4.0,
+                                        false,
+                                        choice.is_some_and(|c| c.hero_class == class),
+                                    );
+                                }
+                            });
+                        picker
+                            .spawn(Node {
+                                column_gap: Val::Px(4.0),
+                                ..default()
+                            })
+                            .with_children(|roles| {
+                                for role in Role::ALL {
+                                    action_button(
+                                        roles,
+                                        data::role(role),
+                                        DraftAction::Role(role),
+                                        // The TestId keeps the English label: ids never translate.
+                                        &format!("DraftRole-{}", role.label()),
+                                        (picker_width - 16.0) / 5.0,
+                                        false,
+                                        choice.is_some_and(|c| c.role == role),
+                                    );
+                                }
+                            });
+                    }
+                    if !compact || state.picker_tab == PickerTab::Avatars {
+                        picker
+                            .spawn((
+                                Node {
+                                    flex_grow: 1.0,
+                                    min_height: Val::Px(if compact { 192.0 } else { 100.0 }),
+                                    flex_shrink: 0.0,
+                                    flex_direction: FlexDirection::Column,
+                                    overflow: Overflow::scroll_y(),
+                                    row_gap: Val::Px(6.0),
+                                    ..default()
+                                },
+                                ScrollPosition(Vec2::new(0.0, *scroll.0.get(&1).unwrap_or(&0.0))),
+                                draft_pane(1),
+                                Name::new("DraftAvatarCatalogue"),
+                            ))
+                            .with_children(|avatars| {
+                                for defaults in [true, false] {
                                     avatars.spawn((
                                         widgets::label(
-                                            crate::i18n::data::catalogue_status(&catalogue.status),
+                                            if defaults {
+                                                tr("draft.avatars.included")
+                                            } else {
+                                                tr("draft.avatars.studio")
+                                            },
                                             12.0,
-                                            theme::MUTED,
+                                            theme::GOLD,
                                         ),
-                                        Name::new("DraftStudioStatus"),
+                                        Name::new(if defaults {
+                                            "DraftIncludedHeading"
+                                        } else {
+                                            "DraftStudioHeading"
+                                        }),
                                     ));
-                                    avatars
-                                        .spawn(Node {
-                                            column_gap: Val::Px(6.0),
-                                            ..default()
-                                        })
-                                        .with_children(|actions| {
-                                            action_button(
-                                                actions,
-                                                tr("draft.button.refresh"),
-                                                DraftAction::Refresh,
-                                                "DraftStudioRefresh",
-                                                86.0,
-                                                false,
-                                                false,
-                                            );
-                                            if !crate::passport::account_connected() {
+                                    if !defaults {
+                                        avatars.spawn((
+                                            widgets::label(
+                                                crate::i18n::data::catalogue_status(
+                                                    &catalogue.status,
+                                                ),
+                                                12.0,
+                                                theme::MUTED,
+                                            ),
+                                            Name::new("DraftStudioStatus"),
+                                        ));
+                                        avatars
+                                            .spawn(Node {
+                                                column_gap: Val::Px(6.0),
+                                                ..default()
+                                            })
+                                            .with_children(|actions| {
                                                 action_button(
                                                     actions,
-                                                    tr("draft.button.connect_ekza"),
-                                                    DraftAction::Connect,
-                                                    "DraftStudioConnect",
-                                                    116.0,
+                                                    tr("draft.button.refresh"),
+                                                    DraftAction::Refresh,
+                                                    "DraftStudioRefresh",
+                                                    86.0,
                                                     false,
                                                     false,
                                                 );
+                                                if !crate::passport::account_connected() {
+                                                    action_button(
+                                                        actions,
+                                                        tr("draft.button.connect_ekza"),
+                                                        DraftAction::Connect,
+                                                        "DraftStudioConnect",
+                                                        116.0,
+                                                        false,
+                                                        false,
+                                                    );
+                                                }
+                                            });
+                                    }
+                                    avatars
+                                        .spawn(Node {
+                                            flex_wrap: FlexWrap::Wrap,
+                                            column_gap: Val::Px(6.0),
+                                            row_gap: Val::Px(6.0),
+                                            ..default()
+                                        })
+                                        .with_children(|tiles| {
+                                            for entry in catalogue.entries.iter().filter(|e| {
+                                                (e.source == AvatarCatalogueSource::Default)
+                                                    == defaults
+                                            }) {
+                                                let selected = choice.is_some_and(|c| {
+                                                    c.avatar.as_deref() == Some(&entry.avatar.slug)
+                                                });
+                                                let style = ButtonStyle {
+                                                    kind: ButtonKind::Tile,
+                                                    selected,
+                                                };
+                                                tiles
+                                                    .spawn((
+                                                        Button,
+                                                        Node {
+                                                            width: Val::Px(84.0),
+                                                            height: Val::Px(78.0),
+                                                            min_height: Val::Px(78.0),
+                                                            flex_shrink: 0.0,
+                                                            flex_direction: FlexDirection::Column,
+                                                            align_items: AlignItems::Center,
+                                                            justify_content: JustifyContent::Center,
+                                                            border: UiRect::all(Val::Px(1.0)),
+                                                            border_radius: BorderRadius::all(
+                                                                Val::Px(6.0),
+                                                            ),
+                                                            padding: UiRect::all(Val::Px(4.0)),
+                                                            overflow: Overflow::clip(),
+                                                            ..default()
+                                                        },
+                                                        BackgroundColor(style.idle_color()),
+                                                        BorderColor::all(if selected {
+                                                            theme::GOLD
+                                                        } else {
+                                                            theme::PANEL_EDGE
+                                                        }),
+                                                        style,
+                                                        UiAction(DraftAction::Avatar(
+                                                            entry.avatar.slug.clone(),
+                                                        )),
+                                                        TestId::new(format!(
+                                                            "DraftAvatar-{}",
+                                                            entry.avatar.slug
+                                                        )),
+                                                    ))
+                                                    .with_children(|tile| {
+                                                        if let Some(image) =
+                                                            thumbnails.0.get(&entry.avatar.slug)
+                                                        {
+                                                            tile.spawn((
+                                                                ImageNode::new(image.clone()),
+                                                                Node {
+                                                                    width: Val::Px(44.0),
+                                                                    height: Val::Px(44.0),
+                                                                    flex_shrink: 0.0,
+                                                                    ..default()
+                                                                },
+                                                            ));
+                                                        }
+                                                        tile.spawn((
+                                                            widgets::label(
+                                                                &entry.avatar.display_name,
+                                                                11.0,
+                                                                theme::IVORY,
+                                                            ),
+                                                            TextLayout::new_with_justify(
+                                                                Justify::Center,
+                                                            )
+                                                            .with_linebreak(LineBreak::NoWrap),
+                                                        ));
+                                                    });
                                             }
                                         });
                                 }
-                                avatars
-                                    .spawn(Node {
-                                        flex_wrap: FlexWrap::Wrap,
-                                        column_gap: Val::Px(6.0),
-                                        row_gap: Val::Px(6.0),
-                                        ..default()
-                                    })
-                                    .with_children(|tiles| {
-                                        for entry in catalogue.entries.iter().filter(|e| {
-                                            (e.source == AvatarCatalogueSource::Default) == defaults
-                                        }) {
-                                            let selected = choice.is_some_and(|c| {
-                                                c.avatar.as_deref() == Some(&entry.avatar.slug)
-                                            });
-                                            let style = ButtonStyle {
-                                                kind: ButtonKind::Tile,
-                                                selected,
-                                            };
-                                            tiles
-                                                .spawn((
-                                                    Button,
-                                                    Node {
-                                                        width: Val::Px(84.0),
-                                                        height: Val::Px(78.0),
-                                                        min_height: Val::Px(78.0),
-                                                        flex_shrink: 0.0,
-                                                        flex_direction: FlexDirection::Column,
-                                                        align_items: AlignItems::Center,
-                                                        justify_content: JustifyContent::Center,
-                                                        border: UiRect::all(Val::Px(1.0)),
-                                                        border_radius: BorderRadius::all(Val::Px(
-                                                            6.0,
-                                                        )),
-                                                        padding: UiRect::all(Val::Px(4.0)),
-                                                        overflow: Overflow::clip(),
-                                                        ..default()
-                                                    },
-                                                    BackgroundColor(style.idle_color()),
-                                                    BorderColor::all(if selected {
-                                                        theme::GOLD
-                                                    } else {
-                                                        theme::PANEL_EDGE
-                                                    }),
-                                                    style,
-                                                    UiAction(DraftAction::Avatar(
-                                                        entry.avatar.slug.clone(),
-                                                    )),
-                                                    TestId::new(format!(
-                                                        "DraftAvatar-{}",
-                                                        entry.avatar.slug
-                                                    )),
-                                                ))
-                                                .with_children(|tile| {
-                                                    if let Some(image) =
-                                                        thumbnails.0.get(&entry.avatar.slug)
-                                                    {
-                                                        tile.spawn((
-                                                            ImageNode::new(image.clone()),
-                                                            Node {
-                                                                width: Val::Px(44.0),
-                                                                height: Val::Px(44.0),
-                                                                flex_shrink: 0.0,
-                                                                ..default()
-                                                            },
-                                                        ));
-                                                    }
-                                                    tile.spawn((
-                                                        widgets::label(
-                                                            &entry.avatar.display_name,
-                                                            11.0,
-                                                            theme::IVORY,
-                                                        ),
-                                                        TextLayout::new_with_justify(
-                                                            Justify::Center,
-                                                        )
-                                                        .with_linebreak(LineBreak::NoWrap),
-                                                    ));
-                                                });
-                                        }
-                                    });
-                            }
-                        });
+                            });
+                    }
                 });
             });
             root.spawn(Node {
@@ -1241,6 +1315,205 @@ mod tests {
                 }
             })
             .collect()
+    }
+
+    #[test]
+    fn phone_avatar_picker_has_visible_tiles_and_raw_taps_switch_tabs_and_select() {
+        use bevy::camera::{ComputedCameraValues, RenderTargetInfo};
+        use bevy::input::touch::{TouchInput, TouchPhase};
+        let mut app = request_app();
+        app.add_plugins((
+            MinimalPlugins,
+            bevy::asset::AssetPlugin::default(),
+            bevy::image::ImagePlugin::default(),
+            bevy::text::TextPlugin,
+            bevy::transform::TransformPlugin,
+            bevy::input::InputPlugin,
+            bevy::ui::UiPlugin,
+            bevy::camera::visibility::VisibilityPlugin,
+            bevy::picking::PickingPlugin,
+            bevy::picking::InteractionPlugin,
+        ))
+        .init_resource::<Assets<bevy::mesh::Mesh>>()
+        .init_resource::<Assets<TextureAtlasLayout>>()
+        .init_resource::<DraftScrollMemory>()
+        .init_resource::<AvatarThumbnails>()
+        .insert_resource(crate::ui::UiPlatform(crate::platform::UiProfile::Mobile))
+        .init_resource::<crate::ui::GestureEpoch>()
+        .add_message::<SessionUiCommand>()
+        .add_ui_action::<DraftAction>()
+        .add_systems(
+            Update,
+            crate::ui::gesture::recognize_presses.before(UiSet::Dispatch),
+        )
+        .add_systems(
+            Update,
+            draft_actions
+                .after(UiSet::Dispatch)
+                .after(sync_draft)
+                .before(send_requests),
+        )
+        .add_systems(
+            Update,
+            (render_draft, update_selection_clock)
+                .chain()
+                .after(draft_actions),
+        );
+        let mut window = Window {
+            focused: true,
+            ..default()
+        };
+        window.resolution.set_scale_factor_override(Some(1.0));
+        window.resolution.set(852.0, 393.0);
+        let window = app.world_mut().spawn((window, PrimaryWindow)).id();
+        app.world_mut().spawn((
+            Camera2d,
+            Camera {
+                computed: ComputedCameraValues {
+                    target_info: Some(RenderTargetInfo {
+                        physical_size: UVec2::new(852, 393),
+                        scale_factor: 1.0,
+                    }),
+                    ..default()
+                },
+                ..default()
+            },
+        ));
+        app.finish();
+        app.cleanup();
+        for _ in 0..5 {
+            app.update();
+        }
+        let tap = |app: &mut App, id: &str| {
+            let button = crate::ui::test_id::harness::find(app.world_mut(), id).unwrap();
+            let node = app.world().get::<ComputedNode>(button).unwrap();
+            let transform = app.world().get::<UiGlobalTransform>(button).unwrap();
+            let rect = crate::ui::gesture::logical_ui_rect(
+                node,
+                transform,
+                app.world().get::<bevy::ui::CalculatedClip>(button),
+                1.0,
+            );
+            assert!(
+                rect.width() >= 40.0 && rect.height() >= 40.0,
+                "clipped {id}: {rect:?}"
+            );
+            assert!(rect.min.y >= 0.0 && rect.max.y <= 393.0);
+            let position = rect.center();
+            for phase in [TouchPhase::Started, TouchPhase::Ended] {
+                app.world_mut().write_message(TouchInput {
+                    window,
+                    id: 77,
+                    phase,
+                    position,
+                    force: None,
+                });
+                app.update();
+            }
+            for _ in 0..3 {
+                app.update();
+            }
+        };
+        let clock = app
+            .world_mut()
+            .query::<(Entity, &Name)>()
+            .iter(app.world())
+            .find(|(_, name)| name.as_str() == "DraftSelectionClock")
+            .unwrap()
+            .0;
+        let center = app
+            .world()
+            .get::<UiGlobalTransform>(clock)
+            .unwrap()
+            .translation
+            .x;
+        assert!((center - 426.0).abs() <= 0.5, "draft clock at {center}");
+        assert!(!app.world().get::<Text>(clock).unwrap().0.is_empty());
+        tap(&mut app, "DraftTabClasses");
+        assert_eq!(
+            app.world().resource::<DraftClient>().picker_tab,
+            PickerTab::Classes
+        );
+        assert!(crate::ui::test_id::harness::find(app.world_mut(), "DraftClass-mage").is_some());
+        tap(&mut app, "DraftTabAvatars");
+        let slug = crate::passport::default_avatars()[0].slug.clone();
+        tap(&mut app, &format!("DraftAvatar-{slug}"));
+        assert_eq!(
+            app.world()
+                .resource::<DraftClient>()
+                .choice
+                .as_ref()
+                .unwrap()
+                .avatar
+                .as_deref(),
+            Some(slug.as_str())
+        );
+        assert!(drain_requests(&mut app).iter().any(|request| matches!(&request.action,PrematchAction::Select {avatar:Some(avatar),..} if avatar == &slug)));
+    }
+
+    #[test]
+    fn avatar_picker_changes_an_available_avatar_before_lock_and_is_guarded_after_lock() {
+        let mut app = request_app();
+        app.add_message::<Activated<DraftAction>>()
+            .add_message::<SessionUiCommand>()
+            .add_systems(
+                Update,
+                draft_actions.after(sync_draft).before(send_requests),
+            );
+        let slug = crate::passport::default_avatars()
+            .into_iter()
+            .find(|avatar| crate::passport::can_select(avatar))
+            .unwrap()
+            .slug
+            .clone();
+        app.world_mut().write_message(Activated {
+            action: DraftAction::Avatar(slug.clone()),
+            source: Entity::PLACEHOLDER,
+        });
+        app.update();
+        let requests = drain_requests(&mut app);
+        assert_eq!(requests.len(), 1);
+        assert!(
+            matches!(&requests[0].action, PrematchAction::Select { avatar: Some(avatar), .. } if avatar == &slug)
+        );
+        assert_eq!(
+            app.world()
+                .resource::<DraftClient>()
+                .choice
+                .as_ref()
+                .unwrap()
+                .avatar
+                .as_ref(),
+            Some(&slug)
+        );
+        {
+            let mut game = app.world_mut().resource_mut::<GameStateSnapshot>();
+            let draft = game.prematch.as_mut().unwrap();
+            draft.players[0].avatar = Some(slug.clone());
+            draft.players[0].locked = true;
+            draft.last_request_id = requests[0].request_id;
+        }
+        app.update();
+        app.world_mut().write_message(Activated {
+            action: DraftAction::Avatar("missing-avatar".into()),
+            source: Entity::PLACEHOLDER,
+        });
+        app.update();
+        assert!(drain_requests(&mut app).is_empty());
+        assert_eq!(
+            app.world()
+                .resource::<DraftClient>()
+                .choice
+                .as_ref()
+                .unwrap()
+                .avatar
+                .as_ref(),
+            Some(&slug)
+        );
+        assert_eq!(
+            app.world().resource::<DraftClient>().notice.as_deref(),
+            Some(tr("draft.notice.unlock_first"))
+        );
     }
 
     #[test]

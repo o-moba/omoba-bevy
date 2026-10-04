@@ -64,11 +64,39 @@ pub struct CombatEvent {
     pub style: ProjectileStyle,
     pub action_slot: Option<u8>,
     pub killed: bool,
+    /// Authoritative trap activation; false for ordinary attacks/spells.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub trap_triggered: bool,
+    /// An accepted rear dagger hit reduced a surviving hero to exactly 1 HP.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub near_lethal: bool,
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn near_lethal_receipt_defaults_off_and_round_trips_only_when_present() {
+        let ordinary = CombatEvent::default();
+        let wire = serde_json::to_value(&ordinary).unwrap();
+        assert!(wire.get("near_lethal").is_none());
+        assert!(
+            !serde_json::from_value::<CombatEvent>(wire)
+                .unwrap()
+                .near_lethal
+        );
+        let triggered = CombatEvent {
+            near_lethal: true,
+            ..ordinary
+        };
+        let wire = serde_json::to_value(&triggered).unwrap();
+        assert_eq!(wire["near_lethal"], true);
+        assert_eq!(
+            serde_json::from_value::<CombatEvent>(wire).unwrap(),
+            triggered
+        );
+    }
 
     #[test]
     fn absent_fields_and_unknown_future_enums_are_inert() {

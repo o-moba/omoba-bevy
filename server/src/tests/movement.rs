@@ -279,17 +279,24 @@ fn movement_budget_leaves_a_normal_20hz_client_unclipped() {
     let mut client_x = start_x;
     // Arrival gaps around the 50 ms send interval; ten sends, 500 ms.
     let gaps_ms = [35_u64, 65, 50, 40, 60, 50, 50, 35, 65, 50];
-    for round in 0..2 {
-        for gap in gaps_ms {
-            client_x += speed * 0.05;
-            let step = Duration::from_millis(gap);
-            send_transform(&mut rt, &transport, &clock, addr, step, client_x);
-            let hero_x = rt.world.players[&addr].hero.x;
-            assert!(
-                (hero_x - client_x).abs() < 0.001,
-                "round {round}: step clipped to {hero_x}, client at {client_x}"
-            );
+    // Repeat identical jitter while sharply reversing: the elapsed-time
+    // budget must accept either sign immediately, without a braking phase.
+    for direction in [1.0, -1.0] {
+        let leg_start = rt.world.players[&addr].hero.x;
+        for round in 0..2 {
+            for gap in gaps_ms {
+                client_x += direction * speed * 0.05;
+                let step = Duration::from_millis(gap);
+                send_transform(&mut rt, &transport, &clock, addr, step, client_x);
+                let hero_x = rt.world.players[&addr].hero.x;
+                assert!(
+                    (hero_x - client_x).abs() < 0.001,
+                    "direction {direction} round {round}: step clipped to {hero_x}, client at {client_x}"
+                );
+            }
         }
+        let covered = (rt.world.players[&addr].hero.x - leg_start) * direction;
+        assert!((covered - speed).abs() < 0.01);
     }
-    assert!((rt.world.players[&addr].hero.x - start_x - speed * 0.05 * 20.0).abs() < 0.01);
+    assert!((rt.world.players[&addr].hero.x - start_x).abs() < 0.01);
 }

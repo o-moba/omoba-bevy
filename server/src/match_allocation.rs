@@ -489,12 +489,18 @@ mod runtime_tests {
         rt.match_started_at = Some(now);
         rt.maintain_roster(now + PLAYER_TIMEOUT + Duration::from_secs(1));
         rt.maintain_roster(now + PLAYER_TIMEOUT + Duration::from_secs(20));
-        assert!(rt.world.disconnected_sessions.contains_key("seat-a"));
+        assert!(
+            rt.world
+                .players
+                .iter()
+                .any(|(addr, p)| crate::bots::is_bot_address(*addr)
+                    && p.session_id.as_deref() == Some("seat-a"))
+        );
         assert!(!rt.match_service.worker().unwrap().aborted);
         assert_eq!(rt.world.game_state, GameState::Running);
     }
     #[test]
-    fn mobile_background_reclaims_within_three_minutes_but_not_after_expiry() {
+    fn running_allocated_match_reclaims_same_hero_after_the_menu_retry_budget() {
         use crate::balance::SESSION_RECLAIM_WINDOW;
         for elapsed in [
             Duration::from_secs(120),
@@ -521,23 +527,25 @@ mod runtime_tests {
                 "seat-a",
             );
             rt.handle_packet(new_addr, join, resume);
-            if elapsed <= SESSION_RECLAIM_WINDOW {
-                let player = &rt.world.players[&new_addr];
-                assert!(player.joined);
-                assert_eq!(player.hero.identity.id, id);
-                assert_eq!(player.hero.hp, 47.0);
-                assert_eq!(common::recall::remaining(player, resume), 0.0);
-                assert!(!rt.match_service.worker().unwrap().aborted);
-            } else {
-                assert!(!rt.world.players.get(&new_addr).is_some_and(|p| p.joined));
-                assert!(rt.world.disconnected_sessions.is_empty());
-                assert!(rt.match_service.worker().unwrap().aborted);
-            }
+            let player = &rt.world.players[&new_addr];
+            assert!(player.joined);
+            assert_eq!(player.hero.identity.id, id);
+            assert_eq!(player.hero.hp, 47.0);
+            assert_eq!(common::recall::remaining(player, resume), 0.0);
+            assert!(!rt.match_service.worker().unwrap().aborted);
+            assert!(rt.world.disconnected_sessions.is_empty());
+            assert!(
+                rt.world
+                    .players
+                    .iter()
+                    .all(|(addr, player)| player.hero.identity.id != id
+                        || !crate::bots::is_bot_address(*addr))
+            );
         }
     }
 
     #[test]
-    fn deliberate_last_leave_does_not_wait_the_mobile_reclaim_window() {
+    fn deliberate_last_leave_keeps_running_allocated_hero_live() {
         let (mut rt, addr, join) = fixture();
         let now = Instant::now();
         rt.handle_packet(addr, join, now);
@@ -551,7 +559,258 @@ mod runtime_tests {
         rt.maintain_roster(now);
         assert!(rt.world.disconnected_sessions.is_empty());
         rt.maintain_roster(now + crate::balance::EMPTY_ROSTER_GRACE);
-        assert!(rt.match_service.worker().unwrap().aborted);
+        assert!(!rt.match_service.worker().unwrap().aborted);
+        assert_eq!(rt.world.game_state, GameState::Running);
+        assert!(
+            rt.world
+                .players
+                .iter()
+                .any(|(addr, player)| !player.hero.identity.is_bot
+                    && crate::bots::is_bot_address(*addr)
+                    && rt.bots.kind(*addr).is_some())
+        );
+    }
+
+    #[test]
+    fn takeover_requires_authenticated_same_team_current_generation_and_restores_manual() {
+        use shared::match_service::TakeoverPolicy;
+        let (mut rt, alice, join) = fixture();
+        let now = Instant::now();
+        let bob: SocketAddr = "127.0.0.1:60312".parse().unwrap();
+        let eve: SocketAddr = "127.0.0.1:60313".parse().unwrap();
+        for (addr, session, profile, team) in [
+            (bob, "bob", "c".repeat(64), Team::Blue),
+            (eve, "eve", "d".repeat(64), Team::Green),
+        ] {
+            let profile = shared::career::ProfileSummary::new(profile, session.into());
+            if let crate::match_service::MatchService::Worker(worker) = &mut rt.match_service {
+                worker.manifest.preference = MatchPreference::Quick;
+                worker.manifest.humans.push(AllocatedHuman {
+                    profile_id: profile.profile_id.clone(),
+                    session_id: session.into(),
+                    team,
+                });
+            }
+            rt.career.backend.test_authenticated(addr, profile, session);
+            let mut request = join.clone();
+            if let ClientPacket::Join { session_id, .. } = &mut request {
+                *session_id = Some(session.into());
+            }
+            rt.handle_packet(addr, request, now);
+        }
+        rt.handle_packet(alice, join.clone(), now);
+        rt.begin_career_round(now);
+        let result = rt.career_allocation_for_test().unwrap();
+        rt.career.backend.test_ack_start(&result.result_id);
+        assert!(rt.begin_career_round(now));
+        rt.world.game_state = GameState::Running;
+        rt.match_started_at = Some(now);
+        let original_id = rt.world.players[&alice].hero.identity.id;
+        rt.handle_packet(alice, ClientPacket::Leave, now);
+        let seat = rt.takeover_view(bob).pop().unwrap();
+        assert_eq!(seat.policy, TakeoverPolicy::Bot);
+        assert_eq!(seat.eligible_voters, 1);
+        assert!(rt.takeover_view(eve).is_empty());
+        let vote = ClientPacket::TakeoverVote {
+            server_epoch: rt.server_epoch,
+            match_id: rt.match_id,
+            player_id: seat.player_id,
+            generation: seat.generation,
+            policy: TakeoverPolicy::Idle,
+        };
+        rt.handle_packet(eve, vote.clone(), now);
+        assert_eq!(rt.takeover_view(bob)[0].policy, TakeoverPolicy::Bot);
+        rt.handle_packet(bob, vote.clone(), now);
+        assert_eq!(rt.takeover_view(bob)[0].policy, TakeoverPolicy::Idle);
+        let detached = *rt
+            .world
+            .players
+            .iter()
+            .find(|(_, p)| p.hero.identity.id == original_id)
+            .unwrap()
+            .0;
+        assert!(rt.bots.kind(detached).is_none());
+        rt.career.backend.test_authenticated(
+            alice,
+            shared::career::ProfileSummary::new("a".repeat(64), "Alice".into()),
+            "seat-a",
+        );
+        rt.handle_packet(alice, join, now);
+        assert_eq!(rt.world.players[&alice].hero.identity.id, original_id);
+        assert!(rt.takeover_view(bob).is_empty());
+        assert!(rt.bots.kind(detached).is_none());
+        rt.handle_packet(alice, ClientPacket::Leave, now);
+        rt.handle_packet(bob, vote, now);
+        assert_eq!(
+            rt.takeover_view(bob)[0].policy,
+            TakeoverPolicy::Bot,
+            "a delayed old vote cannot idle a subsequent disconnection"
+        );
+        rt.career.backend.forget(bob);
+        assert!(rt.takeover_view(bob).is_empty());
+    }
+
+    #[test]
+    fn fresh_quick_handoff_after_thirty_seconds_enters_draft_without_terminal_result() {
+        let (mut rt, addr, join) = fixture();
+        let now = Instant::now() + Duration::from_secs(30);
+        if let crate::match_service::MatchService::Worker(worker) = &mut rt.match_service {
+            worker.manifest.preference = MatchPreference::Quick;
+        }
+        rt.maintain_roster(now);
+        rt.career.backend.test_authenticated(
+            addr,
+            shared::career::ProfileSummary::new("a".repeat(64), "Alice".into()),
+            "seat-a",
+        );
+        rt.handle_packet(addr, join, now);
+        rt.tick_prematch(now);
+        assert!(rt.world.players[&addr].joined);
+        assert_eq!(
+            crate::prematch::snapshot(
+                &rt.prematch,
+                &rt.world.players,
+                &rt.world.players[&addr],
+                rt.rules,
+                now
+            )
+            .unwrap()
+            .phase,
+            shared::prematch::PrematchPhase::Draft
+        );
+        assert!(rt.career_view(addr, now).last_result.is_none());
+        assert!(!rt.match_service.worker().unwrap().aborted);
+    }
+
+    #[test]
+    fn real_signed_udp_restart_reclaims_live_allocated_hero_after_three_minutes() {
+        use ed25519_dalek::{Signer, SigningKey};
+        use shared::public_transport::{
+            PublicClientDatagram, PublicServerDatagram, SignedCommand, hex,
+        };
+        fn deliver(rt: &mut ServerRuntime, client: &UdpSocket, packet: &PublicClientDatagram) {
+            client
+                .send_to(
+                    &serde_json::to_vec(packet).unwrap(),
+                    rt.transport.local_addr().unwrap(),
+                )
+                .unwrap();
+            let deadline = Instant::now() + Duration::from_secs(2);
+            while rt.transport.peek(&mut [0; 1]).is_err() {
+                assert!(Instant::now() < deadline, "UDP delivery timed out");
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            rt.receive_packets();
+        }
+        fn join_over_udp(rt: &mut ServerRuntime, client: &UdpSocket, join: &ClientPacket) {
+            deliver(
+                rt,
+                client,
+                &PublicClientDatagram::TransportProbe {
+                    protocol_version: shared::protocol::PROTOCOL_VERSION,
+                    client_nonce: "a".repeat(32),
+                    padding: "0".repeat(384),
+                },
+            );
+            let mut buffer = [0; 4096];
+            let (len, _) = client.recv_from(&mut buffer).unwrap();
+            let PublicServerDatagram::TransportChallenge { path_nonce, .. } =
+                serde_json::from_slice(&buffer[..len]).unwrap();
+            deliver(
+                rt,
+                client,
+                &PublicClientDatagram::TransportProof {
+                    server_epoch: rt.server_epoch,
+                    path_nonce: path_nonce.clone(),
+                },
+            );
+            let addr = client.local_addr().unwrap();
+            // Account storage is the test port; all gameplay traverses the real
+            // UDP socket, path proof and production Ed25519 envelope gate.
+            rt.career.backend.test_authenticated(
+                addr,
+                shared::career::ProfileSummary::new("a".repeat(64), "Alice".into()),
+                "seat-a",
+            );
+            let principal = rt.career.backend.gameplay_principal(addr).unwrap();
+            let mut command = SignedCommand {
+                server_epoch: rt.server_epoch,
+                match_id: rt.match_id,
+                session_id: principal.session_id,
+                session_nonce: principal.session_nonce,
+                path_nonce,
+                sequence: 1,
+                payload: serde_json::to_string(join).unwrap(),
+                signature: String::new(),
+            };
+            command.signature = hex(&SigningKey::from_bytes(&[7; 32])
+                .sign(&command.signing_bytes())
+                .to_bytes());
+            deliver(rt, client, &PublicClientDatagram::SignedCommand { command });
+        }
+        let (mut rt, _, join) = fixture();
+        let clock = crate::runtime::ports::ManualClock::new(Instant::now());
+        rt.clock = Box::new(clock.clone());
+        let client = UdpSocket::bind("127.0.0.1:0").unwrap();
+        client
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
+        join_over_udp(&mut rt, &client, &join);
+        let addr = client.local_addr().unwrap();
+        let now = rt.clock.now();
+        let id = rt.world.players[&addr].hero.identity.id;
+        rt.begin_career_round(now);
+        let result = rt.career_allocation_for_test().unwrap();
+        rt.career.backend.test_ack_start(&result.result_id);
+        assert!(rt.begin_career_round(now));
+        rt.world.game_state = GameState::Running;
+        rt.match_started_at = Some(now);
+        rt.world.players.get_mut(&addr).unwrap().economy.gold = 1234;
+        drop(client); // Process exit: no Leave datagram is required.
+        let later = clock.advance(Duration::from_secs(240));
+        rt.tick(later, 0.1);
+        assert!(
+            rt.world.match_elapsed_secs > 0.0,
+            "simulation continues without a connected human"
+        );
+        assert!(!rt.match_service.worker().unwrap().aborted);
+        let detached = *rt
+            .world
+            .players
+            .iter()
+            .find(|(_, p)| p.hero.identity.id == id)
+            .unwrap()
+            .0;
+        assert!(rt.bots.kind(detached).is_some());
+        let retained_gold = rt.world.players[&detached].economy.gold;
+        let request_id = rt.world.players[&detached].economy.basic_attack_request_id + 1;
+        // The same shared handler used by AI refreshes last_seen, even when a
+        // previously selected target has disappeared. It must not block its owner.
+        common::basic_attack::handle_basic_attack_request(
+            &mut rt.world,
+            detached,
+            shared::wire::TargetId {
+                kind: shared::wire::TargetKind::Player,
+                id: u64::MAX,
+            },
+            request_id,
+            later,
+        );
+        assert_eq!(rt.world.players[&detached].last_seen, later);
+        let restarted = UdpSocket::bind("127.0.0.1:0").unwrap();
+        restarted
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
+        join_over_udp(&mut rt, &restarted, &join);
+        let restored = &rt.world.players[&restarted.local_addr().unwrap()];
+        assert!(restored.joined);
+        assert_eq!(restored.hero.identity.id, id);
+        assert_eq!(restored.hero.identity.hero_class, HeroClass::Mage);
+        assert_eq!(restored.economy.gold, retained_gold);
+        assert!(!restored.hero.identity.is_bot);
+        assert!(!rt.world.players.contains_key(&detached));
+        assert!(rt.bots.kind(detached).is_none());
+        assert_eq!(rt.world.game_state, GameState::Running);
     }
 
     #[test]

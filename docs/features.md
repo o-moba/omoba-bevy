@@ -1,5 +1,27 @@
 # Feature Inventory
 
+## Configurable lane defense and lane brush (0.39.0)
+
+The default arena has three towers per team on each lane: an outer tower, an inner tower and a final tower near the Nexus. All 18 towers and two bases are server-owned; siege protection follows the remaining active tiers. Map configuration can disable tiers, with ready one- and two-tower variants for faster matches. Six additional brush pockets touch the lane corridors and use the same authoritative concealment rules as jungle brush. Existing player movement, minion passage and original object identities remain intact. See [configuration](map-customization.md) and [verification](progress/2026-10-04-lane-defense.md). Matching protocol 8 client/server builds are required for the new compiled brush geometry.
+
+## Touch movement response (0.38.0)
+
+The thumb-stick reaches full speed at its visible travel limit (70% of the base radius), and its knob tracks the finger directly inside that range. Reversing from an extended forward drag to the opposite visible limit retains full running speed. The inner range still supports analog walking; slow, haste, root/stun and collision rules remain authoritative. See [measured regression and scope](progress/2026-10-04-movement-reversal.md).
+
+## Adventurer dagger class (0.38.0)
+
+Adventurer adds four close-range skills: Deadly Blow, Bluff, Backstab and Lethal Blow. Bluff briefly stuns and turns the victim away; rear geometry uses authoritative facing. A qualifying rear Backstab can leave a surviving enemy hero at 1 HP with a 2% authority-owned chance. The class uses the shared online/offline engine and recipe resolver, a hand-attached dagger and skill-owned humanoid animation. [Class contract and balance](adventurer.md) document exact limits; [implementation verification](progress/2026-10-04-adventurer.md) records current release status.
+
+## Mobile playtest round two (0.37.0)
+
+Quick taps assist projectile aim toward nearby visible opponents; drag aiming remains manual. Long-range targeting adds minimap intersection crosses, and nearby hostile towers show their attack area. Bots require living allied minion cover before entering it. Four river butterfly locations supplement the forest pickups; confirmed pickup and trap-trigger events have distinct sounds.
+
+The compact score includes authoritative match time. Death timers start at 5 seconds, begin growing after minute 2 and cap at 35 seconds. The 16-item shop uses component credit, three price tiers and critical/lifesteal build paths. Hero kills award 500g, reduced for repeated defeats, with a bounded 100g assist pool. Postmatch shows both rosters, KDA and earned income. [Economy model and balance](economy.md) records assumptions and timing.
+
+Allocated running matches retain disconnected heroes, default to bot control and accept authenticated teammate votes for idle/bot policy. A saved resume hint allows reopening the same match after restarting the app; the server validates the session and match identity. Phone draft selection uses tabs and per-character rotation. FPS visibility is saved separately from its limit; diagnostics distinguish measured app cadence and native display-link cadence. Physical iPhone performance remains to be measured.
+
+The matching protocol 6 server and client are required for the new inventory types. This work is prepared locally; see [verification and rollout status](progress/2026-10-04-playtest-round-two.md).
+
 ## Mobile playtest follow-up (0.36.0)
 
 Home always offers Offline Practice, including while connected. It runs the shared combat engine locally, produces no saved history or progression, and supports local debug chat, reactions and item purchases. Server bot matches remain a separate online option. Nearby alive enemies visible to the client have exact-identity targeting portraits; hidden enemies never enter this rail. Gold and quick-buy sit directly below the minimap. The remaining basic-attack instruction banners are removed.

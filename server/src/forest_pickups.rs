@@ -224,19 +224,34 @@ mod tests {
             forest_pickups,
             players,
             combat_events,
+            vision,
             ..
         } = packet
         else {
             panic!()
         };
         assert_eq!(
-            forest_pickups.len(),
-            1,
-            "only the nearby pickup is in team sight"
+            forest_pickups
+                .iter()
+                .map(|pickup| pickup.id)
+                .collect::<Vec<_>>(),
+            vec![1, 3, 5, 9],
+            "hero and additional inner towers reveal allied forest pickups"
         );
-        assert!(!forest_pickups[0].available);
-        assert_eq!(forest_pickups[0].last_collector_id, Some(players[0].id));
-        assert_eq!(forest_pickups[0].healed_amount, 10.0);
+        assert!(
+            forest_pickups.iter().all(|pickup| {
+                shared::vision::point_visible(
+                    &vision.as_ref().expect("running team sight").sources,
+                    pickup.position,
+                    false,
+                )
+            }),
+            "hidden pickup state must not leak"
+        );
+        let collected = forest_pickups.iter().find(|pickup| pickup.id == 1).unwrap();
+        assert!(!collected.available);
+        assert_eq!(collected.last_collector_id, Some(players[0].id));
+        assert_eq!(collected.healed_amount, 10.0);
         assert_eq!(players[0].hp, 110.0);
         assert!(
             combat_events.is_empty(),

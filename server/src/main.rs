@@ -43,6 +43,7 @@ mod release_tests;
 mod runtime;
 mod sandbox;
 mod session;
+mod session_recovery;
 mod shop;
 mod sim;
 mod skills;

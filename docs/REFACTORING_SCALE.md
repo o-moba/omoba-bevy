@@ -7,6 +7,13 @@
 [REFACTORING.md](REFACTORING.md), заметки по каждому шагу — в
 [progress/](progress/).
 
+Scope note (2026-10-04): the measurements below remain the historical
+September 24–25 comparison, not current repository totals. Completed later
+work and the current prioritized TODO are maintained only in
+[REFACTORING.md](REFACTORING.md#post-programme-architecture-follow-ups--2026-10-04).
+The shared offline/online engine was extracted on September 29; the October
+playtest iteration extends it. See the [iteration delivery note](progress/2026-10-04-iteration-commit.md).
+
 | Точка | Коммит | Что это |
 |---|---|---|
 | **Было** | `b6fad0e` (2026-09-24 10:32 UTC) | последний коммит `main` до программы |

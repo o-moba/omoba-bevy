@@ -42,6 +42,8 @@ pub enum ClientConnectionState {
 pub enum SessionUiCommand {
     /// User explicitly resumes waiting for snapshots after **Disconnected** (P2 manual recovery).
     Retry,
+    /// Reclaim the saved allocated seat, after checking its round namespace.
+    ResumeMatch,
     /// Replace remote I/O with an in-process, unrated character practice.
     StartOffline,
     /// Validated address chosen in the pre-join UI. Never transfers an active match.
@@ -49,7 +51,7 @@ pub enum SessionUiCommand {
     /// Switch to a trusted lobby allocation without overwriting the saved lobby.
     ConnectAllocated(String),
     /// Leave the current match or queue and return to the front end. The
-    /// server is told to release the seat; the connection stays up.
+    /// running allocated seat remains resumable; other seats are released.
     LeaveMatch,
 }
 
@@ -102,10 +104,10 @@ pub enum SessionEvent {
 pub struct NetIncomingDisconnected(pub bool);
 
 /// The loadout that was actually sent in a Join packet. Remembered so a
-/// transient connection loss can re-join automatically (the server keeps the
-/// session reclaimable for `SESSION_RECLAIM_WINDOW`, 30 s) instead of
+/// transient connection loss can re-join automatically during the bounded
+/// retry budget; allocated running seats remain reclaimable until the match ends, instead of
 /// dumping an already-joined player back onto the select screen (TASK-25).
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct CommittedJoin {
     pub handheld: shared::handheld::HandheldSelection,
     pub prematch: bool,
@@ -401,6 +403,18 @@ impl ClientSession {
             && !self.join_flow_committed
             && self.join_error.is_none()
             && !self.join_exhausted
+    }
+
+    /// A saved resume can race the former endpoint's five-second expiry. Keep
+    /// the ordinary attempt count/cadence; never make a live duplicate retry forever.
+    pub(crate) fn defer_active_seat_rejection(&mut self) {
+        if self.join_error == Some(JoinRejection::SessionActive)
+            && self.last_join.is_some()
+            && !self.join_exhausted
+            && self.join_attempts < MAX_JOIN_ATTEMPTS
+        {
+            self.join_error = None;
+        }
     }
 
     pub(in crate::net) fn clear_join_attempt(&mut self) {
@@ -862,8 +876,8 @@ pub(in crate::net) fn update_session_lifecycle(
                         .as_mut()
                         .and_then(|service| service.take_return_to_lobby())
                 });
-                // The server releases the seat (or the queue entry) on `Leave`;
-                // the connection itself stays up for the menus and the career.
+                // Running allocated seats remain resumable. Queue/prematch
+                // seats are released; a return transport opens the lobby.
                 if let Some(channels) = channels.as_ref() {
                     let _ = channels.outgoing.try_send(ClientPacket::Leave);
                 }
@@ -896,6 +910,7 @@ pub(in crate::net) fn update_session_lifecycle(
                     retried_this_frame = true;
                 }
             }
+            SessionUiCommand::ResumeMatch => {}
             SessionUiCommand::Retry => {
                 if client_session.state == ClientConnectionState::Disconnected
                     || client_session.join_error.is_some()
@@ -1910,5 +1925,30 @@ mod tests {
             assert_eq!(retry.display, Display::Flex);
         }
         assert!(app.world().get_entity(actor).is_err());
+    }
+}
+
+#[cfg(test)]
+mod saved_resume_retry_tests {
+    use super::*;
+    #[test]
+    fn active_old_endpoint_retry_preserves_cadence_and_stops_at_normal_budget() {
+        let mut session = ClientSession::queued_for_test();
+        session.join_attempts = MAX_JOIN_ATTEMPTS - 1;
+        session.join_last_sent = Some(Instant::now());
+        session.join_error = Some(JoinRejection::SessionActive);
+        session.defer_active_seat_rejection();
+        assert_eq!(session.join_attempts, MAX_JOIN_ATTEMPTS - 1);
+        assert!(!session.join_retry_due(Instant::now()));
+        assert!(session.join_retry_due(Instant::now() + T_RETRY));
+        session.join_attempts = MAX_JOIN_ATTEMPTS;
+        session.join_error = Some(JoinRejection::SessionActive);
+        session.defer_active_seat_rejection();
+        assert!(session.join_blocked());
+        assert!(!session.join_retry_due(Instant::now() + T_RETRY));
+        session.join_attempts = 1;
+        session.join_error = Some(JoinRejection::AvatarNotAuthorized);
+        session.defer_active_seat_rejection();
+        assert_eq!(session.join_error, Some(JoinRejection::AvatarNotAuthorized));
     }
 }

@@ -18,6 +18,7 @@ mod beta_ui_qa;
 mod career_visual_qa;
 mod combat_polish_qa;
 mod combat_qa;
+mod dagger_qa;
 mod demo_qa;
 mod forest_pickup_qa;
 mod frontend_flow_qa;
@@ -64,6 +65,7 @@ impl PluginGroup for QaPlugins {
             .add(targeting_qa::TargetingQaPlugin)
             .add(record_qa::RecordQaPlugin)
             .add(demo_qa::DemoQaPlugin)
+            .add(dagger_qa::DaggerQaPlugin)
             .add(result_qa::ResultQaPlugin)
             .add(ui_gallery::UiGalleryPlugin)
             .add(help_qa::HelpQaPlugin)

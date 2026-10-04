@@ -49,7 +49,7 @@ fn mid_only() -> HashMap<u64, Structure> {
 fn default_and_example_preserve_ids_stats_and_reachable_placement() {
     let layout = build_map_layout();
     let defaults = build_structures(&layout);
-    assert_eq!(defaults.len(), 8);
+    assert_eq!(defaults.len(), 20);
     for id in 1..=8 {
         let s = &defaults[&id];
         assert_eq!(s.state.hp, if id <= 6 { 240.0 } else { 650.0 });
@@ -116,6 +116,146 @@ fn default_and_example_preserve_ids_stats_and_reachable_placement() {
                 "{} has no reachable attack approach",
                 structure.key
             );
+        }
+    }
+}
+
+#[test]
+fn classic_and_disabled_tiers_unlock_in_order_and_round_reset_restores_only_active_towers() {
+    for mask in 0..8 {
+        let mut definition = MapDefinition::from_json(shared::map::DEFAULT_JSON).unwrap();
+        definition.disabled_tower_tiers = (0..3).filter(|tier| mask & (1 << tier) != 0).collect();
+        let config = definition.resolve().unwrap();
+        let expected: std::collections::BTreeSet<_> =
+            config.structures.iter().map(|s| s.id).collect();
+        for (team, attacker, base) in [(Team::Green, Team::Blue, 7), (Team::Blue, Team::Green, 8)] {
+            for lane in [Lane::Top, Lane::Mid, Lane::Bot] {
+                let mut rt = runtime(config.clone());
+                rt.world.game_state = GameState::Running;
+                let mut towers: Vec<_> = config
+                    .structures
+                    .iter()
+                    .filter(|s| s.team == team && s.lane == Some(lane))
+                    .collect();
+                towers.sort_by_key(|s| s.tier);
+                assert_eq!(
+                    structure_is_protected(&rt.world.structures, base),
+                    !towers.is_empty()
+                );
+                for (index, tower) in towers.iter().enumerate() {
+                    assert!(!structure_is_protected(&rt.world.structures, tower.id));
+                    for protected in &towers[index + 1..] {
+                        assert!(structure_is_protected(&rt.world.structures, protected.id));
+                        assert!(
+                            apply_structure_damage(
+                                &mut rt.world.structures,
+                                protected.id,
+                                1000.0,
+                                attacker,
+                                &mut rt.world.game_state
+                            )
+                            .is_none()
+                        );
+                    }
+                    assert!(structure_is_protected(&rt.world.structures, base));
+                    assert!(
+                        apply_structure_damage(
+                            &mut rt.world.structures,
+                            tower.id,
+                            1000.0,
+                            attacker,
+                            &mut rt.world.game_state
+                        )
+                        .unwrap()
+                        .killed
+                    );
+                }
+                assert!(!structure_is_protected(&rt.world.structures, base));
+                assert!(
+                    apply_structure_damage(
+                        &mut rt.world.structures,
+                        base,
+                        1000.0,
+                        attacker,
+                        &mut rt.world.game_state
+                    )
+                    .unwrap()
+                    .killed
+                );
+                assert!(
+                    matches!(rt.world.game_state, GameState::Victory { winner } if winner == attacker)
+                );
+                rt.restart_round(Instant::now());
+                assert_eq!(
+                    rt.world
+                        .structures
+                        .keys()
+                        .copied()
+                        .collect::<std::collections::BTreeSet<_>>(),
+                    expected
+                );
+                assert!(
+                    rt.world
+                        .structures
+                        .values()
+                        .all(|s| s.state.hp == s.state.max_hp)
+                );
+                assert_eq!(
+                    structure_is_protected(&rt.world.structures, base),
+                    !towers.is_empty()
+                );
+                for tower in &towers {
+                    assert_eq!(rt.world.structures[&tower.id].state.tier, tower.tier);
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn minions_follow_classic_and_reduced_siege_order_for_both_teams() {
+    let layout = build_map_layout();
+    for disabled in [vec![], vec![1], vec![0, 1], vec![0, 1, 2]] {
+        let mut definition = MapDefinition::from_json(shared::map::DEFAULT_JSON).unwrap();
+        definition.disabled_tower_tiers = disabled;
+        let config = definition.resolve().unwrap();
+        for (attacker, defender, base) in
+            [(Team::Green, Team::Blue, 8), (Team::Blue, Team::Green, 7)]
+        {
+            for lane in [Lane::Top, Lane::Mid, Lane::Bot] {
+                let mut world = GameWorld::empty();
+                world.structures = build_configured_structures(&config);
+                spawn_minion_wave_for_team_lane(
+                    &layout,
+                    &mut world.minions,
+                    &mut 1,
+                    attacker,
+                    lane,
+                );
+                world.minions.retain(|&id, _| id == 1);
+                let mut towers: Vec<_> = config
+                    .structures
+                    .iter()
+                    .filter(|s| s.team == defender && s.lane == Some(lane))
+                    .collect();
+                towers.sort_by_key(|s| s.tier);
+                let targets: Vec<_> = towers.iter().map(|s| s.id).chain([base]).collect();
+                let now = Instant::now();
+                for target in targets {
+                    // Start behind every defender; rank must beat proximity.
+                    let base_state = world.structures[&base].state.clone();
+                    let minion = world.minions.get_mut(&1).unwrap();
+                    minion.state.x = base_state.x + 3.0;
+                    minion.state.z = base_state.z + 3.0;
+                    simulate_minions(&mut world, TickCtx { now, dt: 0.0 });
+                    assert_eq!(
+                        world.minions[&1].state.target_id,
+                        Some(target),
+                        "{attacker:?}/{lane:?}"
+                    );
+                    world.structures.get_mut(&target).unwrap().state.hp = 0.0;
+                }
+            }
         }
     }
 }

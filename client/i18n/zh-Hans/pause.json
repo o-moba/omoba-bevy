@@ -46,5 +46,6 @@
   "pause.hud.joystick_y": "摇杆 · 垂直位置",
   "pause.hud.combat_x": "技能 · 水平位置",
   "pause.hud.combat_y": "技能 · 垂直位置",
-  "pause.hud.reset": "重置按钮位置"
+  "pause.hud.reset": "重置按钮位置",
+  "pause.render.show_fps": "显示 FPS"
 }

@@ -6,9 +6,9 @@ mod wire_enums;
 
 use serde::{Deserialize, Serialize};
 
-// Version 5 adds strict Recall/CancelRecall utility commands. Roll out client
-// and host together rather than silently dropping the new actions.
-pub const PROTOCOL_VERSION: u16 = 5;
+// Version 8 adds shared lane-brush geometry. Deploy client and host together:
+// older clients cannot display the newly authoritative concealment pockets.
+pub const PROTOCOL_VERSION: u16 = 8;
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]

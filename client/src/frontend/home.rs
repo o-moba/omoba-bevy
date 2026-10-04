@@ -41,6 +41,7 @@ impl Plugin for HomeScreenPlugin {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum HomeAction {
     Play,
+    Resume,
     BotPractice,
     OfflinePractice,
     Card,
@@ -239,6 +240,7 @@ fn spawn_home_utilities(
 /// What the home screen renders from. When it changes, the screen is rebuilt.
 #[derive(PartialEq, Clone)]
 struct HomeSignature {
+    resume_available: bool,
     nickname: String,
     rating: i32,
     matches: u32,
@@ -271,6 +273,7 @@ fn signature(
 ) -> HomeSignature {
     let profile = career.view.profile.as_ref();
     HomeSignature {
+        resume_available: false,
         locale: locale.map_or(0, Locale::generation),
         ui_scale_bits: ui_scale.to_bits(),
         viewport_bits: (viewport.x.to_bits(), viewport.y.to_bits()),
@@ -365,7 +368,9 @@ fn spawn_home(
     party: Res<crate::party::PartyClient>,
     locale: Option<Res<Locale>>,
     windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
+    resume: Option<Res<crate::net::recovery::ResumeMatchState>>,
 ) {
+    let can_resume = resume.as_ref().is_some_and(|resume| resume.saved.is_some());
     if automation_bypass() {
         return;
     }
@@ -661,15 +666,23 @@ fn spawn_home(
                     } else {
                         kit::button_node(ButtonSize::Hero, ButtonKind::Primary, form)
                     },
-                    play_label,
+                    if can_resume {
+                        tr("home.play.resume").to_owned()
+                    } else {
+                        play_label
+                    },
                     TextStyle::new(TextRole::ButtonLg),
                     ButtonKind::Primary,
                     Some(Icon::HudAttack),
-                    HomeAction::Play,
+                    if can_resume {
+                        HomeAction::Resume
+                    } else {
+                        HomeAction::Play
+                    },
                     "HomePlay".into(),
                     (),
                 );
-                if !matches!(session.state(), ClientConnectionState::Connected) {
+                if !can_resume && !matches!(session.state(), ClientConnectionState::Connected) {
                     column.commands().entity(play).insert(Pressable {
                         disabled: true,
                         ..default()
@@ -700,7 +713,9 @@ fn spawn_home(
                         "HomeOfflinePractice",
                     ),
                 ] {
-                    if action == HomeAction::BotPractice && career.view.match_service.is_none() {
+                    if action == HomeAction::BotPractice
+                        && (can_resume || career.view.match_service.is_none())
+                    {
                         continue;
                     }
                     let button = kit::spawn_button(
@@ -1082,6 +1097,10 @@ fn home_actions(
     let leads = party.as_ref().is_some_and(|p| p.view.is_leader());
     for Activated { action, .. } in activated.read() {
         match action {
+            HomeAction::Resume => {
+                session_ui.write(crate::net::SessionUiCommand::ResumeMatch);
+                next.set(AppScreen::Searching);
+            }
             HomeAction::Play | HomeAction::BotPractice if in_party => {
                 // A party plays together: the leader launches it, a member
                 // waits for the leader in the lobby.
@@ -1169,8 +1188,9 @@ fn refresh_home(
     locale: Option<Res<Locale>>,
     mut last: Local<Option<HomeSignature>>,
     windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
+    resume: Option<Res<crate::net::recovery::ResumeMatchState>>,
 ) {
-    let current = signature(
+    let mut current = signature(
         &career,
         &session,
         &card,
@@ -1181,6 +1201,7 @@ fn refresh_home(
             Vec2::new(w.width(), w.height())
         }),
     );
+    current.resume_available = resume.as_ref().is_some_and(|resume| resume.saved.is_some());
     if last.as_ref() == Some(&current) {
         return;
     }
@@ -1194,7 +1215,7 @@ fn refresh_home(
         .despawn();
     spawn_home(
         commands, career, session, card, thumbnails, preview, platform, ui_scale, party, locale,
-        windows,
+        windows, resume,
     );
 }
 

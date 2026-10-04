@@ -1520,7 +1520,7 @@ fn hud_page(body: &mut ChildSpawnerCommands, form: Form) {
             125,
             form,
         );
-        game::score_strip(line, 12, 9, (7, 2, 11));
+        game::score_strip(line, 12, 9, (7, 2, 11), 754);
         game::target_frame(
             line,
             ART[3].into(),

@@ -46,7 +46,7 @@ impl Plugin for PartyQaPlugin {
                 dimension("OMOBA_QA_HEIGHT", 720),
             ),
             started: Instant::now(),
-            stage: 0,
+            stage: if draft_only() { 5 } else { 0 },
             frames: 0,
             sequence: 0,
             in_flight: false,
@@ -85,6 +85,10 @@ struct PartyQa {
 }
 #[derive(Component)]
 struct PartyShot(usize);
+/// The two changed states only: editable draft and its circular countdown.
+fn draft_only() -> bool {
+    std::env::var("OMOBA_PARTY_QA_DRAFT_ONLY").as_deref() == Ok("1")
+}
 fn wanted(stage: usize) -> AppScreen {
     match stage {
         0..=4 => AppScreen::Lobby,
@@ -306,7 +310,7 @@ fn drive(
             _ => None,
         };
         if qa.frames == 12 {
-            qa.drag = Some((center, stage.yaw));
+            qa.drag = Some((center, stage.yaws[0]));
         }
         if let Some(phase) = phase {
             let start = qa.drag.map_or(center, |v| v.0);
@@ -423,10 +427,10 @@ fn capture(
         qa.in_flight = false;
         qa.drag = None;
         qa.scroll_before = None;
-        if qa.stage == FILES.len() {
+        if qa.stage == FILES.len() || (draft_only() && qa.stage == 7) {
             let summary = serde_json::json!({ "status":"passed", "scenario":"party-stage", "version":env!("CARGO_PKG_VERSION"),
                 "method":"real Bevy primary_window ScreenshotCaptured + save_to_disk", "synthetic_roster_fixture":true,
-                "live_multiplayer_evidence":false, "raw_touch_input_injected":true, "manual_or_physical_device_input":false,
+                "live_multiplayer_evidence":false, "raw_touch_input_injected":!draft_only(), "manual_or_physical_device_input":false,
                 "viewport_simulation":true, "captures":qa.captures });
             let saved = std::fs::write(
                 qa.directory.join("qa-summary.json"),
@@ -563,7 +567,7 @@ fn capture(
     if qa.stage == 3
         && !qa
             .drag
-            .is_some_and(|(_, before)| (stage.yaw - before - 64.0 * 0.012).abs() < 0.002)
+            .is_some_and(|(_, before)| (stage.yaws[0] - before - 64.0 * 0.012).abs() < 0.002)
     {
         abort(
             &mut qa,
@@ -601,7 +605,7 @@ fn capture(
     let capture = serde_json::json!({ "file":FILES[index], "screen":format!("{:?}", screen.get()), "pixels":qa.pixels.to_array(),
         "synthetic_roster_fixture":true, "viewer":VIEWER, "party":party_fixture(index), "prematch":(index>=5).then(||prematch_fixture(index)),
         "stage_members":stage.members.iter().map(|m| serde_json::json!({"avatar":m.avatar,"leader":m.leader,"revealed":m.revealed,"character":format!("{:?}",m.character)})).collect::<Vec<_>>(),
-        "yaw":stage.yaw, "yaw_before_drag":qa.drag.map(|v|v.1), "scroll_before":qa.scroll_before,
+        "yaw":stage.yaws[0], "yaw_before_drag":qa.drag.map(|v|v.1), "scroll_before":qa.scroll_before,
         "scroll_after":scrolling.map(|v|v.0), "scroll_max":scrolling.map(|v|v.1), "window_focused":window.focused,
         "modal_stack_open":modals.is_open(), "top_modal":format!("{:?}",modals.top()),
         "model_paths":model_paths, "required":required, "nodes":records });

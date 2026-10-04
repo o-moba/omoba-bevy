@@ -182,10 +182,11 @@ pub enum HeroClass {
     Riftshot,
     Chainkeeper,
     Frostguard,
+    Adventurer,
 }
 
 impl HeroClass {
-    pub const ALL: [Self; 16] = [
+    pub const ALL: [Self; 17] = [
         Self::Warrior,
         Self::Mage,
         Self::Ranger,
@@ -202,6 +203,7 @@ impl HeroClass {
         Self::Riftshot,
         Self::Chainkeeper,
         Self::Frostguard,
+        Self::Adventurer,
     ];
 
     pub const LEGACY: [Self; 5] = [
@@ -239,6 +241,7 @@ impl HeroClass {
             Self::Riftshot => "riftshot",
             Self::Chainkeeper => "chainkeeper",
             Self::Frostguard => "frostguard",
+            Self::Adventurer => "adventurer",
         }
     }
 

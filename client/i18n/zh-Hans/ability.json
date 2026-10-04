@@ -126,5 +126,13 @@
   "ability.northwall.name": "北境之墙",
   "ability.northwall.desc": "拦截前方来袭弹体，首次伤害被完全抵消，之后伤害降低。",
   "ability.winter_divide.name": "寒冬分界",
-  "ability.winter_divide.desc": "沿直线击飞敌人，并留下持续减速的冰冻路径。"
+  "ability.winter_divide.desc": "沿直线击飞敌人，并留下持续减速的冰冻路径。",
+  "ability.dagger_deadly_blow.name": "致命一击",
+  "ability.dagger_deadly_blow.desc": "快速发动近距离短刀攻击。",
+  "ability.dagger_bluff.name": "转身计",
+  "ability.dagger_bluff.desc": "使附近的敌方英雄眩晕 1 秒，并转身背对你。",
+  "ability.dagger_backstab.name": "背刺",
+  "ability.dagger_backstab.desc": "从背后攻击造成 2.5x 伤害。如果命中并使英雄损失生命且仍存活，有 2% 几率使其只剩 1 点生命。",
+  "ability.dagger_lethal_blow.name": "终结一击",
+  "ability.dagger_lethal_blow.desc": "强力的近距离短刀攻击，从背后命中造成 1.5x 伤害。"
 }

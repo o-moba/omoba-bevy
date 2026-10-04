@@ -26,5 +26,7 @@
   "draft.button.lock_in": "锁定",
   "draft.timer.remaining": "锁定倒计时 · {seconds}秒",
   "draft.timer.gathering": "等待队伍…",
-  "draft.stage.rotate": "拖动旋转"
+  "draft.stage.rotate": "拖动旋转",
+  "draft.tab.avatars": "角色",
+  "draft.tab.classes": "职业"
 }

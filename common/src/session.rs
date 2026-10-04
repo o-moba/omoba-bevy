@@ -432,6 +432,7 @@ impl GameWorld {
             player.join_error = None;
         }
         self.game_state = GameState::Lobby;
+        self.match_elapsed_secs = 0.0;
     }
 }
 

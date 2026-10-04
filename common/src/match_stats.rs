@@ -81,6 +81,7 @@ impl RoundLedger {
         }
         participant.stats = MatchStats {
             final_level: participant.stats.final_level.max(1),
+            earned_gold: Some(0),
             ..Default::default()
         };
         // Progression and rating are awarded later by result finalization,
@@ -133,11 +134,13 @@ impl RoundLedger {
             && let Some(participant) = self.participants.get_mut(&PlayerId(player_id))
         {
             participant.earned_gold = participant.earned_gold.max(earned_gold);
+            participant.result.stats.earned_gold = Some(participant.earned_gold);
         }
     }
 
     pub fn live_scoreboard(&self) -> Option<shared::live_score::LiveScoreboard> {
         self.started.then(|| shared::live_score::LiveScoreboard {
+            elapsed_secs: 0,
             kills: self.kills.clone(),
             players: self
                 .participants
@@ -464,6 +467,7 @@ mod tests {
             stats(&ledger, 1),
             MatchStats {
                 final_level: 1,
+                earned_gold: Some(0),
                 ..Default::default()
             }
         );
@@ -873,7 +877,8 @@ mod tests {
             ledger.live_scoreboard().unwrap().players[0].earned_gold,
             250
         );
-        ledger.freeze();
+        let final_rows = ledger.freeze();
+        assert_eq!(final_rows[0].stats.earned_gold, Some(250));
         ledger.update_earned_gold(1, 999);
         assert_eq!(
             ledger.live_scoreboard().unwrap().players[0].earned_gold,

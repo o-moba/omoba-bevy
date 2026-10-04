@@ -36,7 +36,9 @@ const STANDARD_ABILITIES: [&str; 8] = [
     "wild_rocket",
 ];
 pub(crate) fn atlas_path(ability: &str) -> &'static str {
-    if shared::loadout::SkillId::from_id(ability).is_some_and(|id| id as usize >= 8) {
+    if DAGGER_ABILITIES.contains(&ability) {
+        "ui/skills/dagger-skills.png"
+    } else if shared::loadout::SkillId::from_id(ability).is_some_and(|id| id as usize >= 8) {
         "ui/skills/roster-skills.png"
     } else if STANDARD_ABILITIES.contains(&ability) {
         "ui/skills/standard-skills.png"
@@ -46,10 +48,18 @@ pub(crate) fn atlas_path(ability: &str) -> &'static str {
 }
 const COLUMNS: usize = 4;
 const ROWS: usize = ABILITIES.len() / COLUMNS;
+const DAGGER_ABILITIES: [&str; 4] = [
+    "dagger_deadly_blow",
+    "dagger_bluff",
+    "dagger_backstab",
+    "dagger_lethal_blow",
+];
 
 /// Pixel rectangles support any atlas resolution, including odd-sized source art.
 pub(crate) fn icon_rect(ability: &str, size: Vec2) -> Option<Rect> {
-    let (index, rows) = if let Some(id) =
+    let (index, rows) = if let Some(i) = DAGGER_ABILITIES.iter().position(|id| *id == ability) {
+        (i, 1)
+    } else if let Some(id) =
         shared::loadout::SkillId::from_id(ability).filter(|id| *id as usize >= 8)
     {
         (id as usize - 8, 9)

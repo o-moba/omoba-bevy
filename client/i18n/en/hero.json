@@ -30,5 +30,7 @@
   "hero.chainkeeper.name": "Chainkeeper",
   "hero.chainkeeper.tagline": "Hook enemies, rescue allies and collect souls",
   "hero.frostguard.name": "Frostguard",
-  "hero.frostguard.tagline": "Protect allies and intercept incoming projectiles"
+  "hero.frostguard.tagline": "Protect allies and intercept incoming projectiles",
+  "hero.adventurer.name": "Adventurer",
+  "hero.adventurer.tagline": "Dagger assassin: Bluff exposes the back; rear attacks hit harder"
 }

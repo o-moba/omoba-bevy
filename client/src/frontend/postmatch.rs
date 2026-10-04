@@ -107,6 +107,7 @@ pub(crate) struct PostMatchLatch {
     namespace: Option<(u64, u64)>,
     local_team: Option<Team>,
     live: Option<LiveScorePlayer>,
+    roster: Vec<LiveScorePlayer>,
     avatar: Option<String>,
     /// The server sent `rematch_in_secs`: a rematch server (no career flow).
     rematch_seen: bool,
@@ -167,6 +168,69 @@ struct StatsModel {
     gold: Option<u32>,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+struct TeamPlayerStats {
+    player_id: u64,
+    nickname: String,
+    team: shared::map::Team,
+    local: bool,
+    kda: (u32, u32, u32),
+    gold: Option<u32>,
+}
+
+fn team_stats(latch: &PostMatchLatch, result: Option<&MatchResult>) -> Vec<TeamPlayerStats> {
+    let local_id = latch.live.as_ref().map(|row| row.player_id);
+    if let Some(result) = result.filter(|result| !result.participants.is_empty()) {
+        return result
+            .participants
+            .iter()
+            .map(|p| TeamPlayerStats {
+                player_id: p.player_id,
+                nickname: p.nickname.clone(),
+                team: p.team,
+                local: local_id == Some(p.player_id),
+                kda: (p.stats.kills, p.stats.deaths, p.stats.assists),
+                gold: p.stats.earned_gold.or_else(|| {
+                    latch
+                        .roster
+                        .iter()
+                        .find(|live| live.player_id == p.player_id)
+                        .map(|live| live.earned_gold)
+                }),
+            })
+            .collect();
+    }
+    latch
+        .roster
+        .iter()
+        .map(|p| TeamPlayerStats {
+            player_id: p.player_id,
+            nickname: p.nickname.clone(),
+            team: p.team,
+            local: local_id == Some(p.player_id),
+            kda: (p.kills, p.deaths, p.assists),
+            gold: Some(p.earned_gold),
+        })
+        .collect()
+}
+
+fn team_totals(
+    rows: &[TeamPlayerStats],
+    team: shared::map::Team,
+) -> ((u32, u32, u32), Option<u32>) {
+    let mut kda = (0_u32, 0_u32, 0_u32);
+    let mut gold = Some(0_u32);
+    for row in rows.iter().filter(|row| row.team == team) {
+        kda.0 = kda.0.saturating_add(row.kda.0);
+        kda.1 = kda.1.saturating_add(row.kda.1);
+        kda.2 = kda.2.saturating_add(row.kda.2);
+        gold = gold
+            .zip(row.gold)
+            .map(|(total, amount)| total.saturating_add(amount));
+    }
+    (kda, gold)
+}
+
 /// The career progress strip once the result is in.
 #[derive(Clone, Debug, PartialEq)]
 struct ProgressModel {
@@ -189,6 +253,7 @@ struct ResultModel {
     title: &'static str,
     summary: String,
     stats: Option<StatsModel>,
+    teams: Vec<TeamPlayerStats>,
     progress: Cell<ProgressModel>,
     details: Cell<()>,
     expects_result: bool,
@@ -254,6 +319,7 @@ fn result_model(
         title: outcome_headline(winner, local_team),
         summary,
         stats,
+        teams: team_stats(latch, result),
         progress,
         details,
         expects_result: expects,
@@ -298,7 +364,9 @@ fn stats_model(
         level,
         kda,
         damage,
-        gold: live.map(|live| live.earned_gold),
+        gold: participant
+            .and_then(|p| p.stats.earned_gold)
+            .or_else(|| live.map(|live| live.earned_gold)),
     })
 }
 
@@ -438,6 +506,10 @@ fn latch_post_match(
                 .find(|player| player.player_id == game.your_id)
                 .cloned()
         }),
+        roster: game
+            .scoreboard
+            .as_ref()
+            .map_or_else(Vec::new, |board| board.players.clone()),
         avatar: local.and_then(|(_, avatar)| avatar.and_then(|avatar| avatar.0.clone())),
         rematch_seen: game.rematch_in_secs.is_some(),
         entered_at: time.map_or(0.0, |time| time.elapsed_secs()),
@@ -733,8 +805,17 @@ fn phone_layout(
 fn spawn_body(body: &mut ChildSpawnerCommands, model: &ResultModel, form: Form) -> Entity {
     let banner = spawn_banner(body, model.outcome, model.title, form);
     spawn_summary(body, &model.summary, form);
-    if let Some(stats) = &model.stats {
-        spawn_stats(body, stats, form);
+    if model.teams.is_empty() {
+        if let Some(stats) = &model.stats {
+            spawn_stats(body, stats, form);
+        }
+    } else {
+        spawn_team_stats(body, &model.teams, form);
+        if let Some(stats) = &model.stats
+            && form == Form::Desktop
+        {
+            spawn_damage_line(body, &stats.damage);
+        }
     }
     if !matches!(model.progress, Cell::Hidden) {
         spawn_progress(body, &model.progress, form);
@@ -749,8 +830,8 @@ fn spawn_banner(
     form: Form,
 ) -> Entity {
     let (width, height) = match form {
-        Form::Desktop => (640.0, 112.0),
-        Form::Phone => (420.0, 64.0),
+        Form::Desktop => (640.0, 80.0),
+        Form::Phone => (420.0, 48.0),
     };
     let title_ink = if outcome == Outcome::Victory {
         color::TEXT_GOLD
@@ -775,7 +856,13 @@ fn spawn_banner(
     .with_children(|banner| {
         banner.spawn((
             Text::new(title),
-            theme::role_text(TextRole::TitleXl),
+            theme::styled_text(if form == Form::Phone {
+                // Match the phone role immediately, before the theme pass, so
+                // the first measured frame cannot expand this compact banner.
+                TextStyle::new(TextRole::TitleXl).sized(crate::ui::tokens::Metric::new(32.0, 32.0))
+            } else {
+                TextStyle::new(TextRole::TitleXl)
+            }),
             TextColor(title_ink),
             TextLayout::new(Justify::Center, LineBreak::NoWrap),
             Name::new("PostMatchOutcome"),
@@ -828,7 +915,14 @@ fn spawn_summary(body: &mut ChildSpawnerCommands, summary: &str, form: Form) {
             max_width: Val::Percent(100.0),
             height: Val::Px(height),
             margin: UiRect::top(Val::Px(gap)),
-            padding: UiRect::axes(Val::Px(space::S12), Val::Px(space::S4)),
+            padding: UiRect::axes(
+                Val::Px(space::S12),
+                Val::Px(if form == Form::Desktop {
+                    space::S4
+                } else {
+                    0.0
+                }),
+            ),
             column_gap: Val::Px(space::S16),
             align_items: AlignItems::Center,
             justify_content: JustifyContent::Center,
@@ -863,6 +957,209 @@ fn spawn_summary(body: &mut ChildSpawnerCommands, summary: &str, form: Form) {
             row.spawn(rule());
         }
     });
+}
+
+fn spawn_team_stats(parent: &mut ChildSpawnerCommands, rows: &[TeamPlayerStats], form: Form) {
+    let phone = form == Form::Phone;
+    parent
+        .spawn((
+            Node {
+                width: if phone {
+                    Val::Percent(100.0)
+                } else {
+                    Val::Px(880.0)
+                },
+                max_width: Val::Percent(100.0),
+                column_gap: Val::Px(12.0),
+                margin: UiRect::top(Val::Px(6.0)),
+                flex_shrink: 0.0,
+                ..default()
+            },
+            Name::new("PostMatchTeams"),
+        ))
+        .with_children(|teams| {
+            for (team, key, ink, identity) in [
+                (
+                    shared::map::Team::Green,
+                    "edge.team.green",
+                    color::TEAM_GREEN,
+                    "Green", // i18n-allow: canonical node identity suffix
+                ),
+                (
+                    shared::map::Team::Blue,
+                    "edge.team.blue",
+                    color::TEAM_BLUE,
+                    "Blue", // i18n-allow: canonical node identity suffix
+                ),
+            ] {
+                teams
+                    .spawn((
+                        Node {
+                            flex_grow: 1.0,
+                            flex_basis: Val::Px(0.0),
+                            min_width: Val::Px(0.0),
+                            flex_direction: FlexDirection::Column,
+                            padding: UiRect::all(Val::Px(4.0)),
+                            border_radius: BorderRadius::all(Val::Px(radius::MD)),
+                            ..default()
+                        },
+                        BackgroundColor(theme::perceptual(color::SURFACE_GLASS_STRONG)),
+                        Name::new(format!("PostMatchTeam{identity}")),
+                    ))
+                    .with_children(|panel| {
+                        team_row(
+                            panel,
+                            tr(key),
+                            tr("edge.kda"),
+                            tr("postmatch.gold_earned"),
+                            phone,
+                            ink,
+                            &format!("PostMatchHeader{identity}"),
+                            false,
+                        );
+                        for row in rows.iter().filter(|row| row.team == team) {
+                            team_row(
+                                panel,
+                                &row.nickname,
+                                &format!("{} / {} / {}", row.kda.0, row.kda.1, row.kda.2),
+                                &row.gold
+                                    .map_or_else(|| "—".to_owned(), |gold| gold.to_string()),
+                                phone,
+                                if row.local {
+                                    color::TEXT_GOLD
+                                } else {
+                                    color::TEXT_PRIMARY
+                                },
+                                &format!("PostMatchPlayer{}", row.player_id),
+                                row.local,
+                            );
+                        }
+                        let (kda, gold) = team_totals(rows, team);
+                        team_row(
+                            panel,
+                            tr("postmatch.total"),
+                            &format!("{} / {} / {}", kda.0, kda.1, kda.2),
+                            &gold.map_or_else(|| "—".to_owned(), |gold| gold.to_string()),
+                            phone,
+                            ink,
+                            &format!("PostMatchTotal{identity}"),
+                            false,
+                        );
+                    });
+            }
+        });
+}
+
+#[allow(clippy::too_many_arguments)]
+fn team_row(
+    parent: &mut ChildSpawnerCommands,
+    name: &str,
+    kda: &str,
+    gold: &str,
+    phone: bool,
+    ink: Color,
+    identity: &str,
+    local: bool,
+) {
+    parent
+        .spawn((
+            Node {
+                width: Val::Percent(100.0),
+                height: Val::Px(if phone { 18.0 } else { 24.0 }),
+                flex_shrink: 0.0,
+                align_items: AlignItems::Center,
+                column_gap: Val::Px(6.0),
+                ..default()
+            },
+            Name::new(identity.to_owned()),
+        ))
+        .with_children(|row| {
+            for (value, width, child_name) in [
+                (name, Val::Auto, format!("{identity}Name")), // i18n-allow: canonical node identity
+                (
+                    kda,
+                    Val::Px(if phone { 72.0 } else { 90.0 }),
+                    if local {
+                        "PostMatchKdaValue".to_owned()
+                    } else {
+                        format!("{identity}Kda") // i18n-allow: canonical node identity
+                    },
+                ),
+                (
+                    gold,
+                    Val::Px(if phone { 76.0 } else { 104.0 }),
+                    if local {
+                        "PostMatchGoldValue".to_owned()
+                    } else {
+                        format!("{identity}Gold") // i18n-allow: canonical node identity
+                    },
+                ),
+            ] {
+                row.spawn((
+                    Text::new(value),
+                    TextFont {
+                        font_size: if phone { 11.0 } else { 14.0 },
+                        ..default()
+                    },
+                    TextColor(ink),
+                    TextLayout::new(
+                        if width == Val::Auto {
+                            Justify::Left
+                        } else {
+                            Justify::Right
+                        },
+                        LineBreak::NoWrap,
+                    ),
+                    Node {
+                        width,
+                        min_width: Val::Px(0.0),
+                        flex_grow: if width == Val::Auto { 1.0 } else { 0.0 },
+                        flex_shrink: if width == Val::Auto { 1.0 } else { 0.0 },
+                        overflow: Overflow::clip(),
+                        ..default()
+                    },
+                    Name::new(child_name),
+                ));
+            }
+        });
+}
+
+fn spawn_damage_line(parent: &mut ChildSpawnerCommands, damage: &Cell<String>) {
+    if matches!(damage, Cell::Hidden) {
+        return;
+    }
+    parent
+        .spawn((
+            Node {
+                height: Val::Px(20.0),
+                flex_shrink: 0.0,
+                column_gap: Val::Px(8.0),
+                align_items: AlignItems::Center,
+                ..default()
+            },
+            Name::new("PostMatchDamage"),
+        ))
+        .with_children(|row| {
+            row.spawn((
+                Text::new(tr("career.table.hero_damage")),
+                theme::role_text(TextRole::Caption),
+                TextColor(color::TEXT_MUTED),
+            ));
+            match damage {
+                Cell::Value(value) => {
+                    row.spawn((
+                        Text::new(value),
+                        theme::role_text(TextRole::Caption),
+                        TextColor(color::TEXT_PRIMARY),
+                        Name::new("PostMatchDamageValue"),
+                    ));
+                }
+                Cell::Pending => {
+                    row.spawn(skeleton(Val::Px(56.0), Val::Px(12.0)));
+                }
+                Cell::Hidden => {}
+            }
+        });
 }
 
 fn spawn_stats(body: &mut ChildSpawnerCommands, stats: &StatsModel, form: Form) {
@@ -1110,7 +1407,7 @@ struct LevelFlash {
 
 fn spawn_progress(body: &mut ChildSpawnerCommands, progress: &Cell<ProgressModel>, form: Form) {
     let desktop = form == Form::Desktop;
-    let badge = if desktop { 48.0 } else { 40.0 };
+    let badge = if desktop { 48.0 } else { 32.0 };
     body.spawn((
         Node {
             width: if desktop {
@@ -1119,8 +1416,10 @@ fn spawn_progress(body: &mut ChildSpawnerCommands, progress: &Cell<ProgressModel
                 Val::Percent(100.0)
             },
             max_width: Val::Percent(100.0),
-            height: Val::Px(if desktop { 72.0 } else { 48.0 }),
-            margin: UiRect::top(Val::Px(if desktop { space::S12 } else { space::S8 })),
+            // The phone keeps both five-player tables above its fixed56px
+            // actions. A32px level disc plus padding/border needs42px.
+            height: Val::Px(if desktop { 72.0 } else { 42.0 }),
+            margin: UiRect::top(Val::Px(if desktop { space::S12 } else { space::S4 })),
             padding: UiRect::axes(
                 Val::Px(if desktop { space::S16 } else { space::S12 }),
                 Val::Px(if desktop { space::S12 } else { space::S4 }),
@@ -1794,6 +2093,136 @@ mod tests {
         .unwrap()
     }
 
+    fn full_receipt() -> MatchResult {
+        let mut result = saved_receipt();
+        result.match_id = 2;
+        result.participants = (0..10).map(|index| serde_json::from_value(serde_json::json!({
+            "player_id": 11 + index, "profile_id": if index == 0 {Some("p-1")} else {None},
+            "nickname": format!("Player {index}"), "team": if index < 5 {"green"} else {"blue"},
+            "hero_class":"mage", "character":"cube", "avatar":null, "sprite_character":null,
+            "stats":{"kills":index,"deaths":2,"assists":3,"earned_gold":5000 + index * 100,"final_level":9},
+            "disconnected":false,"rating":null,"progression_xp_gained":150
+        })).unwrap()).collect();
+        result
+    }
+
+    #[test]
+    fn both_teams_use_final_earned_income_and_do_not_invent_legacy_gold() {
+        let mut result = full_receipt();
+        let latch = PostMatchLatch::default();
+        let rows = team_stats(&latch, Some(&result));
+        assert_eq!(rows.len(), 10);
+        assert_eq!(
+            team_totals(&rows, shared::map::Team::Green),
+            ((10, 10, 15), Some(26000))
+        );
+        assert_eq!(
+            team_totals(&rows, shared::map::Team::Blue),
+            ((35, 10, 15), Some(28500))
+        );
+        result.participants[2].stats.earned_gold = None;
+        let rows = team_stats(&latch, Some(&result));
+        assert_eq!(rows[2].gold, None);
+        assert_eq!(team_totals(&rows, shared::map::Team::Green).1, None);
+        assert_eq!(team_totals(&rows, shared::map::Team::Blue).1, Some(28500));
+        assert!(team_stats(&latch, Some(&saved_receipt())).is_empty());
+    }
+
+    #[test]
+    fn phone_full_teams_and_totals_fit_above_result_actions() {
+        use bevy::camera::{ComputedCameraValues, RenderTargetInfo};
+        let mut app = screen_app();
+        app.add_plugins((
+            bevy::asset::AssetPlugin::default(),
+            bevy::image::ImagePlugin::default(),
+            bevy::text::TextPlugin,
+            bevy::transform::TransformPlugin,
+            bevy::input::InputPlugin,
+            bevy::ui::UiPlugin,
+            bevy::camera::visibility::VisibilityPlugin,
+            bevy::picking::PickingPlugin,
+            bevy::picking::InteractionPlugin,
+        ))
+        .init_resource::<Assets<bevy::mesh::Mesh>>()
+        .init_resource::<Assets<TextureAtlasLayout>>();
+        let mut mobile = MobileControls::default();
+        mobile.enabled = true;
+        mobile.viewport = Vec2::new(852.0, 393.0);
+        mobile.safe = crate::mobile_controls::MobileSafeInsets {
+            left: 32.0,
+            right: 32.0,
+            top: 12.0,
+            bottom: 20.0,
+        };
+        app.insert_resource(mobile);
+        let mut window = Window::default();
+        window.resolution.set_scale_factor_override(Some(1.0));
+        window.resolution.set(852.0, 393.0);
+        app.world_mut().spawn((window, bevy::window::PrimaryWindow));
+        app.world_mut().spawn((
+            Camera2d,
+            Camera {
+                computed: ComputedCameraValues {
+                    target_info: Some(RenderTargetInfo {
+                        physical_size: UVec2::new(852, 393),
+                        scale_factor: 1.0,
+                    }),
+                    ..default()
+                },
+                ..default()
+            },
+        ));
+        {
+            let mut career = app.world_mut().resource_mut::<CareerClient>();
+            career.view.storage_enabled = true;
+            career.view.profile = Some(shared::career::ProfileSummary::new(
+                "p-1".into(),
+                "Guest".into(),
+            ));
+            career.public_profile_id = Some("p-1".into());
+            career.view.last_result = Some(full_receipt());
+        }
+        app.finish();
+        app.cleanup();
+        enter(&mut app);
+        for _ in 0..5 {
+            app.update();
+        }
+        let rect = |app: &App, entity| {
+            Rect::from_center_size(
+                app.world()
+                    .get::<UiGlobalTransform>(entity)
+                    .unwrap()
+                    .translation,
+                app.world().get::<ComputedNode>(entity).unwrap().size(),
+            )
+        };
+        let teams = named(&mut app, "PostMatchTeams").unwrap();
+        let status = named(&mut app, "PostMatchStatus").unwrap();
+        let actions = named(&mut app, "PostMatchActions").unwrap();
+        let table = rect(&app, teams);
+        let controls = rect(&app, actions);
+        assert!(
+            table.size().y >= 126.0 && table.max.y < controls.min.y,
+            "{table:?} / {controls:?}"
+        );
+        let status = rect(&app, status);
+        assert!(
+            status.max.y <= controls.min.y,
+            "status {status:?} must stay above actions {controls:?}; table {table:?}"
+        );
+        for index in 11..21 {
+            let row = named(&mut app, &format!("PostMatchPlayer{index}")).unwrap();
+            let row = rect(&app, row);
+            assert!(row.size().y >= 18.0 && table.contains(row.center()));
+            assert!(row.min.x >= table.min.x && row.max.x <= table.max.x + 0.1);
+        }
+        for team in ["Green", "Blue"] {
+            let total = named(&mut app, &format!("PostMatchTotal{team}")).unwrap();
+            assert!(table.contains(rect(&app, total).center()));
+        }
+    }
+
     fn screen_app() -> App {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, bevy::state::app::StatesPlugin))
@@ -1811,6 +2240,7 @@ mod tests {
                 winner: shared::map::Team::Green,
             };
             game.scoreboard = Some(shared::live_score::LiveScoreboard {
+                elapsed_secs: 720,
                 kills: Vec::new(),
                 players: vec![LiveScorePlayer {
                     avatar: None,

@@ -2,7 +2,7 @@
 //!
 //! Callers put the viewer first and supply the actual members and their selected
 //! models. The image is transparent, with isolated lighting and render layers;
-//! dragging its surface turns each hero without moving anyone out of formation.
+//! dragging a hero turns only that hero without moving anyone out of formation.
 //! No player-facing text: screens label the team and its interaction.
 // i18n-strict
 use bevy::camera::{RenderTarget, visibility::RenderLayers};
@@ -81,8 +81,8 @@ pub struct PartyStage {
     pub image: Handle<Image>,
     /// Caller-owned identity order: viewer, inner left/right, outer left/right.
     pub members: Vec<StageMember>,
-    /// Hero turntable angle; the formation and camera remain fixed.
-    pub yaw: f32,
+    /// Independent turntables in the caller-owned identity order.
+    pub yaws: [f32; shared::party::MAX_PARTY_SIZE],
     spawned: Option<StageSnapshot>,
     slots: Vec<Slot>,
 }
@@ -100,7 +100,7 @@ impl FromWorld for PartyStage {
         Self {
             image,
             members: Vec::new(),
-            yaw: std::f32::consts::PI,
+            yaws: [std::f32::consts::PI; shared::party::MAX_PARTY_SIZE],
             spawned: None,
             slots: Vec::new(),
         }
@@ -208,9 +208,55 @@ pub fn slot_anchor(index: usize, count: usize) -> Vec2 {
         0.1,
         100.0,
     );
-    let feet = STAGE_ORIGIN + slot_position(index, count) + Vec3::Y * PLINTH_TOP;
+    project_slot(index, count, 0.0, view, projection)
+}
+
+fn project_slot(index: usize, count: usize, height: f32, view: Mat4, projection: Mat4) -> Vec2 {
+    let feet = STAGE_ORIGIN + slot_position(index, count) + Vec3::Y * (PLINTH_TOP + height);
     let projected = projection.project_point3(view.transform_point3(feet));
     Vec2::new(0.5 + projected.x * 0.5, 0.5 - projected.y * 0.5)
+}
+
+/// Select the closest revealed body under the pointer. Width is limited by
+/// neighbouring projected feet so an adjacent hero never rotates by accident.
+fn touched_slot(position: Vec2, rect: Rect, members: &[StageMember]) -> Option<usize> {
+    if !rect.contains(position) || rect.size().min_element() <= 0.0 {
+        return None;
+    }
+    let point = (position - rect.min) / rect.size();
+    let count = members.len();
+    let view = camera_transform(count).to_matrix().inverse();
+    let projection = Mat4::perspective_rh(
+        STAGE_FOV,
+        STAGE_WIDTH as f32 / STAGE_HEIGHT as f32,
+        0.1,
+        100.0,
+    );
+    members
+        .iter()
+        .enumerate()
+        .filter(|(_, member)| member.revealed)
+        .filter_map(|(index, _)| {
+            let feet = slot_anchor(index, count);
+            let head = project_slot(
+                index,
+                count,
+                crate::model_scale::DEFAULT_MODEL_TARGET_HEIGHT,
+                view,
+                projection,
+            );
+            let half_width = (0..count)
+                .filter(|other| *other != index)
+                .map(|other| (slot_anchor(other, count).x - feet.x).abs() * 0.5)
+                .fold(0.13_f32, f32::min);
+            (point.x >= feet.x - half_width
+                && point.x <= feet.x + half_width
+                && point.y >= head.y - 0.03
+                && point.y <= feet.y + 0.03)
+                .then_some((index, (point.x - feet.x).abs()))
+        })
+        .min_by(|a, b| a.1.total_cmp(&b.1))
+        .map(|(index, _)| index)
 }
 
 /// A close, gently elevated camera gives the main hero prominence; the wider
@@ -224,7 +270,7 @@ fn camera_transform(members: usize) -> Transform {
 fn release_stage_off_screen(screen: Res<State<AppScreen>>, mut stage: ResMut<PartyStage>) {
     if !stage_screen(*screen.get()) && !stage.members.is_empty() {
         stage.members.clear();
-        stage.yaw = std::f32::consts::PI;
+        stage.yaws.fill(std::f32::consts::PI);
     }
 }
 
@@ -374,7 +420,7 @@ fn sync_stage(
         let pivot = commands
             .spawn((
                 Transform::from_xyz(0.0, PLINTH_TOP, 0.0)
-                    .with_rotation(Quat::from_rotation_y(stage.yaw)),
+                    .with_rotation(Quat::from_rotation_y(stage.yaws[index])),
                 Visibility::Visible,
                 RenderLayers::layer(STAGE_LAYER),
                 Name::new(format!("PartyStageHeroPivot{index}")),
@@ -596,14 +642,16 @@ fn play_idle(
 #[derive(Default)]
 struct StageDrag {
     held: Option<(Option<u64>, Vec2)>,
+    slot: Option<usize>,
     viewport: Option<Vec2>,
     screen: Option<AppScreen>,
 }
 
 impl StageDrag {
-    fn begin(&mut self, pointer: Option<u64>, position: Vec2, inside: bool) {
-        if self.held.is_none() && inside && position.is_finite() {
+    fn begin(&mut self, pointer: Option<u64>, position: Vec2, slot: Option<usize>) {
+        if self.held.is_none() && slot.is_some() && position.is_finite() {
             self.held = Some((pointer, position));
+            self.slot = slot;
         }
     }
 
@@ -621,6 +669,7 @@ impl StageDrag {
     fn end(&mut self, pointer: Option<u64>) {
         if self.held.is_some_and(|(owner, _)| owner == pointer) {
             self.held = None;
+            self.slot = None;
         }
     }
 }
@@ -664,21 +713,47 @@ fn interact(
         gesture.held = None;
         return;
     }
-    let inside = |position| {
-        surfaces.iter().any(|(node, transform, clip, visible)| {
-            visible.is_none_or(|visibility| visibility.get())
-                && crate::ui::gesture::logical_ui_rect(node, transform, clip, window.scale_factor())
-                    .contains(position)
-        })
+    let members = stage.members.clone();
+    let slot_at = |position| {
+        surfaces
+            .iter()
+            .find_map(|(node, transform, clip, visible)| {
+                if visible.is_some_and(|visibility| !visibility.get()) {
+                    return None;
+                }
+                let rect = crate::ui::gesture::logical_ui_rect(
+                    node,
+                    transform,
+                    clip,
+                    window.scale_factor(),
+                );
+                if !rect.contains(position) {
+                    return None;
+                }
+                // Projection coordinates belong to the complete render image;
+                // clipping controls admission, never its coordinate system.
+                let image_rect = crate::ui::gesture::logical_ui_rect(
+                    node,
+                    transform,
+                    None,
+                    window.scale_factor(),
+                );
+                touched_slot(position, image_rect, &members)
+            })
     };
     let mut touched = false;
     for event in touches.read() {
         touched = true;
         match event.phase {
             TouchPhase::Started => {
-                gesture.begin(Some(event.id), event.position, inside(event.position))
+                gesture.begin(Some(event.id), event.position, slot_at(event.position))
             }
-            TouchPhase::Moved => stage.yaw += gesture.moved(Some(event.id), event.position),
+            TouchPhase::Moved => {
+                let delta = gesture.moved(Some(event.id), event.position);
+                if let Some(slot) = gesture.slot {
+                    stage.yaws[slot] += delta;
+                }
+            }
             TouchPhase::Ended | TouchPhase::Canceled => gesture.end(Some(event.id)),
         }
     }
@@ -687,15 +762,20 @@ fn interact(
             gesture.end(None);
         } else if let Some(position) = window.cursor_position() {
             if mouse.just_pressed(MouseButton::Left) {
-                gesture.begin(None, position, inside(position));
+                gesture.begin(None, position, slot_at(position));
             } else if mouse.pressed(MouseButton::Left) {
-                stage.yaw += gesture.moved(None, position);
+                let delta = gesture.moved(None, position);
+                if let Some(slot) = gesture.slot {
+                    stage.yaws[slot] += delta;
+                }
             }
         } else {
             gesture.end(None);
         }
     }
-    stage.yaw = stage.yaw.rem_euclid(std::f32::consts::TAU);
+    for yaw in &mut stage.yaws {
+        *yaw = yaw.rem_euclid(std::f32::consts::TAU);
+    }
 }
 
 fn turn_and_ground_heroes(
@@ -703,9 +783,9 @@ fn turn_and_ground_heroes(
     mut transforms: Query<&mut Transform>,
     normalized: Query<&NormalizeModelScale>,
 ) {
-    for slot in &stage.slots {
+    for (index, slot) in stage.slots.iter().enumerate() {
         if let Ok(mut transform) = transforms.get_mut(slot.pivot) {
-            transform.rotation = Quat::from_rotation_y(stage.yaw);
+            transform.rotation = Quat::from_rotation_y(stage.yaws[index]);
         }
         if let Ok(normalized) = normalized.get(slot.model)
             && let Some(feet) = normalized.foot_local_y()
@@ -1149,21 +1229,93 @@ mod tests {
     }
 
     #[test]
+    fn touched_preview_selects_each_revealed_body_and_ignores_empty_space() {
+        let rect = Rect::from_corners(Vec2::new(32.0, 60.0), Vec2::new(398.0, 265.875));
+        let mut members = vec![member(); 5];
+        for index in 0..5 {
+            let anchor = slot_anchor(index, 5);
+            let body = rect.min + (anchor - Vec2::Y * 0.15) * rect.size();
+            assert_eq!(touched_slot(body, rect, &members), Some(index));
+        }
+        let hidden = rect.min + (slot_anchor(1, 5) - Vec2::Y * 0.15) * rect.size();
+        members[1].revealed = false;
+        assert_eq!(touched_slot(hidden, rect, &members), None);
+        assert_eq!(touched_slot(rect.min, rect, &members), None);
+        assert_eq!(touched_slot(rect.max + Vec2::ONE, rect, &members), None);
+    }
+
+    #[test]
     fn only_drag_started_on_surface_rotates_and_other_fingers_are_ignored() {
         let mut drag = StageDrag::default();
-        drag.begin(Some(1), Vec2::ZERO, false);
+        drag.begin(Some(1), Vec2::ZERO, None);
         assert_eq!(drag.moved(Some(1), Vec2::new(50.0, 0.0)), 0.0);
-        drag.begin(Some(1), Vec2::ZERO, true);
+        drag.begin(Some(1), Vec2::ZERO, Some(2));
+        drag.begin(Some(2), Vec2::ZERO, Some(1));
+        assert_eq!(drag.slot, Some(2));
         assert_eq!(drag.moved(Some(2), Vec2::new(50.0, 0.0)), 0.0);
         assert!((drag.moved(Some(1), Vec2::new(50.0, 0.0)) - 0.6).abs() < 1e-6);
         drag.end(Some(2));
         assert!(drag.held.is_some());
         drag.end(Some(1));
         assert_eq!(drag.moved(Some(1), Vec2::new(80.0, 0.0)), 0.0);
-        drag.begin(None, Vec2::ZERO, true);
+        drag.begin(None, Vec2::ZERO, Some(0));
         assert_eq!(drag.moved(None, Vec2::new(0.0, 70.0)), 0.0);
         drag.end(None);
         assert!(drag.held.is_none());
+    }
+
+    #[test]
+    fn raw_touch_rotates_only_the_body_where_the_drag_began() {
+        let mut app = App::new();
+        app.init_resource::<Assets<Image>>()
+            .init_resource::<PartyStage>()
+            .insert_resource(State::new(AppScreen::Draft))
+            .add_message::<TouchInput>()
+            .add_systems(Update, interact);
+        app.world_mut().resource_mut::<PartyStage>().members = vec![member(); 5];
+        let mut window = Window {
+            focused: true,
+            ..default()
+        };
+        window.resolution.set_scale_factor_override(Some(1.0));
+        window.resolution.set(852.0, 393.0);
+        let window = app.world_mut().spawn((window, PrimaryWindow)).id();
+        let size = Vec2::new(366.0, 205.875);
+        let rect = Rect::from_corners(Vec2::new(32.0, 60.0), Vec2::new(32.0, 60.0) + size);
+        app.world_mut().spawn((
+            StageSurface,
+            ComputedNode {
+                size,
+                inverse_scale_factor: 1.0,
+                ..default()
+            },
+            UiGlobalTransform::from_translation(rect.center()),
+            InheritedVisibility::VISIBLE,
+        ));
+        let start = rect.min + (slot_anchor(1, 5) - Vec2::Y * 0.15) * size;
+        for (id, phase, position) in [
+            (1, TouchPhase::Started, start),
+            (2, TouchPhase::Started, rect.center()),
+            (2, TouchPhase::Moved, rect.center() + Vec2::X * 50.0),
+            (1, TouchPhase::Moved, start + Vec2::X * 50.0),
+            (1, TouchPhase::Ended, start + Vec2::X * 50.0),
+        ] {
+            app.world_mut().write_message(TouchInput {
+                id,
+                phase,
+                position,
+                window,
+                force: None,
+            });
+            app.update();
+        }
+        for (index, yaw) in app.world().resource::<PartyStage>().yaws.iter().enumerate() {
+            let expected = std::f32::consts::PI + if index == 1 { 0.6 } else { 0.0 };
+            assert!(
+                (yaw - expected).abs() < 1e-5,
+                "slot {index} rotated by {yaw}"
+            );
+        }
     }
 
     #[test]
@@ -1196,20 +1348,23 @@ mod tests {
                 });
             positions.push((root, pivot, position));
         }
-        app.world_mut().resource_mut::<PartyStage>().yaw = 0.75;
+        app.world_mut().resource_mut::<PartyStage>().yaws[2] = 0.75;
         app.update();
-        for (root, pivot, original) in positions {
+        for (index, (root, pivot, original)) in positions.into_iter().enumerate() {
             assert_eq!(
                 app.world().get::<Transform>(root).unwrap().translation,
                 original
             );
             let transformed = app.world().get::<Transform>(pivot).unwrap();
             assert_eq!(transformed.translation, Vec3::Y * PLINTH_TOP);
-            assert!(
-                transformed
-                    .rotation
-                    .abs_diff_eq(Quat::from_rotation_y(0.75), 1e-6)
-            );
+            assert!(transformed.rotation.abs_diff_eq(
+                Quat::from_rotation_y(if index == 2 {
+                    0.75
+                } else {
+                    std::f32::consts::PI
+                }),
+                1e-6
+            ));
         }
     }
 

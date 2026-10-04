@@ -220,6 +220,7 @@ fn class_keys(class: HeroClass) -> (&'static str, &'static str) {
         HeroClass::Riftshot => ("hero.riftshot.name", "hero.riftshot.tagline"),
         HeroClass::Chainkeeper => ("hero.chainkeeper.name", "hero.chainkeeper.tagline"),
         HeroClass::Frostguard => ("hero.frostguard.name", "hero.frostguard.tagline"),
+        HeroClass::Adventurer => ("hero.adventurer.name", "hero.adventurer.tagline"),
     }
 }
 

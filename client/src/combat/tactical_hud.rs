@@ -447,7 +447,8 @@ pub(super) fn update_tactical_hud(
                     .spawn((
                         Node {
                             column_gap: Val::Px(3.0),
-                            width: Val::Percent(100.0),
+                            max_width: Val::Percent(100.0),
+                            align_self: AlignSelf::FlexEnd,
                             align_items: AlignItems::Center,
                             padding: UiRect::all(Val::Px(2.0)),
                             ..default()
@@ -466,8 +467,7 @@ pub(super) fn update_tactical_hud(
                     TextLayout::new_with_no_wrap(),
                     Node {
                         min_width: Val::Px(0.0),
-                        width: Val::Px(0.0),
-                        flex_grow: 1.0,
+                        max_width: Val::Px(if phone { 72.0 } else { 104.0 }),
                         overflow: Overflow::clip(),
                         ..default()
                     },
@@ -491,8 +491,7 @@ pub(super) fn update_tactical_hud(
                     TextLayout::new_with_no_wrap(),
                     Node {
                         min_width: Val::Px(0.0),
-                        width: Val::Px(0.0),
-                        flex_grow: 1.0,
+                        max_width: Val::Px(if phone { 72.0 } else { 104.0 }),
                         overflow: Overflow::clip(),
                         ..default()
                     },
@@ -594,6 +593,7 @@ mod tests {
             connected: true,
         };
         let mut board = LiveScoreboard {
+            elapsed_secs: 0,
             kills: vec![],
             players: vec![
                 player(1, shared::map::Team::Blue),

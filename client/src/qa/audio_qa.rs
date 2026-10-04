@@ -204,7 +204,7 @@ fn drive(
         }
     } else if qa.stage == 1 {
         if diagnostics.assets_ready != diagnostics.assets_total
-            || diagnostics.assets_total != 17
+            || diagnostics.assets_total != 19
             || !diagnostics.music_sink
             || diagnostics.music_position_secs < 0.3
             || diagnostics.music_volume <= 0.0

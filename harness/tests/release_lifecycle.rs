@@ -85,7 +85,11 @@ fn own(snapshot: &Value) -> &Value {
         .unwrap()
 }
 
-fn assert_preserved_with_income(before: &Value, after: &Value, max_gold_gain: u64) {
+fn assert_preserved_with_income(before: &Value, after: &Value, income_window_secs: u64) {
+    // Callers include the existing snapshot/whole-second timing allowance.
+    // Convert that window using the shared authoritative income rate.
+    let max_gold_gain =
+        (income_window_secs as f64 * f64::from(shared::shop::GOLD_PER_SECOND)).ceil() as u64;
     let before_gold = before["gold"].as_u64().unwrap();
     let after_gold = after["gold"].as_u64().unwrap();
     assert!(

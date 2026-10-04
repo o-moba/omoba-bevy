@@ -86,6 +86,7 @@ pub(super) fn mobile_cast_system(
     camera: Query<(&Camera, &GlobalTransform), With<MainCamera>>,
     visual_mode: Res<PlayerVisualMode>,
     target: Res<TargetState>,
+    basic: Res<crate::targeting::BasicAttackState>,
     mut pending: ResMut<PendingCast>,
     mut feedback: ResMut<ActionFeedback>,
     mut commands: MessageWriter<NetworkCommand>,
@@ -127,17 +128,36 @@ pub(super) fn mobile_cast_system(
     let definition = ability_for_class_slot(class, slot);
     if shared::loadout::preset_for_class(class).is_some() {
         let range = scaled_cast_range(definition, prog.ranks[intent.slot].max(1));
-        let direction = intent
-            .aim
-            .and_then(|screen| {
-                camera.single().ok().map(|(_, pose)| {
-                    crate::player::mobile_screen_direction(screen, pose, *visual_mode).xz()
-                })
+        let origin = transform.translation.xz();
+        let manual = intent.aim.and_then(|screen| {
+            camera.single().ok().map(|(_, pose)| {
+                crate::player::mobile_screen_direction(screen, pose, *visual_mode).xz()
             })
-            .unwrap_or_else(|| transform.forward().xz())
-            .normalize_or_zero();
+        });
+        let assisted = intent
+            .aim
+            .is_none()
+            .then(|| {
+                quick_cast_target(
+                    origin,
+                    *team,
+                    range,
+                    target.selected_entity,
+                    basic.order.map(|order| order.entity),
+                    &candidates,
+                    &validity,
+                )
+            })
+            .flatten();
         queue_cast_request(intent.slot, class, &target, &mut pending, &mut feedback);
-        pending.aim = Some(transform.translation.xz() + direction * range * intent.extent);
+        pending.aim = Some(resolve_mobile_aim(
+            origin,
+            transform.forward().xz(),
+            range,
+            intent.extent,
+            manual,
+            assisted,
+        ));
         return;
     }
     if definition.targeting == TargetingMode::UnitTarget {
@@ -181,6 +201,95 @@ pub(super) fn mobile_cast_system(
         return;
     }
     queue_cast_request(intent.slot, class, &target, &mut pending, &mut feedback);
+}
+
+/// Short taps prefer a valid lock/chase, then the closest visible hero. Manual
+/// drags never pass through this chooser. Snapshot visibility remains authority.
+pub(super) fn quick_cast_target(
+    origin: Vec2,
+    team: Team,
+    range: f32,
+    selected: Option<Entity>,
+    chased: Option<Entity>,
+    candidates: &TargetCandidates,
+    validity: &crate::targeting::TargetValidity,
+) -> Option<Vec2> {
+    let range = range.min(shared::vision::HERO_SIGHT_RADIUS);
+    let mut choices = Vec::new();
+    let mut consider = |entity: Entity, id: TargetId, p: Vec3, stats: &CombatStats| {
+        let distance = origin.distance(p.xz());
+        if stats.is_alive()
+            && p.is_finite()
+            && distance > 0.01
+            && distance <= range
+            && validity.valid(entity, id, team)
+        {
+            let priority = if selected == Some(entity) {
+                0
+            } else if chased == Some(entity) {
+                1
+            } else if id.kind == TargetKind::Player {
+                2
+            } else {
+                3
+            };
+            choices.push((priority, distance, id.id, p.xz()));
+        }
+    };
+    for (entity, pose, id, stats, _) in &candidates.players {
+        consider(
+            entity,
+            TargetId {
+                kind: TargetKind::Player,
+                id: id.0,
+            },
+            pose.translation,
+            stats,
+        );
+    }
+    for (entity, pose, id, stats, _) in &candidates.minions {
+        consider(
+            entity,
+            TargetId {
+                kind: TargetKind::Minion,
+                id: id.0,
+            },
+            pose.translation,
+            stats,
+        );
+    }
+    for (entity, pose, id, stats) in &candidates.neutrals {
+        consider(
+            entity,
+            TargetId {
+                kind: TargetKind::Neutral,
+                id: id.0,
+            },
+            pose.translation,
+            stats,
+        );
+    }
+    choices
+        .into_iter()
+        .min_by(|a, b| a.0.cmp(&b.0).then(a.1.total_cmp(&b.1)).then(a.2.cmp(&b.2)))
+        .map(|choice| choice.3)
+}
+
+pub(super) fn resolve_mobile_aim(
+    origin: Vec2,
+    facing: Vec2,
+    range: f32,
+    extent: f32,
+    manual: Option<Vec2>,
+    assisted: Option<Vec2>,
+) -> Vec2 {
+    if let Some(direction) = manual {
+        origin + direction.normalize_or_zero() * range * extent.clamp(0.0, 1.0)
+    } else if let Some(target) = assisted {
+        target
+    } else {
+        origin + facing.normalize_or_zero() * range
+    }
 }
 
 pub(crate) fn mobile_assisted_target(
@@ -308,5 +417,77 @@ pub(super) fn mobile_target_score(
             .then_some((1.0 - alignment) * 4.0 + distance / range)
     } else {
         Some(distance / range - if selected { 2.0 } else { 0.0 })
+    }
+}
+
+#[cfg(test)]
+mod quick_cast_tests {
+    use super::*;
+    #[test]
+    fn quick_cast_uses_lock_then_chase_then_visible_hero_without_hidden_or_dead_targets() {
+        use bevy::ecs::system::SystemState;
+        let mut world = World::new();
+        let mut hero = |id, x, team, visibility| {
+            world
+                .spawn((
+                    crate::net::RemotePlayer,
+                    crate::net::NetworkPlayerId(id),
+                    Transform::from_xyz(x, 0.0, 0.0),
+                    CombatStats::default(),
+                    team,
+                    visibility,
+                ))
+                .id()
+        };
+        let near = hero(2, 8.0, Team::Blue, InheritedVisibility::VISIBLE);
+        let chase = hero(3, 16.0, Team::Blue, InheritedVisibility::VISIBLE);
+        let hidden = hero(4, 2.0, Team::Blue, InheritedVisibility::HIDDEN);
+        hero(5, 1.0, Team::Green, InheritedVisibility::VISIBLE);
+        let far = hero(6, 60.0, Team::Blue, InheritedVisibility::VISIBLE);
+        let pick = |world: &mut World, selected, chased| {
+            let mut state =
+                SystemState::<(TargetCandidates, crate::targeting::TargetValidity)>::new(world);
+            let (candidates, validity) = state.get(world);
+            quick_cast_target(
+                Vec2::ZERO,
+                Team::Green,
+                100.0,
+                selected,
+                chased,
+                &candidates,
+                &validity,
+            )
+        };
+        assert_eq!(pick(&mut world, None, None), Some(Vec2::X * 8.0));
+        assert_eq!(pick(&mut world, None, Some(chase)), Some(Vec2::X * 16.0));
+        assert_eq!(
+            pick(&mut world, Some(near), Some(chase)),
+            Some(Vec2::X * 8.0)
+        );
+        assert_eq!(
+            pick(&mut world, Some(hidden), Some(chase)),
+            Some(Vec2::X * 16.0)
+        );
+        assert_eq!(pick(&mut world, Some(far), None), Some(Vec2::X * 8.0));
+        world.get_mut::<CombatStats>(near).unwrap().hp = 0.0;
+        assert_eq!(pick(&mut world, Some(near), None), Some(Vec2::X * 16.0));
+    }
+
+    #[test]
+    fn tap_faces_target_but_drag_and_no_enemy_fallback_preserve_intent() {
+        let origin = Vec2::new(3.0, 4.0);
+        let enemy = Vec2::new(-5.0, 8.0);
+        assert_eq!(
+            resolve_mobile_aim(origin, Vec2::X, 40.0, 1.0, None, Some(enemy)),
+            enemy
+        );
+        assert_eq!(
+            resolve_mobile_aim(origin, Vec2::X, 40.0, 0.5, Some(Vec2::Y), Some(enemy)),
+            origin + Vec2::Y * 20.0
+        );
+        assert_eq!(
+            resolve_mobile_aim(origin, Vec2::X, 40.0, 1.0, None, None),
+            origin + Vec2::X * 40.0
+        );
     }
 }

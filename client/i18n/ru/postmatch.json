@@ -13,5 +13,7 @@
   "postmatch.local_result": "Результат офлайн-тренировки",
   "postmatch.saving": "Сохранение результатов матча…",
   "postmatch.button.play_again": "Сыграть ещё раз",
-  "postmatch.button.back_to_menu": "В меню"
+  "postmatch.button.back_to_menu": "В меню",
+  "postmatch.gold_earned": "Золото",
+  "postmatch.total": "Всего"
 }

@@ -19,6 +19,7 @@ use crate::game_world::{GameWorld, TickCtx};
 use crate::hero_stats;
 
 pub mod advanced;
+mod dagger;
 
 const MAX_EFFECTS: usize = shared::loadout::MAX_ACTIVE_EFFECTS;
 const MAX_OWNER_EFFECTS: usize = shared::loadout::MAX_EFFECTS_PER_OWNER;
@@ -243,6 +244,22 @@ pub fn attack_modifiers(p: &ConnectedPlayer) -> (f32, f32, f32, f32, f32) {
     }
     (base, 1.0, 1.0, 0.0, 0.0)
 }
+/// Shared accepted-Technique hooks: specialized executors must preserve the
+/// recipe's passive and combat lifecycle after all admission gates have passed.
+fn accepted_technique(p: &mut ConnectedPlayer, now: Instant) {
+    p.hero.skills.advanced.last_combat = Some(now);
+    p.hero.skills.advanced.forge_ready = false;
+    p.hero.skills.advanced.forge_since = None;
+    if p.hero
+        .skills
+        .loadout
+        .is_some_and(|l| l.passive() == PassiveId::Flow)
+    {
+        p.hero.skills.advanced.flow_attacks = 2;
+        p.hero.skills.advanced.flow_until = Some(now + duration(3.0));
+    }
+}
+
 pub fn accepted_basic(p: &mut ConnectedPlayer, now: Instant) {
     p.hero.skills.advanced.last_combat = Some(now);
     p.hero.skills.advanced.forge_ready = false;
@@ -312,6 +329,7 @@ pub fn state(p: &ConnectedPlayer, now: Instant) -> Option<LoadoutState> {
         }),
         weapon_mode: s.mode,
         shield_hp: shields,
+        stun_remaining_secs: remaining(s.control.stun_until, now),
         root_remaining_secs: remaining(s.control.root_until, now)
             .max(remaining(s.control.stun_until, now)),
         slow_multiplier: s
@@ -362,6 +380,7 @@ struct Mark {
 }
 #[derive(Default)]
 pub struct SkillWorld {
+    dagger_chance: dagger::Chance,
     effects: BTreeMap<u64, ActiveEffect>,
     advanced: advanced::WorldState,
     next_id: u64,
@@ -636,7 +655,21 @@ pub fn apply_hit(
             ));
         }
     }
-    events.extend(raw_damage(w, target, amount, kind, src, team, now));
+    let amount = if basic && src.entity.kind == CombatEntityKind::Player {
+        amount * dagger::basic_multiplier(w, src.entity.id, target)
+    } else {
+        amount
+    };
+    let primary = raw_damage(w, target, amount, kind, src, team, now);
+    if basic && target.kind != TargetKind::Structure && src.entity.kind == CombatEntityKind::Player
+    {
+        crate::shop::basic_lifesteal(
+            w,
+            src.entity.id,
+            primary.iter().map(|event| event.amount).sum(),
+        );
+    }
+    events.extend(primary);
     if src.entity.kind == CombatEntityKind::Player && amount > 0.0 {
         events.extend(advanced::on_hit(w, c, amount, src, team, basic, now));
     }
@@ -819,7 +852,11 @@ pub fn cast(
     if !p.modifiers.unlock_all && !unlocked_slots_for_level(p.hero.progress.level)[slot as usize] {
         return;
     }
-    if matches!(d.effect, SkillEffect::Technique { .. }) {
+    if let SkillEffect::Technique { action, .. } = d.effect {
+        if dagger::handles(action) {
+            dagger::cast(w, addr, slot, aim, now);
+            return;
+        }
         advanced::cast(w, addr, slot, aim, now);
         return;
     }
@@ -1271,7 +1308,7 @@ pub fn tick(w: &mut GameWorld, t: TickCtx) -> Vec<CombatEvent> {
                             e.cast_request,
                             c.target.id,
                         )) {
-                            out.extend(apply_hit(
+                            let mut receipts = apply_hit(
                                 w,
                                 c.target,
                                 damage * e.scale,
@@ -1282,7 +1319,34 @@ pub fn tick(w: &mut GameWorld, t: TickCtx) -> Vec<CombatEvent> {
                                 true,
                                 false,
                                 now,
-                            ));
+                            );
+                            // Activation is independent of HP loss: shields may
+                            // absorb the damage while the trap still roots and
+                            // disappears. Mark exactly one receipt for this victim.
+                            if let Some(receipt) = receipts.iter_mut().find(|receipt| {
+                                receipt.target.kind == CombatEntityKind::Player
+                                    && receipt.target.id == c.target.id
+                            }) {
+                                receipt.trap_triggered = true;
+                            } else {
+                                let target = w
+                                    .players
+                                    .values()
+                                    .find(|p| p.hero.identity.id == c.target.id)
+                                    .expect("trap candidate must still exist");
+                                receipts.push(source(e.owner, e.slot).annotate(CombatEvent {
+                                    target: shared::combat::CombatEntity {
+                                        kind: CombatEntityKind::Player,
+                                        id: c.target.id,
+                                    },
+                                    x: target.hero.x,
+                                    y: target.hero.y + crate::balance::AIM_HEIGHT,
+                                    z: target.hero.z,
+                                    trap_triggered: true,
+                                    ..Default::default()
+                                }));
+                            }
+                            out.extend(receipts);
                             control(w, c, e.id, e.team, root_secs, 1.0, 0.0, 0.0, now);
                             w.skill_runtime
                                 .trap_hits
@@ -1479,6 +1543,11 @@ pub fn observe(w: &mut GameWorld, events: &[CombatEvent], now: Instant) {
                     .contributions
                     .remove(&key(target))
                     .unwrap_or_default();
+                crate::shop::award_hero_kill(
+                    w,
+                    event,
+                    &participants.keys().copied().collect::<Vec<_>>(),
+                );
                 for p in w
                     .players
                     .values_mut()
