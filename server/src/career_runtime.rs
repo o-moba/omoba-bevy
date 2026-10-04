@@ -971,6 +971,11 @@ impl ServerRuntime {
         self.career.backend.poll();
         let mut invalidated = Vec::new();
         for (addr, player) in &mut self.world.players {
+            // Retained humans have no transport authentication at their internal
+            // controller address. Reclaim still requires the normal signed Join.
+            if self.session_recovery.retains(*addr, player) {
+                continue;
+            }
             player.hero.identity.supporter_aura = if player.hero.identity.is_bot {
                 None
             } else {

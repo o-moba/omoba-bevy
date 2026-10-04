@@ -1,5 +1,9 @@
 # Feature Inventory
 
+## Retained online match seats (0.40.1)
+
+Career polling preserves a registered server-controlled human while its transport is disconnected. The authenticated owner can reclaim the same hero; ordinary unauthenticated endpoints still lose admission. Protocol 9 remains compatible with iOS 0.40.0 (19). See [the Beta patch and deployment evidence](progress/2026-10-04-beta-0401.md).
+
 ## Equipped skill bindings and shared control (0.40.0)
 
 Accepted recipes can bind four unique compatible skills to any Q/W/E/R buttons, including four different ultimates. Each skill keeps its authored unlock role (levels 1/2/4/6), rank limits, resource costs, cooldown, targeting and presentation when moved. Capability checks remain: weapon switching needs a Repeater core, and orb field/pull needs an equipped orb controller. Duplicate skills and malformed or mismatched recipes are rejected.

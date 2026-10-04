@@ -13,6 +13,24 @@ pub(crate) struct SessionRecovery {
     seats: HashMap<u64, DetachedSeat>,
     generation: u64,
 }
+impl SessionRecovery {
+    /// A retained actor is controlled by the server, not an authenticated UDP
+    /// endpoint. Only the exact registered identity can keep that exemption.
+    pub(crate) fn retains(
+        &self,
+        addr: SocketAddr,
+        player: &crate::entities::ConnectedPlayer,
+    ) -> bool {
+        crate::bots::is_bot_address(addr)
+            && self
+                .seats
+                .get(&player.hero.identity.id)
+                .is_some_and(|seat| {
+                    seat.address == addr
+                        && player.session_id.as_deref() == Some(seat.session.as_str())
+                })
+    }
+}
 struct DetachedSeat {
     address: SocketAddr,
     session: String,
