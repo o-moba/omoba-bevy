@@ -1,0 +1,19 @@
+{
+  "status": "PARTIAL",
+  "acceptance": {
+    "AC1": "PASS",
+    "AC2": "PASS",
+    "AC3": "BLOCKED_DISK",
+    "AC4": "BLOCKED_ARCHIVE_AND_ACCOUNT_ACCESS"
+  },
+  "artifacts": [
+    "ci.json",
+    "ios-ci.json",
+    "release-ci.json",
+    "BUILD.json",
+    "deployment-result.json",
+    "live-contract-checks.json",
+    "remote-smoke/report.json",
+    "test-worker-cleanup.json"
+  ]
+}

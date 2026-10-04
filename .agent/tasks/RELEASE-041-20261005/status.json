@@ -1,0 +1,34 @@
+{
+  "version": "0.41.0",
+  "build": 20,
+  "feature_commit": "5707d9e7a2254e1d1d6d11a2d33c3f3eb7298447",
+  "pr": "https://github.com/o-moba/omoba-bevy/pull/71",
+  "pushed": true,
+  "merged": true,
+  "server_deployed": true,
+  "archive_verified": false,
+  "uploaded": false,
+  "testflight_available": false,
+  "blockers": [
+    "12 GiB free; explicit approval to delete target/debug/incremental is pending",
+    "Mac locked; manual unlock requested"
+  ],
+  "acceptance": {
+    "AC1": "PASS",
+    "AC2": "PASS",
+    "AC3": "BLOCKED_DISK",
+    "AC4": "BLOCKED_ARCHIVE_AND_ACCOUNT_ACCESS"
+  },
+  "main_revision": "361543a89a48cdbd3af12039e66e399d8a89801a",
+  "ci": "PASS",
+  "ios_compile": "PASS",
+  "server_release": {
+    "status": "DEPLOYED",
+    "release": "/opt/omoba/releases/0.41.0-beta-361543a",
+    "rollback": "/opt/omoba/releases/0.40.1-beta-7d68ebe",
+    "pid": 90617,
+    "sha256": "b5e3a26f66ff35fa3ae0d31833fdf931a1dd1c2aa985e7ab06ab882dff2a1349"
+  },
+  "live_contract_checks": "PASS",
+  "remote_smoke": "PASS"
+}

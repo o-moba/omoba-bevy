@@ -1,0 +1,46 @@
+[
+  {
+    "manifest": "compatibility.json",
+    "exit": 0,
+    "client": {
+      "catalog": "standard-kits-4",
+      "gameplay": "combat-2026-10-04",
+      "geometry": "verdant-confluence-v1",
+      "handshake": 1,
+      "protocol": 9,
+      "release": "0.41.0"
+    },
+    "compatible": true,
+    "issue": null,
+    "server": {
+      "catalog": "standard-kits-4",
+      "gameplay": "combat-2026-10-04",
+      "geometry": "verdant-confluence-v1",
+      "handshake": 1,
+      "protocol": 9,
+      "release": "0.41.0"
+    }
+  },
+  {
+    "manifest": "incompatible.json",
+    "exit": 2,
+    "client": {
+      "catalog": "standard-kits-4",
+      "gameplay": "combat-2026-10-04",
+      "geometry": "verdant-confluence-v1",
+      "handshake": 1,
+      "protocol": 10,
+      "release": "0.41.0"
+    },
+    "compatible": false,
+    "issue": "protocol",
+    "server": {
+      "catalog": "standard-kits-4",
+      "gameplay": "combat-2026-10-04",
+      "geometry": "verdant-confluence-v1",
+      "handshake": 1,
+      "protocol": 9,
+      "release": "0.41.0"
+    }
+  }
+]

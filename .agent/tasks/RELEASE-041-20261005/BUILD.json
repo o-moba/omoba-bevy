@@ -1,0 +1,20 @@
+{
+  "version": "0.41.0",
+  "revision": "361543a89a48cdbd3af12039e66e399d8a89801a",
+  "artifact_source_revision": "5707d9e7a2254e1d1d6d11a2d33c3f3eb7298447",
+  "ci_run": 37219015911,
+  "protocol": 9,
+  "sha256": "b5e3a26f66ff35fa3ae0d31833fdf931a1dd1c2aa985e7ab06ab882dff2a1349",
+  "rollback": "/opt/omoba/releases/0.40.1-beta-7d68ebe",
+  "toolchain": "1.94.1",
+  "profile": "release",
+  "compatibility": {
+    "handshake": 1,
+    "release": "0.41.0",
+    "protocol": 9,
+    "catalog": "standard-kits-4",
+    "geometry": "verdant-confluence-v1",
+    "gameplay": "combat-2026-10-04"
+  },
+  "release_path": "/opt/omoba/releases/0.41.0-beta-361543a"
+}
