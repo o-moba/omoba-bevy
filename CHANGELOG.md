@@ -9,8 +9,10 @@ The current implementation is 0.40.1, **protocol 9** and
 **standard-kits-4**. The final gate, real-server harness and affected-HUD capture
 pass; see the [equipped-skills progress note](docs/progress/2026-10-04-equipped-skills.md).
 The [0.37–0.39 delivery note](docs/progress/2026-10-04-iteration-commit.md)
-records the previous protocol-8 iteration. These entries do not indicate a
-server deployment or TestFlight upload. Physical iPhone reconnect/120 Hz,
+records the previous protocol-8 iteration. Beta now runs compatible 0.40.1;
+see the [deployment and reconnect verification](docs/progress/2026-10-04-beta-0401.md).
+iOS 0.40.0 (19) is archived; its TestFlight upload remains pending Xcode account access.
+Physical iPhone reconnect/120 Hz,
 sustained worker capacity and competitive balance remain in the
 [refactoring/release tracker](docs/REFACTORING.md#post-programme-architecture-follow-ups--2026-10-04).
 
