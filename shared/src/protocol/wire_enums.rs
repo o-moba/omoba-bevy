@@ -27,7 +27,7 @@ use std::path::Path;
 use crate::protocol::PROTOCOL_VERSION;
 
 /// The protocol version this variant list was last reviewed for.
-const POLICY_PROTOCOL_VERSION: u16 = 8;
+const POLICY_PROTOCOL_VERSION: u16 = 9;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Decoding {

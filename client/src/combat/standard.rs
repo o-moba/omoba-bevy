@@ -269,6 +269,7 @@ pub(crate) fn draw_aim(
             &crate::net::PlayerProgression,
             &super::CombatStats,
             &crate::team::Team,
+            Option<&crate::net::PlayerLoadout>,
         ),
         With<Player>,
     >,
@@ -289,13 +290,13 @@ pub(crate) fn draw_aim(
     if !context.gameplay_allowed() {
         return;
     }
-    let Ok((pose, class, progression, stats, team)) = local.single() else {
+    let Ok((pose, class, progression, stats, team, loadout)) = local.single() else {
         return;
     };
     if !stats.is_alive() {
         return;
     }
-    let Some(preset) = shared::loadout::preset_for_class(class.0) else {
+    let Some(skills) = crate::equipped_skills::resolve(class.0, loadout) else {
         return;
     };
     let touch = mobile
@@ -314,7 +315,9 @@ pub(crate) fn draw_aim(
     let Some(slot) = slot.filter(|i| *i < 4) else {
         return;
     };
-    let def = preset.skill(shared::SkillSlot::ALL[slot]);
+    let Some(def) = skills.skill(shared::SkillSlot::ALL[slot]) else {
+        return;
+    };
     if def.ability.targeting == TargetingMode::SelfTarget {
         return;
     }

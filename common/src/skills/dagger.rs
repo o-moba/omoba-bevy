@@ -170,22 +170,27 @@ pub(super) fn cast(w: &mut GameWorld, addr: SocketAddr, slot: u8, aim: [f32; 2],
     crate::sim::cast::record_player_action(p, skill_slot);
     crate::sim::cast::face_player_action(p, target.pos[0] - origin[0], target.pos[1] - origin[1]);
     if action == Technique::DaggerBluff {
-        let victim = w
+        if !crowd_control::apply(
+            w,
+            target,
+            owner,
+            team,
+            duration_secs,
+            1.0,
+            0.0,
+            0.0,
+            now,
+            crowd_control::Kind::Bluff,
+        ) {
+            return;
+        }
+        let Some(victim) = w
             .players
             .values_mut()
-            .find(|p| p.hero.identity.id == target.target.id)
-            .unwrap();
-        crate::recall::cancel(victim);
-        let until = now + duration(duration_secs);
-        victim.hero.skills.control.stun_until = Some(
-            victim
-                .hero
-                .skills
-                .control
-                .stun_until
-                .unwrap_or(now)
-                .max(until),
-        );
+            .find(|p| p.hero.identity.id == target.target.id && p.hero.hp > 0.0)
+        else {
+            return;
+        };
         victim.hero.skills.advanced.charm = None;
         // Victim forward points away from the caster, so the caster is behind.
         crate::sim::cast::face_player_action(

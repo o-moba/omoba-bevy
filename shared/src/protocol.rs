@@ -6,9 +6,9 @@ mod wire_enums;
 
 use serde::{Deserialize, Serialize};
 
-// Version 8 adds shared lane-brush geometry. Deploy client and host together:
-// older clients cannot display the newly authoritative concealment pockets.
-pub const PROTOCOL_VERSION: u16 = 8;
+// Version 9 makes skill bindings independent of their progression role and
+// adds validated laboratory recipes. Deploy matching clients and hosts together.
+pub const PROTOCOL_VERSION: u16 = 9;
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]

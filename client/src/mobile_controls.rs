@@ -11,8 +11,8 @@ use bevy::{
     ui::FocusPolicy,
     window::{AppLifecycle, PrimaryWindow, WindowFocused},
 };
+use shared::SkillSlot;
 use shared::utility::UtilityAction;
-use shared::{SkillSlot, ability_for_class_slot, scaled_mana_cost};
 
 use crate::{
     combat::{CombatStats, LocalCastCooldown},
@@ -916,9 +916,11 @@ fn read_mobile_controls(
             &CombatStats,
             Option<&PlayerProgression>,
             Option<&NetworkHeroClass>,
+            Option<&crate::net::PlayerLoadout>,
         ),
         With<Player>,
     >,
+    selection: Res<TeamSelection>,
     mut mobile: ResMut<MobileControls>,
     mut session_events: MessageReader<SessionEvent>,
     gamepad: Option<Res<crate::gamepad::GamepadControls>>,
@@ -948,7 +950,7 @@ fn read_mobile_controls(
         mobile.clear();
         mobile.layout_changed = true;
     }
-    let alive = local.single().is_ok_and(|(stats, _, _)| stats.is_alive());
+    let alive = local.single().is_ok_and(|(stats, ..)| stats.is_alive());
     mobile.utilities_available = true;
     // A controller that owns input hides the touch HUD; the first touch
     // takes ownership back before this runs, so no finger is lost.
@@ -965,12 +967,16 @@ fn read_mobile_controls(
         events.clear();
         return;
     }
-    if let Ok((_, prog, _)) = local.single() {
+    if let Ok((_, prog, class, loadout)) = local.single() {
         let prog = prog.copied().unwrap_or_default();
+        let skills = crate::equipped_skills::resolve(
+            class.map_or(selection.hero_class, |class| class.0),
+            loadout,
+        );
         mobile.upgrade_enabled = std::array::from_fn(|slot| {
-            prog.skill_points > 0
-                && prog.ranks[slot] < shared::MAX_ABILITY_RANK
-                && prog.unlocked()[slot]
+            skills
+                .as_ref()
+                .is_some_and(|skills| crate::equipped_skills::upgrade_eligible(skills, &prog, slot))
         });
         mobile.upgrade_mode &= mobile.upgrade_enabled.iter().any(|enabled| *enabled);
     }
@@ -1434,6 +1440,7 @@ fn draw_mobile_controls(
             Option<&PlayerProgression>,
             Option<&NetworkHeroClass>,
             Option<&crate::net::PlayerEquipment>,
+            Option<&crate::net::PlayerLoadout>,
         ),
         With<Player>,
     >,
@@ -1471,22 +1478,21 @@ fn draw_mobile_controls(
     let layout = mobile.layout();
     let s = mobile.combat_scale();
     let local = local.single().ok();
-    let prog = local
-        .and_then(|(_, p, _, _)| p)
-        .copied()
-        .unwrap_or_default();
+    let prog = local.and_then(|(_, p, ..)| p).copied().unwrap_or_default();
     let class = local
-        .and_then(|(_, _, c, _)| c)
+        .and_then(|(_, _, c, ..)| c)
         .map(|c| c.0)
         .unwrap_or(selection.hero_class);
+    let skills =
+        crate::equipped_skills::resolve(class, local.and_then(|(_, _, _, _, loadout)| loadout));
     let bonuses = local
-        .and_then(|(_, _, _, equipment)| equipment)
+        .and_then(|(_, _, _, equipment, _)| equipment)
         .map_or_else(Default::default, |equipment| equipment.item_bonuses);
     let sandbox = game.as_ref().and_then(|g| g.sandbox.as_ref());
-    let mana = local.map_or(0.0, |(stats, _, _, _)| stats.mana);
+    let mana = local.map_or(0.0, |(stats, ..)| stats.mana);
     // hud.md § States, Dead: the combat group stays drawn but veiled (input
     // is off: `read_mobile_controls` clears every finger while dead).
-    let dead = local.is_some_and(|(stats, _, _, _)| !stats.is_alive());
+    let dead = local.is_some_and(|(stats, ..)| !stats.is_alive());
     let visible = mobile.enabled
         && !gamepad.as_ref().is_some_and(|pad| pad.active)
         && mobile.landscape
@@ -1644,19 +1650,19 @@ fn draw_mobile_controls(
                 )
             }
             MobileVisual::Ability(slot) => {
-                let def = ability_for_class_slot(class, SkillSlot::from_index(slot as u8).unwrap());
-                let rank = prog.ranks[slot].max(1);
-                let cost = if cooldown.recast[slot] {
-                    0.0
-                } else {
-                    scaled_mana_cost(def, rank)
+                let Some(skills) = skills.as_ref() else {
+                    node.display = Display::None;
+                    continue;
                 };
+                let def = skills.ability(SkillSlot::ALL[slot]);
+                let rank = prog.ranks[slot].max(1);
+                let cost = skills.mana_cost(rank, SkillSlot::ALL[slot], cooldown.recast[slot]);
                 let remaining = cooldown.remaining_secs[slot];
                 let fraction = cooldown.remaining_fraction(slot);
                 if let Some(children) = children {
                     for child in children.iter() {
                         if let Ok((mut view, mut face)) = faces.get_mut(child) {
-                            let unlocked = prog.unlocked()[slot];
+                            let unlocked = crate::equipped_skills::unlocked(skills, &prog)[slot];
                             let next = crate::ui::widgets::game::AbilityView {
                                 ability: Some(def.id),
                                 cost: Some(cost.round() as u32),
@@ -1674,7 +1680,7 @@ fn draw_mobile_controls(
                                 }),
                                 locked: !unlocked || dead,
                                 unlock_level: (!unlocked && !dead)
-                                    .then_some(shared::SLOT_UNLOCK_LEVELS[slot] as u8),
+                                    .then_some(skills.unlock_level(SkillSlot::ALL[slot]) as u8),
                                 no_mana: mana < cost,
                                 ..view.clone()
                             };
@@ -1778,13 +1784,13 @@ fn draw_mobile_controls(
             MobileVisual::SkillDescription => {
                 let slot = inspected;
                 let Some(mut card) = card else { continue };
-                if let Some(slot) = slot {
+                if let Some((slot, skills)) = slot.zip(skills.as_ref()) {
                     let rank = prog.ranks[slot].max(1);
                     let duration = if sandbox.is_some_and(|s| s.config.player.no_cooldowns) {
                         0.0
                     } else {
-                        crate::combat::effective_cast_duration(
-                            class,
+                        crate::equipped_skills::cooldown(
+                            skills,
                             prog.level,
                             rank,
                             SkillSlot::ALL[slot],
@@ -1792,13 +1798,14 @@ fn draw_mobile_controls(
                             sandbox.is_some(),
                         )
                     };
-                    let mut next = crate::combat::skill_card::SkillCardView::of(
-                        class, &prog, slot, mana, duration,
+                    let mut next = crate::combat::skill_card::SkillCardView::of_equipped(
+                        skills,
+                        &prog,
+                        slot,
+                        mana,
+                        duration,
+                        cooldown.recast[slot],
                     );
-                    if cooldown.recast[slot] {
-                        next.mana = 0;
-                        next.no_mana = false;
-                    }
                     next.hint = true;
                     next.visible = visible;
                     if *card != next {
@@ -2216,6 +2223,94 @@ mod tests {
             let text = crate::combat::skill_card::cooldown_line(view.cooldown);
             assert!(text.contains(expected), "expected {expected}, got {text}");
         }
+    }
+
+    #[test]
+    fn mixed_equipped_mobile_face_and_hold_card_share_identity_and_unlock() {
+        use shared::loadout::{CoreId, LoadoutState, SkillId};
+        let mut mobile = controls();
+        mobile.event(1, TouchPhase::Started, mobile.layout().ability_centers[0]);
+        mobile.advance_hold_time(SKILL_DESCRIPTION_SECONDS);
+        let mut app = App::new();
+        app.insert_resource(mobile)
+            .init_resource::<GameplayInputContext>()
+            .init_resource::<TeamSelection>()
+            .init_resource::<LocalCastCooldown>()
+            .add_systems(Update, draw_mobile_controls);
+        let mut recipe = CoreId::Dawnweaver.preset();
+        recipe.skills = [
+            SkillId::WildRocket,
+            SkillId::DawnBarrier,
+            SkillId::DawnField,
+            SkillId::DawnBind,
+        ];
+        app.world_mut().spawn((
+            Player,
+            CombatStats::default(),
+            PlayerProgression {
+                level: 4,
+                ..default()
+            },
+            NetworkHeroClass(shared::HeroClass::Dawnweaver),
+            crate::net::PlayerLoadout(Some(LoadoutState {
+                recipe: Some(recipe),
+                ..default()
+            })),
+        ));
+        let face = app
+            .world_mut()
+            .spawn((
+                crate::ui::widgets::game::AbilityView {
+                    ability: None,
+                    icon: crate::ui::kit_assets::Icon::HudAttack,
+                    key: None,
+                    cost: None,
+                    rank: 0,
+                    cooldown: None,
+                    locked: false,
+                    unlock_level: None,
+                    no_mana: false,
+                    pips: false,
+                    ring: true,
+                },
+                crate::ui::widgets::game::AbilityFace::default(),
+            ))
+            .id();
+        app.world_mut()
+            .spawn((
+                MobileVisual::Ability(0),
+                Node::default(),
+                UiTransform::default(),
+            ))
+            .add_child(face);
+        let card = app
+            .world_mut()
+            .spawn((
+                MobileVisual::SkillDescription,
+                Node::default(),
+                UiTransform::default(),
+                crate::combat::skill_card::SkillCardView::default(),
+            ))
+            .id();
+        app.update();
+        let face = app
+            .world()
+            .get::<crate::ui::widgets::game::AbilityView>(face)
+            .unwrap();
+        assert_eq!(face.ability, Some("wild_rocket"));
+        assert!(face.locked);
+        assert_eq!(face.unlock_level, Some(6));
+        let card = app
+            .world()
+            .get::<crate::combat::skill_card::SkillCardView>(card)
+            .unwrap();
+        assert!(card.visible && card.locked && card.hint);
+        assert_eq!(card.skills.unwrap().ability(SkillSlot::Q).id, "wild_rocket");
+        assert_eq!(
+            card.mana,
+            shared::scaled_mana_cost(&shared::loadout::skill(SkillId::WildRocket).ability, 1)
+                .round() as u32
+        );
     }
 
     #[test]
@@ -2666,6 +2761,7 @@ mod tests {
         for gate in 0..5 {
             let mut app = App::new();
             app.init_resource::<Time>()
+                .init_resource::<TeamSelection>()
                 .init_resource::<Touches>()
                 .init_resource::<ButtonInput<MouseButton>>()
                 .init_resource::<GameplayInputContext>()

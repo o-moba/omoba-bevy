@@ -5,12 +5,24 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
-The 0.37.0–0.39.0 entries below record implemented changes prepared together
-for the next release. They do not indicate a server deployment or TestFlight
-upload. The combined client/server contract is **protocol 8**. Physical iPhone
-reconnect/120 Hz behavior, sustained worker capacity and competitive balance
-still require validation. See the [delivery note](docs/progress/2026-10-04-iteration-commit.md)
-and [completed work / refactoring TODO](docs/REFACTORING.md#post-programme-architecture-follow-ups--2026-10-04).
+The current local implementation is 0.40.0, **protocol 9** and
+**standard-kits-4**. The final gate, real-server harness and affected-HUD capture
+pass; see the [equipped-skills progress note](docs/progress/2026-10-04-equipped-skills.md).
+The [0.37–0.39 delivery note](docs/progress/2026-10-04-iteration-commit.md)
+records the previous protocol-8 iteration. These entries do not indicate a
+server deployment or TestFlight upload. Physical iPhone reconnect/120 Hz,
+sustained worker capacity and competitive balance remain in the
+[refactoring/release tracker](docs/REFACTORING.md#post-programme-architecture-follow-ups--2026-10-04).
+
+## [0.40.0] - 2026-10-04
+
+- Allow four unique compatible skills on arbitrary Q/W/E/R bindings, including four distinct ultimates. Preserve capability requirements and authored unlock levels: moving an ultimate to Q still requires level 6.
+- Resolve desktop, touch and controller casting, aiming, names/icons, skill cards, upgrades and predicted cooldown totals from the accepted recipe. Reject malformed recipes without substituting a preset; preserve authoritative remaining cooldowns and sandbox unlock overrides.
+- Preserve bound skill identity through animation, persistent effects, damage receipts and recasts. Follow-up costs belong to the skill: Echo Strike, Anchor Step and Thunder Pulse cost 25 on any core; other current follow-ups remain free.
+- Share admitted root/stun/slow/charm handling across online/offline skill executors. Admitted Bluff now consumes eligible Brittle once through the existing damage/event path; rejected control preserves the mark and rejected-cast resource rules. Document preserved unstoppable, charm and displacement exceptions.
+- Add validated optional recipes to the existing opt-in local Combat Test actor configuration. Public matchmaking, a class editor, account recipe storage and website equip remain outside this change.
+- Advance to protocol 9 and standard-kits-4 for the revised recipe/catalog contract and sandbox configuration. Matching client and host builds are required; default presets and legacy classes retain their rules. No new production dependencies.
+- Add cross-kit, permutation, four-ultimate, resource and invalid-recipe regressions. Local verification passes: 1,547 Rust tests, 201 Python tests, 50 harness tests and two focused HUD states; [contract and limits](docs/equipped-skills.md).
 
 ## [0.39.0] - 2026-10-04
 

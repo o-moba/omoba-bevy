@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "revision": "standard-kits-3",
+  "revision": "standard-kits-4",
   "skills": [
     {
       "id": "dawn_bind",
@@ -337,6 +337,7 @@
       "description": "Mark the first enemy hit; recast to dash to that exact target.",
       "targeting": "direction",
       "mana_cost": 50,
+      "recast_mana_cost": 25,
       "cooldown_secs": 9,
       "cast_range": 18,
       "windup_secs": 0.0,
@@ -357,6 +358,7 @@
       "description": "Leap to an ally or place a short-lived anchor; recast for lifesteal.",
       "targeting": "point",
       "mana_cost": 50,
+      "recast_mana_cost": 25,
       "cooldown_secs": 12,
       "cast_range": 9,
       "windup_secs": 0.0,
@@ -377,6 +379,7 @@
       "description": "Damage and reveal nearby enemies; recast to slow those victims.",
       "targeting": "self_target",
       "mana_cost": 50,
+      "recast_mana_cost": 25,
       "cooldown_secs": 10,
       "cast_range": 0,
       "windup_secs": 0.0,

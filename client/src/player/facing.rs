@@ -64,6 +64,7 @@ pub(super) fn face_confirmed_actions(
         &PlayerActionFacing,
         Option<&NetworkPlayerId>,
         Option<&PlayerLoadout>,
+        Option<&crate::net::NetworkHeroClass>,
         Option<&crate::net::AuthoritativePlayerYaw>,
     )>,
 ) {
@@ -80,7 +81,9 @@ pub(super) fn face_confirmed_actions(
     }
     state.1.retain(|entity, _| actors.contains(*entity));
     let delta = clock.delta(&time, game.as_deref());
-    for (entity, mut pose, stats, action, facing, id, loadout, authoritative_yaw) in &mut actors {
+    for (entity, mut pose, stats, action, facing, id, loadout, class, authoritative_yaw) in
+        &mut actors
+    {
         if loadout
             .and_then(|loadout| loadout.0.as_ref())
             .is_some_and(|loadout| loadout.stun_remaining_secs > 0.0)
@@ -96,10 +99,13 @@ pub(super) fn face_confirmed_actions(
             }
             continue;
         }
-        let skill = crate::skill_presentation::equipped_skill(
-            loadout.and_then(|l| l.0.as_ref()),
-            action.slot,
-        );
+        let skill = class.and_then(|class| {
+            crate::skill_presentation::equipped_skill(
+                class.0,
+                loadout.and_then(|l| l.0.as_ref()),
+                action.slot,
+            )
+        });
         let preparing = game.as_ref().is_some_and(|g| {
             g.skill_effects.iter().any(|e| {
                 Some(e.owner_id) == id.map(|id| id.0)

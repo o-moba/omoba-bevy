@@ -5,7 +5,9 @@
 //! mana and cooldown, and the live status (desktop) or the touch hint (phone).
 // i18n-strict
 use bevy::prelude::*;
-use shared::{HeroClass, SkillSlot, ability_for_class_slot, scaled_mana_cost};
+#[cfg(any(test, feature = "qa"))]
+use shared::HeroClass;
+use shared::{SkillSlot, loadout::EquippedSkills};
 
 use crate::i18n::{Locale, data, tr, trf};
 use crate::net::PlayerProgression;
@@ -56,7 +58,7 @@ pub(crate) struct SkillCardView {
     pub visible: bool,
     /// Desktop keycap (`Q`, or the pad binding).
     pub key: Option<String>,
-    pub class: Option<HeroClass>,
+    pub skills: Option<EquippedSkills>,
     pub slot: usize,
     /// Rank 1–3 (rank-1 values while locked).
     pub rank: u8,
@@ -74,6 +76,7 @@ pub(crate) struct SkillCardView {
 impl SkillCardView {
     /// The card of `slot` for a class and progression (`rank` = the learned
     /// rank, at least 1).
+    #[cfg(any(test, feature = "qa"))]
     pub(crate) fn of(
         class: HeroClass,
         progression: &PlayerProgression,
@@ -81,16 +84,28 @@ impl SkillCardView {
         mana: f32,
         cooldown: f32,
     ) -> Self {
-        let definition = ability_for_class_slot(class, SkillSlot::ALL[slot]);
-        let rank = progression.ranks[slot].clamp(1, shared::MAX_ABILITY_RANK);
-        let cost = scaled_mana_cost(definition, rank);
+        let skills = crate::equipped_skills::resolve(class, None).expect("preset or legacy kit");
+        Self::of_equipped(&skills, progression, slot, mana, cooldown, false)
+    }
+
+    pub(crate) fn of_equipped(
+        skills: &EquippedSkills,
+        progression: &PlayerProgression,
+        slot: usize,
+        mana: f32,
+        cooldown: f32,
+        recast: bool,
+    ) -> Self {
+        let definition = skills.ability(SkillSlot::ALL[slot]);
+        let rank = progression.ranks[slot].clamp(1, definition.max_rank);
+        let cost = skills.mana_cost(rank, SkillSlot::ALL[slot], recast);
         Self {
             visible: true,
             key: None,
-            class: Some(class),
+            skills: Some(*skills),
             slot,
             rank,
-            locked: !progression.unlocked()[slot],
+            locked: !crate::equipped_skills::unlocked(skills, progression)[slot],
             mana: cost.round() as u32,
             no_mana: mana < cost,
             cooldown,
@@ -366,8 +381,8 @@ pub(crate) fn paint_skill_card(
         if !(view.is_changed() || relabel) || !view.visible {
             continue;
         }
-        let Some(class) = view.class else { continue };
-        let definition = ability_for_class_slot(class, SkillSlot::ALL[view.slot]);
+        let Some(skills) = view.skills else { continue };
+        let definition = skills.ability(SkillSlot::ALL[view.slot]);
         let (mana_before, mana_after) = around("combat.skill.mana", "mana");
         let (cool_before, cool_after) = around("combat.skill.cooldown", "seconds");
         for entity in children.iter_descendants(card) {
@@ -381,7 +396,7 @@ pub(crate) fn paint_skill_card(
                 Part::Availability => Some(if view.locked {
                     trf(
                         "touch.skill.unlocks",
-                        &[("level", &shared::SLOT_UNLOCK_LEVELS[view.slot])],
+                        &[("level", &skills.unlock_level(SkillSlot::ALL[view.slot]))],
                     )
                 } else {
                     trf("touch.skill.rank", &[("rank", &view.rank)])

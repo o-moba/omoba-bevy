@@ -203,13 +203,6 @@ pub struct PlayerProgression {
     pub ranks: [u8; 4],
 }
 
-impl PlayerProgression {
-    pub fn unlocked(&self) -> [bool; 4] {
-        self.sandbox_unlocked
-            .unwrap_or_else(|| shared::unlocked_slots_for_level(self.level.max(1)))
-    }
-}
-
 impl Default for PlayerProgression {
     fn default() -> Self {
         Self {

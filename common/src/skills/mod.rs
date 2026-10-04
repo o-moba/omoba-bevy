@@ -11,7 +11,7 @@ use shared::loadout::{
 };
 use shared::map::Team;
 use shared::wire::{GameState, TargetId, TargetKind};
-use shared::{SkillSlot, scaled_cast_range, scaled_mana_cost, unlocked_slots_for_level};
+use shared::{SkillSlot, scaled_cast_range, scaled_mana_cost};
 
 use crate::combat_feedback::{HitSource, apply_player_damage_kind};
 use crate::entities::ConnectedPlayer;
@@ -19,6 +19,7 @@ use crate::game_world::{GameWorld, TickCtx};
 use crate::hero_stats;
 
 pub mod advanced;
+mod crowd_control;
 mod dagger;
 
 const MAX_EFFECTS: usize = shared::loadout::MAX_ACTIVE_EFFECTS;
@@ -124,7 +125,7 @@ pub struct HeroSkills {
     pub recovery_until: Option<Instant>,
     pub marked_until: Option<Instant>,
     // The effect ID identifies the exact zone; a stale recast cannot hit a replacement.
-    zones: [Option<(u64, Instant)>; 4],
+    zones: [Option<(u64, Instant, SkillId)>; 4],
 }
 impl HeroSkills {
     pub fn absorb(&mut self, damage: f32, now: Instant) -> f32 {
@@ -311,21 +312,21 @@ pub fn state(p: &ConnectedPlayer, now: Instant) -> Option<LoadoutState> {
         orb_position: s.advanced.orb.as_ref().map(|o| o.pos),
         forged: s.advanced.forged,
         recipe: s.loadout.as_ref().map(|l| l.recipe().clone()),
-        slots: std::array::from_fn(|i| SkillSlotState {
-            can_recast: s.zones[i].is_some_and(|(_, end)| now < end)
-                || s.advanced.recasts[i]
-                    .as_ref()
-                    .is_some_and(|r| r.until > now && r.uses > 0),
-            recast_remaining_secs: s.zones[i].map_or_else(
-                || {
-                    s.advanced.recasts[i]
-                        .as_ref()
-                        .filter(|r| r.uses > 0)
-                        .map_or(0.0, |r| remaining(Some(r.until), now))
-                },
-                |(_, end)| remaining(Some(end), now),
-            ),
-            active: s.zones[i].is_some_and(|(_, end)| now < end),
+        slots: std::array::from_fn(|i| {
+            let zone = s.zones[i]
+                .filter(|(_, _, skill)| s.loadout.is_some_and(|l| l.skills()[i] == *skill));
+            let recast = s.advanced.recasts[i]
+                .as_ref()
+                .filter(|r| r.uses > 0 && s.loadout.is_some_and(|l| l.skills()[i] == r.skill));
+            SkillSlotState {
+                can_recast: zone.is_some_and(|(_, end, _)| now < end)
+                    || recast.is_some_and(|r| r.until > now),
+                recast_remaining_secs: zone.map_or_else(
+                    || recast.map_or(0.0, |r| remaining(Some(r.until), now)),
+                    |(_, end, _)| remaining(Some(end), now),
+                ),
+                active: zone.is_some_and(|(_, end, _)| now < end),
+            }
         }),
         weapon_mode: s.mode,
         shield_hp: shields,
@@ -758,39 +759,18 @@ fn control(
     reveal: f32,
     now: Instant,
 ) {
-    if c.target.kind == TargetKind::Player {
-        if let Some(p) = w
-            .players
-            .values_mut()
-            .find(|p| p.hero.identity.id == c.target.id && p.hero.hp > 0.0 && !p.modifiers.god_mode)
-        {
-            if remaining(p.hero.skills.advanced.parry_until, now) > 0.0 {
-                p.hero.skills.advanced.parried_control |= root > 0.0;
-                return;
-            }
-            if p.hero.skills.advanced.immune(now) {
-                return;
-            }
-            p.hero
-                .skills
-                .control
-                .apply(id, root, slow, secs, reveal, now);
-        }
-    } else if c.target.kind != TargetKind::Structure {
-        let status = w
-            .skill_runtime
-            .npc_controls
-            .entry(key(c.target))
-            .or_default();
-        status.apply(id, root, slow, secs, reveal, now);
-        if reveal > 0.0 {
-            let until = &mut status.revealed_to[usize::from(team == Team::Blue)];
-            *until = Some(until.unwrap_or(now).max(now + duration(reveal)));
-        }
-    }
-    if root > 0.0 {
-        advanced::consume_brittle(w, c, now);
-    }
+    crowd_control::apply(
+        w,
+        c,
+        id,
+        team,
+        root,
+        slow,
+        secs,
+        reveal,
+        now,
+        crowd_control::Kind::Root,
+    );
 }
 
 fn shield(w: &mut GameWorld, target: u64, owner: u64, amount: f32, secs: f32, now: Instant) {
@@ -849,7 +829,7 @@ pub fn cast(
     let id = loadout.skills()[slot as usize];
     let d = skill(id);
     let rank = p.hero.progress.ranks[slot as usize].clamp(1, d.ability.max_rank);
-    if !p.modifiers.unlock_all && !unlocked_slots_for_level(p.hero.progress.level)[slot as usize] {
+    if !p.modifiers.unlock_all && !loadout.unlocked(p.hero.progress.level)[slot as usize] {
         return;
     }
     if let SkillEffect::Technique { action, .. } = d.effect {
@@ -868,7 +848,7 @@ pub fn cast(
     {
         return;
     }
-    if let Some((zone, expires)) = p.hero.skills.zones[slot as usize] {
+    if let Some((zone, expires, _)) = p.hero.skills.zones[slot as usize] {
         if now < expires
             && w.skill_runtime
                 .effects
@@ -1018,7 +998,7 @@ pub fn cast(
         let eid = w.skill_runtime.id();
         if matches!(d.effect, SkillEffect::RecastZone { .. }) {
             w.players.get_mut(&addr).unwrap().hero.skills.zones[slot as usize] =
-                Some((eid, now + duration(lifetime)));
+                Some((eid, now + duration(lifetime), id));
         }
         effects.push(ActiveEffect {
             id: eid,
@@ -1080,7 +1060,7 @@ fn detonate(w: &mut GameWorld, e: &ActiveEffect, now: Instant) -> Vec<CombatEven
         .values_mut()
         .find(|p| p.hero.identity.id == e.owner)
     {
-        if p.hero.skills.zones[e.slot as usize].is_some_and(|(id, _)| id == e.id) {
+        if p.hero.skills.zones[e.slot as usize].is_some_and(|(id, _, _)| id == e.id) {
             p.hero.skills.zones[e.slot as usize] = None;
         }
     }

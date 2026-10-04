@@ -4,6 +4,7 @@ use shared::loadout::Technique;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Recast {
+    pub(super) skill: SkillId,
     pub until: Instant,
     target: Option<TargetId>,
     victims: Vec<TargetId>,
@@ -17,6 +18,7 @@ pub struct Orb {
     moving: bool,
     hits: BTreeSet<TargetKey>,
     skill: SkillId,
+    slot: u8,
     scale: f32,
 }
 #[derive(Debug, Clone, PartialEq)]
@@ -99,6 +101,7 @@ enum MarkKind {
 #[derive(Clone)]
 struct StatusMark {
     owner: u64,
+    slot: u8,
     target: TargetId,
     kind: MarkKind,
     since: Instant,
@@ -217,6 +220,7 @@ fn mark(
     kind: MarkKind,
     secs: f32,
     amount: f32,
+    slot: u8,
     now: Instant,
 ) {
     let marks = &mut w.skill_runtime.advanced.marks;
@@ -225,6 +229,7 @@ fn mark(
     if marks.len() < MAX_MARKS {
         marks.push(StatusMark {
             owner,
+            slot,
             target: c.target,
             kind,
             since: now,
@@ -351,13 +356,25 @@ fn area(
 fn recast(
     p: &mut ConnectedPlayer,
     slot: u8,
+    skill: SkillId,
     now: Instant,
     secs: f32,
     uses: u8,
     target: Option<TargetId>,
     victims: Vec<TargetId>,
 ) {
+    // An old in-flight projectile cannot grant a free cast to a replacement
+    // skill installed in the same button by a new sandbox incarnation.
+    if !p
+        .hero
+        .skills
+        .loadout
+        .is_some_and(|l| l.skills()[slot as usize] == skill)
+    {
+        return;
+    }
     p.hero.skills.advanced.recasts[slot as usize] = Some(Recast {
+        skill,
         until: now + duration(secs),
         target,
         victims,
@@ -392,7 +409,7 @@ pub fn cast(w: &mut GameWorld, addr: SocketAddr, slot: u8, aim: [f32; 2], now: I
     let range = def.ability.cast_range;
     let follow = p.hero.skills.advanced.recasts[slot as usize]
         .clone()
-        .filter(|r| r.until > now && r.uses > 0);
+        .filter(|r| r.skill == def.id && r.until > now && r.uses > 0);
     if p.hero.skills.advanced.immune(now)
         || remaining(p.hero.skills.control.stun_until, now) > 0.0
         || p.hero
@@ -509,15 +526,7 @@ pub fn cast(w: &mut GameWorld, addr: SocketAddr, slot: u8, aim: [f32; 2], now: I
         return;
     }
     let rank = p.hero.progress.ranks[slot as usize].clamp(1, def.ability.max_rank);
-    let cost = if follow.is_some() {
-        if l.core() == shared::loadout::CoreId::Stormfist {
-            25.0
-        } else {
-            0.0
-        }
-    } else {
-        scaled_mana_cost(&def.ability, rank)
-    };
+    let cost = def.mana_cost(rank, follow.is_some());
     if !p.modifiers.infinite_resource && p.hero.mana < cost {
         return;
     }
@@ -539,7 +548,10 @@ pub fn cast(w: &mut GameWorld, addr: SocketAddr, slot: u8, aim: [f32; 2], now: I
     }
     p.hero.skills.recovery_until = Some(now + duration(def.windup_secs.max(0.15)));
     accepted_technique(p, now);
-    if let Some(r) = p.hero.skills.advanced.recasts[slot as usize].as_mut() {
+    if let Some(r) = p.hero.skills.advanced.recasts[slot as usize]
+        .as_mut()
+        .filter(|r| r.skill == def.id)
+    {
         r.uses = r.uses.saturating_sub(1);
     }
     crate::sim::cast::record_player_action(p, SkillSlot::from_index(slot).unwrap());
@@ -615,6 +627,7 @@ pub fn cast(w: &mut GameWorld, addr: SocketAddr, slot: u8, aim: [f32; 2], now: I
                 recast(
                     actor_mut(w, owner).unwrap(),
                     slot,
+                    def.id,
                     now,
                     duration_secs,
                     3,
@@ -700,6 +713,7 @@ pub fn cast(w: &mut GameWorld, addr: SocketAddr, slot: u8, aim: [f32; 2], now: I
                 recast(
                     actor_mut(w, owner).unwrap(),
                     slot,
+                    def.id,
                     now,
                     duration_secs,
                     1,
@@ -771,6 +785,7 @@ pub fn cast(w: &mut GameWorld, addr: SocketAddr, slot: u8, aim: [f32; 2], now: I
                     recast(
                         actor_mut(w, owner).unwrap(),
                         slot,
+                        def.id,
                         now,
                         duration_secs,
                         1,
@@ -807,6 +822,7 @@ pub fn cast(w: &mut GameWorld, addr: SocketAddr, slot: u8, aim: [f32; 2], now: I
                 recast(
                     actor_mut(w, owner).unwrap(),
                     slot,
+                    def.id,
                     now,
                     duration_secs,
                     1,
@@ -836,6 +852,7 @@ pub fn cast(w: &mut GameWorld, addr: SocketAddr, slot: u8, aim: [f32; 2], now: I
             MarkKind::Curse,
             duration_secs,
             0.0,
+            slot,
             now,
         ),
         Technique::Lash => {
@@ -918,6 +935,7 @@ pub fn cast(w: &mut GameWorld, addr: SocketAddr, slot: u8, aim: [f32; 2], now: I
                 recast(
                     actor_mut(w, owner).unwrap(),
                     slot,
+                    def.id,
                     now,
                     duration_secs,
                     2,
@@ -948,6 +966,7 @@ pub fn cast(w: &mut GameWorld, addr: SocketAddr, slot: u8, aim: [f32; 2], now: I
                 moving: true,
                 hits: BTreeSet::new(),
                 skill: def.id,
+                slot,
                 scale,
             });
         }
@@ -1157,7 +1176,7 @@ pub(super) fn effect_tick(
                     }
             }) {
                 out.extend(hit(w, e, c, damage * e.scale, now));
-                mark(w, e.owner, c, MarkKind::Brittle, 4.0, 0.07, now);
+                mark(w, e.owner, c, MarkKind::Brittle, 4.0, 0.07, e.slot, now);
             }
             return false;
         }
@@ -1235,6 +1254,7 @@ pub(super) fn effect_tick(
                 MarkKind::Seal,
                 duration_secs,
                 damage * e.scale,
+                e.slot,
                 now,
             ),
             Technique::OnHitBolt => {
@@ -1292,6 +1312,7 @@ pub(super) fn effect_tick(
                     MarkKind::Spikes,
                     duration_secs,
                     8.0 * e.scale,
+                    e.slot,
                     now,
                 );
                 if let Some(m) = w.skill_runtime.advanced.marks.iter_mut().find(|m| {
@@ -1301,18 +1322,28 @@ pub(super) fn effect_tick(
                 }
                 if let Some(r) = actor_mut(w, e.owner)
                     .and_then(|p| p.hero.skills.advanced.recasts[e.slot as usize].as_mut())
+                    .filter(|r| r.skill == e.skill)
                 {
                     r.target = Some(c.target);
                 }
             }
             Technique::CharmBolt => charm(w, c, owner_pos, duration_secs, now),
             Technique::ConcussiveBolt => {
-                concussion(w, e.owner, c, now, out);
+                concussion(w, e.owner, e.slot, c, now, out);
                 control(w, c, e.owner, e.team, 0.0, 0.55, duration_secs, 0.0, now);
             }
             Technique::EchoStrike | Technique::Hook => {
                 if let Some(p) = actor_mut(w, e.owner) {
-                    recast(p, e.slot, now, duration_secs, 1, Some(c.target), vec![]);
+                    recast(
+                        p,
+                        e.slot,
+                        e.skill,
+                        now,
+                        duration_secs,
+                        1,
+                        Some(c.target),
+                        vec![],
+                    );
                 }
                 control(
                     w,
@@ -1350,7 +1381,7 @@ pub(super) fn effect_tick(
                     0.0,
                     now,
                 );
-                mark(w, e.owner, c, MarkKind::Brittle, 4.0, 0.07, now);
+                mark(w, e.owner, c, MarkKind::Brittle, 4.0, 0.07, e.slot, now);
             }
             _ => {}
         }
@@ -1378,17 +1409,23 @@ pub(super) fn effect_tick(
     }
 }
 fn charm(w: &mut GameWorld, c: Candidate, toward: [f32; 2], secs: f32, now: Instant) {
+    if !crowd_control::apply(
+        w,
+        c,
+        0,
+        c.team.unwrap_or(Team::Green),
+        secs,
+        1.0,
+        0.0,
+        0.0,
+        now,
+        crowd_control::Kind::Charm,
+    ) {
+        return;
+    }
     if c.target.kind == TargetKind::Player {
         if let Some(p) = actor_mut(w, c.target.id) {
-            if remaining(p.hero.skills.advanced.parry_until, now) > 0.0 {
-                p.hero.skills.advanced.parried_control = true;
-                return;
-            }
-            if p.modifiers.god_mode || p.hero.skills.advanced.immune(now) {
-                return;
-            }
             p.hero.skills.advanced.charm = Some((toward, now + duration(secs)));
-            p.hero.skills.control.root_until = Some(now + duration(secs));
         }
     } else {
         w.skill_runtime
@@ -1401,22 +1438,12 @@ fn charm(w: &mut GameWorld, c: Candidate, toward: [f32; 2], secs: f32, now: Inst
                 .npc_charms
                 .push((c.target, toward, now + duration(secs)));
         }
-        control(
-            w,
-            c,
-            0,
-            c.team.unwrap_or(Team::Green),
-            secs,
-            1.0,
-            0.0,
-            0.0,
-            now,
-        );
     }
 }
 fn concussion(
     w: &mut GameWorld,
     owner: u64,
+    slot: u8,
     c: Candidate,
     now: Instant,
     out: &mut Vec<CombatEvent>,
@@ -1444,21 +1471,21 @@ fn concussion(
             return;
         }
     } else {
-        mark(w, owner, c, MarkKind::Concussion, 4.0, 20.0, now);
+        mark(w, owner, c, MarkKind::Concussion, 4.0, 20.0, slot, now);
         return;
     }
     w.skill_runtime
         .advanced
         .marks
         .retain(|m| !(m.target == c.target && m.kind == MarkKind::Concussion));
-    mark(w, owner, c, MarkKind::Immunity, 7.0, 0.0, now);
+    mark(w, owner, c, MarkKind::Immunity, 7.0, 0.0, slot, now);
     let team = actor(w, owner).map_or(Team::Green, |p| p.hero.identity.team);
     out.extend(raw_damage(
         w,
         c.target,
         20.0,
         DamageType::Magic,
-        source(owner, 0),
+        source(owner, slot),
         team,
         now,
     ));
@@ -1566,7 +1593,7 @@ pub(super) fn on_hit(
                 && m.until > now
                 && actor(w, m.owner).is_some_and(|p| p.hero.identity.team == team)
         })
-        .map(|m| m.owner);
+        .map(|m| (m.owner, m.slot));
     if basic
         && passive == Some(PassiveId::Concussion)
         && w.skill_runtime.advanced.marks.iter().any(|m| {
@@ -1579,7 +1606,9 @@ pub(super) fn on_hit(
         bonus += 8.0;
     }
     if basic && (passive == Some(PassiveId::Concussion) || ally_mark.is_some()) {
-        concussion(w, ally_mark.unwrap_or(owner), c, now, &mut out);
+        let (mark_owner, mark_slot) =
+            ally_mark.unwrap_or((owner, shared::BASIC_ATTACK_ACTION_SLOT));
+        concussion(w, mark_owner, mark_slot, c, now, &mut out);
     }
     if let Some(p) = actor_mut(w, owner) {
         let s = &mut p.hero.skills.advanced;
@@ -1917,7 +1946,7 @@ pub fn tick(w: &mut GameWorld, t: TickCtx, out: &mut Vec<CombatEvent>) {
                             c.target,
                             damage * orb.scale * factor,
                             DamageType::Magic,
-                            source(owner, if orb.attached.is_some() { 2 } else { 0 }),
+                            source(owner, orb.slot),
                             team,
                             false,
                             true,
@@ -2081,7 +2110,13 @@ pub fn observe(w: &mut GameWorld, events: &[CombatEvent], now: Instant) {
                                 }
                             )
                         }) {
-                            if let Some(r) = r.as_mut().filter(|r| r.until > now) {
+                            if let Some(r) = r.as_mut().filter(|r| {
+                                r.until > now
+                                    && p.hero
+                                        .skills
+                                        .loadout
+                                        .is_some_and(|l| l.skills()[i] == r.skill)
+                            }) {
                                 r.uses = (r.uses + 1).min(3);
                             }
                         }
@@ -2225,34 +2260,26 @@ fn control(
     reveal: f32,
     now: Instant,
 ) {
-    let resisted = c.target.kind == TargetKind::Player
-        && actor(w, c.target.id)
-            .is_some_and(|p| p.modifiers.god_mode || p.hero.skills.advanced.immune(now));
-    super::control(w, c, id, team, root, slow, secs, reveal, now);
-    if !resisted
-        && root > 0.0
-        && c.target.kind != TargetKind::Player
-        && c.target.kind != TargetKind::Structure
-    {
-        w.skill_runtime
-            .npc_controls
-            .entry(key(c.target))
-            .or_default()
-            .stun_until = Some(now + duration(root));
-    }
-    if !resisted && root > 0.0 && c.target.kind == TargetKind::Player {
-        if let Some(p) = actor_mut(w, c.target.id) {
-            p.hero.skills.control.stun_until = Some(now + duration(root));
-        }
-    }
+    crowd_control::apply(
+        w,
+        c,
+        id,
+        team,
+        root,
+        slow,
+        secs,
+        reveal,
+        now,
+        crowd_control::Kind::Stun,
+    );
 }
 
 pub fn ensure_orb(p: &mut ConnectedPlayer) {
     if p.hero.hp <= 0.0 || p.hero.skills.advanced.orb.is_some() {
         return;
     }
-    let Some(id) = p.hero.skills.loadout.and_then(|l| {
-        l.skills().into_iter().find(|id| {
+    let Some((slot, id)) = p.hero.skills.loadout.and_then(|l| {
+        l.skills().into_iter().enumerate().find(|(_, id)| {
             matches!(
                 skill(*id).effect,
                 SkillEffect::Technique {
@@ -2272,6 +2299,7 @@ pub fn ensure_orb(p: &mut ConnectedPlayer) {
         moving: false,
         hits: BTreeSet::new(),
         skill: id,
+        slot: slot as u8,
         scale: 1.0,
     });
 }
@@ -2296,7 +2324,7 @@ pub(super) fn consume_brittle(w: &mut GameWorld, c: Candidate, now: Instant) {
                 c.target,
                 c.max_hp * m.amount,
                 DamageType::Magic,
-                source(m.owner, 1),
+                source(m.owner, m.slot),
                 team,
                 now,
             ) {

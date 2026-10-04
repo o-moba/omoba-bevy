@@ -112,14 +112,9 @@ impl SkillPresentation {
         loadout: Option<&LoadoutState>,
         slot: u8,
     ) -> Option<&SkillProfile> {
-        if let Some(skill) = equipped_skill(loadout, slot) {
-            return self.profile(skill);
-        }
-        if !shared::HeroClass::LEGACY.contains(&class) {
-            return None;
-        }
+        let skills = crate::equipped_skills::resolve_state(class, loadout)?;
         self.skills
-            .get(class.ability(shared::SkillSlot::from_index(slot)?).id)
+            .get(skills.ability(shared::SkillSlot::from_index(slot)?).id)
     }
     pub(crate) fn profile(&self, skill: SkillId) -> Option<&SkillProfile> {
         self.skills.get(skill.id())
@@ -127,13 +122,15 @@ impl SkillPresentation {
 }
 
 /// The accepted recipe, not the hero class or a skill's default catalogue slot.
-pub(crate) fn equipped_skill(loadout: Option<&LoadoutState>, slot: u8) -> Option<SkillId> {
-    loadout?
-        .recipe
-        .as_ref()?
-        .skills
-        .get(usize::from(slot))
-        .copied()
+pub(crate) fn equipped_skill(
+    class: shared::HeroClass,
+    loadout: Option<&LoadoutState>,
+    slot: u8,
+) -> Option<SkillId> {
+    let skills = crate::equipped_skills::resolve_state(class, loadout)?;
+    skills
+        .skill(shared::SkillSlot::from_index(slot)?)
+        .map(|skill| skill.id)
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -144,16 +141,17 @@ pub(crate) struct MotionCue {
 
 pub(crate) fn motion_cue(
     registry: &SkillPresentation,
+    class: shared::HeroClass,
     loadout: Option<&LoadoutState>,
     slot: u8,
     owner: u64,
     effects: &[SkillEffectState],
 ) -> Option<MotionCue> {
     if slot == shared::BASIC_ATTACK_ACTION_SLOT {
-        let recipe = loadout?.recipe.as_ref()?;
-        let motion = if recipe.core == shared::loadout::CoreId::Adventurer {
+        let equipped = crate::equipped_skills::resolve_state(class, loadout)?.resolved()?;
+        let motion = if equipped.core() == shared::loadout::CoreId::Adventurer {
             "dagger_stab"
-        } else if recipe.core.attack_profile() == shared::loadout::AttackProfileId::Repeater {
+        } else if equipped.attack_profile() == shared::loadout::AttackProfileId::Repeater {
             "pistol_shoot"
         } else {
             return None;
@@ -163,7 +161,7 @@ pub(crate) fn motion_cue(
             hold: false,
         });
     }
-    let skill = equipped_skill(loadout, slot)?;
+    let skill = equipped_skill(class, loadout, slot)?;
     let profile = registry.profile(skill)?;
     if let Some(windup) = &profile.windup {
         // A vanished warning is not proof that a beam fired (cancel/fog/round change).

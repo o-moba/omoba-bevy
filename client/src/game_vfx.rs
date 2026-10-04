@@ -1081,6 +1081,7 @@ fn emit_skill_cast_particles(
             continue;
         }
         if crate::skill_presentation::equipped_skill(
+            class.0,
             loadout.and_then(|l| l.0.as_ref()),
             action.slot,
         ) == Some(shared::loadout::SkillId::DaggerBluff)

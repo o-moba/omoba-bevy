@@ -5,7 +5,7 @@ use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 
 use shared::map::{Lane, Team};
-use shared::progression::skill_upgrade_order;
+use shared::progression::equipped_skill_upgrade_order;
 use shared::shop::plan_purchases;
 use shared::wire::{GameState, TargetId, TargetKind, default_character_choice};
 use shared::{
@@ -493,8 +493,8 @@ pub fn seated_count(
 /// upgrade path.
 pub fn auto_rank_skills(player: &mut ConnectedPlayer) {
     let progress = &player.hero.progress;
-    let order = skill_upgrade_order(
-        player.hero.identity.hero_class,
+    let order = equipped_skill_upgrade_order(
+        hero_stats::equipped_skills(player),
         progress.level,
         progress.ranks,
         progress.skill_points,

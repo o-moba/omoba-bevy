@@ -90,8 +90,10 @@ its structure is fresh, then the client). Each row is one to four PRs.
 
 This is the current refactoring TODO after the September programme. A checked
 item means implemented and locally verified; it does not mean deployed or
-available in TestFlight. Versions 0.37–0.39 are prepared together on
-`feat/playtest-round-two`. See the [iteration delivery note](progress/2026-10-04-iteration-commit.md).
+available in TestFlight. Versions 0.37–0.39 have their own
+[iteration delivery note](progress/2026-10-04-iteration-commit.md).
+Version 0.40.0 is implemented on `feat/playtest-round-two`, with R16/R17
+implemented and locally verified; see [current progress](progress/2026-10-04-equipped-skills.md).
 Historical September metrics and PR descriptions above/below remain dated
 records; much of the authority code now lives in `common/`.
 
@@ -106,8 +108,8 @@ records; much of the authority code now lives in `common/`.
 
 ### TODO — prioritized, separately reviewable slices
 
-- [ ] **P1 / R16 — Resolve mobile skill metadata from the equipped recipe.** Replace class-preset lookups in input/HUD with the actual equipped slot definition (`client/src/combat/mobile.rs`, `mobile_controls.rs`, skill cards). Done when a mixed kit with reordered skills uses matching targeting, range, cost, cooldown, icon and upgrade rules on client and authority. A custom-kit editor is a separate product feature.
-- [ ] **P1 / R17 — Unify admitted control effects across skill executors.** First reproduce and decide **Bluff × Brittle** semantics: `common/src/skills/dagger.rs` directly sets stun while the common control path consumes Brittle. This is a confirmed code-path discrepancy and a gameplay-bug candidate, not a confirmed defect or an intentional exception. Pin the agreed interaction with a cross-kit regression, then centralize applicable immunity/parry/control hooks. Keep the already-shared accepted-cast hook; avoid duplicating or charging rejected casts. Behavior fixes and mechanical extraction should be separate changes.
+- [x] **P1 / R16 — Equipped skill metadata: complete, locally verified 2026-10-04.** `EquippedSkills` now supplies desktop/mobile/controller input, aim, HUD/cards, costs, cooldown totals, unlocks and upgrades. Authority accepts unique arbitrary bindings, including four ultimates, while preserving authored progression roles and capability checks. Effects/recasts/animation and damage receipts retain actual bindings; follow-up costs are skill-owned. Invalid recipes fail closed. The final full gate, real-server mixed-recipe scenario and affected HUD/card captures pass. [Contract](equipped-skills.md), [verification status](progress/2026-10-04-equipped-skills.md). A public editor is separate.
+- [x] **P1 / R17 — Admitted control effects: complete, locally verified 2026-10-04.** The shared control helper centralizes applicable target/immunity/parry checks, control application, recall cancellation and Brittle consumption. The intentional behavior fix makes admitted Bluff consume Brittle once through existing receipts; rejected controls do not consume marks or cancel recall. Cross-kit and negative regressions are separate from extraction, and preserved unstoppable/player-charm/forced-displacement exceptions are explicit in the [contract](equipped-skills.md#shared-admitted-control). The final full gate, negative/cross-kit regressions and real-server suite pass.
 - [ ] **P2 / R18 — Separate actor identity, controller ownership and transport presence.** Replace synthetic `SocketAddr` actor keys and reclaim-time `last_seen` adjustments in `server/src/session_recovery.rs` with explicit identities/state. Done when AI activity cannot update network liveness, reclaim preserves the same hero/build, and stale or unauthorized sessions still cannot take control. Design the migration before changing protocol/storage.
 - [ ] **P2 / R19 — Define and measure unattended-match resource policy.** Running matches with detached humans currently keep worker slots until a terminal result. Measure sustained tick time, memory and occupied slots on the small VPS; specify observable bounds and retirement rules that preserve legitimate reconnects. Do not silently restore immediate abandonment. Bot takeover currently also ranks skills and buys items; document or configure that ownership policy explicitly.
 - [ ] **P2 / R20 — Put configurable brush geometry in validated map data.** Keep one resolved layout for authority and both renderers; validate stable IDs, reachable lane entrances and relevant structure/brush interactions. Preserve existing default geometry and declare client/map compatibility. This is needed for editable map variants, not evidence that today's default brush is broken.
@@ -115,14 +117,14 @@ records; much of the authority code now lives in `common/`.
 - [ ] **P3 / R22 — Decouple catalog source order from enum order.** If larger/editor-authored catalogs require it, resolve explicit stable item IDs and validate the recipe graph independently of JSON array order. Preserve wire compatibility, duplicate/unknown/cycle rejection and deterministic purchase quotes. The existing validated data-driven catalog is already complete; this is an extension.
 - [ ] **P3 / R23 — Consolidate concrete UI reuse and split busy modules.** Separate gesture ownership, radial layout and HUD state where useful; extract repeated draft/postmatch/shop builders into the existing UI kit. These screens already use typed actions. Done when reuse reduces duplicated layout policy while raw-touch, scroll, modal and phone-layout behavior stays pinned; line count alone is not the acceptance criterion.
 
-Suggested order: R17 and R16 before more hybrid-kit content; R18/R19 together
-before expanding multiplayer capacity; R20 when adding map editing; R21–R23
+Suggested order: use the verified R16/R17 contract for further hybrid-kit content;
+address R18/R19 together before expanding multiplayer capacity; R20 when adding map editing; R21–R23
 as small behavior-preserving changes around active work. These are backlog
 items, not authorization for production infrastructure or dependency changes.
 
 ### Release/playtest follow-ups — separate from refactoring
 
-- [ ] Publish a coordinated protocol-8 client/server release after its release checks. Commit/push alone does not deploy or upload a mobile build.
+- [ ] Publish a coordinated protocol-9 / standard-kits-4 client/server release after its release checks. Commit/push alone does not deploy or upload a mobile build.
 - [ ] Exercise real iPhone backgrounding, app restart, reconnect and Home escape, including continued bot play during absence. The signed local test advances a manual clock; it is not a multi-minute device soak test.
 - [ ] Measure requested cap, actual app cadence and native display cadence on iPhone 16 Pro; verify the FPS visibility toggle. Desktop screenshots are not 120 Hz certification.
 - [ ] Play full matches to tune 500g bounties, the rare 1-HP dagger effect, tower count and respawn curve. The current economy model gives roughly three farming minutes per full bounty; actual match duration/win rates remain unmeasured.

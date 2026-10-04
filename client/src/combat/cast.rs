@@ -11,14 +11,15 @@ use crate::player::{MovementTarget, Player};
 use crate::team::{Team, TeamSelection};
 use bevy::prelude::*;
 use shared::{
-    AbilityDefinition, HeroClass, SkillSlot, TargetingMode, ability_for_class_slot,
-    scaled_cast_range, scaled_cooldown, scaled_mana_cost,
+    AbilityDefinition, SkillSlot, TargetingMode, loadout::EquippedSkills, scaled_cast_range,
+    scaled_cooldown, scaled_mana_cost,
 };
 use std::fmt::Display;
 
-use super::cooldown::{LocalCastCooldown, effective_cast_duration, local_hero_class};
+use super::cooldown::{LocalCastCooldown, local_hero_class};
 use super::feedback::ActionFeedback;
 use super::selection::TargetState;
+use crate::equipped_skills;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct PendingCastRequest {
@@ -101,7 +102,7 @@ fn report_plain(feedback: &mut ActionFeedback, key: &'static str) {
 /// responsive UX only; the server re-validates everything authoritatively.
 fn try_cast_slot(
     slot_index: usize,
-    class: HeroClass,
+    skills: &EquippedSkills,
     local: (&CombatStats, PlayerProgression, Option<&NetworkPlayerId>),
     selected_target: Option<TargetId>,
     command_writer: &mut MessageWriter<NetworkCommand>,
@@ -115,13 +116,13 @@ fn try_cast_slot(
     if !stats.is_alive() {
         return false;
     }
-    let def = ability_for_class_slot(class, slot);
-    if !prog.unlocked()[slot.index()] {
+    let def = skills.ability(slot);
+    if !equipped_skills::unlocked(skills, &prog)[slot.index()] {
         report(
             feedback,
             "combat.cast.locked",
             def,
-            &[("level", &shared::SLOT_UNLOCK_LEVELS[slot.index()])],
+            &[("level", &skills.unlock_level(slot))],
         );
         return false;
     }
@@ -184,7 +185,7 @@ fn try_cast_slot(
 
 pub(crate) fn queue_cast_request(
     slot_index: usize,
-    class: HeroClass,
+    skills: &EquippedSkills,
     target_state: &TargetState,
     pending_cast: &mut PendingCast,
     feedback: &mut ActionFeedback,
@@ -192,7 +193,7 @@ pub(crate) fn queue_cast_request(
     let Some(slot) = SkillSlot::from_index(slot_index as u8) else {
         return;
     };
-    let def = ability_for_class_slot(class, slot);
+    let def = skills.ability(slot);
     let (target_entity, target) = match def.targeting {
         TargetingMode::SelfTarget | TargetingMode::Direction | TargetingMode::Point => (None, None),
         TargetingMode::UnitTarget => {
@@ -224,6 +225,7 @@ pub(super) fn cast_spell_system(
             Option<&PlayerProgression>,
             Option<&NetworkPlayerId>,
             Option<&NetworkHeroClass>,
+            Option<&crate::net::PlayerLoadout>,
         ),
         With<Player>,
     >,
@@ -243,11 +245,16 @@ pub(super) fn cast_spell_system(
             return;
         }
     }
-    let Ok((_stats, _prog, _net_id, class)) = local_player.single() else {
+    let Ok((_stats, _prog, _net_id, class, loadout)) = local_player.single() else {
         return;
     };
     let class = local_hero_class(Some(class), &team_selection);
-    let slot_index = if class.is_standard() {
+    let Some(skills) = equipped_skills::resolve(class, loadout) else {
+        *aimed = [false; 4];
+        pending_cast.cancel();
+        return;
+    };
+    let slot_index = if skills.resolved().is_some() {
         let mut released = None;
         for (slot, key) in SKILL_CAST_KEYS.iter().enumerate() {
             if keyboard_input.just_pressed(*key) {
@@ -272,7 +279,7 @@ pub(super) fn cast_spell_system(
     };
     queue_cast_request(
         slot_index,
-        class,
+        &skills,
         &target_state,
         &mut pending_cast,
         &mut feedback,
@@ -337,10 +344,14 @@ pub(super) fn resolve_pending_cast_system(
         pending_cast.cancel();
         return;
     };
-    let definition = ability_for_class_slot(class, slot);
+    let Some(skills) = equipped_skills::resolve(class, loadouts.single().ok()) else {
+        pending_cast.cancel();
+        return;
+    };
+    let definition = skills.ability(slot);
     let prog = progression.copied().unwrap_or_default();
     let rank = prog.ranks[slot.index()].clamp(1, definition.max_rank);
-    if let Some(preset) = shared::loadout::preset_for_class(class) {
+    if let Some(skill) = skills.skill(slot) {
         let state = loadouts.single().ok().and_then(|s| s.0.as_ref());
         let cursor = aim_view
             .0
@@ -367,20 +378,21 @@ pub(super) fn resolve_pending_cast_system(
             player_transform.translation.xz() + player_transform.forward().xz() * 10.0
         });
         let recast = state.is_some_and(|s| s.slots[slot.index()].can_recast);
-        if !stats.is_alive() || !prog.unlocked()[slot.index()] || !aim.is_finite() {
+        if !stats.is_alive()
+            || !equipped_skills::unlocked(&skills, &prog)[slot.index()]
+            || !aim.is_finite()
+        {
             pending_cast.cancel();
             return;
         }
         if !recast && cast_cd.recovery_secs > 0.0 {
             return;
         }
-        if !recast
-            && (cast_cd.remaining_secs[slot.index()] > 0.0
-                || stats.mana < scaled_mana_cost(definition, rank))
-        {
+        let mana_cost = skills.mana_cost(rank, slot, recast);
+        if (!recast && cast_cd.remaining_secs[slot.index()] > 0.0) || stats.mana < mana_cost {
             report_plain(
                 &mut feedback,
-                if stats.mana < scaled_mana_cost(definition, rank) {
+                if stats.mana < mana_cost {
                     "combat.hotbar.need_mana"
                 } else {
                     "combat.standard.not_ready"
@@ -407,7 +419,6 @@ pub(super) fn resolve_pending_cast_system(
                 .as_ref()
                 .and_then(|g| g.sandbox.as_ref())
                 .is_some_and(|s| s.config.player.no_cooldowns);
-            let skill = preset.skill(slot);
             cast_cd.recovery_secs = if no_cooldowns {
                 0.0
             } else {
@@ -429,8 +440,8 @@ pub(super) fn resolve_pending_cast_system(
             let duration = if no_cooldowns {
                 0.0
             } else {
-                effective_cast_duration(
-                    class,
+                equipped_skills::cooldown(
+                    &skills,
                     prog.level,
                     rank,
                     slot,
@@ -448,12 +459,12 @@ pub(super) fn resolve_pending_cast_system(
     }
     let rejection = if !stats.is_alive() {
         Some(tr("combat.cast.wait_respawn").to_string())
-    } else if !prog.unlocked()[slot.index()] {
+    } else if !equipped_skills::unlocked(&skills, &prog)[slot.index()] {
         Some(
             ability_message(
                 "combat.cast.unlocks_at",
                 definition,
-                &[("level", &shared::SLOT_UNLOCK_LEVELS[slot.index()])],
+                &[("level", &skills.unlock_level(slot))],
             )
             .0,
         )
@@ -545,7 +556,7 @@ pub(super) fn resolve_pending_cast_system(
     commands.entity(player_entity).remove::<MovementTarget>();
     let sent = try_cast_slot(
         request.slot,
-        class,
+        &skills,
         (stats, progression.copied().unwrap_or_default(), net_id),
         request.target,
         &mut command_writer,
@@ -557,8 +568,8 @@ pub(super) fn resolve_pending_cast_system(
             .single()
             .map(|equipment| equipment.item_bonuses)
             .unwrap_or_default();
-        cast_cd.remaining_secs[slot.index()] = effective_cast_duration(
-            class,
+        cast_cd.remaining_secs[slot.index()] = equipped_skills::cooldown(
+            &skills,
             prog.level,
             rank,
             slot,

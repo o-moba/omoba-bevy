@@ -74,6 +74,15 @@ fn apply(rt: &mut ServerRuntime, a: SocketAddr, c: SandboxConfig) {
     let ack = command(rt, a, SandboxCommand::ApplyConfig { config: c });
     assert!(ack.accepted, "{}", ack.message);
 }
+fn negotiate_protocol(rt: &mut ServerRuntime, a: SocketAddr, now: Instant) {
+    rt.handle_packet(
+        a,
+        ClientPacket::Hello {
+            protocol_version: shared::protocol::PROTOCOL_VERSION,
+        },
+        now,
+    );
+}
 fn advance(rt: &mut ServerRuntime, dt: f32) {
     let (now, dt) = rt.sandbox.as_mut().unwrap().advance(dt);
     rt.tick(now, dt);
@@ -109,6 +118,233 @@ fn sandbox_defaults_valid_and_actor_edit_is_transactional() {
     c.player.max_hp = f32::NAN;
     assert!(!command(&mut rt, a, SandboxCommand::ApplyConfig { config: c }).accepted);
     assert_eq!(rt.world.players[&a].hero.hp, 27.0);
+}
+
+#[test]
+fn sandbox_recipe_edit_is_atomic_preserves_identity_and_clears_old_skill_state() {
+    use shared::loadout::{CoreId, SkillId};
+    let (mut rt, a, now) = fixture();
+    negotiate_protocol(&mut rt, a, now);
+    let mut c = config(&rt);
+    c.player.hero = shared::HeroClass::Dawnweaver;
+    c.player.level = 6;
+    apply(&mut rt, a, c.clone());
+    crate::skills::cast(&mut rt.world, a, 2, [0.0, 0.0], 1, now);
+    assert!(
+        crate::skills::state(&rt.world.players[&a], now)
+            .unwrap()
+            .slots[2]
+            .can_recast
+    );
+    let p = rt.world.players.get_mut(&a).unwrap();
+    let id = p.hero.identity.id;
+    p.hero.hp = 31.0;
+    p.hero.mana = 37.0;
+    p.hero.skills.request_id = 71;
+    p.hero.skills.recovery_until = Some(now + Duration::from_secs(8));
+    p.timers.last_cast_at[2] = Some(now);
+    p.timers.last_basic_attack_at = Some(now);
+    let position = [p.hero.x, p.hero.z];
+    let mut recipe = CoreId::Dawnweaver.preset();
+    recipe.skills = [
+        SkillId::WildRocket,
+        SkillId::DawnField,
+        SkillId::DawnBarrier,
+        SkillId::DawnBind,
+    ];
+    c.player.level = 1;
+    c.player.recipe = Some(recipe.clone());
+    apply(&mut rt, a, c.clone());
+    let p = &rt.world.players[&a];
+    assert_eq!(
+        (p.hero.identity.id, p.hero.identity.hero_class),
+        (id, shared::HeroClass::Dawnweaver)
+    );
+    assert_eq!([p.hero.x, p.hero.z], position);
+    assert_eq!((p.hero.hp, p.hero.mana), (31.0, 37.0));
+    assert_eq!(p.hero.skills.request_id, 71);
+    assert_eq!(p.hero.skills.loadout.unwrap().recipe(), recipe);
+    assert_eq!(p.timers.last_cast_at, [None; 4]);
+    assert_eq!(p.timers.last_basic_attack_at, Some(now));
+    assert!(
+        !crate::skills::state(p, now)
+            .unwrap()
+            .slots
+            .iter()
+            .any(|slot| slot.can_recast)
+    );
+    assert!(
+        !crate::skills::effects(&rt.world, now)
+            .iter()
+            .any(|effect| effect.owner_id == id)
+    );
+    assert_eq!(p.hero.skills.recovery_until, None);
+    let snapshot = rt
+        .sandbox
+        .as_ref()
+        .unwrap()
+        .snapshot(a, &rt.world.players, &rt.combat_log);
+    assert_eq!(
+        snapshot
+            .actors
+            .iter()
+            .find(|actor| actor.id == id)
+            .unwrap()
+            .unlocked,
+        [false, false, false, true]
+    );
+    for invalid in [
+        {
+            let mut r = recipe.clone();
+            r.skills[1] = r.skills[0];
+            r
+        },
+        CoreId::Wildspark.preset(),
+    ] {
+        let mut rejected = c.clone();
+        rejected.player.recipe = Some(invalid);
+        rejected.player.max_hp = 500.0;
+        assert!(!command(&mut rt, a, SandboxCommand::ApplyConfig { config: rejected }).accepted);
+        let p = &rt.world.players[&a];
+        assert_eq!(p.hero.skills.loadout.unwrap().recipe(), recipe);
+        assert_eq!(
+            (p.hero.hp, p.hero.mana, p.hero.skills.request_id),
+            (31.0, 37.0, 71)
+        );
+        assert_eq!(rt.sandbox.as_ref().unwrap().config, c);
+    }
+}
+
+#[test]
+fn sandbox_default_initialization_keeps_class_selector_in_preset_mode() {
+    let (mut rt, a, _) = fixture();
+    let mut c = config(&rt);
+    c.player.hero = shared::HeroClass::Dawnweaver;
+    apply(&mut rt, a, c);
+    let id = rt.world.players[&a].hero.identity.id;
+    rt.sandbox.as_mut().unwrap().initialized.remove(&id);
+    rt.initialize_sandbox_players();
+    let mut echoed = rt
+        .sandbox
+        .as_ref()
+        .unwrap()
+        .actor_config(&rt.world.players[&a])
+        .unwrap();
+    assert_eq!(echoed.hero, shared::HeroClass::Dawnweaver);
+    assert_eq!(echoed.recipe, None);
+    echoed.hero = shared::HeroClass::Wildspark;
+    assert!(validate_actor(&echoed).is_ok());
+}
+
+#[test]
+fn sandbox_force_cast_and_upgrade_use_bound_skill_progression_and_targeting() {
+    use shared::loadout::{CoreId, SkillId, WeaponMode};
+    let (mut rt, a, now) = fixture();
+    negotiate_protocol(&mut rt, a, now);
+    let mut c = config(&rt);
+    c.player.hero = shared::HeroClass::Wildspark;
+    let mut recipe = CoreId::Wildspark.preset();
+    recipe.skills.swap(0, 3);
+    c.player.recipe = Some(recipe);
+    c.player.level = 2;
+    apply(&mut rt, a, c);
+    let before = rt.world.players[&a].hero.mana;
+    assert!(
+        !command(
+            &mut rt,
+            a,
+            SandboxCommand::ForceCast {
+                actor: SandboxActor::Player,
+                slot: 0,
+                target_id: None,
+            }
+        )
+        .accepted
+    );
+    rt.handle_packet(a, ClientPacket::UpgradeSkill { slot: 0 }, now);
+    assert_eq!(rt.world.players[&a].hero.progress.ranks, [1; 4]);
+    rt.handle_packet(a, ClientPacket::UpgradeSkill { slot: 3 }, now);
+    assert_eq!(rt.world.players[&a].hero.progress.ranks, [1, 1, 1, 2]);
+    // The bound R is a self-target toggle; no enemy must be invented by the lab.
+    assert!(
+        command(
+            &mut rt,
+            a,
+            SandboxCommand::ForceCast {
+                actor: SandboxActor::Player,
+                slot: 3,
+                target_id: None,
+            }
+        )
+        .accepted
+    );
+    let p = &rt.world.players[&a];
+    assert_eq!(
+        p.hero.skills.loadout.unwrap().skills()[3],
+        SkillId::WildSwitch
+    );
+    assert_eq!(p.hero.skills.mode, WeaponMode::Rockets);
+    assert_eq!(p.hero.last_action.slot, 3);
+    assert_eq!(p.hero.mana, before);
+}
+
+#[test]
+fn sandbox_explicit_recipes_require_negotiation_before_any_actor_mutation() {
+    use shared::loadout::CoreId;
+    let (mut rt, a, now) = fixture();
+    assert!(!rt.world.players[&a].framed_snapshots);
+    assert!(
+        rt.world.players[&a].protocol_compatible,
+        "legacy admission remains supported"
+    );
+    let mut baseline = config(&rt);
+    baseline.player.hero = HeroClass::Mage;
+    baseline.player.max_hp = 321.0;
+    apply(&mut rt, a, baseline.clone());
+    let before = rt.world.players[&a].hero.clone();
+    let count = rt.world.players.len();
+    let mut recipe = CoreId::Dawnweaver.preset();
+    recipe.skills.swap(0, 3);
+    let mut authored = baseline.clone();
+    for enemy in [false, true] {
+        authored = baseline.clone();
+        authored.player.max_hp = 777.0;
+        authored.enemy.enabled = enemy;
+        let actor = if enemy {
+            &mut authored.enemy.actor
+        } else {
+            &mut authored.player
+        };
+        actor.hero = HeroClass::Dawnweaver;
+        actor.recipe = Some(recipe.clone());
+        let ack = command(
+            &mut rt,
+            a,
+            SandboxCommand::ApplyConfig {
+                config: authored.clone(),
+            },
+        );
+        assert!(!ack.accepted);
+        assert!(ack.message.contains("protocol"));
+        assert_eq!(
+            rt.world.players[&a].hero, before,
+            "no heal, move, rank, identity or kit mutation"
+        );
+        assert_eq!(rt.world.players.len(), count, "no custom enemy spawned");
+        assert_eq!(rt.sandbox.as_ref().unwrap().config, baseline);
+    }
+    negotiate_protocol(&mut rt, a, now);
+    apply(&mut rt, a, authored);
+    assert_eq!(rt.world.players[&a].hero.identity.id, before.identity.id);
+    assert_eq!(
+        rt.world.players[&ENEMY_ADDR]
+            .hero
+            .skills
+            .loadout
+            .unwrap()
+            .recipe(),
+        recipe
+    );
 }
 #[test]
 fn sandbox_epoch_replay_and_mode_gates() {

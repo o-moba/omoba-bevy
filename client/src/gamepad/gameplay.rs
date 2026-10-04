@@ -10,7 +10,7 @@
 //! (`player::input::move_player_analog`).
 // i18n-strict
 use bevy::prelude::*;
-use shared::{SkillSlot, TargetingMode, ability_for_class_slot, scaled_cast_range};
+use shared::{SkillSlot, TargetingMode, scaled_cast_range};
 
 use super::GamepadControls;
 use crate::camera::MainCamera;
@@ -141,11 +141,18 @@ pub(crate) fn pad_combat(
     }
     let class = class.map_or(selection.hero_class, |c| c.0);
     let prog = progression.copied().unwrap_or_default();
+    let Some(skills) = crate::equipped_skills::resolve(class, loadout) else {
+        pad.cancel_gesture();
+        pending.cancel();
+        basic.cancel();
+        *preview = default();
+        return;
+    };
     let attack_range = crate::combat::standard::attack_range(class, loadout);
     let slot = pad.aiming_slot.or(pad.cast);
     let skill_range = slot.and_then(|slot| {
         SkillSlot::from_index(slot as u8)
-            .map(|s| scaled_cast_range(ability_for_class_slot(class, s), prog.ranks[slot].max(1)))
+            .map(|s| scaled_cast_range(skills.ability(s), prog.ranks[slot].max(1)))
     });
     if pad.locked
         && target
@@ -244,7 +251,7 @@ pub(crate) fn pad_combat(
     }
     if let Some(slot) = pad.upgrade.take()
         && slot < 4
-        && upgrade_eligible(&prog, slot)
+        && upgrade_eligible(&skills, &prog, slot)
     {
         commands.write(NetworkCommand::UpgradeSkill { slot: slot as u8 });
     }
@@ -253,8 +260,8 @@ pub(crate) fn pad_combat(
         let Some(skill) = SkillSlot::from_index(slot as u8) else {
             return;
         };
-        if shared::loadout::preset_for_class(class).is_some() {
-            let definition = ability_for_class_slot(class, skill);
+        if skills.resolved().is_some() {
+            let definition = skills.ability(skill);
             let range = scaled_cast_range(definition, prog.ranks[slot].max(1));
             let direction = pad
                 .aim
@@ -269,11 +276,11 @@ pub(crate) fn pad_combat(
             } else {
                 1.0
             };
-            queue_cast_request(slot, class, &target, &mut pending, &mut feedback);
+            queue_cast_request(slot, &skills, &target, &mut pending, &mut feedback);
             pending.aim = Some(position.translation.xz() + direction * range * extent);
             return;
         }
-        if ability_for_class_slot(class, skill).targeting == TargetingMode::UnitTarget {
+        if skills.ability(skill).targeting == TargetingMode::UnitTarget {
             // The adapter just resolved the displayed candidate (or the lock).
             let Some((entity, id)) =
                 pick.filter(|(entity, id)| validity.valid(*entity, *id, *team))
@@ -281,9 +288,9 @@ pub(crate) fn pad_combat(
                 return;
             };
             let request_target = TargetState::for_request(entity, id);
-            queue_cast_request(slot, class, &request_target, &mut pending, &mut feedback);
+            queue_cast_request(slot, &skills, &request_target, &mut pending, &mut feedback);
         } else {
-            queue_cast_request(slot, class, &target, &mut pending, &mut feedback);
+            queue_cast_request(slot, &skills, &target, &mut pending, &mut feedback);
         }
         return;
     }

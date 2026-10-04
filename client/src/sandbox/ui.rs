@@ -577,7 +577,9 @@ fn actions(
                 }
             }
             Action::Hero(hero) => {
-                s.actor_config_mut().hero = *hero;
+                let actor = s.actor_config_mut();
+                actor.hero = *hero;
+                actor.recipe = None;
                 s.apply();
             }
             Action::Handheld(choice) => {
@@ -970,6 +972,7 @@ fn draw_geometry(
         &Transform,
         &crate::net::NetworkHeroClass,
         &crate::net::PlayerProgression,
+        Option<&crate::net::PlayerLoadout>,
     )>,
     projectiles: Query<&Transform, With<crate::net::NetworkProjectile>>,
     mut gizmos: Gizmos,
@@ -987,7 +990,7 @@ fn draw_geometry(
             Color::srgb(1.0, 0.45, 0.1),
         );
     }
-    for (id, t, class, progress) in &players {
+    for (id, t, class, progress, loadout) in &players {
         if !g.actors.iter().any(|a| a.id == id.0) {
             continue;
         }
@@ -1002,11 +1005,12 @@ fn draw_geometry(
             shared::basic_attack_for_class(class.0).range,
             Color::srgb(1.0, 0.85, 0.2),
         );
+        let Some(skills) = crate::equipped_skills::resolve(class.0, loadout) else {
+            continue;
+        };
         for slot in shared::SkillSlot::ALL {
-            let radius = shared::scaled_cast_range(
-                shared::ability_for_class_slot(class.0, slot),
-                progress.ranks[slot.index()],
-            );
+            let radius =
+                shared::scaled_cast_range(skills.ability(slot), progress.ranks[slot.index()]);
             gizmos.circle(
                 Isometry3d::new(
                     p + Vec3::Y * (slot.index() as f32 * 0.02),

@@ -18,15 +18,14 @@ use crate::ui::{
     widgets::game::{self, AbilityView},
 };
 use bevy::prelude::*;
-use shared::{
-    SkillSlot, TargetingMode, ability_for_class_slot, scaled_cast_range, scaled_mana_cost,
-};
+use shared::{SkillSlot, TargetingMode, scaled_cast_range};
 
 use super::cast::{PendingCast, queue_cast_request, within_cast_range};
 use super::cooldown::{LocalCastCooldown, local_hero_class};
 use super::feedback::{ActionFeedback, ActionFeedbackText};
 use super::selection::TargetState;
 use super::skill_card::{SkillCardView, StatusTone};
+use crate::equipped_skills::{self, upgrade_eligible};
 
 /// Ability slot diameter (`size.ability.desktop`).
 pub(super) const SKILL_SLOT_SIZE: f32 = size::ABILITY.desktop;
@@ -266,6 +265,7 @@ pub(super) fn setup_combat_ui(
 fn slot_status(
     slot: usize,
     prog: &PlayerProgression,
+    skills: &shared::loadout::EquippedSkills,
     cooldowns: &LocalCastCooldown,
     stats: Option<&CombatStats>,
     cost: f32,
@@ -274,15 +274,15 @@ fn slot_status(
     out_of_range: bool,
     has_target: bool,
 ) -> (String, StatusTone) {
-    if !prog.unlocked()[slot] {
+    if !equipped_skills::unlocked(skills, prog)[slot] {
         (
             trf(
                 "combat.hotbar.locked",
-                &[("level", &shared::SLOT_UNLOCK_LEVELS[slot])],
+                &[("level", &skills.unlock_level(SkillSlot::ALL[slot]))],
             ),
             StatusTone::Muted,
         )
-    } else if cooldowns.recast[slot] {
+    } else if cooldowns.recast[slot] && stats.is_none_or(|stats| stats.mana >= cost) {
         (
             trf(
                 "combat.standard.recast",
@@ -340,6 +340,7 @@ pub(super) fn update_skill_bar_system(
             Option<&NetworkHeroClass>,
             &CombatStats,
             &Transform,
+            Option<&crate::net::PlayerLoadout>,
         ),
         With<Player>,
     >,
@@ -370,14 +371,46 @@ pub(super) fn update_skill_bar_system(
     let local = progression.iter().next();
     let prog = local.map(|(prog, ..)| *prog).unwrap_or_default();
     let class = local_hero_class(local.map(|(_, class, ..)| class), &team_selection);
-    let stats = local.map(|(_, _, stats, _)| stats);
+    let stats = local.map(|(_, _, stats, ..)| stats);
+    let Some(skills) =
+        equipped_skills::resolve(class, local.and_then(|(_, _, _, _, loadout)| loadout))
+    else {
+        for (_, _, mut node) in &mut icons {
+            node.display = Display::None;
+        }
+        for (_, mut text) in &mut name_labels {
+            text.0.clear();
+        }
+        for (_, mut text) in &mut rank_labels {
+            text.0.clear();
+        }
+        for (_, mut view) in &mut slots {
+            *view = AbilityView {
+                ability: None,
+                cost: None,
+                rank: 0,
+                cooldown: None,
+                locked: true,
+                unlock_level: None,
+                no_mana: false,
+                ..view.clone()
+            };
+        }
+        for (_, mut node) in &mut upgrade_buttons {
+            node.display = Display::None;
+        }
+        for mut node in &mut chips {
+            node.display = Display::None;
+        }
+        return;
+    };
 
     for (icon, mut image, mut node) in &mut icons {
         let Some(slot) = SkillSlot::from_index(icon.slot as u8) else {
             node.display = Display::None;
             continue;
         };
-        let definition = ability_for_class_slot(class, slot);
+        let definition = skills.ability(slot);
         if let Some(assets) = assets.as_ref() {
             image.image = assets.load(crate::skill_icons::atlas_path(definition.id));
         }
@@ -391,10 +424,10 @@ pub(super) fn update_skill_bar_system(
             Display::None
         };
         let rank = prog.ranks[icon.slot].max(1);
-        let available = prog.unlocked()[icon.slot]
+        let available = equipped_skills::unlocked(&skills, &prog)[icon.slot]
             && cooldowns.remaining_secs[icon.slot] <= 0.0
-            && local.is_none_or(|(_, _, stats, _)| {
-                cooldowns.recast[icon.slot] || stats.mana >= scaled_mana_cost(definition, rank)
+            && local.is_none_or(|(_, _, stats, ..)| {
+                stats.mana >= skills.mana_cost(rank, slot, cooldowns.recast[icon.slot])
             });
         image.color = if available {
             Color::WHITE
@@ -407,7 +440,7 @@ pub(super) fn update_skill_bar_system(
         let Some(slot) = SkillSlot::from_index(label.slot as u8) else {
             continue;
         };
-        let next = data::ability_name(ability_for_class_slot(class, slot));
+        let next = data::ability_name(skills.ability(slot));
         if text.0 != next {
             text.0 = next.to_string();
         }
@@ -421,7 +454,7 @@ pub(super) fn update_skill_bar_system(
                     .selected_entity
                     .and_then(|entity| targets.get(entity).ok()),
             )
-            .is_some_and(|((_, _, _, player), target)| {
+            .is_some_and(|((_, _, _, player, _), target)| {
                 !within_cast_range(
                     player.translation,
                     target.translation,
@@ -432,15 +465,16 @@ pub(super) fn update_skill_bar_system(
     for (label, mut text) in &mut rank_labels {
         let rank = prog.ranks.get(label.slot).copied().unwrap_or(1).max(1);
         let slot = SkillSlot::from_index(label.slot as u8).expect("hotbar slot");
-        let definition = ability_for_class_slot(class, slot);
-        let cost = if cooldowns.recast[label.slot] {
-            0.0
-        } else {
-            scaled_mana_cost(definition, rank)
-        };
+        let definition = skills.ability(slot);
+        let cost = skills.mana_cost(
+            rank,
+            SkillSlot::ALL[label.slot],
+            cooldowns.recast[label.slot],
+        );
         let (status, _) = slot_status(
             label.slot,
             &prog,
+            &skills,
             &cooldowns,
             stats,
             cost,
@@ -464,14 +498,14 @@ pub(super) fn update_skill_bar_system(
 
     for (button, mut view) in &mut slots {
         let rank = prog.ranks[button.slot].max(1);
-        let definition = ability_for_class_slot(class, SkillSlot::ALL[button.slot]);
-        let cost = if cooldowns.recast[button.slot] {
-            0.0
-        } else {
-            scaled_mana_cost(definition, rank)
-        };
+        let definition = skills.ability(SkillSlot::ALL[button.slot]);
+        let cost = skills.mana_cost(
+            rank,
+            SkillSlot::ALL[button.slot],
+            cooldowns.recast[button.slot],
+        );
         let remaining = cooldowns.remaining_secs[button.slot];
-        let unlocked = prog.unlocked()[button.slot];
+        let unlocked = equipped_skills::unlocked(&skills, &prog)[button.slot];
         // hud.md § States, Dead: every ability is veiled (no lock, no level).
         let dead = stats.is_some_and(|stats| !stats.is_alive());
         let next = AbilityView {
@@ -483,7 +517,7 @@ pub(super) fn update_skill_bar_system(
                 .then(|| (remaining, cooldowns.total_secs[button.slot].max(remaining))),
             locked: !unlocked || dead,
             unlock_level: (!unlocked && !dead)
-                .then_some(shared::SLOT_UNLOCK_LEVELS[button.slot] as u8),
+                .then_some(skills.unlock_level(SkillSlot::ALL[button.slot]) as u8),
             no_mana: stats.is_some_and(|stats| stats.mana < cost),
             ..view.clone()
         };
@@ -495,7 +529,7 @@ pub(super) fn update_skill_bar_system(
     let mut any = false;
     for (button, mut node) in &mut upgrade_buttons {
         // The + only shows when a point can actually be spent on this slot.
-        let can_upgrade = upgrade_eligible(&prog, button.slot);
+        let can_upgrade = upgrade_eligible(&skills, &prog, button.slot);
         any |= can_upgrade;
         let display = if can_upgrade {
             Display::Flex
@@ -506,7 +540,7 @@ pub(super) fn update_skill_bar_system(
             node.display = display;
         }
     }
-    let any = any || (0..4).any(|slot| upgrade_eligible(&prog, slot));
+    let any = any || (0..4).any(|slot| upgrade_eligible(&skills, &prog, slot));
     for mut node in &mut chips {
         let display = if any { Display::Flex } else { Display::None };
         if node.display != display {
@@ -529,6 +563,7 @@ pub(super) fn update_skill_tooltip(
             &CombatStats,
             &Transform,
             Option<&crate::net::PlayerEquipment>,
+            Option<&crate::net::PlayerLoadout>,
         ),
         With<Player>,
     >,
@@ -565,17 +600,21 @@ pub(super) fn update_skill_tooltip(
         }
         return;
     };
-    let Ok((prog, class, stats, position, equipment)) = local.single() else {
+    let Ok((prog, class, stats, position, equipment, loadout)) = local.single() else {
         return;
     };
     let class = local_hero_class(Some(class), &team_selection);
+    let Some(skills) = equipped_skills::resolve(class, loadout) else {
+        view.visible = false;
+        return;
+    };
     let sandbox = game.as_ref().and_then(|game| game.sandbox.as_ref());
     let rank = prog.ranks[slot].max(1);
     let duration = if sandbox.is_some_and(|s| s.config.player.no_cooldowns) {
         0.0
     } else {
-        super::effective_cast_duration(
-            class,
+        equipped_skills::cooldown(
+            &skills,
             prog.level,
             rank,
             SkillSlot::ALL[slot],
@@ -583,12 +622,15 @@ pub(super) fn update_skill_tooltip(
             sandbox.is_some(),
         )
     };
-    let mut next = SkillCardView::of(class, prog, slot, stats.mana, duration);
-    if cooldowns.recast[slot] {
-        next.mana = 0;
-        next.no_mana = false;
-    }
-    let definition = ability_for_class_slot(class, SkillSlot::ALL[slot]);
+    let mut next = SkillCardView::of_equipped(
+        &skills,
+        prog,
+        slot,
+        stats.mana,
+        duration,
+        cooldowns.recast[slot],
+    );
+    let definition = skills.ability(SkillSlot::ALL[slot]);
     let out_of_range = target
         .selected_entity
         .and_then(|entity| targets.get(entity).ok())
@@ -604,9 +646,10 @@ pub(super) fn update_skill_tooltip(
         slot_status(
             slot,
             prog,
+            &skills,
             &cooldowns,
             Some(stats),
-            scaled_mana_cost(definition, rank),
+            skills.mana_cost(rank, SkillSlot::ALL[slot], cooldowns.recast[slot]),
             &pending,
             definition,
             out_of_range,
@@ -669,17 +712,19 @@ pub(super) fn sync_skill_key_labels(
     }
 }
 
-/// A skill point can be spent on `slot` (0..4): the one rule the arrow, the
-/// upgrade key and a controller's North + skill share.
-pub(crate) fn upgrade_eligible(prog: &PlayerProgression, slot: usize) -> bool {
-    prog.skill_points > 0 && prog.unlocked()[slot] && prog.ranks[slot] < shared::MAX_ABILITY_RANK
-}
-
 /// Arrow click or the upgrade key spends a point on the matching slot. The server
 /// is authoritative: it ignores the request when no point is available.
 pub(super) fn skill_upgrade_input_system(
     keyboard: Res<ButtonInput<KeyCode>>,
-    progression: Query<&PlayerProgression, With<Player>>,
+    progression: Query<
+        (
+            &PlayerProgression,
+            Option<&NetworkHeroClass>,
+            Option<&crate::net::PlayerLoadout>,
+        ),
+        With<Player>,
+    >,
+    selection: Res<TeamSelection>,
     mut activated: MessageReader<Activated<HotbarAction>>,
     mut command_writer: MessageWriter<NetworkCommand>,
     context: Res<GameplayInputContext>,
@@ -698,10 +743,14 @@ pub(super) fn skill_upgrade_input_system(
         return;
     }
 
-    let Some(prog) = progression.iter().next() else {
+    let Some((prog, class, loadout)) = progression.iter().next() else {
         return;
     };
-    let eligible = |slot: usize| upgrade_eligible(prog, slot);
+    let Some(skills) = equipped_skills::resolve(local_hero_class(Some(class), &selection), loadout)
+    else {
+        return;
+    };
+    let eligible = |slot: usize| upgrade_eligible(&skills, prog, slot);
     let first = || (0..4).find(|slot| eligible(*slot));
     if keyboard.just_pressed(SKILL_UPGRADE_KEY) {
         if let Some(slot) = first() {
@@ -733,6 +782,7 @@ pub(super) fn skill_button_system(
             Option<&PlayerProgression>,
             Option<&NetworkPlayerId>,
             Option<&NetworkHeroClass>,
+            Option<&crate::net::PlayerLoadout>,
         ),
         With<Player>,
     >,
@@ -759,10 +809,20 @@ pub(super) fn skill_button_system(
         }
     }
     for slot in casts {
-        let Ok((_stats, _prog, _net_id, class)) = local_player.single() else {
+        let Ok((_stats, _prog, _net_id, class, loadout)) = local_player.single() else {
             continue;
         };
         let class = local_hero_class(Some(class), &team_selection);
-        queue_cast_request(slot, class, &target_state, &mut pending_cast, &mut feedback);
+        let Some(skills) = equipped_skills::resolve(class, loadout) else {
+            pending_cast.cancel();
+            continue;
+        };
+        queue_cast_request(
+            slot,
+            &skills,
+            &target_state,
+            &mut pending_cast,
+            &mut feedback,
+        );
     }
 }

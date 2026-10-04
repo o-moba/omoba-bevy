@@ -22,12 +22,13 @@ pub(crate) use crate::input_context::{CombatPointerInputSet, WorldMovementInputS
 use crate::targeting::{BasicAttackState, TargetAimPreview};
 use bevy::prelude::*;
 
+pub(crate) use crate::equipped_skills::upgrade_eligible;
 pub(crate) use bars::CombatBarAnchor;
 pub(crate) use cast::{PendingCast, queue_cast_request};
 pub use cooldown::LocalCastCooldown;
+#[cfg(test)]
 pub(crate) use cooldown::effective_cast_duration;
 pub(crate) use feedback::ActionFeedback;
-pub(crate) use hotbar::upgrade_eligible;
 pub(crate) use mobile::mobile_assisted_target;
 pub use selection::TargetState;
 #[cfg(feature = "qa")]

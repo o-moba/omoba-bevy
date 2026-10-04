@@ -140,10 +140,11 @@ pub fn automation_bypass() -> bool {
 }
 
 /// These harnesses exercise the actual menu controls as well as match states.
-const SHELL_HARNESSES: [&str; 3] = [
+const SHELL_HARNESSES: [&str; 4] = [
     "OMOBA_FRONTEND_QA_OUTPUT",
     "OMOBA_RECOVERY_QA_OUTPUT",
     "OMOBA_DAGGER_QA_DIR",
+    "OMOBA_EQUIPPED_SKILLS_QA_DIR",
 ];
 
 fn bypass_for(keys: impl Iterator<Item = String>) -> bool {
@@ -509,7 +510,11 @@ mod tests {
         ] {
             assert!(bypass_for(keys(&[harness]).into_iter()), "{harness}");
         }
-        for harness in ["OMOBA_FRONTEND_QA_OUTPUT", "OMOBA_RECOVERY_QA_OUTPUT"] {
+        for harness in [
+            "OMOBA_FRONTEND_QA_OUTPUT",
+            "OMOBA_RECOVERY_QA_OUTPUT",
+            "OMOBA_EQUIPPED_SKILLS_QA_DIR",
+        ] {
             assert!(
                 !bypass_for(keys(&[harness, "HOME"]).into_iter()),
                 "{harness}"

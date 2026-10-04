@@ -7,9 +7,7 @@ use crate::player::Player;
 use crate::sprite::PlayerVisualMode;
 use crate::team::{Team, TeamSelection};
 use bevy::prelude::*;
-use shared::{
-    MAX_ABILITY_RANK, SkillSlot, TargetingMode, ability_for_class_slot, scaled_cast_range,
-};
+use shared::{SkillSlot, TargetingMode, scaled_cast_range};
 
 use super::cast::{PendingCast, queue_cast_request};
 use super::feedback::ActionFeedback;
@@ -78,6 +76,7 @@ pub(super) fn mobile_cast_system(
             &CombatStats,
             Option<&PlayerProgression>,
             Option<&NetworkHeroClass>,
+            Option<&crate::net::PlayerLoadout>,
         ),
         With<Player>,
     >,
@@ -99,7 +98,7 @@ pub(super) fn mobile_cast_system(
         mobile.upgrades.clear();
         return;
     }
-    let Ok((transform, team, stats, prog, class)) = local.single() else {
+    let Ok((transform, team, stats, prog, class, loadout)) = local.single() else {
         return;
     };
     if !stats.is_alive() {
@@ -108,16 +107,18 @@ pub(super) fn mobile_cast_system(
         return;
     }
     let prog = prog.copied().unwrap_or_default();
+    let class = class.map(|class| class.0).unwrap_or(selection.hero_class);
+    let Some(skills) = crate::equipped_skills::resolve(class, loadout) else {
+        mobile.casts.clear();
+        mobile.upgrades.clear();
+        pending.cancel();
+        return;
+    };
     for slot in mobile.upgrades.drain(..) {
-        if slot < 4
-            && prog.skill_points > 0
-            && prog.ranks[slot] < MAX_ABILITY_RANK
-            && prog.unlocked()[slot]
-        {
+        if crate::equipped_skills::upgrade_eligible(&skills, &prog, slot) {
             commands.write(NetworkCommand::UpgradeSkill { slot: slot as u8 });
         }
     }
-    let class = class.map(|class| class.0).unwrap_or(selection.hero_class);
     let intent = mobile.casts.drain(..).next_back();
     let Some(intent) = intent else {
         return;
@@ -125,8 +126,8 @@ pub(super) fn mobile_cast_system(
     let Some(slot) = SkillSlot::from_index(intent.slot as u8) else {
         return;
     };
-    let definition = ability_for_class_slot(class, slot);
-    if shared::loadout::preset_for_class(class).is_some() {
+    let definition = skills.ability(slot);
+    if skills.resolved().is_some() {
         let range = scaled_cast_range(definition, prog.ranks[intent.slot].max(1));
         let origin = transform.translation.xz();
         let manual = intent.aim.and_then(|screen| {
@@ -149,7 +150,7 @@ pub(super) fn mobile_cast_system(
                 )
             })
             .flatten();
-        queue_cast_request(intent.slot, class, &target, &mut pending, &mut feedback);
+        queue_cast_request(intent.slot, &skills, &target, &mut pending, &mut feedback);
         pending.aim = Some(resolve_mobile_aim(
             origin,
             transform.forward().xz(),
@@ -193,14 +194,14 @@ pub(super) fn mobile_cast_system(
         };
         queue_cast_request(
             intent.slot,
-            class,
+            &skills,
             &request_target,
             &mut pending,
             &mut feedback,
         );
         return;
     }
-    queue_cast_request(intent.slot, class, &target, &mut pending, &mut feedback);
+    queue_cast_request(intent.slot, &skills, &target, &mut pending, &mut feedback);
 }
 
 /// Short taps prefer a valid lock/chase, then the closest visible hero. Manual

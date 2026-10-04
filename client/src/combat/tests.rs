@@ -885,7 +885,7 @@ fn explicit_q_skill_request_preserves_the_exact_authoritative_target() {
     let mut feedback = ActionFeedback::default();
     queue_cast_request(
         SkillSlot::Q.index(),
-        HeroClass::Warrior,
+        &crate::equipped_skills::resolve(HeroClass::Warrior, None).unwrap(),
         &state,
         &mut pending,
         &mut feedback,
@@ -1061,7 +1061,7 @@ fn self_target_hotbar_request_needs_no_selected_enemy() {
     let mut feedback = ActionFeedback::default();
     queue_cast_request(
         SkillSlot::W.index(),
-        HeroClass::Warrior,
+        &crate::equipped_skills::resolve(HeroClass::Warrior, None).unwrap(),
         &state,
         &mut pending,
         &mut feedback,
@@ -1862,4 +1862,181 @@ fn skill_descriptions_require_continuous_hold_and_hide_on_release() {
         !card(&mut app).0.visible,
         "menu time cannot count toward a hold"
     );
+}
+
+fn equip_recipe(app: &mut App, recipe: shared::loadout::BuildRecipe, level: u32, mana: f32) {
+    let mut query = app.world_mut().query_filtered::<(
+        &mut crate::net::PlayerLoadout,
+        &mut PlayerProgression,
+        &mut CombatStats,
+    ), With<Player>>();
+    let (mut state, mut progression, mut stats) = query.single_mut(app.world_mut()).unwrap();
+    state.0.as_mut().unwrap().recipe = Some(recipe);
+    progression.level = level;
+    stats.mana = mana;
+}
+
+#[test]
+fn mixed_permuted_cast_prechecks_use_equipped_mana_range_unlock_and_cooldown() {
+    use shared::loadout::{CoreId, SkillId};
+    let mut recipe = CoreId::Dawnweaver.preset();
+    recipe.skills = [
+        SkillId::DawnRay,
+        SkillId::DawnBarrier,
+        SkillId::DawnBind,
+        SkillId::WildTraps,
+    ];
+    let mut locked = standard_cast_app(HeroClass::Dawnweaver, 0, false);
+    equip_recipe(&mut locked, recipe.clone(), 5, 1000.0);
+    locked.update();
+    assert_eq!(
+        locked
+            .world_mut()
+            .resource_mut::<Messages<NetworkCommand>>()
+            .drain()
+            .count(),
+        0,
+        "ultimate on Q remains locked until level six"
+    );
+
+    let mut app = standard_cast_app(HeroClass::Dawnweaver, 3, false);
+    equip_recipe(&mut app, recipe.clone(), 4, 1000.0);
+    app.update();
+    let definition = shared::loadout::skill(SkillId::WildTraps);
+    let commands: Vec<_> = app
+        .world_mut()
+        .resource_mut::<Messages<NetworkCommand>>()
+        .drain()
+        .collect();
+    assert!(
+        matches!(commands.as_slice(), [NetworkCommand::CastSkill { slot: 3, aim }] if (aim.length() - definition.ability.cast_range).abs() < 0.001)
+    );
+    let skills =
+        shared::loadout::EquippedSkills::resolve(HeroClass::Dawnweaver, Some(&recipe)).unwrap();
+    assert_eq!(
+        app.world().resource::<LocalCastCooldown>().total_secs[3],
+        skills
+            .cooldown(4, 1, SkillSlot::R, Default::default())
+            .as_secs_f32()
+    );
+
+    let mut rejected = standard_cast_app(HeroClass::Dawnweaver, 3, false);
+    equip_recipe(
+        &mut rejected,
+        recipe,
+        10,
+        shared::scaled_mana_cost(&definition.ability, 1) - 0.1,
+    );
+    rejected.update();
+    assert_eq!(
+        rejected
+            .world_mut()
+            .resource_mut::<Messages<NetworkCommand>>()
+            .drain()
+            .count(),
+        0
+    );
+}
+
+#[test]
+fn malformed_equipped_recipe_cancels_cast_instead_of_substituting_preset() {
+    let mut app = standard_cast_app(HeroClass::Dawnweaver, 0, false);
+    let mut recipe = shared::loadout::CoreId::Dawnweaver.preset();
+    recipe.skills[1] = recipe.skills[0];
+    equip_recipe(&mut app, recipe, 10, 1000.0);
+    app.update();
+    assert!(!app.world().resource::<PendingCast>().is_pending());
+    assert_eq!(
+        app.world_mut()
+            .resource_mut::<Messages<NetworkCommand>>()
+            .drain()
+            .count(),
+        0
+    );
+}
+
+#[test]
+fn equipped_total_cooldown_keeps_authoritative_remaining_deadline() {
+    use shared::loadout::{CoreId, LoadoutState, SkillId};
+    let mut app = App::new();
+    app.init_resource::<LocalCastCooldown>()
+        .add_systems(Update, sync_authoritative_cooldown_durations);
+    let mut recipe = CoreId::Dawnweaver.preset();
+    recipe.skills.swap(0, 3);
+    let equipped =
+        shared::loadout::EquippedSkills::resolve(HeroClass::Dawnweaver, Some(&recipe)).unwrap();
+    app.world_mut().spawn((
+        Player,
+        PlayerProgression {
+            level: 10,
+            ..default()
+        },
+        NetworkHeroClass(HeroClass::Dawnweaver),
+        crate::net::PlayerEquipment::default(),
+        crate::net::PlayerLoadout(Some(LoadoutState {
+            recipe: Some(recipe),
+            ..default()
+        })),
+        crate::net::PlayerSkillCooldowns {
+            remaining_secs: [7.25, 1.0, 2.0, 3.0],
+            recovery_secs: 0.2,
+        },
+    ));
+    app.update();
+    let cd = app.world().resource::<LocalCastCooldown>();
+    assert_eq!(cd.remaining_secs, [7.25, 1.0, 2.0, 3.0]);
+    assert_eq!(
+        cd.total_secs[0],
+        equipped
+            .cooldown(10, 1, SkillSlot::Q, Default::default())
+            .as_secs_f32()
+    );
+    assert_eq!(equipped.skill(SkillSlot::Q).unwrap().id, SkillId::DawnRay);
+}
+
+#[test]
+fn borrowed_recast_requires_and_displays_its_own_mana_cost() {
+    use shared::loadout::{CoreId, SkillId};
+    for (mana, accepted) in [(24.0, false), (25.0, true)] {
+        let mut app = standard_cast_app(HeroClass::Dawnweaver, 0, true);
+        let mut recipe = CoreId::Dawnweaver.preset();
+        recipe.skills[0] = SkillId::EchoStrike;
+        let skills =
+            shared::loadout::EquippedSkills::resolve(HeroClass::Dawnweaver, Some(&recipe)).unwrap();
+        let card = super::skill_card::SkillCardView::of_equipped(
+            &skills,
+            &PlayerProgression {
+                level: 10,
+                ..default()
+            },
+            0,
+            mana,
+            0.0,
+            true,
+        );
+        assert_eq!(card.mana, 25);
+        assert_eq!(card.no_mana, !accepted);
+        equip_recipe(&mut app, recipe, 10, mana);
+        app.world_mut()
+            .resource_mut::<LocalCastCooldown>()
+            .recovery_secs = 0.5;
+        app.update();
+        let sent: Vec<_> = app
+            .world_mut()
+            .resource_mut::<Messages<NetworkCommand>>()
+            .drain()
+            .collect();
+        assert_eq!(sent.len(), usize::from(accepted), "mana {mana}: {sent:?}");
+        if accepted {
+            assert!(matches!(
+                sent.as_slice(),
+                [NetworkCommand::CastSkill { slot: 0, .. }]
+            ));
+        }
+        assert_eq!(
+            app.world().resource::<LocalCastCooldown>().remaining_secs[0],
+            8.0,
+            "follow-up does not reset its running base cooldown"
+        );
+    }
 }
