@@ -10,5 +10,16 @@
   "net.status.join_unconfirmed": "Сервер не подтвердил вход в матч. Нажмите «Повторить», чтобы попробовать снова.",
   "net.practice.banner": "ОФЛАЙН-ТРЕНИРОВКА · Уровень {level} · Без наград",
   "net.practice.you": "Вы",
-  "net.practice.bot": "Бот {id}"
+  "net.practice.bot": "Бот {id}",
+  "net.compatibility.handshake": "Проверка совместимости сервера устарела. Выберите обновлённый сервер.",
+  "net.compatibility.protocol": "Сетевые протоколы несовместимы. Обновите игру или выберите другой сервер.",
+  "net.compatibility.catalog": "Каталоги навыков различаются. Обновите игру или выберите совместимый сервер.",
+  "net.compatibility.geometry": "Версии карты различаются. Обновите игру или выберите совместимый сервер.",
+  "net.compatibility.gameplay": "Версии боевых правил различаются. Обновите игру или выберите совместимый сервер.",
+  "net.compatibility.unavailable": "Не удалось проверить совместимость. Сервер может быть недоступен или устарел. Повторите попытку или выберите другой сервер.",
+  "net.compatibility.verified": "Совместимо · Игра {client} / Сервер {server}",
+  "net.compatibility.failed": "Несовместимо · Игра {client} / Сервер {server}",
+  "net.compatibility.pending": "Совместимость не проверена",
+  "net.compatibility.unverified_short": "Не проверено",
+  "net.compatibility.incompatible_short": "Несовместимо"
 }

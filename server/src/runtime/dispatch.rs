@@ -73,6 +73,13 @@ impl ServerRuntime {
                         }
                         continue;
                     }
+                    if let Some(reply) =
+                        self.public_transport
+                            .compatibility_reply(addr, &self.recv_buf[..len], now)
+                    {
+                        let _ = self.transport.send_to(&reply, addr);
+                        continue;
+                    }
                     if self.match_service.is_public() {
                         match self.public_transport.receive(
                             addr,

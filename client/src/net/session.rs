@@ -174,6 +174,8 @@ pub struct ClientSession {
     pub(in crate::net) join_last_sent: Option<Instant>,
     pub(in crate::net) join_attempts: u32,
     pub(in crate::net) join_error: Option<JoinRejection>,
+    pub(crate) server_contract: Option<shared::compatibility::ReleaseContract>,
+    pub(crate) compatibility_issue: Option<shared::compatibility::CompatibilityIssue>,
     pub(in crate::net) join_exhausted: bool,
     pub(in crate::net) snapshot_order: SnapshotOrder,
     pub(in crate::net) career_server_epoch: u64,
@@ -201,6 +203,8 @@ impl Default for ClientSession {
             join_last_sent: None,
             join_attempts: 0,
             join_error: None,
+            server_contract: None,
+            compatibility_issue: None,
             join_exhausted: false,
             snapshot_order: SnapshotOrder::default(),
             career_server_epoch: 0,
@@ -222,6 +226,7 @@ pub(crate) enum TeardownReason {
     ServerWaitTimeout,
     IncomingChannelClosed,
     ProtocolMismatch,
+    CompatibilityMismatch,
 }
 
 impl std::fmt::Display for TeardownReason {
@@ -233,6 +238,9 @@ impl std::fmt::Display for TeardownReason {
             Self::TransportFailure => write!(f, "transport failure reported by the UDP thread"),
             Self::ServerWaitTimeout => write!(f, "server did not answer within the wait budget"),
             Self::IncomingChannelClosed => write!(f, "incoming packet channel closed"),
+            Self::CompatibilityMismatch => {
+                write!(f, "client and server compatibility contracts differ")
+            }
             Self::ProtocolMismatch => write!(f, "client and server protocol versions differ"),
         }
     }
@@ -257,6 +265,24 @@ fn should_attempt_reconnect(
 }
 
 impl ClientSession {
+    pub(crate) fn compatibility_summary(&self) -> String {
+        let Some(server) = &self.server_contract else {
+            return crate::i18n::tr("net.compatibility.pending").to_owned();
+        };
+        let key = if self.compatibility_issue.is_some() {
+            "net.compatibility.failed"
+        } else {
+            "net.compatibility.verified"
+        };
+        crate::i18n::trf(
+            key,
+            &[
+                ("client", &env!("CARGO_PKG_VERSION")),
+                ("server", &server.release),
+            ],
+        )
+    }
+
     /// Keep reconnect equipment aligned with a server-confirmed draft choice.
     pub(crate) fn remember_handheld(&mut self, handheld: &shared::handheld::HandheldSelection) {
         if let Some(join) = self.last_join.as_mut() {
@@ -684,6 +710,7 @@ pub(in crate::net) fn perform_network_teardown(
     *game_state_snapshot = GameStateSnapshot::default();
     cam_state.locked = false;
 
+    client_session.server_contract = None;
     warn!("Network teardown: {reason}");
     if teardown_shows_select(client_session.last_join.is_some()) {
         // Nothing was committed: the player is somewhere in the front end and
@@ -712,6 +739,12 @@ pub(in crate::net) fn perform_network_teardown(
     client_session.join_flow_committed = false;
     client_session.waiting_since = None;
     client_session.last_qualifying_snapshot_wall = None;
+    if matches!(
+        reason,
+        TeardownReason::ProtocolMismatch | TeardownReason::CompatibilityMismatch
+    ) {
+        client_session.stop_reconnecting();
+    }
     let reconnecting = client_session.reconnect.active;
     client_session.outbox.push(SessionEvent::Disconnected {
         reason,
@@ -979,6 +1012,37 @@ pub(in crate::net) fn update_session_lifecycle(
 
     while let Ok(signal) = channels.signals.try_recv() {
         match signal {
+            NetThreadSignal::Compatibility { server, issue } => {
+                if issue.is_some() && client_session.state != ClientConnectionState::Disconnected {
+                    perform_network_teardown(
+                        if issue == Some(shared::compatibility::CompatibilityIssue::Unavailable) {
+                            TeardownReason::TransportFailure
+                        } else {
+                            TeardownReason::CompatibilityMismatch
+                        },
+                        &mut commands,
+                        &mut client_session,
+                        &mut network_state,
+                        &mut game_state_snapshot,
+                        &mut team_selection,
+                        &mut cam_state,
+                        remote_query,
+                        projectile_query,
+                        structure_query,
+                        minion_query,
+                        neutral_query,
+                        player_query,
+                    );
+                }
+                client_session.server_contract = server;
+                client_session.compatibility_issue = issue;
+                if issue.is_some_and(|reason| {
+                    reason != shared::compatibility::CompatibilityIssue::Unavailable
+                }) {
+                    client_session.set_join_error(Some(JoinRejection::ProtocolMismatch));
+                    client_session.stop_reconnecting();
+                }
+            }
             NetThreadSignal::ProtocolMismatch => {
                 if client_session.state != ClientConnectionState::Disconnected {
                     perform_network_teardown(
@@ -1281,6 +1345,55 @@ mod tests {
             ]
         );
         assert!(!app.world().resource::<ClientSession>().reconnect.active);
+    }
+
+    #[test]
+    fn compatibility_mismatch_stops_reconnect_and_retains_diagnostic() {
+        let (outgoing, _outgoing_rx) = crossbeam_channel::unbounded();
+        let (_incoming_tx, incoming) = crossbeam_channel::unbounded();
+        let (signals_tx, signals) = crossbeam_channel::unbounded();
+        let mut app = App::new();
+        app.insert_resource(NetworkChannels {
+            gameplay_signer: Default::default(),
+            outgoing,
+            incoming,
+            signals,
+        })
+        .insert_resource(ClientSession::admitted_for_test())
+        .init_resource::<NetIncomingDisconnected>()
+        .init_resource::<PendingServerSnapshotFrame>()
+        .init_resource::<NetworkState>()
+        .init_resource::<GameStateSnapshot>()
+        .init_resource::<TeamSelection>()
+        .init_resource::<CameraState>()
+        .add_message::<SessionUiCommand>()
+        .add_message::<SessionEvent>()
+        .add_systems(
+            Update,
+            (update_session_lifecycle, flush_session_events).chain(),
+        );
+        signals_tx
+            .send(NetThreadSignal::Compatibility {
+                server: Some(shared::compatibility::ReleaseContract::current()),
+                issue: Some(shared::compatibility::CompatibilityIssue::Catalog),
+            })
+            .unwrap();
+        app.update();
+        let session = app.world().resource::<ClientSession>();
+        assert_eq!(session.state(), ClientConnectionState::Disconnected);
+        assert_eq!(
+            session.compatibility_issue,
+            Some(shared::compatibility::CompatibilityIssue::Catalog)
+        );
+        assert!(session.server_contract.is_some());
+        assert!(!session.reconnect.active);
+        assert!(crate::net::link_status(session).can_retry());
+        assert!(
+            crate::net::link_status(session)
+                .detail()
+                .unwrap()
+                .contains("catalogue")
+        );
     }
 
     #[test]
@@ -1652,10 +1765,17 @@ mod tests {
         send_test_join(&mut app, HeroClass::Mage);
         let mut packet = [0_u8; 4096];
         let mut received_join = false;
-        for _ in 0..4 {
-            let (length, _) = server
+        for _ in 0..6 {
+            let (length, peer) = server
                 .recv_from(&mut packet)
                 .expect("the restored production UDP transport must reach the saved endpoint");
+            if let Some(reply) = shared::compatibility::response(
+                &packet[..length],
+                &shared::compatibility::ReleaseContract::current(),
+            ) {
+                server.send_to(&reply, peer).unwrap();
+                continue;
+            }
             if matches!(
                 serde_json::from_slice::<shared::public_transport::PublicClientDatagram>(
                     &packet[..length]
@@ -1829,6 +1949,17 @@ mod tests {
             );
         });
         let mut packet = [0_u8; 1200];
+        let (length, client_addr) = server.recv_from(&mut packet).unwrap();
+        let reply = shared::compatibility::response(
+            &packet[..length],
+            &shared::compatibility::ReleaseContract::current(),
+        )
+        .unwrap();
+        server.send_to(&reply, client_addr).unwrap();
+        assert!(matches!(
+            signals_rx.recv_timeout(Duration::from_secs(2)).unwrap(),
+            NetThreadSignal::Compatibility { issue: None, .. }
+        ));
         let (length, client_addr) = server.recv_from(&mut packet).unwrap();
         assert!(matches!(
             serde_json::from_slice::<ClientPacket>(&packet[..length]).unwrap(),

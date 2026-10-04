@@ -28,6 +28,9 @@ use crate::protocol::PROTOCOL_VERSION;
 
 /// The protocol version this variant list was last reviewed for.
 const POLICY_PROTOCOL_VERSION: u16 = 9;
+// CompatibilityDatagram is an independent pre-game envelope; review its
+// variants against HANDSHAKE_VERSION, not the gameplay PROTOCOL_VERSION.
+const POLICY_HANDSHAKE_VERSION: u16 = 1;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Decoding {
@@ -62,6 +65,7 @@ macro_rules! wire_enums {
 }
 
 wire_enums! {
+    crate::compatibility::CompatibilityDatagram => Strict [CompatibilityProbe, CompatibilityReport],
     crate::protocol::wire::ClientPacket => Strict [Sandbox, Leave, Social, Party, Career, Hello, Transform, Cast, CastSkill, Interact, Utility, BasicAttack, Join, Prematch, Ping, RequestRematch, SetGodMode, SetSpeedBoost, Practice, UpgradeSkill, BuyItem, TakeoverVote],
     crate::protocol::wire::ServerPacket => Strict [Party, Social, Career, Snapshot],
     crate::party::PartyCommand => Strict [Presence, Invite, Accept, Decline, Leave, Kick, Launch],
@@ -119,6 +123,10 @@ wire_enums! {
 /// Serde enums in `shared` that the UDP protocol does not carry, and why.
 /// They are versioned by their own contract (HTTP API, data file).
 const NOT_UDP_WIRE: &[(&str, &str)] = &[
+    (
+        "CompatibilityIssue",
+        "local client diagnosis and operator JSON, not a UDP field",
+    ),
     ("DeviceAction", "account-api HTTP contract"),
     ("NativeSupporterAction", "account-api HTTP contract"),
     ("WebPairDecision", "account-api HTTP contract"),
@@ -141,6 +149,11 @@ fn short_name(path: &str) -> &str {
 
 #[test]
 fn policy_matches_the_protocol_version() {
+    assert_eq!(
+        crate::compatibility::HANDSHAKE_VERSION,
+        POLICY_HANDSHAKE_VERSION,
+        "HANDSHAKE_VERSION changed: review the CompatibilityDatagram variants"
+    );
     assert_eq!(
         PROTOCOL_VERSION, POLICY_PROTOCOL_VERSION,
         "PROTOCOL_VERSION changed: review the variant lists in this module, then update POLICY_PROTOCOL_VERSION"

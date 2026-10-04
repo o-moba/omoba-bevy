@@ -1,0 +1,280 @@
+{
+  "status": "PASS",
+  "candidate": "0.41.0",
+  "base_commit": "8d4dcb8bff07b5c196243831d733e42c44cd954c",
+  "branch": "feat/release-compatibility",
+  "source_state": "uncommitted changes in the dedicated worktree",
+  "acceptance": {
+    "AC1": {
+      "status": "PASS",
+      "evidence": [
+        "shared compatibility matrix and envelope bounds/nonce tests",
+        "client UDP gate tests",
+        "offline lifecycle regression suite"
+      ]
+    },
+    "AC2": {
+      "status": "PASS",
+      "evidence": [
+        "compatibility_dispatch_works_in_every_role_without_allocating_a_player",
+        "compatibility_probe_is_rate_limited_and_never_admits_players",
+        "live-server-probe.json"
+      ]
+    },
+    "AC3": {
+      "status": "PASS",
+      "evidence": [
+        "compatibility_mismatch_stops_reconnect_and_retains_diagnostic",
+        "menu_retry_preserves_confirmed_incompatibility_but_retries_unavailable_servers",
+        "existing scope/redirect lifecycle tests",
+        "raw/ui/01-home.png"
+      ]
+    },
+    "AC4": {
+      "status": "PASS",
+      "evidence": [
+        "raw/cli-matrix.json",
+        "scripts/test_compatibility_release.py",
+        "docs/release-compatibility.md"
+      ]
+    },
+    "AC5": {
+      "status": "PASS",
+      "evidence": [
+        "raw/gate-final-current.log",
+        "fresh-review.md",
+        "raw/ui-layout-check.json"
+      ]
+    }
+  },
+  "tests": {
+    "rust_passed": 1558,
+    "rust_ignored": 39,
+    "python_passed": 203,
+    "full_gate_exit": 0
+  },
+  "cli_matrix": [
+    {
+      "field": null,
+      "code": 0,
+      "stdout": {
+        "client": {
+          "catalog": "standard-kits-4",
+          "gameplay": "combat-2026-10-04",
+          "geometry": "verdant-confluence-v1",
+          "handshake": 1,
+          "protocol": 9,
+          "release": "0.41.0"
+        },
+        "compatible": true,
+        "issue": null,
+        "server": {
+          "catalog": "standard-kits-4",
+          "gameplay": "combat-2026-10-04",
+          "geometry": "verdant-confluence-v1",
+          "handshake": 1,
+          "protocol": 9,
+          "release": "0.41.0"
+        }
+      },
+      "stderr": ""
+    },
+    {
+      "field": "protocol",
+      "code": 2,
+      "stdout": {
+        "client": {
+          "catalog": "standard-kits-4",
+          "gameplay": "combat-2026-10-04",
+          "geometry": "verdant-confluence-v1",
+          "handshake": 1,
+          "protocol": 9,
+          "release": "0.41.0"
+        },
+        "compatible": false,
+        "issue": "protocol",
+        "server": {
+          "catalog": "standard-kits-4",
+          "gameplay": "combat-2026-10-04",
+          "geometry": "verdant-confluence-v1",
+          "handshake": 1,
+          "protocol": 10,
+          "release": "0.41.0"
+        }
+      },
+      "stderr": ""
+    },
+    {
+      "field": "catalog",
+      "code": 2,
+      "stdout": {
+        "client": {
+          "catalog": "standard-kits-4",
+          "gameplay": "combat-2026-10-04",
+          "geometry": "verdant-confluence-v1",
+          "handshake": 1,
+          "protocol": 9,
+          "release": "0.41.0"
+        },
+        "compatible": false,
+        "issue": "catalog",
+        "server": {
+          "catalog": "standard-kits-4x",
+          "gameplay": "combat-2026-10-04",
+          "geometry": "verdant-confluence-v1",
+          "handshake": 1,
+          "protocol": 9,
+          "release": "0.41.0"
+        }
+      },
+      "stderr": ""
+    },
+    {
+      "field": "geometry",
+      "code": 2,
+      "stdout": {
+        "client": {
+          "catalog": "standard-kits-4",
+          "gameplay": "combat-2026-10-04",
+          "geometry": "verdant-confluence-v1",
+          "handshake": 1,
+          "protocol": 9,
+          "release": "0.41.0"
+        },
+        "compatible": false,
+        "issue": "geometry",
+        "server": {
+          "catalog": "standard-kits-4",
+          "gameplay": "combat-2026-10-04",
+          "geometry": "verdant-confluence-v1x",
+          "handshake": 1,
+          "protocol": 9,
+          "release": "0.41.0"
+        }
+      },
+      "stderr": ""
+    },
+    {
+      "field": "gameplay",
+      "code": 2,
+      "stdout": {
+        "client": {
+          "catalog": "standard-kits-4",
+          "gameplay": "combat-2026-10-04",
+          "geometry": "verdant-confluence-v1",
+          "handshake": 1,
+          "protocol": 9,
+          "release": "0.41.0"
+        },
+        "compatible": false,
+        "issue": "gameplay",
+        "server": {
+          "catalog": "standard-kits-4",
+          "gameplay": "combat-2026-10-04x",
+          "geometry": "verdant-confluence-v1",
+          "handshake": 1,
+          "protocol": 9,
+          "release": "0.41.0"
+        }
+      },
+      "stderr": ""
+    },
+    {
+      "field": "handshake",
+      "code": 2,
+      "stdout": {
+        "client": {
+          "catalog": "standard-kits-4",
+          "gameplay": "combat-2026-10-04",
+          "geometry": "verdant-confluence-v1",
+          "handshake": 1,
+          "protocol": 9,
+          "release": "0.41.0"
+        },
+        "compatible": false,
+        "issue": "handshake",
+        "server": {
+          "catalog": "standard-kits-4",
+          "gameplay": "combat-2026-10-04",
+          "geometry": "verdant-confluence-v1",
+          "handshake": 2,
+          "protocol": 9,
+          "release": "0.41.0"
+        }
+      },
+      "stderr": ""
+    },
+    {
+      "field": "release",
+      "code": 0,
+      "stdout": {
+        "client": {
+          "catalog": "standard-kits-4",
+          "gameplay": "combat-2026-10-04",
+          "geometry": "verdant-confluence-v1",
+          "handshake": 1,
+          "protocol": 9,
+          "release": "0.41.0"
+        },
+        "compatible": true,
+        "issue": null,
+        "server": {
+          "catalog": "standard-kits-4",
+          "gameplay": "combat-2026-10-04",
+          "geometry": "verdant-confluence-v1",
+          "handshake": 1,
+          "protocol": 9,
+          "release": "0.41.0x"
+        }
+      },
+      "stderr": ""
+    },
+    {
+      "field": "silent-server",
+      "code": 3,
+      "stdout": {
+        "client": {
+          "catalog": "standard-kits-4",
+          "gameplay": "combat-2026-10-04",
+          "geometry": "verdant-confluence-v1",
+          "handshake": 1,
+          "protocol": 9,
+          "release": "0.41.0"
+        },
+        "compatible": false,
+        "endpoint": "127.0.0.1:49790",
+        "issue": "unavailable",
+        "server": null
+      },
+      "stderr": ""
+    }
+  ],
+  "ui": {
+    "language": "en",
+    "viewport": [
+      852,
+      393
+    ],
+    "native_desktop": true,
+    "synthetic_incompatible_server": true,
+    "physical_device": false,
+    "note": "Final change after capture only prevents automatic menu retries; visual layout unchanged."
+  },
+  "artifacts": {
+    "raw/gate-final-current.log": "28b602d6d02f49e68f5bca045752419430c730d6df9051666c086555faafaa8b",
+    "raw/client-final.log": "f03912514b38b7046710717cdc6a854eacec9cb6b12db9d4a7002be35b5b0348",
+    "raw/client-final-clippy.log": "1c97040530bb040de085bd4fb6863e88419a77e874c1bdac71edbcf09ec9b77e",
+    "raw/cli-matrix.json": "58677a5f0c52911376d846e7350ad85e462633c14c62410c61969cbbab4ba730",
+    "raw/compatibility.json": "9eee254213dba16b7936f7c077584ca8b50cb36cf42106eb8cecf59a4934b123",
+    "raw/live-server-probe.json": "dba89c441c5d5c569c68f24f920ce225802071d9b9bc6e035dd86edc285e4b44",
+    "raw/ui-layout-check.json": "430db2b5975f3c091d1d411206146e479dbb0cf1493df71c63d0368ee0c6774f",
+    "raw/ui/01-home.png": "e9c6e3a09d89c1bec8b5386e3fa1b6bf30621ec70df06309a66a7e5fbabf825f",
+    "raw/ui/qa-summary.json": "01ccb9be90666385deee2b833995d59ac40ff8af191dfa8e0185f19a8eb1ce47"
+  },
+  "limits": [
+    "No deployment, main merge, mobile artifact or TestFlight upload",
+    "No physical mobile or production lobby-to-worker smoke in this task",
+    "Compatibility revisions require deliberate maintenance; no server authentication is provided by the envelope",
+    "39 existing integration tests remained ignored"
+  ]
+}

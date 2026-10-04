@@ -555,11 +555,27 @@ def dist_dir(version: str, base: Path | None) -> Path:
     return directory
 
 
+def write_compatibility_manifest(out: Path, version: str) -> Path:
+    """Keep the exact shared Rust contract beside the artifacts being built."""
+    common = Path(run("git", "rev-parse", "--path-format=absolute", "--git-common-dir", capture=True))
+    env = dict(os.environ)
+    env.setdefault("CARGO_TARGET_DIR", str(common.parent / "target"))
+    raw = run("cargo", "run", "--locked", "--quiet", "-p", "shared", "--example",
+              "compatibility", "--", "manifest", env=env, capture=True)
+    manifest = json.loads(raw)
+    if manifest.get("release") != version:
+        raise SystemExit("Compatibility manifest does not match the artifact release")
+    path = out / "compatibility.json"
+    path.write_text(json.dumps(manifest, indent=2) + "\n")
+    return path
+
+
 def command_build(args) -> int:
     version = workspace_version()
     server = validate_server(args.server)
     out = dist_dir(version, args.out)
     report = check_report()
+    write_compatibility_manifest(out, version)
     targets = [p for p in PLATFORMS if report["platforms"][p]] if args.platform == "all" else [args.platform]
     if args.platform == "all":
         # TestFlight upload never happens implicitly.

@@ -133,7 +133,9 @@ pub(in crate::net) fn sync_connection_status_ui(
         return;
     };
     // Written every frame, so a language change shows at once.
-    let status = if let Some(reason) = client_session.join_error {
+    let status = if let Some(issue) = client_session.compatibility_issue {
+        compatibility_message(issue).to_owned()
+    } else if let Some(reason) = client_session.join_error {
         data::join_rejection(reason).to_owned()
     } else if client_session.join_exhausted {
         tr("net.status.join_unconfirmed").to_owned()
@@ -168,16 +170,22 @@ pub(in crate::net) fn sync_connection_status_ui(
 pub(crate) enum LinkStatus {
     /// The server refused the join (after a reconnect, or a protocol mismatch).
     Rejected(shared::protocol::JoinRejection),
+    Compatibility(shared::compatibility::CompatibilityIssue),
     /// The server never confirmed the join.
     Unconfirmed,
     /// The transport dropped; the auto-reconnect is on its `attempt`.
-    Reconnecting { attempt: u32 },
+    Reconnecting {
+        attempt: u32,
+    },
     /// The transport dropped and nothing retries by itself.
     Disconnected,
     /// Connecting or waiting for the server (after a Retry).
     Connecting,
     /// Connected with a committed join the server has not admitted yet.
-    Joining { attempt: u32, max: u32 },
+    Joining {
+        attempt: u32,
+        max: u32,
+    },
     /// Connected (admitted, or nothing to admit).
     Connected,
 }
@@ -187,13 +195,17 @@ impl LinkStatus {
     pub(crate) fn can_retry(self) -> bool {
         matches!(
             self,
-            LinkStatus::Rejected(_) | LinkStatus::Unconfirmed | LinkStatus::Disconnected
+            LinkStatus::Compatibility(_)
+                | LinkStatus::Rejected(_)
+                | LinkStatus::Unconfirmed
+                | LinkStatus::Disconnected
         )
     }
 
     /// The line a screen prints for it (`None` = nothing to say).
     pub(crate) fn detail(self) -> Option<String> {
         match self {
+            LinkStatus::Compatibility(issue) => Some(compatibility_message(issue).to_owned()),
             LinkStatus::Rejected(reason) => Some(data::join_rejection(reason).to_owned()),
             LinkStatus::Unconfirmed => Some(tr("net.status.join_unconfirmed").to_owned()),
             LinkStatus::Reconnecting { attempt } => {
@@ -211,6 +223,9 @@ impl LinkStatus {
 
 /// Where the session stands, first match wins (`loading-shell.md`).
 pub(crate) fn link_status(session: &ClientSession) -> LinkStatus {
+    if let Some(issue) = session.compatibility_issue {
+        return LinkStatus::Compatibility(issue);
+    }
     if let Some(reason) = session.join_error {
         return LinkStatus::Rejected(reason);
     }
@@ -268,6 +283,18 @@ fn connection_line(client_session: &ClientSession) -> String {
         ),
         ClientConnectionState::Disconnected => tr("net.status.disconnected").to_owned(),
     }
+}
+
+fn compatibility_message(issue: shared::compatibility::CompatibilityIssue) -> &'static str {
+    use shared::compatibility::CompatibilityIssue as Issue;
+    tr(match issue {
+        Issue::Handshake => "net.compatibility.handshake",
+        Issue::Protocol => "net.compatibility.protocol",
+        Issue::Catalog => "net.compatibility.catalog",
+        Issue::Geometry => "net.compatibility.geometry",
+        Issue::Gameplay => "net.compatibility.gameplay",
+        Issue::Unavailable => "net.compatibility.unavailable",
+    })
 }
 
 #[cfg(test)]

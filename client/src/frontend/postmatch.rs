@@ -464,14 +464,15 @@ fn status_spec(
                 ink: color::STATE_WARNING,
                 timer: None,
             },
-            LinkStatus::Disconnected | LinkStatus::Rejected(_) | LinkStatus::Unconfirmed => {
-                StatusSpec {
-                    icon: StatusIcon::Failed,
-                    text: link.detail().unwrap_or_default(),
-                    ink: color::TEXT_DANGER,
-                    timer: None,
-                }
-            }
+            LinkStatus::Compatibility(_)
+            | LinkStatus::Disconnected
+            | LinkStatus::Rejected(_)
+            | LinkStatus::Unconfirmed => StatusSpec {
+                icon: StatusIcon::Failed,
+                text: link.detail().unwrap_or_default(),
+                ink: color::TEXT_DANGER,
+                timer: None,
+            },
             _ => muted(StatusIcon::Saving, with_reason(tr("postmatch.saving"))),
         };
     }

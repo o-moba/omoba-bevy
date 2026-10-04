@@ -10,6 +10,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use shared::compatibility::{CompatibilityIssue, CompatibilityProbe, ReleaseContract};
 use shared::protocol::{PROTOCOL_VERSION, SnapshotOrder};
 use shared::transport::{SnapshotAssembler, TransportError};
 use shared::wire::{ClientPacket, ServerPacket};
@@ -39,12 +40,16 @@ const _: () = assert!(SERVER_DATAGRAM_RECEIVE_CAPACITY > IPV4_UDP_MAX_PAYLOAD_BY
 const DECODE_ERROR_LOG_INTERVAL: Duration = Duration::from_secs(1);
 
 /// Signal from the UDP thread to the Bevy main thread (failure detection §3 in spec).
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub enum NetThreadSignal {
     /// Recv/send error streak exceeded fixed thresholds (P3 transport rule).
     TransportFailure,
     /// A framed reply uses a different application protocol. No payload was applied.
     ProtocolMismatch,
+    Compatibility {
+        server: Option<ReleaseContract>,
+        issue: Option<CompatibilityIssue>,
+    },
 }
 
 pub(in crate::net) type SharedGameplaySigner =
@@ -64,6 +69,8 @@ pub(in crate::net) fn spawn_network_transport(
     server_addr: String,
 ) {
     client_session.clear_join_attempt();
+    client_session.server_contract = None;
+    client_session.compatibility_issue = None;
     client_session.snapshot_order = SnapshotOrder::default();
     client_session.server_addr_display.clone_from(&server_addr);
     if !client_session.ephemeral_endpoint {
@@ -155,6 +162,46 @@ fn connect_resolved_udp_server(
     }))
 }
 
+/// Gate all application traffic on a correlated, bounded compatibility report.
+/// No legacy fallback: an unanswered check is unknown, never a verified match.
+fn verify_server_compatibility(
+    socket: &UdpSocket,
+    timeout: Duration,
+) -> Result<ReleaseContract, CompatibilityIssue> {
+    let mut nonce = [0_u8; 16];
+    getrandom::fill(&mut nonce).map_err(|_| CompatibilityIssue::Unavailable)?;
+    let probe = CompatibilityProbe::new(
+        ReleaseContract::current(),
+        shared::public_transport::hex(&nonce),
+    );
+    let request = probe.request();
+    let started = Instant::now();
+    let mut last_sent = None;
+    let mut buffer = [0_u8; shared::compatibility::MAX_PROBE_BYTES + 1];
+    while started.elapsed() < timeout {
+        if last_sent.is_none_or(|at: Instant| at.elapsed() >= Duration::from_millis(500)) {
+            socket
+                .send(&request)
+                .map_err(|_| CompatibilityIssue::Unavailable)?;
+            last_sent = Some(Instant::now());
+        }
+        // Bounded work even if an old server floods snapshots during preflight.
+        for _ in 0..32 {
+            match socket.recv(&mut buffer) {
+                Ok(len) => {
+                    if let Some(server) = probe.accept(&buffer[..len]) {
+                        return Ok(server);
+                    }
+                }
+                Err(error) if error.kind() == io::ErrorKind::WouldBlock => break,
+                Err(_) => return Err(CompatibilityIssue::Unavailable),
+            }
+        }
+        thread::sleep(NETWORK_LOOP_SLEEP);
+    }
+    Err(CompatibilityIssue::Unavailable)
+}
+
 pub(in crate::net) fn run_udp_client(
     server_addr: String,
     outgoing: Receiver<ClientPacket>,
@@ -175,6 +222,25 @@ pub(in crate::net) fn run_udp_client(
     if let Err(error) = socket.set_nonblocking(true) {
         eprintln!("Failed to set UDP client socket nonblocking: {error}");
         let _ = signals.send(NetThreadSignal::TransportFailure);
+        return;
+    }
+    let result = verify_server_compatibility(&socket, Duration::from_secs(4));
+    let (server, issue) = match result {
+        Ok(server) => {
+            let issue = ReleaseContract::current().compare(&server).err();
+            println!(
+                "Server compatibility at {server_addr}: client={:?}, server={server:?}, issue={issue:?}",
+                ReleaseContract::current()
+            );
+            (Some(server), issue)
+        }
+        Err(issue) => (None, Some(issue)),
+    };
+    if signals
+        .send(NetThreadSignal::Compatibility { server, issue })
+        .is_err()
+        || issue.is_some()
+    {
         return;
     }
     println!("UDP socket connected to {server_addr}; waiting for first snapshot");
@@ -521,6 +587,90 @@ mod tests {
             }
             Err(error) => panic!("legal IPv4 UDP payload failed on loopback: {error}"),
         }
+    }
+
+    #[test]
+    fn compatibility_udp_gates_application_packets_on_mismatch() {
+        let server = UdpSocket::bind("127.0.0.1:0").unwrap();
+        server
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
+        let address = server.local_addr().unwrap().to_string();
+        let (outgoing, outgoing_rx) = crossbeam_channel::bounded(8);
+        let (incoming_tx, incoming) = crossbeam_channel::bounded(8);
+        let (signals_tx, signals) = crossbeam_channel::unbounded();
+        outgoing
+            .send(ClientPacket::Hello {
+                protocol_version: PROTOCOL_VERSION,
+            })
+            .unwrap();
+        let worker = thread::spawn(move || {
+            run_udp_client(
+                address,
+                outgoing_rx,
+                incoming_tx,
+                signals_tx,
+                Default::default(),
+            )
+        });
+        let mut bytes = [0; 2048];
+        let (len, peer) = server.recv_from(&mut bytes).unwrap();
+        let mut contract = ReleaseContract::current();
+        contract.catalog.push('x');
+        let reply = shared::compatibility::response(&bytes[..len], &contract).unwrap();
+        server.send_to(&reply, peer).unwrap();
+        assert!(matches!(
+            signals.recv_timeout(Duration::from_secs(2)).unwrap(),
+            NetThreadSignal::Compatibility {
+                issue: Some(CompatibilityIssue::Catalog),
+                ..
+            }
+        ));
+        worker.join().unwrap();
+        assert!(incoming.try_recv().is_err());
+        server
+            .set_read_timeout(Some(Duration::from_millis(80)))
+            .unwrap();
+        assert!(
+            server.recv_from(&mut bytes).is_err(),
+            "no Hello or queued gameplay after rejection"
+        );
+    }
+
+    #[test]
+    fn compatibility_udp_accepts_patch_and_ignores_stale_report() {
+        let server = UdpSocket::bind("127.0.0.1:0").unwrap();
+        server
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
+        let socket = connect_udp_server(server.local_addr().unwrap()).unwrap();
+        socket.set_nonblocking(true).unwrap();
+        let worker =
+            thread::spawn(move || verify_server_compatibility(&socket, Duration::from_secs(2)));
+        let mut bytes = [0; 2048];
+        let (len, peer) = server.recv_from(&mut bytes).unwrap();
+        let mut contract = ReleaseContract::current();
+        contract.release = "99.2.3".into();
+        let reply = shared::compatibility::response(&bytes[..len], &contract).unwrap();
+        let mut stale: serde_json::Value = serde_json::from_slice(&reply).unwrap();
+        stale["nonce"] = "00".repeat(16).into();
+        server
+            .send_to(&serde_json::to_vec(&stale).unwrap(), peer)
+            .unwrap();
+        server.send_to(b"{}", peer).unwrap();
+        server.send_to(&reply, peer).unwrap();
+        assert_eq!(worker.join().unwrap(), Ok(contract));
+    }
+
+    #[test]
+    fn compatibility_timeout_is_unknown_never_compatible_or_protocol_mismatch() {
+        let server = UdpSocket::bind("127.0.0.1:0").unwrap();
+        let socket = connect_udp_server(server.local_addr().unwrap()).unwrap();
+        socket.set_nonblocking(true).unwrap();
+        assert_eq!(
+            verify_server_compatibility(&socket, Duration::from_millis(60)),
+            Err(CompatibilityIssue::Unavailable)
+        );
     }
 
     fn assert_loopback_round_trip(bind_address: &str) {

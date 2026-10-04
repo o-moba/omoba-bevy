@@ -506,7 +506,10 @@ fn shell_status(
         stage: None,
     };
     let mut status = match link {
-        LinkStatus::Rejected(_) | LinkStatus::Unconfirmed | LinkStatus::Disconnected => {
+        LinkStatus::Compatibility(_)
+        | LinkStatus::Rejected(_)
+        | LinkStatus::Unconfirmed
+        | LinkStatus::Disconnected => {
             return failure(link.detail().unwrap_or_default());
         }
         LinkStatus::Reconnecting { .. } => {

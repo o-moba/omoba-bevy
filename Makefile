@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 
-.PHONY: help server server-dev practice practice-server game game2d start start-release play play-bots bots stop restart verify-task-12 verify-gameplay iphone-check iphone iphone-box android-check android android-universal check fmt fmt-check lint check-no-qa test test-scripts test-postgres release-check release-local release-mac release-linux release-android release-ios release-testflight release-ci release-draft release-notes showcase demo-video
+.PHONY: compatibility-manifest compatibility-check help server server-dev practice practice-server game game2d start start-release play play-bots bots stop restart verify-task-12 verify-gameplay iphone-check iphone iphone-box android-check android android-universal check fmt fmt-check lint check-no-qa test test-scripts test-postgres release-check release-local release-mac release-linux release-android release-ios release-testflight release-ci release-draft release-notes showcase demo-video
 
 # ---------------------------------------------------------------------------
 # Match modes (TASK-22)
@@ -235,3 +235,11 @@ demo-video: ## Record the gameplay demo video into DEMO_OUTPUT (default builds/d
 # omoba-ui design workspace (next to this repo). Needs a GPU window ~30 min.
 ui-audit: ## Capture all UI screens (desktop + phone) into UI_AUDIT_OUTPUT (default ../omoba-ui/captures/<date>)
 	python3 scripts/capture_ui_audit.py --build --output $(UI_AUDIT_OUTPUT)
+
+# Stable pre-game compatibility check. Save the manifest beside each artifact.
+compatibility-manifest: ## Print this source build's JSON compatibility manifest
+	cargo run --locked --quiet -p shared --example compatibility -- manifest
+
+compatibility-check: ## Probe GAME_SERVER_ADDR against COMPATIBILITY_MANIFEST
+	@test -n "$(COMPATIBILITY_MANIFEST)" || (echo 'Set COMPATIBILITY_MANIFEST to the artifact compatibility.json'; exit 1)
+	cargo run --locked --quiet -p shared --example compatibility -- check "$(GAME_SERVER_ADDR)" "$(COMPATIBILITY_MANIFEST)"

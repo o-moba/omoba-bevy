@@ -10,5 +10,16 @@
   "net.status.join_unconfirmed": "The server did not confirm your Join. Use Retry to try again.",
   "net.practice.banner": "OFFLINE PRACTICE · Level {level} · No rewards",
   "net.practice.you": "You",
-  "net.practice.bot": "Bot {id}"
+  "net.practice.bot": "Bot {id}",
+  "net.compatibility.handshake": "Server compatibility check is outdated. Choose an updated server.",
+  "net.compatibility.protocol": "Network versions are incompatible. Update the game or choose another server.",
+  "net.compatibility.catalog": "Skill catalogues differ. Update the game or choose a compatible server.",
+  "net.compatibility.geometry": "Map versions differ. Update the game or choose a compatible server.",
+  "net.compatibility.gameplay": "Gameplay versions differ. Update the game or choose a compatible server.",
+  "net.compatibility.unavailable": "Server unverified: offline or outdated. Retry or choose another server.",
+  "net.compatibility.verified": "Compatible · Game {client} / Server {server}",
+  "net.compatibility.failed": "Incompatible · Game {client} / Server {server}",
+  "net.compatibility.pending": "Compatibility not verified",
+  "net.compatibility.unverified_short": "Unverified",
+  "net.compatibility.incompatible_short": "Incompatible"
 }

@@ -5,7 +5,7 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
-The current implementation is 0.40.1, **protocol 9** and
+The prior deployed implementation is 0.40.1, **protocol 9** and
 **standard-kits-4**. The final gate, real-server harness and affected-HUD capture
 pass; see the [equipped-skills progress note](docs/progress/2026-10-04-equipped-skills.md).
 The [0.37–0.39 delivery note](docs/progress/2026-10-04-iteration-commit.md)
@@ -15,6 +15,13 @@ iOS 0.40.0 (19) is archived; its TestFlight upload remains pending Xcode account
 Physical iPhone reconnect/120 Hz,
 sustained worker capacity and competitive balance remain in the
 [refactoring/release tracker](docs/REFACTORING.md#post-programme-architecture-follow-ups--2026-10-04).
+
+## [0.41.0] - 2026-10-05
+
+- Verify network protocol, skill catalogue, map and gameplay contract before client application traffic. Release labels are informational, so compatible patch releases can differ.
+- Show distinct incompatibility and unavailable-verification messages, stop futile mismatch reconnects, and show client/server versions in settings. Every new endpoint, including match-worker redirects, is checked; offline practice stays socket-free.
+- Add bounded stateless probes on all server roles, a shared-contract CLI, artifact manifests from the release builder, and regression coverage for version matrix, UDP gating, stale replies and rate limits. No new production dependencies or CI/deployment changes.
+- Deploy the new server before distributing new clients: old servers cannot complete the new preflight. See [release compatibility](docs/release-compatibility.md).
 
 ## [0.40.1] - 2026-10-04
 

@@ -41,8 +41,39 @@ pub(crate) struct PublicTransport {
     endpoints: HashMap<SocketAddr, Endpoint>,
     probe_window: Option<Instant>,
     probes: u32,
+    compatibility_window: Option<Instant>,
+    compatibility_probes: u32,
 }
 impl PublicTransport {
+    /// Independent of public admission: works for lobby, worker and standalone.
+    /// No per-source allocation, at most 64 non-amplifying replies per second.
+    pub(crate) fn compatibility_reply(
+        &mut self,
+        addr: SocketAddr,
+        bytes: &[u8],
+        now: Instant,
+    ) -> Option<Vec<u8>> {
+        if bots::is_bot_address(addr) {
+            return None;
+        }
+        if self
+            .compatibility_window
+            .is_none_or(|at| now.saturating_duration_since(at) >= Duration::from_secs(1))
+        {
+            self.compatibility_window = Some(now);
+            self.compatibility_probes = 0;
+        }
+        if self.compatibility_probes >= MAX_PROBES_PER_SECOND {
+            return None;
+        }
+        let reply = shared::compatibility::response(
+            bytes,
+            &shared::compatibility::ReleaseContract::current(),
+        )?;
+        self.compatibility_probes += 1;
+        Some(reply)
+    }
+
     pub(crate) fn validated(&self, addr: SocketAddr, now: Instant) -> bool {
         self.endpoints.get(&addr).is_some_and(|p| {
             p.validated && now.saturating_duration_since(p.touched) < VALIDATED_TTL
@@ -285,6 +316,35 @@ mod tests {
         ));
         path_nonce
     }
+    #[test]
+    fn compatibility_probe_is_rate_limited_and_never_admits_players() {
+        use shared::compatibility::{CompatibilityProbe, ReleaseContract};
+        let client = ReleaseContract::current();
+        let probe = CompatibilityProbe::new(client.clone(), "ab".repeat(16));
+        let request = probe.request();
+        let now = Instant::now();
+        let mut gate = PublicTransport::default();
+        for _ in 0..MAX_PROBES_PER_SECOND {
+            let reply = gate.compatibility_reply(address(1), &request, now).unwrap();
+            assert!(reply.len() <= request.len());
+            assert_eq!(probe.accept(&reply), Some(client.clone()));
+            assert!(gate.endpoints.is_empty());
+        }
+        assert!(
+            gate.compatibility_reply(address(2), &request, now)
+                .is_none()
+        );
+        assert!(
+            gate.compatibility_reply(address(2), &request, now + Duration::from_secs(1))
+                .is_some()
+        );
+        assert!(!gate.validated(address(1), now));
+        assert!(
+            gate.compatibility_reply(address(1), b"{}", now + Duration::from_secs(2))
+                .is_none()
+        );
+    }
+
     #[test]
     fn unknown_unsigned_sources_never_create_endpoints_and_challenge_is_nonamplifying() {
         let mut gate = PublicTransport::default();
