@@ -736,11 +736,11 @@ impl ServerRuntime {
                 .ledger
                 .update_earned_gold(player.hero.identity.id, player.economy.earned_gold);
         }
-        for player in self.world.players.values().filter(|p| p.joined) {
+        for (addr, player) in self.world.players.iter().filter(|(_, p)| p.joined) {
             self.combat_log.ledger.update_player(
                 player.hero.identity.id,
                 player.hero.progress.level,
-                false,
+                crate::bots::is_bot_address(*addr) && !player.hero.identity.is_bot,
             );
         }
         for session in self.world.disconnected_sessions.values() {
@@ -855,12 +855,15 @@ impl ServerRuntime {
         }
     }
 
-    /// A deliberate leave, as opposed to a timeout: the seat and any queue
-    /// entry are released at once and nothing is kept for a session reclaim,
+    /// A running allocated seat changes controller and remains reclaimable.
+    /// Other seats and any queue entry are released at once,
     /// so a guest can join again straight away with a new hero. Signed profiles
     /// still have at most one participant per round. The endpoint and its career
     /// authentication stay as they are.
     pub(crate) fn leave_match(&mut self, addr: SocketAddr, now: Instant) {
+        if self.detach_running_seat(addr, now) {
+            return;
+        }
         let Some(player) = self.world.players.get_mut(&addr) else {
             return;
         };
@@ -1152,6 +1155,7 @@ impl ServerRuntime {
 
     pub(crate) fn career_view(&self, addr: SocketAddr, now: Instant) -> CareerView {
         let mut view = self.career.backend.view(addr);
+        view.takeovers = self.takeover_view(addr);
         if let (Some(profile), Some(session)) = (
             self.career.backend.profile(addr),
             self.career.backend.authenticated_session(addr),
@@ -1206,7 +1210,7 @@ impl ServerRuntime {
         self.career.last_sent = Some(now);
         self.career.sequence = self.career.sequence.saturating_add(1);
         for (addr, player) in &self.world.players {
-            if !player.career_capable {
+            if !player.career_capable || crate::bots::is_bot_address(*addr) {
                 continue;
             }
             let result = encode_career_datagrams(

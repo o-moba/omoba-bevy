@@ -1,4 +1,5 @@
 // i18n-strict
+use crate::equipped_skills;
 use crate::net::{GameStateSnapshot, NetworkHeroClass, PlayerProgression};
 use crate::player::Player;
 use crate::team::TeamSelection;
@@ -108,10 +109,14 @@ pub(super) fn sync_authoritative_cooldown_durations(
             }
         }
     }
+    let Some(skills) = equipped_skills::resolve(class.0, loadout) else {
+        cooldowns.total_secs = [0.0; 4];
+        return;
+    };
     for slot in SkillSlot::ALL {
         let index = slot.index();
-        let duration = effective_cast_duration(
-            class.0,
+        let duration = equipped_skills::cooldown(
+            &skills,
             progression.level,
             progression.ranks[index],
             slot,
@@ -131,19 +136,17 @@ pub(super) fn sync_authoritative_cooldown_durations(
     }
 }
 
+#[cfg(test)]
 pub(crate) fn effective_cast_duration(
     class: HeroClass,
     level: u32,
     rank: u8,
     slot: SkillSlot,
-    mut bonuses: shared::shop::ItemBonuses,
+    bonuses: shared::shop::ItemBonuses,
     sandbox: bool,
 ) -> f32 {
-    if !sandbox {
-        bonuses.attack_speed_multiplier = bonuses.attack_speed_multiplier.max(1.0);
-        bonuses.spell_haste_multiplier = bonuses.spell_haste_multiplier.max(1.0);
-    }
-    shared::hero_balance::ability_cooldown(class, level, rank, slot, bonuses).as_secs_f32()
+    let skills = equipped_skills::resolve(class, None).expect("preset or legacy kit");
+    equipped_skills::cooldown(&skills, level, rank, slot, bonuses, sandbox)
 }
 
 /// The class whose kit drives the local HUD: server-replicated when available,

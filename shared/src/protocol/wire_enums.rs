@@ -27,7 +27,7 @@ use std::path::Path;
 use crate::protocol::PROTOCOL_VERSION;
 
 /// The protocol version this variant list was last reviewed for.
-const POLICY_PROTOCOL_VERSION: u16 = 5;
+const POLICY_PROTOCOL_VERSION: u16 = 9;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Decoding {
@@ -62,7 +62,7 @@ macro_rules! wire_enums {
 }
 
 wire_enums! {
-    crate::protocol::wire::ClientPacket => Strict [Sandbox, Leave, Social, Party, Career, Hello, Transform, Cast, CastSkill, Interact, Utility, BasicAttack, Join, Prematch, Ping, RequestRematch, SetGodMode, SetSpeedBoost, Practice, UpgradeSkill, BuyItem],
+    crate::protocol::wire::ClientPacket => Strict [Sandbox, Leave, Social, Party, Career, Hello, Transform, Cast, CastSkill, Interact, Utility, BasicAttack, Join, Prematch, Ping, RequestRematch, SetGodMode, SetSpeedBoost, Practice, UpgradeSkill, BuyItem, TakeoverVote],
     crate::protocol::wire::ServerPacket => Strict [Party, Social, Career, Snapshot],
     crate::party::PartyCommand => Strict [Presence, Invite, Accept, Decline, Leave, Kick, Launch],
     crate::public_transport::PublicClientDatagram => Strict [TransportProbe, TransportProof, TransportBootstrap, SignedCommand],
@@ -70,10 +70,10 @@ wire_enums! {
     crate::career::CareerRequest => Strict [FindMatch, SupporterStatus, EquipSupporterAura, Social, Challenge, Authenticate, History, Detail, Friends, Friend, Profile, LookupPlayer, Rename, Authorized, CancelQueue],
     crate::utility::UtilityAction => Strict [Dash, Haste, Recall, CancelRecall],
     crate::map::Team => Strict [Green, Blue],
-    crate::HeroClass => Tolerant [Warrior, Mage, Ranger, Cleric, Warden, Dawnweaver, Wildspark, Cinderforge, Edgeweaver, Stormfist, Veilstalker, Emberveil, Orbitwright, Riftshot, Chainkeeper, Frostguard],
-    crate::loadout::CoreId => Strict [Dawnweaver, Wildspark, Cinderforge, Edgeweaver, Stormfist, Veilstalker, Emberveil, Orbitwright, Riftshot, Chainkeeper, Frostguard],
-    crate::loadout::SkillId => Strict [DawnBind, DawnBarrier, DawnField, DawnRay, WildSwitch, WildZap, WildTraps, WildRocket, FaultLine, FurnaceBreath, AnvilCharge, MountainEcho, EdgeLunge, MirrorGuard, TwinTempo, FourfoldDuel, EchoStrike, AnchorStep, ThunderPulse, ThunderKick, ThornVolley, PatientCurse, ShadowLash, Nightfall, WanderingEmber, KindledWisps, HeartTether, FlameDance, OrbitalCommand, OrbitalField, OrbitalGuard, OrbitalCollapse, RiftNeedle, RiftSeal, RiftStep, HorizonWave, IronHook, GuidingLantern, ChainSweep, IronBoundary, WinterShard, ShelteringLeap, Northwall, WinterDivide],
-    crate::loadout::PassiveId => Strict [Radiance, Momentum, Tempered, Vitals, Flow, Shroud, Essence, Clockwork, Resonance, Souls, Concussion],
+    crate::HeroClass => Tolerant [Warrior, Mage, Ranger, Cleric, Warden, Dawnweaver, Wildspark, Cinderforge, Edgeweaver, Stormfist, Veilstalker, Emberveil, Orbitwright, Riftshot, Chainkeeper, Frostguard, Adventurer],
+    crate::loadout::CoreId => Strict [Dawnweaver, Wildspark, Cinderforge, Edgeweaver, Stormfist, Veilstalker, Emberveil, Orbitwright, Riftshot, Chainkeeper, Frostguard, Adventurer],
+    crate::loadout::SkillId => Strict [DawnBind, DawnBarrier, DawnField, DawnRay, WildSwitch, WildZap, WildTraps, WildRocket, FaultLine, FurnaceBreath, AnvilCharge, MountainEcho, EdgeLunge, MirrorGuard, TwinTempo, FourfoldDuel, EchoStrike, AnchorStep, ThunderPulse, ThunderKick, ThornVolley, PatientCurse, ShadowLash, Nightfall, WanderingEmber, KindledWisps, HeartTether, FlameDance, OrbitalCommand, OrbitalField, OrbitalGuard, OrbitalCollapse, RiftNeedle, RiftSeal, RiftStep, HorizonWave, IronHook, GuidingLantern, ChainSweep, IronBoundary, WinterShard, ShelteringLeap, Northwall, WinterDivide, DaggerDeadlyBlow, DaggerBluff, DaggerBackstab, DaggerLethalBlow],
+    crate::loadout::PassiveId => Strict [Radiance, Momentum, Tempered, Vitals, Flow, Shroud, Essence, Clockwork, Resonance, Souls, Concussion, DaggerMastery],
     crate::loadout::WeaponMode => Strict [Repeater, Rockets],
     crate::loadout::EffectVisualKind => Strict [Orb, Soul, Anchor, Healing, ShieldWall, Cage, Lantern, Bolt, Barrier, Field, BeamWarning, Beam, Trap, Rocket],
     crate::practice::PracticeCommand => Tolerant [Roster, ClearBots, SpawnDummy, SpawnMovingDummy, StartDuel, Unsupported],
@@ -81,6 +81,7 @@ wire_enums! {
     crate::protocol::wire::GameState => Strict [Lobby, Forming, Starting, Running, Victory],
     crate::sandbox::SandboxCommand => Strict [ApplyConfig, Refill, ResetCooldowns, Teleport, ResetActor, AddXp, GrantItem, ResetDuel, ResetAnalytics, SpawnWave, FrameStep, ForceCast],
     crate::social::SocialCommand => Strict [Subscribe, Chat, Reaction],
+    crate::match_service::TakeoverPolicy => Strict [Idle, Bot],
     crate::match_service::MatchPreference => Strict [Quick, HumansOnly, BotPractice],
     crate::supporter::AuraStyle => Strict [Solar, Lunar, Verdant],
     crate::handheld::HandheldSelection => Strict [ClassDefault, Unequipped, Item],
@@ -90,7 +91,7 @@ wire_enums! {
     crate::prematch::PrematchAction => Strict [Select, Lock, Loaded],
     crate::match_service::MatchServiceView => Strict [Idle, Waiting, Allocating, Assigned, Failed],
     crate::career::QueueView => Strict [Idle, Waiting, Selected, Playing, Full],
-    crate::shop::ItemId => Strict [EmberBlade, SwiftGrip, TrailBoots, VitalityGem, FocusCharm, GuardianCrest],
+    crate::shop::ItemId => Strict [EmberBlade, SwiftGrip, TrailBoots, VitalityGem, FocusCharm, GuardianCrest, CritShard, SiphonStone, WindrunnerBoots, DuelistEdge, VampiricFang, ArcaneFocus, Bulwark, TempestBlade, Bloodreaver, AetherCrown],
     crate::PlayerActionKind => Tolerant [Attack, Cast, None],
     crate::prematch::PrematchPhase => Strict [Draft, Countdown, Loading],
     crate::combat::CombatEntityKind => Tolerant [Player, Minion, Structure, Neutral, Unknown],

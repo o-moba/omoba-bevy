@@ -1,5 +1,5 @@
 //! Explicit native map proof: authoritative structures and real prop geometry.
-//! QA changes only the spectator camera and validated cosmetic registry.
+//! QA joins a local host, then changes the spectator camera and cosmetic registry.
 use crate::{
     camera::MainCamera,
     combat::CombatStats,
@@ -8,12 +8,13 @@ use crate::{
     map_visuals::{MapPropInstance, MapVisualCache, MapVisualRegistry},
     mobile_controls::MobileControls,
     net::{
-        ClientSession, GameState, GameStateSnapshot, NetworkMapStructure, NetworkStructureId,
-        NetworkStructureProtected, StructureKind,
+        ClientSession, GameState, GameStateSnapshot, NetworkCommand, NetworkMapStructure,
+        NetworkStructureId, NetworkStructureProtected, StructureKind,
     },
     presentation2d::MapStructure2dVisual,
     sprite::PlayerVisualMode,
-    team::Team,
+    team::{CharacterChoice, Team, TeamSelection},
+    team_vision::BrushArt,
     verdant3d::VerdantStructureVisual,
     world2d::{WORLD_TILE_COLUMNS, WORLD_TILE_ROWS, World2dStatic, simulation_xz_to_render_xy},
 };
@@ -21,7 +22,7 @@ use bevy::{
     app::AppExit,
     asset::RecursiveDependencyLoadState,
     camera::ScalingMode,
-    ecs::system::SystemParam,
+    ecs::system::{NonSendMarker, SystemParam},
     mesh::VertexAttributeValues,
     prelude::*,
     render::view::screenshot::{Screenshot, ScreenshotCaptured, save_to_disk},
@@ -67,6 +68,7 @@ const FILES_3D: [&str; 5] = [
     "05-prop-b-repeated.png",
 ];
 const FILES_2D: [&str; 2] = ["01-map-overview.png", "02-tower-detail.png"];
+const FILES_LANE_DEFENSE: [&str; 2] = ["01-map-overview.png", "02-lane-defense-brush.png"];
 pub(crate) struct MapQaPlugin;
 impl Plugin for MapQaPlugin {
     fn build(&self, app: &mut App) {
@@ -82,33 +84,44 @@ impl Plugin for MapQaPlugin {
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(fallback)
         };
-        app.insert_resource(MapQa {
-            directory,
-            started: Instant::now(),
-            timeout: Duration::from_secs(
-                value("OMOBA_VISUAL_QA_TIMEOUT", 120).clamp(30, 600) as u64
-            ),
-            pixels: UVec2::new(value("OMOBA_QA_WIDTH", 1280), value("OMOBA_QA_HEIGHT", 720)),
-            expected_structures: value("OMOBA_MAP_QA_EXPECTED_STRUCTURES", 8) as usize,
-            stage: 0,
-            settled: 0,
-            configured: None,
-            selected_key: None,
-            focus: Vec3::ZERO,
-            frames: Vec::new(),
-            readbacks: BTreeSet::new(),
-            operations: Vec::new(),
-            readiness: serde_json::Value::Null,
-        })
-        .add_systems(Startup, label)
-        .add_systems(PreUpdate, prepare.after(bevy::ui::UiSystems::Focus))
-        .add_systems(Update, position_camera.after(InputContextSet::Actions))
-        .add_systems(
-            PostUpdate,
-            observe
-                .after(bevy::transform::TransformSystems::Propagate)
-                .after(bevy::ui::UiSystems::Layout),
-        );
+        app.insert_resource(bevy::winit::WinitSettings::continuous())
+            .insert_resource(MapQa {
+                directory,
+                started: Instant::now(),
+                timeout: Duration::from_secs(
+                    value("OMOBA_VISUAL_QA_TIMEOUT", 120).clamp(30, 600) as u64
+                ),
+                pixels: UVec2::new(value("OMOBA_QA_WIDTH", 1280), value("OMOBA_QA_HEIGHT", 720)),
+                expected_structures: value(
+                    "OMOBA_MAP_QA_EXPECTED_STRUCTURES",
+                    shared::map::ResolvedMap::default().structures.len() as u32,
+                ) as usize,
+                lane_defense: std::env::var("OMOBA_MAP_QA_LANE_DEFENSE").as_deref() == Ok("1"),
+                stage: 0,
+                settled: 0,
+                configured: None,
+                selected_key: None,
+                focus: Vec3::ZERO,
+                frames: Vec::new(),
+                readbacks: BTreeSet::new(),
+                operations: Vec::new(),
+                readiness: serde_json::Value::Null,
+            })
+            .add_systems(Startup, label)
+            .add_systems(
+                PreUpdate,
+                (
+                    focus_capture_window,
+                    prepare.after(bevy::ui::UiSystems::Focus),
+                ),
+            )
+            .add_systems(Update, position_camera.after(InputContextSet::Actions))
+            .add_systems(
+                PostUpdate,
+                observe
+                    .after(bevy::transform::TransformSystems::Propagate)
+                    .after(bevy::ui::UiSystems::Layout),
+            );
     }
 }
 #[derive(Resource)]
@@ -118,6 +131,7 @@ struct MapQa {
     timeout: Duration,
     pixels: UVec2,
     expected_structures: usize,
+    lane_defense: bool,
     stage: usize,
     settled: u32,
     configured: Option<usize>,
@@ -128,7 +142,7 @@ struct MapQa {
     operations: Vec<serde_json::Value>,
     readiness: serde_json::Value,
 }
-fn label(mut commands: Commands) {
+fn label(mut commands: Commands, qa: Res<MapQa>) {
     commands.spawn((
         Node {
             position_type: PositionType::Absolute,
@@ -136,7 +150,11 @@ fn label(mut commands: Commands) {
             bottom: Val::Px(3.0),
             ..default()
         },
-        Text::new("QA: live map objects · scripted cosmetic swaps"),
+        Text::new(if qa.lane_defense {
+            "QA: live lane defenses and hiding brush"
+        } else {
+            "QA: live map objects · scripted cosmetic swaps"
+        }),
         TextFont {
             font_size: 10.0,
             ..default()
@@ -150,6 +168,9 @@ fn label(mut commands: Commands) {
 fn prepare(
     qa: Res<MapQa>,
     session: Res<ClientSession>,
+    mut selection: ResMut<TeamSelection>,
+    mut outgoing: MessageWriter<NetworkCommand>,
+    mut joined: Local<bool>,
     help: Res<HelpOverlayVisible>,
     mut windows: Query<&mut Window, With<PrimaryWindow>>,
     mut buttons: crate::qa::TestIdPresses,
@@ -165,9 +186,49 @@ fn prepare(
     if qa.stage != 0 {
         return;
     }
-    buttons.press_where(|name| {
-        (session.is_connected() && !session.join_confirmed() && name == "TeamGreenButton")
-            || (session.join_confirmed() && help.0 && name == "HelpDismissButton")
+    // Map proof exercises real authoritative snapshots, not menu navigation.
+    // Use the normal join command; the former team button no longer exists.
+    if session.is_connected() && !session.join_confirmed() && !*joined {
+        *joined = true;
+        selection.team = Some(Team::Green);
+        selection.character = CharacterChoice::Cube;
+        selection.hero_class = shared::HeroClass::Ranger;
+        selection.avatar = Some("agnes".into());
+        outgoing.write(NetworkCommand::Join {
+            handheld: Default::default(),
+            team: Team::Green,
+            character: selection.character,
+            hero_class: selection.hero_class,
+            avatar: selection.avatar.clone(),
+            sprite_character: None,
+        });
+    }
+    buttons.press_where(|name| session.join_confirmed() && help.0 && name == "HelpDismissButton");
+}
+// Ask the OS to focus the real window; do not override gameplay focus guards.
+fn focus_capture_window(
+    windows: Query<Entity, With<PrimaryWindow>>,
+    mut retry: Local<(u8, Option<Instant>)>,
+    _main: NonSendMarker,
+) {
+    if retry.0 >= 3
+        || retry
+            .1
+            .is_some_and(|time| time.elapsed() < Duration::from_secs(2))
+    {
+        return;
+    }
+    let Ok(entity) = windows.single() else {
+        return;
+    };
+    bevy::winit::WINIT_WINDOWS.with_borrow(|windows| {
+        if let Some(window) = windows.get_window(entity)
+            && !window.has_focus()
+        {
+            window.focus_window();
+            retry.0 += 1;
+            retry.1 = Some(Instant::now());
+        }
     });
 }
 fn position_camera(
@@ -190,6 +251,8 @@ fn position_camera(
     } else {
         let (position, target) = if qa.stage == 0 {
             (Vec3::new(-180.0, 260.0, 180.0), Vec3::ZERO)
+        } else if qa.lane_defense {
+            (qa.focus + Vec3::new(-38.0, 72.0, 42.0), qa.focus)
         } else {
             (qa.focus + Vec3::new(-8.5, 12.0, 8.5), qa.focus + Vec3::Y)
         };
@@ -256,6 +319,16 @@ struct Scene<'w, 's> {
     >,
     structure_sprites: Query<'w, 's, (Entity, &'static MapStructure2dVisual)>,
     structure_visuals: Query<'w, 's, (Entity, &'static VerdantStructureVisual)>,
+    brush: Query<
+        'w,
+        's,
+        (
+            Entity,
+            &'static BrushArt,
+            &'static GlobalTransform,
+            &'static InheritedVisibility,
+        ),
+    >,
     props: Query<'w, 's, (Entity, &'static MapPropInstance, &'static GlobalTransform)>,
     children: Query<'w, 's, &'static Children>,
     drawables: Query<
@@ -464,7 +537,13 @@ fn observe(
         return;
     }
     let is_3d = *mode == PlayerVisualMode::Models3d;
-    let files: &[&str] = if is_3d { &FILES_3D } else { &FILES_2D };
+    let files: &[&str] = if qa.lane_defense {
+        &FILES_LANE_DEFENSE
+    } else if is_3d {
+        &FILES_3D
+    } else {
+        &FILES_2D
+    };
     if qa.stage == files.len() {
         if qa.readbacks.len() != files.len()
             || files
@@ -475,7 +554,8 @@ fn observe(
         }
         let summary = serde_json::json!({"scenario":"map","version":env!("CARGO_PKG_VERSION"),"pass":true,
             "geometry_id":snapshot.geometry_id,"map_profile":snapshot.map_profile,"visual_mode":format!("{:?}",*mode),"pixels":qa.pixels.to_array(),
-            "scripted_camera":true,"scripted_cosmetic_registry":is_3d,"synthetic_structures":false,"physical_device_verified":false,"manual_interaction_verified":false,
+            "scripted_camera":true,"scripted_cosmetic_registry":is_3d && !qa.lane_defense,"lane_defense":qa.lane_defense,"synthetic_structures":false,"physical_device_verified":false,"manual_interaction_verified":false,
+            "shared_brush_count":shared::vision::brush_layout().len(),
             "geometry_fingerprint":"FNV-1a over actual mesh position/index buffers; not a cryptographic asset hash",
             "two_d_contract":"configured authoritative structure sprites; 3D prop model swaps are not applied",
             "captures":qa.frames,"operations":qa.operations,"map_visual_cache_counts":cache.counts()});
@@ -542,7 +622,28 @@ fn observe(
         qa.settled = 0;
         return;
     }
-    if qa.selected_key.is_none() && is_3d {
+    if qa.lane_defense {
+        // Frame the Green mid-lane siege sequence and its nearest new pocket.
+        let rear = scene
+            .structures
+            .iter()
+            .filter(|(_, _, _, map, kind, team, _, _)| {
+                **team == Team::Green
+                    && **kind == StructureKind::Tower
+                    && map.lane == Some(crate::net::Lane::Mid)
+            })
+            .max_by_key(|(_, _, _, map, _, _, _, _)| map.tier);
+        if let (Some((_, tower, _, _, _, _, _, _)), Some(brush)) = (
+            rear,
+            shared::vision::brush_layout()
+                .iter()
+                .find(|brush| brush.id == 11),
+        ) {
+            qa.focus = (tower.translation
+                + Vec3::new(brush.center[0], tower.translation.y, brush.center[1]))
+                * 0.5;
+        }
+    } else if qa.selected_key.is_none() && is_3d {
         let requested = std::env::var("OMOBA_MAP_QA_PROP_KEY").ok();
         let selected = scene
             .props
@@ -577,7 +678,7 @@ fn observe(
             qa.focus = transform.translation;
         }
     }
-    if is_3d && qa.stage > 0 && qa.configured != Some(qa.stage) {
+    if is_3d && !qa.lane_defense && qa.stage > 0 && qa.configured != Some(qa.stage) {
         let key = qa.selected_key.as_ref().unwrap();
         let model = MODELS[(qa.stage - 1) % 2];
         // Validated production registry; only this cosmetic instance changes.
@@ -646,11 +747,82 @@ fn observe(
         qa.settled = 0;
         return;
     }
+    let brush: Vec<_> = scene.brush.iter().map(|(entity, art, transform, visible)| {
+        let zone = shared::vision::brush_layout().iter().find(|zone| zone.id == art.id);
+        serde_json::json!({"id":art.id,"shared_center":zone.map(|zone| zone.center),"radius":zone.map(|zone| zone.radius),
+            "render_position":transform.translation().to_array(),"visible":visible.get(),"geometry":geometry(&scene,&meshes,entity)})
+    }).collect();
+    if qa.lane_defense && is_3d {
+        let brush_ready = brush.len() == shared::vision::brush_layout().len()
+            && shared::vision::brush_layout().iter().all(|zone| {
+                brush
+                    .iter()
+                    .filter(|record| record["id"].as_u64() == Some(zone.id as u64))
+                    .count()
+                    == 1
+                    && scene.brush.iter().any(|(entity, art, transform, visible)| {
+                        art.id == zone.id
+                            && visible.get()
+                            && transform
+                                .translation()
+                                .xz()
+                                .distance(Vec2::from_array(zone.center))
+                                < 0.001
+                            && geometry(&scene, &meshes, entity)["mesh_count"].as_u64() == Some(32)
+                    })
+            });
+        let tower_count_ready = scene
+            .structures
+            .iter()
+            .filter(|(_, _, _, map, kind, _, _, _)| **kind == StructureKind::Tower && map.tier <= 2)
+            .count()
+            == qa.expected_structures.saturating_sub(2);
+        let towers_ready = tower_count_ready
+            && (qa.expected_structures != 20
+                || [Team::Green, Team::Blue].into_iter().all(|team| {
+                    [
+                        crate::net::Lane::Top,
+                        crate::net::Lane::Mid,
+                        crate::net::Lane::Bot,
+                    ]
+                    .into_iter()
+                    .all(|lane| {
+                        let tiers: BTreeSet<_> = scene
+                            .structures
+                            .iter()
+                            .filter(|(_, _, _, map, kind, owner_team, _, _)| {
+                                **kind == StructureKind::Tower
+                                    && **owner_team == team
+                                    && map.lane == Some(lane)
+                            })
+                            .map(|(_, _, _, map, _, _, _, _)| map.tier)
+                            .collect();
+                        tiers == BTreeSet::from([0, 1, 2])
+                    })
+                }));
+        qa.readiness = serde_json::json!({"brush":brush,"brush_ready":brush_ready,"towers_ready":towers_ready,"structure_count":structures.len()});
+        if !brush_ready || !towers_ready {
+            qa.settled = 0;
+            return;
+        }
+    }
     let nodes:Vec<_>=scene.nodes.iter().filter(|(name,_,_)|matches!(name.as_str(),"MobileJoystick"|"MobileAttack"|"MobileAbility-0"|"MobileAbility-1"|"MobileAbility-2"|"MobileAbility-3"))
         .map(|(name,node,visible)|serde_json::json!({"name":name.as_str(),"size":node.size().to_array(),"visible":visible.get()})).collect();
+    if mobile.enabled
+        && (nodes.len() != 6
+            || nodes.iter().any(|node| {
+                node["visible"] != true
+                    || node["size"][0].as_f64().unwrap_or(0.0) <= 0.0
+                    || node["size"][1].as_f64().unwrap_or(0.0) <= 0.0
+            }))
+    {
+        qa.readiness = serde_json::json!({"mobile_nodes":nodes,"focused":mobile.focused});
+        qa.settled = 0;
+        return;
+    }
     let frame = serde_json::json!({"stage":qa.stage,"file":files[qa.stage],"pixels":qa.pixels.to_array(),"mobile_controls":mobile.enabled,"visual_mode":format!("{:?}",*mode),
         "snapshot_tick":snapshot.meta.snapshot_tick,"server_epoch":snapshot.meta.server_epoch,"match_id":snapshot.meta.match_id,"geometry_id":snapshot.geometry_id,"map_profile":snapshot.map_profile,
-        "structures":structures,"selected_prop":prop_record,"world_2d":world_2d,"static_props_by_archetype":static_counts,"ready_static_props":ready_static_props,"prop_instances":scene.props.iter().count(),"scene_roots":scene.scenes.iter().count(),"mesh_assets":meshes.len(),"map_visual_cache_counts":cache.counts(),"nodes":nodes});
+        "structures":structures,"brush":brush,"selected_prop":prop_record,"world_2d":world_2d,"static_props_by_archetype":static_counts,"ready_static_props":ready_static_props,"prop_instances":scene.props.iter().count(),"scene_roots":scene.scenes.iter().count(),"mesh_assets":meshes.len(),"map_visual_cache_counts":cache.counts(),"nodes":nodes});
     let index = qa.stage;
     qa.frames.push(frame);
     commands

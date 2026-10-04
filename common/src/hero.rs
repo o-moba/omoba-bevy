@@ -28,6 +28,9 @@ pub struct HeroEconomy {
     pub purchase_sequence: u64,
     /// Fractional passive income not yet paid out as whole gold.
     pub gold_income_remainder: f32,
+    /// Deterministic accepted-strike credit: rejected/replayed commands cannot advance it.
+    pub basic_crit_meter: f32,
+    pub death_streak: u32,
 }
 
 impl HeroEconomy {
@@ -42,6 +45,8 @@ impl HeroEconomy {
             basic_attack_request_id: 0,
             purchase_sequence: 0,
             gold_income_remainder: 0.0,
+            basic_crit_meter: 0.0,
+            death_streak: 0,
         }
     }
 }

@@ -14,6 +14,7 @@ pub(crate) mod skill_card;
 pub(crate) mod standard;
 mod tactical_hud;
 pub(crate) mod targeting;
+mod tower_zones;
 
 pub use crate::domain::{CombatStats, MAX_HP};
 use crate::input_context::InputContextSet;
@@ -21,13 +22,13 @@ pub(crate) use crate::input_context::{CombatPointerInputSet, WorldMovementInputS
 use crate::targeting::{BasicAttackState, TargetAimPreview};
 use bevy::prelude::*;
 
-#[cfg(feature = "qa")]
+pub(crate) use crate::equipped_skills::upgrade_eligible;
 pub(crate) use bars::CombatBarAnchor;
 pub(crate) use cast::{PendingCast, queue_cast_request};
 pub use cooldown::LocalCastCooldown;
+#[cfg(test)]
 pub(crate) use cooldown::effective_cast_duration;
 pub(crate) use feedback::ActionFeedback;
-pub(crate) use hotbar::upgrade_eligible;
 pub(crate) use mobile::mobile_assisted_target;
 pub use selection::TargetState;
 #[cfg(feature = "qa")]
@@ -55,6 +56,7 @@ pub struct CombatPlugin;
 impl Plugin for CombatPlugin {
     fn build(&self, app: &mut App) {
         use crate::ui::UiActionAppExt;
+        app.add_plugins(tower_zones::TowerZonesPlugin);
         app.insert_gizmo_config(
             standard::SkillAimGizmos,
             bevy::gizmos::config::GizmoConfig {

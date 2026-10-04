@@ -10,7 +10,7 @@ pub const DUEL_MIN_LEVEL: u32 = 1;
 /// Gold step and cap for the duel opponent's shopping budget. The cap buys a
 /// full inventory of any items (pinned by a test against the catalog).
 pub const DUEL_GOLD_STEP: u32 = 100;
-pub const DUEL_MAX_GOLD: u32 = 1_000;
+pub const DUEL_MAX_GOLD: u32 = 10_000;
 /// Stationary dummies alive at once; older ones are recycled first.
 pub const MAX_DUMMIES: usize = 4;
 
@@ -68,7 +68,7 @@ mod tests {
     #[test]
     fn duel_values_are_clamped_and_round_trip_on_the_wire() {
         assert_eq!(
-            PracticeCommand::duel(0, 5_000),
+            PracticeCommand::duel(0, u32::MAX),
             PracticeCommand::StartDuel {
                 level: DUEL_MIN_LEVEL,
                 gold: DUEL_MAX_GOLD

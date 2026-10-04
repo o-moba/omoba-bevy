@@ -5,6 +5,8 @@ mod ingest;
 mod interpolate;
 mod offline;
 mod public_transport;
+pub(crate) mod recovery;
+pub(crate) mod recovery_ui;
 mod session;
 mod status_ui;
 #[cfg(test)]

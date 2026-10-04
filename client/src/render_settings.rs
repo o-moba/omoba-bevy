@@ -13,11 +13,15 @@ use serde::{Deserialize, Serialize};
 #[serde(default)]
 pub(crate) struct RenderSettings {
     pub(crate) fps_limit: u16,
+    pub(crate) show_fps: bool,
 }
 
 impl Default for RenderSettings {
     fn default() -> Self {
-        Self { fps_limit: 60 }
+        Self {
+            fps_limit: 60,
+            show_fps: true,
+        }
     }
 }
 
@@ -25,6 +29,7 @@ impl RenderSettings {
     pub(crate) fn sanitized(self) -> Self {
         Self {
             fps_limit: if self.fps_limit == 120 { 120 } else { 60 },
+            show_fps: self.show_fps,
         }
     }
 }
@@ -35,8 +40,12 @@ impl Plugin for RenderSettingsPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<RenderSettings>()
             .init_resource::<MeasuredFps>()
+            .init_resource::<FramePacingDiagnostics>()
             .add_systems(Startup, spawn_fps_readout)
-            .add_systems(Update, (measure_fps, update_fps_readout).chain());
+            .add_systems(
+                Update,
+                (measure_fps, collect_pacing_diagnostics, update_fps_readout).chain(),
+            );
         #[cfg(target_os = "ios")]
         app.add_systems(Update, apply_ios_pacing);
         #[cfg(not(target_os = "ios"))]
@@ -115,6 +124,38 @@ fn apply_ios_pacing(
     *applied = Some(limit);
 }
 
+/// Diagnostics separate the requested ceiling, native callback delivery and
+/// measured app updates. They do not claim to measure GPU completion/scanout.
+#[derive(Resource, Default, Debug, Clone, Serialize)]
+pub(crate) struct FramePacingDiagnostics {
+    pub requested_limit: u16,
+    pub measured_update_hz: Option<f64>,
+    pub display_max_hz: Option<u16>,
+    pub display_link_hz: Option<f64>,
+}
+
+fn collect_pacing_diagnostics(
+    _main_thread: bevy::ecs::system::NonSendMarker,
+    settings: Res<RenderSettings>,
+    measured: Res<MeasuredFps>,
+    mut diagnostics: ResMut<FramePacingDiagnostics>,
+) {
+    diagnostics.requested_limit = settings.sanitized().fps_limit;
+    diagnostics.measured_update_hz = measured.value;
+    #[cfg(target_os = "ios")]
+    {
+        unsafe extern "C" {
+            fn omoba_frame_pacing_max_fps() -> i32;
+            fn omoba_frame_pacing_hz() -> f64;
+        }
+        let maximum = unsafe { omoba_frame_pacing_max_fps() };
+        let callbacks = unsafe { omoba_frame_pacing_hz() };
+        diagnostics.display_max_hz = u16::try_from(maximum).ok().filter(|value| *value > 0);
+        diagnostics.display_link_hz =
+            (callbacks.is_finite() && callbacks > 0.0).then_some(callbacks);
+    }
+}
+
 /// Smoothed observed app frame cadence, never the requested FPS preference.
 /// VSync stays enabled so a normally paced app frame maps to a rendered frame;
 /// this is not a GPU timestamp or a claim about physical display scanout.
@@ -179,10 +220,16 @@ fn measure_fps(time: Res<Time<Real>>, mut measured: ResMut<MeasuredFps>) {
 
 fn update_fps_readout(
     measured: Res<MeasuredFps>,
+    settings: Res<RenderSettings>,
     mobile: Option<Res<crate::mobile_controls::MobileControls>>,
     mut readout: Query<(&mut Text, &mut Node), With<FpsReadout>>,
 ) {
     for (mut text, mut node) in &mut readout {
+        node.display = if settings.show_fps {
+            Display::Flex
+        } else {
+            Display::None
+        };
         let value = measured
             .value
             .map_or_else(|| "—".to_owned(), |value| format!("{value:.0}"));
@@ -229,9 +276,19 @@ mod tests {
         let legacy: RenderSettings = serde_json::from_str("{}").unwrap();
         assert_eq!(legacy.fps_limit, 60);
         for value in [0, 1, 59, 61, 144, u16::MAX] {
-            assert_eq!(RenderSettings { fps_limit: value }.sanitized(), legacy);
+            assert_eq!(
+                RenderSettings {
+                    fps_limit: value,
+                    ..default()
+                }
+                .sanitized(),
+                legacy
+            );
         }
-        let settings = RenderSettings { fps_limit: 120 };
+        let settings = RenderSettings {
+            fps_limit: 120,
+            show_fps: false,
+        };
         assert_eq!(
             serde_json::from_str::<RenderSettings>(&serde_json::to_string(&settings).unwrap())
                 .unwrap(),
@@ -256,12 +313,63 @@ mod tests {
             wait,
             react_to_user_events,
             ..
-        } = focused_pacing(RenderSettings { fps_limit: 120 }, true)
+        } = focused_pacing(
+            RenderSettings {
+                fps_limit: 120,
+                ..default()
+            },
+            true,
+        )
         else {
             panic!()
         };
         assert_eq!(wait, Duration::from_secs(1));
         assert!(react_to_user_events);
+    }
+
+    #[test]
+    fn hiding_readout_keeps_measuring_and_preserves_the_selected_ceiling() {
+        let mut app = App::new();
+        app.init_resource::<Time<Real>>()
+            .init_resource::<MeasuredFps>()
+            .init_resource::<FramePacingDiagnostics>()
+            .insert_resource(RenderSettings {
+                fps_limit: 120,
+                show_fps: false,
+            })
+            .add_systems(
+                Update,
+                (measure_fps, collect_pacing_diagnostics, update_fps_readout).chain(),
+            );
+        let readout = app
+            .world_mut()
+            .spawn((Text::new(""), Node::default(), FpsReadout))
+            .id();
+        for _ in 0..60 {
+            app.world_mut()
+                .resource_mut::<Time<Real>>()
+                .advance_by(Duration::from_secs_f64(1.0 / 30.0));
+            app.update();
+        }
+        assert_eq!(
+            app.world().get::<Node>(readout).unwrap().display,
+            Display::None
+        );
+        let diagnostics = app.world().resource::<FramePacingDiagnostics>();
+        assert_eq!(diagnostics.requested_limit, 120);
+        assert!((diagnostics.measured_update_hz.unwrap() - 30.0).abs() < 0.1);
+        assert_eq!(
+            diagnostics.display_max_hz, None,
+            "desktop cannot certify an iOS display"
+        );
+        app.world_mut().resource_mut::<RenderSettings>().show_fps = true;
+        app.update();
+        assert_eq!(
+            app.world().get::<Node>(readout).unwrap().display,
+            Display::Flex
+        );
+        assert_eq!(app.world().get::<Text>(readout).unwrap().0, "30 FPS");
+        assert_eq!(app.world().resource::<RenderSettings>().fps_limit, 120);
     }
 
     #[test]
@@ -284,7 +392,10 @@ mod tests {
         app.init_resource::<Time<Real>>()
             .init_resource::<Time<Virtual>>()
             .init_resource::<MeasuredFps>()
-            .insert_resource(RenderSettings { fps_limit: 120 })
+            .insert_resource(RenderSettings {
+                fps_limit: 120,
+                ..default()
+            })
             .add_systems(Update, measure_fps);
         for _ in 0..120 {
             app.world_mut()

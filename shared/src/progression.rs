@@ -2,7 +2,7 @@
 //! keyboard: server bots (lane bots and the practice duelist) and the offline
 //! duel. Hosts apply the result through their own upgrade path.
 
-use crate::{HeroClass, SkillSlot, unlocked_slots_for_level};
+use crate::{HeroClass, SkillSlot, loadout::EquippedSkills};
 
 /// The order a bot spends skill points in: the ultimate first once it
 /// unlocks, then Q, W and E.
@@ -14,16 +14,42 @@ const RANK_PRIORITY: [SkillSlot; 4] = [SkillSlot::R, SkillSlot::Q, SkillSlot::W,
 /// order; applying them to `ranks` one at a time is always a legal upgrade.
 /// Points that have nowhere to go are left unspent.
 pub fn skill_upgrade_order(class: HeroClass, level: u32, ranks: [u8; 4], points: u32) -> Vec<u8> {
-    let unlocked = unlocked_slots_for_level(level);
+    equipped_skill_upgrade_order(
+        EquippedSkills::from_resolved(class, None),
+        level,
+        ranks,
+        points,
+    )
+}
+
+/// Upgrade the actual kit, prioritizing authored ultimate roles even when moved
+/// to another button. Equal roles use physical binding order deterministically.
+pub fn equipped_skill_upgrade_order(
+    skills: EquippedSkills,
+    level: u32,
+    ranks: [u8; 4],
+    points: u32,
+) -> Vec<u8> {
+    let unlocked = skills.unlocked(level);
+    let mut priority = SkillSlot::ALL;
+    priority.sort_by_key(|slot| {
+        let role = skills
+            .skill(*slot)
+            .map_or(*slot, |definition| definition.slot);
+        RANK_PRIORITY
+            .iter()
+            .position(|candidate| *candidate == role)
+            .unwrap()
+    });
     let mut ranks = ranks;
     let mut points = points;
     let mut order = Vec::new();
-    for slot in RANK_PRIORITY {
+    for slot in priority {
         let index = slot.index();
         if !unlocked[index] {
             continue;
         }
-        let max_rank = class.ability(slot).max_rank;
+        let max_rank = skills.ability(slot).max_rank;
         while points > 0 && ranks[index] < max_rank {
             ranks[index] += 1;
             points -= 1;
@@ -75,6 +101,39 @@ mod tests {
         assert_eq!(
             skill_upgrade_order(HeroClass::Warden, 1, [1; 4], 5),
             vec![0, 0]
+        );
+    }
+}
+
+#[cfg(test)]
+mod equipped_tests {
+    use super::*;
+    use crate::loadout::{CoreId, SkillId};
+
+    #[test]
+    fn moved_ultimate_keeps_unlock_priority_and_duplicate_roles_stay_bounded() {
+        let mut recipe = CoreId::Dawnweaver.preset();
+        recipe.skills.swap(0, 3);
+        let skills = EquippedSkills::resolve(HeroClass::Dawnweaver, Some(&recipe)).unwrap();
+        assert_eq!(
+            equipped_skill_upgrade_order(skills, 1, [1; 4], 5),
+            vec![3, 3]
+        );
+        assert_eq!(
+            equipped_skill_upgrade_order(skills, 6, [1; 4], 4),
+            vec![0, 0, 3, 3]
+        );
+        recipe.skills = [
+            SkillId::DawnRay,
+            SkillId::WildRocket,
+            SkillId::FourfoldDuel,
+            SkillId::Nightfall,
+        ];
+        let skills = EquippedSkills::resolve(HeroClass::Dawnweaver, Some(&recipe)).unwrap();
+        assert!(equipped_skill_upgrade_order(skills, 5, [1; 4], 8).is_empty());
+        assert_eq!(
+            equipped_skill_upgrade_order(skills, 6, [1; 4], 9),
+            vec![0, 0, 1, 1, 2, 2, 3, 3]
         );
     }
 }

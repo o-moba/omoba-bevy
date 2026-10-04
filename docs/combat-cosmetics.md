@@ -1,17 +1,23 @@
 # Combat cosmetics
 
-The [combat visual uplift TODO](plans/combat-visual-uplift.md) maps all 16
-classes and 64 active skills to proposed animations, props and effects, with
-implementation order and acceptance checks. Its required design supports future
-hybrid recipes, including four ultimate abilities or different weapon attacks:
-presentation belongs to the skill, independently of class and input slot. It
-separates existing mechanics from planned presentation work; arbitrary slot
-assignment is supported by presentation; the server loadout resolver still enforces its existing slot rules.
+The [combat visual uplift TODO](plans/combat-visual-uplift.md) records the
+September inventory of 16 classes and 64 skills, proposed animations/props and
+acceptance checks. Adventurer expands the current roster to 17 classes and 68
+active skills. Presentation belongs to the skill, independently of class and
+input slot.
+
+As of **0.40.0 / protocol 9 / standard-kits-4**, the shared resolver and runtime
+also accept arbitrary unique compatible bindings, including four ultimates.
+Authored unlock roles, skill-owned follow-up costs and capability requirements
+remain enforced. The client metadata adapter supplies names, icons, aiming,
+cards and cooldown totals from that accepted kit. Local 0.40 validation passes; see [the contract](equipped-skills.md) and
+[progress](progress/2026-10-04-equipped-skills.md). Public recipe editing,
+full animation phases and physical-device acceptance remain separate work.
 
 ## Skill presentation pilot
 
 [`config/skills.skillfx`](../client/assets/config/skills.skillfx) now owns the
-64 skill presentations: all 44 modular skills plus the 20 canonical legacy
+68 skill presentations: all 48 modular skills plus the 20 canonical legacy
 ability IDs. Legacy projectile shapes use the complementary registry below. Fields are `release`, optional `windup`,
 `effect`, RGB `color`, and optional `hdr_gain` (linear brightness, 1–8,
 default 3); unknown fields, skills and motion IDs are rejected.
@@ -29,11 +35,15 @@ back to the previous geometric renderer.
 }
 ```
 
-The animation selector reads `recipe.skills[action.slot]`, then the skill
-profile. It does not derive the motion from the class or default catalogue
-slot. Moving Dawn Ray into a Wildspark recipe's Q is covered by a client ECS
-test; this is an accepted-recipe fixture, **not** a claim that the server's
-current `WrongSlot` restriction or public class editor has been removed.
+The animation selector resolves the accepted recipe against the replicated
+actor class, reads the skill at `action.slot`, then selects its profile. The
+slot remains the physical binding, while the authored skill role determines
+the generic Attack/Cast category. Malformed or mismatched recipes cannot select
+skill or basic-attack motion by silently falling back to another kit. Moving
+Dawn Ray to Q is supported by authority and presentation; its unlock remains
+level 6. The old `WrongSlot` restriction is removed, while duplicate and
+capability checks remain. Local Combat Test configuration can author a recipe;
+there is no public class editor.
 
 | Skill | Motion | 3D presentation |
 | --- | --- | --- |
@@ -92,10 +102,12 @@ package, additional viewport/language or physical mobile performance was tested.
 ## Full roster presentation pass
 
 Each remaining class has four skill-owned profiles in `skills.skillfx`, with
-reusable silhouettes instead of 64 independent model files. Accepted recipes
+reusable silhouettes instead of a model file per skill. Accepted recipes
 always win over class defaults. The five legacy classes resolve canonical
-ability IDs when no modular recipe exists. A four-ultimate presentation fixture
-covers slot independence without changing server validation.
+ability IDs when no modular recipe exists. The original four-ultimate fixture
+proved presentation independence only. Version 0.40 adds resolver/runtime and
+client regressions for actual accepted permutations and four ultimates; its
+current final validation status is recorded separately above.
 
 | Class | Added presentation |
 | --- | --- |

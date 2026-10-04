@@ -44,3 +44,24 @@ pub enum MatchServiceView {
         code: String,
     },
 }
+
+/// Team decision for an allocated human who is temporarily disconnected.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum TakeoverPolicy {
+    Idle,
+    #[default]
+    Bot,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct TakeoverSeatView {
+    pub player_id: u64,
+    pub generation: u64,
+    pub nickname: String,
+    pub policy: TakeoverPolicy,
+    pub idle_votes: u32,
+    pub bot_votes: u32,
+    pub eligible_voters: u32,
+    pub my_vote: Option<TakeoverPolicy>,
+}

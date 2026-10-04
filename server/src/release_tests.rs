@@ -453,14 +453,14 @@ fn siege_blocks_cast_and_damage_until_own_lane_falls_and_resets() {
         .unwrap()
         .state
         .clone();
-    let own_lane = rt
+    let mut own_lane: Vec<_> = rt
         .world
         .structures
         .values()
-        .find(|s| s.state.kind == StructureKind::Tower && s.state.team == Team::Blue)
-        .unwrap()
-        .state
-        .id;
+        .filter(|s| s.state.team == Team::Blue && s.state.lane == Some(shared::map::Lane::Mid))
+        .map(|s| (s.state.tier, s.state.id))
+        .collect();
+    own_lane.sort_unstable();
     let other_lane = rt
         .world
         .structures
@@ -495,13 +495,20 @@ fn siege_blocks_cast_and_damage_until_own_lane_falls_and_resets() {
     assert_eq!(rt.world.structures[&base.id].state.hp, base.hp);
     rt.world.structures.get_mut(&other_lane).unwrap().state.hp = 0.0;
     assert!(structure_is_protected(&rt.world.structures, base.id));
-    apply_structure_damage(
-        &mut rt.world.structures,
-        own_lane,
-        999.0,
-        Team::Green,
-        &mut rt.world.game_state,
-    );
+    for (_, id) in own_lane {
+        assert!(structure_is_protected(&rt.world.structures, base.id));
+        assert!(
+            apply_structure_damage(
+                &mut rt.world.structures,
+                id,
+                999.0,
+                Team::Green,
+                &mut rt.world.game_state,
+            )
+            .unwrap()
+            .killed
+        );
+    }
     assert!(!structure_is_protected(&rt.world.structures, base.id));
     rt.handle_packet(
         addr(55601),
@@ -661,18 +668,12 @@ fn live_udp_victory_rematch_uses_real_cast_receiver_and_framed_snapshots() {
         .unwrap()
         .state
         .clone();
-    let lane = rt
-        .world
-        .structures
-        .values()
-        .find(|s| s.state.kind == StructureKind::Tower && s.state.team == Team::Blue)
-        .unwrap()
-        .state
-        .id;
     for s in rt.world.structures.values_mut() {
         s.attack_range = 0.0;
+        if s.state.team == Team::Blue && s.state.lane == Some(shared::map::Lane::Mid) {
+            s.state.hp = 0.0;
+        }
     }
-    rt.world.structures.get_mut(&lane).unwrap().state.hp = 0.0;
     rt.world.structures.get_mut(&base.id).unwrap().state.hp = 1.0;
     let player = rt.world.players.get_mut(&first_addr).unwrap();
     progress(player, now, false);

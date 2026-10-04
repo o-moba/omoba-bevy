@@ -300,10 +300,38 @@ def validate_manifest(data: dict, root: Path, *, check_pixels: bool = True) -> d
         raise ValidationError("invalid traversable river topology")
     towers = topology.get("lane_towers")
     bases = topology.get("base_objectives")
-    if not isinstance(towers, list) or len(towers) != 6 or not isinstance(bases, list) or len(bases) != 2:
-        raise ValidationError("topology must define six lane and two base objectives")
-    if {(tower.get("team"), tower.get("lane")) for tower in towers} != {(team, lane) for team in ("green", "blue") for lane in ("mid", "top", "bot")}:
-        raise ValidationError("tower topology team/lane coverage mismatch")
+    authored = load_json(Path(__file__).resolve().parents[1] / "shared/assets/maps/verdant.json")["structures"]
+    expected_towers = [structure for structure in authored if structure["kind"] == "tower"]
+    if not isinstance(towers, list) or len(towers) != len(expected_towers) or not isinstance(bases, list) or len(bases) != 2:
+        raise ValidationError("topology must document the default lane and base objectives")
+    anchors = towers + bases
+    if len({anchor.get("id") for anchor in anchors}) != len(anchors):
+        raise ValidationError("duplicate topology structure id")
+    for structure in authored:
+        matches = [anchor for anchor in anchors if anchor.get("id") == structure["id"]]
+        if len(matches) != 1 or matches[0].get("team") != structure["team"]:
+            raise ValidationError("topology structure identity mismatch")
+        anchor = matches[0]
+        if structure["kind"] == "tower":
+            peers = sorted((item for item in expected_towers if (item["team"], item["lane"]) == (structure["team"], structure["lane"])),
+                           key=lambda item: item["t"], reverse=structure["team"] == "green")
+            if anchor not in towers or anchor.get("lane") != structure["lane"] or anchor.get("tier") != peers.index(structure):
+                raise ValidationError("tower topology team/lane/tier coverage mismatch")
+            points = lanes[structure["lane"]]
+            lengths = [math.dist(a, b) for a, b in zip(points, points[1:])]
+            remaining = sum(lengths) * structure["t"]
+            expected = points[-1]
+            for (start, end), length in zip(zip(points, points[1:]), lengths):
+                if remaining <= length:
+                    expected = [a + (b - a) * remaining / length for a, b in zip(start, end)]
+                    break
+                remaining -= length
+            expected = [coordinate + offset for coordinate, offset in zip(expected, structure.get("offset", [0, 0]))]
+        else:
+            if anchor not in bases or anchor.get("lane") is not None:
+                raise ValidationError("invalid base topology anchor")
+            expected = topology["bases"][structure["team"]]
+        close_pair(anchor.get("xz"), expected, f"structure {structure['id']}", 1e-4)
 
     generation = data.get("generation")
     grid = generation.get("grid", {}) if isinstance(generation, dict) else {}
@@ -438,6 +466,15 @@ class NegativeContractTests(unittest.TestCase):
 
     def test_invalid_topology_reference(self) -> None:
         self.rejected(lambda data: data["teams"]["green"].update(base_prop="absent"), "invalid manifest topology reference")
+
+    def test_missing_default_tower(self) -> None:
+        self.rejected(lambda data: data["topology"]["lane_towers"].pop(), "default lane and base objectives")
+
+    def test_wrong_tower_tier(self) -> None:
+        self.rejected(lambda data: data["topology"]["lane_towers"][0].update(tier=2), "team/lane/tier")
+
+    def test_moved_tower(self) -> None:
+        self.rejected(lambda data: data["topology"]["lane_towers"][0].update(xz=[0, 0]), "structure 1")
 
 
 def main() -> int:

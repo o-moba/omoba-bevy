@@ -35,5 +35,11 @@
   "home.footer": "Esc · 设置                         OMOBA · 翠绿竞技场",
   "home.invite": "{name} 邀请你加入队伍",
   "home.button.accept": "接受",
-  "home.button.decline": "拒绝"
+  "home.button.decline": "拒绝",
+  "home.play.resume": "继续对局",
+  "home.recovery.home": "主页 · 保留对局",
+  "home.recovery.bot": "机器人",
+  "home.recovery.idle": "待机",
+  "home.recovery.seat": "{name} · {policy}",
+  "home.recovery.team": "队友控制（{count}）"
 }

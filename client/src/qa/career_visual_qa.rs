@@ -154,6 +154,7 @@ fn fixture() -> CareerView {
             avatar: Some("agnes".into()),
             sprite_character: None,
             stats: MatchStats {
+                earned_gold: Some(2500 + index as u32 * 100),
                 kills: 2 + index as u32,
                 deaths: 1 + index as u32 % 4,
                 assists: 3 + index as u32,

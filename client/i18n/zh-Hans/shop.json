@@ -4,7 +4,7 @@
   "shop.title": "圣所商店",
   "shop.button.close": "ESC  关闭",
   "shop.button.close_phone": "关闭",
-  "shop.footer": "独特的永久装备。在基地购买，复活后仍然保留。\n对局中每秒获得 1 金币，战斗另有奖励。每局开始时装备重置。",
+  "shop.footer": "组件可合成升级装备。在己方基地购买，已有配方组件可用于合成并减少价格。\n每秒获得2金币，战斗另有奖励。装备在复活后保留，新对局重置。",
   "shop.footer_phone": "在基地购买。装备复活后保留，下一局重置。",
   "shop.item_phone.vitality_gem": "+30 最大生命值",
   "shop.item_phone.guardian_crest": "+15 最大生命值 / +6% 伤害",
@@ -31,5 +31,9 @@
   "shop.card.details": "{cost} 金币  {tag}\n{action}",
   "shop.card.recommended": "推荐",
   "shop.card.click_to_buy": "点击购买",
-  "shop.card.tap_to_buy": "轻触购买"
+  "shop.card.tap_to_buy": "轻触购买",
+  "shop.recipe": "配方：{items}。总价{total}金币，已有组件会被消耗并抵消对应价格。",
+  "shop.tier": "{tier}级",
+  "shop.credit": "{tier}（−{credit}金币）",
+  "shop.tier_tag": "{tier} {tag}"
 }

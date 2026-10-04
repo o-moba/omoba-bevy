@@ -21,12 +21,13 @@ pub fn apply_skill_upgrade(player: &mut ConnectedPlayer, slot: u8) {
     let Some(skill_slot) = SkillSlot::from_index(slot) else {
         return;
     };
-    let def = player.hero.skills.loadout.as_ref().map_or_else(
-        || ability_for_class_slot(player.hero.identity.hero_class, skill_slot),
-        |l| &l.skill(skill_slot).ability,
-    );
+    let equipped = hero_stats::equipped_skills(player);
+    let def = equipped.ability(skill_slot);
     let s = skill_slot.index();
-    if player.hero.progress.skill_points > 0 && player.hero.progress.ranks[s] < def.max_rank {
+    if (player.modifiers.unlock_all || equipped.unlocked(player.hero.progress.level)[s])
+        && player.hero.progress.skill_points > 0
+        && player.hero.progress.ranks[s] < def.max_rank
+    {
         player.hero.progress.ranks[s] += 1;
         player.hero.progress.skill_points -= 1;
         println!(
@@ -212,7 +213,14 @@ pub fn record_player_action(player: &mut ConnectedPlayer, slot: SkillSlot) {
     if player.hero.last_action.sequence == 0 {
         player.hero.last_action.sequence = 1;
     }
-    player.hero.last_action.kind = PlayerActionKind::for_cast(slot);
+    // Animation category follows the authored skill role, while the receipt's
+    // action_slot remains the physical binding used by the caller.
+    let authored = player
+        .hero
+        .skills
+        .loadout
+        .map_or(slot, |l| l.skill(slot).slot);
+    player.hero.last_action.kind = PlayerActionKind::for_cast(authored);
     player.hero.last_action.slot = slot.index() as u8;
     player.hero.last_action.yaw = None;
 }
@@ -221,4 +229,7 @@ pub fn record_player_action(player: &mut ConnectedPlayer, slot: SkillSlot) {
 pub fn face_player_action(player: &mut ConnectedPlayer, dx: f32, dz: f32) {
     player.hero.last_action.yaw = (dx.is_finite() && dz.is_finite() && dx * dx + dz * dz > 1e-6)
         .then(|| shared::math::hero_yaw_towards(dx, dz));
+    if let Some(yaw) = player.hero.last_action.yaw {
+        player.hero.yaw = yaw;
+    }
 }

@@ -23,7 +23,7 @@ fn full_roster_resolves_and_each_kit_has_four_distinct_skills() {
             assert_eq!(skill(id).slot.index(), i);
         }
     }
-    assert_eq!(ids.len(), 44);
+    assert_eq!(ids.len(), SkillId::ALL.len());
     let mut bad = CoreId::Riftshot.preset();
     bad.skills[3] = SkillId::OrbitalCollapse;
     assert!(matches!(
@@ -650,7 +650,21 @@ fn every_standard_slot_produces_its_actual_effect_or_status() {
                 world.players[&addr(1)].hero.x,
                 world.players[&addr(1)].hero.z,
             ];
-            cast(&mut world, addr(1), slot, [13.0, 0.0], 1, now);
+            let victim_before = world.players[&addr(2)].hero.skills.clone();
+            let definition = world.players[&addr(1)]
+                .hero
+                .skills
+                .loadout
+                .unwrap()
+                .skill(SkillSlot::from_index(slot).unwrap());
+            // Point intent is clamped by the client; melee can reach a target
+            // hitbox whose center lies just beyond the allowed aim endpoint.
+            let aim_x = if definition.ability.targeting == shared::TargetingMode::Point {
+                10.0 + definition.ability.cast_range.min(3.0)
+            } else {
+                13.0
+            };
+            cast(&mut world, addr(1), slot, [aim_x, 0.0], 1, now);
             let after = &world.players[&addr(1)].hero;
             let mut a = after.skills.clone();
             let mut b = before;
@@ -664,7 +678,8 @@ fn every_standard_slot_produces_its_actual_effect_or_status() {
             let immediate = !world.skill_runtime.effects.is_empty()
                 || a != b
                 || before_pos != [after.x, after.z]
-                || world.players[&addr(2)].hero.hp < 1000.0;
+                || world.players[&addr(2)].hero.hp < 1000.0
+                || world.players[&addr(2)].hero.skills != victim_before;
             let events = advance(&mut world, now, 1.0);
             let prepared_curse = if class == HeroClass::Veilstalker && slot == 1 {
                 advance(&mut world, now, 2.6);

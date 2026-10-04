@@ -56,6 +56,7 @@ async fn main() {
             avatar: None,
             sprite_character: None,
             stats: MatchStats {
+                earned_gold: Some(if i == 0 { 5200 } else { 4300 }),
                 kills: if i == 0 { 7 } else { 3 },
                 deaths: if i == 0 { 3 } else { 7 },
                 assists: 2,

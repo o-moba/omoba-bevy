@@ -9,7 +9,8 @@ step it describes.
 Architecture report (before vs after, current architecture, verified improvement list O1–O30 and Q1–Q9): [ARCHITECTURE_REPORT.md](ARCHITECTURE_REPORT.md).
 Roadmap source: the "Roadmap" section of [ARCHITECTURE.md](ARCHITECTURE.md).
 Per-step notes: [progress/](progress/) (one dated note per merged step).
-Release notes: `## [Unreleased]` in the root `CHANGELOG.md`.
+Release notes: [CHANGELOG.md](../CHANGELOG.md), including delivery status and versioned changes.
+Current completed work and TODOs: [October follow-ups](#post-programme-architecture-follow-ups--2026-10-04).
 
 ## Process rules (agreed with the maintainer)
 
@@ -84,6 +85,50 @@ Release notes: `## [Unreleased]` in the root `CHANGELOG.md`.
 
 Suggested order after 7: 14 (done), 10 (done), 15, 11, 12, 13, 9b (server first while
 its structure is fresh, then the client). Each row is one to four PRs.
+
+## Post-programme architecture follow-ups — 2026-10-04
+
+This is the current refactoring TODO after the September programme. A checked
+item means implemented and locally verified; it does not mean deployed or
+available in TestFlight. Versions 0.37–0.39 have their own
+[iteration delivery note](progress/2026-10-04-iteration-commit.md).
+Version 0.40.0 is implemented on `feat/playtest-round-two`, with R16/R17
+implemented and locally verified; see [current progress](progress/2026-10-04-equipped-skills.md).
+Historical September metrics and PR descriptions above/below remain dated
+records; much of the authority code now lives in `common/`.
+
+### Completed foundations and this iteration
+
+- [x] Extract the shared headless online/offline engine into `common` — completed **2026-09-29**, commit `c36dd0f`, before this iteration. Today's mechanics extend that engine. [Original completion](progress/2026-09-29-common-offline.md).
+- [x] Use shared purchase quotes and component-credit planning across the client and authority. Keep spending, kill/assist rewards, critical/lifesteal effects and match-time respawns authoritative. [Economy contract](economy.md), [0.37 verification](progress/2026-10-04-playtest-round-two.md).
+- [x] Add reusable dagger skills and a common accepted-technique lifecycle hook, including mixed-core/Flow coverage, shared hand attachment and skill-owned presentation. This completes the implemented preset; arbitrary custom-kit UI remains open below. [0.38 verification](progress/2026-10-04-adventurer.md).
+- [x] Retain the same authoritative hero across disconnect/reclaim and provide authenticated teammate bot/idle votes. Separating the underlying actor/controller/transport model remains open. [Recovery scope](progress/2026-10-04-playtest-round-two.md).
+- [x] Derive removable tower tiers from validated map data, preserving object identity and protection order. Share lane-brush geometry between online/offline visibility and 3D/2D rendering. [0.39 verification](progress/2026-10-04-lane-defense.md).
+- [x] Align touch movement response with the visible stick travel, with first-frame reversal regressions. [Movement evidence](progress/2026-10-04-movement-reversal.md).
+
+### TODO — prioritized, separately reviewable slices
+
+- [x] **P1 / R16 — Equipped skill metadata: complete, locally verified 2026-10-04.** `EquippedSkills` now supplies desktop/mobile/controller input, aim, HUD/cards, costs, cooldown totals, unlocks and upgrades. Authority accepts unique arbitrary bindings, including four ultimates, while preserving authored progression roles and capability checks. Effects/recasts/animation and damage receipts retain actual bindings; follow-up costs are skill-owned. Invalid recipes fail closed. The final full gate, real-server mixed-recipe scenario and affected HUD/card captures pass. [Contract](equipped-skills.md), [verification status](progress/2026-10-04-equipped-skills.md). A public editor is separate.
+- [x] **P1 / R17 — Admitted control effects: complete, locally verified 2026-10-04.** The shared control helper centralizes applicable target/immunity/parry checks, control application, recall cancellation and Brittle consumption. The intentional behavior fix makes admitted Bluff consume Brittle once through existing receipts; rejected controls do not consume marks or cancel recall. Cross-kit and negative regressions are separate from extraction, and preserved unstoppable/player-charm/forced-displacement exceptions are explicit in the [contract](equipped-skills.md#shared-admitted-control). The final full gate, negative/cross-kit regressions and real-server suite pass.
+- [ ] **P2 / R18 — Separate actor identity, controller ownership and transport presence.** Replace synthetic `SocketAddr` actor keys and reclaim-time `last_seen` adjustments in `server/src/session_recovery.rs` with explicit identities/state. Done when AI activity cannot update network liveness, reclaim preserves the same hero/build, and stale or unauthorized sessions still cannot take control. Design the migration before changing protocol/storage.
+- [ ] **P2 / R19 — Define and measure unattended-match resource policy.** Running matches with detached humans currently keep worker slots until a terminal result. Measure sustained tick time, memory and occupied slots on the small VPS; specify observable bounds and retirement rules that preserve legitimate reconnects. Do not silently restore immediate abandonment. Bot takeover currently also ranks skills and buys items; document or configure that ownership policy explicitly.
+- [ ] **P2 / R20 — Put configurable brush geometry in validated map data.** Keep one resolved layout for authority and both renderers; validate stable IDs, reachable lane entrances and relevant structure/brush interactions. Preserve existing default geometry and declare client/map compatibility. This is needed for editable map variants, not evidence that today's default brush is broken.
+- [ ] **P2 / R21 — Split skill execution by responsibility.** Extract common admission/payment/scaling/control steps only where duplicated behavior is demonstrated, then separate effect families in `common/src/skills/{mod,advanced,dagger}.rs`. Preserve accepted/rejected action, passive, receipt, visibility and replay tests. Avoid a broad framework rewrite or a wire change solely for file size.
+- [ ] **P3 / R22 — Decouple catalog source order from enum order.** If larger/editor-authored catalogs require it, resolve explicit stable item IDs and validate the recipe graph independently of JSON array order. Preserve wire compatibility, duplicate/unknown/cycle rejection and deterministic purchase quotes. The existing validated data-driven catalog is already complete; this is an extension.
+- [ ] **P3 / R23 — Consolidate concrete UI reuse and split busy modules.** Separate gesture ownership, radial layout and HUD state where useful; extract repeated draft/postmatch/shop builders into the existing UI kit. These screens already use typed actions. Done when reuse reduces duplicated layout policy while raw-touch, scroll, modal and phone-layout behavior stays pinned; line count alone is not the acceptance criterion.
+
+Suggested order: use the verified R16/R17 contract for further hybrid-kit content;
+address R18/R19 together before expanding multiplayer capacity; R20 when adding map editing; R21–R23
+as small behavior-preserving changes around active work. These are backlog
+items, not authorization for production infrastructure or dependency changes.
+
+### Release/playtest follow-ups — separate from refactoring
+
+- [ ] Publish a coordinated protocol-9 / standard-kits-4 client/server release after its release checks. Commit/push alone does not deploy or upload a mobile build.
+- [ ] Exercise real iPhone backgrounding, app restart, reconnect and Home escape, including continued bot play during absence. The signed local test advances a manual clock; it is not a multi-minute device soak test.
+- [ ] Measure requested cap, actual app cadence and native display cadence on iPhone 16 Pro; verify the FPS visibility toggle. Desktop screenshots are not 120 Hz certification.
+- [ ] Play full matches to tune 500g bounties, the rare 1-HP dagger effect, tower count and respawn curve. The current economy model gives roughly three farming minutes per full bounty; actual match duration/win rates remain unmeasured.
+- [ ] Reproduce the separately observed remote interpolation cadence change before changing it: eight samples with a 100ms delay may be insufficient around 120-to-60 Hz input cadence. This is not proven as the reported local-hero reversal symptom, which has its own fixed touch-response regression.
 
 ## How to continue
 
@@ -165,14 +210,14 @@ O2 (CI as a required gate): the maintainer approved it on 2026-09-25. Rules 2 an
 - 10g (#37): `make check-no-qa` (part of `make check`) and a CI step run `cargo clippy -p client --lib --no-deps --no-default-features -- -D warnings`. Production items only QA reads are `#[cfg(feature = "qa")]`, items QA and tests read are `#[cfg(any(test, feature = "qa"))]`; nothing uses `allow(dead_code)`. Client lib tests: 549 with the default features, 529 without.
 - Optional follow-ups from the plan: 10h (mobile store builds with `--no-default-features`), 10i (migrate imports off the re-export shims).
 
-### 15: Client session events (in progress: 15a + 15b1 in #39, 15b2 + 15c + 15d in #41)
+### 15: Client session events (15a–15e done: #39, #41, #43; 15f/15g optional)
 - `SessionEvent` and `SnapshotApplied` messages emitted by `net`; other modules react to them instead of `net` writing into their resources; `apply_server_snapshot` split into staged passes. Inventory, design, ordering hazards and slices 15a-15g: [plans/client-10-15.md](plans/client-10-15.md), "Step 15".
 - 15a (#39): `SessionEvent` (`TransportStarted`, `Connected`, `Joined`, `Rejected`, `JoinExhausted`, `Disconnected`, `Left`, `ServerScopeReset`, `RoundChanged`) in `net/session.rs`, registered by `NetworkingPlugin`, re-exported as `crate::net::SessionEvent`. Every site queues into `ClientSession.outbox` (`pub(in crate::net)`); `flush_session_events` writes the queue at the end of `ApplySnapshot` and chained after `retry_pending_join` in `SessionLifecycle`. `NetworkState.last_round` gives `RoundChanged` the `CombatRoundIdentity` semantics; `ClientSession.announced_join` (reset in `clear_join_attempt`) makes `Joined` an edge. `TeardownReason` is `pub(crate)`. `SessionReactions` is configured after `SessionLifecycle` and has no members yet. No consumers.
 - 15b1 (#39): `SnapshotApply::{Begin, Session, Resources, Entities, Finish}`, chained and inside `ApplySnapshot`; `StagedSnapshot { data, gate }`; `apply_snapshot_entities` is the old body from the Draft gate on, unchanged except that it reads and sets the gate; `SnapshotApplied { meta, your_id, round, outcome }` with `ApplyOutcome::{Full, Draft, LocalPending}` (no `local` field yet); `snapshot_apply_systems()` is used by the plugin, `net/test_fixtures.rs` and the offline lifecycle test. `SnapshotUiState` stays (three resources) until 15b2, because the entity stage would otherwise need 18 parameters.
 - 15b2 (#41): `Entities` is split into `LocalPlayer`, `RemotePlayers`, `Projectiles`, `Structures`, `Minions`, `Neutrals` (chained between `Resources` and `Finish`). `LocalPlayer` runs the Draft despawn or closes the gate (`LocalPending`); the other five run under `world_stages_open` (`gate == Full`). Per-stage filtered queries replace the `Transform` `ParamSet` (hero `With<Player>, Without<MainCamera>`, camera `With<MainCamera>, Without<Player>`, `With<NetworkProjectile>`, ...). One `local_hero_components` bundle replaces the three spawn copies; `SnapshotUiState` is gone; `SnapshotApplied.local: LocalHeroApply::{Unchanged, Updated { entity, corrected, dashed }, Spawned { entity, position, team }, Cleared}`.
 - 15c (#41): `combat/round_reset.rs` and `read_mobile_controls` read `SessionEvent::RoundChanged` (after `ApplySnapshot`, whose flush writes it, and before input); `CombatRoundIdentity` and `MobileControls.round_identity` are deleted. The teardown-gap assertion is `net::apply::tests::teardown_gap_keeps_the_last_round_so_only_the_next_round_is_a_change`. `shop.rs`, `edge_hud.rs`, `sandbox/mod.rs` and `frontend/draft.rs` keep polling (they also react to the teardown's zero ids).
 - 15d (#41): `SessionReactions` members: `career::clear_account_on_scope_reset` and `social::clear_on_scope_reset` (`ServerScopeReset`), `frontend::return_home_on_leave` (`Left` → `PendingScreen(Home)`). `update_session_lifecycle` lost its `CareerClient`, `SocialClient` and `PendingScreen` writes; `TeamSelection.team = None`, `take_return_to_lobby()` and the `CancelQueue` signing stay in `net` (hazards 8, 9). `scope_reset_clears_career_and_social_in_its_frame_so_the_next_view_survives` pins the same-frame clearing (hazard 7).
-- Next: 15e (`ClientSession` accessors); 15f (camera through `SnapshotApplied`, its first reader, which also drops its `expect(dead_code)`) and 15g are optional.
+- 15e (`ClientSession` accessors) is complete in #43. Optional follow-ups remain 15f (camera through `SnapshotApplied`) and 15g; consult the plan before starting a slice.
 
 ### 11: One debug tooling family (done: 11-0 #34, 11a-11c #42, 11d #43, 11e+11f #49)
 - Plan: [plans/steps-11-13.md](plans/steps-11-13.md), "Step 11". The Combat Test protocol stays its own family (acknowledged, sequenced, epoch-scoped, dev-only); no new `ClientPacket` variant.
@@ -236,7 +281,7 @@ check`), as are all earlier runs back to #40. Nothing needed fixing. For #52 a
 60 s launch of the real client under Xvfb also confirmed the system schedule
 builds without ordering cycles (no unit test builds the whole app).
 
-The programme is finished. The final documents:
+The September 24–25 programme is finished. The final documents:
 [ARCHITECTURE_CURRENT.md](ARCHITECTURE_CURRENT.md) (the current architecture,
 in Russian, with Mermaid diagrams) and
 [REFACTORING_SCALE.md](REFACTORING_SCALE.md) (before vs after: lines, files,

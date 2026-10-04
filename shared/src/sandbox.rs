@@ -24,6 +24,10 @@ pub enum BotBehavior {
 pub struct ActorConfig {
     #[serde(deserialize_with = "strict_hero")]
     pub hero: HeroClass,
+    /// Optional authored kit for the opt-in local laboratory. Admission validates
+    /// the complete recipe atomically; absence selects the class preset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recipe: Option<crate::loadout::BuildRecipe>,
     pub avatar: Option<String>,
     #[serde(
         default,
@@ -51,6 +55,7 @@ impl Default for ActorConfig {
     fn default() -> Self {
         Self {
             hero: HeroClass::Warrior,
+            recipe: None,
             avatar: None,
             handheld: Default::default(),
             level: 1,

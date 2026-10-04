@@ -142,21 +142,61 @@ impl Plugin for ShopPlugin {
 
 pub(crate) fn item_code(id: ItemId) -> &'static str {
     match id {
-        ItemId::EmberBlade => "EB",    // i18n-allow
-        ItemId::SwiftGrip => "SG",     // i18n-allow
-        ItemId::TrailBoots => "TB",    // i18n-allow
-        ItemId::VitalityGem => "VG",   // i18n-allow
-        ItemId::FocusCharm => "FC",    // i18n-allow
-        ItemId::GuardianCrest => "GC", // i18n-allow
+        ItemId::EmberBlade => "EB",      // i18n-allow
+        ItemId::SwiftGrip => "SG",       // i18n-allow
+        ItemId::TrailBoots => "TB",      // i18n-allow
+        ItemId::VitalityGem => "VG",     // i18n-allow
+        ItemId::FocusCharm => "FC",      // i18n-allow
+        ItemId::GuardianCrest => "GC",   // i18n-allow
+        ItemId::CritShard => "CS",       // i18n-allow
+        ItemId::SiphonStone => "SS",     // i18n-allow
+        ItemId::WindrunnerBoots => "WB", // i18n-allow
+        ItemId::DuelistEdge => "DE",     // i18n-allow
+        ItemId::VampiricFang => "VF",    // i18n-allow
+        ItemId::ArcaneFocus => "AF",     // i18n-allow
+        ItemId::Bulwark => "BW",         // i18n-allow
+        ItemId::TempestBlade => "TB3",   // i18n-allow
+        ItemId::Bloodreaver => "BR",     // i18n-allow
+        ItemId::AetherCrown => "AC",     // i18n-allow
     }
 }
 
 pub(crate) fn quick_offers(class: shared::HeroClass, inventory: &[ItemId]) -> [Option<ItemId>; 2] {
-    let mut offers = shop::recommended_items(class)
-        .iter()
-        .copied()
-        .filter(|id| !inventory.contains(id));
-    [offers.next(), offers.next()]
+    // Walk the next build from its missing leaves, so early gold buys a useful
+    // component instead of showing only a finished item hundreds of gold away.
+    fn next_part(id: ItemId, inventory: &[ItemId]) -> Option<ItemId> {
+        if shop::inventory_covers(id, inventory) {
+            return None;
+        }
+        for component in shop::item(id).components {
+            if let Some(part) = next_part(*component, inventory) {
+                return Some(part);
+            }
+        }
+        Some(id)
+    }
+    let mut result = [None, None];
+    let mut filled = 0;
+    for id in shop::recommended_items(class) {
+        let Some(mut next) = next_part(*id, inventory) else {
+            continue;
+        };
+        if shop::purchase_quote(next, u32::MAX, inventory).is_err()
+            && shop::purchase_quote(*id, u32::MAX, inventory).is_ok()
+        {
+            next = *id;
+        }
+        if result.contains(&Some(next)) || shop::purchase_quote(next, u32::MAX, inventory).is_err()
+        {
+            continue;
+        }
+        result[filled] = Some(next);
+        filled += 1;
+        if filled == result.len() {
+            break;
+        }
+    }
+    result
 }
 fn compact_gold(gold: u32) -> String {
     if gold < 10_000 {
@@ -461,7 +501,9 @@ fn update_quick_buy(
                 if state.pending.as_ref().is_some_and(|p| p.item == id) {
                     "...".into()
                 } else {
-                    shop::item(id).cost.to_string()
+                    shop::upgrade_quote(id, &equipment.inventory)
+                        .cost
+                        .to_string()
                 }
             },
         );
@@ -513,8 +555,8 @@ fn update_quick_buy(
         let next = offers[slot.0].map_or_else(TooltipText::default, |id| TooltipText {
             title: Some(data::item_name(id).to_owned()),
             body: match unavailable_reason(equipment, stats, id) {
-                Some(reason) => format!("{}\n{reason}", data::item_desc(id)),
-                None => data::item_desc(id).to_owned(),
+                Some(reason) => format!("{}\n{reason}", item_tooltip(id)),
+                None => item_tooltip(id),
             },
         });
         if *tooltip != next {
@@ -602,6 +644,25 @@ fn item_description(id: ItemId, phone: bool) -> &'static str {
     }
 }
 
+fn item_tooltip(id: ItemId) -> String {
+    let definition = shop::item(id);
+    let mut body = data::item_desc(id).to_owned();
+    if !definition.components.is_empty() {
+        let recipe = definition
+            .components
+            .iter()
+            .map(|id| data::item_name(*id))
+            .collect::<Vec<_>>()
+            .join(" + ");
+        body.push('\n');
+        body.push_str(&trf(
+            "shop.recipe",
+            &[("items", &recipe), ("total", &definition.cost)],
+        ));
+    }
+    body
+}
+
 /// Rewrites the item cards, close label and footer when the language or the
 /// UI platform changes.
 fn relabel_shop_text(
@@ -609,6 +670,7 @@ fn relabel_shop_text(
     mobile: Option<Res<crate::mobile_controls::MobileControls>>,
     mut last: Local<Option<(u32, bool)>>,
     mut labels: Query<(&ShopText, &mut Text)>,
+    mut cards: Query<(&ShopBuy, &mut TooltipText)>,
 ) {
     let phone = phone_copy(mobile.as_deref());
     let key = (
@@ -624,6 +686,10 @@ fn relabel_shop_text(
         if text.0 != next {
             text.0 = next.to_owned();
         }
+    }
+    for (buy, mut tooltip) in &mut cards {
+        tooltip.title = Some(data::item_name(buy.0).to_owned());
+        tooltip.body = item_tooltip(buy.0);
     }
 }
 
@@ -658,6 +724,7 @@ fn setup_shop(mut commands: Commands, mobile: Option<Res<crate::mobile_controls:
                     Node {
                         width: Val::Px(864.0),
                         max_width: Val::Percent(94.0),
+                        max_height: Val::Percent(94.0),
                         flex_direction: FlexDirection::Column,
                         row_gap: Val::Px(12.0),
                         padding: UiRect::all(Val::Px(22.0)),
@@ -713,9 +780,13 @@ fn setup_shop(mut commands: Commands, mobile: Option<Res<crate::mobile_controls:
                                 flex_wrap: FlexWrap::Wrap,
                                 column_gap: Val::Px(10.0),
                                 row_gap: Val::Px(10.0),
+                                max_height: Val::Px(480.0),
+                                min_height: Val::Px(0.0),
+                                overflow: Overflow::scroll_y(),
                                 ..default()
                             },
                             Name::new("ShopCards"),
+                            crate::ui::ScrollArea::menu(28.0),
                         ))
                         .with_children(|cards| {
                             for definition in shop::items() {
@@ -725,6 +796,12 @@ fn setup_shop(mut commands: Commands, mobile: Option<Res<crate::mobile_controls:
                                         Node {
                                             width: Val::Px(264.0),
                                             height: Val::Px(150.0),
+                                            min_height: Val::Px(if definition.tier > 1 {
+                                                132.0
+                                            } else {
+                                                0.0
+                                            }),
+                                            flex_shrink: 0.0,
                                             padding: UiRect::all(Val::Px(13.0)),
                                             flex_direction: FlexDirection::Column,
                                             row_gap: Val::Px(7.0),
@@ -735,6 +812,14 @@ fn setup_shop(mut commands: Commands, mobile: Option<Res<crate::mobile_controls:
                                         BackgroundColor(ui::TILE),
                                         BorderColor::all(ui::EDGE),
                                         ShopBuy(definition.id),
+                                        Tooltip {
+                                            title: None,
+                                            body: "shop.title",
+                                        },
+                                        TooltipText {
+                                            title: Some(data::item_name(definition.id).into()),
+                                            body: item_tooltip(definition.id),
+                                        },
                                         ButtonStyle::new(ButtonKind::ShopItem),
                                         UiAction(ShopAction::Buy(definition.id)),
                                         TestId::new(format!(
@@ -883,7 +968,11 @@ fn spawn_item_icon(parent: &mut ChildSpawnerCommands, id: ItemId, size: f32) {
                     ));
                 };
             match id {
-                ItemId::EmberBlade => {
+                ItemId::EmberBlade
+                | ItemId::DuelistEdge
+                | ItemId::VampiricFang
+                | ItemId::TempestBlade
+                | ItemId::Bloodreaver => {
                     part(17.0, 3.0, 6.0, 25.0, 35.0, ui::IVORY, 1.0);
                     part(8.0, 23.0, 16.0, 4.0, 35.0, ui::GOLD, 1.0);
                     part(9.0, 25.0, 5.0, 9.0, 35.0, ui::GOLD, 1.0);
@@ -903,18 +992,18 @@ fn spawn_item_icon(parent: &mut ChildSpawnerCommands, id: ItemId, size: f32) {
                     part(8.0, 18.0, 20.0, 11.0, -8.0, ui::IVORY, 3.0);
                     part(8.0, 28.0, 17.0, 4.0, -8.0, ui::GOLD, 1.0);
                 }
-                ItemId::TrailBoots => {
+                ItemId::TrailBoots | ItemId::WindrunnerBoots => {
                     part(6.0, 7.0, 9.0, 18.0, 0.0, ui::JADE, 2.0);
                     part(6.0, 22.0, 16.0, 7.0, 0.0, ui::JADE, 3.0);
                     part(20.0, 4.0, 9.0, 18.0, 0.0, ui::IVORY, 2.0);
                     part(20.0, 19.0, 14.0, 7.0, 0.0, ui::IVORY, 3.0);
                     part(6.0, 28.0, 16.0, 3.0, 0.0, ui::GOLD, 1.0);
                 }
-                ItemId::VitalityGem => {
+                ItemId::VitalityGem | ItemId::CritShard | ItemId::SiphonStone => {
                     part(7.0, 7.0, 22.0, 22.0, 45.0, ui::JADE, 3.0);
                     part(13.0, 10.0, 8.0, 14.0, 45.0, ui::IVORY, 1.0);
                 }
-                ItemId::FocusCharm => {
+                ItemId::FocusCharm | ItemId::ArcaneFocus | ItemId::AetherCrown => {
                     part(6.0, 4.0, 24.0, 24.0, 0.0, ui::GOLD, 12.0);
                     part(9.0, 7.0, 18.0, 18.0, 0.0, ui::TILE, 9.0);
                     part(
@@ -928,7 +1017,7 @@ fn spawn_item_icon(parent: &mut ChildSpawnerCommands, id: ItemId, size: f32) {
                     );
                     part(16.0, 26.0, 4.0, 7.0, 0.0, ui::GOLD, 2.0);
                 }
-                ItemId::GuardianCrest => {
+                ItemId::GuardianCrest | ItemId::Bulwark => {
                     part(6.0, 5.0, 24.0, 23.0, 0.0, ui::GOLD, 5.0);
                     part(10.0, 9.0, 16.0, 17.0, 0.0, ui::TILE, 4.0);
                     part(12.0, 21.0, 12.0, 12.0, 45.0, ui::GOLD, 2.0);
@@ -1050,12 +1139,17 @@ fn unavailable_reason(
         Some(tr("shop.reason.owned").into())
     } else if !equipment.shop_available {
         Some(tr("shop.reason.return_base").into())
-    } else if equipment.inventory.len() >= shop::INVENTORY_CAPACITY {
+    } else if shop::purchase_quote(id, u32::MAX, &equipment.inventory)
+        == Err(PurchaseError::InventoryFull)
+    {
         Some(tr("shop.reason.inventory_full").into())
-    } else if equipment.gold < shop::item(id).cost {
+    } else if equipment.gold < shop::upgrade_quote(id, &equipment.inventory).cost {
         Some(trf(
             "shop.reason.need_gold",
-            &[("gold", &(shop::item(id).cost - equipment.gold))],
+            &[(
+                "gold",
+                &(shop::upgrade_quote(id, &equipment.inventory).cost - equipment.gold),
+            )],
         ))
     } else {
         None
@@ -1328,13 +1422,17 @@ fn update_shop(
                 })
                 .into()
             });
+            let quote = shop::upgrade_quote(label.0, &equipment.inventory);
+            let tier = trf("shop.tier", &[("tier", &shop::item(label.0).tier)]);
+            let credit = shop::item(label.0).cost - quote.cost;
+            let tag = if credit > 0 {
+                trf("shop.credit", &[("tier", &tier), ("credit", &credit)])
+            } else {
+                trf("shop.tier_tag", &[("tier", &tier), ("tag", &tag)])
+            };
             trf(
                 "shop.card.details",
-                &[
-                    ("cost", &shop::item(label.0).cost),
-                    ("tag", &tag),
-                    ("action", &action),
-                ],
+                &[("cost", &quote.cost), ("tag", &tag), ("action", &action)],
             )
         };
     }
@@ -1425,7 +1523,7 @@ mod tests {
             .collect();
         assert_eq!(close, ["ESC  CLOSE"]);
         assert_eq!(footer.len(), 1);
-        assert!(footer[0].starts_with("Unique permanent items."));
+        assert!(footer[0].starts_with("Components become upgrades."));
     }
     #[test]
     fn browse_reasons_prioritize_life_ownership_base_and_price() {
@@ -1965,7 +2063,7 @@ mod tests {
         assert_eq!(named(&mut app, "ShopCloseLabel"), "ESC  关闭");
         assert_eq!(item_name(&mut app), "余烬之刃");
         assert_eq!(keyed(&mut app, "shop.title"), "圣所商店");
-        assert!(named(&mut app, "ShopFooter").starts_with("独特的永久装备"));
+        assert!(named(&mut app, "ShopFooter").starts_with("组件可合成升级装备"));
 
         let mut controls = crate::mobile_controls::MobileControls::default();
         controls.enabled = true;
@@ -1977,15 +2075,30 @@ mod tests {
 
     #[test]
     fn quick_offers_have_two_stable_slots_and_do_not_offer_owned_items() {
+        use ItemId::*;
         let mut owned = Vec::new();
-        for _ in 0..shop::INVENTORY_CAPACITY {
+        for _ in 0..20 {
             let offers = quick_offers(shared::HeroClass::Mage, &owned);
-            let next = offers[0].unwrap();
+            let Some(next) = offers[0] else { break };
             assert!(!owned.contains(&next));
             assert!(offers[1].is_none_or(|id| id != next && !owned.contains(&id)));
+            let quote = shop::purchase_quote(next, u32::MAX, &owned).unwrap();
+            owned.retain(|id| !quote.consumed.contains(id));
             owned.push(next);
+            assert!(owned.len() <= shop::INVENTORY_CAPACITY);
         }
-        assert_eq!(quick_offers(shared::HeroClass::Mage, &owned), [None, None]);
+        let ranger = quick_offers(shared::HeroClass::Ranger, &[SwiftGrip]);
+        assert_eq!(ranger[0], Some(EmberBlade));
+        let upgrade = quick_offers(
+            shared::HeroClass::Ranger,
+            &[SwiftGrip, EmberBlade, CritShard],
+        );
+        assert_eq!(upgrade[0], Some(DuelistEdge));
+        let upgrade = quick_offers(shared::HeroClass::Ranger, &[SwiftGrip, DuelistEdge]);
+        assert_eq!(upgrade[0], Some(TempestBlade));
+        assert!(
+            !quick_offers(shared::HeroClass::Ranger, &[TempestBlade]).contains(&Some(SwiftGrip))
+        );
         assert_eq!(compact_gold(80), "80");
         assert_eq!(compact_gold(10_000), "10k");
     }

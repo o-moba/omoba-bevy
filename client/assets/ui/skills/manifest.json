@@ -55,6 +55,17 @@
       "width": 1024,
       "height": 2304,
       "sha256": "b28a211ec00bd1fded811f6ff736996dd73c842c9283902c51f81e9082755d70"
+    },
+    {
+      "path": "ui/skills/dagger-skills.png",
+      "columns": 4,
+      "rows": 1,
+      "classes": [
+        "adventurer"
+      ],
+      "width": 1024,
+      "height": 256,
+      "sha256": "ee0063c5621e2f202e655fbaa1de6adfd38a06b0cf0fdae9f4f19af2867dc272"
     }
   ],
   "sources": [
@@ -328,6 +339,24 @@
         "sheltering_leap",
         "northwall",
         "winter_divide"
+      ]
+    },
+    {
+      "class_id": "adventurer",
+      "file": "adventurer-icons.png",
+      "dimensions": [
+        1024,
+        1024
+      ],
+      "sha256": "8b08426035e52024d5acb35cebb0c5ed3640843f9fd7ba026e5a5505805942cc",
+      "generator": "scripts/build_dagger_icons.py",
+      "provenance": "Original Open Moba vector-painted silhouettes, no third-party game artwork",
+      "license": "CC-BY-4.0",
+      "abilities": [
+        "dagger_deadly_blow",
+        "dagger_bluff",
+        "dagger_backstab",
+        "dagger_lethal_blow"
       ]
     }
   ],

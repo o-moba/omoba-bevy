@@ -64,6 +64,8 @@ pub(super) fn face_confirmed_actions(
         &PlayerActionFacing,
         Option<&NetworkPlayerId>,
         Option<&PlayerLoadout>,
+        Option<&crate::net::NetworkHeroClass>,
+        Option<&crate::net::AuthoritativePlayerYaw>,
     )>,
 ) {
     if mode.is_some_and(|m| *m == crate::sprite::PlayerVisualMode::Sprite2d) {
@@ -79,11 +81,31 @@ pub(super) fn face_confirmed_actions(
     }
     state.1.retain(|entity, _| actors.contains(*entity));
     let delta = clock.delta(&time, game.as_deref());
-    for (entity, mut pose, stats, action, facing, id, loadout) in &mut actors {
-        let skill = crate::skill_presentation::equipped_skill(
-            loadout.and_then(|l| l.0.as_ref()),
-            action.slot,
-        );
+    for (entity, mut pose, stats, action, facing, id, loadout, class, authoritative_yaw) in
+        &mut actors
+    {
+        if loadout
+            .and_then(|loadout| loadout.0.as_ref())
+            .is_some_and(|loadout| loadout.stun_remaining_secs > 0.0)
+        {
+            // Bluff turns a victim without granting them a new attack sequence.
+            // Clear the old action lock so it cannot turn them back after the stun.
+            state.1.remove(&entity);
+            if let Some(yaw) = authoritative_yaw
+                .map(|yaw| yaw.0)
+                .filter(|yaw| yaw.is_finite())
+            {
+                pose.rotation = Quat::from_rotation_y(yaw);
+            }
+            continue;
+        }
+        let skill = class.and_then(|class| {
+            crate::skill_presentation::equipped_skill(
+                class.0,
+                loadout.and_then(|l| l.0.as_ref()),
+                action.slot,
+            )
+        });
         let preparing = game.as_ref().is_some_and(|g| {
             g.skill_effects.iter().any(|e| {
                 Some(e.owner_id) == id.map(|id| id.0)
@@ -111,6 +133,72 @@ pub(super) fn face_confirmed_actions(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn stun_uses_replicated_victim_yaw_and_clears_old_attack_facing() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<GameStateSnapshot>()
+            .add_systems(PostUpdate, face_confirmed_actions);
+        let actor = app
+            .world_mut()
+            .spawn((
+                Transform::IDENTITY,
+                CombatStats::default(),
+                NetworkPlayerId(7),
+                PlayerCosmeticAction::default(),
+                PlayerActionFacing::default(),
+                PlayerLoadout(Some(shared::loadout::LoadoutState::default())),
+                crate::net::AuthoritativePlayerYaw(1.5),
+            ))
+            .id();
+        app.update();
+        app.world_mut().entity_mut(actor).insert((
+            PlayerCosmeticAction {
+                sequence: 1,
+                slot: 0,
+                kind: shared::PlayerActionKind::Attack,
+            },
+            PlayerActionFacing {
+                sequence: 1,
+                yaw: Some(-1.0),
+            },
+        ));
+        app.update();
+        // The last attack points east; movement has since turned north. A
+        // normal stun must retain current authoritative yaw, just like Bluff.
+        app.world_mut()
+            .get_mut::<PlayerLoadout>(actor)
+            .unwrap()
+            .0
+            .as_mut()
+            .unwrap()
+            .stun_remaining_secs = 1.0;
+        app.update();
+        assert!(
+            app.world()
+                .get::<Transform>(actor)
+                .unwrap()
+                .rotation
+                .angle_between(Quat::from_rotation_y(1.5))
+                < 0.001
+        );
+        app.world_mut()
+            .get_mut::<PlayerLoadout>(actor)
+            .unwrap()
+            .0
+            .as_mut()
+            .unwrap()
+            .stun_remaining_secs = 0.0;
+        app.update();
+        assert!(
+            app.world()
+                .get::<Transform>(actor)
+                .unwrap()
+                .rotation
+                .angle_between(Quat::from_rotation_y(1.5))
+                < 0.001
+        );
+    }
     #[test]
     fn local_and_remote_actor_turn_after_locomotion_without_moving_their_positions() {
         let mut app = App::new();

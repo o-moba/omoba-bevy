@@ -17,6 +17,11 @@ use super::{GameState, TargetId};
 
 #[derive(Message, Clone, Debug)]
 pub enum NetworkCommand {
+    TakeoverVote {
+        player_id: u64,
+        generation: u64,
+        policy: shared::match_service::TakeoverPolicy,
+    },
     Sandbox(shared::sandbox::SandboxRequest),
     /// Profile/history requests are valid before arena admission as well.
     Career(shared::career::CareerRequest),
@@ -256,6 +261,24 @@ pub(in crate::net) fn send_network_commands(
                     && let Some(social) = social_client.as_mut()
                 {
                     social.request_failed(*request_id, error);
+                }
+            }
+            NetworkCommand::TakeoverVote {
+                player_id,
+                generation,
+                policy,
+            } => {
+                if !client_session.join_confirmed() || client_session.is_offline() {
+                    continue;
+                }
+                if let Some(snapshot) = snapshot.as_ref() {
+                    let _ = channels.outgoing.try_send(ClientPacket::TakeoverVote {
+                        server_epoch: snapshot.meta.server_epoch,
+                        match_id: snapshot.meta.match_id,
+                        player_id: *player_id,
+                        generation: *generation,
+                        policy: *policy,
+                    });
                 }
             }
             NetworkCommand::Party(command) => {

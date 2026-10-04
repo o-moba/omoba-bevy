@@ -12,11 +12,10 @@
 //! `lane_control_points` (constants from `server/src/balance.rs`). Keep in
 //! sync with the server, same convention as `protocol.rs`.
 
+use shared::loadout::EquippedSkills;
 #[cfg(test)]
 use shared::scaled_cooldown;
-use shared::{
-    SkillSlot, TargetingMode, ability_for_class_slot, scaled_mana_cost, unlocked_slots_for_level,
-};
+use shared::{SkillSlot, TargetingMode, ability_for_class_slot};
 use std::time::Instant;
 
 use crate::protocol::{
@@ -325,18 +324,21 @@ fn authoritative_class(me: &PlayerState) -> HeroClass {
     me.hero_class
 }
 
-/// Spend one point, prioritizing Q then W/E/R, only on an unlocked legal rank.
+fn equipped_skills(me: &PlayerState) -> Option<EquippedSkills> {
+    // Malformed accepted metadata must not silently become the class preset.
+    EquippedSkills::resolve(
+        me.hero_class,
+        me.loadout.as_ref().and_then(|l| l.recipe.as_ref()),
+    )
+    .ok()
+}
+
+/// Spend one point using the shared authored-role priority and bound unlocks.
 pub fn choose_skill_upgrade(me: &PlayerState) -> Option<u8> {
-    if me.skill_points == 0 {
-        return None;
-    }
-    let unlocked = unlocked_slots_for_level(me.level);
-    (0..4u8).find(|&index| {
-        let slot = SkillSlot::from_index(index).unwrap();
-        unlocked[index as usize]
-            && me.ranks[index as usize]
-                < ability_for_class_slot(authoritative_class(me), slot).max_rank
-    })
+    let equipped = equipped_skills(me)?;
+    shared::progression::equipped_skill_upgrade_order(equipped, me.level, me.ranks, me.skill_points)
+        .first()
+        .copied()
 }
 
 /// Buy only where the authoritative snapshot permits it, honoring class
@@ -361,16 +363,26 @@ pub fn can_cast_slot(
     let Some(skill_slot) = SkillSlot::from_index(slot) else {
         return false;
     };
-    let def = ability_for_class_slot(authoritative_class(me), skill_slot);
+    let Some(equipped) = equipped_skills(me) else {
+        return false;
+    };
+    let def = equipped.ability(skill_slot);
     let index = slot as usize;
     let rank = me.ranks[index].clamp(1, def.max_rank);
+    let recast = me.loadout.as_ref().is_some_and(|loadout| {
+        let state = loadout.slots[index];
+        state.can_recast && state.recast_remaining_secs > 0.0
+    });
     me.hp > 0.0
-        && unlocked_slots_for_level(me.level)[index]
-        && me.mana >= scaled_mana_cost(def, rank)
-        && last_casts[index].is_none_or(|last| {
-            now.saturating_duration_since(last)
-                >= shared::shop::item_cooldown(def, rank, skill_slot, me.item_bonuses)
-        })
+        && equipped.unlocked(me.level)[index]
+        && me.mana >= equipped.mana_cost(rank, skill_slot, recast)
+        && me.skill_recovery_remaining_secs <= 0.0
+        && (recast
+            || (me.skill_cooldown_remaining_secs[index] <= 0.0
+                && last_casts[index].is_none_or(|last| {
+                    now.saturating_duration_since(last)
+                        >= equipped.cooldown(me.level, rank, skill_slot, me.item_bonuses)
+                })))
 }
 
 /// A self heal or mana restore is useful after at least 20% of that resource is missing.
@@ -379,11 +391,9 @@ pub fn choose_self_sustain(
     last_casts: &[Option<Instant>; 4],
     now: Instant,
 ) -> Option<u8> {
+    let equipped = equipped_skills(me)?;
     (0..4u8).find(|&index| {
-        let def = ability_for_class_slot(
-            authoritative_class(me),
-            SkillSlot::from_index(index).unwrap(),
-        );
+        let def = equipped.ability(SkillSlot::from_index(index).unwrap());
         let needs_hp = def.self_heal.is_some_and(|amount| amount > 0.0)
             && me.max_hp > 0.0
             && me.hp <= me.max_hp * 0.8;
@@ -459,14 +469,12 @@ pub fn choose_offensive_skill(
         .chain(&view.structures)
         .find(|enemy| enemy.kind == target.kind && enemy.id == target.id)?;
     let range = distance((me.x, me.z), (enemy.x, enemy.z));
-    [3, 2, 0].into_iter().find(|&slot| {
-        let def = ability_for_class_slot(
-            authoritative_class(me),
-            SkillSlot::from_index(slot).unwrap(),
-        );
+    let equipped = equipped_skills(me)?;
+    [3, 2, 0, 1].into_iter().find(|&slot| {
+        let def = equipped.ability(SkillSlot::from_index(slot).unwrap());
         def.targeting == TargetingMode::UnitTarget
             && def.projectile_damage.is_some_and(|damage| damage > 0.0)
-            && range <= def.cast_range * 0.98
+            && range <= shared::scaled_cast_range(def, me.ranks[slot as usize]) * 0.98
             && can_cast_slot(me, slot, last_casts, now)
     })
 }
@@ -1039,6 +1047,95 @@ mod tests {
             me.ranks = class.abilities().map(|def| def.max_rank);
             assert_eq!(choose_skill_upgrade(&me), None);
         }
+    }
+
+    #[test]
+    fn snapshot_recipe_controls_bot_unlock_cost_cooldown_and_upgrade_without_fallback() {
+        use shared::loadout::{CoreId, LoadoutState, SkillId};
+        let now = Instant::now();
+        let mut me = hero("dawnweaver", 1);
+        let mut recipe = CoreId::Dawnweaver.preset();
+        recipe.skills = [
+            SkillId::WildRocket,
+            SkillId::DawnField,
+            SkillId::DawnBarrier,
+            SkillId::DawnBind,
+        ];
+        me.loadout = Some(LoadoutState {
+            recipe: Some(recipe.clone()),
+            ..Default::default()
+        });
+        assert_eq!(choose_skill_upgrade(&me), Some(3));
+        assert!(!can_cast_slot(&me, 0, &[None; 4], now));
+        assert!(can_cast_slot(&me, 3, &[None; 4], now));
+        me.level = 6;
+        let equipped = equipped_skills(&me).unwrap();
+        assert_eq!(choose_skill_upgrade(&me), Some(0));
+        let cost = equipped.mana_cost(1, SkillSlot::Q, false);
+        me.mana = cost - 1.0;
+        assert!(!can_cast_slot(&me, 0, &[None; 4], now));
+        me.mana = cost;
+        let last = [Some(now), None, None, None];
+        let cooldown = equipped.cooldown(6, 1, SkillSlot::Q, me.item_bonuses);
+        assert!(!can_cast_slot(&me, 0, &last, now + cooldown / 2));
+        assert!(can_cast_slot(&me, 0, &last, now + cooldown));
+        me.skill_cooldown_remaining_secs[0] = 0.2;
+        assert!(!can_cast_slot(&me, 0, &[None; 4], now + cooldown));
+        me.loadout.as_mut().unwrap().recipe.as_mut().unwrap().skills[1] = SkillId::WildRocket;
+        assert_eq!(choose_skill_upgrade(&me), None);
+        assert!(!can_cast_slot(&me, 3, &[None; 4], now));
+        assert!(
+            equipped_skills(&me).is_none(),
+            "invalid recipe never becomes preset Dawn Bind on Q"
+        );
+    }
+
+    #[test]
+    fn snapshot_recast_affordability_follows_equipped_skill_instead_of_core() {
+        use shared::loadout::{CoreId, LoadoutState, SkillId, SkillSlotState};
+        let now = Instant::now();
+        let mut me = hero("dawnweaver", 6);
+        let mut recipe = CoreId::Dawnweaver.preset();
+        recipe.skills = [
+            SkillId::DawnRay,
+            SkillId::AnchorStep,
+            SkillId::ThunderPulse,
+            SkillId::EchoStrike,
+        ];
+        me.loadout = Some(LoadoutState {
+            recipe: Some(recipe),
+            slots: [SkillSlotState {
+                can_recast: true,
+                recast_remaining_secs: 2.0,
+                active: false,
+            }; 4],
+            ..Default::default()
+        });
+        me.skill_cooldown_remaining_secs = [10.0; 4];
+        let last = [Some(now); 4];
+        for slot in [1, 2, 3] {
+            me.mana = 24.0;
+            assert!(!can_cast_slot(&me, slot, &last, now));
+            me.mana = 25.0;
+            assert!(
+                can_cast_slot(&me, slot, &last, now),
+                "live paid recast on another core/binding"
+            );
+        }
+        me.hero_class = HeroClass::Stormfist;
+        let mut recipe = CoreId::Stormfist.preset();
+        recipe.skills[0] = SkillId::DawnField;
+        me.loadout.as_mut().unwrap().recipe = Some(recipe);
+        me.mana = 0.0;
+        assert!(
+            can_cast_slot(&me, 0, &last, now),
+            "Dawn Field recast stays free on Stormfist"
+        );
+        me.loadout.as_mut().unwrap().slots[0].can_recast = false;
+        assert!(
+            !can_cast_slot(&me, 0, &last, now),
+            "expired recast cannot bypass cooldown or initial cost"
+        );
     }
 
     #[test]

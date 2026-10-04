@@ -23,8 +23,9 @@ impl ServerRuntime {
             .world
             .players
             .iter()
-            .filter(|(_, player)| {
-                !player.hero.identity.is_bot
+            .filter(|(addr, player)| {
+                !crate::bots::is_bot_address(**addr)
+                    && !player.hero.identity.is_bot
                     && now.saturating_duration_since(player.last_seen) > PLAYER_TIMEOUT
             })
             .map(|(addr, _)| *addr)
@@ -33,6 +34,9 @@ impl ServerRuntime {
             .iter()
             .any(|addr| self.world.players.get(addr).is_some_and(|p| p.joined));
         for addr in expired {
+            if self.detach_running_seat(addr, now) {
+                continue;
+            }
             self.disconnect_career_player(addr, now);
             let mut player = self.world.players.remove(&addr).unwrap();
             common::recall::cancel(&mut player);
@@ -115,6 +119,7 @@ impl ServerRuntime {
         }
         self.reset_career_round();
         self.prematch = Default::default();
+        self.session_recovery = Default::default();
         for player in self.world.players.values_mut() {
             let capable = player.draft.capable;
             player.draft = prematch::DraftState {

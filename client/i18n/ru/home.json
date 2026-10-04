@@ -35,5 +35,11 @@
   "home.footer": "Escape · Настройки                         OMOBA · Изумрудная арена",
   "home.invite": "{name} приглашает вас в группу",
   "home.button.accept": "Принять",
-  "home.button.decline": "Отклонить"
+  "home.button.decline": "Отклонить",
+  "home.play.resume": "Вернуться в матч",
+  "home.recovery.home": "Домой · матч сохранён",
+  "home.recovery.bot": "Бот",
+  "home.recovery.idle": "Ожидание",
+  "home.recovery.seat": "{name} · {policy}",
+  "home.recovery.team": "Управление союзниками ({count})"
 }

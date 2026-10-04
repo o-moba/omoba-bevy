@@ -893,6 +893,7 @@ pub(super) fn sync_player_animation_state(
         let skill_cue = skill_profiles.as_deref().and_then(|registry| {
             crate::skill_presentation::motion_cue(
                 registry,
+                class?.0,
                 loadout.and_then(|l| l.0.as_ref()),
                 action.slot,
                 id.unwrap_or(0),
@@ -919,6 +920,7 @@ pub(super) fn sync_player_animation_state(
             .as_deref()
             .and_then(|registry| {
                 let skill = crate::skill_presentation::equipped_skill(
+                    class?.0,
                     loadout.and_then(|l| l.0.as_ref()),
                     action.slot,
                 )?;

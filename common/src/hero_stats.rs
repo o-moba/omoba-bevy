@@ -122,24 +122,19 @@ pub fn basic_attack_cooldown(player: &ConnectedPlayer) -> Duration {
 }
 
 pub fn ability_cooldown(player: &ConnectedPlayer, slot: SkillSlot) -> Duration {
-    if let Some(loadout) = &player.hero.skills.loadout {
-        let def = loadout.skill(slot);
-        let rate = shared::hero_balance::spell_haste_multiplier(
-            player.hero.identity.hero_class,
-            player.hero.progress.level,
-        ) * combat_bonuses(player).spell_haste_multiplier.max(1.0);
-        return shared::scaled_cooldown(
-            &def.ability,
-            player.hero.progress.ranks[slot.index()].clamp(1, def.ability.max_rank),
-        )
-        .div_f32(rate);
-    }
-    shared::hero_balance::ability_cooldown(
-        player.hero.identity.hero_class,
+    equipped_skills(player).cooldown(
         player.hero.progress.level,
         player.hero.progress.ranks[slot.index()],
         slot,
         combat_bonuses(player),
+    )
+}
+
+/// The accepted recipe owns binding metadata; legacy actors use their class kit.
+pub fn equipped_skills(player: &ConnectedPlayer) -> shared::loadout::EquippedSkills {
+    shared::loadout::EquippedSkills::from_resolved(
+        player.hero.identity.hero_class,
+        player.hero.skills.loadout,
     )
 }
 

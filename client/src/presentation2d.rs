@@ -2056,36 +2056,37 @@ mod tests {
 
     fn spawn_structure_and_wave_fixture(
         app: &mut App,
+        map: &shared::map::ResolvedMap,
         wave_offset: f32,
     ) -> (Vec<Entity>, Vec<Entity>) {
-        let layout = MapLayout::default();
         let mut structures = Vec::new();
-        for points in layout.lane_polylines() {
-            for (team, fraction) in [(Team::Green, 0.30), (Team::Blue, 0.70)] {
-                let anchor = sample_polyline(&points, fraction);
-                structures.push(
-                    app.world_mut()
-                        .spawn((
-                            Transform::from_xyz(anchor.x, 3.0, anchor.y),
-                            NetworkStructure,
-                            team,
-                            StructureKind::Tower,
-                        ))
-                        .id(),
-                );
-            }
-        }
-        for (team, position) in [
-            (Team::Green, layout.home_spawn),
-            (Team::Blue, layout.away_spawn),
-        ] {
+        for structure in &map.structures {
+            let team = match structure.team {
+                shared::map::Team::Green => Team::Green,
+                shared::map::Team::Blue => Team::Blue,
+            };
+            let lane = structure.lane.map(|lane| match lane {
+                shared::map::Lane::Top => crate::net::Lane::Top,
+                shared::map::Lane::Mid => crate::net::Lane::Mid,
+                shared::map::Lane::Bot => crate::net::Lane::Bot,
+            });
             structures.push(
                 app.world_mut()
                     .spawn((
-                        Transform::from_xyz(position.x, 3.0, position.z),
+                        Transform::from_xyz(structure.position[0], 3.0, structure.position[1]),
                         NetworkStructure,
+                        NetworkMapStructure {
+                            key: structure.key.clone(),
+                            visual_profile: structure.visual_profile.clone(),
+                            lane,
+                            tier: structure.tier,
+                        },
                         team,
-                        StructureKind::BaseTower,
+                        if lane.is_some() {
+                            StructureKind::Tower
+                        } else {
+                            StructureKind::BaseTower
+                        },
                     ))
                     .id(),
             );
@@ -2136,9 +2137,10 @@ mod tests {
     }
 
     #[test]
-    fn six_towers_two_bases_and_initial_wave_stay_one_to_one_and_bounded() {
+    fn eighteen_towers_two_bases_and_initial_wave_stay_one_to_one_and_bounded() {
         let mut app = proxy_test_app(PlayerVisualMode::Sprite2d);
-        let (structures, minions) = spawn_structure_and_wave_fixture(&mut app, 0.0);
+        let map = shared::map::ResolvedMap::default();
+        let (structures, minions) = spawn_structure_and_wave_fixture(&mut app, &map, 0.0);
 
         app.update();
         let mut owner_counts = HashMap::<Entity, usize>::new();
@@ -2168,10 +2170,10 @@ mod tests {
                 _ => {}
             }
         }
-        assert_eq!((structure_count, lane_tower_count, base_count), (8, 6, 2));
+        assert_eq!((structure_count, lane_tower_count, base_count), (20, 18, 2));
         assert_eq!(minion_count, 18);
-        assert_eq!(lane_tower_count + minion_count, 24);
-        assert_eq!(owner_counts.len(), 26);
+        assert_eq!(lane_tower_count + minion_count, 36);
+        assert_eq!(owner_counts.len(), 38);
         assert!(owner_counts.values().all(|count| *count == 1));
         let visual_positions = app
             .world_mut()
@@ -2196,15 +2198,15 @@ mod tests {
                 .query::<&PresentationActorCue>()
                 .iter(app.world())
                 .count(),
-            34,
-            "eight structures have two cues and 18 minions have one"
+            58,
+            "twenty structures have two cues and 18 minions have one"
         );
 
         app.update();
-        assert_eq!(primary_and_cue_counts(&mut app), (26, 34));
+        assert_eq!(primary_and_cue_counts(&mut app), (38, 58));
         app.world_mut().entity_mut(minions[0]).despawn();
         app.update();
-        assert_eq!(primary_and_cue_counts(&mut app), (25, 33));
+        assert_eq!(primary_and_cue_counts(&mut app), (37, 57));
 
         // Snapshot omission/reconnect teardown removes every owner proxy and
         // fixed child cue before a fresh authoritative set is recreated.
@@ -2218,11 +2220,11 @@ mod tests {
         let actor_definition_count = app.world().resource::<Presentation2dAssets>().actors.len();
         for wave in 1..=6 {
             let (structures, minions) =
-                spawn_structure_and_wave_fixture(&mut app, wave as f32 * 0.25);
+                spawn_structure_and_wave_fixture(&mut app, &map, wave as f32 * 0.25);
             app.update();
             assert_eq!(
                 primary_and_cue_counts(&mut app),
-                (26, 34),
+                (38, 58),
                 "wave {wave} must remain at the live-owner-derived bound"
             );
             assert_eq!(
@@ -2239,9 +2241,45 @@ mod tests {
             );
         }
 
-        let _recreated = spawn_structure_and_wave_fixture(&mut app, 2.0);
+        let _recreated = spawn_structure_and_wave_fixture(&mut app, &map, 2.0);
         app.update();
-        assert_eq!(primary_and_cue_counts(&mut app), (26, 34));
+        assert_eq!(primary_and_cue_counts(&mut app), (38, 58));
+    }
+
+    #[test]
+    fn disabled_tiers_never_create_proxies_and_reconnect_restores_current_map_only() {
+        let mut app = proxy_test_app(PlayerVisualMode::Sprite2d);
+        for disabled in [vec![1], vec![0, 2], vec![], vec![0, 1, 2]] {
+            let mut definition =
+                shared::map::MapDefinition::from_json(shared::map::DEFAULT_JSON).unwrap();
+            definition.disabled_tower_tiers = disabled.clone();
+            let map = definition.resolve().unwrap();
+            let (structures, minions) = spawn_structure_and_wave_fixture(&mut app, &map, 0.);
+            app.update();
+            assert_eq!(
+                primary_and_cue_counts(&mut app),
+                (map.structures.len() + 18, map.structures.len() * 2 + 18)
+            );
+            for visual in app
+                .world_mut()
+                .query::<&MapStructure2dVisual>()
+                .iter(app.world())
+            {
+                let identity = app
+                    .world()
+                    .get::<NetworkMapStructure>(visual.owner)
+                    .unwrap();
+                assert!(identity.lane.is_none() || !disabled.contains(&identity.tier));
+                assert!(
+                    map.structures
+                        .iter()
+                        .any(|structure| structure.key == identity.key)
+                );
+            }
+            despawn_owners(&mut app, structures.into_iter().chain(minions));
+            app.update();
+            assert_eq!(primary_and_cue_counts(&mut app), (0, 0));
+        }
     }
 
     #[test]

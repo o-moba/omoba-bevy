@@ -189,6 +189,7 @@ fn fixture(
     }
     let local_id = local.single().map_or(0, |id| id.0);
     game.scoreboard = Some(LiveScoreboard {
+        elapsed_secs: 720,
         kills: Vec::new(),
         players: (0..10)
             .map(|index| LiveScorePlayer {

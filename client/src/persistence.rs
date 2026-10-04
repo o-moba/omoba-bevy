@@ -158,7 +158,7 @@ pub fn validate_client_session_id(raw: &str) -> Option<String> {
     Some(t.to_string())
 }
 
-fn preferences_path() -> Option<PathBuf> {
+pub(crate) fn preferences_path() -> Option<PathBuf> {
     crate::platform::preferences_file_path(
         std::env::var("OMOBA_CLIENT_CONFIG_DIR").ok().as_deref(),
         crate::platform::preferences_directory(),
@@ -866,6 +866,7 @@ mod tests {
             &CameraSettings::default(),
         );
         prefs.render.fps_limit = 120;
+        prefs.render.show_fps = false;
         prefs.hud_position.combat_offset = Vec2::new(-24.0, -16.0);
         write_preferences_file(&dir.join(PREFS_FILENAME), &prefs).unwrap();
         let mut app = App::new();
@@ -877,6 +878,7 @@ mod tests {
             app.update();
         }
         assert_eq!(app.world().resource::<RenderSettings>().fps_limit, 120);
+        assert!(!app.world().resource::<RenderSettings>().show_fps);
         assert_eq!(
             app.world().resource::<HudPositionSettings>().combat_offset,
             Vec2::new(-24.0, -16.0)
@@ -888,6 +890,7 @@ mod tests {
         app.update();
         let saved = read_preferences_file(&dir.join(PREFS_FILENAME)).unwrap();
         assert_eq!(saved.render.fps_limit, 60);
+        assert!(!saved.render.show_fps);
         assert_eq!(saved.hud_position.joystick_offset, Vec2::new(8.0, -8.0));
         reset_graphics_to_defaults(
             &mut LightingSettings::default(),

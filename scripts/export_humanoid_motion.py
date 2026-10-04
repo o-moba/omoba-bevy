@@ -42,6 +42,15 @@ CLIPS = (
     ("shoulder_drive", "Punch_Jab", False),
     ("roll", "Roll", False),
 )
+# Skill-owned edits of the CC0 source: a short thrust, a partial jab withdrawn
+# twice, a full committed backstab and a slower heavy cross-body thrust. These
+# are retargeted by semantic bones, so no avatar-specific rig is baked or edited.
+DAGGER_MOTIONS = {
+    "dagger_stab": ("Punch_Jab", 0.44, (0, .12, .43, .70, 1)),
+    "dagger_feint": ("Punch_Jab", 0.62, (0, .29, .08, .38, 0)),
+    "dagger_backstab": ("Punch_Jab", 0.65, (0, .08, .45, .49, .78, 1)),
+    "dagger_heavy_thrust": ("Punch_Cross", 0.84, (0, .15, .23, .57, .78, 1)),
+}
 REQUIRED = (
     "hips", "spine", "head", "leftUpperArm", "leftLowerArm", "leftHand",
     "rightUpperArm", "rightLowerArm", "rightHand", "leftUpperLeg",
@@ -170,6 +179,25 @@ def export_library(source_path=SOURCE):
             "world_rotation_deltas": {key: rounded(value) for key, value in rotations.items()},
             "hips_world_deltas": rounded(hips),
         }
+    for name, (source_name, duration, phases) in DAGGER_MOTIONS.items():
+        clip = source.clip(source_name)
+        rotations = {semantic: [] for semantic in bones}
+        hips = []
+        for phase in phases:
+            world = source.doc.world_pose(clip.pose_at(phase * clip.timeline[-1], source.rest_pose))
+            for semantic, index in bones.items():
+                rotations[semantic].append(legacy.qnorm(legacy.qmul(
+                    world[index][1], legacy.qconj(source.ref_world[index][1]))))
+            # Keep casts in place. Only a slight vertical weight shift is cosmetic.
+            hips.append((0, world[source.hips][0][1] - source.ref_world[source.hips][0][1], 0))
+        library["clips"][name] = {
+            "source_clip": f"{source_name} / Open Moba {name} timing edit",
+            "duration": duration,
+            "looping": False,
+            "times": rounded([duration * i / (len(phases) - 1) for i in range(len(phases))]),
+            "world_rotation_deltas": {key: rounded(value) for key, value in rotations.items()},
+            "hips_world_deltas": rounded(hips),
+        }
     validate_library(library)
     return library
 
@@ -192,8 +220,8 @@ def validate_library(library):
     bones = library["bones"]
     if len(bones) != len(set(bones)) or not set(REQUIRED) <= set(bones):
         raise ValueError("duplicate or missing required semantic bones")
-    if set(library["clips"]) != {name for name, _, _ in CLIPS}:
-        raise ValueError("motion library must contain all six states")
+    if set(library["clips"]) != {name for name, _, _ in CLIPS} | set(DAGGER_MOTIONS):
+        raise ValueError("motion library must contain all declared locomotion and skill clips")
     for name, clip in library["clips"].items():
         times = clip["times"]
         if len(times) < 2 or times[0] != 0 or times[-1] != clip["duration"]:

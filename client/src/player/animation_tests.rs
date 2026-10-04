@@ -56,6 +56,7 @@ fn skill_motion_waits_for_phase_deduplicates_and_respects_cancel_death_respawn()
             NetworkCharacterChoice(CharacterChoice::Cube),
             NetworkAvatar(Some("agnes".into())),
             crate::net::NetworkPlayerId(7),
+            crate::net::NetworkHeroClass(shared::HeroClass::Wildspark),
             PlayerCosmeticAction::default(),
             crate::net::PlayerLoadout(Some(LoadoutState {
                 recipe: Some(recipe),

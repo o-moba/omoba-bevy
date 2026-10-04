@@ -50,6 +50,8 @@ impl Plugin for MinimapPlugin {
                 (
                     update_minimap_icons_system,
                     update_rocket_markers,
+                    update_aim_intersections.after(update_minimap_icons_system),
+                    update_pickup_markers,
                     sync_minimap_visibility_for_session,
                     update_camera_footprint.after(bevy::camera::CameraUpdateSystems),
                 )
@@ -1990,5 +1992,178 @@ mod tests {
                     .is_none()
             );
         }
+    }
+}
+
+/// A cue means the current visible position intersects the cast corridor, not
+/// that a moving enemy is guaranteed to be hit when the projectile arrives.
+fn aim_intersects(origin: Vec2, end: Vec2, radius: f32, target: Vec2) -> bool {
+    let delta = end - origin;
+    let length = delta.length_squared();
+    if !origin.is_finite()
+        || !end.is_finite()
+        || !target.is_finite()
+        || !radius.is_finite()
+        || radius < 0.0
+        || length < 0.001
+    {
+        return false;
+    }
+    let t = (target - origin).dot(delta) / length;
+    (0.0..=1.0).contains(&t)
+        && target.distance_squared(origin + delta * t)
+            <= (radius + shared::PLAYER_TARGET_RADIUS).powi(2)
+}
+
+fn update_aim_intersections(
+    mut commands: Commands,
+    vector: Option<Res<crate::combat::standard::SkillAimVector>>,
+    state: Res<MinimapUiState>,
+    layout: Res<MapLayout>,
+    local: Query<&Team, With<Player>>,
+    heroes: Query<(&Transform, &Team, &CombatStats), With<RemotePlayer>>,
+    mut markers: Local<Vec<Entity>>,
+) {
+    let hits: Vec<Vec2> = if let (Some((a, b, radius)), Ok(team)) =
+        (vector.as_ref().and_then(|v| v.0), local.single())
+    {
+        // Use the actual set of live map portraits, including the legacy fog fallback.
+        state
+            .player_icons
+            .keys()
+            .filter_map(|entity| heroes.get(*entity).ok())
+            .filter(|(pose, other, stats)| {
+                **other != *team
+                    && stats.is_alive()
+                    && aim_intersects(a, b, radius, pose.translation.xz())
+            })
+            .map(|(pose, _, _)| map_point(*layout, pose.translation))
+            .take(5)
+            .collect()
+    } else {
+        Vec::new()
+    };
+    let Some(parent) = state.container else {
+        return;
+    };
+    for (index, p) in hits.iter().enumerate() {
+        for arm in 0..2 {
+            let (node, transform) = line_node(
+                *p + Vec2::new(-9.0, if arm == 0 { -9.0 } else { 9.0 }),
+                *p + Vec2::new(9.0, if arm == 0 { 9.0 } else { -9.0 }),
+                3.5,
+            );
+            let index = index * 2 + arm;
+            if let Some(entity) = markers.get(index) {
+                commands.entity(*entity).insert((node, transform));
+            } else {
+                markers.push(
+                    commands
+                        .spawn((
+                            node,
+                            transform,
+                            BackgroundColor(Color::srgb(1.0, 0.86, 0.22)),
+                            ZIndex(45),
+                            ChildOf(parent),
+                            Name::new("MinimapAimIntersection"),
+                        ))
+                        .id(),
+                );
+            }
+        }
+    }
+    for entity in markers.iter().skip(hits.len() * 2) {
+        commands.entity(*entity).insert(Node {
+            display: Display::None,
+            ..default()
+        });
+    }
+}
+
+fn update_pickup_markers(
+    mut commands: Commands,
+    game: Option<Res<crate::net::GameStateSnapshot>>,
+    layout: Res<MapLayout>,
+    state: Res<MinimapUiState>,
+    mut markers: Local<Vec<Entity>>,
+) {
+    let Some(parent) = state.container else {
+        return;
+    };
+    let pickups: Vec<_> = game
+        .as_ref()
+        .filter(|g| matches!(g.state, crate::net::GameState::Running))
+        .into_iter()
+        .flat_map(|g| &g.forest_pickups)
+        .filter(|p| p.available && p.position.into_iter().all(f32::is_finite))
+        .collect();
+    for (i, pickup) in pickups.iter().enumerate() {
+        let p = map_point(
+            *layout,
+            Vec3::new(pickup.position[0], 0.0, pickup.position[1]),
+        );
+        let node = Node {
+            position_type: PositionType::Absolute,
+            left: Val::Px(p.x - 3.0),
+            top: Val::Px(p.y - 3.0),
+            width: Val::Px(6.0),
+            height: Val::Px(6.0),
+            border_radius: BorderRadius::MAX,
+            ..default()
+        };
+        if let Some(entity) = markers.get(i) {
+            commands.entity(*entity).insert(node);
+        } else {
+            markers.push(
+                commands
+                    .spawn((
+                        node,
+                        BackgroundColor(Color::srgb(0.30, 1.0, 0.58)),
+                        ZIndex(8),
+                        ChildOf(parent),
+                        Name::new("MinimapHealingButterfly"),
+                    ))
+                    .id(),
+            );
+        }
+    }
+    for entity in markers.iter().skip(pickups.len()) {
+        commands.entity(*entity).insert(Node {
+            display: Display::None,
+            ..default()
+        });
+    }
+}
+
+#[cfg(test)]
+mod aim_intersection_tests {
+    use super::*;
+    #[test]
+    fn cast_corridor_accepts_hitbox_overlap_and_rejects_outside_forward_segment() {
+        assert!(aim_intersects(
+            Vec2::ZERO,
+            Vec2::X * 100.0,
+            1.0,
+            Vec2::new(45.0, 0.8)
+        ));
+        assert!(!aim_intersects(
+            Vec2::ZERO,
+            Vec2::X * 100.0,
+            1.0,
+            Vec2::new(45.0, 4.0)
+        ));
+        assert!(!aim_intersects(
+            Vec2::ZERO,
+            Vec2::X * 100.0,
+            1.0,
+            Vec2::new(-1.0, 0.0)
+        ));
+        assert!(!aim_intersects(
+            Vec2::ZERO,
+            Vec2::X * 100.0,
+            1.0,
+            Vec2::new(101.0, 0.0)
+        ));
+        assert!(!aim_intersects(Vec2::ZERO, Vec2::ZERO, 1.0, Vec2::ZERO));
     }
 }

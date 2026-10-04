@@ -186,9 +186,11 @@ fn views() -> [View; 5] {
 fn jungle_views() -> [View; 4] {
     let forest = std::env::var("OMOBA_VISUAL_QA_SCENARIO").as_deref() == Ok("forest-vfx");
     let anchors = if forest {
-        shared::forest_pickups::pickup_layout().map(Vec2::from_array)
+        shared::forest_pickups::pickup_layout()
+            .map(Vec2::from_array)
+            .to_vec()
     } else {
-        MapLayout::default().camp_centers()
+        MapLayout::default().camp_centers().to_vec()
     };
     let dimension = |key, fallback, min, max| {
         std::env::var(key)

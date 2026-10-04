@@ -36,6 +36,7 @@ impl Default for TickOptions {
     }
 }
 pub fn prepare(world: &mut GameWorld, combat_log: &mut CombatLog, now: Instant, dt: f32) {
+    advance_match_clock(world, dt);
     regenerate_mana(&mut world.players, dt);
     // Minion-targeted projectiles resolve ahead of formation, bots and the
     // rest of the simulation, where the ECS combat systems used to run;
@@ -46,6 +47,16 @@ pub fn prepare(world: &mut GameWorld, combat_log: &mut CombatLog, now: Instant, 
         });
         crate::skills::observe(world, &minion_hits, now);
         combat_log.extend(now, minion_hits);
+    }
+}
+
+pub fn advance_match_clock(world: &mut GameWorld, dt: f32) {
+    if matches!(world.game_state, shared::wire::GameState::Running) && dt.is_finite() && dt > 0.0 {
+        world.match_elapsed_secs = (world.match_elapsed_secs + dt).min(86_400.0);
+    }
+    let delay = crate::match_rules::respawn_duration(world.match_elapsed_secs);
+    for player in world.players.values_mut() {
+        player.timers.respawn_delay = delay;
     }
 }
 pub fn skills(world: &mut GameWorld, combat_log: &mut CombatLog, now: Instant, dt: f32) {

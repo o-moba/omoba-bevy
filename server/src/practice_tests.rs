@@ -808,7 +808,8 @@ fn bot_pushes_a_real_lane_and_damages_towers_without_crossing_live_structure_dis
     let nav = shared::navigation::world_navigation();
     let mut damaged_tower = false;
     let mut moved = 0.0;
-    for _ in 0..900 {
+    let mut checkpoints = Vec::new();
+    for tick in 0..900 {
         let before = rt.world.players[&bot_addr].hero.clone();
         let discs: Vec<_> = rt
             .world
@@ -832,6 +833,40 @@ fn bot_pushes_a_real_lane_and_damages_towers_without_crossing_live_structure_dis
             );
             moved += (after.x - before.x).hypot(after.z - before.z);
         }
+        if tick % 100 == 99 {
+            let towers: Vec<_> = rt
+                .world
+                .structures
+                .values()
+                .filter(|s| s.state.team != after.identity.team && s.state.hp > 0.0)
+                .map(|s| {
+                    let cover = rt
+                        .world
+                        .minions
+                        .values()
+                        .filter(|m| {
+                            m.state.team == after.identity.team
+                                && m.state.hp > 0.0
+                                && (m.state.x - s.state.x).hypot(m.state.z - s.state.z)
+                                    <= s.attack_range
+                        })
+                        .count();
+                    (
+                        s.state.id,
+                        s.role,
+                        (after.x - s.state.x).hypot(after.z - s.state.z),
+                        cover,
+                    )
+                })
+                .collect();
+            checkpoints.push(format!(
+                "{}s at({:.1},{:.1}) hp{:.1}; hostile towers(distance,cover) {towers:?}",
+                (tick + 1) / 10,
+                after.x,
+                after.z,
+                after.hp
+            ));
+        }
         let stats = rt.combat_log.ledger.snapshot();
         if stats
             .iter()
@@ -844,7 +879,8 @@ fn bot_pushes_a_real_lane_and_damages_towers_without_crossing_live_structure_dis
     assert!(moved > 10.0, "bot should leave its base and push the lane");
     assert!(
         damaged_tower,
-        "normal bot attacks must actually reach a lane tower"
+        "normal bot attacks must actually reach a lane tower: {}",
+        checkpoints.join("\n")
     );
 }
 

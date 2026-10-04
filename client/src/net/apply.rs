@@ -402,6 +402,7 @@ fn local_hero_components(state: &PlayerState, your_id: u64) -> impl Bundle {
             NetworkSpriteCharacter(state.sprite_character.clone()),
             PlayerCosmeticAction::from(state),
             PlayerActionFacing::from(state),
+            AuthoritativePlayerYaw(state.yaw),
             PlayerHandheld(state.handheld.clone()),
             NetworkHeroClass(state.hero_class),
             PlayerLoadout(state.loadout.clone()),
@@ -528,6 +529,7 @@ fn apply_snapshot_local_player(
             ));
             commands.entity(local_entity).insert((
                 PlayerActionFacing::from(local_player_state),
+                AuthoritativePlayerYaw(local_player_state.yaw),
                 PlayerHandheld(local_player_state.handheld.clone()),
             ));
             let next_action = PlayerCosmeticAction::from(local_player_state);
@@ -749,6 +751,7 @@ fn apply_snapshot_remote_players(
                 PlayerLoadout(player.loadout.clone()),
                 (
                     PlayerActionFacing::from(player),
+                    AuthoritativePlayerYaw(player.yaw),
                     PlayerHandheld(player.handheld.clone()),
                 ),
                 crate::supporter::NetworkSupporterAura(player.supporter_aura),
@@ -793,6 +796,7 @@ fn apply_snapshot_remote_players(
                 PlayerLoadout(player.loadout.clone()),
                 (
                     PlayerActionFacing::from(player),
+                    AuthoritativePlayerYaw(player.yaw),
                     PlayerHandheld(player.handheld.clone()),
                 ),
             ),
@@ -938,6 +942,7 @@ fn apply_snapshot_structures(
                 Team::from(structure.team),
                 NetworkStructureId(structure.id),
                 NetworkStructureProtected(structure.protected),
+                NetworkStructureAttackRange(structure.attack_range),
                 NetworkMapStructure::from(structure),
                 structure_state_to_combat_stats(structure),
             ));
@@ -950,6 +955,7 @@ fn apply_snapshot_structures(
             NetworkStructure,
             NetworkStructureId(structure.id),
             NetworkStructureProtected(structure.protected),
+            NetworkStructureAttackRange(structure.attack_range),
             NetworkMapStructure::from(structure),
             StructureKind::from(structure.kind),
             Team::from(structure.team),

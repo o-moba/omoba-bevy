@@ -3,6 +3,9 @@ use crate::session::handle_join_request;
 use shared::wire::CharacterChoice;
 use shared::{BASIC_ATTACK_ACTION_SLOT, HeroClass};
 
+#[path = "equipped_tests.rs"]
+mod equipped_tests;
+
 fn addr(n: u16) -> SocketAddr {
     format!("127.0.0.1:{}", 56000 + n).parse().unwrap()
 }
@@ -247,6 +250,7 @@ fn armed_traps_do_not_trigger_early_or_repeat_for_same_cast() {
     assert!(advance(&mut w, now, 0.5).is_empty());
     let events = advance(&mut w, now + duration(0.5), 0.2);
     assert_eq!(events.len(), 1);
+    assert!(events[0].trap_triggered);
     assert_eq!(w.players[&addr(2)].hero.hp, 980.0);
     assert_eq!(
         w.players[&addr(2)]
@@ -258,6 +262,46 @@ fn armed_traps_do_not_trigger_early_or_repeat_for_same_cast() {
     );
     assert!(advance(&mut w, now + duration(0.7), 2.0).is_empty());
 }
+#[test]
+fn shielded_trap_emits_one_activation_without_damage_or_repeat() {
+    let (mut w, now, victim) = fixture(HeroClass::Wildspark);
+    let caster = w.players[&addr(1)].hero.identity.id;
+    shield(&mut w, victim, victim, 100.0, 10.0, now);
+    cast(&mut w, addr(1), 2, [6.0, 0.0], 1, now);
+    assert!(advance(&mut w, now, 0.5).is_empty());
+    let events = advance(&mut w, now + duration(0.5), 0.2);
+    assert_eq!(events.len(), 1);
+    let event = &events[0];
+    assert!(event.trap_triggered);
+    assert_eq!(event.amount, 0.0);
+    assert!(!event.killed);
+    assert_eq!(event.source.id, caster);
+    assert_eq!(event.target.id, victim);
+    assert_eq!(event.action_slot, Some(2));
+    assert_eq!([event.x, event.z], [6.0, 0.0]);
+    assert_eq!(w.players[&addr(2)].hero.hp, 1000.0);
+    assert_eq!(w.players[&addr(2)].hero.skills.shields[0].amount, 80.0);
+    assert_eq!(
+        w.players[&addr(2)]
+            .hero
+            .skills
+            .control
+            .movement(now + duration(0.7)),
+        0.0
+    );
+    let mut log = crate::combat_feedback::CombatLog::default();
+    log.enable_sandbox(now);
+    log.extend(now + duration(0.7), events);
+    let first = log.snapshot(now + duration(0.7));
+    assert!(first[0].id > 0);
+    assert_eq!(log.snapshot(now + duration(0.8)), first);
+    let analytics = log.sandbox_analytics(now + duration(0.8));
+    assert_eq!(analytics.hits, 0);
+    assert_eq!(analytics.damage, 0.0);
+    assert!(analytics.breakdown.is_empty());
+    assert!(advance(&mut w, now + duration(0.7), 2.0).is_empty());
+}
+
 #[test]
 fn shockline_damage_is_physical_and_reveal_has_expiry() {
     let (mut w, now, _) = fixture(HeroClass::Wildspark);

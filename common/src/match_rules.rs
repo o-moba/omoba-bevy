@@ -43,6 +43,17 @@ pub struct MatchConfig {
 
 pub const DEFAULT_TEAM_SIZE: u32 = 5;
 
+/// Five seconds for the first two minutes, then +1.5 seconds per minute,
+/// capped at 35 seconds. Snapshot and death deadlines share simulation time.
+pub fn respawn_duration(elapsed_secs: f32) -> std::time::Duration {
+    let elapsed = if elapsed_secs.is_finite() {
+        elapsed_secs.max(0.0)
+    } else {
+        0.0
+    };
+    std::time::Duration::from_secs_f32((5.0 + (elapsed - 120.0).max(0.0) / 40.0).min(35.0))
+}
+
 pub const MIN_TEAM_SIZE: u32 = 1;
 
 pub const MAX_TEAM_SIZE: u32 = 16;

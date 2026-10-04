@@ -139,14 +139,19 @@ pub fn automation_bypass() -> bool {
     })
 }
 
-/// The shell's own harness is the one QA run that must *not* bypass it.
-const OWN_HARNESS: &str = "OMOBA_FRONTEND_QA_OUTPUT";
+/// These harnesses exercise the actual menu controls as well as match states.
+const SHELL_HARNESSES: [&str; 4] = [
+    "OMOBA_FRONTEND_QA_OUTPUT",
+    "OMOBA_RECOVERY_QA_OUTPUT",
+    "OMOBA_DAGGER_QA_DIR",
+    "OMOBA_EQUIPPED_SKILLS_QA_DIR",
+];
 
 fn bypass_for(keys: impl Iterator<Item = String>) -> bool {
     keys.into_iter().any(|key| {
         key == "OMOBA_AUTOJOIN"
             || (key.starts_with("OMOBA_")
-                && key != OWN_HARNESS
+                && !SHELL_HARNESSES.contains(&key.as_str())
                 && (key.ends_with("_QA_DIR") || key.ends_with("_QA_OUTPUT")))
     })
 }
@@ -490,7 +495,7 @@ mod tests {
     }
 
     #[test]
-    fn every_world_harness_bypasses_the_shell_and_the_shell_harness_does_not() {
+    fn every_world_harness_bypasses_the_shell_and_menu_harnesses_do_not() {
         let keys = |names: &[&str]| {
             names
                 .iter()
@@ -505,10 +510,20 @@ mod tests {
         ] {
             assert!(bypass_for(keys(&[harness]).into_iter()), "{harness}");
         }
-        assert!(!bypass_for(
-            keys(&["OMOBA_FRONTEND_QA_OUTPUT", "HOME"]).into_iter()
-        ));
+        for harness in [
+            "OMOBA_FRONTEND_QA_OUTPUT",
+            "OMOBA_RECOVERY_QA_OUTPUT",
+            "OMOBA_EQUIPPED_SKILLS_QA_DIR",
+        ] {
+            assert!(
+                !bypass_for(keys(&[harness, "HOME"]).into_iter()),
+                "{harness}"
+            );
+        }
         assert!(!bypass_for(keys(&["OMOBA_QA_WIDTH"]).into_iter()));
+        assert!(!bypass_for(
+            keys(&["OMOBA_DAGGER_QA_DIR", "OMOBA_QA_SYNTHETIC_FOCUS"]).into_iter()
+        ));
     }
 
     #[test]

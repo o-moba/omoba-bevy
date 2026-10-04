@@ -35,6 +35,8 @@ pub struct HeroTimers {
     pub haste_ready_at: Option<Instant>,
     pub haste_expires_at: Option<Instant>,
     pub respawn_at: Option<Instant>,
+    /// Updated from the shared match clock before damage; fixed when death occurs.
+    pub respawn_delay: Duration,
     pub recall: Option<crate::recall::RecallChannel>,
 }
 
@@ -49,6 +51,7 @@ impl HeroTimers {
             haste_ready_at: None,
             haste_expires_at: None,
             respawn_at: None,
+            respawn_delay: crate::balance::RESPAWN_DELAY,
             recall: None,
         }
     }

@@ -7,23 +7,42 @@ or a different collision shape.
 
 ## Tune towers without rebuilding
 
-Start with `shared/assets/maps/verdant.json`, or use the complete
-`examples/maps/two-tier.json` example. Pass your edited file to the server:
+Start with `shared/assets/maps/verdant.json`. The complete
+`examples/maps/two-towers-per-lane.json` and `examples/maps/one-tower-per-lane.json`
+presets disable selected tower tiers for shorter matches. The older
+`examples/maps/two-tier.json` remains a separate custom tuning example. Pass your edited file to the server:
 
 ```sh
-OMOBA_MAP_CONFIG=examples/maps/two-tier.json cargo run -p server --locked
+OMOBA_MAP_CONFIG=examples/maps/two-towers-per-lane.json cargo run -p server --locked
 ```
 
 The server validates and resolves the file before accepting players. A missing
 or invalid explicitly selected file stops startup with a diagnostic; it does
 not silently start the default arena. Without the environment variable, the
-embedded default preserves the six lane towers and two bases. Settings stay
+embedded default places 18 lane towers (three per team on each lane) and two bases. Settings stay
 pinned for the process, including rematches. Restart the server to load edits.
 
-The example adds a second tower for each team on mid lane, moves the outer mid
+The legacy `two-tier.json` example adds a second tower for each team on mid lane, moves the outer mid
 towers toward the middle and gives them 300 HP; inner towers have 420 HP.
 It is a tuning example, not the default balance or a recommendation for ranked
 matches. Clients learn the count, coordinates and HP from snapshots.
+
+## Disable tiers for shorter matches
+
+The default contains three tiers on each lane, retaining the original outer IDs 1–6 and base IDs 7–8. Inner towers use IDs 9–14; base-side towers use IDs 15–20. All tiers currently use the same lane-tower combat profile. Tower placement and the number of defensive stops, rather than a hidden stat increase, distinguish them.
+
+Set optional `disabled_tower_tiers` in the map JSON:
+
+| Value | Active towers per team per lane in the default layout |
+| --- | --- |
+| `[]` or omitted | Three: outer (0), inner (1), base-side (2) |
+| `[1]` | Two: outer (0), base-side (2) |
+| `[1, 2]` | One: outer (0) |
+| `[0, 1, 2]` | None; bases start vulnerable |
+
+The selector applies to every lane/team, keeps IDs and original ranks, and removes disabled towers from simulation, collision, snapshots and rendering. Surviving tiers still unlock in order even when ranks have gaps. Bases cannot be disabled by this selector. Duplicate or nonexistent ranks are invalid, and the complete authored map must remain valid even when some tiers are off. Changing a file requires a host restart; rematches preserve the selected configuration. Offline Practice uses the embedded three-tier default. To tune individual instances beyond whole tiers, edit the `structures` list as before.
+
+Six additional lane brush pockets share concealment geometry with the game engine and renderer. They sit at lane edges, leave minion centerlines clear and allow entry from the lane. An enemy outside the pocket cannot see a concealed hero; sharing the pocket or a hostile-action reveal makes them visible. These pockets are compiled gameplay geometry, so protocol 8 clients and hosts must be deployed together.
 
 ## Stable objects and reusable gameplay profiles
 

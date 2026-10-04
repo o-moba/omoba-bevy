@@ -26,5 +26,7 @@
   "draft.button.lock_in": "Lock in",
   "draft.timer.remaining": "LOCK IN · {seconds}s",
   "draft.timer.gathering": "Waiting for team…",
-  "draft.stage.rotate": "Drag to rotate"
+  "draft.stage.rotate": "Drag to rotate",
+  "draft.tab.avatars": "Avatars",
+  "draft.tab.classes": "Classes"
 }

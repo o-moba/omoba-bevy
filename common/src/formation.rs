@@ -52,6 +52,9 @@ pub fn assign_release_team(
 
 /// Shared `-> Running` transition: arms the raid-boss spawn schedule.
 pub fn start_match_running(world: &mut GameWorld, now: Instant) {
+    if !matches!(world.game_state, GameState::Running) {
+        world.match_elapsed_secs = 0.0;
+    }
     world.game_state = GameState::Running;
     schedule_boss_spawns(&mut world.neutrals, now);
     println!(

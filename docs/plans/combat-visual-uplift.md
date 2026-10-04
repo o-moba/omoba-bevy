@@ -1,5 +1,24 @@
 # План обновления визуала боёвки
 
+## Current implementation checkpoint — 2026-10-04
+
+The inventory below is the historical September plan. Version **0.40.0 /
+protocol 9 / standard-kits-4** implements the gameplay/metadata part of CV-01:
+four unique compatible skills can occupy arbitrary bindings, including four
+ultimates; authored progression roles, skill-owned recast costs and capability
+requirements survive permutation. The accepted recipe now drives input, aim,
+HUD and presentation through shared metadata. Local Combat Test configuration
+can author recipes; a public editor and saved account builds remain future work.
+Admitted control is shared, with an explicit Bluff/Brittle fix and documented
+exceptions. See [the current contract](../equipped-skills.md) and
+[verification checkpoint](../progress/2026-10-04-equipped-skills.md).
+
+Final client/gate/harness/HUD evidence passes for this scope. CV-01 stays open
+for its broader stage/instance/feedback requirements; this checkpoint
+does not close the full visual uplift plan. Current catalogue scope is 48
+modular skills plus 20 legacy skills across 17 classes. Counts and observations
+dated September below describe that earlier audit.
+
 Рабочий TODO для OMOBA: сделать навыки различимыми по движению, форме эффекта и реакции цели, включая будущие гибридные пользовательские классы. Нынешние 16 классов служат готовыми наборами для инвентаризации и проверки. Основа — проверка кода на 30 сентября 2026, commit `c36dd0f`, каталог `standard-kits-2`. Ниже разделены существующая механика и **предлагаемые** анимации, модели и VFX. Пункты остаются открытыми до реализации и проверки в игре.
 
 После исходного аудита старт уточнён: первым реализован пилот **Dawnweaver + Wildspark**. Он проверяет настройку движения по SkillId, общую VRM-библиотеку, фазу луча, объёмные эффекты и модели ракеты/ловушки. [Описание пилота и ограничения](../combat-cosmetics.md#skill-presentation-pilot). Ниже исходная карта потребностей; полные пункты CV остаются открыты, пока не выполнены все их критерии.
@@ -23,13 +42,33 @@
 
 Повтор одного и того же навыка в нескольких слотах пока не является отдельным продуктовым требованием. Тем не менее, общий контракт не должен случайно объединять такие экземпляры по SkillId: правила допустимости повторов и общего/независимого cooldown должны быть явными, если повторы появятся.
 
-**Что пока мешает этому в коде.** `BuildRecipe` уже хранит четыре SkillId отдельно от внешности, но [resolve](../../shared/src/loadout.rs) требует `SkillDefinition.slot == equipped_slot` и возвращает `WrongSlot`. Поэтому четыре нынешних R-навыка сегодня не пройдут проверку. AA-профиль выбирается из core, переключение оружия требует Repeater, а поле/стяжка требуют контроллер сферы. [PlayerActionKind::for_cast](../../shared/src/lib.rs) пока выводит Attack/Cast из кнопки. Существующая поддержка совместимых смешанных рецептов не равна полной свободе компоновки.
+**Implemented binding boundary (0.40.0).** [The resolver](../../shared/src/loadout.rs)
+accepts four distinct SkillIds on arbitrary physical bindings and no longer
+returns `WrongSlot`. Four distinct ultimates are valid. The core still selects
+the basic-attack profile; weapon switching requires Repeater, and orb field/pull
+requires an equipped controller. Modular action category now follows the
+skill's authored role while action slots and effect receipts retain the actual
+binding. This is executable recipe support with explicit dependencies, without
+public editor or persistence functionality.
 
-Разблокировка слотов сейчас задана уровнями 1/2/4/6, а [прогрессия ботов](../../shared/src/progression.rs) приоритизирует R как ульту. Общий [HeroState расширенных техник](../../common/src/skills/advanced.rs) имеет одиночные поля orb/challenge/parry/defense: для будущих пересекающихся способностей нужно явно определить совместное владение или независимые экземпляры. Это ограничение расширения, не утверждение о неисправности текущих пресетов. При этом recast и возврат зарядов SpiritDash уже преимущественно используют фактический слот/технику — это свойство сохранить и покрыть перестановками слотов.
+Unlocks retain levels 1/2/4/6 by authored role; moving an ultimate to Q does not
+unlock it early. [Bot progression](../../shared/src/progression.rs) prioritizes
+authored ultimate roles independently of binding. Recasts validate current skill
+identity, and follow-up costs belong to the skill. The advanced runtime still
+has shared orb/challenge/parry/defense state: independent duplicate or overlapping
+instances need a separate design. Duplicate SkillIds remain rejected. This is
+an extension boundary, not a defect claim about the existing presets.
 
-Первый пользовательский конструктор собирает классы из существующих навыков. Добавление совершенно новых определений — следующий уровень: текущий каталог содержит закрытый enum из 44 стандартных SkillId, а 20 базовых навыков живут в старом пути. Общая визуальная идентичность должна охватить оба пути; генерация новых боевых механик или загрузка пользовательского исполняемого кода этим планом не предполагается.
+A future public constructor would compose the existing skills. The current
+closed catalogue has 48 modular SkillIds; twenty legacy abilities retain their
+class-owned path. Adding executable skill definitions or user code is a separate
+capability. Shared presentation covers both existing paths.
 
-В CV-01 требуется спроектировать и постепенно снять ограничения назначения слота, проверить прогрессию/ранги, ресурсные зависимости и хранение состояний. Нельзя просто удалить проверку WrongSlot и объявить конструктор готовым. Нужны версия каталога/рецепта и сохранение поведения действующих пресетов. Публичный редактор классов, сохранение на аккаунте и подбор баланса остаются отдельными будущими задачами; визуальная основа не должна ждать их появления.
+CV-01's binding/progression/resource foundation is implemented under the new
+catalogue revision with verified preset-equivalence, cross-kit, real-server
+and focused HUD evidence. Full phase/instance feedback, public construction,
+account storage and balance remain separate acceptance work; removing a slot
+restriction does not complete those features.
 
 **Реквизит и параллельные эффекты.** У тела один актуальный жест и согласованный набор предметов в руках. Начало следующего навыка освобождает временный реквизит прошлого действия согласно его фазе; постоянный щит или оружейный режим имеют отдельный срок жизни. Уже летящая ракета, поставленная ловушка, фонарь или сфера продолжают существовать независимо от того, какое оружие сейчас держит герой. Прерывание каста, смерть и возврат к AA проверяются отдельно. Для аватара без нужного крепления остаётся общий жест и совместимый процедурный выпуск.
 
@@ -382,7 +421,7 @@ flowchart LR
 ### Этап 0 — Зафиксировать основу
 
 - [ ] **CV-00 · P0 · S. Базовые сцены.** Снять дуэль, каст в пустоту, успешное попадание, защиту и crowded fight для репрезентативных семейств. Зафиксировать тестовые рецепты гибридов из обязательного контракта выше. Сохранить build/recipe/аватар/skill instance/стадию/камеру; измерить текущую стоимость кадра. Результат: исходные кадры и список конкретных нечитаемых состояний.
-- [ ] **CV-01 · P0 · L. Навык независимо от класса и кнопки.** Таблица `skill_id + stage → animation + object + trail + impact + status + sound`; отдельные instance/cast/effect ID. Адаптер старых классов сначала переводит class/slot в идентичность действия, после чего работает общий визуальный путь. Убрать фиксированный slot как семантику навыка, определить требования возможностей/ресурсов и прогрессию, сохранить пресеты через версионирование. UI и renderer читают принятый рецепт. Результат: перенос между Q/W/E/R и тестовый набор из четырёх ульт не ломают механику/визуал; повторное подтверждение не повторяет burst. Это обязательная основа, публичный редактор не входит в задачу.
+- [ ] **CV-01 · P0 · L. Skill identity independent of class/button — binding foundation verified; broader phases remain open.** Version 0.40 implements arbitrary unique bindings, authored-role progression, capability/resource rules, accepted-recipe client metadata and bound runtime/presentation identity. Permutation/four-ultimate server and affected-HUD evidence pass. Remaining acceptance: the broader `skill_id + stage → animation + object + trail + impact + status + sound` and instance/cast/effect lifecycle contract. Keep preset equivalence and repeat-confirmation deduplication. Public editing remains outside CV-01. [Current scope and status](../progress/2026-10-04-equipped-skills.md).
 - [ ] **CV-02 · P0 · M. Жизненный цикл эффектов и фаз каста.** Переиспользуемые объекты по серверному ID; create/update/expire/consume/intercept/visibility loss; очистка на смерть/смену матча/reconnect по действующим правилам. Определить недостающие в DTO фазы/время каста, прибытие и причины завершения: расширять события только там, где визуал иначе врёт. Результат: исчезновение снаряда не изображает попадание, скрытая цель не оставляет раскрывающий след; поздний snapshot не повторяет взлёт, отменённый каст не оставляет вечный loop.
 - [ ] **CV-03 · P0 · M. Смысловые статусы и границы.** Общие root/stun/charm/slow/reveal/shield/parry/mark индикаторы, различение owner/ally/enemy и реальных площадей. Результат: читаются на нейтральном материале, без bloom и без различения оттенков.
 - [ ] **CV-04 · P0 · L. Настраиваемые последовательности навыков и VRM retargeting.** Расширить текущие шесть движений до motion ID; exporter/validation/runtime/cache/binding меняются согласованно. Профиль навыка задаёт клипы фаз, loop/one-shot, переходы, маски тела, требования и fallback; клип отдельной фазы заменяется через данные. Провести skill instance/stage от подтверждения до общего движения и его переноса на rig; slot остаётся назначением управления. Добавить переходы, приоритет death/control/action/locomotion и bounded playback-rate. Результат: подготовка/перемещение/arrival/recovery следуют реальным стадиям навыка; замена клипа не меняет геймплей. Один исходный клип работает на совместимых аватарах без перепекания моделей; два героя одной модели играют независимо; перенос R → Q не меняет motion family. Проверить численно все 15 rigs и визуально выбранные различающиеся пропорции.
@@ -463,7 +502,13 @@ CV-08…11 можно делать отдельными короткими ит�
 - `python3 scripts/export_humanoid_motion.py --check --audit /private/tmp/omoba-motion-audit-2026-09-30.json` — PASS: общая библиотека воспроизводится, численный retarget-аудит Run пройден для 15 rigs, исходные GLB не изменены.
 - Чтение JSON всех 15 GLB и исходного UAL подтвердило пять встроенных клипов у каждого аватара и 46 исходных движений.
 
-Исходный аудит выше относился к состоянию до реализации. Пилот Dawnweaver/Wildspark теперь добавляет восемь профилей навыков, шесть общих движений, объёмные эффекты и две модели Blender; контракт и воспроизведение описаны в [combat cosmetics](../combat-cosmetics.md#skill-presentation-pilot). Это частичная реализация CV-01/04/05/12, а не завершение этих задач: публичные гибриды, произвольные слоты в resolver, сокеты/хват, полный набор фаз перемещения и замеры мобильной производительности остаются открыты.
+The audit above predates implementation. The Dawnweaver/Wildspark pilot added
+eight profiles, six shared motions, volumetric effects and two Blender models;
+see [combat cosmetics](../combat-cosmetics.md#skill-presentation-pilot). Version
+0.40 subsequently implements arbitrary resolver bindings and equipped metadata,
+with passing local gate, real-server and focused HUD evidence. CV-01/04/05/12 remain partial: public construction,
+complete grip/IK support, full movement phases and measured mobile performance
+are still open. The historical pilot evidence does not certify those later changes.
 
 Проход контраста для этого пилота (2026-09-30), часть CV-21:
 

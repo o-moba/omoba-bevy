@@ -33,9 +33,46 @@ fn has(cues: &[Candidate], cue: AudioCue) -> bool {
 }
 
 #[test]
+fn vital_break_cue_is_confirmed_once_and_never_a_kill_cue() {
+    let mut cursor = EventCursor::default();
+    cursor.accept((1, 1), &GameState::Running, Some(local()), &[]);
+    let mut receipt = event(1, ProjectileStyle::Standard);
+    receipt.near_lethal = true;
+    let cues = cursor
+        .accept(
+            (1, 1),
+            &GameState::Running,
+            Some(local()),
+            &[receipt.clone()],
+        )
+        .1;
+    assert!(has(&cues, AudioCue::VitalBreak));
+    assert!(!has(&cues, AudioCue::Kill));
+    assert!(
+        cursor
+            .accept(
+                (1, 1),
+                &GameState::Running,
+                Some(local()),
+                &[receipt.clone()]
+            )
+            .1
+            .is_empty()
+    );
+    receipt.id = 2;
+    receipt.amount = 0.0;
+    assert!(!has(
+        &cursor
+            .accept((1, 1), &GameState::Running, Some(local()), &[receipt])
+            .1,
+        AudioCue::VitalBreak
+    ));
+}
+
+#[test]
 fn packaged_manifest_has_every_safe_stable_cue() {
     let catalog = CueCatalog::parse(include_str!("../../../assets/audio/manifest.json")).unwrap();
-    assert_eq!(catalog.cues.len(), 16);
+    assert_eq!(catalog.cues.len(), AudioCue::ALL.len());
     for cue in AudioCue::ALL {
         assert!(catalog.cues.contains_key(cue.id()));
     }
@@ -430,4 +467,107 @@ fn pending_sources_without_device_have_short_deadline_and_effects_absolute_limit
     assert!(!expired(0.3, true));
     assert!(!expired(3.99, true));
     assert!(expired(4.0, true));
+}
+
+#[test]
+fn trap_receipt_plays_once_only_after_confirmed_trigger() {
+    let mut cursor = EventCursor::default();
+    cursor.accept((1, 1), &GameState::Running, Some(local()), &[]);
+    let mut trigger = event(1, ProjectileStyle::Arcane);
+    trigger.trap_triggered = true;
+    assert!(has(
+        &cursor
+            .accept(
+                (1, 1),
+                &GameState::Running,
+                Some(local()),
+                &[trigger.clone()]
+            )
+            .1,
+        AudioCue::TrapTrigger
+    ));
+    assert!(!has(
+        &cursor
+            .accept((1, 1), &GameState::Running, Some(local()), &[trigger])
+            .1,
+        AudioCue::TrapTrigger
+    ));
+    assert!(!has(
+        &cursor
+            .accept(
+                (1, 1),
+                &GameState::Running,
+                Some(local()),
+                &[event(2, ProjectileStyle::Arcane)]
+            )
+            .1,
+        AudioCue::TrapTrigger
+    ));
+}
+
+#[test]
+fn shielded_trap_is_audible_once_without_inventing_damage_or_remote_hits() {
+    let mut cursor = EventCursor::default();
+    cursor.accept((1, 1), &GameState::Running, Some(local()), &[]);
+    let mut trigger = event(1, ProjectileStyle::Arcane);
+    trigger.trap_triggered = true;
+    trigger.amount = 0.0;
+    let cues = cursor
+        .accept(
+            (1, 1),
+            &GameState::Running,
+            Some(local()),
+            &[trigger.clone()],
+        )
+        .1;
+    assert_eq!(cues.len(), 1);
+    assert_eq!(cues[0].cue, AudioCue::TrapTrigger);
+    assert!(
+        cursor
+            .accept(
+                (1, 1),
+                &GameState::Running,
+                Some(local()),
+                &[trigger.clone()]
+            )
+            .1
+            .is_empty()
+    );
+    trigger.id = 2;
+    trigger.trap_triggered = false;
+    assert!(
+        cursor
+            .accept(
+                (1, 1),
+                &GameState::Running,
+                Some(local()),
+                &[trigger.clone()]
+            )
+            .1
+            .is_empty()
+    );
+    trigger.id = 3;
+    trigger.trap_triggered = true;
+    trigger.source.id = 9;
+    trigger.x = 100.0;
+    assert!(
+        cursor
+            .accept(
+                (1, 1),
+                &GameState::Running,
+                Some(local()),
+                &[trigger.clone()]
+            )
+            .1
+            .is_empty()
+    );
+    trigger.id = 4;
+    trigger.x = 0.0;
+    trigger.amount = -1.0;
+    assert!(
+        cursor
+            .accept((1, 1), &GameState::Running, Some(local()), &[trigger])
+            .1
+            .is_empty()
+    );
 }

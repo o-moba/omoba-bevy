@@ -317,6 +317,7 @@ pub(crate) enum PauseAction {
     /// Switch to the next shipped language.
     CycleLanguage,
     ToggleReduceMotion,
+    ToggleFpsReadout,
     TogglePhoneLayoutPreview,
     SettingsTab(SettingsTab),
 }
@@ -560,6 +561,7 @@ fn sync_settings_sliders(
     audio: Res<AudioSettings>,
     lighting: Res<LightingSettings>,
     motion: Res<MotionSettings>,
+    render: Res<RenderSettings>,
     mut sliders: Query<(&SettingsSlider, &mut Slider, &widgets::KitParts)>,
     mut values: Query<&mut Text>,
     mut toggles: Query<(&UiAction<PauseAction>, &mut widgets::ButtonStyle)>,
@@ -595,6 +597,7 @@ fn sync_settings_sliders(
     for (action, mut style) in &mut toggles {
         let selected = match action.0 {
             PauseAction::ToggleReduceMotion => motion.reduce,
+            PauseAction::ToggleFpsReadout => render.show_fps,
             PauseAction::Audio(AudioButton::Mute) => audio.muted,
             _ => continue,
         };
@@ -1282,6 +1285,13 @@ fn setup_pause_menu_ui(mut commands: Commands, platform: Option<Res<crate::ui::U
                                     Setting::RenderFps,
                                     "PauseMenuRenderFpsControls",
                                 );
+                                widgets::controls::toggle(
+                                    settings,
+                                    Localized::new("pause.render.show_fps"),
+                                    true,
+                                    PauseAction::ToggleFpsReadout,
+                                    "PauseMenuShowFpsToggle",
+                                );
                                 settings.spawn((
                                     Localized::new("pause.render.hint").into_text(),
                                     theme::role_text(TextRole::Caption),
@@ -1779,6 +1789,7 @@ fn apply_render_and_hud_settings(
             PauseAction::Step(Setting::RenderFps, direction) => {
                 render.fps_limit = if direction > 0 { 120 } else { 60 };
             }
+            PauseAction::ToggleFpsReadout => render.show_fps = !render.show_fps,
             PauseAction::Step(
                 setting @ (Setting::JoystickX
                 | Setting::JoystickY
@@ -2563,6 +2574,7 @@ mod tests {
         app.insert_resource(initial)
             .init_resource::<LightingSettings>()
             .init_resource::<MotionSettings>()
+            .init_resource::<RenderSettings>()
             .insert_resource(PauseMenuState {
                 open: false,
                 in_settings: true,
@@ -2640,6 +2652,7 @@ mod tests {
         app.init_resource::<AudioSettings>()
             .init_resource::<LightingSettings>()
             .init_resource::<MotionSettings>()
+            .init_resource::<RenderSettings>()
             .insert_resource(PauseMenuState {
                 open: true,
                 in_settings: true,
@@ -3321,6 +3334,8 @@ mod tests {
             });
             app.update();
         };
+        press(&mut app, PauseAction::ToggleFpsReadout);
+        assert!(app.world().resource::<RenderSettings>().show_fps);
         press(&mut app, PauseAction::Step(Setting::RenderFps, 1));
         assert_eq!(app.world().resource::<RenderSettings>().fps_limit, 60);
         *app.world_mut().resource_mut::<PauseMenuState>() = PauseMenuState {
@@ -3329,6 +3344,10 @@ mod tests {
         };
         press(&mut app, PauseAction::Step(Setting::RenderFps, 1));
         assert_eq!(app.world().resource::<RenderSettings>().fps_limit, 120);
+        press(&mut app, PauseAction::ToggleFpsReadout);
+        assert!(!app.world().resource::<RenderSettings>().show_fps);
+        app.update();
+        assert!(!app.world().resource::<RenderSettings>().show_fps);
         for _ in 0..20 {
             press(&mut app, PauseAction::Step(Setting::CombatX, -1));
         }

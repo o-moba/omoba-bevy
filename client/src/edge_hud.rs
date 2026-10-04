@@ -61,6 +61,8 @@ enum ScoreLabel {
 #[derive(Component)]
 struct KdaLabel;
 #[derive(Component)]
+struct MatchClockLabel;
+#[derive(Component)]
 struct TargetLabel;
 #[derive(Component)]
 struct TargetValue;
@@ -272,7 +274,9 @@ fn setup(mut commands: Commands, mobile: Option<Res<MobileControls>>) {
                         })
                         .with_children(|column| {
                             column.spawn((
-                                Localized::new("edge.kda").into_text(),
+                                Text::new("—:—"),
+                                MatchClockLabel,
+                                Name::new("MatchClockText"),
                                 ui::role_text(TextRole::Eyebrow),
                                 TextColor(color::TEXT_MUTED),
                                 TextLayout::new_with_no_wrap(),
@@ -996,6 +1000,13 @@ struct TargetParts<'w, 's> {
     >,
 }
 
+fn match_clock(elapsed_secs: Option<u64>) -> String {
+    elapsed_secs.map_or_else(
+        || "—:—".to_owned(),
+        |seconds| format!("{:02}:{:02}", seconds / 60, seconds % 60),
+    )
+}
+
 #[allow(clippy::too_many_arguments)]
 fn update(
     state: Res<ScoreboardState>,
@@ -1013,6 +1024,7 @@ fn update(
             &mut TextColor,
             Option<&ScoreLabel>,
             Option<&KdaLabel>,
+            Option<&MatchClockLabel>,
             Option<&TargetLabel>,
             Option<&TargetValue>,
             Option<&ScoreDetail>,
@@ -1043,7 +1055,9 @@ fn update(
         .and_then(|(entity, id)| {
             target_details(id, targets.get(entity).ok()?, game.scoreboard.as_ref())
         });
-    for (mut text, mut ink, score_label, kda_label, target_label, value, detail) in &mut labels {
+    for (mut text, mut ink, score_label, kda_label, clock_label, target_label, value, detail) in
+        &mut labels
+    {
         let next = if let Some(label) = score_label {
             kills.map_or_else(
                 || "—".to_owned(),
@@ -1052,6 +1066,8 @@ fn update(
                     ScoreLabel::Blue => blue.to_string(),
                 },
             )
+        } else if clock_label.is_some() {
+            match_clock(game.scoreboard.as_ref().map(|board| board.elapsed_secs))
         } else if kda_label.is_some() {
             kda.clone()
         } else if target_label.is_some() {
@@ -1847,6 +1863,7 @@ mod tests {
         app.world_mut()
             .resource_mut::<GameStateSnapshot>()
             .scoreboard = Some(LiveScoreboard {
+            elapsed_secs: 0,
             kills: Vec::new(),
             players: vec![LiveScorePlayer {
                 avatar: None,
@@ -2052,6 +2069,14 @@ mod tests {
     }
 
     #[test]
+    fn match_clock_uses_elapsed_seconds_and_keeps_long_matches_unambiguous() {
+        assert_eq!(match_clock(None), "—:—");
+        assert_eq!(match_clock(Some(0)), "00:00");
+        assert_eq!(match_clock(Some(754)), "12:34");
+        assert_eq!(match_clock(Some(3661)), "61:01");
+    }
+
+    #[test]
     fn live_score_totals_use_both_teams_and_distinguish_missing_data() {
         let player = |id, team, kills| LiveScorePlayer {
             avatar: None,
@@ -2067,6 +2092,7 @@ mod tests {
             connected: true,
         };
         let board = LiveScoreboard {
+            elapsed_secs: 0,
             kills: Vec::new(),
             players: vec![
                 player(1, Team::Green, 4),

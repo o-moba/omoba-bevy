@@ -100,6 +100,8 @@ impl Plugin for ResultQaPlugin {
             started: Instant::now(),
             stage: if std::env::var("OMOBA_RESULT_QA_ABANDONED_ONLY").as_deref() == Ok("1") {
                 3
+            } else if std::env::var("OMOBA_RESULT_QA_SAVED_ONLY").as_deref() == Ok("1") {
+                1
             } else {
                 0
             },
@@ -168,25 +170,46 @@ const YOUR_ID: u64 = 11;
 
 fn live_row(team: shared::map::Team) -> LiveScoreboard {
     LiveScoreboard {
+        elapsed_secs: 720,
         kills: Vec::new(),
-        players: vec![LiveScorePlayer {
-            avatar: None,
-            player_id: YOUR_ID,
-            nickname: "Guest".into(), // i18n-allow: fixture nickname
-            team,
-            hero_class: shared::HeroClass::Mage,
-            kills: 7,
-            deaths: 2,
-            assists: 11,
-            earned_gold: 12480,
-            level: 12,
-            connected: true,
-        }],
+        players: (0..10)
+            .map(|index| LiveScorePlayer {
+                avatar: None,
+                player_id: YOUR_ID + index,
+                nickname: [
+                    "Guest",
+                    "Agnes",
+                    "BlueFox",
+                    "Ironleaf",
+                    "Snowbear",
+                    "Sentinel",
+                    "Nightbird",
+                    "Willow",
+                    "Storm",
+                    "Rook",
+                ][index as usize]
+                    .into(),
+                team: if index == 0 {
+                    team
+                } else if index < 5 {
+                    shared::map::Team::Green
+                } else {
+                    shared::map::Team::Blue
+                },
+                hero_class: shared::HeroClass::Mage,
+                kills: 7,
+                deaths: 2,
+                assists: 11,
+                earned_gold: 12480 + index as u32 * 120,
+                level: 12,
+                connected: true,
+            })
+            .collect(),
     }
 }
 
 fn receipt(outcome: MatchOutcome, rated: bool) -> MatchResult {
-    serde_json::from_value(serde_json::json!({
+    let mut result: MatchResult = serde_json::from_value(serde_json::json!({
         "result_id": format!("qa-{outcome:?}"), "server_epoch": 7, "match_id": 2,
         "started_at_ms": 0, "ended_at_ms": 720_000, "duration_ms": 720_000,
         "map_profile": "verdant_default", "ruleset": "public-casual-v1",
@@ -206,7 +229,24 @@ fn receipt(outcome: MatchOutcome, rated: bool) -> MatchResult {
         }],
         "saved": true
     }))
-    .expect("fixture receipt")
+    .expect("fixture receipt");
+    let template = result.participants[0].clone();
+    result.participants = live_row(shared::map::Team::Green)
+        .players
+        .into_iter()
+        .map(|live| {
+            let mut participant = template.clone();
+            participant.player_id = live.player_id;
+            participant.nickname = live.nickname;
+            participant.team = live.team;
+            participant.stats.earned_gold = Some(live.earned_gold);
+            if participant.player_id != YOUR_ID {
+                participant.profile_id = None;
+            }
+            participant
+        })
+        .collect();
+    result
 }
 
 /// Writes the stage's fixture into the client's resources.
@@ -343,7 +383,9 @@ fn shoot(
             info!("RESULT_QA captured {file}");
             qa.in_flight = false;
             qa.entered = false;
-            qa.stage = if std::env::var("OMOBA_RESULT_QA_ABANDONED_ONLY").as_deref() == Ok("1") {
+            qa.stage = if std::env::var("OMOBA_RESULT_QA_ABANDONED_ONLY").as_deref() == Ok("1")
+                || std::env::var("OMOBA_RESULT_QA_SAVED_ONLY").as_deref() == Ok("1")
+            {
                 STAGES.len()
             } else {
                 qa.stage + 1

@@ -17,6 +17,7 @@ mod debug;
 mod decor;
 mod domain;
 mod edge_hud;
+mod equipped_skills;
 mod frontend;
 mod game_audio;
 mod game_state;

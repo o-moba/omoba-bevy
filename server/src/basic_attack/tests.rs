@@ -213,7 +213,12 @@ fn target_surface_range_and_base_protection_are_authoritative_for_all_kinds() {
                     .world
                     .structures
                     .values_mut()
-                    .find(|s| s.state.team == Team::Blue && s.state.kind == StructureKind::Tower)
+                    .find(|s| {
+                        s.state.team == Team::Blue
+                            && s.state.kind == StructureKind::Tower
+                            && s.state.lane == Some(Lane::Mid)
+                            && s.state.tier == 0
+                    })
                     .unwrap();
                 structure.state.x = range + shared::TOWER_TARGET_RADIUS - 0.01;
                 structure.state.z = 0.0;

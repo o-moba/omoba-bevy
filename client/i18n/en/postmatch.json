@@ -13,5 +13,7 @@
   "postmatch.local_result": "Local practice result",
   "postmatch.saving": "Saving match results…",
   "postmatch.button.play_again": "Play again",
-  "postmatch.button.back_to_menu": "Back to menu"
+  "postmatch.button.back_to_menu": "Back to menu",
+  "postmatch.gold_earned": "Gold earned",
+  "postmatch.total": "Total"
 }

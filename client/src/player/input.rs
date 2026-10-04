@@ -245,6 +245,9 @@ pub(super) fn move_player_analog(
                 * hero_movement_multiplier(class, progression),
         ) * utility.map_or(1.0, |u| u.state.movement_multiplier())
             * crate::combat::standard::movement_factor(loadout);
+        if speed <= 0.0 {
+            continue;
+        }
         // Bound a resumed/hitched frame; the server movement envelope remains authoritative.
         let desired = current
             + direction

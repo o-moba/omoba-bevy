@@ -104,17 +104,20 @@ impl ServerRuntime {
         }
         self.snapshot_tick = self.snapshot_tick.saturating_add(1);
         let world = &self.world;
-        for player in world.players.values().filter(|p| p.joined) {
+        for (addr, player) in world.players.iter().filter(|(_, p)| p.joined) {
             self.combat_log.ledger.update_player(
                 player.hero.identity.id,
                 player.hero.progress.level,
-                false,
+                crate::bots::is_bot_address(*addr) && !player.hero.identity.is_bot,
             );
             self.combat_log
                 .ledger
                 .update_earned_gold(player.hero.identity.id, player.economy.earned_gold);
         }
-        let scoreboard = self.combat_log.ledger.live_scoreboard();
+        let mut scoreboard = self.combat_log.ledger.live_scoreboard();
+        if let Some(board) = scoreboard.as_mut() {
+            board.elapsed_secs = world.match_elapsed_secs.max(0.0) as u64;
+        }
 
         let mut projectiles_snapshot = world
             .projectiles

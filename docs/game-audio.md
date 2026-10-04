@@ -1,6 +1,6 @@
 # Game audio
 
-The client now includes an instrumental background loop and sixteen sound cues.
+The client now includes an instrumental background loop and eighteen sound cues.
 Start normally with `make practice` or join a running server. Audio requires no
 separate service, network requests or installation. The existing Bevy audio stack
 decodes the bundled Ogg Vorbis assets on desktop and mobile builds.
@@ -30,6 +30,8 @@ their own acceptance checks.
 | --- | --- |
 | `melee`, `arrow`, `arcane`, `holy`, `caster`, `tower` | Accepted server damage receipts, selected by attack style |
 | `hit`, `kill`, `death` | Local hero damage and hero kills/death |
+| `butterfly` | Confirmed local healing pickup collection, once per receipt |
+| `trap_trigger` | Authoritative trap activation damage receipt; owner/victim or nearby visible combat |
 | `respawn`, `level_up` | Local authoritative alive/level changes |
 | `match_start`, `victory`, `defeat` | Observed match transitions and local team outcome |
 | `ui_click`, `ui_confirm` | Interface interaction and explicit presentation confirmation |
@@ -50,12 +52,12 @@ maximum effect lifetime. Machines without an audio device can still play the gam
 
 ## Art, rights and size
 
-The complete seventeen-file palette is approximately **1.86 MB**. Music is stereo;
+The complete nineteen-file palette is approximately **1.86 MB**. Music is stereo;
 effects are mono. All clips use Vorbis at 44.1 kHz.
 
 - **Exploration Theme**, Cleyton Kauffman — [original author page](https://opengameart.org/content/exploration-theme), CC0. The author marks the 134.4-second composition as seamless. The packaged version is encoded from the lossless source with its duration and loop boundaries retained.
 - Two adapted foley clips from **Kenney RPG Audio** — [original source](https://kenney.nl/assets/rpg-audio), CC0.
-- Fourteen original effects synthesized from mathematical tones and filtered noise, with short authored musical motifs and echoes. No imported instrument samples, voices or commercial-game melodies are used.
+- Sixteen original effects synthesized from mathematical tones and filtered noise, with short authored musical motifs and echoes. No imported instrument samples, voices or commercial-game melodies are used.
 
 `client/assets/audio/LICENSE.md`, both provenance JSON files and the `licenses/`
 directory record terms, credits, exact source/member/output hashes and adaptations.
@@ -76,7 +78,7 @@ separately. Download archives and temporary PCM output are development materials
 }
 ```
 
-This excerpt shows the shape; the real file must contain all sixteen known cue
+This excerpt shows the shape; the real file must contain all eighteen known cue
 IDs. Gains must be finite in 0–1. Music paths must be `audio/music/<name>.ogg`;
 effect paths must be `audio/sfx/<name>.ogg`, using letters, digits, hyphens or
 underscores. URLs, traversal, nested paths and unknown/missing cues are rejected.
@@ -89,7 +91,7 @@ different sounds by individual avatar/NFT ownership; such a future adapter can
 resolve trusted cue assets without granting gameplay authority or accepting
 arbitrary remote URLs.
 
-To regenerate the fourteen original sounds and two normalized foley adaptations:
+To regenerate the sixteen original sounds and two normalized foley adaptations:
 
 ```sh
 python3 scripts/build_audio_palette.py --kenney-archive /path/to/kenney-rpg-audio.zip

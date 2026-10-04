@@ -28,7 +28,7 @@ pub struct BrushZone {
 }
 
 pub fn brush_layout() -> &'static [BrushZone] {
-    const BRUSH: [BrushZone; 10] = [
+    const BRUSH: [BrushZone; 16] = [
         BrushZone {
             id: 1,
             center: [-22.0, -8.0],
@@ -78,6 +78,38 @@ pub fn brush_layout() -> &'static [BrushZone] {
             id: 10,
             center: [39.0, 71.0],
             radius: 2.0,
+        },
+        // Lane pockets touch the road while leaving its marching centerline
+        // clear. Keep the older jungle IDs stable for saved/QA brush fixtures.
+        BrushZone {
+            id: 11,
+            center: [-15.0, -5.0],
+            radius: 2.5,
+        },
+        BrushZone {
+            id: 12,
+            center: [15.0, 5.0],
+            radius: 2.5,
+        },
+        BrushZone {
+            id: 13,
+            center: [-93.25, 66.0],
+            radius: 2.5,
+        },
+        BrushZone {
+            id: 14,
+            center: [93.25, -66.0],
+            radius: 2.5,
+        },
+        BrushZone {
+            id: 15,
+            center: [-66.0, 93.25],
+            radius: 2.5,
+        },
+        BrushZone {
+            id: 16,
+            center: [66.0, -93.25],
+            radius: 2.5,
         },
     ];
     &BRUSH
@@ -172,5 +204,86 @@ mod tests {
                 assert!(distance_squared(*route.last().unwrap(), zone.center) < 0.01);
             }
         }
+    }
+
+    #[test]
+    fn lane_brush_has_open_approaches_and_clears_default_structure_sight() {
+        use crate::map::{Lane, ResolvedMap};
+        use crate::navigation::{Disc, HERO_RADIUS, PLANNING_CLEARANCE};
+
+        let nav = crate::navigation::world_navigation();
+        let map = ResolvedMap::default();
+        let structures: Vec<_> = map
+            .structures
+            .iter()
+            .map(|structure| Disc {
+                center: structure.position,
+                radius: if structure.lane.is_some() {
+                    crate::TOWER_TARGET_RADIUS
+                } else {
+                    3.2
+                },
+            })
+            .collect();
+        let lanes = [Lane::Mid, Lane::Top, Lane::Bot];
+        let mut covered = [false; 3];
+        for zone in brush_layout().iter().filter(|zone| zone.id >= 11) {
+            let (lane_index, approach, lane_distance) = lanes
+                .iter()
+                .enumerate()
+                .flat_map(|(index, &lane)| {
+                    crate::map::minion_lane_points(lane)
+                        .windows(2)
+                        .map(|segment| {
+                            let [a, b] = [segment[0], segment[1]];
+                            let delta = [b[0] - a[0], b[1] - a[1]];
+                            let t = (((zone.center[0] - a[0]) * delta[0]
+                                + (zone.center[1] - a[1]) * delta[1])
+                                / distance_squared(a, b))
+                            .clamp(0.0, 1.0);
+                            let point = [a[0] + t * delta[0], a[1] + t * delta[1]];
+                            (index, point, distance_squared(point, zone.center).sqrt())
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .min_by(|a, b| a.2.total_cmp(&b.2))
+                .unwrap();
+            covered[lane_index] = true;
+            assert!(
+                lane_distance < crate::map::LANE_WIDTH * 0.5 + zone.radius,
+                "brush {} must touch a lane corridor",
+                zone.id
+            );
+            assert!(
+                lane_distance > zone.radius + HERO_RADIUS + PLANNING_CLEARANCE,
+                "brush {} must leave the lane centerline unconcealed",
+                zone.id
+            );
+            assert!(nav.segment_clear_with_discs(approach, zone.center, &structures));
+            assert_eq!(brush_at(approach), None);
+            for structure in &map.structures {
+                let sight = if structure.lane.is_some() {
+                    TOWER_SIGHT_RADIUS
+                } else {
+                    BASE_SIGHT_RADIUS
+                };
+                assert!(
+                    distance_squared(zone.center, structure.position)
+                        > (zone.radius + sight).powi(2),
+                    "brush {} overlaps {} sight",
+                    zone.id,
+                    structure.key
+                );
+            }
+            for base in [crate::map::geometry().home, crate::map::geometry().away] {
+                let spawn_scale = 1.0 - 7.0 / distance_squared(base, [0.0; 2]).sqrt();
+                let spawn = base.map(|coordinate| coordinate * spawn_scale);
+                let route = nav
+                    .plan_route(spawn, zone.center, &structures)
+                    .expect("lane brush remains reachable with every structure alive");
+                assert!(distance_squared(*route.last().unwrap(), zone.center) < 0.01);
+            }
+        }
+        assert!(covered.into_iter().all(|lane| lane));
     }
 }

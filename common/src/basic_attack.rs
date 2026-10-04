@@ -134,7 +134,7 @@ pub fn handle_basic_attack_request(
         attacker.hero.y + CAST_SPAWN_HEIGHT,
         attacker.hero.z,
     );
-    let damage = hero_stats::basic_attack_damage(attacker)
+    let mut damage = hero_stats::basic_attack_damage(attacker)
         * mode_damage
         * world.team_buffs.damage_multiplier(team, now);
     if !bypass_vision && !vision::target_visible(team, target, world, now) {
@@ -164,6 +164,15 @@ pub fn handle_basic_attack_request(
         return;
     }
     let attacker = world.players.get_mut(&addr).unwrap();
+    // Critical hits are reproducible server decisions, independent of request IDs.
+    if target.kind != TargetKind::Structure {
+        attacker.economy.basic_crit_meter +=
+            attacker.economy.item_bonuses.crit_chance.clamp(0.0, 0.75);
+        if attacker.economy.basic_crit_meter + f32::EPSILON >= 1.0 {
+            attacker.economy.basic_crit_meter = (attacker.economy.basic_crit_meter - 1.0).max(0.0);
+            damage *= shared::shop::CRITICAL_DAMAGE_MULTIPLIER;
+        }
+    }
     if !attacker.modifiers.infinite_resource {
         attacker.hero.mana -= mana_cost;
     }
@@ -206,4 +215,76 @@ pub fn handle_basic_attack_request(
             expires_at: now + PROJECTILE_LIFETIME,
         },
     );
+}
+
+#[cfg(test)]
+mod critical_tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[test]
+    fn accepted_basic_strikes_accumulate_crit_but_replays_and_rejections_do_not() {
+        let now = Instant::now();
+        let mut world = GameWorld::empty();
+        let a: SocketAddr = "127.0.0.1:61201".parse().unwrap();
+        let b: SocketAddr = "127.0.0.1:61202".parse().unwrap();
+        for (address, team, x) in [(a, Team::Green, -8.0), (b, Team::Blue, -5.0)] {
+            world.ensure_connected(address, now);
+            let p = world.players.get_mut(&address).unwrap();
+            p.joined = true;
+            p.hero.identity.team = team;
+            p.hero.x = x;
+            p.hero.z = -8.0;
+        }
+        world
+            .players
+            .get_mut(&a)
+            .unwrap()
+            .economy
+            .item_bonuses
+            .crit_chance = 0.25;
+        let target = TargetId {
+            kind: TargetKind::Player,
+            id: world.players[&b].hero.identity.id,
+        };
+        let mut damages = Vec::new();
+        for request in 1..=4 {
+            handle_basic_attack_request(
+                &mut world,
+                a,
+                target,
+                request,
+                now + Duration::from_secs(request * 2),
+            );
+            assert_eq!(world.projectiles.len(), 1);
+            damages.push(world.projectiles.values().next().unwrap().damage);
+            let meter = world.players[&a].economy.basic_crit_meter;
+            handle_basic_attack_request(
+                &mut world,
+                a,
+                target,
+                request,
+                now + Duration::from_secs(request * 2),
+            );
+            assert_eq!(world.players[&a].economy.basic_crit_meter, meter);
+            world.projectiles.clear();
+        }
+        assert_eq!(damages[0], damages[1]);
+        assert_eq!(damages[0], damages[2]);
+        assert!(
+            (damages[3] - damages[0] * shared::shop::CRITICAL_DAMAGE_MULTIPLIER).abs() < 0.0001
+        );
+        let meter = world.players[&a].economy.basic_crit_meter;
+        handle_basic_attack_request(
+            &mut world,
+            a,
+            TargetId {
+                id: u64::MAX,
+                ..target
+            },
+            999,
+            now + Duration::from_secs(20),
+        );
+        assert_eq!(world.players[&a].economy.basic_crit_meter, meter);
+    }
 }

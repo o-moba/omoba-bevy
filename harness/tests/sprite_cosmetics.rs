@@ -9,11 +9,11 @@ const TIMEOUT: Duration = Duration::from_secs(5);
 #[test]
 fn distinct_sprite_ids_round_trip_and_invalid_or_omitted_values_default() {
     let server = ServerProcess::spawn_with_env(&[("OMOBA_MATCH_MODE", "dev")]);
-    let mut teapot = Bot::connect(server.addr());
-    let mut jelly = Bot::connect(server.addr());
-    let mut orchard = Bot::connect(server.addr());
-    let mut invalid = Bot::connect(server.addr());
-    let mut omitted = Bot::connect(server.addr());
+    let mut teapot = Bot::connect_framed(server.addr());
+    let mut jelly = Bot::connect_framed(server.addr());
+    let mut orchard = Bot::connect_framed(server.addr());
+    let mut invalid = Bot::connect_framed(server.addr());
+    let mut omitted = Bot::connect_framed(server.addr());
 
     teapot.join_with_cosmetics(
         Team::Green,

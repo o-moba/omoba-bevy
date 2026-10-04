@@ -119,6 +119,23 @@ def original_cues():
     note(b, 0, .09, 740, .2, 'sine', 520)
     out['ui_click'] = b
     out['ui_confirm'] = motif([660, 880], .065, .2, gain=.2)
+    out['butterfly'] = motif([880, 1174.66, 1567.98], .055, .3, gain=.22)
+    b = blank(.55)
+    air(b, 0, .14, .8, seed=83, lowpass=.6)
+    note(b, .035, .22, 740, .3, 'magic', 210)
+    note(b, .12, .31, 1046.5, .15, 'bell')
+    out['trap_trigger'] = b
+    b = blank(.42)
+    air(b, 0, .20, .5, seed=173, swell=True)
+    note(b, .04, .28, 510, .26, 'magic', 1350)
+    out['bluff'] = b
+    b = blank(.85)
+    air(b, 0, .09, .65, seed=179, lowpass=.75)
+    note(b, 0, .40, 1320, .29, 'bell', 440)
+    note(b, .07, .30, 95, .40, 'warm', 55)
+    note(b, .18, .50, 1760, .16, 'bell')
+    echo(b)
+    out['vital_break'] = b
     return out
 
 

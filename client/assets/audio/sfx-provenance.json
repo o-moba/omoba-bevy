@@ -119,6 +119,34 @@
       "license": "CC0-1.0",
       "duration_seconds": 0.484989,
       "sha256": "603cc314d9bc7e337deb58319b38449477658b3907dc69130ace5d518d39be75"
+    },
+    "butterfly": {
+      "origin": "Original mathematical synthesis; scripts/build_audio_palette.py",
+      "license": "CC0-1.0",
+      "path": "audio/sfx/butterfly.ogg",
+      "duration_seconds": 0.63,
+      "sha256": "466934f8f5b0ae52fd667982ee649d9355bf05934499432f57b73ed1b71c55aa"
+    },
+    "trap_trigger": {
+      "origin": "Original mathematical synthesis; scripts/build_audio_palette.py",
+      "license": "CC0-1.0",
+      "path": "audio/sfx/trap_trigger.ogg",
+      "duration_seconds": 0.55,
+      "sha256": "a33a2e373c85332e47b8cc64da25a3122bb4e0a833d677c04413fc1ca112cbcd"
+    },
+    "bluff": {
+      "origin": "Original mathematical synthesis; scripts/build_audio_palette.py",
+      "path": "audio/sfx/bluff.ogg",
+      "license": "CC0-1.0",
+      "duration_seconds": 0.42,
+      "sha256": "cff1a9597da12068c5dd544f6dc2f809eed4c3e873ee04b57cbdfea7773a048d"
+    },
+    "vital_break": {
+      "origin": "Original mathematical synthesis; scripts/build_audio_palette.py",
+      "path": "audio/sfx/vital_break.ogg",
+      "license": "CC0-1.0",
+      "duration_seconds": 0.85,
+      "sha256": "d18f1759ef84f6740039a8c82194eabe6042c59d01f66cb98644b5db17ab5fd6"
     }
   }
 }

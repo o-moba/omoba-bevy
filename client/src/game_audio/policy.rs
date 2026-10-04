@@ -30,10 +30,14 @@ pub(crate) enum AudioCue {
     Defeat,
     UiClick,
     UiConfirm,
+    Butterfly,
+    TrapTrigger,
+    Bluff,
+    VitalBreak,
 }
 
 impl AudioCue {
-    pub(super) const ALL: [Self; 16] = [
+    pub(super) const ALL: [Self; 20] = [
         Self::Melee,
         Self::Arrow,
         Self::Arcane,
@@ -50,6 +54,10 @@ impl AudioCue {
         Self::Defeat,
         Self::UiClick,
         Self::UiConfirm,
+        Self::Butterfly,
+        Self::TrapTrigger,
+        Self::Bluff,
+        Self::VitalBreak,
     ];
 
     pub(crate) const fn id(self) -> &'static str {
@@ -70,6 +78,10 @@ impl AudioCue {
             Self::Defeat => "defeat",
             Self::UiClick => "ui_click",
             Self::UiConfirm => "ui_confirm",
+            Self::Butterfly => "butterfly",
+            Self::TrapTrigger => "trap_trigger",
+            Self::Bluff => "bluff",
+            Self::VitalBreak => "vital_break",
         }
     }
 
@@ -80,7 +92,13 @@ impl AudioCue {
     pub(super) const fn priority(self) -> u8 {
         match self {
             Self::Victory | Self::Defeat | Self::Death => 0,
-            Self::Respawn | Self::LevelUp | Self::Kill | Self::MatchStart => 1,
+            Self::Respawn
+            | Self::LevelUp
+            | Self::Kill
+            | Self::MatchStart
+            | Self::Butterfly
+            | Self::TrapTrigger
+            | Self::VitalBreak => 1,
             Self::UiClick | Self::UiConfirm | Self::Hit => 2,
             _ => 3,
         }
@@ -162,7 +180,7 @@ impl CueCatalog {
         }
         validate_asset(&catalog.music, "audio/music/")?;
         if catalog.cues.len() != AudioCue::ALL.len() {
-            return Err("audio manifest must contain exactly the 16 supported cue IDs".into());
+            return Err("audio manifest must contain exactly the supported cue IDs".into());
         }
         for cue in AudioCue::ALL {
             let asset = catalog
@@ -301,7 +319,7 @@ impl EventCursor {
             }
             seen.push(event.id);
             if !event.amount.is_finite()
-                || event.amount <= 0.0
+                || event.amount < 0.0
                 || !Vec3::new(event.x, event.y, event.z).is_finite()
                 || event.target.kind == CombatEntityKind::Unknown
             {
@@ -311,6 +329,28 @@ impl EventCursor {
                 event.target.kind == CombatEntityKind::Player && event.target.id == local.id;
             let outgoing =
                 event.source.kind == CombatEntityKind::Player && event.source.id == local.id;
+            let gain = distance_gain(local.position, Vec3::new(event.x, event.y, event.z));
+            if event.trap_triggered && (outgoing || incoming || gain > 0.0) {
+                cues.push(Candidate {
+                    cue: AudioCue::TrapTrigger,
+                    gain: if outgoing || incoming { 1.0 } else { gain },
+                });
+            }
+            // A shield can absorb the damage while the trap still activates.
+            // Its explicit receipt is audible without inventing a damage hit.
+            if event.amount == 0.0 {
+                continue;
+            }
+            if event.near_lethal
+                && !event.killed
+                && event.target.kind == CombatEntityKind::Player
+                && (outgoing || incoming || gain > 0.0)
+            {
+                cues.push(Candidate {
+                    cue: AudioCue::VitalBreak,
+                    gain: if outgoing || incoming { 1.0 } else { gain },
+                });
+            }
             if incoming {
                 if event.killed {
                     death = true;
@@ -321,7 +361,6 @@ impl EventCursor {
             if outgoing && event.killed && event.target.kind == CombatEntityKind::Player {
                 cues.push(Candidate::local(AudioCue::Kill));
             }
-            let gain = distance_gain(local.position, Vec3::new(event.x, event.y, event.z));
             if gain > 0.0 {
                 cues.push(Candidate {
                     cue: AudioCue::for_style(event.style),

@@ -1304,12 +1304,16 @@ pub(crate) fn item_slot_button<T: UiActionT>(
 pub(crate) fn item_icon(item: shared::shop::ItemId) -> Icon {
     use shared::shop::ItemId;
     match item {
-        ItemId::EmberBlade => Icon::ItemEmberBlade32,
+        ItemId::EmberBlade
+        | ItemId::DuelistEdge
+        | ItemId::VampiricFang
+        | ItemId::TempestBlade
+        | ItemId::Bloodreaver => Icon::ItemEmberBlade32,
         ItemId::SwiftGrip => Icon::ItemSwiftGrip32,
-        ItemId::TrailBoots => Icon::ItemTrailBoots32,
-        ItemId::VitalityGem => Icon::ItemVitalityGem32,
-        ItemId::FocusCharm => Icon::ItemFocusCharm32,
-        ItemId::GuardianCrest => Icon::ItemGuardianCrest32,
+        ItemId::TrailBoots | ItemId::WindrunnerBoots => Icon::ItemTrailBoots32,
+        ItemId::VitalityGem | ItemId::CritShard | ItemId::SiphonStone => Icon::ItemVitalityGem32,
+        ItemId::FocusCharm | ItemId::ArcaneFocus | ItemId::AetherCrown => Icon::ItemFocusCharm32,
+        ItemId::GuardianCrest | ItemId::Bulwark => Icon::ItemGuardianCrest32,
     }
 }
 
@@ -1325,7 +1329,7 @@ pub(crate) fn class_icon(class: shared::HeroClass) -> Icon {
         HeroClass::Dawnweaver => Icon::ClassCleric,
         HeroClass::Wildspark | HeroClass::Riftshot => Icon::ClassRanger,
         HeroClass::Cinderforge | HeroClass::Edgeweaver | HeroClass::Stormfist => Icon::ClassWarrior,
-        HeroClass::Veilstalker => Icon::ClassWarden,
+        HeroClass::Veilstalker | HeroClass::Adventurer => Icon::ClassWarden,
         HeroClass::Emberveil | HeroClass::Orbitwright => Icon::ClassMage,
         HeroClass::Chainkeeper | HeroClass::Frostguard => Icon::ClassCleric,
     }
@@ -2501,14 +2505,13 @@ pub(crate) fn player_status(
 }
 
 /// Score strip (hud.md `score-strip`): team kills `type.number_lg` in team
-/// colours around a muted colon, a divider, and `edge.kda` (`type.eyebrow`
-/// muted) over the own K/D/A (`type.number_sm`). The match has no clock
-/// (hud.md § Out of scope), so there is no timer.
+/// colours around a muted colon, then authoritative match time over own K/D/A.
 pub(crate) fn score_strip(
     parent: &mut ChildSpawnerCommands,
     green: u32,
     blue: u32,
     kda: (u32, u32, u32),
+    elapsed_secs: u64,
 ) -> Entity {
     parent
         .spawn(hud_plate(true))
@@ -2540,7 +2543,7 @@ pub(crate) fn score_strip(
                 })
                 .with_children(|column| {
                     column.spawn((
-                        crate::i18n::Localized::new("edge.kda").into_text(),
+                        Text::new(format!("{:02}:{:02}", elapsed_secs / 60, elapsed_secs % 60)),
                         theme::role_text(TextRole::Eyebrow),
                         TextColor(color::TEXT_MUTED),
                     ));

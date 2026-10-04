@@ -68,5 +68,6 @@
   "combat.standard.resonance": "Резонанс: попадания ускоряют атаки",
   "combat.standard.souls_passive": "Души: собирайте постоянное усиление защиты",
   "combat.standard.concussion_passive": "Сотрясение: четыре союзных удара оглушают",
-  "combat.standard.forging": "Ковка · {seconds} с"
+  "combat.standard.forging": "Ковка · {seconds} с",
+  "combat.standard.dagger_mastery_passive": "Мастерство кинжала: +10% к урону обычных атак со спины"
 }

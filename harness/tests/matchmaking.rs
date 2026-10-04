@@ -33,7 +33,7 @@ fn release_mode_forms_and_starts_a_full_match() {
         ServerProcess::spawn_with_env(&[("OMOBA_MATCH_MODE", "release"), ("OMOBA_TEAM_SIZE", "1")]);
 
     // First player queues: the match forms but must NOT start.
-    let mut first = Bot::connect(server.addr());
+    let mut first = Bot::connect_framed(server.addr());
     first.join(Team::Green, Character::Ipfs);
     let forming = wait_for_state(&mut first, "forming state after first join", |state| {
         matches!(state, GameState::Forming { .. })
@@ -59,7 +59,7 @@ fn release_mode_forms_and_starts_a_full_match() {
     }
 
     // Second player completes the roster: Starting countdown, then Running.
-    let mut second = Bot::connect(server.addr());
+    let mut second = Bot::connect_framed(server.addr());
     // Both bots ask for Green: the server must still balance to 1v1.
     second.join(Team::Green, Character::Ipfs);
     wait_for_state(

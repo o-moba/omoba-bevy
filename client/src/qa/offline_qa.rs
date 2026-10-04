@@ -51,6 +51,9 @@ struct Qa {
     reaction_confirmed: bool,
     proof_step: u8,
     completed_captures: HashSet<String>,
+    shop_frames: Vec<serde_json::Value>,
+    shop_drag: Option<(Vec2, Vec2)>,
+    shop_scrolls: u8,
 }
 impl Plugin for OfflineQaPlugin {
     fn build(&self, app: &mut App) {
@@ -87,6 +90,9 @@ impl Plugin for OfflineQaPlugin {
             reaction_confirmed: false,
             proof_step: 0,
             completed_captures: HashSet::new(),
+            shop_frames: Vec::new(),
+            shop_drag: None,
+            shop_scrolls: 0,
             expected_server: std::env::var("GAME_SERVER_ADDR").unwrap_or_default(),
         })
         .insert_resource(bevy::winit::WinitSettings::continuous())
@@ -144,6 +150,8 @@ fn capture(world: &mut World, qa: &Qa, name: &str) {
             | "03-local-chat.png"
             | "04-target-recall.png"
             | "09-reentered-wildspark.png"
+            | "01-shop-owned-component.png"
+            | "02-shop-scrolled-upgrades.png"
     );
     if !gameplay && qa.directory.join(name).exists() {
         return;
@@ -300,6 +308,194 @@ fn press(world: &mut World, id: &str) -> bool {
         .map(|entity| world.write_message(crate::ui::SyntheticPress(entity)))
         .is_some()
 }
+fn shop_only() -> bool {
+    std::env::var("OMOBA_OFFLINE_SHOP_QA_ONLY").as_deref() == Ok("1")
+}
+
+struct ShopLayout {
+    rect: Rect,
+    offset: f32,
+    max_offset: f32,
+    ready: bool,
+    nodes: serde_json::Value,
+}
+
+fn shop_layout(world: &mut World) -> Option<ShopLayout> {
+    let mut viewport = None;
+    let mut close = false;
+    let mut card = false;
+    let mut nodes = Vec::new();
+    for (key, node, pose, clip, visible, scroll, text) in world
+        .query::<(
+            crate::qa::QaName,
+            &ComputedNode,
+            &UiGlobalTransform,
+            Option<&bevy::ui::CalculatedClip>,
+            Option<&InheritedVisibility>,
+            Option<&ScrollPosition>,
+            Option<&Text>,
+        )>()
+        .iter(world)
+    {
+        let name = key.as_str();
+        if !name.starts_with("Shop")
+            || node.size().min_element() <= 0.0
+            || visible.is_some_and(|v| !v.get())
+        {
+            continue;
+        }
+        let dpi = 1.0 / node.inverse_scale_factor();
+        let rect = crate::ui::gesture::logical_ui_rect(node, pose, clip, dpi);
+        if name == "ShopCards" {
+            viewport = Some((
+                rect,
+                scroll.map_or(0.0, |s| s.0.y),
+                crate::ui::scroll::max_offset(node),
+            ));
+        }
+        if name == "ShopCloseButton" {
+            close = rect.width() >= 44.0 && rect.height() >= 43.5;
+        }
+        if name.starts_with("ShopBuy-") && rect.width() >= 44.0 && rect.height() >= 44.0 {
+            card = true;
+        }
+        nodes.push(serde_json::json!({"name":name,"visible_rect":[rect.min.x,rect.min.y,rect.max.x,rect.max.y],"text":text.map(|t|t.0.as_str())}));
+    }
+    let (rect, offset, max_offset) = viewport?;
+    Some(ShopLayout {
+        rect,
+        offset,
+        max_offset,
+        ready: close && card && rect.height() >= 80.0,
+        nodes: nodes.into(),
+    })
+}
+
+fn shop_touch(world: &mut World, phase: TouchPhase, position: Vec2) {
+    if let Ok(window) = world
+        .query_filtered::<Entity, With<PrimaryWindow>>()
+        .single(world)
+    {
+        world.write_message(TouchInput {
+            window,
+            id: 918,
+            phase,
+            position,
+            force: None,
+        });
+    }
+}
+
+/// One real local purchase followed by two catalog frames; all scrolling goes
+/// through the normal raw-touch recognizer. No menu/social/combat capture sweep.
+fn drive_shop(world: &mut World, qa: &mut Qa, age: f32) {
+    match qa.proof_step {
+        0 if age > 0.5 && ui_ready(world, "QuickBuy-0") => {
+            if press(world, "QuickBuy-0") {
+                qa.quick_buy_requested = true;
+                qa.proof_step = 1;
+                qa.since = Instant::now();
+            }
+        }
+        1 => {
+            qa.quick_buy_confirmed = world
+                .query_filtered::<&crate::net::PlayerEquipment, With<Player>>()
+                .single(world)
+                .is_ok_and(|equipment| {
+                    !equipment.inventory.is_empty()
+                        && equipment
+                            .last_purchase
+                            .as_ref()
+                            .is_some_and(|receipt| receipt.error.is_none())
+                });
+            if qa.quick_buy_confirmed && press(world, "GoldShopButton") {
+                qa.proof_step = 2;
+                qa.since = Instant::now();
+            }
+        }
+        2 if age > 0.4 => {
+            if let Some(layout) =
+                shop_layout(world).filter(|layout| layout.ready && layout.max_offset > 20.0)
+            {
+                let equipment = world
+                    .query_filtered::<&crate::net::PlayerEquipment, With<Player>>()
+                    .single(world)
+                    .unwrap();
+                let quotes: Vec<_> = shared::shop::items().iter().filter_map(|item| {
+                    let quote = shared::shop::upgrade_quote(item.id,&equipment.inventory);
+                    (!quote.consumed.is_empty()).then(||serde_json::json!({"item":item.id,"full_price":item.cost,"remaining_price":quote.cost,"components":quote.consumed}))
+                }).collect();
+                if quotes.is_empty() {
+                    return;
+                }
+                qa.shop_frames.push(serde_json::json!({"file":"01-shop-owned-component.png","scroll_offset":layout.offset,"scroll_max":layout.max_offset,"inventory":equipment.inventory,"purchase_receipt":equipment.last_purchase,"component_credit_quotes":quotes,"nodes":layout.nodes}));
+                capture(world, qa, "01-shop-owned-component.png");
+                qa.proof_step = 3;
+                qa.since = Instant::now();
+            }
+        }
+        3 if qa
+            .completed_captures
+            .contains("01-shop-owned-component.png")
+            && age > 0.2 =>
+        {
+            if let Some(layout) = shop_layout(world).filter(|layout| layout.ready) {
+                if layout.offset >= layout.max_offset - 2.0 && qa.shop_scrolls > 0 {
+                    qa.shop_frames.push(serde_json::json!({"file":"02-shop-scrolled-upgrades.png","scroll_offset":layout.offset,"scroll_max":layout.max_offset,"raw_touch_drags":qa.shop_scrolls,"nodes":layout.nodes}));
+                    capture(world, qa, "02-shop-scrolled-upgrades.png");
+                    qa.proof_step = 7;
+                    qa.since = Instant::now();
+                } else if qa.shop_scrolls < 12 {
+                    let start = Vec2::new(layout.rect.center().x, layout.rect.max.y - 12.0);
+                    let end = Vec2::new(start.x, layout.rect.min.y + 12.0);
+                    qa.shop_drag = Some((start, end));
+                    shop_touch(world, TouchPhase::Started, start);
+                    qa.proof_step = 4;
+                    qa.since = Instant::now();
+                }
+            }
+        }
+        4 if age > 0.12 => {
+            if let Some((_, end)) = qa.shop_drag {
+                shop_touch(world, TouchPhase::Moved, end);
+                qa.proof_step = 5;
+                qa.since = Instant::now();
+            }
+        }
+        5 if age > 0.12 => {
+            if let Some((_, end)) = qa.shop_drag {
+                shop_touch(world, TouchPhase::Ended, end);
+                qa.shop_scrolls += 1;
+                qa.proof_step = 3;
+                qa.since = Instant::now();
+            }
+        }
+        7 if qa
+            .completed_captures
+            .contains("02-shop-scrolled-upgrades.png") =>
+        {
+            let pass = qa.quick_buy_confirmed && qa.shop_scrolls > 0 && qa.shop_frames.len() == 2;
+            let viewport = world
+                .query_filtered::<&Window, With<PrimaryWindow>>()
+                .single(world)
+                .map(|window| [window.width(), window.height()])
+                .unwrap_or([0.0, 0.0]);
+            std::fs::write(qa.directory.join("shop-result.json"),serde_json::to_vec_pretty(&serde_json::json!({
+                "pass":pass,"offline_purchase_confirmed":qa.quick_buy_confirmed,"raw_touch_scrolls":qa.shop_scrolls,
+                "frames":qa.shop_frames,"viewport":viewport,"language":"en","physical_device_verified":false,
+                "synthetic_window_focus":synthetic_focus_enabled(),"method":"Native renderer, production purchase and raw-touch scrolling; local authority."
+            })).unwrap()).unwrap();
+            qa.stage = 250;
+            world.write_message(if pass {
+                AppExit::Success
+            } else {
+                AppExit::error()
+            });
+        }
+        _ => {}
+    }
+}
+
 fn drive(world: &mut World) {
     let Some(mut qa) = world.remove_resource::<Qa>() else {
         return;
@@ -321,6 +517,7 @@ fn drive(world: &mut World) {
                 "recall_visual_submitted":qa.recall_visual_submitted,
                 "recall_readback_active":qa.recall_readback_active,"recall_diagnostic":qa.recall_diagnostic,
                 "completed_captures":qa.completed_captures,
+                "shop_frames":qa.shop_frames,"shop_scrolls":qa.shop_scrolls,
             })).unwrap(),
         )
         .unwrap();
@@ -335,11 +532,11 @@ fn drive(world: &mut World) {
             let width = std::env::var("OMOBA_QA_WIDTH")
                 .ok()
                 .and_then(|s| s.parse().ok())
-                .unwrap_or(1180);
+                .unwrap_or(if shop_only() { 852 } else { 1180 });
             let height = std::env::var("OMOBA_QA_HEIGHT")
                 .ok()
                 .and_then(|s| s.parse().ok())
-                .unwrap_or(820);
+                .unwrap_or(if shop_only() { 393 } else { 820 });
             window.resolution.set_scale_factor_override(Some(1.0));
             window.resolution.set(width as f32, height as f32);
         }
@@ -365,6 +562,11 @@ fn drive(world: &mut World) {
     let age = qa.since.elapsed().as_secs_f32();
     if matches!(qa.stage, 5..=8 | 19) && screen == AppScreen::InMatch && !gameplay_ready(world) {
         qa.since = Instant::now();
+        world.insert_resource(qa);
+        return;
+    }
+    if shop_only() && qa.stage == 5 && screen == AppScreen::InMatch {
+        drive_shop(world, &mut qa, age);
         world.insert_resource(qa);
         return;
     }
@@ -477,7 +679,9 @@ fn drive(world: &mut World) {
     let mut advance = false;
     match qa.stage {
         0 if age > 4.0 && screen == AppScreen::Home => {
-            capture(world, &qa, "01-home.png");
+            if !shop_only() {
+                capture(world, &qa, "01-home.png");
+            }
             advance = true;
         }
         1 if age > 0.5 => {
@@ -488,7 +692,9 @@ fn drive(world: &mut World) {
             advance = true;
         }
         3 if age > 2.0 => {
-            capture(world, &qa, "02-hero-picker.png");
+            if !shop_only() {
+                capture(world, &qa, "02-hero-picker.png");
+            }
             advance = true;
         }
         4 if age > 0.5 => {

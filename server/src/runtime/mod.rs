@@ -58,6 +58,7 @@ impl RateLimitedDiagnostic {
 }
 
 pub(crate) struct ServerRuntime {
+    pub(crate) session_recovery: crate::session_recovery::SessionRecovery,
     pub(crate) sandbox: Option<sandbox::SandboxRuntime>,
     pub(crate) match_service: match_service::MatchService,
     pub(crate) public_transport: public_transport::PublicTransport,
@@ -160,6 +161,7 @@ impl ServerRuntime {
     ) -> Self {
         let now = clock.now();
         Self {
+            session_recovery: Default::default(),
             sandbox: None,
             match_service: match_service::MatchService::default(),
             public_transport: public_transport::PublicTransport::default(),

@@ -26,5 +26,7 @@
   "draft.button.lock_in": "Подтвердить",
   "draft.timer.remaining": "ВЫБОР · {seconds}с",
   "draft.timer.gathering": "Ожидаем команду…",
-  "draft.stage.rotate": "Потяни, чтобы повернуть"
+  "draft.stage.rotate": "Потяни, чтобы повернуть",
+  "draft.tab.avatars": "Аватары",
+  "draft.tab.classes": "Классы"
 }

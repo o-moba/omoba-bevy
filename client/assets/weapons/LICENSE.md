@@ -16,3 +16,8 @@ The grant covers only these three visual assets and their editable source.
 It does not license imported/downloaded weapons, avatars or other authors'
 works. Scripts, configuration and manifest metadata retain MPL-2.0.
 See [LICENSING.md](../../../LICENSING.md) for the repository license map.
+
+The original **Adventurer Dagger** (`dagger.glb`) and its editable
+`assets-src/weapons/dagger.blend` source are also CC-BY-4.0, credited to
+Open Moba contributors. Created from original geometry by
+`scripts/build_dagger_model.py`; no third-party game assets are used.

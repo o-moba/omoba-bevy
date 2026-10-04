@@ -131,7 +131,7 @@ fn real_release_5v5_snapshots_fit_framed_datagrams_and_keep_complete_ordered_sch
         frames.retain(|(_, old_tick), _| *old_tick > tick);
         if snapshot["game_state"]["type"] == "running"
             && array(&snapshot, "players").len() == 5
-            && array(&snapshot, "structures").len() == 4
+            && array(&snapshot, "structures").len() == 20
             && array(&snapshot, "minions").len() == 9
         {
             break (payload, snapshot, actual_frames);
@@ -162,15 +162,29 @@ fn real_release_5v5_snapshots_fit_framed_datagrams_and_keep_complete_ordered_sch
     }
     assert_eq!(teams.get("green"), Some(&5));
     assert_eq!(teams.get("blue"), None);
-    for field in ["structures", "minions"] {
-        assert!(
-            array(&snapshot, field)
+    assert!(
+        array(&snapshot, "minions")
+            .iter()
+            .all(|actor| actor["team"] == "green")
+    );
+    // Public map landmarks include both teams; live units remain fog filtered.
+    assert_eq!(
+        array(&snapshot, "structures")
+            .iter()
+            .map(|actor| actor["id"].as_u64().unwrap())
+            .collect::<Vec<_>>(),
+        (1..=20).collect::<Vec<_>>()
+    );
+    for team in ["green", "blue"] {
+        assert_eq!(
+            array(&snapshot, "structures")
                 .iter()
-                .all(|actor| actor["team"] == "green")
+                .filter(|actor| actor["team"] == team)
+                .count(),
+            10
         );
     }
     assert_eq!(array(&snapshot, "minions").last().unwrap()["id"], 15);
-    assert_eq!(array(&snapshot, "structures").last().unwrap()["id"], 7);
     for field in ["neutrals", "projectiles", "team_buffs"] {
         let _ = array(&snapshot, field);
     }
@@ -219,24 +233,36 @@ fn real_release_5v5_snapshots_fit_framed_datagrams_and_keep_complete_ordered_sch
         }
     };
     assert_eq!(typed.players().len(), 5);
-    assert_eq!(typed.structures().len(), 4);
+    assert_eq!(typed.structures().len(), 20);
     assert_eq!(typed.minions().len(), 9);
     assert_eq!(typed.scoreboard().unwrap().players.len(), 10);
     let own_team = typed.player(typed.your_id()).unwrap().team;
     assert!(typed.players().iter().all(|actor| actor.team == own_team));
-    assert!(
+    assert_eq!(
         typed
             .structures()
             .iter()
-            .all(|actor| actor.team == own_team)
+            .map(|actor| actor.id)
+            .collect::<Vec<_>>(),
+        (1..=20).collect::<Vec<_>>()
     );
+    for team in [Team::Green, Team::Blue] {
+        assert_eq!(
+            typed
+                .structures()
+                .iter()
+                .filter(|actor| actor.team == team)
+                .count(),
+            10
+        );
+    }
     assert!(typed.minions().iter().all(|actor| actor.team == own_team));
     eprintln!(
         "FRAMED_5V5_MEASUREMENT {}",
         serde_json::json!({
             "reconstructed_bytes":payload.len(), "maximum_datagram_bytes":maximum_datagram,
             "populated_fragment_count":actual_frames.len(), "completed_ordered_snapshots":completed,
-            "players":5,"structures":4,"minions":9,"public_roster":10,"team_vision":true,"server_epoch":last_meta.unwrap().server_epoch,
+            "players":5,"structures":20,"minions":9,"public_roster":10,"team_vision":true,"server_epoch":last_meta.unwrap().server_epoch,
             "match_id":last_meta.unwrap().match_id,"snapshot_tick":last_meta.unwrap().snapshot_tick,
             "transport":"loopback; remote/Wi-Fi unverified",
         })

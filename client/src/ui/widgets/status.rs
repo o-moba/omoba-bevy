@@ -59,7 +59,7 @@ pub(crate) fn status_ring(
     ring_size: RingSize,
 ) -> Entity {
     let (side, _, role) = ring_size.metrics();
-    let disc = ring_size.disc();
+    let disc_size = ring_size.disc();
     let icon = if ring_size == RingSize::Small {
         size::ICON_MD
     } else {
@@ -81,8 +81,8 @@ pub(crate) fn status_ring(
         timer_ring_layers(root, 1.0, color::SURFACE_3, color::GOLD_400);
         root.spawn((
             Node {
-                width: Val::Px(disc),
-                height: Val::Px(disc),
+                width: Val::Px(disc_size),
+                height: Val::Px(disc_size),
                 justify_content: JustifyContent::Center,
                 align_items: AlignItems::Center,
                 border_radius: BorderRadius::all(Val::Px(radius::PILL)),
@@ -105,6 +105,16 @@ pub(crate) fn status_ring(
                     icon_node(Icon::NavAlertTriangle, icon, color::TEXT_DANGER),
                     Visibility::Hidden,
                 ))
+                // Hidden flex children still reserve space. The alert shares
+                // the disc centre with the number without shifting it sideways.
+                .insert(Node {
+                    position_type: PositionType::Absolute,
+                    width: Val::Px(icon),
+                    height: Val::Px(icon),
+                    left: Val::Px((disc_size - icon) * 0.5),
+                    top: Val::Px((disc_size - icon) * 0.5),
+                    ..default()
+                })
                 .id(),
             );
         });
@@ -331,6 +341,82 @@ mod tests {
             .query_filtered::<(&Visibility, &KitImage, Has<Spin>), With<RingArc>>();
         let (visibility, image, spin) = arcs.single(app.world()).unwrap();
         (*visibility, image.frame, spin)
+    }
+
+    #[test]
+    fn countdown_number_is_centered_in_real_phone_layout() {
+        use bevy::camera::{ComputedCameraValues, RenderTargetInfo};
+        let mut app = App::new();
+        app.add_plugins((
+            MinimalPlugins,
+            bevy::asset::AssetPlugin::default(),
+            bevy::image::ImagePlugin::default(),
+            bevy::text::TextPlugin,
+            bevy::transform::TransformPlugin,
+            bevy::input::InputPlugin,
+            bevy::ui::UiPlugin,
+            bevy::camera::visibility::VisibilityPlugin,
+            bevy::picking::PickingPlugin,
+            bevy::picking::InteractionPlugin,
+        ))
+        .init_resource::<Assets<bevy::mesh::Mesh>>()
+        .init_resource::<Assets<TextureAtlasLayout>>();
+        add_systems(&mut app);
+        let mut window = Window::default();
+        window.resolution.set_scale_factor_override(Some(1.0));
+        window.resolution.set(852.0, 393.0);
+        app.world_mut().spawn((window, bevy::window::PrimaryWindow));
+        app.world_mut().spawn((
+            Camera2d,
+            Camera {
+                computed: ComputedCameraValues {
+                    target_info: Some(RenderTargetInfo {
+                        physical_size: UVec2::new(852, 393),
+                        scale_factor: 1.0,
+                    }),
+                    ..default()
+                },
+                ..default()
+            },
+        ));
+        let mut ring = Entity::PLACEHOLDER;
+        app.world_mut()
+            .commands()
+            .spawn(Node::default())
+            .with_children(|parent| {
+                ring = status_ring(
+                    parent,
+                    RingMode::Countdown {
+                        progress: 0.5,
+                        number: 20,
+                    },
+                    RingSize::Medium,
+                );
+            });
+        app.world_mut().flush();
+        app.finish();
+        app.cleanup();
+        for _ in 0..5 {
+            app.update();
+        }
+        let label = app.world().get::<KitParts>(ring).unwrap().label.unwrap();
+        let center = app
+            .world()
+            .get::<UiGlobalTransform>(ring)
+            .unwrap()
+            .translation;
+        let number = app
+            .world()
+            .get::<UiGlobalTransform>(label)
+            .unwrap()
+            .translation;
+        assert!(app.world().get::<ComputedNode>(label).unwrap().size().x > 0.0);
+        // Pixel rounding may move an odd-sized text box by half a pixel on
+        // each axis (sqrt(0.5² + 0.5²) =0.707); the old flex offset was12px.
+        assert!(
+            (center - number).length() <= 0.75,
+            "ring {center:?}, number {number:?}"
+        );
     }
 
     #[test]

@@ -1,5 +1,35 @@
 # Feature Inventory
 
+## Equipped skill bindings and shared control (0.40.0)
+
+Accepted recipes can bind four unique compatible skills to any Q/W/E/R buttons, including four different ultimates. Each skill keeps its authored unlock role (levels 1/2/4/6), rank limits, resource costs, cooldown, targeting and presentation when moved. Capability checks remain: weapon switching needs a Repeater core, and orb field/pull needs an equipped orb controller. Duplicate skills and malformed or mismatched recipes are rejected.
+
+Desktop, phone and controller paths share the accepted metadata for casts, aim previews, localized names/icons, cards, upgrades and total cooldowns. Server remaining cooldown and recast state stay authoritative. Stormfist follow-up costs now follow the equipped skill across cores; admitted Bluff consumes Brittle once through the common online/offline control and damage paths. Existing control exceptions are documented explicitly.
+
+Optional authored recipes are available through the existing opt-in local Combat Test configuration. Normal selection still offers presets; a public class editor, saved account recipes and website equip are future work. The current contract requires matching **protocol 9 / standard-kits-4** builds. Local verification passes: the complete strict gate, 50 harness tests including the live mixed-kit route, and two English 852×393 synthetic HUD states. Physical-device acceptance remains separate. See [the contract](equipped-skills.md) and [current evidence status](progress/2026-10-04-equipped-skills.md). Earlier version sections below describe their historical contracts.
+
+## Configurable lane defense and lane brush (0.39.0)
+
+The default arena has three towers per team on each lane: an outer tower, an inner tower and a final tower near the Nexus. All 18 towers and two bases are server-owned; siege protection follows the remaining active tiers. Map configuration can disable tiers, with ready one- and two-tower variants for faster matches. Six additional brush pockets touch the lane corridors and use the same authoritative concealment rules as jungle brush. Existing player movement, minion passage and original object identities remain intact. See [configuration](map-customization.md) and [verification](progress/2026-10-04-lane-defense.md). Matching protocol 8 client/server builds are required for the new compiled brush geometry.
+
+## Touch movement response (0.38.0)
+
+The thumb-stick reaches full speed at its visible travel limit (70% of the base radius), and its knob tracks the finger directly inside that range. Reversing from an extended forward drag to the opposite visible limit retains full running speed. The inner range still supports analog walking; slow, haste, root/stun and collision rules remain authoritative. See [measured regression and scope](progress/2026-10-04-movement-reversal.md).
+
+## Adventurer dagger class (0.38.0)
+
+Adventurer adds four close-range skills: Deadly Blow, Bluff, Backstab and Lethal Blow. Bluff briefly stuns and turns the victim away; rear geometry uses authoritative facing. A qualifying rear Backstab can leave a surviving enemy hero at 1 HP with a 2% authority-owned chance. The class uses the shared online/offline engine and recipe resolver, a hand-attached dagger and skill-owned humanoid animation. [Class contract and balance](adventurer.md) document exact limits; [implementation verification](progress/2026-10-04-adventurer.md) records current release status.
+
+## Mobile playtest round two (0.37.0)
+
+Quick taps assist projectile aim toward nearby visible opponents; drag aiming remains manual. Long-range targeting adds minimap intersection crosses, and nearby hostile towers show their attack area. Bots require living allied minion cover before entering it. Four river butterfly locations supplement the forest pickups; confirmed pickup and trap-trigger events have distinct sounds.
+
+The compact score includes authoritative match time. Death timers start at 5 seconds, begin growing after minute 2 and cap at 35 seconds. The 16-item shop uses component credit, three price tiers and critical/lifesteal build paths. Hero kills award 500g, reduced for repeated defeats, with a bounded 100g assist pool. Postmatch shows both rosters, KDA and earned income. [Economy model and balance](economy.md) records assumptions and timing.
+
+Allocated running matches retain disconnected heroes, default to bot control and accept authenticated teammate votes for idle/bot policy. A saved resume hint allows reopening the same match after restarting the app; the server validates the session and match identity. Phone draft selection uses tabs and per-character rotation. FPS visibility is saved separately from its limit; diagnostics distinguish measured app cadence and native display-link cadence. Physical iPhone performance remains to be measured.
+
+The matching protocol 6 server and client are required for the new inventory types. This work is prepared locally; see [verification and rollout status](progress/2026-10-04-playtest-round-two.md).
+
 ## Mobile playtest follow-up (0.36.0)
 
 Home always offers Offline Practice, including while connected. It runs the shared combat engine locally, produces no saved history or progression, and supports local debug chat, reactions and item purchases. Server bot matches remain a separate online option. Nearby alive enemies visible to the client have exact-identity targeting portraits; hidden enemies never enter this rail. Gold and quick-buy sit directly below the minimap. The remaining basic-attack instruction banners are removed.
@@ -73,7 +103,7 @@ Eleven modular presets now cover the standard roster. The nine additions are **C
 
 **Dawnweaver** is a ranged control/support kit: spell marks empower attacks, a snare catches two targets, a returning projectile shields allies, a slowing field detonates on recast, and a telegraphed beam finishes the combo. **Wildspark** is a ranged carry: switch between a stacking repeater and Mana-consuming splash rockets, catch enemies with a slowing shot and armed traps, fire a long-range finisher and accelerate after qualifying takedowns. Both classes use any supported avatar and keep the existing level/skill-unlock system.
 
-The shared catalogue now separates 44 reusable skill definitions from eleven four-slot presets. Versioned `BuildRecipe` data chooses a core, passive and skills; a pure resolver checks slot and attack-profile compatibility before the server executes effects. Mixed recipes are tested internally. The public constructor, persistent user recipes and website synchronization are still deferred; the game exposes the eleven fixed presets. Numbers are initial tuning values, not a competitive balance guarantee.
+This work introduced reusable skill definitions separately from four-slot presets. Versioned `BuildRecipe` data chooses a core, passive and skills; the current resolver validates unique skill identities and capability dependencies, with arbitrary bindings added in [0.40.0](equipped-skills.md). The catalogue now has 48 reusable skills across twelve modular presets, alongside five legacy kits. Public construction, persistent user recipes and website synchronization remain deferred; authored recipes are limited to internal tests and the opt-in local laboratory. Numbers are initial tuning values, not a competitive balance guarantee.
 
 Server-authoritative aim, cooldowns, costs, control, shields, weapon modes, effect lifetimes and fog-filtered snapshots use protocol 4. New peers reject incompatible protocol versions explicitly. Desktop, touch and controller paths share aimed casts; original icons and English/Russian/Chinese text accompany the hotbar, recast/mode/status feedback and effect geometry. As of 0.31.0, every kit also runs in socket-free Offline Practice through the same authoritative engine. See [implementation, architecture and remaining TODO](progress/2026-09-29-standard-kits.md).
 

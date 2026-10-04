@@ -6,8 +6,9 @@
 use std::time::{Duration, Instant};
 
 use harness::{
-    Bot, Character, GameState, HeroClass, ServerProcess, SnapshotView, Team,
+    Bot, Character, GameState, HeroClass, ServerProcess, SnapshotView, StructureKind, Team,
     bot_ai::{BotBrain, Lane, WorldView, step_toward},
+    navigation::BotNavigator,
 };
 
 const TICK: Duration = Duration::from_millis(50);
@@ -17,7 +18,7 @@ const MIN_PROGRESS: f32 = 20.0;
 #[test]
 fn brain_driven_bot_pushes_its_lane_on_a_live_server() {
     let server = ServerProcess::spawn(); // dev mode: match starts on join
-    let mut bot = Bot::connect(server.addr());
+    let mut bot = Bot::connect_framed(server.addr());
     bot.join_with_loadout(Team::Green, Character::Ipfs, HeroClass::Warrior, None);
     let my_id = bot.my_id(Duration::from_secs(5));
 
@@ -28,6 +29,7 @@ fn brain_driven_bot_pushes_its_lane_on_a_live_server() {
     let spawn = (me.x, me.z);
     let mut brain = BotBrain::new(Lane::Mid, Team::Green, HeroClass::Warrior);
     brain.resync(spawn.0, spawn.1);
+    let mut navigation = BotNavigator::default();
 
     let deadline = Instant::now() + TEST_BUDGET;
     let mut position = spawn;
@@ -46,8 +48,25 @@ fn brain_driven_bot_pushes_its_lane_on_a_live_server() {
         position = (me.x, me.z);
         let view = WorldView::from_snapshot(&snapshot, my_id, Team::Green);
         let decision = brain.decide(position.0, position.1, &view);
-        if let Some(target) = decision.move_target {
-            let (nx, nz, yaw) = step_toward(position, target, TICK.as_secs_f32());
+        // Follow the runtime bot's route around authoritative structure discs;
+        // a straight step toward the lane waypoint can hit a friendly tower.
+        let structures: Vec<_> = snapshot
+            .structures()
+            .iter()
+            .filter(|s| s.hp > 0.0)
+            .map(|s| shared::navigation::Disc {
+                center: [s.x, s.z],
+                radius: if s.kind == StructureKind::BaseTower {
+                    3.2
+                } else {
+                    1.3
+                },
+            })
+            .collect();
+        if let Some(target) = decision.move_target.and_then(|target| {
+            navigation.next([position.0, position.1], [target.0, target.1], &structures)
+        }) {
+            let (nx, nz, yaw) = step_toward(position, (target[0], target[1]), TICK.as_secs_f32());
             bot.send_transform(nx, 0.5, nz, yaw);
         }
         if let Some(target) = decision.cast {

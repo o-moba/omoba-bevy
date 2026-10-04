@@ -4,12 +4,12 @@ use bevy::gizmos::config::GizmoConfigGroup;
 use bevy::prelude::*;
 
 #[derive(Default, Reflect, GizmoConfigGroup)]
-pub(super) struct SkillAimGizmos;
+pub(crate) struct SkillAimGizmos;
 #[derive(Default, Reflect, GizmoConfigGroup)]
 pub(super) struct SkillEffectGizmos;
 
 #[derive(Resource, Default)]
-pub(super) struct SkillAimVector(pub Option<(Vec2, Vec2)>);
+pub(crate) struct SkillAimVector(pub Option<(Vec2, Vec2, f32)>);
 
 use shared::loadout::{EffectVisualKind, WeaponMode};
 use shared::{HeroClass, TargetingMode};
@@ -131,6 +131,7 @@ pub(super) fn update_status(
         shared::loadout::PassiveId::Resonance => tr("combat.standard.resonance"),
         shared::loadout::PassiveId::Souls => tr("combat.standard.souls_passive"),
         shared::loadout::PassiveId::Concussion => tr("combat.standard.concussion_passive"),
+        shared::loadout::PassiveId::DaggerMastery => tr("combat.standard.dagger_mastery_passive"),
     };
     let mut lines = vec![format!("{} · {}", data::hero_name(class.0), passive)];
     if !mobile.enabled && !pad.active {
@@ -258,7 +259,7 @@ fn ring<G: GizmoConfigGroup>(
 }
 
 /// Authored aim geometry while a key, touch drag or controller button is held.
-pub(super) fn draw_aim(
+pub(crate) fn draw_aim(
     mut gizmos: Gizmos<SkillAimGizmos>,
     mut vector: ResMut<SkillAimVector>,
     local: Query<
@@ -267,6 +268,8 @@ pub(super) fn draw_aim(
             &NetworkHeroClass,
             &crate::net::PlayerProgression,
             &super::CombatStats,
+            &crate::team::Team,
+            Option<&crate::net::PlayerLoadout>,
         ),
         With<Player>,
     >,
@@ -278,18 +281,22 @@ pub(super) fn draw_aim(
     keyboard: Res<ButtonInput<KeyCode>>,
     mobile: Option<Res<crate::mobile_controls::MobileControls>>,
     pad: Option<Res<crate::gamepad::GamepadControls>>,
+    candidates: super::selection::TargetCandidates,
+    validity: crate::targeting::TargetValidity,
+    target: Res<super::selection::TargetState>,
+    basic: Res<crate::targeting::BasicAttackState>,
 ) {
     vector.0 = None;
     if !context.gameplay_allowed() {
         return;
     }
-    let Ok((pose, class, progression, stats)) = local.single() else {
+    let Ok((pose, class, progression, stats, team, loadout)) = local.single() else {
         return;
     };
     if !stats.is_alive() {
         return;
     }
-    let Some(preset) = shared::loadout::preset_for_class(class.0) else {
+    let Some(skills) = crate::equipped_skills::resolve(class.0, loadout) else {
         return;
     };
     let touch = mobile
@@ -308,7 +315,9 @@ pub(super) fn draw_aim(
     let Some(slot) = slot.filter(|i| *i < 4) else {
         return;
     };
-    let def = preset.skill(shared::SkillSlot::ALL[slot]);
+    let Some(def) = skills.skill(shared::SkillSlot::ALL[slot]) else {
+        return;
+    };
     if def.ability.targeting == TargetingMode::SelfTarget {
         return;
     }
@@ -318,21 +327,39 @@ pub(super) fn draw_aim(
         let screen = touch
             .and_then(|t| t.aim)
             .or_else(|| controller.and_then(|p| p.aim));
-        let direction = screen
-            .and_then(|screen| {
-                camera.single().ok().map(|(_, camera)| {
-                    crate::player::mobile_screen_direction(screen, camera, *mode).xz()
-                })
+        let manual = screen.and_then(|screen| {
+            camera.single().ok().map(|(_, camera)| {
+                crate::player::mobile_screen_direction(screen, camera, *mode).xz()
             })
-            .unwrap_or_else(|| pose.forward().xz())
-            .normalize_or_zero();
+        });
+        let assisted = screen
+            .is_none()
+            .then(|| {
+                super::mobile::quick_cast_target(
+                    origin,
+                    *team,
+                    range,
+                    target.selected_entity,
+                    basic.order.map(|order| order.entity),
+                    &candidates,
+                    &validity,
+                )
+            })
+            .flatten();
         let extent = touch.map(|t| t.extent).unwrap_or_else(|| {
             controller
                 .filter(|p| p.aim.is_some())
                 .and_then(|p| p.raw)
                 .map_or(1.0, |p| p.right.length().clamp(0.15, 1.0))
         });
-        origin + direction * range * extent
+        super::mobile::resolve_mobile_aim(
+            origin,
+            pose.forward().xz(),
+            range,
+            extent,
+            manual,
+            assisted,
+        )
     } else {
         let (Ok(window), Ok((camera, camera_pose))) = (windows.single(), camera.single()) else {
             return;
@@ -395,7 +422,7 @@ pub(super) fn draw_aim(
             }
             if direction.length_squared() > 0.5 {
                 if range >= 35.0 {
-                    vector.0 = Some((origin, origin + direction * range));
+                    vector.0 = Some((origin, origin + direction * range, radius));
                 }
                 let distance = range.min(14.0);
                 let tip = origin + direction * distance;
@@ -762,7 +789,7 @@ pub(super) fn draw_minimap_aim(
     mut lines: Query<(&mut Node, &mut UiTransform), With<MinimapAimLine>>,
 ) {
     use crate::minimap::{clip_map_segment, line_node, map_point};
-    let segment = vector.0.and_then(|(a, b)| {
+    let segment = vector.0.and_then(|(a, b, _)| {
         clip_map_segment(
             map_point(*layout, Vec3::new(a.x, 0.0, a.y)),
             map_point(*layout, Vec3::new(b.x, 0.0, b.y)),

@@ -223,6 +223,11 @@
       "sha256": "cb7d098f277b3016e6472f85c1f9178368a0eaa52a811c481a9ffc445622f659",
       "source": "scripts/build_handheld_models.py",
       "provenance": "original project-authored geometry"
+    },
+    "weapons/dagger.glb": {
+      "sha256": "7fc975a6b166f871cff0214a52d65eb63c41c90955e42308a869bcf71db32cc1",
+      "source": "scripts/build_dagger_model.py",
+      "provenance": "original project-authored geometry"
     }
   }
 }

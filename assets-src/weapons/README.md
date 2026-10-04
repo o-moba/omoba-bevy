@@ -23,3 +23,8 @@ Models inherit avatar normalization and bone animation through their parent.
 After changing a model, inspect each output with `assimp info`, update its hash
 in `client/assets/config/asset_policy.json`, and run the candidate asset audit.
 See `docs/handheld-weapons.md` for the SDK import contract and pilot limits.
+
+Adventurer dagger uses the same canonical grip with a shorter 0.53 m blade-tip
+extent and a distinct diamond profile. Regenerate only this isolated source:
+`/Applications/Blender.app/Contents/MacOS/Blender --background --factory-startup --python scripts/build_dagger_model.py`.
+It writes `dagger.blend` and `dagger.glb`, preserving the pilot armory source.

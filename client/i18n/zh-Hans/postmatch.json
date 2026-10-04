@@ -13,5 +13,7 @@
   "postmatch.local_result": "本地练习结果",
   "postmatch.saving": "正在保存对局结果…",
   "postmatch.button.play_again": "再来一局",
-  "postmatch.button.back_to_menu": "返回主菜单"
+  "postmatch.button.back_to_menu": "返回主菜单",
+  "postmatch.gold_earned": "获得金币",
+  "postmatch.total": "合计"
 }

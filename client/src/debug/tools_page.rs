@@ -516,7 +516,7 @@ mod tests {
     #[test]
     fn duel_settings_clamp_and_build_the_wire_command() {
         let mut state = PracticeSandboxState::default();
-        for _ in 0..20 {
+        for _ in 0..(DUEL_MAX_GOLD / DUEL_GOLD_STEP + 1) {
             state.adjust_level(1);
             state.adjust_gold(1);
         }
@@ -524,7 +524,7 @@ mod tests {
             (state.duel_level, state.duel_gold),
             (DUEL_MAX_LEVEL, DUEL_MAX_GOLD)
         );
-        for _ in 0..40 {
+        for _ in 0..(DUEL_MAX_GOLD / DUEL_GOLD_STEP + 1) {
             state.adjust_level(-1);
             state.adjust_gold(-1);
         }

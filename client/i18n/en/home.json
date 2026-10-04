@@ -35,5 +35,11 @@
   "home.footer": "Escape · Settings                         OMOBA · Verdant Arena",
   "home.invite": "{name} invites you to a party",
   "home.button.accept": "Accept",
-  "home.button.decline": "Decline"
+  "home.button.decline": "Decline",
+  "home.play.resume": "Resume match",
+  "home.recovery.home": "Home · keep match",
+  "home.recovery.bot": "Bot",
+  "home.recovery.idle": "Idle",
+  "home.recovery.seat": "{name} · {policy}",
+  "home.recovery.team": "Team control ({count})"
 }

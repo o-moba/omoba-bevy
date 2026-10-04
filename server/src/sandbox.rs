@@ -4,12 +4,11 @@ use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 
 use shared::combat::CombatEntityKind;
+use shared::loadout::EquippedSkills;
 use shared::map::{Lane, Team};
 use shared::sandbox::*;
 use shared::wire::{GameState, TargetId, TargetKind, default_character_choice};
-use shared::{
-    PlayerActionKind, SkillSlot, TargetingMode, ability_for_class_slot, unlocked_slots_for_level,
-};
+use shared::{PlayerActionKind, SkillSlot, TargetingMode};
 
 use crate::balance::{MAX_LEVEL, PLAYER_GROUND_Y, PLAYER_HIT_RADIUS, RESPAWN_DELAY};
 use crate::basic_attack::handle_basic_attack_request;
@@ -83,6 +82,10 @@ impl SandboxRuntime {
     ) {
         let old = self.actors.get(&p.hero.identity.id);
         let changed_hero = p.hero.identity.hero_class != c.hero;
+        let loadout = EquippedSkills::resolve(c.hero, c.recipe.as_ref())
+            .expect("sandbox actor configurations are validated before application")
+            .resolved();
+        let changed_loadout = p.hero.skills.loadout != loadout;
         let changed_avatar = old.is_some_and(|old| old.avatar != c.avatar);
         let moved = old.is_some_and(|old| old.position != c.position);
         self.actors.insert(p.hero.identity.id, c.clone());
@@ -106,11 +109,14 @@ impl SandboxRuntime {
         };
         p.hero.identity.hero_class = c.hero;
         p.hero.identity.handheld = c.handheld.clone();
-        if changed_hero || reset {
+        if changed_hero || changed_loadout || reset {
             let sequence = p.hero.skills.request_id;
             p.hero.skills = crate::skills::HeroSkills::default();
-            p.hero.skills.loadout = shared::loadout::preset_for_class(c.hero);
+            p.hero.skills.loadout = loadout;
             p.hero.skills.request_id = sequence;
+            // A newly bound skill cannot inherit another skill's clock/recast.
+            // Basic attacks and network request high-water marks stay intact.
+            p.timers.last_cast_at = [None; 4];
         }
         if changed_hero || changed_avatar || c.avatar.is_some() {
             p.hero.identity.avatar = c
@@ -204,7 +210,8 @@ impl SandboxRuntime {
                 unlocked: if p.modifiers.unlock_all {
                     [true; 4]
                 } else {
-                    unlocked_slots_for_level(p.hero.progress.level)
+                    EquippedSkills::from_resolved(p.hero.identity.hero_class, p.hero.skills.loadout)
+                        .unlocked(p.hero.progress.level)
                 },
             })
         })
@@ -244,6 +251,8 @@ fn validate_position(position: [f32; 2]) -> Result<(), String> {
     Ok(())
 }
 fn validate_actor(c: &ActorConfig) -> Result<(), String> {
+    let equipped = EquippedSkills::resolve(c.hero, c.recipe.as_ref())
+        .map_err(|error| format!("Invalid equipped skills: {error}"))?;
     if let shared::handheld::HandheldSelection::Item(id) = &c.handheld {
         if !omoba_passport::weapons::catalog()
             .items
@@ -262,7 +271,7 @@ fn validate_actor(c: &ActorConfig) -> Result<(), String> {
         return Err("Level must be 1..10; XP must fit the current level".into());
     }
     for (i, r) in c.ranks.iter().enumerate() {
-        if !(1..=c.hero.abilities()[i].max_rank).contains(r) {
+        if !(1..=equipped.ability(SkillSlot::ALL[i]).max_rank).contains(r) {
             return Err("Skill rank outside ability bounds".into());
         }
     }
@@ -323,6 +332,14 @@ impl ServerRuntime {
             {
                 let mut c = s.config.player.clone();
                 c.hero = p.hero.identity.hero_class;
+                // Preserve the ordinary class selector's preset semantics.
+                // Only a retained authored kit needs an explicit recipe.
+                c.recipe = p
+                    .hero
+                    .skills
+                    .loadout
+                    .filter(|loadout| Some(*loadout) != shared::loadout::preset_for_class(c.hero))
+                    .map(|loadout| loadout.recipe());
                 c.avatar = p.hero.identity.avatar.clone();
                 if p.hero.identity.team == Team::Blue {
                     c.position = [3.0, 0.0];
@@ -402,6 +419,16 @@ impl ServerRuntime {
         let now = self.sandbox.as_ref().unwrap().now;
         match command {
             SandboxCommand::ApplyConfig { config } => {
+                // Legacy preset-only lab commands remain compatible. Authored
+                // bindings use new progression semantics and require Hello for
+                // this protocol (compatibility is checked by handle_sandbox).
+                if (config.player.recipe.is_some() || config.enemy.actor.recipe.is_some())
+                    && !self.world.players[&addr].framed_snapshots
+                {
+                    return Err(
+                        "Negotiate the current protocol before authoring skill recipes".into(),
+                    );
+                }
                 validate_config(&config)?;
                 for position in [
                     config.player.position,
@@ -414,13 +441,20 @@ impl ServerRuntime {
                 let old = s.config.clone();
                 let p = self.world.players.get_mut(&addr).unwrap();
                 let reset = p.hero.identity.hero_class != config.player.hero;
+                let changed_loadout = p.hero.skills.loadout
+                    != EquippedSkills::resolve(config.player.hero, config.player.recipe.as_ref())
+                        .expect("configuration validated above")
+                        .resolved();
                 let id = p.hero.identity.id;
                 let moved = s
                     .actors
                     .get(&id)
                     .is_some_and(|c| c.position != config.player.position);
                 s.apply_actor(p, &config.player, reset, now);
-                if reset || moved {
+                if reset || changed_loadout {
+                    crate::skills::clear_actor(&mut self.world, id);
+                }
+                if reset || changed_loadout || moved {
                     self.world.projectiles.retain(|_, p| {
                         p.state.owner_id != id
                             && p.target
@@ -645,7 +679,11 @@ impl ServerRuntime {
                 now,
             );
         }
-        if reset {
+        let changed_loadout = self.world.players[&addr].hero.skills.loadout
+            != EquippedSkills::resolve(c.hero, c.recipe.as_ref())
+                .expect("configuration validated before synchronizing actors")
+                .resolved();
+        if reset || changed_loadout {
             let id = self.world.players[&addr].hero.identity.id;
             crate::skills::clear_actor(&mut self.world, id);
             self.world.projectiles.retain(|_, p| {
@@ -691,33 +729,36 @@ impl ServerRuntime {
     ) -> Result<(), String> {
         let skill = SkillSlot::from_index(slot).ok_or("Skill slot must be 0..3")?;
         let p = &self.world.players[&addr];
-        let target = if ability_for_class_slot(p.hero.identity.hero_class, skill).targeting
-            == TargetingMode::SelfTarget
-        {
-            TargetId {
-                kind: TargetKind::Player,
-                id: p.hero.identity.id,
-            }
-        } else {
-            self.world
-                .players
-                .values()
-                .filter(|t| {
-                    t.joined
-                        && t.hero.hp > 0.0
-                        && t.hero.identity.team != p.hero.identity.team
-                        && target_id.is_none_or(|id| id == t.hero.identity.id)
-                })
-                .min_by(|a, b| {
-                    ((a.hero.x - p.hero.x).hypot(a.hero.z - p.hero.z))
-                        .total_cmp(&((b.hero.x - p.hero.x).hypot(b.hero.z - p.hero.z)))
-                })
-                .map(|t| TargetId {
+        let target =
+            if EquippedSkills::from_resolved(p.hero.identity.hero_class, p.hero.skills.loadout)
+                .ability(skill)
+                .targeting
+                == TargetingMode::SelfTarget
+            {
+                TargetId {
                     kind: TargetKind::Player,
-                    id: t.hero.identity.id,
-                })
-                .ok_or("No living hostile target")?
-        };
+                    id: p.hero.identity.id,
+                }
+            } else {
+                self.world
+                    .players
+                    .values()
+                    .filter(|t| {
+                        t.joined
+                            && t.hero.hp > 0.0
+                            && t.hero.identity.team != p.hero.identity.team
+                            && target_id.is_none_or(|id| id == t.hero.identity.id)
+                    })
+                    .min_by(|a, b| {
+                        ((a.hero.x - p.hero.x).hypot(a.hero.z - p.hero.z))
+                            .total_cmp(&((b.hero.x - p.hero.x).hypot(b.hero.z - p.hero.z)))
+                    })
+                    .map(|t| TargetId {
+                        kind: TargetKind::Player,
+                        id: t.hero.identity.id,
+                    })
+                    .ok_or("No living hostile target")?
+            };
         let before = p.hero.last_action.sequence;
         if p.hero.skills.loadout.is_some() {
             let request = p.hero.skills.request_id.saturating_add(1);

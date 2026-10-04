@@ -57,6 +57,25 @@
         ],
         "scale": 1
       }
+    },
+    {
+      "id": "dagger",
+      "name": "Adventurer Dagger",
+      "model": "weapons/dagger.glb",
+      "grip": {
+        "bone": "rightHand",
+        "offset": [
+          0,
+          0,
+          0
+        ],
+        "rotation_degrees": [
+          0,
+          0,
+          0
+        ],
+        "scale": 1
+      }
     }
   ]
 }

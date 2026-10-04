@@ -57,6 +57,9 @@ pub fn valid_profile_id(id: &str) -> bool {
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct MatchStats {
+    /// Gross match income; absent in legacy saved results.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub earned_gold: Option<u32>,
     pub kills: u32,
     pub deaths: u32,
     pub assists: u32,
@@ -455,6 +458,8 @@ impl CareerRequest {
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct CareerView {
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub takeovers: Vec<crate::match_service::TakeoverSeatView>,
     pub match_service: Option<crate::match_service::MatchServiceView>,
     pub match_service_request_id: Option<u64>,
     pub supporter: Option<crate::supporter::SupporterStatus>,

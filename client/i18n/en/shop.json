@@ -4,7 +4,7 @@
   "shop.title": "Sanctuary shop",
   "shop.button.close": "ESC  CLOSE",
   "shop.button.close_phone": "CLOSE",
-  "shop.footer": "Unique permanent items. Buy at your base; keep them through respawn.\nEarn 1 gold / second during the match, plus combat rewards. Equipment resets each new round.",
+  "shop.footer": "Components become upgrades. Buy at your base; owned recipe parts reduce the price.\nEarn 2 gold / second plus combat rewards. Equipment survives respawn and resets each round.",
   "shop.footer_phone": "Buy at your base. Items survive respawn and reset next round.",
   "shop.item_phone.vitality_gem": "+30 max HP",
   "shop.item_phone.guardian_crest": "+15 max HP / +6% damage",
@@ -31,5 +31,9 @@
   "shop.card.details": "{cost}g  {tag}\n{action}",
   "shop.card.recommended": "RECOMMENDED",
   "shop.card.click_to_buy": "CLICK TO PURCHASE",
-  "shop.card.tap_to_buy": "TAP TO BUY"
+  "shop.card.tap_to_buy": "TAP TO BUY",
+  "shop.recipe": "Builds from {items}. Total {total}g; owned components are consumed as credit.",
+  "shop.tier": "Tier {tier}",
+  "shop.credit": "{tier} (−{credit}g)",
+  "shop.tier_tag": "{tier} {tag}"
 }

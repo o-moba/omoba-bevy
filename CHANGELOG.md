@@ -1,5 +1,58 @@
 # Changelog
 
+All notable changes are recorded here. The canonical version is
+`[workspace.package].version` in `Cargo.toml`.
+
+## [Unreleased]
+
+The current local implementation is 0.40.0, **protocol 9** and
+**standard-kits-4**. The final gate, real-server harness and affected-HUD capture
+pass; see the [equipped-skills progress note](docs/progress/2026-10-04-equipped-skills.md).
+The [0.37–0.39 delivery note](docs/progress/2026-10-04-iteration-commit.md)
+records the previous protocol-8 iteration. These entries do not indicate a
+server deployment or TestFlight upload. Physical iPhone reconnect/120 Hz,
+sustained worker capacity and competitive balance remain in the
+[refactoring/release tracker](docs/REFACTORING.md#post-programme-architecture-follow-ups--2026-10-04).
+
+## [0.40.0] - 2026-10-04
+
+- Allow four unique compatible skills on arbitrary Q/W/E/R bindings, including four distinct ultimates. Preserve capability requirements and authored unlock levels: moving an ultimate to Q still requires level 6.
+- Resolve desktop, touch and controller casting, aiming, names/icons, skill cards, upgrades and predicted cooldown totals from the accepted recipe. Reject malformed recipes without substituting a preset; preserve authoritative remaining cooldowns and sandbox unlock overrides.
+- Preserve bound skill identity through animation, persistent effects, damage receipts and recasts. Follow-up costs belong to the skill: Echo Strike, Anchor Step and Thunder Pulse cost 25 on any core; other current follow-ups remain free.
+- Share admitted root/stun/slow/charm handling across online/offline skill executors. Admitted Bluff now consumes eligible Brittle once through the existing damage/event path; rejected control preserves the mark and rejected-cast resource rules. Document preserved unstoppable, charm and displacement exceptions.
+- Add validated optional recipes to the existing opt-in local Combat Test actor configuration. Public matchmaking, a class editor, account recipe storage and website equip remain outside this change.
+- Advance to protocol 9 and standard-kits-4 for the revised recipe/catalog contract and sandbox configuration. Matching client and host builds are required; default presets and legacy classes retain their rules. No new production dependencies.
+- Add cross-kit, permutation, four-ultimate, resource and invalid-recipe regressions. Local verification passes: 1,547 Rust tests, 201 Python tests, 50 harness tests and two focused HUD states; [contract and limits](docs/equipped-skills.md).
+
+## [0.39.0] - 2026-10-04
+
+- Make three defensive towers per team on each lane the default: outer, inner and base-side, with sequential protection and the existing two Nexus structures.
+- Add optional disabled tower tiers and ready one-/two-tower map configurations for shorter matches; retain stable IDs and omit disabled towers from simulation and snapshots.
+- Add six real lane brush pockets with shared concealment/visual geometry and keep clear minion paths.
+- Advance to protocol 8 so clients without the new brush geometry cannot join and encounter invisible hiding areas. Deploy matching clients and hosts together.
+- Keep brush inspection identifiers behind the QA/test feature boundary so builds without QA pass strict checks.
+- Run live gameplay fixtures over the current framed snapshot transport and route the lane-push bot around authoritative structures; retain separate legacy transport checks.
+- Refresh the refactoring tracker with completed foundations, prioritized follow-ups and explicit device/balance verification limits; retain the historical September architecture measurements.
+
+## [0.38.0] - 2026-10-04
+
+- Match mobile movement sensitivity to the visible thumb-stick travel, avoiding unintended slow running when reversing to the visible limit; preserve analog walking and authoritative speed modifiers.
+- Add Adventurer, a close-range dagger class with Deadly Blow, Bluff, Backstab and Lethal Blow, available as reusable skills in hybrid recipes.
+- Bluff stuns and turns an enemy away; rear attacks gain damage, and eligible Backstabs have a server-owned 2% chance to leave a surviving hero at 1 HP. Preserve resource, shield, immunity, replay and reward rules.
+- Add an original hand-attached dagger and skill-owned humanoid motions/effects; expose the new preset through normal selection, draft and Offline Practice.
+- Advance to protocol 7 and standard-kits-3 for the expanded strict recipe enums. Matching client/server deployment is required; no new production dependencies.
+
+## [0.37.0] - 2026-10-04
+
+- Aim quick-tapped projectile skills at nearby visible enemies, prioritizing locked/pursued targets; dragging keeps manual direction. Long-range aim marks intersected visible enemy portraits on the minimap.
+- Add nearby hostile turret range fills and make bots wait for allied minion cover before pushing into turret range.
+- Add four river butterfly spawns, visible pickup map markers, confirmed pickup sound and trap-trigger audio.
+- Show the authoritative match clock and compact numeric KDA/killfeed. Respawns grow from five seconds through minute two to 35 seconds at minute 22.
+- Expand the shop to 16 items with component-credit upgrades, movement/attack-speed/critical/lifesteal options and 500g hero bounties with repeated-death reduction. Results show both teams, individual KDA and gross earned gold.
+- Keep running allocated matches and disconnected heroes alive; persist a resume hint across app restarts, reclaim the same hero and let connected teammates vote for bot or idle control. Preserve a route Home during connection loss.
+- Fix draft avatar selection/phone scrolling, center the countdown and rotate only the touched preview hero. Add persistent FPS visibility and separate requested/app/display-link cadence diagnostics.
+- Use protocol 6 for the expanded inventory enum. Deploy the matching client and server together; older clients cannot decode the new items. No production dependencies added.
+
 ## [0.36.0] - 2026-10-04
 
 - Restore online dash, haste and recall for recipe-based classes; retain server authority, cooldowns and replay protection.
@@ -41,12 +94,6 @@
 - New installations connect to the hosted OMOBA beta lobby; existing custom server preferences and environment/build overrides are preserved.
 - Home exposes an editable server selector on desktop and mobile. OMOBA Beta/Localhost buttons prefill the address; Connect applies and saves it. Desktop party lobby offers the same presets.
 - Add a bounded, supervised Linux VPS deployment for two public match workers with dedicated PostgreSQL roles/state and a rollback runbook.
-
-All notable changes to this repository should be documented in this file.
-
-The canonical repository version lives in `Cargo.toml` under `[workspace.package].version` and follows SemVer.
-
-## [Unreleased]
 
 ## [0.33.0] - 2026-10-02
 

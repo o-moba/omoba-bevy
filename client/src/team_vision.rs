@@ -1,4 +1,4 @@
-//! 3D presentation of server-owned team sight. This module never grants vision.
+//! Presentation of server-owned team sight and brush. This module never grants vision.
 // i18n-strict
 use crate::{
     camera::MainCamera,
@@ -130,7 +130,13 @@ fn update_hidden_icon(
     }
 }
 #[derive(Component)]
-struct BrushArt;
+pub(crate) struct BrushArt {
+    #[cfg(any(test, feature = "qa"))]
+    pub id: u16,
+    mode: PlayerVisualMode,
+}
+#[derive(Component)]
+struct BrushFootprint2d;
 #[derive(Component)]
 struct GrassTuft {
     phase: f32,
@@ -221,6 +227,7 @@ fn setup(
     mut images: ResMut<Assets<Image>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    mut flat_materials: ResMut<Assets<ColorMaterial>>,
     mode: Res<PlayerVisualMode>,
     layout: Res<MapLayout>,
 ) {
@@ -301,6 +308,7 @@ fn setup(
         Pickable::IGNORE,
     ));
     if *mode != PlayerVisualMode::Models3d {
+        setup_brush_2d(&mut commands, &mut meshes, &mut flat_materials);
         return;
     }
     let tuft = meshes.add(grass_mesh());
@@ -331,7 +339,11 @@ fn setup(
         commands
             .spawn((
                 Name::new(format!("Gameplay brush {}", zone.id)), // i18n-allow
-                BrushArt,
+                BrushArt {
+                    #[cfg(any(test, feature = "qa"))]
+                    id: zone.id,
+                    mode: *mode,
+                },
                 Transform::from_xyz(zone.center[0], y, zone.center[1]),
                 Visibility::Visible,
             ))
@@ -354,6 +366,66 @@ fn setup(
                             .with_rotation(Quat::from_rotation_y(yaw))
                             .with_scale(Vec3::splat(0.85 + (i % 4) as f32 * 0.06)),
                         GrassTuft { phase, yaw },
+                    ));
+                }
+            });
+    }
+}
+
+fn setup_brush_2d(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<ColorMaterial>,
+) {
+    let disc = meshes.add(Circle::new(1.));
+    let tuft = meshes.add(Triangle2d::new(
+        Vec2::new(-0.30, -0.30),
+        Vec2::new(0.30, -0.30),
+        Vec2::new(0.10, 0.55),
+    ));
+    let floor = materials.add(Color::srgba(0.12, 0.28, 0.16, 0.72));
+    let grass = [
+        Color::srgb(0.30, 0.48, 0.25),
+        Color::srgb(0.40, 0.58, 0.30),
+        Color::srgb(0.52, 0.66, 0.35),
+    ]
+    .map(|color| materials.add(color));
+    for zone in brush_layout() {
+        // The circular footprint is the exact shared concealment boundary;
+        // every decorative blade remains inside it and below actor sprites.
+        commands
+            .spawn((
+                Name::new(format!("Gameplay brush {}", zone.id)), // i18n-allow
+                BrushArt {
+                    #[cfg(any(test, feature = "qa"))]
+                    id: zone.id,
+                    mode: PlayerVisualMode::Sprite2d,
+                },
+                Transform::from_xyz(
+                    zone.center[0],
+                    zone.center[1],
+                    crate::world2d::layer::LOW_PROP - 1.,
+                ),
+                Visibility::Visible,
+                Pickable::IGNORE,
+            ))
+            .with_children(|parent| {
+                parent.spawn((
+                    BrushFootprint2d,
+                    Mesh2d(disc.clone()),
+                    MeshMaterial2d(floor.clone()),
+                    Transform::from_scale(Vec3::new(zone.radius, zone.radius, 1.)),
+                    Pickable::IGNORE,
+                ));
+                for i in 0..19 {
+                    let phase = i as f32 * 2.39996 + zone.id as f32;
+                    let distance = (i as f32 / 18.).sqrt() * (zone.radius - 0.65);
+                    parent.spawn((
+                        Mesh2d(tuft.clone()),
+                        MeshMaterial2d(grass[i % 3].clone()),
+                        Transform::from_xyz(phase.cos() * distance, phase.sin() * distance, 0.1)
+                            .with_rotation(Quat::from_rotation_z(phase)),
+                        Pickable::IGNORE,
                     ));
                 }
             });
@@ -461,12 +533,12 @@ fn sync_visibility(
         (&mut Text, &mut Node, &mut TextColor, &mut BackgroundColor),
         With<BrushStatus>,
     >,
-    mut brush: Query<&mut Visibility, With<BrushArt>>,
+    mut brush: Query<(&BrushArt, &mut Visibility)>,
 ) {
-    art.active = *mode == PlayerVisualMode::Models3d
-        && game
-            .as_ref()
-            .is_some_and(|g| matches!(g.state, GameState::Running) && g.vision.is_some());
+    let vision_active = game
+        .as_ref()
+        .is_some_and(|g| matches!(g.state, GameState::Running) && g.vision.is_some());
+    art.active = *mode == PlayerVisualMode::Models3d && vision_active;
     for mut node in &mut overlay {
         node.display = if art.active {
             Display::Flex
@@ -474,8 +546,8 @@ fn sync_visibility(
             Display::None
         };
     }
-    for mut visible in &mut brush {
-        *visible = if *mode == PlayerVisualMode::Models3d {
+    for (brush, mut visible) in &mut brush {
+        *visible = if brush.mode == *mode {
             Visibility::Visible
         } else {
             Visibility::Hidden
@@ -483,7 +555,7 @@ fn sync_visibility(
     }
     for (mut text, mut node, mut color, mut fill) in &mut status {
         let vision = game.as_ref().and_then(|g| g.vision.as_ref());
-        let show = art.active
+        let show = vision_active
             && gameplay_badges_visible(context.as_deref(), pause.as_deref())
             && vision.is_some_and(|v| v.local_brush.is_some());
         node.display = if show { Display::Flex } else { Display::None };
@@ -808,12 +880,86 @@ mod tests {
         }
     }
     #[test]
+    fn sprite_brush_uses_shared_footprints_and_stays_bounded_across_match_reset() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<Assets<Image>>()
+            .init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<StandardMaterial>>()
+            .init_resource::<Assets<ColorMaterial>>()
+            .init_resource::<MapLayout>()
+            .insert_resource(PlayerVisualMode::Sprite2d)
+            .init_resource::<GameStateSnapshot>()
+            .add_plugins(TeamVisionPlugin);
+        app.update();
+        let count = app.world().entities().len();
+        let roots: Vec<_> = app
+            .world_mut()
+            .query::<(Entity, &BrushArt, &Transform, &Visibility)>()
+            .iter(app.world())
+            .map(|(entity, art, transform, visibility)| (entity, art.id, *transform, *visibility))
+            .collect();
+        assert_eq!(roots.len(), brush_layout().len());
+        for (entity, id, transform, visibility) in roots {
+            let zone = brush_layout().iter().find(|zone| zone.id == id).unwrap();
+            assert_eq!(transform.translation.xy(), Vec2::from_array(zone.center));
+            assert!(transform.translation.z < crate::world2d::layer::ACTOR);
+            assert_eq!(visibility, Visibility::Visible);
+            let children = app.world().get::<Children>(entity).unwrap();
+            assert_eq!(children.len(), 20);
+            let footprint = children
+                .iter()
+                .find(|child| app.world().get::<BrushFootprint2d>(*child).is_some())
+                .unwrap();
+            let footprint = app.world().get::<Transform>(footprint).unwrap();
+            assert_eq!(footprint.scale, Vec3::new(zone.radius, zone.radius, 1.));
+            for child in children.iter() {
+                assert!(app.world().get::<Mesh2d>(child).is_some());
+                assert_eq!(
+                    *app.world().get::<Pickable>(child).unwrap(),
+                    Pickable::IGNORE
+                );
+            }
+        }
+        assert_eq!(app.world().resource::<Assets<Mesh>>().len(), 2);
+        assert_eq!(app.world().resource::<Assets<ColorMaterial>>().len(), 4);
+        for state in [GameState::Running, GameState::Lobby, GameState::Running] {
+            let mut game = app.world_mut().resource_mut::<GameStateSnapshot>();
+            game.state = state.clone();
+            game.vision = Some(shared::vision::TeamVision {
+                sources: vec![],
+                local_brush: Some(11),
+                local_hidden: true,
+            });
+            app.update();
+            let node = app
+                .world_mut()
+                .query_filtered::<&Node, With<BrushStatus>>()
+                .single(app.world())
+                .unwrap();
+            assert_eq!(
+                node.display,
+                if matches!(state, GameState::Running) {
+                    Display::Flex
+                } else {
+                    Display::None
+                }
+            );
+            assert!(
+                !app.world().resource::<VisionPresentation>().active,
+                "3D fog is unchanged in sprite mode"
+            );
+            assert_eq!(app.world().entities().len(), count);
+        }
+    }
+    #[test]
     fn brush_and_fog_assets_are_fixed_noninteractive_and_reset_in_lobby() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .init_resource::<Assets<Image>>()
             .init_resource::<Assets<Mesh>>()
             .init_resource::<Assets<StandardMaterial>>()
+            .init_resource::<Assets<ColorMaterial>>()
             .init_resource::<MapLayout>()
             .insert_resource(PlayerVisualMode::Models3d)
             .init_resource::<GameStateSnapshot>()

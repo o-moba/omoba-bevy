@@ -76,12 +76,19 @@ const LEGACY_MAX_MANA: f32 = crate::hero_balance::MAX_MANA;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ClientPacket {
+    TakeoverVote {
+        server_epoch: u64,
+        match_id: u64,
+        player_id: u64,
+        generation: u64,
+        policy: crate::match_service::TakeoverPolicy,
+    },
     Sandbox {
         request: crate::sandbox::SandboxRequest,
     },
-    /// The player chose to leave the match or the queue. The seat is released
-    /// immediately instead of being held for a reconnect; the endpoint itself
-    /// stays connected for career, friends and the menus.
+    /// Leave the current screen/queue. A running allocated hero stays in the
+    /// authoritative match with a takeover controller until its owner returns.
+    /// Other seats are released immediately.
     Leave,
     Social {
         request: crate::social::SocialRequest,
@@ -347,8 +354,15 @@ pub enum StructureKind {
     BaseTower,
 }
 
+fn zero_attack_range(value: &f32) -> bool {
+    *value == 0.0
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StructureState {
+    /// Authoritative horizontal attack radius; zero for older snapshots.
+    #[serde(default, skip_serializing_if = "zero_attack_range")]
+    pub attack_range: f32,
     #[serde(default)]
     pub protected: bool,
     #[serde(default)]
@@ -712,6 +726,7 @@ mod tests {
                     spell_haste_multiplier: 1.0,
                     max_hp: 20.0,
                     max_mana: 0.0,
+                    ..Default::default()
                 },
                 shop_available: true,
                 last_purchase: Some(PurchaseReceipt {
@@ -757,6 +772,7 @@ mod tests {
             }],
             combat_events: Vec::new(),
             structures: vec![StructureState {
+                attack_range: 0.0,
                 protected: true,
                 map_key: "green_top_t1".into(),
                 visual_profile: "verdant_tower".into(),
@@ -846,6 +862,29 @@ mod tests {
             .unwrap(),
             state
         );
+    }
+
+    #[test]
+    fn authoritative_structure_range_round_trips_and_legacy_range_defaults_zero() {
+        let mut packet = populated_snapshot();
+        let ServerPacket::Snapshot { structures, .. } = &mut packet else {
+            unreachable!()
+        };
+        structures[0].attack_range = 12.75;
+        let value = serde_json::to_value(packet).unwrap();
+        assert_eq!(value["structures"][0]["attack_range"], 12.75);
+        let ServerPacket::Snapshot { structures, .. } =
+            serde_json::from_value::<ServerPacket>(value).unwrap()
+        else {
+            unreachable!()
+        };
+        assert_eq!(structures[0].attack_range, 12.75);
+        let ServerPacket::Snapshot { structures, .. } =
+            serde_json::from_str::<ServerPacket>(GOLDEN_SNAPSHOT).unwrap()
+        else {
+            unreachable!()
+        };
+        assert_eq!(structures[0].attack_range, 0.0);
     }
 
     #[test]
