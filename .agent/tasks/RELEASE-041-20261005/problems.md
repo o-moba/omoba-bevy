@@ -1,6 +1,7 @@
-# Outstanding blockers
+# Release issues and resolution
 
-Disk: 12 GiB free; cache deletion approval pending.
-Apple delivery: Mac locked; unlock requested. New archive and upload have not occurred.
+Disk blocker resolved after explicit user authorization: deleted only target/debug/incremental.
+Mac lock resolved; Xcode accessible. CLI upload still returns Failed to Use Accounts. The existing authenticated Xcode Organizer successfully uploaded 0.41.0 (20).
+Apple processing/tester availability is not independently verified.
 
-Release artifact extraction initially expected the archive at the root; CI places it under v0.41.0. The staging script now locates that archive recursively and verifies exactly one match and identical Git trees.
+CI archive nesting was handled by recursive exact-one archive selection and merged-tree identity verification.

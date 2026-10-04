@@ -1,10 +1,10 @@
 {
-  "status": "PARTIAL",
+  "status": "PASS_UPLOAD_CONFIRMED",
   "acceptance": {
     "AC1": "PASS",
     "AC2": "PASS",
-    "AC3": "BLOCKED_DISK",
-    "AC4": "BLOCKED_ARCHIVE_AND_ACCOUNT_ACCESS"
+    "AC3": "PASS",
+    "AC4": "PASS_UPLOAD_CONFIRMED_PROCESSING_UNVERIFIED"
   },
   "artifacts": [
     "ci.json",
@@ -14,6 +14,10 @@
     "deployment-result.json",
     "live-contract-checks.json",
     "remote-smoke/report.json",
-    "test-worker-cleanup.json"
+    "test-worker-cleanup.json",
+    "cache-cleanup.json",
+    "archive-verification.json",
+    "upload-confirmation.json",
+    "uploaded-041-20.png"
   ]
 }

@@ -1,0 +1,25 @@
+{
+  "status": "PASS",
+  "version": "0.41.0",
+  "build": "20",
+  "source_revision": "a9a372e63b202752c807102415afa3954d9347a5",
+  "source_dirty": false,
+  "signature_verified": true,
+  "exempt_encryption_declaration": true,
+  "device_family": [
+    1,
+    2
+  ],
+  "cargo_profile": "release",
+  "debug_symbols": {
+    "uuid_match_verified": true,
+    "uuids": {
+      "arm64": "F1FBF0FC-95AD-3C28-BE0A-46CEFD4FB996"
+    },
+    "dwarf_file": "Contents/Resources/DWARF/client-a7e00135b6659c67",
+    "dwarf_sha256": "daac2f9ecf7a347b7a58b73514d4313173d7b76a8b8997b064d88de1ac8d6f04",
+    "dwarf_bytes": 742368695
+  },
+  "archive_binary_sha256": "a32890fe15dab2fc3419b621130524d0da5df7c5b4255dd8b42489900986daa3",
+  "archive": "/Users/wotori/git/ekza/omoba-bevy/builds/mobile-0.41.0-20/Omoba.xcarchive"
+}

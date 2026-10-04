@@ -6,18 +6,15 @@
   "pushed": true,
   "merged": true,
   "server_deployed": true,
-  "archive_verified": false,
-  "uploaded": false,
-  "testflight_available": false,
-  "blockers": [
-    "12 GiB free; explicit approval to delete target/debug/incremental is pending",
-    "Mac locked; manual unlock requested"
-  ],
+  "archive_verified": true,
+  "uploaded": true,
+  "testflight_available": null,
+  "blockers": [],
   "acceptance": {
     "AC1": "PASS",
     "AC2": "PASS",
-    "AC3": "BLOCKED_DISK",
-    "AC4": "BLOCKED_ARCHIVE_AND_ACCOUNT_ACCESS"
+    "AC3": "PASS",
+    "AC4": "PASS_UPLOAD_CONFIRMED_PROCESSING_UNVERIFIED"
   },
   "main_revision": "361543a89a48cdbd3af12039e66e399d8a89801a",
   "ci": "PASS",
@@ -30,5 +27,9 @@
     "sha256": "b5e3a26f66ff35fa3ae0d31833fdf931a1dd1c2aa985e7ab06ab882dff2a1349"
   },
   "live_contract_checks": "PASS",
-  "remote_smoke": "PASS"
+  "remote_smoke": "PASS",
+  "archive_source_revision": "a9a372e63b202752c807102415afa3954d9347a5",
+  "upload_method": "Xcode Organizer",
+  "cli_upload_error": "Failed to Use Accounts (exit 70)",
+  "testflight_status": "Upload confirmed by Xcode Organizer; Apple processing and tester availability not independently verified"
 }

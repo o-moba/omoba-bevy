@@ -1,0 +1,12 @@
+{
+  "version": "0.41.0",
+  "build": 20,
+  "bundle": "space.ekza.omoba.beta",
+  "uploaded": true,
+  "method": "Xcode Organizer App Store Connect distribution",
+  "confirmation": "Uploaded to Apple",
+  "observed_upload_time_local": "2026-10-05 02:37 Asia/Shanghai",
+  "screenshot": "uploaded-041-20.png",
+  "testflight_available": null,
+  "note": "CLI failed account access; authenticated Organizer successfully uploaded. Processing/tester availability not verified."
+}
