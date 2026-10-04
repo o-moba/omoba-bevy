@@ -5,7 +5,7 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
-The current local implementation is 0.40.0, **protocol 9** and
+The current implementation is 0.40.1, **protocol 9** and
 **standard-kits-4**. The final gate, real-server harness and affected-HUD capture
 pass; see the [equipped-skills progress note](docs/progress/2026-10-04-equipped-skills.md).
 The [0.37–0.39 delivery note](docs/progress/2026-10-04-iteration-commit.md)
@@ -13,6 +13,12 @@ records the previous protocol-8 iteration. These entries do not indicate a
 server deployment or TestFlight upload. Physical iPhone reconnect/120 Hz,
 sustained worker capacity and competitive balance remain in the
 [refactoring/release tracker](docs/REFACTORING.md#post-programme-architecture-follow-ups--2026-10-04).
+
+## [0.40.1] - 2026-10-04
+
+- Preserve registered server-controlled human seats during career account polling after transport loss or Leave. They remain in the running match and can be reclaimed by their authenticated owner; polling no longer marks them unjoined simply because their internal controller has no network session.
+- Keep ordinary endpoint invalidation and signed allocated-Join checks. The retained-seat exception matches the internal address, player identity and session; regression tests cover timeout, Leave and mismatched identities.
+- Keep protocol 9 / standard-kits-4; this server patch is compatible with the already-built iOS 0.40.0 (19). See [deployment verification](docs/progress/2026-10-04-beta-0401.md).
 
 ## [0.40.0] - 2026-10-04
 

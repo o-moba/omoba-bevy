@@ -572,6 +572,89 @@ mod runtime_tests {
     }
 
     #[test]
+    fn retained_human_survives_account_polling_and_reclaims_after_empty_grace() {
+        for deliberate_leave in [false, true] {
+            let (mut rt, addr, join) = fixture();
+            let now = Instant::now();
+            rt.handle_packet(addr, join.clone(), now);
+            let id = rt.world.players[&addr].hero.identity.id;
+            rt.begin_career_round(now);
+            let result = rt.career_allocation_for_test().unwrap();
+            rt.career.backend.test_ack_start(&result.result_id);
+            assert!(rt.begin_career_round(now));
+            rt.world.game_state = GameState::Running;
+            rt.match_started_at = Some(now);
+            let detached_at = now + PLAYER_TIMEOUT + Duration::from_secs(1);
+            if deliberate_leave {
+                rt.handle_packet(addr, ClientPacket::Leave, now);
+            }
+            rt.maintain_roster(detached_at);
+            rt.poll_career(detached_at);
+            let later = detached_at + crate::balance::EMPTY_ROSTER_GRACE + Duration::from_secs(20);
+            rt.maintain_roster(later);
+            rt.poll_career(later);
+            let retained = rt
+                .world
+                .players
+                .values()
+                .find(|p| p.hero.identity.id == id)
+                .unwrap();
+            assert!(
+                retained.joined,
+                "career polling must preserve the retained human"
+            );
+            assert!(!retained.hero.identity.is_bot);
+            assert_eq!(rt.world.game_state, GameState::Running);
+            let reconnect: SocketAddr = "127.0.0.1:60409".parse().unwrap();
+            rt.career.backend.test_authenticated(
+                reconnect,
+                shared::career::ProfileSummary::new("a".repeat(64), "Alice".into()),
+                "seat-a",
+            );
+            rt.handle_packet(reconnect, join, later);
+            rt.poll_career(later);
+            assert!(rt.world.players[&reconnect].joined);
+            assert_eq!(rt.world.players[&reconnect].hero.identity.id, id);
+            assert!(rt.takeover_view(reconnect).is_empty());
+        }
+    }
+
+    #[test]
+    fn account_polling_still_invalidates_unregistered_or_changed_retained_identities() {
+        for altered in [0, 1, 2] {
+            let (mut rt, addr, join) = fixture();
+            let now = Instant::now();
+            rt.handle_packet(addr, join, now);
+            rt.world.game_state = GameState::Running;
+            rt.match_started_at = Some(now);
+            let target = if altered == 0 {
+                rt.career.backend.forget(addr);
+                addr
+            } else {
+                assert!(rt.detach_running_seat(addr, now));
+                let target = *rt
+                    .world
+                    .players
+                    .iter()
+                    .find(|(_, p)| {
+                        !p.hero.identity.is_bot && p.session_id.as_deref() == Some("seat-a")
+                    })
+                    .unwrap()
+                    .0;
+                let player = rt.world.players.get_mut(&target).unwrap();
+                if altered == 1 {
+                    player.session_id = Some("wrong-session".into());
+                } else {
+                    player.hero.identity.id += 1000;
+                }
+                target
+            };
+            rt.poll_career(now);
+            assert!(!rt.world.players[&target].joined);
+        }
+    }
+
+    #[test]
     fn takeover_requires_authenticated_same_team_current_generation_and_restores_manual() {
         use shared::match_service::TakeoverPolicy;
         let (mut rt, alice, join) = fixture();
