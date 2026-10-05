@@ -443,7 +443,7 @@ fn update_buff_chips(
                             Text::new(line.clone()),
                             theme_caption(),
                             TextColor(color::TEXT_GOLD),
-                            TextLayout::new_with_no_wrap(),
+                            TextLayout::no_wrap(),
                             Name::new("MatchBuffText"),
                         ));
                     });

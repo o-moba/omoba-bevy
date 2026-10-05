@@ -7,7 +7,7 @@ use bevy::{
 };
 use std::collections::HashMap;
 
-/// Attach to the entity containing this model's SceneRoot. The loaded GLTF
+/// Attach to the entity containing this model's WorldAssetRoot. The loaded GLTF
 /// handle is also the cache identity, so a replacement never reuses another rig.
 #[derive(Component, Clone, Debug)]
 pub(crate) struct RuntimeHumanoidRequest {
@@ -69,7 +69,7 @@ pub(crate) fn bind_runtime_humanoids(
     }
     for (root, request, bound, last_error) in &requests {
         let same_model = bound.is_some_and(|bound| bound.model == request.model.id());
-        // SceneSpawner can refresh imported target components after our first
+        // WorldInstanceSpawner can refresh imported target components after our first
         // binding. The external root marker survives that refresh, so validate
         // the actual targets before considering the binding complete.
         if same_model
@@ -133,7 +133,7 @@ pub(crate) fn bind_runtime_humanoids(
             .filter(|(entity, _)| is_descendant(*entity, root, &parents))
             .map(|(_, skin)| (skin.inverse_bindposes.id(), skin.joints.clone()))
             .collect();
-        // Scene instantiation is asynchronous. No partial target set is ever
+        // WorldAsset instantiation is asynchronous. No partial target set is ever
         // installed; the next update retries until every mapped joint exists.
         if instances.is_empty() {
             continue;

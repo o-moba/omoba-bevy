@@ -192,7 +192,7 @@ fn watermark(mut commands: Commands) {
         },
         Text::new("QA CAPTURE · offline shell, no live match"),
         TextFont {
-            font_size: 8.0,
+            font_size: (8.0).into(),
             ..default()
         },
         TextColor(Color::WHITE),
@@ -220,7 +220,7 @@ fn result_fixture_label(mut commands: Commands) {
         },
         Text::new("07-result-fixture · layout only"),
         TextFont {
-            font_size: 11.0,
+            font_size: (11.0).into(),
             ..default()
         },
         TextColor(Color::srgb(1.0, 0.8, 0.3)),

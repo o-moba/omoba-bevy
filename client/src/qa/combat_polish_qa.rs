@@ -492,7 +492,10 @@ fn capture(
     pacing: Res<crate::render_settings::FramePacingDiagnostics>,
     geometry: Query<(&Name, Option<&Mesh3d>, Option<&ViewVisibility>)>,
     mut qa: ResMut<Qa>,
-    roots: Query<(&SceneRoot, Option<&bevy::scene::SceneInstance>)>,
+    roots: Query<(
+        &WorldAssetRoot,
+        Option<&bevy::world_serialization::WorldInstance>,
+    )>,
     assets: Res<AssetServer>,
     context: Res<crate::input_context::GameplayInputContext>,
     mobile: Res<crate::mobile_controls::MobileControls>,

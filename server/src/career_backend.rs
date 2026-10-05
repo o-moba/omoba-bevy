@@ -799,10 +799,7 @@ impl<L: JobLink> CareerPort for CareerBackend<L> {
         }
     }
     fn poll(&mut self) {
-        loop {
-            let Some(reply) = self.link.try_recv() else {
-                break;
-            };
+        while let Some(reply) = self.link.try_recv() {
             match reply {
                 Reply::RecoveryChecked => {
                     self.recovery_checked = Some(Instant::now());

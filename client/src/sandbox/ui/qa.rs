@@ -136,14 +136,10 @@ fn drive(
         return;
     }
     let next = match qa.step {
-        0 => {
-            if session.join_confirmed() && animations.0.contains_key(&game.your_id) {
-                qa.warm = Some(qa.started.elapsed().as_secs_f64());
-                shot(&mut commands, &mut qa, "01-entry.png");
-                true
-            } else {
-                false
-            }
+        0 if session.join_confirmed() && animations.0.contains_key(&game.your_id) => {
+            qa.warm = Some(qa.started.elapsed().as_secs_f64());
+            shot(&mut commands, &mut qa, "01-entry.png");
+            true
         }
         1 => press(&mut buttons, &mut panels, |a| {
             matches!(a, Action::Tab(Tab::Presets))
@@ -179,20 +175,16 @@ fn drive(
                 Action::Command(SandboxCommand::ForceCast { slot: 0, .. })
             )
         }),
-        10 => {
-            if s.analytics.damage > 0.0 {
-                if let Some(dummy) = s.actors.iter().find(|a| a.actor == SandboxActor::Dummy) {
-                    network.write(NetworkCommand::BasicAttack {
-                        target: crate::net::TargetId {
-                            kind: crate::net::TargetKind::Player,
-                            id: dummy.id,
-                        },
-                    });
-                }
-                true
-            } else {
-                false
+        10 if s.analytics.damage > 0.0 => {
+            if let Some(dummy) = s.actors.iter().find(|a| a.actor == SandboxActor::Dummy) {
+                network.write(NetworkCommand::BasicAttack {
+                    target: crate::net::TargetId {
+                        kind: crate::net::TargetKind::Player,
+                        id: dummy.id,
+                    },
+                });
             }
+            true
         }
         11 => s
             .analytics
@@ -212,13 +204,9 @@ fn drive(
         15 => press(&mut buttons, &mut panels, |a| {
             matches!(a, Action::Toggle(Toggle::DummyMoving))
         }),
-        16 => {
-            if s.config.dummy.moving {
-                shot(&mut commands, &mut qa, "03-dummy.png");
-                true
-            } else {
-                false
-            }
+        16 if s.config.dummy.moving => {
+            shot(&mut commands, &mut qa, "03-dummy.png");
+            true
         }
         17 => press(&mut buttons, &mut panels, |a| {
             matches!(a, Action::Tab(Tab::Enemy))
@@ -232,16 +220,12 @@ fn drive(
         20 => press(&mut buttons, &mut panels, |a| {
             matches!(a, Action::Behavior(BotBehavior::Fight))
         }),
-        21 => {
-            if s.config.enemy.enabled
-                && s.config.enemy.actor.hero == shared::HeroClass::Ranger
-                && s.config.enemy.behavior == BotBehavior::Fight
-            {
-                shot(&mut commands, &mut qa, "04-enemy.png");
-                true
-            } else {
-                false
-            }
+        21 if s.config.enemy.enabled
+            && s.config.enemy.actor.hero == shared::HeroClass::Ranger
+            && s.config.enemy.behavior == BotBehavior::Fight =>
+        {
+            shot(&mut commands, &mut qa, "04-enemy.png");
+            true
         }
         22 => press(&mut buttons, &mut panels, |a| {
             matches!(a, Action::Tab(Tab::World))
@@ -249,35 +233,27 @@ fn drive(
         23 => press(&mut buttons, &mut panels, |a| {
             matches!(a, Action::Toggle(Toggle::Pause))
         }),
-        24 => {
-            if s.config.environment.paused {
-                qa.baseline = Some((s.simulation_secs, s.frame, game.meta.snapshot_tick));
-                shot(&mut commands, &mut qa, "05-paused.png");
-                true
-            } else {
-                false
-            }
+        24 if s.config.environment.paused => {
+            qa.baseline = Some((s.simulation_secs, s.frame, game.meta.snapshot_tick));
+            shot(&mut commands, &mut qa, "05-paused.png");
+            true
         }
-        25 => {
-            if qa.at.elapsed() > Duration::from_secs(7) {
-                let (t, frame, tick) = qa.baseline.unwrap();
-                if s.simulation_secs != t
-                    || s.frame != frame
-                    || game.meta.snapshot_tick <= tick
-                    || !session.join_confirmed()
-                {
-                    finish(
-                        &mut qa,
-                        false,
-                        "Pause changed simulation or stopped live snapshots",
-                        &mut exit,
-                    );
-                    return;
-                }
-                true
-            } else {
-                false
+        25 if qa.at.elapsed() > Duration::from_secs(7) => {
+            let (t, frame, tick) = qa.baseline.unwrap();
+            if s.simulation_secs != t
+                || s.frame != frame
+                || game.meta.snapshot_tick <= tick
+                || !session.join_confirmed()
+            {
+                finish(
+                    &mut qa,
+                    false,
+                    "Pause changed simulation or stopped live snapshots",
+                    &mut exit,
+                );
+                return;
             }
+            true
         }
         26 => press(&mut buttons, &mut panels, |a| {
             matches!(a, Action::Command(SandboxCommand::FrameStep))
@@ -292,17 +268,13 @@ fn drive(
         29 => press(&mut buttons, &mut panels, |a| {
             matches!(a, Action::Preview(PreviewKind::Run))
         }),
-        30 => {
-            if animations
-                .0
-                .get(&game.your_id)
-                .is_some_and(|a| a.0.contains("Run"))
-            {
-                shot(&mut commands, &mut qa, "06-animation.png");
-                true
-            } else {
-                false
-            }
+        30 if animations
+            .0
+            .get(&game.your_id)
+            .is_some_and(|a| a.0.contains("Run")) =>
+        {
+            shot(&mut commands, &mut qa, "06-animation.png");
+            true
         }
         31 => press(&mut buttons, &mut panels, |a| {
             matches!(a, Action::Command(SandboxCommand::FrameStep))
@@ -325,28 +297,20 @@ fn drive(
             &mut panels,
             |a| matches!(a,Action::Load(n)if n=="duel"),
         ),
-        37 => {
-            if s.config.enemy.enabled && !s.config.dummy.enabled && s.config.player.level == 10 {
-                shot(&mut commands, &mut qa, "07-duel.png");
-                true
-            } else {
-                false
-            }
+        37 if s.config.enemy.enabled && !s.config.dummy.enabled && s.config.player.level == 10 => {
+            shot(&mut commands, &mut qa, "07-duel.png");
+            true
         }
         38 => press(&mut buttons, &mut panels, |a| {
             matches!(a, Action::LoadNamed)
         }),
-        39 => {
-            if s.config.player.hero == shared::HeroClass::Mage
-                && s.config.player.max_hp == 200.0
-                && s.config.enemy.enabled
-                && s.config.dummy.enabled
-            {
-                shot(&mut commands, &mut qa, "08-restored.png");
-                true
-            } else {
-                false
-            }
+        39 if s.config.player.hero == shared::HeroClass::Mage
+            && s.config.player.max_hp == 200.0
+            && s.config.enemy.enabled
+            && s.config.dummy.enabled =>
+        {
+            shot(&mut commands, &mut qa, "08-restored.png");
+            true
         }
         40 => press(&mut buttons, &mut panels, |a| {
             matches!(a, Action::Tab(Tab::World))
@@ -414,20 +378,16 @@ fn drive(
             }
             false
         }
-        100 => {
-            if session.join_confirmed()
-                && animations.0.contains_key(&game.your_id)
-                && s.config.player.hero == shared::HeroClass::Mage
-                && s.config.player.max_hp == 200.0
-                && s.config.enemy.enabled
-                && s.config.dummy.enabled
-            {
-                qa.warm = Some(qa.started.elapsed().as_secs_f64());
-                shot(&mut commands, &mut qa, "restart-restored.png");
-                true
-            } else {
-                false
-            }
+        100 if session.join_confirmed()
+            && animations.0.contains_key(&game.your_id)
+            && s.config.player.hero == shared::HeroClass::Mage
+            && s.config.player.max_hp == 200.0
+            && s.config.enemy.enabled
+            && s.config.dummy.enabled =>
+        {
+            qa.warm = Some(qa.started.elapsed().as_secs_f64());
+            shot(&mut commands, &mut qa, "restart-restored.png");
+            true
         }
         _ => false,
     };

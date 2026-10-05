@@ -12,9 +12,9 @@ use bevy::{
     input::touch::{TouchInput, TouchPhase},
     prelude::*,
     render::view::screenshot::{Screenshot, ScreenshotCaptured, save_to_disk},
-    scene::{SceneInstance, SceneSpawner},
     ui::FocusPolicy,
     window::PrimaryWindow,
+    world_serialization::{WorldInstance, WorldInstanceSpawner},
 };
 
 use crate::{
@@ -88,7 +88,7 @@ fn label(mut commands: Commands) {
         },
         Text::new("QA: scripted input · server placement fixture"),
         TextFont {
-            font_size: 10.0,
+            font_size: (10.0).into(),
             ..default()
         },
         TextColor(Color::WHITE),
@@ -296,7 +296,7 @@ fn observe_commands(
 }
 
 #[derive(SystemParam)]
-struct Scene<'w, 's> {
+struct WorldAsset<'w, 's> {
     player: Query<
         'w,
         's,
@@ -323,7 +323,7 @@ struct Scene<'w, 's> {
     >,
     cameras: Query<'w, 's, (&'static Camera, &'static GlobalTransform), With<MainCamera>>,
     environment: Query<'w, 's, Entity, With<VerdantEnvironment>>,
-    scenes: Query<'w, 's, (&'static SceneRoot, Option<&'static SceneInstance>)>,
+    scenes: Query<'w, 's, (&'static WorldAssetRoot, Option<&'static WorldInstance>)>,
     windows: Query<'w, 's, Entity, With<PrimaryWindow>>,
     window_state: Query<'w, 's, &'static Window, With<PrimaryWindow>>,
     mouse: Res<'w, ButtonInput<MouseButton>>,
@@ -366,14 +366,14 @@ struct Scene<'w, 's> {
     >,
 }
 
-fn project(scene: &Scene, p: Vec3) -> Option<Vec2> {
+fn project(scene: &WorldAsset, p: Vec3) -> Option<Vec2> {
     let (camera, transform) = scene.cameras.single().ok()?;
     camera.world_to_viewport(transform, p).ok()
 }
 
 /// Observes production gates without changing them or repeating an input.
 fn selection_gates(
-    scene: &Scene,
+    scene: &WorldAsset,
     context: &GameplayInputContext,
     mobile: &MobileControls,
     target: &TargetState,
@@ -411,7 +411,7 @@ fn selection_gates(
 fn observe_targeting(
     mut commands: Commands,
     mut qa: ResMut<TargetingQa>,
-    scene: Scene,
+    scene: WorldAsset,
     session: Res<ClientSession>,
     game: Res<GameStateSnapshot>,
     help: Res<HelpOverlayVisible>,
@@ -422,7 +422,7 @@ fn observe_targeting(
     preview: Res<TargetAimPreview>,
     cooldown: Res<LocalCastCooldown>,
     assets: Res<AssetServer>,
-    spawner: Res<SceneSpawner>,
+    spawner: Res<WorldInstanceSpawner>,
     mut exit: MessageWriter<AppExit>,
 ) {
     if qa.stage == 255 {
@@ -987,7 +987,7 @@ fn capture(
     commands: &mut Commands,
     qa: &mut TargetingQa,
     index: usize,
-    scene: &Scene,
+    scene: &WorldAsset,
     mobile: &MobileControls,
     target: &TargetState,
     preview: &TargetAimPreview,

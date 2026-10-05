@@ -201,7 +201,7 @@ fn render(
                             &[("name", &seat.nickname), ("policy", &policy)],
                         )),
                         TextFont {
-                            font_size: 13.0 * unit,
+                            font_size: (13.0 * unit).into(),
                             ..default()
                         },
                         TextColor(Color::WHITE),

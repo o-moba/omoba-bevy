@@ -130,7 +130,7 @@ impl Plugin for PartyStagePlugin {
                     .chain(),
             )
             .add_systems(
-                // SceneSpawner may replace imported players after Update.
+                // WorldInstanceSpawner may replace imported players after Update.
                 // Validate the binding after those writes, before pose evaluation.
                 PostUpdate,
                 play_idle
@@ -169,7 +169,7 @@ pub(super) fn setup_stage(mut commands: Commands, stage: Res<PartyStage>) {
         commands.spawn((
             DirectionalLight {
                 illuminance,
-                shadows_enabled: false,
+                shadow_maps_enabled: false,
                 ..default()
             },
             Transform::from_translation(from).looking_at(Vec3::new(0.0, 1.0, 0.0), Vec3::Y),
@@ -441,7 +441,7 @@ fn sync_stage(
         };
         let model = commands
             .spawn((
-                SceneRoot(scene),
+                WorldAssetRoot(scene),
                 Transform::default(),
                 if member.revealed {
                     Visibility::Visible
@@ -1170,7 +1170,7 @@ mod tests {
             "valid bindings must not restart the idle every frame"
         );
 
-        // Simulate SceneSpawner's writes after Update in its actual schedule.
+        // Simulate WorldInstanceSpawner's writes after Update in its actual schedule.
         #[derive(Resource)]
         struct ResetPlayer(Entity);
         app.add_systems(bevy::app::SpawnScene, |world: &mut World| {
@@ -1207,7 +1207,7 @@ mod tests {
         );
 
         // Asset refresh replaces scene entities altogether, retaining the
-        // external SceneRoot. That replacement needs a newly located player.
+        // external WorldAssetRoot. That replacement needs a newly located player.
         app.world_mut().despawn(roots[0].1);
         let replacement = app
             .world_mut()

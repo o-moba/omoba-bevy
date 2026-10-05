@@ -8,7 +8,7 @@ use bevy::{
     gltf::GltfExtras,
     mesh::VertexAttributeValues,
     prelude::*,
-    scene::SceneInstance,
+    world_serialization::WorldInstance,
 };
 use serde::Deserialize;
 
@@ -261,7 +261,7 @@ impl MapVisualRegistry {
 }
 
 /// Stable binding on the real prop/structure presentation root. Readiness means
-/// loaded mesh vertices, not merely a requested SceneRoot or a marker entity.
+/// loaded mesh vertices, not merely a requested WorldAssetRoot or a marker entity.
 #[derive(Component, Debug)]
 pub struct MapPropInstance {
     pub key: String,
@@ -296,7 +296,7 @@ struct PropState {
     authored_transform: Transform,
     original_children: Vec<Entity>,
     original_bounds: MeshBounds,
-    replacement: Option<(String, Entity, Handle<Scene>, ReplacementStatus)>,
+    replacement: Option<(String, Entity, Handle<WorldAsset>, ReplacementStatus)>,
     applied_revision: Option<u64>,
     applied_key: String,
     applied_archetype: String,
@@ -318,7 +318,7 @@ struct OriginalMaterial(Handle<StandardMaterial>);
 
 #[derive(Resource, Default)]
 pub struct MapVisualCache {
-    models: HashMap<String, Handle<Scene>>,
+    models: HashMap<String, Handle<WorldAsset>>,
     materials: HashMap<(AssetId<StandardMaterial>, [u32; 4]), Handle<StandardMaterial>>,
 }
 
@@ -327,7 +327,7 @@ impl MapVisualCache {
     pub fn counts(&self) -> (usize, usize) {
         (self.models.len(), self.materials.len())
     }
-    fn scene(&mut self, path: &str, server: &AssetServer) -> Option<Handle<Scene>> {
+    fn scene(&mut self, path: &str, server: &AssetServer) -> Option<Handle<WorldAsset>> {
         if let Some(handle) = self.models.get(path) {
             return Some(handle.clone());
         }
@@ -613,8 +613,8 @@ fn reconcile_props(
     nodes: Query<(&Transform, Option<&ChildOf>)>,
     drawables: Query<&Mesh3d>,
     meshes: Option<Res<Assets<Mesh>>>,
-    instances: Query<&SceneInstance>,
-    spawner: Option<Res<SceneSpawner>>,
+    instances: Query<&WorldInstance>,
+    spawner: Option<Res<WorldInstanceSpawner>>,
 ) {
     for (entity, mut prop, mut state) in &mut props {
         let dirty = state.applied_revision != Some(registry.revision())
@@ -653,7 +653,7 @@ fn reconcile_props(
                 {
                     let replacement = commands
                         .spawn((
-                            SceneRoot(scene.clone()),
+                            WorldAssetRoot(scene.clone()),
                             Transform::IDENTITY,
                             Visibility::Hidden,
                             ReplacementRoot,
@@ -892,40 +892,8 @@ mod tests {
     }
 
     fn headless() -> App {
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .add_plugins(bevy::asset::AssetPlugin {
-                file_path: format!("{}/assets", env!("CARGO_MANIFEST_DIR")),
-                ..default()
-            })
-            .add_plugins((
-                bevy::mesh::MeshPlugin,
-                bevy::scene::ScenePlugin,
-                bevy::transform::TransformPlugin,
-            ))
-            .init_asset::<Image>()
-            .init_asset::<StandardMaterial>()
-            .init_asset::<bevy::animation::AnimationClip>()
-            .add_plugins(bevy::gltf::GltfPlugin::default())
-            .register_type::<Name>()
-            .register_type::<Transform>()
-            .register_type::<GlobalTransform>()
-            .register_type::<bevy::transform::components::TransformTreeChanged>()
-            .register_type::<Children>()
-            .register_type::<ChildOf>()
-            .register_type::<Visibility>()
-            .register_type::<InheritedVisibility>()
-            .register_type::<ViewVisibility>()
-            .register_type::<Mesh3d>()
-            .register_type::<MeshMaterial3d<StandardMaterial>>()
-            .register_type::<bevy::camera::primitives::Aabb>()
-            .register_type::<GltfExtras>()
-            .register_type::<bevy::gltf::GltfSceneExtras>()
-            .register_type::<bevy::gltf::GltfMeshExtras>()
-            .register_type::<bevy::gltf::GltfMaterialExtras>()
-            .register_type::<bevy::gltf::GltfMaterialName>()
-            .register_type::<bevy::gltf::GltfMeshName>()
-            .insert_resource(PlayerVisualMode::Models3d)
+        let mut app = crate::test_support::asset_app();
+        app.insert_resource(PlayerVisualMode::Models3d)
             .add_plugins(MapVisualsPlugin);
         app.finish();
         app.cleanup();
@@ -961,11 +929,11 @@ mod tests {
     #[test]
     fn shipped_glb_wrappers_import_all_real_props_and_keep_ground_unbound() {
         let mut app = headless();
-        let environment_scene: Handle<Scene> = app
+        let environment_scene: Handle<WorldAsset> = app
             .world()
             .resource::<AssetServer>()
             .load("verdant/environment.glb#Scene0");
-        let foliage_scene: Handle<Scene> = app
+        let foliage_scene: Handle<WorldAsset> = app
             .world()
             .resource::<AssetServer>()
             .load("verdant/foliage.glb#Scene0");
@@ -973,7 +941,7 @@ mod tests {
             .world_mut()
             .spawn((
                 VerdantEnvironment,
-                SceneRoot(environment_scene),
+                WorldAssetRoot(environment_scene),
                 Transform::IDENTITY,
             ))
             .id();
@@ -982,7 +950,7 @@ mod tests {
             .spawn((
                 VerdantFoliage,
                 crate::decor::DecorRoot,
-                SceneRoot(foliage_scene),
+                WorldAssetRoot(foliage_scene),
                 Transform::IDENTITY,
             ))
             .id();
@@ -1028,7 +996,7 @@ mod tests {
     #[test]
     fn actual_loaded_prop_a_b_a_has_no_stale_descendants_and_bounded_cache() {
         let mut app = headless();
-        let scene: Handle<Scene> = app
+        let scene: Handle<WorldAsset> = app
             .world()
             .resource::<AssetServer>()
             .load("map-props/lantern.glb#Scene0");
@@ -1053,7 +1021,7 @@ mod tests {
             ))
             .id();
         app.world_mut()
-            .spawn((SceneRoot(scene), Transform::IDENTITY, ChildOf(prop)));
+            .spawn((WorldAssetRoot(scene), Transform::IDENTITY, ChildOf(prop)));
         pump(&mut app, |world| {
             world.resource::<MapVisualRegistry>().revision() > 0
                 && world

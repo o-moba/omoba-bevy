@@ -155,7 +155,7 @@ fn fixture_label(mut commands: Commands) {
         },
         Text::new("QA FIXTURE: result states, synthetic data"),
         TextFont {
-            font_size: 11.0,
+            font_size: (11.0).into(),
             ..default()
         },
         TextColor(Color::srgb(1.0, 0.8, 0.3)),

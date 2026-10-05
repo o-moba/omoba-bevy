@@ -241,7 +241,7 @@ fn spawn_fps_readout(mut commands: Commands) {
         crate::ui::TestId::from("MeasuredFps"),
         Text::new(crate::i18n::trf("hud.fps", &[("value", &"—")])),
         TextFont {
-            font_size: 9.0,
+            font_size: (9.0).into(),
             ..default()
         },
         TextColor(Color::srgba(0.78, 0.85, 0.84, 0.85)),

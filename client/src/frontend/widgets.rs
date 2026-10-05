@@ -35,8 +35,8 @@ fn adapt_phone_menu_readability(
     let form = metric::Form::from_mobile(mobile.as_deref());
     for (typography, mut font) in &mut labels {
         let size = metric::menu_font(form, typography.size, typography.heading, scale.0);
-        if font.font_size != size {
-            font.font_size = size;
+        if font.font_size != size.into() {
+            font.font_size = size.into();
         }
     }
     for (control, mut node) in &mut buttons {
@@ -80,7 +80,7 @@ pub fn heading(text: impl crate::i18n::UiLabel, size: f32) -> impl Bundle {
     (
         text.into_text(),
         TextFont {
-            font_size: size,
+            font_size: (size).into(),
             ..default()
         },
         TextColor(IVORY),

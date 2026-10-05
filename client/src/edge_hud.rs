@@ -250,7 +250,7 @@ fn setup(mut commands: Commands, mobile: Option<Res<MobileControls>>) {
                                         TextRole::NumberLg
                                     }),
                                     TextColor(ink),
-                                    TextLayout::new_with_no_wrap(),
+                                    TextLayout::no_wrap(),
                                 ));
                                 if let Some(label) = label {
                                     text.insert(label);
@@ -279,13 +279,13 @@ fn setup(mut commands: Commands, mobile: Option<Res<MobileControls>>) {
                                 Name::new("MatchClockText"),
                                 ui::role_text(TextRole::Eyebrow),
                                 TextColor(color::TEXT_MUTED),
-                                TextLayout::new_with_no_wrap(),
+                                TextLayout::no_wrap(),
                             ));
                             column.spawn((
                                 Text::new("—/—/—"),
                                 ui::role_text(TextRole::NumberSm),
                                 TextColor(color::TEXT_PRIMARY),
-                                TextLayout::new_with_no_wrap(),
+                                TextLayout::no_wrap(),
                                 KdaLabel,
                                 Name::new("MatchKdaText"),
                             ));
@@ -555,7 +555,7 @@ fn spawn_target_frame(commands: &mut Commands, form: Form) {
                             Text::new(""),
                             ui::styled_text(TextStyle::keep_case(TextRole::Label)),
                             TextColor(color::TEXT_PRIMARY),
-                            TextLayout::new_with_no_wrap(),
+                            TextLayout::no_wrap(),
                             TargetLabel,
                             Name::new("TargetHealthName"),
                         ));
@@ -1279,7 +1279,7 @@ fn spawn_score_row<L: UiLabel>(parent: &mut ChildSpawnerCommands, cells: [L; 3])
                     value.into_text(),
                     ui::text(12.0),
                     TextColor(ui::MUTED),
-                    TextLayout::new_with_justify(if grow > 0.0 {
+                    TextLayout::justify(if grow > 0.0 {
                         Justify::Left
                     } else {
                         Justify::Right
@@ -1393,13 +1393,13 @@ fn spawn_live_score_row(
                     Text::new(name),
                     ui::role_text(TextRole::Label),
                     TextColor(ink),
-                    TextLayout::new_with_no_wrap(),
+                    TextLayout::no_wrap(),
                 ));
                 identity.spawn((
                     Text::new(data::hero_name(player.hero_class)),
                     ui::role_text(TextRole::Caption),
                     TextColor(color::TEXT_MUTED),
-                    TextLayout::new_with_no_wrap(),
+                    TextLayout::no_wrap(),
                 ));
             });
             for (value, width, ink) in [
@@ -1419,7 +1419,7 @@ fn spawn_live_score_row(
                         flex_shrink: 0.0,
                         ..default()
                     },
-                    TextLayout::new_with_justify(Justify::Right),
+                    TextLayout::justify(Justify::Right),
                 ));
             }
         });
@@ -1701,6 +1701,7 @@ mod tests {
         let y = |app: &App| app.world().get::<ScrollPosition>(rows).unwrap().y;
         let wheel = |app: &mut App| {
             app.world_mut().write_message(MouseWheel {
+                phase: bevy::input::touch::TouchPhase::Moved,
                 unit: MouseScrollUnit::Line,
                 x: 0.0,
                 y: -1.0,

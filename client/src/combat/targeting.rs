@@ -915,7 +915,7 @@ pub(crate) fn setup_targeting_ui(mut commands: Commands) {
             parent.spawn((
                 Text::new(tr("combat.marker.locked")),
                 TextFont {
-                    font_size: 10.0,
+                    font_size: (10.0).into(),
                     ..default()
                 },
                 TextColor(Color::srgb(0.06, 0.05, 0.01)),
@@ -958,7 +958,7 @@ pub(crate) fn setup_targeting_ui(mut commands: Commands) {
             entity.insert((
                 Text::new(""),
                 TextFont {
-                    font_size: 12.0,
+                    font_size: (12.0).into(),
                     ..default()
                 },
                 TextColor(crate::ui::theme::IVORY),

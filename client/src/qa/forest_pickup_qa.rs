@@ -148,7 +148,7 @@ fn prepare(
     buttons.press_where(|name| session.join_confirmed() && help.0 && name == "HelpDismissButton");
 }
 #[derive(SystemParam)]
-struct Scene<'w, 's> {
+struct WorldAsset<'w, 's> {
     local: Query<
         'w,
         's,
@@ -200,7 +200,7 @@ fn navigate(
 fn observe(
     mut commands: Commands,
     mut qa: ResMut<PickupQa>,
-    scene: Scene,
+    scene: WorldAsset,
     snapshot: Res<GameStateSnapshot>,
     session: Res<ClientSession>,
     help: Res<HelpOverlayVisible>,

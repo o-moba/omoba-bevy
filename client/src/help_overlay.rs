@@ -514,7 +514,7 @@ fn spawn_desktop_guide(root: &mut ChildSpawnerCommands) {
                         reopen_hint().into_text(),
                         theme::role_text(TextRole::Caption),
                         TextColor(color::TEXT_MUTED),
-                        TextLayout::new_with_justify(Justify::Right),
+                        TextLayout::justify(Justify::Right),
                     ));
             });
     });
@@ -667,7 +667,7 @@ fn spawn_phone_guide(root: &mut ChildSpawnerCommands) {
                     Localized::new("help.phone.title").into_text(),
                     theme::role_text(TextRole::Heading),
                     TextColor(color::TEXT_GOLD),
-                    TextLayout::new_with_no_wrap(),
+                    TextLayout::no_wrap(),
                     Node {
                         flex_grow: 1.0,
                         min_width: Val::Px(0.0),
@@ -1222,6 +1222,7 @@ mod tests {
             bottom: 21.0,
         };
         app.init_resource::<Assets<bevy::mesh::Mesh>>()
+            .init_resource::<Assets<bevy::mesh::skinning::SkinnedMeshInverseBindposes>>()
             .init_resource::<Assets<TextureAtlasLayout>>()
             .insert_resource(crate::ui::UiPlatform(profile))
             .insert_resource(mobile)
@@ -1495,7 +1496,10 @@ mod tests {
         let mut gate =
             bevy::ecs::system::SystemState::<crate::ui::modal::ModalGate>::new(app.world_mut());
         assert!(
-            !gate.get(app.world()).allows(hud),
+            !gate
+                .get(app.world())
+                .expect("modal test resources exist")
+                .allows(hud),
             "the HUD waits under the guide"
         );
         // Gamepad East is a back press.

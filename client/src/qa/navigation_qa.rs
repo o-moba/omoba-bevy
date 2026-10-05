@@ -10,8 +10,8 @@ use bevy::{
     asset::RecursiveDependencyLoadState,
     prelude::*,
     render::view::screenshot::{Screenshot, ScreenshotCaptured, save_to_disk},
-    scene::{SceneInstance, SceneSpawner},
     window::PrimaryWindow,
+    world_serialization::{WorldInstance, WorldInstanceSpawner},
 };
 
 use crate::{
@@ -102,7 +102,7 @@ fn label_scripted_input(mut commands: Commands) {
         },
         Text::new("QA: scripted input / live server"),
         TextFont {
-            font_size: 14.0,
+            font_size: (14.0).into(),
             ..default()
         },
         TextColor(Color::srgb(1.0, 0.85, 0.4)),
@@ -249,7 +249,7 @@ struct NavigationScene<'w, 's> {
     >,
     cameras: Query<'w, 's, (&'static Camera, &'static GlobalTransform), With<MainCamera>>,
     environment: Query<'w, 's, Entity, With<VerdantEnvironment>>,
-    scenes: Query<'w, 's, (&'static SceneRoot, Option<&'static SceneInstance>)>,
+    scenes: Query<'w, 's, (&'static WorldAssetRoot, Option<&'static WorldInstance>)>,
     windows: Query<'w, 's, Entity, With<PrimaryWindow>>,
 }
 
@@ -348,7 +348,7 @@ fn observe_navigation(
     layout: Res<MapLayout>,
     minimap: crate::minimap::MinimapQaScene,
     assets: Res<AssetServer>,
-    spawner: Res<SceneSpawner>,
+    spawner: Res<WorldInstanceSpawner>,
     mouse: Res<ButtonInput<MouseButton>>,
     mut exit: MessageWriter<AppExit>,
 ) {
@@ -430,10 +430,8 @@ fn observe_navigation(
             qa.click(cursor, MouseButton::Right, false);
             qa.advance(100);
         }
-        100 => {
-            if idle && position.xz().distance(qa.approach.xz()) < 0.3 {
-                qa.advance(101);
-            }
+        100 if idle && position.xz().distance(qa.approach.xz()) < 0.3 => {
+            qa.advance(101);
         }
         101 => {
             if qa.stage_started.elapsed() < Duration::from_millis(800) {

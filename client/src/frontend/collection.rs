@@ -1555,6 +1555,7 @@ mod tests {
             .id();
         let y = |app: &App| app.world().get::<ScrollPosition>(grid).unwrap().y;
         app.world_mut().write_message(MouseWheel {
+            phase: bevy::input::touch::TouchPhase::Moved,
             unit: MouseScrollUnit::Line,
             x: 0.0,
             y: -1.0,

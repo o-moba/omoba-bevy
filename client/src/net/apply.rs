@@ -4,7 +4,7 @@ use bevy::ecs::query::Or;
 use bevy::ecs::schedule::ScheduleConfigs;
 use bevy::ecs::system::ScheduleSystem;
 use bevy::prelude::*;
-use bevy::scene::SceneRoot;
+use bevy::world_serialization::WorldAssetRoot;
 use std::collections::HashSet;
 
 use shared::protocol::SnapshotMeta;
@@ -631,7 +631,7 @@ fn apply_snapshot_local_player(
                 .id()
         } else if let Some(scene_handle) = local_scene {
             let mut entity_commands = commands.spawn((
-                SceneRoot(scene_handle),
+                WorldAssetRoot(scene_handle),
                 Transform {
                     translation: spawn,
                     rotation: Quat::IDENTITY,
@@ -826,7 +826,7 @@ fn apply_snapshot_remote_players(
             entity_commands.with_children(|parent| {
                 if let Some(scene_handle) = scene_handle {
                     parent.spawn((
-                        SceneRoot(scene_handle),
+                        WorldAssetRoot(scene_handle),
                         Transform::default(),
                         Visibility::default(),
                     ));

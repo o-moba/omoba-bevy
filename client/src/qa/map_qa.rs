@@ -26,9 +26,9 @@ use bevy::{
     mesh::VertexAttributeValues,
     prelude::*,
     render::view::screenshot::{Screenshot, ScreenshotCaptured, save_to_disk},
-    scene::{SceneInstance, SceneSpawner},
     ui::FocusPolicy,
     window::PrimaryWindow,
+    world_serialization::{WorldInstance, WorldInstanceSpawner},
 };
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -156,7 +156,7 @@ fn label(mut commands: Commands, qa: Res<MapQa>) {
             "QA: live map objects · scripted cosmetic swaps"
         }),
         TextFont {
-            font_size: 10.0,
+            font_size: (10.0).into(),
             ..default()
         },
         TextColor(Color::WHITE),
@@ -281,7 +281,7 @@ fn inside_depth(depth: f32, projection: &OrthographicProjection) -> bool {
     depth >= projection.near && depth <= projection.far
 }
 #[derive(SystemParam)]
-struct Scene<'w, 's> {
+struct WorldAsset<'w, 's> {
     cameras: Query<
         'w,
         's,
@@ -341,7 +341,7 @@ struct Scene<'w, 's> {
             Option<&'static Sprite>,
         ),
     >,
-    scenes: Query<'w, 's, (&'static SceneRoot, Option<&'static SceneInstance>)>,
+    scenes: Query<'w, 's, (&'static WorldAssetRoot, Option<&'static WorldInstance>)>,
     nodes: Query<
         'w,
         's,
@@ -359,7 +359,7 @@ fn hash_bytes(hash: &mut u64, bytes: &[u8]) {
         *hash = hash.wrapping_mul(0x100000001b3);
     }
 }
-fn geometry(scene: &Scene, meshes: &Assets<Mesh>, root: Entity) -> serde_json::Value {
+fn geometry(scene: &WorldAsset, meshes: &Assets<Mesh>, root: Entity) -> serde_json::Value {
     let mut signatures = Vec::new();
     let mut vertices = 0_usize;
     let mut indices = 0_usize;
@@ -406,7 +406,10 @@ fn geometry(scene: &Scene, meshes: &Assets<Mesh>, root: Entity) -> serde_json::V
     serde_json::json!({"mesh_geometry_signatures":signatures,"mesh_count":signatures.len(),"vertices":vertices,"indices":indices,
         "world_min":if minimum.is_finite(){Some(minimum.to_array())}else{None},"world_max":if maximum.is_finite(){Some(maximum.to_array())}else{None}})
 }
-fn static_prop_inventory(scene: &Scene, meshes: &Assets<Mesh>) -> (BTreeMap<String, usize>, usize) {
+fn static_prop_inventory(
+    scene: &WorldAsset,
+    meshes: &Assets<Mesh>,
+) -> (BTreeMap<String, usize>, usize) {
     let mut counts = BTreeMap::new();
     let mut ready = 0;
     for (entity, prop, _) in &scene.props {
@@ -433,7 +436,7 @@ fn static_prop_inventory(scene: &Scene, meshes: &Assets<Mesh>) -> (BTreeMap<Stri
 }
 
 fn world_2d_readback(
-    scene: &Scene,
+    scene: &WorldAsset,
     images: &Assets<Image>,
     atlases: &Assets<TextureAtlasLayout>,
 ) -> serde_json::Value {
@@ -495,7 +498,7 @@ fn world_2d_readback(
         "static_sprites":scene.world_sprites.iter().count(),"camera_position":camera_transform.translation().to_array(),"camera_near":projection.near,"camera_far":projection.far,
         "ground_z":if ground_min.is_finite(){Some([ground_min,ground_max])}else{None}})
 }
-fn sprites(scene: &Scene, root: Entity) -> usize {
+fn sprites(scene: &WorldAsset, root: Entity) -> usize {
     std::iter::once(root)
         .chain(scene.children.iter_descendants(root))
         .filter(|entity| {
@@ -511,14 +514,14 @@ fn sprites(scene: &Scene, root: Entity) -> usize {
 fn observe(
     mut commands: Commands,
     mut qa: ResMut<MapQa>,
-    scene: Scene,
+    scene: WorldAsset,
     snapshot: Res<GameStateSnapshot>,
     session: Res<ClientSession>,
     help: Res<HelpOverlayVisible>,
     mobile: Res<MobileControls>,
     mode: Res<PlayerVisualMode>,
     assets: Res<AssetServer>,
-    spawner: Res<SceneSpawner>,
+    spawner: Res<WorldInstanceSpawner>,
     meshes: Res<Assets<Mesh>>,
     cache: Res<MapVisualCache>,
     images: Res<Assets<Image>>,

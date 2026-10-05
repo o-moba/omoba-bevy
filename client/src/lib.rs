@@ -147,3 +147,6 @@ pub fn main() {
         std::process::exit(i32::from(code.get()));
     }
 }
+
+#[cfg(test)]
+mod test_support;

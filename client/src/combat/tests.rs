@@ -497,7 +497,9 @@ fn hidden_and_protected_nearest_candidates_do_not_mask_visible_targets() {
         TargetCandidates,
         crate::targeting::TargetValidity,
     )>::new(app.world_mut());
-    let (candidates, validity) = params.get(app.world());
+    let (candidates, validity) = params
+        .get(app.world())
+        .expect("targeting test resources exist");
     let expected = Some((
         visible,
         TargetId {
@@ -1402,7 +1404,7 @@ fn feedback_expires_in_place_and_hotbar_shows_server_rank_lock_mana_and_cooldown
         text.iter()
             .any(|(slot, text)| *slot == 3 && text.contains("Locked Lv 6"))
     );
-    let count = app.world().entities().len();
+    let count = app.world().entities().count_spawned();
     for _ in 0..5 {
         app.world_mut()
             .resource_mut::<Time>()
@@ -1410,7 +1412,7 @@ fn feedback_expires_in_place_and_hotbar_shows_server_rank_lock_mana_and_cooldown
         app.update();
     }
     assert!(app.world().resource::<ActionFeedback>().text.is_empty());
-    assert_eq!(app.world().entities().len(), count);
+    assert_eq!(app.world().entities().count_spawned(), count);
     assert!(app.world().entity(player).contains::<CombatStats>());
 }
 

@@ -17,8 +17,8 @@ use bevy::{
     asset::RecursiveDependencyLoadState,
     ecs::system::SystemParam,
     prelude::*,
-    scene::{SceneInstance, SceneSpawner},
     window::PrimaryWindow,
+    world_serialization::{WorldInstance, WorldInstanceSpawner},
 };
 use shared::prematch::PrematchPhase;
 
@@ -164,7 +164,7 @@ fn loading_actions(
 #[derive(SystemParam)]
 struct LoadingAssets<'w, 's> {
     server: Res<'w, AssetServer>,
-    spawner: Res<'w, SceneSpawner>,
+    spawner: Res<'w, WorldInstanceSpawner>,
     cache: Res<'w, AvatarAssetCache>,
     mode: Res<'w, PlayerVisualMode>,
     meshes: Res<'w, Assets<Mesh>>,
@@ -182,7 +182,7 @@ struct LoadingAssets<'w, 's> {
             Option<&'static ModelScaleSource>,
         ),
     >,
-    scenes: Query<'w, 's, (&'static SceneRoot, Option<&'static SceneInstance>)>,
+    scenes: Query<'w, 's, (&'static WorldAssetRoot, Option<&'static WorldInstance>)>,
     children: Query<'w, 's, &'static Children>,
     map: Query<
         'w,

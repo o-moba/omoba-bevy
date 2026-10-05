@@ -148,7 +148,7 @@ pub(crate) struct PauseMenuState {
     pub(crate) in_settings: bool,
 }
 
-#[derive(Resource, Component, Default, Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Resource, Default, Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum SettingsTab {
     #[default]
     Sound,
@@ -205,7 +205,8 @@ fn settings_group(
 fn settings_tabs(
     mut selected: ResMut<SettingsTab>,
     mut events: MessageReader<Activated<PauseAction>>,
-    mut groups: Query<(&SettingsTab, &mut Node)>,
+    // Resources are entities in Bevy 0.19; keep UI tab markers disjoint.
+    mut groups: Query<(&SettingsTab, &mut Node), Without<bevy::ecs::resource::IsResource>>,
     mut buttons: Query<(&UiAction<PauseAction>, &mut widgets::ButtonStyle)>,
     mut scroll: Query<&mut ScrollPosition, With<SettingsSection>>,
     menu: Res<PauseMenuState>,
@@ -2137,6 +2138,7 @@ mod tests {
             bevy::picking::InteractionPlugin,
         ));
         app.init_resource::<Assets<bevy::mesh::Mesh>>()
+            .init_resource::<Assets<bevy::mesh::skinning::SkinnedMeshInverseBindposes>>()
             .init_resource::<Assets<TextureAtlasLayout>>()
             .init_resource::<ClientSession>()
             .insert_resource(crate::ui::UiPlatform(if mobile_enabled {
@@ -2361,6 +2363,10 @@ mod tests {
             (Vec2::new(1180.0, 820.0), 2.0),
         ] {
             let (mut app, window) = layout_app(size, dpi, true);
+            // Exercise the production Graphics tab, rather than laying out all
+            // tab bodies simultaneously (which the actual menu never does).
+            app.insert_resource(SettingsTab::Graphics)
+                .add_systems(Update, settings_tabs.after(apply_pause_navigation));
             app.insert_resource(ClientSession::admitted_for_test());
             app.update();
             app.update();
@@ -2380,7 +2386,12 @@ mod tests {
             let close_before = rect(&app, close, dpi);
             let before = *app.world().resource::<AudioSettings>();
             let area = rect(&app, body, dpi);
-            for id in 1..10 {
+            // Text metrics can change with the layout engine. Verify that real
+            // drags reach the final control, without assuming nine fixed swipes.
+            for id in 1..60 {
+                if rect(&app, reset, dpi).height() >= 44.0 {
+                    break;
+                }
                 for (phase, point) in [
                     (TouchPhase::Started, area.center()),
                     (TouchPhase::Moved, area.center() - Vec2::Y * 200.0),
@@ -2578,6 +2589,7 @@ mod tests {
                 let close_before = rect(&app, close, 1.0);
                 let footer_before = rect(&app, footer, 1.0);
                 app.world_mut().write_message(MouseWheel {
+                    phase: bevy::input::touch::TouchPhase::Moved,
                     unit: MouseScrollUnit::Pixel,
                     x: 0.0,
                     y: -2000.0,
@@ -2902,6 +2914,7 @@ mod tests {
             ))
             .id();
         app.world_mut().write_message(MouseWheel {
+            phase: bevy::input::touch::TouchPhase::Moved,
             unit: MouseScrollUnit::Line,
             x: 0.0,
             y: -2.0,
@@ -2914,6 +2927,7 @@ mod tests {
             "32 px per line"
         );
         app.world_mut().write_message(MouseWheel {
+            phase: bevy::input::touch::TouchPhase::Moved,
             unit: MouseScrollUnit::Line,
             x: 0.0,
             y: -50.0,

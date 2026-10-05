@@ -15,7 +15,7 @@ pub(crate) fn register_hero_animation_systems(app: &mut App) {
     app.init_resource::<PlayerAnimationLibrary>()
         .init_resource::<crate::humanoid::HumanoidRuntimeLibrary>()
         .add_systems(
-            // SceneSpawner runs after Update and may restore imported targets.
+            // WorldInstanceSpawner runs after Update and may restore imported targets.
             // Bind after scene writes, before animation consumes those targets.
             PostUpdate,
             (

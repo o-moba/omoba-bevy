@@ -470,12 +470,10 @@ fn shop_touch(world: &mut World, phase: TouchPhase, position: Vec2) {
 /// through the normal raw-touch recognizer. No menu/social/combat capture sweep.
 fn drive_shop(world: &mut World, qa: &mut Qa, age: f32) {
     match qa.proof_step {
-        0 if age > 0.5 && ui_ready(world, "QuickBuy-0") => {
-            if press(world, "QuickBuy-0") {
-                qa.quick_buy_requested = true;
-                qa.proof_step = 1;
-                qa.since = Instant::now();
-            }
+        0 if age > 0.5 && ui_ready(world, "QuickBuy-0") && press(world, "QuickBuy-0") => {
+            qa.quick_buy_requested = true;
+            qa.proof_step = 1;
+            qa.since = Instant::now();
         }
         1 => {
             qa.quick_buy_confirmed = world

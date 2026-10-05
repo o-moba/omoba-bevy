@@ -1370,7 +1370,7 @@ fn render_phone_chat(
                                 &social.preedit,
                                 layout.width - 180.0,
                             )),
-                            TextLayout::new_with_no_wrap(),
+                            TextLayout::no_wrap(),
                             ui::text(16.0),
                             TextColor(ui::IVORY),
                             Name::new("SocialChatInput"),
@@ -1420,7 +1420,7 @@ fn render_phone_chat(
                             social.draft.chars().count(),
                             social.status.text()
                         )),
-                        TextLayout::new_with_no_wrap(),
+                        TextLayout::no_wrap(),
                         ui::text(12.0),
                         TextColor(ui::MUTED),
                         Node {
@@ -2056,7 +2056,7 @@ fn reconcile_bubbles(
             commands
                 .spawn((
                     Localized::new("social.bot").into_text(),
-                    TextLayout::new_with_justify(Justify::Center),
+                    TextLayout::justify(Justify::Center),
                     ui::text(11.0),
                     TextColor(ui::GOLD),
                     FocusPolicy::Pass,
@@ -2476,6 +2476,7 @@ mod tests {
                 bottom: 20.0,
             };
             app.init_resource::<Assets<bevy::mesh::Mesh>>()
+                .init_resource::<Assets<bevy::mesh::skinning::SkinnedMeshInverseBindposes>>()
                 .init_resource::<Assets<TextureAtlasLayout>>()
                 .insert_resource(ClientSession::admitted_for_test())
                 .insert_resource(GameStateSnapshot {

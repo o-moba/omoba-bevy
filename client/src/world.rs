@@ -1,11 +1,12 @@
+use bevy::camera::Hdr;
 use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::ecs::system::SystemParam;
 use bevy::gltf::{Gltf, GltfLoaderSettings};
 use bevy::light::CascadeShadowConfigBuilder;
 use bevy::post_process::bloom::{Bloom, BloomCompositeMode, BloomPrefilter};
 use bevy::prelude::*;
-use bevy::render::view::{ColorGrading, ColorGradingGlobal, Hdr};
-use bevy::scene::SceneRoot;
+use bevy::render::view::{ColorGrading, ColorGradingGlobal};
+use bevy::world_serialization::WorldAssetRoot;
 #[cfg(not(target_os = "android"))]
 use ekza_bevy_sdk::bevy::EkzaModelCatalog;
 use std::collections::HashMap;
@@ -34,7 +35,7 @@ pub const MAX_LIGHT_YAW_DEG: f32 = 180.0;
 
 #[derive(Resource, Clone)]
 pub struct PlayerAssets {
-    pub scene: Option<Handle<Scene>>,
+    pub scene: Option<Handle<WorldAsset>>,
     pub gltf: Option<Handle<Gltf>>,
     pub mesh: Handle<Mesh>,
     pub material: Handle<StandardMaterial>,
@@ -54,7 +55,7 @@ impl PlayerModelCatalog {
     pub fn handles_for(
         &self,
         _: ekza_bevy_sdk::EkzaCharacter,
-    ) -> (Option<Handle<Scene>>, Option<Handle<Gltf>>) {
+    ) -> (Option<Handle<WorldAsset>>, Option<Handle<Gltf>>) {
         (None, None)
     }
 
@@ -79,7 +80,7 @@ pub fn sdk_character(choice: CharacterChoice) -> ekza_bevy_sdk::EkzaCharacter {
 pub fn model_assets_for_choice(
     catalog: &PlayerModelCatalog,
     choice: CharacterChoice,
-) -> (Option<Handle<Scene>>, Option<Handle<Gltf>>) {
+) -> (Option<Handle<WorldAsset>>, Option<Handle<Gltf>>) {
     catalog.handles_for(sdk_character(choice))
 }
 
@@ -88,7 +89,7 @@ pub fn model_assets_for_choice(
 /// instead of preloading all 15 GLBs at startup.
 #[derive(Resource, Default)]
 pub struct AvatarAssetCache {
-    handles: HashMap<String, (Handle<Scene>, Handle<Gltf>)>,
+    handles: HashMap<String, (Handle<WorldAsset>, Handle<Gltf>)>,
 }
 
 impl AvatarAssetCache {
@@ -96,7 +97,7 @@ impl AvatarAssetCache {
         &mut self,
         asset_server: &AssetServer,
         slug: &str,
-    ) -> (Handle<Scene>, Handle<Gltf>) {
+    ) -> (Handle<WorldAsset>, Handle<Gltf>) {
         self.ensure_loaded_from(asset_server, slug, format!("avatars/{slug}.glb"))
     }
 
@@ -106,19 +107,24 @@ impl AvatarAssetCache {
         asset_server: &AssetServer,
         slug: &str,
         path: String,
-    ) -> (Handle<Scene>, Handle<Gltf>) {
+    ) -> (Handle<WorldAsset>, Handle<Gltf>) {
         self.handles
             .entry(slug.to_owned())
             .or_insert_with(|| {
                 info!("Loading roster avatar model '{slug}'");
                 (
-                    asset_server.load_with_settings(
-                        format!("{path}#Scene0"),
-                        |settings: &mut GltfLoaderSettings| settings.include_source = true,
-                    ),
-                    asset_server.load_with_settings(path, |settings: &mut GltfLoaderSettings| {
-                        settings.include_source = true
-                    }),
+                    asset_server
+                        .load_builder()
+                        .with_settings(|settings: &mut GltfLoaderSettings| {
+                            settings.include_source = true
+                        })
+                        .load(format!("{path}#Scene0")),
+                    asset_server
+                        .load_builder()
+                        .with_settings(|settings: &mut GltfLoaderSettings| {
+                            settings.include_source = true
+                        })
+                        .load(path),
                 )
             })
             .clone()
@@ -147,7 +153,7 @@ impl PlayerModelResolver<'_> {
         &mut self,
         character: CharacterChoice,
         avatar: Option<&str>,
-    ) -> (Option<Handle<Scene>>, Option<Handle<Gltf>>) {
+    ) -> (Option<Handle<WorldAsset>>, Option<Handle<Gltf>>) {
         use omoba_passport::store::{self, ModelState};
         if let Some(slug) = avatar
             && omoba_passport::avatars::avatar_definition(slug).is_none()
@@ -309,7 +315,7 @@ fn setup_scene(
                 .illuminance
                 .clamp(MIN_LIGHT_ILLUMINANCE, MAX_LIGHT_ILLUMINANCE),
             // Bevy's Android example disables shadows for affected mobile drivers.
-            shadows_enabled: !cfg!(target_os = "android"),
+            shadow_maps_enabled: !cfg!(target_os = "android"),
             ..default()
         },
         light_transform,
@@ -545,7 +551,7 @@ fn spawn_player_entity(
     }
     if let Some(glb_scene) = assets.scene.clone() {
         let mut entity_commands = commands.spawn((
-            SceneRoot(glb_scene),
+            WorldAssetRoot(glb_scene),
             Transform {
                 translation: spawn,
                 rotation: Quat::IDENTITY,
@@ -619,7 +625,7 @@ pub(crate) fn force_vrm_models_double_sided(
             if patched.contains(&id) {
                 continue;
             }
-            if let Some(material) = materials.get_mut(&handle.0) {
+            if let Some(mut material) = materials.get_mut(&handle.0) {
                 material.double_sided = true;
                 material.cull_mode = None;
                 patched.insert(id);
@@ -783,7 +789,7 @@ mod tests {
         );
         assert_eq!(
             app.world_mut()
-                .query::<&SceneRoot>()
+                .query::<&WorldAssetRoot>()
                 .iter(app.world())
                 .count(),
             0

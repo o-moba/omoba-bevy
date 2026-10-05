@@ -146,8 +146,8 @@ pub(crate) fn draw_legend(
                 transform.translation = translation;
             }
         }
-        if font.font_size != size {
-            font.font_size = size;
+        if font.font_size != size.into() {
+            font.font_size = size.into();
         }
         let value = legend(controls.playstation, menu, phone.is_some());
         if text.0 != value {

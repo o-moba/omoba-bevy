@@ -48,7 +48,7 @@ pub(super) fn setup_respawn_ui(mut commands: Commands) {
             parent.spawn((
                 Text::new(""),
                 TextFont {
-                    font_size: 36.0,
+                    font_size: (36.0).into(),
                     ..default()
                 },
                 TextColor::WHITE,

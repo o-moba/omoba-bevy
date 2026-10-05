@@ -30,9 +30,9 @@ struct Geometry {
     hostile: Handle<StandardMaterial>,
     colors: HashMap<String, Handle<StandardMaterial>>,
     fills: HashMap<String, Handle<StandardMaterial>>,
-    rocket: Handle<Scene>,
-    trap: Handle<Scene>,
-    props: HashMap<&'static str, Handle<Scene>>,
+    rocket: Handle<WorldAsset>,
+    trap: Handle<WorldAsset>,
+    props: HashMap<&'static str, Handle<WorldAsset>>,
 }
 
 fn material(color: Color) -> StandardMaterial {
@@ -95,7 +95,7 @@ struct Instance {
     kind: EffectVisualKind,
     style: EffectStyle,
     friendly: bool,
-    model: Option<Handle<Scene>>,
+    model: Option<Handle<WorldAsset>>,
 }
 #[derive(Resource, Default)]
 struct Instances {
@@ -234,7 +234,7 @@ fn spawn_instance(
                 color: Color::srgb(1.0, 0.48, 0.12),
                 intensity: 65_000.0,
                 range: 8.0,
-                shadows_enabled: false,
+                shadow_maps_enabled: false,
                 ..default()
             },
             Transform::from_xyz(0.0, 0.6, -0.6),
@@ -255,7 +255,7 @@ fn spawn_instance(
     if let Some(scene) = &model {
         let entity = commands
             .spawn((
-                SceneRoot(scene.clone()),
+                WorldAssetRoot(scene.clone()),
                 Transform::default(),
                 Visibility::Hidden,
                 ChildOf(root),
@@ -415,8 +415,8 @@ fn sync(
     mut materials: ResMut<Assets<StandardMaterial>>,
     server: Res<AssetServer>,
     mut poses: Query<(&mut Transform, &mut Visibility)>,
-    scene_instances: Query<&bevy::scene::SceneInstance>,
-    scene_spawner: Option<Res<bevy::scene::SceneSpawner>>,
+    scene_instances: Query<&bevy::world_serialization::WorldInstance>,
+    scene_spawner: Option<Res<bevy::world_serialization::WorldInstanceSpawner>>,
 ) {
     let round = game
         .as_ref()
@@ -806,7 +806,7 @@ mod tests {
         app.add_plugins((MinimalPlugins, bevy::asset::AssetPlugin::default()))
             .init_asset::<Mesh>()
             .init_asset::<StandardMaterial>()
-            .init_asset::<Scene>()
+            .init_asset::<WorldAsset>()
             .insert_resource(PlayerVisualMode::Models3d)
             .init_resource::<GameStateSnapshot>()
             .insert_resource(
