@@ -179,6 +179,7 @@ pub(crate) fn recognize_presses(
         Option<&UiGlobalTransform>,
         Option<&InheritedVisibility>,
         Option<&bevy::ui::CalculatedClip>,
+        Option<&bevy::ui::ComputedStackIndex>,
     )>,
 ) {
     let touch_mode = platform
@@ -245,22 +246,28 @@ pub(crate) fn recognize_presses(
     let dpi = window.scale_factor();
     let mut visible: Vec<_> = buttons
         .iter()
-        .filter_map(|(entity, pressable, node, transform, visibility, clip)| {
-            if pressable.disabled || pressable.blocked || visibility.is_some_and(|v| !v.get()) {
-                return None;
-            }
-            let (Some(node), Some(transform)) = (node, transform) else {
-                return None;
-            };
-            if node.size().min_element() <= 0.0 {
-                return None;
-            }
-            let rect = logical_ui_rect(node, transform, clip, dpi);
-            (rect.width() > 0.0 && rect.height() > 0.0).then_some((node.stack_index, entity, rect))
-        })
+        .filter_map(
+            |(entity, pressable, node, transform, visibility, clip, stack)| {
+                if pressable.disabled || pressable.blocked || visibility.is_some_and(|v| !v.get()) {
+                    return None;
+                }
+                let (Some(node), Some(transform)) = (node, transform) else {
+                    return None;
+                };
+                if node.size().min_element() <= 0.0 {
+                    return None;
+                }
+                let rect = logical_ui_rect(node, transform, clip, dpi);
+                (rect.width() > 0.0 && rect.height() > 0.0).then_some((
+                    stack.map_or(0, |index| index.0),
+                    entity,
+                    rect,
+                ))
+            },
+        )
         .collect();
     // Front-most first, so an overlapping button on top wins the touch.
-    visible.sort_by(|a, b| b.0.cmp(&a.0));
+    visible.sort_by_key(|entry| std::cmp::Reverse(entry.0));
     let visible: Vec<_> = visible
         .into_iter()
         .map(|(_, entity, rect)| (entity, rect))
@@ -423,9 +430,9 @@ mod tests {
                 ComputedNode {
                     size: Vec2::new(60.0, 46.0),
                     inverse_scale_factor: 1.0,
-                    stack_index: 5,
                     ..default()
                 },
+                bevy::ui::ComputedStackIndex(5),
                 UiGlobalTransform::from_translation(Vec2::new(300.0, 150.0)),
                 InheritedVisibility::VISIBLE,
             ))

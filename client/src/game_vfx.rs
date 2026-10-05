@@ -898,12 +898,12 @@ fn animate_particles(
         // Ring/slash meshes need a solid tint; glows and streaks use the radial texture.
         let texture =
             matches!(p.shape, Shape::Glow | Shape::Streak).then(|| assets.glow_texture.clone());
-        if let Some(m) = materials.get_mut(&slot.material) {
+        if let Some(mut m) = materials.get_mut(&slot.material) {
             m.base_color = hdr_tint(p.color, PARTICLE_HDR_GAIN);
             m.base_color_texture = texture.clone();
             m.alpha_mode = AlphaMode::Blend;
         }
-        if let Some(m) = flats.get_mut(&slot.flat) {
+        if let Some(mut m) = flats.get_mut(&slot.flat) {
             m.color = p.color;
             m.texture = texture;
         }
@@ -932,11 +932,11 @@ fn animate_particles(
         *visibility = Visibility::Visible;
         *inherited = InheritedVisibility::VISIBLE;
         let opacity = (1. - p.age / p.lifetime).max(0.);
-        if let Some(m) = materials.get_mut(&slot.material) {
+        if let Some(mut m) = materials.get_mut(&slot.material) {
             m.base_color =
                 hdr_tint(p.color, PARTICLE_HDR_GAIN).with_alpha(p.color.alpha() * opacity);
         }
-        if let Some(m) = flats.get_mut(&slot.flat) {
+        if let Some(mut m) = flats.get_mut(&slot.flat) {
             m.color = p.color.with_alpha(p.color.alpha() * opacity);
         }
     }
@@ -1680,7 +1680,7 @@ mod tests {
             .init_resource::<MapLayout>()
             .add_plugins(GameVfxPlugin);
         app.update();
-        let count = app.world().entities().len();
+        let count = app.world().entities().count_spawned();
         for _ in 0..96 {
             app.world_mut().write_message(test_burst());
         }
@@ -1693,7 +1693,7 @@ mod tests {
                 .count(),
             PARTICLE_BUDGET
         );
-        assert_eq!(app.world().entities().len(), count);
+        assert_eq!(app.world().entities().count_spawned(), count);
         app.world_mut().write_message(ClearCombatVfx);
         app.update();
         assert!(
@@ -1720,7 +1720,7 @@ mod tests {
                 .count(),
             BUTTERFLY_BUDGET * 2
         );
-        assert_eq!(app.world().entities().len(), count);
+        assert_eq!(app.world().entities().count_spawned(), count);
         // Expired particles free slots instead of growing the entity set.
         for mut slot in app
             .world_mut()

@@ -782,7 +782,7 @@ fn spawn_home(
                         if phone { 11.0 * unit } else { 12.0 },
                         theme::IVORY,
                     ),
-                    TextLayout::new_with_justify(Justify::Center),
+                    TextLayout::justify(Justify::Center),
                     Node {
                         max_width: Val::Percent(100.0),
                         ..default()
@@ -865,7 +865,7 @@ fn spawn_home(
             root.spawn((
                 Text::new(crate::build_info::label()),
                 TextFont {
-                    font_size: 12.0 * unit,
+                    font_size: (12.0 * unit).into(),
                     ..default()
                 },
                 TextColor(theme::MUTED),

@@ -100,7 +100,7 @@ pub(super) fn setup_banner(
                 .sized(TextRole::Caption.style().size),
         ),
         TextColor(ink),
-        TextLayout::new_with_no_wrap(),
+        TextLayout::no_wrap(),
         BackgroundColor(fill),
         BorderColor::all(if phone {
             crate::ui::theme::perceptual(color::BORDER_HAIRLINE)

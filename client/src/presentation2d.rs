@@ -357,7 +357,7 @@ fn spawn_structure_cues(
         parent.spawn((
             crate::i18n::Localized::new(key).text2d(),
             TextFont {
-                font_size: 16.0,
+                font_size: (16.0).into(),
                 ..default()
             },
             TextColor(Color::WHITE),
@@ -571,7 +571,7 @@ fn attach_actor(
             parent.spawn((
                 crate::i18n::Localized::new(crate::i18n::data::boss_key(camp)).text2d(),
                 TextFont {
-                    font_size: 18.0,
+                    font_size: (18.0).into(),
                     ..default()
                 },
                 TextColor(Color::srgb(1.0, 0.86, 0.45)),

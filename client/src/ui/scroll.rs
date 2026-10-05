@@ -428,6 +428,7 @@ pub(crate) mod harness {
 
     pub(crate) fn wheel_lines(app: &mut App, window: Entity, lines: f32) {
         app.world_mut().write_message(MouseWheel {
+            phase: bevy::input::touch::TouchPhase::Moved,
             unit: MouseScrollUnit::Line,
             x: 0.0,
             y: lines,
@@ -509,6 +510,7 @@ mod tests {
 
     fn wheel(app: &mut App, window: Entity, unit: MouseScrollUnit, y: f32) {
         app.world_mut().write_message(MouseWheel {
+            phase: bevy::input::touch::TouchPhase::Moved,
             unit,
             x: 0.0,
             y,
@@ -586,9 +588,9 @@ mod tests {
                 ComputedNode {
                     size: Vec2::new(180.0, 46.0),
                     inverse_scale_factor: 1.0,
-                    stack_index: 1,
                     ..default()
                 },
+                bevy::ui::ComputedStackIndex(1),
                 UiGlobalTransform::from_translation(Vec2::new(300.0, 300.0)),
                 ChildOf(panel),
             ))

@@ -124,7 +124,7 @@ fn setup(mut commands: Commands, assets: Res<AssetServer>, qa: Res<Audit>) {
     commands.spawn((
         DirectionalLight {
             illuminance: 10500.0,
-            shadows_enabled: false,
+            shadow_maps_enabled: false,
             ..default()
         },
         Transform::from_xyz(5.0, 8.0, 9.0).looking_at(Vec3::ZERO, Vec3::Y),
@@ -142,7 +142,7 @@ fn setup(mut commands: Commands, assets: Res<AssetServer>, qa: Res<Audit>) {
             "QA | ALL 15 SHIPPED HEROES | shared runtime run"
         }),
         TextFont {
-            font_size: 22.0,
+            font_size: (22.0).into(),
             ..default()
         },
         TextColor(Color::srgb(0.76, 0.87, 0.82)),
@@ -176,16 +176,16 @@ fn setup(mut commands: Commands, assets: Res<AssetServer>, qa: Res<Audit>) {
             )
         };
         let gltf: Handle<Gltf> = assets
-            .load_with_settings(path.clone(), |s: &mut GltfLoaderSettings| {
-                s.include_source = true
-            });
-        let scene: Handle<Scene> = assets
-            .load_with_settings(format!("{path}#Scene0"), |s: &mut GltfLoaderSettings| {
-                s.include_source = true
-            });
+            .load_builder()
+            .with_settings(|s: &mut GltfLoaderSettings| s.include_source = true)
+            .load(path.clone());
+        let scene: Handle<WorldAsset> = assets
+            .load_builder()
+            .with_settings(|s: &mut GltfLoaderSettings| s.include_source = true)
+            .load(format!("{path}#Scene0"));
         let local = i % 2 == 0;
         let mut hero = commands.spawn((
-            SceneRoot(scene),
+            WorldAssetRoot(scene),
             Transform::from_translation(origin)
                 .with_rotation(Quat::from_rotation_y(std::f32::consts::PI + 0.35)),
             Visibility::default(),
@@ -236,7 +236,7 @@ fn setup(mut commands: Commands, assets: Res<AssetServer>, qa: Res<Audit>) {
                 if local { "local" } else { "remote" }
             )),
             TextFont {
-                font_size: 15.0,
+                font_size: (15.0).into(),
                 ..default()
             },
             TextColor(Color::srgb(0.68, 0.77, 0.73)),

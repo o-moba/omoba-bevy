@@ -1114,7 +1114,7 @@ fn team_row(
                 row.spawn((
                     Text::new(value),
                     TextFont {
-                        font_size: if phone { 11.0 } else { 14.0 },
+                        font_size: (if phone { 11.0 } else { 14.0 }).into(),
                         ..default()
                     },
                     TextColor(ink),
@@ -2168,6 +2168,7 @@ mod tests {
             bevy::picking::InteractionPlugin,
         ))
         .init_resource::<Assets<bevy::mesh::Mesh>>()
+        .init_resource::<Assets<bevy::mesh::skinning::SkinnedMeshInverseBindposes>>()
         .init_resource::<Assets<TextureAtlasLayout>>();
         let mut mobile = MobileControls::default();
         mobile.enabled = true;

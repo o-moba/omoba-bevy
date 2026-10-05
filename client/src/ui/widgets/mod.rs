@@ -926,7 +926,7 @@ pub(crate) fn spawn_button<T: UiActionT>(
                     label.into_text(),
                     theme::styled_text(style),
                     TextColor(theme::button_label_color(kind, false, ButtonState::Idle)),
-                    TextLayout::new_with_justify(Justify::Center),
+                    TextLayout::justify(Justify::Center),
                     label_extra,
                 ))
                 .id(),
@@ -1003,7 +1003,7 @@ pub(crate) fn value_label<M: Component>(
                 flex_shrink: 0.0,
                 ..default()
             },
-            TextLayout::new_with_justify(Justify::Center),
+            TextLayout::justify(Justify::Center),
             theme::role_text(TextRole::Number),
             TextColor(color::TEXT_PRIMARY),
             marker,

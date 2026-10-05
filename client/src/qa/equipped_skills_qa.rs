@@ -61,7 +61,7 @@ fn label(mut commands: Commands) {
     commands.spawn((
         Text::new("QA · synthetic hybrid HUD · EN 852×393"),
         TextFont {
-            font_size: 9.0,
+            font_size: (9.0).into(),
             ..default()
         },
         TextColor(Color::WHITE),
@@ -190,7 +190,10 @@ fn capture(
         Option<&InheritedVisibility>,
         Option<&bevy::ui::CalculatedClip>,
     )>,
-    scenes: Query<(&SceneRoot, Option<&bevy::scene::SceneInstance>)>,
+    scenes: Query<(
+        &WorldAssetRoot,
+        Option<&bevy::world_serialization::WorldInstance>,
+    )>,
     assets: Res<AssetServer>,
 ) {
     if qa.pending

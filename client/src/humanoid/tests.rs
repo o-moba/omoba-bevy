@@ -292,7 +292,7 @@ fn actual_ecs_clipless_binding_survives_async_readiness_scene_refresh_and_despaw
         .add(empty_gltf(node_handles, skin));
     let (first, first_joints) = spawn_instance(app.world_mut(), &model, &rig, inverse.clone());
     let (second, second_joints) = spawn_instance(app.world_mut(), &model, &rig, inverse);
-    app.update(); // Scene may exist before its shared motion asset is prepared.
+    app.update(); // WorldAsset may exist before its shared motion asset is prepared.
     assert!(app.world().get::<RuntimeHumanoidPlayer>(first).is_none());
     let (clips, animated_nodes) = retarget::retarget_all(&rig, &motion()).unwrap();
     let mut handles: HashMap<_, _> = clips

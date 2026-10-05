@@ -1243,7 +1243,7 @@ fn setup_mobile_controls(mut commands: Commands) {
                     Text::new(""),
                     theme::styled_text(TextStyle::keep_case(TextRole::Caption)),
                     TextColor(color::TEXT_PRIMARY),
-                    TextLayout::new_with_justify(Justify::Center),
+                    TextLayout::justify(Justify::Center),
                     DiscPart::Label,
                 ));
             }
@@ -1256,7 +1256,7 @@ fn setup_mobile_controls(mut commands: Commands) {
                     Text::new(""),
                     theme::role_text(TextRole::Heading),
                     TextColor(color::TEXT_PRIMARY),
-                    TextLayout::new_with_justify(Justify::Center),
+                    TextLayout::justify(Justify::Center),
                     DiscPart::Label,
                 ));
             }
@@ -1316,7 +1316,7 @@ fn setup_mobile_controls(mut commands: Commands) {
                         } else {
                             color::TEXT_GOLD
                         }),
-                        TextLayout::new_with_justify(Justify::Center),
+                        TextLayout::justify(Justify::Center),
                         bevy::text::LineHeight::RelativeToFont(1.0),
                         DiscPart::Label,
                     ));

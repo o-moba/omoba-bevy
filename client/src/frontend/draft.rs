@@ -562,7 +562,7 @@ pub(super) fn roster_row(
                 );
                 text.spawn((
                     widgets::label(&identity, 13.0, theme::IVORY),
-                    TextLayout::new_with_justify(Justify::Left).with_linebreak(LineBreak::NoWrap),
+                    TextLayout::justify(Justify::Left).with_linebreak(LineBreak::NoWrap),
                 ));
                 text.spawn(widgets::label(
                     &trf(
@@ -577,7 +577,7 @@ pub(super) fn roster_row(
                 ));
                 text.spawn((
                     widgets::label(&avatar_name(player.avatar.as_deref()), 11.0, theme::MUTED),
-                    TextLayout::new_with_justify(Justify::Left).with_linebreak(LineBreak::NoWrap),
+                    TextLayout::justify(Justify::Left).with_linebreak(LineBreak::NoWrap),
                 ));
             });
             row.spawn(widgets::label(
@@ -731,8 +731,7 @@ fn render_draft(
                         ));
                         title.spawn((
                             widgets::label(tr("draft.subtitle"), 12.0, theme::MUTED),
-                            TextLayout::new_with_justify(Justify::Left)
-                                .with_linebreak(LineBreak::NoWrap),
+                            TextLayout::justify(Justify::Left).with_linebreak(LineBreak::NoWrap),
                         ));
                     });
                 header.spawn((
@@ -745,7 +744,7 @@ fn render_draft(
                         margin: UiRect::left(Val::Px(-80.0)),
                         ..default()
                     },
-                    TextLayout::new_with_justify(Justify::Center).with_linebreak(LineBreak::NoWrap),
+                    TextLayout::justify(Justify::Center).with_linebreak(LineBreak::NoWrap),
                     Name::new("DraftSelectionClock"),
                 ));
                 action_button(
@@ -1044,10 +1043,8 @@ fn render_draft(
                                                                 11.0,
                                                                 theme::IVORY,
                                                             ),
-                                                            TextLayout::new_with_justify(
-                                                                Justify::Center,
-                                                            )
-                                                            .with_linebreak(LineBreak::NoWrap),
+                                                            TextLayout::justify(Justify::Center)
+                                                                .with_linebreak(LineBreak::NoWrap),
                                                         ));
                                                     });
                                             }
@@ -1335,6 +1332,7 @@ mod tests {
             bevy::picking::InteractionPlugin,
         ))
         .init_resource::<Assets<bevy::mesh::Mesh>>()
+        .init_resource::<Assets<bevy::mesh::skinning::SkinnedMeshInverseBindposes>>()
         .init_resource::<Assets<TextureAtlasLayout>>()
         .init_resource::<DraftScrollMemory>()
         .init_resource::<AvatarThumbnails>()

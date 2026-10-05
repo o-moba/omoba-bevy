@@ -69,7 +69,7 @@ pub(super) fn setup(mut commands: Commands, assets: Res<AssetServer>) {
         .with_child((
             Text::new(tr("combat.standard.interact")),
             TextFont {
-                font_size: 16.0,
+                font_size: (16.0).into(),
                 ..default()
             },
             TextColor(Color::WHITE),
@@ -77,8 +77,8 @@ pub(super) fn setup(mut commands: Commands, assets: Res<AssetServer>) {
     commands.spawn((
         Text::default(),
         TextFont {
-            font: assets.load("ui/Inter.ttf"),
-            font_size: 14.0,
+            font: assets.load("ui/Inter.ttf").into(),
+            font_size: (14.0).into(),
             ..default()
         },
         TextColor(crate::ui::tokens::color::TEXT_PRIMARY),

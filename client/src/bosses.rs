@@ -9,7 +9,7 @@
 
 use bevy::gltf::Gltf;
 use bevy::prelude::*;
-use bevy::scene::SceneRoot;
+use bevy::world_serialization::WorldAssetRoot;
 use std::collections::HashMap;
 
 use crate::camera::MainCamera;
@@ -65,7 +65,7 @@ fn boss_slug(camp_type: NeutralCampType) -> Option<&'static str> {
 /// intentionally has no model path or imported animation dependency.
 #[derive(Resource, Default)]
 pub struct BossAssetCache {
-    handles: HashMap<NeutralCampType, (Handle<Scene>, Handle<Gltf>)>,
+    handles: HashMap<NeutralCampType, (Handle<WorldAsset>, Handle<Gltf>)>,
 }
 
 #[derive(Clone)]
@@ -182,7 +182,7 @@ fn attach_boss_models(
                 })
                 .with_children(|parent| {
                     parent.spawn((
-                        SceneRoot(scene.clone()),
+                        WorldAssetRoot(scene.clone()),
                         // Authored dragon faces glTF -Z; authoritative neutral yaw faces +Z.
                         Transform::from_rotation(Quat::from_rotation_y(std::f32::consts::PI)),
                         Visibility::default(),
@@ -201,7 +201,7 @@ fn attach_boss_models(
         commands.spawn((
             crate::i18n::Localized::new(crate::i18n::data::boss_key(visual.camp_type)).into_text(),
             TextFont {
-                font_size: 18.0,
+                font_size: (18.0).into(),
                 ..default()
             },
             TextColor(NAMEPLATE_COLOR),
@@ -393,7 +393,7 @@ fn force_boss_models_double_sided(
             if patched.contains(&id) {
                 continue;
             }
-            if let Some(material) = materials.get_mut(&handle.0) {
+            if let Some(mut material) = materials.get_mut(&handle.0) {
                 material.double_sided = true;
                 material.cull_mode = None;
                 patched.insert(id);
@@ -472,7 +472,7 @@ mod tests {
             assert!(app.world().entity(king).get::<ModelScaleSource>().is_some());
             assert_eq!(
                 app.world_mut()
-                    .query::<&SceneRoot>()
+                    .query::<&WorldAssetRoot>()
                     .iter(app.world())
                     .count(),
                 1
@@ -525,7 +525,7 @@ mod tests {
             );
             assert_eq!(
                 app.world_mut()
-                    .query::<&SceneRoot>()
+                    .query::<&WorldAssetRoot>()
                     .iter(app.world())
                     .count(),
                 0
@@ -562,7 +562,7 @@ mod tests {
         );
         assert_eq!(
             app.world_mut()
-                .query::<&SceneRoot>()
+                .query::<&WorldAssetRoot>()
                 .iter(app.world())
                 .count(),
             0

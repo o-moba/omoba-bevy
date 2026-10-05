@@ -152,7 +152,7 @@ fn focus_capture_window(
     });
 }
 #[derive(SystemParam)]
-struct Scene<'w, 's> {
+struct WorldAsset<'w, 's> {
     heroes: Query<
         'w,
         's,
@@ -186,7 +186,7 @@ struct Scene<'w, 's> {
 fn observe(
     mut commands: Commands,
     mut qa: ResMut<VisionQa>,
-    scene: Scene,
+    scene: WorldAsset,
     snapshot: Res<GameStateSnapshot>,
     session: Res<ClientSession>,
     help: Res<HelpOverlayVisible>,

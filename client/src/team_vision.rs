@@ -289,7 +289,7 @@ fn setup(
                 .sized(crate::ui::tokens::TextRole::Caption.style().size),
         ),
         TextColor(crate::ui::tokens::color::TEXT_SECONDARY),
-        TextLayout::new_with_no_wrap(),
+        TextLayout::no_wrap(),
         Node {
             position_type: PositionType::Absolute,
             padding: UiRect::axes(
@@ -676,7 +676,7 @@ fn update_mask(
     art.identity = Some(identity);
     let mut darkest = 0;
     let mut clearest = 255;
-    if let Some(image) = images.get_mut(&art.texture)
+    if let Some(mut image) = images.get_mut(&art.texture)
         && let Some(data) = image.data.as_mut()
     {
         for y in 0..MASK_HEIGHT {
@@ -694,7 +694,7 @@ fn update_mask(
             }
         }
     }
-    if let Some(image) = images.get_mut(&art.minimap)
+    if let Some(mut image) = images.get_mut(&art.minimap)
         && let Some(data) = image.data.as_mut()
     {
         for y in 0..MAP_SIZE {
@@ -903,7 +903,7 @@ mod tests {
             .init_resource::<GameStateSnapshot>()
             .add_plugins(TeamVisionPlugin);
         app.update();
-        let count = app.world().entities().len();
+        let count = app.world().entities().count_spawned();
         let roots: Vec<_> = app
             .world_mut()
             .query::<(Entity, &BrushArt, &Transform, &Visibility)>()
@@ -960,7 +960,7 @@ mod tests {
                 !app.world().resource::<VisionPresentation>().active,
                 "3D fog is unchanged in sprite mode"
             );
-            assert_eq!(app.world().entities().len(), count);
+            assert_eq!(app.world().entities().count_spawned(), count);
         }
     }
     #[test]
@@ -974,9 +974,11 @@ mod tests {
             .init_resource::<MapLayout>()
             .insert_resource(PlayerVisualMode::Models3d)
             .init_resource::<GameStateSnapshot>()
+            .init_resource::<crate::pause_menu::PauseMenuState>()
+            .init_resource::<crate::input_context::GameplayInputContext>()
             .add_plugins(TeamVisionPlugin);
         app.update();
-        let count = app.world().entities().len();
+        let count = app.world().entities().count_spawned();
         let images = app.world().resource::<Assets<Image>>().len();
         assert_eq!(images, 2);
         assert_eq!(
@@ -1061,7 +1063,7 @@ mod tests {
         app.world_mut().resource_mut::<GameStateSnapshot>().state = GameState::Lobby;
         app.update();
         assert!(!app.world().resource::<VisionPresentation>().active);
-        assert_eq!(app.world().entities().len(), count);
+        assert_eq!(app.world().entities().count_spawned(), count);
         assert_eq!(app.world().resource::<Assets<Image>>().len(), images);
     }
 }

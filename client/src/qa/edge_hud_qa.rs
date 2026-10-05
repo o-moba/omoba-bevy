@@ -169,7 +169,7 @@ fn fixture(
             .with_child((
                 Text::new("QA: synthetic target / scoreboard presentation"),
                 TextFont {
-                    font_size: 12.0,
+                    font_size: (12.0).into(),
                     ..default()
                 },
                 TextColor(crate::ui::theme::GOLD),

@@ -226,7 +226,7 @@ pub(crate) fn spawn_team_stage(
                                 ] {
                                     plate.spawn((
                                         widgets::label(text, size, ink),
-                                        TextLayout::new_with_justify(Justify::Center)
+                                        TextLayout::justify(Justify::Center)
                                             .with_linebreak(LineBreak::NoWrap),
                                         Pickable::IGNORE,
                                     ));

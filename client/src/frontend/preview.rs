@@ -78,7 +78,7 @@ pub struct AvatarPreview {
     gltf: Option<Handle<Gltf>>,
     graph: Option<Handle<AnimationGraph>>,
     bound: bool,
-    /// Set by the `SceneInstanceReady` observer of the current model.
+    /// Set by the `WorldInstanceReady` observer of the current model.
     scene_ready: bool,
     tag_frames: u8,
     gesture: Option<usize>,
@@ -242,7 +242,7 @@ pub(super) fn setup_preview(mut commands: Commands, preview: Res<AvatarPreview>)
     commands.spawn((
         DirectionalLight {
             illuminance: 9_000.0,
-            shadows_enabled: false,
+            shadow_maps_enabled: false,
             ..default()
         },
         Transform::from_xyz(2.4, 3.2, 2.6).looking_at(Vec3::new(0.0, 1.0, 0.0), Vec3::Y),
@@ -252,7 +252,7 @@ pub(super) fn setup_preview(mut commands: Commands, preview: Res<AvatarPreview>)
     commands.spawn((
         DirectionalLight {
             illuminance: 3_200.0,
-            shadows_enabled: false,
+            shadow_maps_enabled: false,
             ..default()
         },
         Transform::from_xyz(-2.6, 1.8, -1.8).looking_at(Vec3::new(0.0, 1.0, 0.0), Vec3::Y),
@@ -353,7 +353,7 @@ fn sync_preview_model(
         .id();
     let model = commands
         .spawn((
-            SceneRoot(scene),
+            WorldAssetRoot(scene),
             Transform::default(),
             Visibility::Visible,
             RenderLayers::layer(PREVIEW_LAYER),
@@ -380,7 +380,8 @@ fn sync_preview_model(
     // The scene reports when every one of its entities exists. Until then the
     // tagging pass keeps running, however long the load takes.
     commands.entity(model).observe(
-        |ready: On<bevy::scene::SceneInstanceReady>, mut preview: ResMut<AvatarPreview>| {
+        |ready: On<bevy::world_serialization::WorldInstanceReady>,
+         mut preview: ResMut<AvatarPreview>| {
             if preview.model == Some(ready.entity) {
                 preview.scene_ready = true;
                 preview.tag_frames = TAG_FRAMES_AFTER_READY;

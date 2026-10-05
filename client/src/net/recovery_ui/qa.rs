@@ -58,7 +58,7 @@ fn label(mut commands: Commands) {
     commands.spawn((
         Text::new("SYNTHETIC RECOVERY UI · local fixture"),
         TextFont {
-            font_size: 12.0,
+            font_size: (12.0).into(),
             ..default()
         },
         TextColor(Color::WHITE),

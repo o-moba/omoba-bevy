@@ -447,7 +447,7 @@ mod quick_cast_tests {
         let pick = |world: &mut World, selected, chased| {
             let mut state =
                 SystemState::<(TargetCandidates, crate::targeting::TargetValidity)>::new(world);
-            let (candidates, validity) = state.get(world);
+            let (candidates, validity) = state.get(world).expect("targeting test resources exist");
             quick_cast_target(
                 Vec2::ZERO,
                 Team::Green,
@@ -490,7 +490,7 @@ mod quick_cast_tests {
                 SystemState::<(TargetCandidates, crate::targeting::TargetValidity)>::new(
                     &mut world,
                 );
-            let (candidates, validity) = state.get(&world);
+            let (candidates, validity) = state.get(&world).expect("targeting test resources exist");
             assert_eq!(
                 quick_cast_target(
                     Vec2::ZERO,

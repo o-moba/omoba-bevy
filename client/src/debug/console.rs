@@ -103,7 +103,7 @@ fn setup_debug_console_ui(mut commands: Commands, console: Res<DebugConsole>) {
             parent.spawn((
                 Text::new(""),
                 TextFont {
-                    font_size: 14.0,
+                    font_size: (14.0).into(),
                     ..default()
                 },
                 TextColor::WHITE,

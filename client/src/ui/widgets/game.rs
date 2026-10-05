@@ -574,7 +574,7 @@ fn fill_ability(
                             TextStyle::keep_case(TextRole::Label).sized(LOCKED_LABEL),
                         ),
                         TextColor(color::TEXT_SECONDARY),
-                        TextLayout::new_with_no_wrap(),
+                        TextLayout::no_wrap(),
                     ))
                     .id();
             })
@@ -1422,7 +1422,7 @@ pub(crate) fn shop_card<T: UiActionT>(
                         Text::new(crate::i18n::data::item_name(card.item)),
                         theme::styled_text(TextStyle::keep_case(TextRole::Label)),
                         TextColor(color::TEXT_PRIMARY),
-                        TextLayout::new_with_no_wrap(),
+                        TextLayout::no_wrap(),
                     ))
                     .id(),
                 );
@@ -1454,7 +1454,7 @@ pub(crate) fn shop_card<T: UiActionT>(
                         Text::new(line),
                         theme::styled_text(TextStyle::keep_case(TextRole::Caption)),
                         TextColor(ink),
-                        TextLayout::new_with_no_wrap(),
+                        TextLayout::no_wrap(),
                     ))
                     .id(),
                 );
@@ -2289,7 +2289,7 @@ pub(crate) fn scoreboard_row(
                         Text::new(row.name.clone()),
                         theme::styled_text(TextStyle::keep_case(TextRole::Label)),
                         TextColor(ink),
-                        TextLayout::new_with_no_wrap(),
+                        TextLayout::no_wrap(),
                     ));
                     if row.disconnected {
                         surfaces_badge_off(top);
@@ -2320,7 +2320,7 @@ pub(crate) fn scoreboard_row(
                     Text::new(value),
                     theme::role_text(TextRole::Number),
                     TextColor(if gold { color::TEXT_GOLD } else { ink }),
-                    TextLayout::new_with_justify(Justify::Right),
+                    TextLayout::justify(Justify::Right),
                     Node {
                         width: Val::Px(width),
                         flex_shrink: 0.0,
@@ -2607,7 +2607,7 @@ pub(crate) fn target_frame(
                                 Text::new(name),
                                 theme::styled_text(TextStyle::keep_case(TextRole::Label)),
                                 TextColor(color::TEXT_PRIMARY),
-                                TextLayout::new_with_no_wrap(),
+                                TextLayout::no_wrap(),
                             ));
                         });
                     bar(

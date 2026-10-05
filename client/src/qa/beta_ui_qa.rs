@@ -5,7 +5,7 @@
 //! OMOBA_BETA_UI_SCENE_LANE=<top|mid|bot>:<0..1> stages a showcase shot instead:
 //! after the help overlay the hero gets an ordinary move order to that lane point
 //! (measured from its own base), and the gameplay capture waits for arrival plus
-//! OMOBA_BETA_UI_SCENE_HOLD seconds of live match. Scene runs stop after gameplay.
+//! OMOBA_BETA_UI_SCENE_HOLD seconds of live match. WorldAsset runs stop after gameplay.
 use std::{
     path::PathBuf,
     time::{Duration, Instant},
@@ -16,8 +16,8 @@ use bevy::{
     asset::RecursiveDependencyLoadState,
     prelude::*,
     render::view::screenshot::{Screenshot, ScreenshotCaptured, save_to_disk},
-    scene::{SceneInstance, SceneSpawner},
     window::PrimaryWindow,
+    world_serialization::{WorldInstance, WorldInstanceSpawner},
 };
 
 use crate::{
@@ -437,7 +437,7 @@ fn prepare_result_fixture(
             ResultFixtureLabel,
             Text::new("QA FIXTURE: result layout only"),
             TextFont {
-                font_size: 16.0,
+                font_size: (16.0).into(),
                 ..default()
             },
             TextColor(Color::srgb(1.0, 0.8, 0.3)),
@@ -543,7 +543,7 @@ fn prepare_skill_upgrade_fixture(
             .with_child((
                 Text::new("QA: skill-upgrade layout fixture"),
                 TextFont {
-                    font_size: 12.0,
+                    font_size: (12.0).into(),
                     ..default()
                 },
                 TextColor(Color::srgb(1.0, 0.8, 0.3)),
@@ -563,7 +563,7 @@ struct UiScene<'w, 's> {
     texts: Query<'w, 's, (&'static Name, &'static Text)>,
     utility: Query<'w, 's, &'static crate::net::PlayerUtility, With<crate::player::Player>>,
     environment: Query<'w, 's, Entity, With<VerdantEnvironment>>,
-    scenes: Query<'w, 's, (&'static SceneRoot, Option<&'static SceneInstance>)>,
+    scenes: Query<'w, 's, (&'static WorldAssetRoot, Option<&'static WorldInstance>)>,
     join: Query<'w, 's, Entity, With<TeamSelectRoot>>,
     nodes: Query<
         'w,
@@ -589,7 +589,7 @@ fn capture(
     context: Res<crate::input_context::GameplayInputContext>,
     mobile: Option<Res<crate::mobile_controls::MobileControls>>,
     assets: Res<AssetServer>,
-    spawner: Res<SceneSpawner>,
+    spawner: Res<WorldInstanceSpawner>,
     scene: UiScene,
     minimap: crate::minimap::MinimapQaScene,
     progression_fixture: Option<Res<SkillUpgradeFixtureState>>,

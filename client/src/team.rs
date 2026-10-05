@@ -571,7 +571,7 @@ pub fn spawn_team_select_ui(
                     header.spawn((
                         Localized::new("team.title").into_text(),
                         TextFont {
-                            font_size: 26.0,
+                            font_size: (26.0).into(),
                             ..default()
                         },
                         TextStyle::new(TextRole::Title),
@@ -581,7 +581,7 @@ pub fn spawn_team_select_ui(
                     header.spawn((
                         Text::new(String::new()),
                         TextFont {
-                            font_size: 13.0,
+                            font_size: (13.0).into(),
                             ..default()
                         },
                         TextStyle::keep_case(TextRole::Caption),
@@ -631,7 +631,7 @@ pub fn spawn_team_select_ui(
             parent.spawn((
                 PhoneCopy::label("team.scroll_hint", "team.scroll_hint_phone"),
                 TextFont {
-                    font_size: 12.5,
+                    font_size: (12.5).into(),
                     ..default()
                 },
                 TextColor(crate::ui::theme::MUTED),
@@ -723,7 +723,7 @@ pub fn spawn_team_select_ui(
                         button.spawn((
                             Localized::new("team.refresh_studio").into_text(),
                             TextFont {
-                                font_size: 13.0,
+                                font_size: (13.0).into(),
                                 ..default()
                             },
                             TextColor(Color::WHITE),
@@ -844,7 +844,7 @@ pub fn spawn_team_select_ui(
             parent.spawn((
                 PhoneCopy::label("team.hint", "team.hint_phone"),
                 TextFont {
-                    font_size: 15.0,
+                    font_size: (15.0).into(),
                     ..default()
                 },
                 TextColor(Color::srgba(0.78, 0.80, 0.86, 1.0)),
@@ -952,7 +952,7 @@ fn spawn_hero_panel(
                         TextFont::default(),
                         TextStyle::keep_case(TextRole::Heading),
                         TextColor(theme::IVORY),
-                        TextLayout::new_with_justify(Justify::Center),
+                        TextLayout::justify(Justify::Center),
                         HeroPanelAvatarName,
                         Name::new("HeroSelectAvatarName"),
                     ));
@@ -960,7 +960,7 @@ fn spawn_hero_panel(
                         Text::new(class_line(class)),
                         theme::role_text(TextRole::Caption),
                         TextColor(theme::GOLD),
-                        TextLayout::new_with_justify(Justify::Center),
+                        TextLayout::justify(Justify::Center),
                         HeroPanelClassName,
                         Name::new("HeroSelectClassName"),
                     ));
@@ -1109,7 +1109,7 @@ fn spawn_ekza_row(parent: &mut ChildSpawnerCommands) {
             row.spawn((
                 Text::new(crate::passport::wallet_status_line()),
                 TextFont {
-                    font_size: 12.5,
+                    font_size: (12.5).into(),
                     ..default()
                 },
                 TextStyle::keep_case(TextRole::Caption),
@@ -1123,7 +1123,7 @@ fn spawn_ekza_row(parent: &mut ChildSpawnerCommands) {
             row.spawn((
                 Text::new(crate::passport::account_status_line()),
                 TextFont {
-                    font_size: 12.5,
+                    font_size: (12.5).into(),
                     ..default()
                 },
                 TextStyle::keep_case(TextRole::Caption),
@@ -1186,7 +1186,7 @@ fn spawn_connect_button(
         button.spawn((
             Localized::new(label).into_text(),
             TextFont {
-                font_size: 13.0,
+                font_size: (13.0).into(),
                 ..default()
             },
             TextStyle::new(TextRole::Button).sized(Metric::new(14.0, 12.0)),
@@ -1284,7 +1284,7 @@ fn spawn_sprite_button(
         ));
         let style = (
             TextFont {
-                font_size: 9.5,
+                font_size: (9.5).into(),
                 ..default()
             },
             TextColor(Color::srgba(0.86, 0.88, 0.92, 1.0)),
@@ -1465,7 +1465,7 @@ fn spawn_avatar_button(
             TextFont::default(),
             TextStyle::keep_case(TextRole::Caption).sized(Metric::new(13.0, 11.0)),
             TextColor(theme::IVORY),
-            TextLayout::new_with_justify(Justify::Center),
+            TextLayout::justify(Justify::Center),
             Node {
                 max_width: Val::Percent(100.0),
                 ..default()

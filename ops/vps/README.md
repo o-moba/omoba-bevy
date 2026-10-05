@@ -2,7 +2,7 @@
 
 Target: `ssh vds-eternal`, 77.246.105.57, Linux x86_64. Native clients enter UDP4000; the lobby assigns UDP41000–41001. This is the OMOBA lobby, separate from Ekza Space TCP3001 and Studio HTTPS. Initial cap: two matches, ten slots per match; solo bot play also consumes a room. This cap is an operating limit, not a load SLA.
 
-Build **only** Linux `server` and `omoba-account-api` with pinned Rust1.94.1 and `--release --locked`. The latter runs the existing career+portal schema migrations, not a public HTTP service. Server has no renderer and does not need avatar model files on disk: shipped manifests are embedded, approved hosted assets are checked through the Registry.
+Build **only** Linux `server` and `omoba-account-api` with pinned Rust1.95.0 and `--release --locked`. The latter runs the existing career+portal schema migrations, not a public HTTP service. Server has no renderer and does not need avatar model files on disk: shipped manifests are embedded, approved hosted assets are checked through the Registry.
 
 Deployment layout:
 - `/opt/omoba/releases/<source>/`: immutable binaries and source identity.

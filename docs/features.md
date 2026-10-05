@@ -1012,3 +1012,7 @@ Practice bot matches expose zero cooldowns, disposable moving/attacking targets 
 Release protocol/catalogue/geometry revisions require matching 0.42-compatible peers. Existing production and TestFlight 0.41.0 are unchanged by this source iteration. See `docs/progress/2026-10-05-playtest-quality.md` for verification and limitations.
 
 Allied portraits also show remaining respawn seconds. Nexus motion rotates the original central GLB armillary rings; the extra upper rings are removed.
+
+### Engine baseline — 0.43.0
+
+The game and Ekza SDK use Bevy 0.19.1 with Rust 1.95.0. Existing avatar/weapon account flows, humanoid animation and 0.42 gameplay remain supported. GLB scene labels are retained while engine scene types move to world serialization. The upgrade does not claim improved phone FPS without physical-device measurement.

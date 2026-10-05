@@ -67,7 +67,7 @@ store distribution and a reliable public service remain separate release work.
 
 Install [Rust](https://rustup.rs/), Git, Python 3.9+ and Make. The commands below
 use a POSIX shell. Your OS also needs the native build and graphics libraries
-required by Bevy; see [Bevy's Linux dependencies](https://github.com/bevyengine/bevy/blob/v0.18.0/docs/linux_dependencies.md)
+required by Bevy; see [Bevy's Linux dependencies](https://github.com/bevyengine/bevy/blob/v0.19.1/docs/linux_dependencies.md)
 when building on Linux.
 
 ```sh

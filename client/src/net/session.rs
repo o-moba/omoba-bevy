@@ -1627,7 +1627,7 @@ mod tests {
         let saved_address = server.local_addr().unwrap().to_string();
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, bevy::asset::AssetPlugin::default()))
-            .init_asset::<Scene>()
+            .init_asset::<WorldAsset>()
             .init_asset::<bevy::gltf::Gltf>()
             .insert_resource(ClientSession {
                 server_addr_display: saved_address.clone(),

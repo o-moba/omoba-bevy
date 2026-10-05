@@ -725,18 +725,17 @@ fn actions(
                     request_id: id,
                 }));
             }
-            Action::Equip => {
+            Action::Equip
                 if career
                     .view
                     .supporter
                     .as_ref()
-                    .is_some_and(|status| status.active)
-                {
-                    requests.write(NetworkCommand::Career(CareerRequest::EquipSupporterAura {
-                        request_id: id,
-                        aura: Some(state.selected),
-                    }));
-                }
+                    .is_some_and(|status| status.active) =>
+            {
+                requests.write(NetworkCommand::Career(CareerRequest::EquipSupporterAura {
+                    request_id: id,
+                    aura: Some(state.selected),
+                }));
             }
             Action::Disable => {
                 requests.write(NetworkCommand::Career(CareerRequest::EquipSupporterAura {

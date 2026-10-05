@@ -810,13 +810,16 @@ fn adapt_phone_layout(
         if family == PhoneText::Entry || style.is_some() {
             continue;
         }
-        let original = base.map_or(font.font_size, |base| base.0);
+        let bevy::text::FontSize::Px(current_size) = font.font_size else {
+            continue;
+        };
+        let original = base.map_or(current_size, |base| base.0);
         if base.is_none() {
             commands
                 .entity(entity)
                 .insert((PhoneFontSize(original), crate::ui::theme::PhoneSized));
         }
-        font.font_size = metric::phone_font(family, original, width, scale);
+        font.font_size = metric::phone_font(family, original, width, scale).into();
     }
     // Phone copy of a help dismiss label spawned without its key (the guide
     // spawns `help.phone.dismiss` itself on a phone and relabels it). Other
@@ -1184,7 +1187,10 @@ mod tests {
             let mut fonts = app.world_mut().query::<(&Text, &TextFont)>();
             for (text, font) in fonts.iter(app.world()) {
                 if matches!(text.0.as_str(), "?" | "MENU" | "SERVER") {
-                    assert!((font.font_size * scale - 14.0).abs() < 0.001);
+                    let bevy::text::FontSize::Px(px) = font.font_size else {
+                        panic!("phone font must remain pixel-sized");
+                    };
+                    assert!((px * scale - 14.0).abs() < 0.001);
                 }
             }
         }

@@ -102,7 +102,7 @@ fn label(mut commands: Commands, qa: Res<Qa>) {
             "QA · live sandbox · scripted commands and held-key input"
         }),
         TextFont {
-            font_size: 10.0,
+            font_size: (10.0).into(),
             ..default()
         },
         TextColor(Color::WHITE),
@@ -202,7 +202,7 @@ fn observe(
     mut outgoing: MessageWriter<NetworkCommand>,
     mut exit: MessageWriter<AppExit>,
     assets: Res<AssetServer>,
-    scenes: Query<&SceneRoot>,
+    scenes: Query<&WorldAssetRoot>,
     context: Res<crate::input_context::GameplayInputContext>,
     (
         animations,
@@ -247,7 +247,7 @@ fn observe(
             &crate::held_weapons::HeldWeapon,
             &GlobalTransform,
             &Transform,
-            &SceneRoot,
+            &WorldAssetRoot,
         )>,
         Query<&GlobalTransform>,
         Query<Entity, With<Player>>,

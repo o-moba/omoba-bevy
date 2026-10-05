@@ -96,7 +96,7 @@ fn label(mut commands: Commands) {
         Label,
         Text::new("QA · Adventurer · scripted offline casts"),
         TextFont {
-            font_size: 9.0,
+            font_size: (9.0).into(),
             ..default()
         },
         TextColor(Color::WHITE),
@@ -249,10 +249,8 @@ fn drive(world: &mut World) {
         }
     }
     match qa.phase {
-        0 if screen == AppScreen::Home && age > 2.0 => {
-            if press(world, "HomeOfflinePractice") {
-                advance(&mut qa, 1);
-            }
+        0 if screen == AppScreen::Home && age > 2.0 && press(world, "HomeOfflinePractice") => {
+            advance(&mut qa, 1);
         }
         1 if screen == AppScreen::HeroSelect && age > 1.0 => {
             {
@@ -270,10 +268,8 @@ fn drive(world: &mut World) {
                 press(world, "ClassButton-adventurer");
             }
         }
-        3 if qa.done.contains("01-adventurer-preview.png") => {
-            if press(world, "FindMatchButton") {
-                advance(&mut qa, 4);
-            }
+        3 if qa.done.contains("01-adventurer-preview.png") && press(world, "FindMatchButton") => {
+            advance(&mut qa, 4);
         }
         4 if screen == AppScreen::InMatch
             && world.resource::<ClientSession>().is_offline()
@@ -493,7 +489,7 @@ fn drive(world: &mut World) {
 }
 
 fn handhelds(world: &mut World) -> Vec<serde_json::Value> {
-    world.query::<(&crate::held_weapons::HeldWeapon,&GlobalTransform,&Transform,&SceneRoot)>().iter(world)
+    world.query::<(&crate::held_weapons::HeldWeapon,&GlobalTransform,&Transform,&WorldAssetRoot)>().iter(world)
         .filter(|(w,..)|w.id=="dagger")
         .map(|(w,pose,local,scene)|serde_json::json!({"id":w.id,"owner":w.owner.to_bits(),
             "loaded":world.resource::<AssetServer>().is_loaded_with_dependencies(scene.0.id()),

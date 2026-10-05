@@ -48,7 +48,7 @@ pub(in crate::net) fn setup_connection_status_ui(mut commands: Commands) {
             parent.spawn((
                 Text::new(""),
                 TextFont {
-                    font_size: 16.0,
+                    font_size: (16.0).into(),
                     ..default()
                 },
                 TextColor(Color::WHITE),
@@ -75,7 +75,7 @@ pub(in crate::net) fn setup_connection_status_ui(mut commands: Commands) {
                     button.spawn((
                         Localized::new("net.retry").into_text(),
                         TextFont {
-                            font_size: 16.0,
+                            font_size: (16.0).into(),
                             ..default()
                         },
                         TextColor(Color::WHITE),

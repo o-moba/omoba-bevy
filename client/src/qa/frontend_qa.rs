@@ -192,7 +192,7 @@ fn watermark(mut commands: Commands) {
         },
         Text::new("QA CAPTURE · offline shell, no live match"),
         TextFont {
-            font_size: 8.0,
+            font_size: (8.0).into(),
             ..default()
         },
         TextColor(Color::WHITE),
@@ -220,7 +220,7 @@ fn result_fixture_label(mut commands: Commands) {
         },
         Text::new("07-result-fixture · layout only"),
         TextFont {
-            font_size: 11.0,
+            font_size: (11.0).into(),
             ..default()
         },
         TextColor(Color::srgb(1.0, 0.8, 0.3)),
@@ -239,7 +239,7 @@ fn drive(
     mut next: ResMut<NextState<AppScreen>>,
     mut windows: Query<&mut Window, With<PrimaryWindow>>,
     mut pause: ResMut<crate::pause_menu::PauseMenuState>,
-    mut settings_tab: ResMut<crate::pause_menu::SettingsTab>,
+    mut settings_tab: ResMut<crate::pause_menu::SelectedSettingsTab>,
     server: Option<ResMut<crate::mobile_ui::ServerEntry>>,
     mut scrolls: Query<(crate::qa::QaName, &ComputedNode, &mut ScrollPosition)>,
     mut career: ResMut<crate::career::CareerClient>,
@@ -277,7 +277,7 @@ fn drive(
     // The production modal visibility, scrolling and input gates still render it.
     pause.open = (7..=9).contains(&qa.stage);
     pause.in_settings = (8..=9).contains(&qa.stage);
-    *settings_tab = if qa.stage == 9 {
+    settings_tab.0 = if qa.stage == 9 {
         crate::pause_menu::SettingsTab::Graphics
     } else {
         crate::pause_menu::SettingsTab::Sound

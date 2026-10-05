@@ -163,7 +163,7 @@ fn remove_orphaned_replacements(
     replacements: Query<(Entity, &RiverReplacement)>,
     sources: Query<(), With<RiverAdjusted>>,
 ) {
-    // Scene hot reload removes the old authored nodes but can retain their
+    // WorldAsset hot reload removes the old authored nodes but can retain their
     // parent. Do not leave a second coplanar river behind on the next load.
     for (entity, source) in &replacements {
         if !sources.contains(source.0) {
