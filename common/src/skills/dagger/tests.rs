@@ -153,7 +153,7 @@ fn invalid_bluff_and_strikes_spend_no_resources_or_rng() {
 
 #[test]
 fn three_strikes_have_distinct_normal_and_rear_damage_with_rank_scaling() {
-    for (slot, damage, rear_multiplier) in [(0, 22.0, 1.0), (2, 16.0, 2.5), (3, 38.0, 1.5)] {
+    for (slot, damage, rear_multiplier) in [(0, 34.0, 1.0), (2, 24.0, 2.5), (3, 48.0, 1.5)] {
         for rear in [false, true] {
             let (mut w, now, _) = fixture();
             if !rear {
@@ -353,7 +353,7 @@ fn nonhero_strike_hits_normally_but_bluff_and_vital_break_exclude_it() {
     attack(&mut w, 1, 1, now);
     assert_eq!(w.players[&addr(1)].hero.mana, 500.0);
     attack(&mut w, 2, 2, now);
-    assert_eq!(w.minions[&first].state.hp, 984.0);
+    assert_eq!(w.minions[&first].state.hp, 976.0);
     assert_eq!(w.skill_runtime.dagger_chance.counter, 0);
     assert!(pending(&mut w).iter().all(|e| !e.near_lethal));
 }
@@ -500,4 +500,84 @@ fn mixed_flow_recipe_primes_only_accepted_dagger_casts_and_restores_energy_on_fo
         attack(&mut w, slot, 4, now + duration(30.0));
         assert_eq!(w.players[&addr(1)].hero.skills.advanced.flow_attacks, 0);
     }
+}
+
+#[test]
+fn dagger_drag_hits_close_and_overlapping_enemies_without_throwing_a_projectile() {
+    for x in [0.0, 0.2, 1.0, 2.6, 2.9] {
+        let (mut w, now, _) = fixture();
+        w.players.get_mut(&addr(2)).unwrap().hero.x = x;
+        // Thumb drag sets the maximum-range point, not the victim centre.
+        super::super::cast(&mut w, addr(1), 0, [2.6, 0.0], 1, now);
+        let events = pending(&mut w);
+        assert_eq!(events.len(), 1, "x={x}");
+        assert!(events[0].amount >= 34.0);
+        assert_eq!(events[0].style, ProjectileStyle::Crescent);
+        assert!(w.projectiles.is_empty());
+    }
+    let (mut w, now, _) = fixture();
+    w.players.get_mut(&addr(2)).unwrap().hero.x = 5.0;
+    super::super::cast(&mut w, addr(1), 0, [2.6, 0.0], 1, now);
+    assert!(pending(&mut w).is_empty());
+    assert_eq!(w.players[&addr(1)].hero.mana, 500.0);
+}
+
+#[test]
+fn dagger_basic_uses_melee_contact_and_shared_hit_receipts() {
+    let (mut w, now, victim) = fixture();
+    let before = w.players[&addr(2)].hero.hp;
+    crate::basic_attack::handle_basic_attack_request(&mut w, addr(1), target(victim), 1, now);
+    assert!(w.projectiles.is_empty(), "dagger must stay in the hand");
+    let events = pending(&mut w);
+    assert_eq!(events.len(), 1);
+    assert_eq!(
+        events[0].action_slot,
+        Some(shared::BASIC_ATTACK_ACTION_SLOT)
+    );
+    assert!((before - w.players[&addr(2)].hero.hp - 26.4).abs() < 0.001);
+    crate::basic_attack::handle_basic_attack_request(&mut w, addr(1), target(victim), 2, now);
+    assert!(
+        pending(&mut w).is_empty(),
+        "contact does not bypass cooldown"
+    );
+}
+
+#[test]
+fn winning_melee_contact_keeps_the_terminal_damage_receipt() {
+    let (mut w, now, _) = fixture();
+    w.structures = crate::world::build_configured_structures(&w.map_config);
+    w.structures.retain(|_, s| {
+        s.state.kind == shared::wire::StructureKind::BaseTower && s.state.team == Team::Blue
+    });
+    let (&id, tower) = w.structures.iter_mut().next().unwrap();
+    tower.state.x = 2.0;
+    tower.state.z = 0.0;
+    tower.state.hp = 1.0;
+    w.players.get_mut(&addr(1)).unwrap().modifiers.bypass_vision = true;
+    crate::basic_attack::handle_basic_attack_request(
+        &mut w,
+        addr(1),
+        TargetId {
+            kind: TargetKind::Structure,
+            id,
+        },
+        1,
+        now,
+    );
+    assert!(matches!(
+        w.game_state,
+        shared::wire::GameState::Victory {
+            winner: Team::Green
+        }
+    ));
+    let mut log = crate::combat_feedback::CombatLog::default();
+    crate::tick::skills(&mut w, &mut log, now, 0.0);
+    assert_eq!(log.snapshot(now).len(), 1);
+    assert!(log.snapshot(now)[0].killed);
+    crate::tick::skills(&mut w, &mut log, now, 0.1);
+    assert_eq!(
+        log.snapshot(now).len(),
+        1,
+        "a retained final receipt is never replayed"
+    );
 }

@@ -28,7 +28,11 @@ fn sync_held_weapons(
     assets: Res<AssetServer>,
     library: Res<HumanoidRuntimeLibrary>,
     roots: Query<(Entity, &RuntimeHumanoidPlayer)>,
-    actors: Query<(&NetworkHeroClass, &PlayerHandheld)>,
+    actors: Query<(
+        &NetworkHeroClass,
+        &PlayerHandheld,
+        Option<&crate::net::PlayerLoadout>,
+    )>,
     parents: Query<&ChildOf>,
     attachments: Query<(Entity, &HeldWeapon)>,
 ) {
@@ -47,10 +51,15 @@ fn sync_held_weapons(
                 };
                 owner = parent.parent();
             }
-            let Some((class, selection)) = actor else {
+            let Some((class, selection, loadout)) = actor else {
                 continue;
             };
-            let Some(id) = selection.0.resolve(class.0) else {
+            let mode = loadout
+                .and_then(|l| l.0.as_ref())
+                .map_or(shared::loadout::WeaponMode::Repeater, |state| {
+                    state.weapon_mode
+                });
+            let Some(id) = selection.0.resolve_mode(class.0, mode) else {
                 continue;
             };
             let Some(def) = omoba_passport::weapon_store::definition(id) else {

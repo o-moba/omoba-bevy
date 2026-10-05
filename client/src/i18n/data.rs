@@ -336,12 +336,13 @@ mod tests {
             chinese(&format!("reaction.pack.{}", pack.id));
         }
         assert_eq!(reaction("no_such_reaction"), "Reaction");
-        for camp in [
-            NeutralCampType::WendigoBoss,
-            NeutralCampType::KingMutatioBoss,
-            NeutralCampType::Skirmisher,
+        // Display names can evolve independently of stable entity/QA IDs.
+        for (camp, label) in [
+            (NeutralCampType::WendigoBoss, "Wendigo"),
+            (NeutralCampType::KingMutatioBoss, "Verdant Dragon"),
+            (NeutralCampType::Skirmisher, "Neutral"),
         ] {
-            assert_eq!(boss(camp), crate::bosses::boss_name_id(camp));
+            assert_eq!(boss(camp), label);
         }
         assert_eq!(
             [Lane::Top, Lane::Mid, Lane::Bot].map(lane),

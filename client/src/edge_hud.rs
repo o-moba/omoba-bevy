@@ -1877,6 +1877,7 @@ mod tests {
                 earned_gold: 0,
                 level: 5,
                 connected: true,
+                respawn_remaining_ms: 0,
             }],
         });
         app.update();
@@ -1944,7 +1945,7 @@ mod tests {
                     ));
                 }),
                 Expect {
-                    name: "King Mutatio",
+                    name: "Verdant Dragon",
                     badge: Some("BOSS"),
                     icon: None,
                     level: None,
@@ -2090,6 +2091,7 @@ mod tests {
             earned_gold: 57,
             level: 4,
             connected: true,
+            respawn_remaining_ms: 0,
         };
         let board = LiveScoreboard {
             elapsed_secs: 0,

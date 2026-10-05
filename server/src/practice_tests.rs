@@ -724,13 +724,9 @@ fn bot_controller_routes_around_real_forest_and_rejects_remote_control() {
         .unwrap();
     rt.world.structures.clear();
     // A melee bot must walk around the trunk; long reach could shoot from `from`.
-    rt.world
-        .players
-        .get_mut(&bot_addr)
-        .unwrap()
-        .hero
-        .identity
-        .hero_class = HeroClass::Warrior;
+    let bot = rt.world.players.get_mut(&bot_addr).unwrap();
+    bot.hero.identity.hero_class = HeroClass::Warrior;
+    bot.hero.skills.loadout = shared::loadout::preset_for_class(HeroClass::Warrior);
     for (address, point) in [(bot_addr, from), (addr(1), to)] {
         let p = rt.world.players.get_mut(&address).unwrap();
         p.hero.x = point[0];
@@ -789,7 +785,11 @@ fn bot_controller_routes_around_real_forest_and_rejects_remote_control() {
         (bot.x - to[0]).hypot(bot.z - to[1])
             <= shared::basic_attack_for_class(bot.identity.hero_class).range
                 + PLAYER_HIT_RADIUS
-                + 0.1
+                + 0.1,
+        "from {from:?}, target {to:?}, bot at {:?}, target hp {}, loadout reach {}",
+        [bot.x, bot.z],
+        rt.world.players[&addr(1)].hero.hp,
+        common::skills::attack_modifiers(&rt.world.players[&bot_addr]).0
     );
 }
 
@@ -1254,7 +1254,7 @@ fn bots_of(rt: &ServerRuntime) -> Vec<SocketAddr> {
 }
 
 #[test]
-fn sandbox_dummy_stands_in_front_of_the_human_and_returns_after_respawn() {
+fn sandbox_dummy_stands_in_front_of_the_human_and_disappears_on_death() {
     use shared::practice::{MAX_DUMMIES, PracticeCommand};
     let mut rt = runtime(2);
     let mut now = Instant::now();
@@ -1291,19 +1291,17 @@ fn sandbox_dummy_stands_in_front_of_the_human_and_returns_after_respawn() {
             .all(|p| p.state.owner_id != dummy.identity.id)
     );
     assert_eq!(bots_of(&rt).len(), 4);
-    // Killed dummies respawn at base like everyone, then walk back to their spot.
+    // Killed practice targets disappear and cannot return after the respawn delay.
     apply_player_damage(&mut rt.world.players, dummy.identity.id, 10_000.0, now);
     assert_eq!(rt.world.players[&dummies[0]].hero.hp, 0.0);
-    // Respawn lands at base within a tick; the next bot tick walks it back.
     // Pings keep the otherwise silent test human from timing out meanwhile.
     for _ in 0..(RESPAWN_DELAY.as_millis() / 50 + 4) {
         now += Duration::from_millis(50);
         rt.handle_packet(addr(1), ClientPacket::Ping, now);
         rt.tick(now, 0.05);
     }
-    let back = &rt.world.players[&dummies[0]].hero;
-    assert_eq!((back.x, back.z), (dummy.x, dummy.z));
-    assert_eq!(back.hp, back.max_hp);
+    assert!(!rt.world.players.contains_key(&dummies[0]));
+    assert!(rt.bots.kind(dummies[0]).is_none());
     // Extra dummies recycle the oldest one instead of growing without bound.
     for _ in 0..MAX_DUMMIES + 2 {
         rt.handle_packet(addr(1), practice_command(PracticeCommand::SpawnDummy), now);
@@ -1416,6 +1414,9 @@ fn all_practice_bots_leave_spawn_and_advance_without_nearby_enemies() {
     let mut rt = runtime(5);
     let mut now = Instant::now();
     rt.handle_packet(addr(1), join("all-lanes-observer"), now);
+    // This isolates travel: new nearby camps otherwise hold the jungler in
+    // attack range, and this movement-only loop does not resolve projectiles.
+    rt.world.neutrals.clear();
     for phase in ["initial spawn", "respawn"] {
         let starts: HashMap<_, _> = rt
             .world
@@ -1433,9 +1434,10 @@ fn all_practice_bots_leave_spawn_and_advance_without_nearby_enemies() {
             let distance = (p.x - start[0]).hypot(p.z - start[1]);
             assert!(
                 distance > 20.0,
-                "bot {} {:?} stalled after {phase}: moved {distance}",
+                "bot {} {:?} stalled after {phase}: moved {distance} from {start:?} to {:?}",
                 p.identity.id,
-                p.identity.team
+                p.identity.team,
+                [p.x, p.z]
             );
         }
         // Ordinary death clears the route and ordinary respawn must allow it
@@ -1787,7 +1789,7 @@ fn match_metrics_do_not_settle_the_round() {
 }
 
 #[test]
-fn practice_moving_dummy_circles_without_attacking_and_returns_after_respawn() {
+fn practice_moving_dummy_circles_without_attacking_and_disappears_on_death() {
     use shared::practice::PracticeCommand;
     let mut rt = runtime(2);
     let mut now = Instant::now();
@@ -1832,7 +1834,120 @@ fn practice_moving_dummy_circles_without_attacking_and_returns_after_respawn() {
         rt.handle_packet(addr(1), ClientPacket::Ping, now);
         rt.tick(now, 0.05);
     }
-    let back = &rt.world.players[&bot].hero;
-    assert!(back.hp > 0.0);
-    assert!((back.x - original.x).hypot(back.z - original.z) < 1.0);
+    assert!(!rt.world.players.contains_key(&bot));
+    assert!(
+        bots_of(&rt).is_empty(),
+        "disposable target must not refill or respawn"
+    );
+}
+
+#[test]
+fn practice_aggressive_dummy_attacks_immediately_then_disappears() {
+    use shared::practice::PracticeCommand;
+    let mut rt = runtime(2);
+    let mut now = Instant::now();
+    rt.handle_packet(addr(1), join("attack-target"), now);
+    rt.handle_packet(addr(1), ClientPacket::SetGodMode { enabled: true }, now);
+    rt.handle_packet(addr(1), practice_command(PracticeCommand::ClearBots), now);
+    rt.handle_packet(
+        addr(1),
+        practice_command(PracticeCommand::SpawnAggressiveDummy),
+        now,
+    );
+    let bot = bots_of(&rt)[0];
+    let id = rt.world.players[&bot].hero.identity.id;
+    for _ in 0..60 {
+        now += Duration::from_millis(50);
+        rt.tick(now, 0.05);
+    }
+    assert!(
+        rt.world.players[&bot].timers.last_basic_attack_at.is_some(),
+        "attacking target should engage without a lane trip"
+    );
+    apply_player_damage(&mut rt.world.players, id, 10000.0, now);
+    now += Duration::from_millis(50);
+    rt.tick(now, 0.05);
+    assert!(!rt.world.players.contains_key(&bot));
+    assert!(rt.bots.kind(bot).is_none());
+}
+
+#[test]
+fn practice_zero_cooldown_is_authoritative_reversible_and_human_only() {
+    use shared::practice::PracticeCommand;
+    let now = Instant::now();
+    let mut rt = runtime(2);
+    rt.handle_packet(addr(1), join("zero-cooldown"), now);
+    let bot = bots_of(&rt)[0];
+    for enabled in [true, false] {
+        rt.handle_packet(
+            addr(1),
+            practice_command(PracticeCommand::SetNoCooldowns { enabled }),
+            now,
+        );
+        assert_eq!(rt.world.players[&addr(1)].modifiers.no_cooldowns, enabled);
+    }
+    rt.world
+        .players
+        .get_mut(&addr(1))
+        .unwrap()
+        .timers
+        .last_cast_at[0] = Some(now);
+    rt.handle_packet(
+        addr(1),
+        practice_command(PracticeCommand::SetNoCooldowns { enabled: true }),
+        now,
+    );
+    assert!(
+        rt.world.players[&addr(1)]
+            .timers
+            .last_cast_at
+            .iter()
+            .all(Option::is_none)
+    );
+    rt.handle_packet(
+        bot,
+        practice_command(PracticeCommand::SetNoCooldowns { enabled: true }),
+        now,
+    );
+    assert!(!rt.world.players[&bot].modifiers.no_cooldowns);
+    for mode in [MatchMode::Dev, MatchMode::Release] {
+        let socket = UdpSocket::bind("127.0.0.1:0").unwrap();
+        let mut rt = ServerRuntime::new(socket, MatchConfig { mode, team_size: 2 });
+        rt.handle_packet(addr(2), join("not-practice"), now);
+        rt.handle_packet(
+            addr(2),
+            practice_command(PracticeCommand::SetNoCooldowns { enabled: true }),
+            now,
+        );
+        assert!(!rt.world.players[&addr(2)].modifiers.no_cooldowns);
+    }
+}
+
+#[test]
+fn empty_roster_preserves_unsettled_victory_in_career_result() {
+    let (mut rt, clock, transport) = memory_runtime(2);
+    let now = clock.now();
+    transport.push_inbound(
+        addr(1),
+        serde_json::to_vec(&join("victory-before-leave")).unwrap(),
+    );
+    rt.prepare_tick();
+    let id = rt.world.players[&addr(1)].hero.identity.id;
+    rt.world.game_state = GameState::Victory {
+        winner: Team::Green,
+    };
+    assert!(
+        rt.victory_at.is_none(),
+        "exercise teardown before ordinary settlement"
+    );
+    let later = now + crate::runtime::PLAYER_TIMEOUT + Duration::from_secs(1);
+    rt.maintain_roster(later);
+    let ended = later + crate::balance::EMPTY_ROSTER_GRACE;
+    rt.maintain_roster(ended);
+    assert_eq!(rt.match_id, 2);
+    rt.world.ensure_connected(addr(2), ended);
+    rt.world.players.get_mut(&addr(2)).unwrap().hero.identity.id = id;
+    let result = rt.career_view(addr(2), ended).last_result.unwrap();
+    assert_eq!(result.outcome, shared::career::MatchOutcome::Completed);
+    assert_eq!(result.winner, Some(Team::Green));
 }

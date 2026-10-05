@@ -42,13 +42,14 @@ CLIPS = (
     ("shoulder_drive", "Punch_Jab", False),
     ("roll", "Roll", False),
 )
+# Right-hand Cross drives the hand holding the dagger; Jab is a left-hand feint.
 # Skill-owned edits of the CC0 source: a short thrust, a partial jab withdrawn
 # twice, a full committed backstab and a slower heavy cross-body thrust. These
 # are retargeted by semantic bones, so no avatar-specific rig is baked or edited.
 DAGGER_MOTIONS = {
-    "dagger_stab": ("Punch_Jab", 0.44, (0, .12, .43, .70, 1)),
+    "dagger_stab": ("Punch_Cross", 0.44, (0, .12, .43, .70, 1)),
     "dagger_feint": ("Punch_Jab", 0.62, (0, .29, .08, .38, 0)),
-    "dagger_backstab": ("Punch_Jab", 0.65, (0, .08, .45, .49, .78, 1)),
+    "dagger_backstab": ("Punch_Cross", 0.65, (0, .08, .45, .49, .78, 1)),
     "dagger_heavy_thrust": ("Punch_Cross", 0.84, (0, .15, .23, .57, .78, 1)),
 }
 REQUIRED = (

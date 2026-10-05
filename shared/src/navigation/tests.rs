@@ -251,8 +251,8 @@ fn current_world_cache_keeps_lane_access_and_routes_around_a_shipped_trunk() {
         &map.plan_route(start, destination, &[]).unwrap(),
         &[],
     );
-    let start = [66.641_04, 11.667_086];
-    let destination = [76.641_04, 11.667_086];
+    let start = [66.641_04, 11.667_086].map(|v| v * crate::map::WORLD_SCALE);
+    let destination = [76.641_04, 11.667_086].map(|v| v * crate::map::WORLD_SCALE);
     assert!(map.point_clear(start) && map.point_clear(destination));
     assert!(!map.segment_clear(start, destination));
     let route = map.plan_route(start, destination, &[]).unwrap();

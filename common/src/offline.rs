@@ -290,7 +290,7 @@ impl PracticeSession {
             your_id,
             players: crate::snapshot::build_players_snapshot(world, Some(your_id), now),
             scoreboard: self.combat_log.ledger.live_scoreboard().map(|mut board| {
-                board.elapsed_secs = world.match_elapsed_secs.max(0.0) as u64;
+                crate::match_stats::update_live_timers(&mut board, world, now);
                 board
             }),
             prematch: None,
@@ -347,6 +347,79 @@ mod tests {
             p.advance(0.05);
         }
     }
+    #[test]
+    fn offline_snapshot_carries_public_respawn_countdown() {
+        let mut practice = joined(HeroClass::Warrior);
+        let player = practice.world.players.get_mut(&LOCAL_ADDR).unwrap();
+        let id = player.hero.identity.id;
+        player.hero.hp = 0.0;
+        player.timers.respawn_at = Some(practice.now + std::time::Duration::from_millis(3400));
+        let ServerPacket::Snapshot {
+            scoreboard: Some(board),
+            ..
+        } = practice.snapshot()
+        else {
+            panic!("joined practice must publish scoreboard");
+        };
+        assert_eq!(
+            board
+                .players
+                .iter()
+                .find(|p| p.player_id == id)
+                .unwrap()
+                .respawn_remaining_ms,
+            3400
+        );
+    }
+
+    #[test]
+    fn offline_practice_zero_cooldown_and_disposable_targets_use_shared_authority() {
+        let mut p = joined(HeroClass::Ranger);
+        p.world
+            .players
+            .get_mut(&LOCAL_ADDR)
+            .unwrap()
+            .timers
+            .last_cast_at[0] = Some(p.now);
+        p.command(ClientPacket::Practice {
+            command: PracticeCommand::SetNoCooldowns { enabled: true },
+        });
+        assert!(p.world.players[&LOCAL_ADDR].modifiers.no_cooldowns);
+        assert!(
+            p.world.players[&LOCAL_ADDR]
+                .timers
+                .last_cast_at
+                .iter()
+                .all(Option::is_none)
+        );
+        p.command(ClientPacket::Practice {
+            command: PracticeCommand::SetNoCooldowns { enabled: false },
+        });
+        assert!(!p.world.players[&LOCAL_ADDR].modifiers.no_cooldowns);
+        for command in [
+            PracticeCommand::SpawnDummy,
+            PracticeCommand::SpawnMovingDummy,
+            PracticeCommand::SpawnAggressiveDummy,
+        ] {
+            p.command(ClientPacket::Practice { command });
+            let (&addr, _) = p
+                .world
+                .players
+                .iter()
+                .find(|(_, player)| player.hero.identity.is_bot)
+                .unwrap();
+            p.world.players.get_mut(&addr).unwrap().hero.hp = 0.0;
+            run(&mut p, 15.0);
+            assert!(!p.world.players.contains_key(&addr));
+            assert!(
+                p.world
+                    .players
+                    .values()
+                    .all(|player| !player.hero.identity.is_bot)
+            );
+        }
+    }
+
     #[test]
     fn every_class_joins_without_transport_and_publishes_real_kit() {
         for class in HeroClass::ALL {

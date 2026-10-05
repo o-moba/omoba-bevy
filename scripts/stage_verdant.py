@@ -194,6 +194,89 @@ def flatten_sanctuary(gltf, binary):
             recalculate_normals(gltf, binary, primitive, points)
 
 
+def articulate_nexus_rings(gltf, binary):
+    """Recover the three disconnected armillary rings from the joined export.
+
+    Weld positions only for component discovery; retain original split normals
+    and UVs. All triangles/materials are preserved, with a shared central pivot.
+    """
+    from collections import defaultdict
+    mesh = gltf["meshes"][0]
+    ring_count = 0
+
+    def append_accessor(values, component_type, shape):
+        components = {"SCALAR": 1, "VEC2": 2, "VEC3": 3, "VEC4": 4}[shape]
+        fmt = "<" + {5121: "B", 5123: "H", 5125: "I", 5126: "f"}[component_type] * components
+        binary.extend(b"\0" * (-len(binary) % 4))
+        offset = len(binary)
+        for value in values:
+            binary.extend(struct.pack(fmt, *value))
+        view = len(gltf["bufferViews"])
+        gltf["bufferViews"].append({"buffer": 0, "byteOffset": offset, "byteLength": len(binary) - offset})
+        accessor = {"bufferView": view, "componentType": component_type, "count": len(values), "type": shape}
+        if shape == "VEC3":
+            accessor.update(min=[min(v[k] for v in values) for k in range(3)],
+                            max=[max(v[k] for v in values) for k in range(3)])
+        index = len(gltf["accessors"])
+        gltf["accessors"].append(accessor)
+        return index
+
+    for primitive in list(mesh["primitives"]):
+        points = accessor_values(gltf, binary, primitive["attributes"]["POSITION"])
+        faces = triangles(gltf, binary, primitive)
+        parent = list(range(len(points)))
+        def find(i):
+            while parent[i] != i:
+                parent[i] = parent[parent[i]]
+                i = parent[i]
+            return i
+        def union(a, b):
+            parent[find(a)] = find(b)
+        welded = {}
+        for i, point in enumerate(points):
+            key = tuple(round(v, 4) for v in point)
+            if key in welded:
+                union(i, welded[key])
+            else:
+                welded[key] = i
+        for face in faces:
+            union(face[0], face[1]); union(face[0], face[2])
+        groups = defaultdict(list)
+        for face in faces:
+            groups[find(face[0])].append(face)
+        keep = []
+        for group in groups.values():
+            ids = sorted({i for face in group for i in face})
+            low = [min(points[i][k] for i in ids) for k in range(3)]
+            high = [max(points[i][k] for i in ids) for k in range(3)]
+            centre = [(a + b) / 2 for a, b in zip(low, high)]
+            is_ring = (len(ids) > 700 and low[1] > 3.8 and abs(centre[1] - 7.33) < .01
+                       and abs(centre[0]) < .01 and abs(centre[2]) < .01)
+            if not is_ring:
+                keep.extend(group)
+                continue
+            remap = {old: new for new, old in enumerate(ids)}
+            part = copy.deepcopy(primitive)
+            for semantic, index in primitive["attributes"].items():
+                acc = gltf["accessors"][index]
+                values = accessor_values(gltf, binary, index)
+                selected = [values[i] for i in ids]
+                if semantic == "POSITION":
+                    selected = [tuple(v[k] - centre[k] for k in range(3)) for v in selected]
+                part["attributes"][semantic] = append_accessor(selected, acc["componentType"], acc["type"])
+            part["indices"] = append_accessor([(remap[i],) for face in group for i in face], 5125, "SCALAR")
+            mesh_index = len(gltf["meshes"])
+            gltf["meshes"].append({"name": f"NexusOrbit-{ring_count}", "primitives": [part]})
+            node_index = len(gltf["nodes"])
+            gltf["nodes"].append({"name": f"NexusOrbit-{ring_count}", "mesh": mesh_index, "translation": centre})
+            gltf["nodes"][0].setdefault("children", []).append(node_index)
+            ring_count += 1
+        if keep:
+            primitive["indices"] = append_accessor([(i,) for face in keep for i in face], 5125, "SCALAR")
+    assert ring_count == 3, f"Expected exactly three authored nexus rings, got {ring_count}"
+    gltf["buffers"][0]["byteLength"] = len(binary)
+
+
 def subset(gltf, roots):
     """Prune unreachable nodes/meshes. Buffer/accessor data stay byte-stable."""
     keep = set()
@@ -282,6 +365,7 @@ def derive(output):
         document, buffer = read_glb(ART / "library" / (name + ".glb"))
         if name.startswith("sanctuary"):
             flatten_sanctuary(document, buffer)
+            articulate_nexus_rings(document, buffer)
         save(name, document, buffer, "art/verdant-confluence/library/" + name + ".glb")
     manifest = dict(schema_version=1, title="Verdant Confluence runtime", seed=260905,
                     units="meters; exported glTF Y-up; no additional axis conversion",
@@ -301,6 +385,7 @@ def derive(output):
                                  "Move bridge parapets and abutments 0.8m outward and widen fascia bearings to clear the entire 12m deck.",
                                  "Square the base pad upper bevel ring at the existing 46m by 0.7m walktop so it meets the miter skirt without corner dips.",
                                  "Compress sanctuary bottom 1.1m to 0.03m; translate upper architecture down 1.07m to expose spawn/walk floor.",
+                                 "Recover three disconnected armillary rings as independently animated NexusOrbit nodes around their shared crystal pivot; preserve all source triangles, normals and materials.",
                                  "Runtime sanctuaries rotate 45 degrees around Y to clear original diagonal spawn points.",
                                  "Reduce decorative reed height by 50% and grass-fan height by 35% around their ground pivots; preserve XZ footprints and all solid geometry.",
                                  "Two scenes split static architecture from F4-controlled foliage; eight live structures are separate assets."],

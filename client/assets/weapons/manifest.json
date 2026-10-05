@@ -76,6 +76,63 @@
         ],
         "scale": 1
       }
+    },
+    {
+      "id": "wild-repeater",
+      "name": "Wildspark Repeater",
+      "model": "weapons/wild-repeater.glb",
+      "grip": {
+        "bone": "rightHand",
+        "offset": [
+          0,
+          0,
+          0
+        ],
+        "rotation_degrees": [
+          0,
+          0,
+          0
+        ],
+        "scale": 1
+      }
+    },
+    {
+      "id": "wild-launcher",
+      "name": "Wildspark Rocket Launcher",
+      "model": "weapons/wild-launcher.glb",
+      "grip": {
+        "bone": "rightHand",
+        "offset": [
+          0,
+          0,
+          0
+        ],
+        "rotation_degrees": [
+          0,
+          0,
+          0
+        ],
+        "scale": 1
+      }
+    },
+    {
+      "id": "verdant-bow",
+      "name": "Verdant Bow",
+      "model": "weapons/verdant-bow.glb",
+      "grip": {
+        "bone": "rightHand",
+        "offset": [
+          0,
+          0,
+          0
+        ],
+        "rotation_degrees": [
+          0,
+          0,
+          0
+        ],
+        "scale": 1
+      }
     }
   ]
 }

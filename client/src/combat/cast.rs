@@ -312,6 +312,7 @@ pub(super) fn resolve_pending_cast_system(
     sticks: (
         Option<Res<crate::mobile_controls::MobileControls>>,
         Option<Res<crate::gamepad::GamepadControls>>,
+        Option<Res<crate::debug::DebugToggles>>,
     ),
     validity: crate::targeting::TargetValidity,
     game: Option<Res<GameStateSnapshot>>,
@@ -322,6 +323,15 @@ pub(super) fn resolve_pending_cast_system(
         Option<Res<crate::sprite::PlayerVisualMode>>,
     ),
 ) {
+    let no_cooldowns = sticks.2.as_ref().is_some_and(|debug| debug.no_cooldowns)
+        || game
+            .as_ref()
+            .and_then(|g| g.sandbox.as_ref())
+            .is_some_and(|s| s.config.player.no_cooldowns);
+    if no_cooldowns {
+        cast_cd.remaining_secs = [0.0; 4];
+        cast_cd.recovery_secs = 0.0;
+    }
     // Touch and controller casts never walk to an out-of-range target.
     let touch_mode = sticks.0.as_ref().is_some_and(|mobile| mobile.enabled)
         || sticks.1.as_ref().is_some_and(|pad| pad.active);
@@ -415,10 +425,6 @@ pub(super) fn resolve_pending_cast_system(
             .entity(player_entity)
             .remove::<(MovementTarget, crate::player::MovementRoute)>();
         if !recast {
-            let no_cooldowns = game
-                .as_ref()
-                .and_then(|g| g.sandbox.as_ref())
-                .is_some_and(|s| s.config.player.no_cooldowns);
             cast_cd.recovery_secs = if no_cooldowns {
                 0.0
             } else {
@@ -577,10 +583,6 @@ pub(super) fn resolve_pending_cast_system(
             game.as_ref().is_some_and(|g| g.sandbox.is_some()),
         );
         cast_cd.total_secs[slot.index()] = cast_cd.remaining_secs[slot.index()];
-        let no_cooldowns = game
-            .as_ref()
-            .and_then(|g| g.sandbox.as_ref())
-            .is_some_and(|s| s.config.player.no_cooldowns);
         if no_cooldowns {
             cast_cd.remaining_secs[slot.index()] = 0.0;
         }

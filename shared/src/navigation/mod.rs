@@ -79,8 +79,16 @@ pub struct NavigationMap {
 pub fn world_navigation() -> &'static NavigationMap {
     static WORLD: OnceLock<NavigationMap> = OnceLock::new();
     WORLD.get_or_init(|| {
-        NavigationMap::from_json(include_str!("../../assets/verdant-collision.json"))
-            .expect("versioned Verdant collision data must be valid")
+        let mut data: CollisionData =
+            serde_json::from_str(include_str!("../../assets/verdant-collision.json"))
+                .expect("versioned Verdant collision data must be valid");
+        for obstacle in &mut data.obstacles {
+            for vertex in &mut obstacle.vertices {
+                *vertex = vertex.map(|coordinate| coordinate * crate::map::WORLD_SCALE);
+            }
+        }
+        NavigationMap::new(crate::map::geometry().bounds, data.obstacles)
+            .expect("scaled Verdant collision data must be valid")
     })
 }
 

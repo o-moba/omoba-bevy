@@ -20,6 +20,8 @@ pub enum ProjectileStyle {
     Claw,
     CasterBolt,
     TowerBolt,
+    Bullet,
+    Rocket,
     #[default]
     #[serde(other)]
     Standard,

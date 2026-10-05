@@ -440,7 +440,7 @@
       "basic_attack": {
         "range": 11.5,
         "damage": 18,
-        "cooldown_secs": 1.0
+        "cooldown_secs": 0.7
       },
       "projectile_style": "arrow",
       "skills": [
@@ -849,8 +849,8 @@
       },
       "basic_attack": {
         "range": 2.6,
-        "damage": 18,
-        "cooldown_secs": 0.85
+        "damage": 24,
+        "cooldown_secs": 0.7
       },
       "projectile_style": "crescent",
       "skills": [

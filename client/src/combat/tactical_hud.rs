@@ -334,7 +334,22 @@ pub(super) fn update_tactical_hud(
             allies.push((player, hp));
         }
     }
-    let key = format!("{allies:?}:{:?}:{:?}", layout.allies, focus.player_id);
+    // Rebuild only when displayed values change, not on each millisecond of
+    // an authoritative countdown snapshot.
+    let displayed: Vec<_> = allies
+        .iter()
+        .map(|(p, hp)| {
+            (
+                p.player_id,
+                &p.nickname,
+                &p.avatar,
+                p.team,
+                *hp,
+                p.respawn_remaining_ms.div_ceil(1000),
+            )
+        })
+        .collect();
+    let key = format!("{displayed:?}:{:?}:{:?}", layout.allies, focus.player_id);
     if key != state.allies_key {
         if let Some(root) = state.allies.take() {
             commands.entity(root).despawn();
@@ -387,6 +402,34 @@ pub(super) fn update_tactical_hud(
                     thumbs.as_deref(),
                     (cell - 2.0).min(32.0),
                 );
+                if p.respawn_remaining_ms > 0 {
+                    commands
+                        .spawn((
+                            Node {
+                                position_type: PositionType::Absolute,
+                                top: Val::Px(0.0),
+                                width: Val::Percent(100.0),
+                                height: Val::Px(32.0),
+                                align_items: AlignItems::Center,
+                                justify_content: JustifyContent::Center,
+                                border_radius: BorderRadius::MAX,
+                                ..default()
+                            },
+                            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.65)),
+                            Pickable::IGNORE,
+                            ZIndex(2),
+                            ChildOf(col),
+                            Name::new("Ally respawn countdown"),
+                        ))
+                        .with_child((
+                            label(
+                                p.respawn_remaining_ms.div_ceil(1000).to_string(),
+                                19.0,
+                                Color::WHITE,
+                            ),
+                            Pickable::IGNORE,
+                        ));
+                }
                 let bg = commands
                     .spawn((
                         Node {
@@ -591,6 +634,7 @@ mod tests {
             earned_gold: 0,
             level: 1,
             connected: true,
+            respawn_remaining_ms: 0,
         };
         let mut board = LiveScoreboard {
             elapsed_secs: 0,

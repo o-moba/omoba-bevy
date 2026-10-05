@@ -27,7 +27,7 @@ use std::path::Path;
 use crate::protocol::PROTOCOL_VERSION;
 
 /// The protocol version this variant list was last reviewed for.
-const POLICY_PROTOCOL_VERSION: u16 = 9;
+const POLICY_PROTOCOL_VERSION: u16 = 10;
 // CompatibilityDatagram is an independent pre-game envelope; review its
 // variants against HANDSHAKE_VERSION, not the gameplay PROTOCOL_VERSION.
 const POLICY_HANDSHAKE_VERSION: u16 = 1;
@@ -80,7 +80,7 @@ wire_enums! {
     crate::loadout::PassiveId => Strict [Radiance, Momentum, Tempered, Vitals, Flow, Shroud, Essence, Clockwork, Resonance, Souls, Concussion, DaggerMastery],
     crate::loadout::WeaponMode => Strict [Repeater, Rockets],
     crate::loadout::EffectVisualKind => Strict [Orb, Soul, Anchor, Healing, ShieldWall, Cage, Lantern, Bolt, Barrier, Field, BeamWarning, Beam, Trap, Rocket],
-    crate::practice::PracticeCommand => Tolerant [Roster, ClearBots, SpawnDummy, SpawnMovingDummy, StartDuel, Unsupported],
+    crate::practice::PracticeCommand => Tolerant [Roster, ClearBots, SpawnDummy, SpawnMovingDummy, SpawnAggressiveDummy, SetNoCooldowns, StartDuel, Unsupported],
     crate::protocol::JoinRejection => Strict [MatchFull, SessionActive, ProtocolMismatch, MapGeometryMismatch, AvatarNotAuthorized, OfflineKitUnsupported],
     crate::protocol::wire::GameState => Strict [Lobby, Forming, Starting, Running, Victory],
     crate::sandbox::SandboxCommand => Strict [ApplyConfig, Refill, ResetCooldowns, Teleport, ResetActor, AddXp, GrantItem, ResetDuel, ResetAnalytics, SpawnWave, FrameStep, ForceCast],
@@ -99,7 +99,7 @@ wire_enums! {
     crate::PlayerActionKind => Tolerant [Attack, Cast, None],
     crate::prematch::PrematchPhase => Strict [Draft, Countdown, Loading],
     crate::combat::CombatEntityKind => Tolerant [Player, Minion, Structure, Neutral, Unknown],
-    crate::combat::ProjectileStyle => Tolerant [Arrow, Arcane, Holy, Crescent, Claw, CasterBolt, TowerBolt, Standard],
+    crate::combat::ProjectileStyle => Tolerant [Arrow, Arcane, Holy, Crescent, Claw, CasterBolt, TowerBolt, Bullet, Rocket, Standard],
     crate::map::Lane => Strict [Top, Mid, Bot],
     crate::protocol::wire::StructureKind => Strict [Tower, BaseTower],
     crate::combat::MinionKind => Tolerant [Caster, Melee],

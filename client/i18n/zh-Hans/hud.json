@@ -13,7 +13,7 @@
   "hud.goal.unlock_base": "清空一条兵线即可解锁基地。",
   "hud.goal.base_hp": "敌方基地 · {hp} / {max} 生命值",
   "hud.buff.wendigo": "温迪戈之恩：技能伤害 +15% - {secs} 秒",
-  "hud.buff.mutatio": "变异之力：技能伤害 +25%，生命回复 +2/秒 - {secs} 秒",
+  "hud.buff.mutatio": "巨龙之力：技能伤害 +25%，生命回复 +2/秒 - {secs} 秒",
   "hud.brush.concealed": "草丛 · 已隐蔽",
   "hud.brush.revealed": "草丛 · 已暴露",
   "hud.fps": "{value} FPS"

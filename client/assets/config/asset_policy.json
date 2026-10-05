@@ -142,7 +142,7 @@
     }
   },
   "environment_manifest": "verdant/manifest.json",
-  "environment_manifest_sha256": "ce596c28a93e8708fd381b55956604720272392a833b5e89d6eec924385acb3d",
+  "environment_manifest_sha256": "8c24af0b7a3e695429980ce2324bab931be257c12466f4891e651d3b0a3f5988",
   "environment_provenance": "Original project-authored geometry; see art/verdant-confluence/PROVENANCE.md",
   "prop_manifest": "map-props/provenance.json",
   "prop_manifest_sha256": "f7992da07e1439f282b11e702471cca478585ac60b7795e32feaa06560b66f22",
@@ -228,6 +228,38 @@
       "sha256": "7fc975a6b166f871cff0214a52d65eb63c41c90955e42308a869bcf71db32cc1",
       "source": "scripts/build_dagger_model.py",
       "provenance": "original project-authored geometry"
+    },
+    "weapons/wild-repeater.glb": {
+      "sha256": "2508a3cac976af173457be42d80480a16ab58a75776235331a186ef7cccebe8a",
+      "source": "scripts/build_ranged_handhelds.py",
+      "provenance": "original project-authored geometry",
+      "license": "CC-BY-4.0"
+    },
+    "weapons/wild-launcher.glb": {
+      "sha256": "45d1b78660cc0df623cad9ff0f7951c506aa3b895d81050d02e303e12277b554",
+      "source": "scripts/build_ranged_handhelds.py",
+      "provenance": "original project-authored geometry",
+      "license": "CC-BY-4.0"
+    },
+    "weapons/verdant-bow.glb": {
+      "sha256": "9a7861a6900422d7053c5e4837ff7a0f8950e99757427e970694385a5cfce547",
+      "source": "scripts/build_ranged_handhelds.py",
+      "provenance": "original project-authored geometry",
+      "license": "CC-BY-4.0"
+    },
+    "weapons/wild-rocket.glb": {
+      "sha256": "eb80c8c58b884eea820f990dd190cedde5ee263f65da15aeeaf836519b30a208",
+      "source": "scripts/build_ranged_handhelds.py",
+      "provenance": "original project-authored geometry",
+      "license": "CC-BY-4.0"
+    }
+  },
+  "approved_original_models": {
+    "bosses/verdant-dragon.glb": {
+      "sha256": "b20f1b2f9d0f394c5b316c2d0b51c3b3a015ccb5d7bf416f805e1be4ef096cd8",
+      "source": "scripts/build_verdant_dragon.py",
+      "provenance": "original project-authored geometry",
+      "license": "CC-BY-4.0"
     }
   }
 }

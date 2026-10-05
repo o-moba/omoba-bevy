@@ -93,26 +93,35 @@ pub fn brush_layout() -> &'static [BrushZone] {
         },
         BrushZone {
             id: 13,
-            center: [-93.25, 66.0],
+            center: [-93.15, 66.0],
             radius: 2.5,
         },
         BrushZone {
             id: 14,
-            center: [93.25, -66.0],
+            center: [93.15, -66.0],
             radius: 2.5,
         },
         BrushZone {
             id: 15,
-            center: [-66.0, 93.25],
+            center: [-66.0, 93.15],
             radius: 2.5,
         },
         BrushZone {
             id: 16,
-            center: [66.0, -93.25],
+            center: [66.0, -93.15],
             radius: 2.5,
         },
     ];
-    &BRUSH
+    static SCALED: std::sync::OnceLock<[BrushZone; 16]> = std::sync::OnceLock::new();
+    SCALED.get_or_init(|| {
+        BRUSH.map(|zone| BrushZone {
+            center: zone
+                .center
+                .map(|coordinate| coordinate * crate::map::WORLD_SCALE),
+            radius: zone.radius * crate::map::WORLD_SCALE,
+            ..zone
+        })
+    })
 }
 
 pub fn brush_at(point: [f32; 2]) -> Option<u16> {
@@ -207,7 +216,7 @@ mod tests {
     }
 
     #[test]
-    fn lane_brush_has_open_approaches_and_clears_default_structure_sight() {
+    fn lane_brush_has_open_approaches_and_clears_default_structure_footprints() {
         use crate::map::{Lane, ResolvedMap};
         use crate::navigation::{Disc, HERO_RADIUS, PLANNING_CLEARANCE};
 
@@ -262,17 +271,28 @@ mod tests {
             assert!(nav.segment_clear_with_discs(approach, zone.center, &structures));
             assert_eq!(brush_at(approach), None);
             for structure in &map.structures {
-                let sight = if structure.lane.is_some() {
-                    TOWER_SIGHT_RADIUS
+                let footprint = if structure.lane.is_some() {
+                    crate::TOWER_TARGET_RADIUS
                 } else {
-                    BASE_SIGHT_RADIUS
+                    3.2
                 };
                 assert!(
                     distance_squared(zone.center, structure.position)
-                        > (zone.radius + sight).powi(2),
-                    "brush {} overlaps {} sight",
+                        > (zone.radius + footprint + HERO_RADIUS).powi(2),
+                    "brush {} overlaps {} collision",
                     zone.id,
                     structure.key
+                );
+                assert!(
+                    !point_visible(
+                        &[VisionSource {
+                            position: structure.position,
+                            radius: TOWER_SIGHT_RADIUS,
+                        }],
+                        zone.center,
+                        true
+                    ),
+                    "external tower sight must respect brush concealment"
                 );
             }
             for base in [crate::map::geometry().home, crate::map::geometry().away] {

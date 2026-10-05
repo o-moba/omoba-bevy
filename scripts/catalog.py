@@ -26,6 +26,21 @@ def protocol_version() -> int:
     return int(match.group(1))
 
 
+@lru_cache(maxsize=1)
+def map_tuning() -> dict:
+    """Read the literal compact-map tuning used by both Rust authorities."""
+    source_root = CATALOG_DIR.parents[1] / 'src'
+    def literal(filename, name):
+        source = (source_root / filename).read_text(encoding='utf-8')
+        match = re.search(rf'pub const {name}: (?:f32|usize) = ([0-9]+(?:\.[0-9]+)?);', source)
+        if match is None:
+            raise ValueError(f'shared map tuning constant {name} not found')
+        return float(match.group(1))
+    return dict(world_scale=literal('map.rs', 'WORLD_SCALE'),
+                river_width=literal('map.rs', 'RIVER_WIDTH'),
+                camp_count=int(literal('jungle.rs', 'CAMP_COUNT')))
+
+
 @lru_cache(maxsize=None)
 def _load(directory: Path, name: str, key: str) -> tuple:
     path = Path(directory) / f'{name}.json'

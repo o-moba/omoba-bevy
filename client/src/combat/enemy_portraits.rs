@@ -1,4 +1,4 @@
-//! Direct hero locks from the visible, nearby enemy entities in the snapshot.
+//! Nearby visible enemy locks and position-free public enemy death timers.
 // i18n-strict
 use bevy::{prelude::*, window::PrimaryWindow};
 
@@ -29,7 +29,10 @@ pub(super) struct EnemyPortraitAction {
 }
 
 #[derive(Component)]
-pub(super) struct EnemyPortraitArt(Entity);
+pub(super) struct EnemyPortraitArt(u64);
+
+#[derive(Component)]
+pub(super) struct EnemyRespawnLabel(u64);
 
 fn nearby(origin: Vec3, point: Vec3) -> bool {
     origin.is_finite()
@@ -37,8 +40,8 @@ fn nearby(origin: Vec3, point: Vec3) -> bool {
         && origin.xz().distance_squared(point.xz()) <= shared::vision::HERO_SIGHT_RADIUS.powi(2)
 }
 
-/// Source this list from replicated world entities, never the global scoreboard:
-/// snapshot omission despawns hidden enemies, while the scoreboard is identity-only.
+/// Live locks require replicated visible nearby entities. Public scoreboard death
+/// timers add disabled portraits without revealing hidden enemy positions.
 #[allow(clippy::type_complexity)]
 pub(super) fn sync_enemy_portraits(
     mut commands: Commands,
@@ -64,8 +67,9 @@ pub(super) fn sync_enemy_portraits(
     selected: Res<TargetState>,
     mut buttons: Query<(Entity, &EnemyPortraitAction, &mut Node, &mut BorderColor)>,
     mut portraits: Query<(&EnemyPortraitArt, &mut PortraitView)>,
+    mut timers: Query<(&EnemyRespawnLabel, &mut Text)>,
 ) {
-    let local = local.single().ok().filter(|(_, _, stats)| stats.is_alive());
+    let local = local.single().ok();
     let mut visible = Vec::new();
     if matches!(game.state, GameState::Running)
         && screen
@@ -99,11 +103,43 @@ pub(super) fn sync_enemy_portraits(
                     grey: false,
                     strong_rim: selected.selected_entity == Some(entity),
                 },
+                0_u32,
             ));
+        }
+        // Death timers are public match information; this carries no live enemy position.
+        if let Some(board) = &game.scoreboard {
+            for row in &board.players {
+                if Team::from(row.team) == *team || row.respawn_remaining_ms == 0 {
+                    continue;
+                }
+                visible.retain(|(action, _, _)| action.target.id != row.player_id);
+                visible.push((
+                    EnemyPortraitAction {
+                        entity: Entity::PLACEHOLDER,
+                        target: TargetId {
+                            kind: TargetKind::Player,
+                            id: row.player_id,
+                        },
+                    },
+                    PortraitView {
+                        art: row
+                            .avatar
+                            .as_deref()
+                            .and_then(omoba_passport::avatars::avatar_definition)
+                            .and_then(crate::passport::thumbnail_asset_path),
+                        fallback: game::class_icon(row.hero_class),
+                        level: Some(row.level),
+                        xp: 0.0,
+                        grey: true,
+                        strong_rim: false,
+                    },
+                    row.respawn_remaining_ms.div_ceil(1000),
+                ));
+            }
         }
     }
     // Stable identities avoid reshuffling portraits as enemies move around.
-    visible.sort_by_key(|(action, _)| action.target.id);
+    visible.sort_by_key(|(action, _, _)| action.target.id);
     visible.truncate(5);
     let viewport = window.single().ok().map_or_else(
         || {
@@ -115,10 +151,9 @@ pub(super) fn sync_enemy_portraits(
     );
     let slots = HudLayout::resolve(viewport, mobile.as_deref(), false).enemy_portrait_slots();
     for (button, action, mut node, mut border) in &mut buttons {
-        let Some(slot) = visible
-            .iter()
-            .position(|(entry, _)| entry.entity == action.entity)
-        else {
+        let Some(slot) = visible.iter().position(|(entry, _, _)| {
+            entry.target == action.target && entry.entity == action.entity
+        }) else {
             commands.entity(button).despawn();
             continue;
         };
@@ -131,15 +166,28 @@ pub(super) fn sync_enemy_portraits(
         });
     }
     for (art, mut view) in &mut portraits {
-        if let Some((_, next)) = visible.iter().find(|(entry, _)| entry.entity == art.0) {
+        if let Some((_, next, _)) = visible
+            .iter()
+            .find(|(entry, _, _)| entry.target.id == art.0)
+        {
             view.set_if_neq(next.clone());
         }
     }
-    for (slot, (action, view)) in visible.into_iter().enumerate() {
-        if buttons
+    for (label, mut text) in &mut timers {
+        let value = visible
             .iter()
-            .any(|(_, existing, _, _)| existing.entity == action.entity)
-        {
+            .find(|(action, _, _)| action.target.id == label.0)
+            .map_or(0, |(_, _, secs)| *secs);
+        text.0 = if value > 0 {
+            value.to_string()
+        } else {
+            String::new()
+        };
+    }
+    for (slot, (action, view, secs)) in visible.into_iter().enumerate() {
+        if buttons.iter().any(|(_, existing, _, _)| {
+            existing.target == action.target && existing.entity == action.entity
+        }) {
             continue;
         }
         // Each button owns one immutable target identity for its entire life.
@@ -178,8 +226,28 @@ pub(super) fn sync_enemy_portraits(
                         disc_at: Vec2::new(-space::S4, -space::S4),
                         icon: 24.0,
                     },
-                    EnemyPortraitArt(action.entity),
+                    EnemyPortraitArt(action.target.id),
                 );
+                button.spawn((
+                    Text::new(if secs > 0 {
+                        secs.to_string()
+                    } else {
+                        String::new()
+                    }),
+                    TextFont {
+                        font_size: 19.0,
+                        ..default()
+                    },
+                    TextColor(Color::WHITE),
+                    Node {
+                        position_type: PositionType::Absolute,
+                        ..default()
+                    },
+                    ZIndex(2),
+                    Pickable::IGNORE,
+                    EnemyRespawnLabel(action.target.id),
+                    Name::new("Enemy respawn countdown"),
+                ));
             });
     }
 }
@@ -214,7 +282,8 @@ pub(super) fn activate_enemy_portrait(
         let Ok((origin, team, stats)) = local.single() else {
             continue;
         };
-        if !stats.is_alive()
+        if action.entity == Entity::PLACEHOLDER
+            || !stats.is_alive()
             || visibility
                 .get(action.entity)
                 .is_ok_and(|visibility| *visibility == Visibility::Hidden)
@@ -316,6 +385,98 @@ mod tests {
         app.world_mut().despawn(live);
         app.update();
         assert!(portraits(&mut app).is_empty());
+    }
+
+    #[test]
+    fn public_death_portrait_has_no_position_cannot_lock_and_expires_at_respawn() {
+        let mut app = app();
+        let row = shared::live_score::LiveScorePlayer {
+            player_id: 77,
+            nickname: "Hidden opponent".into(),
+            avatar: None,
+            team: shared::map::Team::Blue,
+            hero_class: shared::HeroClass::Ranger,
+            kills: 0,
+            deaths: 1,
+            assists: 0,
+            earned_gold: 0,
+            level: 3,
+            connected: true,
+            respawn_remaining_ms: 2400,
+        };
+        app.world_mut()
+            .resource_mut::<GameStateSnapshot>()
+            .scoreboard = Some(shared::live_score::LiveScoreboard {
+            players: vec![row],
+            ..default()
+        });
+        app.update();
+        let (source, action) = portraits(&mut app)[0];
+        assert_eq!(
+            action.entity,
+            Entity::PLACEHOLDER,
+            "no remote world entity or position is required"
+        );
+        let node = app.world().get::<Node>(source).unwrap();
+        assert_eq!((node.width, node.height), (Val::Px(44.0), Val::Px(44.0)));
+        assert!(
+            app.world_mut()
+                .query::<&PortraitView>()
+                .iter(app.world())
+                .any(|view| view.grey)
+        );
+        let countdown = |app: &mut App| {
+            app.world_mut()
+                .query::<(&EnemyRespawnLabel, &Text)>()
+                .iter(app.world())
+                .find(|(label, _)| label.0 == 77)
+                .unwrap()
+                .1
+                .0
+                .clone()
+        };
+        assert_eq!(countdown(&mut app), "3");
+        app.world_mut().write_message(Activated { source, action });
+        app.update();
+        assert!(
+            app.world()
+                .resource::<TargetState>()
+                .selected_target
+                .is_none()
+        );
+        app.world_mut()
+            .resource_mut::<GameStateSnapshot>()
+            .scoreboard
+            .as_mut()
+            .unwrap()
+            .players[0]
+            .respawn_remaining_ms = 999;
+        app.update();
+        assert_eq!(countdown(&mut app), "1");
+        app.world_mut()
+            .resource_mut::<GameStateSnapshot>()
+            .scoreboard
+            .as_mut()
+            .unwrap()
+            .players[0]
+            .respawn_remaining_ms = 0;
+        app.update();
+        assert!(
+            portraits(&mut app).is_empty(),
+            "a living hidden enemy must not remain on the public HUD"
+        );
+        let live = enemy(&mut app, 77, 3.0);
+        app.update();
+        assert_eq!(portraits(&mut app)[0].1.entity, live);
+        app.world_mut().write_message(Activated { source, action });
+        app.update();
+        assert!(
+            app.world()
+                .resource::<TargetState>()
+                .selected_target
+                .is_none(),
+            "a stale dead portrait cannot become a live lock"
+        );
     }
 
     #[test]

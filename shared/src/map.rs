@@ -4,12 +4,17 @@ use crate::navigation::{Bounds, Point, world_navigation};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashSet};
 
-pub const GEOMETRY_ID: &str = "verdant-confluence-v1";
-pub const BASE_PAD_SIZE: f32 = 46.0;
-pub const BASE_EDGE_MARGIN: f32 = 6.0;
-pub const LANE_WIDTH: f32 = 12.0;
-pub const LANE_EDGE_PADDING: f32 = 6.0;
-pub const TARGET_BASE_DISTANCE: f32 = 225.0;
+pub const GEOMETRY_ID: &str = "verdant-confluence-compact-v2";
+/// Compiled arena tuning. Change this single scalar for a coordinated client/
+/// host build; actors, attack ranges and movement speed keep their world units.
+pub const WORLD_SCALE: f32 = 0.8;
+pub const BASE_PAD_SIZE: f32 = 46.0 * WORLD_SCALE;
+pub const BASE_EDGE_MARGIN: f32 = 6.0 * WORLD_SCALE;
+pub const LANE_WIDTH: f32 = 12.0 * WORLD_SCALE;
+pub const LANE_EDGE_PADDING: f32 = 6.0 * WORLD_SCALE;
+pub const TARGET_BASE_DISTANCE: f32 = 225.0 * WORLD_SCALE;
+/// Water width can be tuned independently of the arena's overall footprint.
+pub const RIVER_WIDTH: f32 = 12.0;
 pub const MAX_STRUCTURES: usize = 32;
 pub const MAX_CONFIG_BYTES: usize = 65_536;
 pub const DEFAULT_JSON: &str = include_str!("../assets/maps/verdant.json");
@@ -546,19 +551,19 @@ mod tests {
         map
     }
     #[test]
-    fn defaults_preserve_authored_anchors_and_canonical_collision_bounds() {
+    fn compact_defaults_match_authored_lane_tuning_and_canonical_collision_bounds() {
         let map = ResolvedMap::default();
         assert_eq!(map.structures.len(), 20);
         assert_eq!(map.map_profile, "verdant_default");
         for (id, x, z) in [
-            (1, -96.54951, 29.5099),
-            (2, 4.49010, 96.54951),
-            (3, -31.8198, -31.8198),
-            (4, 31.8198, 31.8198),
-            (5, -4.49010, -96.54951),
-            (6, 96.54951, -29.5099),
-            (7, -79.54951, -79.54951),
-            (8, 79.54951, 79.54951),
+            (1, -77.23961, 30.33109),
+            (2, -3.13109, 77.23961),
+            (3, -22.91026, -22.91026),
+            (4, 22.91026, 22.91026),
+            (5, 3.13109, -77.23961),
+            (6, 77.23961, -30.33109),
+            (7, -63.63961, -63.63961),
+            (8, 63.63961, 63.63961),
         ] {
             let s = map.structures.iter().find(|s| s.id == id).unwrap();
             assert!(distance(s.position, [x, z]) < 0.001, "{} moved", s.key);

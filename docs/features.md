@@ -1003,3 +1003,12 @@ The beta lobby on `vds-eternal` supervises at most two independent matches on UD
 ### Avatar preview framing (0.34.2)
 
 The Home, collection and selection preview camera fits the actual glTF vertex silhouette after model normalization. In 0.35.0, a cached rotational envelope keeps the ground line at the Home platform while accounting for model width/depth, height and vertical origin without changing gameplay scale or colliders. Wide upper wings do not introduce an imaginary wide foot that would unnecessarily shrink the avatar. The opt-in `OMOBA_HOME_ONLY_QA=1` screenshot check waits for the avatar and captures only Home. Bind-pose geometry plus padding cover normal idle motion; extreme animation excursions and separately attached props are not dynamically measured.
+
+
+### Playtest quality — 0.42.0
+
+Practice bot matches expose zero cooldowns, disposable moving/attacking targets and a scrollable tool panel. Combat repairs cover Adventurer melee/point-blank targeting, cooldown reconciliation, Wildspark weapon modes and accepted-attack audio. Public enemy death portraits complement live target portraits without disclosing hidden coordinates. The compact Verdant arena shares navigation, collision, brush and objective placement across offline/server simulation; ten camps include timed fire/ice rewards. An original animated dragon, ranged handhelds, independent nexus rings and inner guard silhouettes improve 3D presentation.
+
+Release protocol/catalogue/geometry revisions require matching 0.42-compatible peers. Existing production and TestFlight 0.41.0 are unchanged by this source iteration. See `docs/progress/2026-10-05-playtest-quality.md` for verification and limitations.
+
+Allied portraits also show remaining respawn seconds. Nexus motion rotates the original central GLB armillary rings; the extra upper rings are removed.

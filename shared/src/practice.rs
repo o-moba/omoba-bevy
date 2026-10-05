@@ -11,7 +11,7 @@ pub const DUEL_MIN_LEVEL: u32 = 1;
 /// full inventory of any items (pinned by a test against the catalog).
 pub const DUEL_GOLD_STEP: u32 = 100;
 pub const DUEL_MAX_GOLD: u32 = 10_000;
-/// Stationary dummies alive at once; older ones are recycled first.
+/// Disposable dummies alive at once; older ones are recycled first.
 pub const MAX_DUMMIES: usize = 4;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -21,11 +21,14 @@ pub enum PracticeCommand {
     Roster,
     /// Remove every bot; only humans remain (minions still spawn).
     ClearBots,
-    /// A stationary enemy target in front of the requester. It never moves
-    /// or attacks and returns to its spot after each respawn.
+    /// A stationary enemy target in front of the requester, removed on death.
     SpawnDummy,
     /// Nonattacking nearby target following a bounded circular route.
     SpawnMovingDummy,
+    /// Nearby enemy that immediately pursues and attacks the requester, removed on death.
+    SpawnAggressiveDummy,
+    /// Disable combat cooldowns for the requesting human in authorized practice.
+    SetNoCooldowns { enabled: bool },
     /// Clear the bots and send one enemy lane bot down mid at `level`, with
     /// its skills ranked for that level and `gold` spent on items at base.
     StartDuel { level: u32, gold: u32 },

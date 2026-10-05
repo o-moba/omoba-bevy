@@ -591,6 +591,8 @@ fn sandbox_ai_modes_forced_cast_and_all_heroes() {
         c.enemy.actor.unlock_all = true;
         c.enemy.actor.position = [1.0, 0.0];
         c.player.position = [-1.0, 0.0];
+        // Keep one live target through contact attacks and the forced-cast phases.
+        c.player.max_hp = 1000.0;
         apply(&mut rt, a, c.clone());
         let original = rt.world.players[&ENEMY_ADDR].hero.x;
         rt.simulate_sandbox(now + Duration::from_secs(1), 0.1);
@@ -601,8 +603,50 @@ fn sandbox_ai_modes_forced_cast_and_all_heroes() {
         assert!(rt.world.players[&ENEMY_ADDR].hero.x > original);
         c.enemy.behavior = BotBehavior::Attack;
         apply(&mut rt, a, c.clone());
-        rt.simulate_sandbox(now + Duration::from_secs(3), 0.1);
-        assert!(!rt.world.projectiles.is_empty());
+        let hp_before = rt.world.players[&a].hero.hp;
+        let victim_id = rt.world.players[&a].hero.identity.id;
+        let enemy = &rt.world.players[&ENEMY_ADDR];
+        let attacker_id = enemy.hero.identity.id;
+        let sequence_before = enemy.hero.last_action.sequence;
+        let contact_melee = enemy.hero.skills.loadout.is_some_and(|loadout| {
+            loadout.attack_profile() == shared::loadout::AttackProfileId::Melee
+        });
+        let attack_at = now + Duration::from_secs(3);
+        rt.simulate_sandbox(attack_at, 0.1);
+        let action = &rt.world.players[&ENEMY_ADDR].hero.last_action;
+        assert_eq!(action.kind, shared::PlayerActionKind::Attack, "{hero:?}");
+        assert!(action.sequence > sequence_before, "{hero:?}");
+        if contact_melee {
+            assert!(
+                rt.world.projectiles.is_empty(),
+                "melee {hero:?} threw a shot"
+            );
+            let damage = hp_before - rt.world.players[&a].hero.hp;
+            assert!(damage > 0.0, "melee {hero:?} did not damage its target");
+            let receipts = crate::skills::tick(
+                &mut rt.world,
+                TickCtx {
+                    now: attack_at,
+                    dt: 0.0,
+                },
+            );
+            assert!(
+                receipts.iter().any(|event| {
+                    event.source.kind == CombatEntityKind::Player
+                        && event.source.id == attacker_id
+                        && event.target.kind == CombatEntityKind::Player
+                        && event.target.id == victim_id
+                        && event.action_slot == Some(shared::BASIC_ATTACK_ACTION_SLOT)
+                        && (event.amount - damage).abs() < 0.0001
+                }),
+                "melee {hero:?} omitted its accepted damage receipt"
+            );
+        } else {
+            assert!(
+                !rt.world.projectiles.is_empty(),
+                "ranged {hero:?} did not fire"
+            );
+        }
         rt.world.projectiles.clear();
         assert!(
             command(

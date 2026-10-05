@@ -308,3 +308,23 @@ fn mismatched_or_malformed_recipes_cannot_select_skill_or_basic_motion() {
         .is_none()
     );
 }
+
+#[test]
+fn ranged_basic_attacks_use_aimed_motion_and_dagger_keeps_the_right_hand_thrust() {
+    use shared::{BASIC_ATTACK_ACTION_SLOT, HeroClass};
+    for (class, expected) in [
+        (HeroClass::Ranger, "pistol_shoot"),
+        (HeroClass::Wildspark, "pistol_shoot"),
+        (HeroClass::Riftshot, "pistol_shoot"),
+        (HeroClass::Mage, "cast"),
+        (HeroClass::Dawnweaver, "cast"),
+        (HeroClass::Adventurer, "dagger_stab"),
+    ] {
+        assert_eq!(
+            motion_cue(&profiles(), class, None, BASIC_ATTACK_ACTION_SLOT, 1, &[])
+                .unwrap()
+                .motion,
+            expected
+        );
+    }
+}

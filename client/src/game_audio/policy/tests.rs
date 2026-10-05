@@ -571,3 +571,58 @@ fn shielded_trap_is_audible_once_without_inventing_damage_or_remote_hits() {
             .is_empty()
     );
 }
+
+#[test]
+fn confirmed_enemy_attacks_sound_without_hp_receipts_and_never_replay() {
+    let mut cursor = AttackCursor::default();
+    let mut enemy = AttackObservation {
+        id: 8,
+        sequence: 5,
+        attacking: true,
+        visible: true,
+        alive: true,
+        team: Team::Blue,
+        position: Vec3::X,
+        style: ProjectileStyle::Crescent,
+    };
+    assert!(
+        cursor
+            .accept((1, 2), true, Some(local()), [enemy])
+            .is_empty()
+    );
+    enemy.sequence += 1;
+    assert!(has(
+        &cursor.accept((1, 2), true, Some(local()), [enemy]),
+        AudioCue::Melee
+    ));
+    assert!(
+        cursor
+            .accept((1, 2), true, Some(local()), [enemy])
+            .is_empty()
+    );
+    enemy.visible = false;
+    enemy.sequence += 1;
+    assert!(
+        cursor
+            .accept((1, 2), true, Some(local()), [enemy])
+            .is_empty()
+    );
+    enemy.visible = true;
+    assert!(
+        cursor
+            .accept((1, 2), true, Some(local()), [enemy])
+            .is_empty()
+    );
+    enemy.sequence += 1;
+    assert!(
+        cursor
+            .accept((1, 3), true, Some(local()), [enemy])
+            .is_empty()
+    );
+    enemy.sequence += 1;
+    assert!(
+        cursor
+            .accept((1, 3), false, Some(local()), [enemy])
+            .is_empty()
+    );
+}

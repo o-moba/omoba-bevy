@@ -119,9 +119,9 @@ fn bosses_are_gated_before_spawn_delays_and_spawn_with_full_stats() {
     world.neutrals = build_camps_and_bosses();
     let now = Instant::now();
 
-    // Before match start (Lobby): bosses dormant, only the six camps visible.
+    // Before match start (Lobby): bosses dormant, only ordinary camps visible.
     let visible = visible_camp_types(&world.neutrals);
-    assert_eq!(visible.len(), 6);
+    assert_eq!(visible.len(), shared::jungle::CAMP_COUNT);
     assert!(visible.iter().all(|camp_type| !camp_type.is_boss()));
 
     schedule_boss_spawns(&mut world.neutrals, now);
@@ -188,7 +188,7 @@ fn bosses_are_gated_before_spawn_delays_and_spawn_with_full_stats() {
         .iter()
         .filter(|camp_type| !camp_type.is_boss())
         .count();
-    assert_eq!(camp_count, 6);
+    assert_eq!(camp_count, shared::jungle::CAMP_COUNT);
 }
 
 #[test]

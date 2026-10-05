@@ -394,7 +394,10 @@ pub(crate) fn address_keyboard(
     if (entry.open || *owned_ime)
         && let Ok(mut window) = windows.single_mut()
     {
-        window.ime_enabled = entry.open && entry.keyboard;
+        let enabled = entry.open && entry.keyboard;
+        if window.ime_enabled != enabled {
+            window.ime_enabled = enabled;
+        }
     }
     *owned_ime = entry.open;
     for event in ime.read() {

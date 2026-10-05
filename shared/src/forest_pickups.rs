@@ -23,6 +23,7 @@ pub fn pickup_layout() -> [Point; FOREST_PICKUP_COUNT] {
         [-52.0, 52.0],
         [52.0, -52.0],
     ]
+    .map(|point| point.map(|coordinate| coordinate * crate::map::WORLD_SCALE))
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -57,7 +58,11 @@ mod tests {
             assert!(
                 camps
                     .iter()
-                    .all(|(camp, _)| (anchor[0] - camp[0]).hypot(anchor[1] - camp[1]) > 7.0)
+                    .all(|(camp, _)| (anchor[0] - camp[0]).hypot(anchor[1] - camp[1])
+                        > 3.0
+                            + PICKUP_RADIUS
+                            + crate::navigation::HERO_RADIUS
+                            + crate::navigation::PLANNING_CLEARANCE)
             );
             for base in [map.home, map.away] {
                 let route = nav.plan_route(base, anchor, &[]).expect("pickup route");

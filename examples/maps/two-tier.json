@@ -1,6 +1,6 @@
 {
   "format_version": 1,
-  "geometry_id": "verdant-confluence-v1",
+  "geometry_id": "verdant-confluence-compact-v2",
   "map_profile": "verdant_two_tier_example",
   "profiles": {
     "lane_tower": {

@@ -47,10 +47,53 @@ impl Plugin for RenderSettingsPlugin {
                 (measure_fps, collect_pacing_diagnostics, update_fps_readout).chain(),
             );
         #[cfg(target_os = "ios")]
-        app.add_systems(Update, apply_ios_pacing);
+        app.add_systems(
+            Update,
+            (apply_ios_pacing, apply_editor_pacing)
+                .chain()
+                .after(crate::input_context::InputContextSet::Modal),
+        );
         #[cfg(not(target_os = "ios"))]
-        app.add_systems(Update, apply_timer_pacing);
+        app.add_systems(
+            Update,
+            (apply_timer_pacing, apply_editor_pacing)
+                .chain()
+                .after(crate::input_context::InputContextSet::Modal),
+        );
     }
+}
+
+/// Native text entry can temporarily interrupt display-link/focus delivery.
+/// Keep IME events responsive with a bounded timer while an editor owns the
+/// keyboard; leaving it restores the user's normal display-driven pacing.
+fn editor_pacing(settings: RenderSettings) -> UpdateMode {
+    UpdateMode::Reactive {
+        wait: Duration::from_secs_f64(1.0 / f64::from(settings.sanitized().fps_limit)),
+        react_to_device_events: false,
+        react_to_window_events: true,
+        react_to_user_events: true,
+    }
+}
+
+fn apply_editor_pacing(
+    settings: Res<RenderSettings>,
+    windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
+    pacing: Option<ResMut<WinitSettings>>,
+    mut was_active: Local<bool>,
+) {
+    let active = windows.single().is_ok_and(|window| window.ime_enabled);
+    if active == *was_active && (!active || !settings.is_changed()) {
+        return;
+    }
+    let Some(mut pacing) = pacing else { return };
+    if active {
+        pacing.focused_mode = editor_pacing(*settings);
+        pacing.unfocused_mode = editor_pacing(*settings);
+    } else {
+        pacing.focused_mode = focused_pacing(*settings, cfg!(target_os = "ios"));
+        pacing.unfocused_mode = UpdateMode::reactive_low_power(Duration::from_secs(1));
+    }
+    *was_active = active;
 }
 
 /// Input events are queued for the next frame; touch sampling must not bypass
@@ -255,6 +298,48 @@ fn update_fps_readout(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn editor_events_keep_updates_alive_and_closing_restores_pacing() {
+        let mut app = App::new();
+        app.init_resource::<RenderSettings>()
+            .insert_resource(WinitSettings::mobile())
+            .add_systems(Update, apply_editor_pacing);
+        let window = app
+            .world_mut()
+            .spawn((
+                Window {
+                    ime_enabled: true,
+                    ..default()
+                },
+                bevy::window::PrimaryWindow,
+            ))
+            .id();
+        app.update();
+        let pacing = app.world().resource::<WinitSettings>();
+        for mode in [pacing.focused_mode, pacing.unfocused_mode] {
+            let UpdateMode::Reactive {
+                wait,
+                react_to_window_events,
+                react_to_user_events,
+                ..
+            } = mode
+            else {
+                panic!()
+            };
+            assert!(react_to_window_events && react_to_user_events);
+            assert!(wait <= Duration::from_millis(17));
+        }
+        app.world_mut()
+            .get_mut::<Window>(window)
+            .unwrap()
+            .ime_enabled = false;
+        app.update();
+        assert_eq!(
+            app.world().resource::<WinitSettings>().focused_mode,
+            focused_pacing(RenderSettings::default(), cfg!(target_os = "ios"))
+        );
+    }
 
     #[test]
     fn native_bridge_waits_for_a_window_event_loop_before_switching_pacing() {

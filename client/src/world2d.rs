@@ -13,7 +13,7 @@ use crate::map_visuals::MapVisualRegistry;
 use crate::maps::{LANE_WIDTH, MapLayout, RIVER_WIDTH};
 use crate::sprite::{PlayerVisualMode, in_sprite2d};
 
-pub const WORLD_TILE_SIZE: f32 = 4.0;
+pub const WORLD_TILE_SIZE: f32 = 4.0 * shared::map::WORLD_SCALE;
 pub const WORLD_TILE_COLUMNS: usize = 55;
 pub const WORLD_TILE_ROWS: usize = 55;
 pub const STATIC_WORLD_ENTITY_BUDGET: usize = 4_096;
@@ -937,7 +937,7 @@ mod tests {
         ] {
             assert!(Vec2::from_array(actual).distance(Vec2::from_array(expected)) < 0.001);
         }
-        assert_eq!(manifest.topology.camps.len(), 6);
+        assert_eq!(manifest.topology.camps.len(), shared::jungle::CAMP_COUNT);
         for (actual, expected) in manifest.topology.camps.iter().zip(layout.camp_centers()) {
             assert!(Vec2::from_array(*actual).distance(expected) < 0.001);
         }

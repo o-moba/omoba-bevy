@@ -20,6 +20,7 @@ const WATER_Y: f32 = -0.035;
 const MEADOW_Y: f32 = -0.02;
 const AUTHORED_BANK_Y: f32 = -0.04;
 const HIGHLIGHT_LOWERING: f32 = 0.035;
+const RIVER_SURFACE_WIDTH: f32 = 18.0 * shared::map::WORLD_SCALE;
 
 #[derive(Component)]
 struct RiverAdjusted;
@@ -104,7 +105,13 @@ fn repair_river(
                     alpha_mode: AlphaMode::Opaque,
                     ..default()
                 })),
-                Transform::IDENTITY,
+                // The replacement uses final gameplay coordinates, whereas
+                // its static scene parent is scaled from authored metres.
+                Transform::from_scale(Vec3::new(
+                    shared::map::WORLD_SCALE.recip(),
+                    1.0,
+                    shared::map::WORLD_SCALE.recip(),
+                )),
                 ChildOf(parent.parent()),
                 RiverReplacement(entity),
                 Name::new("River / continuous joined surface"),
@@ -209,11 +216,21 @@ fn water_mesh(layout: &MapLayout) -> Mesh {
     let across = Vec2::new(-direction.y, direction.x);
     let datum = start.dot(across);
     let half = crate::maps::RIVER_WIDTH * 0.5;
-    let offsets = [-half, -half + 2.0, 0.0, half - 2.0, half];
+    let bank_edge = RIVER_SURFACE_WIDTH * 0.5;
+    let offsets = [
+        -bank_edge,
+        -half,
+        -half + 2.0,
+        0.0,
+        half - 2.0,
+        half,
+        bank_edge,
+    ];
     let mut positions = Vec::new();
     let mut colors = Vec::new();
     let mut indices = Vec::new();
     for band in offsets.windows(2) {
+        let bank = band[1] <= -half || band[0] >= half;
         let polygon = vec![
             layout.min,
             Vec2::new(layout.max.x, layout.min.y),
@@ -227,15 +244,19 @@ fn water_mesh(layout: &MapLayout) -> Mesh {
         }
         let base = positions.len() as u32;
         for point in &polygon {
-            positions.push([point.x, WATER_Y, point.y]);
+            positions.push([point.x, if bank { MEADOW_Y } else { WATER_Y }, point.y]);
             let edge = ((point.dot(across) - datum).abs() - (half - 2.0)).clamp(0.0, 2.0) / 2.0;
             // Exported Blender base-color factors are already linear RGB.
-            colors.push([
-                0.025 + (0.08 - 0.025) * edge,
-                0.24 + (0.39 - 0.24) * edge,
-                0.27 + (0.36 - 0.27) * edge,
-                1.0,
-            ]);
+            colors.push(if bank {
+                [0.075, 0.145, 0.105, 1.0]
+            } else {
+                [
+                    0.025 + (0.08 - 0.025) * edge,
+                    0.24 + (0.39 - 0.24) * edge,
+                    0.27 + (0.36 - 0.27) * edge,
+                    1.0,
+                ]
+            });
         }
         for i in 1..polygon.len() - 1 {
             if (polygon[i] - polygon[0])
@@ -300,11 +321,11 @@ mod tests {
             for point in triangle {
                 assert!(point.x >= layout.min.x - 0.0001 && point.x <= layout.max.x + 0.0001);
                 assert!(point.z >= layout.min.y - 0.0001 && point.z <= layout.max.y + 0.0001);
-                assert_eq!(point.y, WATER_Y);
+                assert!(point.y == WATER_Y || point.y == MEADOW_Y);
             }
         }
         let width = layout.size().x;
-        let half_river = crate::maps::RIVER_WIDTH * 0.5;
+        let half_river = RIVER_SURFACE_WIDTH * 0.5;
         let expected_area = width * width - (width - half_river * 2.0_f32.sqrt()).powi(2);
         assert!(
             (area - expected_area).abs() < 0.02,

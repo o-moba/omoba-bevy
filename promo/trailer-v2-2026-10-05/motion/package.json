@@ -1,0 +1,21 @@
+{
+  "name": "omoba-trailer-v2-motion",
+  "private": true,
+  "description": "Remotion project of the OMOBA gameplay trailer v2",
+  "scripts": {
+    "prepare-frames": "python3 prepare.py",
+    "stills": "node stills.mjs 2 6 14 18 22 26 30 34 38 42 46 54",
+    "render": "./render.sh"
+  },
+  "dependencies": {
+    "@remotion/bundler": "^4.0.484",
+    "@remotion/renderer": "^4.0.484",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "remotion": "^4.0.484"
+  },
+  "devDependencies": {
+    "@types/react": "^18.2.0",
+    "typescript": "^5.3.0"
+  }
+}

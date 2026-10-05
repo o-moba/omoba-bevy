@@ -213,18 +213,18 @@ fn spawn_formation_wave_cadence_and_authored_structure_anchors_are_preserved() {
         assert_eq!(world.minions.len(), expected_count);
     }
 
-    // Baseline positions from the authored six-point outer lanes at fab5f23.
-    // Towers must not move when the minion-only route drops its dead-end spur.
+    // Reviewed compact-map anchors, with outer towers advanced to t=0.32/0.68.
+    // The minion-only route must not alter the authored structure positions.
     let structures = build_structures(&layout);
     for (id, x, z) in [
-        (1, -96.54951, 29.5099),
-        (2, 4.49010, 96.54951),
-        (3, -31.8198, -31.8198),
-        (4, 31.8198, 31.8198),
-        (5, -4.49010, -96.54951),
-        (6, 96.54951, -29.5099),
-        (7, -79.54951, -79.54951),
-        (8, 79.54951, 79.54951),
+        (1, -77.23961, 30.33109),
+        (2, -3.13109, 77.23961),
+        (3, -22.91026, -22.91026),
+        (4, 22.91026, 22.91026),
+        (5, 3.13109, -77.23961),
+        (6, 77.23961, -30.33109),
+        (7, -63.63961, -63.63961),
+        (8, 63.63961, 63.63961),
     ] {
         let structure = &structures[&id].state;
         assert!((structure.x - x).abs() < 0.001 && (structure.z - z).abs() < 0.001);

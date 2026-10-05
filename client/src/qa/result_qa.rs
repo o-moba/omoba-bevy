@@ -203,6 +203,7 @@ fn live_row(team: shared::map::Team) -> LiveScoreboard {
                 earned_gold: 12480 + index as u32 * 120,
                 level: 12,
                 connected: true,
+                respawn_remaining_ms: 0,
             })
             .collect(),
     }

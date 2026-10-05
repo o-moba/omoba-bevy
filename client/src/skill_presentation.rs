@@ -148,13 +148,21 @@ pub(crate) fn motion_cue(
     effects: &[SkillEffectState],
 ) -> Option<MotionCue> {
     if slot == shared::BASIC_ATTACK_ACTION_SLOT {
-        let equipped = crate::equipped_skills::resolve_state(class, loadout)?.resolved()?;
-        let motion = if equipped.core() == shared::loadout::CoreId::Adventurer {
-            "dagger_stab"
-        } else if equipped.attack_profile() == shared::loadout::AttackProfileId::Repeater {
-            "pistol_shoot"
-        } else {
-            return None;
+        let equipped = crate::equipped_skills::resolve_state(class, loadout)?;
+        let motion = match equipped.resolved() {
+            Some(kit) if kit.core() == shared::loadout::CoreId::Adventurer => "dagger_stab",
+            Some(kit)
+                if kit.attack_profile() == shared::loadout::AttackProfileId::Repeater
+                    || kit.core() == shared::loadout::CoreId::Riftshot =>
+            {
+                "pistol_shoot"
+            }
+            Some(kit) if kit.attack_profile() == shared::loadout::AttackProfileId::LightBolt => {
+                "cast"
+            }
+            None if class == shared::HeroClass::Ranger => "pistol_shoot",
+            None if matches!(class, shared::HeroClass::Mage | shared::HeroClass::Cleric) => "cast",
+            _ => return None,
         };
         return Some(MotionCue {
             motion: motion.into(),

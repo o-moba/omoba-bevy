@@ -9,6 +9,7 @@ import socket
 import tempfile
 import time
 import unittest
+from unittest import mock
 
 from capture_verdant import FRAME_HEADER, SnapshotObserver, verify_navigation
 from capture_combat import CombatObserver
@@ -91,6 +92,46 @@ class NavigationEvidenceTest(unittest.TestCase):
         crossed = copy.deepcopy(snapshots)
         crossed[2]["players"][0].update(x=3, z=0)
         self.assertFalse(verify_navigation(summary, crossed, document)["pass"])
+
+    def test_shipped_forest_polygons_scale_into_snapshot_coordinates(self):
+        summary, snapshots = evidence()
+        summary['obstacle'].update(kind='tree', id='scaled-tree')
+        summary['route_display'] = 'minimap_only'
+        summary['events'].append(dict(event='forest_approach_input', snapshot_tick=0, detail={}))
+        for index in range(2):
+            summary['events'].append(dict(event='travel_capture_after_settle', snapshot_tick=3+index,
+                detail=dict(minimap=dict(route_segments=[dict(a=[1,2],b=[4,5])], route_destination=[3,4,5,6]))))
+        # At half scale this authored square matches the existing safe detour.
+        document = dict(obstacles=[dict(id='scaled-tree', vertices=[[-4,-4],[4,-4],[4,4],[-4,4]])])
+        with mock.patch('capture_verdant.Path.read_text', return_value=json.dumps(document)), \
+             mock.patch('capture_verdant.catalog.map_tuning', return_value=dict(world_scale=.5)):
+            self.assertTrue(verify_navigation(summary, snapshots)['pass'])
+        self.assertFalse(verify_navigation(summary, snapshots, document)['pass'])
+
+    def test_quality_observer_joins_once_without_gameplay_commands(self):
+        with tempfile.TemporaryDirectory() as directory, socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as server:
+            server.bind(('127.0.0.1', 0))
+            server.settimeout(1)
+            observer = SnapshotObserver(server.getsockname(), Path(directory) / 'quality.jsonl', team='green')
+            try:
+                observer.update(1)
+                hello, address = server.recvfrom(65536)
+                join, _ = server.recvfrom(65536)
+                self.assertEqual(json.loads(hello)['type'], 'hello')
+                self.assertEqual(json.loads(join)['team'], 'green')
+                packet = dict(type='snapshot', your_id=7, snapshot_tick=42,
+                              players=[dict(id=7, hp=100)], neutrals=[])
+                server.sendto(json.dumps(packet).encode(), address)
+                select.select([observer.socket], [], [], 1)
+                observer.update(1.1)
+                self.assertTrue(observer.joined)
+                observer.update(2.1)
+                self.assertEqual(json.loads(server.recvfrom(65536)[0])['type'], 'hello')
+                server.setblocking(False)
+                with self.assertRaises(BlockingIOError):
+                    server.recvfrom(65536)
+            finally:
+                observer.close()
 
     def test_hello_only_observer_reassembles_real_udp_chunks(self):
         with tempfile.TemporaryDirectory() as directory, socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as server:

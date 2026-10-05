@@ -273,6 +273,7 @@ fn result_model(
     result: Option<&MatchResult>,
     career: &CareerClient,
 ) -> ResultModel {
+    let result = result.filter(|result| latch.accepts_result(result));
     let expects = expects_result(latch, career);
     let participant = result.and_then(|result| crate::career::local_participant(result, career));
     let local_team = latch
@@ -408,6 +409,17 @@ fn play_again_enabled(pressed: bool) -> bool {
 }
 
 impl PostMatchLatch {
+    /// A terminal world snapshot wins over late abandonment or another round's
+    /// receipt. Persistence may enrich the result, never rewrite its outcome.
+    fn accepts_result(&self, result: &MatchResult) -> bool {
+        self.namespace
+            .is_none_or(|namespace| namespace == (result.server_epoch, result.match_id))
+            && self.winner.is_none_or(|winner| {
+                result.outcome == MatchOutcome::Completed
+                    && result.winner.map(Into::into) == Some(winner)
+            })
+    }
+
     pub(super) fn contains_round(&self, game: &GameStateSnapshot) -> bool {
         self.namespace == Some((game.meta.server_epoch, game.meta.match_id))
     }
@@ -561,12 +573,15 @@ impl ScreenInputs<'_> {
 }
 
 fn spawn_post_match(mut commands: Commands, inputs: ScreenInputs) {
-    build_screen(&mut commands, &inputs);
+    build_screen(&mut commands, &inputs, None);
 }
 
-fn build_screen(commands: &mut Commands, inputs: &ScreenInputs) {
+fn build_screen(commands: &mut Commands, inputs: &ScreenInputs, retained: Option<&MatchResult>) {
     let latch = inputs.latch();
-    let result = current_result(&inputs.career, &inputs.game).cloned();
+    let result = current_result(&inputs.career, &inputs.game)
+        .filter(|result| latch.accepts_result(result))
+        .or_else(|| retained.filter(|result| latch.accepts_result(result)))
+        .cloned();
     let model = result_model(&latch, result.as_ref(), &inputs.career);
     let form = inputs.form();
     let safe = inputs.mobile.as_deref().map(|mobile| mobile.safe);
@@ -1808,7 +1823,13 @@ fn refresh_post_match(
     {
         return;
     }
-    let result = current_result(&inputs.career, game);
+    let latch = inputs.latch();
+    if latch.namespace.is_some() && !latch.contains_round(game) {
+        return;
+    }
+    let result = current_result(&inputs.career, game)
+        .filter(|result| latch.accepts_result(result))
+        .or(root.0.as_ref());
     let new_shape = inputs.shape();
     let body_changed = root.0.as_ref() != result
         || root.1 != inputs.career.view.storage_enabled
@@ -1838,7 +1859,7 @@ fn refresh_post_match(
         }
         _ if body_changed || locale_changed(&locale) => {
             commands.entity(entity).despawn();
-            build_screen(&mut commands, &inputs);
+            build_screen(&mut commands, &inputs, result);
         }
         _ => {}
     }
@@ -2061,8 +2082,10 @@ fn post_match_actions(
                 pressed(&mut latch);
             }
             PostMatchAction::Details => {
-                if let Some(career) = career.as_mut() {
-                    career.open_last_result_modal();
+                if let Some(career) = career.as_mut()
+                    && let Some(result) = roots.single().ok().and_then(|root| root.0.as_ref())
+                {
+                    career.open_result_modal(result);
                 }
             }
             PostMatchAction::BackToMenu => {
@@ -2255,6 +2278,7 @@ mod tests {
                     earned_gold: 6210,
                     level: 9,
                     connected: true,
+                    respawn_remaining_ms: 0,
                 }],
             });
         }
@@ -2561,6 +2585,106 @@ mod tests {
     }
 
     #[test]
+    fn locale_rebuild_retains_an_accepted_receipt_after_a_conflicting_update() {
+        let mut app = screen_app();
+        app.init_resource::<Locale>();
+        let accepted = full_receipt();
+        {
+            let mut career = app.world_mut().resource_mut::<CareerClient>();
+            career.view.storage_enabled = true;
+            career.view.profile = Some(shared::career::ProfileSummary::new(
+                "p-1".into(),
+                "Guest".into(),
+            ));
+            career.public_profile_id = Some("p-1".into());
+            career.view.last_result = Some(accepted.clone());
+        }
+        enter(&mut app);
+        let previous_root = named(&mut app, "PostMatchScreen").unwrap();
+        let previous_summary = text_of(&mut app, "PostMatchSummaryText");
+        let mut conflicting = accepted.clone();
+        conflicting.outcome = MatchOutcome::Abandoned;
+        conflicting.winner = None;
+        app.world_mut()
+            .resource_mut::<CareerClient>()
+            .view
+            .last_result = Some(conflicting);
+        // Exercise the relabel/full-rebuild path without changing the process-wide locale.
+        app.world_mut().resource_mut::<Locale>().set_changed();
+        app.update();
+        let rebuilt = named(&mut app, "PostMatchScreen").unwrap();
+        assert_ne!(rebuilt, previous_root);
+        assert_eq!(
+            app.world()
+                .get::<PostMatchRoot>(rebuilt)
+                .unwrap()
+                .0
+                .as_ref(),
+            Some(&accepted)
+        );
+        assert_eq!(text_of(&mut app, "PostMatchSummaryText"), previous_summary);
+        let details = by_id(&mut app, "PostMatchDetails");
+        assert!(!app.world().get::<Pressable>(details).unwrap().disabled);
+    }
+
+    #[test]
+    fn details_opens_the_retained_receipt_instead_of_a_conflicting_live_result() {
+        let accepted = full_receipt();
+        let mut abandoned = accepted.clone();
+        abandoned.outcome = MatchOutcome::Abandoned;
+        abandoned.winner = None;
+        let mut interrupted = abandoned.clone();
+        interrupted.outcome = MatchOutcome::Interrupted;
+        let mut stale = saved_receipt();
+        stale.result_id = "another-round".into();
+        for latest in [accepted.clone(), abandoned, interrupted, stale] {
+            let mut app = App::new();
+            let mut career = CareerClient::default();
+            career.view.last_result = Some(latest.clone());
+            app.insert_resource(career)
+                .add_message::<NetworkCommand>()
+                .add_message::<SessionUiCommand>()
+                .add_ui_action::<PostMatchAction>()
+                .add_systems(Update, post_match_actions.after(UiSet::Dispatch));
+            app.world_mut()
+                .spawn(PostMatchRoot(Some(accepted.clone()), true));
+            app.world_mut().spawn((
+                Button,
+                Interaction::Pressed,
+                crate::ui::UiAction(PostMatchAction::Details),
+            ));
+            app.update();
+            let career = app.world().resource::<CareerClient>();
+            assert_eq!(career.modal, crate::career::CareerModal::Result);
+            assert_eq!(career.view.detail.as_ref(), Some(&accepted));
+            assert_eq!(career.view.last_result.as_ref(), Some(&latest));
+        }
+    }
+
+    #[test]
+    fn details_without_an_accepted_receipt_does_not_open_an_old_result() {
+        let mut app = App::new();
+        let mut career = CareerClient::default();
+        career.view.last_result = Some(saved_receipt());
+        app.insert_resource(career)
+            .add_message::<NetworkCommand>()
+            .add_message::<SessionUiCommand>()
+            .add_ui_action::<PostMatchAction>()
+            .add_systems(Update, post_match_actions.after(UiSet::Dispatch));
+        app.world_mut().spawn(PostMatchRoot(None, true));
+        app.world_mut().spawn((
+            Button,
+            Interaction::Pressed,
+            crate::ui::UiAction(PostMatchAction::Details),
+        ));
+        app.update();
+        assert_eq!(
+            app.world().resource::<CareerClient>().modal,
+            crate::career::CareerModal::Closed
+        );
+    }
+
+    #[test]
     fn saved_terminal_receipt_with_running_direct_server_returns_home_on_replay() {
         for outcome in [MatchOutcome::Abandoned, MatchOutcome::Interrupted] {
             let mut app = App::new();
@@ -2602,6 +2726,38 @@ mod tests {
                 "a direct server rejects RequestRematch while its snapshot is Running"
             );
         }
+    }
+
+    #[test]
+    fn terminal_victory_rejects_late_abandoned_and_stale_receipts() {
+        let receipt = saved_receipt();
+        let latch = PostMatchLatch {
+            winner: receipt.winner.map(Into::into),
+            local_team: receipt.winner.map(Into::into),
+            namespace: Some((receipt.server_epoch, receipt.match_id)),
+            ..default()
+        };
+        assert!(latch.accepts_result(&receipt));
+        for outcome in [MatchOutcome::Abandoned, MatchOutcome::Interrupted] {
+            let late = MatchResult {
+                outcome,
+                winner: None,
+                ..receipt.clone()
+            };
+            assert!(!latch.accepts_result(&late));
+            let model = result_model(&latch, Some(&late), &CareerClient::default());
+            assert_eq!(model.title, "Victory");
+            assert!(!model.summary.contains("abandoned"));
+        }
+        let stale = MatchResult {
+            match_id: receipt.match_id + 1,
+            ..receipt.clone()
+        };
+        assert!(!latch.accepts_result(&stale));
+        assert_eq!(
+            result_model(&latch, Some(&stale), &CareerClient::default()).title,
+            "Victory"
+        );
     }
 
     #[test]

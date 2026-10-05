@@ -74,6 +74,14 @@ impl CombatHost<'_> {
         let class = human.hero.identity.hero_class;
         let origin = [human.hero.x, human.hero.z];
         match command {
+            PracticeCommand::SetNoCooldowns { enabled } => {
+                let player = self.world.players.get_mut(&addr).unwrap();
+                player.modifiers.no_cooldowns = enabled;
+                if enabled {
+                    player.timers.clear_cooldowns();
+                    player.hero.skills.recovery_until = None;
+                }
+            }
             PracticeCommand::Roster => {
                 self.remove_all_bots();
                 self.bots.sandbox = false;
@@ -85,7 +93,9 @@ impl CombatHost<'_> {
                 self.bots.sandbox = true;
                 println!("Practice sandbox: bots cleared by player {requester}");
             }
-            PracticeCommand::SpawnDummy | PracticeCommand::SpawnMovingDummy => {
+            PracticeCommand::SpawnDummy
+            | PracticeCommand::SpawnMovingDummy
+            | PracticeCommand::SpawnAggressiveDummy => {
                 if !matches!(self.world.game_state, GameState::Running) {
                     return;
                 }
@@ -96,7 +106,11 @@ impl CombatHost<'_> {
                     .filter(|(a, _)| {
                         matches!(
                             self.bots.kind(**a),
-                            Some(BotKind::Dummy { .. } | BotKind::MovingDummy { .. })
+                            Some(
+                                BotKind::Dummy { .. }
+                                    | BotKind::MovingDummy { .. }
+                                    | BotKind::AggressiveDummy { .. }
+                            )
                         )
                     })
                     .map(|(a, p)| (p.hero.identity.id, *a))
@@ -118,8 +132,9 @@ impl CombatHost<'_> {
                         BotKind::MovingDummy {
                             anchor,
                             started: now,
-                            respawning: false,
                         }
+                    } else if command == PracticeCommand::SpawnAggressiveDummy {
+                        BotKind::AggressiveDummy { target: requester }
                     } else {
                         BotKind::Dummy { anchor }
                     },

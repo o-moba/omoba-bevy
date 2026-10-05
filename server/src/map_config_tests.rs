@@ -53,7 +53,7 @@ fn default_and_example_preserve_ids_stats_and_reachable_placement() {
     for id in 1..=8 {
         let s = &defaults[&id];
         assert_eq!(s.state.hp, if id <= 6 { 240.0 } else { 650.0 });
-        assert_eq!(s.attack_range, if id <= 6 { 20.0 } else { 24.0 });
+        assert_eq!(s.attack_range, if id <= 6 { 16.0 } else { 19.2 });
         assert_eq!(s.attack_damage, if id <= 6 { 14.0 } else { 18.0 });
         assert_eq!(s.hero_damage_multiplier, 2.0);
         assert_eq!(

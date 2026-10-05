@@ -394,6 +394,10 @@ pub struct SkillWorld {
     seen_deaths: BTreeSet<TargetKey>,
 }
 impl SkillWorld {
+    pub(crate) fn queue_combat_events(&mut self, events: impl IntoIterator<Item = CombatEvent>) {
+        self.pending.extend(events);
+    }
+
     pub(crate) fn rocket_sight(
         &self,
         team: Team,
@@ -661,7 +665,38 @@ pub fn apply_hit(
     } else {
         amount
     };
+    let jungle_buff = (basic
+        && target.kind != TargetKind::Structure
+        && src.entity.kind == CombatEntityKind::Player
+        && amount > 0.0)
+        .then(|| {
+            w.players
+                .values()
+                .find(|player| player.hero.identity.id == src.entity.id)
+                .map(|player| player.economy.jungle_buffs.clone())
+        })
+        .flatten();
+    let amount = amount
+        + jungle_buff
+            .as_ref()
+            .map_or(0.0, |buff| buff.on_hit_damage(now));
     let primary = raw_damage(w, target, amount, kind, src, team, now);
+    if jungle_buff
+        .as_ref()
+        .is_some_and(|buff| buff.ice_active(now))
+    {
+        control(
+            w,
+            c,
+            src.entity.id,
+            team,
+            0.0,
+            crate::jungle_buffs::ICE_MULTIPLIER,
+            crate::jungle_buffs::ICE_SECONDS,
+            0.0,
+            now,
+        );
+    }
     if basic && target.kind != TargetKind::Structure && src.entity.kind == CombatEntityKind::Player
     {
         crate::shop::basic_lifesteal(
@@ -1068,11 +1103,13 @@ fn detonate(w: &mut GameWorld, e: &ActiveEffect, now: Instant) -> Vec<CombatEven
 }
 
 pub fn tick(w: &mut GameWorld, t: TickCtx) -> Vec<CombatEvent> {
+    // Contact attacks can deliver the terminal hit before the next tick.
+    // Drain their accepted receipts even when that hit ended the match.
+    let mut out = std::mem::take(&mut w.skill_runtime.pending);
     if !matches!(w.game_state, GameState::Running) || t.dt <= 0.0 {
-        return Vec::new();
+        return out;
     }
     let now = t.now;
-    let mut out = std::mem::take(&mut w.skill_runtime.pending);
     advanced::tick(w, t, &mut out);
     w.skill_runtime.marks.retain(|_, m| m.expires > now);
     let ids: Vec<_> = w.skill_runtime.effects.keys().copied().collect();

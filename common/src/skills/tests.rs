@@ -220,6 +220,10 @@ fn rocket_mode_spends_mana_snapshot_survives_switch_and_splashes() {
     cast(&mut w, addr(1), 0, [0.0, 0.0], 1, now);
     crate::basic_attack::handle_basic_attack_request(&mut w, addr(1), target(victim), 1, now);
     assert_eq!(w.players[&addr(1)].hero.mana, 496.0);
+    assert_eq!(
+        w.projectiles.values().next().unwrap().state.style,
+        ProjectileStyle::Rocket
+    );
     cast(&mut w, addr(1), 0, [0.0, 0.0], 2, now + duration(0.3));
     assert_eq!(w.players[&addr(1)].hero.skills.mode, WeaponMode::Repeater);
     let events = crate::sim::projectiles::simulate_projectiles(
@@ -230,8 +234,8 @@ fn rocket_mode_spends_mana_snapshot_survives_switch_and_splashes() {
         },
     );
     assert_eq!(events.len(), 2);
-    assert!((w.players[&addr(2)].hero.hp - 980.2).abs() < 0.001);
-    assert!((w.players[&addr(3)].hero.hp - 980.2).abs() < 0.001);
+    assert!((w.players[&addr(2)].hero.hp - 976.6).abs() < 0.001);
+    assert!((w.players[&addr(3)].hero.hp - 976.6).abs() < 0.001);
     cast(&mut w, addr(1), 0, [0.0, 0.0], 3, now + duration(0.6));
     w.players.get_mut(&addr(1)).unwrap().hero.mana = 3.0;
     crate::basic_attack::handle_basic_attack_request(
@@ -612,11 +616,11 @@ fn repeater_stacks_change_accepted_cadence_expire_and_modes_enforce_range() {
     let (mut w, now, victim) = fixture(HeroClass::Wildspark);
     for (request, secs, count, stacks) in [
         (1, 0.0, 1, 1),
-        (2, 0.88, 1, 1),
-        (3, 0.90, 2, 2),
-        (4, 1.69, 2, 2),
-        (5, 1.72, 3, 3),
-        (6, 2.46, 4, 3),
+        (2, 0.61, 1, 1),
+        (3, 0.64, 2, 2),
+        (4, 1.19, 2, 2),
+        (5, 1.22, 3, 3),
+        (6, 1.75, 4, 3),
     ] {
         strike(
             &mut w,
@@ -641,7 +645,7 @@ fn repeater_stacks_change_accepted_cadence_expire_and_modes_enforce_range() {
     );
     assert_eq!(
         hero_stats::basic_attack_cooldown_at(&w.players[&addr(1)], now + duration(5.0)),
-        duration(1.0)
+        duration(0.7)
     );
     strike(&mut w, addr(1), target(victim), 7, now + duration(5.1));
     assert_eq!(w.projectiles.len(), 5);
@@ -658,7 +662,7 @@ fn repeater_stacks_change_accepted_cadence_expire_and_modes_enforce_range() {
     assert!(w.projectiles.is_empty());
     cast(&mut w, addr(1), 0, [0.0, 0.0], 1, now);
     strike(&mut w, addr(1), target(victim), 2, now);
-    strike(&mut w, addr(1), target(victim), 3, now + duration(1.19));
+    strike(&mut w, addr(1), target(victim), 3, now + duration(1.18));
     assert_eq!(w.projectiles.len(), 1);
     strike(&mut w, addr(1), target(victim), 4, now + duration(1.21));
     assert_eq!(w.projectiles.len(), 2);
@@ -902,4 +906,31 @@ fn all_towers_are_public_map_landmarks_without_granting_attack_vision() {
         &w,
         now
     ));
+}
+
+#[test]
+fn repeater_is_single_target_and_keeps_the_fired_mode_after_switching() {
+    let (mut w, now, victim) = fixture(HeroClass::Wildspark);
+    add_player(&mut w, 3, HeroClass::Warrior, Team::Blue, [6.0, 1.0], now);
+    crate::basic_attack::handle_basic_attack_request(&mut w, addr(1), target(victim), 1, now);
+    assert_eq!(
+        w.projectiles.values().next().unwrap().state.style,
+        ProjectileStyle::Bullet
+    );
+    cast(&mut w, addr(1), 0, [0.0, 0.0], 1, now);
+    assert_eq!(
+        w.projectiles.values().next().unwrap().state.style,
+        ProjectileStyle::Bullet
+    );
+    let events = crate::sim::projectiles::simulate_projectiles(
+        &mut w,
+        TickCtx {
+            now: now + duration(0.4),
+            dt: 0.4,
+        },
+    );
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].style, ProjectileStyle::Bullet);
+    assert_eq!(w.players[&addr(3)].hero.hp, 1000.0);
+    assert_eq!(w.players[&addr(1)].hero.mana, 500.0);
 }

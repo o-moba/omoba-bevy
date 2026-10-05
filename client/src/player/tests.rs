@@ -105,15 +105,15 @@ fn player_grounding_preserves_sprite_corners_and_tracks_verdant_walktops() {
         &layout,
         PlayerVisualMode::Sprite2d,
         None,
-        c.x + 24.0,
-        c.z + 26.0,
+        c.x + 24.0 * shared::map::WORLD_SCALE,
+        c.z + 26.0 * shared::map::WORLD_SCALE,
     );
     let model_y = ground_origin_y(
         &layout,
         PlayerVisualMode::Models3d,
         None,
-        c.x + 24.0,
-        c.z + 26.0,
+        c.x + 24.0 * shared::map::WORLD_SCALE,
+        c.z + 26.0 * shared::map::WORLD_SCALE,
     );
     assert!((sprite_y - (0.7 * 5.0 / 6.0 + PLAYER_SIZE * 0.5)).abs() < 0.00001);
     assert!((model_y - (0.35 + PLAYER_SIZE * 0.5)).abs() < 0.00001);

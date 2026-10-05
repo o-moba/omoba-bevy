@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 
-.PHONY: compatibility-manifest compatibility-check help server server-dev practice practice-server game game2d start start-release play play-bots bots stop restart verify-task-12 verify-gameplay iphone-check iphone iphone-box android-check android android-universal check fmt fmt-check lint check-no-qa test test-scripts test-postgres release-check release-local release-mac release-linux release-android release-ios release-testflight release-ci release-draft release-notes showcase demo-video
+.PHONY: compatibility-manifest compatibility-check help server server-dev practice practice-server game game2d start start-release play play-bots bots stop restart verify-task-12 verify-gameplay iphone-check iphone iphone-box android-check android android-universal check fmt fmt-check lint check-no-qa test test-scripts test-postgres release-check release-local release-mac release-linux release-android release-ios release-testflight release-ci release-draft release-notes showcase demo-video trailer-clips
 
 # ---------------------------------------------------------------------------
 # Match modes (TASK-22)
@@ -230,6 +230,12 @@ showcase: ## Capture staged desktop/phone screenshots into SHOWCASE_OUTPUT (defa
 # drawtext (brew install ffmpeg-full). Clips live in scripts/record_demo.py.
 demo-video: ## Record the gameplay demo video into DEMO_OUTPUT (default builds/demo)
 	python3 scripts/record_demo.py --build --output $(DEMO_OUTPUT)
+
+# Clean 60 fps clips for the second trailer: frame-stepped captures of the
+# offline practice (no server), one frame per 1/60 s of game time at any
+# resolution, slower than real time. See promo/trailer-v2-2026-10-05/README.md.
+trailer-clips: ## Record the v2 trailer clips into DEMO_OUTPUT (frame-stepped 60 fps)
+	python3 scripts/record_demo.py --profile v2 --build --output $(DEMO_OUTPUT)
 
 # Every reachable UI screen on desktop and phone, filed by area for the
 # omoba-ui design workspace (next to this repo). Needs a GPU window ~30 min.

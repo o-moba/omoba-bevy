@@ -21,7 +21,7 @@ use crate::wire::ClientPacket;
 pub use crate::practice::{self, PracticeCommand};
 
 /// Hit points of a practice dummy: enough to test a full rotation before it
-/// falls over and returns to its spot.
+/// is removed on death.
 pub const DUMMY_MAX_HP: f32 = 600.0;
 /// How far in front of the requester (toward the enemy base) a dummy stands.
 pub const DUMMY_DISTANCE: f32 = 4.5;

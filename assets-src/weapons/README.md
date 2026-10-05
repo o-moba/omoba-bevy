@@ -28,3 +28,10 @@ Adventurer dagger uses the same canonical grip with a shorter 0.53 m blade-tip
 extent and a distinct diamond profile. Regenerate only this isolated source:
 `/Applications/Blender.app/Contents/MacOS/Blender --background --factory-startup --python scripts/build_dagger_model.py`.
 It writes `dagger.blend` and `dagger.glb`, preserving the pilot armory source.
+
+Original **Wildspark Repeater**, **Wildspark Rocket Launcher**, **Verdant Bow**
+and **Wildspark Rocket** (`wild-repeater.glb`, `wild-launcher.glb`,
+`verdant-bow.glb`, `wild-rocket.glb`) and `ranged-handhelds.blend` are CC-BY-4.0,
+credited to Open Moba contributors. Regenerate using Blender and
+`scripts/build_ranged_handhelds.py`. No external geometry or textures.
+Gun muzzles point along canonical palm +Z; bow limbs follow +Y.

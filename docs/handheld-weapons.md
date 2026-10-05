@@ -1,12 +1,36 @@
-# Handheld weapon pilot
+# Handheld weapons
 
 A handheld is a cosmetic asset, independent of hero class, VRM appearance and
-combat inventory. Warrior defaults to Forge Sword. Combat Test's **Hero / Enemy
+combat inventory. Warrior defaults to Forge Sword; Adventurer to the dagger;
+Ranger to Verdant Bow; Wildspark to the repeater or launcher matching its
+accepted weapon mode; Riftshot to the repeater; Dawnweaver to Dawn Scepter.
+Explicitly equipped local/SDK skins and empty hands override those defaults. Combat Test's **Hero / Enemy
 → Handheld appearance** selects the sword, hammer, scepter, an installed Ekza
 item, class default or empty hands. These choices are stored in sandbox presets,
 validated by the server and replicated to both local and remote actors. Any
 class can select any installed handheld in Combat Test; changing a prop never
 changes damage, reach, projectiles or the skill recipe.
+
+## Current product route
+
+The October 1–2 typed lifecycle supersedes the historical operator-import pilot
+below. Studio supports weapon upload/publication and separate OMOBA review.
+The SDK reads `/v2/assets?kind=weapon&project=omoba&platform=desktop&profile=handheld-glb-v1`;
+Collection → Weapons and draft equipment selection download verified approved
+files into the writable runtime cache. Peers install the same immutable IDs;
+the server independently checks eligibility. A per-model packaged manifest edit
+or game rebuild is not required for this route.
+
+The hosted free-weapon route and two desktop clients have recorded pilot
+acceptance, not a fresh production availability check in this document. Mobile
+runtime integration exists; physical iPhone/Android visual and performance
+acceptance is still separate. Paid ownership/checkout remains future work.
+
+Artists must currently export valid embedded grip metadata: Studio has a generic
+model preview, but no grip editor or avatar-hand placement preview. The export
+contract below is current. Priorities for making this authorable without an
+engineer are in the [creator roadmap](plans/creator-loop-and-class-builder.md).
+See [typed lifecycle and runtime ownership](progress/2026-10-01-asset-lifecycle.md).
 
 ## Attachment
 
@@ -21,9 +45,10 @@ The prop follows the skeletal hierarchy during idle, run, attack and death.
 Unequip, avatar replacement, actor removal and switching to Sprite2d remove the
 attachment. Model normalization scales the prop together with the character.
 No IK, new collider, root motion or per-frame transform copying is required.
-The basic attack already uses the shared `Sword_Attack` clip; scepter and hammer
-currently reuse this one-handed motion. Individual finger posing, two-handed
-IK, bows and weapon-specific motion sets remain separate work.
+Adventurer uses a right-hand thrust for contact attacks; Wildspark uses the
+shared pistol action. The new bow currently uses the existing ranged avatar
+motion path: dedicated bow-draw animation, string deformation and two-handed IK
+remain separate work. No visual prop changes the accepted attack profile.
 
 ## One contract for shipped and Ekza assets
 
@@ -56,7 +81,12 @@ itself does not require a humanoid skeleton.
 The [profile document](profiles/handheld-glb-v1.json) describes
 `omoba / desktop / handheld-glb-v1`. The existing **Ekza SDK** handles the
 catalog query and bounded cached download; no new SDK dependency or fork is
-needed. Omoba adds the static attachment validator and a sidecar catalog:
+needed. Omoba adds the static attachment validator.
+
+## Historical operator-import pilot
+
+The following CLI/sidecar route is retained for controlled local imports and its
+original verification. It is not the current artist-to-game onboarding route:
 
 ```sh
 cargo run -p omoba-passport --bin weapon-import -- https://registry.ekza.io
@@ -79,26 +109,30 @@ OMOBA_ASSET_DIR=/absolute/assets
 
 At startup, imported files are checked again against their hash and embedded
 grip; invalid entries remain unavailable. Clients cannot supply model URLs in
-combat packets. Android/iOS packaging of external imports needs a separate
-asset-source integration; the pilot imports and verifies desktop assets.
+combat packets. This original pilot verified desktop packaging only. The current dynamic
+asset-source path described above supplies runtime installs; physical mobile
+acceptance remains pending.
 
-## Scope and next steps
+## Historical pilot scope and remaining work
 
 The local SDK integration is testable with an HTTP catalog fixture and real
-GLB downloads. The profile has **not been registered/published to the production
-registry**, and these models have not been uploaded to a live Space collection.
+GLB downloads. At the original pilot stage, the profile was not registered in the hosted
+Registry. The subsequent October 1–2 typed rollout registered it and published
+the Forge Hammer; that does not mean every shipped prop is published or that
+Ekza Space itself supports handhelds.
 The `weapon-build --source FILE --output-dir DIRECTORY` adapter implements the
 existing registry RenditionWorker result contract and reuses the Rust validator.
 It preserves bytes; it does not generate a humanoid skeleton or animation. The
 registry's current `none` builder accepts VRM only, so register the supplied
 `omoba-handheld-v1` builder when enabling this profile.
-Studio/Space creator publication and approval of this profile must precede
-public catalog availability. The profile document is an integration deliverable,
-not a claim that production currently lists weapons.
+Studio publication and separate game approval remain necessary for each
+public rendition. See the newer lifecycle evidence for the hosted pilot;
+current production availability must be checked separately.
 
 This pilot includes free built-ins and approved free imports. Paid weapon
-ownership, storefront checkout and a production equipment screen remain future
-work; the importer deliberately excludes `owned` entries. Connect that ownership
+ownership and storefront checkout remain future work; the current game already
+has collection/draft equipment UI. The importer deliberately excludes `owned`
+entries. Connect that ownership
 check to `HandheldSelection::Item` before adding paid props. Do not repurpose
 combat gold/stat items as cosmetic ownership.
 

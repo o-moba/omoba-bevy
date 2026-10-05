@@ -13,7 +13,7 @@
   "hud.goal.unlock_base": "Разрушьте башни одной линии, чтобы открыть базу.",
   "hud.goal.base_hp": "База противника · {hp} / {max} ОЗ",
   "hud.buff.wendigo": "Благосклонность Вендиго: +15% урона способностей — {secs} с",
-  "hud.buff.mutatio": "Мощь Мутацио: +25% урона способностей, +2 ОЗ/с — {secs} с",
+  "hud.buff.mutatio": "Мощь дракона: +25% урона способностей, +2 ОЗ/с — {secs} с",
   "hud.brush.concealed": "КУСТЫ · ВЫ СКРЫТЫ",
   "hud.brush.revealed": "КУСТЫ · ВЫ ОБНАРУЖЕНЫ",
   "hud.fps": "{value} FPS"

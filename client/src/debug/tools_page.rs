@@ -22,7 +22,7 @@ use super::{ClientDebugAccess, DebugAccessSet, DebugToggles};
 use crate::combat::ActionFeedback;
 use crate::net::NetworkCommand;
 use crate::pause_menu::{PauseAction, PauseMenuSet, PauseMenuState};
-use crate::ui::{Activated, UiActionAppExt, theme, theme::ButtonKind, widgets};
+use crate::ui::{Activated, ScrollArea, UiActionAppExt, theme, theme::ButtonKind, widgets};
 
 pub(crate) struct PracticeSandboxPlugin;
 
@@ -113,12 +113,14 @@ impl ToolsPart {
 pub(crate) enum PracticeAction {
     Back,
     GodMode,
+    NoCooldowns,
     SpeedBoost,
     OpenCombatTest,
     Roster,
     ClearBots,
     SpawnDummy,
     SpawnMovingDummy,
+    SpawnAggressiveDummy,
     StartDuel,
     LevelDown,
     LevelUp,
@@ -129,6 +131,7 @@ pub(crate) enum PracticeAction {
 #[derive(Component, Clone, Copy, PartialEq, Eq, Debug)]
 enum PracticeLabel {
     GodMode,
+    NoCooldowns,
     SpeedBoost,
     Level,
     Gold,
@@ -155,9 +158,13 @@ pub(crate) fn spawn_practice_section(panel: &mut ChildSpawnerCommands) {
                 display: Display::None,
                 align_items: AlignItems::Center,
                 justify_content: JustifyContent::FlexStart,
-                flex_shrink: 0.0,
+                width: Val::Percent(100.0),
+                height: Val::Percent(100.0),
+                min_height: Val::Px(0.0),
+                overflow: Overflow::scroll_y(),
                 ..default()
             },
+            ScrollArea::menu(32.0),
             Visibility::Hidden,
             PracticeSection,
             Name::new("PauseMenuPracticeSection"),
@@ -184,6 +191,18 @@ pub(crate) fn spawn_practice_section(panel: &mut ChildSpawnerCommands) {
                         PracticeLabel::GodMode,
                         PracticeAction::GodMode,
                         "PauseMenuPracticeGodMode",
+                    );
+                    part(toggles, ToolsPart::Practice, "PauseMenuPracticeCooldowns").with_children(
+                        |row| {
+                            widgets::toggle_row(
+                                row,
+                                "Zero cooldown",
+                                "OFF",
+                                PracticeLabel::NoCooldowns,
+                                PracticeAction::NoCooldowns,
+                                "PauseMenuPracticeNoCooldowns",
+                            );
+                        },
                     );
                     widgets::toggle_row(
                         toggles,
@@ -230,6 +249,18 @@ pub(crate) fn spawn_practice_section(panel: &mut ChildSpawnerCommands) {
                     PracticeAction::SpawnMovingDummy,
                     "PauseMenuPracticeMovingDummyButton",
                 );
+                widgets::button(
+                    bots,
+                    "Spawn attacking target",
+                    ButtonKind::Secondary,
+                    PracticeAction::SpawnAggressiveDummy,
+                    "PauseMenuPracticeAggressiveDummyButton",
+                );
+                bots.spawn((
+                    Text::new("Targets disappear on death."),
+                    theme::text(13.0),
+                    TextColor(theme::MUTED),
+                ));
                 bots.spawn((
                     Text::new("1v1 opponent"),
                     theme::text(18.0),
@@ -302,6 +333,7 @@ fn part<'a>(
         Node {
             flex_direction: FlexDirection::Column,
             row_gap: Val::Px(8.0),
+            flex_shrink: 0.0,
             align_items: AlignItems::Center,
             display: Display::None,
             ..default()
@@ -376,7 +408,9 @@ fn apply_practice_actions(
                 PracticeAction::GodMode | PracticeAction::SpeedBoost => access.toggles(),
                 PracticeAction::OpenCombatTest => access.combat_test,
                 PracticeAction::Back => true,
-                PracticeAction::Roster
+                PracticeAction::NoCooldowns
+                | PracticeAction::SpawnAggressiveDummy
+                | PracticeAction::Roster
                 | PracticeAction::ClearBots
                 | PracticeAction::SpawnDummy
                 | PracticeAction::SpawnMovingDummy
@@ -406,6 +440,25 @@ fn apply_practice_actions(
                 } else {
                     "God mode off."
                 });
+            }
+            PracticeAction::NoCooldowns => {
+                toggles.no_cooldowns = !toggles.no_cooldowns;
+                commands.write(NetworkCommand::Debug(DebugCommand::Practice(
+                    PracticeCommand::SetNoCooldowns {
+                        enabled: toggles.no_cooldowns,
+                    },
+                )));
+                say(if toggles.no_cooldowns {
+                    "Zero cooldown on."
+                } else {
+                    "Zero cooldown off."
+                });
+            }
+            PracticeAction::SpawnAggressiveDummy => {
+                commands.write(NetworkCommand::Debug(DebugCommand::Practice(
+                    PracticeCommand::SpawnAggressiveDummy,
+                )));
+                say("Attacking target placed near you.");
             }
             PracticeAction::SpeedBoost => {
                 toggles.speed_boost = !toggles.speed_boost;
@@ -498,6 +551,7 @@ fn update_practice_labels(
     for (label, mut text) in &mut labels {
         text.0 = match label {
             PracticeLabel::GodMode => on_off(toggles.god_mode).to_owned(),
+            PracticeLabel::NoCooldowns => on_off(toggles.no_cooldowns).to_owned(),
             PracticeLabel::SpeedBoost => on_off(toggles.speed_boost).to_owned(),
             PracticeLabel::Level => state.duel_level.to_string(),
             PracticeLabel::Gold => state.duel_gold.to_string(),
@@ -712,6 +766,33 @@ mod tests {
     /// Step 11e: the page follows access. Dev (without `OMOBA_DEBUG_UI`)
     /// gets the toggles only; practice gets everything; a worker round
     /// (new server: `Some(all false)`) and release get nothing.
+    #[test]
+    fn zero_cooldown_and_attacking_targets_are_practice_only() {
+        let mut app = page_app();
+        set_mode(&mut app, "dev", None);
+        app.update();
+        assert!(press(&mut app, PracticeAction::NoCooldowns).is_empty());
+        assert!(press(&mut app, PracticeAction::SpawnAggressiveDummy).is_empty());
+        set_mode(&mut app, "practice", None);
+        app.update();
+        assert!(matches!(
+            press(&mut app, PracticeAction::NoCooldowns).as_slice(),
+            [NetworkCommand::Debug(DebugCommand::Practice(
+                PracticeCommand::SetNoCooldowns { enabled: true }
+            ))]
+        ));
+        assert!(app.world().resource::<DebugToggles>().no_cooldowns);
+        assert!(matches!(
+            press(&mut app, PracticeAction::SpawnAggressiveDummy).as_slice(),
+            [NetworkCommand::Debug(DebugCommand::Practice(
+                PracticeCommand::SpawnAggressiveDummy
+            ))]
+        ));
+        set_mode(&mut app, "dev", None);
+        app.update();
+        assert!(!app.world().resource::<DebugToggles>().no_cooldowns);
+    }
+
     #[test]
     fn the_page_shows_what_access_allows() {
         let mut app = page_app();

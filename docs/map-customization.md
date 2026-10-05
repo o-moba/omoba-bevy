@@ -184,10 +184,14 @@ projectile skins have their own [combat registry](combat-cosmetics.md).
 
 ## Geometry is a separate versioned contract
 
-The supported geometry is `verdant-confluence-v1`. Shared layout coordinates,
+The supported geometry is `verdant-confluence-compact-v2`. Shared layout coordinates,
 static collision and authored terrain must agree. Snapshots identify the arena;
-a client with incompatible geometry refuses to apply it. This release edits
-objects on the existing Verdant map. Rescaling the entire map, reshaping roads,
+a client with incompatible geometry refuses to apply it. Version 0.42 uses a compiled `WORLD_SCALE = 0.8` profile: terrain,
+static collisions, brush, lanes and base anchors share the same XZ transform;
+model height and hero speed/ranges stay in world units. River width is 12 m.
+Default tower/base ranges scale to 16/19.2 m; explicit custom ranges stay
+unchanged. Base-side towers have a shorter visual silhouette. Map JSON still
+configures structures and tier disabling, not arbitrary per-match terrain scale. Rescaling the entire map, reshaping roads,
 moving base pads, or moving solid forest obstacles requires a matching geometry
 and collision export and a new geometry revision. A cosmetic model edit cannot
 silently remove server obstacles.

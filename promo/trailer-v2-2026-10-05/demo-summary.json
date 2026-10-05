@@ -1,0 +1,575 @@
+{
+  "schema_version": 1,
+  "generator": "scripts/record_demo.py",
+  "profile": "v2",
+  "recorded_on": "2026-10-05",
+  "source": {
+    "commit": "db0014a11a0efc20511f594bcce7a4b248993d0d",
+    "dirty": true,
+    "version": "0.41.0"
+  },
+  "method": "scripted production inputs against the in-process offline practice (server bots); frame-stepped window readbacks, one per 1/60 s of game time; no captions",
+  "clips": [
+    {
+      "clip": "phone-wildspark",
+      "scale": 3.0,
+      "touch": true,
+      "script": "showcase",
+      "hero": "wildspark",
+      "lane": "mid",
+      "zoom": 0.62,
+      "label": "Phone interface · Wildspark",
+      "offline": true,
+      "fps": 60,
+      "size": [
+        2532,
+        1170
+      ],
+      "client_exit_code": 0,
+      "events": [
+        {
+          "seconds": 0.0,
+          "subtitle": "Every class, one tap each",
+          "title": "Hero roster"
+        },
+        {
+          "seconds": 15.833333333333334,
+          "subtitle": "Waves meet in the middle",
+          "title": "To the lane"
+        },
+        {
+          "seconds": 33.31666666666667,
+          "subtitle": "Attacks and the four abilities",
+          "title": "Lane fight"
+        }
+      ],
+      "pace": [
+        {
+          "seconds": 15.85,
+          "speed": 4.0
+        },
+        {
+          "seconds": 33.3,
+          "speed": 1.0
+        },
+        {
+          "seconds": 38.1,
+          "speed": 4.0
+        },
+        {
+          "seconds": 41.75,
+          "speed": 1.0
+        },
+        {
+          "seconds": 60.916666666666664,
+          "speed": 4.0
+        },
+        {
+          "seconds": 62.38333333333333,
+          "speed": 1.0
+        }
+      ],
+      "pass": true,
+      "attempt": 1,
+      "encoded_seconds": 62.5,
+      "video": {
+        "file": "sources/clips/phone-wildspark.mp4",
+        "bytes": 115068846,
+        "sha256": "07b1b013a47285ac8876842bc6bbcf80ec2a99275334515592863e66d57917e7",
+        "seconds": 62.5,
+        "video_codec": "h264",
+        "width": 2532,
+        "height": 1170,
+        "fps": 60.0,
+        "pixel_format": "yuv420p"
+      },
+      "frame_count": 3750,
+      "binary_sha256": "ef0ea705b97139ba0d7688c9ef8a09ae0d202cd3a341bd2cbe56b4eb84200b8e",
+      "recorded_on": "2026-10-05"
+    },
+    {
+      "clip": "phone-stormfist",
+      "scale": 3.0,
+      "touch": true,
+      "script": "lane",
+      "hero": "stormfist",
+      "lane": "top",
+      "zoom": 0.62,
+      "label": "Phone interface · Stormfist",
+      "offline": true,
+      "fps": 60,
+      "size": [
+        2532,
+        1170
+      ],
+      "client_exit_code": 0,
+      "events": [
+        {
+          "seconds": 1.1,
+          "subtitle": "Waves meet in the middle",
+          "title": "To the lane"
+        },
+        {
+          "seconds": 35.483333333333334,
+          "subtitle": "Attacks and the four abilities",
+          "title": "Lane fight"
+        }
+      ],
+      "pace": [
+        {
+          "seconds": 1.1166666666666667,
+          "speed": 4.0
+        },
+        {
+          "seconds": 35.46666666666667,
+          "speed": 1.0
+        },
+        {
+          "seconds": 40.516666666666666,
+          "speed": 4.0
+        },
+        {
+          "seconds": 47.36666666666667,
+          "speed": 1.0
+        },
+        {
+          "seconds": 53.016666666666666,
+          "speed": 4.0
+        },
+        {
+          "seconds": 55.25,
+          "speed": 1.0
+        },
+        {
+          "seconds": 71.46666666666667,
+          "speed": 4.0
+        },
+        {
+          "seconds": 101.0,
+          "speed": 1.0
+        },
+        {
+          "seconds": 105.25,
+          "speed": 4.0
+        },
+        {
+          "seconds": 113.3,
+          "speed": 1.0
+        }
+      ],
+      "pass": true,
+      "attempt": 1,
+      "encoded_seconds": 118.21666666666667,
+      "video": {
+        "file": "sources/clips/phone-stormfist.mp4",
+        "bytes": 197516843,
+        "sha256": "fdc8e8ba02b477976c2243ba75a2096361bb6a71a693a895c4d770081069e24d",
+        "seconds": 118.217,
+        "video_codec": "h264",
+        "width": 2532,
+        "height": 1170,
+        "fps": 60.0,
+        "pixel_format": "yuv420p"
+      },
+      "frame_count": 7093,
+      "binary_sha256": "e5930fd7e82e9aa4f8cc80769db5e51953d4406fcf582324bc78d53829549995",
+      "recorded_on": "2026-10-05"
+    },
+    {
+      "clip": "phone-emberveil",
+      "scale": 3.0,
+      "touch": true,
+      "script": "lane",
+      "hero": "emberveil",
+      "lane": "bot",
+      "zoom": 0.62,
+      "label": "Phone interface · Emberveil",
+      "offline": true,
+      "fps": 60,
+      "size": [
+        2532,
+        1170
+      ],
+      "client_exit_code": 0,
+      "events": [
+        {
+          "seconds": 1.1,
+          "subtitle": "Waves meet in the middle",
+          "title": "To the lane"
+        },
+        {
+          "seconds": 37.2,
+          "subtitle": "Attacks and the four abilities",
+          "title": "Lane fight"
+        }
+      ],
+      "pace": [
+        {
+          "seconds": 1.1166666666666667,
+          "speed": 4.0
+        },
+        {
+          "seconds": 37.18333333333333,
+          "speed": 1.0
+        },
+        {
+          "seconds": 37.233333333333334,
+          "speed": 4.0
+        },
+        {
+          "seconds": 37.8,
+          "speed": 1.0
+        },
+        {
+          "seconds": 50.2,
+          "speed": 4.0
+        },
+        {
+          "seconds": 57.25,
+          "speed": 1.0
+        },
+        {
+          "seconds": 60.88333333333333,
+          "speed": 4.0
+        },
+        {
+          "seconds": 64.43333333333334,
+          "speed": 1.0
+        },
+        {
+          "seconds": 76.7,
+          "speed": 4.0
+        },
+        {
+          "seconds": 76.71666666666667,
+          "speed": 1.0
+        }
+      ],
+      "pass": true,
+      "attempt": 1,
+      "encoded_seconds": 84.45,
+      "video": {
+        "file": "sources/clips/phone-emberveil.mp4",
+        "bytes": 128588588,
+        "sha256": "d9ee4125a0217acf6a1b4c745efc6778ad2a41e1bae94418d2383199e10e553f",
+        "seconds": 84.45,
+        "video_codec": "h264",
+        "width": 2532,
+        "height": 1170,
+        "fps": 60.0,
+        "pixel_format": "yuv420p"
+      },
+      "frame_count": 5067,
+      "binary_sha256": "e5930fd7e82e9aa4f8cc80769db5e51953d4406fcf582324bc78d53829549995",
+      "recorded_on": "2026-10-05"
+    },
+    {
+      "clip": "phone-warden",
+      "scale": 3.0,
+      "touch": true,
+      "script": "jungle",
+      "hero": "warden",
+      "zoom": 0.62,
+      "label": "Phone interface · Warden",
+      "offline": true,
+      "fps": 60,
+      "size": [
+        2532,
+        1170
+      ],
+      "client_exit_code": 0,
+      "events": [
+        {
+          "seconds": 1.1,
+          "subtitle": "Forest Tracker: faster camps, more gold",
+          "title": "Warden jungler"
+        },
+        {
+          "seconds": 4.633333333333334,
+          "subtitle": "Neutral creatures fight back and respawn",
+          "title": "Jungle camps"
+        }
+      ],
+      "pace": [
+        {
+          "seconds": 1.1166666666666667,
+          "speed": 4.0
+        },
+        {
+          "seconds": 4.616666666666666,
+          "speed": 1.0
+        },
+        {
+          "seconds": 6.366666666666666,
+          "speed": 4.0
+        },
+        {
+          "seconds": 7.133333333333334,
+          "speed": 1.0
+        },
+        {
+          "seconds": 12.85,
+          "speed": 4.0
+        },
+        {
+          "seconds": 27.433333333333334,
+          "speed": 1.0
+        },
+        {
+          "seconds": 31.35,
+          "speed": 4.0
+        },
+        {
+          "seconds": 50.81666666666667,
+          "speed": 1.0
+        },
+        {
+          "seconds": 55.0,
+          "speed": 4.0
+        },
+        {
+          "seconds": 55.516666666666666,
+          "speed": 1.0
+        },
+        {
+          "seconds": 60.833333333333336,
+          "speed": 4.0
+        },
+        {
+          "seconds": 74.91666666666667,
+          "speed": 1.0
+        },
+        {
+          "seconds": 79.06666666666666,
+          "speed": 4.0
+        },
+        {
+          "seconds": 98.13333333333334,
+          "speed": 1.0
+        },
+        {
+          "seconds": 102.25,
+          "speed": 4.0
+        },
+        {
+          "seconds": 102.75,
+          "speed": 1.0
+        },
+        {
+          "seconds": 108.01666666666667,
+          "speed": 4.0
+        },
+        {
+          "seconds": 121.78333333333333,
+          "speed": 1.0
+        },
+        {
+          "seconds": 125.85,
+          "speed": 4.0
+        },
+        {
+          "seconds": 144.56666666666666,
+          "speed": 1.0
+        },
+        {
+          "seconds": 148.61666666666667,
+          "speed": 4.0
+        },
+        {
+          "seconds": 149.11666666666667,
+          "speed": 1.0
+        },
+        {
+          "seconds": 154.35,
+          "speed": 4.0
+        },
+        {
+          "seconds": 167.86666666666667,
+          "speed": 1.0
+        }
+      ],
+      "pass": true,
+      "attempt": 2,
+      "encoded_seconds": 171.55,
+      "video": {
+        "file": "sources/clips/phone-warden.mp4",
+        "bytes": 388410566,
+        "sha256": "d54e1e262b55ee187945b68d5b05e22033c7600454a2f464f1454f8b91bd0948",
+        "seconds": 171.55,
+        "video_codec": "h264",
+        "width": 2532,
+        "height": 1170,
+        "fps": 60.0,
+        "pixel_format": "yuv420p"
+      },
+      "frame_count": 10293,
+      "binary_sha256": "3bdce3e57661373eff5c1103a1149bb843d4ae13acf083d3ebca60f7bcb74c23",
+      "recorded_on": "2026-10-05"
+    },
+    {
+      "clip": "desktop-dawnweaver",
+      "scale": 2.0,
+      "touch": false,
+      "script": "showcase",
+      "hero": "dawnweaver",
+      "lane": "mid",
+      "zoom": 0.62,
+      "label": "Desktop · Dawnweaver",
+      "offline": true,
+      "fps": 60,
+      "size": [
+        2560,
+        1440
+      ],
+      "client_exit_code": 0,
+      "events": [
+        {
+          "seconds": 0.0,
+          "subtitle": "Every class, one tap each",
+          "title": "Hero roster"
+        },
+        {
+          "seconds": 11.3,
+          "subtitle": "Waves meet in the middle",
+          "title": "To the lane"
+        },
+        {
+          "seconds": 28.833333333333332,
+          "subtitle": "Attacks and the four abilities",
+          "title": "Lane fight"
+        }
+      ],
+      "pace": [
+        {
+          "seconds": 11.316666666666666,
+          "speed": 4.0
+        },
+        {
+          "seconds": 28.816666666666666,
+          "speed": 1.0
+        },
+        {
+          "seconds": 34.28333333333333,
+          "speed": 4.0
+        },
+        {
+          "seconds": 39.21666666666667,
+          "speed": 1.0
+        },
+        {
+          "seconds": 56.0,
+          "speed": 4.0
+        },
+        {
+          "seconds": 57.93333333333333,
+          "speed": 1.0
+        }
+      ],
+      "pass": true,
+      "attempt": 1,
+      "encoded_seconds": 59.766666666666666,
+      "video": {
+        "file": "sources/clips/desktop-dawnweaver.mp4",
+        "bytes": 118614484,
+        "sha256": "3ed232622144d399cbbc586c745484503c4c48a3e5df0c699a82caeceaad493d",
+        "seconds": 59.767,
+        "video_codec": "h264",
+        "width": 2560,
+        "height": 1440,
+        "fps": 60.0,
+        "pixel_format": "yuv420p"
+      },
+      "frame_count": 3586,
+      "binary_sha256": "3bdce3e57661373eff5c1103a1149bb843d4ae13acf083d3ebca60f7bcb74c23",
+      "recorded_on": "2026-10-05"
+    },
+    {
+      "clip": "desktop-frostguard",
+      "scale": 2.0,
+      "touch": false,
+      "script": "lane",
+      "hero": "frostguard",
+      "lane": "top",
+      "zoom": 0.62,
+      "label": "Desktop · Frostguard",
+      "offline": true,
+      "fps": 60,
+      "size": [
+        2560,
+        1440
+      ],
+      "client_exit_code": 0,
+      "events": [
+        {
+          "seconds": 1.1,
+          "subtitle": "Waves meet in the middle",
+          "title": "To the lane"
+        },
+        {
+          "seconds": 30.283333333333335,
+          "subtitle": "Attacks and the four abilities",
+          "title": "Lane fight"
+        }
+      ],
+      "pace": [
+        {
+          "seconds": 1.1166666666666667,
+          "speed": 4.0
+        },
+        {
+          "seconds": 30.266666666666666,
+          "speed": 1.0
+        },
+        {
+          "seconds": 30.316666666666666,
+          "speed": 4.0
+        },
+        {
+          "seconds": 31.633333333333333,
+          "speed": 1.0
+        },
+        {
+          "seconds": 38.0,
+          "speed": 4.0
+        },
+        {
+          "seconds": 45.733333333333334,
+          "speed": 1.0
+        },
+        {
+          "seconds": 55.13333333333333,
+          "speed": 4.0
+        },
+        {
+          "seconds": 56.733333333333334,
+          "speed": 1.0
+        },
+        {
+          "seconds": 67.78333333333333,
+          "speed": 4.0
+        },
+        {
+          "seconds": 98.6,
+          "speed": 1.0
+        }
+      ],
+      "pass": true,
+      "attempt": 1,
+      "encoded_seconds": 107.83333333333333,
+      "video": {
+        "file": "sources/clips/desktop-frostguard.mp4",
+        "bytes": 230229857,
+        "sha256": "68e1b5929cf7a835fac11ad665665900e6d5add25d0f631d110f8ad6568334c1",
+        "seconds": 107.833,
+        "video_codec": "h264",
+        "width": 2560,
+        "height": 1440,
+        "fps": 60.0,
+        "pixel_format": "yuv420p"
+      },
+      "frame_count": 6470,
+      "binary_sha256": "3bdce3e57661373eff5c1103a1149bb843d4ae13acf083d3ebca60f7bcb74c23",
+      "recorded_on": "2026-10-05"
+    }
+  ]
+}

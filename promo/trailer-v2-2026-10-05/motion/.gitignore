@@ -1,0 +1,4 @@
+# Media and build output of the edit stay out of git.
+node_modules/
+public/
+out/

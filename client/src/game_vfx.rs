@@ -1071,6 +1071,27 @@ fn emit_skill_cast_particles(
         {
             continue;
         }
+        if action.slot == shared::BASIC_ATTACK_ACTION_SLOT
+            && crate::equipped_skills::resolve(class.0, loadout)
+                .and_then(|skills| skills.resolved())
+                .is_some_and(|skills| {
+                    skills.attack_profile() == shared::loadout::AttackProfileId::Melee
+                })
+        {
+            let forward = pose.forward().as_vec3();
+            output.write(FlightParticles(vec![Particle {
+                event_id: action.sequence,
+                origin: pose.translation + Vec3::Y * 0.8 + forward * 0.65,
+                velocity: Vec3::ZERO,
+                age: 0.0,
+                lifetime: 0.2,
+                size: 0.8,
+                angle: forward.z.atan2(forward.x),
+                color: Color::srgb(0.75, 0.95, 1.0),
+                shape: Shape::Slash,
+            }]));
+            continue;
+        }
         let Some(profile) =
             profiles.action_profile(class.0, loadout.and_then(|l| l.0.as_ref()), action.slot)
         else {

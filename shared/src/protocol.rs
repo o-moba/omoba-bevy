@@ -6,9 +6,9 @@ mod wire_enums;
 
 use serde::{Deserialize, Serialize};
 
-// Version 9 makes skill bindings independent of their progression role and
-// adds validated laboratory recipes. Deploy matching clients and hosts together.
-pub const PROTOCOL_VERSION: u16 = 9;
+// Version 10 adds practice commands, public respawn timers and distinct bullet/rocket styles.
+// The release handshake also gates the compact map and revised combat catalogue.
+pub const PROTOCOL_VERSION: u16 = 10;
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]

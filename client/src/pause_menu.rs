@@ -2113,6 +2113,15 @@ mod tests {
     // Real Bevy/Taffy layout, font measurement and clipping; no fabricated
     // ComputedNode rectangles. GPU/window event loop are not required.
     fn layout_app(size: Vec2, dpi: f32, mobile_enabled: bool) -> (App, Entity) {
+        layout_app_with_practice(size, dpi, mobile_enabled, false)
+    }
+
+    fn layout_app_with_practice(
+        size: Vec2,
+        dpi: f32,
+        mobile_enabled: bool,
+        practice: bool,
+    ) -> (App, Entity) {
         use bevy::camera::{ComputedCameraValues, RenderTargetInfo};
         let mut app = App::new();
         app.add_plugins((
@@ -2191,6 +2200,10 @@ mod tests {
                 ..default()
             },
         ));
+        if practice {
+            app.add_message::<crate::net::NetworkCommand>()
+                .add_plugins(crate::debug::PracticeSandboxPlugin);
+        }
         app.finish();
         app.cleanup();
         for _ in 0..5 {
@@ -2291,6 +2304,52 @@ mod tests {
             );
             assert!(app.world().resource::<Messages<AppExit>>().is_empty());
         }
+    }
+
+    #[test]
+    fn practice_tools_scroll_to_last_action_on_phone() {
+        let (mut app, window) = layout_app_with_practice(Vec2::new(852.0, 393.0), 1.0, true, true);
+        app.insert_resource(ClientSession::admitted_for_test())
+            .insert_resource(crate::debug::ClientDebugAccess {
+                server: shared::debug::DebugAccess {
+                    toggles: true,
+                    practice: true,
+                },
+                combat_test: false,
+            });
+        app.world_mut().resource_mut::<PauseMenuState>().in_settings = false;
+        app.world_mut()
+            .resource_mut::<crate::debug::tools_page::PracticeSandboxState>()
+            .open = true;
+        for _ in 0..3 {
+            app.update();
+        }
+        let body = named(&mut app, "PauseMenuPracticeSection");
+        let last = named(&mut app, "PauseMenuPracticeBackButton");
+        let area = rect(&app, body, 1.0);
+        assert!(area.height() > 100.0 && area.max.y <= 393.0, "{area:?}");
+        for id in 1..10 {
+            for (phase, point) in [
+                (TouchPhase::Started, area.center()),
+                (TouchPhase::Moved, area.center() - Vec2::Y * 160.0),
+                (TouchPhase::Ended, area.center() - Vec2::Y * 160.0),
+            ] {
+                app.world_mut().write_message(TouchInput {
+                    phase,
+                    position: point,
+                    window,
+                    id,
+                    force: None,
+                });
+                app.update();
+            }
+        }
+        assert!(app.world().get::<ScrollPosition>(body).unwrap().y > 0.0);
+        let last_rect = rect(&app, last, 1.0);
+        assert!(
+            last_rect.height() >= 40.0 && area.contains(last_rect.center()),
+            "last tool must be reachable: {last_rect:?} in {area:?}"
+        );
     }
 
     #[test]

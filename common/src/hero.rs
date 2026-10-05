@@ -17,6 +17,8 @@ use crate::progression::xp_threshold_for_level;
 /// retained `ConnectedPlayer`); `reset_player_round` clears it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct HeroEconomy {
+    /// Individual camp rewards; refreshed on a kill and cleared each round.
+    pub jungle_buffs: crate::jungle_buffs::JungleBuffs,
     pub gold: u32,
     pub earned_gold: u32,
     pub inventory: Vec<ItemId>,
@@ -37,6 +39,7 @@ impl HeroEconomy {
     /// A fresh wallet at round start.
     pub fn starting() -> Self {
         Self {
+            jungle_buffs: Default::default(),
             gold: STARTING_GOLD,
             earned_gold: 0,
             inventory: Vec::new(),

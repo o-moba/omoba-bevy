@@ -37,14 +37,14 @@ pub const BASE_TOWER_MAX_HP: f32 = 650.0;
 pub const TOWER_SIZE: f32 = shared::TOWER_TARGET_RADIUS * 2.0;
 pub const BASE_TOWER_SIZE: f32 = shared::BASE_TOWER_TARGET_RADIUS * 2.0;
 #[cfg(any(test, feature = "test-support"))]
-pub const TOWER_RANGE: f32 = 20.0;
+pub const TOWER_RANGE: f32 = 20.0 * shared::map::WORLD_SCALE;
 #[cfg(any(test, feature = "test-support"))]
 pub const TOWER_DAMAGE: f32 = 14.0;
 #[cfg(any(test, feature = "test-support"))]
 pub const TOWER_COOLDOWN: Duration = Duration::from_millis(900);
 pub const TOWER_SHOT_HEIGHT: f32 = 2.4;
 #[cfg(any(test, feature = "test-support"))]
-pub const BASE_TOWER_RANGE: f32 = 24.0;
+pub const BASE_TOWER_RANGE: f32 = 24.0 * shared::map::WORLD_SCALE;
 #[cfg(any(test, feature = "test-support"))]
 pub const BASE_TOWER_DAMAGE: f32 = 18.0;
 #[cfg(any(test, feature = "test-support"))]
@@ -175,10 +175,10 @@ pub const VICTORY_REMATCH_DELAY: Duration = Duration::from_secs(10);
 
 // --- Map generation (affects lane length and jungle placement) ---
 #[cfg(any(test, feature = "test-support"))]
-pub const TARGET_BASE_RUN_TIME_SECONDS: f32 = 45.0;
+pub const TARGET_BASE_RUN_TIME_SECONDS: f32 = shared::map::TARGET_BASE_DISTANCE / PLAYER_SPEED;
 pub use shared::hero_balance::PLAYER_SPEED;
 #[cfg(any(test, feature = "test-support"))]
-pub const TARGET_BASE_DISTANCE: f32 = PLAYER_SPEED * TARGET_BASE_RUN_TIME_SECONDS;
+pub const TARGET_BASE_DISTANCE: f32 = shared::map::TARGET_BASE_DISTANCE;
 
 #[cfg(test)]
 mod tests {

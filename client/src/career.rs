@@ -383,14 +383,13 @@ impl CareerClient {
         self.nickname_focused = true;
         self.friend_code_focused = false;
     }
-    /// Opens the match detail of the last result from outside the career UI
-    /// (the result screen's Details). Does nothing without a result.
-    pub(crate) fn open_last_result_modal(&mut self) {
-        if let Some(id) = self.view.last_result.as_ref().map(|r| r.result_id.clone()) {
-            self.selected_result = Some(id);
-            self.expanded_player = None;
-            self.modal = CareerModal::Result;
-        }
+    /// Opens the exact receipt accepted by the result screen. A late live
+    /// snapshot may already have replaced `last_result` with another outcome.
+    pub(crate) fn open_result_modal(&mut self, result: &MatchResult) {
+        self.selected_result = Some(result.result_id.clone());
+        self.view.detail = Some(result.clone());
+        self.expanded_player = None;
+        self.modal = CareerModal::Result;
     }
     /// Opens the profile modal from outside the career UI (front-end shell).
     pub(crate) fn open_profile_modal(&mut self) {
@@ -445,7 +444,12 @@ impl Plugin for CareerPlugin {
                     .in_set(InputContextSet::Modal)
                     .in_set(CareerUiSet),
             )
-            .add_systems(Update, render.after(CareerUiSet))
+            .add_systems(
+                Update,
+                render
+                    .after(CareerUiSet)
+                    .after(crate::pause_menu::PauseMenuSet::Visuals),
+            )
             .add_systems(
                 Update,
                 clear_account_on_scope_reset.in_set(SessionReactions),
@@ -2207,7 +2211,10 @@ fn render(
     profile: Res<crate::ui::UiPlatform>,
     windows: Query<&Window, With<PrimaryWindow>>,
     mobile: Option<Res<crate::mobile_controls::MobileControls>>,
-    pause: Option<Res<crate::pause_menu::PauseMenuState>>,
+    (pause, practice): (
+        Option<Res<crate::pause_menu::PauseMenuState>>,
+        Option<Res<crate::debug::tools_page::PracticeSandboxState>>,
+    ),
     game: Option<Res<GameStateSnapshot>>,
     session: Option<Res<crate::net::ClientSession>>,
     // Grouped: a system takes at most 16 parameters.
@@ -2276,6 +2283,7 @@ fn render(
         && !front_end_menu;
     let show_entry = !front_end_menu
         && pause.as_ref().is_none_or(|pause| !pause.in_settings)
+        && !practice.as_ref().is_some_and(|practice| practice.open)
         && (selection_recovery
             || queue_text(&career.view.queue).is_some()
             || !game
@@ -2770,6 +2778,31 @@ mod tests {
         }
     }
     #[test]
+    fn accepted_result_modal_uses_its_receipt_after_conflicting_live_updates() {
+        let accepted = result();
+        let mut conflicting = accepted.clone();
+        conflicting.outcome = MatchOutcome::Abandoned;
+        conflicting.winner = None;
+        let mut career = CareerClient {
+            public_profile_id: Some("a".repeat(64)),
+            hold_result_modal: true,
+            ..default()
+        };
+        career.apply_view(CareerView {
+            last_result: Some(conflicting.clone()),
+            ..default()
+        });
+        career.open_result_modal(&accepted);
+        assert_eq!(career.result(), Some(&accepted));
+        career.apply_view(CareerView {
+            last_result: Some(conflicting),
+            ..default()
+        });
+        assert_eq!(career.result(), Some(&accepted));
+        assert_eq!(result_title(career.result().unwrap(), &career), "Victory");
+    }
+
+    #[test]
     fn results_survive_live_reset_and_close_without_reopening() {
         let mut career = CareerClient {
             public_profile_id: Some("a".repeat(64)),
@@ -3161,8 +3194,9 @@ mod tests {
         assert!(modal_layer > entry_layer);
     }
     #[test]
-    fn career_navigation_hides_only_inside_settings_and_returns_to_pause() {
+    fn career_navigation_hides_inside_settings_and_practice_then_returns_to_pause() {
         let mut app = render_app(UiProfile::Mobile, CareerModal::Closed);
+        app.init_resource::<crate::debug::tools_page::PracticeSandboxState>();
         app.insert_resource(GameStateSnapshot {
             state: GameState::Running,
             ..default()
@@ -3203,6 +3237,20 @@ mod tests {
             .in_settings = false;
         app.update();
         assert_eq!(nav_count(&mut app), 3);
+        app.world_mut()
+            .resource_mut::<crate::debug::tools_page::PracticeSandboxState>()
+            .open = true;
+        app.update();
+        assert_eq!(
+            nav_count(&mut app),
+            0,
+            "practice tools own the panel without floating career buttons"
+        );
+        app.world_mut()
+            .resource_mut::<crate::debug::tools_page::PracticeSandboxState>()
+            .open = false;
+        app.update();
+        assert_eq!(nav_count(&mut app), 3, "Back restores main-menu entries");
     }
 
     #[test]

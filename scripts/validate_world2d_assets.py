@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import copy
+import catalog
 import hashlib
 import json
 import math
@@ -182,7 +183,7 @@ def validate_manifest(data: dict, root: Path, *, check_pixels: bool = True) -> d
     budget = data.get("repository_size_budget_bytes")
     if not isinstance(budget, int) or not 1_000_000 <= budget <= 20_000_000:
         raise ValidationError("invalid repository_size_budget_bytes")
-    if data.get("tile_pixels") != 128 or data.get("tile_world_size") != 4.0:
+    if data.get("tile_pixels") != 128 or data.get("tile_world_size") != 4.0 * catalog.map_tuning()["world_scale"]:
         raise ValidationError("tile pixel/world size contract mismatch")
 
     atlases = data.get("atlases")
@@ -272,9 +273,10 @@ def validate_manifest(data: dict, root: Path, *, check_pixels: bool = True) -> d
     topology = data.get("topology")
     if not isinstance(topology, dict) or topology.get("coordinate_domain") != "simulation_xz":
         raise ValidationError("topology must use simulation_xz")
-    target = 5.0 * 45.0
+    scale = catalog.map_tuning()["world_scale"]
+    target = 225.0 * scale
     half_inner = (target / math.sqrt(2.0)) * 0.5
-    half_map = half_inner + 23.0 + 6.0
+    half_map = half_inner + (23.0 + 6.0) * scale
     map_size = half_map * 2.0
     outer, inner = map_size * 0.34, map_size * 0.22
     close_pair(topology.get("bounds", {}).get("min"), (-half_map, -half_map), "bounds.min", 1e-4)
@@ -283,11 +285,15 @@ def validate_manifest(data: dict, root: Path, *, check_pixels: bool = True) -> d
     close_pair(topology.get("bases", {}).get("blue"), (half_inner, half_inner), "bases.blue", 1e-4)
     expected_camps = [(-outer, inner), (outer, -inner),
                       (-map_size * 0.30, -map_size * 0.227), (map_size * 0.30, map_size * 0.227),
-                      (-inner, -outer), (inner, outer)]
+                      (-inner, -outer), (inner, outer),
+                      (-map_size * 0.2441282, map_size * 0.04606193),
+                      (map_size * 0.2441282, -map_size * 0.04606193),
+                      (-map_size * 0.02303097, -map_size * 0.2164911),
+                      (map_size * 0.02303097, map_size * 0.2164911)]
     expected_bosses = [(inner, -outer), (-inner, outer)]
     camps, bosses = topology.get("camps"), topology.get("boss_pits")
-    if not isinstance(camps, list) or len(camps) != 6 or not isinstance(bosses, list) or len(bosses) != 2:
-        raise ValidationError("topology must define six camps and two boss pits")
+    if not isinstance(camps, list) or len(camps) != catalog.map_tuning()["camp_count"] or not isinstance(bosses, list) or len(bosses) != 2:
+        raise ValidationError("topology must define all shared camps and two boss pits")
     for index, expected in enumerate(expected_camps):
         close_pair(camps[index], expected, f"camps[{index}]", 1e-4)
     for index, expected in enumerate(expected_bosses):
@@ -296,7 +302,7 @@ def validate_manifest(data: dict, root: Path, *, check_pixels: bool = True) -> d
     if not isinstance(lanes, dict) or set(lanes) != {"mid", "top", "bot"} or [len(lanes[name]) for name in ("mid", "top", "bot")] != [2, 6, 6]:
         raise ValidationError("topology must define all three lane polylines")
     river = topology.get("river")
-    if not isinstance(river, dict) or river.get("width") != 18.0 or river.get("traversable") is not True or len(river.get("polyline", [])) != 2:
+    if not isinstance(river, dict) or river.get("width") != catalog.map_tuning()["river_width"] or river.get("traversable") is not True or len(river.get("polyline", [])) != 2:
         raise ValidationError("invalid traversable river topology")
     towers = topology.get("lane_towers")
     bases = topology.get("base_objectives")
@@ -466,6 +472,12 @@ class NegativeContractTests(unittest.TestCase):
 
     def test_invalid_topology_reference(self) -> None:
         self.rejected(lambda data: data["teams"]["green"].update(base_prop="absent"), "invalid manifest topology reference")
+
+    def test_missing_camp(self) -> None:
+        self.rejected(lambda data: data["topology"]["camps"].pop(), "all shared camps")
+
+    def test_moved_new_camp(self) -> None:
+        self.rejected(lambda data: data["topology"]["camps"].__setitem__(6, [0, 0]), "camps\\[6\\]")
 
     def test_missing_default_tower(self) -> None:
         self.rejected(lambda data: data["topology"]["lane_towers"].pop(), "default lane and base objectives")

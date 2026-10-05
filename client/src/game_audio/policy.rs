@@ -116,11 +116,11 @@ impl AudioCue {
 
     fn for_style(style: ProjectileStyle) -> Self {
         match style {
-            ProjectileStyle::Arrow => Self::Arrow,
+            ProjectileStyle::Arrow | ProjectileStyle::Bullet => Self::Arrow,
             ProjectileStyle::Arcane => Self::Arcane,
             ProjectileStyle::Holy => Self::Holy,
             ProjectileStyle::CasterBolt => Self::Caster,
-            ProjectileStyle::TowerBolt => Self::Tower,
+            ProjectileStyle::TowerBolt | ProjectileStyle::Rocket => Self::Tower,
             ProjectileStyle::Standard | ProjectileStyle::Crescent | ProjectileStyle::Claw => {
                 Self::Melee
             }
@@ -372,6 +372,65 @@ impl EventCursor {
             cues.push(Candidate::local(AudioCue::Death));
         }
         (false, cues)
+    }
+}
+
+/// Accepted attack actions are audible even when a shield or god mode absorbs
+/// every hit. This cursor consumes snapshots while muted and never replays old
+/// attacks when an enemy appears from fog, reconnects or a round changes.
+#[derive(Default)]
+pub(super) struct AttackCursor {
+    identity: Option<(u64, u64, u64)>,
+    seen: BTreeMap<u64, u64>,
+}
+#[derive(Clone, Copy)]
+pub(super) struct AttackObservation {
+    pub id: u64,
+    pub sequence: u64,
+    pub attacking: bool,
+    pub visible: bool,
+    pub alive: bool,
+    pub team: Team,
+    pub position: Vec3,
+    pub style: ProjectileStyle,
+}
+impl AttackCursor {
+    pub fn accept(
+        &mut self,
+        round: (u64, u64),
+        running: bool,
+        local: Option<LocalState>,
+        actors: impl IntoIterator<Item = AttackObservation>,
+    ) -> Vec<Candidate> {
+        let identity = local.map(|p| (round.0, round.1, p.id));
+        if self.identity != identity {
+            self.identity = identity;
+            self.seen.clear();
+        }
+        let mut live = BTreeMap::new();
+        let mut cues = Vec::new();
+        for actor in actors {
+            let previous = self.seen.get(&actor.id).copied();
+            live.insert(actor.id, previous.unwrap_or(0).max(actor.sequence));
+            if let Some(local) = local
+                && running
+                && actor.alive
+                && actor.visible
+                && actor.attacking
+                && actor.team != local.team
+                && previous.is_some_and(|seq| actor.sequence > seq)
+            {
+                let gain = distance_gain(local.position, actor.position);
+                if gain > 0.0 {
+                    cues.push(Candidate {
+                        cue: AudioCue::for_style(actor.style),
+                        gain,
+                    });
+                }
+            }
+        }
+        self.seen = live;
+        cues
     }
 }
 

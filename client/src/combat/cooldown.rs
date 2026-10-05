@@ -83,7 +83,10 @@ pub(super) fn sync_authoritative_cooldown_durations(
                 .iter()
                 .find(|a| a.actor == shared::sandbox::SandboxActor::Player)
         });
-    if let Some(snapshot) = authoritative.as_ref().filter(|s| s.is_changed()) {
+    if let Some(snapshot) = authoritative.as_ref().filter(|s| {
+        s.is_changed()
+            || (cooldowns.pending_slot.is_some() && cooldowns.prediction_grace_secs <= 0.0)
+    }) {
         // Ignore a pre-cast snapshot briefly while waiting for the accepted slot.
         // A rejection still corrects the optimistic UI after this bounded grace.
         let pending = cooldowns.pending_slot.is_some_and(|slot| {

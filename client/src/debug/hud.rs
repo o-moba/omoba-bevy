@@ -378,7 +378,8 @@ mod tests {
             *app.world().resource::<DebugToggles>(),
             DebugToggles {
                 god_mode: true,
-                speed_boost: false
+                speed_boost: false,
+                no_cooldowns: false,
             }
         );
         assert_eq!(
@@ -424,7 +425,8 @@ mod tests {
             *app.world().resource::<DebugToggles>(),
             DebugToggles {
                 god_mode: true,
-                speed_boost: true
+                speed_boost: true,
+                no_cooldowns: false,
             }
         );
         assert_eq!(

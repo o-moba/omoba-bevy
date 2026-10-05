@@ -474,12 +474,43 @@ fn bottom_boss_spawns_on_schedule_with_boss_stats() {
     let map_size = bounds.max[0] - bounds.min[0];
     let bottom_pit = [map_size * 0.22, -map_size * 0.34];
     let top_pit = [-bottom_pit[0], -bottom_pit[1]];
+    let pits = [bottom_pit, top_pit];
     let anchors: Vec<_> = shared::jungle::camp_layout(map_size)
         .into_iter()
         .map(|(point, _)| point)
-        .chain([bottom_pit, top_pit])
         .collect();
-    // Fog requires real sight at each camp and both pits. Ordinary admitted
+    let mut goals: Vec<_> = anchors
+        .iter()
+        .map(|anchor| {
+            let length = anchor[0].hypot(anchor[1]);
+            [
+                anchor[0] * (1.0 - 15.0 / length),
+                anchor[1] * (1.0 - 15.0 / length),
+            ]
+        })
+        .collect();
+    // Ten ordinary camps already fill the match's ten player slots. Each pit
+    // shares a scout with its nearest camp: their midpoint provides actual
+    // sight of both without entering either creature's aggro radius.
+    for pit in pits {
+        let (index, anchor) = anchors
+            .iter()
+            .enumerate()
+            .min_by(|(_, a), (_, b)| {
+                (a[0] - pit[0])
+                    .hypot(a[1] - pit[1])
+                    .total_cmp(&(b[0] - pit[0]).hypot(b[1] - pit[1]))
+            })
+            .expect("ordinary camps");
+        goals[index] = [(anchor[0] + pit[0]) * 0.5, (anchor[1] + pit[1]) * 0.5];
+        assert!(shared::navigation::world_navigation().point_clear(goals[index]));
+        assert!(
+            (goals[index][0] - pit[0]).hypot(goals[index][1] - pit[1])
+                < shared::vision::HERO_SIGHT_RADIUS,
+            "one scout must have sight of its camp and the nearby boss pit"
+        );
+    }
+    // Fog requires real sight at every camp and both pits. Ordinary admitted
     // scouts walk there; god mode only keeps these passive observers alive.
     let mut scouts: Vec<_> = anchors
         .iter()
@@ -505,7 +536,7 @@ fn bottom_boss_spawns_on_schedule_with_boss_stats() {
         .collect();
     let mut seen_camps = std::collections::HashSet::new();
     let mut pit_in_sight = [false; 2];
-    let mut last_diagnostic = [0_u64; 8];
+    let mut last_diagnostic = vec![0_u64; scouts.len()];
     let mut wendigo: Option<harness::NeutralState> = None;
     let deadline = match_start + Duration::from_secs(BOTTOM_BOSS_SPAWN_DELAY_SECS + 15);
     while Instant::now() < deadline && wendigo.is_none() {
@@ -525,11 +556,7 @@ fn bottom_boss_spawns_on_schedule_with_boss_stats() {
                 packet.game_state()
             );
             let anchor = anchors[index];
-            let length = anchor[0].hypot(anchor[1]);
-            let goal = [
-                anchor[0] * (1.0 - 15.0 / length),
-                anchor[1] * (1.0 - 15.0 / length),
-            ];
+            let goal = goals[index];
             let structures: Vec<_> = packet
                 .structures()
                 .iter()
@@ -567,10 +594,10 @@ fn bottom_boss_spawns_on_schedule_with_boss_stats() {
                         .collect::<Vec<_>>()
                 );
             }
-            if index >= 6
-                && (me.x - anchor[0]).hypot(me.z - anchor[1]) <= shared::vision::HERO_SIGHT_RADIUS
-            {
-                pit_in_sight[index - 6] = true;
+            for (pit, seen) in pits.iter().zip(pit_in_sight.iter_mut()) {
+                if (me.x - pit[0]).hypot(me.z - pit[1]) <= shared::vision::HERO_SIGHT_RADIUS {
+                    *seen = true;
+                }
             }
             for neutral in packet.neutrals() {
                 if !neutral.camp_type.is_boss() && elapsed < Duration::from_secs(50) {
@@ -597,8 +624,8 @@ fn bottom_boss_spawns_on_schedule_with_boss_stats() {
             if elapsed >= Duration::from_secs(50) {
                 assert_eq!(
                     seen_camps.len(),
-                    6,
-                    "all six starting camps must have been observed through actual sight before boss spawn"
+                    shared::jungle::CAMP_COUNT,
+                    "all starting camps must have been observed through actual sight before boss spawn"
                 );
                 assert!(
                     pit_in_sight.into_iter().all(|seen| seen),

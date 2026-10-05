@@ -28,6 +28,7 @@ impl Plugin for CombatPolishQaPlugin {
             iphone: std::env::var("OMOBA_IPHONE_UX_QA").is_ok_and(|v| v == "1") || round2_mode(),
             round2: round2_mode(),
             fps_hidden_once: false,
+            first_only: std::env::var("OMOBA_COMBAT_POLISH_QA_ONLY_FIRST").as_deref() == Ok("1"),
             fixture_target: None,
             reports: Vec::new(),
         })
@@ -61,6 +62,7 @@ struct Qa {
     iphone: bool,
     round2: bool,
     fps_hidden_once: bool,
+    first_only: bool,
     fixture_target: Option<Entity>,
     reports: Vec<serde_json::Value>,
 }
@@ -124,7 +126,8 @@ fn fixture_actor_position(index: usize) -> Vec3 {
 
 impl Qa {
     fn files(&self) -> &'static [&'static str] {
-        if self.iphone { &IPHONE_FILES } else { &FILES }
+        let files: &'static [&'static str] = if self.iphone { &IPHONE_FILES } else { &FILES };
+        if self.first_only { &files[..1] } else { files }
     }
     fn viewport(&self) -> UVec2 {
         if self.iphone {
@@ -397,6 +400,7 @@ fn prepare(
         earned_gold: 0,
         level: 10,
         connected: true,
+        respawn_remaining_ms: 0,
     };
     let mut players = vec![
         player(game.your_id, "Wildspark", (*team).into()),
@@ -411,6 +415,19 @@ fn prepare(
         ),
     ];
     if qa.iphone {
+        // Public death metadata deliberately has no matching world entity.
+        let mut defeated = player(
+            99001,
+            "Defeated opponent",
+            if *team == crate::team::Team::Green {
+                shared::map::Team::Blue
+            } else {
+                shared::map::Team::Green
+            },
+        );
+        defeated.deaths = 1;
+        defeated.respawn_remaining_ms = 12_000;
+        players.push(defeated);
         for (id, name) in [
             (90001, "Fixture ally 1"),
             (90002, "Fixture ally 2"),
@@ -527,7 +544,7 @@ fn capture(
     if qa.iphone {
         let measured: Vec<_> = nodes.iter().filter_map(|(name, id, node, computed, pose, inherited, text, clip)| {
             let name = crate::ui::test_id::node_key(name, id)?;
-            let watched = (qa.round2 && matches!(name,"MinimapAimIntersection" | "MinimapAimLine" | "MatchClockText" | "MatchKdaText" | "PauseMenuShowFpsToggle")) || name.starts_with("Mobile") || name.starts_with("AllyCamera-") || name.starts_with("PauseMenuHud")
+            let watched = (qa.round2 && matches!(name,"MinimapAimIntersection" | "MinimapAimLine" | "MatchClockText" | "MatchKdaText" | "PauseMenuShowFpsToggle")) || name.starts_with("Mobile") || name.starts_with("EnemyPortrait-") || name == "Enemy respawn countdown" || name.starts_with("AllyCamera-") || name.starts_with("PauseMenuHud")
                 || matches!(name, "AlliedVitals" | "TargetHealthRoot" | "KillFeed" | "HeroOverheadPlate" | "HiddenOverheadIcon" | "MeasuredFps" | "MatchMenuButton" | "SocialOpenChat" | "SocialOpenWheel" | "PauseMenuRenderFpsControls" | "IphoneUxFixtureLabel" | "TargetAimLabel" | "LockedTargetLabel" | "ActionFeedback" | "BrushStatus" | "CareerEntryActions" | "CareerProfileButton" | "CareerHistoryButton" | "CareerFriendsButton" | "CareerQueueLeaveButton");
             watched.then(|| {
                 let rect = Rect::from_center_size(pose.translation, computed.size() * pose.to_scale_angle_translation().0.abs());
@@ -634,6 +651,16 @@ fn capture(
                 }
             }
         }
+        if qa.stage == 0
+            && (!visible("EnemyPortrait-99001")
+                || !measured.iter().any(|node| {
+                    node["name"] == "Enemy respawn countdown"
+                        && node["visible"] == true
+                        && node["text"] == "12"
+                }))
+        {
+            errors.push("public enemy death portrait/countdown is not rendered".into());
+        }
         let expected: &[&str] = match qa.stage {
             0 => &[
                 "AlliedVitals",
@@ -703,7 +730,9 @@ fn readback(shot: On<ScreenshotCaptured>, mut qa: ResMut<Qa>, mut exit: MessageW
         return;
     }
     qa.pending = false;
-    qa.stage = if qa.round2 {
+    qa.stage = if qa.first_only {
+        qa.files().len()
+    } else if qa.round2 {
         if qa.stage == 0 { 5 } else { qa.files().len() }
     } else {
         qa.stage + 1
@@ -725,7 +754,7 @@ fn readback(shot: On<ScreenshotCaptured>, mut qa: ResMut<Qa>, mut exit: MessageW
                 })
                 .collect::<Vec<_>>()
         });
-        let report = serde_json::json!({"presentation_fixture":true,"synthetic_window_focus":std::env::var("OMOBA_QA_SYNTHETIC_FOCUS").as_deref()==Ok("1"),"authoritative_multiplayer_verified":false,"physical_device_verified":false,"viewport":[viewport.x,viewport.y],"language":"en","fixture_actors":fixture_actors,"files":if qa.round2 {vec![IPHONE_FILES[0],IPHONE_FILES[5]]} else {qa.files().to_vec()},"round2_aim_geometry_injected":qa.round2,"synthetic_tower":qa.round2.then_some(serde_json::json!({"position_xz":[-12.0,-2.0],"radius":10.0})),"stages":qa.reports});
+        let report = serde_json::json!({"presentation_fixture":true,"synthetic_window_focus":std::env::var("OMOBA_QA_SYNTHETIC_FOCUS").as_deref()==Ok("1"),"authoritative_multiplayer_verified":false,"physical_device_verified":false,"viewport":[viewport.x,viewport.y],"language":"en","fixture_actors":fixture_actors,"files":if qa.round2 && !qa.first_only {vec![IPHONE_FILES[0],IPHONE_FILES[5]]} else {qa.files().to_vec()},"round2_aim_geometry_injected":qa.round2,"synthetic_tower":qa.round2.then_some(serde_json::json!({"position_xz":[-12.0,-2.0],"radius":10.0})),"stages":qa.reports});
         let _ = std::fs::write(
             qa.directory.join("capture.json"),
             serde_json::to_vec_pretty(&report).unwrap(),

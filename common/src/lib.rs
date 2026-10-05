@@ -13,6 +13,7 @@ pub mod hero;
 pub mod hero_stats;
 pub mod hero_timers;
 pub mod host;
+pub mod jungle_buffs;
 pub mod match_rules;
 pub mod match_stats;
 pub mod neutrals;

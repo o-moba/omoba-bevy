@@ -1,7 +1,7 @@
 //! Client-side raid-boss presentation (TASK-19).
 //!
 //! The server replicates bosses as neutrals with boss camp types; this module
-//! renders King Mutatio with its retained GLB and Wendigo with an original
+//! renders the Verdant Dragon with an original animated GLB and Wendigo with an original
 //! stone/crystal guardian. Both keep raid scale, floating names, and AI-driven
 //! motion. The HP bar comes for free via
 //! the shared `CombatStats`/`CombatBars` pipeline.
@@ -56,7 +56,7 @@ pub(crate) fn boss_name_id(camp_type: NeutralCampType) -> &'static str {
 /// Asset path slug under `client/assets/bosses/` for a boss camp type.
 fn boss_slug(camp_type: NeutralCampType) -> Option<&'static str> {
     match camp_type {
-        NeutralCampType::KingMutatioBoss => Some("king-mutatio"),
+        NeutralCampType::KingMutatioBoss => Some("verdant-dragon"),
         _ => None,
     }
 }
@@ -183,7 +183,7 @@ fn attach_boss_models(
                 .with_children(|parent| {
                     parent.spawn((
                         SceneRoot(scene.clone()),
-                        // The retained VRM-derived GLB faces -Z; server yaw faces +Z.
+                        // Authored dragon faces glTF -Z; authoritative neutral yaw faces +Z.
                         Transform::from_rotation(Quat::from_rotation_y(std::f32::consts::PI)),
                         Visibility::default(),
                         Name::new("BossModel"),
@@ -444,7 +444,7 @@ mod tests {
         assert_eq!(boss_slug(NeutralCampType::WendigoBoss), None);
         assert_eq!(
             boss_slug(NeutralCampType::KingMutatioBoss),
-            Some("king-mutatio")
+            Some("verdant-dragon")
         );
         for _round in 0..3 {
             let guardian = spawn_boss(&mut app, NeutralCampType::WendigoBoss);
@@ -484,7 +484,7 @@ mod tests {
                 .map(|(plate, text)| (plate.boss, text.0.clone()))
                 .collect();
             assert!(plates.contains(&(guardian, "Wendigo".into())));
-            assert!(plates.contains(&(king, "King Mutatio".into())));
+            assert!(plates.contains(&(king, "Verdant Dragon".into())));
             assert_eq!(plates.len(), 2);
             for _snapshot in 0..100 {
                 app.world_mut()

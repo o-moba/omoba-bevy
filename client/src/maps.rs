@@ -8,14 +8,14 @@ pub(crate) const BASE_PAD_HEIGHT: f32 = 0.7;
 /// Horizontal length of the walk-up ramps around each base pad. Characters
 /// ascend/descend over this distance (League-style client-side fake: the
 /// server keeps a flat ground plane, only the rendered height changes).
-pub(crate) const PAD_RAMP_LENGTH: f32 = 6.0;
+pub(crate) const PAD_RAMP_LENGTH: f32 = 6.0 * shared::map::WORLD_SCALE;
 /// Blocks whose center is within this distance of a neutral-camp or
 /// boss-pit anchor get no decorative box (the creature must be visible).
 const JUNGLE_BLOCK_CLEARANCE: f32 = 10.0;
 const PLAYER_SPAWN_OFFSET: f32 = 7.0;
 pub(crate) const LANE_WIDTH: f32 = shared::map::LANE_WIDTH;
 const LANE_EDGE_PADDING: f32 = shared::map::LANE_EDGE_PADDING;
-pub(crate) const RIVER_WIDTH: f32 = 18.0;
+pub(crate) const RIVER_WIDTH: f32 = shared::map::RIVER_WIDTH;
 /// Fraction of the map size where the outer jungle blocks/camps sit
 /// (mirrors `JUNGLE_MAP_OUTER_FRAC` in server/src/balance.rs).
 const JUNGLE_MAP_OUTER_FRAC: f32 = 0.34;
@@ -26,7 +26,7 @@ const JUNGLE_MAP_INNER_FRAC: f32 = 0.22;
 const JUNGLE_MAP_MID_FRAC: f32 = 0.28;
 
 /// Height of one pad's walkable surface at an offset (dx, dz) from the pad
-/// center. Full height on the 46×46 top, linear ramp over `PAD_RAMP_LENGTH`
+/// center. Full height on the scaled base top, linear ramp over `PAD_RAMP_LENGTH`
 /// beyond each edge (ramp slabs span the pad plus both corner extensions),
 /// zero outside.
 fn pad_surface_height(dx: f32, dz: f32) -> f32 {
@@ -190,8 +190,8 @@ impl MapLayout {
         height(self.home_spawn).max(height(self.away_spawn))
     }
 
-    /// Six authoritative camp anchors shared by server and both visual modes.
-    pub(crate) fn camp_centers(self) -> [Vec2; 6] {
+    /// Authoritative camp anchors shared by server and both visual modes.
+    pub(crate) fn camp_centers(self) -> [Vec2; shared::jungle::CAMP_COUNT] {
         shared::jungle::camp_layout(self.size().x).map(|(point, _)| Vec2::from_array(point))
     }
 
@@ -339,7 +339,7 @@ mod tests {
                 );
             }
         }
-        // New camps claim six slots, bosses two, leaving the mid-jungle pair.
+        // The remaining forest regions stay clear of every camp and boss pit.
         assert_eq!(spawned.len(), 2);
     }
 
@@ -371,27 +371,27 @@ mod verdant_surface_tests {
                 (29.1, 29.1, 0.0),
             ] {
                 for (sx, sz) in [(1.0, 1.0), (-1.0, 1.0), (1.0, -1.0), (-1.0, -1.0)] {
-                    let actual = layout.terrain_height_3d(center.x + sx * x, center.z + sz * z);
+                    let actual = layout.terrain_height_3d(
+                        center.x + sx * x * shared::map::WORLD_SCALE,
+                        center.z + sz * z * shared::map::WORLD_SCALE,
+                    );
                     assert!((actual - expected).abs() < 0.00001, "{x}, {z}: {actual}");
                 }
             }
         }
         // Keep the separately tested legacy Sprite2d corner contract intact.
         let c = layout.home_spawn;
-        assert!(
-            (layout.terrain_height(c.x + 24.0, c.z + 26.0)
-                - layout.terrain_height_3d(c.x + 24.0, c.z + 26.0))
-            .abs()
-                > 0.2
-        );
+        let x = c.x + 24.0 * shared::map::WORLD_SCALE;
+        let z = c.z + 26.0 * shared::map::WORLD_SCALE;
+        assert!((layout.terrain_height(x, z) - layout.terrain_height_3d(x, z)).abs() > 0.2);
     }
 
     #[test]
     fn normalized_crossings_approaches_decks_and_exits_match_within_five_centimeters() {
         let layout = MapLayout::default();
-        let edge = layout.max.x - 12.0;
+        let edge = shared::map::geometry().right_x;
         for delta in [-17.0, -14.0, -9.0, 0.0, 9.0, 14.0, 17.0] {
-            let p = Vec2::splat(delta / 2.0_f32.sqrt());
+            let p = Vec2::splat(delta * shared::map::WORLD_SCALE / 2.0_f32.sqrt());
             assert!((layout.terrain_height_3d(p.x, p.y) - 0.02).abs() <= 0.05);
         }
         // Outer lanes turn through square watergates; sample their actual
@@ -403,7 +403,7 @@ mod verdant_surface_tests {
                     Vec2::new(-sign * distance, 0.0),
                     Vec2::new(0.0, sign * distance),
                 ] {
-                    let p = center + offset;
+                    let p = center + offset * shared::map::WORLD_SCALE;
                     assert!((layout.terrain_height_3d(p.x, p.y) - 0.02).abs() <= 0.05);
                 }
             }
@@ -411,7 +411,7 @@ mod verdant_surface_tests {
         for base in [layout.home_spawn, layout.away_spawn] {
             let mut previous = 0.7;
             for step in 0..=320 {
-                let d = step as f32 * 0.1;
+                let d = step as f32 * 0.1 * shared::map::WORLD_SCALE;
                 let current = layout.terrain_height_3d(base.x + d, base.z + d);
                 assert!((current - previous).abs() < 0.012);
                 previous = current;

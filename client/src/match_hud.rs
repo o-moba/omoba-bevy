@@ -749,12 +749,12 @@ mod tests {
             "remaining time must round up: {green}"
         );
         assert!(
-            !green.contains("Mutatio"),
+            !green.contains("Dragon"),
             "enemy team's buff must not show: {green}"
         );
 
         let blue = team_buff_hud_text(&buffs, Team::Blue);
-        assert!(blue.contains("Mutatio's Might"));
+        assert!(blue.contains("Dragon's Might"));
         assert!(blue.contains("+25% ability damage, +2 HP/s"));
         assert!(blue.contains("45s"));
     }
@@ -786,6 +786,6 @@ mod tests {
         ];
         let text = team_buff_hud_text(&buffs, Team::Green);
         assert_eq!(text.lines().count(), 2);
-        assert!(text.contains("Wendigo's Favor") && text.contains("Mutatio's Might"));
+        assert!(text.contains("Wendigo's Favor") && text.contains("Dragon's Might"));
     }
 }

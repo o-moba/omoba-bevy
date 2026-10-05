@@ -40,6 +40,7 @@ struct Qa {
     chat_confirmed: bool,
     chat_readable: bool,
     chat_layout: serde_json::Value,
+    debug_layout: serde_json::Value,
     chat_captured: bool,
     portrait_selected: bool,
     recall_confirmed: bool,
@@ -79,6 +80,7 @@ impl Plugin for OfflineQaPlugin {
             chat_confirmed: false,
             chat_readable: false,
             chat_layout: serde_json::Value::Null,
+            debug_layout: serde_json::Value::Null,
             chat_captured: false,
             portrait_selected: false,
             recall_confirmed: false,
@@ -143,6 +145,13 @@ fn fixture_pacing(mut pacing: ResMut<bevy::winit::WinitSettings>) {
 }
 
 fn capture(world: &mut World, qa: &Qa, name: &str) {
+    // Focused modes render exactly their requested evidence state.
+    if (std::env::var("OMOBA_OFFLINE_CHAT_QA_ONLY").as_deref() == Ok("1")
+        && name != "03-local-chat.png")
+        || (debug_only() && name != "01-debug-tools-bottom.png")
+    {
+        return;
+    }
     // Reuse verified menus, but never reuse a failed gameplay proof frame.
     let gameplay = matches!(
         name,
@@ -308,6 +317,77 @@ fn press(world: &mut World, id: &str) -> bool {
         .map(|entity| world.write_message(crate::ui::SyntheticPress(entity)))
         .is_some()
 }
+fn debug_only() -> bool {
+    std::env::var("OMOBA_OFFLINE_DEBUG_QA_ONLY").as_deref() == Ok("1")
+}
+
+fn drive_debug_tools(world: &mut World, qa: &mut Qa, age: f32) {
+    match qa.proof_step {
+        0 if age > 1.0 => {
+            world.resource_mut::<PauseMenuState>().open = true;
+            if ui_ready(world, "PauseMenuPracticeButton") && press(world, "PauseMenuPracticeButton")
+            {
+                qa.proof_step = 1;
+                qa.since = Instant::now();
+            }
+        }
+        1 if age > 0.5 && ui_ready(world, "PauseMenuPracticeSection") => {
+            for (name, mut scroll) in world
+                .query::<(&Name, &mut ScrollPosition)>()
+                .iter_mut(world)
+            {
+                if name.as_str() == "PauseMenuPracticeSection" {
+                    scroll.y = 100_000.0;
+                }
+            }
+            qa.proof_step = 2;
+            qa.since = Instant::now();
+        }
+        2 if age > 0.5 => {
+            let mut bottom_visible = false;
+            let mut offset = 0.0;
+            for (name, node, pose, clip, visible, scroll) in world
+                .query::<(
+                    crate::qa::QaName,
+                    &ComputedNode,
+                    &UiGlobalTransform,
+                    Option<&bevy::ui::CalculatedClip>,
+                    Option<&InheritedVisibility>,
+                    Option<&ScrollPosition>,
+                )>()
+                .iter(world)
+            {
+                if name.as_str() == "PauseMenuPracticeSection" {
+                    offset = scroll.map_or(0.0, |scroll| scroll.y);
+                }
+                if name.as_str() == "PauseMenuPracticeBackButton"
+                    && visible.is_some_and(|visible| visible.get())
+                {
+                    let full = crate::ui::gesture::logical_ui_rect(node, pose, None, 1.0);
+                    let shown = crate::ui::gesture::logical_ui_rect(node, pose, clip, 1.0);
+                    bottom_visible = shown.height() >= 40.0
+                        && shown.min.distance(full.min) < 1.0
+                        && shown.max.distance(full.max) < 1.0;
+                }
+            }
+            if bottom_visible && offset > 0.0 {
+                qa.debug_layout = serde_json::json!({"scroll_offset":offset,"last_action_fully_visible":true,"scroll_method":"fixture offset; raw touch separately regression tested"});
+                capture(world, qa, "01-debug-tools-bottom.png");
+                qa.proof_step = 3;
+            }
+        }
+        3 if qa.completed_captures.contains("01-debug-tools-bottom.png") => {
+            std::fs::write(qa.directory.join("debug-result.json"), serde_json::to_vec_pretty(&serde_json::json!({
+                "pass":true,"viewport":[852,393],"language":"en","physical_device_verified":false,
+                "geometry":qa.debug_layout,"file":"01-debug-tools-bottom.png"
+            })).unwrap()).unwrap();
+            qa.stage = 250;
+            world.write_message(AppExit::Success);
+        }
+        _ => {}
+    }
+}
+
 fn shop_only() -> bool {
     std::env::var("OMOBA_OFFLINE_SHOP_QA_ONLY").as_deref() == Ok("1")
 }
@@ -532,11 +612,19 @@ fn drive(world: &mut World) {
             let width = std::env::var("OMOBA_QA_WIDTH")
                 .ok()
                 .and_then(|s| s.parse().ok())
-                .unwrap_or(if shop_only() { 852 } else { 1180 });
+                .unwrap_or(if shop_only() || debug_only() {
+                    852
+                } else {
+                    1180
+                });
             let height = std::env::var("OMOBA_QA_HEIGHT")
                 .ok()
                 .and_then(|s| s.parse().ok())
-                .unwrap_or(if shop_only() { 393 } else { 820 });
+                .unwrap_or(if shop_only() || debug_only() {
+                    393
+                } else {
+                    820
+                });
             window.resolution.set_scale_factor_override(Some(1.0));
             window.resolution.set(width as f32, height as f32);
         }
@@ -562,6 +650,11 @@ fn drive(world: &mut World) {
     let age = qa.since.elapsed().as_secs_f32();
     if matches!(qa.stage, 5..=8 | 19) && screen == AppScreen::InMatch && !gameplay_ready(world) {
         qa.since = Instant::now();
+        world.insert_resource(qa);
+        return;
+    }
+    if debug_only() && qa.stage == 5 && screen == AppScreen::InMatch {
+        drive_debug_tools(world, &mut qa, age);
         world.insert_resource(qa);
         return;
     }
@@ -599,6 +692,9 @@ fn drive(world: &mut World) {
                             |mut social: ResMut<crate::social::SocialClient>,
                              mut out: MessageWriter<NetworkCommand>| {
                                 social.qa_send_chat(&mut out);
+                                // Successful send releases gameplay; reopen the transcript for this capture.
+                                assert!(!social.chat_open);
+                                social.qa_open_transcript();
                             },
                         )
                         .expect("offline QA chat system");

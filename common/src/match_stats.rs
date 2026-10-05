@@ -159,6 +159,7 @@ impl RoundLedger {
                         earned_gold: participant.earned_gold,
                         level: p.stats.final_level,
                         connected: !p.disconnected,
+                        respawn_remaining_ms: 0,
                     }
                 })
                 .collect(),
@@ -298,6 +299,30 @@ impl RoundLedger {
     }
 }
 
+/// Enrich identity-only scoreboard data with public timers from the same snapshot tick.
+/// Hidden positions and current health never cross this boundary.
+pub fn update_live_timers(
+    board: &mut shared::live_score::LiveScoreboard,
+    world: &crate::game_world::GameWorld,
+    now: std::time::Instant,
+) {
+    board.elapsed_secs = world.match_elapsed_secs.max(0.0) as u64;
+    for row in &mut board.players {
+        row.respawn_remaining_ms = world
+            .players
+            .values()
+            .find(|p| p.hero.identity.id == row.player_id)
+            .filter(|p| p.hero.hp <= 0.0)
+            .and_then(|p| p.timers.respawn_at)
+            .map_or(0, |deadline| {
+                deadline
+                    .saturating_duration_since(now)
+                    .as_millis()
+                    .min(u32::MAX as u128) as u32
+            });
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use shared::HeroClass;
@@ -366,6 +391,43 @@ mod tests {
             .find(|p| p.player_id == id)
             .unwrap()
             .stats
+    }
+
+    #[test]
+    fn public_respawn_timers_follow_authority_and_clear_on_alive_expired_or_missing_actor() {
+        let now = Instant::now();
+        let mut world = crate::game_world::GameWorld::empty();
+        let addr = "127.0.0.1:55001".parse().unwrap();
+        world.ensure_connected(addr, now);
+        let player = world.players.get_mut(&addr).unwrap();
+        player.hero.hp = 0.0;
+        player.hero.x = 91.25;
+        player.hero.z = -72.5;
+        player.timers.respawn_at = Some(now + Duration::from_millis(2400));
+        world.match_elapsed_secs = 12.9;
+        let mut board = ledger().live_scoreboard().unwrap();
+        update_live_timers(&mut board, &world, now);
+        assert_eq!(board.elapsed_secs, 12);
+        assert_eq!(board.players[0].respawn_remaining_ms, 2400);
+        assert_eq!(board.players[1].respawn_remaining_ms, 0);
+        update_live_timers(&mut board, &world, now + Duration::from_secs(1));
+        assert_eq!(board.players[0].respawn_remaining_ms, 1400);
+        update_live_timers(&mut board, &world, now + Duration::from_secs(3));
+        assert_eq!(board.players[0].respawn_remaining_ms, 0);
+        world.players.get_mut(&addr).unwrap().hero.hp = 1.0;
+        update_live_timers(&mut board, &world, now);
+        assert_eq!(
+            board.players[0].respawn_remaining_ms, 0,
+            "living actors cannot retain a stale death timer"
+        );
+        world.players.clear();
+        update_live_timers(&mut board, &world, now);
+        assert!(
+            board
+                .players
+                .iter()
+                .all(|row| row.respawn_remaining_ms == 0)
+        );
     }
 
     #[test]

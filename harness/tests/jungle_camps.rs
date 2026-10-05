@@ -92,7 +92,7 @@ fn both_teams_farm_real_camps_and_observe_same_id_respawn_after_forty_seconds() 
     let mut saw_camp = [false; 2];
     let bounds = shared::map::geometry().bounds;
     let public_camps = shared::jungle::camp_layout(bounds.max[0] - bounds.min[0]);
-    assert_eq!(public_camps.len(), 6);
+    assert_eq!(public_camps.len(), shared::jungle::CAMP_COUNT);
     let mut lane_rewards: [LaneRewards; 2] = Default::default();
     let start = Instant::now();
     while !finished.into_iter().all(|done| done) && start.elapsed() < Duration::from_secs(85) {

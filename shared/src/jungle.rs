@@ -9,10 +9,12 @@ pub enum JungleCampKind {
     Spitter,
 }
 
-/// Stable order is also the six minimap camp slots. Coordinates use full map
+pub const CAMP_COUNT: usize = 10;
+
+/// Stable order is also the minimap camp slots. Coordinates use full map
 /// extent. Bruisers sit slightly toward the base-side clearing to leave more
 /// than ten metres of clearance in both halves of the shipped Verdant forest.
-pub fn camp_layout(map_size: f32) -> [(Point, JungleCampKind); 6] {
+pub fn camp_layout(map_size: f32) -> [(Point, JungleCampKind); CAMP_COUNT] {
     use JungleCampKind::*;
     [
         ([-0.34 * map_size, 0.22 * map_size], Skirmisher),
@@ -21,6 +23,11 @@ pub fn camp_layout(map_size: f32) -> [(Point, JungleCampKind); 6] {
         ([0.30 * map_size, 0.227 * map_size], Bruiser),
         ([-0.22 * map_size, -0.34 * map_size], Spitter),
         ([0.22 * map_size, 0.34 * map_size], Spitter),
+        // Inner forest clearings: the original six camp IDs keep their slots.
+        ([-0.2441282 * map_size, 0.04606193 * map_size], Bruiser),
+        ([0.2441282 * map_size, -0.04606193 * map_size], Bruiser),
+        ([-0.02303097 * map_size, -0.2164911 * map_size], Spitter),
+        ([0.02303097 * map_size, 0.2164911 * map_size], Spitter),
     ]
 }
 

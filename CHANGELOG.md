@@ -5,16 +5,25 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
-The prior deployed implementation is 0.40.1, **protocol 9** and
-**standard-kits-4**. The final gate, real-server harness and affected-HUD capture
-pass; see the [equipped-skills progress note](docs/progress/2026-10-04-equipped-skills.md).
-The [0.37–0.39 delivery note](docs/progress/2026-10-04-iteration-commit.md)
-records the previous protocol-8 iteration. Beta now runs compatible 0.40.1;
-see the [deployment and reconnect verification](docs/progress/2026-10-04-beta-0401.md).
-iOS 0.40.0 (19) is archived; its TestFlight upload remains pending Xcode account access.
-Physical iPhone reconnect/120 Hz,
-sustained worker capacity and competitive balance remain in the
-[refactoring/release tracker](docs/REFACTORING.md#post-programme-architecture-follow-ups--2026-10-04).
+Beta and uploaded iOS remain 0.41.0 (20), protocol 9. The quality iteration below requires a coordinated server/client update; the compatibility handshake intentionally rejects old peers.
+
+## [0.42.0] - 2026-10-05
+
+- Repair Adventurer contact melee, point-blank aiming, rejected predicted cooldowns and final-hit receipts; tune dagger damage and distinguish Wildspark single-target repeater fire from splash rockets.
+- Add bone-attached ranged weapons and an original animated Verdant Dragon. Animate the three nexus rings independently and shorten base-side guard tower silhouettes.
+- Add practice-only zero cooldowns and disposable moving/attacking targets, with a scrollable phone debug menu.
+- Release gameplay input after successful chat, keep native text-editor events responsive, and preserve Victory across late abandonment/empty-roster teardown.
+- Show public enemy death countdown portraits without leaking hidden positions; remove redundant shimmering ground triangles and play confirmed enemy attack sounds even when a shield absorbs the hit.
+- Compact the shared arena by 20%, narrow the river, expand to ten jungle camps, add fire/ice on-hit rewards, color minimap camps, move forward tower tiers and proportionally reduce tower coverage. Correct tree-blocked bot approach goals and occupied lane-corner progress.
+- Remove brush fake-shadow layers that overlay canopy and shimmer. Release contract: protocol 10, catalogue standard-kits-5, compact geometry v2, gameplay combat-2026-10-05.
+- See the classified [iteration checklist](docs/progress/2026-10-05-playtest-quality.md) (verification status recorded there). Physical iPhone keyboard/audio/visual checks remain separate.
+
+- Show allied respawn countdowns and animate only the authored Nexus pivots; remove the previously added upper rings.
+- Consolidate the pending game iteration and trailer tooling onto main; retain recoverable historical branch/source backups. See [consolidation and release limits](docs/progress/2026-10-05-main-consolidation.md).
+
+- **Trailer v2 capture:** the frame recorder gains frame-stepped capture (`OMOBA_RECORD_STEP=1`): game time advances exactly one frame interval per rendered frame and every frame is saved, so the footage is a true 60 fps at any resolution; the real-time recorder reached about 35 frames per second at 720p and 14 at 1080p. The capture runs on a timer with vsync off, keeps its window above the others (`OMOBA_RECORD_WINDOW_AT` parks it) and no longer depends on window focus.
+- **Demo director:** it can drive the in-process offline practice (no server), paces its acts on the recorder clock, renders HiDPI layouts (`OMOBA_QA_SCALE`: a 2532×1170 window at scale 3 is the 844×390 phone layout), sets the camera zoom (`OMOBA_DEMO_ZOOM`), hides the FPS readout and adds the class-agnostic `lane` and `showcase` scripts (`OMOBA_DEMO_LANE`). On phones a finger drags the class list during the class tour and the thumb steers along its lane; a blocked thumb walks by a move order, a dropped joystick is pressed again. Fights use only abilities that are off cooldown and push a quiet lane forward. With `OMOBA_QA_SYNTHETIC_FOCUS=1` the capture keeps running while the desktop is used for other work and scripted clicks leave the real pointer alone.
+- **`scripts/record_demo.py --profile v2`** (`make trailer-clips`): six frame-stepped clips (Wildspark, Stormfist, Emberveil and Warden on the phone layout, Dawnweaver and Frostguard on desktop) encoded as clean 60 fps H.264 at the capture resolution, raw frames deleted after encoding. The default profile is unchanged. See [the v2 trailer notes](promo/trailer-v2-2026-10-05/README.md) and the [session log](docs/progress/2026-10-05-promo-trailer-v2.md).
 
 ## [0.41.0] - 2026-10-05
 

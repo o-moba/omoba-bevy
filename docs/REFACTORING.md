@@ -124,11 +124,50 @@ items, not authorization for production infrastructure or dependency changes.
 
 ### Release/playtest follow-ups — separate from refactoring
 
-- [ ] Publish a coordinated protocol-9 / standard-kits-4 client/server release after its release checks. Commit/push alone does not deploy or upload a mobile build.
+- [x] Publish the protocol-9 compatibility release: Beta and uploaded iOS 0.41.0 (20), 2026-10-05.
+- [ ] Publish the next coordinated protocol-10 / standard-kits-5 / compact-v2 client/server release after its release checks. Local 0.42.0 changes are not deployed. [Quality iteration](progress/2026-10-05-playtest-quality.md).
 - [ ] Exercise real iPhone backgrounding, app restart, reconnect and Home escape, including continued bot play during absence. The signed local test advances a manual clock; it is not a multi-minute device soak test.
 - [ ] Measure requested cap, actual app cadence and native display cadence on iPhone 16 Pro; verify the FPS visibility toggle. Desktop screenshots are not 120 Hz certification.
 - [ ] Play full matches to tune 500g bounties, the rare 1-HP dagger effect, tower count and respawn curve. The current economy model gives roughly three farming minutes per full bounty; actual match duration/win rates remain unmeasured.
 - [ ] Reproduce the separately observed remote interpolation cadence change before changing it: eight samples with a 100ms delay may be insufficient around 120-to-60 Hz input cadence. This is not proven as the reported local-hero reversal symptom, which has its own fixed touch-response regression.
+
+## Product priority — creator loop before class workshop (2026-10-05)
+
+The owner's next priority is a repeatable artist → Studio → game approval →
+SDK → OMOBA player route, for both avatars and weapons. Existing hosted/desktop
+pilot code is the baseline, not a reason to build a second publishing system.
+
+- [ ] **P0 / A1–A7 — Creator loop acceptance:** fresh creator UI/account,
+  source/profile conversion separation, artist-friendly weapon grip preparation,
+  clear processing/review/retry status,
+  exact game approval, two-client use and physical iPhone then Android proof.
+  A concrete current dependency is mandatory avatar USDZ conversion before
+  global publication, even for OMOBA-only assets; remove that coupling while
+  keeping Mirror validation and approval boundaries.
+- [ ] **P1 / C1–C3 — Local class workshop:** skill-card editor and immediate
+  mannequin testing on top of `BuildRecipe`, `EquippedSkills` and existing
+  local named Combat Test presets. The composition engine is done; public
+  authoring UI is not.
+- [ ] **P1 / C4–C5 — Online custom classes:** immutable game-owned revisions,
+  account storage, server admission and match/reconnect identity; then sharing
+  and controlled custom modes. Public Join currently has no recipe field.
+
+Ordered tasks, acceptance criteria and repository ownership:
+[creator loop and class workshop](plans/creator-loop-and-class-builder.md).
+These are product slices; R18–R23 remain focused architecture follow-ups.
+
+## Quality iteration follow-ups — 2026-10-05
+
+The [0.42.0 quality checklist](progress/2026-10-05-playtest-quality.md) separates
+implemented behavior from release/device verification. The current changes keep
+combat, practice permissions and jungle rewards in the shared authority; render
+presentation and disposable QA fixtures remain client-side.
+
+- [ ] **P1 / device verification:** reproduce keyboard open/send/cancel on a physical iPhone, including background/foreground. The confirmed stuck chat-modal flag and native editor pacing have regression coverage; desktop evidence cannot certify UIKit responsiveness.
+- [ ] **P2 / balance:** measure TH time-to-kill, dual jungle reward uptime and compact-map match duration with real playtests. Current constants are an initial tune, not a statistically balanced result.
+- [ ] **P2 / R20 extension:** move compiled terrain scale, river and brush geometry into one validated map profile only when runtime variants are needed. Keep server collision, 2D/3D render transforms, minimap and compatibility revisions derived from that profile.
+- [ ] **P3 / ranged animation:** add bow draw/string deformation and two-hand weapon grips/IK on varied VRM proportions. Current hand attachments and appropriate attack clips provide the functional baseline.
+- [ ] **P3 / presentation:** give personal fire/ice rewards a HUD duration marker and create a matching dragon sprite for the optional 2D renderer. The 3D dragon has original editable Blender source and two animation clips.
 
 ## How to continue
 

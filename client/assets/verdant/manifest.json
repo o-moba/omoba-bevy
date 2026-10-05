@@ -54,22 +54,22 @@
     {
       "id": "sanctuary_green",
       "path": "sanctuary_green.glb",
-      "sha256": "d6674c4076498004798415c237a8c03e36e668a4f5ef2a4f62d66be746dff726",
-      "bytes": 321068,
-      "nodes": 2,
-      "meshes": 1,
-      "primitives": 6,
+      "sha256": "a23daefdab0e5f162d250b0e2c79950f647cd063e1705d92f391ee2853d78065",
+      "bytes": 466804,
+      "nodes": 5,
+      "meshes": 4,
+      "primitives": 9,
       "materials": 6,
       "source": "art/verdant-confluence/library/sanctuary_green.glb"
     },
     {
       "id": "sanctuary_blue",
       "path": "sanctuary_blue.glb",
-      "sha256": "0a26c7f2a1765ea372d30ff386b84c386114982fc1bd839f5c06b437f7cf2ee2",
-      "bytes": 321088,
-      "nodes": 2,
-      "meshes": 1,
-      "primitives": 6,
+      "sha256": "9087a1da9756f4b6d4335f45601d6a20dd2e558affe5899b785e2d1bba498046",
+      "bytes": 466824,
+      "nodes": 5,
+      "meshes": 4,
+      "primitives": 9,
       "materials": 6,
       "source": "art/verdant-confluence/library/sanctuary_blue.glb"
     }
@@ -1493,6 +1493,7 @@
     "Move bridge parapets and abutments 0.8m outward and widen fascia bearings to clear the entire 12m deck.",
     "Square the base pad upper bevel ring at the existing 46m by 0.7m walktop so it meets the miter skirt without corner dips.",
     "Compress sanctuary bottom 1.1m to 0.03m; translate upper architecture down 1.07m to expose spawn/walk floor.",
+    "Recover three disconnected armillary rings as independently animated NexusOrbit nodes around their shared crystal pivot; preserve all source triangles, normals and materials.",
     "Runtime sanctuaries rotate 45 degrees around Y to clear original diagonal spawn points.",
     "Reduce decorative reed height by 50% and grass-fan height by 35% around their ground pivots; preserve XZ footprints and all solid geometry.",
     "Two scenes split static architecture from F4-controlled foliage; eight live structures are separate assets."

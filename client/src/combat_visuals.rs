@@ -18,8 +18,10 @@ const BUILT_INS: &str = r#"{"schema_version":1,"profiles":{
 "warrior_crescent":{"shape":"crescent","color":[1,0.63,0.3,1]},
 "warden_claw":{"shape":"crescent","color":[0.55,0.95,0.4,1],"scale":0.9},
 "caster_bolt":{"shape":"arcane","color":[0.4,0.95,1,1],"scale":0.7},
+"wild_bullet":{"shape":"bolt","color":[1,0.85,0.25,1],"scale":0.5},
+"wild_rocket":{"shape":"bolt","color":[1,0.3,0.05,1],"scale":1.1,"model":{"path":"weapons/wild-rocket.glb","scale":1.4}},
 "tower_bolt":{"shape":"bolt","color":[1,0.43,0.24,1],"scale":1.4}},
-"defaults":{"standard":"standard","arrow":"ranger_arrow","arcane":"mage_arcane","holy":"cleric_holy","crescent":"warrior_crescent","claw":"warden_claw","caster_bolt":"caster_bolt","tower_bolt":"tower_bolt"},
+"defaults":{"bullet":"wild_bullet","rocket":"wild_rocket","standard":"standard","arrow":"ranger_arrow","arcane":"mage_arcane","holy":"cleric_holy","crescent":"warrior_crescent","claw":"warden_claw","caster_bolt":"caster_bolt","tower_bolt":"tower_bolt"},
 "classes":{"ranger":{"default":"ranger_arrow"},"mage":{"default":"mage_arcane"},"cleric":{"default":"cleric_holy"},"warrior":{"default":"warrior_crescent"},"warden":{"default":"warden_claw"}}}"#;
 const CONFIG_PATH: &str = "config/combat_visuals.json";
 
@@ -220,6 +222,8 @@ pub fn safe_asset_path(path: &str, extension: &str) -> bool {
 fn style_key(style: ProjectileStyle) -> &'static str {
     match style {
         ProjectileStyle::Standard => "standard",
+        ProjectileStyle::Bullet => "bullet",
+        ProjectileStyle::Rocket => "rocket",
         ProjectileStyle::Arrow => "arrow",
         ProjectileStyle::Arcane => "arcane",
         ProjectileStyle::Holy => "holy",
@@ -381,6 +385,8 @@ impl CombatVisualRegistry {
             if ![
                 "standard",
                 "arrow",
+                "bullet",
+                "rocket",
                 "arcane",
                 "holy",
                 "crescent",
@@ -531,6 +537,30 @@ mod tests {
         assert_eq!(
             registry.resolve_style(ProjectileStyle::Standard).shape,
             ProjectileShape::Bolt
+        );
+        let packaged =
+            CombatVisualRegistry::from_json(include_str!("../assets/config/combat_visuals.json"))
+                .unwrap();
+        let bullet = packaged.resolve(
+            Some(HeroClass::Wildspark),
+            ProjectileStyle::Bullet,
+            Some(shared::BASIC_ATTACK_ACTION_SLOT),
+            None,
+            None,
+        );
+        let rocket = packaged.resolve(
+            Some(HeroClass::Wildspark),
+            ProjectileStyle::Rocket,
+            Some(shared::BASIC_ATTACK_ACTION_SLOT),
+            None,
+            None,
+        );
+        assert_ne!(bullet.id, rocket.id);
+        assert!(bullet.scale < rocket.scale);
+        assert!(bullet.model.is_none());
+        assert_eq!(
+            rocket.model.as_ref().unwrap().path,
+            "weapons/wild-rocket.glb"
         );
     }
     #[test]

@@ -119,7 +119,8 @@
       ],
       "ignore": {
         "01-shop-owned-component.png": "Only OMOBA_OFFLINE_SHOP_QA_ONLY=1: confirmed purchase and component-credit catalog.",
-        "02-shop-scrolled-upgrades.png": "Only OMOBA_OFFLINE_SHOP_QA_ONLY=1: raw-touch shop scroll to advanced items."
+        "02-shop-scrolled-upgrades.png": "Only OMOBA_OFFLINE_SHOP_QA_ONLY=1: raw-touch shop scroll to advanced items.",
+        "01-debug-tools-bottom.png": "Focused scroll-bottom verification with OMOBA_OFFLINE_DEBUG_QA_ONLY=1; default offline run retains its normal practice-tools frame."
       }
     },
     "party-stage": {

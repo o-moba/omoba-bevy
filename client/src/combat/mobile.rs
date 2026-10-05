@@ -221,8 +221,7 @@ pub(super) fn quick_cast_target(
         let distance = origin.distance(p.xz());
         if stats.is_alive()
             && p.is_finite()
-            && distance > 0.01
-            && distance <= range
+            && distance <= range + validity.radius(entity, id)
             && validity.valid(entity, id, team)
         {
             let priority = if selected == Some(entity) {
@@ -472,6 +471,39 @@ mod quick_cast_tests {
         assert_eq!(pick(&mut world, Some(far), None), Some(Vec2::X * 8.0));
         world.get_mut::<CombatStats>(near).unwrap().hp = 0.0;
         assert_eq!(pick(&mut world, Some(near), None), Some(Vec2::X * 16.0));
+    }
+
+    #[test]
+    fn melee_tap_acquires_overlapping_and_edge_of_reach_targets() {
+        use bevy::ecs::system::SystemState;
+        for x in [0.0, 0.02, 2.6 + shared::PLAYER_TARGET_RADIUS - 0.05] {
+            let mut world = World::new();
+            world.spawn((
+                crate::net::RemotePlayer,
+                crate::net::NetworkPlayerId(2),
+                Transform::from_xyz(x, 0.0, 0.0),
+                CombatStats::default(),
+                Team::Blue,
+                InheritedVisibility::VISIBLE,
+            ));
+            let mut state =
+                SystemState::<(TargetCandidates, crate::targeting::TargetValidity)>::new(
+                    &mut world,
+                );
+            let (candidates, validity) = state.get(&world);
+            assert_eq!(
+                quick_cast_target(
+                    Vec2::ZERO,
+                    Team::Green,
+                    2.6,
+                    None,
+                    None,
+                    &candidates,
+                    &validity
+                ),
+                Some(Vec2::X * x)
+            );
+        }
     }
 
     #[test]

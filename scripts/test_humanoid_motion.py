@@ -55,7 +55,10 @@ class SharedHumanoidMotionTests(unittest.TestCase):
             self.assertTrue(all(p[0] == p[2] == 0 for p in clip['hips_world_deltas']))
             poses = motion.retarget_in_memory(self.library, self.document, self.humanoid, name)
             hand = self.humanoid['rightHand']
-            excursion = max(motion.angular_distance(poses[0][hand][1], p[hand][1]) for p in poses)
+            # A stab can keep the wrist rigid; test the actual right-hand path
+            # after its shoulder/elbow chain, not arbitrary local wrist flexion.
+            points = [self.document.world_pose(p)[hand][0] for p in poses]
+            excursion = max(sum((v - start) ** 2 for v, start in zip(point, points[0])) ** .5 for point in points)
             self.assertGreater(excursion, .1)
 
     def test_idle_walk_run_are_closed_in_place_loops(self):

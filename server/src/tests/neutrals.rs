@@ -45,7 +45,7 @@ fn neutral_camps_spawn_alive_with_distinct_templates() {
     let mut next_neutral_id = 9_001;
     let neutrals = build_neutral_camps(&mut next_neutral_id);
 
-    assert_eq!(neutrals.len(), 6);
+    assert_eq!(neutrals.len(), shared::jungle::CAMP_COUNT);
 
     let mut camp_types = Vec::new();
     for neutral in neutrals.values() {
@@ -59,12 +59,15 @@ fn neutral_camps_spawn_alive_with_distinct_templates() {
         assert_eq!(neutral.state.ai_state, NeutralAiState::Idle);
         assert!(neutral.dead_until.is_none());
     }
-    for kind in [
-        NeutralCampType::Skirmisher,
-        NeutralCampType::Bruiser,
-        NeutralCampType::Spitter,
+    for (kind, expected_count) in [
+        (NeutralCampType::Skirmisher, 2),
+        (NeutralCampType::Bruiser, 4),
+        (NeutralCampType::Spitter, 4),
     ] {
-        assert_eq!(camp_types.iter().filter(|&&value| value == kind).count(), 2);
+        assert_eq!(
+            camp_types.iter().filter(|&&value| value == kind).count(),
+            expected_count
+        );
     }
 }
 

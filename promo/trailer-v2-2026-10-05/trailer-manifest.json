@@ -1,0 +1,472 @@
+{
+  "title": "OMOBA gameplay trailer v2",
+  "made_on": "2026-10-05",
+  "build": {
+    "version": "0.41.0",
+    "source": {
+      "commit": "db0014a11a0efc20511f594bcce7a4b248993d0d",
+      "dirty": true,
+      "version": "0.41.0"
+    },
+    "note": "dev build with the qa feature; the clips were recorded while the demo director was being tuned, so client binaries differ between clips (see demo-summary.json)"
+  },
+  "video": {
+    "file": "omoba-trailer-v2.mp4",
+    "bytes": 60206750,
+    "sha256": "5d601f5f2af13e04c2fd7eb7c7001f7fc17dbe2275eb7ccf423fe844ae1b36c2",
+    "seconds": 56.7,
+    "video_codec": "h264",
+    "width": 1920,
+    "height": 1080,
+    "fps": 60.0,
+    "pixel_format": "yuv420p",
+    "audio_codec": "aac",
+    "audio_hz": 48000,
+    "audio_channels": 2
+  },
+  "poster": {
+    "file": "poster.jpg",
+    "bytes": 205475,
+    "sha256": "b04fdf548edf01e6e6427525df32a575a8f67b8a6f21dad33c80456a1c6d5fcb"
+  },
+  "capture": {
+    "generator": "scripts/record_demo.py --profile v2",
+    "method": "scripted ordinary inputs against the in-process offline practice (server bots, hero at level 6); frame-stepped window readbacks, one per 1/60 s of game time, encoded at constant 60 fps",
+    "edit_frames": "the edit reads still frames extracted from the clips by frame number (motion/prepare.py), so every trailer frame shows exactly one captured frame",
+    "phone_scenes": "the 844x390 phone interface rendered by a desktop development build at scale 3 (2532x1170), not a device recording",
+    "desktop_scenes": "the 1280x720 desktop layout rendered at scale 2 (2560x1440)",
+    "clips": [
+      {
+        "clip": "phone-wildspark",
+        "hero": "wildspark",
+        "script": "showcase",
+        "lane": "mid",
+        "layout": "phone",
+        "size": [
+          2532,
+          1170
+        ],
+        "scale": 3.0,
+        "frames": 3750,
+        "events": [
+          {
+            "seconds": 0.0,
+            "title": "Hero roster"
+          },
+          {
+            "seconds": 15.83,
+            "title": "To the lane"
+          },
+          {
+            "seconds": 33.32,
+            "title": "Lane fight"
+          }
+        ],
+        "binary_sha256": "ef0ea705b97139ba0d7688c9ef8a09ae0d202cd3a341bd2cbe56b4eb84200b8e",
+        "video": {
+          "file": "sources/clips/phone-wildspark.mp4",
+          "bytes": 115068846,
+          "sha256": "07b1b013a47285ac8876842bc6bbcf80ec2a99275334515592863e66d57917e7",
+          "seconds": 62.5,
+          "video_codec": "h264",
+          "width": 2532,
+          "height": 1170,
+          "fps": 60.0,
+          "pixel_format": "yuv420p"
+        }
+      },
+      {
+        "clip": "phone-stormfist",
+        "hero": "stormfist",
+        "script": "lane",
+        "lane": "top",
+        "layout": "phone",
+        "size": [
+          2532,
+          1170
+        ],
+        "scale": 3.0,
+        "frames": 7093,
+        "events": [
+          {
+            "seconds": 1.1,
+            "title": "To the lane"
+          },
+          {
+            "seconds": 35.48,
+            "title": "Lane fight"
+          }
+        ],
+        "binary_sha256": "e5930fd7e82e9aa4f8cc80769db5e51953d4406fcf582324bc78d53829549995",
+        "video": {
+          "file": "sources/clips/phone-stormfist.mp4",
+          "bytes": 197516843,
+          "sha256": "fdc8e8ba02b477976c2243ba75a2096361bb6a71a693a895c4d770081069e24d",
+          "seconds": 118.217,
+          "video_codec": "h264",
+          "width": 2532,
+          "height": 1170,
+          "fps": 60.0,
+          "pixel_format": "yuv420p"
+        }
+      },
+      {
+        "clip": "phone-emberveil",
+        "hero": "emberveil",
+        "script": "lane",
+        "lane": "bot",
+        "layout": "phone",
+        "size": [
+          2532,
+          1170
+        ],
+        "scale": 3.0,
+        "frames": 5067,
+        "events": [
+          {
+            "seconds": 1.1,
+            "title": "To the lane"
+          },
+          {
+            "seconds": 37.2,
+            "title": "Lane fight"
+          }
+        ],
+        "binary_sha256": "e5930fd7e82e9aa4f8cc80769db5e51953d4406fcf582324bc78d53829549995",
+        "video": {
+          "file": "sources/clips/phone-emberveil.mp4",
+          "bytes": 128588588,
+          "sha256": "d9ee4125a0217acf6a1b4c745efc6778ad2a41e1bae94418d2383199e10e553f",
+          "seconds": 84.45,
+          "video_codec": "h264",
+          "width": 2532,
+          "height": 1170,
+          "fps": 60.0,
+          "pixel_format": "yuv420p"
+        }
+      },
+      {
+        "clip": "phone-warden",
+        "hero": "warden",
+        "script": "jungle",
+        "lane": null,
+        "layout": "phone",
+        "size": [
+          2532,
+          1170
+        ],
+        "scale": 3.0,
+        "frames": 10293,
+        "events": [
+          {
+            "seconds": 1.1,
+            "title": "Warden jungler"
+          },
+          {
+            "seconds": 4.63,
+            "title": "Jungle camps"
+          }
+        ],
+        "binary_sha256": "3bdce3e57661373eff5c1103a1149bb843d4ae13acf083d3ebca60f7bcb74c23",
+        "video": {
+          "file": "sources/clips/phone-warden.mp4",
+          "bytes": 388410566,
+          "sha256": "d54e1e262b55ee187945b68d5b05e22033c7600454a2f464f1454f8b91bd0948",
+          "seconds": 171.55,
+          "video_codec": "h264",
+          "width": 2532,
+          "height": 1170,
+          "fps": 60.0,
+          "pixel_format": "yuv420p"
+        }
+      },
+      {
+        "clip": "desktop-dawnweaver",
+        "hero": "dawnweaver",
+        "script": "showcase",
+        "lane": "mid",
+        "layout": "desktop",
+        "size": [
+          2560,
+          1440
+        ],
+        "scale": 2.0,
+        "frames": 3586,
+        "events": [
+          {
+            "seconds": 0.0,
+            "title": "Hero roster"
+          },
+          {
+            "seconds": 11.3,
+            "title": "To the lane"
+          },
+          {
+            "seconds": 28.83,
+            "title": "Lane fight"
+          }
+        ],
+        "binary_sha256": "3bdce3e57661373eff5c1103a1149bb843d4ae13acf083d3ebca60f7bcb74c23",
+        "video": {
+          "file": "sources/clips/desktop-dawnweaver.mp4",
+          "bytes": 118614484,
+          "sha256": "3ed232622144d399cbbc586c745484503c4c48a3e5df0c699a82caeceaad493d",
+          "seconds": 59.767,
+          "video_codec": "h264",
+          "width": 2560,
+          "height": 1440,
+          "fps": 60.0,
+          "pixel_format": "yuv420p"
+        }
+      },
+      {
+        "clip": "desktop-frostguard",
+        "hero": "frostguard",
+        "script": "lane",
+        "lane": "top",
+        "layout": "desktop",
+        "size": [
+          2560,
+          1440
+        ],
+        "scale": 2.0,
+        "frames": 6470,
+        "events": [
+          {
+            "seconds": 1.1,
+            "title": "To the lane"
+          },
+          {
+            "seconds": 30.28,
+            "title": "Lane fight"
+          }
+        ],
+        "binary_sha256": "3bdce3e57661373eff5c1103a1149bb843d4ae13acf083d3ebca60f7bcb74c23",
+        "video": {
+          "file": "sources/clips/desktop-frostguard.mp4",
+          "bytes": 230229857,
+          "sha256": "68e1b5929cf7a835fac11ad665665900e6d5add25d0f631d110f8ad6568334c1",
+          "seconds": 107.833,
+          "video_codec": "h264",
+          "width": 2560,
+          "height": 1440,
+          "fps": 60.0,
+          "pixel_format": "yuv420p"
+        }
+      }
+    ]
+  },
+  "edit": {
+    "tool": "Remotion 4 (motion/src/Trailer.tsx, shots.ts, lib.tsx)",
+    "added_in_the_edit": "device frame, desktop window frame, titles, ability lists, close-up lens (a crop of the same footage), callouts, wipes, flashes, sound effects",
+    "speed": "gameplay plays at recorded speed; the hero-select tour of the reveal scene plays at 1.5x (`rate` in the timeline); walks between fights are cut out",
+    "fonts": [
+      "Unbounded Black/SemiBold (OFL)",
+      "Barlow Condensed Bold/SemiBold (OFL, the game's HUD face)",
+      "Manrope ExtraBold (OFL)"
+    ],
+    "timeline": [
+      {
+        "at": 0.0,
+        "to": 4.0,
+        "scene": "Cold open: 'A whole MOBA in your pocket'",
+        "footage": []
+      },
+      {
+        "at": 4.0,
+        "to": 12.0,
+        "scene": "Reveal: the phone, hero select, 17 classes",
+        "footage": [
+          {
+            "shot": "roster",
+            "clip": "phone-wildspark",
+            "at": 1.0,
+            "seconds": 12.4,
+            "rate": 1.5
+          }
+        ]
+      },
+      {
+        "at": 12.0,
+        "to": 20.0,
+        "scene": "Wildspark: abilities, close-up, callouts",
+        "footage": [
+          {
+            "shot": "wildspark",
+            "clip": "phone-wildspark",
+            "at": 33.8,
+            "seconds": 4.8
+          },
+          {
+            "shot": "wildsparkPush",
+            "clip": "phone-wildspark",
+            "at": 48.3,
+            "seconds": 3.6
+          }
+        ]
+      },
+      {
+        "at": 20.0,
+        "to": 24.0,
+        "scene": "Stormfist",
+        "footage": [
+          {
+            "shot": "stormfist",
+            "clip": "phone-stormfist",
+            "at": 100.6,
+            "seconds": 4.2
+          }
+        ]
+      },
+      {
+        "at": 24.0,
+        "to": 28.0,
+        "scene": "Emberveil",
+        "footage": [
+          {
+            "shot": "emberveil",
+            "clip": "phone-emberveil",
+            "at": 44.2,
+            "seconds": 4.2
+          }
+        ]
+      },
+      {
+        "at": 28.0,
+        "to": 32.0,
+        "scene": "Warden in the jungle",
+        "footage": [
+          {
+            "shot": "warden",
+            "clip": "phone-warden",
+            "at": 121.6,
+            "seconds": 4.2
+          }
+        ]
+      },
+      {
+        "at": 32.0,
+        "to": 36.0,
+        "scene": "Built for thumbs: joystick and attack cluster",
+        "footage": [
+          {
+            "shot": "thumbs",
+            "clip": "phone-emberveil",
+            "at": 22.0,
+            "seconds": 4.2
+          }
+        ]
+      },
+      {
+        "at": 36.0,
+        "to": 40.0,
+        "scene": "Desktop: Dawnweaver",
+        "footage": [
+          {
+            "shot": "dawnweaver",
+            "clip": "desktop-dawnweaver",
+            "at": 29.5,
+            "seconds": 4.2
+          }
+        ]
+      },
+      {
+        "at": 40.0,
+        "to": 44.0,
+        "scene": "Desktop: Frostguard",
+        "footage": [
+          {
+            "shot": "frostguard",
+            "clip": "desktop-frostguard",
+            "at": 34.6,
+            "seconds": 4.2
+          }
+        ]
+      },
+      {
+        "at": 44.0,
+        "to": 52.0,
+        "scene": "Montage, one cut a second: push lanes, clear camps, land combos, take towers",
+        "footage": [
+          {
+            "shot": "montage",
+            "clip": "phone-wildspark",
+            "at": 53.9,
+            "seconds": 1.1
+          },
+          {
+            "shot": "montage",
+            "clip": "phone-stormfist",
+            "at": 34.0,
+            "seconds": 1.1
+          },
+          {
+            "shot": "montage",
+            "clip": "phone-warden",
+            "at": 122.0,
+            "seconds": 1.1
+          },
+          {
+            "shot": "montage",
+            "clip": "phone-warden",
+            "at": 146.0,
+            "seconds": 1.1
+          },
+          {
+            "shot": "montage",
+            "clip": "desktop-dawnweaver",
+            "at": 30.0,
+            "seconds": 1.1
+          },
+          {
+            "shot": "montage",
+            "clip": "phone-stormfist",
+            "at": 102.2,
+            "seconds": 1.1
+          },
+          {
+            "shot": "montage",
+            "clip": "desktop-frostguard",
+            "at": 57.5,
+            "seconds": 1.1
+          },
+          {
+            "shot": "montage",
+            "clip": "desktop-dawnweaver",
+            "at": 42.0,
+            "seconds": 1.1
+          }
+        ]
+      },
+      {
+        "at": 52.0,
+        "to": 56.6,
+        "scene": "End card: OMOBA, links",
+        "footage": [
+          {
+            "shot": "end",
+            "clip": "phone-wildspark",
+            "at": 46.0,
+            "seconds": 4.8
+          }
+        ]
+      }
+    ]
+  },
+  "music": {
+    "source": "ElevenLabs Music API (/v1/music, force_instrumental)",
+    "prompt": "Instrumental hype trailer music for a stylish mobile fantasy team-battle game: modern hybrid electronic with punchy trap-style drums, deep 808 bass, bright plucky synth arpeggios, short heroic brass stabs and risers. Structure: a tense 4-second riser intro, a big drop, a driving energetic groove, a short half-time breakdown about two thirds in, a bigger final chorus and one clean final impact with a short reverb tail. Steady 120 BPM, 4/4, no vocals.",
+    "file": "music.mp3",
+    "bytes": 1728515,
+    "sha256": "0ad29e2b0eebaf723fb3e4c4e85ac44a1b6ae2e4b5b48588970b2d1b7fc7fba8",
+    "bpm": 120,
+    "trailer_starts_at_seconds": 12.03
+  },
+  "claims": [
+    "Beta 0.41",
+    "17 classes",
+    "5v5 matches, 3 lanes, jungle camps, towers and a Nexus",
+    "phone and desktop layouts of the same game",
+    "gameplay captured in offline practice with bots"
+  ]
+}

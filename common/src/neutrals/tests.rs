@@ -23,7 +23,7 @@ use crate::sim::neutrals::{apply_neutral_damage, simulate_neutrals};
 use crate::sim::projectiles::simulate_projectiles;
 use crate::world::build_map_layout;
 
-/// One joined green hero of `class` in a running world that holds the six
+/// One joined green hero of `class` in a running world that holds the
 /// jungle camps.
 fn player_fixture(class: HeroClass, now: Instant) -> (GameWorld, SocketAddr) {
     let mut world = GameWorld::empty();
@@ -58,9 +58,9 @@ fn assert_reset(neutral: &Neutral) {
 }
 
 #[test]
-fn six_camps_have_shared_symmetric_reachable_anchors_and_stable_ids() {
+fn all_camps_have_shared_symmetric_reachable_anchors_and_stable_ids() {
     let camps = camps();
-    assert_eq!(camps.len(), 6);
+    assert_eq!(camps.len(), shared::jungle::CAMP_COUNT);
     let navigation = shared::navigation::world_navigation();
     let layout = build_map_layout();
     for (index, (point, kind)) in shared::jungle::camp_layout(jungle_map_size())
@@ -93,7 +93,7 @@ fn six_camps_have_shared_symmetric_reachable_anchors_and_stable_ids() {
 #[test]
 fn each_camp_pays_once_and_respawns_exactly_at_forty_seconds_only_when_running() {
     let now = Instant::now();
-    for id in 9_001..=9_006 {
+    for id in 9_001..9_001 + shared::jungle::CAMP_COUNT as u64 {
         let (mut world, addr) = player_fixture(HeroClass::Warrior, now);
         let killer = world.players[&addr].hero.identity.id;
         let kind = world.neutrals[&id].state.camp_type;
@@ -174,6 +174,70 @@ fn each_camp_pays_once_and_respawns_exactly_at_forty_seconds_only_when_running()
 }
 
 #[test]
+fn fire_and_ice_camp_kills_add_basic_hit_rewards_then_expire_and_reset() {
+    use crate::combat_feedback::HitSource;
+    use shared::combat::{CombatEntityKind, ProjectileStyle};
+    for (camps, expected_damage, expected_movement) in [
+        (&[9_003][..], 14.0, 1.0),
+        (&[9_005][..], 12.0, 0.9),
+        (&[9_003, 9_005][..], 16.0, 0.9),
+    ] {
+        let now = Instant::now();
+        let (mut world, addr) = player_fixture(HeroClass::Warrior, now);
+        let owner = world.players[&addr].hero.identity.id;
+        let target = TargetId {
+            kind: TargetKind::Neutral,
+            id: 9_001,
+        };
+        let source = HitSource::new(CombatEntityKind::Player, owner, ProjectileStyle::Standard);
+        for &camp in camps {
+            apply_neutral_damage(
+                &mut world.players,
+                &mut world.neutrals,
+                &mut world.team_buffs,
+                camp,
+                9999.0,
+                owner,
+                now,
+            );
+        }
+        let before = world.neutrals[&target.id].state.hp;
+        crate::skills::basic_impact(&mut world, target, 10.0, source, Team::Green, 0, now);
+        assert_eq!(
+            before - world.neutrals[&target.id].state.hp,
+            expected_damage
+        );
+        assert_eq!(
+            world.skill_runtime.npc_movement(target, now),
+            expected_movement
+        );
+        assert_eq!(
+            world
+                .skill_runtime
+                .npc_movement(target, now + Duration::from_secs(1)),
+            1.0
+        );
+        let after_expiry = now + crate::jungle_buffs::DURATION;
+        let before = world.neutrals[&target.id].state.hp;
+        crate::skills::basic_impact(
+            &mut world,
+            target,
+            10.0,
+            source,
+            Team::Green,
+            0,
+            after_expiry,
+        );
+        assert_eq!(before - world.neutrals[&target.id].state.hp, 10.0);
+        assert_eq!(world.skill_runtime.npc_movement(target, after_expiry), 1.0);
+        world.reset_round(now);
+        let buffs = &world.players[&addr].economy.jungle_buffs;
+        assert_eq!(buffs.on_hit_damage(now), 0.0);
+        assert!(!buffs.ice_active(now));
+    }
+}
+
+#[test]
 fn aggro_resets_after_target_death_disconnect_leave_or_leash_escape() {
     let now = Instant::now();
     for cause in ["death", "disconnect", "leave", "leash"] {
@@ -240,7 +304,7 @@ fn ordinary_last_hit_recovery_is_bounded_once_only_and_never_revives_or_heals_bo
 }
 
 #[test]
-fn rematch_restores_all_six_camps_and_discards_old_deaths_and_targets() {
+fn rematch_restores_all_camps_and_discards_old_deaths_and_targets() {
     let now = Instant::now();
     let (mut world, _) = player_fixture(HeroClass::Warrior, now);
     for neutral in world.neutrals.values_mut() {
@@ -255,8 +319,8 @@ fn rematch_restores_all_six_camps_and_discards_old_deaths_and_targets() {
     };
     world.reset_round(now);
     assert!(matches!(world.game_state, GameState::Lobby));
-    assert_eq!(world.neutrals.len(), 8);
-    for id in 9_001..=9_006 {
+    assert_eq!(world.neutrals.len(), shared::jungle::CAMP_COUNT + 2);
+    for id in 9_001..9_001 + shared::jungle::CAMP_COUNT as u64 {
         assert_reset(&world.neutrals[&id]);
         assert!(world.neutrals[&id].dead_until.is_none());
     }

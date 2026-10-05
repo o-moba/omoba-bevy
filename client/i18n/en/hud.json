@@ -13,7 +13,7 @@
   "hud.goal.unlock_base": "Clear one lane to unlock the base.",
   "hud.goal.base_hp": "Enemy base · {hp} / {max} HP",
   "hud.buff.wendigo": "Wendigo's Favor: +15% ability damage - {secs}s",
-  "hud.buff.mutatio": "Mutatio's Might: +25% ability damage, +2 HP/s - {secs}s",
+  "hud.buff.mutatio": "Dragon's Might: +25% ability damage, +2 HP/s - {secs}s",
   "hud.brush.concealed": "BRUSH · CONCEALED",
   "hud.brush.revealed": "BRUSH · REVEALED",
   "hud.fps": "{value} FPS"

@@ -244,10 +244,55 @@ fn jungle_views() -> [View; 4] {
     }
 }
 
+fn quality_views() -> [View; 2] {
+    let layout = MapLayout::default();
+    let pixels = jungle_views()[0].pixels;
+    let dragon = layout.boss_pit_centers()[1];
+    let dragon_target = Vec3::new(dragon.x, 1.2, dragon.y);
+    // Include the mid inner guard beside the base's orbiting rings.
+    let base_target = layout.home_spawn + Vec3::new(5.0, 3.5, 5.0);
+    [
+        View {
+            file: "01-quality-dragon-river.png",
+            position: dragon_target + Vec3::new(22.0, 28.0, 32.0),
+            target: dragon_target,
+            width: 52.0,
+            pixels,
+            hud: true,
+            perspective: false,
+            orbit_yaw: 0.0,
+            zoom: 1.0,
+        },
+        View {
+            file: "02-quality-nexus-inner.png",
+            position: base_target + Vec3::new(-20.0, 35.0, -40.0),
+            target: base_target,
+            width: 56.0,
+            pixels,
+            hud: true,
+            perspective: false,
+            orbit_yaw: 0.0,
+            zoom: 1.0,
+        },
+    ]
+}
+
+fn quality_destination(layout: &MapLayout, view: usize) -> Vec3 {
+    if view == 0 {
+        let pit = layout.boss_pit_centers()[1];
+        // Normal movement brings the real boss into team sight while keeping
+        // the observer outside the boss and nearby camp aggro radius.
+        Vec3::new(pit.x - 12.0, 0.5, pit.y - 14.0)
+    } else {
+        layout.team_spawn(Team::Green)
+    }
+}
+
 #[derive(Resource)]
 struct QaState {
     directory: PathBuf,
     jungle: bool,
+    quality: bool,
     views: Vec<View>,
     started: Instant,
     timeout: Duration,
@@ -268,12 +313,17 @@ struct QaState {
 
 impl QaState {
     fn new(directory: PathBuf, max_seconds: u64) -> Self {
-        let jungle = std::env::var("OMOBA_VISUAL_QA_SCENARIO")
-            .is_ok_and(|v| v == "jungle" || v == "forest-vfx");
+        let quality = std::env::var("OMOBA_VISUAL_QA_SCENARIO").as_deref() == Ok("quality");
+        let jungle = quality
+            || std::env::var("OMOBA_VISUAL_QA_SCENARIO")
+                .is_ok_and(|v| v == "jungle" || v == "forest-vfx");
         Self {
             directory,
             jungle,
-            views: if jungle {
+            quality,
+            views: if quality {
+                quality_views().to_vec()
+            } else if jungle {
                 jungle_views().to_vec()
             } else {
                 views().to_vec()
@@ -375,6 +425,20 @@ fn prepare_qa(
         }
         info!("VERDANT_QA autojoin={avatar} team=green method=normal_network_command");
     }
+    if qa.quality
+        && session.join_confirmed()
+        && let Ok((entity, transform, stats, target)) = players.single()
+    {
+        let destination = quality_destination(&layout, qa.view);
+        if stats.is_alive()
+            && transform.translation.xz().distance(destination.xz()) > 3.0
+            && target.is_none_or(|target| target.target.xz().distance(destination.xz()) > 0.1)
+        {
+            commands.entity(entity).insert(MovementTarget {
+                target: destination,
+            });
+        }
+    }
     if !qa.jungle
         && session.join_confirmed()
         && let Ok((entity, transform, stats, target)) = players.single()
@@ -448,12 +512,14 @@ struct Readiness {
 }
 
 fn ready_for_capture(ready: Readiness) -> bool {
+    static STRUCTURES: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    let expected = *STRUCTURES.get_or_init(|| shared::map::ResolvedMap::default().structures.len());
     ready.admitted
         && ready.running
         && ready.environments == 1
         && ready.foliage == 1
-        && ready.structures == 8
-        && ready.styled_structures == 8
+        && ready.structures == expected
+        && ready.styled_structures == expected
         && ready.scenes >= 10
         && ready.ready_scenes == ready.scenes
         && ready.loaded_scenes == ready.scenes
@@ -499,6 +565,7 @@ struct CaptureWorld<'w, 's> {
         ),
         (With<NetworkNeutral>, Without<MainCamera>),
     >,
+    rings: Query<'w, 's, (&'static Name, &'static Transform), Without<MainCamera>>,
     meshes: Query<'w, 's, (), With<Mesh3d>>,
     materials: Res<'w, Assets<StandardMaterial>>,
     local: Query<
@@ -763,9 +830,30 @@ fn capture_qa(
             !kind.0.is_boss() && stats.is_alive() && scale.head_local_y.is_some()
         })
         .count();
+    let quality_ready = if qa.view == 0 {
+        world.neutrals.iter().any(|(_, kind, stats, scale, _)| {
+            kind.0 == NeutralCampType::KingMutatioBoss
+                && stats.is_alive()
+                && scale.head_local_y.is_some()
+        })
+    } else {
+        world.local.single().is_ok_and(|(pose, stats)| {
+            stats.is_alive()
+                && pose
+                    .translation
+                    .xz()
+                    .distance(quality_destination(&MapLayout::default(), qa.view).xz())
+                    < 3.0
+        })
+    };
     qa.stable_frames = advance_stability(
         qa.stable_frames,
-        ready_for_capture(ready) && (!qa.jungle || (jungle_mobs == 6 && mobile_ready)),
+        ready_for_capture(ready)
+            && if qa.quality {
+                quality_ready && mobile_ready
+            } else {
+                !qa.jungle || (jungle_mobs == shared::jungle::CAMP_COUNT && mobile_ready)
+            },
     );
     qa.diagnostic = serde_json::json!({
         "elapsed_seconds":qa.started.elapsed().as_secs_f64(), "view":qa.view,
@@ -817,14 +905,25 @@ fn capture_qa(
         "animation_players":world.animations.iter().count(),
         "playing_animation_nodes":world.animations.iter().map(|player| player.playing_animations().count()).sum::<usize>(),
         "asset_root":omoba_passport::assets::client_asset_root(),"version":env!("CARGO_PKG_VERSION"),
-        "source_camera":if qa.jungle {"shared jungle camp anchors and bounded QA closeup offsets"} else if view.perspective {"production follow offset with declared QA orbit/zoom"} else {"art/verdant-confluence/scripts/build_scene.py"},"stable_frames":qa.stable_frames,
+        "source_camera":if qa.quality {"two shared-map quality cameras; authoritative dragon and live base structures"} else if qa.jungle {"shared jungle camp anchors and bounded QA closeup offsets"} else if view.perspective {"production follow offset with declared QA orbit/zoom"} else {"art/verdant-confluence/scripts/build_scene.py"},"stable_frames":qa.stable_frames,
         "orbit_yaw_radians":view.orbit_yaw,"zoom":view.zoom,"minimap":minimap_summary,
         "butterfly_wings":world.wings.iter().filter(|(_, v)| v.get()).map(|(p, _)| p.translation().to_array()).collect::<Vec<_>>(),
         "forest_vfx_camera":std::env::var("OMOBA_VISUAL_QA_SCENARIO").as_deref() == Ok("forest-vfx"),
         "jungle_mobs":world.neutrals.iter().filter(|(_, kind, _, _, _)| !kind.0.is_boss()).map(|(id, kind, stats, scale, transform)|
             serde_json::json!({"id":id.0,"kind":format!("{:?}",kind.0),"hp":stats.hp,
                 "position":transform.translation.to_array(),"foot_local_y":scale.foot_local_y(),"head_local_y":scale.head_local_y})).collect::<Vec<_>>(),
-        "setup":if qa.jungle {"six authoritative server camp creatures; no render fixtures"} else {"authoritative server structures and selected local avatar; five tagged render-only production creature fixtures"} });
+        "setup":if qa.quality {"ordinary hero movement; scheduled authoritative boss; no render fixtures"} else if qa.jungle {"all authoritative server camp creatures; no render fixtures"} else {"authoritative server structures and selected local avatar; five tagged render-only production creature fixtures"} });
+    if qa.quality {
+        capture["authoritative_bosses"] = serde_json::json!(world.neutrals.iter()
+            .filter(|(_, kind, _, _, _)| kind.0.is_boss())
+            .map(|(id, kind, stats, _, pose)| serde_json::json!({
+                "id":id.0, "kind":format!("{:?}",kind.0), "hp":stats.hp, "position":pose.translation.to_array()
+            })).collect::<Vec<_>>());
+        capture["nexus_rings"] = serde_json::json!(world.rings.iter()
+            .filter(|(name, _)| name.as_str().starts_with("NexusOrbit-"))
+            .map(|(name, pose)| serde_json::json!({"name":name.as_str(), "rotation":pose.rotation.to_array()}))
+            .collect::<Vec<_>>());
+    }
     capture["mobile_controls"] = mobile.enabled.into();
     capture["gameplay_allowed"] = context.gameplay_allowed().into();
     capture["window_focused"] = window_focused.into();
@@ -904,16 +1003,17 @@ mod tests {
 
     #[test]
     fn screenshot_waits_for_authoritative_structures_scene_instances_assets_and_actor() {
+        let count = shared::map::ResolvedMap::default().structures.len();
         let ready = Readiness {
             admitted: true,
             running: true,
             environments: 1,
             foliage: 1,
-            structures: 8,
-            styled_structures: 8,
-            scenes: 11,
-            ready_scenes: 11,
-            loaded_scenes: 11,
+            structures: count,
+            styled_structures: count,
+            scenes: count + 3,
+            ready_scenes: count + 3,
+            loaded_scenes: count + 3,
             local_at_river: true,
             peers_at_river: true,
             meshes: 200,
@@ -925,19 +1025,19 @@ mod tests {
                 ..ready
             },
             Readiness {
-                ready_scenes: 10,
+                ready_scenes: count + 2,
                 ..ready
             },
             Readiness {
-                loaded_scenes: 10,
+                loaded_scenes: count + 2,
                 ..ready
             },
             Readiness {
-                styled_structures: 7,
+                styled_structures: count - 1,
                 ..ready
             },
             Readiness {
-                structures: 9,
+                structures: count + 1,
                 ..ready
             },
             Readiness {
@@ -958,6 +1058,27 @@ mod tests {
         assert_eq!(advance_stability(44, true), 45);
         assert_eq!(advance_stability(45, true), 45);
         assert_eq!(advance_stability(44, false), 0);
+    }
+
+    #[test]
+    fn quality_views_use_real_boss_and_base_anchors_in_exactly_two_frames() {
+        let layout = MapLayout::default();
+        let plan = quality_views();
+        assert_eq!(plan.len(), 2);
+        assert_eq!(plan[0].target.xz(), layout.boss_pit_centers()[1]);
+        assert!(plan[1].target.xz().distance(layout.home_spawn.xz()) < 8.0);
+        assert_ne!(plan[0].file, plan[1].file);
+        let destination = quality_destination(&layout, 0);
+        assert!(destination.xz().distance(plan[0].target.xz()) > 15.0);
+        assert!(destination.xz().distance(plan[0].target.xz()) < shared::vision::HERO_SIGHT_RADIUS);
+        let route = shared::navigation::world_navigation()
+            .plan_route(
+                layout.team_spawn(Team::Green).xz().to_array(),
+                destination.xz().to_array(),
+                &[],
+            )
+            .unwrap();
+        assert!(Vec2::from_array(*route.last().unwrap()).distance(destination.xz()) < 3.0);
     }
 
     #[test]

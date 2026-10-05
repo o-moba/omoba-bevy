@@ -204,6 +204,10 @@ fn drive(
         social.qa_send_chat(&mut out);
         qa.chat_sent = true;
     }
+    if qa.step == 0 && qa.chat_sent && !social.chat_open && !social.events.is_empty() {
+        // The production success path closes the composer. Inspect history explicitly.
+        social.qa_open_transcript();
+    }
     if qa.step == 1 && !qa.gesture_started {
         let Some(point) = world.camera.single().ok().and_then(|(camera, transform)| {
             crate::social::hero_screen(camera, transform, *world.mode, position.translation, 1.1)

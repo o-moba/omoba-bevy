@@ -87,7 +87,7 @@ struct MinimapUiState {
     player_icons: HashMap<Entity, (Entity, String)>,
     structure_icons: HashMap<Entity, Entity>,
     minion_icons: HashMap<Entity, Entity>,
-    camp_icons: [Option<Entity>; 6],
+    camp_icons: [Option<Entity>; shared::jungle::CAMP_COUNT],
     rockets: HashMap<u64, [Entity; 3]>,
 }
 #[derive(Component)]
@@ -792,7 +792,7 @@ fn update_minimap_icons_system(
     }
     despawn_removed_icons(&mut commands, &mut state.minion_icons, &seen);
     let camps = shared::jungle::camp_layout(layout.size().x);
-    let mut living = [false; 6];
+    let mut living = [false; shared::jungle::CAMP_COUNT];
     for (transform, kind, stats) in &neutrals {
         if !stats.is_alive() || kind.0.is_boss() {
             continue;
@@ -828,8 +828,8 @@ fn update_minimap_icons_system(
         let alive = living[index];
         let color = match kind {
             shared::jungle::JungleCampKind::Skirmisher => Color::srgb(0.46, 0.96, 0.40),
-            shared::jungle::JungleCampKind::Bruiser => Color::srgb(1.0, 0.71, 0.26),
-            shared::jungle::JungleCampKind::Spitter => Color::srgb(0.84, 0.52, 1.0),
+            shared::jungle::JungleCampKind::Bruiser => Color::srgb(1.0, 0.40, 0.12),
+            shared::jungle::JungleCampKind::Spitter => Color::srgb(0.24, 0.76, 1.0),
         };
         let mut node = marker_node(
             map_point(*layout, Vec3::new(anchor[0], 0.0, anchor[1])),
@@ -846,11 +846,9 @@ fn update_minimap_icons_system(
             } else {
                 Color::srgb(0.07, 0.10, 0.09)
             }),
-            BorderColor::all(if alive {
-                Color::srgb(0.10, 0.13, 0.09)
-            } else {
-                Color::srgb(0.47, 0.50, 0.44)
-            }),
+            // Camp type is public map information; retain its reward color
+            // through fog while the center alone conveys known life state.
+            BorderColor::all(color),
             MinimapCamp {
                 #[cfg(any(test, feature = "qa"))]
                 index,
@@ -1236,7 +1234,7 @@ mod tests {
     }
 
     #[test]
-    fn six_persistent_camp_markers_follow_authoritative_death_roaming_and_respawn() {
+    fn persistent_camp_markers_follow_authoritative_death_roaming_and_respawn() {
         let mut app = marker_app();
         let layout = *app.world().resource::<MapLayout>();
         let camps = shared::jungle::camp_layout(layout.size().x);
@@ -1321,7 +1319,7 @@ mod tests {
                 .query::<&MinimapCamp>()
                 .iter(app.world())
                 .count(),
-            6
+            shared::jungle::CAMP_COUNT
         );
     }
 

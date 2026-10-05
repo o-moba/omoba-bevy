@@ -6,10 +6,10 @@
 //!   `DebugAccess::for_match_mode(match_mode)` for an older server; nothing
 //!   until the join is confirmed. In Combat Test the sandbox actor config owns
 //!   god mode and the speed boost, so the toggles are not offered there.
-//! - [`DebugToggles`] is the one client copy of god mode and the speed boost.
+//! - [`DebugToggles`] holds the requested god mode, speed boost, and practice cooldown bypass.
 //!   The HUD buttons and hotkeys (`hud`), the tools page (`tools_page`),
 //!   local movement (`player`) and the local-player snapshot stage (`net`)
-//!   all read it. While the toggles are not allowed it is held at "both off"
+//!   all read it. Disallowed toggles are held off
 //!   ([`sync_debug_access`]), so leaving practice or joining a worker round
 //!   drops them.
 //! - [`resend_debug_toggles`] re-sends the toggles every 0.5 s wherever they
@@ -35,24 +35,28 @@ pub(crate) use console::DebugConsolePlugin;
 pub(crate) use hud::GodModePlugin;
 pub(crate) use tools_page::PracticeSandboxPlugin;
 
-/// Last requested god mode and speed boost. The server owns the real flags;
+/// Last requested god mode, speed boost and practice cooldown bypass. The server owns the real flags;
 /// this is what the client asks for (and re-sends while the toggles are
 /// allowed). The speed boost also makes local movement faster and widens the
-/// snapshot snap threshold. Both reset to off whenever the toggles are not
+/// snapshot snap threshold. Each resets to off whenever its commands are not
 /// allowed ([`sync_debug_access`]): the next match starts without them on the
 /// server too.
 #[derive(Resource, Default, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct DebugToggles {
     pub god_mode: bool,
     pub speed_boost: bool,
+    pub no_cooldowns: bool,
 }
 
 impl DebugToggles {
-    /// Both toggles as commands, god mode first (the re-send order).
-    pub(crate) fn commands(self) -> [DebugCommand; 2] {
+    /// Toggle requests; the sender filters each by its authorization.
+    pub(crate) fn commands(self) -> [DebugCommand; 3] {
         [
             DebugCommand::GodMode(self.god_mode),
             DebugCommand::SpeedBoost(self.speed_boost),
+            DebugCommand::Practice(shared::practice::PracticeCommand::SetNoCooldowns {
+                enabled: self.no_cooldowns,
+            }),
         ]
     }
 }
@@ -124,10 +128,10 @@ impl Plugin for DebugAccessPlugin {
 }
 
 pub(crate) fn debug_toggles_allowed(access: Option<Res<ClientDebugAccess>>) -> bool {
-    access.is_some_and(|access| access.toggles())
+    access.is_some_and(|access| access.toggles() || access.practice())
 }
 
-/// Recomputes [`ClientDebugAccess`] and holds [`DebugToggles`] at "both off"
+/// Recomputes [`ClientDebugAccess`] and holds disallowed [`DebugToggles`] off
 /// while the toggles are not allowed (not joined yet, a release match, a
 /// worker round, Combat Test), so nothing requested in one match leaks into
 /// the next or keeps local movement boosted.
@@ -145,9 +149,16 @@ pub(crate) fn sync_debug_access(
     if *access != next {
         *access = next;
     }
-    if !next.toggles() && *toggles != DebugToggles::default() {
-        info!("[debug] toggles not allowed here; god mode and speed boost off");
-        *toggles = DebugToggles::default();
+    let mut permitted = *toggles;
+    if !next.toggles() {
+        permitted.god_mode = false;
+        permitted.speed_boost = false;
+    }
+    if !next.practice() || next.combat_test {
+        permitted.no_cooldowns = false;
+    }
+    if permitted != *toggles {
+        *toggles = permitted;
     }
 }
 
@@ -155,11 +166,12 @@ pub(crate) fn sync_debug_access(
 /// A single edge-triggered send can be dropped (UDP, connection races, or a fresh
 /// server session resetting the flags); periodic idempotent re-assertion guarantees
 /// the server's `god_mode`/`speed_mult` eventually match the local toggles.
-/// Runs only while [`ClientDebugAccess::toggles`] allows them.
+/// Each command is filtered by its own current access.
 pub(crate) fn resend_debug_toggles(
     time: Res<Time>,
     mut elapsed: Local<f32>,
     toggles: Res<DebugToggles>,
+    access: Res<ClientDebugAccess>,
     client_session: Res<ClientSession>,
     mut command_writer: MessageWriter<NetworkCommand>,
 ) {
@@ -172,7 +184,13 @@ pub(crate) fn resend_debug_toggles(
     }
     *elapsed = 0.0;
     for command in toggles.commands() {
-        command_writer.write(NetworkCommand::Debug(command));
+        let allowed = match command {
+            DebugCommand::Practice(_) => access.practice() && !access.combat_test,
+            _ => access.toggles(),
+        };
+        if allowed {
+            command_writer.write(NetworkCommand::Debug(command));
+        }
     }
 }
 
@@ -210,6 +228,7 @@ mod tests {
     const ON: DebugToggles = DebugToggles {
         god_mode: true,
         speed_boost: true,
+        no_cooldowns: false,
     };
 
     #[test]

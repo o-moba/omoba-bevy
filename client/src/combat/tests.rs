@@ -2040,3 +2040,44 @@ fn borrowed_recast_requires_and_displays_its_own_mana_cost() {
         );
     }
 }
+
+#[test]
+fn rejected_skill_clears_prediction_after_grace_even_with_unchanged_zero_snapshot() {
+    let mut app = App::new();
+    app.init_resource::<Time>()
+        .init_resource::<LocalCastCooldown>()
+        .add_systems(
+            Update,
+            (
+                tick_local_cast_cooldown,
+                sync_authoritative_cooldown_durations,
+            )
+                .chain(),
+        );
+    app.world_mut().spawn((
+        Player,
+        PlayerProgression::default(),
+        NetworkHeroClass(HeroClass::Adventurer),
+        crate::net::PlayerEquipment::default(),
+        crate::net::PlayerSkillCooldowns::default(),
+    ));
+    app.update();
+    {
+        let mut cd = app.world_mut().resource_mut::<LocalCastCooldown>();
+        cd.pending_slot = Some(3);
+        cd.prediction_grace_secs = 0.3;
+        cd.remaining_secs[3] = 22.0;
+    }
+    app.world_mut()
+        .resource_mut::<Time>()
+        .advance_by(std::time::Duration::from_millis(100));
+    app.update();
+    assert!(app.world().resource::<LocalCastCooldown>().remaining_secs[3] > 20.0);
+    app.world_mut()
+        .resource_mut::<Time>()
+        .advance_by(std::time::Duration::from_millis(250));
+    app.update();
+    let cd = app.world().resource::<LocalCastCooldown>();
+    assert_eq!(cd.remaining_secs[3], 0.0);
+    assert!(cd.pending_slot.is_none());
+}

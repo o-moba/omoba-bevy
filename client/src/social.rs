@@ -360,6 +360,7 @@ impl SocialClient {
                 {
                     self.draft.clear();
                     self.keyboard_requested = false;
+                    self.close();
                 }
                 self.set_status(SocialStatus::None);
             }
@@ -440,6 +441,7 @@ impl SocialClient {
                 SocialCommand::Chat { channel, text } => {
                     self.draft.clear();
                     self.keyboard_requested = false;
+                    self.close();
                     SocialEventKind::Chat { channel, text }
                 }
                 SocialCommand::Reaction { reaction_id } => {
@@ -526,6 +528,11 @@ impl SocialClient {
         self.opened_frame = true;
         self.draft = "QA: Привет 小明 — ready for practice!".into(); // i18n-allow: QA harness draft
         self.send_chat(out);
+    }
+    #[cfg(feature = "qa")]
+    pub(crate) fn qa_open_transcript(&mut self) {
+        self.open_chat();
+        self.keyboard_requested = false;
     }
     #[cfg(feature = "qa")]
     pub(crate) fn qa_send_reaction(&mut self, out: &mut MessageWriter<NetworkCommand>) {
@@ -1037,10 +1044,14 @@ fn chat_keyboard(
     let phone = mobile.as_ref().is_some_and(|mobile| mobile.enabled);
     if let Ok(mut window) = window.single_mut() {
         if social.chat_open && (!phone || social.keyboard_requested) {
-            window.ime_enabled = true;
+            if !window.ime_enabled {
+                window.ime_enabled = true;
+            }
             social.ime_owned = true;
         } else if social.ime_owned {
-            window.ime_enabled = false;
+            if window.ime_enabled {
+                window.ime_enabled = false;
+            }
             social.ime_owned = false;
         }
     }
@@ -2126,6 +2137,84 @@ mod tests {
     }
 
     #[test]
+    fn successful_chat_releases_composer_but_failed_delivery_keeps_draft() {
+        let mut social = SocialClient::default();
+        social.bind(7, 2);
+        social.open_chat();
+        social.draft = "hello".into();
+        let now = Instant::now();
+        social.pending = Some(PendingSend {
+            id: 1,
+            command: SocialCommand::Chat {
+                channel: SocialChannel::Team,
+                text: "hello".into(),
+            },
+            started: now,
+            next: now,
+        });
+        social.request_failed(1, SocialStatus::Key("social.status.no_confirmation"));
+        assert!(social.chat_open);
+        assert_eq!(social.draft, "hello");
+        social.pending = Some(PendingSend {
+            id: 2,
+            command: SocialCommand::Chat {
+                channel: SocialChannel::Team,
+                text: "hello".into(),
+            },
+            started: now,
+            next: now,
+        });
+        social.apply_view(
+            7,
+            2,
+            1,
+            SocialView {
+                request_id: Some(2),
+                ..default()
+            },
+        );
+        assert!(!social.chat_open && !social.keyboard_requested);
+        assert!(
+            social.blocked_frame,
+            "submission consumes its own input frame"
+        );
+        social.blocked_frame = false;
+        assert!(
+            !social.blocks_gameplay(),
+            "the next frame accepts movement again"
+        );
+    }
+
+    #[test]
+    fn unchanged_chat_keyboard_does_not_dirty_the_native_window_every_frame() {
+        let mut app = App::new();
+        app.insert_resource(SocialClient {
+            chat_open: true,
+            ..default()
+        })
+        .init_resource::<ButtonInput<KeyCode>>()
+        .add_message::<KeyboardInput>()
+        .add_message::<Ime>()
+        .add_message::<NetworkCommand>()
+        .add_systems(Update, chat_keyboard);
+        let entity = app
+            .world_mut()
+            .spawn((Window::default(), PrimaryWindow))
+            .id();
+        app.update();
+        app.world_mut().clear_trackers();
+        app.update();
+        assert!(app.world().get::<Window>(entity).unwrap().ime_enabled);
+        assert!(
+            !app.world()
+                .entity(entity)
+                .get_ref::<Window>()
+                .unwrap()
+                .is_changed()
+        );
+    }
+
+    #[test]
     fn server_delivery_clears_status_and_errors_and_received_lines_expire() {
         let mut social = SocialClient::default();
         social.bind(7, 2);
@@ -2439,7 +2528,10 @@ mod tests {
             app.world_mut()
                 .run_system_once(
                     |mut social: ResMut<SocialClient>, mut out: MessageWriter<NetworkCommand>| {
-                        social.send_chat(&mut out)
+                        social.send_chat(&mut out);
+                        assert!(!social.chat_open, "successful send closes the composer");
+                        social.open_chat();
+                        social.keyboard_requested = false;
                     },
                 )
                 .unwrap();

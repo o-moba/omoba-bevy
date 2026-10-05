@@ -22,7 +22,10 @@ use crate::{
     team::Team,
 };
 pub(crate) use policy::AudioCue;
-use policy::{Candidate, CueCatalog, EventCursor, LocalState, RateBudget, expired};
+use policy::{
+    AttackCursor, AttackObservation, Candidate, CueCatalog, EventCursor, LocalState, RateBudget,
+    expired,
+};
 
 pub struct GameAudioPlugin;
 
@@ -78,6 +81,7 @@ struct GameAudioRuntime {
     music: Option<LoadedCue>,
     cues: BTreeMap<AudioCue, LoadedCue>,
     cursor: EventCursor,
+    attacks: AttackCursor,
     budget: RateBudget,
     unlocked: bool,
     music_gain: f32,
@@ -169,6 +173,19 @@ impl AudioInput<'_, '_> {
 #[derive(SystemParam)]
 struct AudioWorld<'w, 's> {
     snapshot: Res<'w, GameStateSnapshot>,
+    actors: Query<
+        'w,
+        's,
+        (
+            &'static NetworkPlayerId,
+            &'static Transform,
+            &'static CombatStats,
+            &'static Team,
+            &'static crate::net::NetworkHeroClass,
+            &'static crate::net::PlayerCosmeticAction,
+            Option<&'static InheritedVisibility>,
+        ),
+    >,
     session: Res<'w, ClientSession>,
     local: Query<
         'w,
@@ -232,6 +249,31 @@ fn update_audio(
         &world.snapshot.state,
         local,
         &world.snapshot.combat_events,
+    );
+    candidates.extend(
+        runtime.attacks.accept(
+            (
+                world.snapshot.meta.server_epoch,
+                world.snapshot.meta.match_id,
+            ),
+            matches!(world.snapshot.state, GameState::Running),
+            local,
+            world
+                .actors
+                .iter()
+                .map(
+                    |(id, pose, stats, team, class, action, visibility)| AttackObservation {
+                        id: id.0,
+                        sequence: action.sequence,
+                        attacking: action.kind == shared::PlayerActionKind::Attack,
+                        visible: visibility.is_none_or(|v| v.get()),
+                        alive: stats.is_alive(),
+                        team: *team,
+                        position: pose.translation,
+                        style: shared::combat::ProjectileStyle::for_class(class.0),
+                    },
+                ),
+        ),
     );
     if input.ui_pressed() {
         candidates.push(Candidate::local(AudioCue::UiClick));

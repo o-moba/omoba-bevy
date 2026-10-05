@@ -97,6 +97,7 @@ pub(super) fn cast(w: &mut GameWorld, addr: SocketAddr, slot: u8, aim: [f32; 2],
         action,
         damage,
         duration_secs,
+        radius,
         ..
     } = def.effect
     else {
@@ -128,7 +129,9 @@ pub(super) fn cast(w: &mut GameWorld, addr: SocketAddr, slot: u8, aim: [f32; 2],
             hostile(c, team)
                 && (action != Technique::DaggerBluff || c.target.kind == TargetKind::Player)
                 && distance(origin, c.pos) <= def.ability.cast_range + c.radius
-                && distance(aim, c.pos) <= 1.0 + c.radius
+                // Directional drags also reach enemies between the caster and
+                // the endpoint, including an overlapping point-blank target.
+                && intersection(origin, aim, c.pos, radius.min(0.55) + c.radius).is_some()
                 && (p.modifiers.bypass_vision
                     || crate::vision::target_visible(team, c.target, w, now))
                 && (c.target.kind != TargetKind::Player
@@ -211,7 +214,8 @@ pub(super) fn cast(w: &mut GameWorld, addr: SocketAddr, slot: u8, aim: [f32; 2],
     } else {
         1.0
     };
-    let src = source(owner, slot);
+    let mut src = source(owner, slot);
+    src.style = ProjectileStyle::Crescent;
     let mut events = apply_hit(
         w,
         target.target,

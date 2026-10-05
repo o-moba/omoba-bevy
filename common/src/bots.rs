@@ -383,14 +383,12 @@ pub enum BotKind {
     Lane,
     /// Sandbox 1v1 opponent: the lane AI with a configured level and budget.
     Duelist,
-    /// Sandbox target: stands at `anchor`, never moves or attacks, and walks
-    /// back to the anchor after every respawn.
+    /// Disposable sandbox target: stands still and never attacks.
     Dummy { anchor: [f32; 2] },
-    MovingDummy {
-        anchor: [f32; 2],
-        started: Instant,
-        respawning: bool,
-    },
+    /// Disposable passive target following a bounded circular route.
+    MovingDummy { anchor: [f32; 2], started: Instant },
+    /// Disposable opponent that immediately pursues the requesting human.
+    AggressiveDummy { target: u64 },
 }
 
 struct Controller {
@@ -529,7 +527,7 @@ pub fn auto_shop(
 
 /// Put a dummy on its anchor, facing `toward`, without a movement envelope
 /// check: this is a placement, not a step. Used when a dummy spawns
-/// (`debug::practice`) and when it walks back after a respawn.
+/// (`debug::practice`). Disposable practice targets do not respawn.
 pub fn place_dummy(player: &mut ConnectedPlayer, anchor: [f32; 2], toward: [f32; 2], now: Instant) {
     player.hero.x = anchor[0];
     player.hero.y = PLAYER_GROUND_Y;
@@ -652,6 +650,24 @@ impl CombatHost<'_> {
             let Some(player) = self.world.players.get(&addr) else {
                 continue;
             };
+            // Remove disposable targets before stun/respawn handling. Their
+            // absence must never make the ordinary roster refill a replacement.
+            if player.hero.hp <= 0.0
+                && matches!(
+                    controller.kind,
+                    BotKind::Dummy { .. }
+                        | BotKind::MovingDummy { .. }
+                        | BotKind::AggressiveDummy { .. }
+                )
+            {
+                remove_bot(
+                    &mut self.world.players,
+                    self.bots,
+                    &mut self.combat_log.ledger,
+                    addr,
+                );
+                continue;
+            }
             if player
                 .hero
                 .skills
@@ -662,72 +678,84 @@ impl CombatHost<'_> {
                 self.bots.controllers.insert(addr, controller);
                 continue;
             }
-            if let BotKind::MovingDummy {
-                anchor,
-                started,
-                respawning,
-            } = controller.kind
-            {
-                if player.hero.hp > 0.0 {
-                    if respawning {
-                        let dummy = self.world.players.get_mut(&addr).unwrap();
-                        place_dummy(dummy, anchor, anchor, now);
-                        controller.kind = BotKind::MovingDummy {
-                            anchor,
-                            started: now,
-                            respawning: false,
-                        };
-                        self.bots.controllers.insert(addr, controller);
-                        continue;
-                    }
-                    let phase = now.saturating_duration_since(started).as_secs_f32() * 0.8;
-                    let goal = [
-                        anchor[0] + 2.5 * (phase.cos() - 1.0),
-                        anchor[1] + 2.5 * phase.sin(),
+            if let BotKind::MovingDummy { anchor, started } = controller.kind {
+                let phase = now.saturating_duration_since(started).as_secs_f32() * 0.8;
+                let goal = [
+                    anchor[0] + 2.5 * (phase.cos() - 1.0),
+                    anchor[1] + 2.5 * phase.sin(),
+                ];
+                let from = [player.hero.x, player.hero.z];
+                let distance = (goal[0] - from[0]).hypot(goal[1] - from[1]);
+                let step = (3.0 * dt * player.hero.skills.movement(now)).min(distance);
+                if distance > 0.001 && step > 0.0 {
+                    let desired = [
+                        from[0] + (goal[0] - from[0]) / distance * step,
+                        from[1] + (goal[1] - from[1]) / distance * step,
                     ];
-                    let from = [player.hero.x, player.hero.z];
-                    let distance = (goal[0] - from[0]).hypot(goal[1] - from[1]);
-                    let control = player.hero.skills.movement(now);
-                    let step = (3.0 * dt * control).min(distance);
-                    if distance > 0.001 && step > 0.0 {
-                        let desired = [
-                            from[0] + (goal[0] - from[0]) / distance * step,
-                            from[1] + (goal[1] - from[1]) / distance * step,
-                        ];
-                        let clipped =
-                            shared::navigation::world_navigation().clip_movement(from, desired);
-                        let clipped = shared::navigation::clip_discs(from, clipped, &discs);
-                        let dummy = self.world.players.get_mut(&addr).unwrap();
-                        dummy.hero.x = clipped[0];
-                        dummy.hero.z = clipped[1];
-                        dummy.hero.yaw = hero_yaw_towards(goal[0] - from[0], goal[1] - from[1]);
-                        dummy.timers.last_movement_at = now;
-                    }
-                } else {
-                    // Respawn continues from the practice anchor, without lane AI.
-                    controller.kind = BotKind::MovingDummy {
-                        anchor,
-                        started: now,
-                        respawning: true,
-                    };
+                    let clipped =
+                        shared::navigation::world_navigation().clip_movement(from, desired);
+                    let clipped = shared::navigation::clip_discs(from, clipped, &discs);
+                    let dummy = self.world.players.get_mut(&addr).unwrap();
+                    dummy.hero.x = clipped[0];
+                    dummy.hero.z = clipped[1];
+                    dummy.hero.yaw = hero_yaw_towards(goal[0] - from[0], goal[1] - from[1]);
+                    dummy.timers.last_movement_at = now;
                 }
                 self.bots.controllers.insert(addr, controller);
                 continue;
             }
-            if let BotKind::Dummy { anchor } = controller.kind {
-                // Never thinks, moves or attacks. After a respawn at base it
-                // is put back on its anchor so target practice continues.
-                if player.hero.hp > 0.0
-                    && (player.hero.x - anchor[0]).hypot(player.hero.z - anchor[1]) > 0.5
-                {
-                    let toward = self
-                        .world
-                        .players
-                        .values()
-                        .find(|p| p.joined && !p.hero.identity.is_bot)
-                        .map_or(anchor, |p| [p.hero.x, p.hero.z]);
-                    let dummy = self.world.players.get_mut(&addr).unwrap();
-                    place_dummy(dummy, anchor, toward, now);
+            if matches!(controller.kind, BotKind::Dummy { .. }) {
+                self.bots.controllers.insert(addr, controller);
+                continue;
+            }
+            if let BotKind::AggressiveDummy { target } = controller.kind {
+                let origin = [player.hero.x, player.hero.z];
+                let target = TargetId {
+                    kind: TargetKind::Player,
+                    id: target,
+                };
+                if let Some((position, radius)) = basic_attack::resolve_hostile_target(
+                    player.hero.identity.team,
+                    target,
+                    &self.world.players,
+                    &self.world.minions,
+                    &self.world.structures,
+                    &self.world.neutrals,
+                ) {
+                    let dx = position.x - origin[0];
+                    let dz = position.z - origin[1];
+                    let distance = dx.hypot(dz);
+                    let reach = crate::skills::attack_modifiers(player).0 + radius;
+                    if distance <= reach {
+                        let request = player.economy.basic_attack_request_id.saturating_add(1);
+                        self.world.players.get_mut(&addr).unwrap().hero.yaw =
+                            hero_yaw_towards(dx, dz);
+                        basic_attack::handle_basic_attack_request(
+                            self.world, addr, target, request, now,
+                        );
+                    } else {
+                        let step = (hero_stats::move_speed(player)
+                            * player.hero.skills.movement(now)
+                            * dt)
+                            .min(distance - reach + 0.1);
+                        let desired = [
+                            origin[0] + dx / distance * step,
+                            origin[1] + dz / distance * step,
+                        ];
+                        let next =
+                            shared::navigation::world_navigation().clip_movement(origin, desired);
+                        let next = shared::navigation::clip_discs(origin, next, &discs);
+                        handle_transform_request_with_structures(
+                            self.world.players.get_mut(&addr).unwrap(),
+                            &self.world.map_layout,
+                            &self.world.structures,
+                            next[0],
+                            PLAYER_GROUND_Y,
+                            next[1],
+                            hero_yaw_towards(dx, dz),
+                            now,
+                        );
+                    }
                 }
                 self.bots.controllers.insert(addr, controller);
                 continue;
@@ -1037,11 +1065,10 @@ impl CombatHost<'_> {
                         self.world, addr, target, request, now,
                     );
                 }
-                let approach = (reach + radius - 0.35).max(0.5).min(distance);
-                [
-                    position.x - dx / distance.max(0.001) * approach,
-                    position.z - dz / distance.max(0.001) * approach,
-                ]
+                // Route to the target and stop at attack reach on the way.
+                // A radial approach point can fall inside an intervening tree,
+                // whose projected boundary may still be outside attack reach.
+                [position.x, position.z]
             } else if let Some((_, camp)) = controller
                 .jungle
                 .then(|| self.jungle_camp(team, origin))
@@ -1050,12 +1077,25 @@ impl CombatHost<'_> {
                 camp
             } else {
                 let path = build_minion_path(&self.world.map_layout, controller.lane, team);
-                while controller.waypoint + 1 < path.len()
-                    && (path[controller.waypoint].x - origin[0])
-                        .hypot(path[controller.waypoint].z - origin[1])
-                        < 1.5
-                {
+                while controller.waypoint + 1 < path.len() {
+                    let waypoint = [path[controller.waypoint].x, path[controller.waypoint].z];
+                    let near = (waypoint[0] - origin[0]).hypot(waypoint[1] - origin[1]) < 1.5;
+                    // A live tower can occupy an authored lane corner. Reaching
+                    // its planned boundary is arrival, even when the original
+                    // point lies farther away than the ordinary corner tolerance.
+                    // A turret staging destination is a different goal and must
+                    // never advance the lane behind an unsupported defense.
+                    let projected_arrival = controller.goal == Some(waypoint)
+                        && controller.route.back().is_some_and(|end| {
+                            (end[0] - origin[0]).hypot(end[1] - origin[1]) < 0.2
+                        });
+                    if !near && !projected_arrival {
+                        break;
+                    }
                     controller.waypoint += 1;
+                    controller.route.clear();
+                    controller.goal = None;
+                    controller.next_route = now;
                 }
                 let point = path[controller.waypoint.min(path.len() - 1)];
                 lane_staging_destination(self.world, team, controller.lane, [point.x, point.z])

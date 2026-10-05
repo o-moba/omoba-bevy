@@ -21,3 +21,10 @@ The original **Adventurer Dagger** (`dagger.glb`) and its editable
 `assets-src/weapons/dagger.blend` source are also CC-BY-4.0, credited to
 Open Moba contributors. Created from original geometry by
 `scripts/build_dagger_model.py`; no third-party game assets are used.
+
+Original **Wildspark Repeater**, **Wildspark Rocket Launcher**, **Verdant Bow**
+and **Wildspark Rocket** (`wild-repeater.glb`, `wild-launcher.glb`,
+`verdant-bow.glb`, `wild-rocket.glb`) and `ranged-handhelds.blend` are CC-BY-4.0,
+credited to Open Moba contributors. Regenerate using Blender and
+`scripts/build_ranged_handhelds.py`. No external geometry or textures.
+Gun muzzles point along canonical palm +Z; bow limbs follow +Y.

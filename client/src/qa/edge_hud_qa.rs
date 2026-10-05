@@ -221,6 +221,7 @@ fn fixture(
                 earned_gold: 12345 + index as u32 * 1234,
                 level: 10 + index as u32,
                 connected: index != 9,
+                respawn_remaining_ms: 0,
             })
             .collect(),
     });

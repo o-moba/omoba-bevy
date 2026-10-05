@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "revision": "standard-kits-4",
+  "revision": "standard-kits-5",
   "skills": [
     {
       "id": "dawn_bind",
@@ -94,8 +94,8 @@
       "effect": {
         "kind": "weapon_toggle",
         "rocket_range": 16,
-        "rocket_damage_multiplier": 1.1,
-        "rocket_cooldown_multiplier": 1.2,
+        "rocket_damage_multiplier": 1.3,
+        "rocket_cooldown_multiplier": 1.7,
         "rocket_mana_cost": 4,
         "splash_radius": 2,
         "minigun_stack_attack_speed": 0.12,
@@ -907,7 +907,7 @@
       "effect": {
         "kind": "technique",
         "action": "dagger_deadly_blow",
-        "damage": 22,
+        "damage": 34,
         "radius": 1.4,
         "duration_secs": 0.35,
         "speed": 0
@@ -947,7 +947,7 @@
       "effect": {
         "kind": "technique",
         "action": "dagger_backstab",
-        "damage": 16,
+        "damage": 24,
         "radius": 1.4,
         "duration_secs": 0.4,
         "speed": 0
@@ -967,7 +967,7 @@
       "effect": {
         "kind": "technique",
         "action": "dagger_lethal_blow",
-        "damage": 38,
+        "damage": 48,
         "radius": 1.4,
         "duration_secs": 0.5,
         "speed": 0

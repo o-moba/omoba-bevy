@@ -26,6 +26,12 @@ use crate::sim::towers::simulate_tower_attacks;
 use crate::snapshot::build_players_snapshot;
 use crate::world::build_structures;
 
+// Convert authored fixture positions alongside the shipped arena. Sight
+// radii, combat ranges and all resource assertions stay in gameplay units.
+fn map_coordinate(value: f32) -> f32 {
+    value * shared::map::WORLD_SCALE
+}
+
 fn fixture() -> (ServerRuntime, SocketAddr, SocketAddr, Instant) {
     let socket = UdpSocket::bind("127.0.0.1:0").unwrap();
     socket.set_nonblocking(true).unwrap();
@@ -34,7 +40,10 @@ fn fixture() -> (ServerRuntime, SocketAddr, SocketAddr, Instant) {
     let now = Instant::now();
     let a = "127.0.0.1:58901".parse().unwrap();
     let b = "127.0.0.1:58902".parse().unwrap();
-    for (addr, team, x) in [(a, Team::Green, -18.0), (b, Team::Blue, -22.0)] {
+    for (addr, team, x) in [
+        (a, Team::Green, map_coordinate(-18.0)),
+        (b, Team::Blue, map_coordinate(-22.0)),
+    ] {
         rt.handle_packet(
             addr,
             ClientPacket::Join {
@@ -52,7 +61,7 @@ fn fixture() -> (ServerRuntime, SocketAddr, SocketAddr, Instant) {
         );
         let p = rt.world.players.get_mut(&addr).unwrap();
         p.hero.x = x;
-        p.hero.z = -8.0;
+        p.hero.z = map_coordinate(-8.0);
     }
     rt.world.structures.clear();
     rt.world.minions.clear();
@@ -279,7 +288,7 @@ fn unseen_basic_and_cast_reject_without_resources_or_reveal_but_same_brush_accep
     assert_eq!(rt.world.players[&a].timers.last_basic_attack_at, None);
     assert_eq!(rt.world.players[&a].timers.last_cast_at, [None; 4]);
     assert!(!revealed(&rt.world.players[&a], now));
-    rt.world.players.get_mut(&a).unwrap().hero.x = -20.0;
+    rt.world.players.get_mut(&a).unwrap().hero.x = map_coordinate(-20.0);
     cast(&mut rt, a, t, now);
     assert_eq!(rt.world.projectiles.len(), 1);
     assert!(revealed(&rt.world.players[&a], now));
@@ -314,9 +323,9 @@ fn recipient_payloads_hide_actors_projectiles_events_and_pickup_receipts() {
     let ta = target(&rt, a);
     let tb = target(&rt, b);
     // Launch while visible, then hide target before replication.
-    rt.world.players.get_mut(&b).unwrap().hero.x = -18.5;
+    rt.world.players.get_mut(&b).unwrap().hero.x = map_coordinate(-18.5);
     cast(&mut rt, a, tb, now);
-    rt.world.players.get_mut(&b).unwrap().hero.x = -22.0;
+    rt.world.players.get_mut(&b).unwrap().hero.x = map_coordinate(-22.0);
     rt.combat_log.extend(
         now,
         [CombatEvent {
@@ -328,8 +337,8 @@ fn recipient_payloads_hide_actors_projectiles_events_and_pickup_receipts() {
                 kind: CombatEntityKind::Player,
                 id: tb.id,
             },
-            x: -22.0,
-            z: -8.0,
+            x: map_coordinate(-22.0),
+            z: map_coordinate(-8.0),
             ..Default::default()
         }],
     );
@@ -355,11 +364,11 @@ fn recipient_payloads_hide_actors_projectiles_events_and_pickup_receipts() {
     let encoded = serde_json::to_string(&packet).unwrap();
     assert!(!encoded.contains("101.125"));
     assert!(!encoded.contains("99.375"));
-    assert!(!encoded.contains("\"x\":-22.0"));
+    assert!(!encoded.contains(&format!("\"x\":{}", brush_layout()[0].center[0])));
     if let ServerPacket::Snapshot { forest_pickups, .. } = &mut packet {
         forest_pickups.push(shared::forest_pickups::ForestPickupState {
             id: 99,
-            position: [-18.0, -8.0],
+            position: [map_coordinate(-18.0), map_coordinate(-8.0)],
             available: false,
             collection_sequence: 9,
             last_collector_id: Some(tb.id),
@@ -394,10 +403,10 @@ fn recipient_payloads_hide_actors_projectiles_events_and_pickup_receipts() {
 fn launched_homing_hits_after_concealment_without_replication_leak() {
     let (mut rt, a, b, now) = fixture();
     let t = target(&rt, b);
-    rt.world.players.get_mut(&b).unwrap().hero.x = -18.5;
+    rt.world.players.get_mut(&b).unwrap().hero.x = map_coordinate(-18.5);
     cast(&mut rt, a, t, now);
     assert_eq!(rt.world.projectiles.len(), 1);
-    rt.world.players.get_mut(&b).unwrap().hero.x = -22.0;
+    rt.world.players.get_mut(&b).unwrap().hero.x = map_coordinate(-22.0);
     let ServerPacket::Snapshot { projectiles, .. } = snapshot(&mut rt, a, now) else {
         panic!()
     };
@@ -443,7 +452,7 @@ fn zero_damage_trap_activation_respects_authoritative_snapshot_visibility() {
         }],
     );
     // Sharing the brush makes both the victim and receipt position visible.
-    rt.world.players.get_mut(&a).unwrap().hero.x = -20.0;
+    rt.world.players.get_mut(&a).unwrap().hero.x = map_coordinate(-20.0);
     let ServerPacket::Snapshot { combat_events, .. } = snapshot(&mut rt, a, now) else {
         panic!()
     };
@@ -453,12 +462,12 @@ fn zero_damage_trap_activation_respects_authoritative_snapshot_visibility() {
     let receipt = combat_events[0].clone();
     // Leaving the brush hides the same retained event; the explicit trigger
     // flag must not become a position/audio side channel through concealment.
-    rt.world.players.get_mut(&a).unwrap().hero.x = -18.0;
+    rt.world.players.get_mut(&a).unwrap().hero.x = map_coordinate(-18.0);
     let ServerPacket::Snapshot { combat_events, .. } = snapshot(&mut rt, a, now) else {
         panic!()
     };
     assert!(combat_events.is_empty());
-    rt.world.players.get_mut(&a).unwrap().hero.x = -20.0;
+    rt.world.players.get_mut(&a).unwrap().hero.x = map_coordinate(-20.0);
     let ServerPacket::Snapshot { combat_events, .. } = snapshot(&mut rt, a, now) else {
         panic!()
     };
@@ -470,12 +479,22 @@ fn bots_minions_and_towers_do_not_acquire_or_keep_concealed_heroes() {
     let (mut rt, a, b, now) = fixture();
     assert!(
         rt.combat_host()
-            .bot_target(Team::Green, [-18.0, -8.0], Lane::Mid, now)
+            .bot_target(
+                Team::Green,
+                [map_coordinate(-18.0), map_coordinate(-8.0)],
+                Lane::Mid,
+                now
+            )
             .is_none()
     );
-    rt.world
-        .minions
-        .insert(501, minion(501, Team::Green, [-18.0, -8.0]));
+    rt.world.minions.insert(
+        501,
+        minion(
+            501,
+            Team::Green,
+            [map_coordinate(-18.0), map_coordinate(-8.0)],
+        ),
+    );
     rt.world.minions.get_mut(&501).unwrap().aggro_target = Some(MinionAggroTarget::Player(
         rt.world.players[&b].hero.identity.id,
     ));
@@ -487,8 +506,8 @@ fn bots_minions_and_towers_do_not_acquire_or_keep_concealed_heroes() {
         .structures
         .retain(|_, s| s.state.team == Team::Green);
     for s in rt.world.structures.values_mut() {
-        s.state.x = -18.0;
-        s.state.z = -8.0;
+        s.state.x = map_coordinate(-18.0);
+        s.state.z = map_coordinate(-8.0);
     }
     simulate_tower_attacks(&mut rt.world, now);
     assert!(rt.world.projectiles.is_empty());
@@ -498,10 +517,15 @@ fn bots_minions_and_towers_do_not_acquire_or_keep_concealed_heroes() {
             .values()
             .all(|s| s.last_attack_at.is_none())
     );
-    rt.world.players.get_mut(&a).unwrap().hero.x = -20.0;
+    rt.world.players.get_mut(&a).unwrap().hero.x = map_coordinate(-20.0);
     assert!(
         rt.combat_host()
-            .bot_target(Team::Green, [-20.0, -8.0], Lane::Mid, now)
+            .bot_target(
+                Team::Green,
+                [map_coordinate(-20.0), map_coordinate(-8.0)],
+                Lane::Mid,
+                now
+            )
             .is_some()
     );
     simulate_tower_attacks(&mut rt.world, now);
@@ -511,22 +535,32 @@ fn bots_minions_and_towers_do_not_acquire_or_keep_concealed_heroes() {
 #[test]
 fn native_qa_route_is_walkable_and_final_destination_is_outside_green_sight() {
     let (mut rt, a, _, _) = fixture();
-    rt.world.players.get_mut(&a).unwrap().hero.x = -14.0;
+    rt.world.players.get_mut(&a).unwrap().hero.x = map_coordinate(-14.0);
     rt.world.structures = build_structures(&rt.world.map_layout);
+    // Keep a world-unit distance beyond hero sight. The old endpoint falls
+    // against a scaled trunk; ordinary move orders use the navigation route.
+    let destination = [23.0, 0.0];
     assert!(!point_visible(
         &sources(Team::Green, &rt.world),
-        [22.0, -8.0],
+        destination,
         false
     ));
-    assert!(shared::navigation::world_navigation().segment_clear([-18.0, -8.0], [22.0, -8.0]));
+    let navigation = shared::navigation::world_navigation();
+    let mut previous = [map_coordinate(-18.0), map_coordinate(-8.0)];
+    let route = navigation.plan_route(previous, destination, &[]).unwrap();
+    assert_eq!(route.last(), Some(&destination));
+    for next in route {
+        assert!(navigation.segment_clear(previous, next));
+        previous = next;
+    }
 }
 
 #[test]
 fn both_teams_hide_other_brush_and_all_hidden_dynamic_channels() {
     let (mut rt, a, b, now) = fixture();
     let pa = rt.world.players.get_mut(&a).unwrap();
-    pa.hero.x = 22.0;
-    pa.hero.z = 8.0;
+    pa.hero.x = brush_layout()[1].center[0];
+    pa.hero.z = brush_layout()[1].center[1];
     rt.world.structures = build_structures(&rt.world.map_layout);
     rt.world.neutrals = build_neutral_camps(&mut 700);
     for n in rt.world.neutrals.values_mut() {
@@ -634,22 +668,26 @@ fn allied_dead_viewer_keeps_team_sight_and_round_reset_clears_reveal() {
 #[test]
 fn lethal_nonhero_receipts_survive_removal_only_for_visible_impacts() {
     let (mut rt, a, b, now) = fixture();
-    let mut dead_minion = minion(501, Team::Blue, [-18.0, -8.0]);
+    let mut dead_minion = minion(
+        501,
+        Team::Blue,
+        [map_coordinate(-18.0), map_coordinate(-8.0)],
+    );
     dead_minion.state.hp = 0.0;
     rt.world.minions.insert(501, dead_minion);
     let mut camps = build_neutral_camps(&mut 502);
     let mut dead_neutral = camps.remove(&502).unwrap();
     dead_neutral.state.hp = 0.0;
     dead_neutral.dead_until = Some(now + Duration::from_secs(30));
-    dead_neutral.state.x = -18.0;
-    dead_neutral.state.z = -8.0;
+    dead_neutral.state.x = map_coordinate(-18.0);
+    dead_neutral.state.z = map_coordinate(-8.0);
     rt.world.neutrals.insert(502, dead_neutral);
     let mut authored = build_structures(&rt.world.map_layout);
     let mut dead_tower = authored.remove(&1).unwrap();
     dead_tower.state.id = 503;
     dead_tower.state.hp = 0.0;
-    dead_tower.state.x = -18.0;
-    dead_tower.state.z = -8.0;
+    dead_tower.state.x = map_coordinate(-18.0);
+    dead_tower.state.z = map_coordinate(-8.0);
     rt.world.structures.insert(503, dead_tower);
     let source = CombatEntity {
         kind: CombatEntityKind::Player,
@@ -665,8 +703,8 @@ fn lethal_nonhero_receipts_survive_removal_only_for_visible_impacts() {
             [CombatEvent {
                 source,
                 target: CombatEntity { kind, id },
-                x: -18.0,
-                z: -8.0,
+                x: map_coordinate(-18.0),
+                z: map_coordinate(-8.0),
                 amount: 7.0,
                 killed: true,
                 ..Default::default()
@@ -708,8 +746,8 @@ fn lethal_nonhero_receipts_survive_removal_only_for_visible_impacts() {
                 kind: CombatEntityKind::Minion,
                 id: 505,
             },
-            x: -18.0,
-            z: -8.0,
+            x: map_coordinate(-18.0),
+            z: map_coordinate(-8.0),
             amount: 7.0,
             killed: true,
             ..Default::default()
@@ -767,7 +805,7 @@ fn enrich(rt: &mut ServerRuntime, addr: SocketAddr) {
 fn visible_enemy_is_replicated_with_its_private_economy_blanked() {
     let (mut rt, a, b, now) = fixture();
     // Out of the brush, inside green sight.
-    rt.world.players.get_mut(&b).unwrap().hero.x = -18.5;
+    rt.world.players.get_mut(&b).unwrap().hero.x = map_coordinate(-18.5);
     enrich(&mut rt, b);
     let packet = snapshot(&mut rt, a, now);
     let ServerPacket::Snapshot { players, .. } = &packet else {
@@ -827,8 +865,8 @@ fn recipient_gets_its_own_owner_view_and_teammates_are_redacted() {
     let mate = rt.world.players.get_mut(&c).unwrap();
     mate.joined = true;
     mate.hero.identity.team = Team::Green;
-    mate.hero.x = -16.0;
-    mate.hero.z = -8.0;
+    mate.hero.x = map_coordinate(-16.0);
+    mate.hero.z = map_coordinate(-8.0);
     enrich(&mut rt, a);
     enrich(&mut rt, c);
     let packet = snapshot(&mut rt, a, now);

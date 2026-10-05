@@ -327,8 +327,10 @@ fn setup(
         })
     });
     let floor = materials.add(StandardMaterial {
-        base_color: Color::srgba(0.12, 0.24, 0.14, 0.42),
-        alpha_mode: AlphaMode::Blend,
+        // A single opaque ground patch writes depth consistently; hundreds of
+        // animated alpha/shadow layers previously shimmered over the paving.
+        base_color: Color::srgb(0.16, 0.29, 0.17),
+        alpha_mode: AlphaMode::Opaque,
         unlit: true,
         cull_mode: None,
         ..default()
@@ -351,9 +353,12 @@ fn setup(
                 parent.spawn((
                     Mesh3d(disc.clone()),
                     MeshMaterial3d(floor.clone()),
-                    Transform::from_xyz(0., 0.035, 0.)
+                    Transform::from_xyz(0., 0.065, 0.)
                         .with_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2))
                         .with_scale(Vec3::splat(zone.radius)),
+                    bevy::light::NotShadowCaster,
+                    bevy::light::NotShadowReceiver,
+                    Pickable::IGNORE,
                 ));
                 for i in 0..31 {
                     let phase = i as f32 * 2.39996 + zone.id as f32;
@@ -366,6 +371,12 @@ fn setup(
                             .with_rotation(Quat::from_rotation_y(yaw))
                             .with_scale(Vec3::splat(0.85 + (i % 4) as f32 * 0.06)),
                         GrassTuft { phase, yaw },
+                        // The footprint supplies the soft contact shade. Thin
+                        // crossing blades must not self-shadow or cast noisy
+                        // cascaded shadows over a concealed hero.
+                        bevy::light::NotShadowCaster,
+                        bevy::light::NotShadowReceiver,
+                        Pickable::IGNORE,
                     ));
                 }
             });
@@ -474,7 +485,7 @@ fn grass_mesh() -> Mesh {
 fn animate_brush(time: Res<Time>, mut tufts: Query<(&GrassTuft, &mut Transform)>) {
     for (tuft, mut pose) in &mut tufts {
         pose.rotation = Quat::from_rotation_y(tuft.yaw)
-            * Quat::from_rotation_z((time.elapsed_secs() * 1.7 + tuft.phase).sin() * 0.06);
+            * Quat::from_rotation_z((time.elapsed_secs() * 0.8 + tuft.phase).sin() * 0.025);
     }
 }
 fn attach_minimap_mask(
@@ -974,6 +985,18 @@ mod tests {
                 .iter(app.world())
                 .count(),
             brush_layout().len() * 31
+        );
+        assert_eq!(
+            app.world_mut()
+                .query_filtered::<Entity, (
+                    With<GrassTuft>,
+                    With<bevy::light::NotShadowCaster>,
+                    With<bevy::light::NotShadowReceiver>,
+                )>()
+                .iter(app.world())
+                .count(),
+            brush_layout().len() * 31,
+            "thin animated brush blades never enter cascaded shadow maps"
         );
         let mut game = app.world_mut().resource_mut::<GameStateSnapshot>();
         game.state = GameState::Running;

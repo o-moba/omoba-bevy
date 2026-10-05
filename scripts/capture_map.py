@@ -28,7 +28,7 @@ FILES_3D = ("01-map-overview.png", "02-prop-a.png", "03-prop-b.png", "04-prop-a-
 FILES_2D = ("01-map-overview.png", "02-tower-detail.png")
 FILES_LANE_DEFENSE = ("01-map-overview.png", "02-lane-defense-brush.png")
 MODELS = ("map-props/lantern.glb#Scene0", "map-props/flowering_shrub.glb#Scene0")
-GEOMETRY_ID = "verdant-confluence-v1"
+GEOMETRY_ID = json.loads((ROOT / "shared/assets/maps/verdant.json").read_text())["geometry_id"]
 # Pinned authored v1 geometry; bridge is terrain, not a replaceable prop.
 STATIC_PROPS = {
     "environment.glb:banner_blue": 2,

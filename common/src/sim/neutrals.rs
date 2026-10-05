@@ -60,6 +60,11 @@ pub fn apply_neutral_damage(
     if neutral.state.hp <= 0.0 {
         let camp_type = neutral.state.camp_type;
         award_neutral_kill_to_player(players, attacker_player_id, camp_type);
+        if let Some(killer) = players.values_mut().find(|player| {
+            player.joined && player.hero.hp > 0.0 && player.hero.identity.id == attacker_player_id
+        }) {
+            killer.economy.jungle_buffs.grant(camp_type, now);
+        }
         // Boss kill: the killer's whole team gains the boss buff (refresh on
         // re-kill). Unresolvable killer (already gone) grants no buff.
         if let Some(kind) = camp_type.team_buff_kind() {

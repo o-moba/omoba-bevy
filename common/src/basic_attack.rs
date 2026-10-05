@@ -182,6 +182,24 @@ pub fn handle_basic_attack_request(
     attacker.hero.last_action.kind = PlayerActionKind::Attack;
     attacker.hero.last_action.slot = BASIC_ATTACK_ACTION_SLOT;
     crate::sim::cast::face_player_action(attacker, direction.x, direction.z);
+    // Melee cores resolve contact now: they must not throw a homing dagger or
+    // let a target outrun the strike after the authoritative reach check.
+    if attacker
+        .hero
+        .skills
+        .loadout
+        .is_some_and(|loadout| loadout.attack_profile() == shared::loadout::AttackProfileId::Melee)
+    {
+        let mut source = crate::combat_feedback::HitSource::new(
+            CombatEntityKind::Player,
+            attacker.hero.identity.id,
+            ProjectileStyle::Crescent,
+        );
+        source.action_slot = Some(BASIC_ATTACK_ACTION_SLOT);
+        let events = crate::skills::basic_impact(world, target, damage, source, team, 0, now);
+        world.skill_runtime.queue_combat_events(events);
+        return;
+    }
     let id = world.next_projectile_id;
     world.next_projectile_id += 1;
     if splash > 0.0 {
@@ -192,7 +210,17 @@ pub fn handle_basic_attack_request(
         Projectile {
             state: ProjectileState {
                 source_kind: CombatEntityKind::Player,
-                style: ProjectileStyle::for_class(attacker.hero.identity.hero_class),
+                style: if attacker.hero.skills.loadout.is_some_and(|l| {
+                    l.attack_profile() == shared::loadout::AttackProfileId::Repeater
+                }) {
+                    if splash > 0.0 {
+                        ProjectileStyle::Rocket
+                    } else {
+                        ProjectileStyle::Bullet
+                    }
+                } else {
+                    ProjectileStyle::for_class(attacker.hero.identity.hero_class)
+                },
                 action_slot: Some(BASIC_ATTACK_ACTION_SLOT),
                 direction: [direction.x, direction.y, direction.z],
                 id,

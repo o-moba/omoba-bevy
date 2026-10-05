@@ -87,13 +87,14 @@ impl ServerRuntime {
                 EMPTY_ROSTER_GRACE
             };
             if now.saturating_duration_since(*empty_since) >= grace {
+                let (outcome, winner) = self.teardown_outcome();
                 println!(
-                    "MATCH_METRIC event=abandoned epoch={} match={} elapsed_ms={}",
+                    "MATCH_METRIC event=empty_roster outcome={outcome:?} epoch={} match={} elapsed_ms={}",
                     self.server_epoch,
                     self.match_id,
                     self.elapsed_match_ms(now)
                 );
-                self.finish_career_round(shared::career::MatchOutcome::Abandoned, None, now);
+                self.finish_career_round(outcome, winner, now);
                 self.restart_round(now);
             }
         }

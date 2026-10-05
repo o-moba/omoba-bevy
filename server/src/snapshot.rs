@@ -116,7 +116,7 @@ impl ServerRuntime {
         }
         let mut scoreboard = self.combat_log.ledger.live_scoreboard();
         if let Some(board) = scoreboard.as_mut() {
-            board.elapsed_secs = world.match_elapsed_secs.max(0.0) as u64;
+            common::match_stats::update_live_timers(board, world, now);
         }
 
         let mut projectiles_snapshot = world

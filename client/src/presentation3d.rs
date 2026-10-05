@@ -1,7 +1,7 @@
 //! Offline, bounded Models3d combat feedback and allegiance markers.
 //!
 //! Gizmos are rebuilt each frame: effects own no render entities or assets.
-//! Local = double circle, ally = square, enemy = triangle, in addition to color.
+//! A terrain-anchored double circle identifies only the locally controlled hero.
 // i18n-strict
 
 use bevy::prelude::*;
@@ -10,10 +10,9 @@ use std::collections::HashMap;
 
 use crate::combat::CombatStats;
 use crate::maps::MapLayout;
-use crate::net::{GameStateSnapshot, PlayerCosmeticAction, RemotePlayer};
+use crate::net::{GameStateSnapshot, PlayerCosmeticAction};
 use crate::player::Player;
 use crate::sprite::{PlayerVisualMode, in_models3d};
-use crate::team::{Team, TeamSelection};
 
 const MAX_EFFECTS: usize = 192;
 
@@ -27,33 +26,6 @@ impl Plugin for Presentation3dPlugin {
                 .chain()
                 .run_if(in_models3d()),
         );
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Allegiance {
-    Local,
-    Friendly,
-    Enemy,
-}
-
-fn allegiance(local: bool, team: Team, selected: Option<Team>) -> Allegiance {
-    if local {
-        Allegiance::Local
-    } else if selected == Some(team) {
-        Allegiance::Friendly
-    } else {
-        Allegiance::Enemy
-    }
-}
-
-impl Allegiance {
-    fn color(self) -> Color {
-        match self {
-            Self::Local => Color::srgb(1.0, 0.90, 0.30),
-            Self::Friendly => Color::srgb(0.20, 0.90, 1.0),
-            Self::Enemy => Color::srgb(1.0, 0.24, 0.15),
-        }
     }
 }
 
@@ -208,51 +180,33 @@ fn ground_circle(gizmos: &mut Gizmos, center: Vec3, radius: f32, color: Color) {
     );
 }
 
+fn ground_marker_center(position: Vec3, layout: MapLayout) -> Vec3 {
+    Vec3::new(
+        position.x,
+        layout.terrain_height_3d(position.x, position.z) + 0.09,
+        position.z,
+    )
+}
+
 fn draw_feedback(
     mut gizmos: Gizmos,
     mode: Res<PlayerVisualMode>,
     layout: Res<MapLayout>,
-    selection: Res<TeamSelection>,
     feedback: Res<CombatPresentation>,
-    heroes: Query<(&Transform, &Team, Has<Player>), Or<(With<Player>, With<RemotePlayer>)>>,
+    heroes: Query<&Transform, With<Player>>,
 ) {
     if *mode != PlayerVisualMode::Models3d {
         return;
     }
-    for (transform, team, local) in &heroes {
-        let mut center = transform.translation;
-        center.y = layout.terrain_height_3d(center.x, center.z) + 0.09;
-        let cue = allegiance(local, *team, selection.team);
-        let color = cue.color();
-        let radius = 0.85;
-        ground_circle(&mut gizmos, center, radius, color);
-        match cue {
-            Allegiance::Local => ground_circle(&mut gizmos, center, radius + 0.18, color),
-            Allegiance::Friendly => {
-                gizmos.linestrip(
-                    [
-                        center + Vec3::new(-radius, 0.0, -radius),
-                        center + Vec3::new(radius, 0.0, -radius),
-                        center + Vec3::new(radius, 0.0, radius),
-                        center + Vec3::new(-radius, 0.0, radius),
-                        center + Vec3::new(-radius, 0.0, -radius),
-                    ],
-                    color,
-                );
-            }
-            Allegiance::Enemy => {
-                gizmos.linestrip(
-                    [
-                        center + Vec3::new(0.0, 0.0, -1.2),
-                        center + Vec3::new(1.05, 0.0, 0.7),
-                        center + Vec3::new(-1.05, 0.0, 0.7),
-                        center + Vec3::new(0.0, 0.0, -1.2),
-                    ],
-                    color,
-                );
-            }
-        }
+    for transform in &heroes {
+        // Selection belongs only to the controlled actor and follows terrain,
+        // never the animated model's vertical offset.
+        let center = ground_marker_center(transform.translation, *layout);
+        let color = Color::srgb(1.0, 0.90, 0.30);
+        ground_circle(&mut gizmos, center, 0.85, color);
+        ground_circle(&mut gizmos, center, 1.03, color);
     }
+
     for effect in &feedback.effects {
         let progress = effect.age / effect.kind.lifetime();
         let color = effect.kind.color().with_alpha(1.0 - progress);
@@ -283,23 +237,22 @@ mod tests {
     use super::*;
 
     #[test]
-    fn allegiance_is_relative_and_local_does_not_depend_on_avatar_or_color() {
-        assert_eq!(
-            allegiance(true, Team::Blue, Some(Team::Blue)),
-            Allegiance::Local
-        );
-        assert_eq!(
-            allegiance(false, Team::Blue, Some(Team::Blue)),
-            Allegiance::Friendly
-        );
-        assert_eq!(
-            allegiance(false, Team::Blue, Some(Team::Green)),
-            Allegiance::Enemy
-        );
-        assert_eq!(
-            allegiance(false, Team::Green, Some(Team::Blue)),
-            Allegiance::Enemy
-        );
+    fn local_marker_is_grounded_independent_of_animated_height() {
+        let layout = MapLayout::default();
+        for point in [Vec3::new(0.0, 0.0, 0.0), Vec3::new(5.0, 0.0, 12.0)] {
+            let grounded = ground_marker_center(point, layout);
+            assert_eq!(grounded.xz(), point.xz());
+            assert_eq!(
+                grounded.y,
+                layout.terrain_height_3d(point.x, point.z) + 0.09
+            );
+            for height in [-5.0, 1.0, 9.0] {
+                assert_eq!(
+                    ground_marker_center(Vec3::new(point.x, height, point.z), layout),
+                    grounded
+                );
+            }
+        }
     }
 
     #[test]
