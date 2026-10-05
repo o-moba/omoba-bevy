@@ -18,13 +18,18 @@ impl Plugin for Verdant3dPlugin {
         app.init_resource::<VerdantPaletteMaterials>()
             .add_systems(
                 Startup,
-                (load_assets, spawn_environment)
+                (load_assets, setup_nexus_orbits, spawn_environment)
                     .chain()
                     .run_if(in_models3d()),
             )
             .add_systems(
                 PostUpdate,
-                (reconcile_structures, apply_environment_palette)
+                (
+                    reconcile_structures,
+                    animate_nexus_orbits,
+                    apply_environment_palette,
+                )
+                    .chain()
                     .before(bevy::transform::TransformSystems::Propagate)
                     .run_if(in_models3d()),
             );
@@ -47,6 +52,25 @@ pub struct VerdantStructureVisual {
 
 #[derive(Component)]
 struct AttachedStructure(Entity);
+
+/// A lightweight, client-only orbital ring around a live base crystal.
+///
+/// The sanctuary GLBs intentionally keep their architecture in one mesh so
+/// they are cheap to stream. These three additive rings supply the motion
+/// language without changing collision, map data, or the authored asset.
+#[derive(Component)]
+struct NexusOrbit {
+    phase: f32,
+    speed: f32,
+    tilt: Vec3,
+}
+
+#[derive(Resource)]
+struct NexusOrbitAssets {
+    mesh: Handle<Mesh>,
+    green: Handle<StandardMaterial>,
+    blue: Handle<StandardMaterial>,
+}
 
 /// Each authored material has one presentation-only copy shared by all of its
 /// map instances. Never edit the source asset: another scene can reuse it.
@@ -175,6 +199,32 @@ struct VerdantAssets {
     sanctuary_blue: Handle<Scene>,
 }
 
+fn orbit_material(color: Color) -> StandardMaterial {
+    StandardMaterial {
+        base_color: color.with_alpha(0.76),
+        emissive: LinearRgba::from(color) * 1.8,
+        unlit: true,
+        alpha_mode: AlphaMode::Add,
+        double_sided: true,
+        cull_mode: None,
+        ..default()
+    }
+}
+
+fn setup_nexus_orbits(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    commands.insert_resource(NexusOrbitAssets {
+        // A narrow authored-looking band reads as an arc from the combat
+        // camera while keeping geometry and draw-call cost fixed per Nexus.
+        mesh: meshes.add(Annulus::new(2.15, 2.23)),
+        green: materials.add(orbit_material(Color::srgb(0.18, 0.98, 0.76))),
+        blue: materials.add(orbit_material(Color::srgb(0.34, 0.72, 1.0))),
+    });
+}
+
 impl VerdantAssets {
     fn structure(&self, kind: StructureKind, team: Team) -> Handle<Scene> {
         match (kind, team) {
@@ -275,11 +325,56 @@ fn structure_transform(layout: &MapLayout, root: &Transform, kind: StructureKind
     Transform::from_xyz(0.0, ground + foundation - root.translation.y, 0.0).with_rotation(rotation)
 }
 
+fn spawn_nexus_orbits(
+    commands: &mut Commands,
+    parent: Entity,
+    team: Team,
+    assets: &NexusOrbitAssets,
+) {
+    let material = match team {
+        Team::Green => assets.green.clone(),
+        Team::Blue => assets.blue.clone(),
+    };
+    // The crystal's center is deliberately a local coordinate: the same
+    // effect follows either team's sanctuary and its existing presentation
+    // rotation without becoming gameplay state.
+    for (index, (tilt, speed)) in [
+        (Vec3::new(0.56, 0.0, 0.18), 1.10),
+        (Vec3::new(-0.38, 0.0, 0.72), -0.86),
+        (Vec3::new(0.18, 0.0, -0.66), 0.63),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let phase = index as f32 * std::f32::consts::TAU / 3.0;
+        let orbit = commands
+            .spawn((
+                Mesh3d(assets.mesh.clone()),
+                MeshMaterial3d(material.clone()),
+                Transform::from_translation(Vec3::new(0.0, 14.15, 0.0)),
+                NexusOrbit { phase, speed, tilt },
+                bevy::light::NotShadowCaster,
+                bevy::light::NotShadowReceiver,
+                Name::new("Verdant / Nexus crystal orbit"),
+            ))
+            .id();
+        commands.entity(parent).add_child(orbit);
+    }
+}
+
+fn animate_nexus_orbits(time: Res<Time>, mut orbits: Query<(&NexusOrbit, &mut Transform)>) {
+    for (orbit, mut transform) in &mut orbits {
+        let turn = time.elapsed_secs() * orbit.speed + orbit.phase;
+        transform.rotation = Quat::from_euler(EulerRot::XYZ, orbit.tilt.x, turn, orbit.tilt.z);
+    }
+}
+
 fn reconcile_structures(
     mut commands: Commands,
     mode: Res<PlayerVisualMode>,
     layout: Res<MapLayout>,
     assets: Option<Res<VerdantAssets>>,
+    orbit_assets: Option<Res<NexusOrbitAssets>>,
     roots: Query<
         (
             Entity,
@@ -361,6 +456,11 @@ fn reconcile_structures(
                 Name::new(format!("Verdant / {team:?} {kind:?}")),
             ))
             .id();
+        if *kind == StructureKind::BaseTower
+            && let Some(orbit_assets) = orbit_assets.as_deref()
+        {
+            spawn_nexus_orbits(&mut commands, child, *team, orbit_assets);
+        }
         commands
             .entity(owner)
             .add_child(child)
@@ -564,6 +664,14 @@ mod tests {
     fn fixture(mode: PlayerVisualMode) -> App {
         let mut app = App::new();
         app.insert_resource(mode).init_resource::<MapLayout>();
+        let mut meshes = Assets::<Mesh>::default();
+        let mut materials = Assets::<StandardMaterial>::default();
+        let orbit_mesh = meshes.add(Annulus::new(2.15, 2.23));
+        app.insert_resource(NexusOrbitAssets {
+            mesh: orbit_mesh,
+            green: materials.add(orbit_material(Color::srgb(0.18, 0.98, 0.76))),
+            blue: materials.add(orbit_material(Color::srgb(0.34, 0.72, 1.0))),
+        });
         let mut scenes = Assets::<Scene>::default();
         let mut scene = || scenes.add(Scene::new(World::new()));
         app.insert_resource(VerdantAssets {
@@ -574,7 +682,9 @@ mod tests {
             sanctuary_green: scene(),
             sanctuary_blue: scene(),
         });
-        app.insert_resource(scenes)
+        app.insert_resource(meshes)
+            .insert_resource(materials)
+            .insert_resource(scenes)
             .add_systems(Update, (spawn_environment, reconcile_structures).chain());
         app
     }
@@ -655,6 +765,14 @@ mod tests {
             8
         );
         assert_eq!(app.world().resource::<Assets<Scene>>().len(), 6);
+        assert_eq!(
+            app.world_mut()
+                .query::<&NexusOrbit>()
+                .iter(app.world())
+                .count(),
+            6,
+            "each of the two living Nexus structures owns exactly three orbit bands"
+        );
         let assets = app.world().resource::<VerdantAssets>();
         for owner in &owners {
             let entity = app.world().entity(*owner);
@@ -675,6 +793,38 @@ mod tests {
             );
             assert!(entity.get::<Mesh3d>().is_none());
         }
+    }
+
+    #[test]
+    fn nexus_orbits_are_owned_by_the_base_visual_not_an_authoritative_entity() {
+        let mut app = fixture(PlayerVisualMode::Models3d);
+        let base = structure(&mut app, StructureKind::BaseTower, Team::Green);
+        let tower = structure(&mut app, StructureKind::Tower, Team::Green);
+        app.update();
+
+        let base_visual = app.world().get::<AttachedStructure>(base).unwrap().0;
+        let tower_visual = app.world().get::<AttachedStructure>(tower).unwrap().0;
+        let orbits: Vec<_> = app
+            .world_mut()
+            .query::<(Entity, &NexusOrbit, &ChildOf)>()
+            .iter(app.world())
+            .map(|(entity, orbit, parent)| (entity, orbit.speed, parent.parent()))
+            .collect();
+        assert_eq!(orbits.len(), 3);
+        assert!(orbits.iter().all(|(_, _, parent)| *parent == base_visual));
+        assert!(orbits.iter().all(|(_, speed, _)| *speed != 0.0));
+        assert!(
+            app.world().get::<NexusOrbit>(tower_visual).is_none(),
+            "ordinary lane towers stay static"
+        );
+
+        app.world_mut().despawn(base);
+        assert!(
+            orbits
+                .iter()
+                .all(|(entity, _, _)| app.world().get_entity(*entity).is_err()),
+            "round teardown recursively removes the client-only orbit visuals"
+        );
     }
 
     #[test]
