@@ -1,5 +1,7 @@
 # Releasing OMOBA
 
+Follow the owner-approved [release policy](release-policy.md) and [tester guide](beta-testing.md). This page documents the commands; the policy defines release acceptance.
+
 One script, `scripts/release.py`, builds every package; `make release-*`
 targets wrap it. Packages land in `dist/v<version>/` with `SHA256SUMS.txt`.
 Nothing is published without an explicit step: GitHub releases are created as
@@ -45,29 +47,20 @@ server. Direct Xcode/server builds must retain a manifest from the same frozen s
 
 ## Turnkey release
 
-1. Merge the release PR to `main` with CI green (`make check` locally first).
-2. Bump `Cargo.toml` version, move `CHANGELOG.md` `[Unreleased]` entries into
-   `## [x.y.z] - date`, update `docs/features.md`, commit to `main`.
-3. Optional: choose the server clients start on. Either pass
-   `RELEASE_SERVER=host:port` to the make targets, set the repository
-   variable `OMOBA_RELEASE_SERVER` for CI, or leave it empty (players type the
-   address in the party lobby → SERVER → Change).
-4. **Desktop + Android:** push the tag (or run the workflow by hand):
+1. Prepare the version, changelog and release notes in a short-lived branch. Merge the release PR into `main` after the applicable checks pass; freeze that commit.
+2. Build/stage the matching server and verify the contract, signed gameplay and reconnect. Deploy under authorization with rollback retained and no active human matches interrupted. If building from the tag first, keep its release a draft until this gate passes.
+3. Leave the initial endpoint unset to use the built-in **OMOBA Beta** server, or pass `RELEASE_SERVER=host:port` / repository variable `OMOBA_RELEASE_SERVER` for an intentional override. Existing client preferences are preserved.
+4. Create an annotated tag on the frozen commit and push it:
 
    ```sh
-   git tag v0.24.0 && git push origin v0.24.0     # triggers .github/workflows/release.yml
-   # or: make release-ci RELEASE_SERVER=host:port
+   git tag -a v0.43.0 -m "OMOBA 0.43.0 community beta"
+   git push origin v0.43.0
    ```
 
-   The workflow builds macOS, Windows, Linux and Android in parallel and
-   attaches them, plus `SHA256SUMS.txt`, to a **draft** release.
-5. **iPhone:** `make release-testflight` (Xcode must be signed in to the team
-   in `mobile/ios/Omoba.local.xcconfig`). Then in App Store Connect → TestFlight,
-   add the processed build to your tester group.
-6. Optional local extras: `make release-mac` / `make release-ios` and
-   `make release-draft` upload local packages into the same draft (`--clobber`).
-7. Review the draft on GitHub, download one package per platform, smoke it,
-   then publish: `gh release edit v0.24.0 --draft=false`.
+   The existing workflow builds desktop and Android packages and creates a **draft prerelease**, including `SHA256SUMS.txt`, `compatibility.json` and `SOURCE_COMMIT.txt`. It refuses to overwrite a published release. Never force-update a published tag.
+5. For iOS, build the frozen source with a new build number; run `make release-testflight` only under upload authorization. After Apple processing, assign the build to the intended tester group. External testers may require beta review.
+6. Review checksums, source identity, compatibility against the live endpoint, installation instructions and known limitations. Publish the approved draft with `gh release edit v0.43.0 --draft=false`. Once public, corrections use a new version/tag.
+7. Record deployment and distribution evidence. Delete merged work branches, retain release tags and symbols, and start the next fix/feature on a new short-lived branch.
 
 ## Signing and trust
 
@@ -79,7 +72,7 @@ server. Direct Xcode/server builds must retain a manifest from the same frozen s
   other. Locally it lives in `~/.config/omoba/android-playtest.keystore`; for CI
   store it as the secret `OMOBA_ANDROID_KEYSTORE_BASE64`
   (`base64 -i ~/.config/omoba/android-playtest.keystore | gh secret set OMOBA_ANDROID_KEYSTORE_BASE64`).
-  Without the secret CI generates a fresh key per run (uninstall before updating).
+  Tagged/manual releases fail without that secret. PR-only build checks may use an ephemeral key and must not be distributed as updates.
   Store publication needs a real release key.
 - **iPhone:** App Store distribution signing, managed by Xcode.
 

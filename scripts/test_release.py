@@ -1,5 +1,7 @@
 import tempfile
 import unittest
+from unittest.mock import patch
+from types import SimpleNamespace
 import zipfile
 from pathlib import Path
 
@@ -44,6 +46,36 @@ class ReleaseHelpers(unittest.TestCase):
         self.assertIn("10.0.0.2:4000", text)
         self.assertIn("Host Practice Server.bat", text)
         self.assertIn("PLAY VS BOTS", text)
+
+    def test_default_package_instructions_preserve_beta_and_saved_servers(self):
+        text = release.player_readme("0.43.0", "android", None)
+        self.assertIn("OMOBA Beta", text)
+        self.assertIn("previously saved custom server", text)
+        self.assertNotIn("starts on 127.0.0.1", text)
+
+    def test_release_rejects_missing_stable_android_key_before_creating_one(self):
+        with patch.dict(release.os.environ, {"OMOBA_REQUIRE_STABLE_ANDROID_KEY": "1"}, clear=True), \
+                patch.object(release, "run") as run:
+            with self.assertRaisesRegex(SystemExit, "refusing a new signing key"):
+                release.ensure_android_keystore()
+            run.assert_not_called()
+
+    def test_draft_command_never_overwrites_a_published_release(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "CHANGELOG.md").write_text("## [0.43.0]\n- beta\n")
+            out = root / "dist" / "v0.43.0"
+            out.mkdir(parents=True)
+            (out / "game.apk").write_bytes(b"candidate")
+            args = SimpleNamespace(tag="v0.43.0", out=root / "dist", target="main")
+            with patch.object(release, "ROOT", root), \
+                    patch.object(release, "workspace_version", return_value="0.43.0"), \
+                    patch.object(release.subprocess, "run", return_value=SimpleNamespace(
+                        returncode=0, stdout='{"isDraft":false}')), \
+                    patch.object(release, "run") as mutate:
+                with self.assertRaisesRegex(SystemExit, "immutable"):
+                    release.command_draft(args)
+                mutate.assert_not_called()
 
     def test_zip_keeps_executable_bits_and_a_root_folder(self):
         with tempfile.TemporaryDirectory() as temporary:

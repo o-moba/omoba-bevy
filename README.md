@@ -24,6 +24,7 @@ a character, a map, a sound, an idea or a pull request. Help shape what comes ne
 
 | I want to… | Start here |
 | --- | --- |
+| Join the community beta | [Numbered releases](https://github.com/o-moba/omoba-bevy/releases) and [tester guide](docs/beta-testing.md) |
 | Play a match with bots | [Run locally](#play-locally) with `make practice` |
 | Test on an iPhone | [Device build](mobile/ios/README.md) and [TestFlight workflow](mobile/ios/TESTFLIGHT.md) |
 | Make characters, worlds or effects | [Create with us](#create-with-us) |
@@ -34,12 +35,12 @@ a character, a map, a sound, an idea or a pull request. Help shape what comes ne
 ## What you can play today
 
 This is a **native beta under active development**. The source version is
-[`0.28.0`](Cargo.toml); see [features](docs/features.md) and
+[`0.43.0`](Cargo.toml); see [features](docs/features.md) and
 [changes](CHANGELOG.md) for the detailed implementation history. A source version
 is not a promise of a published installer or a live public server.
 
-- **Team combat:** five classes (Warrior, Mage, Ranger, Cleric and the Warden
-  jungler), basic attacks and class abilities, lane minions,
+- **Team combat:** legacy classes and modular presets, including the Adventurer
+  dagger class, basic attacks and class abilities, lane minions,
   towers, jungle camps that respawn, items and match results.
 - **Bot practice:** native server bots fill empty seats; people can join and take
   over those seats. Practice is separate from ranked progression.

@@ -1016,3 +1016,7 @@ Allied portraits also show remaining respawn seconds. Nexus motion rotates the o
 ### Engine baseline — 0.43.0
 
 The game and Ekza SDK use Bevy 0.19.1 with Rust 1.95.0. Existing avatar/weapon account flows, humanoid animation and 0.42 gameplay remain supported. GLB scene labels are retained while engine scene types move to world serialization. The upgrade does not claim improved phone FPS without physical-device measurement.
+
+## Community beta releases
+
+The [release policy](release-policy.md) defines immutable version tags, short-lived branches, client/server compatibility gates, draft-to-prerelease publication and rollback. The [tester guide](beta-testing.md) records installation and feedback expectations. Package build/upload status and physical-device acceptance remain separate claims.

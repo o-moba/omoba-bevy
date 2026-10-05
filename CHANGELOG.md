@@ -7,6 +7,8 @@ All notable changes are recorded here. The canonical version is
 
 ## [0.43.0] - 2026-10-05
 
+- Establish the first tagged community beta: immutable release tags, short-lived development branches, server-first compatibility gates, tester instructions and GitHub feedback templates. Correct package connection instructions and require stable Android signing for tagged/manual releases.
+
 - Upgrade the current game and Ekza SDK integration to stable Bevy 0.19.1 with Rust 1.95.0; preserve the consolidated 0.42 combat, map, Nexus and asset lifecycle work.
 - Migrate legacy GLB scene types to world serialization, pixel fonts and packaged font sources to typed text APIs, material mutation and UI stack/input APIs. Preserve original GLB scene labels and mobile pixel sizing.
 - Update existing CI/iOS/release workflow Rust pins with explicit owner approval. This engine change does not deploy Beta or upload a mobile build; physical-device performance still requires measurement.

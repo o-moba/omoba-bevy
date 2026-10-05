@@ -27,6 +27,10 @@ You retain your copyright. This project does not require copyright assignment or
 
 AI-assisted work is welcome when you have reviewed it, verified the result and can explain its provenance and intended behavior. Do not submit material copied from proprietary games, unlicensed repositories or private data. Mark generated art and retain the available tool/source records without claiming rights the project does not have. Keep user avatars, likenesses and runtime downloads out of the repository unless their actual permission covers that contribution.
 
+## Branches and releases
+
+Follow the canonical [release policy](docs/release-policy.md): short-lived branches and reviewed PRs into `main`, immutable version tags, verified server/client contracts, and numbered beta packages for testers. See the [tester guide](docs/beta-testing.md). Merging code does not deploy a server or publish a release.
+
 ## Review expectations
 
 Keep changes focused and explain the user-visible result. Include relevant verification and known limits; a mobile preview is not a physical-device test. Follow the existing Rust formatting and Conventional Commit style. Run `make check` before pushing: it is the same gate CI runs on every push and pull request (`cargo fmt --check`, `cargo clippy --workspace --all-targets -D warnings`, `cargo test --workspace --locked`, and the Python tooling tests). The toolchain is pinned in `rust-toolchain.toml`; bump it deliberately in its own change. For gameplay changes also run `make verify-gameplay` (the headless harness) or a multiplayer check. For changes to career storage, the account API or their migrations also run `make test-postgres` against a disposable database (`OMOBA_TEST_DATABASE_URL`); CI runs the same tests in its `postgres` job. Documentation-only changes need link/content review rather than a full game build.

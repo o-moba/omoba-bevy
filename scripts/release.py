@@ -142,7 +142,8 @@ def validate_server(server: str | None) -> str | None:
 
 def player_readme(version: str, target: str, server: str | None) -> str:
     server_line = (f"This build connects to {server} by default." if server else
-                   "This build starts on 127.0.0.1:4000 (a server on the same computer).")
+                   "Fresh installations connect to the built-in OMOBA Beta server. "
+                   "A previously saved custom server is preserved.")
     common = f"""OMOBA {version} — playtest build
 {'=' * (len(version) + 25)}
 
@@ -454,6 +455,8 @@ def ensure_android_keystore() -> Path:
         path = Path(tempfile.mkdtemp()) / "playtest.keystore"
         path.write_bytes(base64.b64decode(encoded))
         return path
+    if os.environ.get("OMOBA_REQUIRE_STABLE_ANDROID_KEY") == "1":
+        raise SystemExit("Release requires OMOBA_ANDROID_KEYSTORE_BASE64; refusing a new signing key")
     if not ANDROID_KEYSTORE.exists():
         ANDROID_KEYSTORE.parent.mkdir(parents=True, exist_ok=True)
         run("keytool", "-genkeypair", "-keystore", ANDROID_KEYSTORE, "-storepass", "android",
@@ -622,9 +625,13 @@ def command_draft(args) -> int:
     files = sorted(p for p in out.iterdir() if p.is_file())
     notes = out.parent / f"{tag}-notes.md"
     notes.write_text(release_notes(version, (ROOT / "CHANGELOG.md").read_text()))
-    exists = subprocess.run(["gh", "release", "view", tag, "--repo", REPO],
-                            capture_output=True).returncode == 0
-    if exists:
+    if tag != tag_for(version):
+        raise SystemExit("Release tag must match the workspace version")
+    existing = subprocess.run(["gh", "release", "view", tag, "--repo", REPO,
+                               "--json", "isDraft"], capture_output=True, text=True)
+    if existing.returncode == 0:
+        if json.loads(existing.stdout).get("isDraft") is not True:
+            raise SystemExit("Published release is immutable; increment the version instead")
         run("gh", "release", "upload", tag, *files, "--clobber", "--repo", REPO)
     else:
         run("gh", "release", "create", tag, *files, "--repo", REPO, "--draft", "--prerelease",
