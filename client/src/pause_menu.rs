@@ -65,7 +65,7 @@ pub(crate) enum PauseMenuSet {
 impl Plugin for PauseMenuPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<PauseMenuState>()
-            .init_resource::<SettingsTab>()
+            .init_resource::<SelectedSettingsTab>()
             .init_resource::<AudioSettings>()
             .init_resource::<RenderSettings>()
             .init_resource::<HudPositionSettings>()
@@ -148,7 +148,7 @@ pub(crate) struct PauseMenuState {
     pub(crate) in_settings: bool,
 }
 
-#[derive(Resource, Default, Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Component, Default, Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum SettingsTab {
     #[default]
     Sound,
@@ -157,6 +157,11 @@ pub(crate) enum SettingsTab {
     Hud,
     Language,
 }
+
+// Bevy resources are unique entity components. The selected value must use a
+// different type from the per-panel tab markers.
+#[derive(Resource, Default)]
+pub(crate) struct SelectedSettingsTab(pub(crate) SettingsTab);
 
 #[derive(Component)]
 struct SettingsRail;
@@ -203,10 +208,9 @@ fn settings_group(
 }
 
 fn settings_tabs(
-    mut selected: ResMut<SettingsTab>,
+    mut selected: ResMut<SelectedSettingsTab>,
     mut events: MessageReader<Activated<PauseAction>>,
-    // Resources are entities in Bevy 0.19; keep UI tab markers disjoint.
-    mut groups: Query<(&SettingsTab, &mut Node), Without<bevy::ecs::resource::IsResource>>,
+    mut groups: Query<(&SettingsTab, &mut Node)>,
     mut buttons: Query<(&UiAction<PauseAction>, &mut widgets::ButtonStyle)>,
     mut scroll: Query<&mut ScrollPosition, With<SettingsSection>>,
     menu: Res<PauseMenuState>,
@@ -214,14 +218,14 @@ fn settings_tabs(
 ) {
     for event in events.read() {
         if let PauseAction::SettingsTab(tab) = event.action {
-            *selected = tab;
+            selected.0 = tab;
             for mut position in &mut scroll {
                 position.y = 0.0;
             }
         }
     }
     for (tab, mut node) in &mut groups {
-        node.display = if *tab == *selected {
+        node.display = if *tab == selected.0 {
             Display::Flex
         } else {
             Display::None
@@ -229,7 +233,7 @@ fn settings_tabs(
     }
     for (action, mut style) in &mut buttons {
         if let PauseAction::SettingsTab(tab) = action.0 {
-            widgets::ButtonStyle::set_selected(&mut style, tab == *selected);
+            widgets::ButtonStyle::set_selected(&mut style, tab == selected.0);
         }
     }
     for (name, mut text) in &mut titles {
@@ -2235,7 +2239,7 @@ mod tests {
     #[test]
     fn tablet_graphics_rows_share_label_slider_and_value_columns() {
         let (mut app, _) = layout_app(Vec2::new(1180.0, 820.0), 2.0, true);
-        app.insert_resource(SettingsTab::Graphics)
+        app.insert_resource(SelectedSettingsTab(SettingsTab::Graphics))
             .add_systems(Update, settings_tabs);
         app.update();
         app.update();
@@ -2365,7 +2369,7 @@ mod tests {
             let (mut app, window) = layout_app(size, dpi, true);
             // Exercise the production Graphics tab, rather than laying out all
             // tab bodies simultaneously (which the actual menu never does).
-            app.insert_resource(SettingsTab::Graphics)
+            app.insert_resource(SelectedSettingsTab(SettingsTab::Graphics))
                 .add_systems(Update, settings_tabs.after(apply_pause_navigation));
             app.insert_resource(ClientSession::admitted_for_test());
             app.update();
@@ -2480,7 +2484,7 @@ mod tests {
     #[test]
     fn tablet_sound_fits_without_scrolling_and_tabs_keep_their_controls_separate() {
         let (mut app, _) = layout_app(Vec2::new(1180.0, 820.0), 2.0, true);
-        app.init_resource::<SettingsTab>()
+        app.init_resource::<SelectedSettingsTab>()
             .add_systems(Update, settings_tabs.after(apply_pause_navigation));
         app.update();
         app.update();
@@ -2506,11 +2510,21 @@ mod tests {
         });
         app.update();
         app.update();
-        for (tab, node) in app
-            .world_mut()
-            .query::<(&SettingsTab, &Node)>()
+        let mut groups = app.world_mut().query::<(&SettingsTab, &Node)>();
+        let present: std::collections::HashSet<_> = groups
             .iter(app.world())
-        {
+            .map(|(tab, _)| *tab as u8)
+            .collect();
+        assert_eq!(
+            present.len(),
+            5,
+            "all five tab markers must survive spawning"
+        );
+        assert_eq!(
+            app.world().resource::<SelectedSettingsTab>().0,
+            SettingsTab::Language
+        );
+        for (tab, node) in groups.iter(app.world()) {
             assert_eq!(
                 node.display,
                 if *tab == SettingsTab::Language {
@@ -2525,7 +2539,7 @@ mod tests {
     #[test]
     fn phone_sound_keeps_all_volume_controls_and_header_navigation_in_view() {
         let (mut app, _) = layout_app(Vec2::new(844.0, 390.0), 3.0, true);
-        app.init_resource::<SettingsTab>()
+        app.init_resource::<SelectedSettingsTab>()
             .add_systems(Update, settings_tabs.after(apply_pause_navigation));
         app.update();
         app.update();
