@@ -565,6 +565,52 @@ fn malformed_shared_motion_is_rejected_before_runtime_assets_exist() {
 }
 
 #[test]
+fn contacts_cover_every_action_clip_and_the_library_is_parsed_once() {
+    let motion = motion();
+    assert!(motion.clips.len() <= 64);
+    for (name, clip) in &motion.clips {
+        let contact = motion.contact(name);
+        if clip.looping || name == "death" {
+            assert_eq!(contact, None, "{name} is never released");
+        } else {
+            let contact = contact.unwrap_or_else(|| panic!("{name} lacks a contact"));
+            assert!((0.0..=clip.duration).contains(&contact), "{name}");
+        }
+    }
+    assert_eq!(motion.contact("no_such_clip"), None);
+    let embedded = SharedHumanoidMotion::embedded().unwrap();
+    assert!(std::ptr::eq(
+        embedded,
+        SharedHumanoidMotion::embedded().unwrap()
+    ));
+    assert_eq!(embedded.contact("cast"), motion.contact("cast"));
+    assert_eq!(embedded.clips.len(), motion.clips.len());
+}
+
+#[test]
+fn a_contact_must_name_a_clip_and_lie_inside_it() {
+    let source: serde_json::Value = serde_json::from_str(include_str!(
+        "../../assets/animations/humanoid-motion-v1.json"
+    ))
+    .unwrap();
+    for (clip, contact) in [("cast", 9.0), ("cast", -0.1), ("no_such_clip", 0.1)] {
+        let mut value = source.clone();
+        value["contacts"][clip] = serde_json::json!(contact);
+        assert!(
+            SharedHumanoidMotion::parse(&value.to_string())
+                .unwrap_err()
+                .contains("contact"),
+            "{clip} at {contact}"
+        );
+    }
+    // A library written before contacts existed still loads, without any.
+    let mut value = source;
+    value.as_object_mut().unwrap().remove("contacts");
+    let motion = SharedHumanoidMotion::parse(&value.to_string()).unwrap();
+    assert_eq!(motion.contact("cast"), None);
+}
+
+#[test]
 fn embedded_alias_preserves_curves_with_safe_runtime_ids_and_rejects_partial_remaps() {
     use bevy::{animation::animated_field, math::curve::UnevenSampleAutoCurve};
     let rig = rig("agnes");

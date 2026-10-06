@@ -74,9 +74,7 @@ impl SkillPresentation {
         if config.schema_version != 1 || config.skills.len() > 80 {
             return Err("Unsupported skill presentation schema/size".into());
         }
-        let motion = crate::humanoid::SharedHumanoidMotion::parse(include_str!(
-            "../assets/animations/humanoid-motion-v1.json"
-        ))?;
+        let motion = crate::humanoid::SharedHumanoidMotion::embedded()?;
         for (id, profile) in &config.skills {
             if SkillId::from_id(id).is_none()
                 && !shared::HeroClass::LEGACY.iter().any(|class| {

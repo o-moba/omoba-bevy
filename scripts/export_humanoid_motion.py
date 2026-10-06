@@ -9,14 +9,23 @@ rest transforms, bone indices, facing alignment and proportion scaling.
     python3 scripts/export_humanoid_motion.py
     python3 scripts/export_humanoid_motion.py --check --audit /tmp/motion-audit.json
 
+Three tables define the library: `CLIPS` (full-rate source clips), the dagger
+timing edits in `DAGGER_MOTIONS`, and the pose-key rows of
+`assets-src/animations/derived-motions.json`. A derived row names its keys as
+(source clip, normalised phase) and may mirror, spin or lift them; nothing is
+drawn by hand. `contacts` gives, per action clip, the seconds from the clip
+start to its contact pose.
+
 Only Python's standard library is required. The older retarget module supplies
 source parsing and quaternion math; its GLB-writing functions are never called.
 """
 
 import argparse
+import functools
 import hashlib
 import json
 import math
+import re
 from pathlib import Path
 
 import retarget_animations as legacy
@@ -24,6 +33,7 @@ import retarget_animations as legacy
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / legacy.SOURCE_GLTF
 OUTPUT = ROOT / "client/assets/animations/humanoid-motion-v1.json"
+DERIVED = ROOT / "assets-src/animations/derived-motions.json"
 CLIPS = (
     ("idle", "Idle_Loop", True),
     ("walk", "Walk_Loop", True),
@@ -44,14 +54,43 @@ CLIPS = (
 )
 # Right-hand Cross drives the hand holding the dagger; Jab is a left-hand feint.
 # Skill-owned edits of the CC0 source: a short thrust, a partial jab withdrawn
-# twice, a full committed backstab and a slower heavy cross-body thrust. These
-# are retargeted by semantic bones, so no avatar-specific rig is baked or edited.
+# twice, a backstab that drops into a crouch after the stab and a slower heavy
+# cross-body thrust. These are retargeted by semantic bones, so no
+# avatar-specific rig is baked or edited. `None` marks a clip whose keys join
+# two source clips and therefore live in the derived table.
 DAGGER_MOTIONS = {
     "dagger_stab": ("Punch_Cross", 0.44, (0, .12, .43, .70, 1)),
     "dagger_feint": ("Punch_Jab", 0.62, (0, .29, .08, .38, 0)),
-    "dagger_backstab": ("Punch_Cross", 0.65, (0, .08, .45, .49, .78, 1)),
+    "dagger_backstab": None,
     "dagger_heavy_thrust": ("Punch_Cross", 0.84, (0, .15, .23, .57, .78, 1)),
 }
+# Seconds from the clip start to the contact pose of the clips above: the key
+# at which the striking hand is fully extended or the gesture is fully formed,
+# measured on the CC0 source. Derived rows carry their own `contact`. Loops and
+# `death` are never released and have none.
+CONTACTS = {
+    "attack": 0.4166667,
+    "cast": 0.0833333,
+    "spell_prepare": 0.4166667,
+    "spell_finish": 0.25,
+    "pistol_shoot": 0.0416667,
+    "pistol_reload": 0.3333333,
+    "pistol_aim": 0.0,
+    "interact": 0.5,
+    "punch": 0.25,
+    "guard": 0.3333333,
+    "shoulder_drive": 0.2083333,
+    "roll": 0.375,
+    "dagger_stab": 0.22,
+    "dagger_feint": 0.155,
+    "dagger_heavy_thrust": 0.336,
+}
+MOTION_ID = re.compile(r"[a-z0-9_]{1,64}")
+ROW_FIELDS = {"duration", "looping", "keys", "times", "ops", "contact", "approx"}
+KEY_FIELDS = {"clip", "phase", "mirror"}
+OP_FIELDS = {"mirror", "spin_deg", "hips_y"}
+# One baked turn step must stay well inside the half turn a slerp can follow.
+MAX_SPIN_STEP_DEG = 90
 REQUIRED = (
     "hips", "spine", "head", "leftUpperArm", "leftLowerArm", "leftHand",
     "rightUpperArm", "rightLowerArm", "rightHand", "leftUpperLeg",
@@ -101,7 +140,155 @@ def semantic_source_bones(source):
     return dict(sorted((semantic, source.name_to_node[rig]) for rig, semantic in names.items()))
 
 
-def export_library(source_path=SOURCE):
+def number(value):
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+
+
+def check_row(name, row):
+    """Reject a malformed derived row before any source pose is sampled."""
+    def fail(reason):
+        raise ValueError(f"derived motion {name}: {reason}")
+
+    if not MOTION_ID.fullmatch(name):
+        fail("ID must match [a-z0-9_]{1,64}")
+    if name in {clip for clip, _, _ in CLIPS} or DAGGER_MOTIONS.get(name, None) is not None:
+        fail("ID is already a full-rate or dagger clip")
+    if not isinstance(row, dict) or not set(row) <= ROW_FIELDS:
+        fail(f"unknown field (allowed: {sorted(ROW_FIELDS)})")
+    looping, duration, keys = row.get("looping"), row.get("duration"), row.get("keys")
+    if not isinstance(looping, bool) or not isinstance(row.get("approx"), bool):
+        fail("looping and approx must be booleans")
+    if not number(duration) or duration <= 0 or rounded(duration) != duration:
+        fail("duration must be positive with at most seven decimals")
+    if not isinstance(keys, list) or len(keys) < 2:
+        fail("at least two keys are required")
+    for key in keys:
+        if not isinstance(key, dict) or not {"clip", "phase"} <= set(key) <= KEY_FIELDS:
+            fail("a key is {clip, phase, mirror?}")
+        if not isinstance(key["clip"], str) or key["clip"].endswith("_RM") or key["clip"] == "A_TPose":
+            fail("a key names a source clip without root motion")
+        if not number(key["phase"]) or not 0 <= key["phase"] <= 1:
+            fail("a key phase is a normalised source time in 0..=1")
+        if not isinstance(key.get("mirror", False), bool):
+            fail("key mirror must be a boolean")
+    times = row.get("times")
+    if times is not None and (
+        not isinstance(times, list) or len(times) != len(keys)
+        or not all(number(time) and rounded(time) == time for time in times)
+        or times[0] != 0 or times[-1] != duration
+        or any(a >= b for a, b in zip(times, times[1:]))
+    ):
+        fail("times must rise strictly from 0 to the duration, one per key")
+    ops = row.get("ops", {})
+    if not isinstance(ops, dict) or not set(ops) <= OP_FIELDS:
+        fail(f"unknown op (allowed: {sorted(OP_FIELDS)})")
+    if not isinstance(ops.get("mirror", False), bool):
+        fail("ops.mirror must be a boolean")
+    for op in ("spin_deg", "hips_y"):
+        values = ops.get(op)
+        if values is not None and (
+            not isinstance(values, list) or len(values) != len(keys) or not all(map(number, values))
+        ):
+            fail(f"ops.{op} needs one number per key")
+    spin = ops.get("spin_deg")
+    if spin is not None and (
+        spin[0] != 0 or spin[-1] % 360 != 0
+        or any(abs(b - a) > MAX_SPIN_STEP_DEG for a, b in zip(spin, spin[1:]))
+    ):
+        fail(f"a baked spin starts at 0, ends on a full turn and steps at most {MAX_SPIN_STEP_DEG} degrees")
+    lift = ops.get("hips_y")
+    if looping:
+        first, last = keys[0], keys[-1]
+        closes = last["clip"] == first["clip"] and last.get("mirror", False) == first.get("mirror", False) and (
+            last["phase"] == first["phase"] or (first["phase"], last["phase"]) == (0, 1)
+        )
+        if not closes or spin is not None or (lift is not None and lift[-1] != lift[0]):
+            fail("a loop repeats its first key last, without a spin or a net lift")
+        if "contact" in row:
+            fail("a loop is never released and has no contact")
+    else:
+        contact = row.get("contact")
+        if not number(contact) or not 0 <= contact <= duration or rounded(contact) != contact:
+            fail("contact must lie inside the clip, with at most seven decimals")
+        if lift is not None and lift[-1] != 0:
+            fail("a hop ends on the ground")
+
+
+@functools.lru_cache(maxsize=None)
+def derived_table(path=DERIVED):
+    """Rows of the derived-motion table in file order, shape-checked."""
+    table = json.loads(Path(path).read_text())
+    if set(table) != {"schema_version", "motions"} or table["schema_version"] != 1:
+        raise ValueError("unsupported derived-motion table")
+    for name, row in table["motions"].items():
+        check_row(name, row)
+    return table["motions"]
+
+
+def opposite(bone):
+    for side, other in (("left", "right"), ("right", "left")):
+        if bone.startswith(side):
+            return other + bone[len(side):]
+    return bone
+
+
+def mirrored(rotations):
+    """Reflect a pose through the sagittal plane of the symmetric reference pose."""
+    return {
+        bone: (q[0], -q[1], -q[2], q[3])
+        for bone, q in ((bone, rotations[opposite(bone)]) for bone in rotations)
+    }
+
+
+def derive_clip(name, row, source, bones):
+    """Build one clip from pose keys of the CC0 source and the row's operations."""
+    keys, ops = row["keys"], row.get("ops", {})
+    spin = ops.get("spin_deg", [0] * len(keys))
+    lift = ops.get("hips_y", [0] * len(keys))
+    duration = float(row["duration"])
+    times = row.get("times") or [duration * i / (len(keys) - 1) for i in range(len(keys))]
+    rotations = {semantic: [] for semantic in bones}
+    hips = []
+    for key, degrees, height in zip(keys, spin, lift):
+        if key["clip"] not in source.anims:
+            raise ValueError(f"derived motion {name}: unknown source clip {key['clip']}")
+        clip = source.clip(key["clip"])
+        world = source.doc.world_pose(clip.pose_at(key["phase"] * clip.timeline[-1], source.rest_pose))
+        pose = {
+            semantic: legacy.qnorm(legacy.qmul(world[index][1], legacy.qconj(source.ref_world[index][1])))
+            for semantic, index in bones.items()
+        }
+        if key.get("mirror", False) != ops.get("mirror", False):
+            pose = mirrored(pose)
+        half = math.radians(degrees) / 2
+        turn = (0.0, math.sin(half), 0.0, math.cos(half))
+        for semantic, delta in pose.items():
+            delta = legacy.qnorm(legacy.qmul(turn, delta))
+            stream = rotations[semantic]
+            if stream and sum(a * b for a, b in zip(stream[-1], delta)) < 0:
+                delta = tuple(-v for v in delta)
+            stream.append(delta)
+        # In place: only the vertical weight shift and the row's own lift remain.
+        hips.append((0, world[source.hips][0][1] - source.ref_world[source.hips][0][1] + height, 0))
+    if row["looping"]:
+        hips[-1] = hips[0]
+        for stream in rotations.values():
+            first = stream[0]
+            if sum(a * b for a, b in zip(stream[-2], first)) < 0:
+                first = tuple(-v for v in first)
+            stream[-1] = first
+    sources = list(dict.fromkeys(key["clip"] for key in keys))
+    return {
+        "source_clip": f"{' + '.join(sources)} / Open Moba {name} pose-key edit",
+        "duration": duration,
+        "looping": row["looping"],
+        "times": rounded(times),
+        "world_rotation_deltas": {key: rounded(value) for key, value in rotations.items()},
+        "hips_world_deltas": rounded(hips),
+    }
+
+
+def export_library(source_path=SOURCE, derived_path=DERIVED):
     source_path = Path(source_path)
     source = legacy.SourceRig(legacy.Gltf.from_gltf_file(source_path))
     for index, node in enumerate(source.doc.nodes):
@@ -180,7 +367,16 @@ def export_library(source_path=SOURCE):
             "world_rotation_deltas": {key: rounded(value) for key, value in rotations.items()},
             "hips_world_deltas": rounded(hips),
         }
-    for name, (source_name, duration, phases) in DAGGER_MOTIONS.items():
+    table = derived_table(derived_path)
+    if any(opposite(bone) not in bones for bone in bones):
+        raise ValueError("mirroring needs both sides of every paired bone")
+    for name, spec in DAGGER_MOTIONS.items():
+        if spec is None:
+            if name not in table:
+                raise ValueError(f"{name}: the derived table lacks its row")
+            library["clips"][name] = derive_clip(name, table[name], source, bones)
+            continue
+        source_name, duration, phases = spec
         clip = source.clip(source_name)
         rotations = {semantic: [] for semantic in bones}
         hips = []
@@ -199,12 +395,18 @@ def export_library(source_path=SOURCE):
             "world_rotation_deltas": {key: rounded(value) for key, value in rotations.items()},
             "hips_world_deltas": rounded(hips),
         }
-    validate_library(library)
+    for name, row in table.items():
+        if name not in DAGGER_MOTIONS:
+            library["clips"][name] = derive_clip(name, row, source, bones)
+    contacts = dict(CONTACTS, **{name: row["contact"] for name, row in table.items() if not row["looping"]})
+    library["contacts"] = {name: rounded(float(contacts[name])) for name in library["clips"] if name in contacts}
+    validate_library(library, table)
     return library
 
 
-def validate_library(library):
+def validate_library(library, table=None):
     """Reject malformed or drifting motion before it becomes a runtime asset."""
+    table = derived_table() if table is None else table
     if library.get("schema_version") != 1:
         raise ValueError("unsupported motion schema")
     height = library["source_hips_height"]
@@ -221,8 +423,16 @@ def validate_library(library):
     bones = library["bones"]
     if len(bones) != len(set(bones)) or not set(REQUIRED) <= set(bones):
         raise ValueError("duplicate or missing required semantic bones")
-    if set(library["clips"]) != {name for name, _, _ in CLIPS} | set(DAGGER_MOTIONS):
-        raise ValueError("motion library must contain all declared locomotion and skill clips")
+    if set(library["clips"]) != {name for name, _, _ in CLIPS} | set(DAGGER_MOTIONS) | set(table):
+        raise ValueError("motion library must contain all declared locomotion, skill and derived clips")
+    if len(library["clips"]) > 64:
+        raise ValueError("the runtime accepts at most 64 motions")
+    contacts = library.get("contacts", {})
+    if set(contacts) != {name for name, clip in library["clips"].items() if not clip["looping"] and name != "death"}:
+        raise ValueError("contacts must cover every action clip and no loop")
+    for name, contact in contacts.items():
+        if not number(contact) or not 0 <= contact <= library["clips"][name]["duration"]:
+            raise ValueError(f"{name}: contact must lie inside the clip")
     for name, clip in library["clips"].items():
         times = clip["times"]
         if len(times) < 2 or times[0] != 0 or times[-1] != clip["duration"]:
@@ -251,6 +461,8 @@ def validate_library(library):
             raise ValueError(f"{name}: invalid hips samples")
         if clip["looping"] and hips[0] != hips[-1]:
             raise ValueError(f"{name}: loop has root displacement")
+        if (name in table or name in DAGGER_MOTIONS) and any(v[0] != 0 or v[2] != 0 for v in hips):
+            raise ValueError(f"{name}: a skill motion must stay in place")
 
 
 def encode_library(library):
@@ -396,7 +608,7 @@ def main():
         args.audit.write_text(json.dumps(audit, indent=2, allow_nan=False) + "\n")
     print(f"{'Verified' if args.check else 'Wrote'} {args.output}: {len(output)} bytes, "
           f"{len(library['bones'])} semantic bones, {len(library['clips'])} motions, "
-          f"sha256 {hashlib.sha256(output).hexdigest()}")
+          f"{len(library['contacts'])} contacts, sha256 {hashlib.sha256(output).hexdigest()}")
     return 0
 
 

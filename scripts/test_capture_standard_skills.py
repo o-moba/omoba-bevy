@@ -58,6 +58,13 @@ class LauncherTests(unittest.TestCase):
         catalog = json.loads((ROOT / "shared/assets/catalog/heroes.json").read_text())
         self.assertEqual(launcher.HEROES, [hero["id"] for hero in catalog["classes"]])
         self.assertIn("adventurer", launcher.HEROES)
+
+    def test_look_options_name_a_shipped_rig_and_a_release_time(self):
+        slugs = launcher.avatar_slugs(ROOT / "client/assets")
+        self.assertEqual(len(slugs), 15)
+        self.assertIn("agnes", slugs)
+        self.assertEqual([launcher.release_time(value) for value in ("contact", "0", "0.45", "2")],
+                         ["contact", "0", "0.45", "2"])
         self.assertNotIn("adventurer", launcher.ROSTER_HEROES)
 
     def test_overlay_links_the_assets_and_replaces_only_the_named_registry(self):
@@ -127,7 +134,8 @@ class LauncherTests(unittest.TestCase):
             temporary = Path(temporary)
             for name in ("client", "server"):
                 (temporary / name).write_text("binary")
-            (temporary / "assets").mkdir()
+            (temporary / "assets" / "avatars").mkdir(parents=True)
+            (temporary / "assets" / "avatars" / "manifest.json").write_text('{"avatars": [{"slug": "agnes"}]}')
             base = ["--client-bin", str(temporary / "client"), "--server-bin", str(temporary / "server"),
                     "--assets", str(temporary / "assets"), "--output", str(temporary / "out")]
             for extra, message in (
@@ -136,6 +144,11 @@ class LauncherTests(unittest.TestCase):
                     (["--hero", "adventurer"], "adventurer needs --phases"),
                     (["--phases", "--skillfx", str(temporary / "absent.skillfx")], "Overlay file not found"),
                     (["--visual-mode", "isometric"], "invalid choice"),
+                    (["--avatar", "agnes"], "need --phases"),
+                    (["--release-at", "contact"], "need --phases"),
+                    (["--phases", "--avatar", "nobody"], "Unknown avatar"),
+                    (["--phases", "--release-at", "3"], "expected `contact` or 0..2 seconds"),
+                    (["--phases", "--release-at", "soon"], "invalid release_time value"),
             ):
                 code, stderr = run_main(base + extra)
                 self.assertEqual(code, 2, extra)

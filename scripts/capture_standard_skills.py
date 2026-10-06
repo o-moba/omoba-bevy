@@ -15,6 +15,11 @@ arrived). `--offscreen` hides the window and renders to an image, so a locked
 or covered desktop still gives frames. `--skillfx` / `--combat-visuals` overlay
 one registry file on a private copy of the asset `config/` directory. The
 output directory receives one folder per class and a merged `manifest.json`.
+
+For a look at motion clips, `--avatar SLUG` stages the hero on another shipped
+rig and `--release-at contact|SECONDS` moves the release still of skills
+without a telegraph to the clip's contact time or to a fixed time after the
+accepted cast.
 """
 import argparse
 import datetime
@@ -83,12 +88,13 @@ def phase_problems(summary, directory):
 
 
 def capture(hero, client, server, assets, output, timeout=135, roster=False, handhelds=False, sdk_weapon=None,
-            phases=False, offscreen=False, visual_mode="models3d", overlays=None):
+            phases=False, offscreen=False, visual_mode="models3d", overlays=None, avatar=None, release_at=None):
     output.mkdir(parents=True)
     children = []
     result = dict(hero=hero, source=source_identity(), client_sha256=sha256(client),
                   locale="en", viewport=[1280, 720], physical_device_verified=False,
-                  phases=phases, offscreen=offscreen, visual_mode=visual_mode)
+                  phases=phases, offscreen=offscreen, visual_mode=visual_mode,
+                  avatar=avatar, release_at=release_at)
     with tempfile.TemporaryDirectory(prefix="omoba-skill-pilot-") as isolated:
         if overlays:
             assets = overlay_assets(assets, isolated, overlays)
@@ -109,6 +115,10 @@ def capture(hero, client, server, assets, output, timeout=135, roster=False, han
             env.update(OMOBA_STANDARD_QA_DIR=str(output), OMOBA_STANDARD_QA_CLASS=hero)
             if phases:
                 env["OMOBA_STANDARD_QA_PHASES"] = "1"
+                if avatar:
+                    env["OMOBA_STANDARD_QA_AVATAR"] = avatar
+                if release_at:
+                    env["OMOBA_STANDARD_QA_RELEASE_AT"] = release_at
             elif roster or handhelds:
                 env["OMOBA_ROSTER_SKILLS_QA"] = "1"
             if offscreen:
@@ -154,6 +164,19 @@ def merge_manifest(path, header, results):
     return manifest
 
 
+def avatar_slugs(assets):
+    """Slugs of the rigs shipped in an asset root."""
+    manifest = json.loads((Path(assets) / "avatars" / "manifest.json").read_text())
+    return [avatar["slug"] for avatar in manifest["avatars"]]
+
+
+def release_time(value):
+    """`contact`, or seconds after the accepted cast."""
+    if value != "contact" and not 0 <= float(value) <= 2:
+        raise argparse.ArgumentTypeError("expected `contact` or 0..2 seconds")
+    return value
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--client-bin", type=Path, required=True)
@@ -170,11 +193,17 @@ def main(argv=None):
     parser.add_argument("--visual-mode", choices=["models3d", "sprite2d"], default="models3d")
     parser.add_argument("--skillfx", type=Path, help="Overlay this file as config/skills.skillfx")
     parser.add_argument("--combat-visuals", type=Path, help="Overlay this file as config/combat_visuals.json")
+    parser.add_argument("--avatar", help="With --phases: the hero's rig (a shipped avatar slug; default agnes)")
+    parser.add_argument("--release-at", type=release_time, metavar="contact|SECONDS",
+                        help="With --phases: take the release still of a skill without a telegraph at its "
+                             "clip's contact time, or this long after the accepted cast (default: 0.10 s)")
     parser.add_argument("--timeout", type=float,
                         help="Per-client deadline in seconds (default: 135, or 300 with --phases)")
     args = parser.parse_args(argv)
     if args.phases and (args.roster or args.handhelds):
         parser.error("--phases replaces --roster and --handhelds")
+    if (args.avatar or args.release_at) and not args.phases:
+        parser.error("--avatar and --release-at need --phases")
     if args.timeout is None:
         args.timeout = 300 if args.phases else 135
     if not 0 < args.timeout <= 600:
@@ -190,6 +219,8 @@ def main(argv=None):
     for path in overlays.values():
         if not path.is_file():
             parser.error(f"Overlay file not found: {path}")
+    if args.avatar and args.avatar not in avatar_slugs(assets):
+        parser.error(f"Unknown avatar: {args.avatar}")
     if args.handhelds:
         heroes = ["warrior"]
     elif args.phases:
@@ -215,10 +246,11 @@ def main(argv=None):
                       overlays={OVERLAYS[name]: dict(path=str(path), sha256=sha256(path))
                                 for name, path in overlays.items()},
                       locale="en", viewport=[1280, 720], phases=args.phases, offscreen=args.offscreen,
-                      visual_mode=args.visual_mode)
+                      visual_mode=args.visual_mode, avatar=args.avatar, release_at=args.release_at)
         results = [capture(hero, binaries["client"], binaries["server"], assets, output / hero, args.timeout,
                            args.roster or hero not in PILOT_HEROES, args.handhelds, phases=args.phases,
-                           offscreen=args.offscreen, visual_mode=args.visual_mode, overlays=overlays)
+                           offscreen=args.offscreen, visual_mode=args.visual_mode, overlays=overlays,
+                           avatar=args.avatar, release_at=args.release_at)
                    for hero in heroes]
     merge_manifest(output / "manifest.json", header, results)
     print(json.dumps([{key: result.get(key) for key in ("hero", "pass", "client_exit_code", "error", "errors")}

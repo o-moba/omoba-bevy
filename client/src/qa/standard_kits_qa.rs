@@ -4,7 +4,10 @@
 //! camera to an image, so a locked or covered desktop still yields frames.
 //! `OMOBA_STANDARD_QA_PHASES=1` replaces the single frame per skill by three
 //! stills (windup, release, impact or settled) gated on replicated state; see
-//! the phase capture section at the end of this file.
+//! the phase capture section at the end of this file. For a look at a motion
+//! clip, `OMOBA_STANDARD_QA_AVATAR=<slug>` picks the hero's rig of a phase run
+//! and `OMOBA_STANDARD_QA_RELEASE_AT=contact|<seconds>` moves the release still
+//! of a skill without a telegraph to the clip's contact time or a fixed time.
 use crate::{
     frontend::{AppScreen, ScreenDriverPaused},
     help_overlay::HelpOverlayVisible,
@@ -52,6 +55,16 @@ impl Plugin for StandardKitsQaPlugin {
         let flag = |name: &str| std::env::var(name).as_deref() == Ok("1");
         let phases = flag("OMOBA_STANDARD_QA_PHASES");
         let offscreen = flag("OMOBA_STANDARD_QA_OFFSCREEN");
+        let release_at = match std::env::var("OMOBA_STANDARD_QA_RELEASE_AT").as_deref() {
+            Err(_) => ReleaseAt::Window,
+            Ok("contact") => ReleaseAt::Contact,
+            Ok(secs) => ReleaseAt::Secs(
+                secs.parse()
+                    .ok()
+                    .filter(|secs| (0.0..=2.0).contains(secs))
+                    .expect("OMOBA_STANDARD_QA_RELEASE_AT is `contact` or 0..=2 seconds"),
+            ),
+        };
         if offscreen {
             // Hidden before winit creates it: an invisible window makes the
             // runner update on its timer instead of waiting for a redraw that
@@ -65,6 +78,8 @@ impl Plugin for StandardKitsQaPlugin {
         app.insert_resource(Qa {
             directory,
             class,
+            avatar: std::env::var("OMOBA_STANDARD_QA_AVATAR").unwrap_or_else(|_| "agnes".into()),
+            release_at,
             phases,
             offscreen,
             target: None,
@@ -120,6 +135,9 @@ impl Plugin for StandardKitsQaPlugin {
 struct Qa {
     directory: PathBuf,
     class: HeroClass,
+    /// Rig of the hero in a phase run; the other runs stage their own rigs.
+    avatar: String,
+    release_at: ReleaseAt,
     /// Three state-gated stills per skill instead of the roster frame.
     phases: bool,
     /// Hidden window; the main camera renders to `target`.
@@ -219,7 +237,11 @@ fn prepare(
         qa.prepared = true;
         selection.hero_class = qa.class;
         selection.character = CharacterChoice::Cube;
-        selection.avatar = Some("agnes".into());
+        selection.avatar = Some(if qa.phases {
+            qa.avatar.clone()
+        } else {
+            "agnes".into()
+        });
         screen.set(AppScreen::HeroSelect);
     }
     if help.0 {
@@ -1148,9 +1170,32 @@ const TELEGRAPH_GRACE: f64 = 0.25;
 /// Share of the telegraph the probe observed that has passed at the windup still.
 const TELEGRAPH_SHARE: f64 = 0.4;
 /// Release window of a skill without a telegraph, in simulated seconds after
-/// the accepted edge. The motion library carries no contact time per clip yet,
-/// so the window is the same for every clip.
+/// the accepted edge. A row that keeps the contact rule shows its contact pose
+/// inside it; `ReleaseAt` moves the window for a look at a clip played from
+/// its first key.
 const RELEASE_WINDOW: (f64, f64) = (0.10, 0.20);
+
+/// Where the release window of a skill without a telegraph starts.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum ReleaseAt {
+    /// `RELEASE_WINDOW`.
+    Window,
+    /// The library contact time of the profile's release clip.
+    Contact,
+    /// A fixed time after the edge.
+    Secs(f64),
+}
+impl ReleaseAt {
+    /// The window for a release clip whose library contact is `contact`.
+    fn window(self, contact: Option<f32>) -> (f64, f64) {
+        let start = match self {
+            Self::Window => return RELEASE_WINDOW,
+            Self::Contact => contact.map_or(RELEASE_WINDOW.0, f64::from),
+            Self::Secs(secs) => secs,
+        };
+        (start, start + RELEASE_WINDOW.1 - RELEASE_WINDOW.0)
+    }
+}
 /// Age window of the impact burst in the impact still.
 const IMPACT_AGE: (f32, f32) = (0.03, 0.2);
 /// Simulated seconds between the release still and a `settled` still.
@@ -1595,6 +1640,16 @@ impl PhaseWorld<'_, '_> {
             .get(&self.game.your_id)
             .map(|(label, _)| label.as_str())
     }
+    /// Library contact time of the release clip the slot's profile names.
+    fn release_contact(&self, slot: u8) -> Option<f32> {
+        let (class, _, loadout, ..) = self.local.single().ok()?;
+        let profile = self
+            .registry
+            .action_profile(class.0, loadout.0.as_ref(), slot)?;
+        crate::humanoid::SharedHumanoidMotion::embedded()
+            .ok()?
+            .contact(&profile.release)
+    }
     /// What is left of an earlier cast, or `None` on a clean slate.
     fn leftovers(&self, target: Vec2) -> Option<&'static str> {
         let near = |actor: SandboxActor, spot: Vec2| {
@@ -1637,11 +1692,11 @@ impl PhaseWorld<'_, '_> {
     }
 }
 
-fn stage_config(class: HeroClass) -> SandboxConfig {
+fn stage_config(class: HeroClass, avatar: &str) -> SandboxConfig {
     let mut config = SandboxConfig {
         player: ActorConfig {
             hero: class,
-            avatar: Some("agnes".into()),
+            avatar: Some(avatar.into()),
             level: 10,
             position: STAGE_HOME.to_array(),
             max_hp: shared::hero_balance::base_hp(class),
@@ -1775,6 +1830,8 @@ fn still_record(
         "profile": profile.map(|profile| serde_json::json!({
             "release": profile.release,
             "windup": profile.windup,
+            "release_contact_secs": world.release_contact(run.slot)
+                .map(|secs| (f64::from(secs) * 1e4).round() / 1e4),
         })),
         "registry_profiles": world.registry.profile_count(),
         // Cast accents carry the action sequence and impact bursts the receipt
@@ -1902,7 +1959,10 @@ fn drive_phases(
     match step {
         Step::Arrange => {
             let staging = Staging::of(class.0, &equipped, slot);
-            let mut config = run.config.take().unwrap_or_else(|| stage_config(qa.class));
+            let mut config = run
+                .config
+                .take()
+                .unwrap_or_else(|| stage_config(qa.class, &qa.avatar));
             config.enemy.actor.position = (STAGE_HOME + STAGE_LANE * staging.distance).to_array();
             config.environment.time_scale = 1.0;
             config.environment.paused = false;
@@ -2018,6 +2078,7 @@ fn drive_phases(
                 return;
             };
             let fused = probe.fuse();
+            let release_window = qa.release_at.window(world.release_contact(run.slot));
             let due = if !run.windup_taken {
                 match fused {
                     None => Some((Phase::Windup, "edge")),
@@ -2046,7 +2107,7 @@ fn drive_phases(
                 Some((Phase::Impact, "receipt"))
             } else if run.release_taken.is_none() {
                 match fused {
-                    None => (now - edge >= RELEASE_WINDOW.0)
+                    None => (now - edge >= release_window.0)
                         .then_some((Phase::Release, "release_window")),
                     Some(_) => run.watch.fuse().map(|(_, _, how)| (Phase::Release, how)),
                 }
@@ -2094,9 +2155,9 @@ fn drive_phases(
             let record = still_record(&world, run, phase, sandbox, skill);
             if phase == Phase::Release
                 && run.gate == "release_window"
-                && record["since_edge_secs"]
-                    .as_f64()
-                    .is_none_or(|after| after > RELEASE_WINDOW.1)
+                && record["since_edge_secs"].as_f64().is_none_or(|after| {
+                    after > qa.release_at.window(world.release_contact(run.slot)).1
+                })
             {
                 stop(
                     qa,
@@ -2186,6 +2247,8 @@ fn drive_phases(
                     "locale": "en",
                     "pixels": [qa.pixels().0, qa.pixels().1],
                     "offscreen": qa.offscreen,
+                    "avatar": qa.avatar,
+                    "release_at": format!("{:?}", qa.release_at),
                     "visual_mode": format!("{:?}", *world.mode),
                     "manual_interaction_verified": false,
                     "physical_device_verified": false,

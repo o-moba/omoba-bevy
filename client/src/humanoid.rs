@@ -39,21 +39,9 @@ struct RuntimeRig {
 }
 
 /// Cache identity is the loaded model asset, never a mutable display name/slug.
-#[derive(Resource)]
+#[derive(Resource, Default)]
 pub(crate) struct HumanoidRuntimeLibrary {
-    motion: Result<SharedHumanoidMotion, String>,
     models: HashMap<AssetId<Gltf>, RuntimeRig>,
-}
-
-impl Default for HumanoidRuntimeLibrary {
-    fn default() -> Self {
-        Self {
-            motion: SharedHumanoidMotion::parse(include_str!(
-                "../assets/animations/humanoid-motion-v1.json"
-            )),
-            models: HashMap::new(),
-        }
-    }
 }
 
 impl HumanoidRuntimeLibrary {
@@ -73,7 +61,7 @@ impl HumanoidRuntimeLibrary {
         let document = serde_json::to_value(source.document.as_json())
             .map_err(|error| format!("Cannot read humanoid metadata: {error}"))?;
         let rig = HumanoidRig::from_document(&document)?;
-        let motion = self.motion.as_ref().map_err(Clone::clone)?;
+        let motion = SharedHumanoidMotion::embedded()?;
         let (retargeted, animated_nodes) = retarget::retarget_all(&rig, motion)?;
         let mut handles: HashMap<String, Handle<AnimationClip>> = retargeted
             .into_iter()
