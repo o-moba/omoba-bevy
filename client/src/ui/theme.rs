@@ -193,10 +193,10 @@ pub mod metric {
     /// The pause panel as spawned (desktop), `(width, settings height)`.
     pub const PAUSE_PANEL: (f32, f32) = (480.0, 560.0);
     /// Desktop pause panel height on the main page.
-    pub const PAUSE_MAIN_H: f32 = 380.0;
+    pub const PAUSE_MAIN_H: f32 = 560.0;
     /// Widest phone pause panel, and its main-page height cap.
     pub const PHONE_PAUSE_W: f32 = 650.0;
-    pub const PHONE_PAUSE_MAIN_H: f32 = 360.0;
+    pub const PHONE_PAUSE_MAIN_H: f32 = 560.0;
 
     /// Pause panel height. On a phone `available` is the safe-area height;
     /// the desktop ignores it.
@@ -1080,9 +1080,9 @@ mod tests {
         assert_eq!(metric::menu_control_height(Form::Phone, 60.0, 1.0), 60.0);
         // Pause panel.
         assert_eq!(metric::pause_panel_height(Form::Desktop, true, 0.0), 560.0);
-        assert_eq!(metric::pause_panel_height(Form::Desktop, false, 0.0), 380.0);
+        assert_eq!(metric::pause_panel_height(Form::Desktop, false, 0.0), 560.0);
         assert_eq!(metric::pause_panel_height(Form::Phone, true, 350.0), 350.0);
-        assert_eq!(metric::pause_panel_height(Form::Phone, false, 390.0), 360.0);
+        assert_eq!(metric::pause_panel_height(Form::Phone, false, 390.0), 390.0);
         assert_eq!(metric::pause_panel_height(Form::Phone, false, 300.0), 300.0);
         assert_eq!(metric::PAUSE_PANEL, (480.0, 560.0));
         // Phone hero select and shop.

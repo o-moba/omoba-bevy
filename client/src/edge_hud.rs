@@ -1946,7 +1946,7 @@ mod tests {
                     ));
                 }),
                 Expect {
-                    name: "Verdant Dragon",
+                    name: "Flame Dragon · 3/3",
                     badge: Some("BOSS"),
                     icon: None,
                     level: None,

@@ -1,4 +1,4 @@
-//! Match-scoped utility requests, using the normal movement collision authority.
+//! Match-scoped utilities. Dash blinks through obstacles to a clear landing.
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
@@ -8,7 +8,6 @@ use shared::wire::GameState;
 use crate::balance::PLAYER_GROUND_Y;
 use crate::entities::{ConnectedPlayer, MapLayoutState, Structure, Vec3f};
 use crate::hero_timers;
-use crate::session::clip_live_structures;
 
 pub fn utility_movement_multiplier(player: &ConnectedPlayer, now: Instant) -> f32 {
     if player.hero.hp > 0.0
@@ -32,6 +31,30 @@ pub fn handle_utility_request(
     direction: [f32; 2],
     request_id: u64,
     now: Instant,
+) {
+    handle_utility_request_with_terrain(
+        player,
+        map,
+        structures,
+        phase,
+        action,
+        direction,
+        request_id,
+        now,
+        &[],
+    );
+}
+
+pub fn handle_utility_request_with_terrain(
+    player: &mut ConnectedPlayer,
+    map: &MapLayoutState,
+    structures: &HashMap<u64, Structure>,
+    phase: &GameState,
+    action: UtilityAction,
+    direction: [f32; 2],
+    request_id: u64,
+    now: Instant,
+    terrain: &[shared::navigation::Disc],
 ) {
     if !player.joined || request_id == 0 || request_id <= player.hero.utility.last_request_id {
         return;
@@ -72,8 +95,15 @@ pub fn handle_utility_request(
                 PLAYER_GROUND_Y,
                 from[1] + direction[1] / length * DASH_DISTANCE,
             ));
-            let to = shared::navigation::world_navigation().clip_movement(from, [to.x, to.z]);
-            let to = clip_live_structures(from, to, structures);
+            let mut blocked = terrain.to_vec();
+            blocked.extend(structures.values().filter(|s| s.state.hp > 0.0).map(|s| {
+                shared::navigation::Disc {
+                    center: [s.state.x, s.state.z],
+                    radius: crate::world::structure_collision_radius(s.state.kind),
+                }
+            }));
+            let to =
+                shared::navigation::world_navigation().blink_landing(from, [to.x, to.z], &blocked);
             player.hero.x = to[0];
             player.hero.y = PLAYER_GROUND_Y;
             player.hero.z = to[1];

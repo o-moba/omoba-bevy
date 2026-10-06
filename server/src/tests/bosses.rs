@@ -94,7 +94,7 @@ fn boss_pits_are_point_symmetric_and_clear_of_camps() {
     let (wendigo_anchor, wendigo_type) = bosses[0];
     let (mutatio_anchor, mutatio_type) = bosses[1];
     assert_eq!(wendigo_type, NeutralCampType::WendigoBoss);
-    assert_eq!(mutatio_type, NeutralCampType::KingMutatioBoss);
+    assert_eq!(mutatio_type, NeutralCampType::WindDragon);
 
     // Bottom boss sits in negative-z (bottom-lane) territory, top boss in
     // positive-z; the pits are 180-degree rotationally symmetric.
@@ -153,7 +153,7 @@ fn bosses_are_gated_before_spawn_delays_and_spawn_with_full_stats() {
     );
     let visible = visible_camp_types(&world.neutrals);
     assert!(visible.contains(&NeutralCampType::WendigoBoss));
-    assert!(!visible.contains(&NeutralCampType::KingMutatioBoss));
+    assert!(!visible.contains(&NeutralCampType::WindDragon));
     let wendigo = world
         .neutrals
         .values()
@@ -173,11 +173,11 @@ fn bosses_are_gated_before_spawn_delays_and_spawn_with_full_stats() {
         },
     );
     let visible = visible_camp_types(&world.neutrals);
-    assert!(visible.contains(&NeutralCampType::KingMutatioBoss));
+    assert!(visible.contains(&NeutralCampType::WindDragon));
     let mutatio = world
         .neutrals
         .values()
-        .find(|neutral| neutral.state.camp_type == NeutralCampType::KingMutatioBoss)
+        .find(|neutral| neutral.state.camp_type == NeutralCampType::WindDragon)
         .unwrap();
     assert!((mutatio.state.hp - MUTATIO_MAX_HP).abs() < EPSILON);
     assert!((mutatio.state.x - mutatio.anchor.x).abs() < EPSILON);

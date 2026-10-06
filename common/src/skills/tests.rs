@@ -934,3 +934,16 @@ fn repeater_is_single_target_and_keeps_the_fired_mode_after_switching() {
     assert_eq!(w.players[&addr(3)].hero.hp, 1000.0);
     assert_eq!(w.players[&addr(1)].hero.mana, 500.0);
 }
+
+#[test]
+fn rocket_accepts_grazing_heroes_but_not_a_clear_miss() {
+    for (offset, hit) in [(1.5, true), (2.6, false)] {
+        let (mut w, now, _) = fixture(HeroClass::Wildspark);
+        let victim = w.players.get_mut(&addr(2)).unwrap();
+        victim.hero.x = 25.0;
+        victim.hero.z = offset;
+        cast(&mut w, addr(1), 3, [256.0, 0.0], 1, now);
+        advance(&mut w, now, 0.7);
+        assert_eq!(w.players[&addr(2)].hero.hp < 1000.0, hit);
+    }
+}

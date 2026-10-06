@@ -81,6 +81,7 @@ impl Default for StatModifiers {
 /// one on purpose, down to zero damage).
 pub fn combat_bonuses(player: &ConnectedPlayer) -> ItemBonuses {
     let mut bonuses = player.economy.item_bonuses;
+    bonuses.move_speed_multiplier *= player.economy.dragon_speed;
     bonuses.damage_multiplier = bonuses.damage_multiplier.max(1.0) * player.modifiers.damage_mult;
     bonuses.attack_speed_multiplier =
         bonuses.attack_speed_multiplier.max(1.0) * player.modifiers.attack_speed_mult;
@@ -159,7 +160,7 @@ pub fn attack_speed(player: &ConnectedPlayer) -> f32 {
 pub fn move_speed(player: &ConnectedPlayer) -> f32 {
     PLAYER_SPEED
         * player.modifiers.move_speed_mult
-        * player.economy.item_bonuses.move_speed_multiplier
+        * combat_bonuses(player).move_speed_multiplier
         * shared::hero_balance::movement_multiplier(
             player.hero.identity.hero_class,
             player.hero.progress.level,
@@ -180,7 +181,7 @@ pub fn movement_envelope(player: &ConnectedPlayer, now: Instant, elapsed: f32) -
         );
     PLAYER_SPEED
         * multiplier
-        * player.economy.item_bonuses.move_speed_multiplier
+        * combat_bonuses(player).move_speed_multiplier
         * player.hero.skills.movement(now)
         * elapsed
         + player.timers.movement_slack
@@ -242,7 +243,7 @@ pub fn mitigate(player: &ConnectedPlayer, damage: f32, magical: bool) -> f32 {
     } else {
         0.0
     } + if s.forged { 15.0 } else { 0.0 };
-    damage * 100.0 / (100.0 + mitigation + extra)
+    damage * 100.0 / (100.0 + mitigation + extra + player.economy.dragon_armor)
 }
 
 /// Mode and passive timing apply after the shared class/gear baseline.

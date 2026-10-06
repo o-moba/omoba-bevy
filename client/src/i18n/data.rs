@@ -139,6 +139,8 @@ pub(crate) fn boss_key(camp: NeutralCampType) -> &'static str {
     match camp {
         NeutralCampType::WendigoBoss => "boss.wendigo",
         NeutralCampType::KingMutatioBoss => "boss.king_mutatio",
+        NeutralCampType::WindDragon => "boss.wind_dragon",
+        NeutralCampType::StoneDragon => "boss.stone_dragon",
         _ => "boss.neutral",
     }
 }
@@ -339,7 +341,7 @@ mod tests {
         // Display names can evolve independently of stable entity/QA IDs.
         for (camp, label) in [
             (NeutralCampType::WendigoBoss, "Wendigo"),
-            (NeutralCampType::KingMutatioBoss, "Verdant Dragon"),
+            (NeutralCampType::KingMutatioBoss, "Flame Dragon · 3/3"),
             (NeutralCampType::Skirmisher, "Neutral"),
         ] {
             assert_eq!(boss(camp), label);

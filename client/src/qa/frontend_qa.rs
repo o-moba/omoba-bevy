@@ -397,6 +397,11 @@ fn observe(
             return;
         }
         qa.stage += 1;
+        if std::env::var("OMOBA_PLAYTEST_UI_QA").as_deref() == Ok("1") {
+            while qa.stage < VIEWS.len() && ![0, 1, 2, 6, 7, 11, 12, 13].contains(&qa.stage) {
+                qa.stage += 1;
+            }
+        }
         qa.in_flight = false;
         qa.applied_stage = None;
         if std::env::var("OMOBA_SERVER_ENTRY_QA").as_deref() == Ok("1")
@@ -524,6 +529,7 @@ fn observe(
             "HomeParty",
         ],
         1 => &["CardBack", "CardOpenCollection"],
+        2 if viewport.y < 600.0 => &["CollectionBack", "AvatarShowcase", "AvatarEquip"],
         2 => &[
             "CollectionBack",
             "AvatarAutoSpin",

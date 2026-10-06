@@ -1,7 +1,13 @@
 //! Display-paced rendering and a small measured frame-rate readout.
 //! The preference is a ceiling; thermal, low-power and GPU limits still apply.
 // i18n-strict
-use std::time::Duration;
+use std::{
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
+    time::{Duration, Instant},
+};
 
 use bevy::{
     prelude::*,
@@ -38,6 +44,16 @@ pub(crate) struct RenderSettingsPlugin;
 
 impl Plugin for RenderSettingsPlugin {
     fn build(&self, app: &mut App) {
+        // Count render submissions independently from the simulation clock.
+        // Bevy's pipelined Time<Real> can be fed by delayed render timestamps.
+        let counter = RenderFrameCounter::default();
+        if let Some(render) = app.get_sub_app_mut(bevy::render::RenderApp) {
+            render.insert_resource(counter.clone()).add_systems(
+                bevy::render::Render,
+                count_rendered_frame.in_set(bevy::render::RenderSystems::Cleanup),
+            );
+            app.insert_resource(counter);
+        }
         app.init_resource::<RenderSettings>()
             .init_resource::<MeasuredFps>()
             .init_resource::<FramePacingDiagnostics>()
@@ -168,11 +184,11 @@ fn apply_ios_pacing(
 }
 
 /// Diagnostics separate the requested ceiling, native callback delivery and
-/// measured app updates. They do not claim to measure GPU completion/scanout.
+/// measured render submissions. They do not claim to measure GPU completion/scanout.
 #[derive(Resource, Default, Debug, Clone, Serialize)]
 pub(crate) struct FramePacingDiagnostics {
     pub requested_limit: u16,
-    pub measured_update_hz: Option<f64>,
+    pub measured_render_hz: Option<f64>,
     pub display_max_hz: Option<u16>,
     pub display_link_hz: Option<f64>,
 }
@@ -184,7 +200,7 @@ fn collect_pacing_diagnostics(
     mut diagnostics: ResMut<FramePacingDiagnostics>,
 ) {
     diagnostics.requested_limit = settings.sanitized().fps_limit;
-    diagnostics.measured_update_hz = measured.value;
+    diagnostics.measured_render_hz = measured.value;
     #[cfg(target_os = "ios")]
     {
         unsafe extern "C" {
@@ -199,9 +215,14 @@ fn collect_pacing_diagnostics(
     }
 }
 
-/// Smoothed observed app frame cadence, never the requested FPS preference.
-/// VSync stays enabled so a normally paced app frame maps to a rendered frame;
-/// this is not a GPU timestamp or a claim about physical display scanout.
+#[derive(Resource, Clone, Default)]
+struct RenderFrameCounter(Arc<AtomicU64>);
+fn count_rendered_frame(counter: Res<RenderFrameCounter>) {
+    counter.0.fetch_add(1, Ordering::Relaxed);
+}
+
+/// Observed render submissions over monotonic wall time. This is not the
+/// requested refresh rate, nor a GPU-completion or physical scanout counter.
 #[derive(Resource, Default)]
 struct MeasuredFps {
     seconds: f64,
@@ -211,6 +232,9 @@ struct MeasuredFps {
 
 impl MeasuredFps {
     fn sample(&mut self, delta: f64) {
+        self.sample_frames(delta, 1);
+    }
+    fn sample_frames(&mut self, delta: f64, frames: u32) {
         if !delta.is_finite() || delta <= 0.0 || delta > 1.0 {
             self.seconds = 0.0;
             self.frames = 0;
@@ -218,7 +242,7 @@ impl MeasuredFps {
             return;
         }
         self.seconds += delta;
-        self.frames += 1;
+        self.frames += frames;
         if self.seconds >= 0.5 {
             let observed = f64::from(self.frames) / self.seconds;
             self.value = Some(
@@ -257,8 +281,25 @@ fn spawn_fps_readout(mut commands: Commands) {
     ));
 }
 
-fn measure_fps(time: Res<Time<Real>>, mut measured: ResMut<MeasuredFps>) {
-    measured.sample(time.delta_secs_f64());
+fn measure_fps(
+    time: Res<Time<Real>>,
+    counter: Option<Res<RenderFrameCounter>>,
+    mut previous: Local<Option<(Instant, u64)>>,
+    mut measured: ResMut<MeasuredFps>,
+) {
+    if let Some(counter) = counter {
+        let now = Instant::now();
+        let frames = counter.0.load(Ordering::Relaxed);
+        if let Some((at, before)) = previous.replace((now, frames)) {
+            measured.sample_frames(
+                now.duration_since(at).as_secs_f64(),
+                frames.saturating_sub(before).min(u64::from(u32::MAX)) as u32,
+            );
+        }
+    } else {
+        // Minimal/headless applications do not own a renderer.
+        measured.sample(time.delta_secs_f64());
+    }
 }
 
 fn update_fps_readout(
@@ -298,6 +339,19 @@ fn update_fps_readout(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn render_counter_samples_submissions_instead_of_simulation_ticks() {
+        let mut measured = MeasuredFps::default();
+        // Thirty UI updates observe sixty render submissions in half a second.
+        for _ in 0..30 {
+            measured.sample_frames(1.0 / 60.0, 2);
+        }
+        measured.sample_frames(1.0 / 60.0, 2);
+        assert!((measured.value.unwrap() - 120.0).abs() < 0.01);
+        measured.sample_frames(2.0, 1);
+        assert_eq!(measured.value, None, "suspension resets the display");
+    }
 
     #[test]
     fn editor_events_keep_updates_alive_and_closing_restores_pacing() {
@@ -442,7 +496,7 @@ mod tests {
         );
         let diagnostics = app.world().resource::<FramePacingDiagnostics>();
         assert_eq!(diagnostics.requested_limit, 120);
-        assert!((diagnostics.measured_update_hz.unwrap() - 30.0).abs() < 0.1);
+        assert!((diagnostics.measured_render_hz.unwrap() - 30.0).abs() < 0.1);
         assert_eq!(
             diagnostics.display_max_hz, None,
             "desktop cannot certify an iOS display"

@@ -47,5 +47,6 @@
   "pause.hud.combat_x": "Skills · horizontal",
   "pause.hud.combat_y": "Skills · vertical",
   "pause.hud.reset": "Reset button positions",
-  "pause.render.show_fps": "Show FPS counter"
+  "pause.render.show_fps": "Show FPS counter",
+  "pause.button.practice": "Debug tools"
 }

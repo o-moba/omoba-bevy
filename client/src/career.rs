@@ -351,11 +351,9 @@ impl CareerClient {
             self.announced_result = Some(result.result_id.clone());
             self.announced_player_id = self.local_player_id;
             self.selected_result = Some(result.result_id.clone());
-            if !self.hold_result_modal {
-                self.modal = CareerModal::Result;
-                self.nickname_focused = false;
-                self.friend_code_focused = false;
-            }
+            // A last_result is account history, not a navigation event. The
+            // scoped PostMatch screen owns live results; history/details open
+            // this modal explicitly. Never interrupt launch or another menu.
             self.expanded_player = None;
         }
         if self.view != next {
@@ -1027,6 +1025,9 @@ fn button(parent: &mut ChildSpawnerCommands, value: &str, action: Action, name: 
     parent
         .spawn((
             Button,
+            // This compact control owns its native rounded fill and border.
+            // Do not layer a second textured slab inside its padded content.
+            crate::ui::widgets::NoSlab,
             style,
             Node {
                 min_height: Val::Px(if input { 52.0 } else { 44.0 }),
@@ -2222,7 +2223,10 @@ fn render(
     assets: Option<Res<AssetServer>>,
     sprites: Option<Res<SpriteVisualAssets>>,
     screen: Option<Res<State<crate::frontend::AppScreen>>>,
-    roots: Query<Entity, With<CareerRoot>>,
+    (roots, pause_sections): (
+        Query<Entity, With<CareerRoot>>,
+        Query<Entity, With<crate::pause_menu::MainMenuSection>>,
+    ),
     scrolls: Query<&ScrollPosition, With<CareerScroll>>,
     mut previous: Local<Option<RenderKey>>,
     mut texts: Query<(&Name, &mut Text)>,
@@ -2349,14 +2353,30 @@ fn render(
     }
     if !career.modal_open() {
         if show_entry {
-            commands
+            // In-game navigation belongs to the menu's scrollable body, never
+            // an independent corner overlay competing with its fixed footer.
+            let parent = pause
+                .as_ref()
+                .filter(|p| p.open)
+                .and_then(|_| pause_sections.single().ok());
+            let node = if parent.is_some() {
+                Node {
+                    width: Val::Percent(100.0),
+                    justify_content: JustifyContent::Center,
+                    row_gap: Val::Px(8.0),
+                    ..row_node()
+                }
+            } else {
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: Val::Px(insets[0] + 6.0),
+                    bottom: Val::Px(insets[3] + 8.0),
+                    ..row_node()
+                }
+            };
+            let entry = commands
                 .spawn((
-                    Node {
-                        position_type: PositionType::Absolute,
-                        left: Val::Px(insets[0] + 6.0),
-                        bottom: Val::Px(insets[3] + 8.0),
-                        ..row_node()
-                    },
+                    node,
                     ZIndex(110),
                     CareerRoot,
                     Name::new("CareerEntryActions"),
@@ -2396,7 +2416,11 @@ fn render(
                             "CareerQueueLeaveButton",
                         );
                     }
-                });
+                })
+                .id();
+            if let Some(parent) = parent {
+                commands.entity(entry).insert(ChildOf(parent));
+            }
         }
         return;
     }
@@ -2803,6 +2827,20 @@ mod tests {
     }
 
     #[test]
+    fn historical_abandonment_does_not_interrupt_home_or_an_open_profile() {
+        for modal in [CareerModal::Closed, CareerModal::Profile] {
+            let mut career = CareerClient { modal, ..default() };
+            let mut abandoned = result();
+            abandoned.outcome = MatchOutcome::Abandoned;
+            career.apply_view(CareerView {
+                last_result: Some(abandoned),
+                ..default()
+            });
+            assert_eq!(career.modal, modal);
+        }
+    }
+
+    #[test]
     fn results_survive_live_reset_and_close_without_reopening() {
         let mut career = CareerClient {
             public_profile_id: Some("a".repeat(64)),
@@ -2812,6 +2850,11 @@ mod tests {
             last_result: Some(result()),
             ..default()
         });
+        assert!(
+            !career.modal_open(),
+            "historical results must never open at login"
+        );
+        career.open_result_modal(&result());
         assert_eq!(career.modal, CareerModal::Result);
         assert_eq!(result_title(career.result().unwrap(), &career), "Victory");
         career.close();
@@ -2964,6 +3007,9 @@ mod tests {
                     last_result: Some(result()),
                     ..default()
                 });
+            app.world_mut()
+                .resource_mut::<CareerClient>()
+                .open_result_modal(&result());
             app.update();
             let names: Vec<_> = app
                 .world_mut()

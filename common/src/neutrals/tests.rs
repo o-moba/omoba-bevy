@@ -578,3 +578,95 @@ fn warden_forest_tracker_hits_camps_harder_and_earns_more_from_the_kill() {
     assert_eq!(dealt[0], 10.0);
     assert!((dealt[1] - 10.0 * shared::jungle::WARDEN_CAMP_DAMAGE_MULTIPLIER).abs() < 0.001);
 }
+
+#[test]
+fn three_dragons_pay_once_in_order_then_stop_and_reset_for_rematch() {
+    use shared::wire::TeamBuffKind;
+    let start = Instant::now();
+    let (mut world, addr) = player_fixture(HeroClass::Warrior, start);
+    world.neutrals = build_boss_neutrals(&mut 12000);
+    schedule_boss_spawns(&mut world.neutrals, start);
+    let id = *world
+        .neutrals
+        .iter()
+        .find(|(_, n)| n.state.camp_type.is_dragon())
+        .unwrap()
+        .0;
+    let killer = world.players[&addr].hero.identity.id;
+    let sequence = [
+        (NeutralCampType::WindDragon, TeamBuffKind::DragonSpeed),
+        (NeutralCampType::StoneDragon, TeamBuffKind::DragonDefense),
+        (NeutralCampType::KingMutatioBoss, TeamBuffKind::DragonAttack),
+    ];
+    let mut at = start + TOP_BOSS_SPAWN_DELAY;
+    for (kind, buff) in sequence {
+        simulate_neutrals(&mut world, TickCtx { now: at, dt: 0.0 });
+        assert_eq!(world.neutrals[&id].state.camp_type, kind);
+        assert!(world.neutrals[&id].state.hp > 0.0);
+        apply_neutral_damage(
+            &mut world.players,
+            &mut world.neutrals,
+            &mut world.team_buffs,
+            id,
+            1_000_000.0,
+            killer,
+            at,
+        )
+        .unwrap();
+        assert!(world.team_buffs.is_active(Team::Green, buff, at));
+        assert!(!world.team_buffs.is_active(Team::Blue, buff, at));
+        let gold = world.players[&addr].economy.gold;
+        assert!(
+            apply_neutral_damage(
+                &mut world.players,
+                &mut world.neutrals,
+                &mut world.team_buffs,
+                id,
+                1_000_000.0,
+                killer,
+                at
+            )
+            .is_none()
+        );
+        assert_eq!(world.players[&addr].economy.gold, gold);
+        crate::sim::regenerate_team_buff_hp(&mut world, TickCtx { now: at, dt: 0.01 });
+        let player = &world.players[&addr];
+        if buff == TeamBuffKind::DragonSpeed {
+            assert!(
+                (crate::hero_stats::combat_bonuses(player).move_speed_multiplier - 1.08).abs()
+                    < 0.001
+            );
+        }
+        if buff == TeamBuffKind::DragonDefense {
+            assert!(crate::hero_stats::mitigate(player, 100.0, false) < 84.0);
+            assert!(crate::hero_stats::mitigate(player, 100.0, true) < 84.0);
+        }
+        if buff == TeamBuffKind::DragonAttack {
+            assert!((world.team_buffs.damage_multiplier(Team::Green, at) - 1.12).abs() < 0.001);
+        }
+        at += Duration::from_secs(75);
+    }
+    assert!(world.neutrals[&id].dead_until.is_none());
+    simulate_neutrals(
+        &mut world,
+        TickCtx {
+            now: at + Duration::from_secs(500),
+            dt: 0.1,
+        },
+    );
+    assert_eq!(world.neutrals[&id].state.hp, 0.0);
+    crate::sim::regenerate_team_buff_hp(
+        &mut world,
+        TickCtx {
+            now: at + Duration::from_secs(500),
+            dt: 0.1,
+        },
+    );
+    assert_eq!(world.players[&addr].economy.dragon_speed, 1.0);
+    assert_eq!(world.players[&addr].economy.dragon_armor, 0.0);
+    schedule_boss_spawns(&mut world.neutrals, at);
+    assert_eq!(
+        world.neutrals[&id].state.camp_type,
+        NeutralCampType::WindDragon
+    );
+}

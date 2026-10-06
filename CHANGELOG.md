@@ -5,13 +5,29 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+### 0.44.0 candidate — mobile playtest quality
+
+- Surround the Verdant island with original Higgsfield-generated forest scenery below its cliffs; package the texture for fully offline play. No navigation or playable-area expansion.
+- Utility Dash blinks through intervening trees, walls and structures, with a shared safe-landing search for authority and aiming preview. Blocked destinations shorten the blink; bounds, control gates, cooldowns and replay protection remain enforced.
+- Fix offline Victory → Play Again repeatedly restarting the new round: discard the delivered rematch command during round-input reset, and accept offline rematches only from Victory. Regression drives two complete UI rematches and checks authoritative player/bot movement.
+
+- Historical account receipts no longer open Match abandoned on login or interrupt another screen; explicit Home navigation wins over late match results.
+- Remove duplicate button fills behind textured frames. Pin collection filters above clipped catalogue scrolling, center avatar tiles, enlarge phone previews and hide their crowded animation strip. Unify pause/debug action dimensions and use available tablet height.
+- Fix the remaining centered square on iPad: the separate 256×256 battlefield edge-mist image now stretches to the viewport. Center Home build information in a reserved footer below the ornament and above the mobile gesture gutter.
+- Correct Bevy 0.19 image geometry: stretch world/minimap fog to its full UV extent, removing the centered dark rectangle and clear edge strips; draw decorative UI frames around padding so debug toggle labels/status retain their 16 px insets.
+- Remove screen-space brush dark spots that painted over trees; reproject world fog when the camera moves. Concealed local avatars retain material depth/cutouts with a cool muted tint and eye-off indicator instead of exposing inner meshes through alpha blending.
+- Measure render submissions over monotonic time for the FPS readout, independently of simulation timestamps; this is not a physical-device 120 FPS guarantee.
+- Separate bot/round-start spawns, widen Wildspark's rocket collision radius from 0.70 to 1.05 m, and add distance-sensitive touch precision shared by aim preview and release.
+- Add the finite Wind → Stone → Flame dragon sequence: first at 90 s, next 75 s after the previous kill; team rewards last 180 s (+8% movement, +20 armor/resistance, +12% damage). The Wendigo objective remains separate.
+- Coordinate protocol 11, catalog standard-kits-6 and gameplay combat-2026-10-06-blink. Both client and server must be updated together; this candidate has not been deployed or distributed.
+
 ## [0.43.0] - 2026-10-05
 
 - Upgrade the current game and Ekza SDK integration to stable Bevy 0.19.1 with Rust 1.95.0; preserve the consolidated 0.42 combat, map, Nexus and asset lifecycle work.
 - Migrate legacy GLB scene types to world serialization, pixel fonts and packaged font sources to typed text APIs, material mutation and UI stack/input APIs. Preserve original GLB scene labels and mobile pixel sizing.
 - Update existing CI/iOS/release workflow Rust pins with explicit owner approval. This engine change does not deploy Beta or upload a mobile build; physical-device performance still requires measurement.
 
-Beta and uploaded iOS remain 0.41.0 (20), protocol 9. The quality iteration below requires a coordinated server/client update; the compatibility handshake intentionally rejects old peers.
+Historical deployment note for the 0.42.0 iteration: Beta and uploaded iOS were 0.41.0 (20), protocol 9. Check release/deployment records for current distribution status; the compatibility handshake intentionally rejects incompatible peers.
 
 ## [0.42.0] - 2026-10-05
 

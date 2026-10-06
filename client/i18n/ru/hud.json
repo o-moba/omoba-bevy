@@ -16,5 +16,8 @@
   "hud.buff.mutatio": "Мощь дракона: +25% урона способностей, +2 ОЗ/с — {secs} с",
   "hud.brush.concealed": "КУСТЫ · ВЫ СКРЫТЫ",
   "hud.brush.revealed": "КУСТЫ · ВЫ ОБНАРУЖЕНЫ",
-  "hud.fps": "{value} FPS"
+  "hud.fps": "{value} FPS",
+  "hud.buff.dragon_speed": "Ветер: +8% скорости · {secs}с",
+  "hud.buff.dragon_defense": "Камень: +20 защиты · {secs}с",
+  "hud.buff.dragon_attack": "Пламя: +12% урона · {secs}с"
 }

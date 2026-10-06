@@ -277,6 +277,35 @@ impl NavigationMap {
         self.static_point_clear(point, HERO_RADIUS)
     }
 
+    /// A blink checks only its landing, not the intervening segment. Search
+    /// backwards along the bounded ray when its end is occupied; never extend
+    /// range or move sideways around an obstacle to find a landing.
+    pub fn blink_landing(&self, from: Point, to: Point, dynamic: &[Disc]) -> Point {
+        if !self.bounds.contains(from)
+            || !finite(to)
+            || dynamic
+                .iter()
+                .any(|d| !finite(d.center) || !d.radius.is_finite() || d.radius < 0.0)
+        {
+            return from;
+        }
+        let to = self.bounds.clamp(to);
+        let delta = sub(to, from);
+        // Bounded work even for malformed callers; normal utility range is 5m.
+        let steps = ((distance_squared(from, to).sqrt() / 0.05).ceil() as usize).clamp(1, 256);
+        for step in (1..=steps).rev() {
+            let candidate = add(from, scale(delta, step as f32 / steps as f32));
+            if self.point_clear(candidate)
+                && dynamic.iter().all(|disc| {
+                    distance_squared(candidate, disc.center) >= (disc.radius + HERO_RADIUS).powi(2)
+                })
+            {
+                return candidate;
+            }
+        }
+        from
+    }
+
     pub fn segment_clear(&self, from: Point, to: Point) -> bool {
         self.static_segment_clear(from, to, HERO_RADIUS, false)
     }

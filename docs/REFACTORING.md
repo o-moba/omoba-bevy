@@ -169,6 +169,44 @@ presentation and disposable QA fixtures remain client-side.
 - [ ] **P3 / ranged animation:** add bow draw/string deformation and two-hand weapon grips/IK on varied VRM proportions. Current hand attachments and appropriate attack clips provide the functional baseline.
 - [ ] **P3 / presentation:** give personal fire/ice rewards a HUD duration marker and create a matching dragon sprite for the optional 2D renderer. The 3D dragon has original editable Blender source and two animation clips.
 
+## EXPERIMENT — Bevy 0.19 presentation opportunities (2026-10-06)
+
+Optional work **after the frozen community beta**, not a release blocker or a
+promise of higher FPS. Reference: [Bevy 0.19 release notes](https://bevy.org/news/bevy-0-19/).
+Keep each experiment independently switchable; preserve current defaults until
+visual and device performance evidence supports adoption.
+
+- [ ] **First: preview lighting.** Compare contact shadows and rectangular area
+  lights in Home / avatar and weapon previews, one change at a time. Check feet,
+  weapon contact, faces and materials on varied VRM proportions. Area lights do
+  not cast shadows; assess their feature/LUT requirement before implementation.
+- [ ] **Next: gameplay contact shadows.** Trial a small, bounded lighting setup
+  around heroes and towers, with a quality-setting fallback. Measure mobile GPU
+  cost before extending it across the arena; cost grows with affected pixels
+  and lights. Tune existing bloom and color grading as the baseline, rather
+  than treating them as newly introduced engine features.
+- [ ] **Audit animated bounds.** Verify Bevy's automatic skinned glTF bounds with
+  wide and animated VRM avatars near camera edges. Check for disappearing meshes;
+  keep camera framing / cropped heads as a separate layout problem.
+- [ ] **Later: text and input.** Prototype new text/UI facilities in one isolated
+  field. Verify iPhone keyboard, focus, send/cancel and background/foreground;
+  account for upstream editable-text limitations before replacing working input.
+- [ ] **Later: composable scenes (BSN).** Prototype one reusable avatar + weapon
+  + effects composition and compare maintenance effort with current spawning.
+  No wholesale rewrite; this alone does not implement a class constructor or
+  downloadable executable behavior.
+
+Acceptance for each experiment:
+
+- [ ] Capture before/after with the same scene, camera, avatar and render cap;
+  start with the English phone layout (852 × 393), then a physical iPhone 16 Pro.
+- [ ] Record actual FPS and frame-time median / p95, CPU/GPU timings where
+  available, and sustained thermal / battery impact. Compare 60 and 120 targets
+  where practical; selecting 120 is not evidence of achieving 120 FPS.
+- [ ] Record a **keep / tune / reject** decision with screenshots, device/build
+  details and measured performance tradeoffs before changing defaults. Add iPad
+  verification when the experiment affects its layout or rendering path.
+
 ## How to continue
 
 1. `git fetch origin main && git checkout -b refactor/<topic> origin/main`.

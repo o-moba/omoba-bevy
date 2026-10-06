@@ -1,5 +1,24 @@
 # Feature Inventory
 
+## Mobile playtest quality (0.44.0 candidate)
+
+The new candidate removes automatic account-history result popups, gives textured
+buttons a single fill, separates collection navigation from its scrolling grid,
+and makes phone previews and pause-menu actions more consistent. Brush darkness
+no longer paints through scenery; concealed avatars use an opaque muted tint and
+the eye-off indicator to preserve clean VRM surfaces. FPS measures render
+submissions independently of the simulation clock.
+
+Wildspark's rocket accepts grazing hero hits with a 1.05 m projectile radius;
+long touch drags reduce angular sensitivity while keeping preview and release in
+sync. Round starts and practice bot creation separate occupied spawn positions.
+The dragon pit hosts Wind, Stone and Flame in that order, with no fourth spawn:
+90 s initial delay, 75 s between kills/spawns, 180 s team buffs of +8% movement,
++20 armor and resistance, and +12% damage respectively. Buffs do not stack with
+themselves, expire normally, affect respawned teammates and reset each round.
+Wendigo is unchanged. Protocol 11 / standard-kits-6 requires matching client and
+server. See [verification status](progress/2026-10-06-mobile-playtest-quality.md).
+
 ## Release compatibility (0.41.0)
 
 A stable pre-game check compares protocol, skill catalogue, map and gameplay revisions independently of release labels. Mismatches have an actionable explanation; unanswered checks remain unverified. All network endpoints are checked, while offline practice stays local. The release builder retains a contract manifest; the CLI compares artifacts and probes servers. [Contract, release sequence and rollout limits](release-compatibility.md).

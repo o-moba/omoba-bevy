@@ -230,6 +230,13 @@ fn drive_screen_from_session(
     if paused.0 || automation_bypass() {
         return;
     }
+    // Explicit navigation wins over a late terminal snapshot in the same frame.
+    if matches!(
+        *next,
+        NextState::Pending(AppScreen::Home | AppScreen::HeroSelect)
+    ) {
+        return;
+    }
     let current = *screen.get();
     let admitted = session.join_confirmed();
     let committed = session.has_committed_join();
@@ -243,6 +250,7 @@ fn drive_screen_from_session(
         .as_ref()
         .is_some_and(|career| postmatch::current_result(career, &game).is_some());
     if terminal
+        && (committed || admitted || in_world || current == AppScreen::PostMatch)
         && matches!(
             current,
             AppScreen::Searching

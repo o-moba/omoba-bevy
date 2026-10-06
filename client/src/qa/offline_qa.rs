@@ -55,6 +55,8 @@ struct Qa {
     shop_frames: Vec<serde_json::Value>,
     shop_drag: Option<(Vec2, Vec2)>,
     shop_scrolls: u8,
+    rematch_round: u64,
+    rematch_bots: Vec<Vec2>,
 }
 impl Plugin for OfflineQaPlugin {
     fn build(&self, app: &mut App) {
@@ -95,6 +97,8 @@ impl Plugin for OfflineQaPlugin {
             shop_frames: Vec::new(),
             shop_drag: None,
             shop_scrolls: 0,
+            rematch_round: 0,
+            rematch_bots: Vec::new(),
             expected_server: std::env::var("GAME_SERVER_ADDR").unwrap_or_default(),
         })
         .insert_resource(bevy::winit::WinitSettings::continuous())
@@ -103,7 +107,11 @@ impl Plugin for OfflineQaPlugin {
             Update,
             fixture_window.before(crate::mobile_controls::MobileControlsSet::Layout),
         )
-        .add_systems(Last, (fixture_pacing, capture_recall));
+        .add_systems(Last, (fixture_pacing, capture_recall))
+        .add_systems(
+            PostUpdate,
+            surroundings_camera.before(bevy::transform::TransformSystems::Propagate),
+        );
     }
 }
 fn focus(windows: Query<Entity, With<PrimaryWindow>>, _main: bevy::ecs::system::NonSendMarker) {
@@ -145,10 +153,22 @@ fn fixture_pacing(mut pacing: ResMut<bevy::winit::WinitSettings>) {
 }
 
 fn capture(world: &mut World, qa: &Qa, name: &str) {
+    if rematch_only() && !name.starts_with("rematch-") {
+        return;
+    }
+    if overlay_only()
+        && !matches!(
+            name,
+            "01-home.png" | "mist-auto.png" | "mist-stretch.png" | "mist-hidden.png"
+        )
+    {
+        return;
+    }
     // Focused modes render exactly their requested evidence state.
     if (std::env::var("OMOBA_OFFLINE_CHAT_QA_ONLY").as_deref() == Ok("1")
         && name != "03-local-chat.png")
-        || (debug_only() && name != "01-debug-tools-bottom.png")
+        || (debug_only() && name != "01-debug-tools-bottom.png" && name != "01-debug-tools-top.png")
+        || (menu_only() && name != "05-game-menu.png")
     {
         return;
     }
@@ -317,8 +337,126 @@ fn press(world: &mut World, id: &str) -> bool {
         .map(|entity| world.write_message(crate::ui::SyntheticPress(entity)))
         .is_some()
 }
+fn menu_only() -> bool {
+    std::env::var("OMOBA_OFFLINE_MENU_QA_ONLY").as_deref() == Ok("1")
+}
+
+fn drive_menu(world: &mut World, qa: &mut Qa, age: f32) {
+    if qa.proof_step == 0 && age > 1.0 {
+        world.resource_mut::<PauseMenuState>().open = true;
+        qa.proof_step = 1;
+        qa.since = Instant::now();
+    } else if qa.proof_step == 1 && age > 1.0 {
+        let mut geometry = serde_json::Map::new();
+        for (name, node, pose) in world
+            .query::<(crate::qa::QaName, &ComputedNode, &UiGlobalTransform)>()
+            .iter(world)
+        {
+            if matches!(
+                name.as_str(),
+                "PauseMenuPanel"
+                    | "PauseMenuMainSection"
+                    | "PauseMenuPracticeButton"
+                    | "SettingsButton"
+                    | "CareerEntryActions"
+                    | "PauseMenuResumeButton"
+            ) {
+                let rect = crate::ui::gesture::logical_ui_rect(node, pose, None, 1.0);
+                geometry.insert(name.as_str().to_owned(), serde_json::json!({
+                    "min":rect.min.to_array(), "max":rect.max.to_array(), "size":rect.size().to_array(),
+                    "overflow_y":((node.content_size().y-node.size().y)*node.inverse_scale_factor()).max(0.0)
+                }));
+            }
+        }
+        qa.debug_layout = serde_json::Value::Object(geometry);
+        capture(world, qa, "05-game-menu.png");
+        qa.proof_step = 2;
+    } else if qa.proof_step == 2 && qa.completed_captures.contains("05-game-menu.png") {
+        std::fs::write(
+            qa.directory.join("menu-geometry.json"),
+            serde_json::to_vec_pretty(&qa.debug_layout).unwrap(),
+        )
+        .unwrap();
+        qa.stage = 250;
+        world.write_message(AppExit::Success);
+    }
+}
+
 fn debug_only() -> bool {
-    std::env::var("OMOBA_OFFLINE_DEBUG_QA_ONLY").as_deref() == Ok("1")
+    std::env::var("OMOBA_OFFLINE_DEBUG_QA_ONLY").as_deref() == Ok("1") || debug_top_only()
+}
+
+fn overlay_only() -> bool {
+    std::env::var("OMOBA_OFFLINE_OVERLAY_QA_ONLY").as_deref() == Ok("1")
+}
+
+// Attribute the iPad square on the real gameplay stack, preserving the actual
+// vignette texture. A paused simulation keeps before/after pixel comparisons valid.
+fn drive_overlay(world: &mut World, qa: &mut Qa, age: f32) {
+    let mist = world
+        .query::<(Entity, &Name)>()
+        .iter(world)
+        .find(|(_, name)| name.as_str() == "Battlefield edge mist")
+        .map(|(e, _)| e)
+        .unwrap();
+    match qa.proof_step {
+        0 if age > 1.0 => {
+            assert_eq!(
+                world.get::<ImageNode>(mist).unwrap().image_mode,
+                NodeImageMode::Stretch
+            );
+            world.resource_mut::<Time<Virtual>>().pause();
+            world.get_mut::<ImageNode>(mist).unwrap().image_mode = NodeImageMode::Auto;
+            qa.proof_step = 1;
+            qa.since = Instant::now();
+        }
+        1 if age > 0.5 => {
+            capture(world, qa, "mist-auto.png");
+            qa.proof_step = 2;
+        }
+        2 if qa.completed_captures.contains("mist-auto.png") => {
+            world.get_mut::<ImageNode>(mist).unwrap().image_mode = NodeImageMode::Stretch;
+            qa.proof_step = 3;
+            qa.since = Instant::now();
+        }
+        3 if age > 0.5 => {
+            capture(world, qa, "mist-stretch.png");
+            qa.proof_step = 4;
+        }
+        4 if qa.completed_captures.contains("mist-stretch.png") => {
+            world.get_mut::<ImageNode>(mist).unwrap().color = Color::NONE;
+            qa.proof_step = 5;
+            qa.since = Instant::now();
+        }
+        5 if age > 0.5 => {
+            capture(world, qa, "mist-hidden.png");
+            qa.proof_step = 6;
+        }
+        6 if qa.completed_captures.contains("mist-hidden.png") => {
+            world.get_mut::<ImageNode>(mist).unwrap().color = Color::WHITE;
+            let mut layers = Vec::new();
+            for (name, node, image, visible) in world
+                .query::<(&Name, &ComputedNode, &ImageNode, &InheritedVisibility)>()
+                .iter(world)
+            {
+                if visible.get() && node.size().x > 500.0 && node.size().y > 500.0 {
+                    layers.push(serde_json::json!({"name":name.as_str(),"size":node.size().to_array(),"mode":format!("{:?}",image.image_mode)}));
+                }
+            }
+            std::fs::write(
+                qa.directory.join("overlay-layers.json"),
+                serde_json::to_vec_pretty(&layers).unwrap(),
+            )
+            .unwrap();
+            qa.stage = 250;
+            world.write_message(AppExit::Success);
+        }
+        _ => {}
+    }
+}
+
+fn debug_top_only() -> bool {
+    std::env::var("OMOBA_OFFLINE_DEBUG_TOP_QA_ONLY").as_deref() == Ok("1")
 }
 
 fn drive_debug_tools(world: &mut World, qa: &mut Qa, age: f32) {
@@ -332,6 +470,11 @@ fn drive_debug_tools(world: &mut World, qa: &mut Qa, age: f32) {
             }
         }
         1 if age > 0.5 && ui_ready(world, "PauseMenuPracticeSection") => {
+            if debug_top_only() {
+                capture(world, qa, "01-debug-tools-top.png");
+                qa.proof_step = 4;
+                return;
+            }
             for (name, mut scroll) in world
                 .query::<(&Name, &mut ScrollPosition)>()
                 .iter_mut(world)
@@ -381,6 +524,10 @@ fn drive_debug_tools(world: &mut World, qa: &mut Qa, age: f32) {
                 "pass":true,"viewport":[852,393],"language":"en","physical_device_verified":false,
                 "geometry":qa.debug_layout,"file":"01-debug-tools-bottom.png"
             })).unwrap()).unwrap();
+            qa.stage = 250;
+            world.write_message(AppExit::Success);
+        }
+        4 if qa.completed_captures.contains("01-debug-tools-top.png") => {
             qa.stage = 250;
             world.write_message(AppExit::Success);
         }
@@ -574,6 +721,127 @@ fn drive_shop(world: &mut World, qa: &mut Qa, age: f32) {
     }
 }
 
+fn rematch_only() -> bool {
+    std::env::var("OMOBA_OFFLINE_REMATCH_QA_ONLY").as_deref() == Ok("1")
+}
+
+// Opt-in capture only: keep the production world/HUD, position the camera at
+// two real arena corners to verify the matte's coverage and cliff transition.
+fn surroundings_camera(
+    qa: Option<Res<Qa>>,
+    layout: Res<crate::maps::MapLayout>,
+    mut cameras: Query<&mut Transform, With<crate::camera::MainCamera>>,
+) {
+    let Some(qa) = qa.filter(|q| rematch_only() && q.proof_step >= 5) else {
+        return;
+    };
+    let away = qa.proof_step >= 7;
+    let corner = if away { layout.max } else { layout.min };
+    let target = Vec3::new(corner.x, 0.0, corner.y);
+    let zoom = if away {
+        crate::camera::CAMERA_MAX_ZOOM
+    } else {
+        1.4
+    };
+    for mut camera in &mut cameras {
+        *camera = Transform::from_translation(target + crate::camera::locked_camera_offset(zoom))
+            .looking_at(target, Vec3::Y);
+    }
+}
+
+fn drive_rematch(world: &mut World, qa: &mut Qa, age: f32, screen: AppScreen) {
+    match qa.proof_step {
+        0 if screen == AppScreen::InMatch && age > 1.0 => {
+            qa.rematch_round = crate::net::qa_practice_positions(world).0;
+            crate::net::qa_finish_match(world);
+            qa.proof_step = 1;
+            qa.since = Instant::now();
+        }
+        1 if screen == AppScreen::PostMatch && age > 1.0 => {
+            capture(world, qa, "rematch-result.png");
+            if press(world, "PostMatchPlayAgain") {
+                qa.proof_step = 2;
+                qa.since = Instant::now();
+            }
+        }
+        2 if screen == AppScreen::InMatch && age > 1.0 => {
+            let (round, position, bots) = crate::net::qa_practice_positions(world);
+            if round <= qa.rematch_round {
+                return;
+            }
+            qa.origin = Vec3::new(position.x, 0.0, position.y);
+            qa.rematch_bots = bots;
+            if let Ok(entity) = world.query_filtered::<Entity, With<Player>>().single(world) {
+                world.entity_mut(entity).insert(MovementTarget {
+                    target: qa.origin + Vec3::new(4.0, 0.0, 3.0),
+                });
+            }
+            qa.proof_step = 3;
+            qa.since = Instant::now();
+        }
+        3 if age > 2.0 => {
+            let (round, position, bots) = crate::net::qa_practice_positions(world);
+            let moved = position.distance(qa.origin.xz());
+            let bot_moved = bots
+                .iter()
+                .zip(&qa.rematch_bots)
+                .map(|(a, b)| a.distance(*b))
+                .fold(0.0f32, f32::max);
+            let allowed = world
+                .resource::<crate::input_context::GameplayInputContext>()
+                .gameplay_allowed();
+            qa.debug_layout = serde_json::json!({"pass":moved > 1.0 && bot_moved > 1.0 && allowed, "old_round":qa.rematch_round,"new_round":round,"local_distance":moved,"max_bot_distance":bot_moved,"context":format!("{:?}",world.resource::<crate::input_context::GameplayInputContext>())});
+            capture(world, qa, "rematch-moving.png");
+            qa.proof_step = 4;
+        }
+        4 if qa.completed_captures.contains("rematch-moving.png") => {
+            qa.shop_frames.push(qa.debug_layout.clone());
+            if qa.shop_frames.len() < 2 && qa.debug_layout["pass"] == true {
+                qa.proof_step = 0;
+            } else {
+                qa.proof_step = 5;
+            }
+            qa.since = Instant::now();
+        }
+        5 if age > 1.0 => {
+            capture(world, qa, "rematch-surroundings-home.png");
+            qa.proof_step = 6;
+        }
+        6 if qa
+            .completed_captures
+            .contains("rematch-surroundings-home.png") =>
+        {
+            qa.proof_step = 7;
+            qa.since = Instant::now();
+        }
+        7 if age > 1.0 => {
+            capture(world, qa, "rematch-surroundings-away-max-zoom.png");
+            qa.proof_step = 8;
+        }
+        8 if qa
+            .completed_captures
+            .contains("rematch-surroundings-away-max-zoom.png") =>
+        {
+            let passed =
+                qa.shop_frames.len() == 2 && qa.shop_frames.iter().all(|r| r["pass"] == true);
+            std::fs::write(
+                qa.directory.join("result.json"),
+                serde_json::to_vec_pretty(
+                    &serde_json::json!({"pass":passed, "rounds":qa.shop_frames}),
+                )
+                .unwrap(),
+            )
+            .unwrap();
+            world.write_message(if passed {
+                AppExit::Success
+            } else {
+                AppExit::error()
+            });
+        }
+        _ => {}
+    }
+}
+
 fn drive(world: &mut World) {
     let Some(mut qa) = world.remove_resource::<Qa>() else {
         return;
@@ -642,12 +910,27 @@ fn drive(world: &mut World) {
     }
     // Start the gameplay proof clock after loading, so a slow asset load cannot
     // collapse chat-open, capture, close and purchase into a single frame.
-    if qa.stage == 5 && screen != AppScreen::InMatch {
+    if qa.stage == 5 && screen != AppScreen::InMatch && !rematch_only() {
         qa.since = Instant::now();
     }
     let age = qa.since.elapsed().as_secs_f32();
     if matches!(qa.stage, 5..=8 | 19) && screen == AppScreen::InMatch && !gameplay_ready(world) {
         qa.since = Instant::now();
+        world.insert_resource(qa);
+        return;
+    }
+    if rematch_only() && qa.stage == 5 {
+        drive_rematch(world, &mut qa, age, screen);
+        world.insert_resource(qa);
+        return;
+    }
+    if menu_only() && qa.stage == 5 && screen == AppScreen::InMatch {
+        drive_menu(world, &mut qa, age);
+        world.insert_resource(qa);
+        return;
+    }
+    if overlay_only() && qa.stage == 5 && screen == AppScreen::InMatch {
+        drive_overlay(world, &mut qa, age);
         world.insert_resource(qa);
         return;
     }

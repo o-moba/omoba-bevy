@@ -60,6 +60,34 @@ pub(super) fn step(practice: Option<ResMut<LocalPractice>>, time: Res<Time>) {
     let _ = practice.snapshots.try_send(snapshot);
 }
 
+/// Native QA ends the authoritative local world, then drives the real result UI.
+#[cfg(feature = "qa")]
+pub(crate) fn qa_finish_match(world: &mut World) {
+    let mut practice = world.resource_mut::<LocalPractice>();
+    practice.simulation.world.game_state = shared::wire::GameState::Victory {
+        winner: shared::map::Team::Green,
+    };
+}
+
+#[cfg(feature = "qa")]
+pub(crate) fn qa_practice_positions(world: &World) -> (u64, Vec2, Vec<Vec2>) {
+    let practice = world.resource::<LocalPractice>();
+    let simulation = &practice.simulation;
+    let player = &simulation.world.players[&common::offline::LOCAL_ADDR];
+    let mut bots: Vec<_> = simulation
+        .world
+        .players
+        .values()
+        .filter(|p| p.hero.identity.is_bot)
+        .collect();
+    bots.sort_by_key(|p| p.hero.identity.id);
+    (
+        simulation.match_id,
+        Vec2::new(player.hero.x, player.hero.z),
+        bots.iter().map(|p| Vec2::new(p.hero.x, p.hero.z)).collect(),
+    )
+}
+
 #[derive(Component)]
 pub(super) struct PracticeBanner;
 /// The offline-practice banner (`VARIANTS.md` `offline-practice`, R5.6):

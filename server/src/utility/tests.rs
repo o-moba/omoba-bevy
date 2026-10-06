@@ -199,7 +199,7 @@ fn haste_lasts_three_seconds_and_cancels_on_death_without_clearing_replay_or_coo
 }
 
 #[test]
-fn dash_clips_live_structures_and_old_transform_packets_cannot_undo_short_dash() {
+fn dash_crosses_live_structures_and_old_transform_packets_cannot_undo_blink() {
     let (mut rt, addr, now) = fixture();
     let structure = rt.world.structures.values_mut().next().unwrap();
     structure.state.x = 3.0;
@@ -208,10 +208,7 @@ fn dash_clips_live_structures_and_old_transform_packets_cannot_undo_short_dash()
     structure.state.hp = 100.0;
     request(&mut rt, addr, UtilityAction::Dash, [1.0, 0.0], 1, now);
     let x = rt.world.players[&addr].hero.x;
-    assert!(
-        x > 0.0 && x < 2.0,
-        "expected clipped short displacement: {x}"
-    );
+    assert_eq!(x, DASH_DISTANCE, "blink crosses the tower");
     assert_eq!(rt.world.players[&addr].hero.utility.dash_sequence, 1);
     rt.handle_packet(
         addr,
@@ -240,7 +237,7 @@ fn dash_clips_live_structures_and_old_transform_packets_cannot_undo_short_dash()
 }
 
 #[test]
-fn dash_sweeps_static_obstacles_and_honors_world_bounds() {
+fn dash_crosses_static_obstacles_and_honors_world_bounds() {
     let (mut rt, addr, now) = fixture();
     rt.world.structures.clear();
     let nav = shared::navigation::world_navigation();
@@ -255,7 +252,10 @@ fn dash_sweeps_static_obstacles_and_honors_world_bounds() {
                 .fold([0.0, 0.0], |a, p| [a[0] + p[0], a[1] + p[1]])
                 .map(|x| x / o.vertices.len() as f32);
             let p = [c[0] - 2.5, c[1]];
-            (nav.point_clear(p) && !nav.segment_clear(p, [p[0] + 5.0, p[1]])).then_some(p)
+            (nav.point_clear(p)
+                && nav.point_clear([p[0] + 5.0, p[1]])
+                && !nav.segment_clear(p, [p[0] + 5.0, p[1]]))
+            .then_some(p)
         })
         .unwrap();
     let p = rt.world.players.get_mut(&addr).unwrap();
@@ -263,9 +263,9 @@ fn dash_sweeps_static_obstacles_and_honors_world_bounds() {
     p.hero.z = from[1];
     request(&mut rt, addr, UtilityAction::Dash, [1.0, 0.0], 1, now);
     let p = &rt.world.players[&addr];
-    assert!(p.hero.x - from[0] < DASH_DISTANCE);
+    assert!((p.hero.x - from[0] - DASH_DISTANCE).abs() < 0.0001);
     assert!(nav.point_clear([p.hero.x, p.hero.z]));
-    assert!(nav.segment_clear(from, [p.hero.x, p.hero.z]));
+    assert!(!nav.segment_clear(from, [p.hero.x, p.hero.z]));
     let edge = rt
         .world
         .map_layout
@@ -282,6 +282,55 @@ fn dash_sweeps_static_obstacles_and_honors_world_bounds() {
         now + Duration::from_secs(21),
     );
     assert!(rt.world.players[&addr].hero.x <= edge.x);
+}
+
+#[test]
+fn blink_landing_does_not_overlap_a_live_tower() {
+    let (mut rt, addr, now) = fixture();
+    let structure = rt.world.structures.values_mut().next().unwrap();
+    structure.state.x = DASH_DISTANCE;
+    structure.state.z = 0.0;
+    structure.state.kind = StructureKind::Tower;
+    structure.state.hp = 100.0;
+    request(&mut rt, addr, UtilityAction::Dash, [1.0, 0.0], 1, now);
+    let x = rt.world.players[&addr].hero.x;
+    assert!(
+        x > 3.0
+            && x <= DASH_DISTANCE - shared::TOWER_TARGET_RADIUS - shared::navigation::HERO_RADIUS
+    );
+}
+
+#[test]
+fn blink_landing_respects_temporary_solids_and_cooldown() {
+    let (mut rt, addr, now) = fixture();
+    rt.world.structures.clear();
+    let terrain = [shared::navigation::Disc {
+        center: [5.0, 0.0],
+        radius: 1.0,
+    }];
+    common::utility::handle_utility_request_with_terrain(
+        rt.world.players.get_mut(&addr).unwrap(),
+        &rt.world.map_layout,
+        &rt.world.structures,
+        &rt.world.game_state,
+        UtilityAction::Dash,
+        [1.0, 0.0],
+        1,
+        now,
+        &terrain,
+    );
+    let p = &rt.world.players[&addr];
+    assert!(
+        p.hero.x > 3.0 && p.hero.x <= 3.5,
+        "free point before occupied destination"
+    );
+    assert_eq!(p.hero.z, 0.0);
+    let landed = p.hero.x;
+    request(&mut rt, addr, UtilityAction::Dash, [1.0, 0.0], 2, now);
+    assert_eq!(
+        rt.world.players[&addr].hero.x, landed,
+        "cooldown still applies"
+    );
 }
 
 #[test]

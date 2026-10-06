@@ -10,7 +10,7 @@ use crate::{AbilityDefinition, HeroClass, MAX_ABILITY_RANK, SkillSlot, Targeting
 use serde::{Deserialize, Serialize};
 use std::sync::LazyLock;
 
-pub const CATALOG_REVISION: &str = "standard-kits-5";
+pub const CATALOG_REVISION: &str = "standard-kits-6";
 pub const RECIPE_SCHEMA_VERSION: u16 = 1;
 pub const MAX_ACTIVE_EFFECTS: usize = 128;
 pub const MAX_EFFECTS_PER_OWNER: usize = 16;

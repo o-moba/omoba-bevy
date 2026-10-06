@@ -138,10 +138,11 @@ enum PracticeLabel {
 }
 
 pub(crate) fn spawn_practice_open_button(main: &mut ChildSpawnerCommands) {
-    let button = widgets::button(
+    let button = crate::pause_menu::menu_button(
         main,
-        "Debug tools",
+        "pause.button.practice",
         ButtonKind::Secondary,
+        crate::ui::kit_assets::Icon::NavSettings,
         PauseAction::OpenPractice,
         "PauseMenuPracticeButton",
     );

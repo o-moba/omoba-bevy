@@ -138,7 +138,7 @@ pub const BOSS_PIT_INNER_FRAC: f32 = JUNGLE_MAP_INNER_FRAC;
 /// Bottom boss (Wendigo) spawns this long after match start (Lobby -> Running).
 pub const BOTTOM_BOSS_SPAWN_DELAY: Duration = Duration::from_secs(60);
 /// Top boss (King Mutatio) spawns this long after match start.
-pub const TOP_BOSS_SPAWN_DELAY: Duration = Duration::from_secs(180);
+pub const TOP_BOSS_SPAWN_DELAY: Duration = Duration::from_secs(90);
 /// Bosses respawn this long after death (camps keep `NEUTRAL_RESPAWN_COOLDOWN`).
 pub const BOSS_RESPAWN_COOLDOWN: Duration = Duration::from_secs(180);
 

@@ -1,5 +1,7 @@
 //! The authored Verdant scene is presentation only. Network entities remain
 //! the owners of live structures; the static GLBs exclude all eight copies.
+mod surroundings;
+
 use bevy::prelude::*;
 use std::collections::HashMap;
 
@@ -18,7 +20,7 @@ impl Plugin for Verdant3dPlugin {
         app.init_resource::<VerdantPaletteMaterials>()
             .add_systems(
                 Startup,
-                (load_assets, spawn_environment)
+                (load_assets, spawn_environment, surroundings::spawn)
                     .chain()
                     .run_if(in_models3d()),
             )

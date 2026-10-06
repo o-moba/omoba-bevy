@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 // Version 10 adds practice commands, public respawn timers and distinct bullet/rocket styles.
 // The release handshake also gates the compact map and revised combat catalogue.
-pub const PROTOCOL_VERSION: u16 = 10;
+pub const PROTOCOL_VERSION: u16 = 11;
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]

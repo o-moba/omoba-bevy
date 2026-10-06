@@ -80,7 +80,14 @@ pub fn apply_neutral_damage(
                 );
             }
         }
-        neutral.dead_until = Some(now + neutral_respawn_cooldown(camp_type));
+        neutral.dead_until = if camp_type.is_dragon() {
+            camp_type.next_dragon().map(|next| {
+                neutral.state.camp_type = next;
+                now + neutral_respawn_cooldown(camp_type)
+            })
+        } else {
+            Some(now + neutral_respawn_cooldown(camp_type))
+        };
         neutral.target_player_id = None;
         neutral.last_attack_at = None;
         neutral.state.ai_state = NeutralAiState::Idle;
