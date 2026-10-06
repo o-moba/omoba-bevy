@@ -117,9 +117,7 @@ pub fn apply(
         } => {
             let terrain = crate::skills::advanced::terrain(world, now);
             if let Some(p) = world.players.get_mut(&addr) {
-                let from = [p.hero.x, p.hero.z];
-                let sequence = p.hero.utility.dash_sequence;
-                crate::utility::handle_utility_request(
+                crate::utility::handle_utility_request_with_terrain(
                     p,
                     &world.map_layout,
                     &world.structures,
@@ -128,12 +126,8 @@ pub fn apply(
                     *direction,
                     *request_id,
                     now,
+                    &terrain,
                 );
-                if p.hero.utility.dash_sequence != sequence {
-                    let end = shared::navigation::clip_discs(from, [p.hero.x, p.hero.z], &terrain);
-                    p.hero.x = end[0];
-                    p.hero.z = end[1];
-                }
             }
         }
         UpgradeSkill { slot } => {

@@ -48,6 +48,8 @@ struct BossNameplate {
 pub(crate) fn boss_name_id(camp_type: NeutralCampType) -> &'static str {
     match camp_type {
         NeutralCampType::WendigoBoss => "Wendigo", // i18n-allow: stable id
+        NeutralCampType::WindDragon => "Wind Dragon", // i18n-allow: stable QA id
+        NeutralCampType::StoneDragon => "Stone Dragon", // i18n-allow: stable QA id
         NeutralCampType::KingMutatioBoss => "King Mutatio", // i18n-allow: stable id
         _ => "Neutral",                            // i18n-allow: stable id
     }
@@ -56,7 +58,9 @@ pub(crate) fn boss_name_id(camp_type: NeutralCampType) -> &'static str {
 /// Asset path slug under `client/assets/bosses/` for a boss camp type.
 fn boss_slug(camp_type: NeutralCampType) -> Option<&'static str> {
     match camp_type {
-        NeutralCampType::KingMutatioBoss => Some("verdant-dragon"),
+        NeutralCampType::KingMutatioBoss
+        | NeutralCampType::WindDragon
+        | NeutralCampType::StoneDragon => Some("verdant-dragon"),
         _ => None,
     }
 }
@@ -130,6 +134,8 @@ fn load_boss_assets(
     for camp_type in [
         NeutralCampType::WendigoBoss,
         NeutralCampType::KingMutatioBoss,
+        NeutralCampType::WindDragon,
+        NeutralCampType::StoneDragon,
     ] {
         let Some(slug) = boss_slug(camp_type) else {
             continue;
@@ -484,7 +490,7 @@ mod tests {
                 .map(|(plate, text)| (plate.boss, text.0.clone()))
                 .collect();
             assert!(plates.contains(&(guardian, "Wendigo".into())));
-            assert!(plates.contains(&(king, "Verdant Dragon".into())));
+            assert!(plates.contains(&(king, "Flame Dragon · 3/3".into())));
             assert_eq!(plates.len(), 2);
             for _snapshot in 0..100 {
                 app.world_mut()

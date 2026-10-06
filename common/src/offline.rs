@@ -145,7 +145,12 @@ impl PracticeSession {
                 self.match_id = round;
             }
             ClientPacket::RequestRematch => {
-                let Some(player) = self.world.players.get(&LOCAL_ADDR) else {
+                // A late/repeated Play Again must never reset a running round.
+                // Match the authoritative server's terminal-only transition.
+                if !matches!(self.world.game_state, GameState::Victory { .. }) {
+                    return;
+                }
+                let Some(player) = self.world.players.get(&LOCAL_ADDR).filter(|p| p.joined) else {
                     return;
                 };
                 let identity = &player.hero.identity;
@@ -347,6 +352,77 @@ mod tests {
             p.advance(0.05);
         }
     }
+    #[test]
+    fn terminal_rematch_is_once_only_and_late_retries_do_not_reset_movement() {
+        let mut p = PracticeSession::new(Instant::now());
+        p.command(ClientPacket::RequestRematch);
+        assert_eq!(p.match_id, 1, "no rematch before joining");
+        p.command(join(HeroClass::Wildspark));
+        p.command(ClientPacket::RequestRematch);
+        assert_eq!(p.match_id, 1, "running round cannot be restarted");
+        for round in 2..=4 {
+            p.world.game_state = GameState::Victory {
+                winner: Team::Green,
+            };
+            p.command(ClientPacket::RequestRematch);
+            assert_eq!(p.match_id, round);
+            let before: Vec<_> = p
+                .world
+                .players
+                .values()
+                .filter(|p| p.hero.identity.is_bot)
+                .map(|p| (p.hero.identity.id, p.hero.x, p.hero.z))
+                .collect();
+            // Simulate queued repeats arriving over subsequent frames.
+            for _ in 0..40 {
+                p.command(ClientPacket::RequestRematch);
+                p.advance(0.05);
+                assert_eq!(p.match_id, round);
+            }
+            assert!(before.iter().any(|(id, x, z)| {
+                p.world
+                    .players
+                    .values()
+                    .any(|p| p.hero.identity.id == *id && (p.hero.x - x).hypot(p.hero.z - z) > 1.0)
+            }));
+            assert!(matches!(p.world.game_state, GameState::Running));
+        }
+    }
+
+    #[test]
+    fn repeated_practice_keeps_roster_separated_and_movable() {
+        let mut p = PracticeSession::new(Instant::now());
+        p.command(join(HeroClass::Wildspark));
+        for _ in 0..3 {
+            assert_eq!(p.world.players.values().filter(|p| p.joined).count(), 10);
+            let players: Vec<_> = p.world.players.values().filter(|p| p.joined).collect();
+            for (i, a) in players.iter().enumerate() {
+                for b in players.iter().skip(i + 1) {
+                    assert!(
+                        (a.hero.x - b.hero.x).hypot(a.hero.z - b.hero.z)
+                            > shared::PLAYER_TARGET_RADIUS * 2.0
+                    );
+                }
+            }
+            let before: Vec<_> = players
+                .iter()
+                .filter(|p| p.hero.identity.is_bot)
+                .map(|p| (p.hero.identity.id, p.hero.x, p.hero.z))
+                .collect();
+            run(&mut p, 2.0);
+            assert!(before.iter().any(|(id, x, z)| {
+                p.world
+                    .players
+                    .values()
+                    .any(|p| p.hero.identity.id == *id && (p.hero.x - x).hypot(p.hero.z - z) > 1.0)
+            }));
+            p.world.game_state = GameState::Victory {
+                winner: Team::Green,
+            };
+            p.command(ClientPacket::RequestRematch);
+        }
+    }
+
     #[test]
     fn offline_snapshot_carries_public_respawn_countdown() {
         let mut practice = joined(HeroClass::Warrior);
@@ -630,6 +706,9 @@ mod tests {
             request_id: 9,
         });
         assert!(!crate::skills::effects(&p.world, p.now).is_empty());
+        p.world.game_state = GameState::Victory {
+            winner: Team::Green,
+        };
         p.command(ClientPacket::RequestRematch);
         let local = &p.world.players[&LOCAL_ADDR];
         assert_eq!(local.hero.progress.level, START_LEVEL);

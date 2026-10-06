@@ -48,7 +48,10 @@ pub(super) fn reset_round_input_state(
         .filter(|command| {
             !matches!(
                 command,
-                NetworkCommand::BasicAttack { .. }
+                // Do not re-enqueue the already delivered command that caused
+                // this RoundChanged: it would restart offline play every frame.
+                NetworkCommand::RequestRematch
+                    | NetworkCommand::BasicAttack { .. }
                     | NetworkCommand::Cast { .. }
                     | NetworkCommand::CastSkill { .. }
                     | NetworkCommand::UpgradeSkill { .. }

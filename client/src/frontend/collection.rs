@@ -117,20 +117,32 @@ fn layout_collection(
                 node.row_gap = Val::Px(if compact { 8.0 } else { 20.0 });
             }
             "AvatarPreviewSurface" => {
-                node.height = Val::Px(
-                    (height - if compact { 300.0 } else { 410.0 }).max(if compact {
-                        50.0
-                    } else {
-                        100.0
-                    }),
-                );
+                node.height = if compact {
+                    Val::Px((height - 216.0).max(100.0))
+                } else {
+                    Val::Auto
+                };
+                node.flex_grow = if compact { 0.0 } else { 1.0 };
+                node.min_height = Val::Px(100.0);
                 node.max_height = Val::Px(580.0);
                 node.flex_shrink = 0.0;
             }
             "AvatarClipRow" => {
-                node.max_height = Val::Px(if compact { 44.0 } else { 88.0 });
+                node.display = if compact {
+                    Display::None
+                } else {
+                    Display::Flex
+                };
+                node.max_height = Val::Auto;
                 node.flex_shrink = 0.0;
-                node.overflow = Overflow::scroll_y();
+                node.overflow = Overflow::visible();
+            }
+            "AvatarDetailPanel" => {
+                node.row_gap = Val::Px(if compact { 2.0 } else { 8.0 });
+                node.flex_shrink = 0.0;
+            }
+            "CollectionGrid" => {
+                node.padding = UiRect::all(Val::Px(if compact { 8.0 } else { 20.0 }));
             }
             "CollectionPreview" => {
                 node.padding = UiRect::all(Val::Px(if compact { 8.0 } else { 20.0 }));
@@ -209,142 +221,163 @@ fn spawn_catalogue_grid(
             );
         }
     });
-    if filter == CollectionFilter::Weapons {
-        grid.spawn(widgets::heading(tr("collection.weapons"), 17.0));
-        grid.spawn(widgets::label(
-            tr("collection.weapons_hint"),
-            12.0,
-            theme::MUTED,
-        ));
-        screen_button(
-            grid,
-            tr("collection.button.refresh"),
-            ButtonKind::Secondary,
-            CollectionAction::Refresh,
-            "CollectionRefreshWeapons",
-        );
-        let (_, status, _) = omoba_passport::weapon_store::snapshot();
-        let key = match status {
-            omoba_passport::store::CatalogueStatus::Loading { .. } => "collection.weapons_loading",
-            omoba_passport::store::CatalogueStatus::Empty => "collection.weapons_empty",
-            omoba_passport::store::CatalogueStatus::Unavailable { .. } => {
-                "collection.weapons_unavailable"
-            }
-            omoba_passport::store::CatalogueStatus::Ready { .. } => "collection.weapons_ready",
-        };
-        grid.spawn(widgets::label(tr(key), 12.0, theme::MUTED));
-        if let Some(status) = handheld_status(handheld) {
-            grid.spawn((
-                widgets::label(status, 12.0, theme::GOLD),
-                Name::new("SelectedWeaponStatus"),
+    grid.spawn((
+        Node {
+            flex_direction: FlexDirection::Column,
+            flex_grow: 1.0,
+            flex_basis: Val::Px(0.0),
+            min_height: Val::Px(0.0),
+            width: Val::Percent(100.0),
+            row_gap: Val::Px(10.0),
+            overflow: Overflow::scroll_y(),
+            ..default()
+        },
+        grid_scroll(),
+        Name::new("CollectionCatalogueScroll"),
+    ))
+    .with_children(|grid| {
+        if filter == CollectionFilter::Weapons {
+            grid.spawn(widgets::heading(tr("collection.weapons"), 17.0));
+            grid.spawn(widgets::label(
+                tr("collection.weapons_hint"),
+                12.0,
+                theme::MUTED,
             ));
-        }
-        for (choice, name, id) in handheld_choices() {
-            compact_screen_tile(
+            screen_button(
                 grid,
-                name,
-                *handheld == choice,
-                CollectionAction::Handheld(choice),
-                id,
-                phone,
+                tr("collection.button.refresh"),
+                ButtonKind::Secondary,
+                CollectionAction::Refresh,
+                "CollectionRefreshWeapons",
             );
+            let (_, status, _) = omoba_passport::weapon_store::snapshot();
+            let key = match status {
+                omoba_passport::store::CatalogueStatus::Loading { .. } => {
+                    "collection.weapons_loading"
+                }
+                omoba_passport::store::CatalogueStatus::Empty => "collection.weapons_empty",
+                omoba_passport::store::CatalogueStatus::Unavailable { .. } => {
+                    "collection.weapons_unavailable"
+                }
+                omoba_passport::store::CatalogueStatus::Ready { .. } => "collection.weapons_ready",
+            };
+            grid.spawn(widgets::label(tr(key), 12.0, theme::MUTED));
+            if let Some(status) = handheld_status(handheld) {
+                grid.spawn((
+                    widgets::label(status, 12.0, theme::GOLD),
+                    Name::new("SelectedWeaponStatus"),
+                ));
+            }
+            for (choice, name, id) in handheld_choices() {
+                compact_screen_tile(
+                    grid,
+                    name,
+                    *handheld == choice,
+                    CollectionAction::Handheld(choice),
+                    id,
+                    phone,
+                );
+            }
+            return;
         }
-        return;
-    }
-    if filter != CollectionFilter::Studio {
-        grid.spawn(widgets::heading(tr("collection.included"), 17.0));
-    }
-    for (defaults, title) in [(true, ""), (false, tr("collection.studio"))] {
-        if (filter == CollectionFilter::Included && !defaults)
-            || (filter == CollectionFilter::Studio && defaults)
-        {
-            continue;
+        if filter != CollectionFilter::Studio {
+            grid.spawn(widgets::heading(tr("collection.included"), 17.0));
         }
-        if !defaults {
-            grid.spawn((
-                widgets::heading(title, 17.0),
-                Name::new("CollectionStudioHeading"),
-            ));
-            grid.spawn((
-                widgets::label(
-                    crate::i18n::data::catalogue_status(&catalogue.status),
-                    12.0,
-                    theme::MUTED,
-                ),
-                Name::new("CollectionStudioStatus"),
-            ));
+        for (defaults, title) in [(true, ""), (false, tr("collection.studio"))] {
+            if (filter == CollectionFilter::Included && !defaults)
+                || (filter == CollectionFilter::Studio && defaults)
+            {
+                continue;
+            }
+            if !defaults {
+                grid.spawn((
+                    widgets::heading(title, 17.0),
+                    Name::new("CollectionStudioHeading"),
+                ));
+                grid.spawn((
+                    widgets::label(
+                        crate::i18n::data::catalogue_status(&catalogue.status),
+                        12.0,
+                        theme::MUTED,
+                    ),
+                    Name::new("CollectionStudioStatus"),
+                ));
+                grid.spawn(Node {
+                    flex_wrap: FlexWrap::Wrap,
+                    column_gap: Val::Px(6.0),
+                    row_gap: Val::Px(6.0),
+                    ..default()
+                })
+                .with_children(|row| {
+                    screen_button(
+                        row,
+                        tr("collection.button.refresh"),
+                        ButtonKind::Secondary,
+                        CollectionAction::Refresh,
+                        "CollectionRefresh",
+                    );
+                    screen_button(
+                        row,
+                        if crate::passport::account_connected() {
+                            tr("collection.button.sign_out")
+                        } else {
+                            tr("collection.button.connect")
+                        },
+                        ButtonKind::Secondary,
+                        CollectionAction::ConnectAccount,
+                        "CollectionConnectAccount",
+                    );
+                });
+                grid.spawn((
+                    widgets::label(
+                        &crate::passport::avatar_account_status_line(),
+                        11.0,
+                        theme::MUTED,
+                    ),
+                    Name::new("CollectionAccountStatus"),
+                ));
+            }
             grid.spawn(Node {
+                flex_direction: FlexDirection::Row,
                 flex_wrap: FlexWrap::Wrap,
-                column_gap: Val::Px(6.0),
-                row_gap: Val::Px(6.0),
+                column_gap: Val::Px(10.0),
+                row_gap: Val::Px(10.0),
+                justify_content: JustifyContent::Center,
+                width: Val::Percent(100.0),
+                flex_shrink: 0.0,
                 ..default()
             })
-            .with_children(|row| {
-                screen_button(
-                    row,
-                    tr("collection.button.refresh"),
-                    ButtonKind::Secondary,
-                    CollectionAction::Refresh,
-                    "CollectionRefresh",
-                );
-                screen_button(
-                    row,
-                    if crate::passport::account_connected() {
-                        tr("collection.button.sign_out")
-                    } else {
-                        tr("collection.button.connect")
-                    },
-                    ButtonKind::Secondary,
-                    CollectionAction::ConnectAccount,
-                    "CollectionConnectAccount",
-                );
+            .with_children(|tiles| {
+                for entry in &catalogue.entries {
+                    if (entry.source == AvatarSource::Default) == defaults {
+                        spawn_avatar_tile(
+                            tiles,
+                            &entry.avatar,
+                            entry.source,
+                            selected == Some(entry.avatar.slug.as_str()),
+                            thumbnails,
+                            phone,
+                        );
+                    }
+                }
             });
+        }
+        // Preserve existing paid-avatar pairing as an optional action, below the
+        // primary account/free library path.
+        {
+            screen_button(
+                grid,
+                tr("collection.button.connect_wallet"),
+                ButtonKind::Secondary,
+                CollectionAction::ConnectWallet,
+                "CollectionConnectWallet",
+            );
             grid.spawn((
-                widgets::label(
-                    &crate::passport::avatar_account_status_line(),
-                    11.0,
-                    theme::MUTED,
-                ),
-                Name::new("CollectionAccountStatus"),
+                widgets::label(&crate::passport::wallet_status_line(), 11.0, theme::MUTED),
+                Name::new("CollectionWalletStatus"),
             ));
         }
-        grid.spawn(Node {
-            flex_direction: FlexDirection::Row,
-            flex_wrap: FlexWrap::Wrap,
-            column_gap: Val::Px(10.0),
-            row_gap: Val::Px(10.0),
-            ..default()
-        })
-        .with_children(|tiles| {
-            for entry in &catalogue.entries {
-                if (entry.source == AvatarSource::Default) == defaults {
-                    spawn_avatar_tile(
-                        tiles,
-                        &entry.avatar,
-                        entry.source,
-                        selected == Some(entry.avatar.slug.as_str()),
-                        thumbnails,
-                        phone,
-                    );
-                }
-            }
-        });
-    }
-    // Preserve existing paid-avatar pairing as an optional action, below the
-    // primary account/free library path.
-    {
-        screen_button(
-            grid,
-            tr("collection.button.connect_wallet"),
-            ButtonKind::Secondary,
-            CollectionAction::ConnectWallet,
-            "CollectionConnectWallet",
-        );
-        grid.spawn((
-            widgets::label(&crate::passport::wallet_status_line(), 11.0, theme::MUTED),
-            Name::new("CollectionWalletStatus"),
-        ));
-    }
+    });
 }
 
 fn refresh_connection_labels(mut labels: Query<(&Name, &mut Text)>) {
@@ -523,13 +556,13 @@ fn spawn_collection(
                         align_content: AlignContent::FlexStart,
                         column_gap: Val::Px(10.0),
                         row_gap: Val::Px(10.0),
-                        overflow: Overflow::scroll_y(),
+                        min_height: Val::Px(0.0),
+                        overflow: Overflow::clip(),
                         ..default()
                     },
                     KitImage::frame(Frame::Panel),
                     BorderColor::all(theme::PANEL_EDGE),
                     CollectionGrid,
-                    grid_scroll(),
                     CatalogueRevision(catalogue.revision),
                     Name::new("CollectionGrid"),
                 ))
@@ -588,7 +621,6 @@ fn spawn_collection(
                             ..default()
                         },
                         ClipRow,
-                        crate::ui::ScrollArea::menu(28.0),
                         Name::new("AvatarClipRow"),
                     ));
                     column.spawn((

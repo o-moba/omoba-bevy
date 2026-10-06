@@ -1,5 +1,34 @@
 use super::*;
 
+#[test]
+fn blink_crosses_solids_but_lands_clear_without_extending_its_ray() {
+    let map = NavigationMap::new(
+        bounds(10.0),
+        vec![rectangle("wall", [0.0, -5.0], [1.0, 5.0])],
+    )
+    .unwrap();
+    assert!(!map.segment_clear([-2.0, 0.0], [3.0, 0.0]));
+    assert_eq!(map.blink_landing([-2.0, 0.0], [3.0, 0.0], &[]), [3.0, 0.0]);
+    let occupied = map.blink_landing([-2.0, 0.0], [0.8, 0.0], &[]);
+    assert!(map.point_clear(occupied));
+    assert!(occupied[0] <= -HERO_RADIUS && occupied[0] >= -2.0);
+    assert_eq!(occupied[1], 0.0);
+    let discs = [Disc {
+        center: [3.0, 0.0],
+        radius: 0.8,
+    }];
+    let landing = map.blink_landing([-2.0, 0.0], [3.0, 0.0], &discs);
+    assert!(map.point_clear(landing));
+    assert!(distance_squared(landing, discs[0].center) >= 1.3_f32.powi(2));
+    assert!(landing[0] < 3.0 && landing[0] > 1.0);
+    assert_eq!(
+        map.blink_landing([-2.0, 0.0], [f32::NAN, 0.0], &[]),
+        [-2.0, 0.0]
+    );
+    let edge = map.blink_landing([2.0, 0.0], [30.0, 0.0], &[]);
+    assert_eq!(edge, [10.0, 0.0]);
+}
+
 fn bounds(half: f32) -> Bounds {
     Bounds {
         min: [-half; 2],

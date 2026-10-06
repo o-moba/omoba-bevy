@@ -19,6 +19,8 @@ use crate::progression::xp_threshold_for_level;
 pub struct HeroEconomy {
     /// Individual camp rewards; refreshed on a kill and cleared each round.
     pub jungle_buffs: crate::jungle_buffs::JungleBuffs,
+    pub dragon_speed: f32,
+    pub dragon_armor: f32,
     pub gold: u32,
     pub earned_gold: u32,
     pub inventory: Vec<ItemId>,
@@ -40,6 +42,8 @@ impl HeroEconomy {
     pub fn starting() -> Self {
         Self {
             jungle_buffs: Default::default(),
+            dragon_speed: 1.0,
+            dragon_armor: 0.0,
             gold: STARTING_GOLD,
             earned_gold: 0,
             inventory: Vec::new(),

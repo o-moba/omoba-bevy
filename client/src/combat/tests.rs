@@ -1526,6 +1526,20 @@ fn round_change_event_clears_old_intents_cooldowns_and_queued_casts_but_reconnec
             },
             slot: 3,
         });
+    // Messages retain delivered commands for two frames. Round reset must
+    // discard the old rematch instead of writing it again with a fresh ID.
+    app.world_mut()
+        .write_message(NetworkCommand::RequestRematch);
+    let mut sender = app
+        .world()
+        .resource::<Messages<NetworkCommand>>()
+        .get_cursor();
+    assert_eq!(
+        sender
+            .read(app.world().resource::<Messages<NetworkCommand>>())
+            .count(),
+        2
+    );
     app.world_mut().write_message(SessionEvent::RoundChanged {
         previous: RoundId {
             server_epoch: 10,
@@ -1549,6 +1563,13 @@ fn round_change_event_clears_old_intents_cooldowns_and_queued_casts_but_reconnec
             .is_none()
     );
     assert!(!app.world().entity(actor).contains::<MovementTarget>());
+    assert_eq!(
+        sender
+            .read(app.world().resource::<Messages<NetworkCommand>>())
+            .count(),
+        0,
+        "round change cannot replay a delivered rematch"
+    );
     assert_eq!(
         app.world_mut()
             .resource_mut::<Messages<NetworkCommand>>()

@@ -431,6 +431,7 @@ impl GameWorld {
             reset_player_round(player, &self.map_layout, now);
             player.join_error = None;
         }
+        self.separate_team_spawns();
         self.game_state = GameState::Lobby;
         self.match_elapsed_secs = 0.0;
     }

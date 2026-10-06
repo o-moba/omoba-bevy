@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "revision": "standard-kits-5",
+  "revision": "standard-kits-6",
   "skills": [
     {
       "id": "dawn_bind",
@@ -162,7 +162,7 @@
       "effect": {
         "kind": "impact_rocket",
         "speed": 45,
-        "radius": 0.7,
+        "radius": 1.05,
         "blast_radius": 3,
         "damage": 84,
         "min_damage_multiplier": 0.5,

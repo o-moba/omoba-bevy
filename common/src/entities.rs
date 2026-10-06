@@ -33,6 +33,9 @@ impl TeamBuffBalance for TeamBuffKind {
         match self {
             TeamBuffKind::WendigoFavor => BOTTOM_BOSS_BUFF_DURATION,
             TeamBuffKind::MutatioMight => TOP_BOSS_BUFF_DURATION,
+            TeamBuffKind::DragonSpeed
+            | TeamBuffKind::DragonDefense
+            | TeamBuffKind::DragonAttack => Duration::from_secs(180),
         }
     }
 
@@ -40,12 +43,17 @@ impl TeamBuffBalance for TeamBuffKind {
         match self {
             TeamBuffKind::WendigoFavor => BOTTOM_BOSS_BUFF_DAMAGE_MULT,
             TeamBuffKind::MutatioMight => TOP_BOSS_BUFF_DAMAGE_MULT,
+            TeamBuffKind::DragonAttack => 1.12,
+            TeamBuffKind::DragonSpeed | TeamBuffKind::DragonDefense => 1.0,
         }
     }
 
     fn hp_regen_per_second(self) -> f32 {
         match self {
-            TeamBuffKind::WendigoFavor => 0.0,
+            TeamBuffKind::WendigoFavor
+            | TeamBuffKind::DragonSpeed
+            | TeamBuffKind::DragonDefense
+            | TeamBuffKind::DragonAttack => 0.0,
             TeamBuffKind::MutatioMight => TOP_BOSS_BUFF_HP_REGEN_PER_SECOND,
         }
     }

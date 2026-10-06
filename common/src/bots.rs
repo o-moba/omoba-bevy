@@ -585,6 +585,7 @@ impl CombatHost<'_> {
             &self.world.map_layout,
             now,
         );
+        self.world.separate_spawn(addr);
         self.bots.controllers.insert(
             addr,
             Controller {

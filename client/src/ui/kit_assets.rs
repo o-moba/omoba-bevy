@@ -14,6 +14,7 @@ use std::collections::HashMap;
 use bevy::{
     prelude::*,
     sprite::{BorderRect, SliceScaleMode, TextureSlicer},
+    ui::VisualBox,
 };
 
 /// A sprite atlas grid (`TextureAtlasLayout::from_grid`), in texture px.
@@ -201,6 +202,13 @@ pub(crate) fn resolve_kit_images(
             }
             _ => NodeImageMode::Stretch,
         };
+        // A decorative frame surrounds padding as well as content. Bevy 0.19
+        // defaults images to ContentBox, moving the frame onto the labels.
+        let visual_box = if matches!(kit.source, KitSource::Frame(_)) {
+            VisualBox::BorderBox
+        } else {
+            VisualBox::ContentBox
+        };
         let atlas = match (kit.source, kit.frame) {
             (KitSource::Sprite(sprite), Some(index)) => sprite.atlas(hi).map(|grid| {
                 let layout = layouts.0.entry((sprite, hi)).or_insert_with(|| {
@@ -234,6 +242,9 @@ pub(crate) fn resolve_kit_images(
                 if node.image_mode != mode {
                     node.image_mode = mode;
                 }
+                if node.visual_box != visual_box {
+                    node.visual_box = visual_box;
+                }
                 if node.texture_atlas != atlas {
                     node.texture_atlas = atlas;
                 }
@@ -241,6 +252,7 @@ pub(crate) fn resolve_kit_images(
             None => {
                 let mut node = ImageNode::new(handle).with_mode(mode);
                 node.color = kit.tint;
+                node.visual_box = visual_box;
                 node.texture_atlas = atlas;
                 commands.entity(entity).insert(node);
             }
@@ -334,6 +346,41 @@ pub(crate) fn cover_rect(texture: Vec2, node: Vec2, anchor_y: f32) -> Option<Rec
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn frame_surrounds_padding_on_creation_and_refresh_but_icons_stay_in_content() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, bevy::asset::AssetPlugin::default()))
+            .init_asset::<Image>()
+            .init_resource::<UiDensity>()
+            .init_resource::<KitAtlasLayouts>()
+            .add_systems(Update, resolve_kit_images);
+        let frame = app
+            .world_mut()
+            .spawn(KitImage::frame(Frame::ButtonSecondary))
+            .id();
+        let refresh = app
+            .world_mut()
+            .spawn((
+                KitImage::frame(Frame::ButtonSecondary),
+                ImageNode::default(),
+            ))
+            .id();
+        app.update();
+        for entity in [frame, refresh] {
+            let image = app.world().get::<ImageNode>(entity).unwrap();
+            assert_eq!(image.visual_box, VisualBox::BorderBox);
+            assert!(matches!(image.image_mode, NodeImageMode::Sliced(_)));
+        }
+        app.world_mut()
+            .entity_mut(refresh)
+            .insert(KitImage::icon(Icon::NavLock, Color::WHITE));
+        app.update();
+        assert_eq!(
+            app.world().get::<ImageNode>(refresh).unwrap().visual_box,
+            VisualBox::ContentBox
+        );
+    }
 
     #[test]
     fn every_typed_asset_is_installed_at_both_densities() {

@@ -16,5 +16,8 @@
   "hud.buff.mutatio": "巨龙之力：技能伤害 +25%，生命回复 +2/秒 - {secs} 秒",
   "hud.brush.concealed": "草丛 · 已隐蔽",
   "hud.brush.revealed": "草丛 · 已暴露",
-  "hud.fps": "{value} FPS"
+  "hud.fps": "{value} FPS",
+  "hud.buff.dragon_speed": "风：移动速度+8% · {secs}秒",
+  "hud.buff.dragon_defense": "石：防御+20 · {secs}秒",
+  "hud.buff.dragon_attack": "火：伤害+12% · {secs}秒"
 }

@@ -259,7 +259,7 @@ pub(crate) struct SettingsHelpReturn(pub(crate) bool);
 struct PauseMenuRoot;
 
 #[derive(Component)]
-struct MainMenuSection;
+pub(crate) struct MainMenuSection;
 
 #[derive(Component)]
 struct MainMenuFooter;
@@ -373,7 +373,7 @@ fn size_desktop_pause_panel(
     let height = if menu.in_settings {
         Val::Percent(92.0)
     } else {
-        Val::Px(440.0)
+        Val::Px(metric::PAUSE_MAIN_H)
     };
     for mut panel in &mut panels {
         panel.width = if menu.in_settings {
@@ -678,6 +678,10 @@ fn layout_pause_contents(
                     0.0
                 });
             }
+            "PauseMenuMainSection" => {
+                node.width = Val::Percent(100.0);
+                node.align_items = AlignItems::Center;
+            }
             "PauseMenuHeader" => node.padding.bottom = Val::Px(if compact { 0.0 } else { 8.0 }),
             "PauseMenuAudioTitleGroup" => {
                 node.display = if compact {
@@ -842,7 +846,7 @@ fn setting_row(
         });
 }
 
-fn menu_button(
+pub(crate) fn menu_button(
     parent: &mut ChildSpawnerCommands,
     key: &'static str,
     kind: ButtonKind,

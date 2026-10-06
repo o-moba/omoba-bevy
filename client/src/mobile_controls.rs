@@ -154,6 +154,7 @@ struct Capture {
     control: Control,
     origin: Vec2,
     position: Vec2,
+    raw_position: Vec2,
     canceled: bool,
     held_seconds: f32,
     hold_exposed: bool,
@@ -537,6 +538,7 @@ impl MobileControls {
                             origin
                         },
                         position,
+                        raw_position: position,
                         canceled: false,
                         held_seconds: 0.0,
                         hold_exposed: false,
@@ -550,7 +552,7 @@ impl MobileControls {
                 let layout = self.layout();
                 let scale = self.combat_scale();
                 if let Some(capture) = self.captures.get_mut(&id) {
-                    capture.position = position;
+                    update_capture_position(capture, position, scale);
                     capture.dragged |= position.distance(capture.origin)
                         > control_drag_dead_zone(capture.control) * scale;
                     capture.canceled = position.distance(layout.cancel_center)
@@ -563,7 +565,7 @@ impl MobileControls {
                 if let Some(mut capture) = self.captures.remove(&id) {
                     self.skill_released_this_frame |=
                         matches!(capture.control, Control::Ability(_));
-                    capture.position = position;
+                    update_capture_position(&mut capture, position, self.combat_scale());
                     capture.dragged |= position.distance(capture.origin)
                         > control_drag_dead_zone(capture.control) * self.combat_scale();
                     capture.canceled = position.distance(self.layout().cancel_center)
@@ -825,6 +827,31 @@ fn control_drag_dead_zone(control: Control) -> f32 {
         ATTACK_DRAG_DEAD_ZONE
     }
 }
+/// Radial aiming already gets finer with distance. Beyond 80 logical pixels,
+/// attenuate only angular changes further; radial motion remains immediate.
+/// The stored virtual pointer is shared by preview and release, so release
+/// cannot snap back to the unsmoothed finger position.
+fn update_capture_position(capture: &mut Capture, point: Vec2, scale: f32) {
+    let raw_before = capture.raw_position - capture.origin;
+    let raw_after = point - capture.origin;
+    let previous = capture.position - capture.origin;
+    if matches!(capture.control, Control::Ability(_))
+        && raw_before.length() > 24.0 * scale
+        && raw_after.length() > 24.0 * scale
+        && previous.length_squared() > 0.0
+    {
+        let angle = raw_before
+            .perp_dot(raw_after)
+            .atan2(raw_before.dot(raw_after));
+        let gain = (80.0 * scale / raw_after.length()).clamp(0.3, 1.0);
+        capture.position = capture.origin
+            + Vec2::from_angle(previous.y.atan2(previous.x) + angle * gain) * raw_after.length();
+    } else {
+        capture.position = point;
+    }
+    capture.raw_position = point;
+}
+
 fn aim_vector(delta: Vec2, scale: f32) -> Option<Vec2> {
     (delta.length() > SKILL_DRAG_DEAD_ZONE * scale).then(|| delta.normalize_or_zero())
 }
@@ -2360,6 +2387,20 @@ mod tests {
             ..default()
         }
     }
+    #[test]
+    fn long_skill_drag_has_precision_and_release_preserves_preview() {
+        let mut m = controls();
+        let origin = m.layout().ability_centers[3];
+        m.event(1, TouchPhase::Started, origin);
+        m.event(1, TouchPhase::Moved, origin + Vec2::NEG_X * 160.0);
+        let point = origin + Vec2::new(-160.0, -16.0);
+        m.event(1, TouchPhase::Moved, point);
+        let preview = m.aimed_skill().unwrap().aim.unwrap();
+        assert!(preview.y.abs() < 0.08 && preview.y.abs() > 0.01);
+        m.event(1, TouchPhase::Ended, point);
+        assert!(m.casts[0].aim.unwrap().distance(preview) < 0.0001);
+    }
+
     #[test]
     fn stationary_skill_hold_describes_without_casting_and_movement_keeps_working() {
         let mut m = controls();

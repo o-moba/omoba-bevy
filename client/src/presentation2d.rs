@@ -611,8 +611,18 @@ fn boss_key(boss: &BossVisual, state: NeutralAiState) -> &'static str {
     match (boss.camp_type, aggro) {
         (crate::net::NeutralCampType::WendigoBoss, false) => "wendigo_idle",
         (crate::net::NeutralCampType::WendigoBoss, true) => "wendigo_aggro",
-        (crate::net::NeutralCampType::KingMutatioBoss, false) => "king_mutatio_idle",
-        (crate::net::NeutralCampType::KingMutatioBoss, true) => "king_mutatio_aggro",
+        (
+            crate::net::NeutralCampType::KingMutatioBoss
+            | crate::net::NeutralCampType::WindDragon
+            | crate::net::NeutralCampType::StoneDragon,
+            false,
+        ) => "king_mutatio_idle",
+        (
+            crate::net::NeutralCampType::KingMutatioBoss
+            | crate::net::NeutralCampType::WindDragon
+            | crate::net::NeutralCampType::StoneDragon,
+            true,
+        ) => "king_mutatio_aggro",
         _ => "neutral",
     }
 }

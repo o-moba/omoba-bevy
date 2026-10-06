@@ -63,6 +63,7 @@ struct HomeRoot;
 enum HomeChrome {
     Frame,
     Scrim,
+    BuildInfo,
 }
 
 // Chrome belongs to the physical viewport, not the centered 16:9 content canvas.
@@ -70,12 +71,14 @@ fn layout_home_chrome(
     windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
     platform: Res<crate::ui::UiPlatform>,
     scale: Res<UiScale>,
-    mut chrome: Query<(&HomeChrome, &mut Node)>,
+    mut chrome: Query<(&HomeChrome, &mut Node, Option<&mut TextFont>)>,
 ) {
     let Ok(window) = windows.single() else { return };
     let scale = scale.0.max(0.1);
     let compact = platform.is_mobile() && window.height() < 600.0;
-    for (kind, mut node) in &mut chrome {
+    // Reserve a separate footer outside the ornament, above the home indicator.
+    let footer_gutter = if platform.is_mobile() { 20.0 } else { 0.0 };
+    for (kind, mut node, font) in &mut chrome {
         match kind {
             HomeChrome::Frame => {
                 let display = if compact {
@@ -87,15 +90,15 @@ fn layout_home_chrome(
                     node.display = display;
                 }
                 let inset = Val::Px(12.0 / scale);
-                if [node.left, node.right, node.top, node.bottom]
+                if [node.left, node.right, node.top]
                     .iter()
                     .any(|edge| *edge != inset)
                 {
                     node.left = inset;
                     node.right = inset;
                     node.top = inset;
-                    node.bottom = inset;
                 }
+                node.bottom = Val::Px((footer_gutter + 32.0) / scale);
             }
             HomeChrome::Scrim => {
                 let height = Val::Px(if compact { 96.0 / scale } else { 160.0 / scale });
@@ -103,11 +106,43 @@ fn layout_home_chrome(
                     node.height = height;
                 }
             }
+            HomeChrome::BuildInfo => {
+                node.left = Val::Px(24.0 / scale);
+                node.right = Val::Px(24.0 / scale);
+                node.bottom = Val::Px((footer_gutter + 6.0) / scale);
+                node.height = Val::Px(18.0 / scale);
+                if let Some(mut font) = font {
+                    font.font_size = (12.0 / scale).into();
+                }
+            }
         }
     }
 }
 
 fn spawn_home_backdrop(mut commands: Commands, platform: Res<crate::ui::UiPlatform>) {
+    commands.spawn((
+        Text::new(crate::build_info::label()),
+        TextFont {
+            font_size: 12.0.into(),
+            ..default()
+        },
+        TextColor(theme::IVORY),
+        TextShadow {
+            offset: Vec2::splat(1.0),
+            color: Color::srgba(0.0, 0.0, 0.0, 0.9),
+        },
+        TextLayout::default().with_justify(Justify::Center),
+        Node {
+            position_type: PositionType::Absolute,
+            ..default()
+        },
+        HomeChrome::BuildInfo,
+        GlobalZIndex(theme::SCREEN_Z + 1),
+        Pickable::IGNORE,
+        bevy::ui::FocusPolicy::Pass,
+        bevy::state::state_scoped::DespawnOnExit(AppScreen::Home),
+        Name::new("HomeBuildInfo"),
+    ));
     commands
         .spawn(widgets::screen_root(AppScreen::Home, "HomeBackdrop"))
         .insert(ZIndex(theme::SCREEN_Z - 1))
@@ -860,24 +895,6 @@ fn spawn_home(
             if let Some((party_id, from)) = &party_line.invite {
                 spawn_invite_banner(root, *party_id, from, phone, platform.is_mobile(), fit);
             }
-            // Build metadata is deliberately smaller than interactive labels;
-            // keep it below the navigation strip on mobile and footer on desktop.
-            root.spawn((
-                Text::new(crate::build_info::label()),
-                TextFont {
-                    font_size: (12.0 * unit).into(),
-                    ..default()
-                },
-                TextColor(theme::MUTED),
-                Node {
-                    position_type: PositionType::Absolute,
-                    left: Val::Px(if phone { 63.0 * unit } else { HOME_INSET }),
-                    bottom: Val::Px(if phone { 4.0 } else { 48.0 / fit } - outer_y),
-                    ..default()
-                },
-                bevy::ui::FocusPolicy::Pass,
-                Name::new("HomeBuildInfo"),
-            ));
             if !platform.is_mobile() {
                 root.spawn((
                     widgets::label(tr("home.footer"), 12.0, theme::MUTED),
@@ -1483,14 +1500,23 @@ mod tests {
                 .world_mut()
                 .spawn((Node::default(), HomeChrome::Scrim))
                 .id();
+            let footer = app
+                .world_mut()
+                .spawn((Node::default(), TextFont::default(), HomeChrome::BuildInfo))
+                .id();
             app.update();
             let node = app.world().get::<Node>(frame).unwrap();
-            for edge in [node.left, node.right, node.top, node.bottom] {
+            for edge in [node.left, node.right, node.top] {
                 let Val::Px(edge) = edge else {
                     panic!("viewport inset must use pixels")
                 };
                 assert!((edge * scale - 12.0).abs() < 0.01);
             }
+            assert_eq!(node.bottom, Val::Px(52.0 / scale));
+            let footer = app.world().get::<Node>(footer).unwrap();
+            assert_eq!(footer.left, footer.right);
+            assert_eq!(footer.bottom, Val::Px(26.0 / scale));
+            assert_eq!(footer.height, Val::Px(18.0 / scale));
             assert_eq!(
                 node.display,
                 if size.y < 600.0 {
