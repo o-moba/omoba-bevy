@@ -9,6 +9,7 @@ use std::collections::{HashMap, HashSet};
 pub(super) struct SkillEffectsPlugin;
 impl Plugin for SkillEffectsPlugin {
     fn build(&self, app: &mut App) {
+        crate::vfx_clock::ensure(app);
         app.init_resource::<Instances>()
             .add_systems(Startup, setup)
             .add_systems(
@@ -407,7 +408,7 @@ fn sync(
     game: Option<Res<GameStateSnapshot>>,
     mode: Res<PlayerVisualMode>,
     profiles: Res<SkillPresentation>,
-    time: Res<Time>,
+    clock: Res<crate::vfx_clock::VfxClock>,
     map: Option<Res<crate::maps::MapLayout>>,
     local: Query<&crate::team::Team, With<crate::player::Player>>,
     mut instances: ResMut<Instances>,
@@ -430,10 +431,7 @@ fn sync(
     let Some(game) = game.filter(|_| *mode == PlayerVisualMode::Models3d) else {
         return;
     };
-    let now = game
-        .sandbox
-        .as_ref()
-        .map_or(time.elapsed_secs(), |s| s.simulation_secs as f32);
+    let now = clock.now as f32;
     let mut live = HashSet::new();
     for e in game
         .skill_effects

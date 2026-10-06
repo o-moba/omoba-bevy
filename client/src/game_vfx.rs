@@ -204,6 +204,7 @@ impl VfxAssets {
 pub(crate) struct GameVfxPlugin;
 impl Plugin for GameVfxPlugin {
     fn build(&self, app: &mut App) {
+        crate::vfx_clock::ensure(app);
         app.init_resource::<PickupReceipts>()
             .add_message::<ImpactBurst>()
             .add_message::<ClearCombatVfx>()
@@ -744,7 +745,7 @@ pub(crate) struct HasteTrail {
 /// distance travelled, so a stationary hero only pulses and a sprinting one
 /// leaves a continuous double trail regardless of frame rate.
 pub(crate) fn emit_haste_trails(
-    time: Res<Time>,
+    clock: Res<crate::vfx_clock::VfxClock>,
     heroes: Query<
         (
             Entity,
@@ -802,7 +803,7 @@ pub(crate) fn emit_haste_trails(
                 trail.travelled = 0.;
             }
         }
-        trail.pulse_in -= time.delta_secs();
+        trail.pulse_in -= clock.delta;
         if trail.pulse_in <= 0. {
             trail.pulse_in = HASTE_PULSE_PERIOD;
             trail.emitted += 1;
@@ -817,7 +818,7 @@ pub(crate) fn emit_haste_trails(
 }
 fn animate_particles(
     mut commands: Commands,
-    time: Res<Time>,
+    clock: Res<crate::vfx_clock::VfxClock>,
     mode: Res<PlayerVisualMode>,
     assets: Res<VfxAssets>,
     mut bursts: MessageReader<ImpactBurst>,
@@ -847,7 +848,7 @@ fn animate_particles(
             slot.active = None;
         }
         if let Some(p) = &mut slot.active {
-            p.age += time.delta_secs();
+            p.age += clock.delta;
             if p.age >= p.lifetime {
                 slot.active = None;
             }
@@ -1156,7 +1157,7 @@ fn cast_is_new(previous: Option<u64>, current: u64) -> bool {
 
 /// Short tails sample authoritative positions; no stationary projectile invents a hit.
 fn emit_projectile_particles(
-    time: Res<Time>,
+    vfx_clock: Res<crate::vfx_clock::VfxClock>,
     mode: Res<PlayerVisualMode>,
     game: Option<Res<crate::net::GameStateSnapshot>>,
     cameras: Query<(&Camera, &GlobalTransform), With<MainCamera>>,
@@ -1188,7 +1189,9 @@ fn emit_projectile_particles(
         clock.0 = identity;
         clock.1 = 0.0;
     }
-    clock.1 += time.delta_secs().min(0.1);
+    // Paced by the presentation clock: a paused or slowed simulation must not
+    // pile trail particles onto a projectile that has not moved.
+    clock.1 += vfx_clock.delta.min(0.1);
     if clock.1 < 0.045 {
         return;
     }
@@ -1253,7 +1256,7 @@ fn emit_projectile_particles(
         };
         particles.push(base.clone());
         if magic {
-            let phase = time.elapsed_secs() * 9.0 + projectile.id as f32 % 100.0;
+            let phase = vfx_clock.now as f32 * 9.0 + projectile.id as f32 % 100.0;
             for angle in [phase, phase + std::f32::consts::PI] {
                 particles.push(Particle {
                     origin: p + if flat {
@@ -1787,6 +1790,71 @@ mod tests {
                 .iter(app.world())
                 .all(|s| s.active.is_none())
         );
+    }
+    #[test]
+    fn particles_age_on_the_presentation_clock_under_pause_step_and_slow_motion() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+                std::time::Duration::from_millis(16),
+            ))
+            .init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<Image>>()
+            .init_resource::<Assets<StandardMaterial>>()
+            .init_resource::<Assets<ColorMaterial>>()
+            .init_resource::<PlayerVisualMode>()
+            .init_resource::<MapLayout>()
+            .add_plugins(GameVfxPlugin);
+        let mut paused = shared::sandbox::SandboxSnapshot {
+            config: Default::default(),
+            ack: None,
+            last_request_id: 0,
+            actors: Vec::new(),
+            analytics: Default::default(),
+            simulation_secs: 3.0,
+            frame: 0,
+        };
+        paused.config.environment.paused = true;
+        app.insert_resource(crate::net::GameStateSnapshot {
+            meta: shared::protocol::SnapshotMeta::new(7, 1, 1),
+            state: crate::net::GameState::Running,
+            sandbox: Some(paused),
+            ..Default::default()
+        });
+        app.update();
+        let mut particle = burst_particles(&test_burst())[0].clone();
+        particle.lifetime = 0.1;
+        app.world_mut()
+            .write_message(FlightParticles(vec![particle]));
+        fn age(app: &mut App) -> Option<f32> {
+            app.world_mut()
+                .query::<&ParticleSlot>()
+                .iter(app.world())
+                .find_map(|slot| slot.active.as_ref().map(|particle| particle.age))
+        }
+        fn sandbox(app: &mut App) -> Mut<'_, shared::sandbox::SandboxSnapshot> {
+            app.world_mut()
+                .resource_mut::<crate::net::GameStateSnapshot>()
+                .map_unchanged(|game| game.sandbox.as_mut().unwrap())
+        }
+        // Twenty frames are 0.32 s of wall time, three times the lifetime.
+        for _ in 0..20 {
+            app.update();
+            assert_eq!(
+                age(&mut app),
+                Some(0.0),
+                "a paused frame holds its particles"
+            );
+        }
+        sandbox(&mut app).simulation_secs += 1.0 / 60.0;
+        app.update();
+        let stepped = age(&mut app).unwrap();
+        assert!((stepped - 1.0 / 60.0).abs() < 1e-6);
+        let mut environment = sandbox(&mut app);
+        environment.config.environment.paused = false;
+        environment.config.environment.time_scale = 0.25;
+        app.update();
+        assert!((age(&mut app).unwrap() - stepped - 0.016 * 0.25).abs() < 1e-6);
     }
     #[test]
     fn malformed_bursts_do_not_produce_particles() {

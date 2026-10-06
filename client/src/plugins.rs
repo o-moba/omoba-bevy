@@ -126,7 +126,9 @@ pub(crate) struct PresentationPlugins;
 impl PluginGroup for PresentationPlugins {
     fn build(self) -> PluginGroupBuilder {
         PluginGroupBuilder::start::<Self>()
-            // Shared by both backends.
+            // Shared by both backends. The clock comes first: the effect,
+            // feedback, particle and projectile plugins below read it.
+            .add(crate::vfx_clock::VfxClockPlugin)
             .add(CameraPlugin)
             .add(crate::dash_preview::DashPreviewPlugin)
             .add(crate::recall::RecallPlugin)

@@ -22,6 +22,7 @@ pub(crate) const MAX_VISUALS: usize = 384;
 pub struct ProjectileVisualsPlugin;
 impl Plugin for ProjectileVisualsPlugin {
     fn build(&self, app: &mut App) {
+        crate::vfx_clock::ensure(app);
         app.add_systems(Startup, setup_assets.run_if(in_models3d()))
             .add_systems(
                 PostUpdate,
@@ -423,7 +424,7 @@ fn advance_trail(visual: &mut ProjectileVisual, position: Vec3, delta: f32) {
 }
 
 fn update_visuals(
-    time: Res<Time>,
+    clock: Res<crate::vfx_clock::VfxClock>,
     server: Option<Res<AssetServer>>,
     scenes: Option<Res<Assets<WorldAsset>>>,
     mut roots: Query<(&Transform, &NetworkProjectile, &mut ProjectileVisual)>,
@@ -438,7 +439,7 @@ fn update_visuals(
         if let Ok(mut facing) = transforms.get_mut(visual.facing) {
             facing.rotation = rotation;
         }
-        advance_trail(&mut visual, transform.translation, time.delta_secs());
+        advance_trail(&mut visual, transform.translation, clock.delta);
         if let Some((entity, handle)) = &visual.model {
             let ready = server
                 .as_ref()

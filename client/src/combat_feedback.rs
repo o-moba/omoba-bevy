@@ -33,6 +33,7 @@ pub struct CombatFeedbackPlugin;
 pub(crate) struct CollectCombatFeedback;
 impl Plugin for CombatFeedbackPlugin {
     fn build(&self, app: &mut App) {
+        crate::vfx_clock::ensure(app);
         app.init_resource::<CombatFeedback>()
             .add_systems(
                 Update,
@@ -112,7 +113,7 @@ pub(crate) struct DamageNumber {
 
 fn collect_hits(
     mut commands: Commands,
-    time: Res<Time>,
+    clock: Res<crate::vfx_clock::VfxClock>,
     snapshot: Res<GameStateSnapshot>,
     registry: Res<CombatVisualRegistry>,
     skills: Option<Res<crate::skill_presentation::SkillPresentation>>,
@@ -133,7 +134,7 @@ fn collect_hits(
     mode: Res<PlayerVisualMode>,
 ) {
     feedback.impacts.retain_mut(|impact| {
-        impact.age += time.delta_secs();
+        impact.age += clock.delta;
         impact.age < impact.lifetime
     });
     let (changed, events) = feedback.cursor.accept(
@@ -299,7 +300,7 @@ fn collect_hits(
 
 fn place_numbers(
     mut commands: Commands,
-    time: Res<Time>,
+    clock: Res<crate::vfx_clock::VfxClock>,
     mode: Res<PlayerVisualMode>,
     ui_scale: Option<Res<UiScale>>,
     camera: Query<(&Camera, &Transform), With<MainCamera>>,
@@ -313,7 +314,7 @@ fn place_numbers(
 ) {
     let camera = camera.single().ok();
     for (entity, mut number, mut node, mut color, mut shadow) in &mut numbers {
-        number.age += time.delta_secs();
+        number.age += clock.delta;
         if number.age >= NUMBER_LIFETIME {
             commands.entity(entity).despawn();
             continue;

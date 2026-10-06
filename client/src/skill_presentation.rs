@@ -119,6 +119,11 @@ impl SkillPresentation {
     pub(crate) fn profile(&self, skill: SkillId) -> Option<&SkillProfile> {
         self.skills.get(skill.id())
     }
+    /// Size of the active registry, recorded as capture evidence.
+    #[cfg(feature = "qa")]
+    pub(crate) fn profile_count(&self) -> usize {
+        self.skills.len()
+    }
 }
 
 /// The accepted recipe, not the hero class or a skill's default catalogue slot.
