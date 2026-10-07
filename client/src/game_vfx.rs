@@ -6,6 +6,7 @@ use crate::{
     maps::MapLayout,
     net::{PlayerUtility, RemotePlayer},
     player::Player,
+    skill_presentation::vocab::ParticleShape as Shape,
     sprite::PlayerVisualMode,
     world2d::{layer, simulation_xz_to_render_xy},
 };
@@ -54,7 +55,9 @@ impl BurstKind {
             ProjectileStyle::Arcane | ProjectileStyle::Holy | ProjectileStyle::CasterBolt => {
                 Self::Magic
             }
-            ProjectileStyle::Crescent | ProjectileStyle::Standard => Self::Melee,
+            ProjectileStyle::Crescent | ProjectileStyle::Claw | ProjectileStyle::Standard => {
+                Self::Melee
+            }
             _ => Self::Ranged,
         }
     }
@@ -88,14 +91,212 @@ pub(crate) enum UtilityVfx {
 }
 #[derive(Message)]
 struct FlightParticles(Vec<Particle>);
-#[derive(Clone, Copy)]
-enum Shape {
-    Glow,
-    Ring,
-    Slash,
-    /// Elongated glow oriented along `Particle::angle`; speed lines and afterimages.
-    Streak,
+/// Decorative particles of an accepted cast: accents, moves, links and stage one-shots.
+/// They share the decorative half of the pool with flight trails and are admitted first.
+#[cfg_attr(not(test), allow(dead_code))] // written by the cast observer
+#[derive(Message)]
+pub(crate) struct SkillBurst(pub Vec<ParticleSpec>);
+/// Particles of an accepted combat receipt. They are admitted with the wire-style bursts,
+/// ahead of every decorative particle.
+#[cfg_attr(not(test), allow(dead_code))] // written by the receipt collector
+#[derive(Message)]
+pub(crate) struct ConfirmedBurst(pub Vec<ParticleSpec>);
+
+/// A colour and the HDR gain its 3D material is drawn with. Flat rendering ignores the gain.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct Tint {
+    pub color: Color,
+    pub gain: f32,
 }
+/// How the size of a particle changes over its life.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Curve {
+    /// Shrinks to nothing.
+    Shrink,
+    /// Grows from 0.4 to twice its size.
+    Grow,
+    /// Swells to its size in the first quarter of its life, then holds.
+    Pop,
+    /// Keeps its size.
+    Hold,
+    /// Lengthens along its own axis to one and a half times its size while it thins.
+    Stretch,
+}
+impl Curve {
+    /// Scale along and across the particle's own axis at life fraction `t`.
+    fn scale(self, t: f32) -> Vec2 {
+        match self {
+            Self::Shrink => Vec2::splat((1. - t).max(0.01)),
+            Self::Grow => Vec2::splat(0.4 + t * 1.6),
+            Self::Pop => Vec2::splat(1. - 0.6 * (1. - (t * 4.).min(1.)).powi(2)),
+            Self::Hold => Vec2::ONE,
+            Self::Stretch => Vec2::new(0.5 + t, 1. - t * 0.4),
+        }
+    }
+    /// The largest factor the curve reaches along the particle's axis.
+    pub(crate) const fn peak(self) -> f32 {
+        match self {
+            Self::Shrink | Self::Pop | Self::Hold => 1.,
+            Self::Grow => 2.,
+            Self::Stretch => 1.5,
+        }
+    }
+}
+/// The plane a particle is drawn in. `ParticleSpec::angle` is a ground heading in every case.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Orient {
+    /// Faces the camera; its axis follows the heading as seen on screen.
+    Billboard,
+    /// Lies in the horizontal plane with its axis along the heading.
+    Ground,
+    /// Faces the camera with its axis along its direction of travel; a particle that does
+    /// not move keeps the heading.
+    Velocity,
+}
+/// Admission class in the pool. Confirmations get first access and the reserved half;
+/// `Skill` and `Trail` share the decorative half, `Skill` first.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ParticleClass {
+    Confirm,
+    Skill,
+    Trail,
+}
+/// What a pooled particle depicts. Capture evidence counts particles per source, because an
+/// action sequence and a receipt id can be the same number.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ParticleSource {
+    /// Wire-style bursts, utility effects, flight puffs and accents of rows without `cast`.
+    Engine,
+    Accent,
+    Move,
+    Link,
+    /// A classified transition or end of a replicated effect.
+    Stage,
+    /// The trap cue and the camp hit.
+    Cue,
+    Impact,
+}
+/// Half extent of the mesh of a shape at size 1. Every planar silhouette fits the unit
+/// circle and is symmetric about its own axis, which points along +X.
+pub(crate) const fn unit_radius(shape: Shape) -> f32 {
+    match shape {
+        Shape::Slash => 0.7,
+        Shape::Streak => 0.85,
+        _ => 0.5,
+    }
+}
+/// How far ahead of its mesh origin the middle of a curved blade lies at size 1. Every
+/// other shape is centred on its origin.
+pub(crate) const fn blade_depth(shape: Shape) -> f32 {
+    match shape {
+        Shape::Slash => 0.62,
+        Shape::Crescent => 0.38,
+        Shape::Arc => 0.43,
+        _ => 0.,
+    }
+}
+/// Delayed particles hold a pool slot while hidden, so the wait is bounded.
+const MAX_DELAY: f32 = 0.25;
+
+/// One pooled particle as a pure generator describes it. Positions and velocities are
+/// simulation coordinates in both render modes.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct ParticleSpec {
+    /// The action sequence of a cast accent or the id of a combat receipt.
+    pub event_id: u64,
+    pub origin: Vec3,
+    pub velocity: Vec3,
+    pub lifetime: f32,
+    /// Seconds the particle waits, hidden, before it starts (at most 0.25).
+    pub delay: f32,
+    pub size: f32,
+    /// Ground heading of the particle's own axis, in radians.
+    pub angle: f32,
+    pub color: Tint,
+    /// The colour the particle reaches at the end of its life.
+    pub end_color: Option<Tint>,
+    pub shape: Shape,
+    /// Downward acceleration; a negative value rises.
+    pub gravity: f32,
+    /// Share of the velocity lost per second.
+    pub drag: f32,
+    /// Turn rate of the particle's own axis, in radians per second.
+    pub spin: f32,
+    pub curve: Curve,
+    pub orient: Orient,
+    /// Decorative bursts of one frame are admitted in ascending order: the local hero
+    /// first, then by distance.
+    pub sort_key: u32,
+    pub source: ParticleSource,
+}
+impl ParticleSpec {
+    pub(crate) const BASE: Self = Self {
+        event_id: 0,
+        origin: Vec3::ZERO,
+        velocity: Vec3::ZERO,
+        lifetime: 0.35,
+        delay: 0.,
+        size: 1.,
+        angle: 0.,
+        color: Tint {
+            color: Color::WHITE,
+            gain: PARTICLE_HDR_GAIN,
+        },
+        end_color: None,
+        shape: Shape::Glow,
+        gravity: 0.,
+        drag: 0.,
+        spin: 0.,
+        curve: Curve::Shrink,
+        orient: Orient::Billboard,
+        sort_key: 0,
+        source: ParticleSource::Engine,
+    };
+    /// Seconds after the burst at which the particle is gone.
+    pub(crate) fn end_secs(&self) -> f32 {
+        self.delay + self.lifetime
+    }
+    /// Farthest the particle is drawn from `from` on the ground plane: the travel of its
+    /// centre plus its own half extent. Drag only slows a particle along its line, so the
+    /// centre is farthest at one end of its life.
+    pub(crate) fn reach(&self, from: Vec3) -> f32 {
+        let live = Particle::from_spec(self, ParticleClass::Skill);
+        let centre = [0., self.lifetime]
+            .map(|age| (self.origin + live.travel(age) - from).xz().length())
+            .into_iter()
+            .fold(0., f32::max);
+        centre + unit_radius(self.shape) * self.size * self.curve.peak()
+    }
+    /// The pose `age` seconds after the particle started.
+    #[cfg(test)]
+    pub(crate) fn pose_at(&self, age: f32, flat: bool, facing: Quat) -> Transform {
+        let mut live = Particle::from_spec(self, ParticleClass::Skill);
+        live.age = age;
+        live.pose(flat, facing)
+    }
+    /// Whether the pool can draw the particle: finite fields, a positive life and size, and
+    /// a finite pose in both render modes for its whole life.
+    pub(crate) fn is_sound(&self) -> bool {
+        if !(self.lifetime.is_finite()
+            && self.lifetime > 0.
+            && self.size.is_finite()
+            && self.size > 0.
+            && self.delay.is_finite()
+            && self.delay >= 0.)
+        {
+            return false;
+        }
+        let mut live = Particle::from_spec(self, ParticleClass::Skill);
+        [0., 0.5, 1.].into_iter().all(|t| {
+            live.age = self.lifetime * t;
+            [false, true].into_iter().all(|flat| {
+                let pose = live.pose(flat, Quat::IDENTITY);
+                pose.translation.is_finite() && pose.scale.is_finite() && pose.rotation.is_finite()
+            })
+        })
+    }
+}
+
 #[derive(Clone)]
 struct Particle {
     event_id: u64,
@@ -107,41 +308,141 @@ struct Particle {
     angle: f32,
     color: Color,
     shape: Shape,
+    gain: f32,
+    end_color: Option<Tint>,
+    gravity: f32,
+    drag: f32,
+    spin: f32,
+    /// `None` keeps the built-in motion of the shape: the glow shrinks, the ring grows, the
+    /// slash sweeps and the streak tapers.
+    curve: Option<Curve>,
+    orient: Orient,
+    class: ParticleClass,
+    #[cfg_attr(not(feature = "qa"), allow(dead_code))] // read by capture evidence
+    source: ParticleSource,
 }
 impl Particle {
+    /// The fields a wire-style burst, a utility effect and a flight puff leave alone.
+    const BASE: Self = Self {
+        event_id: 0,
+        origin: Vec3::ZERO,
+        velocity: Vec3::ZERO,
+        age: 0.,
+        lifetime: 1.,
+        size: 1.,
+        angle: 0.,
+        color: Color::WHITE,
+        shape: Shape::Glow,
+        gain: PARTICLE_HDR_GAIN,
+        end_color: None,
+        gravity: 0.,
+        drag: 0.,
+        spin: 0.,
+        curve: None,
+        orient: Orient::Billboard,
+        class: ParticleClass::Confirm,
+        source: ParticleSource::Engine,
+    };
+    fn from_spec(spec: &ParticleSpec, class: ParticleClass) -> Self {
+        Self {
+            event_id: spec.event_id,
+            origin: spec.origin,
+            velocity: spec.velocity,
+            age: -spec.delay.clamp(0., MAX_DELAY),
+            lifetime: spec.lifetime,
+            size: spec.size,
+            angle: spec.angle,
+            color: spec.color.color,
+            shape: spec.shape,
+            gain: spec.color.gain,
+            end_color: spec.end_color,
+            gravity: spec.gravity,
+            drag: spec.drag,
+            spin: spec.spin,
+            curve: Some(spec.curve),
+            orient: spec.orient,
+            class,
+            source: spec.source,
+        }
+    }
+    /// Seconds of undamped flight that cover the same distance as `age` seconds with drag.
+    fn glide(&self, age: f32) -> f32 {
+        if self.drag > 1e-3 {
+            (1. - (-self.drag * age).exp()) / self.drag
+        } else {
+            age
+        }
+    }
+    /// Displacement after `age` seconds under drag and gravity.
+    fn travel(&self, age: f32) -> Vec3 {
+        let glide = self.glide(age);
+        let fall = if self.drag > 1e-3 {
+            (age - glide) / self.drag
+        } else {
+            0.5 * age * age
+        };
+        self.velocity * glide - Vec3::Y * (self.gravity * fall)
+    }
+    /// Colour and HDR gain at life fraction `t`.
+    fn tint(&self, t: f32) -> Tint {
+        match self.end_color {
+            Some(end) => Tint {
+                color: self.color.mix(&end.color, t),
+                gain: self.gain + (end.gain - self.gain) * t,
+            },
+            None => Tint {
+                color: self.color,
+                gain: self.gain,
+            },
+        }
+    }
     fn pose(&self, flat: bool, facing: Quat) -> Transform {
         let t = (self.age / self.lifetime).clamp(0., 1.);
-        let p = self.origin + self.velocity * self.age;
+        let p = self.origin + self.travel(self.age);
         let position = if flat {
             simulation_xz_to_render_xy(p).extend(layer::VFX + 0.1)
         } else {
             p
         };
-        let size = self.size
-            * match self.shape {
-                Shape::Glow => (1. - t).max(0.01),
-                Shape::Ring => 0.4 + t * 1.6,
-                Shape::Slash => 0.75 + t * 0.5,
-                Shape::Streak => 1. - t * 0.45,
-            };
-        let sweep = if matches!(self.shape, Shape::Slash) {
-            t * 1.1
-        } else {
-            0.
+        let (scale, sweep) = match self.curve {
+            Some(curve) => (curve.scale(t), 0.),
+            None => match self.shape {
+                Shape::Glow => (Vec2::splat((1. - t).max(0.01)), 0.),
+                Shape::Ringlet => (Vec2::splat(0.4 + t * 1.6), 0.),
+                Shape::Slash => (Vec2::splat(0.75 + t * 0.5), t * 1.1),
+                Shape::Streak => (Vec2::splat(1. - t * 0.45), 0.),
+                _ => (Vec2::ONE, 0.),
+            },
         };
-        let angle = if flat {
-            self.angle
+        let age = self.age.max(0.);
+        let turn = sweep + self.spin * age;
+        let heading = Vec3::new(self.angle.cos(), 0., self.angle.sin());
+        let moving =
+            self.velocity * (-self.drag * age).exp() - Vec3::Y * (self.gravity * self.glide(age));
+        let axis = if self.orient == Orient::Velocity && moving.length_squared() > 1e-6 {
+            moving
         } else {
-            let projected = facing.inverse() * Vec3::new(self.angle.cos(), 0., self.angle.sin());
-            projected.y.atan2(projected.x)
+            heading
         };
-        Transform::from_translation(position)
-            .with_scale(Vec3::splat(size))
-            .with_rotation(if flat {
-                Quat::from_rotation_z(angle + sweep)
+        let rotation = if flat {
+            // The flat view looks straight down, so only a horizontal direction can turn it.
+            let seen = if axis.xz().length_squared() > 1e-6 {
+                axis
             } else {
-                facing * Quat::from_rotation_z(angle + sweep)
-            })
+                heading
+            };
+            Quat::from_rotation_z(seen.z.atan2(seen.x) + turn)
+        } else if self.orient == Orient::Ground {
+            Quat::from_rotation_y(-(self.angle + turn))
+                * Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)
+        } else {
+            let projected = facing.inverse() * axis;
+            facing * Quat::from_rotation_z(projected.y.atan2(projected.x) + turn)
+        };
+        let scale = scale * self.size;
+        Transform::from_translation(position)
+            .with_scale(scale.extend(scale.max_element()))
+            .with_rotation(rotation)
     }
 }
 #[derive(Component)]
@@ -154,6 +455,12 @@ impl ParticleSlot {
     #[cfg(feature = "qa")]
     pub(crate) fn sample(&self) -> Option<(u64, f32)> {
         self.active.as_ref().map(|p| (p.event_id, p.age))
+    }
+    /// The admission class and the source of the live particle.
+    #[cfg(feature = "qa")]
+    #[cfg_attr(not(test), allow(dead_code))] // read by the capture assertions
+    pub(crate) fn source(&self) -> Option<(ParticleClass, ParticleSource)> {
+        self.active.as_ref().map(|p| (p.class, p.source))
     }
 }
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
@@ -184,21 +491,13 @@ struct PickupReceipts {
 #[derive(Resource)]
 struct VfxAssets {
     glow_texture: Handle<Image>,
-    glow: Handle<Mesh>,
-    ring: Handle<Mesh>,
-    slash: Handle<Mesh>,
-    streak: Handle<Mesh>,
+    /// One mesh per particle shape, in the order of `Shape::ALL`.
+    shapes: Vec<Handle<Mesh>>,
     wing: Handle<Mesh>,
 }
 impl VfxAssets {
     fn mesh(&self, shape: Shape) -> Handle<Mesh> {
-        match shape {
-            Shape::Glow => &self.glow,
-            Shape::Ring => &self.ring,
-            Shape::Slash => &self.slash,
-            Shape::Streak => &self.streak,
-        }
-        .clone()
+        self.shapes[shape as usize].clone()
     }
 }
 pub(crate) struct GameVfxPlugin;
@@ -211,6 +510,8 @@ impl Plugin for GameVfxPlugin {
             .add_message::<crate::game_audio::AudioCueRequest>()
             .add_message::<UtilityVfx>()
             .add_message::<FlightParticles>()
+            .add_message::<SkillBurst>()
+            .add_message::<ConfirmedBurst>()
             .add_systems(Startup, setup)
             .add_systems(
                 Update,
@@ -273,30 +574,140 @@ fn texture(wing: bool) -> Image {
         RenderAssetUsages::default(),
     )
 }
-fn slash_mesh() -> Mesh {
-    let mut positions = Vec::new();
-    let mut indices = Vec::new();
-    for i in 0..=20 {
-        let t = i as f32 / 20.;
-        let a = -1.2 + t * 2.4;
-        let width = (std::f32::consts::PI * t).sin() * 0.16;
-        for radius in [0.7 - width, 0.7] {
-            positions.push([a.cos() * radius, a.sin() * radius, 0.]);
-        }
-        if i < 20 {
-            let j = i * 2;
-            indices.extend_from_slice(&[j, j + 1, j + 2, j + 1, j + 3, j + 2]);
-        }
-    }
+/// A flat mesh in the particle's own XY plane. Particles are tinted, not textured, so
+/// every vertex samples the middle of the glow texture.
+fn planar_mesh(positions: Vec<[f32; 2]>, indices: Vec<u32>) -> Mesh {
     let count = positions.len();
     Mesh::new(
         PrimitiveTopology::TriangleList,
         RenderAssetUsages::default(),
     )
-    .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, positions)
+    .with_inserted_attribute(
+        Mesh::ATTRIBUTE_POSITION,
+        positions
+            .into_iter()
+            .map(|[x, y]| [x, y, 0.])
+            .collect::<Vec<_>>(),
+    )
     .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, vec![[0., 0., 1.]; count])
     .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, vec![[0.5, 0.5]; count])
     .with_inserted_indices(Indices::U32(indices))
+}
+/// A closed outline filled as a fan around `centre`.
+fn fan_mesh(centre: [f32; 2], rim: &[[f32; 2]]) -> Mesh {
+    let mut positions = vec![centre];
+    positions.extend_from_slice(rim);
+    let count = rim.len() as u32;
+    let indices = (0..count)
+        .flat_map(|i| [0, 1 + i, 1 + (i + 1) % count])
+        .collect();
+    planar_mesh(positions, indices)
+}
+/// A band along an arc of `outer` radius between two angles; `width(t)` is its thickness
+/// at the fraction `t` of the arc.
+fn band_mesh(from: f32, to: f32, outer: f32, steps: u32, width: impl Fn(f32) -> f32) -> Mesh {
+    let mut positions = Vec::new();
+    let mut indices = Vec::new();
+    for i in 0..=steps {
+        let t = i as f32 / steps as f32;
+        let a = from + t * (to - from);
+        for radius in [outer - width(t), outer] {
+            positions.push([a.cos() * radius, a.sin() * radius]);
+        }
+        if i < steps {
+            let j = i * 2;
+            indices.extend_from_slice(&[j, j + 1, j + 2, j + 1, j + 3, j + 2]);
+        }
+    }
+    planar_mesh(positions, indices)
+}
+/// The mesh of one particle shape. Each fits `unit_radius`, is symmetric about its own
+/// axis and points along +X, so a mirrored view of it looks the same.
+pub(crate) fn shape_mesh(shape: Shape) -> Mesh {
+    use std::f32::consts::{FRAC_PI_2, PI, TAU};
+    match shape {
+        Shape::Glow => Rectangle::new(1., 1.).into(),
+        Shape::Ringlet => Annulus::new(0.43, 0.5).into(),
+        Shape::Slash => band_mesh(-1.2, 1.2, 0.7, 20, |t| (PI * t).sin() * 0.16),
+        Shape::Streak => Rectangle::new(1.7, 0.36).into(),
+        Shape::Star => {
+            let rim: Vec<_> = (0..8)
+                .map(|i| {
+                    let (radius, a) = (if i % 2 == 0 { 0.5 } else { 0.17 }, i as f32 * TAU / 8.);
+                    [a.cos() * radius, a.sin() * radius]
+                })
+                .collect();
+            fan_mesh([0., 0.], &rim)
+        }
+        Shape::Chevron => planar_mesh(
+            vec![
+                [0.5, 0.],
+                [-0.08, 0.49],
+                [-0.3, 0.4],
+                [0.16, 0.],
+                [-0.3, -0.4],
+                [-0.08, -0.49],
+            ],
+            vec![0, 1, 2, 0, 2, 3, 0, 3, 4, 0, 4, 5],
+        ),
+        Shape::Diamond => fan_mesh([0., 0.], &[[0.5, 0.], [0., 0.3], [-0.5, 0.], [0., -0.3]]),
+        Shape::Arc => band_mesh(-FRAC_PI_2, FRAC_PI_2, 0.5, 12, |_| 0.14),
+        Shape::Drop => {
+            // A round bulb behind a point.
+            let mut rim = vec![[0.5, 0.]];
+            rim.extend((0..=8).map(|i| {
+                let a = 1.2 + i as f32 * (TAU - 2.4) / 8.;
+                [-0.2 + a.cos() * 0.3, a.sin() * 0.3]
+            }));
+            fan_mesh([-0.2, 0.], &rim)
+        }
+        Shape::Cross => planar_mesh(
+            vec![
+                [-0.485, -0.12],
+                [0.485, -0.12],
+                [0.485, 0.12],
+                [-0.485, 0.12],
+                [-0.12, 0.12],
+                [0.12, 0.12],
+                [0.12, 0.485],
+                [-0.12, 0.485],
+                [-0.12, -0.485],
+                [0.12, -0.485],
+                [0.12, -0.12],
+                [-0.12, -0.12],
+            ],
+            vec![0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7, 8, 9, 10, 8, 10, 11],
+        ),
+        Shape::Crescent => band_mesh(-1.3, 1.3, 0.5, 16, |t| (PI * t).sin() * 0.24),
+        Shape::Claw => {
+            // Three tines side by side, the middle one longest.
+            let mut positions = Vec::new();
+            let mut indices = Vec::new();
+            for (y, back, tip) in [(-0.27, -0.36, 0.38), (0., -0.46, 0.5), (0.27, -0.36, 0.38)] {
+                let first = positions.len() as u32;
+                positions.extend_from_slice(&[
+                    [back, y - 0.06],
+                    [back, y + 0.06],
+                    [0.1, y + 0.045],
+                    [tip, y],
+                    [0.1, y - 0.045],
+                ]);
+                indices.extend([0, 1, 2, 0, 2, 3, 0, 3, 4].map(|i| first + i));
+            }
+            planar_mesh(positions, indices)
+        }
+        // A heater shield: the flat top leads, the point trails.
+        Shape::Kite => fan_mesh(
+            [0.05, 0.],
+            &[
+                [0.37, 0.33],
+                [0.05, 0.38],
+                [-0.5, 0.],
+                [0.05, -0.38],
+                [0.37, -0.33],
+            ],
+        ),
+    }
 }
 fn wing_mesh() -> Mesh {
     Mesh::new(
@@ -333,10 +744,10 @@ fn setup(
     let wing_texture = images.add(texture(true));
     let assets = VfxAssets {
         glow_texture: glow.clone(),
-        glow: meshes.add(Rectangle::new(1., 1.)),
-        ring: meshes.add(Annulus::new(0.43, 0.5)),
-        slash: meshes.add(slash_mesh()),
-        streak: meshes.add(Rectangle::new(1.7, 0.36)),
+        shapes: Shape::ALL
+            .iter()
+            .map(|shape| meshes.add(shape_mesh(*shape)))
+            .collect(),
         wing: meshes.add(wing_mesh()),
     };
     for _ in 0..PARTICLE_BUDGET {
@@ -366,9 +777,9 @@ fn setup(
             bevy::light::NotShadowReceiver,
         ));
         if *mode == PlayerVisualMode::Sprite2d {
-            e.insert((Mesh2d(assets.glow.clone()), MeshMaterial2d(flat)));
+            e.insert((Mesh2d(assets.mesh(Shape::Glow)), MeshMaterial2d(flat)));
         } else {
-            e.insert((Mesh3d(assets.glow.clone()), MeshMaterial3d(material)));
+            e.insert((Mesh3d(assets.mesh(Shape::Glow)), MeshMaterial3d(material)));
         }
     }
     let colors = [Color::srgb(0.55, 1., 0.78), Color::srgb(1., 0.88, 0.42)];
@@ -428,12 +839,12 @@ fn setup(
         ));
         if *mode == PlayerVisualMode::Sprite2d {
             halo.insert((
-                Mesh2d(assets.glow.clone()),
+                Mesh2d(assets.mesh(Shape::Glow)),
                 MeshMaterial2d(glow_flat.clone()),
             ));
         } else {
             halo.insert((
-                Mesh3d(assets.glow.clone()),
+                Mesh3d(assets.mesh(Shape::Glow)),
                 MeshMaterial3d(glow_material.clone()),
             ));
         }
@@ -490,11 +901,12 @@ fn burst_particles(burst: &ImpactBurst) -> Vec<Particle> {
         angle,
         color: burst.color,
         shape: match burst.kind {
-            BurstKind::Magic => Shape::Ring,
+            BurstKind::Magic => Shape::Ringlet,
             BurstKind::Melee => Shape::Slash,
             BurstKind::Ranged => Shape::Glow,
-            BurstKind::VitalBreak => Shape::Ring,
+            BurstKind::VitalBreak => Shape::Ringlet,
         },
+        ..Particle::BASE
     };
     let mut particles = vec![
         first.clone(),
@@ -545,7 +957,7 @@ fn burst_particles(burst: &ImpactBurst) -> Vec<Particle> {
     particles
 }
 /// Deterministic per-particle jitter in `[-1, 1]` from a seed and an index.
-fn jitter(seed: u64, index: u64, salt: u64) -> f32 {
+pub(crate) fn jitter(seed: u64, index: u64, salt: u64) -> f32 {
     let mut h = seed
         .wrapping_mul(0x9E37_79B9_7F4A_7C15)
         .wrapping_add(index.wrapping_mul(0xBF58_476D_1CE4_E5B9))
@@ -581,10 +993,11 @@ fn dash_particles(from: Vec3, to: Vec3, seed: u64) -> Vec<Particle> {
         angle,
         color: DASH_COLOR,
         shape: Shape::Glow,
+        ..Particle::BASE
     };
     let mut particles = vec![
         Particle {
-            shape: Shape::Ring,
+            shape: Shape::Ringlet,
             size: 2.2,
             lifetime: 0.4,
             ..base.clone()
@@ -636,7 +1049,7 @@ fn dash_particles(from: Vec3, to: Vec3, seed: u64) -> Vec<Particle> {
         age: delay,
         lifetime: 0.55,
         size: 2.8,
-        shape: Shape::Ring,
+        shape: Shape::Ringlet,
         ..base.clone()
     });
     for i in 0..8u64 {
@@ -674,6 +1087,7 @@ fn haste_streak_particles(position: Vec3, direction: Vec2, seed: u64) -> Vec<Par
         angle: dir.y.atan2(dir.x),
         color: HASTE_COLOR,
         shape: Shape::Streak,
+        ..Particle::BASE
     };
     let mut particles = vec![base.clone()];
     if seed.is_multiple_of(3) {
@@ -704,7 +1118,8 @@ fn haste_pulse_particles(position: Vec3, seed: u64) -> Vec<Particle> {
         size: 1.7,
         angle: 0.,
         color: HASTE_COLOR,
-        shape: Shape::Ring,
+        shape: Shape::Ringlet,
+        ..Particle::BASE
     };
     let mut particles = vec![base.clone()];
     for i in 0..3u64 {
@@ -822,7 +1237,9 @@ fn animate_particles(
     mode: Res<PlayerVisualMode>,
     assets: Res<VfxAssets>,
     mut bursts: MessageReader<ImpactBurst>,
+    mut receipts: MessageReader<ConfirmedBurst>,
     mut utilities: MessageReader<UtilityVfx>,
+    mut casts: MessageReader<SkillBurst>,
     mut flight: MessageReader<FlightParticles>,
     mut resets: MessageReader<ClearCombatVfx>,
     cameras: Query<&GlobalTransform, (With<MainCamera>, Without<ParticleSlot>)>,
@@ -854,11 +1271,16 @@ fn animate_particles(
             }
         }
     }
-    // Confirmed impacts get first access; decorative flight particles cannot starve hits.
+    // Confirmed impacts get first access; decorative particles cannot starve hits.
     let mut impacts = Vec::new();
     for burst in bursts.read() {
         if impacts.len() < 96 * 12 {
             impacts.extend(burst_particles(burst));
+        }
+    }
+    for burst in receipts.read() {
+        if impacts.len() < 96 * 12 {
+            impacts.extend(live_particles(&burst.0, ParticleClass::Confirm));
         }
     }
     // Utility effects are confirmed server actions too (dash acknowledgment,
@@ -868,27 +1290,38 @@ fn animate_particles(
         .take(96)
         .flat_map(utility_particles)
         .collect();
-    let mut trails = Vec::new();
+    // Decorative intake is bounded per frame. Skill bursts go first, the local hero's
+    // before others, and whatever does not fit is dropped, never replayed.
+    let mut skill: Vec<&ParticleSpec> = casts.read().flat_map(|burst| &burst.0).collect();
+    skill.sort_by_key(|spec| spec.sort_key);
+    let mut decorative: Vec<_> =
+        live_particles(skill.into_iter().take(48), ParticleClass::Skill).collect();
     for batch in flight.read() {
-        trails.extend(
-            batch
-                .0
-                .iter()
-                .take(48usize.saturating_sub(trails.len()))
-                .cloned(),
-        );
+        let room = 48usize.saturating_sub(decorative.len());
+        decorative.extend(batch.0.iter().take(room).map(|p| Particle {
+            class: if p.event_id == 0 {
+                ParticleClass::Trail
+            } else {
+                ParticleClass::Skill
+            },
+            ..p.clone()
+        }));
     }
-    let mut trail_count = slots
+    let mut decorative_count = slots
         .iter()
-        .filter(|(_, slot, ..)| slot.active.as_ref().is_some_and(|p| p.event_id == 0))
+        .filter(|(_, slot, ..)| {
+            slot.active
+                .as_ref()
+                .is_some_and(|p| p.class != ParticleClass::Confirm)
+        })
         .count();
-    for p in impacts.into_iter().chain(utility).chain(trails) {
+    for p in impacts.into_iter().chain(utility).chain(decorative) {
         // Reserve half the pool for combat confirmations, even during sustained fire.
-        if p.event_id == 0 {
-            if trail_count >= PARTICLE_BUDGET / 2 {
+        if p.class != ParticleClass::Confirm {
+            if decorative_count >= PARTICLE_BUDGET / 2 {
                 break;
             }
-            trail_count += 1;
+            decorative_count += 1;
         }
         let Some((entity, mut slot, _, _, _, _)) =
             slots.iter_mut().find(|(_, slot, ..)| slot.active.is_none())
@@ -896,11 +1329,11 @@ fn animate_particles(
             break;
         };
         let mesh = assets.mesh(p.shape);
-        // Ring/slash meshes need a solid tint; glows and streaks use the radial texture.
+        // Glows and streaks use the radial texture; every other shape needs a solid tint.
         let texture =
             matches!(p.shape, Shape::Glow | Shape::Streak).then(|| assets.glow_texture.clone());
         if let Some(mut m) = materials.get_mut(&slot.material) {
-            m.base_color = hdr_tint(p.color, PARTICLE_HDR_GAIN);
+            m.base_color = hdr_tint(p.color, p.gain);
             m.base_color_texture = texture.clone();
             m.alpha_mode = AlphaMode::Blend;
         }
@@ -932,15 +1365,26 @@ fn animate_particles(
         *global = GlobalTransform::from(*transform);
         *visibility = Visibility::Visible;
         *inherited = InheritedVisibility::VISIBLE;
-        let opacity = (1. - p.age / p.lifetime).max(0.);
+        let life = p.age / p.lifetime;
+        let opacity = (1. - life).max(0.);
+        let Tint { color, gain } = p.tint(life.clamp(0., 1.));
         if let Some(mut m) = materials.get_mut(&slot.material) {
-            m.base_color =
-                hdr_tint(p.color, PARTICLE_HDR_GAIN).with_alpha(p.color.alpha() * opacity);
+            m.base_color = hdr_tint(color, gain).with_alpha(color.alpha() * opacity);
         }
         if let Some(mut m) = flats.get_mut(&slot.flat) {
-            m.color = p.color.with_alpha(p.color.alpha() * opacity);
+            m.color = color.with_alpha(color.alpha() * opacity);
         }
     }
+}
+/// Generated particles the pool can draw; a malformed one is dropped, like a malformed burst.
+fn live_particles<'a>(
+    specs: impl IntoIterator<Item = &'a ParticleSpec>,
+    class: ParticleClass,
+) -> impl Iterator<Item = Particle> {
+    specs
+        .into_iter()
+        .filter(|spec| spec.is_sound())
+        .map(move |spec| Particle::from_spec(spec, class))
 }
 fn butterfly_position(anchor: Vec3, phase: f32, seconds: f64) -> Vec3 {
     let t = (seconds * 0.7).rem_euclid(std::f64::consts::TAU * 10.) as f32;
@@ -1090,6 +1534,7 @@ fn emit_skill_cast_particles(
                 angle: forward.z.atan2(forward.x),
                 color: Color::srgb(0.75, 0.95, 1.0),
                 shape: Shape::Slash,
+                ..Particle::BASE
             }]));
             continue;
         }
@@ -1127,7 +1572,7 @@ fn emit_skill_cast_particles(
         let (shape, count, size) = match effect {
             S::Slash => (Shape::Slash, 5, 1.6),
             S::Needle | S::Lance | S::Shock | S::Repeater => (Shape::Streak, 4, 1.1),
-            S::Aegis | S::Pulse | S::Field | S::Wall => (Shape::Ring, 7, 1.4),
+            S::Aegis | S::Pulse | S::Field | S::Wall => (Shape::Ringlet, 7, 1.4),
             _ => (Shape::Glow, 7, 1.0),
         };
         let color = Color::srgb_from_array(profile.color);
@@ -1149,6 +1594,7 @@ fn emit_skill_cast_particles(
                         angle: forward.z.atan2(forward.x),
                         color,
                         shape: if i == 0 { shape } else { Shape::Glow },
+                        ..Particle::BASE
                     }
                 })
                 .collect(),
@@ -1257,6 +1703,7 @@ fn emit_projectile_particles(
             angle: 0.0,
             color,
             shape: Shape::Glow,
+            ..Particle::BASE
         };
         particles.push(base.clone());
         if magic {
@@ -1322,7 +1769,7 @@ fn animate_butterfly_glows(
                     .entity(entity)
                     .remove::<(Mesh3d, MeshMaterial3d<StandardMaterial>)>()
                     .insert((
-                        Mesh2d(assets.glow.clone()),
+                        Mesh2d(assets.mesh(Shape::Glow)),
                         MeshMaterial2d(glow.flat.clone()),
                     ));
             } else {
@@ -1330,7 +1777,7 @@ fn animate_butterfly_glows(
                     .entity(entity)
                     .remove::<(Mesh2d, MeshMaterial2d<ColorMaterial>)>()
                     .insert((
-                        Mesh3d(assets.glow.clone()),
+                        Mesh3d(assets.mesh(Shape::Glow)),
                         MeshMaterial3d(glow.material.clone()),
                     ));
             }
@@ -1625,6 +2072,7 @@ mod tests {
                     angle: 0.0,
                     color,
                     shape: Shape::Glow,
+                    ..Particle::BASE
                 }]));
             app.update();
             for mut slot in app
@@ -1883,6 +2331,11 @@ mod tests {
             BurstKind::for_style(ProjectileStyle::Arrow),
             BurstKind::Ranged
         );
+        // A claw is a melee strike; it used to fall through to the ranged pop.
+        assert_eq!(
+            BurstKind::for_style(ProjectileStyle::Claw),
+            BurstKind::Melee
+        );
         for kind in [BurstKind::Melee, BurstKind::Magic, BurstKind::Ranged] {
             let burst = ImpactBurst {
                 position: Vec3::ZERO,
@@ -1901,6 +2354,430 @@ mod tests {
                     let pose = p.pose(flat, Quat::IDENTITY);
                     assert!(pose.translation.is_finite() && pose.scale.is_finite());
                 }
+            }
+        }
+        // The same bound holds for every authored impact kind and accent pattern, however
+        // large a row asks them to be.
+        use crate::skill_presentation::{accents, impacts, vocab};
+        let palette = accents::Palette::of_class(&crate::skill_presentation::Theme {
+            secondary: [0.5; 3],
+            accent: [1.0; 3],
+        });
+        let bounded = |particles: Vec<ParticleSpec>, most: usize, secs: f32| {
+            assert!(!particles.is_empty() && particles.len() <= most);
+            for spec in particles {
+                assert!(spec.is_sound() && spec.end_secs() <= secs);
+            }
+        };
+        for kind in vocab::ImpactKind::ALL {
+            let recipe = impacts::ImpactRecipe {
+                kind: *kind,
+                shape: None,
+                count: Some(u8::MAX),
+                scale: 100.,
+                lifetime: 100.,
+                slots: None,
+            };
+            for area_damage in [false, true] {
+                let ctx = impacts::ImpactContext {
+                    position: Vec3::ZERO,
+                    direction: Vec2::X,
+                    heading: None,
+                    area_damage,
+                    receipt: 42,
+                };
+                bounded(impacts::impact_particles(&recipe, &palette, &ctx), 12, 1.7);
+            }
+        }
+        for pattern in vocab::AccentPattern::ALL {
+            let accent = accents::CastAccent {
+                count: Some(u8::MAX),
+                scale: 100.,
+                lifetime: 100.,
+                ..accents::CastAccent::plain(*pattern)
+            };
+            let ctx = accents::CastContext {
+                origin: Vec3::ZERO,
+                direction: Vec2::X,
+                recast: false,
+                area: None,
+                strike_to: Some(Vec3::X * 30.),
+                sequence: 42,
+            };
+            let particles = accents::accent_particles(&accent, &palette, &ctx);
+            if *pattern == vocab::AccentPattern::None {
+                assert!(particles.is_empty());
+            } else {
+                bounded(particles, 8, 0.5);
+            }
+        }
+    }
+    fn pool() -> App {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+                std::time::Duration::from_millis(16),
+            ))
+            .init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<Image>>()
+            .init_resource::<Assets<StandardMaterial>>()
+            .init_resource::<Assets<ColorMaterial>>()
+            .init_resource::<PlayerVisualMode>()
+            .init_resource::<MapLayout>()
+            .add_plugins(GameVfxPlugin);
+        app.update();
+        app
+    }
+    fn live(app: &mut App, pick: impl Fn(&Particle) -> bool) -> usize {
+        app.world_mut()
+            .query::<&ParticleSlot>()
+            .iter(app.world())
+            .filter(|slot| slot.active.as_ref().is_some_and(&pick))
+            .count()
+    }
+    #[test]
+    fn skill_bursts_fill_the_decorative_half_in_order_and_receipts_keep_the_other() {
+        let mut app = pool();
+        let spec = |event_id: u64, sort_key: u32| ParticleSpec {
+            event_id,
+            sort_key,
+            lifetime: 100.,
+            source: ParticleSource::Accent,
+            ..ParticleSpec::BASE
+        };
+        // A far hero's burst is written first, the local hero's second. One frame takes 48
+        // decorative particles, the lowest sort key first, and drops the rest for good.
+        app.world_mut()
+            .write_message(SkillBurst(vec![spec(7, 5); 60]));
+        app.world_mut()
+            .write_message(SkillBurst(vec![spec(9, 0); 40]));
+        app.update();
+        assert_eq!(live(&mut app, |p| p.event_id == 9), 40);
+        assert_eq!(live(&mut app, |p| p.event_id == 7), 8);
+        app.update();
+        assert_eq!(live(&mut app, |_| true), 48);
+        // Skill bursts and trails share the intake and one half of the pool. Within a frame
+        // the skill bursts go first, whatever was written first.
+        let trail = Particle {
+            lifetime: 100.,
+            ..Particle::BASE
+        };
+        app.world_mut()
+            .write_message(FlightParticles(vec![trail.clone(); 100]));
+        app.world_mut()
+            .write_message(SkillBurst(vec![spec(7, 5); 60]));
+        app.update();
+        assert_eq!(live(&mut app, |p| p.class == ParticleClass::Skill), 96);
+        assert_eq!(live(&mut app, |p| p.class == ParticleClass::Trail), 0);
+        app.world_mut()
+            .write_message(FlightParticles(vec![trail; 100]));
+        app.update();
+        assert_eq!(live(&mut app, |p| p.class == ParticleClass::Trail), 32);
+        assert_eq!(
+            live(&mut app, |p| p.class != ParticleClass::Confirm),
+            PARTICLE_BUDGET / 2
+        );
+        // A receipt is not decoration: it takes the reserved half however full the other
+        // is, and a skill burst cannot take a reserved slot.
+        let hit = ParticleSpec {
+            source: ParticleSource::Impact,
+            ..spec(3, 0)
+        };
+        app.world_mut()
+            .write_message(SkillBurst(vec![spec(11, 0); 10]));
+        app.world_mut()
+            .write_message(ConfirmedBurst(vec![hit; 200]));
+        app.update();
+        assert_eq!(live(&mut app, |p| p.event_id == 3), PARTICLE_BUDGET / 2);
+        assert_eq!(live(&mut app, |p| p.event_id == 11), 0);
+        #[cfg(feature = "qa")]
+        {
+            let tags: Vec<_> = app
+                .world_mut()
+                .query::<&ParticleSlot>()
+                .iter(app.world())
+                .filter_map(ParticleSlot::source)
+                .collect();
+            let count = |tag| tags.iter().filter(|seen| **seen == tag).count();
+            assert_eq!(
+                count((ParticleClass::Confirm, ParticleSource::Impact)),
+                PARTICLE_BUDGET / 2
+            );
+            assert_eq!(count((ParticleClass::Skill, ParticleSource::Accent)), 96);
+            assert_eq!(count((ParticleClass::Trail, ParticleSource::Engine)), 32);
+        }
+    }
+    #[test]
+    fn flight_puffs_are_trails_and_legacy_accents_are_skill_particles() {
+        let mut app = pool();
+        app.world_mut().write_message(FlightParticles(vec![
+            Particle {
+                lifetime: 100.,
+                ..Particle::BASE
+            },
+            Particle {
+                event_id: 12,
+                lifetime: 100.,
+                ..Particle::BASE
+            },
+        ]));
+        app.world_mut().write_message(test_burst());
+        app.update();
+        assert_eq!(
+            live(&mut app, |p| p.event_id == 0
+                && p.class == ParticleClass::Trail),
+            1
+        );
+        assert_eq!(
+            live(&mut app, |p| p.event_id == 12
+                && p.class == ParticleClass::Skill),
+            1
+        );
+        assert_eq!(live(&mut app, |p| p.class == ParticleClass::Confirm), 12);
+    }
+    #[test]
+    fn delayed_particles_wait_hidden_and_malformed_ones_are_dropped() {
+        let mut app = pool();
+        let late = ParticleSpec {
+            event_id: 5,
+            delay: 0.1,
+            lifetime: 1.,
+            ..ParticleSpec::BASE
+        };
+        app.world_mut().write_message(SkillBurst(vec![
+            late.clone(),
+            ParticleSpec {
+                lifetime: 0.,
+                ..late.clone()
+            },
+            ParticleSpec {
+                origin: Vec3::NAN,
+                ..late.clone()
+            },
+            ParticleSpec {
+                size: f32::INFINITY,
+                ..late.clone()
+            },
+            // The pool never holds a slot hidden for longer than a quarter second.
+            ParticleSpec {
+                event_id: 6,
+                delay: 10.,
+                ..late
+            },
+        ]));
+        app.update();
+        assert_eq!(live(&mut app, |_| true), 2);
+        assert_eq!(
+            live(&mut app, |p| p.event_id == 6 && p.age >= -MAX_DELAY),
+            1
+        );
+        let shown = |app: &mut App| {
+            app.world_mut()
+                .query::<(&ParticleSlot, &Visibility)>()
+                .iter(app.world())
+                .find(|(slot, _)| slot.active.as_ref().is_some_and(|p| p.event_id == 5))
+                .map(|(_, visibility)| *visibility == Visibility::Visible)
+        };
+        assert_eq!(shown(&mut app), Some(false));
+        for _ in 0..7 {
+            app.update();
+        }
+        assert_eq!(shown(&mut app), Some(true));
+    }
+    #[test]
+    fn generated_particles_follow_drag_gravity_curves_colours_and_orientation() {
+        let spec = ParticleSpec {
+            origin: Vec3::new(1., 2., 3.),
+            velocity: Vec3::new(4., 3., 0.),
+            lifetime: 1.,
+            gravity: 6.,
+            drag: 2.,
+            ..ParticleSpec::BASE
+        };
+        // The closed form equals a fine step-by-step integration, with and without drag.
+        for drag in [2., 0.] {
+            let particle = Particle::from_spec(
+                &ParticleSpec {
+                    drag,
+                    ..spec.clone()
+                },
+                ParticleClass::Skill,
+            );
+            let (mut position, mut velocity) = (Vec3::ZERO, spec.velocity);
+            for _ in 0..20_000 {
+                velocity += (-Vec3::Y * 6. - velocity * drag) * 5e-5;
+                position += velocity * 5e-5;
+            }
+            assert!(particle.travel(1.).distance(position) < 2e-3, "drag {drag}");
+        }
+        // Reach: the farther end of the flight plus the particle's own half extent.
+        let thrown = (1. - (-2f32).exp()) / 2. * 4.;
+        assert!((spec.reach(spec.origin) - (thrown + 0.5)).abs() < 1e-5);
+        let grown = ParticleSpec {
+            shape: Shape::Ringlet,
+            curve: Curve::Grow,
+            size: 3.,
+            velocity: Vec3::Y * 9.,
+            ..ParticleSpec::BASE
+        };
+        assert!((grown.reach(Vec3::new(0., 5., 4.)) - (4. + 3.)).abs() < 1e-5);
+        // Every curve stays within its stated peak, and reaches it.
+        for curve in [
+            Curve::Shrink,
+            Curve::Grow,
+            Curve::Pop,
+            Curve::Hold,
+            Curve::Stretch,
+        ] {
+            let most = (0..=100)
+                .map(|i| curve.scale(i as f32 / 100.).max_element())
+                .fold(0., f32::max);
+            assert!((most - curve.peak()).abs() < 1e-5, "{curve:?}");
+        }
+        assert!(Curve::Pop.scale(0.).distance(Vec2::splat(0.4)) < 1e-6);
+        assert_eq!(Curve::Pop.scale(0.25), Vec2::ONE);
+        assert_eq!(Curve::Stretch.scale(1.), Vec2::new(1.5, 0.6));
+        // Colour and gain blend toward the end colour; a particle without one keeps both.
+        let blend = Particle::from_spec(
+            &ParticleSpec {
+                color: Tint {
+                    color: Color::srgb(1., 0., 0.),
+                    gain: 4.,
+                },
+                end_color: Some(Tint {
+                    color: Color::srgb(0., 0., 1.),
+                    gain: 1.,
+                }),
+                ..ParticleSpec::BASE
+            },
+            ParticleClass::Skill,
+        );
+        assert_eq!(blend.tint(0.).color, Color::srgb(1., 0., 0.));
+        assert_eq!(blend.tint(1.).color, Color::srgb(0., 0., 1.));
+        assert_eq!(blend.tint(0.5).gain, 2.5);
+        assert_eq!(Particle::BASE.tint(0.7).gain, PARTICLE_HDR_GAIN);
+        // A ground particle lies flat with its axis along the heading, and turns about the
+        // vertical; a billboard keeps facing the camera.
+        let facing = Quat::from_rotation_x(-1.);
+        let heading = Vec3::new(0.6, 0., 0.8);
+        let lying = ParticleSpec {
+            angle: heading.z.atan2(heading.x),
+            orient: Orient::Ground,
+            curve: Curve::Hold,
+            ..ParticleSpec::BASE
+        };
+        let pose = lying.pose_at(0.1, false, facing);
+        assert!((pose.rotation * Vec3::X).distance(heading) < 1e-5);
+        assert!((pose.rotation * Vec3::Z).distance(Vec3::Y) < 1e-5);
+        let turning = ParticleSpec {
+            spin: 5.,
+            ..lying.clone()
+        };
+        let turned = turning.pose_at(0.1, false, facing).rotation * Vec3::X;
+        assert!((turned.dot(heading) - 0.5f32.cos()).abs() < 1e-5 && turned.y.abs() < 1e-5);
+        let billboard = ParticleSpec {
+            orient: Orient::Billboard,
+            ..lying.clone()
+        };
+        let pose = billboard.pose_at(0.1, false, facing);
+        assert!((pose.rotation * Vec3::Z).distance(facing * Vec3::Z) < 1e-5);
+        // In the flat view every particle is seen from above, turned to its heading.
+        for spec in [&lying, &billboard] {
+            let pose = spec.pose_at(0.1, true, facing);
+            assert!((pose.rotation * Vec3::X).distance(Vec3::new(0.6, 0.8, 0.)) < 1e-5);
+        }
+        // A velocity particle points where it travels; at rest it keeps its heading.
+        let rising = ParticleSpec {
+            velocity: Vec3::Y,
+            orient: Orient::Velocity,
+            ..lying.clone()
+        };
+        let pose = rising.pose_at(0.1, false, Quat::IDENTITY);
+        assert!((pose.rotation * Vec3::X).distance(Vec3::Y) < 1e-5);
+        let flat = rising.pose_at(0.1, true, Quat::IDENTITY);
+        assert!((flat.rotation * Vec3::X).distance(Vec3::new(0.6, 0.8, 0.)) < 1e-5);
+        let falling = ParticleSpec {
+            velocity: Vec3::X,
+            gravity: 10.,
+            orient: Orient::Velocity,
+            ..lying.clone()
+        };
+        let nose = falling.pose_at(1., false, Quat::IDENTITY).rotation * Vec3::X;
+        assert!(nose.distance(Vec3::new(1., -10., 0.).normalize()) < 1e-5);
+        // A stretched particle lengthens along its axis only.
+        let stretched = ParticleSpec {
+            curve: Curve::Stretch,
+            size: 2.,
+            ..lying
+        };
+        assert_eq!(
+            stretched
+                .pose_at(stretched.lifetime, false, facing)
+                .scale
+                .truncate(),
+            Vec2::new(3., 1.2)
+        );
+        assert!(spec.is_sound());
+        assert!(
+            !ParticleSpec {
+                angle: f32::NAN,
+                ..spec
+            }
+            .is_sound()
+        );
+    }
+    #[test]
+    fn every_particle_shape_has_a_small_symmetric_mesh_inside_its_unit_radius() {
+        assert_eq!(Shape::ALL.len(), 13);
+        for shape in Shape::ALL {
+            let mesh = shape_mesh(*shape);
+            let positions = mesh
+                .attribute(Mesh::ATTRIBUTE_POSITION)
+                .and_then(|values| values.as_float3())
+                .unwrap();
+            assert!(mesh.indices().unwrap().len() / 3 <= 200, "{shape:?}");
+            // The two textured quads fade out before their corners; the rest is solid.
+            let textured = matches!(shape, Shape::Glow | Shape::Streak);
+            let extent = positions
+                .iter()
+                .map(|p| {
+                    if textured {
+                        p[0].abs()
+                    } else {
+                        Vec2::new(p[0], p[1]).length()
+                    }
+                })
+                .fold(0., f32::max);
+            assert!(
+                (extent - unit_radius(*shape)).abs() < 5e-3,
+                "{shape:?} reaches {extent}"
+            );
+            // A blade lies ahead of its origin and crosses its axis at its depth; every
+            // other mesh surrounds its origin.
+            let back = positions.iter().map(|p| p[0]).fold(f32::MAX, f32::min);
+            if blade_depth(*shape) > 0. {
+                let (near, far) = positions
+                    .iter()
+                    .filter(|p| p[1].abs() < 1e-4)
+                    .fold((f32::MAX, f32::MIN), |(near, far), p| {
+                        (near.min(p[0]), far.max(p[0]))
+                    });
+                assert!(back > -1e-4, "{shape:?} reaches behind its origin");
+                assert!(
+                    (0.5 * (near + far) - blade_depth(*shape)).abs() < 5e-3,
+                    "{shape:?} crosses its axis between {near} and {far}"
+                );
+            } else {
+                assert!(back < -0.2, "{shape:?} starts at {back}");
+            }
+            for p in positions {
+                assert_eq!(p[2], 0., "{shape:?}");
+                assert!(
+                    positions
+                        .iter()
+                        .any(|q| (q[0] - p[0]).abs() < 1e-4 && (q[1] + p[1]).abs() < 1e-4),
+                    "{shape:?} is not symmetric about its axis at {p:?}"
+                );
             }
         }
     }

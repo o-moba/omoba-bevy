@@ -1,8 +1,10 @@
 //! Packaged skill-owned presentation. Recipes select skills; buttons do not select motions.
 //! This module never changes movement, damage, cooldowns or authoritative geometry.
+pub(crate) mod accents;
 mod category;
 mod effects;
 mod geometry;
+pub(crate) mod impacts;
 mod schema;
 mod signature;
 pub(crate) mod vocab;

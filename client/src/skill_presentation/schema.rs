@@ -1,17 +1,22 @@
 //! `skills.skillfx` schema 2: the rows and their validation. Designers author palette,
 //! silhouette, motion, accents, impact and voice; every pick that would contradict a fact
-//! derived from the catalog (`category.rs`, `geometry.rs`) is rejected here.
+//! derived from the catalog (`category.rs`, `geometry.rs`) is rejected here, and every
+//! particle block is run through its generator, because a declared count proves nothing.
+use super::accents::{self, CastContext, OneShot, Palette};
 use super::category::{self, Category, SkillKey};
+use super::impacts::{self, ImpactContext};
 use super::vocab::{
     AccentPattern, Altitude, Archetype, AudioBase, AudioSlice, Behaviour, ExpireKind, ImpactKind,
     Marker, Model, MotionPhase, MovePattern, PaletteSlot, ParticleShape, RecastMarker,
     SatelliteLayout, Silhouette, StageRule, Trail,
 };
 use super::{EffectStyle, SkillPresentation, geometry};
+use crate::game_vfx::ParticleSpec;
 use crate::humanoid::SharedHumanoidMotion;
+use bevy::math::{Vec2, Vec3, Vec3Swizzles};
 use serde::Deserialize;
 use shared::HeroClass;
-use shared::loadout::{EffectVisualKind, SkillId};
+use shared::loadout::{EffectVisualKind, SkillEffectState, SkillId};
 use std::collections::BTreeMap;
 use std::ops::RangeInclusive;
 
@@ -169,6 +174,24 @@ fn default_accent_lifetime() -> f32 {
 }
 
 impl CastAccent {
+    /// The accent a pattern draws when a row names nothing else. A recast accent is always
+    /// this one, whatever the row names for its first cast.
+    pub(crate) fn plain(pattern: AccentPattern) -> Self {
+        Self {
+            pattern,
+            shape: None,
+            count: None,
+            scale: one(),
+            lifetime: default_accent_lifetime(),
+            slots: None,
+            recast: None,
+            movement: None,
+            link: None,
+            area: false,
+            recast_marker: None,
+        }
+    }
+
     pub(crate) fn lead(&self) -> Option<ParticleShape> {
         self.shape.or(self.pattern.default_lead())
     }
@@ -439,7 +462,7 @@ pub(super) fn validate(config: &SkillPresentation) -> Result<(), String> {
     let motion = SharedHumanoidMotion::embedded()?;
     themes(config)?;
     for (class, basic) in &config.basic_attacks {
-        basic_row(class, basic, motion, false)
+        basic_row(config, class, basic, motion, false)
             .map_err(|error| format!("basic_attacks.{class}: {error}"))?;
     }
     for (id, profile) in &config.skills {
@@ -556,6 +579,208 @@ fn skill_row(
             .and_then(|theme| luminance_violation(profile, theme))
         {
             return Err(flat);
+        }
+    }
+    match config.themes.get(home.id()) {
+        Some(theme) => generated(profile, key, &Palette::of(profile, theme)),
+        None => Ok(()),
+    }
+}
+
+/// Why a generated burst cannot be drawn within its budget.
+pub(super) fn burst_budget(
+    specs: &[ParticleSpec],
+    most: usize,
+    secs: f32,
+    block: &str,
+) -> Result<(), String> {
+    if specs.len() > most {
+        return Err(format!(
+            "{block} draws {} particles (at most {most})",
+            specs.len()
+        ));
+    }
+    if specs.iter().any(|spec| !spec.is_sound()) {
+        return Err(format!("{block} draws a particle without a finite pose"));
+    }
+    let longest = specs.iter().map(ParticleSpec::end_secs).fold(0.0, f32::max);
+    if longest > secs + 1e-4 {
+        return Err(format!("{block} lasts {longest:.2} s (at most {secs})"));
+    }
+    Ok(())
+}
+
+/// Farthest any particle of a burst is drawn from `from` on the ground plane.
+fn burst_reach(specs: &[ParticleSpec], from: Vec3) -> f32 {
+    specs
+        .iter()
+        .map(|spec| spec.reach(from))
+        .fold(0.0, f32::max)
+}
+
+/// Where the generators are run for validation; any finite place gives the same counts,
+/// lifetimes and extents.
+const PROBE: Vec3 = Vec3::new(3.0, 0.5, -2.0);
+/// A long observed displacement or link: no skill moves or reaches farther.
+const PROBE_TRAVEL: f32 = 30.0;
+
+/// Runs the accent of a row for a first cast and for a recast, with the area the row would
+/// flash and the farthest strike line the skill could draw, then its move and its link.
+fn accent_output(
+    accent: &CastAccent,
+    palette: &Palette,
+    id: Option<SkillId>,
+    block: &str,
+) -> Result<(), String> {
+    let direction = Vec2::X;
+    let area = id.filter(|_| accent.area).and_then(|id| {
+        geometry::instant_area(
+            id,
+            &geometry::AreaContext {
+                origin: PROBE.xz(),
+                arrival: Some(PROBE.xz()),
+                direction,
+                recast: false,
+            },
+        )
+    });
+    for recast in [false, true] {
+        let specs = accents::accent_particles(
+            accent,
+            palette,
+            &CastContext {
+                origin: PROBE,
+                direction,
+                recast,
+                area,
+                strike_to: Some(PROBE + Vec3::X * PROBE_TRAVEL),
+                sequence: 1,
+            },
+        );
+        burst_budget(&specs, accents::ACCENT_MAX, accents::ACCENT_SECS, block)?;
+        // An outline and a strike line end at replicated geometry. Everything else is
+        // decoration and stays at the caster.
+        let drawn = accent.recast.filter(|_| recast).unwrap_or(accent.pattern);
+        let derived = (area.is_some() && !recast) || drawn == AccentPattern::StrikeLine;
+        let reach = burst_reach(&specs, PROBE);
+        if !derived && reach > accents::DECORATIVE_REACH + 1e-3 {
+            return Err(format!(
+                "{block} reaches {reach:.2} units from the caster (at most {})",
+                accents::DECORATIVE_REACH
+            ));
+        }
+    }
+    let far = PROBE + Vec3::X * PROBE_TRAVEL;
+    if let Some(movement) = &accent.movement {
+        for (from, to) in [
+            (Some(PROBE), Some(far)),
+            (None, Some(far)),
+            (Some(PROBE), None),
+        ] {
+            burst_budget(
+                &accents::move_particles(movement, palette, from, to, 1),
+                accents::MOVE_MAX,
+                accents::MOVE_SECS,
+                "cast.move",
+            )?;
+        }
+    }
+    if let Some(shape) = accent.link {
+        burst_budget(
+            &accents::link_particles(shape, palette, PROBE, far, 1),
+            accents::LINK_MAX,
+            accents::LINK_SECS,
+            "cast.link",
+        )?;
+    }
+    Ok(())
+}
+
+/// Runs the impact of a row with and without a live effect heading. A skill without area
+/// damage must keep the burst at the unit it hit.
+fn impact_output(
+    impact: &ImpactRecipe,
+    palette: &Palette,
+    area_damage: bool,
+) -> Result<(), String> {
+    for heading in [None, Some(Vec2::Y)] {
+        let specs = impacts::impact_particles(
+            impact,
+            palette,
+            &ImpactContext {
+                position: PROBE,
+                direction: Vec2::X,
+                heading,
+                area_damage,
+                receipt: 1,
+            },
+        );
+        burst_budget(&specs, impacts::IMPACT_MAX, impacts::IMPACT_SECS, "impact")?;
+        let reach = burst_reach(&specs, PROBE);
+        if !area_damage && reach > impacts::SINGLE_TARGET_REACH + 1e-3 {
+            return Err(format!(
+                "impact reaches {reach:.2} units from the hit (at most {} without area damage)",
+                impacts::SINGLE_TARGET_REACH
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Runs the one-shot of a body's `expire` over small, usual and large effects of its kind.
+fn expire_output(
+    body: &Body,
+    id: SkillId,
+    kind: EffectVisualKind,
+    palette: &Palette,
+) -> Result<(), String> {
+    let Some(oneshot) = OneShot::of(body.expire) else {
+        return Ok(());
+    };
+    for (radius, length) in [(0.5, 2.0), (3.0, 12.0), (8.0, PROBE_TRAVEL)] {
+        let effect = SkillEffectState {
+            id: 1,
+            owner_id: 1,
+            owner_team: shared::map::Team::Green,
+            skill: id,
+            kind,
+            position: [PROBE.x, PROBE.z],
+            end: [PROBE.x + length, PROBE.z],
+            radius,
+            remaining_secs: 0.0,
+            armed: true,
+            consumed_segments: 0,
+        };
+        let geo = geometry::boundary_shape(id, kind, &effect);
+        burst_budget(
+            &accents::stage_oneshot(oneshot, palette, &geo, PROBE.y, 1),
+            accents::STAGE_MAX,
+            accents::STAGE_SECS,
+            "expire",
+        )?;
+    }
+    Ok(())
+}
+
+/// Output validation of a skill row: every particle block is generated and measured.
+fn generated(profile: &SkillProfile, key: SkillKey, palette: &Palette) -> Result<(), String> {
+    let id = key.modular();
+    if let Some(accent) = &profile.cast {
+        accent_output(accent, palette, id, "cast")?;
+    }
+    if let Some(impact) = &profile.impact {
+        impact_output(impact, palette, category::area_damage(key))?;
+    }
+    let Some(id) = id else {
+        return Ok(());
+    };
+    if let Some((body, kind)) = profile.body.as_ref().zip(category::own_kinds(id).first()) {
+        expire_output(body, id, *kind, palette).map_err(|error| format!("body: {error}"))?;
+    }
+    for (name, body) in &profile.aux {
+        if let Some((_, kind)) = aux_kind(key, name) {
+            expire_output(body, id, kind, palette)
+                .map_err(|error| format!("aux.{name}: {error}"))?;
         }
     }
     Ok(())
@@ -992,6 +1217,7 @@ fn body_block(body: &Body, id: SkillId, binding: Binding) -> Result<(), String> 
 }
 
 fn basic_row(
+    config: &SkillPresentation,
     class: &str,
     basic: &BasicProfile,
     motion: &SharedHumanoidMotion,
@@ -1030,8 +1256,18 @@ fn basic_row(
         if !repeater {
             return Err("`rockets` needs the repeater attack profile".into());
         }
-        basic_row(class.id(), rockets, motion, true)
+        basic_row(config, class.id(), rockets, motion, true)
             .map_err(|error| format!("rockets: {error}"))?;
+    }
+    // `themes` was checked to cover every class.
+    let Some(palette) = config.themes.get(class.id()).map(Palette::of_class) else {
+        return Ok(());
+    };
+    if let Some(accent) = &basic.accent {
+        accent_output(accent, &palette, None, "accent")?;
+    }
+    if let Some(impact) = &basic.impact {
+        impact_output(impact, &palette, false)?;
     }
     Ok(())
 }

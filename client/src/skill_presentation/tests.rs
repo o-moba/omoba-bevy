@@ -581,3 +581,508 @@ fn shipped_identity_ratchet() {
         );
     }
 }
+
+/// What one registry draws with pooled particles, block by block.
+#[derive(Debug, Default, PartialEq, Eq)]
+struct Drawn {
+    accents: usize,
+    silent_accents: usize,
+    recasts: usize,
+    areas: usize,
+    moves: usize,
+    links: usize,
+    impacts: usize,
+    expires: usize,
+}
+
+/// Runs every particle block of a registry the way the client will and holds each burst to
+/// its budget, in both render modes.
+fn draw_registry(registry: &SkillPresentation) -> Drawn {
+    use crate::game_vfx::ParticleSpec;
+    use accents::{CastContext, OneShot, Palette};
+    use impacts::ImpactContext;
+
+    const AT: Vec3 = Vec3::new(-7.0, 2.0, 5.0);
+    let far = AT + Vec3::new(8.0, 0.0, -6.0);
+    let direction = Vec2::new(0.8, -0.6);
+    let mut drawn = Drawn::default();
+    let within = |specs: &[ParticleSpec], most: usize, secs: f32, what: &str| {
+        assert!(specs.len() <= most, "{what}: {} particles", specs.len());
+        for spec in specs {
+            // `is_sound` poses the particle at the start, the middle and the end of its
+            // life in the flat and in the 3D view.
+            assert!(spec.is_sound(), "{what}: a pose is not finite");
+            assert!(
+                spec.end_secs() <= secs + 1e-5,
+                "{what}: {} s",
+                spec.end_secs()
+            );
+            assert!(spec.delay <= 0.25, "{what}: waits {} s", spec.delay);
+        }
+        schema::burst_budget(specs, most, secs, what).unwrap();
+    };
+    let mut accent =
+        |cast: &schema::CastAccent, palette: &Palette, id: Option<SkillId>, what: &str| {
+            let area = id.filter(|_| cast.area).and_then(|id| {
+                geometry::instant_area(
+                    id,
+                    &geometry::AreaContext {
+                        origin: AT.xz(),
+                        arrival: Some(far.xz()),
+                        direction,
+                        recast: false,
+                    },
+                )
+            });
+            assert_eq!(
+                area.is_some(),
+                cast.area,
+                "{what}: a flagged area must exist"
+            );
+            for recast in [false, true] {
+                let ctx = CastContext {
+                    origin: AT,
+                    direction,
+                    recast,
+                    area,
+                    strike_to: Some(far),
+                    sequence: 9,
+                };
+                let specs = accents::accent_particles(cast, palette, &ctx);
+                within(&specs, accents::ACCENT_MAX, accents::ACCENT_SECS, what);
+                // A recast pattern is drawn with its own defaults, not the row's timing.
+                let own = cast.recast.filter(|_| recast);
+                let lifetime = own.map_or(cast.lifetime, |pattern| {
+                    schema::CastAccent::plain(pattern).lifetime
+                });
+                assert!(specs.iter().all(|spec| spec.end_secs() <= lifetime + 1e-5));
+                let pattern = own.unwrap_or(cast.pattern);
+                // The count a row names is the number of particles it gets; `none` gets none.
+                let expected = match (pattern, own, cast.count) {
+                    (vocab::AccentPattern::None, ..) => Some(0),
+                    (_, None, Some(count)) => Some(usize::from(count)),
+                    _ => None,
+                };
+                if let Some(expected) = expected {
+                    assert_eq!(specs.len(), expected, "{what} recast {recast}");
+                }
+                assert_eq!(
+                    specs.is_empty(),
+                    pattern == vocab::AccentPattern::None,
+                    "{what}"
+                );
+                if recast {
+                    drawn.recasts += usize::from(cast.recast.is_some());
+                    continue;
+                }
+                drawn.accents += 1;
+                drawn.silent_accents += usize::from(specs.is_empty());
+                drawn.areas += usize::from(area.is_some());
+                // A plain accent stays at the caster; an outline and a strike line end at
+                // replicated geometry.
+                if area.is_none() && pattern != vocab::AccentPattern::StrikeLine {
+                    let reach = specs.iter().map(|spec| spec.reach(AT)).fold(0.0, f32::max);
+                    assert!(
+                        reach <= pattern.base_extent() * cast.scale + 1e-3
+                            && reach <= accents::DECORATIVE_REACH + 1e-3,
+                        "{what}: reaches {reach}"
+                    );
+                }
+            }
+            if let Some(step) = &cast.movement {
+                drawn.moves += 1;
+                for (from, to) in [(Some(AT), Some(far)), (None, Some(far)), (Some(AT), None)] {
+                    let specs = accents::move_particles(step, palette, from, to, 9);
+                    assert!(!specs.is_empty(), "{what}: move");
+                    within(&specs, accents::MOVE_MAX, accents::MOVE_SECS, what);
+                }
+            }
+            if let Some(shape) = cast.link {
+                drawn.links += 1;
+                let specs = accents::link_particles(shape, palette, AT, far, 9);
+                assert_eq!(specs.len(), accents::LINK_MAX, "{what}: link");
+                within(&specs, accents::LINK_MAX, accents::LINK_SECS, what);
+            }
+        };
+    let mut impact =
+        |recipe: &schema::ImpactRecipe, palette: &Palette, area_damage: bool, what: &str| {
+            drawn.impacts += 1;
+            for heading in [None, Some(Vec2::Y)] {
+                let ctx = ImpactContext {
+                    position: far,
+                    direction,
+                    heading,
+                    area_damage,
+                    receipt: 4,
+                };
+                let specs = impacts::impact_particles(recipe, palette, &ctx);
+                assert!(!specs.is_empty(), "{what}: impact");
+                within(&specs, impacts::IMPACT_MAX, impacts::IMPACT_SECS, what);
+                if let Some(count) = recipe.count {
+                    assert_eq!(specs.len(), usize::from(count), "{what}: impact");
+                }
+                let reach = specs.iter().map(|spec| spec.reach(far)).fold(0.0, f32::max);
+                assert!(
+                    area_damage || reach <= impacts::SINGLE_TARGET_REACH + 1e-3,
+                    "{what}: the impact reaches {reach}"
+                );
+            }
+        };
+    for (id, profile) in registry.rows() {
+        let key = category::SkillKey::from_id(id).unwrap();
+        let palette = Palette::of(profile, registry.theme(key.home()).unwrap());
+        if let Some(cast) = &profile.cast {
+            accent(cast, &palette, key.modular(), id);
+        }
+        if let Some(recipe) = &profile.impact {
+            impact(recipe, &palette, category::area_damage(key), id);
+        }
+        let Some(skill) = key.modular() else {
+            continue;
+        };
+        let own = profile
+            .body
+            .as_ref()
+            .zip(category::own_kinds(skill).first().copied());
+        let aux = profile.aux.iter().filter_map(|(name, body)| {
+            category::aux_kinds(skill)
+                .iter()
+                .find(|kind| category::kind_id(**kind) == name)
+                .map(|kind| (body, *kind))
+        });
+        for (body, kind) in own.into_iter().chain(aux) {
+            let Some(oneshot) = OneShot::of(body.expire) else {
+                continue;
+            };
+            drawn.expires += 1;
+            let mut effect = effect(skill, kind);
+            effect.radius = 3.0;
+            effect.end = [shared::loadout::skill(skill).ability.cast_range, 0.0];
+            let geo = geometry::boundary_shape(skill, kind, &effect);
+            let specs = accents::stage_oneshot(oneshot, &palette, &geo, 0.0, 9);
+            assert!(
+                !specs.is_empty(),
+                "{id}: expire {:?} on {geo:?}",
+                body.expire
+            );
+            within(&specs, accents::STAGE_MAX, accents::STAGE_SECS, id);
+        }
+    }
+    for class in shared::HeroClass::ALL {
+        let Some(basic) = registry.basic(class) else {
+            continue;
+        };
+        let palette = Palette::of_class(registry.theme(class).unwrap());
+        for row in std::iter::once(basic).chain(basic.rockets.as_deref()) {
+            if let Some(cast) = &row.accent {
+                accent(cast, &palette, None, class.id());
+            }
+            if let Some(recipe) = &row.impact {
+                impact(recipe, &palette, false, class.id());
+            }
+        }
+    }
+    drawn
+}
+
+/// AC13 from data: every accent, move, link, impact and expire one-shot of the packaged
+/// file and of the final rows stays inside its budget with finite poses in both backends.
+#[test]
+fn budget_from_data() {
+    // The packaged rows gain their blocks class by class; whatever they have is held to
+    // the same budgets.
+    let shipped = profiles();
+    let packaged = draw_registry(&shipped);
+    assert_eq!(
+        packaged.accents,
+        shipped.rows().filter(|(_, row)| row.cast.is_some()).count()
+            + shared::HeroClass::ALL
+                .into_iter()
+                .filter_map(|class| shipped.basic(class))
+                .map(|basic| {
+                    usize::from(basic.accent.is_some())
+                        + usize::from(
+                            basic
+                                .rockets
+                                .as_ref()
+                                .is_some_and(|row| row.accent.is_some()),
+                        )
+                })
+                .sum::<usize>()
+    );
+    // The final rows: 68 skill accents and 14 basic ones, 51 skill impacts and 18 basic
+    // ones, and every modifier of the data contract.
+    assert_eq!(
+        draw_registry(&target::target()),
+        Drawn {
+            accents: 68 + 14,
+            silent_accents: 1,
+            recasts: 7,
+            areas: 3,
+            moves: 10,
+            links: 14,
+            impacts: 51 + 18,
+            expires: 12,
+        }
+    );
+}
+
+/// Every pattern, kind, move and one-shot with every lead shape, count, scale and lifetime
+/// a row could name: the count is exact, the time and the reach are bounded.
+#[test]
+fn every_pattern_and_kind_is_bounded() {
+    use accents::{CastContext, Palette};
+    use impacts::ImpactContext;
+    use vocab::{AccentPattern, ImpactKind, MovePattern, ParticleShape};
+
+    let palette = Palette::of_class(profiles().theme(shared::HeroClass::Mage).unwrap());
+    let at = Vec3::new(2.0, 0.0, 1.0);
+    for pattern in AccentPattern::ALL {
+        if *pattern == AccentPattern::None {
+            continue;
+        }
+        let base = pattern.base_extent();
+        // The largest scale the parser lets this pattern have.
+        let most = if base > 0.0 {
+            (2.0 / base).min(2.0)
+        } else {
+            2.0
+        };
+        for shape in ParticleShape::ALL {
+            for count in 1..=8 {
+                for scale in [0.4, 1.0, most] {
+                    for lifetime in [0.12, 0.35, 0.5] {
+                        let cast = schema::CastAccent {
+                            shape: Some(*shape),
+                            count: Some(count),
+                            scale,
+                            lifetime,
+                            ..schema::CastAccent::plain(*pattern)
+                        };
+                        let ctx = CastContext {
+                            origin: at,
+                            direction: Vec2::new(-0.6, 0.8),
+                            recast: false,
+                            area: None,
+                            strike_to: Some(at + Vec3::new(3.0, 0.5, 4.0)),
+                            sequence: u64::from(count) * 7,
+                        };
+                        let specs = accents::accent_particles(&cast, &palette, &ctx);
+                        let name = format!(
+                            "{} {} x{count} {scale} {lifetime}",
+                            pattern.id(),
+                            shape.id()
+                        );
+                        assert_eq!(specs.len(), usize::from(count), "{name}");
+                        for spec in &specs {
+                            assert!(spec.is_sound(), "{name}");
+                            assert!(spec.end_secs() <= lifetime + 1e-5, "{name}");
+                            assert!(spec.delay <= 0.25 + 1e-6, "{name}");
+                            // A decorative accent stays inside its extent.
+                            assert!(
+                                *pattern == AccentPattern::StrikeLine
+                                    || spec.reach(at) <= base * scale + 1e-3,
+                                "{name}: {}",
+                                spec.reach(at)
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        // Without a count the pattern has a small one of its own.
+        let plain = schema::CastAccent::plain(*pattern);
+        let ctx = CastContext {
+            origin: at,
+            direction: Vec2::X,
+            recast: false,
+            area: None,
+            strike_to: Some(at + Vec3::X * 5.0),
+            sequence: 1,
+        };
+        let specs = accents::accent_particles(&plain, &palette, &ctx);
+        assert!((1..=6).contains(&specs.len()), "{}", pattern.id());
+    }
+    for kind in ImpactKind::ALL {
+        for shape in ParticleShape::ALL {
+            for count in 1..=12 {
+                for scale in [0.3, 1.0, 2.0] {
+                    for lifetime in [0.08, 0.45, 1.2] {
+                        for area_damage in [false, true] {
+                            let recipe = schema::ImpactRecipe {
+                                kind: *kind,
+                                shape: Some(*shape),
+                                count: Some(count),
+                                scale,
+                                lifetime,
+                                slots: None,
+                            };
+                            let ctx = ImpactContext {
+                                position: at,
+                                direction: Vec2::new(0.0, -1.0),
+                                heading: Some(Vec2::X),
+                                area_damage,
+                                receipt: u64::from(count) * 13,
+                            };
+                            let specs = impacts::impact_particles(&recipe, &palette, &ctx);
+                            let name =
+                                format!("{} {} x{count} {scale} {lifetime}", kind.id(), shape.id());
+                            assert_eq!(specs.len(), usize::from(count), "{name}");
+                            for spec in &specs {
+                                assert!(spec.is_sound(), "{name}");
+                                assert!(spec.end_secs() <= lifetime * 1.4 + 1e-5, "{name}");
+                                assert!(spec.end_secs() <= impacts::IMPACT_SECS, "{name}");
+                                assert!(spec.delay <= 0.25 + 1e-6, "{name}");
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    for pattern in MovePattern::ALL {
+        for shape in ParticleShape::ALL.iter().copied().map(Some).chain([None]) {
+            for travel in [0.0, 0.4, 3.0, 12.0, 60.0] {
+                let to = at + Vec3::new(0.6, 0.0, -0.8) * travel;
+                let step = schema::MoveSpec {
+                    pattern: *pattern,
+                    shape,
+                };
+                for (from, to) in [(Some(at), Some(to)), (None, Some(to)), (Some(at), None)] {
+                    let specs = accents::move_particles(&step, &palette, from, to, 3);
+                    assert!(
+                        (1..=accents::MOVE_MAX).contains(&specs.len()),
+                        "{}",
+                        pattern.id()
+                    );
+                    schema::burst_budget(&specs, accents::MOVE_MAX, accents::MOVE_SECS, "move")
+                        .unwrap();
+                    assert!(
+                        specs.iter().all(|spec| spec.delay <= 0.25),
+                        "{}",
+                        pattern.id()
+                    );
+                }
+            }
+        }
+    }
+    for travel in [0.0, 0.4, 3.0, 12.0, 60.0] {
+        let to = at + Vec3::X * travel;
+        for (from, to) in [(Some(at), Some(to)), (None, Some(to)), (Some(at), None)] {
+            let specs = accents::drag_streak(from, to, 3);
+            schema::burst_budget(&specs, accents::MOVE_MAX, accents::MOVE_SECS, "drag").unwrap();
+            assert!(!specs.is_empty());
+        }
+    }
+}
+
+/// AC16: in the flat view every final row still draws its accent and its impact, on the
+/// ground point of the cast or of the receipt, with a visible size.
+#[test]
+fn every_target_row_draws_a_flat_accent_and_impact() {
+    use accents::{CastContext, Palette};
+    use impacts::ImpactContext;
+
+    let registry = target::target();
+    let at = Vec3::new(12.0, 3.0, -4.0);
+    let flat = |spec: &crate::game_vfx::ParticleSpec| {
+        let pose = spec.pose_at(spec.lifetime * 0.5, true, Quat::IDENTITY);
+        // The flat view drops the height: the particle is drawn over its ground point.
+        let ground = spec
+            .pose_at(spec.lifetime * 0.5, false, Quat::IDENTITY)
+            .translation
+            .xz();
+        pose.translation.truncate().distance(ground) < 1e-4
+            && pose.translation.z > 0.0
+            && pose.scale.truncate().min_element() > 0.0
+            && pose.rotation.is_finite()
+    };
+    let mut rows = 0;
+    for (id, profile) in registry.rows() {
+        let key = category::SkillKey::from_id(id).unwrap();
+        let palette = Palette::of(profile, registry.theme(key.home()).unwrap());
+        let cast = profile.cast.as_ref().unwrap();
+        let specs = accents::accent_particles(
+            cast,
+            &palette,
+            &CastContext {
+                origin: at,
+                direction: Vec2::Y,
+                recast: false,
+                area: None,
+                strike_to: Some(at + Vec3::Z * 6.0),
+                sequence: 2,
+            },
+        );
+        assert_eq!(
+            specs.is_empty(),
+            cast.pattern == vocab::AccentPattern::None,
+            "{id}"
+        );
+        assert!(specs.iter().all(flat), "{id}: accent");
+        if let Some(recipe) = &profile.impact {
+            let specs = impacts::impact_particles(
+                recipe,
+                &palette,
+                &ImpactContext {
+                    position: at,
+                    direction: Vec2::Y,
+                    heading: None,
+                    area_damage: category::area_damage(key),
+                    receipt: 3,
+                },
+            );
+            assert!(!specs.is_empty() && specs.iter().all(flat), "{id}: impact");
+        }
+        rows += 1;
+    }
+    assert_eq!(rows, 68);
+}
+
+/// The parser measures what a block draws; a burst over its budget is refused with the
+/// number that broke it.
+#[test]
+fn output_validation_refuses_bursts_over_their_budget() {
+    use crate::game_vfx::ParticleSpec;
+    let spec = ParticleSpec {
+        lifetime: 0.3,
+        delay: 0.1,
+        ..ParticleSpec::BASE
+    };
+    assert_eq!(schema::burst_budget(&[], 8, 0.5, "cast"), Ok(()));
+    assert_eq!(
+        schema::burst_budget(&vec![spec.clone(); 8], 8, 0.4, "cast"),
+        Ok(())
+    );
+    assert_eq!(
+        schema::burst_budget(&vec![spec.clone(); 9], 8, 0.5, "cast").unwrap_err(),
+        "cast draws 9 particles (at most 8)"
+    );
+    assert_eq!(
+        schema::burst_budget(std::slice::from_ref(&spec), 8, 0.39, "impact").unwrap_err(),
+        "impact lasts 0.40 s (at most 0.39)"
+    );
+    for broken in [
+        ParticleSpec {
+            origin: Vec3::NAN,
+            ..spec.clone()
+        },
+        ParticleSpec {
+            velocity: Vec3::INFINITY,
+            ..spec.clone()
+        },
+        ParticleSpec {
+            size: 0.0,
+            ..spec.clone()
+        },
+        ParticleSpec {
+            lifetime: -1.0,
+            ..spec
+        },
+    ] {
+        assert_eq!(
+            schema::burst_budget(&[broken], 8, 0.5, "cast.move").unwrap_err(),
+            "cast.move draws a particle without a finite pose"
+        );
+    }
+}
