@@ -26,7 +26,12 @@ its way (not for a melee core, which throws nothing). Every still lists the
 hero's projectiles and what stands for each of them. `--interleave` orders one
 basic attack as soon as the cast of a skill with a telegraph is accepted; each
 still names the hero's latest accepted action and the clip that carries its
-pose, so the stills show whether the telegraph kept the body.
+pose, so the stills show whether the telegraph kept the body. `--aim` adds, for
+every modular skill, `<n>-<key>-0-aim.png`: the aim preview with the skill key
+held before the cast, and `<n>-<key>-4-recast-aim.png` when the slot offers a
+recast after the cast (for a recast with a gate, once the hero is in reach).
+Each aim still records the preview the game drew; they are listed under
+`aim_stills`, apart from the three stills of the cast.
 """
 import argparse
 import datetime
@@ -58,6 +63,7 @@ STILL_FIELDS = ("file", "phase", "gate", "slot", "skill", "since_edge_secs", "an
                 "particles", "receipt", "damage_numbers", "effect_parts", "effect_visible_parts",
                 "effect_lights", "registry_profiles", "mean_pixel", "hero_pixels", "target_pixels",
                 "projectiles")
+AIM_PHASES = ("aim", "recast_aim")
 
 
 def overlay_assets(assets, workdir, overlays):
@@ -87,11 +93,24 @@ def phase_problems(summary, directory):
     if [s["file"] for s in stills if s["phase"] == "idle"] != ["0-idle.png"]:
         problems.append("expected exactly one idle baseline")
     for slot, key in enumerate(SLOT_KEYS):
-        phases = [s["phase"] for s in stills if s["phase"] != "idle" and s.get("slot") == slot]
+        phases = [s["phase"] for s in stills
+                  if s["phase"] not in ("idle",) + AIM_PHASES and s.get("slot") == slot]
         if sorted(phases) not in (["impact", "release", "windup"], ["release", "settled", "windup"]):
             problems.append(f"slot {key} has stills {phases}, expected windup, release and impact or settled")
     if len(summary.get("skills", [])) != len(SLOT_KEYS):
         problems.append("expected four skill records")
+    # An aim still belongs to the skill record that names it and carries the preview the
+    # game drew; with `--aim` every modular skill has the one taken before its cast.
+    for record in summary.get("skills", []):
+        key = SLOT_KEYS[record["slot"]] if record.get("slot") in range(len(SLOT_KEYS)) else "?"
+        taken = [s for s in stills if s["phase"] in AIM_PHASES and s.get("slot") == record.get("slot")]
+        if [s["file"] for s in taken] != (record.get("aim_stills") or []):
+            problems.append(f"slot {key}: aim stills {[s['file'] for s in taken]} do not match its record")
+        for still in taken:
+            if not ((still.get("aim") or {}).get("preview") or {}).get("shape"):
+                problems.append(f"{still['file']} records no aim preview")
+        if summary.get("aim") and record.get("modular") and [s["phase"] for s in taken][:1] != ["aim"]:
+            problems.append(f"slot {key} has no aim still")
     # A flight look ends with the basic attack; its record names the still.
     flights = [s["file"] for s in stills if s["phase"] == "flight"]
     if flights != (summary.get("basic") or {}).get("stills", []):
@@ -101,13 +120,13 @@ def phase_problems(summary, directory):
 
 def capture(hero, client, server, assets, output, timeout=135, roster=False, handhelds=False, sdk_weapon=None,
             phases=False, offscreen=False, visual_mode="models3d", overlays=None, avatar=None, release_at=None,
-            flight=False, interleave=False):
+            flight=False, interleave=False, aim=False):
     output.mkdir(parents=True)
     children = []
     result = dict(hero=hero, source=source_identity(), client_sha256=sha256(client),
                   locale="en", viewport=[1280, 720], physical_device_verified=False,
                   phases=phases, offscreen=offscreen, visual_mode=visual_mode,
-                  avatar=avatar, release_at=release_at, flight=flight, interleave=interleave)
+                  avatar=avatar, release_at=release_at, flight=flight, interleave=interleave, aim=aim)
     with tempfile.TemporaryDirectory(prefix="omoba-skill-pilot-") as isolated:
         if overlays:
             assets = overlay_assets(assets, isolated, overlays)
@@ -136,6 +155,8 @@ def capture(hero, client, server, assets, output, timeout=135, roster=False, han
                     env["OMOBA_STANDARD_QA_FLIGHT"] = "1"
                 if interleave:
                     env["OMOBA_STANDARD_QA_INTERLEAVE"] = "1"
+                if aim:
+                    env["OMOBA_STANDARD_QA_AIM"] = "1"
             elif roster or handhelds:
                 env["OMOBA_ROSTER_SKILLS_QA"] = "1"
             if offscreen:
@@ -161,11 +182,17 @@ def capture(hero, client, server, assets, output, timeout=135, roster=False, han
     result["errors"] = [line for line in log.splitlines() if any(marker in line for marker in ERROR_MARKERS)]
     if phases and summary:
         result["errors"] += phase_problems(summary, output)
+        if aim and summary.get("aim") is not True:
+            result["errors"].append("the client took no aim stills")
         result["registry_profiles"] = summary.get("registry_profiles")
         result["skills"] = summary.get("skills", [])
         result["basic"] = summary.get("basic")
         result["stills"] = [{field: capture.get(field) for field in STILL_FIELDS}
-                            for capture in summary.get("captures", []) if capture.get("phase")]
+                            for capture in summary.get("captures", [])
+                            if capture.get("phase") and capture["phase"] not in AIM_PHASES]
+        result["aim_stills"] = [{field: capture.get(field) for field in STILL_FIELDS + ("aim",)}
+                                for capture in summary.get("captures", [])
+                                if capture.get("phase") in AIM_PHASES]
     result["pass"] = (result.get("client_exit_code") == 0 and summary.get("pass") is True
                       and not result["errors"])
     (output / "capture-run.json").write_text(json.dumps(result, indent=2) + "\n")
@@ -221,13 +248,16 @@ def main(argv=None):
     parser.add_argument("--interleave", action="store_true",
                         help="With --phases: a basic attack is ordered as soon as the cast of a skill "
                              "with a telegraph is accepted")
+    parser.add_argument("--aim", action="store_true",
+                        help="With --phases: one more still per modular skill with its key held, showing "
+                             "the aim preview, and one in the recast window of a slot that offers one")
     parser.add_argument("--timeout", type=float,
                         help="Per-client deadline in seconds (default: 135, or 300 with --phases)")
     args = parser.parse_args(argv)
     if args.phases and (args.roster or args.handhelds):
         parser.error("--phases replaces --roster and --handhelds")
-    if (args.avatar or args.release_at or args.flight or args.interleave) and not args.phases:
-        parser.error("--avatar, --release-at, --flight and --interleave need --phases")
+    if (args.avatar or args.release_at or args.flight or args.interleave or args.aim) and not args.phases:
+        parser.error("--avatar, --release-at, --flight, --interleave and --aim need --phases")
     if args.timeout is None:
         args.timeout = 300 if args.phases else 135
     if not 0 < args.timeout <= 600:
@@ -271,12 +301,12 @@ def main(argv=None):
                                 for name, path in overlays.items()},
                       locale="en", viewport=[1280, 720], phases=args.phases, offscreen=args.offscreen,
                       visual_mode=args.visual_mode, avatar=args.avatar, release_at=args.release_at,
-                      flight=args.flight, interleave=args.interleave)
+                      flight=args.flight, interleave=args.interleave, aim=args.aim)
         results = [capture(hero, binaries["client"], binaries["server"], assets, output / hero, args.timeout,
                            args.roster or hero not in PILOT_HEROES, args.handhelds, phases=args.phases,
                            offscreen=args.offscreen, visual_mode=args.visual_mode, overlays=overlays,
                            avatar=args.avatar, release_at=args.release_at, flight=args.flight,
-                           interleave=args.interleave)
+                           interleave=args.interleave, aim=args.aim)
                    for hero in heroes]
     merge_manifest(output / "manifest.json", header, results)
     print(json.dumps([{key: result.get(key) for key in ("hero", "pass", "client_exit_code", "error", "errors")}

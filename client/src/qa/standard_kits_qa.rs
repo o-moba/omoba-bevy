@@ -14,6 +14,9 @@
 //! projectile in flight. `OMOBA_STANDARD_QA_INTERLEAVE=1` orders one basic
 //! attack as soon as the cast of a skill with a telegraph is accepted, so the
 //! stills show what an action accepted during the telegraph does to the pose.
+//! `OMOBA_STANDARD_QA_AIM=1` adds one still of the aim preview of every modular
+//! skill, taken with its key held before the cast, and a second one when the
+//! slot offers a recast after the cast.
 use crate::{
     frontend::{AppScreen, ScreenDriverPaused},
     help_overlay::HelpOverlayVisible,
@@ -63,6 +66,7 @@ impl Plugin for StandardKitsQaPlugin {
         let offscreen = flag("OMOBA_STANDARD_QA_OFFSCREEN");
         let flight = flag("OMOBA_STANDARD_QA_FLIGHT");
         let interleave = flag("OMOBA_STANDARD_QA_INTERLEAVE");
+        let aim = flag("OMOBA_STANDARD_QA_AIM");
         let release_at = match std::env::var("OMOBA_STANDARD_QA_RELEASE_AT").as_deref() {
             Err(_) => ReleaseAt::Window,
             Ok("contact") => ReleaseAt::Contact,
@@ -92,6 +96,7 @@ impl Plugin for StandardKitsQaPlugin {
             offscreen,
             flight,
             interleave,
+            aim,
             target: None,
             black: None,
             ux: std::env::var_os("OMOBA_COMBAT_UX_QA").is_some(),
@@ -138,6 +143,10 @@ impl Plugin for StandardKitsQaPlugin {
                     .after(crate::game_vfx::VfxPresentation)
                     .after(bevy::camera::visibility::VisibilitySystems::CheckVisibility),
             );
+            if aim {
+                app.add_systems(PreUpdate, hold_aim.after(bevy::input::InputSystems))
+                    .add_systems(PostUpdate, restore_cursor);
+            }
         }
     }
 }
@@ -156,6 +165,8 @@ struct Qa {
     flight: bool,
     /// Phase run that orders a basic attack during every telegraph.
     interleave: bool,
+    /// Phase run that also takes stills of the aim previews.
+    aim: bool,
     target: Option<Handle<Image>>,
     /// A frame that read back black; the run fails instead of keeping it.
     black: Option<String>,
@@ -1219,6 +1230,9 @@ const RECEIPT_GRACE: f64 = 1.0;
 /// Share of the way to the target the basic attack's projectile has gone when the pause
 /// for its still is requested.
 const FLIGHT_SHARE: f64 = 0.3;
+/// How far along the lane the orb of a kit is parked for its aim stills, so that a
+/// preview drawn from the orb is told apart from one drawn from the hero.
+const ORB_PARK: f32 = 5.0;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 enum Pass {
@@ -1236,6 +1250,10 @@ enum Phase {
     Settled,
     /// The projectile of the basic attack in flight (`OMOBA_STANDARD_QA_FLIGHT`).
     Flight,
+    /// The aim preview with the key held before the cast (`OMOBA_STANDARD_QA_AIM`).
+    Aim,
+    /// The aim preview with the key held while the slot offers a recast.
+    RecastAim,
 }
 impl Phase {
     fn name(self) -> &'static str {
@@ -1246,15 +1264,19 @@ impl Phase {
             Self::Impact => "impact",
             Self::Settled => "settled",
             Self::Flight => "flight",
+            Self::Aim => "aim",
+            Self::RecastAim => "recast_aim",
         }
     }
-    /// Position of the still in the skill's row of three.
+    /// Position of the still in the skill's row: the three stills of the cast, the aim
+    /// before them and the recast aim after them.
     fn order(self) -> u8 {
         match self {
-            Self::Idle | Self::Flight => 0,
+            Self::Idle | Self::Flight | Self::Aim => 0,
             Self::Windup => 1,
             Self::Release => 2,
             Self::Impact | Self::Settled => 3,
+            Self::RecastAim => 4,
         }
     }
 }
@@ -1280,6 +1302,12 @@ enum Step {
     Gates,
     /// Basic attack sent: wait for its projectile to be in flight.
     Flight,
+    /// The orb was ordered away for an aim still: wait for it to arrive.
+    Park,
+    /// The skill key is held: wait for its aim preview.
+    Aim(Phase),
+    /// Recast offered outside its gate: wait for the hero to be in reach.
+    Reach,
     /// Pause requested for a still.
     Pause(Phase),
     /// Screenshot taken: wait for its read-back.
@@ -1588,6 +1616,27 @@ struct Phases {
     /// The basic attack is being captured, after the four skills.
     basic: bool,
     basic_record: Option<serde_json::Value>,
+    aim_taken: bool,
+    recast_aim_taken: bool,
+    /// The orb was ordered away for the aim still of this slot.
+    parked: bool,
+    /// Why a slot that offered a recast has no still of its aim.
+    recast_aim_note: Option<&'static str>,
+    aim_stills: Vec<String>,
+    /// The key `hold_aim` keeps down and where it points.
+    hold: Option<Hold>,
+    held: Option<KeyCode>,
+    /// The window's cursor before `hold_aim` moved it this frame.
+    cursor_before: Option<Option<Vec2>>,
+}
+
+/// The skill key of an aim still, the point of the world it aims at and the pixel of
+/// that point.
+#[derive(Clone, Copy)]
+struct Hold {
+    slot: u8,
+    aim: Vec2,
+    cursor: Vec2,
 }
 impl Phases {
     /// The action slot of the cast that is being captured.
@@ -1608,6 +1657,10 @@ impl Phases {
         self.windup_taken = false;
         self.release_taken = None;
         self.third_taken = false;
+        self.aim_taken = false;
+        self.recast_aim_taken = false;
+        self.parked = false;
+        self.recast_aim_note = None;
         self.enter(Step::Arrange);
     }
 }
@@ -1618,6 +1671,7 @@ struct PhaseWorld<'w, 's> {
     mode: Res<'w, crate::sprite::PlayerVisualMode>,
     registry: Res<'w, crate::skill_presentation::SkillPresentation>,
     audio: Res<'w, crate::game_audio::GameAudioDiagnostics>,
+    aim: Res<'w, crate::combat::aim_preview::AimPreviewShown>,
     animations: Res<'w, crate::sandbox::AnimationReadout>,
     context: Res<'w, crate::input_context::GameplayInputContext>,
     map: Res<'w, crate::maps::MapLayout>,
@@ -1789,6 +1843,73 @@ impl PhaseWorld<'_, '_> {
             .iter()
             .find(|telemetry| telemetry.actor == actor)
     }
+    /// The hero's replicated orb.
+    fn orb(&self) -> Option<Vec2> {
+        let (_, _, loadout, ..) = self.local.single().ok()?;
+        loadout.0.as_ref()?.orb_position.map(Vec2::from_array)
+    }
+    /// Whether the hero is back at rest after a cast that left no effect of its own:
+    /// nothing is in flight or on screen and the next action is free.
+    fn at_rest(&self) -> bool {
+        self.live_particles().is_empty()
+            && self.numbers.is_empty()
+            && (*self.mode != crate::sprite::PlayerVisualMode::Models3d
+                || self.animation().is_none_or(|label| label == "Idle"))
+            && self.context.gameplay_allowed()
+            && self
+                .local
+                .single()
+                .ok()
+                .and_then(|(_, _, _, _, cooldowns)| cooldowns)
+                .is_none_or(|cooldowns| cooldowns.recovery_secs <= 0.0)
+    }
+    /// The pixel a cursor has to stand on to aim at a point of the ground, as the game
+    /// maps its cursor to the world.
+    fn cursor(&self, aim: Vec2) -> Option<Vec2> {
+        let (camera, pose) = self.cameras.single().ok()?;
+        let point = Vec3::new(aim.x, 0.0, aim.y);
+        let point = if *self.mode == crate::sprite::PlayerVisualMode::Sprite2d {
+            crate::world2d::simulation_xz_to_render_xy(point).extend(0.0)
+        } else {
+            point
+        };
+        camera.world_to_viewport(pose, point).ok()
+    }
+    /// The key, the aim point and the cursor of an aim still: the aim of the cast.
+    fn hold(
+        &self,
+        equipped: &shared::loadout::EquippedSkills,
+        slot: u8,
+        on_caster: bool,
+    ) -> Result<Hold, &'static str> {
+        let aim = self.cast_aim(equipped, slot, on_caster)?;
+        let cursor = self.cursor(aim).ok_or("the aim point is not in view")?;
+        Ok(Hold { slot, aim, cursor })
+    }
+    /// Where the scripted cast of a modular skill is aimed: at the target, bounded by the
+    /// cast range, or at the caster.
+    fn cast_aim(
+        &self,
+        equipped: &shared::loadout::EquippedSkills,
+        slot: u8,
+        on_caster: bool,
+    ) -> Result<Vec2, &'static str> {
+        let hero = self
+            .actor(SandboxActor::Player)
+            .ok_or("no hero telemetry")?;
+        let enemy = self
+            .actor(SandboxActor::Enemy)
+            .ok_or("no target telemetry")?;
+        let ability = equipped.ability(SkillSlot::from_index(slot).ok_or("no such slot")?);
+        let origin = Vec2::from_array(hero.position);
+        let delta = Vec2::from_array(enemy.position) - origin;
+        Ok(if on_caster {
+            origin
+        } else {
+            origin
+                + delta.normalize_or(STAGE_LANE) * delta.length().min(ability.cast_range.max(0.1))
+        })
+    }
     /// Chest height of a simulation position, in pixels of the capture.
     fn pixels(&self, position: [f32; 2]) -> Option<[f32; 2]> {
         let (camera, pose) = self.cameras.single().ok()?;
@@ -1883,6 +2004,12 @@ impl PhaseWorld<'_, '_> {
         }) {
             return Some("a skill effect of the hero is still replicated");
         }
+        if self
+            .orb()
+            .is_some_and(|orb| orb.distance(STAGE_HOME) > 0.05)
+        {
+            return Some("the hero's orb has not come home");
+        }
         if !self.live_particles().is_empty() {
             return Some("particles are still alive");
         }
@@ -1954,14 +2081,7 @@ fn send_cast(
         .ok_or("no target telemetry")?;
     let ability = equipped.ability(SkillSlot::from_index(slot).ok_or("no such slot")?);
     if equipped.resolved().is_some() {
-        let origin = Vec2::from_array(hero.position);
-        let delta = Vec2::from_array(enemy.position) - origin;
-        let aim = if on_caster {
-            origin
-        } else {
-            origin
-                + delta.normalize_or(STAGE_LANE) * delta.length().min(ability.cast_range.max(0.1))
-        };
+        let aim = world.cast_aim(equipped, slot, on_caster)?;
         cast(qa, outgoing, slot, aim, world.game.meta.snapshot_tick);
     } else {
         let target = if ability.targeting == TargetingMode::SelfTarget {
@@ -1978,11 +2098,11 @@ fn send_cast(
     Ok(())
 }
 
-/// The archetype, the boundary the engine drew and the part counts of a staged body.
-fn body_record(body: &crate::skill_presentation::SkillBodyVisual) -> serde_json::Value {
+/// A shape of the geometry table.
+fn shape_record(shape: &crate::skill_presentation::geometry::GeoShape) -> serde_json::Value {
     use crate::skill_presentation::geometry::GeoShape;
     let point = |point: Vec2| point.to_array();
-    let boundary = match body.boundary {
+    match *shape {
         GeoShape::Ring { center, radius } => {
             serde_json::json!({"shape": "ring", "center": point(center), "radius": radius})
         }
@@ -2012,10 +2132,14 @@ fn body_record(body: &crate::skill_presentation::SkillBodyVisual) -> serde_json:
             serde_json::json!({"shape": "segment", "from": point(from), "to": point(to)})
         }
         GeoShape::None => serde_json::json!({"shape": "none"}),
-    };
+    }
+}
+
+/// The archetype, the boundary the engine drew and the part counts of a staged body.
+fn body_record(body: &crate::skill_presentation::SkillBodyVisual) -> serde_json::Value {
     serde_json::json!({
         "archetype": body.archetype.id(),
-        "boundary": boundary,
+        "boundary": shape_record(&body.boundary),
         "engine_parts": body.engine,
         "authored_parts": body.authored,
         "trail_parts": body.trail,
@@ -2144,6 +2268,85 @@ fn still_record(
     })
 }
 
+/// The state of an aim still: the full record of the frame and the preview the game drew
+/// for the held key in it.
+fn aim_record(
+    world: &PhaseWorld,
+    run: &Phases,
+    phase: Phase,
+    sandbox: &SandboxSnapshot,
+    skill: &str,
+) -> serde_json::Value {
+    use crate::skill_presentation::geometry::PreviewMark;
+    let point = |point: Vec2| point.to_array();
+    let mut record = still_record(world, run, phase, sandbox, skill);
+    let flags = world
+        .local
+        .single()
+        .ok()
+        .and_then(|(_, _, loadout, ..)| loadout.0.as_ref());
+    record["aim"] = serde_json::json!({
+        "held_key": crate::input_bindings::SKILL_SLOT_KEY_LABELS[usize::from(run.slot)],
+        "aim_point": run.hold.map(|hold| point(hold.aim)),
+        "cursor": run.hold.map(|hold| point(hold.cursor)),
+        "can_recast": flags.map(|flags| flags.slots[usize::from(run.slot)].can_recast),
+        "orb_position": flags.and_then(|flags| flags.orb_position),
+        "preview": world.aim.0.as_ref().map(|(slot, preview)| serde_json::json!({
+            "slot": slot,
+            "shape": preview.shape.id(),
+            "areas": preview.areas.iter().map(shape_record).collect::<Vec<_>>(),
+            "marks": preview.marks.iter().map(|mark| match *mark {
+                PreviewMark::Path { from, to } => {
+                    serde_json::json!({"mark": "path", "from": point(from), "to": point(to)})
+                }
+                PreviewMark::Landing(at) => serde_json::json!({"mark": "landing", "at": point(at)}),
+                PreviewMark::Picked { at, radius } => {
+                    serde_json::json!({"mark": "picked", "at": point(at), "radius": radius})
+                }
+                PreviewMark::Push { from, to } => {
+                    serde_json::json!({"mark": "push", "from": point(from), "to": point(to)})
+                }
+            }).collect::<Vec<_>>(),
+            "pick": preview.pick,
+            "refused": preview.refused,
+        })),
+    });
+    record
+}
+
+/// Aim stills: keeps the skill key of `Phases::hold` down and the cursor on its aim
+/// point, as a player who holds the key does. When the hold ends the key is let go
+/// without a release, so nothing is cast.
+fn hold_aim(
+    mut run: ResMut<Phases>,
+    mut windows: Query<&mut Window, With<PrimaryWindow>>,
+    mut keyboard: ResMut<ButtonInput<KeyCode>>,
+) {
+    let run = &mut *run;
+    let Some(hold) = run.hold else {
+        if let Some(key) = run.held.take() {
+            keyboard.reset(key);
+        }
+        return;
+    };
+    let key = crate::input_bindings::SKILL_CAST_KEYS[usize::from(hold.slot)];
+    if let Ok(mut window) = windows.single_mut() {
+        run.cursor_before = Some(window.physical_cursor_position());
+        window.set_cursor_position(Some(hold.cursor));
+    }
+    keyboard.press(key);
+    run.held = Some(key);
+}
+/// Puts the window's cursor position back after the frame of a held aim, so the window
+/// system has no pointer move to perform on the desktop.
+fn restore_cursor(mut run: ResMut<Phases>, mut windows: Query<&mut Window, With<PrimaryWindow>>) {
+    if let Some(before) = run.cursor_before.take()
+        && let Ok(mut window) = windows.single_mut()
+    {
+        window.set_physical_cursor_position(before.map(|position| position.as_dvec2()));
+    }
+}
+
 fn drive_phases(
     mut commands: Commands,
     mut qa: ResMut<Qa>,
@@ -2198,6 +2401,9 @@ fn drive_phases(
             Step::Edge => "the server to accept the cast",
             Step::Gates => "the gate of the next still",
             Step::Flight => "the projectile of the basic attack",
+            Step::Park => "the orb to be parked",
+            Step::Aim(_) => "the aim preview of the held key",
+            Step::Reach => "the hero to be in reach of its recast",
             Step::Read(_) => "the screenshot read-back",
             _ => "the sandbox acknowledgement",
         };
@@ -2245,9 +2451,13 @@ fn drive_phases(
             | Step::Pause(_)
             | Step::Read(_)
             | Step::Resume
-    ) {
+            | Step::Reach
+    ) || step == Step::Aim(Phase::RecastAim)
+    {
         run.watch.observe(&world.game, action, now);
     }
+    // An aim still needs a modular skill: a legacy kit casts at a selected unit.
+    let previewed = qa.aim && !run.basic && equipped.skill(slot).is_some();
     match step {
         Step::Arrange => {
             let staging = if run.basic {
@@ -2306,9 +2516,118 @@ fn drive_phases(
                 let index = PHASE_SHOT + run.stills;
                 shoot(&mut commands, qa, index, "0-idle.png".into(), record);
                 run.enter(Step::Read(Phase::Idle));
+            } else if previewed && !run.aim_taken {
+                // A kit with an orb draws its previews from the orb: it is ordered away
+                // from the hero first, by the skill of the kit that moves it.
+                let order = SkillSlot::ALL.iter().position(|slot| {
+                    matches!(
+                        equipped.skill(*slot).map(|definition| definition.effect),
+                        Some(SkillEffect::Technique {
+                            action: Technique::BallMove,
+                            ..
+                        })
+                    )
+                });
+                if let Some(order) = order.filter(|_| world.orb().is_some() && !run.parked) {
+                    let spot = STAGE_HOME + STAGE_LANE * ORB_PARK;
+                    qa.requests.push(serde_json::json!({
+                        "command": "cast_skill",
+                        "purpose": "park_orb",
+                        "slot": order,
+                        "aim": spot.to_array(),
+                        "snapshot_tick": world.game.meta.snapshot_tick,
+                    }));
+                    outgoing.write(NetworkCommand::CastSkill {
+                        slot: order as u8,
+                        aim: spot,
+                    });
+                    run.parked = true;
+                    run.enter(Step::Park);
+                    return;
+                }
+                match world.hold(&equipped, run.slot, staging.on_caster) {
+                    Ok(hold) => {
+                        run.hold = Some(hold);
+                        run.enter(Step::Aim(Phase::Aim));
+                    }
+                    Err(reason) => stop(qa, run, &mut exit, format!("{skill}: {reason}")),
+                }
             } else {
                 request_speed(qa, run, &world, sandbox, SLOW_MOTION, false, &mut outgoing);
                 run.enter(Step::Slow);
+            }
+        }
+        Step::Park
+            if run.frames >= 20
+                && world
+                    .orb()
+                    .is_some_and(|orb| orb.distance(STAGE_HOME + STAGE_LANE * ORB_PARK) < 0.05)
+                && world.at_rest() =>
+        {
+            let on_caster = run.staging.is_some_and(|staging| staging.on_caster);
+            match world.hold(&equipped, run.slot, on_caster) {
+                Ok(hold) => {
+                    run.hold = Some(hold);
+                    run.enter(Step::Aim(Phase::Aim));
+                }
+                Err(reason) => stop(qa, run, &mut exit, format!("{skill}: {reason}")),
+            }
+        }
+        // The key has been down for a few frames and the game drew its preview.
+        Step::Aim(phase)
+            if run.frames >= 6
+                && world
+                    .aim
+                    .0
+                    .as_ref()
+                    .is_some_and(|(shown, _)| *shown == usize::from(run.slot)) =>
+        {
+            run.gate = "key_held";
+            let record = aim_record(&world, run, phase, sandbox, skill);
+            let file = format!(
+                "{}-{}-{}-{}.png",
+                run.slot + 1,
+                ["q", "w", "e", "r"][usize::from(run.slot)],
+                phase.order(),
+                phase.name().replace('_', "-")
+            );
+            run.aim_stills.push(file.clone());
+            let index = PHASE_SHOT + run.stills;
+            shoot(&mut commands, qa, index, file, record);
+            run.enter(Step::Read(phase));
+        }
+        Step::Reach if acknowledged && !sandbox.config.environment.paused => {
+            let hero = world
+                .actor(SandboxActor::Player)
+                .map(|actor| Vec2::from_array(actor.position));
+            let offered = loadout
+                .0
+                .as_ref()
+                .is_some_and(|flags| flags.slots[usize::from(run.slot)].can_recast);
+            let own = equipped.skill(slot).map(|definition| definition.id);
+            let alive =
+                world.game.skill_effects.iter().any(|effect| {
+                    effect.owner_id == world.game.your_id && Some(effect.skill) == own
+                });
+            let reach = hero.zip(own).is_some_and(|(hero, own)| {
+                crate::skill_presentation::status::recast_in_reach(
+                    own,
+                    world.game.your_id,
+                    hero,
+                    &world.game.skill_effects,
+                )
+            });
+            if reach {
+                run.frozen = (now, 0);
+                request_speed(qa, run, &world, sandbox, SLOW_MOTION, true, &mut outgoing);
+                run.enter(Step::Pause(Phase::RecastAim));
+            } else if !offered || !alive {
+                // The window closed before the hero was in reach: there is no press to
+                // preview, and none is staged.
+                run.recast_aim_taken = true;
+                run.recast_aim_note = Some("recast_never_in_reach");
+                finish_skill(run, &equipped, slot, skill);
+                finished = advance_slot(qa, run, &equipped);
             }
         }
         Step::Slow if acknowledged && sandbox.config.environment.time_scale == SLOW_MOTION => {
@@ -2502,6 +2821,17 @@ fn drive_phases(
             if run.frozen.1 < 3 {
                 return;
             }
+            if phase == Phase::RecastAim {
+                let on_caster = run.staging.is_some_and(|staging| staging.on_caster);
+                match world.hold(&equipped, run.slot, on_caster) {
+                    Ok(hold) => {
+                        run.hold = Some(hold);
+                        run.enter(Step::Aim(phase));
+                    }
+                    Err(reason) => stop(qa, run, &mut exit, format!("{skill}: {reason}")),
+                }
+                return;
+            }
             let record = still_record(&world, run, phase, sandbox, skill);
             if phase == Phase::Release
                 && run.gate == "release_window"
@@ -2577,7 +2907,15 @@ fn drive_phases(
                 Phase::Release => run.release_taken = Some(now),
                 Phase::Impact | Phase::Settled => run.third_taken = true,
                 Phase::Flight => finished = true,
+                Phase::Aim => run.aim_taken = true,
+                Phase::RecastAim => run.recast_aim_taken = true,
             }
+            // The key of an aim still is let go; `hold_aim` sends no release.
+            run.hold = None;
+            let offered = loadout
+                .0
+                .as_ref()
+                .is_some_and(|flags| flags.slots[usize::from(run.slot)].can_recast);
             if phase == Phase::Flight {
                 let staging = run.staging;
                 run.basic_record = Some(serde_json::json!({
@@ -2589,48 +2927,58 @@ fn drive_phases(
                     "capture": run.watch.timeline(),
                     "stills": std::mem::take(&mut run.skill_stills),
                 }));
-            } else if phase == Phase::Idle {
+            } else if phase == Phase::Idle && previewed {
+                // The slate is still clean: the aim still comes before the cast.
+                run.enter(Step::Settle);
+            } else if phase == Phase::Aim && run.parked {
+                // The orb is away from the hero: the cast starts from a clean slate again.
+                qa.requests
+                    .push(serde_json::json!({"command":"sandbox_reset_duel","slot":run.slot}));
+                run.wire.send(
+                    &world.game,
+                    sandbox,
+                    SandboxCommand::ResetDuel,
+                    &mut outgoing,
+                );
+                run.enter(Step::Settle);
+            } else if matches!(phase, Phase::Idle | Phase::Aim) {
                 request_speed(qa, run, &world, sandbox, SLOW_MOTION, false, &mut outgoing);
                 run.enter(Step::Slow);
             } else if !(run.windup_taken && run.release_taken.is_some() && run.third_taken) {
                 request_speed(qa, run, &world, sandbox, SLOW_MOTION, false, &mut outgoing);
                 run.enter(Step::Resume);
+            } else if previewed && !run.recast_aim_taken && offered {
+                // The simulation is paused on the third still and the slot offers a
+                // recast: its key is held for one more still. A recast with a gate is
+                // previewed where the server accepts it, so the cast runs on until the
+                // hero is in reach.
+                let in_reach = world
+                    .actor(SandboxActor::Player)
+                    .zip(equipped.skill(slot))
+                    .is_some_and(|(hero, definition)| {
+                        crate::skill_presentation::status::recast_in_reach(
+                            definition.id,
+                            world.game.your_id,
+                            Vec2::from_array(hero.position),
+                            &world.game.skill_effects,
+                        )
+                    });
+                if in_reach {
+                    let on_caster = run.staging.is_some_and(|staging| staging.on_caster);
+                    match world.hold(&equipped, run.slot, on_caster) {
+                        Ok(hold) => {
+                            run.hold = Some(hold);
+                            run.enter(Step::Aim(Phase::RecastAim));
+                        }
+                        Err(reason) => stop(qa, run, &mut exit, format!("{skill}: {reason}")),
+                    }
+                } else {
+                    request_speed(qa, run, &world, sandbox, SLOW_MOTION, false, &mut outgoing);
+                    run.enter(Step::Reach);
+                }
             } else {
-                let staging = run.staging;
-                let probe = run.probe.take();
-                let stills = std::mem::take(&mut run.skill_stills);
-                let watch = run.watch.timeline();
-                let entry = serde_json::json!({
-                    "slot": run.slot,
-                    "skill": skill,
-                    "targeting": format!("{:?}", equipped.ability(slot).targeting),
-                    "cast_range": equipped.ability(slot).cast_range,
-                    "staging": staging.map(|staging| serde_json::json!({
-                        "category": staging.category,
-                        "target_distance": staging.distance,
-                        "cast_on_caster": staging.on_caster,
-                        "can_damage": staging.can_damage,
-                    })),
-                    "probe": probe.as_ref().map(CastWatch::timeline),
-                    "capture": watch,
-                    "stills": stills,
-                });
-                run.skills.push(entry);
-                if run.slot < 3 {
-                    run.slot += 1;
-                    run.begin_pass(Pass::Probe);
-                    return;
-                }
-                // A melee core resolves its basic attack at once and throws nothing.
-                let throws = equipped.resolved().is_none_or(|kit| {
-                    kit.attack_profile() != shared::loadout::AttackProfileId::Melee
-                });
-                if qa.flight && throws {
-                    run.basic = true;
-                    run.begin_pass(Pass::Capture);
-                    return;
-                }
-                finished = true;
+                finish_skill(run, &equipped, slot, skill);
+                finished = advance_slot(qa, run, &equipped);
             }
         }
         Step::Resume if acknowledged && !sandbox.config.environment.paused => {
@@ -2651,6 +2999,7 @@ fn drive_phases(
             "visual_mode": format!("{:?}", *world.mode),
             "flight": qa.flight,
             "interleave": qa.interleave,
+            "aim": qa.aim,
             "manual_interaction_verified": false,
             "physical_device_verified": false,
             "setup": "live sandbox; level 10; rank 1; infinite resource, normal cooldowns; ResetDuel before every cast; one probe cast at 1x, then one cast at 0.25x paused for each still; stationary enemy hero with 1,000,000 HP that takes hits; ally-only casts target the caster",
@@ -2676,6 +3025,58 @@ fn drive_phases(
         }
         exit.write(AppExit::Success);
     }
+}
+
+/// Records the finished skill of the current slot: its staging, what the probe and the
+/// captured cast replicated, and its stills.
+fn finish_skill(
+    run: &mut Phases,
+    equipped: &shared::loadout::EquippedSkills,
+    slot: SkillSlot,
+    skill: &str,
+) {
+    let staging = run.staging;
+    let probe = run.probe.take();
+    let entry = serde_json::json!({
+        "slot": run.slot,
+        "skill": skill,
+        "modular": equipped.skill(slot).is_some(),
+        "targeting": format!("{:?}", equipped.ability(slot).targeting),
+        "cast_range": equipped.ability(slot).cast_range,
+        "staging": staging.map(|staging| serde_json::json!({
+            "category": staging.category,
+            "target_distance": staging.distance,
+            "cast_on_caster": staging.on_caster,
+            "can_damage": staging.can_damage,
+        })),
+        "probe": probe.as_ref().map(CastWatch::timeline),
+        "capture": run.watch.timeline(),
+        "stills": std::mem::take(&mut run.skill_stills),
+        // The stills of the aim previews, and why an offered recast has none.
+        "aim_stills": std::mem::take(&mut run.aim_stills),
+        "recast_aim_note": run.recast_aim_note,
+    });
+    run.skills.push(entry);
+}
+
+/// Moves on to the next skill, or to the basic attack of a flight look. Returns whether
+/// the run is over.
+fn advance_slot(qa: &Qa, run: &mut Phases, equipped: &shared::loadout::EquippedSkills) -> bool {
+    if run.slot < 3 {
+        run.slot += 1;
+        run.begin_pass(Pass::Probe);
+        return false;
+    }
+    // A melee core resolves its basic attack at once and throws nothing.
+    let throws = equipped
+        .resolved()
+        .is_none_or(|kit| kit.attack_profile() != shared::loadout::AttackProfileId::Melee);
+    if qa.flight && throws {
+        run.basic = true;
+        run.begin_pass(Pass::Capture);
+        return false;
+    }
+    true
 }
 
 /// Change the simulation pace; players and target stay as last configured.

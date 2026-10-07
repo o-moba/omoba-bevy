@@ -14,6 +14,7 @@ pub(crate) struct SkillAimVector(pub Option<(Vec2, Vec2, f32)>);
 use shared::loadout::{EffectVisualKind, LoadoutState, SkillEffectState, WeaponMode};
 use shared::{HeroClass, TargetingMode};
 
+use super::aim_preview;
 use crate::i18n::{data, tr, trf};
 use crate::net::{GameStateSnapshot, NetworkHeroClass, PlayerLoadout};
 use crate::player::Player;
@@ -218,7 +219,7 @@ pub(super) fn update_status(
     text.0 = lines.join("\n");
 }
 
-fn point(p: Vec2, mode: PlayerVisualMode, map: Option<&crate::maps::MapLayout>) -> Vec3 {
+pub(super) fn point(p: Vec2, mode: PlayerVisualMode, map: Option<&crate::maps::MapLayout>) -> Vec3 {
     let world = Vec3::new(
         p.x,
         map.map_or(0.08, |m| m.terrain_height_3d(p.x, p.y) + 0.12),
@@ -229,21 +230,6 @@ fn point(p: Vec2, mode: PlayerVisualMode, map: Option<&crate::maps::MapLayout>) 
     } else {
         world
     }
-}
-
-fn ground_line<G: GizmoConfigGroup>(
-    gizmos: &mut Gizmos<G>,
-    a: Vec2,
-    b: Vec2,
-    mode: PlayerVisualMode,
-    map: Option<&crate::maps::MapLayout>,
-    color: Color,
-) {
-    let steps = (a.distance(b) / 1.5).ceil().clamp(1.0, 192.0) as usize;
-    gizmos.linestrip(
-        (0..=steps).map(|i| point(a.lerp(b, i as f32 / steps as f32), mode, map)),
-        color,
-    );
 }
 
 fn ring<G: GizmoConfigGroup>(
@@ -263,7 +249,8 @@ fn ring<G: GizmoConfigGroup>(
     );
 }
 
-/// Authored aim geometry while a key, touch drag or controller button is held.
+/// The aim preview while a key, touch drag or controller button is held: the rule the
+/// server would apply to the cast, as `geometry::preview_shape` derives it.
 pub(crate) fn draw_aim(
     mut gizmos: Gizmos<SkillAimGizmos>,
     mut vector: ResMut<SkillAimVector>,
@@ -275,6 +262,7 @@ pub(crate) fn draw_aim(
             &super::CombatStats,
             &crate::team::Team,
             Option<&crate::net::PlayerLoadout>,
+            Option<&crate::net::NetworkPlayerId>,
         ),
         With<Player>,
     >,
@@ -283,19 +271,27 @@ pub(crate) fn draw_aim(
     mode: Res<PlayerVisualMode>,
     map: Option<Res<crate::maps::MapLayout>>,
     context: Res<crate::input_context::GameplayInputContext>,
-    keyboard: Res<ButtonInput<KeyCode>>,
-    mobile: Option<Res<crate::mobile_controls::MobileControls>>,
-    pad: Option<Res<crate::gamepad::GamepadControls>>,
+    (keyboard, mobile, pad): (
+        Res<ButtonInput<KeyCode>>,
+        Option<Res<crate::mobile_controls::MobileControls>>,
+        Option<Res<crate::gamepad::GamepadControls>>,
+    ),
     candidates: super::selection::TargetCandidates,
     validity: crate::targeting::TargetValidity,
     target: Res<super::selection::TargetState>,
     basic: Res<crate::targeting::BasicAttackState>,
+    world: aim_preview::AimWorld,
+    #[cfg(feature = "qa")] mut shown: ResMut<aim_preview::AimPreviewShown>,
 ) {
     vector.0 = None;
+    #[cfg(feature = "qa")]
+    {
+        shown.0 = None;
+    }
     if !context.gameplay_allowed() {
         return;
     }
-    let Ok((pose, class, progression, stats, team, loadout)) = local.single() else {
+    let Ok((pose, class, progression, stats, team, loadout, id)) = local.single() else {
         return;
     };
     if !stats.is_alive() {
@@ -323,12 +319,12 @@ pub(crate) fn draw_aim(
     let Some(def) = skills.skill(shared::SkillSlot::ALL[slot]) else {
         return;
     };
-    if def.ability.targeting == TargetingMode::SelfTarget {
-        return;
-    }
     let origin = pose.translation.xz();
     let range = shared::scaled_cast_range(&def.ability, progression.ranks[slot].max(1));
-    let aim = if touch.is_some() || controller.is_some() {
+    let aim = if def.ability.targeting == TargetingMode::SelfTarget {
+        // A self cast has no aim: its preview stands on the hero or on its orb.
+        origin
+    } else if touch.is_some() || controller.is_some() {
         let screen = touch
             .and_then(|t| t.aim)
             .or_else(|| controller.and_then(|p| p.aim));
@@ -380,70 +376,19 @@ pub(crate) fn draw_aim(
         p.xz()
     };
     let aim = bounded_aim(origin, aim, def.ability.targeting, range);
-    let direction = (aim - origin).normalize_or_zero();
-    let color = Color::linear_rgb(0.015, 0.8, 5.0);
-    let map = map.as_deref();
-    match def.effect {
-        shared::loadout::SkillEffect::RecastZone { radius, .. } => {
-            ring(&mut gizmos, aim, radius, *mode, map, color)
-        }
-        shared::loadout::SkillEffect::TrapLine {
-            radius,
-            count,
-            spacing,
-            ..
-        } => {
-            let side = Vec2::new(-direction.y, direction.x);
-            for i in 0..count {
-                ring(
-                    &mut gizmos,
-                    aim + side * (i as f32 - (count - 1) as f32 / 2.0) * spacing,
-                    radius,
-                    *mode,
-                    map,
-                    color,
-                );
-            }
-        }
-        _ => {
-            let radius = match def.effect {
-                shared::loadout::SkillEffect::Technique { radius, .. }
-                | shared::loadout::SkillEffect::LinearProjectile { radius, .. }
-                | shared::loadout::SkillEffect::ReturningShield { radius, .. }
-                | shared::loadout::SkillEffect::ImpactRocket { radius, .. } => radius,
-                shared::loadout::SkillEffect::Beam { width, .. } => width,
-                _ => 0.2,
-            };
-            let side = Vec2::new(-direction.y, direction.x) * radius;
-            for sign in [-1.0, 1.0] {
-                ground_line(
-                    &mut gizmos,
-                    origin + side * sign,
-                    origin + direction * range + side * sign,
-                    *mode,
-                    map,
-                    color,
-                );
-            }
-            if direction.length_squared() > 0.5 {
-                if range >= 35.0 {
-                    vector.0 = Some((origin, origin + direction * range, radius));
-                }
-                let distance = range.min(14.0);
-                let tip = origin + direction * distance;
-                let wing = Vec2::new(-direction.y, direction.x) * radius.max(0.5);
-                for sign in [-1.0, 1.0] {
-                    ground_line(
-                        &mut gizmos,
-                        tip - direction * 1.5 + wing * sign,
-                        tip,
-                        *mode,
-                        map,
-                        color,
-                    );
-                }
-            }
-        }
+    let caster = aim_preview::Caster {
+        position: origin,
+        id: id.map(|id| id.0),
+        team: *team,
+        flags: loadout.and_then(|loadout| loadout.0.as_ref()),
+        slot,
+    };
+    let preview = world.preview(def, &caster, aim, &candidates);
+    vector.0 = aim_preview::minimap_vector(&preview);
+    aim_preview::draw(&mut gizmos, &preview, *mode, map.as_deref());
+    #[cfg(feature = "qa")]
+    {
+        shown.0 = Some((slot, preview));
     }
 }
 

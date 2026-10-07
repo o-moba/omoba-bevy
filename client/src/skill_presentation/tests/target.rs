@@ -7,8 +7,9 @@ use super::super::schema::{Body, CastAccent, ImpactRecipe, SoundCue};
 use super::super::signature::{self, RatchetCounts};
 use super::super::vocab::{
     AccentPattern, Altitude, Archetype, AudioBase, AudioSlice, Behaviour, ExpireKind, ImpactKind,
-    Marker, Model, MotionPhase, MovePattern, PaletteSlot, ParticleShape, ProjectileForm,
-    ProjectilePresentation, RecastMarker, SatelliteLayout, Silhouette, StageRule, Trail,
+    Marker, Model, MotionPhase, MovePattern, PaletteSlot, ParticleShape, PreviewShape,
+    ProjectileForm, ProjectilePresentation, RecastMarker, SatelliteLayout, Silhouette, StageRule,
+    Trail,
 };
 use super::super::*;
 use super::schema_rules;
@@ -635,8 +636,8 @@ fn ids<T: Copy>(all: &[T], id: fn(T) -> &'static str) -> BTreeSet<&'static str> 
 }
 
 /// Every ID of the pick list (`docs/skill-vocabulary.md`) that a row can name or that is
-/// derived for a body has a final row that uses it, and no final row plays a clip outside
-/// the required set. Aim previews are derived per skill and are not part of a row.
+/// derived for a body or for the aim preview of a skill has a final row that uses it, and no
+/// final row plays a clip outside the required set.
 #[test]
 fn target_uses_every_required_vocabulary_id() {
     let registry = target();
@@ -667,6 +668,11 @@ fn target_uses_every_required_vocabulary_id() {
             }
         }
         let Some(id) = key.modular() else { continue };
+        // The preview of the first cast and of the press a recast window offers.
+        used.add("preview shape", geometry::preview_kind(id, false).id());
+        if category::has_recast(id) {
+            used.add("preview shape", geometry::preview_kind(id, true).id());
+        }
         if let Some(body) = &profile.body {
             used.body(body);
             for kind in category::own_kinds(id) {
@@ -697,7 +703,7 @@ fn target_uses_every_required_vocabulary_id() {
         }
     }
 
-    let required: [(&str, BTreeSet<&str>); 22] = [
+    let required: [(&str, BTreeSet<&str>); 23] = [
         ("motion", REQUIRED_MOTIONS.into_iter().collect()),
         ("motion phase", ids(MotionPhase::ALL, MotionPhase::id)),
         ("archetype", ids(Archetype::ALL, Archetype::id)),
@@ -713,6 +719,7 @@ fn target_uses_every_required_vocabulary_id() {
         ("altitude", ids(Altitude::ALL, Altitude::id)),
         ("expire", ids(ExpireKind::ALL, ExpireKind::id)),
         ("stage rule", ids(StageRule::ALL, StageRule::id)),
+        ("preview shape", ids(PreviewShape::ALL, PreviewShape::id)),
         ("accent pattern", ids(AccentPattern::ALL, AccentPattern::id)),
         ("move pattern", ids(MovePattern::ALL, MovePattern::id)),
         ("recast marker", ids(RecastMarker::ALL, RecastMarker::id)),

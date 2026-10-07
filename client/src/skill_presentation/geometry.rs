@@ -1,13 +1,17 @@
 //! One table for every boundary and area a skill may draw. Shapes are functions of the
 //! received effect fields and the catalog only; presentation data cannot scale or move them.
-// The parser, the area flash, the body renderer and the 2D fallback read this table; the aim
-// preview adopts the rest of it.
+// The parser, the area flash, the body renderer, the 2D fallback and the aim preview read
+// this table.
 #![cfg_attr(not(test), allow(dead_code))]
 
 use super::category::{cone_half_angle, own_kinds};
-use super::vocab::Archetype;
+use super::vocab::{Archetype, PreviewShape};
 use bevy::math::Vec2;
-use shared::loadout::{EffectVisualKind, SkillEffect, SkillEffectState, SkillId, Technique, skill};
+use shared::TargetingMode;
+use shared::loadout::{
+    EffectVisualKind, SkillDefinition, SkillEffect, SkillEffectState, SkillId, Technique, skill,
+};
+use shared::wire::TargetKind;
 use std::f32::consts::{FRAC_PI_2, PI, TAU};
 
 /// A unit pick takes the nearest candidate within this distance of the aim
@@ -33,6 +37,9 @@ pub(crate) const CAGE_BAR_HALF_WIDTH: f32 = 0.4;
 /// The shield wall is centred this far ahead of its owner
 /// (`common/src/skills/advanced.rs:1790`).
 pub(crate) const WALL_AHEAD: f32 = 1.0;
+/// Chain Sweep moves every unit it hits this far along the aim
+/// (`common/src/skills/advanced.rs:1021`).
+pub(crate) const SWEEP_PUSH: f32 = 3.0;
 /// Rule F: a cone whose received axis is shorter than the cast range by more than this was
 /// cut by fog and is drawn as a plain segment.
 pub(crate) const SECTOR_CLIP_SLACK: f32 = 0.05;
@@ -54,16 +61,22 @@ pub(crate) fn replicated_radius(id: SkillId, kind: EffectVisualKind) -> f32 {
         EffectVisualKind::Healing => HEALING_RADIUS,
         EffectVisualKind::Anchor => ANCHOR_RADIUS,
         EffectVisualKind::Soul => SOUL_RADIUS,
-        _ => match skill(id).effect {
-            SkillEffect::Technique { radius, .. }
-            | SkillEffect::LinearProjectile { radius, .. }
-            | SkillEffect::ReturningShield { radius, .. }
-            | SkillEffect::RecastZone { radius, .. }
-            | SkillEffect::TrapLine { radius, .. }
-            | SkillEffect::ImpactRocket { radius, .. } => radius,
-            SkillEffect::Beam { width, .. } => width,
-            SkillEffect::WeaponToggle { .. } => 0.0,
-        },
+        _ => catalog_radius(id),
+    }
+}
+
+/// The catalog radius of a skill: the half-width of its sweep, the radius of its zone or
+/// strike, or the half-width of its beam.
+fn catalog_radius(id: SkillId) -> f32 {
+    match skill(id).effect {
+        SkillEffect::Technique { radius, .. }
+        | SkillEffect::LinearProjectile { radius, .. }
+        | SkillEffect::ReturningShield { radius, .. }
+        | SkillEffect::RecastZone { radius, .. }
+        | SkillEffect::TrapLine { radius, .. }
+        | SkillEffect::ImpactRocket { radius, .. } => radius,
+        SkillEffect::Beam { width, .. } => width,
+        SkillEffect::WeaponToggle { .. } => 0.0,
     }
 }
 
@@ -358,6 +371,462 @@ pub(crate) fn body_fits(archetype: Archetype, id: SkillId) -> bool {
             .iter()
             .all(|kind| archetype_fits(archetype, id, *kind))
 }
+
+/// A unit the client sees, as the server's pick rules read it
+/// (`common/src/skills/mod.rs:438-506`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct PickCandidate {
+    pub kind: TargetKind,
+    pub id: u64,
+    pub position: Vec2,
+    /// The target radius the server adds to every reach.
+    pub radius: f32,
+    /// On the caster's team. The caster is a candidate of its own.
+    pub ally: bool,
+}
+
+/// The order in which the server breaks a tie between two candidates
+/// (`common/src/skills/mod.rs:38-48`).
+fn pick_order(candidate: &PickCandidate) -> (u8, u64) {
+    let kind = match candidate.kind {
+        TargetKind::Player => 0,
+        TargetKind::Minion => 1,
+        TargetKind::Structure => 2,
+        TargetKind::Neutral => 3,
+    };
+    (kind, candidate.id)
+}
+
+/// The unit a pick skill takes: the candidate nearest the aim within `PICK_RADIUS` plus its
+/// own radius of it and within the cast range plus its radius of the caster; an ally pick
+/// takes heroes and minions only (`common/src/skills/advanced.rs:153-178`). The server also
+/// asks for vision: the caller passes the units the client sees.
+pub(crate) fn server_pick(
+    candidates: &[PickCandidate],
+    aim: Vec2,
+    origin: Vec2,
+    range: f32,
+    ally: bool,
+) -> Option<usize> {
+    candidates
+        .iter()
+        .enumerate()
+        .filter(|(_, c)| {
+            c.ally == ally
+                && (!ally || matches!(c.kind, TargetKind::Player | TargetKind::Minion))
+                && c.position.distance(aim) <= PICK_RADIUS + c.radius
+                && c.position.distance(origin) <= range + c.radius
+        })
+        .min_by(|(_, a), (_, b)| {
+            a.position
+                .distance(aim)
+                .total_cmp(&b.position.distance(aim))
+                .then_with(|| pick_order(a).cmp(&pick_order(b)))
+        })
+        .map(|(index, _)| index)
+}
+
+/// How a pick skill chooses its unit and what it does without one.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct PickRule {
+    /// The pick is made on the caster's own team.
+    pub ally: bool,
+    /// The cast is refused unless the picked unit is a hero
+    /// (`common/src/skills/advanced.rs:486-492`).
+    pub hero_only: bool,
+    /// The cast is accepted without a pick (`common/src/skills/advanced.rs:474-485`).
+    pub pick_optional: bool,
+}
+
+/// The pick rule of a skill that selects a unit near its aim
+/// (`common/src/skills/advanced.rs:461-473`).
+pub(crate) fn pick_rule(id: SkillId) -> Option<PickRule> {
+    let SkillEffect::Technique { action, .. } = skill(id).effect else {
+        return None;
+    };
+    let rule = |ally, hero_only, pick_optional| PickRule {
+        ally,
+        hero_only,
+        pick_optional,
+    };
+    match action {
+        Technique::VitalChallenge | Technique::Curse => Some(rule(false, true, false)),
+        Technique::Lash | Technique::ChainKick => Some(rule(false, false, false)),
+        Technique::GuardLeap => Some(rule(true, false, true)),
+        Technique::AllyLeap => Some(rule(true, false, false)),
+        Technique::BallGuard => Some(rule(true, true, false)),
+        _ => None,
+    }
+}
+
+/// The shape of the aim preview of a skill: for its first cast, or for the press its slot
+/// offers while `recast` is replicated. A recast that ignores the aim previews nothing
+/// (`common/src/skills/mod.rs:886-900`; `common/src/skills/advanced.rs:599-611`, `:755-761`,
+/// `:803-808`); the spike recast strikes around the caster (`:617-624`) and the colossus is
+/// redirected from where it stands (`:695-707`).
+pub(crate) fn preview_kind(id: SkillId, recast: bool) -> PreviewShape {
+    use PreviewShape as P;
+    let action = match skill(id).effect {
+        SkillEffect::WeaponToggle { .. } => return P::None,
+        SkillEffect::LinearProjectile { .. }
+        | SkillEffect::ReturningShield { .. }
+        | SkillEffect::ImpactRocket { .. } => return P::Lane,
+        SkillEffect::Beam { .. } => return P::LaneCapsule,
+        SkillEffect::RecastZone { .. } if recast => return P::None,
+        SkillEffect::RecastZone { .. } => return P::PointRing,
+        SkillEffect::TrapLine { .. } => return P::TrapRow,
+        SkillEffect::Technique { action, .. } => action,
+    };
+    match action {
+        Technique::EchoStrike | Technique::Hook | Technique::GuardLeap | Technique::RevealPulse
+            if recast =>
+        {
+            P::None
+        }
+        Technique::SpikeVolley if recast => P::RangeRing,
+        Technique::ReturningColossus if recast => P::EffectOriginLane,
+        Technique::TerrainLine
+        | Technique::ReturningColossus
+        | Technique::Parry
+        | Technique::EchoStrike
+        | Technique::SpikeVolley
+        | Technique::ReturnOrb
+        | Technique::CharmBolt
+        | Technique::OnHitBolt
+        | Technique::DetonationMark
+        | Technique::Hook
+        | Technique::ConcussiveBolt => P::Lane,
+        Technique::PiercingWave | Technique::GlacialFissure => P::LaneCapsule,
+        Technique::DaggerDeadlyBlow
+        | Technique::DaggerBluff
+        | Technique::DaggerBackstab
+        | Technique::DaggerLethalBlow => P::LaneToPoint,
+        Technique::Lantern | Technique::BallField | Technique::BallPull => P::PointRing,
+        Technique::ConeBrittle | Technique::ExecuteRetreat => P::Sector,
+        Technique::RevealPulse | Technique::Sweep | Technique::GuidedFires => P::SelfRing,
+        Technique::SegmentCage => P::SelfPentagon,
+        Technique::CollisionCharge | Technique::Lunge | Technique::SpiritDash => P::DashLanding,
+        Technique::BlinkShot => P::BlinkLanding,
+        Technique::VitalChallenge
+        | Technique::Curse
+        | Technique::Lash
+        | Technique::GuardLeap
+        | Technique::AllyLeap
+        | Technique::BallGuard => P::UnitPick,
+        Technique::ChainKick => P::PickThenLane,
+        Technique::BallMove => P::EffectOriginLane,
+        Technique::InterceptShield => P::WallAhead,
+        Technique::DoubleStrike => P::None,
+    }
+}
+
+/// A reading aid of an aim preview. It claims no area.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) enum PreviewMark {
+    /// The straight ground move of the caster.
+    Path { from: Vec2, to: Vec2 },
+    /// Where the caster comes to stand.
+    Landing(Vec2),
+    /// The unit the pick rule takes, with its target radius.
+    Picked { at: Vec2, radius: f32 },
+    /// The way and the distance every hit unit is pushed.
+    Push { from: Vec2, to: Vec2 },
+}
+
+/// What the aim preview of a held skill draws, in simulation ground coordinates.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct Preview {
+    pub shape: PreviewShape,
+    /// The areas of the server rule. The server adds the radius of each target to them.
+    pub areas: Vec<GeoShape>,
+    pub marks: Vec<PreviewMark>,
+    /// Index of the candidate the pick rule takes.
+    pub pick: Option<usize>,
+    /// The server would refuse the cast as it is aimed.
+    pub refused: bool,
+}
+
+/// What the client knows while a skill key is held.
+pub(crate) struct PreviewContext<'a> {
+    /// The caster's position.
+    pub origin: Vec2,
+    /// The aim the client would send: the caster for a self cast, bounded by the cast range
+    /// for a point skill.
+    pub aim: Vec2,
+    /// The replicated slot offers a recast.
+    pub recast: bool,
+    /// The caster's replicated orb.
+    pub orb: Option<Vec2>,
+    /// The caster's id; 0 when it is not known.
+    pub hero: u64,
+    /// The replicated effects.
+    pub effects: &'a [SkillEffectState],
+    /// The living units the client sees, the caster included.
+    pub candidates: &'a [PickCandidate],
+    /// Where a ground move from the first point toward the second ends
+    /// (`common/src/skills/advanced.rs:277-279`).
+    pub clip: &'a dyn Fn(Vec2, Vec2) -> Vec2,
+}
+
+/// The direction the server derives from two points; coincident points give +Z
+/// (`common/src/skills/advanced.rs:145-152`).
+fn server_direction(from: Vec2, to: Vec2) -> Vec2 {
+    let delta = to - from;
+    let length = delta.length();
+    if length < 0.001 {
+        Vec2::Y
+    } else {
+        delta / length
+    }
+}
+
+/// The aim preview of a skill: its server rule drawn at the aim the client would send. The
+/// numbers are the catalog's and the mirrored server literals; the cast range is never
+/// scaled by rank for a modular skill (`shared/src/lib.rs:316-319`).
+pub(crate) fn preview_shape(def: &SkillDefinition, ctx: &PreviewContext) -> Preview {
+    let PreviewContext { origin, aim, .. } = *ctx;
+    let mut preview = Preview {
+        shape: preview_kind(def.id, ctx.recast),
+        areas: Vec::new(),
+        marks: Vec::new(),
+        pick: None,
+        refused: false,
+    };
+    let range = def.ability.cast_range;
+    let radius = catalog_radius(def.id);
+    let action = match def.effect {
+        SkillEffect::Technique { action, .. } => Some(action),
+        _ => None,
+    };
+    // A directional cast without a direction is dropped (`common/src/skills/mod.rs:920-929`,
+    // `common/src/skills/advanced.rs:437-439`); the other casts fall back to +Z.
+    let dir = if def.ability.targeting == TargetingMode::Direction {
+        let least = if action.is_some() { 0.001 } else { 0.0001 };
+        let Some(dir) = (aim - origin)
+            .try_normalize()
+            .filter(|_| origin.distance(aim) >= least)
+        else {
+            preview.refused = preview.shape != PreviewShape::None;
+            return preview;
+        };
+        dir
+    } else {
+        server_direction(origin, aim)
+    };
+    match preview.shape {
+        PreviewShape::None => {}
+        PreviewShape::Lane => preview.areas.push(GeoShape::Lane {
+            from: origin,
+            to: origin + dir * range,
+            half_width: radius,
+        }),
+        PreviewShape::LaneCapsule => preview.areas.push(GeoShape::Capsule {
+            from: origin,
+            to: origin + dir * range,
+            radius,
+        }),
+        // The corridor ends at the aim and is never wider than the clamp
+        // (`common/src/skills/dagger.rs:131-134`).
+        PreviewShape::LaneToPoint => preview.areas.push(GeoShape::Lane {
+            from: origin,
+            to: aim,
+            half_width: radius.min(DAGGER_LANE_CLAMP),
+        }),
+        PreviewShape::PointRing => {
+            // The field and the collapse stand on the orb, which a cast puts on the caster
+            // when there is none (`common/src/skills/advanced.rs:973-984`, `:2277-2305`).
+            let center = match action {
+                Some(Technique::BallField | Technique::BallPull) => ctx.orb.unwrap_or(origin),
+                _ => aim,
+            };
+            preview.areas.push(GeoShape::Ring { center, radius });
+        }
+        PreviewShape::TrapRow => {
+            if let SkillEffect::TrapLine { count, spacing, .. } = def.effect {
+                // `common/src/skills/mod.rs:930-934`, `:1022-1026`.
+                let along = if origin.distance(aim) > 0.0001 {
+                    (aim - origin).normalize()
+                } else {
+                    Vec2::Y
+                };
+                let middle = (f32::from(count) - 1.0) * 0.5;
+                preview.areas.extend((0..count).map(|n| GeoShape::Ring {
+                    center: aim + along.perp() * (f32::from(n) - middle) * spacing,
+                    radius,
+                }));
+            }
+        }
+        PreviewShape::Sector => {
+            if let Some(half_angle) = cone_half_angle(def.id) {
+                preview.areas.push(GeoShape::Sector {
+                    apex: origin,
+                    axis: dir,
+                    radius: range,
+                    half_angle,
+                });
+            }
+            if action == Some(Technique::ExecuteRetreat) {
+                let behind = (ctx.clip)(origin, origin - dir * NIGHTFALL_RETREAT);
+                preview.marks.push(PreviewMark::Landing(behind));
+            }
+        }
+        PreviewShape::SelfRing => {
+            // The pulse uses its radius; the sweep and the fires use the cast range
+            // (`common/src/skills/advanced.rs:814`, `:1018`, `:912-920`).
+            let reach = if action == Some(Technique::RevealPulse) {
+                radius
+            } else {
+                range
+            };
+            preview.areas.push(GeoShape::Ring {
+                center: origin,
+                radius: reach,
+            });
+            if action == Some(Technique::Sweep) {
+                preview.marks.push(PreviewMark::Push {
+                    from: origin,
+                    to: origin + dir * SWEEP_PUSH,
+                });
+            }
+        }
+        PreviewShape::SelfPentagon => preview.areas.push(GeoShape::Pentagon {
+            center: origin,
+            radius,
+        }),
+        PreviewShape::RangeRing => preview.areas.push(GeoShape::Ring {
+            center: origin,
+            radius: range,
+        }),
+        PreviewShape::DashLanding => {
+            // A charge runs its whole range along the aim; the others go to the aim point
+            // (`common/src/skills/advanced.rs:570-574`, `:674`, `:726`, `:904`).
+            let goal = if def.ability.targeting == TargetingMode::Direction {
+                origin + dir * range
+            } else {
+                aim
+            };
+            let landing = (ctx.clip)(origin, goal);
+            preview.marks.push(PreviewMark::Path {
+                from: origin,
+                to: landing,
+            });
+            preview.areas.push(GeoShape::Ring {
+                center: landing,
+                radius,
+            });
+        }
+        // A blink is not clipped: an illegal landing drops the cast
+        // (`common/src/skills/advanced.rs:458-460`, `:902`).
+        PreviewShape::BlinkLanding => {
+            preview.marks.push(PreviewMark::Landing(aim));
+            preview.areas.push(GeoShape::Ring {
+                center: aim,
+                radius,
+            });
+        }
+        PreviewShape::UnitPick | PreviewShape::PickThenLane => {
+            let Some(rule) = pick_rule(def.id) else {
+                return preview;
+            };
+            preview.areas.push(GeoShape::Ring {
+                center: aim,
+                radius: PICK_RADIUS,
+            });
+            preview.pick = server_pick(ctx.candidates, aim, origin, range, rule.ally);
+            let picked = preview.pick.map(|index| ctx.candidates[index]);
+            if let Some(unit) = picked {
+                preview.marks.push(PreviewMark::Picked {
+                    at: unit.position,
+                    radius: unit.radius,
+                });
+            }
+            let hero = picked.filter(|unit| unit.kind == TargetKind::Player);
+            preview.refused = match picked {
+                None => !rule.pick_optional,
+                Some(_) => rule.hero_only && hero.is_none(),
+            };
+            match action {
+                // The leap goes to the picked unit, or to the aim point without one
+                // (`common/src/skills/advanced.rs:763`, `:776`).
+                Some(Technique::GuardLeap) => {
+                    let goal = picked.map_or(aim, |unit| unit.position);
+                    preview
+                        .marks
+                        .push(PreviewMark::Landing((ctx.clip)(origin, goal)));
+                }
+                // The orb flies from where it is to the picked hero
+                // (`common/src/skills/advanced.rs:947-971`, `:1933-1938`).
+                Some(Technique::BallGuard) => {
+                    if let Some(ally) = hero {
+                        preview.areas.push(GeoShape::Lane {
+                            from: ctx.orb.unwrap_or(origin),
+                            to: ally.position,
+                            half_width: radius,
+                        });
+                    }
+                }
+                // The kicked unit is carried away from the caster and strikes what it
+                // passes; a structure is not moved (`common/src/skills/advanced.rs:834-846`).
+                Some(Technique::ChainKick) => {
+                    if let Some(unit) = picked.filter(|unit| unit.kind != TargetKind::Structure) {
+                        let away = server_direction(origin, unit.position);
+                        preview.areas.push(GeoShape::Lane {
+                            from: unit.position,
+                            to: (ctx.clip)(unit.position, unit.position + away * KICK_LENGTH),
+                            half_width: radius,
+                        });
+                    }
+                }
+                _ => {}
+            }
+        }
+        PreviewShape::EffectOriginLane => {
+            if action == Some(Technique::ReturningColossus) {
+                // The server drops the recast outside the gate and redirects its first
+                // effect of the skill along the caster's aim
+                // (`common/src/skills/advanced.rs:503-512`, `:696-703`).
+                let body = ctx
+                    .effects
+                    .iter()
+                    .filter(|effect| effect.owner_id == ctx.hero && effect.skill == def.id)
+                    .min_by_key(|effect| effect.id)
+                    .filter(|_| {
+                        super::status::recast_in_reach(def.id, ctx.hero, origin, ctx.effects)
+                    });
+                let Some(body) = body else {
+                    preview.shape = PreviewShape::None;
+                    return preview;
+                };
+                let from = Vec2::from_array(body.position);
+                preview.areas.push(GeoShape::Lane {
+                    from,
+                    to: from + dir * range,
+                    half_width: radius,
+                });
+            } else {
+                // The orb flies from where it is to the aim point
+                // (`common/src/skills/advanced.rs:947-962`).
+                preview.areas.push(GeoShape::Lane {
+                    from: ctx.orb.unwrap_or(origin),
+                    to: aim,
+                    half_width: radius,
+                });
+            }
+        }
+        PreviewShape::WallAhead => {
+            let center = origin + dir * WALL_AHEAD;
+            let side = dir.perp() * radius;
+            preview.areas.push(GeoShape::Segment {
+                from: center - side,
+                to: center + side,
+            });
+        }
+    }
+    preview
+}
+
+#[cfg(test)]
+mod preview_tests;
 
 #[cfg(test)]
 mod tests {
@@ -882,6 +1351,7 @@ mod tests {
         assert_eq!(RECAST_GATE_MOUNTAIN_ECHO, 4.0);
         assert_eq!(CAGE_BAR_HALF_WIDTH, 0.4);
         assert_eq!(WALL_AHEAD, 1.0);
+        assert_eq!(SWEEP_PUSH, 3.0);
         assert_eq!(SECTOR_CLIP_SLACK, 0.05);
         assert_eq!(
             [ORB_RADIUS, HEALING_RADIUS, ANCHOR_RADIUS, SOUL_RADIUS],

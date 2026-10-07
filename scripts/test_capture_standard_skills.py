@@ -138,6 +138,54 @@ class LauncherTests(unittest.TestCase):
             summary["basic"] = None
             self.assertEqual(launcher.phase_problems(summary, directory), [])
 
+    def test_aim_stills_belong_to_their_skill_record_and_carry_a_preview(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+
+            def with_aim():
+                summary = phase_summary()
+                summary["aim"] = True
+                for slot, key in enumerate(launcher.SLOT_KEYS):
+                    summary["skills"][slot].update(modular=True, aim_stills=[f"{slot + 1}-{key}-0-aim.png"])
+                    summary["captures"].append(dict(
+                        file=f"{slot + 1}-{key}-0-aim.png", phase="aim", slot=slot, skill=f"{key}_skill",
+                        mean_pixel=88.0, aim=dict(held_key=key.upper(), preview=dict(shape="lane"))))
+                # The first slot offered a recast after its cast.
+                summary["skills"][0]["aim_stills"].append("1-q-4-recast-aim.png")
+                summary["captures"].append(dict(
+                    file="1-q-4-recast-aim.png", phase="recast_aim", slot=0, skill="q_skill",
+                    mean_pixel=88.0, aim=dict(held_key="Q", preview=dict(shape="none"))))
+                touch_stills(directory, summary)
+                return summary
+
+            # The aim stills stand beside the three stills of the cast.
+            self.assertEqual(launcher.phase_problems(with_aim(), directory), [])
+            summary = with_aim()
+            summary["skills"][1]["aim_stills"] = []
+            self.assertEqual(launcher.phase_problems(summary, directory),
+                             ["slot w: aim stills ['2-w-0-aim.png'] do not match its record"])
+            summary = with_aim()
+            del summary["captures"][-1]["aim"]["preview"]
+            self.assertEqual(launcher.phase_problems(summary, directory),
+                             ["1-q-4-recast-aim.png records no aim preview"])
+            summary = with_aim()
+            summary["captures"][-1]["mean_pixel"] = 0.0
+            self.assertEqual(launcher.phase_problems(summary, directory),
+                             ["1-q-4-recast-aim.png is black or was not read back"])
+            # With --aim a modular skill without its aim still is refused; a legacy
+            # skill has none and needs none.
+            summary = with_aim()
+            summary["skills"][2]["aim_stills"] = []
+            summary["captures"] = [c for c in summary["captures"] if c["file"] != "3-e-0-aim.png"]
+            self.assertEqual(launcher.phase_problems(summary, directory), ["slot e has no aim still"])
+            summary["skills"][2]["modular"] = False
+            self.assertEqual(launcher.phase_problems(summary, directory), [])
+            # A run without --aim has no aim stills and asks for none.
+            summary = phase_summary()
+            for record in summary["skills"]:
+                record["modular"] = True
+            self.assertEqual(launcher.phase_problems(summary, directory), [])
+
     def test_manifest_keeps_classes_of_earlier_runs_and_fails_with_any_class(self):
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "manifest.json"
@@ -167,6 +215,7 @@ class LauncherTests(unittest.TestCase):
                     (["--release-at", "contact"], "need --phases"),
                     (["--flight"], "need --phases"),
                     (["--interleave"], "need --phases"),
+                    (["--aim"], "need --phases"),
                     (["--phases", "--avatar", "nobody"], "Unknown avatar"),
                     (["--phases", "--release-at", "3"], "expected `contact` or 0..2 seconds"),
                     (["--phases", "--release-at", "soon"], "invalid release_time value"),
