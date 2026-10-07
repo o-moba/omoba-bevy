@@ -1,6 +1,7 @@
 use super::*;
 
 pub(super) mod schema_rules;
+pub(super) mod target;
 
 fn profiles() -> SkillPresentation {
     SkillPresentation::parse(include_str!("../../assets/config/skills.skillfx")).unwrap()

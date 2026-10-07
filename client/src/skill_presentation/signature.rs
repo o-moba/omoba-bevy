@@ -493,3 +493,202 @@ pub(crate) fn ratchet(
     };
     Ok(counts)
 }
+
+/// Items whose key an earlier item already has, each named with the first holder.
+#[cfg(test)]
+fn repeated<K: Ord + std::fmt::Debug>(items: impl IntoIterator<Item = (K, String)>) -> Vec<String> {
+    let mut first: BTreeMap<K, String> = BTreeMap::new();
+    let mut found = Vec::new();
+    for (key, name) in items {
+        match first.get(&key) {
+            Some(holder) => found.push(format!("{name} repeats {key:?} of {holder}")),
+            None => {
+                first.insert(key, name);
+            }
+        }
+    }
+    found
+}
+
+/// Keys with more than `limit` users, each with its users.
+#[cfg(test)]
+fn crowded<K: Ord + std::fmt::Debug>(
+    items: impl IntoIterator<Item = (K, String)>,
+    limit: usize,
+) -> Vec<String> {
+    let mut users: BTreeMap<K, Vec<String>> = BTreeMap::new();
+    for (key, name) in items {
+        users.entry(key).or_default().push(name);
+    }
+    users
+        .into_iter()
+        .filter(|(_, users)| users.len() > limit)
+        .map(|(key, users)| format!("{key:?} has {}: {}", users.len(), users.join(", ")))
+        .collect()
+}
+
+/// What [`ratchet`] counts, item by item: `(counter, the rows it is about)`. A failing
+/// identity test prints these, so it names the skills that collide.
+#[cfg(test)]
+pub(crate) fn findings(
+    reg: &SkillPresentation,
+    projectiles: &CombatVisualRegistry,
+) -> Result<Vec<(&'static str, String)>, String> {
+    let motion = SharedHumanoidMotion::embedded()?;
+    let rows: Vec<(&str, SkillKey, &SkillProfile, Identity)> = reg
+        .rows()
+        .filter_map(|(id, profile)| {
+            let key = SkillKey::from_id(id)?;
+            Some((id, key, profile, row_identity(profile, key, projectiles)))
+        })
+        .collect();
+    let mut found: Vec<(&'static str, String)> = Vec::new();
+    let mut note = |counter: &'static str, items: Vec<String>| {
+        found.extend(items.into_iter().map(|item| (counter, item)));
+    };
+
+    for (index, (a_id, _, _, a)) in rows.iter().enumerate() {
+        for (b_id, _, _, b) in &rows[index + 1..] {
+            let shared: Vec<&str> = [
+                ("motion", a.motion == b.motion),
+                ("body", a.body == b.body),
+                ("impact", a.impact == b.impact),
+            ]
+            .into_iter()
+            .filter_map(|(axis, same)| same.then_some(axis))
+            .collect();
+            if shared.len() >= 2 {
+                let pair = format!("{a_id} / {b_id} share {}", shared.join(", "));
+                note("pairs_under_two_axes", vec![pair.clone()]);
+                if shared.len() == 3 {
+                    note("full_tuple_duplicates", vec![pair]);
+                }
+            }
+        }
+    }
+    let named = |name: &str| name.to_string();
+    note(
+        "duplicate_body_keys",
+        repeated(
+            rows.iter()
+                .map(|(id, _, _, identity)| (identity.body.key(), named(id))),
+        ),
+    );
+    for class in HeroClass::ALL {
+        let kit: Vec<_> = rows
+            .iter()
+            .filter(|(_, key, _, _)| key.home() == class)
+            .collect();
+        let per_class = |repeats: Vec<String>| {
+            if repeats.is_empty() {
+                vec![]
+            } else {
+                vec![format!("{}: {}", class.id(), repeats.join("; "))]
+            }
+        };
+        note(
+            "classes_repeating_motion_family",
+            per_class(repeated(
+                kit.iter()
+                    .map(|(id, _, _, identity)| (identity.motion.clone(), named(id))),
+            )),
+        );
+        note(
+            "classes_repeating_body_silhouette",
+            per_class(repeated(kit.iter().map(|(id, _, _, identity)| {
+                (identity.body.silhouette(), named(id))
+            }))),
+        );
+        note(
+            "classes_repeating_impact_kind",
+            per_class(repeated(kit.iter().filter_map(|(id, _, _, identity)| {
+                identity.impact.kind().map(|kind| (kind, named(id)))
+            }))),
+        );
+        if reg.basic(class).is_none() {
+            note("classes_without_basic_row", vec![named(class.id())]);
+        }
+    }
+    note(
+        "families_over_three_skills",
+        crowded(
+            rows.iter()
+                .map(|(id, _, _, identity)| (identity.motion.clone(), named(id))),
+            3,
+        ),
+    );
+    note(
+        "impact_kinds_over_five_skills",
+        crowded(
+            rows.iter().filter_map(|(id, _, _, identity)| {
+                identity.impact.kind().map(|kind| (kind, named(id)))
+            }),
+            5,
+        ),
+    );
+
+    let mut voices = Vec::new();
+    for (id, key, profile, _) in &rows {
+        let category = category::category(*key);
+        let mut row = |counter: &'static str, counted: bool| {
+            if counted {
+                note(counter, vec![named(id)]);
+            }
+        };
+        row("rows_without_cast", profile.cast.is_none());
+        row(
+            "effect_rows_without_body",
+            category == Category::ReplicatedEffect && profile.body.is_none(),
+        );
+        row(
+            "damaging_rows_without_impact",
+            category::can_damage(*key) && profile.impact.is_none(),
+        );
+        row("rows_with_effect", profile.effect.is_some());
+        row(
+            "legacy_projectiles_without_form",
+            legacy_projectile(projectiles, *key).is_some_and(|profile| profile.form.is_none()),
+        );
+        if let Some(late) = schema::contact_violation(profile, *key, motion) {
+            note("rows_breaking_contact_rule", vec![format!("{id}: {late}")]);
+        }
+        match reg.theme(key.home()) {
+            Some(theme) => {
+                if let Some(flat) = schema::luminance_violation(profile, theme) {
+                    note("rows_breaking_luminance", vec![format!("{id}: {flat}")]);
+                }
+            }
+            None => note("rows_breaking_luminance", vec![format!("{id}: no theme")]),
+        }
+        match profile.sound.as_ref().and_then(|sound| sound.cast.as_ref()) {
+            Some(cue) => voices.push((
+                (cue.base, (cue.speed * 20.0).round() as u32, cue.slice),
+                named(id),
+            )),
+            None => note("rows_without_cast_voice", vec![named(id)]),
+        }
+    }
+    note("duplicate_cast_voices", repeated(voices));
+    let thrown: Vec<BodySig> = basic_projectile_bodies(projectiles)
+        .into_iter()
+        .filter(|body| {
+            !matches!(
+                body,
+                BodySig::Projectile {
+                    presentation: ProjectilePresentation::MeleeContact,
+                    ..
+                }
+            )
+        })
+        .collect();
+    note(
+        "basic_projectile_key_duplicates",
+        thrown
+            .iter()
+            .enumerate()
+            .filter(|(index, body)| thrown[..*index].contains(body))
+            .map(|(_, body)| format!("{body:?}"))
+            .collect(),
+    );
+    Ok(found)
+}
