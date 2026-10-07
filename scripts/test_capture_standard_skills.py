@@ -58,6 +58,7 @@ class LauncherTests(unittest.TestCase):
         catalog = json.loads((ROOT / "shared/assets/catalog/heroes.json").read_text())
         self.assertEqual(launcher.HEROES, [hero["id"] for hero in catalog["classes"]])
         self.assertIn("adventurer", launcher.HEROES)
+        self.assertNotIn("adventurer", launcher.ROSTER_HEROES)
 
     def test_look_options_name_a_shipped_rig_and_a_release_time(self):
         slugs = launcher.avatar_slugs(ROOT / "client/assets")
@@ -65,7 +66,6 @@ class LauncherTests(unittest.TestCase):
         self.assertIn("agnes", slugs)
         self.assertEqual([launcher.release_time(value) for value in ("contact", "0", "0.45", "2")],
                          ["contact", "0", "0.45", "2"])
-        self.assertNotIn("adventurer", launcher.ROSTER_HEROES)
 
     def test_overlay_links_the_assets_and_replaces_only_the_named_registry(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -119,6 +119,25 @@ class LauncherTests(unittest.TestCase):
             summary["skills"].pop()
             self.assertIn("expected four skill records", launcher.phase_problems(summary, directory))
 
+    def test_flight_look_ends_with_the_still_its_basic_record_names(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            summary = phase_summary()
+            flight = dict(file="5-basic-flight.png", phase="flight", slot=255, skill="basic", mean_pixel=91.0)
+            summary["captures"].append(flight)
+            touch_stills(directory, summary)
+            # A still nobody recorded, and a record without its still, are both refused.
+            mismatch = "flight stills ['5-basic-flight.png'] do not match the basic attack record"
+            self.assertEqual(launcher.phase_problems(summary, directory), [mismatch])
+            summary["basic"] = dict(slot=255, stills=["5-basic-flight.png"])
+            self.assertEqual(launcher.phase_problems(summary, directory), [])
+            summary["captures"].pop()
+            self.assertEqual(launcher.phase_problems(summary, directory),
+                             ["flight stills [] do not match the basic attack record"])
+            # A melee core throws nothing: no record and no still.
+            summary["basic"] = None
+            self.assertEqual(launcher.phase_problems(summary, directory), [])
+
     def test_manifest_keeps_classes_of_earlier_runs_and_fails_with_any_class(self):
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "manifest.json"
@@ -146,6 +165,7 @@ class LauncherTests(unittest.TestCase):
                     (["--visual-mode", "isometric"], "invalid choice"),
                     (["--avatar", "agnes"], "need --phases"),
                     (["--release-at", "contact"], "need --phases"),
+                    (["--flight"], "need --phases"),
                     (["--phases", "--avatar", "nobody"], "Unknown avatar"),
                     (["--phases", "--release-at", "3"], "expected `contact` or 0..2 seconds"),
                     (["--phases", "--release-at", "soon"], "invalid release_time value"),

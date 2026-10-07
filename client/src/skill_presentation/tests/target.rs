@@ -313,6 +313,112 @@ fn target_identity_is_unique() {
     }
 }
 
+/// The bodies the projectile renderer draws for the basic attacks: every thrown one is its
+/// own, and only the two melee contacts share the engine's reach streak.
+#[test]
+fn basic_projectile_bodies_are_unique() {
+    use crate::combat_visuals::{FlightBody, form_lateral_extent, known_basic};
+    let visuals = target_visuals();
+    let mut thrown = Vec::new();
+    let mut contacts = Vec::new();
+    for class in HeroClass::ALL {
+        let styles = match shared::loadout::preset_for_class(class).map(|kit| kit.attack_profile())
+        {
+            // A melee core resolves contact at once and throws nothing.
+            Some(AttackProfileId::Melee) => vec![],
+            Some(AttackProfileId::Repeater) => {
+                vec![ProjectileStyle::Bullet, ProjectileStyle::Rocket]
+            }
+            Some(AttackProfileId::LightBolt) | None => vec![ProjectileStyle::for_class(class)],
+        };
+        for style in styles {
+            let profile = projectile(&visuals, class, style, BASIC_ATTACK_ACTION_SLOT);
+            assert!(known_basic(Some(class), Some(BASIC_ATTACK_ACTION_SLOT)));
+            match profile.flight_body(true, true) {
+                FlightBody::Reach => contacts.push(class),
+                // A `shape` body is told apart by its shape.
+                body => thrown.push((
+                    class,
+                    style,
+                    body,
+                    (body == FlightBody::Shape).then_some(profile.shape),
+                )),
+            }
+        }
+    }
+    assert_eq!(contacts, [HeroClass::Warrior, HeroClass::Warden]);
+    assert_eq!(thrown.len(), 10);
+    for (index, a) in thrown.iter().enumerate() {
+        for b in &thrown[index + 1..] {
+            assert_ne!((a.2, a.3), (b.2, b.3), "{a:?} and {b:?}");
+            // Different entries of the form table are different meshes in different
+            // places: no two of these bodies are drawn from the same parts.
+            if a.2 != FlightBody::Shape && b.2 != FlightBody::Shape {
+                assert_ne!(a.2.parts(), b.2.parts(), "{a:?} and {b:?}");
+            }
+        }
+    }
+    // The launcher round is its form, not the rocket model; the Ranger keeps the arrow.
+    let body_of = |class: HeroClass, style: ProjectileStyle| {
+        thrown
+            .iter()
+            .find(|entry| entry.0 == class && entry.1 == style)
+            .map(|entry| (entry.2, entry.3))
+            .unwrap()
+    };
+    assert_eq!(
+        body_of(HeroClass::Wildspark, ProjectileStyle::Rocket),
+        (
+            FlightBody::Form(ProjectileForm::Tumbler, Silhouette::Block),
+            None
+        )
+    );
+    assert_eq!(
+        body_of(HeroClass::Ranger, ProjectileStyle::Arrow),
+        (FlightBody::Shape, Some(ProjectileShape::Arrow))
+    );
+    // The signature of a thrown body is the form and the mesh that are drawn.
+    let registry = target();
+    for (id, _, _) in rows(&registry) {
+        let signature::BodySig::Projectile {
+            body, silhouette, ..
+        } = signature::identity(&registry, &visuals, id).unwrap().body
+        else {
+            continue;
+        };
+        let SkillKey::Legacy(class, slot) = SkillKey::from_id(id).unwrap() else {
+            panic!("{id} is not a legacy ability");
+        };
+        let profile = projectile(
+            &visuals,
+            class,
+            ProjectileStyle::for_class(class),
+            slot.index() as u8,
+        );
+        let FlightBody::Form(form, mesh) = profile.flight_body(true, false) else {
+            panic!("{id} is not drawn as a form");
+        };
+        assert_eq!(
+            (body, silhouette),
+            (signature::ProjectileBody::Form(form), Some(mesh)),
+            "{id}"
+        );
+        assert!(form_lateral_extent(form, mesh) > 0.0);
+    }
+    // A profile that leaves the silhouette to its form has the identity of what is drawn:
+    // the wavefront of Heroic Strike is a crescent with or without the name.
+    let mut unnamed: serde_json::Value = serde_json::from_str(TARGET_VISUALS).unwrap();
+    let strike = unnamed["profiles"]["heroic_strike"]
+        .as_object_mut()
+        .unwrap();
+    assert_eq!(strike.remove("silhouette"), Some("crescent".into()));
+    let unnamed = CombatVisualRegistry::from_json(&unnamed.to_string()).unwrap();
+    assert_eq!(
+        signature::identity(&registry, &unnamed, "heroic_strike"),
+        signature::identity(&registry, &visuals, "heroic_strike")
+    );
+}
+
 /// The helper that explains a failing ratchet counts exactly what the ratchet counts.
 #[test]
 fn findings_name_what_the_ratchet_counts() {

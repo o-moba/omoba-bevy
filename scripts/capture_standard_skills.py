@@ -19,7 +19,11 @@ output directory receives one folder per class and a merged `manifest.json`.
 For a look at motion clips, `--avatar SLUG` stages the hero on another shipped
 rig and `--release-at contact|SECONDS` moves the release still of skills
 without a telegraph to the clip's contact time or to a fixed time after the
-accepted cast.
+accepted cast. For a look at projectile bodies, `--flight` stands the target of
+every unit-target ability far enough for its projectile to be in flight at the
+release still and adds `5-basic-flight.png`, the basic attack's projectile on
+its way (not for a melee core, which throws nothing). Every still lists the
+hero's projectiles and what stands for each of them.
 """
 import argparse
 import datetime
@@ -49,7 +53,8 @@ ERROR_MARKERS = ("panicked at", "does not exist", "Path not found", "STANDARD_KI
 # Per-still fields the merged manifest keeps (the full state stays in qa-summary.json).
 STILL_FIELDS = ("file", "phase", "gate", "slot", "skill", "since_edge_secs", "animation", "profile",
                 "particles", "receipt", "damage_numbers", "effect_parts", "effect_visible_parts",
-                "effect_lights", "registry_profiles", "mean_pixel", "hero_pixels", "target_pixels")
+                "effect_lights", "registry_profiles", "mean_pixel", "hero_pixels", "target_pixels",
+                "projectiles")
 
 
 def overlay_assets(assets, workdir, overlays):
@@ -84,17 +89,22 @@ def phase_problems(summary, directory):
             problems.append(f"slot {key} has stills {phases}, expected windup, release and impact or settled")
     if len(summary.get("skills", [])) != len(SLOT_KEYS):
         problems.append("expected four skill records")
+    # A flight look ends with the basic attack; its record names the still.
+    flights = [s["file"] for s in stills if s["phase"] == "flight"]
+    if flights != (summary.get("basic") or {}).get("stills", []):
+        problems.append(f"flight stills {flights} do not match the basic attack record")
     return problems
 
 
 def capture(hero, client, server, assets, output, timeout=135, roster=False, handhelds=False, sdk_weapon=None,
-            phases=False, offscreen=False, visual_mode="models3d", overlays=None, avatar=None, release_at=None):
+            phases=False, offscreen=False, visual_mode="models3d", overlays=None, avatar=None, release_at=None,
+            flight=False):
     output.mkdir(parents=True)
     children = []
     result = dict(hero=hero, source=source_identity(), client_sha256=sha256(client),
                   locale="en", viewport=[1280, 720], physical_device_verified=False,
                   phases=phases, offscreen=offscreen, visual_mode=visual_mode,
-                  avatar=avatar, release_at=release_at)
+                  avatar=avatar, release_at=release_at, flight=flight)
     with tempfile.TemporaryDirectory(prefix="omoba-skill-pilot-") as isolated:
         if overlays:
             assets = overlay_assets(assets, isolated, overlays)
@@ -119,6 +129,8 @@ def capture(hero, client, server, assets, output, timeout=135, roster=False, han
                     env["OMOBA_STANDARD_QA_AVATAR"] = avatar
                 if release_at:
                     env["OMOBA_STANDARD_QA_RELEASE_AT"] = release_at
+                if flight:
+                    env["OMOBA_STANDARD_QA_FLIGHT"] = "1"
             elif roster or handhelds:
                 env["OMOBA_ROSTER_SKILLS_QA"] = "1"
             if offscreen:
@@ -146,6 +158,7 @@ def capture(hero, client, server, assets, output, timeout=135, roster=False, han
         result["errors"] += phase_problems(summary, output)
         result["registry_profiles"] = summary.get("registry_profiles")
         result["skills"] = summary.get("skills", [])
+        result["basic"] = summary.get("basic")
         result["stills"] = [{field: capture.get(field) for field in STILL_FIELDS}
                             for capture in summary.get("captures", []) if capture.get("phase")]
     result["pass"] = (result.get("client_exit_code") == 0 and summary.get("pass") is True
@@ -197,13 +210,16 @@ def main(argv=None):
     parser.add_argument("--release-at", type=release_time, metavar="contact|SECONDS",
                         help="With --phases: take the release still of a skill without a telegraph at its "
                              "clip's contact time, or this long after the accepted cast (default: 0.10 s)")
+    parser.add_argument("--flight", action="store_true",
+                        help="With --phases: unit-target abilities are cast from lane distance and the basic "
+                             "attack gets a still of its projectile in flight")
     parser.add_argument("--timeout", type=float,
                         help="Per-client deadline in seconds (default: 135, or 300 with --phases)")
     args = parser.parse_args(argv)
     if args.phases and (args.roster or args.handhelds):
         parser.error("--phases replaces --roster and --handhelds")
-    if (args.avatar or args.release_at) and not args.phases:
-        parser.error("--avatar and --release-at need --phases")
+    if (args.avatar or args.release_at or args.flight) and not args.phases:
+        parser.error("--avatar, --release-at and --flight need --phases")
     if args.timeout is None:
         args.timeout = 300 if args.phases else 135
     if not 0 < args.timeout <= 600:
@@ -246,11 +262,12 @@ def main(argv=None):
                       overlays={OVERLAYS[name]: dict(path=str(path), sha256=sha256(path))
                                 for name, path in overlays.items()},
                       locale="en", viewport=[1280, 720], phases=args.phases, offscreen=args.offscreen,
-                      visual_mode=args.visual_mode, avatar=args.avatar, release_at=args.release_at)
+                      visual_mode=args.visual_mode, avatar=args.avatar, release_at=args.release_at,
+                      flight=args.flight)
         results = [capture(hero, binaries["client"], binaries["server"], assets, output / hero, args.timeout,
                            args.roster or hero not in PILOT_HEROES, args.handhelds, phases=args.phases,
                            offscreen=args.offscreen, visual_mode=args.visual_mode, overlays=overlays,
-                           avatar=args.avatar, release_at=args.release_at)
+                           avatar=args.avatar, release_at=args.release_at, flight=args.flight)
                    for hero in heroes]
     merge_manifest(output / "manifest.json", header, results)
     print(json.dumps([{key: result.get(key) for key in ("hero", "pass", "client_exit_code", "error", "errors")}

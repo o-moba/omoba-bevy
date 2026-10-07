@@ -121,14 +121,14 @@
         "01-shop-owned-component.png": "Only OMOBA_OFFLINE_SHOP_QA_ONLY=1: confirmed purchase and component-credit catalog.",
         "02-shop-scrolled-upgrades.png": "Only OMOBA_OFFLINE_SHOP_QA_ONLY=1: raw-touch shop scroll to advanced items.",
         "01-debug-tools-bottom.png": "Focused scroll-bottom verification with OMOBA_OFFLINE_DEBUG_QA_ONLY=1; default offline run retains its normal practice-tools frame.",
-   "01-debug-tools-top.png": "Only OMOBA_OFFLINE_DEBUG_TOP_QA_ONLY=1: the practice-tools section before any scroll.",
-   "mist-auto.png": "Only OMOBA_OFFLINE_OVERLAY_QA_ONLY=1: the edge vignette with its image mode switched to Auto, for a paused before/after comparison.",
-   "mist-stretch.png": "Only OMOBA_OFFLINE_OVERLAY_QA_ONLY=1: the edge vignette as shipped (Stretch).",
-   "mist-hidden.png": "Only OMOBA_OFFLINE_OVERLAY_QA_ONLY=1: the same frame with the vignette hidden.",
-   "rematch-result.png": "Only OMOBA_OFFLINE_REMATCH_QA_ONLY=1: the result screen before Play Again.",
-   "rematch-moving.png": "Only OMOBA_OFFLINE_REMATCH_QA_ONLY=1: hero and bots moving in the rematch round.",
-   "rematch-surroundings-home.png": "Only OMOBA_OFFLINE_REMATCH_QA_ONLY=1: the arena surroundings at the home corner.",
-   "rematch-surroundings-away-max-zoom.png": "Only OMOBA_OFFLINE_REMATCH_QA_ONLY=1: the arena surroundings at the far corner, maximum zoom."
+        "01-debug-tools-top.png": "Only OMOBA_OFFLINE_DEBUG_TOP_QA_ONLY=1: the practice-tools section before any scroll.",
+        "mist-auto.png": "Only OMOBA_OFFLINE_OVERLAY_QA_ONLY=1: the edge vignette with its image mode switched to Auto, for a paused before/after comparison.",
+        "mist-stretch.png": "Only OMOBA_OFFLINE_OVERLAY_QA_ONLY=1: the edge vignette as shipped (Stretch).",
+        "mist-hidden.png": "Only OMOBA_OFFLINE_OVERLAY_QA_ONLY=1: the same frame with the vignette hidden.",
+        "rematch-result.png": "Only OMOBA_OFFLINE_REMATCH_QA_ONLY=1: the result screen before Play Again.",
+        "rematch-moving.png": "Only OMOBA_OFFLINE_REMATCH_QA_ONLY=1: hero and bots moving in the rematch round.",
+        "rematch-surroundings-home.png": "Only OMOBA_OFFLINE_REMATCH_QA_ONLY=1: the arena surroundings at the home corner.",
+        "rematch-surroundings-away-max-zoom.png": "Only OMOBA_OFFLINE_REMATCH_QA_ONLY=1: the arena surroundings at the far corner, maximum zoom."
       }
     },
     "party-stage": {
@@ -1068,7 +1068,7 @@
     "client/src/qa/ui_gallery.rs": "UI kit gallery (developer screen, OMOBA_UI_GALLERY=1 / OMOBA_UI_GALLERY_OUTPUT): every kit component and state, not a player screen",
     "client/src/qa/result_qa.rs": "result screen states (finalizing, saved, defeat on a rematch server, abandoned) as labelled fixtures and the loading shell failure, OMOBA_RESULT_QA_OUTPUT; no server (gap post-match-real stays open)",
     "client/src/qa/help_qa.rs": "controls guide controller focus and Settings \u2192 Controls return (OMOBA_HELP_QA_SHOTS); frames duplicate hud-help/home-help/settings, not new screens",
-    "client/src/qa/standard_kits_qa.rs": "Focused standard-kit selection, effects and held-aim proof from a live local sandbox (OMOBA_STANDARD_QA_DIR, OMOBA_STANDARD_QA_CLASS); OMOBA_STANDARD_QA_PHASES=1 takes an idle baseline and three state-gated stills per skill (windup, release, impact or settled) for any of the 17 classes, OMOBA_STANDARD_QA_OFFSCREEN=1 hides the window and renders the main camera to an image; for a look at motion clips a phase run takes OMOBA_STANDARD_QA_AVATAR (the hero's rig) and OMOBA_STANDARD_QA_RELEASE_AT (release still at the clip's contact time or a fixed time). One English desktop viewport, scripted input, no device matrix.",
+    "client/src/qa/standard_kits_qa.rs": "Focused standard-kit selection, effects and held-aim proof from a live local sandbox (OMOBA_STANDARD_QA_DIR, OMOBA_STANDARD_QA_CLASS); OMOBA_STANDARD_QA_PHASES=1 takes an idle baseline and three state-gated stills per skill (windup, release, impact or settled) for any of the 17 classes, OMOBA_STANDARD_QA_OFFSCREEN=1 hides the window and renders the main camera to an image; for a look at motion clips a phase run takes OMOBA_STANDARD_QA_AVATAR (the hero's rig) and OMOBA_STANDARD_QA_RELEASE_AT (release still at the clip's contact time or a fixed time); for a look at projectile bodies OMOBA_STANDARD_QA_FLIGHT=1 casts unit-target abilities from lane distance and adds one still of the basic attack's projectile in flight. One English desktop viewport, scripted input, no device matrix.",
     "client/src/qa/roster_qa.rs": "Focused remaining roster selection and live skill states (OMOBA_ROSTER_QA_DIR); OMOBA_ROSTER_QA_INSPECTION adds short/long/released skill holds. English 1280x720, scripted input; no device matrix.",
     "client/src/qa/sdk_pack_qa.rs": "Focused local SDK collection proof (OMOBA_SDK_PACK_QA_OUTPUT): 20 live avatar previews plus representative server-admitted running avatars and hand mounts. English 1280x720, scripted selection; not public Studio publication or a device matrix.",
     "client/src/qa/combat_polish_qa.rs": "Focused synthetic iPad combat presentation fixtures (OMOBA_COMBAT_POLISH_QA_DIR): vitals, upgrades, held attack, kill feed, concealment and rocket. English 1180x820 by default; OMOBA_IPHONE_UX_QA=1 selects focused 852x393 iPhone gameplay, empty attack, concealment, dash aim, recall and FPS/HUD settings with checked UI readback. Not physical-device or multiplayer proof.",

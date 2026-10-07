@@ -1632,6 +1632,68 @@ fn cast_is_new(previous: Option<u64>, current: u64) -> bool {
     previous.is_some_and(|previous| current > previous)
 }
 
+/// The glow puff and the two orbiting glows a projectile leaves behind in one tick. Only
+/// a thrown `shape` body of a magic style leaves them: a form carries its own wake, and a
+/// wave or a melee contact is no missile in either render mode. `forms` says whether the
+/// projectile renderer draws forms (Models3d with the shared meshes).
+fn flight_puffs(
+    at: Vec3,
+    projectile: &crate::net::NetworkProjectile,
+    profile: Option<&crate::combat_visuals::CombatVisualProfile>,
+    class: Option<shared::HeroClass>,
+    forms: bool,
+    flat: bool,
+    now: f64,
+) -> Vec<Particle> {
+    let puffs = match profile {
+        Some(profile) => profile.puffs(
+            profile.flight_body(
+                forms,
+                crate::combat_visuals::known_basic(class, projectile.action_slot),
+            ),
+            projectile.style,
+        ),
+        None => matches!(
+            projectile.style,
+            ProjectileStyle::Arcane | ProjectileStyle::Holy
+        ),
+    };
+    if !puffs {
+        return Vec::new();
+    }
+    let color = profile
+        .map_or(Color::srgb(0.65, 0.8, 1.0), |p| p.color())
+        .with_alpha(0.85);
+    let scale = profile.map_or(1.0, |p| p.scale).clamp(0.2, 2.0);
+    let direction = projectile.direction.normalize_or_zero();
+    let base = Particle {
+        event_id: 0,
+        origin: at,
+        velocity: -direction * 1.0,
+        age: 0.0,
+        lifetime: 0.26,
+        size: 1.5 * scale,
+        angle: 0.0,
+        color,
+        shape: Shape::Glow,
+        ..Particle::BASE
+    };
+    let phase = now as f32 * 9.0 + projectile.id as f32 % 100.0;
+    let orbit = [phase, phase + std::f32::consts::PI].map(|angle| Particle {
+        origin: at
+            + if flat {
+                Vec3::new(angle.cos() * 0.50, 0.0, angle.sin() * 0.50)
+            } else {
+                Vec3::new(angle.cos() * 0.50, angle.sin() * 0.42, 0.0)
+            },
+        size: 0.45,
+        lifetime: 0.16,
+        color: Color::srgba(0.90, 0.85, 1.0, 0.9),
+        ..base.clone()
+    });
+    std::iter::once(base).chain(orbit).collect()
+}
+
 /// Short tails sample authoritative positions; no stationary projectile invents a hit.
 fn emit_projectile_particles(
     vfx_clock: Res<crate::vfx_clock::VfxClock>,
@@ -1639,6 +1701,7 @@ fn emit_projectile_particles(
     game: Option<Res<crate::net::GameStateSnapshot>>,
     cameras: Query<(&Camera, &GlobalTransform), With<MainCamera>>,
     registry: Option<Res<crate::combat_visuals::CombatVisualRegistry>>,
+    library: Option<Res<crate::skill_presentation::bodies::VfxMeshes>>,
     owners: Query<(
         &crate::net::NetworkPlayerId,
         Option<&crate::net::NetworkHeroClass>,
@@ -1696,59 +1759,31 @@ fn emit_projectile_particles(
         }) {
             continue;
         }
-        let magic = matches!(
-            projectile.style,
-            ProjectileStyle::Arcane | ProjectileStyle::Holy
-        );
         let owner = matches!(
             projectile.source_kind,
             shared::combat::CombatEntityKind::Player | shared::combat::CombatEntityKind::Unknown
         )
         .then(|| owners.iter().find(|(id, ..)| id.0 == projectile.owner_id))
         .flatten();
+        let class = owner.and_then(|(_, c, _, _)| c.map(|c| c.0));
         let profile = registry.as_ref().map(|r| {
             r.resolve(
-                owner.and_then(|(_, c, _, _)| c.map(|c| c.0)),
+                class,
                 projectile.style,
                 projectile.action_slot,
                 owner.and_then(|(_, _, a, _)| a.and_then(|a| a.0.as_deref())),
                 owner.and_then(|(_, _, _, s)| s.and_then(|s| s.0.as_deref())),
             )
         });
-        let color = profile
-            .map_or(Color::srgb(0.65, 0.8, 1.0), |p| p.color())
-            .with_alpha(0.85);
-        let scale = profile.map_or(1.0, |p| p.scale).clamp(0.2, 2.0);
-        let direction = projectile.direction.normalize_or_zero();
-        let base = Particle {
-            event_id: 0,
-            origin: p,
-            velocity: -direction * 1.0,
-            age: 0.0,
-            lifetime: 0.26,
-            size: (if magic { 1.5 } else { 0.65 }) * scale,
-            angle: 0.0,
-            color,
-            shape: Shape::Glow,
-            ..Particle::BASE
-        };
-        particles.push(base.clone());
-        if magic {
-            let phase = vfx_clock.now as f32 * 9.0 + projectile.id as f32 % 100.0;
-            for angle in [phase, phase + std::f32::consts::PI] {
-                particles.push(Particle {
-                    origin: p + if flat {
-                        Vec3::new(angle.cos() * 0.50, 0.0, angle.sin() * 0.50)
-                    } else {
-                        Vec3::new(angle.cos() * 0.50, angle.sin() * 0.42, 0.0)
-                    },
-                    size: 0.45,
-                    lifetime: 0.16,
-                    color: Color::srgba(0.90, 0.85, 1.0, 0.9),
-                    ..base.clone()
-                });
-            }
-        }
+        particles.extend(flight_puffs(
+            p,
+            projectile,
+            profile,
+            class,
+            !flat && library.is_some(),
+            flat,
+            vfx_clock.now,
+        ));
         if particles.len() >= 45 {
             break;
         }
@@ -2745,6 +2780,121 @@ mod tests {
             )
             .is_empty()
         );
+    }
+    #[test]
+    fn no_flight_puff_where_a_form_is_drawn() {
+        use crate::combat_visuals::CombatVisualRegistry;
+        use shared::HeroClass;
+        let target = CombatVisualRegistry::from_json(include_str!(
+            "skill_presentation/fixtures/target_combat_visuals.json"
+        ))
+        .unwrap();
+        let shipped =
+            CombatVisualRegistry::from_json(include_str!("../assets/config/combat_visuals.json"))
+                .unwrap();
+        let at = Vec3::new(2., 0.85, -3.);
+        // The particles one projectile of `class` leaves in a tick: where the renderer
+        // draws forms, where it draws shapes in 3D, and in the flat backend.
+        let puffs = |registry: &CombatVisualRegistry,
+                     class: Option<HeroClass>,
+                     style: ProjectileStyle,
+                     slot: Option<u8>| {
+            let projectile = crate::net::NetworkProjectile {
+                id: 9,
+                owner_id: 1,
+                owner_team: crate::team::Team::Green,
+                source_kind: shared::combat::CombatEntityKind::Player,
+                style,
+                action_slot: slot,
+                direction: Vec3::X,
+            };
+            let profile = registry.resolve(class, style, slot, None, None);
+            [(true, false), (false, false), (false, true)].map(|(forms, flat)| {
+                flight_puffs(at, &projectile, Some(profile), class, forms, flat, 4.0)
+            })
+        };
+        let basic = Some(shared::BASIC_ATTACK_ACTION_SLOT);
+        // Every action of the final data that is drawn as a form or as a reach streak
+        // leaves nothing behind in 3D.
+        for class in HeroClass::ALL {
+            for slot in [Some(0), Some(1), Some(2), Some(3), basic] {
+                let style = ProjectileStyle::for_class(class);
+                let profile = target.resolve(Some(class), style, slot, None, None);
+                let own = crate::combat_visuals::known_basic(Some(class), slot);
+                let drawn = profile.flight_body(true, own);
+                let [forms, shapes, flat] = puffs(&target, Some(class), style, slot);
+                if drawn != crate::combat_visuals::FlightBody::Shape {
+                    assert!(forms.is_empty(), "{} {slot:?}", class.id());
+                }
+                // Where no form is drawn only a thrown body of a magic style puffs, in
+                // the profile colour, with its two orbiting glows; never a wave or a
+                // melee contact.
+                let magic = matches!(style, ProjectileStyle::Arcane | ProjectileStyle::Holy)
+                    && profile.presentation
+                        == crate::skill_presentation::vocab::ProjectilePresentation::Projectile;
+                for particles in [&shapes, &flat] {
+                    assert_eq!(particles.len(), if magic { 3 } else { 0 }, "{}", profile.id);
+                }
+                if magic {
+                    assert_eq!(shapes[0].color, profile.color().with_alpha(0.85));
+                    assert_eq!(shapes[0].origin, at);
+                    assert_eq!(shapes[0].velocity, Vec3::NEG_X);
+                    assert_eq!(shapes[0].size, 1.5 * profile.scale.clamp(0.2, 2.0));
+                    // The orbit is laid in the ground plane of the flat backend.
+                    assert!(shapes[1].origin.z == at.z && flat[1].origin.y == at.y);
+                }
+            }
+        }
+        // The cases by name: the three Mage bodies and the Cleric's spark are forms, Smite
+        // is a wave, the Warrior's basic is a contact; none of them puffs where it is drawn.
+        for (class, style, slot) in [
+            (HeroClass::Mage, ProjectileStyle::Arcane, Some(0)),
+            (HeroClass::Mage, ProjectileStyle::Arcane, Some(2)),
+            (HeroClass::Mage, ProjectileStyle::Arcane, Some(3)),
+            (HeroClass::Mage, ProjectileStyle::Arcane, basic),
+            (HeroClass::Cleric, ProjectileStyle::Holy, basic),
+            (HeroClass::Cleric, ProjectileStyle::Holy, Some(0)),
+            (HeroClass::Warrior, ProjectileStyle::Crescent, basic),
+            (HeroClass::Wildspark, ProjectileStyle::Rocket, basic),
+        ] {
+            assert!(puffs(&target, Some(class), style, slot)[0].is_empty());
+        }
+        let [_, shapes, flat] = puffs(
+            &target,
+            Some(HeroClass::Cleric),
+            ProjectileStyle::Holy,
+            Some(0),
+        );
+        assert!(shapes.is_empty() && flat.is_empty());
+        // The packaged profiles name no form: a magic bolt keeps its puff and its glows
+        // in both backends, and an arrow or a blade no longer leaves an exhaust.
+        for (class, style, count) in [
+            (HeroClass::Mage, ProjectileStyle::Arcane, 3),
+            (HeroClass::Cleric, ProjectileStyle::Holy, 3),
+            (HeroClass::Ranger, ProjectileStyle::Arrow, 0),
+            (HeroClass::Warrior, ProjectileStyle::Crescent, 0),
+            (HeroClass::Warden, ProjectileStyle::Claw, 0),
+            (HeroClass::Wildspark, ProjectileStyle::Bullet, 0),
+        ] {
+            for particles in puffs(&shipped, Some(class), style, Some(0)) {
+                assert_eq!(particles.len(), count, "{}", class.id());
+            }
+        }
+        // A projectile whose profile cannot be resolved keeps the rule of its style.
+        let unresolved = |style| {
+            let projectile = crate::net::NetworkProjectile {
+                id: 9,
+                owner_id: 1,
+                owner_team: crate::team::Team::Green,
+                source_kind: shared::combat::CombatEntityKind::Minion,
+                style,
+                action_slot: None,
+                direction: Vec3::X,
+            };
+            flight_puffs(at, &projectile, None, None, true, false, 4.0).len()
+        };
+        assert_eq!(unresolved(ProjectileStyle::Holy), 3);
+        assert_eq!(unresolved(ProjectileStyle::CasterBolt), 0);
     }
     #[test]
     fn delayed_particles_wait_hidden_and_malformed_ones_are_dropped() {

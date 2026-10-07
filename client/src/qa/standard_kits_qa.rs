@@ -8,6 +8,10 @@
 //! clip, `OMOBA_STANDARD_QA_AVATAR=<slug>` picks the hero's rig of a phase run
 //! and `OMOBA_STANDARD_QA_RELEASE_AT=contact|<seconds>` moves the release still
 //! of a skill without a telegraph to the clip's contact time or a fixed time.
+//! For a look at projectile bodies, `OMOBA_STANDARD_QA_FLIGHT=1` stands the
+//! target of every unit-target ability far enough for its projectile to be in
+//! flight at the release still and adds one still of the basic attack's
+//! projectile in flight.
 use crate::{
     frontend::{AppScreen, ScreenDriverPaused},
     help_overlay::HelpOverlayVisible,
@@ -55,6 +59,7 @@ impl Plugin for StandardKitsQaPlugin {
         let flag = |name: &str| std::env::var(name).as_deref() == Ok("1");
         let phases = flag("OMOBA_STANDARD_QA_PHASES");
         let offscreen = flag("OMOBA_STANDARD_QA_OFFSCREEN");
+        let flight = flag("OMOBA_STANDARD_QA_FLIGHT");
         let release_at = match std::env::var("OMOBA_STANDARD_QA_RELEASE_AT").as_deref() {
             Err(_) => ReleaseAt::Window,
             Ok("contact") => ReleaseAt::Contact,
@@ -82,6 +87,7 @@ impl Plugin for StandardKitsQaPlugin {
             release_at,
             phases,
             offscreen,
+            flight,
             target: None,
             black: None,
             ux: std::env::var_os("OMOBA_COMBAT_UX_QA").is_some(),
@@ -142,6 +148,8 @@ struct Qa {
     phases: bool,
     /// Hidden window; the main camera renders to `target`.
     offscreen: bool,
+    /// Phase run staged for a look at projectiles in flight.
+    flight: bool,
     target: Option<Handle<Image>>,
     /// A frame that read back black; the run fails instead of keeping it.
     black: Option<String>,
@@ -1202,6 +1210,9 @@ const IMPACT_AGE: (f32, f32) = (0.03, 0.2);
 const SETTLED_AFTER_RELEASE: f64 = 0.6;
 /// Extra simulated seconds the capture cast waits for the receipt the probe saw.
 const RECEIPT_GRACE: f64 = 1.0;
+/// Share of the way to the target the basic attack's projectile has gone when the pause
+/// for its still is requested.
+const FLIGHT_SHARE: f64 = 0.3;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 enum Pass {
@@ -1217,6 +1228,8 @@ enum Phase {
     Release,
     Impact,
     Settled,
+    /// The projectile of the basic attack in flight (`OMOBA_STANDARD_QA_FLIGHT`).
+    Flight,
 }
 impl Phase {
     fn name(self) -> &'static str {
@@ -1226,12 +1239,13 @@ impl Phase {
             Self::Release => "release",
             Self::Impact => "impact",
             Self::Settled => "settled",
+            Self::Flight => "flight",
         }
     }
     /// Position of the still in the skill's row of three.
     fn order(self) -> u8 {
         match self {
-            Self::Idle => 0,
+            Self::Idle | Self::Flight => 0,
             Self::Windup => 1,
             Self::Release => 2,
             Self::Impact | Self::Settled => 3,
@@ -1258,6 +1272,8 @@ enum Step {
     Probe,
     /// Capture pass: wait for the gate of the next still.
     Gates,
+    /// Basic attack sent: wait for its projectile to be in flight.
+    Flight,
     /// Pause requested for a still.
     Pause(Phase),
     /// Screenshot taken: wait for its read-back.
@@ -1331,7 +1347,25 @@ struct Staging {
     can_damage: bool,
 }
 impl Staging {
-    fn of(class: HeroClass, equipped: &shared::loadout::EquippedSkills, slot: SkillSlot) -> Self {
+    /// The basic attack: its target stands inside the attack range, as far as the frame
+    /// allows, so that the projectile is seen on its way.
+    fn basic(class: HeroClass) -> Self {
+        Self {
+            category: "basic",
+            distance: (shared::basic_attack_for_class(class).range * 0.9)
+                .clamp(CLOSE_RANGE, LANE_LIMIT),
+            on_caster: false,
+            can_damage: true,
+        }
+    }
+
+    /// `flight` stands the target of every unit-target ability on the lane.
+    fn of(
+        class: HeroClass,
+        equipped: &shared::loadout::EquippedSkills,
+        slot: SkillSlot,
+        flight: bool,
+    ) -> Self {
         let ability = equipped.ability(slot);
         let effect = equipped.skill(slot).map(|skill| skill.effect);
         let technique = match effect {
@@ -1352,7 +1386,9 @@ impl Staging {
             TargetingMode::Direction => ("skillshot", lane),
             TargetingMode::Point => ("pick_or_melee", CLOSE_RANGE.min(ability.cast_range)),
             // A legacy kit is melee when its basic attack is.
-            TargetingMode::UnitTarget if shared::basic_attack_for_class(class).range <= 5.0 => {
+            TargetingMode::UnitTarget
+                if !flight && shared::basic_attack_for_class(class).range <= 5.0 =>
+            {
                 ("pick_or_melee", CLOSE_RANGE)
             }
             TargetingMode::UnitTarget => ("skillshot", lane),
@@ -1543,8 +1579,19 @@ struct Phases {
     stills: usize,
     skill_stills: Vec<String>,
     skills: Vec<serde_json::Value>,
+    /// The basic attack is being captured, after the four skills.
+    basic: bool,
+    basic_record: Option<serde_json::Value>,
 }
 impl Phases {
+    /// The action slot of the cast that is being captured.
+    fn action_slot(&self) -> u8 {
+        if self.basic {
+            shared::BASIC_ATTACK_ACTION_SLOT
+        } else {
+            self.slot
+        }
+    }
     fn enter(&mut self, step: Step) {
         self.step = step;
         self.entered = Some(Instant::now());
@@ -1604,8 +1651,56 @@ struct PhaseWorld<'w, 's> {
             Has<SpotLight>,
         ),
     >,
+    projectiles: Query<
+        'w,
+        's,
+        (
+            Entity,
+            &'static Transform,
+            &'static crate::net::NetworkProjectile,
+            Option<&'static crate::projectile_visuals::ProjectileBodyVisual>,
+        ),
+    >,
+    children: Query<'w, 's, &'static Children>,
+    drawn: Query<'w, 's, (&'static InheritedVisibility, Has<Mesh3d>)>,
 }
 impl PhaseWorld<'_, '_> {
+    /// The hero's replicated projectiles and what stands for each of them.
+    fn own_projectiles(&self) -> Vec<serde_json::Value> {
+        use crate::combat_visuals::FlightBody;
+        let hero = self
+            .actor(SandboxActor::Player)
+            .map(|actor| Vec2::from_array(actor.position));
+        self.projectiles
+            .iter()
+            .filter(|(_, _, projectile, _)| {
+                projectile.source_kind == shared::combat::CombatEntityKind::Player
+                    && projectile.owner_id == self.game.your_id
+            })
+            .map(|(entity, pose, projectile, body)| {
+                serde_json::json!({
+                    "id": projectile.id,
+                    "style": projectile.style,
+                    "action_slot": projectile.action_slot,
+                    "position": pose.translation.to_array(),
+                    "from_hero": hero.map(|hero| pose.translation.xz().distance(hero)),
+                    // Absent in Sprite2d: the flat backend draws its own shapes.
+                    "profile": body.map(|body| body.profile.as_str()),
+                    "body": body.map(|body| match body.body {
+                        FlightBody::Shape => "shape".to_string(),
+                        FlightBody::Form(form, mesh) => format!("{}+{}", form.id(), mesh.id()),
+                        FlightBody::Reach => "reach_streak".to_string(),
+                    }),
+                    "form_parts": body.map(|body| body.parts),
+                    "visible_meshes": self.children.iter_descendants(entity)
+                        .filter(|part| {
+                            self.drawn.get(*part).is_ok_and(|(shown, mesh)| mesh && shown.get())
+                        })
+                        .count(),
+                })
+            })
+            .collect()
+    }
     fn actor(&self, actor: SandboxActor) -> Option<&shared::sandbox::ActorTelemetry> {
         self.game
             .sandbox
@@ -1900,12 +1995,12 @@ fn still_record(
         .and_then(|(class, _, loadout, ..)| {
             world
                 .registry
-                .action_profile(class.0, loadout.0.as_ref(), run.slot)
+                .action_profile(class.0, loadout.0.as_ref(), run.action_slot())
         });
     serde_json::json!({
         "phase": phase.name(),
         "gate": run.gate,
-        "slot": (phase != Phase::Idle).then_some(run.slot),
+        "slot": (phase != Phase::Idle).then_some(run.action_slot()),
         "skill": (phase != Phase::Idle).then_some(skill),
         "snapshot_tick": world.game.meta.snapshot_tick,
         "simulation_secs": sandbox.simulation_secs,
@@ -1942,6 +2037,7 @@ fn still_record(
             .filter(|effect| effect.owner_id == me)
             .collect::<Vec<&SkillEffectState>>(),
         "skill_vfx": roots,
+        "projectiles": world.own_projectiles(),
         "effect_parts": total("parts"),
         "effect_visible_parts": total("visible_parts"),
         "effect_lights": total("lights"),
@@ -2005,6 +2101,7 @@ fn drive_phases(
                 .unwrap_or("the reset acknowledgement"),
             Step::Edge => "the server to accept the cast",
             Step::Gates => "the gate of the next still",
+            Step::Flight => "the projectile of the basic attack",
             Step::Read(_) => "the screenshot read-back",
             _ => "the sandbox acknowledgement",
         };
@@ -2023,7 +2120,13 @@ fn drive_phases(
     };
     let now = sandbox.simulation_secs;
     let slot = SkillSlot::ALL[usize::from(run.slot)];
-    let skill = equipped.ability(slot).id;
+    let skill = if run.basic {
+        "basic"
+    } else {
+        equipped.ability(slot).id
+    };
+    // The run ends after the last skill, or after the basic attack of a flight look.
+    let mut finished = false;
     let acknowledged = match run.wire.poll(sandbox, &mut outgoing) {
         None => false,
         Some(Ok(())) => true,
@@ -2039,13 +2142,23 @@ fn drive_phases(
     };
     if matches!(
         step,
-        Step::Edge | Step::Probe | Step::Gates | Step::Pause(_) | Step::Read(_) | Step::Resume
+        Step::Edge
+            | Step::Probe
+            | Step::Gates
+            | Step::Flight
+            | Step::Pause(_)
+            | Step::Read(_)
+            | Step::Resume
     ) {
         run.watch.observe(&world.game, action, now);
     }
     match step {
         Step::Arrange => {
-            let staging = Staging::of(class.0, &equipped, slot);
+            let staging = if run.basic {
+                Staging::basic(class.0)
+            } else {
+                Staging::of(class.0, &equipped, slot, qa.flight)
+            };
             let mut config = run
                 .config
                 .take()
@@ -2110,8 +2223,11 @@ fn drive_phases(
                 return;
             };
             run.watch = CastWatch {
-                slot: run.slot,
-                skill: equipped.skill(slot).map(|definition| definition.id),
+                slot: run.action_slot(),
+                skill: equipped
+                    .skill(slot)
+                    .filter(|_| !run.basic)
+                    .map(|definition| definition.id),
                 action_before: action.sequence,
                 event_floor: world
                     .game
@@ -2128,6 +2244,18 @@ fn drive_phases(
                     .collect(),
                 ..default()
             };
+            if run.basic {
+                let Some(enemy) = world.actor(SandboxActor::Enemy) else {
+                    stop(qa, run, &mut exit, "no target telemetry".into());
+                    return;
+                };
+                outgoing.write(NetworkCommand::BasicAttack {
+                    target: shared::wire::TargetId::player(enemy.id),
+                });
+                qa.requests.push(serde_json::json!({"command":"basic_attack","target":enemy.id,"snapshot_tick":world.game.meta.snapshot_tick}));
+                run.enter(Step::Flight);
+                return;
+            }
             if let Err(reason) = send_cast(
                 qa,
                 &world,
@@ -2140,6 +2268,32 @@ fn drive_phases(
                 return;
             }
             run.enter(Step::Edge);
+        }
+        Step::Flight => {
+            let Some(staging) = run.staging else {
+                return;
+            };
+            // Gated on the replicated projectile alone; a hit is never staged.
+            let flying = world.own_projectiles().iter().any(|projectile| {
+                projectile["action_slot"].as_u64()
+                    == Some(u64::from(shared::BASIC_ATTACK_ACTION_SLOT))
+                    && projectile["from_hero"]
+                        .as_f64()
+                        .is_some_and(|out| out >= f64::from(staging.distance) * FLIGHT_SHARE)
+            });
+            if flying {
+                run.gate = "own_projectile";
+                run.frozen = (now, 0);
+                request_speed(qa, run, &world, sandbox, SLOW_MOTION, true, &mut outgoing);
+                run.enter(Step::Pause(Phase::Flight));
+            } else if run.watch.receipt.is_some() {
+                stop(
+                    qa,
+                    run,
+                    &mut exit,
+                    "The basic attack hit before its projectile was seen in flight".into(),
+                );
+            }
         }
         Step::Edge if run.watch.edge.is_some() => {
             let next = if run.pass == Pass::Probe {
@@ -2275,13 +2429,32 @@ fn drive_phases(
                 );
                 return;
             }
-            let file = format!(
-                "{}-{}-{}-{}.png",
-                run.slot + 1,
-                ["q", "w", "e", "r"][usize::from(run.slot)],
-                phase.order(),
-                phase.name()
-            );
+            let basic_in_flight = record["projectiles"].as_array().is_some_and(|all| {
+                all.iter().any(|projectile| {
+                    projectile["action_slot"].as_u64()
+                        == Some(u64::from(shared::BASIC_ATTACK_ACTION_SLOT))
+                })
+            });
+            if phase == Phase::Flight && !basic_in_flight {
+                stop(
+                    qa,
+                    run,
+                    &mut exit,
+                    "The projectile of the basic attack was gone before its still".into(),
+                );
+                return;
+            }
+            let file = if phase == Phase::Flight {
+                "5-basic-flight.png".to_string()
+            } else {
+                format!(
+                    "{}-{}-{}-{}.png",
+                    run.slot + 1,
+                    ["q", "w", "e", "r"][usize::from(run.slot)],
+                    phase.order(),
+                    phase.name()
+                )
+            };
             run.skill_stills.push(file.clone());
             let index = PHASE_SHOT + run.stills;
             shoot(&mut commands, qa, index, file, record);
@@ -2294,8 +2467,20 @@ fn drive_phases(
                 Phase::Windup => run.windup_taken = true,
                 Phase::Release => run.release_taken = Some(now),
                 Phase::Impact | Phase::Settled => run.third_taken = true,
+                Phase::Flight => finished = true,
             }
-            if phase == Phase::Idle {
+            if phase == Phase::Flight {
+                let staging = run.staging;
+                run.basic_record = Some(serde_json::json!({
+                    "slot": shared::BASIC_ATTACK_ACTION_SLOT,
+                    "staging": staging.map(|staging| serde_json::json!({
+                        "category": staging.category,
+                        "target_distance": staging.distance,
+                    })),
+                    "capture": run.watch.timeline(),
+                    "stills": std::mem::take(&mut run.skill_stills),
+                }));
+            } else if phase == Phase::Idle {
                 request_speed(qa, run, &world, sandbox, SLOW_MOTION, false, &mut outgoing);
                 run.enter(Step::Slow);
             } else if !(run.windup_taken && run.release_taken.is_some() && run.third_taken) {
@@ -2327,44 +2512,59 @@ fn drive_phases(
                     run.begin_pass(Pass::Probe);
                     return;
                 }
-                let summary = serde_json::json!({
-                    "pass": true,
-                    "scenario": "skill_phases",
-                    "class": qa.class.id(),
-                    "locale": "en",
-                    "pixels": [qa.pixels().0, qa.pixels().1],
-                    "offscreen": qa.offscreen,
-                    "avatar": qa.avatar,
-                    "release_at": format!("{:?}", qa.release_at),
-                    "visual_mode": format!("{:?}", *world.mode),
-                    "manual_interaction_verified": false,
-                    "physical_device_verified": false,
-                    "setup": "live sandbox; level 10; rank 1; infinite resource, normal cooldowns; ResetDuel before every cast; one probe cast at 1x, then one cast at 0.25x paused for each still; stationary enemy hero with 1,000,000 HP that takes hits; ally-only casts target the caster",
-                    "registry_profiles": world.registry.profile_count(),
-                    "skills": run.skills,
-                    "requests": qa.requests,
-                    "captures": qa.captures,
+                // A melee core resolves its basic attack at once and throws nothing.
+                let throws = equipped.resolved().is_none_or(|kit| {
+                    kit.attack_profile() != shared::loadout::AttackProfileId::Melee
                 });
-                if std::fs::write(
-                    qa.directory.join("qa-summary.json"),
-                    serde_json::to_vec_pretty(&summary).unwrap(),
-                )
-                .is_err()
-                {
-                    stop(qa, run, &mut exit, "Cannot write phase evidence".into());
+                if qa.flight && throws {
+                    run.basic = true;
+                    run.begin_pass(Pass::Capture);
                     return;
                 }
-                qa.stage = 255;
-                if let Ok(window) = windows.single() {
-                    commands.entity(window).despawn();
-                }
-                exit.write(AppExit::Success);
+                finished = true;
             }
         }
         Step::Resume if acknowledged && !sandbox.config.environment.paused => {
             run.enter(Step::Gates);
         }
         _ => {}
+    }
+    if finished {
+        let summary = serde_json::json!({
+            "pass": true,
+            "scenario": "skill_phases",
+            "class": qa.class.id(),
+            "locale": "en",
+            "pixels": [qa.pixels().0, qa.pixels().1],
+            "offscreen": qa.offscreen,
+            "avatar": qa.avatar,
+            "release_at": format!("{:?}", qa.release_at),
+            "visual_mode": format!("{:?}", *world.mode),
+            "flight": qa.flight,
+            "manual_interaction_verified": false,
+            "physical_device_verified": false,
+            "setup": "live sandbox; level 10; rank 1; infinite resource, normal cooldowns; ResetDuel before every cast; one probe cast at 1x, then one cast at 0.25x paused for each still; stationary enemy hero with 1,000,000 HP that takes hits; ally-only casts target the caster",
+            "registry_profiles": world.registry.profile_count(),
+            "skills": run.skills,
+            // The still of a flight look; absent for a melee core, which throws nothing.
+            "basic": run.basic_record,
+            "requests": qa.requests,
+            "captures": qa.captures,
+        });
+        if std::fs::write(
+            qa.directory.join("qa-summary.json"),
+            serde_json::to_vec_pretty(&summary).unwrap(),
+        )
+        .is_err()
+        {
+            stop(qa, run, &mut exit, "Cannot write phase evidence".into());
+            return;
+        }
+        qa.stage = 255;
+        if let Ok(window) = windows.single() {
+            commands.entity(window).despawn();
+        }
+        exit.write(AppExit::Success);
     }
 }
 

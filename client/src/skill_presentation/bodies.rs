@@ -50,7 +50,7 @@ const REST_HEADING: Vec2 = Vec2::NEG_X;
 /// Outer radius of the ring and disc meshes: a part scaled by a diameter has that radius.
 const UNIT_RADIUS: f32 = 0.5;
 /// Thickness of the torus tube as a share of its diameter.
-const TORUS_TUBE: f32 = 0.16;
+pub(crate) const TORUS_TUBE: f32 = 0.16;
 /// A flat shell of the same kind of material as its core lies this far behind it, so the
 /// two do not fight for depth. Light is drawn over matter without it (`effects.rs`).
 const SHELL_NUDGE: f32 = 0.03;
@@ -650,7 +650,7 @@ const LATERAL: usize = 0;
 const VERTICAL: usize = 1;
 const HEADING: usize = 2;
 
-fn planar(mesh: PartMesh) -> bool {
+pub(crate) fn planar(mesh: PartMesh) -> bool {
     match mesh {
         PartMesh::Disc => true,
         PartMesh::Silhouette(mesh) => !matches!(
@@ -680,7 +680,7 @@ fn normal_axis(size: Vec3, stands: bool) -> usize {
 /// lies along. A solid keeps its axes. A cone points along its longest authored extent. A
 /// flat mesh faces its normal axis and points along the heading, or upward when it faces
 /// the heading.
-fn lay(mesh: PartMesh, size: Vec3, stands: bool) -> (Quat, [usize; 3]) {
+pub(crate) fn lay(mesh: PartMesh, size: Vec3, stands: bool) -> (Quat, [usize; 3]) {
     let turned = |x: Vec3, y: Vec3, z: Vec3| Quat::from_mat3(&Mat3::from_cols(x, y, z));
     if planar(mesh) {
         return match normal_axis(size, stands) {
@@ -720,7 +720,7 @@ fn lay(mesh: PartMesh, size: Vec3, stands: bool) -> (Quat, [usize; 3]) {
 
 /// Scale of a mesh whose axes lie along `axes` of a part with these extents. A flat mesh
 /// has no thickness to scale, and a torus is never thicker than its own tube.
-fn mesh_scale(mesh: PartMesh, extent: Vec3, axes: [usize; 3]) -> Vec3 {
+pub(crate) fn mesh_scale(mesh: PartMesh, extent: Vec3, axes: [usize; 3]) -> Vec3 {
     let along = Vec3::new(extent[axes[0]], extent[axes[1]], extent[axes[2]]);
     if !planar(mesh) {
         return along;

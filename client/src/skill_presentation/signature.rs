@@ -171,7 +171,10 @@ fn projectile_body(profile: &CombatVisualProfile) -> BodySig {
                 profile.model.as_ref().map(|model| model.path.clone()),
             ),
         },
-        silhouette: profile.silhouette,
+        // A form without a named silhouette is drawn with the one of its form.
+        silhouette: profile
+            .silhouette
+            .or(profile.form.map(crate::combat_visuals::default_silhouette)),
         presentation: profile.presentation,
     }
 }
