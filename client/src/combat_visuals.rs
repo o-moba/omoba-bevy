@@ -1,6 +1,7 @@
 //! Versioned, local-only combat cosmetics. No field enters the simulation.
 use std::collections::HashMap;
 
+use crate::skill_presentation::vocab::{ProjectileForm, ProjectilePresentation, Silhouette};
 use bevy::{
     asset::{AssetLoader, LoadContext, io::Reader},
     prelude::*,
@@ -138,6 +139,15 @@ pub struct CombatVisualProfile {
     pub model: Option<ProjectileModel>,
     #[serde(default)]
     pub sprite: Option<ProjectileSprite>,
+    /// 3D body built from the shared silhouettes; `shape` stays the 2D look and the 3D
+    /// look when this is absent.
+    #[serde(default)]
+    pub form: Option<ProjectileForm>,
+    /// Mesh of the form; the form's default when absent.
+    #[serde(default)]
+    pub silhouette: Option<Silhouette>,
+    #[serde(default)]
+    pub presentation: ProjectilePresentation,
 }
 
 impl CombatVisualProfile {
@@ -347,6 +357,13 @@ impl CombatVisualRegistry {
                 || !in_range(profile.impact.lifetime, 0.08, 1.2)
             {
                 return Err(format!("invalid or unbounded cosmetic profile {id}"));
+            }
+            // A melee contact throws no body, and a silhouette is the mesh of a form.
+            if (profile.presentation == ProjectilePresentation::MeleeContact
+                && profile.form.is_some())
+                || (profile.silhouette.is_some() && profile.form.is_none())
+            {
+                return Err(format!("invalid projectile form in {id}"));
             }
             if let Some(model) = &profile.model {
                 if !safe_asset_path(&model.path, ".glb")
@@ -617,5 +634,47 @@ mod tests {
             assert!(!safe_asset_path(path, ".glb"), "{path}");
         }
         assert!(safe_asset_path("cosmetics/arrow-v2.glb", ".glb"));
+    }
+    #[test]
+    fn forms_are_optional_vocabulary_and_agree_with_the_presentation() {
+        let profile = |fields: &str| {
+            CombatVisualRegistry::from_json(&format!(
+                r#"{{"schema_version":1,"profiles":{{"shot":{{"shape":"crescent","color":[1,1,1,1]{fields}}}}},
+                "classes":{{"warrior":{{"e":"shot"}}}}}}"#
+            ))
+            .map(|registry| {
+                registry
+                    .resolve(
+                        Some(HeroClass::Warrior),
+                        ProjectileStyle::Crescent,
+                        Some(2),
+                        None,
+                        None,
+                    )
+                    .clone()
+            })
+        };
+        // Without the new fields a profile is the thrown `shape` body, as before.
+        let plain = profile("").unwrap();
+        assert_eq!((plain.form, plain.silhouette), (None, None));
+        assert_eq!(plain.presentation, ProjectilePresentation::Projectile);
+        let wave = profile(r#","form":"wavefront","silhouette":"crescent","presentation":"wave""#)
+            .unwrap();
+        assert_eq!(wave.form, Some(ProjectileForm::Wavefront));
+        assert_eq!(wave.silhouette, Some(Silhouette::Crescent));
+        assert_eq!(wave.presentation, ProjectilePresentation::Wave);
+        assert_eq!(wave.shape, ProjectileShape::Crescent);
+        let contact = profile(r#","presentation":"melee_contact""#).unwrap();
+        assert_eq!(contact.presentation, ProjectilePresentation::MeleeContact);
+        assert!(profile(r#","form":"dart""#).unwrap().silhouette.is_none());
+        for rejected in [
+            r#","form":"dart","presentation":"melee_contact""#,
+            r#","silhouette":"kite""#,
+            r#","form":"reach_streak""#,
+            r#","form":"dart","silhouette":"disc""#,
+            r#","presentation":"area""#,
+        ] {
+            assert!(profile(rejected).is_err(), "{rejected}");
+        }
     }
 }

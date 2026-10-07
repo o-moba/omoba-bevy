@@ -1,6 +1,13 @@
 //! Packaged skill-owned presentation. Recipes select skills; buttons do not select motions.
 //! This module never changes movement, damage, cooldowns or authoritative geometry.
+mod category;
 mod effects;
+mod geometry;
+mod schema;
+mod signature;
+pub(crate) mod vocab;
+
+pub(crate) use schema::{BasicProfile, SkillProfile, Theme};
 
 /// Evidence and scene readiness for each replicated world effect, independent of its owner.
 #[cfg(feature = "qa")]
@@ -15,6 +22,7 @@ use bevy::{
     prelude::*,
 };
 use serde::Deserialize;
+use shared::HeroClass;
 use shared::loadout::{EffectVisualKind, LoadoutState, SkillEffectState, SkillId};
 use std::collections::BTreeMap;
 
@@ -44,64 +52,68 @@ pub(crate) enum EffectStyle {
     Ember,
 }
 
-#[derive(Clone, Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct SkillProfile {
-    pub release: String,
-    #[serde(default)]
-    pub windup: Option<String>,
-    pub effect: EffectStyle,
-    pub color: [f32; 3],
-    /// Linear radiance for small cores/rims, independent of broad field opacity.
-    #[serde(default = "default_hdr_gain")]
-    pub hdr_gain: f32,
-}
-
-fn default_hdr_gain() -> f32 {
-    3.0
-}
-
+/// The registry as packaged: raw rows only. Resolved colours and handles live in consumers.
 #[derive(Resource, Clone, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct SkillPresentation {
     schema_version: u32,
+    /// Class colours, one entry per hero class.
+    themes: BTreeMap<String, Theme>,
+    /// Basic attacks by class; a class without a row keeps the built-in motion table.
+    basic_attacks: BTreeMap<String, BasicProfile>,
     skills: BTreeMap<String, SkillProfile>,
+}
+
+/// Where the active registry came from, so evidence can tell the packaged file from the
+/// copy compiled into the client.
+#[derive(Resource, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum SkillPresentationOrigin {
+    #[default]
+    Embedded,
+    /// The packaged file, with the FNV-1a hash of its bytes.
+    Packaged { fnv64: u64 },
+}
+
+fn fnv64(bytes: &[u8]) -> u64 {
+    bytes.iter().fold(0xcbf2_9ce4_8422_2325, |hash, byte| {
+        (hash ^ u64::from(*byte)).wrapping_mul(0x0000_0100_0000_01b3)
+    })
 }
 
 impl SkillPresentation {
     fn parse(json: &str) -> Result<Self, String> {
-        let config: Self = serde_json::from_str(json).map_err(|e| e.to_string())?;
-        if config.schema_version != 1 || config.skills.len() > 80 {
-            return Err("Unsupported skill presentation schema/size".into());
+        if json.len() > schema::MAX_BYTES {
+            return Err("Skill presentation exceeds 256 KiB".into());
         }
-        let motion = crate::humanoid::SharedHumanoidMotion::embedded()?;
-        for (id, profile) in &config.skills {
-            if SkillId::from_id(id).is_none()
-                && !shared::HeroClass::LEGACY.iter().any(|class| {
-                    shared::SkillSlot::ALL
-                        .iter()
-                        .any(|slot| class.ability(*slot).id == id)
-                })
-            {
-                return Err(format!("Unknown skill {id}"));
-            }
-            for name in std::iter::once(&profile.release).chain(profile.windup.iter()) {
-                if !motion.clips.contains_key(name) {
-                    return Err(format!("Unknown motion {name}"));
+        #[derive(Deserialize)]
+        struct Version {
+            schema_version: u32,
+        }
+        let config: Self = serde_json::from_str(json).map_err(|error| {
+            // The rows of an outdated file fail on fields they cannot have; name the cause.
+            match serde_json::from_str::<Version>(json) {
+                Ok(Version { schema_version }) if schema_version != schema::SCHEMA_VERSION => {
+                    schema::unsupported_version(schema_version)
                 }
+                _ => error.to_string(),
             }
-            if profile
-                .color
-                .iter()
-                .any(|c| !c.is_finite() || !(0.0..=1.0).contains(c))
-            {
-                return Err(format!("Invalid color for {id}"));
-            }
-            if !profile.hdr_gain.is_finite() || !(1.0..=8.0).contains(&profile.hdr_gain) {
-                return Err(format!("Invalid HDR gain for {id} (expected 1..=8)"));
-            }
-        }
+        })?;
+        schema::validate(&config)?;
         Ok(config)
+    }
+    pub(crate) fn rows(&self) -> impl Iterator<Item = (&str, &SkillProfile)> {
+        self.skills
+            .iter()
+            .map(|(id, profile)| (id.as_str(), profile))
+    }
+    pub(crate) fn row(&self, id: &str) -> Option<&SkillProfile> {
+        self.skills.get(id)
+    }
+    pub(crate) fn theme(&self, class: HeroClass) -> Option<&Theme> {
+        self.themes.get(class.id())
+    }
+    pub(crate) fn basic(&self, class: HeroClass) -> Option<&BasicProfile> {
+        self.basic_attacks.get(class.id())
     }
     /// Accepted recipes take precedence; legacy ability IDs share the same registry.
     pub(crate) fn action_profile(
@@ -202,7 +214,19 @@ pub(crate) fn motion_cue(
 }
 
 #[derive(Asset, TypePath)]
-struct LoadedPresentation(SkillPresentation);
+struct LoadedPresentation {
+    registry: SkillPresentation,
+    fnv64: u64,
+}
+impl LoadedPresentation {
+    fn from_bytes(bytes: &[u8]) -> Result<Self, String> {
+        let text = std::str::from_utf8(bytes).map_err(|e| e.to_string())?;
+        Ok(Self {
+            registry: SkillPresentation::parse(text)?,
+            fnv64: fnv64(bytes),
+        })
+    }
+}
 #[derive(Default, TypePath)]
 struct PresentationLoader;
 impl AssetLoader for PresentationLoader {
@@ -217,10 +241,7 @@ impl AssetLoader for PresentationLoader {
     ) -> Result<Self::Asset, Self::Error> {
         let mut bytes = Vec::new();
         reader.read_to_end(&mut bytes).await?;
-        let text = std::str::from_utf8(&bytes).map_err(std::io::Error::other)?;
-        SkillPresentation::parse(text)
-            .map(LoadedPresentation)
-            .map_err(std::io::Error::other)
+        LoadedPresentation::from_bytes(&bytes).map_err(std::io::Error::other)
     }
     fn extensions(&self) -> &[&str] {
         &["skillfx"]
@@ -233,8 +254,12 @@ impl Plugin for SkillPresentationPlugin {
     fn build(&self, app: &mut App) {
         // Invalid rebuilt defaults fall back to the existing geometric renderer.
         let registry = SkillPresentation::parse(include_str!("../assets/config/skills.skillfx"))
-            .unwrap_or_default();
+            .unwrap_or_else(|error| {
+                error!("Embedded skill presentation is invalid: {error}");
+                default()
+            });
         app.insert_resource(registry)
+            .init_resource::<SkillPresentationOrigin>()
             .init_resource::<Pending>()
             .init_asset::<LoadedPresentation>()
             .init_asset_loader::<PresentationLoader>()
@@ -253,12 +278,14 @@ fn apply_config(
     loaded: Res<Assets<LoadedPresentation>>,
     mut pending: ResMut<Pending>,
     mut config: ResMut<SkillPresentation>,
+    mut origin: ResMut<SkillPresentationOrigin>,
 ) {
     let Some(handle) = &pending.0 else {
         return;
     };
     if let Some(value) = loaded.get(handle) {
-        *config = value.0.clone();
+        *config = value.registry.clone();
+        *origin = SkillPresentationOrigin::Packaged { fnv64: value.fnv64 };
         pending.0 = None;
     } else if matches!(
         server.get_load_state(handle.id()),

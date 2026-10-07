@@ -48,7 +48,6 @@ impl SharedHumanoidMotion {
     }
 
     /// When the clip reaches its contact pose; loops and `death` have none.
-    #[cfg_attr(not(feature = "qa"), allow(dead_code))]
     pub(crate) fn contact(&self, clip: &str) -> Option<f32> {
         self.contacts.get(clip).copied()
     }

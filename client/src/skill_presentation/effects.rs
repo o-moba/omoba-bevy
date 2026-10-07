@@ -277,8 +277,8 @@ fn spawn_instance(
 }
 
 /// Kind describes the actual replicated object; e.g. a hook's soul is not another hook.
-fn effect_style(e: &SkillEffectState, configured: EffectStyle) -> EffectStyle {
-    match e.kind {
+fn kind_style(e: &SkillEffectState) -> Option<EffectStyle> {
+    Some(match e.kind {
         EffectVisualKind::Orb => EffectStyle::Orb,
         EffectVisualKind::Soul => EffectStyle::Ember,
         EffectVisualKind::Anchor => EffectStyle::Aegis,
@@ -289,8 +289,11 @@ fn effect_style(e: &SkillEffectState, configured: EffectStyle) -> EffectStyle {
         EffectVisualKind::BeamWarning if e.skill == shared::loadout::SkillId::HorizonWave => {
             EffectStyle::Beam
         }
-        _ => configured,
-    }
+        _ => return None,
+    })
+}
+fn effect_style(e: &SkillEffectState, configured: EffectStyle) -> EffectStyle {
+    kind_style(e).unwrap_or(configured)
 }
 fn bar(a: Vec3, b: Vec3, width: f32, height: f32) -> Transform {
     let d = b - a;
@@ -444,7 +447,15 @@ fn sync(
         let Some(profile) = profiles.profile(e.skill) else {
             continue;
         };
-        let style = effect_style(e, profile.effect);
+        // A row that dropped its legacy style still shows the objects whose kind names
+        // their look; its other effects wait for the row's `body`.
+        let Some(style) = profile
+            .effect
+            .map(|configured| effect_style(e, configured))
+            .or_else(|| kind_style(e))
+        else {
+            continue;
+        };
         let friendly = local.single().is_ok_and(|t| *t == e.owner_team);
         if instances.objects.get(&e.id).is_some_and(|i| {
             i.owner != e.owner_id
@@ -797,6 +808,55 @@ mod tests {
             assert_eq!(pose.translation.x.abs(), e.radius);
             assert_eq!(pose.scale.z, 12.0);
         }
+    }
+    #[test]
+    fn a_row_without_a_legacy_style_keeps_only_the_objects_its_kind_names() {
+        use super::super::tests::schema_rules;
+        // The sample registry migrates `winter_shard` and `orbital_command` (no `effect`)
+        // and leaves `iron_hook` as packaged.
+        let registry = schema_rules::parse(&schema_rules::samples()).unwrap();
+        for id in ["winter_shard", "orbital_command"] {
+            assert!(registry.row(id).unwrap().effect.is_none());
+        }
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, bevy::asset::AssetPlugin::default()))
+            .init_asset::<Mesh>()
+            .init_asset::<StandardMaterial>()
+            .init_asset::<WorldAsset>()
+            .insert_resource(PlayerVisualMode::Models3d)
+            .init_resource::<GameStateSnapshot>()
+            .insert_resource(registry)
+            .add_plugins(SkillEffectsPlugin);
+        let effect = |id: u64, skill, kind| SkillEffectState {
+            id,
+            owner_id: 7,
+            owner_team: shared::map::Team::Green,
+            skill,
+            kind,
+            position: [4.0, 5.0],
+            end: [5.0, 5.0],
+            radius: 0.6,
+            remaining_secs: 1.0,
+            armed: true,
+            consumed_segments: 0,
+        };
+        use shared::loadout::SkillId;
+        app.world_mut()
+            .resource_mut::<GameStateSnapshot>()
+            .skill_effects
+            .extend([
+                effect(1, SkillId::IronHook, EffectVisualKind::Bolt),
+                effect(2, SkillId::WinterShard, EffectVisualKind::Bolt),
+                effect(3, SkillId::OrbitalCommand, EffectVisualKind::Orb),
+            ]);
+        app.update();
+        let instances = app.world().resource::<Instances>();
+        assert_eq!(instances.objects[&1].style, EffectStyle::Hook);
+        assert_eq!(instances.objects[&3].style, EffectStyle::Orb);
+        assert!(
+            !instances.objects.contains_key(&2),
+            "a migrated row is not drawn through a style it no longer names"
+        );
     }
     #[test]
     fn live_objects_reuse_identity_and_clear_on_fog_round_or_2d_switch() {

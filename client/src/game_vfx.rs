@@ -1120,7 +1120,11 @@ fn emit_skill_cast_particles(
         let forward = pose.rotation * Vec3::Z;
         let origin = p + Vec3::Y * 0.8;
         use crate::skill_presentation::EffectStyle as S;
-        let (shape, count, size) = match profile.effect {
+        // A row without a legacy style has a `cast` accent of its own instead.
+        let Some(effect) = profile.effect else {
+            continue;
+        };
+        let (shape, count, size) = match effect {
             S::Slash => (Shape::Slash, 5, 1.6),
             S::Needle | S::Lance | S::Shock | S::Repeater => (Shape::Streak, 4, 1.1),
             S::Aegis | S::Pulse | S::Field | S::Wall => (Shape::Ring, 7, 1.4),
