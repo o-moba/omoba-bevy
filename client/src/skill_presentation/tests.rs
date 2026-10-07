@@ -146,6 +146,116 @@ fn hidden_or_other_caster_warning_does_not_drive_this_hero() {
 }
 
 #[test]
+fn own_windup_cue_is_independent_of_the_latest_action_slot() {
+    use shared::{BASIC_ATTACK_ACTION_SLOT, HeroClass};
+    let registry = profiles();
+    let class = HeroClass::Dawnweaver;
+    let state = LoadoutState {
+        recipe: Some(shared::loadout::CoreId::Dawnweaver.preset()),
+        ..default()
+    };
+    let ray = registry.profile(SkillId::DawnRay).unwrap();
+    let own =
+        |effects: &[SkillEffectState]| own_windup_cue(&registry, class, Some(&state), 7, effects);
+    let warning = SkillEffectState {
+        id: 9,
+        ..effect(SkillId::DawnRay, EffectVisualKind::BeamWarning)
+    };
+
+    // The warning alone gives the held windup and names its effect.
+    let (id, held) = own(std::slice::from_ref(&warning)).unwrap();
+    assert_eq!(id, 9);
+    assert_eq!(Some(&held.motion), ray.windup.as_ref());
+    assert!(held.hold);
+    // It is what the ray's own slot gives, and no other slot gives it: a basic attack, a
+    // recast or another cast as the latest action would each replace it.
+    let by_slot = |slot: u8| {
+        motion_cue(
+            &registry,
+            class,
+            Some(&state),
+            slot,
+            7,
+            std::slice::from_ref(&warning),
+        )
+    };
+    assert_eq!(by_slot(3), Some(held.clone()));
+    for slot in [BASIC_ATTACK_ACTION_SLOT, 0, 1, 2] {
+        assert!(by_slot(slot).is_some_and(|cue| !cue.hold), "slot {slot}");
+    }
+
+    // The same effect as a beam is the release, once it has fired.
+    let beam = SkillEffectState {
+        kind: EffectVisualKind::Beam,
+        ..warning.clone()
+    };
+    let (id, release) = own(std::slice::from_ref(&beam)).unwrap();
+    assert_eq!((id, release.hold), (9, false));
+    assert_eq!(release.motion, ray.release);
+    // The newest effect speaks: a second warning outranks the beam of the first cast.
+    let second = SkillEffectState {
+        id: 12,
+        ..warning.clone()
+    };
+    assert_eq!(
+        own(&[second.clone(), beam.clone()]),
+        Some((12, held.clone()))
+    );
+    assert_eq!(own(&[beam, second]), Some((12, held.clone())));
+
+    // Nothing replicated, a hidden owner, another hero's warning: no cue.
+    assert_eq!(own(&[]), None);
+    for owner in [0, 8] {
+        let other = SkillEffectState {
+            owner_id: owner,
+            ..warning.clone()
+        };
+        assert_eq!(own(&[other.clone()]), None, "owner {owner}");
+        assert_eq!(
+            own_windup_cue(&registry, class, Some(&state), 0, &[other]),
+            None,
+            "a hero without an id owns nothing"
+        );
+    }
+    // Only a skill of the accepted kit moves its hero, and a recipe that does not resolve
+    // for the class moves nobody.
+    let foreign = effect(SkillId::HorizonWave, EffectVisualKind::BeamWarning);
+    assert_eq!(own(&[foreign]), None);
+    assert_eq!(
+        own_windup_cue(
+            &registry,
+            HeroClass::Stormfist,
+            Some(&state),
+            7,
+            std::slice::from_ref(&warning)
+        ),
+        None
+    );
+    // An effect of a row without a windup asks nothing of the body.
+    let field = effect(SkillId::DawnField, EffectVisualKind::Field);
+    assert_eq!(own(&[field]), None);
+
+    // A wave is its release only when it has just fired; it travels for seconds after.
+    let rift = LoadoutState {
+        recipe: Some(shared::loadout::CoreId::Riftshot.preset()),
+        ..default()
+    };
+    let tail = category::tail_secs(SkillId::HorizonWave).unwrap();
+    let wave = |remaining_secs: f32, kind: EffectVisualKind| {
+        let effect = SkillEffectState {
+            remaining_secs,
+            ..effect(SkillId::HorizonWave, kind)
+        };
+        own_windup_cue(&registry, HeroClass::Riftshot, Some(&rift), 7, &[effect])
+    };
+    assert!(wave(tail + 0.4, EffectVisualKind::BeamWarning).is_some_and(|(_, cue)| cue.hold));
+    assert!(wave(tail - 0.05, EffectVisualKind::Bolt).is_some_and(|(_, cue)| !cue.hold));
+    assert!(wave(tail - 0.2, EffectVisualKind::Bolt).is_some());
+    assert_eq!(wave(tail - 0.3, EffectVisualKind::Bolt), None);
+    assert_eq!(wave(0.5, EffectVisualKind::Bolt), None);
+}
+
+#[test]
 fn malformed_profile_cannot_introduce_gameplay_or_unknown_motion() {
     assert_eq!(profiles().skills.len(), shared::HeroClass::ALL.len() * 4);
     let rejected = |edit: fn(&mut serde_json::Value)| {

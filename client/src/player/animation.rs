@@ -3,6 +3,7 @@ use crate::domain::{MovementTarget, Player};
 use crate::net::{
     GameStateSnapshot, NetworkAvatar, NetworkCharacterChoice, PlayerCosmeticAction, RemotePlayer,
 };
+use crate::skill_presentation::MotionCue;
 use crate::team::CharacterChoice;
 use crate::world::{AvatarAssetCache, PlayerModelCatalog, model_assets_for_choice};
 use bevy::{gltf::Gltf, prelude::*};
@@ -100,8 +101,62 @@ pub(crate) struct PlayerAnimationBinding {
     sandbox_preview: Option<u64>,
     sandbox_paused: bool,
     sandbox_time: Option<((u64, u64), f64)>,
-    skill_motion: Option<(u64, crate::skill_presentation::MotionCue)>,
-    skill_phase_sequence: Option<u64>,
+    /// The cue the body was last given.
+    skill_motion: Option<MotionCue>,
+    /// The hero's own telegraph the body follows: the id of the effect and whether its
+    /// release has been played.
+    windup_effect: Option<(u64, bool)>,
+}
+
+/// What the hero's own telegraph asks of the body in one frame.
+#[derive(Clone, Debug, PartialEq)]
+pub(super) enum Telegraph {
+    /// Nothing new: a held windup stays held, and without one the accepted actions own
+    /// the body.
+    Unchanged,
+    /// Start this cue: the windup of a telegraph first seen, or its release.
+    Start(MotionCue),
+    /// The telegraph the body held vanished without firing.
+    Cancel,
+}
+
+/// Follows the hero's own telegraph from frame to frame. `own` is its cue in this frame
+/// with the id of the effect; `followed` remembers the effect so each of its two stages is
+/// played once:
+/// (a) a warning first seen starts the windup, also while a newer action is the latest;
+/// (b) an effect that has fired starts the release once, whether or not its warning was seen;
+/// (c) an effect whose release was played asks nothing more;
+/// (d) a warning that vanishes without firing cancels the held windup.
+/// A dead hero follows nothing, and what is replicated when it returns is history.
+pub(super) fn follow_telegraph(
+    followed: &mut Option<(u64, bool)>,
+    own: Option<(u64, MotionCue)>,
+    live: bool,
+) -> Telegraph {
+    if !live {
+        *followed = own.map(|(id, _)| (id, true));
+        return Telegraph::Unchanged;
+    }
+    match own {
+        Some((id, cue)) if cue.hold => {
+            if followed.is_some_and(|(seen, _)| seen == id) {
+                return Telegraph::Unchanged;
+            }
+            *followed = Some((id, false));
+            Telegraph::Start(cue)
+        }
+        Some((id, cue)) => {
+            if *followed == Some((id, true)) {
+                return Telegraph::Unchanged;
+            }
+            *followed = Some((id, true));
+            Telegraph::Start(cue)
+        }
+        None => match followed.take() {
+            Some((_, false)) => Telegraph::Cancel,
+            _ => Telegraph::Unchanged,
+        },
+    }
 }
 
 impl PlayerAnimationBinding {
@@ -150,7 +205,7 @@ impl CharacterAnimationSet {
         }
     }
 
-    fn motion(&self, name: &str) -> HeroAnimationState {
+    pub(super) fn motion(&self, name: &str) -> HeroAnimationState {
         match name {
             "idle" => HeroAnimationState::Idle,
             "walk" => HeroAnimationState::Walk,
@@ -694,7 +749,7 @@ pub(super) fn bind_player_animation_players(
                 sandbox_paused: false,
                 sandbox_time: None,
                 skill_motion: None,
-                skill_phase_sequence: None,
+                windup_effect: None,
             },
         ));
     }
@@ -888,8 +943,23 @@ pub(super) fn sync_player_animation_state(
         };
         if round_changed || key_changed {
             binding.skill_motion = None;
-            binding.skill_phase_sequence = None;
+            binding.windup_effect = None;
         }
+        let effects = game_state
+            .as_ref()
+            .map_or(&[][..], |g| g.skill_effects.as_slice());
+        // The hero's own telegraph, whatever action it has accepted since.
+        let own_cue = skill_profiles.as_deref().and_then(|registry| {
+            crate::skill_presentation::own_windup_cue(
+                registry,
+                class?.0,
+                loadout.and_then(|l| l.0.as_ref()),
+                id.unwrap_or(0),
+                effects,
+            )
+        });
+        let own_hold = own_cue.as_ref().is_some_and(|(_, cue)| cue.hold);
+        // What the latest accepted action asks for.
         let skill_cue = skill_profiles.as_deref().and_then(|registry| {
             crate::skill_presentation::motion_cue(
                 registry,
@@ -897,9 +967,7 @@ pub(super) fn sync_player_animation_state(
                 loadout.and_then(|l| l.0.as_ref()),
                 action.slot,
                 id.unwrap_or(0),
-                game_state
-                    .as_ref()
-                    .map_or(&[], |g| g.skill_effects.as_slice()),
+                effects,
             )
             .or_else(|| {
                 let profile = registry.action_profile(
@@ -907,13 +975,10 @@ pub(super) fn sync_player_animation_state(
                     loadout.and_then(|l| l.0.as_ref()),
                     action.slot,
                 )?;
-                profile
-                    .windup
-                    .is_none()
-                    .then(|| crate::skill_presentation::MotionCue {
-                        motion: profile.release.clone(),
-                        hold: false,
-                    })
+                profile.windup.is_none().then(|| MotionCue {
+                    motion: profile.release.clone(),
+                    hold: false,
+                })
             })
         });
         let requires_phase = skill_profiles
@@ -995,17 +1060,14 @@ pub(super) fn sync_player_animation_state(
                 graphs.as_deref(),
                 clips.as_deref(),
             );
-            let holding = binding
-                .skill_motion
-                .as_ref()
-                .is_some_and(|(seq, cue)| *seq == action.sequence && cue.hold)
-                && skill_cue.as_ref().is_some_and(|cue| cue.hold);
-            let cancelled = requires_phase
-                && skill_cue.is_none()
-                && binding
-                    .skill_motion
-                    .as_ref()
-                    .is_some_and(|(_, cue)| cue.hold);
+            let incoming = action.sequence > binding.playback.last_action_sequence;
+            let respawned = !binding.playback.alive && stats.is_alive();
+            let live = stats.is_alive() && !respawned;
+            let telegraph = follow_telegraph(&mut binding.windup_effect, own_cue, live);
+            // A windup is held for as long as the telegraph it belongs to is replicated.
+            let held = binding.skill_motion.as_ref().is_some_and(|cue| cue.hold);
+            let holding = held && own_hold;
+            let cancelled = held && !holding && !matches!(telegraph, Telegraph::Start(_));
             let finished = cancelled
                 || (!holding
                     && active.is_none_or(|active| {
@@ -1014,23 +1076,10 @@ pub(super) fn sync_player_animation_state(
                                 && duration.is_some_and(|duration| active.seek_time() >= duration)
                                 && active.repeat_mode() == bevy::animation::RepeatAnimation::Never)
                     }));
-            let incoming = action.sequence > binding.playback.last_action_sequence;
-            let respawned = !binding.playback.alive && stats.is_alive();
-            if incoming {
-                binding.skill_phase_sequence =
-                    (requires_phase && stats.is_alive() && !respawned).then_some(action.sequence);
-            }
-            if !stats.is_alive() || respawned {
-                binding.skill_phase_sequence = None;
-            }
-            let phase_changed = binding.skill_phase_sequence == Some(action.sequence)
-                && requires_phase
-                && skill_cue.is_some()
-                && binding.skill_motion.as_ref().is_none_or(|(seq, cue)| {
-                    *seq == action.sequence && Some(cue) != skill_cue.as_ref()
-                });
+            // The accepted edge of a telegraphed skill plays nothing by itself, and an
+            // action accepted during a held windup does not take the body from it.
             let mut confirmed_action = action;
-            if requires_phase && skill_cue.is_none() {
+            if own_hold || (requires_phase && skill_cue.is_none()) {
                 confirmed_action.kind = shared::PlayerActionKind::None;
             }
             let mut restart = binding.playback.advance(
@@ -1040,15 +1089,24 @@ pub(super) fn sync_player_animation_state(
                 finished,
                 |state| set.available(state),
             );
-            if stats.is_alive() && !respawned && (incoming || phase_changed) {
-                binding.skill_motion = skill_cue.clone().map(|cue| (action.sequence, cue));
-                if let Some(cue) = &skill_cue {
-                    binding.playback.state = set.motion(&cue.motion);
-                    restart = true;
-                }
-            }
-            if !stats.is_alive() || cancelled || respawned {
+            if !live || cancelled {
                 binding.skill_motion = None;
+            }
+            if live {
+                let started = match telegraph {
+                    Telegraph::Start(cue) => Some(Some(cue)),
+                    Telegraph::Unchanged | Telegraph::Cancel if incoming && !own_hold => {
+                        Some(skill_cue)
+                    }
+                    Telegraph::Unchanged | Telegraph::Cancel => None,
+                };
+                if let Some(cue) = started {
+                    if let Some(cue) = &cue {
+                        binding.playback.state = set.motion(&cue.motion);
+                        restart = true;
+                    }
+                    binding.skill_motion = cue;
+                }
             }
             (
                 restart || ended_preview,

@@ -635,9 +635,6 @@ impl EffectMemory {
                 && hero.alive
                 && self.visible.contains(&hero.id)
         })?;
-        let aim = (Vec2::from_array(effect.end) - Vec2::from_array(effect.position))
-            .try_normalize()
-            .map(|aim| shared::math::hero_yaw_towards(aim.x, aim.y));
         Some(SkillCastObserved {
             actor_id: hero.id,
             key: CastKey::Skill(row),
@@ -646,7 +643,7 @@ impl EffectMemory {
             recast: false,
             origin: hero.position,
             position: hero.position,
-            yaw: aim,
+            yaw: super::telegraph_yaw(effect),
             forward: hero.forward,
             local: hero.local,
         })

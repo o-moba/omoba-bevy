@@ -261,31 +261,82 @@ pub(crate) fn motion_cue(
     }
     let skill = equipped_skill(class, loadout, slot)?;
     let profile = registry.profile(skill)?;
-    if let Some(windup) = &profile.windup {
+    if profile.windup.is_some() {
         // A vanished warning is not proof that a beam fired (cancel/fog/round change).
-        let phase = effects.iter().find(|e| {
-            e.owner_id == owner
-                && owner != 0
-                && e.skill == skill
-                && matches!(
-                    e.kind,
-                    EffectVisualKind::BeamWarning | EffectVisualKind::Beam | EffectVisualKind::Bolt
-                )
-        })?;
-        return Some(MotionCue {
-            motion: if phase.kind == EffectVisualKind::BeamWarning {
-                windup
-            } else {
-                &profile.release
-            }
-            .clone(),
-            hold: phase.kind == EffectVisualKind::BeamWarning,
-        });
+        return effects
+            .iter()
+            .filter(|effect| owner != 0 && effect.owner_id == owner && effect.skill == skill)
+            .find_map(|effect| telegraph_cue(profile, effect));
     }
     Some(MotionCue {
         motion: profile.release.clone(),
         hold: false,
     })
+}
+
+/// What a row with a windup asks of its caster while this effect of the skill is
+/// replicated: the windup, held, while the effect warns; the release once it is the beam or
+/// the bolt it announced.
+fn telegraph_cue(profile: &SkillProfile, effect: &SkillEffectState) -> Option<MotionCue> {
+    let windup = profile.windup.as_ref()?;
+    match effect.kind {
+        EffectVisualKind::BeamWarning => Some(MotionCue {
+            motion: windup.clone(),
+            hold: true,
+        }),
+        EffectVisualKind::Beam | EffectVisualKind::Bolt => Some(MotionCue {
+            motion: profile.release.clone(),
+            hold: false,
+        }),
+        _ => None,
+    }
+}
+
+/// The yaw a hero has when it looks along a telegraph, from the replicated geometry of the
+/// effect; a telegraph without a direction (a ring) gives none.
+pub(crate) fn telegraph_yaw(effect: &SkillEffectState) -> Option<f32> {
+    (Vec2::from_array(effect.end) - Vec2::from_array(effect.position))
+        .try_normalize()
+        .map(|aim| shared::math::hero_yaw_towards(aim.x, aim.y))
+}
+
+/// A telegraph that fired is its release only this soon after the moment it fired. Later
+/// that moment was not observed, and it is not played late: a wave travels for seconds.
+fn just_fired(effect: &SkillEffectState) -> bool {
+    category::tail_secs(effect.skill)
+        .is_none_or(|tail| f64::from(tail - effect.remaining_secs) <= stage::MAX_GAP_SECS)
+}
+
+/// The cue of a hero's own telegraph, with the id of the effect that gives it, whatever
+/// action the hero had accepted since: the held windup while a skill of its kit warns, the
+/// release when that very effect has just fired. The newest effect speaks. The latest
+/// action slot plays no part, because a basic attack or a recast accepted during the
+/// warning replaces it and the cast edge itself is often never observed.
+pub(crate) fn own_windup_cue(
+    registry: &SkillPresentation,
+    class: shared::HeroClass,
+    loadout: Option<&LoadoutState>,
+    owner: u64,
+    effects: &[SkillEffectState],
+) -> Option<(u64, MotionCue)> {
+    if owner == 0 {
+        return None;
+    }
+    let kit = crate::equipped_skills::resolve_state(class, loadout)?;
+    effects
+        .iter()
+        .filter(|effect| effect.owner_id == owner)
+        // Only a skill of the accepted kit moves its hero.
+        .filter(|effect| {
+            shared::SkillSlot::ALL
+                .into_iter()
+                .any(|slot| kit.skill(slot).is_some_and(|def| def.id == effect.skill))
+        })
+        .filter_map(|effect| {
+            let cue = telegraph_cue(registry.profile(effect.skill)?, effect)?;
+            (cue.hold || just_fired(effect)).then_some((effect.id, cue))
+        })
+        .max_by_key(|(id, _)| *id)
 }
 
 #[derive(Asset, TypePath)]

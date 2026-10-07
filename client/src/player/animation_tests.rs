@@ -913,3 +913,335 @@ fn sandbox_refill_after_death_preserves_authoritatively_reconciled_position() {
             .is_none()
     );
 }
+
+/// A local hero (id 7) on a rig that has every named clip of the motion library, each one
+/// second long, with the registry its motions are read from.
+struct Rig {
+    app: App,
+    owner: Entity,
+    child: Entity,
+    set: CharacterAnimationSet,
+}
+
+impl Rig {
+    fn new(
+        registry: crate::skill_presentation::SkillPresentation,
+        class: shared::HeroClass,
+        loadout: shared::loadout::LoadoutState,
+    ) -> Self {
+        let library = crate::humanoid::SharedHumanoidMotion::embedded().unwrap();
+        let named: Vec<&str> = library
+            .clips
+            .keys()
+            .map(String::as_str)
+            .filter(|name| !matches!(*name, "idle" | "walk" | "run" | "attack" | "cast" | "death"))
+            .collect();
+        let mut clips = Assets::<AnimationClip>::default();
+        let handles: Vec<_> = (0..5 + named.len())
+            .map(|_| {
+                let mut clip = AnimationClip::default();
+                clip.set_duration(1.0);
+                clips.add(clip)
+            })
+            .collect();
+        let (graph, nodes) = AnimationGraph::from_clips(handles);
+        let mut graphs = Assets::<AnimationGraph>::default();
+        let set = CharacterAnimationSet {
+            graph: graphs.add(graph),
+            idle_node: nodes[0],
+            run_node: nodes[1],
+            walk_node: None,
+            runtime: false,
+            attack_node: Some(nodes[2]),
+            cast_node: Some(nodes[3]),
+            death_node: Some(nodes[4]),
+            motion_nodes: named
+                .iter()
+                .zip(&nodes[5..])
+                .map(|(name, node)| ((*name).to_owned(), *node))
+                .collect(),
+        };
+        let mut sets = PlayerAnimationLibrary::default();
+        sets.sets
+            .insert(AvatarKey::Roster("agnes".into()), set.clone());
+        let mut app = App::new();
+        app.insert_resource(Time::<()>::default())
+            .insert_resource(sets)
+            .insert_resource(graphs)
+            .insert_resource(clips)
+            .insert_resource(registry)
+            .init_resource::<GameStateSnapshot>()
+            .add_systems(
+                Update,
+                (bind_player_animation_players, sync_player_animation_state).chain(),
+            );
+        let owner = app
+            .world_mut()
+            .spawn((
+                Player,
+                Transform::default(),
+                CombatStats::default(),
+                NetworkCharacterChoice(CharacterChoice::Cube),
+                NetworkAvatar(Some("agnes".into())),
+                crate::net::NetworkPlayerId(7),
+                crate::net::NetworkHeroClass(class),
+                PlayerCosmeticAction::default(),
+                crate::net::PlayerLoadout(Some(loadout)),
+            ))
+            .id();
+        let child = app
+            .world_mut()
+            .spawn((AnimationPlayer::default(), ChildOf(owner)))
+            .id();
+        app.update();
+        Self {
+            app,
+            owner,
+            child,
+            set,
+        }
+    }
+
+    /// One frame in which the hero's latest accepted action is this one.
+    fn act(&mut self, sequence: u64, slot: u8, kind: PlayerActionKind) {
+        self.app
+            .world_mut()
+            .entity_mut(self.owner)
+            .insert(PlayerCosmeticAction {
+                sequence,
+                slot,
+                kind,
+            });
+        self.app.update();
+    }
+
+    fn effects(&mut self) -> Mut<'_, Vec<shared::loadout::SkillEffectState>> {
+        self.app
+            .world_mut()
+            .resource_mut::<GameStateSnapshot>()
+            .map_unchanged(|game| &mut game.skill_effects)
+    }
+
+    fn state(&self) -> HeroAnimationState {
+        self.app
+            .world()
+            .get::<PlayerAnimationBinding>(self.child)
+            .unwrap()
+            .playback
+            .state
+    }
+
+    /// The clip of the current state, as the player holds it.
+    fn clip(&mut self) -> Mut<'_, bevy::animation::ActiveAnimation> {
+        let node = self.set.node(self.state());
+        self.app
+            .world_mut()
+            .get_mut::<AnimationPlayer>(self.child)
+            .unwrap()
+            .map_unchanged(|player| player.animation_mut(node).unwrap())
+    }
+
+    /// Marks the playing clip, so a later restart shows as a seek time other than this.
+    fn mark(&mut self) {
+        self.clip().seek_to(0.4);
+    }
+
+    fn marked(&mut self) -> bool {
+        self.clip().seek_time() == 0.4
+    }
+}
+
+fn own_effect(
+    id: u64,
+    skill: shared::loadout::SkillId,
+    kind: shared::loadout::EffectVisualKind,
+) -> shared::loadout::SkillEffectState {
+    shared::loadout::SkillEffectState {
+        id,
+        owner_id: 7,
+        owner_team: shared::map::Team::Green,
+        skill,
+        kind,
+        position: [0.0; 2],
+        end: [10.0, 0.0],
+        radius: 0.8,
+        remaining_secs: 0.8,
+        armed: false,
+        consumed_segments: 0,
+    }
+}
+
+/// The triage cases of the Dawn Ray windup: a basic attack accepted during the warning, a
+/// recast accepted during it, and a cast edge that is never observed because the snapshot
+/// that brings the warning already carries a later action. Each runs on the packaged rows
+/// and on the final ones.
+#[test]
+fn windup_survives_interleaved_basic_and_recast_and_releases_once() {
+    use crate::skill_presentation::SkillPresentation;
+    use shared::loadout::{CoreId, EffectVisualKind, LoadoutState, SkillId};
+    use shared::{BASIC_ATTACK_ACTION_SLOT, HeroClass};
+    const RAY: u8 = 3;
+    const FIELD: u8 = 2;
+    // (case, the ray's own edge is observed, the action accepted during the warning)
+    let cases = [
+        (
+            "basic attack",
+            true,
+            BASIC_ATTACK_ACTION_SLOT,
+            PlayerActionKind::Attack,
+        ),
+        ("recast", true, FIELD, PlayerActionKind::Cast),
+        (
+            "edge never observed",
+            false,
+            BASIC_ATTACK_ACTION_SLOT,
+            PlayerActionKind::Attack,
+        ),
+    ];
+    for registry in [SkillPresentation::packaged, SkillPresentation::target] {
+        for (case, own_edge, slot, kind) in cases {
+            let ray = registry().profile(SkillId::DawnRay).unwrap().clone();
+            let mut rig = Rig::new(
+                registry(),
+                HeroClass::Dawnweaver,
+                LoadoutState {
+                    recipe: Some(CoreId::Dawnweaver.preset()),
+                    ..default()
+                },
+            );
+            let windup = rig.set.motion(ray.windup.as_deref().unwrap());
+            let release = rig.set.motion(&ray.release);
+            assert_ne!(windup, release, "{case}");
+
+            if own_edge {
+                rig.act(1, RAY, PlayerActionKind::Cast);
+                assert_eq!(
+                    rig.state(),
+                    HeroAnimationState::Idle,
+                    "{case}: no guessed pose"
+                );
+                rig.effects().push(own_effect(
+                    9,
+                    SkillId::DawnRay,
+                    EffectVisualKind::BeamWarning,
+                ));
+                rig.app.update();
+            } else {
+                rig.effects().push(own_effect(
+                    9,
+                    SkillId::DawnRay,
+                    EffectVisualKind::BeamWarning,
+                ));
+                rig.act(2, slot, kind);
+            }
+            assert_eq!(rig.state(), windup, "{case}: the warning starts the windup");
+            rig.mark();
+
+            // The action accepted during the warning does not take the body, however often
+            // it is repeated, and does not restart the held pose.
+            for sequence in [2, 3] {
+                rig.act(sequence, slot, kind);
+                assert_eq!(rig.state(), windup, "{case}: sequence {sequence}");
+                assert!(rig.marked(), "{case}: the held windup restarted");
+            }
+
+            // The same effect as a beam: the release, once.
+            rig.effects()[0].kind = EffectVisualKind::Beam;
+            rig.app.update();
+            assert_eq!(rig.state(), release, "{case}: the flip releases");
+            assert_eq!(rig.clip().seek_time(), 0.0, "{case}: the release starts");
+            rig.mark();
+            for _ in 0..3 {
+                rig.app.update();
+                assert_eq!(rig.state(), release, "{case}");
+                assert!(rig.marked(), "{case}: the release replayed");
+            }
+            // The beam leaves the snapshot: nothing more is played for it.
+            rig.effects().clear();
+            rig.app.update();
+            assert!(
+                rig.marked(),
+                "{case}: the release replayed when the beam left"
+            );
+
+            // The body is free again: the next accepted action takes it.
+            rig.act(4, BASIC_ATTACK_ACTION_SLOT, PlayerActionKind::Attack);
+            assert_eq!(rig.clip().seek_time(), 0.0, "{case}: the next action plays");
+            assert_ne!(rig.state(), windup, "{case}");
+        }
+
+        // A warning that vanishes fired nothing, also with an action accepted during it.
+        let ray = registry().profile(SkillId::DawnRay).unwrap().clone();
+        let mut rig = Rig::new(
+            registry(),
+            HeroClass::Dawnweaver,
+            LoadoutState {
+                recipe: Some(CoreId::Dawnweaver.preset()),
+                ..default()
+            },
+        );
+        rig.effects().push(own_effect(
+            9,
+            SkillId::DawnRay,
+            EffectVisualKind::BeamWarning,
+        ));
+        rig.act(1, RAY, PlayerActionKind::Cast);
+        rig.act(2, BASIC_ATTACK_ACTION_SLOT, PlayerActionKind::Attack);
+        assert_eq!(rig.state(), rig.set.motion(ray.windup.as_deref().unwrap()));
+        rig.effects().clear();
+        for _ in 0..3 {
+            rig.app.update();
+            assert_eq!(
+                rig.state(),
+                HeroAnimationState::Idle,
+                "a vanished warning releases nothing"
+            );
+        }
+    }
+}
+
+/// The four cases of a hero's own telegraph, and death.
+#[test]
+fn a_telegraph_starts_its_windup_and_its_release_once_each() {
+    use super::animation::{Telegraph, follow_telegraph};
+    use crate::skill_presentation::MotionCue;
+    let windup = MotionCue {
+        motion: "spell_prepare".into(),
+        hold: true,
+    };
+    let release = MotionCue {
+        motion: "cast".into(),
+        hold: false,
+    };
+    let warns = |id| Some((id, windup.clone()));
+    let fired = |id| Some((id, release.clone()));
+    let mut followed = None;
+    let mut step = |own, live| follow_telegraph(&mut followed, own, live);
+
+    // (a) A warning starts the windup when it is first seen and asks nothing while it lasts.
+    assert_eq!(step(warns(9), true), Telegraph::Start(windup.clone()));
+    assert_eq!(step(warns(9), true), Telegraph::Unchanged);
+    // (b) The same effect fires: the release, (c) once.
+    assert_eq!(step(fired(9), true), Telegraph::Start(release.clone()));
+    assert_eq!(step(fired(9), true), Telegraph::Unchanged);
+    assert_eq!(step(None, true), Telegraph::Unchanged);
+    // (d) A warning that vanishes cancels the windup and releases nothing, also later.
+    assert_eq!(step(warns(10), true), Telegraph::Start(windup.clone()));
+    assert_eq!(step(None, true), Telegraph::Cancel);
+    assert_eq!(step(None, true), Telegraph::Unchanged);
+    // (b) An effect first seen after it fired still releases once.
+    assert_eq!(step(fired(10), true), Telegraph::Start(release.clone()));
+    assert_eq!(step(fired(10), true), Telegraph::Unchanged);
+    // A second cast is another effect: both stages play again.
+    assert_eq!(step(warns(11), true), Telegraph::Start(windup.clone()));
+    assert_eq!(step(warns(12), true), Telegraph::Start(windup.clone()));
+    assert_eq!(step(fired(12), true), Telegraph::Start(release.clone()));
+    // A dead hero follows nothing, and what is replicated when it is back is history.
+    assert_eq!(step(warns(13), true), Telegraph::Start(windup.clone()));
+    assert_eq!(step(warns(13), false), Telegraph::Unchanged);
+    assert_eq!(step(fired(13), false), Telegraph::Unchanged);
+    assert_eq!(step(fired(13), true), Telegraph::Unchanged);
+    assert_eq!(step(warns(14), false), Telegraph::Unchanged);
+    assert_eq!(step(warns(14), true), Telegraph::Unchanged);
+    assert_eq!(step(fired(14), true), Telegraph::Unchanged);
+}
