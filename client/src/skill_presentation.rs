@@ -10,6 +10,7 @@ pub(crate) mod impacts;
 mod schema;
 mod signature;
 pub(crate) mod stage;
+pub(crate) mod status;
 pub(crate) mod vocab;
 
 pub(crate) use schema::{BasicProfile, SkillProfile, Theme};
@@ -553,7 +554,7 @@ impl Plugin for SkillPresentationPlugin {
                         .after(crate::net::ClientNetPipeline::InterpolateRemotePlayers),
                 ),
             )
-            .add_plugins(effects::SkillEffectsPlugin);
+            .add_plugins((effects::SkillEffectsPlugin, status::StatusVisualsPlugin));
     }
 }
 fn apply_config(

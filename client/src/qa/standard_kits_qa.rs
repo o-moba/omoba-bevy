@@ -1671,8 +1671,73 @@ struct PhaseWorld<'w, 's> {
     drawn: Query<'w, 's, (&'static InheritedVisibility, Has<Mesh3d>)>,
     hero: Query<'w, 's, Entity, With<Player>>,
     clips: crate::player::HeroClips<'w, 's>,
+    states: Query<
+        'w,
+        's,
+        (
+            Entity,
+            &'static crate::skill_presentation::status::StateVisualShown,
+        ),
+    >,
+    heroes: Query<
+        'w,
+        's,
+        (
+            &'static crate::net::NetworkPlayerId,
+            &'static Transform,
+            &'static NetworkHeroClass,
+            &'static PlayerLoadout,
+        ),
+    >,
 }
 impl PhaseWorld<'_, '_> {
+    /// The mesh visual of each hero's state, with the parts that are drawn.
+    fn state_visuals(&self) -> Vec<serde_json::Value> {
+        self.states
+            .iter()
+            .map(|(root, shown)| {
+                serde_json::json!({
+                    "hero": shown.hero,
+                    "state": shown.state.id(),
+                    "parts": shown.parts,
+                    "visible_parts": self.parts.iter()
+                        .filter(|(parent, visibility, ..)| {
+                            parent.parent() == root && **visibility != Visibility::Hidden
+                        })
+                        .count(),
+                })
+            })
+            .collect()
+    }
+    /// What each hero's replicated flags report: its states, highest rank first, and the
+    /// recast markers of the slots the server offers it.
+    fn hero_states(&self) -> Vec<serde_json::Value> {
+        use crate::skill_presentation::status::{self, StateVisual};
+        self.heroes
+            .iter()
+            .filter_map(|(id, pose, class, loadout)| {
+                let flags = loadout.0.as_ref()?;
+                Some(serde_json::json!({
+                    "hero": id.0,
+                    "states": StateVisual::of(flags).map(StateVisual::id).collect::<Vec<_>>(),
+                    // What the speed read of the particle layer compares.
+                    "movement_multiplier": flags.movement_multiplier,
+                    "slow_multiplier": flags.slow_multiplier,
+                    "recast_markers": status::recast_markers(
+                        &self.registry,
+                        class.0,
+                        flags,
+                        id.0,
+                        pose.translation.xz(),
+                        &self.game.skill_effects,
+                    )
+                    .into_iter()
+                    .map(|(marker, _)| marker.id())
+                    .collect::<Vec<_>>(),
+                }))
+            })
+            .collect()
+    }
     /// The clip of the hero's animation state: its seek time, its speed and whether it
     /// repeats. Sprites have none.
     fn clip(&self) -> Option<serde_json::Value> {
@@ -2059,6 +2124,8 @@ fn still_record(
             .collect::<Vec<&SkillEffectState>>(),
         "skill_vfx": roots,
         "projectiles": world.own_projectiles(),
+        "state_visuals": world.state_visuals(),
+        "hero_states": world.hero_states(),
         "effect_parts": total("parts"),
         "effect_visible_parts": total("visible_parts"),
         "effect_lights": total("lights"),

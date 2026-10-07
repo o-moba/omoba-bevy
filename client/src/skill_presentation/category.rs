@@ -627,7 +627,6 @@ pub(crate) fn recast_instant_hit(id: SkillId) -> bool {
 }
 
 /// The recast is accepted only while the caster is this close to the skill's own effect.
-#[cfg_attr(not(test), allow(dead_code))] // read by the recast marker and the recast preview
 pub(crate) fn recast_gate(id: SkillId) -> Option<f32> {
     matches!(
         skill(id).effect,

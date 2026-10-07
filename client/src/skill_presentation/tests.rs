@@ -1957,3 +1957,78 @@ fn output_validation_refuses_bursts_over_their_budget() {
         );
     }
 }
+
+/// AC6: a status is not authorable. No row can name one of the engine's state visuals in
+/// any of its blocks, no vocabulary list offers their IDs, and the recast marker is the
+/// only state a row selects.
+#[test]
+fn a_row_cannot_name_a_state_visual() {
+    use status::StateVisual;
+    let pick_list = vocab::render_markdown();
+    let fixture: serde_json::Value =
+        serde_json::from_str(include_str!("fixtures/target.skillfx")).unwrap();
+    let refused = |edit: &dyn Fn(&mut serde_json::Value)| {
+        let mut config = fixture.clone();
+        edit(&mut config);
+        SkillPresentation::parse(&config.to_string()).is_err()
+    };
+    // The unedited fixture parses, so every refusal below is caused by its edit.
+    assert!(!refused(&|_| {}));
+    for state in StateVisual::PRIORITY {
+        let id = state.id();
+        assert!(!pick_list.contains(&format!("`{id}`")), "{id}");
+        // `winter_shard` has every block: an accent, a body and an impact.
+        for (block, field) in [
+            (None, "state"),
+            (None, "status"),
+            (Some("cast"), "state"),
+            (Some("body"), "state"),
+            (Some("impact"), "state"),
+        ] {
+            assert!(
+                refused(&|config| {
+                    let row = &mut config["skills"]["winter_shard"];
+                    match block {
+                        Some(block) => row[block][field] = id.into(),
+                        None => row[field] = id.into(),
+                    }
+                }),
+                "{id} as {block:?}.{field}"
+            );
+        }
+        for (block, field) in [
+            ("cast", "pattern"),
+            ("cast", "shape"),
+            ("cast", "recast_marker"),
+            ("body", "marker"),
+            ("impact", "kind"),
+            ("impact", "shape"),
+        ] {
+            assert!(
+                refused(&|config| {
+                    config["skills"]["winter_shard"][block][field] = id.into();
+                }),
+                "{id} as {block}.{field}"
+            );
+        }
+    }
+    // The ten states are the ten of the data contract, in its priority order.
+    assert_eq!(
+        StateVisual::PRIORITY.map(StateVisual::id),
+        [
+            "stunned",
+            "rooted",
+            "parry_stance",
+            "shielded",
+            "marked",
+            "brittle",
+            "concussed",
+            "slowed",
+            "camouflage_veil",
+            "forging",
+        ]
+    );
+    // Six of the nine engine materials of the material rule belong to them.
+    assert_eq!(status::StatePaint::ALL.len() + 3, bodies::SHARED_MATERIALS);
+    assert_eq!(status::MAX_PARTS, 4);
+}

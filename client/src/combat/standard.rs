@@ -11,14 +11,17 @@ pub(super) struct SkillEffectGizmos;
 #[derive(Resource, Default)]
 pub(crate) struct SkillAimVector(pub Option<(Vec2, Vec2, f32)>);
 
-use shared::loadout::{EffectVisualKind, SkillEffectState, WeaponMode};
+use shared::loadout::{EffectVisualKind, LoadoutState, SkillEffectState, WeaponMode};
 use shared::{HeroClass, TargetingMode};
 
 use crate::i18n::{data, tr, trf};
 use crate::net::{GameStateSnapshot, NetworkHeroClass, PlayerLoadout};
 use crate::player::Player;
+use crate::skill_presentation::SkillPresentation;
 use crate::skill_presentation::geometry::{self, GeoShape};
 use crate::skill_presentation::stage::{self, Stage};
+use crate::skill_presentation::status::{self, StateVisual};
+use crate::skill_presentation::vocab::RecastMarker;
 use crate::sprite::PlayerVisualMode;
 
 pub(crate) fn bounded_aim(origin: Vec2, aim: Vec2, targeting: TargetingMode, range: f32) -> Vec2 {
@@ -549,12 +552,194 @@ pub(super) fn effect_strokes(e: &SkillEffectState) -> Vec<Stroke> {
     strokes
 }
 
+/// A gizmo line around a hero, in simulation ground coordinates.
+#[derive(Clone, Debug, PartialEq)]
+pub(super) struct HeroMark {
+    pub points: Vec<Vec2>,
+    pub color: Color,
+}
+
+fn circle(center: Vec2, radius: f32) -> Vec<Vec2> {
+    GeoShape::Ring { center, radius }.outline().remove(0)
+}
+
+/// Radius of the small ground ring of a slow.
+const SLOW_RING: f32 = 0.42;
+
+/// The gizmo of one state of the hero at `p`: the ring each state has had, and a small
+/// ring for a slow. A stun is drawn as the root it is replicated with. Camouflage and
+/// forging have no gizmo.
+pub(super) fn state_marks(state: StateVisual, flags: &LoadoutState, p: Vec2) -> Vec<HeroMark> {
+    let ring = |radius: f32, color: Color| {
+        vec![HeroMark {
+            points: circle(p, radius),
+            color,
+        }]
+    };
+    match state {
+        StateVisual::Stunned | StateVisual::Rooted => ring(0.7, Color::srgb(1.0, 0.3, 0.55)),
+        StateVisual::ParryStance => ring(1.4, Color::WHITE),
+        StateVisual::Shielded => ring(0.95, Color::srgb(0.5, 0.9, 1.0)),
+        StateVisual::Marked => ring(1.15, Color::srgb(1.0, 0.9, 0.3)),
+        StateVisual::Brittle => ring(1.2, Color::srgb(1.0, 0.6, 0.1)),
+        StateVisual::Concussed => (0..flags.concussion_stacks.min(4))
+            .map(|i| HeroMark {
+                points: circle(p + Vec2::new(-0.6 + f32::from(i) * 0.4, 1.4), 0.12),
+                color: Color::srgb(0.6, 0.9, 1.0),
+            })
+            .collect(),
+        StateVisual::Slowed => ring(SLOW_RING, Color::srgb(0.4, 0.65, 1.0)),
+        StateVisual::CamouflageVeil | StateVisual::Forging => Vec::new(),
+    }
+}
+
+/// The state gizmos of one hero: one for every state its flags report, except the state
+/// its mesh visual shows. The flat view has no mesh visual, so there every state keeps its
+/// gizmo; in 3D a slow that another state outranks keeps its small ring.
+pub(super) fn hero_state_marks(
+    mode: PlayerVisualMode,
+    visible: bool,
+    alive: bool,
+    flags: &LoadoutState,
+    p: Vec2,
+) -> Vec<HeroMark> {
+    let meshed = StateVisual::shown(mode, visible, alive, flags);
+    StateVisual::of(flags)
+        .filter(|state| Some(*state) != meshed)
+        .flat_map(|state| state_marks(state, flags, p))
+        .collect()
+}
+
+/// Distance of a recast marker from the feet of its hero.
+const MARKER_RING: f32 = 0.85;
+/// Radians per second at which the marks of `orbit_motes` circle.
+const MARKER_TURN: f32 = 2.6;
+
+/// The ground lines of a recast marker for the hero at `p` that faces `forward`.
+pub(super) fn marker_strokes(
+    marker: RecastMarker,
+    p: Vec2,
+    forward: Vec2,
+    now: f32,
+) -> Vec<Vec<Vec2>> {
+    use std::f32::consts::{FRAC_PI_2, FRAC_PI_4, PI};
+    let pip = |center: Vec2, half: f32| {
+        [Vec2::X, Vec2::Y, Vec2::NEG_X, Vec2::NEG_Y, Vec2::X]
+            .map(|corner| center + corner * half)
+            .to_vec()
+    };
+    match marker {
+        RecastMarker::RingPips => std::iter::once(circle(p, MARKER_RING))
+            .chain((0..4).map(|i| {
+                let turn = FRAC_PI_4 + i as f32 * FRAC_PI_2;
+                pip(p + Vec2::from_angle(turn) * MARKER_RING, 0.16)
+            }))
+            .collect(),
+        RecastMarker::OrbitMotes => (0..2)
+            .map(|i| {
+                let turn = now * MARKER_TURN + i as f32 * PI;
+                pip(p + Vec2::from_angle(turn) * MARKER_RING, 0.22)
+            })
+            .collect(),
+        RecastMarker::GroundArrows => (0..3)
+            .map(|i| {
+                let tip = p + forward * (MARKER_RING + 0.35 + i as f32 * 0.45);
+                let wing = forward.perp() * 0.36;
+                vec![tip - forward * 0.3 + wing, tip, tip - forward * 0.3 - wing]
+            })
+            .collect(),
+    }
+}
+
+/// The colour of the aid that leads a hero to its own orb in the flat view: that of the
+/// skill its replicated orb belongs to.
+fn orb_aid_color(
+    profiles: Option<&SkillPresentation>,
+    owner: Option<u64>,
+    effects: &[SkillEffectState],
+) -> Color {
+    owner
+        .and_then(|owner| {
+            effects.iter().find(|effect| {
+                effect.kind == EffectVisualKind::Orb && owner != 0 && effect.owner_id == owner
+            })
+        })
+        .and_then(|orb| profiles?.profile(orb.skill))
+        .map_or(Color::srgb(0.9, 0.7, 1.0), |profile| {
+            Color::srgb_from_array(profile.color)
+        })
+}
+
+/// One hero as its gizmos are drawn from it.
+pub(super) struct HeroSight<'a> {
+    pub mode: PlayerVisualMode,
+    /// The hero is drawn: nothing hides its entity.
+    pub visible: bool,
+    pub alive: bool,
+    pub class: Option<HeroClass>,
+    pub id: Option<u64>,
+    pub flags: &'a LoadoutState,
+    pub p: Vec2,
+    /// The way the hero faces, on the ground.
+    pub forward: Vec2,
+    pub now: f32,
+    pub profiles: Option<&'a SkillPresentation>,
+    pub effects: &'a [SkillEffectState],
+}
+
+/// Every gizmo line of one hero's replicated state: the aid to its own orb, the states its
+/// mesh visual does not show, and the marker of each recast the server offers it.
+pub(super) fn hero_marks(sight: &HeroSight) -> Vec<HeroMark> {
+    let HeroSight {
+        mode,
+        visible,
+        alive,
+        flags,
+        p,
+        ..
+    } = *sight;
+    let mut marks = Vec::new();
+    // The orb position is replicated to its owner alone. In 3D the orb is a body of its
+    // own; the flat view leads the owner to it with a ring and a line.
+    if mode == PlayerVisualMode::Sprite2d
+        && let Some(orb) = flags.orb_position
+    {
+        let orb = Vec2::from_array(orb);
+        let color = orb_aid_color(sight.profiles, sight.id, sight.effects);
+        marks.push(HeroMark {
+            points: circle(orb, 0.65),
+            color,
+        });
+        marks.push(HeroMark {
+            points: vec![p, orb],
+            color: color.with_alpha(0.3),
+        });
+    }
+    marks.extend(hero_state_marks(mode, visible, alive, flags, p));
+    // A recast the server offers a living hero the client sees, in the colour of its skill.
+    if visible
+        && alive
+        && let (Some(profiles), Some(class), Some(id)) = (sight.profiles, sight.class, sight.id)
+    {
+        for (marker, color) in status::recast_markers(profiles, class, flags, id, p, sight.effects)
+        {
+            marks.extend(
+                marker_strokes(marker, p, sight.forward, sight.now)
+                    .into_iter()
+                    .map(|points| HeroMark { points, color }),
+            );
+        }
+    }
+    marks
+}
+
 /// Bounded, snapshot-driven geometry. Effects do not depend on a visible owner.
 pub(super) fn draw_effects(
     mut gizmos: Gizmos<SkillEffectGizmos>,
-    profiles: Option<Res<crate::skill_presentation::SkillPresentation>>,
+    profiles: Option<Res<SkillPresentation>>,
     game: Option<Res<GameStateSnapshot>>,
     mode: Res<PlayerVisualMode>,
+    clock: Option<Res<crate::vfx_clock::VfxClock>>,
     map: Option<Res<crate::maps::MapLayout>>,
     local: Query<&crate::team::Team, With<Player>>,
     actors: Query<(
@@ -563,6 +748,8 @@ pub(super) fn draw_effects(
         Option<&NetworkHeroClass>,
         Option<&crate::net::NetworkPlayerId>,
         Option<&crate::team::Team>,
+        Option<&InheritedVisibility>,
+        Option<&super::CombatStats>,
     )>,
 ) {
     let Some(game) = game else {
@@ -627,8 +814,8 @@ pub(super) fn draw_effects(
     }
     let duelist = actors
         .iter()
-        .find(|(_, _, _, id, _)| id.is_some_and(|id| id.0 == game.your_id))
-        .and_then(|(_, l, _, _, team)| {
+        .find(|(_, _, _, id, ..)| id.is_some_and(|id| id.0 == game.your_id))
+        .and_then(|(_, l, _, _, team, ..)| {
             l.0.as_ref()
                 .filter(|s| {
                     s.recipe
@@ -638,7 +825,8 @@ pub(super) fn draw_effects(
                 })
                 .map(|s| (s, team))
         });
-    for (pose, loadout, class, id, team) in &actors {
+    let now = clock.map_or(0.0, |clock| clock.now as f32);
+    for (pose, loadout, class, id, team, visible, stats) in &actors {
         if let (Some((duel, own_team)), Some(id)) = (duelist, id) {
             if team != own_team {
                 let p = pose.translation.xz();
@@ -667,46 +855,24 @@ pub(super) fn draw_effects(
             continue;
         };
         let p = pose.translation.xz();
-        if let Some(orb) = state.orb_position {
-            let orb = Vec2::from_array(orb);
-            ring(
-                &mut gizmos,
-                orb,
-                0.65,
-                *mode,
-                map,
-                Color::srgb(0.9, 0.7, 1.0),
+        let sight = HeroSight {
+            mode: *mode,
+            visible: visible.is_some_and(|visible| visible.get()),
+            alive: stats.is_none_or(|stats| stats.is_alive()),
+            class: class.map(|class| class.0),
+            id: id.map(|id| id.0),
+            flags: state,
+            p,
+            forward: pose.forward().xz().normalize_or(Vec2::NEG_Y),
+            now,
+            profiles: profiles.as_deref(),
+            effects: &game.skill_effects,
+        };
+        for mark in hero_marks(&sight) {
+            gizmos.linestrip(
+                mark.points.iter().map(|at| point(*at, *mode, map)),
+                mark.color,
             );
-            gizmos.line(
-                point(p, *mode, map),
-                point(orb, *mode, map),
-                Color::srgba(0.8, 0.7, 1.0, 0.3),
-            );
-        }
-        for i in 0..state.concussion_stacks.min(4) {
-            ring(
-                &mut gizmos,
-                p + Vec2::new(-0.6 + i as f32 * 0.4, 1.4),
-                0.12,
-                *mode,
-                map,
-                Color::srgb(0.6, 0.9, 1.0),
-            );
-        }
-        if state.brittle {
-            ring(&mut gizmos, p, 1.2, *mode, map, Color::srgb(1.0, 0.6, 0.1));
-        }
-        if state.parrying {
-            ring(&mut gizmos, p, 1.4, *mode, map, Color::WHITE);
-        }
-        if state.shield_hp > 0.0 {
-            ring(&mut gizmos, p, 0.95, *mode, map, Color::srgb(0.5, 0.9, 1.0));
-        }
-        if state.root_remaining_secs > 0.0 {
-            ring(&mut gizmos, p, 0.7, *mode, map, Color::srgb(1.0, 0.3, 0.55));
-        }
-        if state.mark_remaining_secs > 0.0 {
-            ring(&mut gizmos, p, 1.15, *mode, map, Color::srgb(1.0, 0.9, 0.3));
         }
         if state.recipe.is_some()
             && let Some(class) = class
@@ -946,6 +1112,393 @@ mod tests {
                 "{kind:?}"
             );
         }
+    }
+
+    /// A ring of `state_marks` as its distance from `p` and its colour.
+    fn rings(marks: &[HeroMark], p: Vec2) -> Vec<(f32, Color)> {
+        marks
+            .iter()
+            .map(|mark| {
+                let radius = mark.points[0].distance(p);
+                assert!(
+                    mark.points
+                        .iter()
+                        .all(|at| (at.distance(p) - radius).abs() < 1e-4)
+                );
+                ((radius * 100.0).round() / 100.0, mark.color)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_state_keeps_its_gizmo_unless_the_mesh_visual_shows_it() {
+        use PlayerVisualMode::{Models3d, Sprite2d};
+        let p = Vec2::new(3.0, -2.0);
+        let pink = Color::srgb(1.0, 0.3, 0.55);
+        let cyan = Color::srgb(0.5, 0.9, 1.0);
+        let yellow = Color::srgb(1.0, 0.9, 0.3);
+        let slow = (SLOW_RING, Color::srgb(0.4, 0.65, 1.0));
+        let marks = |mode, visible, alive, flags: &LoadoutState| {
+            rings(&hero_state_marks(mode, visible, alive, flags, p), p)
+        };
+
+        // Shield, mark and slow together. In 3D the shield is the mesh visual, so its
+        // ring is left out; the mark keeps its ring and the slow its small one.
+        let flags = LoadoutState {
+            shield_hp: 20.0,
+            mark_remaining_secs: 2.0,
+            slow_multiplier: 0.6,
+            ..default()
+        };
+        assert_eq!(marks(Models3d, true, true, &flags), [(1.15, yellow), slow]);
+        // The flat view has no mesh visual: every state keeps its gizmo.
+        let all = [(0.95, cyan), (1.15, yellow), slow];
+        assert_eq!(marks(Sprite2d, true, true, &flags), all);
+        // A hero without a mesh visual in 3D (not drawn, or dead) keeps them as well.
+        assert_eq!(marks(Models3d, false, true, &flags), all);
+        assert_eq!(marks(Models3d, true, false, &flags), all);
+
+        // A slow alone is the mesh visual in 3D and the small ring in the flat view.
+        let slowed = LoadoutState {
+            slow_multiplier: 0.5,
+            ..default()
+        };
+        assert!(marks(Models3d, true, true, &slowed).is_empty());
+        // The smallest ring a hero can have, inside the corners of its kit mark.
+        assert_eq!(marks(Sprite2d, true, true, &slowed), [slow]);
+        assert_eq!(slow.0, 0.42);
+
+        // A stun is replicated with a root of the same length: one ring in the flat view,
+        // as before, and none under the stars in 3D.
+        let stunned = LoadoutState {
+            stun_remaining_secs: 1.0,
+            root_remaining_secs: 1.0,
+            ..default()
+        };
+        assert_eq!(marks(Sprite2d, true, true, &stunned), [(0.7, pink)]);
+        assert!(marks(Models3d, true, true, &stunned).is_empty());
+        let rooted = LoadoutState {
+            root_remaining_secs: 1.0,
+            ..default()
+        };
+        assert_eq!(marks(Sprite2d, true, true, &rooted), [(0.7, pink)]);
+        assert!(marks(Models3d, true, true, &rooted).is_empty());
+
+        // The rings every state has had, by state; camouflage and forging have none.
+        let every = LoadoutState {
+            stun_remaining_secs: 1.0,
+            root_remaining_secs: 1.0,
+            parrying: true,
+            shield_hp: 20.0,
+            mark_remaining_secs: 2.0,
+            brittle: true,
+            concussion_stacks: 0,
+            slow_multiplier: 0.6,
+            camouflaged: true,
+            forge_remaining_secs: 1.0,
+            ..default()
+        };
+        assert_eq!(
+            marks(Sprite2d, true, true, &every),
+            [
+                (0.7, pink),
+                (1.4, Color::WHITE),
+                (0.95, cyan),
+                (1.15, yellow),
+                (1.2, Color::srgb(1.0, 0.6, 0.1)),
+                slow,
+            ]
+        );
+        // In 3D the stars stand for the stun; everything below keeps its gizmo.
+        assert_eq!(
+            marks(Models3d, true, true, &every),
+            marks(Sprite2d, true, true, &every)[1..]
+        );
+        // Concussion pips stay small rings beside the hero, one per stack.
+        for stacks in 0..=6u8 {
+            let flags = LoadoutState {
+                concussion_stacks: stacks,
+                ..default()
+            };
+            let pips = hero_state_marks(Sprite2d, true, true, &flags, p);
+            assert_eq!(pips.len(), usize::from(stacks.min(4)));
+            for (i, pip) in pips.iter().enumerate() {
+                let center = p + Vec2::new(-0.6 + i as f32 * 0.4, 1.4);
+                assert!(
+                    pip.points
+                        .iter()
+                        .all(|at| (at.distance(center) - 0.12).abs() < 1e-4)
+                );
+            }
+            // In 3D the pips are the mesh visual.
+            assert!(hero_state_marks(Models3d, true, true, &flags, p).is_empty());
+        }
+        // No flag, no gizmo.
+        assert!(hero_state_marks(Sprite2d, true, true, &LoadoutState::default(), p).is_empty());
+    }
+
+    #[test]
+    fn recast_markers_are_ground_lines_at_the_feet_of_the_hero() {
+        let p = Vec2::new(3.0, -2.0);
+        for marker in RecastMarker::ALL {
+            for step in 0..24 {
+                let forward = Vec2::from_angle(step as f32 * 0.4);
+                let now = step as f32 * 0.31;
+                let strokes = marker_strokes(*marker, p, forward, now);
+                assert!(!strokes.is_empty(), "{}", marker.id());
+                for stroke in &strokes {
+                    assert!(stroke.len() >= 2, "{}", marker.id());
+                    for at in stroke {
+                        assert!(at.is_finite(), "{}", marker.id());
+                        // Around the feet, clear of the body and within two and a half
+                        // units: a marker claims no area.
+                        let reach = at.distance(p);
+                        assert!((0.6..=2.5).contains(&reach), "{} {reach}", marker.id());
+                    }
+                }
+            }
+        }
+
+        // `ring_pips`: a ring and four pips on it, the same at every moment and facing.
+        let pips = marker_strokes(RecastMarker::RingPips, p, Vec2::X, 0.0);
+        assert_eq!(pips.len(), 5);
+        assert_eq!(pips[0], circle(p, MARKER_RING));
+        for pip in &pips[1..] {
+            let center = pip[..4].iter().sum::<Vec2>() / 4.0;
+            assert!((center.distance(p) - MARKER_RING).abs() < 1e-4);
+        }
+        assert_eq!(
+            pips,
+            marker_strokes(RecastMarker::RingPips, p, Vec2::Y, 9.0)
+        );
+
+        // `orbit_motes`: two marks opposite each other that circle the feet.
+        let center = |stroke: &Vec<Vec2>| stroke[..4].iter().sum::<Vec2>() / 4.0;
+        let motes = |now: f32| -> Vec<Vec2> {
+            marker_strokes(RecastMarker::OrbitMotes, p, Vec2::X, now)
+                .iter()
+                .map(center)
+                .collect()
+        };
+        let (early, late) = (motes(0.0), motes(0.5));
+        assert_eq!(early.len(), 2);
+        for at in early.iter().chain(&late) {
+            assert!((at.distance(p) - MARKER_RING).abs() < 1e-4);
+        }
+        assert!((early[0] + early[1] - p * 2.0).length() < 1e-4);
+        let turned = (early[0] - p).angle_to(late[0] - p);
+        assert!((turned - 0.5 * MARKER_TURN).abs() < 1e-4);
+
+        // `ground_arrows`: three arrows ahead of the hero that point the way it faces.
+        for forward in [Vec2::X, Vec2::NEG_Y, Vec2::new(0.6, 0.8)] {
+            let arrows = marker_strokes(RecastMarker::GroundArrows, p, forward, 3.0);
+            assert_eq!(arrows.len(), 3);
+            let mut last = 0.0;
+            for arrow in &arrows {
+                assert_eq!(arrow.len(), 3);
+                let tip = arrow[1];
+                // The tip lies on the facing line, ahead of both wings and of the last tip.
+                assert!((tip - p).perp_dot(forward).abs() < 1e-4);
+                let ahead = (tip - p).dot(forward);
+                assert!(ahead > last);
+                last = ahead;
+                for wing in [arrow[0], arrow[2]] {
+                    assert!((wing - p).dot(forward) < ahead);
+                    assert!((wing - p).dot(forward) > 0.0);
+                }
+                assert!(
+                    ((arrow[0] - tip) + (arrow[2] - tip))
+                        .perp_dot(forward)
+                        .abs()
+                        < 1e-4
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_orb_aid_takes_the_colour_of_the_skill_of_the_replicated_orb() {
+        // The final rows give every skill of the kit a colour of its own.
+        let registry = SkillPresentation::target();
+        let lilac = Color::srgb(0.9, 0.7, 1.0);
+        let mut orb = effect(SkillId::OrbitalCommand, EffectVisualKind::Orb);
+        let skill = |id: SkillId| Color::srgb_from_array(registry.profile(id).unwrap().color);
+        assert_eq!(
+            orb_aid_color(Some(&registry), Some(7), std::slice::from_ref(&orb)),
+            skill(SkillId::OrbitalCommand)
+        );
+        // The orb is re-ordered by another skill of the kit: the aid follows it.
+        orb.skill = SkillId::OrbitalGuard;
+        assert_eq!(
+            orb_aid_color(Some(&registry), Some(7), std::slice::from_ref(&orb)),
+            skill(SkillId::OrbitalGuard)
+        );
+        assert_ne!(skill(SkillId::OrbitalGuard), skill(SkillId::OrbitalCommand));
+        // Another hero's orb, a hidden owner, another kind of effect or no registry give
+        // the neutral colour.
+        assert_eq!(
+            orb_aid_color(Some(&registry), Some(8), std::slice::from_ref(&orb)),
+            lilac
+        );
+        assert_eq!(
+            orb_aid_color(Some(&registry), None, std::slice::from_ref(&orb)),
+            lilac
+        );
+        assert_eq!(
+            orb_aid_color(None, Some(7), std::slice::from_ref(&orb)),
+            lilac
+        );
+        let mut hidden = orb.clone();
+        hidden.owner_id = 0;
+        assert_eq!(orb_aid_color(Some(&registry), Some(0), &[hidden]), lilac);
+        orb.kind = EffectVisualKind::Field;
+        assert_eq!(orb_aid_color(Some(&registry), Some(7), &[orb]), lilac);
+    }
+
+    #[test]
+    fn hero_gizmos_are_the_orb_aid_of_the_flat_view_the_states_and_the_offered_recasts() {
+        use PlayerVisualMode::{Models3d, Sprite2d};
+        use shared::loadout::CoreId;
+        const P: Vec2 = Vec2::new(3.0, -2.0);
+        fn sight<'a>(
+            registry: &'a SkillPresentation,
+            mode: PlayerVisualMode,
+            class: HeroClass,
+            flags: &'a LoadoutState,
+            effects: &'a [SkillEffectState],
+        ) -> HeroSight<'a> {
+            HeroSight {
+                mode,
+                visible: true,
+                alive: true,
+                class: Some(class),
+                id: Some(7),
+                flags,
+                p: P,
+                forward: Vec2::X,
+                now: 0.0,
+                profiles: Some(registry),
+                effects,
+            }
+        }
+        let registry = SkillPresentation::target();
+        let (registry, p) = (&registry, P);
+
+        // The owner's orb: a ring around it and a faint line to it, in the colour of the
+        // skill the replicated orb belongs to. Only the flat view draws the aid.
+        let at = Vec2::new(6.0, 1.0);
+        let orbiting = LoadoutState {
+            recipe: Some(CoreId::Orbitwright.preset()),
+            orb_position: Some(at.to_array()),
+            ..default()
+        };
+        let orbs = [effect(SkillId::OrbitalCommand, EffectVisualKind::Orb)];
+        let colour =
+            Color::srgb_from_array(registry.profile(SkillId::OrbitalCommand).unwrap().color);
+        assert_eq!(
+            hero_marks(&sight(
+                registry,
+                Sprite2d,
+                HeroClass::Orbitwright,
+                &orbiting,
+                &orbs
+            )),
+            [
+                HeroMark {
+                    points: circle(at, 0.65),
+                    color: colour
+                },
+                HeroMark {
+                    points: vec![p, at],
+                    color: colour.with_alpha(0.3)
+                },
+            ]
+        );
+        assert!(
+            hero_marks(&sight(
+                registry,
+                Models3d,
+                HeroClass::Orbitwright,
+                &orbiting,
+                &orbs
+            ))
+            .is_empty()
+        );
+
+        // A recast the server offers: the marker of the row, in the colour of its skill,
+        // in both views. Dawn Field is the E of the Dawnweaver kit.
+        let mut casting = LoadoutState {
+            recipe: Some(CoreId::Dawnweaver.preset()),
+            ..default()
+        };
+        let slot = casting
+            .recipe
+            .as_ref()
+            .unwrap()
+            .skills
+            .iter()
+            .position(|skill| *skill == SkillId::DawnField)
+            .unwrap();
+        for mode in [Models3d, Sprite2d] {
+            assert!(
+                hero_marks(&sight(registry, mode, HeroClass::Dawnweaver, &casting, &[])).is_empty()
+            );
+        }
+        casting.slots[slot].can_recast = true;
+        let field = Color::srgb_from_array(registry.profile(SkillId::DawnField).unwrap().color);
+        let pips: Vec<_> = marker_strokes(RecastMarker::RingPips, p, Vec2::X, 0.0)
+            .into_iter()
+            .map(|points| HeroMark {
+                points,
+                color: field,
+            })
+            .collect();
+        for mode in [Models3d, Sprite2d] {
+            let offered = sight(registry, mode, HeroClass::Dawnweaver, &casting, &[]);
+            assert_eq!(hero_marks(&offered), pips);
+            // Not for a hero that is hidden or dead, nor without its class, its id or
+            // the registry.
+            for unseen in [
+                HeroSight {
+                    visible: false,
+                    ..sight(registry, mode, HeroClass::Dawnweaver, &casting, &[])
+                },
+                HeroSight {
+                    alive: false,
+                    ..sight(registry, mode, HeroClass::Dawnweaver, &casting, &[])
+                },
+                HeroSight {
+                    class: None,
+                    ..sight(registry, mode, HeroClass::Dawnweaver, &casting, &[])
+                },
+                HeroSight {
+                    id: None,
+                    ..sight(registry, mode, HeroClass::Dawnweaver, &casting, &[])
+                },
+                HeroSight {
+                    profiles: None,
+                    ..sight(registry, mode, HeroClass::Dawnweaver, &casting, &[])
+                },
+            ] {
+                assert!(hero_marks(&unseen).is_empty());
+            }
+        }
+        // The marker joins the state gizmos of the hero; it replaces none of them.
+        casting.mark_remaining_secs = 2.0;
+        casting.shield_hp = 10.0;
+        let both = hero_marks(&sight(
+            registry,
+            Models3d,
+            HeroClass::Dawnweaver,
+            &casting,
+            &[],
+        ));
+        assert_eq!(both.len(), 1 + pips.len());
+        assert_eq!(both[1..], pips[..]);
+        assert_eq!(
+            both[..1],
+            hero_state_marks(Models3d, true, true, &casting, p)[..]
+        );
     }
 
     #[test]

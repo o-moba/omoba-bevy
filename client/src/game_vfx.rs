@@ -1181,6 +1181,23 @@ pub(crate) struct HasteTrail {
     pulse_in: f32,
     emitted: u64,
 }
+/// A speed buff of a skill or a passive counts once the replicated movement multiplier
+/// exceeds the replicated slow by this factor.
+const SPEED_READ_FACTOR: f32 = 1.05;
+/// Whether a hero shows the speed read: the utility haste, or a movement multiplier above
+/// what its slows alone leave, on a living hero the client sees. Both values are
+/// replicated; the read is the same amber for every cause.
+fn speed_read(
+    utility: &shared::utility::UtilityState,
+    loadout: Option<&shared::loadout::LoadoutState>,
+    visible: bool,
+    alive: bool,
+) -> bool {
+    let buffed = loadout.is_some_and(|loadout| {
+        loadout.movement_multiplier > loadout.slow_multiplier * SPEED_READ_FACTOR
+    });
+    visible && alive && (utility.haste_active_secs > 0.0 || buffed)
+}
 /// Follow every hasted hero (local, remote and bot) and pace streaks by
 /// distance travelled, so a stationary hero only pulses and a sprinting one
 /// leaves a continuous double trail regardless of frame rate.
@@ -1191,6 +1208,8 @@ pub(crate) fn emit_haste_trails(
             Entity,
             &Transform,
             &PlayerUtility,
+            &InheritedVisibility,
+            Option<&crate::net::PlayerLoadout>,
             Option<&crate::combat::CombatStats>,
         ),
         Or<(With<Player>, With<RemotePlayer>)>,
@@ -1199,8 +1218,13 @@ pub(crate) fn emit_haste_trails(
     mut out: MessageWriter<UtilityVfx>,
 ) {
     let mut seen = Vec::new();
-    for (entity, transform, utility, stats) in &heroes {
-        let hasted = utility.state.haste_active_secs > 0.0 && stats.is_none_or(|s| s.is_alive());
+    for (entity, transform, utility, visible, loadout, stats) in &heroes {
+        let hasted = speed_read(
+            &utility.state,
+            loadout.and_then(|loadout| loadout.0.as_ref()),
+            visible.get(),
+            stats.is_none_or(|s| s.is_alive()),
+        );
         if !hasted {
             trails.remove(&entity);
             continue;
@@ -2696,6 +2720,134 @@ mod tests {
         app.world_mut().write_message(dash(7));
         app.update();
         assert_eq!(live(&mut app, |p| p.event_id == 77), generic);
+    }
+    /// The speed read follows two replicated facts and nothing else: the utility haste, or
+    /// a movement multiplier above what the hero's slows alone leave.
+    #[test]
+    fn the_speed_read_shows_the_utility_haste_and_skill_speed_buffs() {
+        use shared::loadout::LoadoutState;
+        use shared::utility::UtilityState;
+        let haste = UtilityState {
+            haste_active_secs: 2.0,
+            ..default()
+        };
+        let none = UtilityState::default();
+        let moving = |movement: f32, slow: f32| LoadoutState {
+            movement_multiplier: movement,
+            slow_multiplier: slow,
+            ..default()
+        };
+        // (utility, movement and slow multipliers, visible, alive) -> shown
+        let table = [
+            // No buff: a legacy hero, a modular hero at rest, and the 5 % margin.
+            (none, None, true, true, false),
+            (none, Some((1.0, 1.0)), true, true, false),
+            (none, Some((1.05, 1.0)), true, true, false),
+            (none, Some((1.06, 1.0)), true, true, true),
+            // A skill or passive speed step (1.3, 1.4).
+            (none, Some((1.3, 1.0)), true, true, true),
+            (none, Some((1.4, 1.0)), true, true, true),
+            // A slow without a buff, and a root or a stun (movement 0).
+            (none, Some((0.6, 0.6)), true, true, false),
+            (none, Some((0.0, 1.0)), true, true, false),
+            (none, Some((0.0, 0.6)), true, true, false),
+            (none, Some((0.0, 0.0)), true, true, false),
+            // A buff under a slow still shows: 0.6 x 1.3.
+            (none, Some((0.78, 0.6)), true, true, true),
+            // The utility haste shows with and without replicated skill state.
+            (haste, None, true, true, true),
+            (haste, Some((1.0, 1.0)), true, true, true),
+            (haste, Some((0.6, 0.6)), true, true, true),
+            // Never on a hero the client does not see, nor on a dead one.
+            (haste, None, false, true, false),
+            (haste, None, true, false, false),
+            (none, Some((1.4, 1.0)), false, true, false),
+            (none, Some((1.4, 1.0)), true, false, false),
+            // Values that are not numbers show nothing.
+            (none, Some((f32::NAN, 1.0)), true, true, false),
+            (none, Some((1.4, f32::NAN)), true, true, false),
+        ];
+        for (row, (utility, multipliers, visible, alive, shown)) in table.into_iter().enumerate() {
+            let loadout = multipliers.map(|(movement, slow)| moving(movement, slow));
+            assert_eq!(
+                speed_read(&utility, loadout.as_ref(), visible, alive),
+                shown,
+                "row {row}"
+            );
+        }
+        // The cause never matters: every other replicated field leaves the read alone.
+        let kit = LoadoutState {
+            recipe: Some(shared::loadout::CoreId::Wildspark.preset()),
+            passive_remaining_secs: 6.0,
+            passive_stacks: 5,
+            energy: true,
+            ..default()
+        };
+        assert!(!speed_read(&none, Some(&kit), true, true));
+
+        // In the world: the buffed hero pulses at once and leaves streaks as it moves; the
+        // slowed, the hidden and the dead one leave nothing.
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<UtilityVfx>()
+            .add_systems(Update, emit_haste_trails);
+        crate::vfx_clock::ensure(&mut app);
+        let mut hero = |x: f32, loadout: LoadoutState, visible: bool, hp: f32| {
+            app.world_mut()
+                .spawn((
+                    RemotePlayer,
+                    Transform::from_xyz(x, 0.0, 0.0),
+                    PlayerUtility::default(),
+                    if visible {
+                        InheritedVisibility::VISIBLE
+                    } else {
+                        InheritedVisibility::HIDDEN
+                    },
+                    crate::net::PlayerLoadout(Some(loadout)),
+                    crate::combat::CombatStats { hp, ..default() },
+                ))
+                .id()
+        };
+        let buffed = hero(10.0, moving(1.3, 1.0), true, 50.0);
+        hero(20.0, moving(0.6, 0.6), true, 50.0);
+        hero(30.0, moving(1.3, 1.0), false, 50.0);
+        hero(40.0, moving(1.3, 1.0), true, 0.0);
+        app.update();
+        let drain = |app: &mut App| -> Vec<UtilityVfx> {
+            app.world_mut()
+                .resource_mut::<Messages<UtilityVfx>>()
+                .drain()
+                .collect()
+        };
+        assert!(matches!(
+            drain(&mut app)[..],
+            [UtilityVfx::HastePulse { position, .. }] if position.x == 10.0
+        ));
+        app.world_mut()
+            .get_mut::<Transform>(buffed)
+            .unwrap()
+            .translation
+            .x += 1.0;
+        app.update();
+        let streaks = drain(&mut app);
+        assert!(!streaks.is_empty());
+        assert!(streaks.iter().all(|vfx| matches!(
+            vfx,
+            UtilityVfx::HasteStreak { position, direction, .. }
+                if (10.0..=11.0).contains(&position.x) && *direction == Vec2::X
+        )));
+        // The buff ends with the replicated multiplier.
+        app.world_mut()
+            .get_mut::<crate::net::PlayerLoadout>(buffed)
+            .unwrap()
+            .0 = Some(moving(1.0, 1.0));
+        app.world_mut()
+            .get_mut::<Transform>(buffed)
+            .unwrap()
+            .translation
+            .x += 1.0;
+        app.update();
+        assert!(drain(&mut app).is_empty());
     }
     #[test]
     fn legacy_accents_follow_the_accepted_yaw_at_the_simulation_position() {

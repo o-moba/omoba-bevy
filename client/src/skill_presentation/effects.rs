@@ -80,7 +80,8 @@ fn fill_material(color: Color, strength: f32) -> StandardMaterial {
     }
 }
 
-fn material(color: Color) -> StandardMaterial {
+/// An unlit, two-sided colour that the scene fog does not dim.
+pub(super) fn material(color: Color) -> StandardMaterial {
     StandardMaterial {
         base_color: color,
         unlit: true,
