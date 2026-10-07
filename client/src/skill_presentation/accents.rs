@@ -2,13 +2,15 @@
 //! outline of a signed-off instant area, moves, links, stage one-shots and cues.
 //! Every generator is a pure function of its arguments, so a row is validated by running
 //! it, and nothing here can read a position the client did not observe. The systems at the
-//! end hand the generators what the cast observer and the receipt collector reported.
+//! end hand the generators what the cast observer, the stage tracker and the receipt
+//! collector reported.
 use super::SkillPresentation;
 use super::cast::{CastKey, MoveCause, MoveObserved, SkillCastObserved, ThemedDashes};
-use super::category::{self, StrikeOrigin};
+use super::category::{self, SkillKey, StrikeOrigin};
 use super::geometry::{self, AreaContext, GeoShape};
 pub(crate) use super::schema::{CastAccent, MoveSpec};
 use super::schema::{SkillProfile, Theme};
+use super::stage::{EndKind, OwnerSeen, StageChange, StageEvent, Transition};
 use super::vocab::{AccentPattern, ExpireKind, MovePattern, PaletteSlot, ParticleShape};
 use crate::combat_feedback::ConfirmedHit;
 use crate::game_vfx::{
@@ -17,7 +19,7 @@ use crate::game_vfx::{
 use crate::net::GameStateSnapshot;
 use crate::player::Player;
 use bevy::prelude::*;
-use shared::loadout::{SkillEffectState, SkillId};
+use shared::loadout::{EffectVisualKind, SkillEffectState, SkillId};
 use std::collections::HashSet;
 use std::f32::consts::{PI, TAU};
 
@@ -1023,13 +1025,10 @@ pub(crate) fn link_particles(
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum OneShot {
     /// The effect armed.
-    #[cfg_attr(not(test), allow(dead_code))] // emitted by the stage tracker
     ArmPop,
     /// The cage lost the side with this index.
-    #[cfg_attr(not(test), allow(dead_code))] // emitted by the stage tracker
     SegmentSnap(u8),
     /// A travelling body turned or was renewed.
-    #[cfg_attr(not(test), allow(dead_code))] // emitted by the stage tracker
     TurnSpark,
     Fade,
     Crumble,
@@ -1046,6 +1045,19 @@ impl OneShot {
             ExpireKind::Crumble => Some(Self::Crumble),
             ExpireKind::Discharge => Some(Self::Discharge),
             ExpireKind::Detonate => Some(Self::Detonate),
+        }
+    }
+
+    /// The one-shot of a classified end: the row's `expire` kind when it names what was
+    /// observed. A release is a discharge, a burst zone a detonation, and only an effect
+    /// whose time ran out fades or crumbles; a row that names another kind draws nothing.
+    pub(crate) const fn of_end(end: EndKind, expire: ExpireKind) -> Option<Self> {
+        match (end, expire) {
+            (EndKind::Released, ExpireKind::Discharge) => Some(Self::Discharge),
+            (EndKind::Detonated, ExpireKind::Detonate) => Some(Self::Detonate),
+            (EndKind::TrueExpiry, ExpireKind::Fade) => Some(Self::Fade),
+            (EndKind::TrueExpiry, ExpireKind::Crumble) => Some(Self::Crumble),
+            _ => None,
         }
     }
 }
@@ -1542,6 +1554,49 @@ pub(crate) fn trap_snap(
     }
 }
 
+/// The one-shot of one stage event. Only a row that gives the effect a body draws one, so
+/// a row without the block keeps today's look. The flip of a warning pops when it sets a
+/// travelling body off; the beam a warning becomes is its own read.
+pub(crate) fn stage_shot(registry: &SkillPresentation, event: &StageEvent) -> Option<OneShot> {
+    let body = registry.body_for(&event.effect)?;
+    match event.change {
+        StageChange::Transition(Transition::Armed) => Some(OneShot::ArmPop),
+        StageChange::Transition(Transition::KindFlipped) => {
+            (event.effect.kind == EffectVisualKind::Bolt).then_some(OneShot::ArmPop)
+        }
+        StageChange::Transition(Transition::SegmentBroken(side)) => {
+            Some(OneShot::SegmentSnap(side))
+        }
+        StageChange::Transition(Transition::Turned | Transition::Renewed) => {
+            Some(OneShot::TurnSpark)
+        }
+        StageChange::Ended(end) => OneShot::of_end(end, body.expire),
+    }
+}
+
+/// The particles of one stage event: its one-shot inside the replicated geometry of the
+/// effect, in the colours of the row its `skill` names. `height` is the ground level under
+/// the effect. Never an impact recipe.
+pub(crate) fn stage_burst(
+    registry: &SkillPresentation,
+    event: &StageEvent,
+    height: f32,
+) -> Vec<ParticleSpec> {
+    let effect = &event.effect;
+    let Some((shot, look)) = stage_shot(registry, event)
+        .zip(registry.look(CastKey::Skill(SkillKey::Modular(effect.skill))))
+    else {
+        return Vec::new();
+    };
+    stage_oneshot(
+        shot,
+        &look.palette,
+        &geometry::boundary_shape(effect.skill, effect.kind, effect),
+        height,
+        effect.id,
+    )
+}
+
 /// A cast whose row links it to its hits, waiting for their receipts.
 struct OpenLink {
     actor_id: u64,
@@ -1595,9 +1650,10 @@ impl LinkBook {
         else {
             return;
         };
-        // The hit of a travelling body comes long after its cast; a link from the cast
-        // would run ahead of it.
-        if category::travelling_body(key) {
+        // The hit of a travelling body comes long after its cast, and so does the hit of a
+        // telegraph that fires on its own; a link from the cast would run ahead of either.
+        if category::travelling_body(key) || key.modular().is_some_and(category::strikes_on_release)
+        {
             return;
         }
         let start = match key
@@ -1609,12 +1665,7 @@ impl LinkBook {
             Some(StrikeOrigin::EffectPosition) => return,
             Some(StrikeOrigin::Origin) | None => cast.origin,
         };
-        self.open
-            .retain(|link| (link.actor_id, link.slot) != (cast.actor_id, cast.slot));
-        if self.open.len() == OPEN_LINKS {
-            self.open.remove(0);
-        }
-        self.open.push(OpenLink {
+        self.wait(OpenLink {
             actor_id: cast.actor_id,
             slot: cast.slot,
             start,
@@ -1624,6 +1675,49 @@ impl LinkBook {
             opened: self.snapshots,
             local: cast.local,
         });
+    }
+
+    /// Opens the link of a telegraph that was seen to release: its receipts come with the
+    /// snapshot that dropped the effect or one of the two after it. The link starts where
+    /// the server resolves the strike from, the effect at `ground` or the owner as that
+    /// snapshot shows it.
+    pub(crate) fn release(
+        &mut self,
+        registry: &SkillPresentation,
+        effect: &SkillEffectState,
+        owner: &OwnerSeen,
+        ground: Vec3,
+    ) {
+        let Some(((shape, palette), slot)) = registry
+            .look(CastKey::Skill(SkillKey::Modular(effect.skill)))
+            .and_then(|look| look.accent?.link.zip(Some(look.palette)))
+            .zip(owner.slot)
+        else {
+            return;
+        };
+        self.wait(OpenLink {
+            actor_id: effect.owner_id,
+            slot,
+            start: match category::strike_origin(effect.skill, false) {
+                StrikeOrigin::EffectPosition => ground,
+                StrikeOrigin::Origin | StrikeOrigin::Arrival => owner.position,
+            },
+            shape,
+            palette,
+            left: LINKS_PER_CAST,
+            opened: self.snapshots,
+            local: owner.local,
+        });
+    }
+
+    /// A newer link of the same hero and slot replaces the older one.
+    fn wait(&mut self, link: OpenLink) {
+        self.open
+            .retain(|open| (open.actor_id, open.slot) != (link.actor_id, link.slot));
+        if self.open.len() == OPEN_LINKS {
+            self.open.remove(0);
+        }
+        self.open.push(link);
     }
 
     /// The streaks to one accepted receipt of an open cast and whether the caster is the
@@ -1715,18 +1809,62 @@ pub(crate) fn emit_moves(
     }
 }
 
-/// Draws a link from a cast to each accepted receipt of its own source and slot.
+/// The ground under a point of the simulation plane.
+fn ground_at(map: Option<&crate::maps::MapLayout>, at: Vec2) -> Vec3 {
+    Vec3::new(
+        at.x,
+        map.map_or(0.0, |map| map.terrain_height_3d(at.x, at.y)),
+        at.y,
+    )
+}
+
+/// Draws the one-shot of every transition and classified end the stage tracker reported
+/// this frame. A turn and a renewal of one effect in one snapshot spark once.
+pub(crate) fn emit_stage_oneshots(
+    registry: Option<Res<SkillPresentation>>,
+    map: Option<Res<crate::maps::MapLayout>>,
+    viewer: Query<&Transform, With<Player>>,
+    mut events: MessageReader<StageEvent>,
+    mut out: MessageWriter<SkillBurst>,
+) {
+    let Some(registry) = registry else {
+        events.clear();
+        return;
+    };
+    let viewer = viewer.single().ok().map(|pose| pose.translation);
+    let mut sparked = Vec::new();
+    for event in events.read() {
+        if stage_shot(&registry, event) == Some(OneShot::TurnSpark) {
+            if sparked.contains(&event.effect.id) {
+                continue;
+            }
+            sparked.push(event.effect.id);
+        }
+        let at = ground_at(map.as_deref(), Vec2::from_array(event.effect.position));
+        let specs = stage_burst(&registry, event, at.y);
+        if !specs.is_empty() {
+            let local = event.owner.is_some_and(|owner| owner.local);
+            out.write(ranked(specs, local, at, viewer));
+        }
+    }
+}
+
+/// Draws a link from a cast, or from a telegraph that released, to each accepted receipt of
+/// its own source and slot.
 pub(crate) fn emit_links(
     registry: Option<Res<SkillPresentation>>,
     game: Option<Res<GameStateSnapshot>>,
+    map: Option<Res<crate::maps::MapLayout>>,
     viewer: Query<&Transform, With<Player>>,
     mut book: Local<LinkBook>,
     mut casts: MessageReader<SkillCastObserved>,
+    mut stages: MessageReader<StageEvent>,
     mut hits: MessageReader<ConfirmedHit>,
     mut out: MessageWriter<SkillBurst>,
 ) {
     let (Some(registry), Some(game)) = (registry, game) else {
         casts.clear();
+        stages.clear();
         hits.clear();
         return;
     };
@@ -1736,6 +1874,17 @@ pub(crate) fn emit_links(
     );
     for cast in casts.read() {
         book.open(&registry, cast);
+    }
+    for event in stages.read() {
+        if let (StageChange::Ended(EndKind::Released), Some(owner)) = (event.change, &event.owner) {
+            let at = Vec2::from_array(event.effect.position);
+            book.release(
+                &registry,
+                &event.effect,
+                owner,
+                ground_at(map.as_deref(), at),
+            );
+        }
     }
     let viewer = viewer.single().ok().map(|pose| pose.translation);
     for hit in hits.read() {

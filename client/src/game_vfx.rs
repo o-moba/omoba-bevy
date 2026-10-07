@@ -521,6 +521,7 @@ impl Plugin for GameVfxPlugin {
             .add_message::<ConfirmedBurst>()
             .add_message::<SkillCastObserved>()
             .add_message::<MoveObserved>()
+            .add_message::<crate::skill_presentation::stage::StageEvent>()
             .add_message::<crate::combat_feedback::ConfirmedHit>()
             .add_systems(Startup, setup)
             .add_systems(
@@ -536,6 +537,7 @@ impl Plugin for GameVfxPlugin {
                         emit_skill_cast_particles,
                         accents::emit_cast,
                         accents::emit_moves,
+                        accents::emit_stage_oneshots,
                         accents::emit_links,
                         animate_particles,
                     )

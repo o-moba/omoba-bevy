@@ -11,12 +11,14 @@ pub(super) struct SkillEffectGizmos;
 #[derive(Resource, Default)]
 pub(crate) struct SkillAimVector(pub Option<(Vec2, Vec2, f32)>);
 
-use shared::loadout::{EffectVisualKind, WeaponMode};
+use shared::loadout::{EffectVisualKind, SkillEffectState, WeaponMode};
 use shared::{HeroClass, TargetingMode};
 
 use crate::i18n::{data, tr, trf};
 use crate::net::{GameStateSnapshot, NetworkHeroClass, PlayerLoadout};
 use crate::player::Player;
+use crate::skill_presentation::geometry::{self, GeoShape};
+use crate::skill_presentation::stage::{self, Stage};
 use crate::sprite::PlayerVisualMode;
 
 pub(crate) fn bounded_aim(origin: Vec2, aim: Vec2, targeting: TargetingMode, range: f32) -> Vec2 {
@@ -442,6 +444,111 @@ pub(crate) fn draw_aim(
     }
 }
 
+/// What a line of the fallback drawing of an effect is painted with.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Ink {
+    /// The colour of the skill: the exact boundary of the effect, or the mark of an object
+    /// that has none.
+    Skill,
+    /// The team colour: reading aids that claim no area.
+    Team,
+    /// The team colour at half strength.
+    TeamFaint,
+    /// The cross of a trap that is armed.
+    Armed,
+    /// The cross of a trap that is not armed yet.
+    Arming,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(super) struct Stroke {
+    pub points: Vec<Vec2>,
+    pub ink: Ink,
+}
+
+/// The lines the fallback draws for one replicated effect, in simulation ground
+/// coordinates: first its boundary exactly as `geometry::boundary_shape` derives it from
+/// the received fields, then reading aids. The sides a cage has lost are left out.
+pub(super) fn effect_strokes(e: &SkillEffectState) -> Vec<Stroke> {
+    use EffectVisualKind as K;
+    let geo = geometry::boundary_shape(e.skill, e.kind, e);
+    let mut strokes: Vec<Stroke> = geo
+        .outline()
+        .into_iter()
+        .enumerate()
+        .filter(|(side, _)| e.kind != K::Cage || e.consumed_segments & (1 << side) == 0)
+        .map(|(_, points)| Stroke {
+            points,
+            ink: Ink::Skill,
+        })
+        .collect();
+    let p = Vec2::from_array(e.position);
+    let end = Vec2::from_array(e.end);
+    let radius = e.radius;
+    let ring = |radius: f32, ink: Ink| Stroke {
+        points: GeoShape::Ring { center: p, radius }.outline().remove(0),
+        ink,
+    };
+    let line = |from: Vec2, to: Vec2, ink: Ink| Stroke {
+        points: vec![from, to],
+        ink,
+    };
+    match e.kind {
+        K::Field | K::Healing | K::Anchor | K::Orb | K::Lantern => {
+            strokes.push(ring(radius * 0.86, Ink::TeamFaint));
+        }
+        K::Trap => {
+            strokes.push(ring(radius * 0.86, Ink::TeamFaint));
+            let offset = radius * 0.7;
+            let ink = if e.armed { Ink::Armed } else { Ink::Arming };
+            for sign in [-1.0, 1.0] {
+                strokes.push(line(
+                    p + Vec2::new(-offset, sign * offset),
+                    p + Vec2::new(offset, -sign * offset),
+                    ink,
+                ));
+            }
+        }
+        K::BeamWarning => {
+            // A circular warning fills toward its edge and is full exactly when the server
+            // fires, as its marker does in 3D.
+            let view = stage::view(e);
+            let filled = radius * view.progress;
+            if matches!(geo, GeoShape::Ring { .. })
+                && view.stage == Stage::Telegraph
+                && filled > 0.05
+            {
+                strokes.push(ring(filled, Ink::Team));
+            }
+        }
+        K::Beam => {
+            let side = (end - p).normalize_or_zero().perp() * radius;
+            strokes.extend((-2..=2).map(|i| {
+                let side = side * (i as f32 / 3.0);
+                line(p + side, end + side, Ink::Team)
+            }));
+        }
+        K::Bolt | K::Barrier | K::Rocket => {
+            let direction = (end - p).normalize_or_zero();
+            strokes.push(line(
+                p - direction * radius * 3.0,
+                p + direction * radius,
+                Ink::Team,
+            ));
+        }
+        K::Soul => {
+            // No reach is replicated for a soul, so it gets a mark and no ring.
+            let corners = [Vec2::X, Vec2::Y, Vec2::NEG_X, Vec2::NEG_Y, Vec2::X];
+            strokes.push(Stroke {
+                points: corners.map(|corner| p + corner * radius).to_vec(),
+                ink: Ink::Skill,
+            });
+        }
+        K::ShieldWall | K::Cage => {}
+    }
+    strokes
+}
+
 /// Bounded, snapshot-driven geometry. Effects do not depend on a visible owner.
 pub(super) fn draw_effects(
     mut gizmos: Gizmos<SkillEffectGizmos>,
@@ -467,22 +574,21 @@ pub(super) fn draw_effects(
         .iter()
         .take(shared::loadout::MAX_ACTIVE_EFFECTS)
     {
-        if !e.position.into_iter().chain(e.end).all(f32::is_finite) || !e.radius.is_finite() {
-            continue;
-        }
-        let p = Vec2::from_array(e.position);
-        // Keep the tactical trap outline over the newer 3D trap model.
-        if *mode == PlayerVisualMode::Models3d
-            && e.kind != EffectVisualKind::Trap
-            && profiles
-                .as_ref()
-                .is_some_and(|r| r.profile(e.skill).is_some())
+        if !e.position.into_iter().chain(e.end).all(f32::is_finite)
+            || !(0.0..=256.0).contains(&e.radius)
         {
             continue;
         }
-        let end = Vec2::from_array(e.end);
+        let profile = profiles.as_ref().and_then(|r| r.profile(e.skill));
+        // Keep the tactical trap outline over the newer 3D trap model.
+        if *mode == PlayerVisualMode::Models3d
+            && e.kind != EffectVisualKind::Trap
+            && profile.is_some()
+        {
+            continue;
+        }
         let friendly = local.single().is_ok_and(|t| *t == e.owner_team);
-        let color = if e.kind == EffectVisualKind::Trap {
+        let team = if e.kind == EffectVisualKind::Trap {
             if friendly {
                 Color::linear_rgb(0.015, 0.8, 5.0)
             } else {
@@ -493,104 +599,30 @@ pub(super) fn draw_effects(
         } else {
             Color::srgb(1.0, 0.3, 0.28)
         };
-        let radius = e.radius.clamp(0.05, 256.0);
-        match e.kind {
-            EffectVisualKind::Cage => {
-                for i in 0..5 {
-                    if e.consumed_segments & (1 << i) != 0 {
-                        continue;
-                    }
-                    let a = i as f32 * std::f32::consts::TAU / 5.0;
-                    let b = (i + 1) as f32 * std::f32::consts::TAU / 5.0;
-                    gizmos.line(
-                        point(p + Vec2::new(a.cos(), a.sin()) * radius, *mode, map),
-                        point(p + Vec2::new(b.cos(), b.sin()) * radius, *mode, map),
-                        color,
-                    );
-                }
-            }
-            EffectVisualKind::ShieldWall => {
-                let d = (end - p).normalize_or_zero();
-                let center = p + d;
-                let side = Vec2::new(-d.y, d.x) * radius;
-                gizmos.line(
-                    point(center - side, *mode, map),
-                    point(center + side, *mode, map),
-                    color,
-                );
-            }
-
-            EffectVisualKind::Field
-            | EffectVisualKind::Trap
-            | EffectVisualKind::Healing
-            | EffectVisualKind::Anchor
-            | EffectVisualKind::Soul
-            | EffectVisualKind::Orb
-            | EffectVisualKind::Lantern => {
-                ring(&mut gizmos, p, radius, *mode, map, color);
-                ring(
-                    &mut gizmos,
-                    p,
-                    radius * 0.86,
-                    *mode,
-                    map,
-                    color.with_alpha(0.5),
-                );
-                if e.kind == EffectVisualKind::Trap {
-                    let offset = radius * 0.7;
-                    for sign in [-1.0, 1.0] {
-                        gizmos.line(
-                            point(p + Vec2::new(-offset, sign * offset), *mode, map),
-                            point(p + Vec2::new(offset, -sign * offset), *mode, map),
-                            if e.armed {
-                                Color::WHITE
-                            } else {
-                                Color::srgb(1.0, 0.75, 0.15)
-                            },
-                        );
-                    }
-                }
-            }
-            EffectVisualKind::BeamWarning | EffectVisualKind::Beam => {
-                let d = (end - p).normalize_or_zero();
-                let side = Vec2::new(-d.y, d.x) * radius;
-                for offset in [-1.0, 1.0] {
-                    gizmos.line(
-                        point(p + side * offset, *mode, map),
-                        point(end + side * offset, *mode, map),
-                        color,
-                    );
-                }
-                if e.kind == EffectVisualKind::Beam {
-                    for i in -3..=3 {
-                        let side = side * (i as f32 / 3.0);
-                        gizmos.line(
-                            point(p + side, *mode, map),
-                            point(end + side, *mode, map),
-                            color,
-                        );
-                    }
-                }
-            }
-            EffectVisualKind::Bolt | EffectVisualKind::Barrier | EffectVisualKind::Rocket => {
-                ring(&mut gizmos, p, radius, *mode, map, color);
-                let direction = (end - p).normalize_or_zero();
-                gizmos.line(
-                    point(p - direction * radius * 3.0, *mode, map),
-                    point(p + direction * radius, *mode, map),
-                    color,
-                );
-                if e.kind == EffectVisualKind::Barrier {
-                    ring(
-                        &mut gizmos,
-                        p,
-                        radius * 1.4,
-                        *mode,
-                        map,
-                        Color::srgb(0.95, 0.85, 0.4),
-                    );
-                }
-            }
+        // The flat view has no body for the effect, so its outline carries the colour of
+        // the skill. Over a 3D model the outline stays a team marker.
+        let skill = profile
+            .filter(|_| *mode == PlayerVisualMode::Sprite2d)
+            .map_or(team, |profile| Color::srgb_from_array(profile.color));
+        for stroke in effect_strokes(e) {
+            let color = match stroke.ink {
+                Ink::Skill => skill,
+                Ink::Team => team,
+                Ink::TeamFaint => team.with_alpha(0.5),
+                Ink::Armed => Color::WHITE,
+                Ink::Arming => Color::srgb(1.0, 0.75, 0.15),
+            };
+            // Long edges are split so that they follow the ground in 3D.
+            let points = stroke.points.windows(2).flat_map(|edge| {
+                let steps = (edge[0].distance(edge[1]) / 1.5).ceil().clamp(1.0, 192.0) as usize;
+                (0..steps).map(move |i| edge[0].lerp(edge[1], i as f32 / steps as f32))
+            });
+            gizmos.linestrip(
+                points
+                    .chain(stroke.points.last().copied())
+                    .map(|at| point(at, *mode, map)),
+                color,
+            );
         }
     }
     let duelist = actors
@@ -701,6 +733,221 @@ pub(super) fn draw_effects(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use shared::loadout::SkillId;
+
+    fn effect(skill: SkillId, kind: EffectVisualKind) -> SkillEffectState {
+        SkillEffectState {
+            id: 1,
+            owner_id: 7,
+            owner_team: shared::map::Team::Green,
+            skill,
+            kind,
+            position: [3.0, -2.0],
+            end: [3.0, 5.0],
+            radius: 1.5,
+            remaining_secs: 1.0,
+            armed: false,
+            consumed_segments: 0,
+        }
+    }
+
+    /// The strokes painted in the colour of the skill.
+    fn boundary(e: &SkillEffectState) -> Vec<Vec<Vec2>> {
+        effect_strokes(e)
+            .into_iter()
+            .filter(|stroke| stroke.ink == Ink::Skill)
+            .map(|stroke| stroke.points)
+            .collect()
+    }
+
+    #[test]
+    fn every_effect_kind_has_a_flat_outline_that_equals_its_boundary() {
+        use EffectVisualKind as K;
+        // One skill for every kind the server can replicate.
+        let cases = [
+            (SkillId::OrbitalCommand, K::Orb),
+            (SkillId::IronHook, K::Soul),
+            (SkillId::AnchorStep, K::Anchor),
+            (SkillId::FourfoldDuel, K::Healing),
+            (SkillId::Northwall, K::ShieldWall),
+            (SkillId::IronBoundary, K::Cage),
+            (SkillId::GuidingLantern, K::Lantern),
+            (SkillId::WinterShard, K::Bolt),
+            (SkillId::DawnBarrier, K::Barrier),
+            (SkillId::DawnField, K::Field),
+            (SkillId::DawnRay, K::BeamWarning),
+            (SkillId::DawnRay, K::Beam),
+            (SkillId::WildTraps, K::Trap),
+            (SkillId::WildRocket, K::Rocket),
+        ];
+        let mut kinds = Vec::new();
+        for (skill, kind) in cases {
+            let e = effect(skill, kind);
+            let strokes = effect_strokes(&e);
+            assert!(!strokes.is_empty(), "{kind:?}");
+            for stroke in &strokes {
+                assert!(stroke.points.len() >= 2, "{kind:?}");
+                assert!(stroke.points.iter().all(|at| at.is_finite()), "{kind:?}");
+            }
+            // The outline is the boundary of the received fields and nothing else.
+            let geo = geometry::boundary_shape(skill, kind, &e);
+            if kind == K::Soul {
+                // No reach is replicated for a soul: a mark, and no ring.
+                assert_eq!(geo, GeoShape::None);
+                assert_eq!(boundary(&e).len(), 1);
+                assert_eq!(boundary(&e)[0].len(), 5);
+            } else {
+                assert_eq!(boundary(&e), geo.outline(), "{kind:?}");
+            }
+            if !kinds.contains(&kind) {
+                kinds.push(kind);
+            }
+        }
+        // A new kind does not compile in `effect_strokes` until it has an arm; this list
+        // keeps the table above complete.
+        assert_eq!(kinds.len(), 14);
+    }
+
+    #[test]
+    fn the_fissure_is_a_capsule_the_cone_a_sector_and_the_collapse_a_ring() {
+        use EffectVisualKind as K;
+        let fissure = effect(SkillId::WinterDivide, K::BeamWarning);
+        assert_eq!(
+            boundary(&fissure),
+            GeoShape::Capsule {
+                from: Vec2::new(3.0, -2.0),
+                to: Vec2::new(3.0, 5.0),
+                radius: 1.5
+            }
+            .outline()
+        );
+        // Both round ends are part of the outline.
+        let tips = [Vec2::new(3.0, 6.5), Vec2::new(3.0, -3.5)];
+        for tip in tips {
+            assert!(
+                boundary(&fissure)[0]
+                    .iter()
+                    .any(|at| at.distance(tip) < 1e-3)
+            );
+        }
+        // It has no timed telegraph: no read-out is drawn inside it.
+        assert_eq!(effect_strokes(&fissure).len(), 1);
+
+        // The cone at its full range is a sector with the server's half-angle; a cone the
+        // fog cut short is the received line and nothing wider.
+        let range = shared::loadout::skill(SkillId::FurnaceBreath)
+            .ability
+            .cast_range;
+        let mut cone = effect(SkillId::FurnaceBreath, K::BeamWarning);
+        cone.end = [3.0, -2.0 + range];
+        let outline = boundary(&cone);
+        let widest = outline[0]
+            .iter()
+            .map(|at| (*at - Vec2::new(3.0, -2.0)).angle_to(Vec2::Y).abs())
+            .fold(0.0, f32::max);
+        assert!((widest.cos() - geometry::FURNACE_CONE_COS).abs() < 1e-4);
+        cone.end = [3.0, -2.0 + range - 1.0];
+        assert_eq!(
+            boundary(&cone),
+            [vec![Vec2::new(3.0, -2.0), Vec2::new(3.0, -3.0 + range)]]
+        );
+
+        // The collapse is a ring of the replicated radius. Its inner ring is full exactly
+        // when the server fires, also when the warning is first seen late.
+        let mut collapse = effect(SkillId::OrbitalCollapse, K::BeamWarning);
+        collapse.end = collapse.position;
+        collapse.radius = 5.0;
+        let mut inner = |remaining: f32| {
+            collapse.remaining_secs = remaining;
+            let strokes = effect_strokes(&collapse);
+            assert_eq!(
+                strokes[0].points,
+                GeoShape::Ring {
+                    center: Vec2::new(3.0, -2.0),
+                    radius: 5.0
+                }
+                .outline()[0]
+            );
+            strokes
+                .get(1)
+                .map(|stroke| (stroke.ink, stroke.points[0].distance(Vec2::new(3.0, -2.0))))
+        };
+        assert_eq!(inner(0.9), None);
+        let (ink, half) = inner(0.55).unwrap();
+        assert_eq!(ink, Ink::Team);
+        assert!((half - 2.5).abs() < 1e-4);
+        assert!((inner(0.2).unwrap().1 - 5.0).abs() < 1e-4);
+        // Below the tail the ring stays on the edge and never leaves it.
+        assert!((inner(0.05).unwrap().1 - 5.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn a_cage_draws_only_the_sides_it_still_has() {
+        let mut cage = effect(SkillId::IronBoundary, EffectVisualKind::Cage);
+        cage.radius = 6.0;
+        let sides = GeoShape::Pentagon {
+            center: Vec2::new(3.0, -2.0),
+            radius: 6.0,
+        }
+        .outline();
+        assert_eq!(boundary(&cage), sides);
+        cage.consumed_segments = 0b01010;
+        assert_eq!(
+            boundary(&cage),
+            [sides[0].clone(), sides[2].clone(), sides[4].clone()]
+        );
+        cage.consumed_segments = 0b11111;
+        assert!(effect_strokes(&cage).is_empty());
+    }
+
+    #[test]
+    fn reading_aids_stay_with_the_received_geometry() {
+        use EffectVisualKind as K;
+        let centre = Vec2::new(3.0, -2.0);
+        // The inner ring of a round effect and the cross of a trap lie inside its radius.
+        let mut trap = effect(SkillId::WildTraps, K::Trap);
+        let aids = |e: &SkillEffectState| -> Vec<Stroke> {
+            effect_strokes(e)
+                .into_iter()
+                .filter(|stroke| stroke.ink != Ink::Skill)
+                .collect()
+        };
+        for stroke in aids(&trap) {
+            assert!(stroke.points.iter().all(|at| at.distance(centre) <= 1.5));
+        }
+        assert_eq!(
+            aids(&trap).iter().map(|s| s.ink).collect::<Vec<_>>(),
+            [Ink::TeamFaint, Ink::Arming, Ink::Arming]
+        );
+        trap.armed = true;
+        assert_eq!(aids(&trap)[1].ink, Ink::Armed);
+        // A fired beam is hatched between its two edges.
+        let beam = effect(SkillId::DawnRay, K::Beam);
+        let hatch = aids(&beam);
+        assert_eq!(hatch.len(), 5);
+        for stroke in hatch {
+            assert!(stroke.points.iter().all(|at| (at.x - 3.0).abs() < 1.5));
+            assert_eq!((stroke.points[0].y, stroke.points[1].y), (-2.0, 5.0));
+        }
+        // A travelling body shows its replicated heading and no second ring.
+        for (skill, kind) in [
+            (SkillId::WinterShard, K::Bolt),
+            (SkillId::DawnBarrier, K::Barrier),
+            (SkillId::WildRocket, K::Rocket),
+        ] {
+            let mut body = effect(skill, kind);
+            body.end = [3.0, -1.0];
+            assert_eq!(
+                aids(&body),
+                [Stroke {
+                    points: vec![Vec2::new(3.0, -6.5), Vec2::new(3.0, -0.5)],
+                    ink: Ink::Team
+                }],
+                "{kind:?}"
+            );
+        }
+    }
+
     #[test]
     fn point_aim_clamps_but_direction_retains_its_ray() {
         assert_eq!(

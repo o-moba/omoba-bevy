@@ -1,13 +1,14 @@
 //! One table for every boundary and area a skill may draw. Shapes are functions of the
 //! received effect fields and the catalog only; presentation data cannot scale or move them.
-// The body renderer, the 2D fallback, the area flash and the aim preview read this table;
-// until they land only the archetype check of the parser does.
+// The parser, the area flash and the 2D fallback read this table; the body renderer and the
+// aim preview adopt the rest of it.
 #![cfg_attr(not(test), allow(dead_code))]
 
 use super::category::{cone_half_angle, own_kinds};
 use super::vocab::Archetype;
 use bevy::math::Vec2;
 use shared::loadout::{EffectVisualKind, SkillEffect, SkillEffectState, SkillId, Technique, skill};
+use std::f32::consts::{FRAC_PI_2, PI, TAU};
 
 /// A unit pick takes the nearest candidate within this distance of the aim
 /// (`common/src/skills/advanced.rs:168`).
@@ -63,6 +64,79 @@ pub(crate) enum GeoShape {
     Segment { from: Vec2, to: Vec2 },
     /// Nothing may be drawn as a boundary.
     None,
+}
+
+/// Line segments an outline spends on a full circle.
+const OUTLINE_STEPS: usize = 48;
+
+impl GeoShape {
+    /// The boundary as polylines in ground coordinates, for a backend that draws lines. A
+    /// closed line repeats its first point. A pentagon yields its five sides one by one,
+    /// side `i` at index `i`, so that a consumed side can be left out.
+    pub(crate) fn outline(&self) -> Vec<Vec<Vec2>> {
+        let arc = |center: Vec2, radius: f32, from: f32, sweep: f32| -> Vec<Vec2> {
+            let steps = (sweep.abs() / TAU * OUTLINE_STEPS as f32).ceil().max(1.0) as usize;
+            (0..=steps)
+                .map(|i| {
+                    let angle = from + sweep * i as f32 / steps as f32;
+                    center + Vec2::from_angle(angle) * radius
+                })
+                .collect()
+        };
+        match *self {
+            Self::Ring { center, radius } => vec![arc(center, radius, 0.0, TAU)],
+            Self::Capsule { from, to, radius } => {
+                let Some(along) = (to - from).try_normalize() else {
+                    return vec![arc(from, radius, 0.0, TAU)];
+                };
+                let heading = along.to_angle();
+                // Round the far end, come back along the other side, round the near end.
+                let mut points = arc(to, radius, heading - FRAC_PI_2, PI);
+                points.extend(arc(from, radius, heading + FRAC_PI_2, PI));
+                points.push(points[0]);
+                vec![points]
+            }
+            Self::Lane {
+                from,
+                to,
+                half_width,
+            } => {
+                let side = (to - from).normalize_or_zero().perp() * half_width;
+                vec![vec![
+                    from + side,
+                    to + side,
+                    to - side,
+                    from - side,
+                    from + side,
+                ]]
+            }
+            Self::Sector {
+                apex,
+                axis,
+                radius,
+                half_angle,
+            } => {
+                let mut points = vec![apex];
+                points.extend(arc(
+                    apex,
+                    radius,
+                    axis.to_angle() - half_angle,
+                    2.0 * half_angle,
+                ));
+                points.push(apex);
+                vec![points]
+            }
+            Self::Pentagon { center, radius } => (0..5)
+                .map(|side| {
+                    [side, side + 1]
+                        .map(|corner| center + Vec2::from_angle(TAU * corner as f32 / 5.0) * radius)
+                        .to_vec()
+                })
+                .collect(),
+            Self::Segment { from, to } => vec![vec![from, to]],
+            Self::None => Vec::new(),
+        }
+    }
 }
 
 /// The family of shape a replicated kind of a skill takes, before any effect is seen.
@@ -513,6 +587,207 @@ mod tests {
             with_area,
             ["anvil_charge", "thunder_pulse", "nightfall", "chain_sweep"]
         );
+    }
+
+    #[test]
+    fn outlines_lie_on_the_boundary_they_draw() {
+        let from = Vec2::new(3.0, -2.0);
+        let to = Vec2::new(-4.0, 6.0);
+        let along = (to - from).normalize();
+        let length = from.distance(to);
+        let closed = |line: &[Vec2]| line.first().unwrap().distance(*line.last().unwrap()) < 1e-4;
+        // Distance of a point from the segment.
+        let off_segment = |point: Vec2| {
+            let t = (point - from).dot(along).clamp(0.0, length);
+            point.distance(from + along * t)
+        };
+
+        for radius in [0.5, 3.0, 9.0] {
+            let ring = GeoShape::Ring {
+                center: from,
+                radius,
+            }
+            .outline();
+            assert_eq!(ring.len(), 1);
+            assert!(closed(&ring[0]) && ring[0].len() == OUTLINE_STEPS + 1);
+            for point in &ring[0] {
+                assert!((point.distance(from) - radius).abs() < 1e-4);
+            }
+
+            // Every point of a capsule outline is `radius` from the segment, and both
+            // round ends are drawn.
+            let capsule = GeoShape::Capsule { from, to, radius }.outline();
+            assert_eq!(capsule.len(), 1);
+            assert!(closed(&capsule[0]));
+            for point in &capsule[0] {
+                assert!((off_segment(*point) - radius).abs() < 1e-3, "{point}");
+            }
+            for tip in [to + along * radius, from - along * radius] {
+                assert!(capsule[0].iter().any(|point| point.distance(tip) < 1e-3));
+            }
+            // A capsule without a length is the circle around its point.
+            let dot = GeoShape::Capsule {
+                from,
+                to: from,
+                radius,
+            };
+            assert_eq!(dot.outline(), ring);
+
+            // A lane has flat ends: four corners and nothing beyond them.
+            let lane = GeoShape::Lane {
+                from,
+                to,
+                half_width: radius,
+            }
+            .outline();
+            let side = along.perp() * radius;
+            assert_eq!(
+                lane,
+                [vec![
+                    from + side,
+                    to + side,
+                    to - side,
+                    from - side,
+                    from + side
+                ]]
+            );
+        }
+
+        // A sector runs from its apex along both edges to an arc at the full radius.
+        let half_angle = FURNACE_CONE_COS.acos();
+        let sector = GeoShape::Sector {
+            apex: from,
+            axis: along,
+            radius: 9.0,
+            half_angle,
+        }
+        .outline();
+        assert_eq!(sector.len(), 1);
+        let line = &sector[0];
+        assert_eq!((line[0], *line.last().unwrap()), (from, from));
+        let arc = &line[1..line.len() - 1];
+        for point in arc {
+            assert!((point.distance(from) - 9.0).abs() < 1e-4);
+            assert!((*point - from).angle_to(along).abs() <= half_angle + 1e-4);
+        }
+        for (edge, sign) in [(arc[0], -1.0), (*arc.last().unwrap(), 1.0)] {
+            assert!(((edge - from).angle_to(along) + sign * half_angle).abs() < 1e-4);
+        }
+
+        // The cage is five separate sides between the corners the server tests
+        // (`common/src/skills/advanced.rs:1108-1112`).
+        let cage = GeoShape::Pentagon {
+            center: from,
+            radius: 6.0,
+        }
+        .outline();
+        assert_eq!(cage.len(), 5);
+        for (side, line) in cage.iter().enumerate() {
+            let corner = |i: usize| from + Vec2::from_angle(TAU * i as f32 / 5.0) * 6.0;
+            assert_eq!(line.len(), 2);
+            assert!(line[0].distance(corner(side)) < 1e-4);
+            assert!(line[1].distance(corner(side + 1)) < 1e-4);
+        }
+
+        assert_eq!(GeoShape::Segment { from, to }.outline(), [vec![from, to]]);
+        assert!(GeoShape::None.outline().is_empty());
+    }
+
+    /// Parity with the in-process authority for the cone the flat view now draws: Furnace
+    /// Breath hits a target one degree inside either edge of the drawn sector and misses
+    /// one a degree outside it.
+    #[test]
+    fn the_drawn_cone_has_the_edges_the_authority_hits_within() {
+        use common::offline::{EPOCH, LOCAL_ADDR, PracticeSession};
+        use shared::practice::PracticeCommand;
+        use shared::wire::{CharacterChoice, ClientPacket};
+
+        let id = SkillId::FurnaceBreath;
+        let class = shared::HeroClass::Cinderforge;
+        let slot = shared::loadout::preset_for_class(class)
+            .unwrap()
+            .skills()
+            .iter()
+            .position(|skill| *skill == id)
+            .unwrap() as u8;
+        // Whether the breath aimed along +X damages a hero standing `offset` from the caster.
+        let hits = |offset: Vec2| {
+            let mut session = PracticeSession::new(std::time::Instant::now());
+            session.command(ClientPacket::Join {
+                handheld: Default::default(),
+                prematch: false,
+                team: shared::map::Team::Green,
+                character: CharacterChoice::Ipfs,
+                hero_class: class,
+                avatar: None,
+                sprite_character: None,
+                session_id: None,
+                passport_ticket: None,
+            });
+            for command in [PracticeCommand::ClearBots, PracticeCommand::SpawnDummy] {
+                session.command(ClientPacket::Practice { command });
+            }
+            // Nothing else may move or hurt the target.
+            session.bots = Default::default();
+            session.world.structures.clear();
+            session.world.minions.clear();
+            session.world.neutrals.clear();
+            let caster = &session.world.players[&LOCAL_ADDR].hero;
+            let origin = Vec2::new(caster.x, caster.z);
+            let target = session
+                .world
+                .players
+                .values_mut()
+                .find(|player| player.hero.identity.is_bot)
+                .unwrap();
+            let target_id = target.hero.identity.id;
+            target.hero.x = origin.x + offset.x;
+            target.hero.z = origin.y + offset.y;
+            let full = target.hero.hp;
+            session.command(ClientPacket::CastSkill {
+                slot,
+                aim: [origin.x + 5.0, origin.y],
+                server_epoch: EPOCH,
+                match_id: 1,
+                request_id: 1,
+            });
+            for _ in 0..30 {
+                session.advance(0.05);
+            }
+            let target = session
+                .world
+                .players
+                .values()
+                .find(|player| player.hero.identity.id == target_id)
+                .unwrap();
+            // The target stood still, so the answer is about that one place.
+            assert!((target.hero.x - origin.x - offset.x).abs() < 1e-3);
+            target.hero.hp < full
+        };
+
+        let GeoShape::Sector {
+            radius, half_angle, ..
+        } = boundary_shape(
+            id,
+            EffectVisualKind::BeamWarning,
+            &SkillEffectState {
+                end: [3.0 + skill(id).ability.cast_range, -2.0],
+                ..effect(id, EffectVisualKind::BeamWarning)
+            },
+        )
+        else {
+            panic!("a full-length cone is a sector");
+        };
+        assert_eq!(radius, 7.0);
+        let at = |angle: f32| Vec2::from_angle(angle) * 4.0;
+        let margin = 1.0_f32.to_radians();
+        assert!(hits(at(0.0)));
+        for side in [-1.0, 1.0] {
+            assert!(hits(at(side * (half_angle - margin))), "inside {side}");
+            assert!(!hits(at(side * (half_angle + margin))), "outside {side}");
+        }
+        // Behind the caster nothing is hit, however near.
+        assert!(!hits(Vec2::new(-1.5, 0.0)));
     }
 
     /// A change of a mirrored literal must be deliberate. Parity against the in-process

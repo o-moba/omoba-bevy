@@ -1045,6 +1045,59 @@ fn every_target_row_draws_a_flat_accent_and_impact() {
 /// The parser measures what a block draws; a burst over its budget is refused with the
 /// number that broke it.
 #[test]
+fn a_replicated_effect_resolves_to_the_body_its_row_gives_that_kind() {
+    use EffectVisualKind as K;
+    let registry = target::target();
+    let seen = |skill: SkillId, kind: K| registry.body_for(&effect(skill, kind));
+    for (id, profile) in registry.rows() {
+        let Some(skill) = SkillId::from_id(id) else {
+            continue;
+        };
+        // Every kind of the first cast is drawn by `body`, every auxiliary kind by its own
+        // `aux` entry, and no other kind by anything.
+        for kind in category::own_kinds(skill) {
+            assert_eq!(seen(skill, *kind), profile.body.as_ref(), "{id} {kind:?}");
+        }
+        for kind in category::aux_kinds(skill) {
+            assert_eq!(
+                seen(skill, *kind),
+                profile.aux.get(category::kind_id(*kind)),
+                "{id} {kind:?}"
+            );
+        }
+        let foreign = [K::Cage, K::ShieldWall, K::Rocket]
+            .into_iter()
+            .find(|kind| {
+                !category::own_kinds(skill).contains(kind)
+                    && !category::aux_kinds(skill).contains(kind)
+            });
+        assert_eq!(seen(skill, foreign.unwrap()), None, "{id}");
+    }
+    // The wave and its warning are two bodies of one row.
+    let wave = seen(SkillId::HorizonWave, K::Bolt).unwrap();
+    let warning = seen(SkillId::HorizonWave, K::BeamWarning).unwrap();
+    assert_eq!(
+        (wave.archetype, warning.archetype),
+        (vocab::Archetype::Traveller, vocab::Archetype::Lane)
+    );
+    // Both orders of the orb share its body; a row without the block gives none.
+    assert_eq!(
+        seen(SkillId::OrbitalCommand, K::Orb),
+        seen(SkillId::OrbitalGuard, K::Orb)
+    );
+    assert!(seen(SkillId::OrbitalCommand, K::Orb).is_some());
+    let packaged = profiles();
+    for id in SkillId::ALL {
+        for kind in category::own_kinds(id)
+            .iter()
+            .chain(category::aux_kinds(id))
+        {
+            assert_eq!(packaged.body_for(&effect(id, *kind)), None, "{}", id.id());
+        }
+    }
+}
+
+#[test]
 fn output_validation_refuses_bursts_over_their_budget() {
     use crate::game_vfx::ParticleSpec;
     let spec = ParticleSpec {

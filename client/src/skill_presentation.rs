@@ -4,10 +4,11 @@ pub(crate) mod accents;
 pub(crate) mod cast;
 mod category;
 mod effects;
-mod geometry;
+pub(crate) mod geometry;
 pub(crate) mod impacts;
 mod schema;
 mod signature;
+pub(crate) mod stage;
 pub(crate) mod vocab;
 
 pub(crate) use schema::{BasicProfile, SkillProfile, Theme};
@@ -131,6 +132,16 @@ impl SkillPresentation {
     }
     pub(crate) fn profile(&self, skill: SkillId) -> Option<&SkillProfile> {
         self.skills.get(skill.id())
+    }
+    /// The body a row gives one replicated effect: `body` for the effect of the first cast,
+    /// else the `aux` entry of its kind.
+    pub(crate) fn body_for(&self, effect: &SkillEffectState) -> Option<&schema::Body> {
+        let profile = self.profile(effect.skill)?;
+        if category::own_kinds(effect.skill).contains(&effect.kind) {
+            profile.body.as_ref()
+        } else {
+            profile.aux.get(category::kind_id(effect.kind))
+        }
     }
     /// What the row of an accepted action draws with its particles, resolved with the theme
     /// of its class. A basic attack without a row resolves to nothing.
@@ -312,6 +323,8 @@ impl Plugin for SkillPresentationPlugin {
             .add_message::<crate::net::SessionEvent>()
             .add_message::<cast::SkillCastObserved>()
             .add_message::<cast::MoveObserved>()
+            .add_message::<stage::StageEvent>()
+            .init_resource::<stage::EffectMemory>()
             .add_systems(
                 Startup,
                 |server: Res<AssetServer>, mut pending: ResMut<Pending>| {
@@ -322,7 +335,8 @@ impl Plugin for SkillPresentationPlugin {
                 Update,
                 (
                     apply_config,
-                    cast::observe_skill_casts
+                    (cast::observe_skill_casts, stage::track_effects)
+                        .chain()
                         .after(crate::net::ClientNetPipeline::InterpolateRemotePlayers),
                 ),
             )

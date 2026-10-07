@@ -405,6 +405,62 @@ fn classify_move_truth_table() {
 }
 
 #[test]
+fn a_utility_request_marks_the_dash_when_cooldowns_are_off() {
+    // With cooldowns switched off the server reports no dash cooldown; the request the hero
+    // made in the same snapshot is then the only sign that the dash was its own.
+    let rest = UtilityState {
+        last_request_id: 4,
+        ..default()
+    };
+    let requested = UtilityState {
+        last_request_id: 5,
+        ..rest
+    };
+    for edge in [false, true] {
+        assert_eq!(
+            classify_move(&rest, &requested, edge, false),
+            MoveCause::UtilityDash
+        );
+        // Without a request the same snapshot is a displacement by something else.
+        assert_eq!(classify_move(&rest, &rest, edge, false), MoveCause::Forced);
+    }
+    // A cast that moves its caster is still the stronger evidence, and so is a recall.
+    assert_eq!(
+        classify_move(&rest, &requested, true, true),
+        MoveCause::SkillCast
+    );
+    assert_eq!(
+        classify_move(
+            &rest,
+            &UtilityState {
+                recall_sequence: 1,
+                ..requested
+            },
+            false,
+            false
+        ),
+        MoveCause::Recall
+    );
+
+    // Through the observer: the dash keeps its own look and is not painted as a skid.
+    let mut observer = CastObserver::default();
+    let mut hero = hero(HeroClass::Stormfist);
+    hero.utility = rest;
+    observer.observe(ROUND, true, [hero]);
+    let mut dashed = relocated(hero, AWAY);
+    dashed.utility.last_request_id = 5;
+    let seen = observer.observe(ROUND, true, [dashed]);
+    assert_eq!(seen.moves.len(), 1);
+    assert_eq!(seen.moves[0].cause, MoveCause::UtilityDash);
+    assert_eq!(accents::move_burst(Some(&target()), &seen.moves[0]), None);
+    // The next relocation of that hero without a request is forced again.
+    let kicked = relocated(dashed, HOME);
+    let seen = observer.observe(ROUND, true, [kicked]);
+    assert_eq!(seen.moves[0].cause, MoveCause::Forced);
+    assert!(accents::move_burst(Some(&target()), &seen.moves[0]).is_some());
+}
+
+#[test]
 fn relocations_are_classified_from_what_the_snapshot_shows() {
     let class = HeroClass::Stormfist;
     // A leap of the hero's own cast: the cast is anchored where it was seen before.
@@ -1023,6 +1079,7 @@ fn stage_as(
         .add_message::<SkillCastObserved>()
         .add_message::<MoveObserved>()
         .add_message::<ConfirmedHit>()
+        .add_message::<super::super::stage::StageEvent>()
         .add_message::<SkillBurst>()
         .add_systems(Update, observe_skill_casts)
         .add_systems(

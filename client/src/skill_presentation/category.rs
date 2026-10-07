@@ -179,6 +179,36 @@ pub(crate) const fn unstable_id(kind: EffectVisualKind) -> bool {
     )
 }
 
+/// Kinds replicated with `end` one unit ahead of `position`: a heading and nothing more
+/// (`common/src/skills/mod.rs:1498-1503`).
+pub(crate) const fn heading_only(kind: EffectVisualKind) -> bool {
+    matches!(
+        kind,
+        EffectVisualKind::Bolt | EffectVisualKind::Barrier | EffectVisualKind::Rocket
+    )
+}
+
+/// Whether an instance of this kind travels. Such a body leaves the snapshot when it
+/// reaches something far more often than when its time runs out, and the client cannot
+/// tell the two apart.
+pub(crate) fn travels(id: SkillId, kind: EffectVisualKind) -> bool {
+    use EffectVisualKind as K;
+    match kind {
+        K::Bolt | K::Rocket | K::Soul | K::Orb => true,
+        // The returning shield flies out and back; a parry stance stands where it was cast.
+        K::Barrier => matches!(skill(id).effect, SkillEffect::ReturningShield { .. }),
+        K::Anchor
+        | K::Healing
+        | K::ShieldWall
+        | K::Cage
+        | K::Lantern
+        | K::Field
+        | K::BeamWarning
+        | K::Beam
+        | K::Trap => false,
+    }
+}
+
 /// The wire spelling of a kind; `aux` keys use it.
 pub(crate) const fn kind_id(kind: EffectVisualKind) -> &'static str {
     match kind {
@@ -336,7 +366,6 @@ pub(crate) fn telegraph_secs(id: SkillId) -> Option<f32> {
 }
 
 /// `remaining_secs` at the moment the telegraph ends.
-#[cfg_attr(not(test), allow(dead_code))] // read by the stage tracker
 pub(crate) fn tail_secs(id: SkillId) -> Option<f32> {
     telegraph(id).map(|(_, tail)| tail)
 }
@@ -498,6 +527,14 @@ pub(crate) fn detonates(id: SkillId) -> bool {
     matches!(skill(id).effect, SkillEffect::RecastZone { .. })
 }
 
+/// Whether the skill strikes when its own telegraph fires, long after the accepted cast
+/// (stage rule `fuse`).
+pub(crate) fn strikes_on_release(id: SkillId) -> bool {
+    own_kinds(id)
+        .first()
+        .is_some_and(|kind| stage_rule(id, *kind) == StageRule::Fuse)
+}
+
 /// Whether the cast (or its recast) can move the caster (`dash_to` and `blink_to` in
 /// `common/src/skills/advanced.rs:599-946`).
 pub(crate) fn movement_capable(id: SkillId, recast: bool) -> bool {
@@ -532,7 +569,6 @@ pub(crate) fn own_effect_strike(id: SkillId) -> bool {
 
 /// Half-angle of the server's cone test for the two sector skills
 /// (`dot > 0.6` at `common/src/skills/advanced.rs:1175`, `dot > 0.2` at `:881`).
-#[cfg_attr(not(test), allow(dead_code))] // read by the boundary table of `geometry.rs`
 pub(crate) fn cone_half_angle(id: SkillId) -> Option<f32> {
     match skill(id).effect {
         SkillEffect::Technique {
@@ -1077,6 +1113,56 @@ mod tests {
                 id.id()
             );
         }
+    }
+
+    #[test]
+    fn travelling_kinds_and_released_strikes_follow_the_server_table() {
+        use EffectVisualKind as K;
+        const KINDS: [K; 14] = [
+            K::Orb,
+            K::Soul,
+            K::Anchor,
+            K::Healing,
+            K::ShieldWall,
+            K::Cage,
+            K::Lantern,
+            K::Bolt,
+            K::Barrier,
+            K::Field,
+            K::BeamWarning,
+            K::Beam,
+            K::Trap,
+            K::Rocket,
+        ];
+        let heading: Vec<_> = KINDS
+            .into_iter()
+            .filter(|kind| heading_only(*kind))
+            .collect();
+        assert_eq!(heading, [K::Bolt, K::Barrier, K::Rocket]);
+        // The parry stance is the one barrier that stands still.
+        let moving: Vec<_> = KINDS
+            .into_iter()
+            .filter(|kind| travels(SkillId::MirrorGuard, *kind))
+            .collect();
+        assert_eq!(moving, [K::Orb, K::Soul, K::Bolt, K::Rocket]);
+        assert!(travels(SkillId::DawnBarrier, K::Barrier));
+        // Every kind the first cast of a travelling body replicates is a travelling kind,
+        // except the warning that comes before the wave.
+        for id in SkillId::ALL {
+            for kind in own_kinds(id) {
+                assert_eq!(
+                    travels(id, *kind),
+                    travelling_body(SkillKey::Modular(id)),
+                    "{} {kind:?}",
+                    id.id()
+                );
+            }
+        }
+        assert!(!travels(SkillId::HorizonWave, K::BeamWarning));
+        assert_eq!(
+            modular_where(strikes_on_release),
+            ["furnace_breath", "mirror_guard", "orbital_collapse"]
+        );
     }
 
     #[test]

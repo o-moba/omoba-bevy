@@ -109,8 +109,11 @@ pub(crate) struct MoveObserved {
 }
 
 /// Why the movement barrier of a hero advanced, in this order: a recall, the utility dash
-/// (its cooldown restarted), an own cast of a skill that can move its caster, else a
-/// displacement by something else.
+/// (its cooldown restarted), an own cast of a skill that can move its caster, the utility
+/// dash again (the hero made a utility request in the same snapshot), else a displacement
+/// by something else. The request mark alone shows the dash when cooldowns are switched
+/// off and the server reports none (`common/src/hero_timers.rs:139-144`,
+/// `common/src/utility.rs:64`).
 pub(crate) fn classify_move(
     prev: &UtilityState,
     next: &UtilityState,
@@ -123,6 +126,8 @@ pub(crate) fn classify_move(
         MoveCause::UtilityDash
     } else if own_action_edge && movement_capable {
         MoveCause::SkillCast
+    } else if next.last_request_id > prev.last_request_id {
+        MoveCause::UtilityDash
     } else {
         MoveCause::Forced
     }
