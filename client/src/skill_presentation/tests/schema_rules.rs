@@ -970,35 +970,104 @@ fn body_rules_bound_the_size_and_the_number_of_parts() {
     );
     assert!(parse(&skimming).is_ok());
 
-    // An area body is sized in multiples of its radius and stays inside its boundary.
+    // An area body is sized in multiples of its radius, as full extents, and stays inside
+    // its boundary. The core in the middle of a circle may span it up to the inner edge
+    // of its line: the star of the row turns, and its points reach 0.94 of the radius.
     assert!(parse(&field("core/size", json!([1.0, 4.0, 1.0]))).is_ok());
+    assert!(parse(&field("core/size", json!([1.88, 0.05, 1.88]))).is_ok());
     rejects(
-        &field("core/size", json!([1.1, 0.05, 0.5])),
+        &field("core/size", json!([1.9, 0.05, 0.5])),
         "body: core.size leaves the boundary",
         "wide part of a zone",
     );
+    // The measure is taken on the mesh: the corners of a block reach farther than the
+    // points of a star of the same size.
+    let block = |size: f32| {
+        with(
+            "/skills/dawn_field/body/core",
+            json!({ "mesh": "block", "size": [size, 0.05, size] }),
+        )
+    };
+    assert!(parse(&block(1.3)).is_ok());
+    rejects(
+        &block(1.4),
+        "body: core.size leaves the boundary",
+        "block in a zone",
+    );
+    // Copies stand around the middle, so each keeps to half the circle.
     rejects(
         &field("satellites/size", json!([0.1, 0.1, 1.01])),
         "body: satellites.size leaves the boundary",
         "long satellites of a zone",
+    );
+    // Neither does a strip let a part cross its outline.
+    rejects(
+        &with("/skills/dawn_ray/body/shell/size", json!([1.1, 0.2, 1.0])),
+        "body: shell.size leaves the boundary",
+        "wide part of a lane",
     );
     // A part that turns end over end sweeps its height across the ground.
     let mut tumbling = field("core/behave", json!("tumble"));
     set(
         &mut tumbling,
         "/skills/dawn_field/body/core/size",
-        json!([0.5, 1.0, 0.5]),
+        json!([0.5, 1.5, 0.5]),
     );
     assert!(parse(&tumbling).is_ok());
     set(
         &mut tumbling,
         "/skills/dawn_field/body/core/size",
-        json!([0.5, 1.5, 0.5]),
+        json!([0.5, 1.9, 0.5]),
     );
     rejects(
         &tumbling,
         "body: core.size leaves the boundary",
         "tall tumbling part",
+    );
+
+    // The trail of a body in flight may be scaled, and stays near the hit circle like
+    // every part of it: the motes of the shard (radius 0.6) are 0.36 wide at scale 1.
+    assert!(parse(&shard("trail_scale", json!(2.5))).is_ok());
+    for scale in [0.4, 2.6] {
+        rejects(
+            &shard("trail_scale", json!(scale)),
+            "body: trail_scale must be within 0.5..=2.5",
+            "trail scale range",
+        );
+    }
+    let mut chevrons = shard("trail", json!("chevrons"));
+    set(
+        &mut chevrons,
+        "/skills/winter_shard/body/trail_scale",
+        json!(1.05),
+    );
+    assert!(parse(&chevrons).is_ok());
+    set(
+        &mut chevrons,
+        "/skills/winter_shard/body/trail_scale",
+        json!(1.2),
+    );
+    rejects(
+        &chevrons,
+        "body: trail_scale makes the trail 1.01 wide (at most 0.90 for a radius of 0.6)",
+        "wide trail",
+    );
+    let mut bare = shard("trail_scale", json!(1.5));
+    remove(&mut bare, "/skills/winter_shard/body/trail");
+    rejects(&bare, "body: trail_scale needs a trail", "trail scale");
+    // The strength of the interior layer belongs to a body that has one.
+    assert!(parse(&field("fill_strength", json!(1.0))).is_ok());
+    for strength in [0.3, 1.1] {
+        rejects(
+            &field("fill_strength", json!(strength)),
+            "body: fill_strength must be within 0.4..=1",
+            "fill strength range",
+        );
+    }
+    rejects(
+        &shard("fill_strength", json!(0.8)),
+        "body: fill_strength needs a body with a fill",
+        "fill strength in flight",
     );
 
     // Twelve mesh parts: the ring, the core, the satellites and three motes.

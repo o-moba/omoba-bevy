@@ -198,7 +198,7 @@ of `client/assets/animations/humanoid-motion-v1.json` (see `docs/humanoid-motion
 
 ## Impact kinds
 
-`impact.kind`. `pierce_through` needs a skill that pierces and `blast` one with area damage; `arc` may not lead `chain_snap` or `facet_pop`.
+`impact.kind`. `pierce_through` needs a skill that pierces and `blast` one with area damage; `arc` may not lead `chain_snap` or `facet_pop`. Every kind closes its burst with the flash of the hit: a glow in the lead colour at the receipt.
 
 | ID | What the player sees | Default lead shape |
 | --- | --- | --- |

@@ -1,12 +1,14 @@
 //! The pooled-particle burst of one accepted damage receipt. A recipe is drawn at the
 //! receipt position only: nothing follows the target, stays on it or depicts a status, and
-//! a skill without area damage keeps its whole burst close to the unit it hit.
+//! a skill without area damage keeps its whole burst close to the unit it hit. Every burst
+//! opens with the flash of the hit, so the frame that shows the receipt shows the burst at
+//! its brightest.
 use super::SkillPresentation;
 use super::accents::{Palette, drift, fly, ground, heading, share, sized, spread, tagged};
 use super::cast::CastKey;
 use super::category::{self, SkillKey};
 pub(crate) use super::schema::ImpactRecipe;
-use super::vocab::{ImpactKind, ParticleShape};
+use super::vocab::{ImpactKind, PaletteSlot, ParticleShape};
 use crate::game_vfx::{
     Curve, Orient, ParticleSource, ParticleSpec, Tint, blade_depth, jitter, unit_radius,
 };
@@ -14,7 +16,8 @@ use bevy::prelude::*;
 use shared::loadout::{SkillEffectState, SkillId};
 use std::f32::consts::{FRAC_PI_2, FRAC_PI_4, PI, TAU};
 
-/// Budget of one impact burst (particles, seconds until the last one is gone).
+/// Budget of one impact burst (particles, seconds until the last one is gone). The flash
+/// of the hit is one of the particles, so a kind draws at most eleven of its own.
 pub(crate) const IMPACT_MAX: usize = 12;
 pub(crate) const IMPACT_SECS: f32 = 1.7;
 /// Debris outlives the authored lifetime by this factor at most, as in the wire-style burst.
@@ -22,14 +25,26 @@ const DEBRIS_LIFE: f32 = 1.4;
 /// A skill without area damage draws nothing farther than this from the receipt position on
 /// the ground plane; vertical travel is free.
 pub(crate) const SINGLE_TARGET_REACH: f32 = 1.5;
-/// Ground reach of a recipe in units per unit of `scale`.
-const REACH: f32 = 0.9;
+/// Ground reach of a recipe in units per unit of `scale`. A row of scale 1 reaches the
+/// single-target bound; a larger one is drawn there by `contain` unless its skill damages
+/// an area.
+const REACH: f32 = SINGLE_TARGET_REACH;
 /// `blast` is the one kind that reads as an area; only a skill with area damage may use it.
 const BLAST_REACH: f32 = 1.6;
 /// The ground ring of `thud_ring` never grows past this radius.
 const THUD_RING: f32 = 1.0;
 /// `drain_wisp` motes never drift farther than this toward the source.
 const DRAIN_TRAVEL: f32 = 1.2;
+/// Half extent of a thrown spark as a share of the reach of its recipe.
+const SPARK: f32 = 0.16;
+/// Half extent of the one solid mark of `flash_star`, `star_shards` and `facet_pop` as a
+/// share of the reach of its recipe: a shape on the unit, not a plate over it.
+const MARK: f32 = 0.62;
+/// Half extent of the flash of the hit as a share of the reach of its recipe, and the share
+/// of the authored lifetime it lasts. A glow fades toward its rim, so the part of it that
+/// reads is about half as wide.
+const FLASH: f32 = 0.95;
+const FLASH_LIFE: f32 = 0.65;
 /// Height of the burst above the receipt position. A receipt is at the aim height of its
 /// target; the built-in burst of the wire style is drawn this far above it too, where the
 /// camera sees it over the body it hit.
@@ -86,6 +101,8 @@ struct Burst {
     shape: ParticleShape,
     lead: Tint,
     companion: Tint,
+    /// The colour of the flash of the hit.
+    flash: Tint,
     id: u64,
 }
 
@@ -116,6 +133,11 @@ impl Burst {
     /// off its centre, so it is set back by its depth and bulges away from the source.
     fn stroke(&self, extent: f32, axis: f32, at: Vec3) -> ParticleSpec {
         let depth = blade_depth(self.shape);
+        // A lead that is neither a blade nor a line is a mark on the unit, not a plate
+        // across it.
+        let narrow =
+            depth > 0.0 || matches!(self.shape, ParticleShape::Streak | ParticleShape::Claw);
+        let extent = if narrow { extent } else { extent.min(MARK) };
         let mut cut = self.lead(extent, Curve::Pop);
         cut.origin = at;
         cut.angle = axis;
@@ -138,6 +160,18 @@ impl Burst {
             end_color: None,
             color: self.companion,
             ..self.shaped(ParticleShape::Glow, radius, Curve::Shrink)
+        }
+    }
+
+    /// The flash of the hit: a glow in the skill colour that is whole on the frame the
+    /// receipt is drawn and shrinks from there. The marks and the debris of a kind need a
+    /// moment to swell or to fly out; the hit itself has none to give.
+    fn flash(&self) -> ParticleSpec {
+        ParticleSpec {
+            color: self.flash,
+            end_color: None,
+            lifetime: self.life * FLASH_LIFE,
+            ..self.shaped(ParticleShape::Glow, FLASH, Curve::Shrink)
         }
     }
 
@@ -165,7 +199,7 @@ impl Burst {
     /// Sparks thrown outward that live as long as debris.
     fn sparks(&self, count: usize, distance: f32, out: &mut Vec<ParticleSpec>) {
         out.extend((0..count).map(|i| {
-            let mut spark = self.spark(0.1);
+            let mut spark = self.spark(SPARK);
             spark.lifetime = self.life * DEBRIS_LIFE;
             spark.velocity = Vec3::Y * (0.4 + 0.6 * (i % 3) as f32);
             fly(spark, self.outward(i, count), distance * self.reach)
@@ -185,7 +219,7 @@ impl Burst {
             K::RingBurst => {
                 out.push(self.ring(self.centre, self.reach, Orient::Billboard));
                 for i in 0..n - 1 {
-                    let mut mote = self.shaped(debris, 0.13, Curve::Pop);
+                    let mut mote = self.shaped(debris, 0.18, Curve::Pop);
                     mote.lifetime = self.life * DEBRIS_LIFE;
                     mote.orient = Orient::Velocity;
                     mote.velocity = Vec3::Y * (0.4 + 0.6 * (i % 3) as f32);
@@ -200,7 +234,7 @@ impl Burst {
                     core.lifetime = self.life * 0.65;
                     out.push(core);
                 }
-                self.sparks(n.saturating_sub(2), 0.75, &mut out);
+                self.sparks(n.saturating_sub(2), 0.8, &mut out);
             }
             K::GlowPop => {
                 let curve = if self.shape == ParticleShape::Glow {
@@ -216,7 +250,7 @@ impl Burst {
                     let cut = self.stroke(0.9, self.angle + turn, self.centre);
                     out.push(held(cut, 0.12 * self.life * i as f32));
                 }
-                self.sparks(n.saturating_sub(2), 0.75, &mut out);
+                self.sparks(n.saturating_sub(2), 0.8, &mut out);
             }
             K::ClawRake => {
                 let marks = n.min(3);
@@ -227,7 +261,7 @@ impl Burst {
                     mark.velocity = ground(rake) * (0.12 * self.reach / self.life);
                     out.push(held(mark, 0.1 * self.life * i as f32));
                 }
-                self.sparks(n.saturating_sub(3), 0.7, &mut out);
+                self.sparks(n.saturating_sub(3), 0.8, &mut out);
             }
             K::PierceThrough if self.onward => {
                 // Everything moves on past the target; nothing is thrown back or sideways.
@@ -237,7 +271,7 @@ impl Burst {
                 out.push(streak);
                 for i in 1..n {
                     let mut tail = held(
-                        self.lead(0.12, Curve::Pop),
+                        self.lead(0.18, Curve::Pop),
                         0.1 * self.life * share(i - 1, n - 1),
                     );
                     tail.origin = self.centre
@@ -252,7 +286,7 @@ impl Burst {
                 out.push(self.lead(0.6, Curve::Stretch));
                 for i in 1..n {
                     let mut mark = held(
-                        self.lead(0.12, Curve::Pop),
+                        self.lead(0.18, Curve::Pop),
                         0.1 * self.life * share(i - 1, n - 1),
                     );
                     mark.origin =
@@ -264,16 +298,16 @@ impl Burst {
                 let forks = n.min(3);
                 for i in 0..forks {
                     let way = ground(self.angle + 0.6 * spread(i, forks));
-                    let mut fork = self.lead(0.3, Curve::Pop);
+                    let mut fork = self.lead(0.36, Curve::Pop);
                     fork.orient = Orient::Velocity;
                     fork.angle = heading(way);
-                    out.push(fly(fork, way, 0.55 * self.reach));
+                    out.push(fly(fork, way, 0.6 * self.reach));
                 }
-                self.sparks(n.saturating_sub(3), 0.7, &mut out);
+                self.sparks(n.saturating_sub(3), 0.8, &mut out);
             }
             K::ShardBurst => {
                 for i in 0..n {
-                    let mut shard = self.lead(0.16, Curve::Pop);
+                    let mut shard = self.lead(0.24, Curve::Pop);
                     shard.lifetime = self.life * 1.3;
                     shard.orient = Orient::Velocity;
                     shard.gravity = 9.0;
@@ -282,10 +316,11 @@ impl Burst {
                 }
             }
             K::FlashStar => {
-                // One mark and its echoes, all at rest: no debris.
+                // One mark and its echoes, all at rest: no debris. The flash of the hit is
+                // the width of the burst; the mark stays a shape on the unit it struck.
                 for i in 0..n {
                     let mut flash = held(
-                        self.lead(0.95 * 0.6_f32.powi(i as i32), Curve::Pop),
+                        self.lead(MARK * 0.6_f32.powi(i as i32), Curve::Pop),
                         0.1 * self.life * i as f32,
                     );
                     flash.angle = self.angle + PI / 4.0 * i as f32;
@@ -296,7 +331,7 @@ impl Burst {
             K::EmberPuff => {
                 for i in 0..n {
                     let outward = self.outward(i, n);
-                    let mut ember = self.lead(0.14, Curve::Pop);
+                    let mut ember = self.lead(0.22, Curve::Pop);
                     ember.lifetime = self.life * DEBRIS_LIFE;
                     ember = held(ember, 0.3 * self.life * share(i, n));
                     ember.origin = self.centre + outward * (0.25 * self.reach * (i % 2) as f32);
@@ -308,10 +343,10 @@ impl Burst {
                 }
             }
             K::StarShards => {
-                out.push(self.lead(0.9, Curve::Pop));
+                out.push(self.lead(MARK, Curve::Pop));
                 for i in 1..n {
                     let outward = self.outward(i - 1, n - 1);
-                    let mut chip = self.shaped(ParticleShape::Diamond, 0.12, Curve::Pop);
+                    let mut chip = self.shaped(ParticleShape::Diamond, 0.2, Curve::Pop);
                     chip.color = self.companion;
                     chip.end_color = Some(self.lead);
                     chip.lifetime = self.life * 1.3;
@@ -326,7 +361,7 @@ impl Burst {
                 let ground_ring = self.floor + Vec3::Y * 0.06;
                 out.push(self.ring(ground_ring, self.reach.min(THUD_RING), Orient::Ground));
                 for i in 0..n - 1 {
-                    let mut dust = self.shaped(debris, 0.12, Curve::Pop);
+                    let mut dust = self.shaped(debris, 0.2, Curve::Pop);
                     dust.lifetime = self.life * 1.2;
                     dust.origin = self.floor + Vec3::Y * 0.15;
                     dust.orient = Orient::Velocity;
@@ -339,7 +374,7 @@ impl Burst {
                 // Rule E-15: the facet lies along the hit direction, turned a little by the
                 // receipt id. Nothing moves.
                 let lie = self.angle + 0.35 * jitter(self.id, 0, 65);
-                let mut facet = self.lead(0.8, Curve::Pop);
+                let mut facet = self.lead(MARK, Curve::Pop);
                 facet.angle = lie;
                 out.push(facet);
                 if n > 1 {
@@ -352,7 +387,7 @@ impl Burst {
                 for i in 2..n {
                     let step = (i - 1) as f32;
                     let mut echo = held(
-                        self.lead(0.4 * 0.8_f32.powi(i as i32 - 2), Curve::Pop),
+                        self.lead(0.35 * 0.8_f32.powi(i as i32 - 2), Curve::Pop),
                         0.08 * self.life * step,
                     );
                     echo.angle = lie + 1.1 * step;
@@ -373,7 +408,7 @@ impl Burst {
                     out.push(ring);
                 }
                 for i in 2..n {
-                    let mut piece = self.lead(0.1, Curve::Pop);
+                    let mut piece = self.lead(0.16, Curve::Pop);
                     piece.lifetime = self.life * DEBRIS_LIFE;
                     piece.orient = Orient::Velocity;
                     piece.gravity = 9.0;
@@ -383,9 +418,9 @@ impl Burst {
             }
             K::DrainWisp => {
                 // Toward the source, and never far enough to reach it.
-                let travel = (0.85 * self.reach).min(DRAIN_TRAVEL) - 0.12 * self.reach;
+                let travel = (0.85 * self.reach).min(DRAIN_TRAVEL) - 0.18 * self.reach;
                 for i in 0..n {
-                    let mut wisp = self.lead(0.12, Curve::Hold);
+                    let mut wisp = self.lead(0.18, Curve::Hold);
                     wisp.lifetime = self.life * DEBRIS_LIFE;
                     wisp = held(wisp, 0.2 * self.life * share(i, n));
                     wisp.origin = self.centre
@@ -399,7 +434,7 @@ impl Burst {
             }
             K::ChainSnap => {
                 for i in 0..n {
-                    let mut link = held(self.lead(0.25, Curve::Pop), 0.4 * self.life * share(i, n));
+                    let mut link = held(self.lead(0.3, Curve::Pop), 0.4 * self.life * share(i, n));
                     link.origin = self.centre + self.along * (0.5 * self.reach * spread(i, n));
                     link.velocity = self.along * (0.1 * self.reach / self.life);
                     out.push(link);
@@ -411,7 +446,7 @@ impl Burst {
                     let way = if i % 2 == 0 { 1.0 } else { -1.0 };
                     let lean = 0.8 * jitter(self.id, i as u64, 68);
                     let throw = (self.side * way + self.along * lean).normalize_or_zero();
-                    let mut chip = self.lead(0.14, Curve::Pop);
+                    let mut chip = self.lead(0.2, Curve::Pop);
                     chip.lifetime = self.life * 1.2;
                     chip.orient = Orient::Velocity;
                     chip.angle = heading(throw);
@@ -464,8 +499,15 @@ pub(crate) fn impact_particles(
         return Vec::new();
     }
     let kind = recipe.kind;
-    let count = usize::from(recipe.count.unwrap_or(default_count(kind))).clamp(1, IMPACT_MAX);
+    let count = usize::from(recipe.count.unwrap_or(default_count(kind))).clamp(1, IMPACT_MAX - 1);
     let [lead, companion] = palette.pair(recipe.slots);
+    // Whatever colours the row picks for its marks, the flash is the skill colour, at no
+    // more than the gain of the pool: a broad glow above it turns pale on pale ground.
+    let primary = palette.slot(PaletteSlot::Primary);
+    let flash = Tint {
+        gain: primary.gain.min(ParticleSpec::BASE.color.gain),
+        ..primary
+    };
     // A live effect knows where it is heading; a receipt only where it came from.
     let onward = ctx
         .heading
@@ -493,9 +535,11 @@ pub(crate) fn impact_particles(
         shape: recipe.lead(),
         lead,
         companion,
+        flash,
         id: ctx.receipt,
     };
     let mut specs = burst.particles(kind, count);
+    specs.push(burst.flash());
     if !ctx.area_damage {
         contain(&mut specs, centre, SINGLE_TARGET_REACH);
     }
@@ -565,7 +609,6 @@ pub(crate) fn receipt_burst(
 mod tests {
     use super::super::category::{self, SkillKey};
     use super::super::tests::target::target;
-    use super::super::vocab::PaletteSlot;
     use super::*;
     use shared::HeroClass;
 
@@ -678,10 +721,12 @@ mod tests {
                 }
             }
         }
-        // The largest single-target rows of the roster fit without being shrunk, and
-        // vertical travel is free: Pyroblast's embers climb three units.
+        // Every single-target row of the roster stays at the unit it hit. A row of scale 1
+        // or less is drawn as authored; a larger one is drawn at the bound, and no row is
+        // drawn smaller than a row of scale 1 would be. Vertical travel is free:
+        // Pyroblast's embers climb three units.
         let registry = target();
-        let mut single_target = 0;
+        let (mut single_target, mut at_the_bound) = (0, 0);
         for (id, profile) in registry.rows() {
             let key = SkillKey::from_id(id).unwrap();
             let Some(row) = &profile.impact else {
@@ -694,14 +739,22 @@ mod tests {
             if !area {
                 single_target += 1;
                 assert!(reach(&specs) <= SINGLE_TARGET_REACH + 1e-3, "{id}");
-                assert_eq!(
-                    specs,
-                    impact_particles(row, &palette, &receipt(true)),
-                    "{id}"
-                );
+                let wide = impact_particles(row, &palette, &receipt(true));
+                if row.scale <= 1.0 {
+                    assert_eq!(specs, wide, "{id}");
+                } else {
+                    at_the_bound += 1;
+                    let unit = ImpactRecipe {
+                        scale: 1.0,
+                        ..row.clone()
+                    };
+                    let least = reach(&impact_particles(&unit, &palette, &receipt(false)));
+                    assert!(reach(&specs) >= least - 1e-3, "{id}");
+                }
             }
         }
         assert_eq!(single_target, 44);
+        assert!(at_the_bound > 0);
         let pyroblast = registry.row("pyroblast").unwrap();
         let embers = impact_particles(
             pyroblast.impact.as_ref().unwrap(),
@@ -733,11 +786,41 @@ mod tests {
                 &receipt(false),
             )
         };
+        // The particles of the kind itself: all but the flash of the hit.
+        let marks = |kind: ImpactKind, shape: Option<ParticleShape>, count: u8| {
+            let mut specs = draw(kind, shape, count);
+            specs.pop();
+            specs
+        };
         for kind in ImpactKind::ALL {
-            // The count is the number of particles; without one the kind decides.
+            // The count is the number of particles of the kind, eleven at most; without one
+            // the kind decides. The flash of the hit closes every burst: a glow in the skill
+            // colour at the receipt, whole at once, at rest and gone before the marks are.
             for count in 1..=12 {
                 let specs = draw(*kind, None, count);
-                assert_eq!(specs.len(), usize::from(count), "{}", kind.id());
+                let own = usize::from(count).min(IMPACT_MAX - 1);
+                assert_eq!(specs.len(), own + 1, "{}", kind.id());
+                let flash = &specs[own];
+                assert_eq!(
+                    (flash.shape, flash.curve, flash.origin, flash.velocity),
+                    (ParticleShape::Glow, Curve::Shrink, centre, Vec3::ZERO),
+                    "{}",
+                    kind.id()
+                );
+                assert_eq!((flash.delay, flash.end_color), (0.0, None));
+                assert_eq!(flash.color, palette().slot(PaletteSlot::Primary));
+                assert!((flash.lifetime - 0.45 * FLASH_LIFE).abs() < 1e-6);
+                // It is as large as its share of the reach; a blast without area damage is
+                // held at the unit it hit, and its flash with it.
+                let wide =
+                    impact_particles(&recipe(*kind, None, count, 1.0), &palette(), &receipt(true));
+                let per_scale = if *kind == ImpactKind::Blast {
+                    BLAST_REACH
+                } else {
+                    REACH
+                };
+                assert!((wide[own].reach(centre) - FLASH * per_scale).abs() < 1e-5);
+                assert!(flash.reach(centre) <= wide[own].reach(centre) + 1e-6);
                 for spec in &specs {
                     assert_eq!((spec.event_id, spec.source), (501, ParticleSource::Impact));
                     assert!(spec.is_sound() && spec.delay <= 0.25, "{}", kind.id());
@@ -769,7 +852,7 @@ mod tests {
             };
             assert_eq!(
                 impact_particles(&unnamed, &palette(), &receipt(false)).len(),
-                usize::from(default_count(*kind)),
+                usize::from(default_count(*kind)) + 1,
                 "{}",
                 kind.id()
             );
@@ -797,7 +880,7 @@ mod tests {
                 (Some(ParticleShape::Star), ParticleShape::Star),
                 (Some(ParticleShape::Drop), ParticleShape::Drop),
             ] {
-                let specs = draw(kind, shape, 7);
+                let specs = marks(kind, shape, 7);
                 assert_eq!(
                     (specs[0].shape, specs[0].curve),
                     (ParticleShape::Ringlet, Curve::Grow)
@@ -818,11 +901,15 @@ mod tests {
                 assert_eq!(ring.orient, Orient::Ground);
                 assert!(ring.origin.y - HIT.y < 0.1);
                 let radius = unit_radius(ring.shape) * ring.size * ring.curve.peak();
-                assert!((radius - (REACH * scale).min(THUD_RING)).abs() < 1e-5);
+                assert!(radius <= THUD_RING + 1e-5);
+                // A burst that is held at the unit it hit shrinks its ring with it.
+                if area_damage || REACH * scale <= SINGLE_TARGET_REACH {
+                    assert!((radius - (REACH * scale).min(THUD_RING)).abs() < 1e-5);
+                }
             }
         }
         // A slash, a pop and the crossing and raking cuts are led by the row's shape.
-        let cut = draw(ImpactKind::SlashCut, Some(ParticleShape::Crescent), 6);
+        let cut = marks(ImpactKind::SlashCut, Some(ParticleShape::Crescent), 6);
         assert_eq!(
             (cut[0].shape, cut[0].color, cut[0].end_color),
             (ParticleShape::Crescent, lead, Some(companion))
@@ -843,6 +930,20 @@ mod tests {
         let line = draw(ImpactKind::SlashCut, Some(ParticleShape::Streak), 1);
         assert_eq!(line[0].origin, centre);
         assert!((line[0].angle - hit_angle - 1.0).abs() < 1e-5);
+        // A blade, a line and a claw cut across the unit; any other lead is a mark on it.
+        let half = |shape: ParticleShape| {
+            let cut = &draw(ImpactKind::SlashCut, Some(shape), 1)[0];
+            unit_radius(cut.shape) * cut.size * cut.curve.peak()
+        };
+        assert!((half(ParticleShape::Streak) - 0.95 * REACH).abs() < 1e-5);
+        assert!((half(ParticleShape::Claw) - 0.95 * REACH).abs() < 1e-5);
+        for shape in [
+            ParticleShape::Diamond,
+            ParticleShape::Star,
+            ParticleShape::Kite,
+        ] {
+            assert!((half(shape) - MARK * REACH).abs() < 1e-5, "{}", shape.id());
+        }
         for shape in [ParticleShape::Slash, ParticleShape::Streak] {
             // Two cuts through one point at a right angle: an X.
             let cross = draw(ImpactKind::CrossCut, Some(shape), 6);
@@ -886,7 +987,7 @@ mod tests {
             ..receipt(false)
         };
         let onward = impact_particles(&pierce, &palette(), &flying);
-        for spec in &onward {
+        for spec in &onward[..onward.len() - 1] {
             assert!(spec.velocity.dot(Vec3::NEG_Z) > 0.0);
             assert!(spec.velocity.cross(Vec3::NEG_Z).length() < 1e-4);
             assert!((spec.origin - centre).dot(Vec3::NEG_Z) > 0.0);
@@ -910,7 +1011,7 @@ mod tests {
         };
         assert_eq!(impact_particles(&pierce, &palette(), &broken), stopped);
         // Forks fly out ahead of the hit; shards, splinters and blast debris fall.
-        let forks = draw(ImpactKind::SparkFork, None, 3);
+        let forks = marks(ImpactKind::SparkFork, None, 3);
         assert!(
             forks
                 .iter()
@@ -919,12 +1020,12 @@ mod tests {
         assert!(forks[0].velocity.dot(side) * forks[2].velocity.dot(side) < 0.0);
         for kind in [ImpactKind::ShardBurst, ImpactKind::Splinter] {
             assert!(
-                draw(kind, None, 6)
+                marks(kind, None, 6)
                     .iter()
                     .all(|piece| piece.gravity > 0.0 && piece.velocity.y > 0.0)
             );
         }
-        let chips = draw(ImpactKind::Splinter, None, 6);
+        let chips = marks(ImpactKind::Splinter, None, 6);
         assert!(
             chips
                 .iter()
@@ -939,7 +1040,7 @@ mod tests {
                     .all(|mark| mark.velocity == Vec3::ZERO && mark.origin == centre)
             );
         }
-        let star = draw(ImpactKind::FlashStar, None, 3);
+        let star = marks(ImpactKind::FlashStar, None, 3);
         assert!(star.iter().all(|flash| flash.shape == ParticleShape::Star));
         assert!(star[1].size < star[0].size && star[2].size < star[1].size);
         // The facet lies along the hit direction, turned a little by the receipt id.
@@ -966,7 +1067,7 @@ mod tests {
             facet
         );
         // Embers rise and darken; a frost star stands while its chips fall.
-        let embers = draw(ImpactKind::EmberPuff, None, 6);
+        let embers = marks(ImpactKind::EmberPuff, None, 6);
         assert!(
             embers
                 .iter()
@@ -977,7 +1078,7 @@ mod tests {
                 .iter()
                 .all(|ember| ember.end_color == Some(companion))
         );
-        let frost = draw(ImpactKind::StarShards, Some(ParticleShape::Star), 5);
+        let frost = marks(ImpactKind::StarShards, Some(ParticleShape::Star), 5);
         assert_eq!(
             (frost[0].shape, frost[0].velocity),
             (ParticleShape::Star, Vec3::ZERO)
@@ -989,7 +1090,7 @@ mod tests {
         );
         // Chain links snap along the hit axis; drained motes drift back toward the source
         // and stop within 1.2 units however large the row is.
-        let links = draw(ImpactKind::ChainSnap, None, 4);
+        let links = marks(ImpactKind::ChainSnap, None, 4);
         assert!(
             links
                 .iter()
@@ -1002,7 +1103,7 @@ mod tests {
             &palette(),
             &receipt(true),
         );
-        for wisp in &drain {
+        for wisp in &drain[..drain.len() - 1] {
             assert!(wisp.velocity.dot(along) < 0.0);
             let travel = (wisp.velocity * wisp.lifetime).dot(-along);
             assert!(travel > 0.3 && travel <= DRAIN_TRAVEL);
@@ -1019,7 +1120,7 @@ mod tests {
             (ParticleShape::Glow, ParticleShape::Ringlet, Orient::Ground)
         );
         assert!(
-            blast[2..]
+            blast[2..blast.len() - 1]
                 .iter()
                 .all(|piece| piece.shape == ParticleShape::Star && piece.gravity > 0.0)
         );
@@ -1052,7 +1153,7 @@ mod tests {
             )
             .is_empty()
         );
-        // Slots are lead and companion.
+        // Slots are lead and companion; the flash keeps the skill colour.
         let row = ImpactRecipe {
             slots: Some([PaletteSlot::White, PaletteSlot::Secondary]),
             ..recipe(ImpactKind::SlashCut, None, 4, 1.0)
@@ -1060,6 +1161,18 @@ mod tests {
         let specs = impact_particles(&row, &palette(), &receipt(false));
         assert_eq!(specs[0].color, palette().slot(PaletteSlot::White));
         assert_eq!(specs[3].color, palette().slot(PaletteSlot::Secondary));
+        assert_eq!(specs[4].color, palette().slot(PaletteSlot::Primary));
+        // A row with more gain than the pool draws its marks with it, and its flash with
+        // the gain of the pool.
+        let registry = target();
+        let pyroblast = registry.row("pyroblast").unwrap();
+        let hot = Palette::of(pyroblast, registry.theme(HeroClass::Mage).unwrap());
+        let burst = impact_particles(pyroblast.impact.as_ref().unwrap(), &hot, &receipt(false));
+        let flash = burst.last().unwrap();
+        assert!(hot.slot(PaletteSlot::Primary).gain > ParticleSpec::BASE.color.gain);
+        assert_eq!(flash.color.color, hot.slot(PaletteSlot::Primary).color);
+        assert_eq!(flash.color.gain, ParticleSpec::BASE.color.gain);
+        assert_eq!(burst[0].color.gain, hot.slot(PaletteSlot::Primary).gain);
     }
 
     #[test]

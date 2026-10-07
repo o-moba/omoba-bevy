@@ -44,6 +44,8 @@ pub(crate) const CUE_MAX: usize = 6;
 pub(crate) const CUE_SECS: f32 = 0.4;
 /// A decorative accent stays within this distance of the caster on the ground plane.
 pub(crate) const DECORATIVE_REACH: f32 = 2.0;
+/// Half extent of a soft glint of an accent as a share of the reach of its pattern.
+const GLINT: f32 = 0.14;
 
 /// Heights above the ground a pattern is drawn at.
 const FLOOR: f32 = 0.06;
@@ -319,7 +321,7 @@ impl Frame {
                 out.push(drift(arc, self.side, 0.5 * self.reach));
                 for i in 1..n {
                     let along = self.turned(spread(i - 1, n - 1) * 0.7);
-                    let mut glint = late(self.glint(0.07), 0.2 * share(i - 1, n - 1));
+                    let mut glint = late(self.glint(GLINT), 0.2 * share(i - 1, n - 1));
                     glint.origin = self.origin + along * (0.62 * self.reach) + Vec3::Y * CHEST;
                     out.push(drift(glint, along, 0.16 * self.reach));
                 }
@@ -341,7 +343,7 @@ impl Frame {
                 }
                 for i in 2..n {
                     let along = self.turned(spread(i - 2, n - 2) * 0.8);
-                    let mut glint = late(self.glint(0.07), 0.25);
+                    let mut glint = late(self.glint(GLINT), 0.25);
                     glint.origin = self.at(0.42, 0.0, CHEST);
                     out.push(fly(glint, along, 0.3 * self.reach));
                 }
@@ -355,7 +357,7 @@ impl Frame {
                     out.push(drift(rake, self.forward, 0.3 * self.reach));
                 }
                 for i in 3..n {
-                    let mut glint = late(self.glint(0.06), 0.35);
+                    let mut glint = late(self.glint(0.12), 0.35);
                     glint.origin = self.at(0.6, 0.2 * spread(i - 3, n - 3), HAND);
                     out.push(drift(glint, self.forward, 0.1 * self.reach));
                 }
@@ -367,7 +369,7 @@ impl Frame {
                 out.push(line);
                 for i in 1..n {
                     let along = share(i - 1, n - 1);
-                    let mut copy = late(self.lead(0.09, Curve::Pop), 0.3 * along);
+                    let mut copy = late(self.lead(0.14, Curve::Pop), 0.3 * along);
                     copy.origin = self.at(0.15 + 0.5 * along, 0.0, HAND);
                     copy.orient = Orient::Ground;
                     out.push(drift(copy, self.forward, 0.2 * self.reach));
@@ -384,7 +386,7 @@ impl Frame {
                     out.push(glow);
                 }
                 for i in 2..n {
-                    let mut spark = late(self.glint(0.07), 0.15);
+                    let mut spark = late(self.glint(GLINT), 0.15);
                     spark.origin = self.at(0.45, 0.0, HAND);
                     let along = self.turned(spread(i - 2, n - 2) * 0.5);
                     out.push(fly(spark, along, 0.3 * self.reach));
@@ -392,7 +394,7 @@ impl Frame {
             }
             P::MuzzleBurst => {
                 for i in 0..n {
-                    let radius = 0.2 * (1.0 - 0.1 * i as f32).max(0.5);
+                    let radius = 0.26 * (1.0 - 0.1 * i as f32).max(0.5);
                     let mut shot = late(self.lead(radius, Curve::Pop), 0.45 * share(i, n));
                     shot.origin = self.at(0.25, 0.06 * jitter(self.id, i as u64, 11), HAND);
                     out.push(fly(shot, self.forward, 0.45 * self.reach));
@@ -400,7 +402,7 @@ impl Frame {
             }
             P::FanSpray => {
                 for i in 0..n {
-                    let mut piece = late(self.lead(0.14, Curve::Pop), 0.12 * (i % 2) as f32);
+                    let mut piece = late(self.lead(0.2, Curve::Pop), 0.12 * (i % 2) as f32);
                     piece.origin = self.at(0.2, 0.0, HAND);
                     piece.orient = Orient::Velocity;
                     piece.gravity = 3.0;
@@ -416,7 +418,7 @@ impl Frame {
                 out.push(self.ring(0.9));
                 for i in 1..n {
                     let outward = self.turned(TAU * (i - 1) as f32 / (n - 1) as f32);
-                    let mut mote = self.lead(0.12, Curve::Pop);
+                    let mut mote = self.lead(0.2, Curve::Pop);
                     mote.origin = self.origin + outward * (0.3 * self.reach) + Vec3::Y * FLOOR;
                     mote.orient = Orient::Ground;
                     mote.angle = heading(outward);
@@ -427,7 +429,7 @@ impl Frame {
                 out.push(self.ring(0.8));
                 for i in 1..n {
                     let outward = self.turned(TAU * (i - 1) as f32 / (n - 1) as f32 + 0.5);
-                    let mut chip = self.lead(0.12, Curve::Pop);
+                    let mut chip = self.lead(0.2, Curve::Pop);
                     chip.origin = self.origin + outward * (0.35 * self.reach) + Vec3::Y * 0.1;
                     chip.orient = Orient::Velocity;
                     chip.angle = heading(outward);
@@ -440,7 +442,7 @@ impl Frame {
                 let first = jitter(self.id, 0, 13) * PI;
                 for i in 0..n {
                     let outward = self.turned(first + TAU * i as f32 / n as f32);
-                    let mut mote = late(self.lead(0.14, Curve::Pop), 0.1 * (i % 3) as f32);
+                    let mut mote = late(self.lead(0.2, Curve::Pop), 0.1 * (i % 3) as f32);
                     mote.origin = self.origin
                         + outward * (0.78 * self.reach)
                         + Vec3::Y * (0.15 + 0.12 * (i % 3) as f32);
@@ -455,7 +457,7 @@ impl Frame {
                 for i in 0..n {
                     let outward = self.turned(first + TAU * i as f32 / n as f32);
                     let lift = 0.4 * ((i % 3) as f32 - 1.0);
-                    let mut mote = late(self.lead(0.1, Curve::Hold), 0.1 * (i % 4) as f32);
+                    let mut mote = late(self.lead(0.14, Curve::Hold), 0.1 * (i % 4) as f32);
                     mote.origin =
                         self.origin + outward * (0.85 * self.reach) + Vec3::Y * (CHEST + lift);
                     mote.orient = Orient::Velocity;
@@ -470,7 +472,7 @@ impl Frame {
                     let rise = share(i, n);
                     let outward = self.turned(rise * TAU * 1.25);
                     let tangent = Vec3::new(-outward.z, 0.0, outward.x);
-                    let mut mote = late(self.lead(0.13, Curve::Pop), 0.5 * rise);
+                    let mut mote = late(self.lead(0.2, Curve::Pop), 0.5 * rise);
                     mote.origin =
                         self.origin + outward * (0.55 * self.reach) + Vec3::Y * (0.2 + 1.7 * rise);
                     mote.orient = Orient::Velocity;
@@ -489,7 +491,7 @@ impl Frame {
                 for i in 1..n {
                     let side = if i % 2 == 1 { 1.0 } else { -1.0 };
                     let height = (CHEST + 0.3 - 0.3 * ((i - 1) / 2) as f32).max(0.1);
-                    let mut glint = late(self.glint(0.08), 0.15);
+                    let mut glint = late(self.glint(GLINT), 0.15);
                     glint.origin = self.at(0.5, 0.3 * side, height);
                     out.push(drift(glint, self.side * side, 0.1 * self.reach));
                 }
@@ -518,7 +520,7 @@ impl Frame {
             }
             P::TossArc => {
                 for i in 0..n {
-                    let mut piece = late(self.lead(0.13, Curve::Pop), 0.5 * share(i, n));
+                    let mut piece = late(self.lead(0.18, Curve::Pop), 0.5 * share(i, n));
                     // Alternating sides, so a staggered toss does not read as a slanted line.
                     let lane = i.div_ceil(2) as f32 * if i % 2 == 0 { 1.0 } else { -1.0 };
                     piece.origin = self.at(0.2, 0.07 * lane, HAND);

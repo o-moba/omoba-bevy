@@ -1,7 +1,6 @@
 //! Versioned, local-only combat cosmetics. No field enters the simulation.
 use std::collections::HashMap;
 use std::f32::consts::PI;
-use std::sync::OnceLock;
 
 use crate::skill_presentation::bodies::{self, PartMesh};
 use crate::skill_presentation::vocab::{ProjectileForm, ProjectilePresentation, Silhouette};
@@ -357,24 +356,7 @@ impl FormPart {
 
 /// The vertices of a shared silhouette: the form table is measured on the meshes it draws.
 fn outline(mesh: Silhouette) -> &'static [Vec3] {
-    static OUTLINES: OnceLock<Vec<Vec<Vec3>>> = OnceLock::new();
-    &OUTLINES.get_or_init(|| {
-        Silhouette::ALL
-            .iter()
-            .map(|mesh| {
-                bodies::silhouette_mesh(*mesh)
-                    .attribute(Mesh::ATTRIBUTE_POSITION)
-                    .and_then(|values| values.as_float3())
-                    .map(|points| {
-                        points
-                            .iter()
-                            .map(|point| Vec3::from_array(*point))
-                            .collect()
-                    })
-                    .unwrap_or_default()
-            })
-            .collect()
-    })[mesh as usize]
+    bodies::outline(PartMesh::Silhouette(mesh))
 }
 
 /// The silhouette of a form whose profile names none.

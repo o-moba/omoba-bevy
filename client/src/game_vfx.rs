@@ -204,6 +204,8 @@ pub(crate) const fn blade_depth(shape: Shape) -> f32 {
 }
 /// Delayed particles hold a pool slot while hidden, so the wait is bounded.
 const MAX_DELAY: f32 = 0.25;
+/// Share of its life for which a generated particle is drawn at its whole coverage.
+pub(crate) const HOLD_SHARE: f32 = 0.5;
 
 /// One pooled particle as a pure generator describes it. Positions and velocities are
 /// simulation coordinates in both render modes.
@@ -389,6 +391,17 @@ impl Particle {
             0.5 * age * age
         };
         self.velocity * glide - Vec3::Y * (self.gravity * fall)
+    }
+    /// Coverage at life fraction `t`. A wire-style burst, a utility effect and a flight
+    /// puff fade from their first frame. A generated particle keeps its whole coverage for
+    /// `HOLD_SHARE` of its life and fades over the rest: a short accent or impact is drawn
+    /// in its colour before it thins out over pale ground.
+    fn opacity(&self, t: f32) -> f32 {
+        let left = (1. - t).max(0.);
+        match self.curve {
+            Some(_) => (left / (1. - HOLD_SHARE)).min(1.),
+            None => left,
+        }
     }
     /// Colour and HDR gain at life fraction `t`.
     fn tint(&self, t: f32) -> Tint {
@@ -611,7 +624,27 @@ fn planar_mesh(positions: Vec<[f32; 2]>, indices: Vec<u32>) -> Mesh {
     .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, vec![[0.5, 0.5]; count])
     .with_inserted_indices(Indices::U32(indices))
 }
-/// A closed outline filled as a fan around `centre`.
+/// Radiance of the outline of a shaded silhouette as a share of its middle. The middle
+/// keeps the whole HDR gain of its colour and the outline falls to a deep shade of the
+/// same hue, so a pale or white-hot shape still has an edge on pale ground.
+pub(crate) const RIM_SHADE: f32 = 0.1;
+/// Shades a flat mesh through its vertex colours: `1.0` where `lit` holds for the vertex
+/// index, `RIM_SHADE` elsewhere. The material colour is multiplied by it in both render
+/// modes, so the shading costs no draw and no pool slot.
+fn rimmed(mesh: Mesh, lit: impl Fn(usize) -> bool) -> Mesh {
+    let count = mesh.count_vertices();
+    mesh.with_inserted_attribute(
+        Mesh::ATTRIBUTE_COLOR,
+        (0..count)
+            .map(|index| {
+                let shade = if lit(index) { 1. } else { RIM_SHADE };
+                [shade, shade, shade, 1.]
+            })
+            .collect::<Vec<_>>(),
+    )
+}
+/// A closed outline filled as a fan around `centre`: lit in the middle, shaded on the
+/// outline.
 fn fan_mesh(centre: [f32; 2], rim: &[[f32; 2]]) -> Mesh {
     let mut positions = vec![centre];
     positions.extend_from_slice(rim);
@@ -619,7 +652,7 @@ fn fan_mesh(centre: [f32; 2], rim: &[[f32; 2]]) -> Mesh {
     let indices = (0..count)
         .flat_map(|i| [0, 1 + i, 1 + (i + 1) % count])
         .collect();
-    planar_mesh(positions, indices)
+    rimmed(planar_mesh(positions, indices), |index| index == 0)
 }
 /// A band along an arc of `outer` radius between two angles; `width(t)` is its thickness
 /// at the fraction `t` of the arc.
@@ -639,6 +672,31 @@ fn band_mesh(from: f32, to: f32, outer: f32, steps: u32, width: impl Fn(f32) -> 
     }
     planar_mesh(positions, indices)
 }
+/// The same band with a lit line along its middle and both edges shaded. Where the band
+/// tapers to a point, the point is shaded too.
+fn rimmed_band(from: f32, to: f32, outer: f32, steps: u32, width: impl Fn(f32) -> f32) -> Mesh {
+    let mut positions = Vec::new();
+    let mut indices = Vec::new();
+    let mut lit = Vec::new();
+    for i in 0..=steps {
+        let t = i as f32 / steps as f32;
+        let a = from + t * (to - from);
+        for (row, radius) in [outer - width(t), outer - 0.5 * width(t), outer]
+            .into_iter()
+            .enumerate()
+        {
+            positions.push([a.cos() * radius, a.sin() * radius]);
+            lit.push(row == 1 && width(t) > 1e-3);
+        }
+        if i < steps {
+            let j = i * 3;
+            for row in [j, j + 1] {
+                indices.extend_from_slice(&[row, row + 1, row + 3, row + 1, row + 4, row + 3]);
+            }
+        }
+    }
+    rimmed(planar_mesh(positions, indices), |index| lit[index])
+}
 /// The mesh of one particle shape. Each fits `unit_radius`, is symmetric about its own
 /// axis and points along +X, so a mirrored view of it looks the same.
 pub(crate) fn shape_mesh(shape: Shape) -> Mesh {
@@ -657,16 +715,25 @@ pub(crate) fn shape_mesh(shape: Shape) -> Mesh {
                 .collect();
             fan_mesh([0., 0.], &rim)
         }
-        Shape::Chevron => planar_mesh(
-            vec![
-                [0.5, 0.],
-                [-0.08, 0.49],
-                [-0.3, 0.4],
-                [0.16, 0.],
-                [-0.3, -0.4],
-                [-0.08, -0.49],
-            ],
-            vec![0, 1, 2, 0, 2, 3, 0, 3, 4, 0, 4, 5],
+        // Two arms from the point; a lit line runs down the middle of each.
+        Shape::Chevron => rimmed(
+            planar_mesh(
+                vec![
+                    [0.5, 0.],
+                    [-0.08, 0.49],
+                    [-0.3, 0.4],
+                    [0.16, 0.],
+                    [-0.3, -0.4],
+                    [-0.08, -0.49],
+                    [0.33, 0.],
+                    [-0.19, 0.445],
+                    [-0.19, -0.445],
+                ],
+                vec![
+                    0, 1, 7, 0, 7, 6, 6, 7, 2, 6, 2, 3, 6, 3, 4, 6, 4, 8, 0, 6, 8, 0, 8, 5,
+                ],
+            ),
+            |index| index >= 6,
         ),
         Shape::Diamond => fan_mesh([0., 0.], &[[0.5, 0.], [0., 0.3], [-0.5, 0.], [0., -0.3]]),
         Shape::Arc => band_mesh(-FRAC_PI_2, FRAC_PI_2, 0.5, 12, |_| 0.14),
@@ -679,24 +746,31 @@ pub(crate) fn shape_mesh(shape: Shape) -> Mesh {
             }));
             fan_mesh([-0.2, 0.], &rim)
         }
-        Shape::Cross => planar_mesh(
-            vec![
-                [-0.485, -0.12],
-                [0.485, -0.12],
-                [0.485, 0.12],
-                [-0.485, 0.12],
-                [-0.12, 0.12],
-                [0.12, 0.12],
-                [0.12, 0.485],
-                [-0.12, 0.485],
-                [-0.12, -0.485],
-                [0.12, -0.485],
-                [0.12, -0.12],
-                [-0.12, -0.12],
-            ],
-            vec![0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7, 8, 9, 10, 8, 10, 11],
+        // A lit square in the middle and four arms that shade toward their ends.
+        Shape::Cross => rimmed(
+            planar_mesh(
+                vec![
+                    [-0.12, -0.12],
+                    [0.12, -0.12],
+                    [0.12, 0.12],
+                    [-0.12, 0.12],
+                    [0.485, -0.12],
+                    [0.485, 0.12],
+                    [0.12, 0.485],
+                    [-0.12, 0.485],
+                    [-0.485, 0.12],
+                    [-0.485, -0.12],
+                    [-0.12, -0.485],
+                    [0.12, -0.485],
+                ],
+                vec![
+                    0, 1, 2, 0, 2, 3, 1, 4, 5, 1, 5, 2, 2, 6, 7, 2, 7, 3, 3, 8, 9, 3, 9, 0, 0, 10,
+                    11, 0, 11, 1,
+                ],
+            ),
+            |index| index < 4,
         ),
-        Shape::Crescent => band_mesh(-1.3, 1.3, 0.5, 16, |t| (PI * t).sin() * 0.24),
+        Shape::Crescent => rimmed_band(-1.3, 1.3, 0.5, 16, |t| (PI * t).sin() * 0.24),
         Shape::Claw => {
             // Three tines side by side, the middle one longest.
             let mut positions = Vec::new();
@@ -1418,7 +1492,7 @@ fn animate_particles(
         *visibility = Visibility::Visible;
         *inherited = InheritedVisibility::VISIBLE;
         let life = p.age / p.lifetime;
-        let opacity = (1. - life).max(0.);
+        let opacity = p.opacity(life);
         let Tint { color, gain } = p.tint(life.clamp(0., 1.));
         if let Some(mut m) = materials.get_mut(&slot.material) {
             m.base_color = hdr_tint(color, gain).with_alpha(color.alpha() * opacity);
@@ -2240,8 +2314,8 @@ mod tests {
         // On its own the pool builds its thirteen shapes and the butterfly wing.
         assert_eq!(app(false).world().resource::<Assets<Mesh>>().len(), 14);
         let app = app(true);
-        // Sixteen meshes of the library, four shapes only a particle has, and the wing.
-        assert_eq!(app.world().resource::<Assets<Mesh>>().len(), 16 + 4 + 1);
+        // Seventeen meshes of the library, four shapes only a particle has, and the wing.
+        assert_eq!(app.world().resource::<Assets<Mesh>>().len(), 17 + 4 + 1);
         let library = app.world().resource::<VfxMeshes>();
         let pool = app.world().resource::<VfxAssets>();
         for (shape, silhouette) in [
@@ -3237,6 +3311,18 @@ mod tests {
         assert_eq!(blend.tint(1.).color, Color::srgb(0., 0., 1.));
         assert_eq!(blend.tint(0.5).gain, 2.5);
         assert_eq!(Particle::BASE.tint(0.7).gain, PARTICLE_HDR_GAIN);
+        // A generated particle keeps its whole coverage for the first half of its life and
+        // is gone at its end; a wire-style particle fades from its first frame.
+        for (t, generated, wire) in [
+            (0., 1., 1.),
+            (0.25, 1., 0.75),
+            (HOLD_SHARE, 1., 0.5),
+            (0.75, 0.5, 0.25),
+            (1., 0., 0.),
+        ] {
+            assert!((blend.opacity(t) - generated).abs() < 1e-6, "{t}");
+            assert!((Particle::BASE.opacity(t) - wire).abs() < 1e-6, "{t}");
+        }
         // A ground particle lies flat with its axis along the heading, and turns about the
         // vertical; a billboard keeps facing the camera.
         let facing = Quat::from_rotation_x(-1.);

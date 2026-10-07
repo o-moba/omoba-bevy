@@ -217,9 +217,15 @@ pub(crate) struct Body {
     pub satellites: Option<Satellites>,
     #[serde(default)]
     pub trail: Trail,
+    /// Factor on the engine's size of the trail parts; 1.0 when absent.
+    #[serde(default)]
+    pub trail_scale: Option<f32>,
     /// One translucent interior layer of an area archetype; the archetype decides when absent.
     #[serde(default)]
     pub fill: Option<bool>,
+    /// How strongly that layer tints the ground; the engine's strength when absent.
+    #[serde(default)]
+    pub fill_strength: Option<f32>,
     #[serde(default)]
     pub marker: Marker,
     #[serde(default)]
@@ -474,13 +480,15 @@ pub(super) fn validate(config: &SkillPresentation) -> Result<(), String> {
 }
 
 /// Bodies share their materials by colour. Every skill colour needs three (lit, fill and
-/// telegraph fill) for each HDR gain it is drawn with, every matter and every spark colour
-/// one, and the engine keeps a fixed few of its own.
+/// telegraph fill) for each HDR gain it is drawn with and two more for each further fill
+/// strength its bodies name, every matter and every spark colour one, and the engine keeps
+/// a fixed few of its own.
 fn material_budget(config: &SkillPresentation) -> Result<(), String> {
     let bits = |color: [f32; 3]| color.map(f32::to_bits);
     let mut primaries = std::collections::BTreeSet::new();
     let mut secondaries = std::collections::BTreeSet::new();
     let mut accents = std::collections::BTreeSet::new();
+    let mut strengths = std::collections::BTreeSet::new();
     for theme in config.themes.values() {
         secondaries.insert(bits(theme.secondary));
         accents.insert(bits(theme.accent));
@@ -489,9 +497,21 @@ fn material_budget(config: &SkillPresentation) -> Result<(), String> {
         primaries.insert((bits(profile.color), profile.hdr_gain.to_bits()));
         secondaries.extend(profile.secondary.map(bits));
         accents.extend(profile.accent.map(bits));
+        strengths.extend(
+            profile
+                .body
+                .iter()
+                .chain(profile.aux.values())
+                .filter_map(|body| body.fill_strength)
+                .filter(|strength| *strength != bodies::FILL_STRENGTH)
+                .map(|strength| (bits(profile.color), strength.to_bits())),
+        );
     }
-    let materials =
-        3 * primaries.len() + secondaries.len() + accents.len() + bodies::SHARED_MATERIALS;
+    let materials = 3 * primaries.len()
+        + 2 * strengths.len()
+        + secondaries.len()
+        + accents.len()
+        + bodies::SHARED_MATERIALS;
     if materials > bodies::MATERIAL_BUDGET {
         return Err(format!(
             "The rows need {materials} effect materials (at most {}): {} skill colours, {} secondary and {} accent colours",
@@ -1207,12 +1227,28 @@ fn body_block(body: &Body, id: SkillId, binding: Binding) -> Result<(), String> 
                 ));
             }
         } else {
-            // Multiples of the replicated radius. A part that turns end over end sweeps
-            // its height across the ground as well.
+            // Multiples of the replicated radius, as full extents. A part that turns end
+            // over end sweeps its height across the ground as well.
             let turns_over = matches!(behave, Behaviour::Tumble | Behaviour::Gyro);
-            if lateral.max(along) > 1.0 || (turns_over && vertical > 1.0) {
+            let halved = lateral.max(along) <= 1.0 && !(turns_over && vertical > 1.0);
+            // A `core` or a `shell` stands in the middle of a circle, so it may be larger:
+            // as far as the inner edge of the boundary line, measured on its own mesh.
+            let centred = name != "satellites"
+                && matches!(archetype, A::Zone | A::Prop)
+                && bodies::centred_reach(
+                    &Part {
+                        mesh,
+                        slot: PaletteSlot::Primary,
+                        size,
+                        behave,
+                    },
+                    !on_ground,
+                    bodies::plate_lead(archetype, kind, mesh),
+                ) <= bodies::MARKER_REACH + 1e-4;
+            if !(halved || centred) {
                 return Err(format!(
-                    "{name}.size leaves the boundary: an extent on the ground is at most 1.0 of the radius"
+                    "{name}.size leaves the boundary: an extent on the ground is at most 1.0 of the radius, and a core or a shell in the middle of a circle reaches at most {} of it",
+                    bodies::MARKER_REACH
                 ));
             }
         }
@@ -1254,8 +1290,33 @@ fn body_block(body: &Body, id: SkillId, binding: Binding) -> Result<(), String> 
     if body.trail != Trail::None && !moving {
         return Err("trail needs a traveller or an orbiter".into());
     }
+    if let Some(scale) = body.trail_scale {
+        if body.trail == Trail::None {
+            return Err("trail_scale needs a trail".into());
+        }
+        in_range(scale, bodies::TRAIL_SCALES, "trail_scale")?;
+        // A trail part is held to the hit circle it follows, like every part in flight.
+        let width = bodies::trail_width(body.trail, radius, scale);
+        let widest = (1.5 * radius).max(0.5);
+        if width > widest + 1e-4 || (on_ground && width * 0.5 > radius + 1e-4) {
+            return Err(format!(
+                "trail_scale makes the trail {width:.2} wide (at most {:.2} for a radius of {radius})",
+                if on_ground {
+                    widest.min(2.0 * radius)
+                } else {
+                    widest
+                }
+            ));
+        }
+    }
     if body.fill.is_some() && moving {
         return Err("fill needs an area archetype".into());
+    }
+    if let Some(strength) = body.fill_strength {
+        if !bodies::fills(body) {
+            return Err("fill_strength needs a body with a fill".into());
+        }
+        in_range(strength, bodies::FILL_STRENGTHS, "fill_strength")?;
     }
     if body.model.is_some() && !matches!(archetype, A::Traveller | A::Orbiter | A::Prop | A::Zone) {
         return Err(format!("model is not legal for {}", archetype.id()));

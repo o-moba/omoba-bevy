@@ -17,6 +17,7 @@ use bevy::mesh::PrimitiveTopology;
 use bevy::prelude::*;
 use shared::loadout::{EffectVisualKind, SkillEffectState};
 use std::f32::consts::{FRAC_PI_2, FRAC_PI_4, PI, TAU};
+use std::sync::OnceLock;
 
 /// Visible mesh parts of all skill effects together. Above it the bodies farthest from the
 /// camera lose their authored parts; boundaries, fills and markers are never hidden.
@@ -55,8 +56,15 @@ pub(crate) const TORUS_TUBE: f32 = 0.16;
 /// two do not fight for depth. Light is drawn over matter without it (`effects.rs`).
 const SHELL_NUDGE: f32 = 0.03;
 /// Inner edge of the boundary ring as a share of its radius. A marker ring ends there, so
-/// that the read-out never covers the team colour.
-const MARKER_REACH: f32 = 0.47 / UNIT_RADIUS;
+/// that the read-out never covers the team colour, and so does the largest part a row may
+/// stand in the middle of a circle.
+pub(crate) const MARKER_REACH: f32 = 0.47 / UNIT_RADIUS;
+/// How strongly the interior layer of an area body tints the ground when its row names no
+/// `fill_strength`, and the range a row may name.
+pub(crate) const FILL_STRENGTH: f32 = 0.92;
+pub(crate) const FILL_STRENGTHS: std::ops::RangeInclusive<f32> = 0.4..=1.0;
+/// The range of `trail_scale`: the factor on the engine's size of a trail part.
+pub(crate) const TRAIL_SCALES: std::ops::RangeInclusive<f32> = 0.5..=2.5;
 /// Height of a part that `rise_on_arm` keeps flat, as a share of its full height.
 const FLAT_SHARE: f32 = 0.2;
 /// Seconds over which `rise_on_spawn` grows a part.
@@ -92,12 +100,15 @@ const KITE_TOP: Vec2 = Vec2::new(0.87, 0.33);
 const FAN_DISTANCE: f32 = 0.55;
 const FAN_SPREAD: f32 = 0.6;
 
-/// A mesh a body part is drawn with: a silhouette a row may name, or the disc the engine
-/// keeps for the `fill` layer.
+/// A mesh a body part is drawn with: a silhouette a row may name, or one of the two the
+/// engine keeps for the `fill` layer.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum PartMesh {
     Silhouette(Silhouette),
     Disc,
+    /// The kite that covers the inside of a cone: the outline of the silhouette without
+    /// its shading, so that the layer tints the ground evenly.
+    Wedge,
 }
 
 /// The shared meshes of skill bodies. Each one fits a unit cube around its origin, has at
@@ -107,6 +118,7 @@ pub(crate) struct VfxMeshes {
     /// In the order of `Silhouette::ALL`.
     silhouettes: Vec<Handle<Mesh>>,
     disc: Handle<Mesh>,
+    wedge: Handle<Mesh>,
 }
 
 impl VfxMeshes {
@@ -117,6 +129,7 @@ impl VfxMeshes {
                 .map(|mesh| meshes.add(silhouette_mesh(*mesh)))
                 .collect(),
             disc: meshes.add(disc_mesh()),
+            wedge: meshes.add(wedge_mesh()),
         }
     }
 
@@ -124,6 +137,7 @@ impl VfxMeshes {
         match mesh {
             PartMesh::Silhouette(mesh) => self.silhouettes[mesh as usize].clone(),
             PartMesh::Disc => self.disc.clone(),
+            PartMesh::Wedge => self.wedge.clone(),
         }
     }
 
@@ -226,6 +240,40 @@ pub(crate) fn disc_mesh() -> Mesh {
     Circle::new(UNIT_RADIUS).into()
 }
 
+pub(crate) fn wedge_mesh() -> Mesh {
+    let mut mesh = silhouette_mesh(Silhouette::Kite);
+    mesh.remove_attribute(Mesh::ATTRIBUTE_COLOR);
+    mesh
+}
+
+/// The vertices of a mesh of the library.
+pub(crate) fn outline(mesh: PartMesh) -> &'static [Vec3] {
+    static OUTLINES: OnceLock<Vec<Vec<Vec3>>> = OnceLock::new();
+    let points = |mesh: Mesh| -> Vec<Vec3> {
+        mesh.attribute(Mesh::ATTRIBUTE_POSITION)
+            .and_then(|values| values.as_float3())
+            .map(|points| {
+                points
+                    .iter()
+                    .map(|point| Vec3::from_array(*point))
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    let outlines = OUTLINES.get_or_init(|| {
+        Silhouette::ALL
+            .iter()
+            .map(|mesh| points(silhouette_mesh(*mesh)))
+            .chain([points(disc_mesh())])
+            .collect()
+    });
+    match mesh {
+        PartMesh::Silhouette(mesh) => &outlines[mesh as usize],
+        PartMesh::Disc => &outlines[Silhouette::ALL.len()],
+        PartMesh::Wedge => &outlines[Silhouette::Kite as usize],
+    }
+}
+
 /// Whether the body is an object in flight. Its sizes are metres; the sizes of every other
 /// archetype are multiples of the replicated radius.
 pub(crate) const fn moving(archetype: Archetype) -> bool {
@@ -249,6 +297,62 @@ pub(crate) fn fills(body: &Body) -> bool {
             body.archetype,
             Archetype::Zone | Archetype::Lane | Archetype::Sector
         ))
+}
+
+/// How strongly the interior layer of the body tints the ground.
+pub(crate) fn fill_strength(body: &Body) -> f32 {
+    body.fill_strength.unwrap_or(FILL_STRENGTH)
+}
+
+/// Width of the widest trail part of a body in flight with this replicated radius, in
+/// metres: the engine's size for the radius times the row's `trail_scale`. No trail has no
+/// width.
+pub(crate) fn trail_width(trail: Trail, radius: f32, scale: f32) -> f32 {
+    scale
+        * match trail {
+            Trail::None => 0.0,
+            Trail::Ribbon => (radius * 0.7).clamp(0.12, 0.45),
+            Trail::Motes => (radius * 0.6).clamp(0.14, 0.4),
+            Trail::Chevrons => (radius * 1.4).clamp(0.35, 1.6),
+            Trail::Links => (radius * 0.7).clamp(0.28, 0.5),
+        }
+}
+
+/// How far a `core` or a `shell` in the middle of a circle reaches from the centre of its
+/// boundary on the ground, as a share of the replicated radius: the farthest vertex of its
+/// mesh as it is laid, over everything its behaviour does to it. `ahead` is how far the
+/// part stands ahead of that centre (rule E-6).
+pub(crate) fn centred_reach(part: &Part, stands: bool, ahead: f32) -> f32 {
+    let mesh = PartMesh::Silhouette(part.mesh);
+    let size = Vec3::from_array(part.size);
+    let (laid, axes) = lay(mesh, size, stands);
+    let scale = mesh_scale(mesh, size, axes);
+    outline(mesh)
+        .iter()
+        .map(|vertex| {
+            let point = laid * (*vertex * scale);
+            match part.behave {
+                // End over end, the height of the part sweeps the ground as well.
+                Behaviour::Tumble | Behaviour::Gyro => ahead + point.length(),
+                Behaviour::Spin => ahead + point.xz().length(),
+                _ => (point.xz() + Vec2::Y * ahead).length(),
+            }
+        })
+        .fold(0.0, f32::max)
+}
+
+/// How far ahead of the centre of its boundary a `core` or a `shell` stands, as a share of
+/// the replicated radius. Rule E-6: the plate of a stance stands half a radius ahead of
+/// where it was cast.
+pub(crate) fn plate_lead(archetype: Archetype, kind: EffectVisualKind, mesh: Silhouette) -> f32 {
+    if archetype == Archetype::Prop
+        && kind == EffectVisualKind::Barrier
+        && planar(PartMesh::Silhouette(mesh))
+    {
+        0.5
+    } else {
+        0.0
+    }
 }
 
 /// Height above the ground at which a stage one-shot of this body is drawn: where a body
@@ -372,6 +476,7 @@ struct Plan {
     model: Option<Model>,
     layout: Option<(SatelliteLayout, u8)>,
     trail: Trail,
+    trail_scale: f32,
     marker: Marker,
     /// The body has a `core`.
     has_core: bool,
@@ -413,6 +518,7 @@ pub(crate) fn part_list(body: &Body, shape: &GeoShape) -> Vec<PartSlot> {
             .as_ref()
             .map(|part| (part.layout, part.count)),
         trail: body.trail,
+        trail_scale: body.trail_scale.unwrap_or(1.0),
         marker: body.marker,
         has_core: body.core.is_some(),
         shell_like_core: body.core.as_ref().zip(body.shell.as_ref()).is_some_and(
@@ -449,10 +555,7 @@ pub(crate) fn part_list(body: &Body, shape: &GeoShape) -> Vec<PartSlot> {
     // What covers the inside of the shape: a disc, a sheet over a strip, a kite in a cone.
     let (area, edge) = match shape {
         GeoShape::Capsule { .. } | GeoShape::Lane { .. } => (block, block),
-        GeoShape::Sector { .. } => {
-            let kite = PartMesh::Silhouette(Silhouette::Kite);
-            (kite, kite)
-        }
+        GeoShape::Sector { .. } => (PartMesh::Wedge, PartMesh::Wedge),
         _ => (PartMesh::Disc, ring),
     };
     let mut parts: Vec<PartSlot> = (0..engine_parts(body.archetype, shape))
@@ -652,7 +755,7 @@ const HEADING: usize = 2;
 
 pub(crate) fn planar(mesh: PartMesh) -> bool {
     match mesh {
-        PartMesh::Disc => true,
+        PartMesh::Disc | PartMesh::Wedge => true,
         PartMesh::Silhouette(mesh) => !matches!(
             mesh,
             Silhouette::Ball | Silhouette::Block | Silhouette::Shard | Silhouette::Cone
@@ -1013,16 +1116,19 @@ fn centre(slot: &PartSlot, seen: &Seen) -> Option<Vec3> {
         },
         // Rule E-6: the plate of a stance stands half a radius ahead of where it was
         // cast, in front of its caster, and still inside its ring.
-        Archetype::Prop
-            if seen.effect.kind == EffectVisualKind::Barrier && slot.mesh.is_some_and(planar) =>
-        {
-            Some(Vec3::Z * seen.effect.radius * 0.5)
-        }
         Archetype::Traveller
         | Archetype::Orbiter
         | Archetype::Zone
         | Archetype::Prop
-        | Archetype::Cage => Some(Vec3::ZERO),
+        | Archetype::Cage => {
+            let lead = match slot.mesh {
+                Some(PartMesh::Silhouette(mesh)) => {
+                    plate_lead(slot.plan.archetype, seen.effect.kind, mesh)
+                }
+                _ => 0.0,
+            };
+            Some(Vec3::Z * seen.effect.radius * lead)
+        }
     }
 }
 
@@ -1196,7 +1302,8 @@ fn trail(slot: &PartSlot, index: u8, seen: &Seen) -> Option<Transform> {
         Some(Vec3::new(at.x, stands, at.y))
     };
     let index = usize::from(index);
-    let radius = seen.effect.radius;
+    let scale = slot.plan.trail_scale;
+    let width = trail_width(slot.plan.trail, seen.effect.radius, scale);
     // Older parts are smaller.
     let fade = 1.0 - index as f32 * 0.22;
     let (at, toward) = (point(index + 1)?, point(index)?);
@@ -1205,13 +1312,10 @@ fn trail(slot: &PartSlot, index: u8, seen: &Seen) -> Option<Transform> {
     let flat = Quat::from_mat3(&Mat3::from_cols(Vec3::Z, Vec3::X, Vec3::Y));
     match slot.plan.trail {
         Trail::None => None,
-        Trail::Ribbon => bar(toward, at, (radius * 0.7).clamp(0.12, 0.45) * fade, 0.06),
-        Trail::Motes => Some(
-            Transform::from_translation(at)
-                .with_scale(Vec3::splat((radius * 0.6).clamp(0.14, 0.4) * fade)),
-        ),
+        Trail::Ribbon => bar(toward, at, width * fade, 0.06 * scale),
+        Trail::Motes => Some(Transform::from_translation(at).with_scale(Vec3::splat(width * fade))),
         Trail::Chevrons => {
-            let size = (radius * 1.4).clamp(0.35, 1.6) * fade;
+            let size = width * fade;
             Some(Transform {
                 translation: at,
                 rotation: Quat::from_rotation_y(yaw) * flat,
@@ -1225,7 +1329,7 @@ fn trail(slot: &PartSlot, index: u8, seen: &Seen) -> Option<Transform> {
             } else {
                 Quat::IDENTITY
             };
-            let size = (radius * 0.7).clamp(0.28, 0.5);
+            let size = width;
             Some(Transform {
                 translation: at,
                 rotation: Quat::from_rotation_y(yaw) * edge * flat,
@@ -1464,8 +1568,14 @@ pub(crate) fn part_pose(slot: &PartSlot, seen: &Seen) -> (Transform, Visibility)
                 .mesh
                 .filter(|mesh| planar(*mesh) && slot.plan.shell_like_core)
                 .map_or(Vec3::ZERO, |_| {
+                    // In a small circle the step stays inside the width of its line.
+                    let step = if moving(slot.plan.archetype) {
+                        SHELL_NUDGE
+                    } else {
+                        SHELL_NUDGE.min(seen.effect.radius * (1.0 - MARKER_REACH))
+                    };
                     let mut nudge = Vec3::ZERO;
-                    nudge[normal_axis(slot.size, slot.plan.stands())] = -SHELL_NUDGE;
+                    nudge[normal_axis(slot.size, slot.plan.stands())] = -step;
                     nudge
                 });
             centre(slot, seen).and_then(|at| authored(slot, seen, at + behind, 0.0))

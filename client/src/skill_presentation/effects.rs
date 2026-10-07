@@ -539,7 +539,7 @@ fn sync(
             .or_insert_with(|| {
                 materials.add(fill_material(
                     Color::srgb_from_array(profile.color),
-                    FILL_STRENGTH,
+                    bodies::FILL_STRENGTH,
                 ))
             })
             .clone();
@@ -855,11 +855,10 @@ fn scene_ready(
 /// bodies share one material for each spark colour.
 const ACCENT_GAIN: f32 = 4.0;
 /// Lightness and least saturation of the tint of the interior layer of an area effect, and
-/// how strongly it is applied while the effect is live and while it is a telegraph.
+/// the share of its strength (`bodies::fill_strength`) that a telegraph is tinted with.
 const FILL_LIGHTNESS: f32 = 0.24;
 const FILL_SATURATION: f32 = 0.6;
-const FILL_STRENGTH: f32 = 0.92;
-const FILL_DIM_STRENGTH: f32 = 0.6;
+const FILL_DIM_SHARE: f32 = 0.6 / bodies::FILL_STRENGTH;
 /// Sorting offset of the interior layer among the translucent parts of an effect.
 const FILL_DEPTH_BIAS: f32 = -4.0;
 /// Share of its own colour a matter part glows with, so that its shaded side is not black.
@@ -917,15 +916,22 @@ impl BodyPaints {
                         perceptual_roughness: 0.7,
                         ..material(color)
                     },
-                    PaintKind::Fill => fill_material(color, FILL_STRENGTH),
-                    PaintKind::FillDim => fill_material(color, FILL_DIM_STRENGTH),
+                    // The interior layers carry their strength where a light has its gain.
+                    PaintKind::Fill => fill_material(color, gain),
+                    PaintKind::FillDim => fill_material(color, gain * FILL_DIM_SHARE),
                 })
             })
             .clone()
     }
 
-    /// The handles one body draws with: the colours of its row and the two sides.
-    fn resolve(&mut self, materials: &mut Assets<StandardMaterial>, palette: &Palette) -> Paints {
+    /// The handles one body draws with: the colours of its row and the two sides. `fill`
+    /// is how strongly its interior layer tints the ground.
+    fn resolve(
+        &mut self,
+        materials: &mut Assets<StandardMaterial>,
+        palette: &Palette,
+        fill: f32,
+    ) -> Paints {
         let primary = palette.slot(PaletteSlot::Primary);
         let mut made = |kind, color: Color, gain: f32| self.handle(materials, kind, color, gain);
         Paints {
@@ -943,8 +949,8 @@ impl BodyPaints {
                 ACCENT_GAIN,
             ),
             white: made(PaintKind::Lit, Color::srgb(1.0, 0.97, 0.82), 5.0),
-            fill: made(PaintKind::Fill, primary.color, 0.0),
-            fill_dim: made(PaintKind::FillDim, primary.color, 0.0),
+            fill: made(PaintKind::Fill, primary.color, fill),
+            fill_dim: made(PaintKind::FillDim, primary.color, fill),
         }
     }
 }
@@ -1180,7 +1186,8 @@ fn sync_bodies(
             if rebuilt && let Some(previous) = instances.bodies.remove(&key) {
                 commands.entity(previous.root).despawn();
             }
-            let resolved = paints.resolve(&mut materials, &look.palette);
+            let resolved =
+                paints.resolve(&mut materials, &look.palette, bodies::fill_strength(body));
             match instances.bodies.get_mut(&key) {
                 Some(instance) => {
                     instance.paints = resolved;
@@ -1794,12 +1801,29 @@ mod tests {
         let materials = app.world().resource::<Assets<StandardMaterial>>();
         let alpha =
             |handle: &Handle<StandardMaterial>| materials.get(handle).unwrap().base_color.alpha();
-        assert_eq!(alpha(&instance.paints.fill), FILL_STRENGTH);
-        assert_eq!(alpha(&instance.paints.fill_dim), FILL_DIM_STRENGTH);
+        // The strength of a row that names none, and the dimmer layer of a telegraph.
+        assert_eq!(alpha(&instance.paints.fill), bodies::FILL_STRENGTH);
+        assert!((alpha(&instance.paints.fill_dim) - 0.6).abs() < 1e-6);
         for fill in [&instance.paints.fill, &instance.paints.fill_dim] {
             assert_eq!(materials.get(fill).unwrap().alpha_mode, AlphaMode::Multiply);
         }
         assert_eq!(alpha(&instance.paints.primary), 1.0);
+
+        // A row may name the strength; the telegraph keeps its share of it.
+        let mut gentle = self::app(SkillPresentation::target_with(|config| {
+            config["skills"]["wild_traps"]["body"]["fill_strength"] = serde_json::json!(0.5);
+        }));
+        show(
+            &mut gentle,
+            vec![replicated(3, SkillId::WildTraps, EffectVisualKind::Trap)],
+        );
+        let instance = &bodies(&gentle)[&EffectKey::Runtime(3)];
+        let materials = gentle.world().resource::<Assets<StandardMaterial>>();
+        let alpha =
+            |handle: &Handle<StandardMaterial>| materials.get(handle).unwrap().base_color.alpha();
+        assert_eq!(alpha(&instance.paints.fill), 0.5);
+        let dim = 0.5 * 0.6 / bodies::FILL_STRENGTH;
+        assert!((alpha(&instance.paints.fill_dim) - dim).abs() < 1e-6);
     }
 
     /// The parts of a body are those of the boundary it was built for. The fog can cut a

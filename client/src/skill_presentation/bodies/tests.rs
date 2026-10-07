@@ -93,7 +93,9 @@ fn bare(archetype: Archetype) -> Body {
         shell: None,
         satellites: None,
         trail: Trail::None,
+        trail_scale: None,
         fill: None,
+        fill_strength: None,
         marker: Marker::None,
         model: None,
         altitude: None,
@@ -114,6 +116,7 @@ fn mesh_of(mesh: PartMesh) -> Mesh {
     match mesh {
         PartMesh::Silhouette(mesh) => silhouette_mesh(mesh),
         PartMesh::Disc => disc_mesh(),
+        PartMesh::Wedge => wedge_mesh(),
     }
 }
 
@@ -162,13 +165,13 @@ fn reach(points: &[Vec3]) -> Vec3 {
 }
 
 #[test]
-fn the_library_has_sixteen_small_meshes_inside_a_unit_cube() {
+fn the_library_has_seventeen_small_meshes_inside_a_unit_cube() {
     let meshes: Vec<PartMesh> = Silhouette::ALL
         .iter()
         .map(|mesh| PartMesh::Silhouette(*mesh))
-        .chain([PartMesh::Disc])
+        .chain([PartMesh::Disc, PartMesh::Wedge])
         .collect();
-    assert_eq!(meshes.len(), 16);
+    assert_eq!(meshes.len(), 17);
     for mesh in meshes {
         let built = mesh_of(mesh);
         let points = vertices(mesh);
@@ -233,10 +236,56 @@ fn the_library_has_sixteen_small_meshes_inside_a_unit_cube() {
     let handles: BTreeSet<_> = Silhouette::ALL
         .iter()
         .map(|mesh| library.handle(PartMesh::Silhouette(*mesh)).id())
-        .chain([library.handle(PartMesh::Disc).id()])
+        .chain([PartMesh::Disc, PartMesh::Wedge].map(|mesh| library.handle(mesh).id()))
         .collect();
-    assert_eq!(handles.len(), 16);
-    assert_eq!(assets.len(), 16);
+    assert_eq!(handles.len(), 17);
+    assert_eq!(assets.len(), 17);
+    // The layer over the inside of a cone is the kite point for point, and nothing shades
+    // it: a fan or a plate silhouette is lit in its middle and deep on its outline, the
+    // bands that bound a strip and every solid are of one colour.
+    assert_eq!(
+        vertices(PartMesh::Wedge),
+        vertices(PartMesh::Silhouette(Silhouette::Kite))
+    );
+    for mesh in [PartMesh::Disc, PartMesh::Wedge] {
+        assert!(mesh_of(mesh).attribute(Mesh::ATTRIBUTE_COLOR).is_none());
+    }
+    for mesh in Silhouette::ALL {
+        let shades: Vec<f32> = match silhouette_mesh(*mesh).attribute(Mesh::ATTRIBUTE_COLOR) {
+            Some(bevy::mesh::VertexAttributeValues::Float32x4(colors)) => {
+                assert!(
+                    colors
+                        .iter()
+                        .all(|c| c[0] == c[1] && c[1] == c[2] && c[3] == 1.0)
+                );
+                colors.iter().map(|c| c[0]).collect()
+            }
+            Some(other) => panic!("{mesh:?}: {other:?}"),
+            None => Vec::new(),
+        };
+        let shaded = matches!(
+            mesh,
+            Silhouette::Kite
+                | Silhouette::Star
+                | Silhouette::Chevron
+                | Silhouette::Diamond
+                | Silhouette::Drop
+                | Silhouette::Cross
+                | Silhouette::Crescent
+        );
+        assert_eq!(!shades.is_empty(), shaded, "{mesh:?}");
+        if shaded {
+            let rim = crate::game_vfx::RIM_SHADE;
+            assert!(shades.iter().all(|shade| *shade == 1.0 || *shade == rim));
+            assert!(shades.contains(&1.0) && shades.contains(&rim), "{mesh:?}");
+            // Every vertex on the unit circle is shaded: the tips of a shape are its edge.
+            for (point, shade) in vertices(PartMesh::Silhouette(*mesh)).iter().zip(&shades) {
+                if point.xy().length() > UNIT_RADIUS - 1e-3 {
+                    assert_eq!(*shade, rim, "{mesh:?} at {point}");
+                }
+            }
+        }
+    }
     assert_eq!(
         library.particle(ParticleShape::Kite),
         Some(library.handle(PartMesh::Silhouette(Silhouette::Kite)))
@@ -1080,6 +1129,86 @@ fn no_authored_part_leaves_the_boundary_of_a_zone_or_a_prop() {
             }
         }
     }
+    // A `core` and a `shell` in the middle of a circle may be larger than that: as large
+    // as the measure of the parser allows, which is taken on their own meshes. Each shape
+    // is scaled until that measure is exactly at its bound.
+    let shapes = [
+        [2.0, 3.0, 2.0],
+        [2.0, 1.0, 0.02],
+        [0.02, 1.0, 2.0],
+        [0.3, 0.05, 2.0],
+        [1.0, 0.02, 1.0],
+        [1.0, 1.0, 1.0],
+    ];
+    for (archetype, skill) in [
+        (Archetype::Zone, SkillId::DawnField),
+        (Archetype::Prop, SkillId::WildTraps),
+        // Rule E-6: the plate of a stance stands half a radius ahead of the centre.
+        (Archetype::Prop, SkillId::MirrorGuard),
+    ] {
+        let kind = category::own_kinds(skill)[0];
+        for mesh in Silhouette::ALL {
+            for behave in Behaviour::ALL {
+                if matches!(behave, Behaviour::Gyro | Behaviour::OnlyAfterRenew) {
+                    continue;
+                }
+                for shape in shapes {
+                    for altitude in [Altitude::Ground, Altitude::Chest] {
+                        let lead = plate_lead(archetype, kind, *mesh);
+                        let measure = |size: [f32; 3]| {
+                            centred_reach(
+                                &part(*mesh, size, *behave),
+                                altitude != Altitude::Ground,
+                                lead,
+                            )
+                        };
+                        // The measure is the lead of the plate plus a term that grows with
+                        // the size, and the lead alone is inside the bound.
+                        let (mut low, mut high) = (0.0_f32, 4.0_f32);
+                        for _ in 0..40 {
+                            let middle = 0.5 * (low + high);
+                            if measure(shape.map(|extent| extent * middle)) <= MARKER_REACH {
+                                low = middle;
+                            } else {
+                                high = middle;
+                            }
+                        }
+                        let size = shape.map(|extent| extent * low);
+                        assert!(low > 0.1 && measure(size) > MARKER_REACH - 1e-3);
+                        let mut body = bare(archetype);
+                        body.altitude = Some(altitude);
+                        body.fill = Some(true);
+                        body.core = Some(part(*mesh, size, *behave));
+                        body.shell = Some(part(*mesh, size, *behave));
+                        for radius in [0.3, 0.4, 3.0] {
+                            let e = with(&effect(skill, kind), |e| e.radius = radius);
+                            for now in [0.0, 0.31, 1.7, 4.4] {
+                                for armed in [false, true] {
+                                    let state = with(&e, |e| e.armed = armed);
+                                    inside_the_boundary(
+                                        &body,
+                                        &first(&state, now),
+                                        &format!("{mesh:?} {behave:?} {size:?} {altitude:?}"),
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    // A ring that lies in the circle spans it up to the inner edge of its line, and a
+    // row that keeps every extent within the radius never needed the measure.
+    let lying = |mesh, size: f32| {
+        centred_reach(
+            &part(mesh, [size, 0.02, size], Behaviour::Steady),
+            false,
+            0.0,
+        )
+    };
+    assert!((lying(Silhouette::Ring, 2.0 * MARKER_REACH) - MARKER_REACH).abs() < 1e-5);
+    assert!(lying(Silhouette::Block, 1.0) < MARKER_REACH);
     // A prop wider than a small boundary is scaled down to it.
     let mut lantern = bare(Archetype::Zone);
     lantern.model = Some(Model::Lantern);
@@ -2305,6 +2434,27 @@ fn trail_parts_lie_only_on_observed_positions() {
                     );
                 }
             }
+            // `trail_scale` changes the size of a part across the path and nothing else:
+            // not its place, and not the length of a ribbon between two sightings.
+            let mut wide = body.clone();
+            wide.trail_scale = Some(2.0);
+            let scaled = shown(&wide, &seen, |role| matches!(role, Role::Trail(_)));
+            assert_eq!(scaled.len(), poses.len());
+            for (index, (pose, scaled)) in poses.iter().zip(&scaled).enumerate() {
+                assert_eq!(pose.translation, scaled.translation);
+                assert_eq!(pose.rotation, scaled.rotation);
+                assert!((scaled.scale.x - 2.0 * pose.scale.x).abs() < 1e-5);
+                let width = trail_width(trail, e.radius, 1.0);
+                let fade = if trail == Trail::Links {
+                    1.0
+                } else {
+                    1.0 - index as f32 * 0.22
+                };
+                assert!((pose.scale.x - width * fade).abs() < 1e-5, "{trail:?}");
+                if trail == Trail::Ribbon {
+                    assert_eq!(pose.scale.z, scaled.scale.z);
+                }
+            }
             // A body at rest shows none of them.
             let resting = Seen {
                 resting: true,
@@ -2313,6 +2463,10 @@ fn trail_parts_lie_only_on_observed_positions() {
             assert!(shown(&body, &resting, |role| matches!(role, Role::Trail(_))).is_empty());
         }
     }
+    // The engine's sizes for a radius, which a row scales: a ribbon of 0.45 at most.
+    assert_eq!(trail_width(Trail::Ribbon, 2.0, 1.0), 0.45);
+    assert_eq!(trail_width(Trail::Ribbon, 2.0, 2.0), 0.9);
+    assert_eq!(trail_width(Trail::None, 2.0, 2.0), 0.0);
     assert_eq!(
         shown(&trail_body(Trail::None), &first(&e, 0.0), |_| true).len(),
         2
@@ -2842,6 +2996,7 @@ fn behaviours_follow_the_stage_and_the_remaining_time() {
                 model: None,
                 layout: None,
                 trail: Trail::None,
+                trail_scale: 1.0,
                 marker: Marker::None,
                 has_core: true,
                 shell_like_core: false,
@@ -2869,6 +3024,7 @@ fn behaviours_follow_the_stage_and_the_remaining_time() {
                     model: None,
                     layout: None,
                     trail: Trail::None,
+                    trail_scale: 1.0,
                     marker: Marker::None,
                     has_core: true,
                     shell_like_core: false,

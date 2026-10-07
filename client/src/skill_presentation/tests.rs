@@ -1439,8 +1439,10 @@ fn draw_registry(registry: &SkillPresentation) -> Drawn {
                 let specs = impacts::impact_particles(recipe, palette, &ctx);
                 assert!(!specs.is_empty(), "{what}: impact");
                 within(&specs, impacts::IMPACT_MAX, impacts::IMPACT_SECS, what);
+                // The particles of the kind and the flash of the hit.
                 if let Some(count) = recipe.count {
-                    assert_eq!(specs.len(), usize::from(count), "{what}: impact");
+                    let own = usize::from(count).min(impacts::IMPACT_MAX - 1);
+                    assert_eq!(specs.len(), own + 1, "{what}: impact");
                 }
                 let reach = specs.iter().map(|spec| spec.reach(far)).fold(0.0, f32::max);
                 assert!(
@@ -1649,7 +1651,8 @@ fn every_pattern_and_kind_is_bounded() {
                             let specs = impacts::impact_particles(&recipe, &palette, &ctx);
                             let name =
                                 format!("{} {} x{count} {scale} {lifetime}", kind.id(), shape.id());
-                            assert_eq!(specs.len(), usize::from(count), "{name}");
+                            let own = usize::from(count).min(impacts::IMPACT_MAX - 1);
+                            assert_eq!(specs.len(), own + 1, "{name}");
                             for spec in &specs {
                                 assert!(spec.is_sound(), "{name}");
                                 assert!(spec.end_secs() <= lifetime * 1.4 + 1e-5, "{name}");

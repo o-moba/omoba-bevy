@@ -542,7 +542,8 @@ pub(crate) fn render_markdown() -> String {
         Section {
             title: "Impact kinds",
             note: "`impact.kind`. `pierce_through` needs a skill that pierces and `blast` one with area \
-                   damage; `arc` may not lead `chain_snap` or `facet_pop`.",
+                   damage; `arc` may not lead `chain_snap` or `facet_pop`. Every kind closes its \
+                   burst with the flash of the hit: a glow in the lead colour at the receipt.",
             columns: &["ID", "What the player sees", "Default lead shape"],
             rows: ImpactKind::ALL
                 .iter()

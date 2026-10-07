@@ -1041,10 +1041,11 @@ mod tests {
             let world = app.world_mut();
             assert_eq!(world.query::<&Mesh3d>().iter(world).count(), 0);
         }
-        // The three projectile meshes of the `shape` bodies and the shared silhouettes.
+        // The three projectile meshes of the `shape` bodies, the shared silhouettes and the
+        // two meshes the library keeps for interior layers.
         let shared = app.world().resource::<Assets<Mesh>>().len();
         assert_eq!(counts.unwrap().0, shared);
-        assert_eq!(shared, 3 + Silhouette::ALL.len() + 1);
+        assert_eq!(shared, 3 + Silhouette::ALL.len() + 2);
 
         // Every part is where the form table puts it at the age of the flight; a paused
         // clock holds the whole body still.
