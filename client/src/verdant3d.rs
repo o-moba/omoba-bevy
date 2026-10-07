@@ -223,7 +223,7 @@ fn apply_environment_palette(
 }
 
 #[derive(Resource, Clone)]
-struct VerdantAssets {
+pub(crate) struct VerdantAssets {
     environment: Handle<WorldAsset>,
     foliage: Handle<WorldAsset>,
     watchtower_green: Handle<WorldAsset>,
@@ -233,6 +233,19 @@ struct VerdantAssets {
 }
 
 impl VerdantAssets {
+    /// Every world scene, for the boot splash's progress.
+    pub(crate) fn handles(&self) -> [bevy::asset::UntypedHandle; 6] {
+        [
+            &self.environment,
+            &self.foliage,
+            &self.watchtower_green,
+            &self.watchtower_blue,
+            &self.sanctuary_green,
+            &self.sanctuary_blue,
+        ]
+        .map(|handle| handle.clone().untyped())
+    }
+
     fn structure(&self, kind: StructureKind, team: Team) -> Handle<WorldAsset> {
         match (kind, team) {
             (StructureKind::Tower, Team::Green) => self.watchtower_green.clone(),

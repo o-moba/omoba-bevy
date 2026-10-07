@@ -15,6 +15,7 @@ use bevy::prelude::*;
 pub(crate) mod animation_qa;
 mod audio_qa;
 mod beta_ui_qa;
+mod boot_qa;
 mod career_visual_qa;
 mod combat_polish_qa;
 mod combat_qa;
@@ -71,6 +72,7 @@ impl PluginGroup for QaPlugins {
             .add(result_qa::ResultQaPlugin)
             .add(ui_gallery::UiGalleryPlugin)
             .add(help_qa::HelpQaPlugin)
+            .add(boot_qa::BootQaPlugin)
     }
 }
 

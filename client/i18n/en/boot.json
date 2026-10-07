@@ -1,0 +1,6 @@
+{
+  "boot.status.interface": "Loading the interface…",
+  "boot.status.world": "Loading the world…",
+  "boot.status.ready": "Entering the arena…",
+  "boot.status.line": "{stage} · {percent}%"
+}
