@@ -13,7 +13,7 @@ pub(crate) mod stage;
 pub(crate) mod status;
 pub(crate) mod vocab;
 
-pub(crate) use schema::{BasicProfile, SkillProfile, Theme};
+pub(crate) use schema::{BasicProfile, SkillProfile, SoundCue, Theme};
 
 /// Evidence and scene readiness for each replicated world effect, independent of its owner.
 #[cfg(feature = "qa")]

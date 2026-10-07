@@ -1607,8 +1607,14 @@ fn emit_skill_cast_particles(
         if profile.windup.is_some() {
             continue;
         }
-        if crate::skill_presentation::equipped_skill(class.0, state, action.slot)
-            == Some(shared::loadout::SkillId::DaggerBluff)
+        // A Bluff row that names its cast voice is voiced from that data by the audio
+        // layer. A row without one keeps the cue it always had.
+        if profile
+            .sound
+            .as_ref()
+            .is_none_or(|sound| sound.cast.is_none())
+            && crate::skill_presentation::equipped_skill(class.0, state, action.slot)
+                == Some(shared::loadout::SkillId::DaggerBluff)
         {
             audio.write(crate::game_audio::AudioCueRequest(
                 crate::game_audio::AudioCue::Bluff,
@@ -2932,6 +2938,68 @@ mod tests {
             )
             .is_empty()
         );
+    }
+    #[test]
+    fn the_bluff_cue_is_requested_only_while_its_row_names_no_cast_voice() {
+        use crate::game_audio::{AudioCue, AudioCueRequest};
+        use crate::net::{NetworkHeroClass, PlayerActionFacing, PlayerCosmeticAction};
+        use crate::skill_presentation::SkillPresentation;
+        use shared::{HeroClass, PlayerActionKind, loadout::SkillId};
+        // The cue requests of one accepted action of an Adventurer on `slot`.
+        let requests = |registry: SkillPresentation, slot: u8| {
+            let mut app = App::new();
+            app.insert_resource(registry)
+                .insert_resource(crate::net::GameStateSnapshot {
+                    meta: shared::protocol::SnapshotMeta::new(7, 1, 1),
+                    state: crate::net::GameState::Running,
+                    ..Default::default()
+                })
+                .add_message::<FlightParticles>()
+                .add_message::<AudioCueRequest>()
+                .add_systems(Update, emit_skill_cast_particles);
+            let hero = app
+                .world_mut()
+                .spawn((
+                    Transform::default(),
+                    InheritedVisibility::VISIBLE,
+                    PlayerCosmeticAction::default(),
+                    PlayerActionFacing::default(),
+                    NetworkHeroClass(HeroClass::Adventurer),
+                    crate::combat::CombatStats::default(),
+                ))
+                .id();
+            app.update();
+            app.world_mut()
+                .entity_mut(hero)
+                .insert(PlayerCosmeticAction {
+                    sequence: 1,
+                    kind: PlayerActionKind::Cast,
+                    slot,
+                });
+            app.update();
+            app.world_mut()
+                .resource_mut::<Messages<AudioCueRequest>>()
+                .drain()
+                .map(|request| request.0)
+                .collect::<Vec<_>>()
+        };
+        let kit = shared::loadout::preset_for_class(HeroClass::Adventurer).unwrap();
+        let bluff = kit
+            .skills()
+            .iter()
+            .position(|skill| *skill == SkillId::DaggerBluff)
+            .unwrap() as u8;
+        // The packaged row names no voice, so Bluff keeps the cue it always had.
+        assert_eq!(
+            requests(SkillPresentation::packaged(), bluff),
+            [AudioCue::Bluff]
+        );
+        // A row with `sound.cast` is voiced by the audio layer, once.
+        assert!(requests(SkillPresentation::target(), bluff).is_empty());
+        for slot in (0..4).filter(|slot| *slot != bluff) {
+            assert!(requests(SkillPresentation::packaged(), slot).is_empty());
+            assert!(requests(SkillPresentation::target(), slot).is_empty());
+        }
     }
     #[test]
     fn no_flight_puff_where_a_form_is_drawn() {

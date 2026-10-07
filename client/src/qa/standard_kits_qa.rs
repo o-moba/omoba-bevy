@@ -1617,6 +1617,7 @@ struct PhaseWorld<'w, 's> {
     game: Res<'w, GameStateSnapshot>,
     mode: Res<'w, crate::sprite::PlayerVisualMode>,
     registry: Res<'w, crate::skill_presentation::SkillPresentation>,
+    audio: Res<'w, crate::game_audio::GameAudioDiagnostics>,
     animations: Res<'w, crate::sandbox::AnimationReadout>,
     context: Res<'w, crate::input_context::GameplayInputContext>,
     map: Res<'w, crate::maps::MapLayout>,
@@ -2126,6 +2127,13 @@ fn still_record(
         "projectiles": world.own_projectiles(),
         "state_visuals": world.state_visuals(),
         "hero_states": world.hero_states(),
+        // The action sequence of the cast, and the newest voices the rows of the
+        // registry asked the audio layer for, oldest first. A voice is recorded when
+        // it is asked for, whether or not the mixer lets it sound.
+        "audio": {
+            "cast_sequence": edge.map(|(_, sequence)| sequence),
+            "row_voices": world.audio.row_voices,
+        },
         "effect_parts": total("parts"),
         "effect_visible_parts": total("visible_parts"),
         "effect_lights": total("lights"),

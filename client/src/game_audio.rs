@@ -1,12 +1,18 @@
 //! Local audio presentation. Accepted server receipts select effects; audio never
 //! predicts damage, modifies gameplay, or retains a queue of unheard hits.
+//!
+//! A row of the skill registry gives its skill a voice: a sample, a speed, a slice of the
+//! sample and, for the local hero, up to two later notes. Such a voice is set off by an
+//! accepted action the client observed, by a telegraph that fired or by an accepted
+//! receipt, and by nothing else. The later notes are admitted together with the first one
+//! and wait at most 240 ms for their turn; a voice that was refused is never tried again.
 mod policy;
 
 use std::collections::BTreeMap;
 
 use bevy::{
     audio::{AudioSinkPlayback, Volume},
-    ecs::system::SystemParam,
+    ecs::{message::MessageCursor, system::SystemParam},
     prelude::*,
     window::PrimaryWindow,
 };
@@ -19,12 +25,13 @@ use crate::{
     mobile_controls::MobileControls,
     net::{ClientSession, GameState, GameStateSnapshot, NetworkPlayerId, PlayerProgression},
     player::Player,
+    skill_presentation::{SkillPresentation, cast::SkillCastObserved, stage::StageEvent},
     team::Team,
 };
 pub(crate) use policy::AudioCue;
 use policy::{
-    AttackCursor, AttackObservation, Candidate, CueCatalog, EventCursor, LocalState, RateBudget,
-    expired,
+    AttackCursor, AttackObservation, Candidate, CueCatalog, EventCursor, Heard, HeroHeard,
+    LocalState, RateBudget, Variant, expired, voice_rows,
 };
 
 pub struct GameAudioPlugin;
@@ -40,7 +47,9 @@ impl Plugin for GameAudioPlugin {
                 update_audio
                     .after(crate::net::ClientNetPipeline::ApplySnapshot)
                     .after(crate::net::ClientNetPipeline::SessionLifecycle)
-                    .after(InputContextSet::Resolve),
+                    .after(InputContextSet::Resolve)
+                    // The casts and stage events of this frame are voiced in this frame.
+                    .after(crate::skill_presentation::stage::track_effects),
             );
     }
 }
@@ -69,7 +78,37 @@ pub(crate) struct GameAudioDiagnostics {
     pub(crate) dropped_rate: u64,
     pub(crate) last_cue: String,
     pub(crate) cue_plays: BTreeMap<String, u64>,
+    /// Later notes of admitted voices that wait for their turn.
+    pub(crate) pending_notes: usize,
+    /// The newest voices the skill registry asked for, oldest first, whether or not the
+    /// mixer let them sound.
+    #[cfg(feature = "qa")]
+    pub(crate) row_voices: std::collections::VecDeque<RowVoice>,
 }
+
+/// Evidence of one voice a row of the skill registry gave an action.
+#[cfg(feature = "qa")]
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub(crate) struct RowVoice {
+    /// `cast`, `recast`, `release`, `impact` or `attack`.
+    pub(crate) moment: &'static str,
+    /// The id of the skill row, or the class of a basic-attack row.
+    pub(crate) row: &'static str,
+    /// The hero that acted; 0 when the client does not know it.
+    pub(crate) actor: u64,
+    /// The action sequence, receipt or effect that set the voice off.
+    pub(crate) id: u64,
+    pub(crate) base: &'static str,
+    pub(crate) speed: f32,
+    pub(crate) slice: &'static str,
+    pub(crate) gain: f32,
+    /// Notes after the first one.
+    pub(crate) notes: usize,
+}
+
+/// Voices kept as evidence.
+#[cfg(feature = "qa")]
+const ROW_VOICE_LOG: usize = 64;
 
 struct LoadedCue {
     source: Handle<AudioSource>,
@@ -83,8 +122,18 @@ struct GameAudioRuntime {
     cursor: EventCursor,
     attacks: AttackCursor,
     budget: RateBudget,
+    /// Later notes of voices the budget admitted, each with the moment it starts.
+    pending: Vec<PendingNote>,
     unlocked: bool,
     music_gain: f32,
+}
+
+struct PendingNote {
+    due: f64,
+    variant: Variant,
+    /// The factor of the voice it belongs to, so its notes keep their interval.
+    detune: f32,
+    gain: f32,
 }
 
 #[derive(Component)]
@@ -184,6 +233,7 @@ struct AudioWorld<'w, 's> {
             &'static crate::net::NetworkHeroClass,
             &'static crate::net::PlayerCosmeticAction,
             Option<&'static InheritedVisibility>,
+            Option<&'static crate::net::PlayerLoadout>,
         ),
     >,
     session: Res<'w, ClientSession>,
@@ -201,11 +251,69 @@ struct AudioWorld<'w, 's> {
     >,
 }
 
+/// What the skill registry may give a voice in one frame. An app without the skill
+/// presentation has none of it and keeps the cues of the wire style.
+#[derive(SystemParam)]
+struct SkillVoices<'w, 's> {
+    registry: Option<Res<'w, SkillPresentation>>,
+    casts: Option<Res<'w, Messages<SkillCastObserved>>>,
+    cast_cursor: Local<'s, MessageCursor<SkillCastObserved>>,
+    stages: Option<Res<'w, Messages<StageEvent>>>,
+    stage_cursor: Local<'s, MessageCursor<StageEvent>>,
+}
+
+impl SkillVoices<'_, '_> {
+    /// The accepted actions and the stage events since the previous frame. They are taken
+    /// in every frame, so none is voiced late.
+    fn take(&mut self) -> (Vec<SkillCastObserved>, Vec<StageEvent>) {
+        (
+            self.casts.as_deref().map_or_else(Vec::new, |casts| {
+                self.cast_cursor.read(casts).cloned().collect()
+            }),
+            self.stages.as_deref().map_or_else(Vec::new, |stages| {
+                self.stage_cursor.read(stages).cloned().collect()
+            }),
+        )
+    }
+}
+
+/// One note of a voice, as it is handed to the mixer.
+fn note_voice(
+    source: Handle<AudioSource>,
+    variant: Variant,
+    detune: f32,
+    gain: f32,
+    level: f32,
+    now: f64,
+) -> impl Bundle {
+    let (start, duration) = variant.span();
+    let mut playback = PlaybackSettings::DESPAWN
+        .with_volume(Volume::Linear(level * gain))
+        .with_speed(variant.speed() * detune);
+    if let Some(start) = start {
+        playback = playback.with_start_position(start);
+    }
+    if let Some(duration) = duration {
+        playback = playback.with_duration(duration);
+    }
+    (
+        AudioPlayer::new(source),
+        playback,
+        AudioVoice {
+            cue: Some(variant.cue),
+            gain,
+            born: now,
+            observed_sink: false,
+        },
+    )
+}
+
 fn update_audio(
     mut commands: Commands,
     time: Res<Time<Real>>,
     input: AudioInput,
     world: AudioWorld,
+    mut skills: SkillVoices,
     settings: Option<Res<AudioSettings>>,
     sources: Res<Assets<AudioSource>>,
     mut requests: MessageReader<AudioCueRequest>,
@@ -262,7 +370,7 @@ fn update_audio(
                 .actors
                 .iter()
                 .map(
-                    |(id, pose, stats, team, class, action, visibility)| AttackObservation {
+                    |(id, pose, stats, team, class, action, visibility, _)| AttackObservation {
                         id: id.0,
                         sequence: action.sequence,
                         attacking: action.kind == shared::PlayerActionKind::Attack,
@@ -275,6 +383,57 @@ fn update_audio(
                 ),
         ),
     );
+    let (casts, stages) = skills.take();
+    if let (Some(registry), Some(listener)) = (skills.registry.as_deref(), local) {
+        let heroes: Vec<HeroHeard> = world
+            .actors
+            .iter()
+            .map(
+                |(id, _, _, _, class, action, visibility, loadout)| HeroHeard {
+                    id: id.0,
+                    visible: visibility.is_none_or(|v| v.get()),
+                    class: class.0,
+                    loadout: loadout.and_then(|loadout| loadout.0.as_ref()),
+                    slot: action.slot,
+                },
+            )
+            .collect();
+        voice_rows(
+            &Heard {
+                registry,
+                listener,
+                heroes: &heroes,
+                casts: &casts,
+                stages: &stages,
+            },
+            &mut candidates,
+        );
+    }
+    #[cfg(feature = "qa")]
+    for candidate in &candidates {
+        if let policy::Origin::Row {
+            moment,
+            row,
+            actor,
+            id,
+        } = candidate.origin
+        {
+            if diagnostics.row_voices.len() == ROW_VOICE_LOG {
+                diagnostics.row_voices.pop_front();
+            }
+            diagnostics.row_voices.push_back(RowVoice {
+                moment: moment.id(),
+                row,
+                actor,
+                id,
+                base: candidate.cue.id(),
+                speed: candidate.variant().speed(),
+                slice: candidate.slice.id(),
+                gain: candidate.gain,
+                notes: candidate.admission().notes - 1,
+            });
+        }
+    }
     if input.ui_pressed() {
         candidates.push(Candidate::local(AudioCue::UiClick));
     }
@@ -302,6 +461,10 @@ fn update_audio(
     diagnostics.music_position_secs = 0.0;
     diagnostics.music_volume = 0.0;
     diagnostics.music_paused = true;
+    // A note belongs to its round and to a mixer that lets it sound.
+    if changed || !audible {
+        runtime.pending.clear();
+    }
 
     let state_gain = match world.snapshot.state {
         GameState::Running => 1.0,
@@ -399,9 +562,16 @@ fn update_audio(
     // Candidates are consumed even while muted, loading, unfocused or throttled.
     // There is deliberately no retry queue for stale one-shot effects.
     if !audible {
+        diagnostics.pending_notes = 0;
         return;
     }
-    let mut frame_voices = 0;
+    // Later notes that are due were admitted with their voice. They start in this frame
+    // and count against what the frame may start besides them.
+    let mut frame_voices = runtime
+        .pending
+        .iter()
+        .filter(|note| note.due <= now)
+        .count();
     for candidate in candidates {
         let bus = if candidate.cue.is_ui() {
             settings.ui
@@ -418,37 +588,71 @@ fn update_audio(
             diagnostics.dropped_missing += 1;
             continue;
         }
-        let source = cue.source.clone();
-        let gain = cue.gain * candidate.gain;
-        if gain <= 0.0 {
+        let sample_gain = cue.gain;
+        if sample_gain * candidate.gain <= 0.0 {
             continue;
         }
-        if !runtime
-            .budget
-            .allow(candidate.cue, now, diagnostics.active_effects, frame_voices)
-        {
+        // Every note of the voice is admitted now, or the voice is dropped whole.
+        let admission = candidate.admission();
+        let reserved = diagnostics.active_effects + runtime.pending.len();
+        if !runtime.budget.allow(admission, now, reserved, frame_voices) {
             diagnostics.dropped_rate += 1;
             continue;
         }
-        commands.spawn((
-            AudioPlayer::new(source),
-            PlaybackSettings::DESPAWN.with_volume(Volume::Linear(settings.master * bus * gain)),
-            AudioVoice {
-                cue: Some(candidate.cue),
-                gain,
-                born: now,
-                observed_sink: false,
-            },
-        ));
-        diagnostics.active_effects += 1;
-        frame_voices += 1;
-        diagnostics.played += 1;
-        diagnostics.last_cue = candidate.cue.id().into();
-        *diagnostics
-            .cue_plays
-            .entry(candidate.cue.id().into())
-            .or_default() += 1;
+        frame_voices += admission.notes;
+        let detune = candidate.detune();
+        runtime.pending.push(PendingNote {
+            due: now,
+            variant: admission.variant,
+            detune,
+            gain: sample_gain * candidate.gain,
+        });
+        runtime
+            .pending
+            .extend(candidate.notes.iter().flatten().map(|note| PendingNote {
+                due: now + note.delay_secs,
+                variant: Variant {
+                    step: note.step,
+                    ..admission.variant
+                },
+                detune,
+                gain: sample_gain * note.gain,
+            }));
     }
+    let mut waiting = std::mem::take(&mut runtime.pending);
+    waiting.retain(|note| {
+        if note.due > now {
+            return true;
+        }
+        let cue = note.variant.cue;
+        let bus = if cue.is_ui() {
+            settings.ui
+        } else {
+            settings.effects
+        };
+        // The bus may have been closed while the note waited.
+        if let Some(loaded) = runtime
+            .cues
+            .get(&cue)
+            .filter(|loaded| bus > 0.0 && sources.contains(&loaded.source))
+        {
+            commands.spawn(note_voice(
+                loaded.source.clone(),
+                note.variant,
+                note.detune,
+                note.gain,
+                settings.master * bus,
+                now,
+            ));
+            diagnostics.active_effects += 1;
+            diagnostics.played += 1;
+            diagnostics.last_cue = cue.id().into();
+            *diagnostics.cue_plays.entry(cue.id().into()).or_default() += 1;
+        }
+        false
+    });
+    diagnostics.pending_notes = waiting.len();
+    runtime.pending = waiting;
 }
 
 #[cfg(test)]
