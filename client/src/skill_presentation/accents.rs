@@ -35,6 +35,9 @@ pub(crate) const STAGE_SECS: f32 = 0.6;
 /// How long the flash of a released telegraph is seen: the payoff of a wait, so it stays
 /// for most of what a stage one-shot may last.
 const DISCHARGE_SECS: f32 = 0.5;
+/// Wisps of a fade, and the pause between one pair of them and the next.
+const FADE_WISPS: usize = 6;
+const FADE_STEP_SECS: f32 = 0.03;
 #[cfg_attr(not(test), allow(dead_code))] // the cues are emitted by the receipt collector
 pub(crate) const CUE_MAX: usize = 6;
 #[cfg_attr(not(test), allow(dead_code))]
@@ -1215,7 +1218,7 @@ pub(crate) fn stage_oneshot(
                 return Vec::new();
             };
             let corner = |i: u8| center + Vec2::from_angle(TAU * f32::from(i % 5) / 5.0) * radius;
-            let (from, to) = (corner(index), corner(index + 1));
+            let (from, to) = (corner(index), corner(index % 5 + 1));
             let middle = from.midpoint(to);
             let inward = (center - middle).normalize_or_zero();
             // The two halves of the bar sink a little toward the inside.
@@ -1258,13 +1261,16 @@ pub(crate) fn stage_oneshot(
                 gain: 1.0,
             };
             let radius = inner_circle(geo).map_or(0.2, |(_, radius)| (0.3 * radius).min(0.25));
-            inner_points(geo, 6, radius)
-                .into_iter()
+            let points = inner_points(geo, FADE_WISPS, radius);
+            points
+                .iter()
                 .enumerate()
                 .map(|(i, point)| {
-                    let mut wisp = glow(lift(point, 0.3), radius, 0.5, mist);
+                    let mut wisp = glow(lift(*point, 0.3), radius, 0.5, mist);
                     wisp.velocity = Vec3::Y * 0.5;
-                    wisp.delay = 0.015 * i as f32;
+                    // From both ends toward the middle: the order in which a strip
+                    // dissolves must not say which of its ends was the origin.
+                    wisp.delay = FADE_STEP_SECS * i.min(points.len() - 1 - i) as f32;
                     wisp
                 })
                 .collect()
@@ -1857,7 +1863,9 @@ pub(crate) fn emit_stage_oneshots(
             }
             sparked.push(event.effect.id);
         }
-        let at = ground_at(map.as_deref(), Vec2::from_array(event.effect.position));
+        // The ground the body of the effect stands on: for a strip whose owner is not seen
+        // that may be either of its ends.
+        let at = ground_at(map.as_deref(), super::bodies::root_at(&event.effect));
         // A body in flight sparks where it flies, not on the ground under it.
         let lift = registry
             .body_for(&event.effect)
@@ -2737,6 +2745,11 @@ mod tests {
             let expected = TAU * (side as f32 + 0.5) / 5.0;
             assert!(((*middle - centre).to_angle().rem_euclid(TAU) - expected).abs() < 0.02);
         }
+        // Every side index of the wire stands for one of the five sides.
+        assert_eq!(
+            stage_oneshot(OneShot::SegmentSnap(u8::MAX), &palette(), &cage, 0.0, 5),
+            stage_oneshot(OneShot::SegmentSnap(0), &palette(), &cage, 0.0, 5)
+        );
         // A fade is grey and unlit, so it cannot be taken for a hit.
         for wisp in stage_oneshot(OneShot::Fade, &palette(), &cage, 0.0, 5) {
             assert_eq!(wisp.color.gain, 1.0);
@@ -2748,6 +2761,74 @@ mod tests {
         assert_eq!(OneShot::of(ExpireKind::Crumble), Some(OneShot::Crumble));
         assert_eq!(OneShot::of(ExpireKind::Discharge), Some(OneShot::Discharge));
         assert_eq!(OneShot::of(ExpireKind::Detonate), Some(OneShot::Detonate));
+    }
+
+    /// A strip is received with its caster-side end first. Its fade is the same set of
+    /// wisps whichever end comes first, so a strip whose owner the viewer does not see
+    /// dissolves without saying where it came from.
+    #[test]
+    fn the_fade_of_a_strip_tells_no_direction() {
+        let near = Vec2::new(ORIGIN.x, ORIGIN.z);
+        let far = near + Vec2::new(9.0, 12.0);
+        let wisps = |geo: GeoShape| {
+            let mut wisps: Vec<_> = stage_oneshot(OneShot::Fade, &palette(), &geo, ORIGIN.y, 5)
+                .into_iter()
+                .map(|wisp| {
+                    (
+                        (wisp.origin * 1e3).round().to_array().map(|v| v as i64),
+                        (wisp.delay * 1e4).round() as i64,
+                        (wisp.velocity * 1e3).round().to_array().map(|v| v as i64),
+                    )
+                })
+                .collect();
+            wisps.sort();
+            wisps
+        };
+        for (there, back) in [
+            (
+                GeoShape::Capsule {
+                    from: near,
+                    to: far,
+                    radius: 1.2,
+                },
+                GeoShape::Capsule {
+                    from: far,
+                    to: near,
+                    radius: 1.2,
+                },
+            ),
+            (
+                GeoShape::Lane {
+                    from: near,
+                    to: far,
+                    half_width: 0.8,
+                },
+                GeoShape::Lane {
+                    from: far,
+                    to: near,
+                    half_width: 0.8,
+                },
+            ),
+            (
+                GeoShape::Segment {
+                    from: near,
+                    to: far,
+                },
+                GeoShape::Segment {
+                    from: far,
+                    to: near,
+                },
+            ),
+        ] {
+            let drawn = wisps(there);
+            assert_eq!(drawn.len(), FADE_WISPS, "{there:?}");
+            assert_eq!(drawn, wisps(back), "{there:?}");
+            // The wisps do not start together, so the equality above is about their order
+            // too: the first ones stand at both ends of the strip.
+            let first: Vec<_> = drawn.iter().filter(|wisp| wisp.1 == 0).collect();
+            assert_eq!(first.len(), 2, "{there:?}");
+            assert!(drawn.iter().any(|wisp| wisp.1 > 0), "{there:?}");
+        }
     }
 
     #[test]

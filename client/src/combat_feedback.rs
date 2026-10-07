@@ -43,6 +43,8 @@ pub(crate) struct CollectCombatFeedback;
 impl Plugin for CombatFeedbackPlugin {
     fn build(&self, app: &mut App) {
         crate::vfx_clock::ensure(app);
+        #[cfg(feature = "qa")]
+        app.init_resource::<ReceiptLooks>();
         app.init_resource::<CombatFeedback>()
             .add_message::<ConfirmedHit>()
             .add_systems(
@@ -126,6 +128,56 @@ impl Source<'_> {
     /// The row of the action that dealt the receipt.
     fn key(&self, event: &CombatEvent) -> Option<CastKey> {
         CastKey::of(self.class, self.loadout, event.action_slot?)
+    }
+}
+
+/// Evidence of what drew the burst of one accepted receipt.
+#[cfg(feature = "qa")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ReceiptLook {
+    pub receipt: u64,
+    pub slot: Option<u8>,
+    /// The kind of the recipe of the row that dealt the hit; `None` for a built-in burst.
+    pub impact: Option<&'static str>,
+    /// Particles the recipe asked for.
+    pub particles: usize,
+}
+
+/// The newest receipts that were drawn, oldest first.
+#[cfg(feature = "qa")]
+#[derive(Resource, Default)]
+pub(crate) struct ReceiptLooks(pub std::collections::VecDeque<ReceiptLook>);
+
+#[cfg(feature = "qa")]
+impl ReceiptLook {
+    /// The look of a receipt whose burst is `themed`, the output of `themed_impact` for it.
+    fn of(
+        skills: Option<&SkillPresentation>,
+        source: Option<&Source>,
+        event: &CombatEvent,
+        themed: Option<&[ParticleSpec]>,
+    ) -> Self {
+        Self {
+            receipt: event.id,
+            slot: event.action_slot,
+            impact: themed.and_then(|_| {
+                let look = skills?.look(source?.key(event)?)?;
+                Some(look.impact?.kind.id())
+            }),
+            particles: themed.map_or(0, <[ParticleSpec]>::len),
+        }
+    }
+}
+
+#[cfg(feature = "qa")]
+impl ReceiptLooks {
+    const KEPT: usize = 32;
+
+    fn record(&mut self, look: ReceiptLook) {
+        if self.0.len() == Self::KEPT {
+            self.0.pop_front();
+        }
+        self.0.push_back(look);
     }
 }
 
@@ -231,6 +283,7 @@ fn collect_hits(
     positions: Query<(&NetworkPlayerId, &Transform, &InheritedVisibility)>,
     cameras: Query<(&Camera, &Transform), With<MainCamera>>,
     mode: Res<PlayerVisualMode>,
+    #[cfg(feature = "qa")] mut shown: ResMut<ReceiptLooks>,
 ) {
     feedback.impacts.retain_mut(|impact| {
         impact.age += clock.delta;
@@ -352,6 +405,13 @@ fn collect_hits(
                 )
             })
             .flatten();
+        #[cfg(feature = "qa")]
+        shown.record(ReceiptLook::of(
+            skills.as_deref(),
+            source.as_ref(),
+            &event,
+            themed.as_deref(),
+        ));
         if let Some(burst) = themed {
             out.confirmed.write(ConfirmedBurst(burst));
         } else {
@@ -696,6 +756,52 @@ mod tests {
                 .all(|spec| spec.source == ParticleSource::Impact && spec.event_id == 6)
         );
         assert!(themed_impact(Some(&packaged), Some(&source), &basic, FLOOR, &[]).is_none());
+    }
+
+    /// The capture evidence of a receipt names the recipe that drew its burst, and no recipe
+    /// for a burst the engine drew itself.
+    #[cfg(feature = "qa")]
+    #[test]
+    fn the_evidence_of_a_receipt_names_what_drew_it() {
+        use shared::loadout::SkillId;
+        let registry = SkillPresentation::target();
+        let class = shared::HeroClass::Stormfist;
+        let source = seen_hero(class);
+        for (skill, kind) in [
+            (SkillId::ThunderKick, "thud_ring"),
+            (SkillId::EchoStrike, "spark_fork"),
+        ] {
+            let hit = dealt(5, 40.0, 7, slot_of(class, skill));
+            let burst = themed_impact(Some(&registry), Some(&source), &hit, FLOOR, &[]);
+            let look = ReceiptLook::of(Some(&registry), Some(&source), &hit, burst.as_deref());
+            assert_eq!(
+                look,
+                ReceiptLook {
+                    receipt: 5,
+                    slot: hit.action_slot,
+                    impact: Some(kind),
+                    particles: burst.unwrap().len(),
+                }
+            );
+        }
+        // A row without a recipe, and a source the client does not see, keep the built-in
+        // burst: the evidence names no recipe and counts no particle of one.
+        let hit = dealt(6, 40.0, 7, slot_of(class, SkillId::ThunderKick));
+        let packaged = SkillPresentation::packaged();
+        for (skills, source) in [(&packaged, Some(&source)), (&registry, None)] {
+            let burst = themed_impact(Some(skills), source, &hit, FLOOR, &[]);
+            assert!(burst.is_none());
+            let look = ReceiptLook::of(Some(skills), source, &hit, burst.as_deref());
+            assert_eq!((look.impact, look.particles), (None, 0));
+        }
+        // The log keeps the newest receipts only.
+        let mut looks = ReceiptLooks::default();
+        for id in 0..40 {
+            let hit = dealt(id, 1.0, 7, 0);
+            looks.record(ReceiptLook::of(None, None, &hit, None));
+        }
+        assert_eq!(looks.0.len(), ReceiptLooks::KEPT);
+        assert_eq!((looks.0[0].receipt, looks.0[31].receipt), (8, 39));
     }
 
     #[test]

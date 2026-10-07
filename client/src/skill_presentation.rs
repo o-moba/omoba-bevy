@@ -5,6 +5,8 @@ pub(crate) mod bodies;
 pub(crate) mod cast;
 mod category;
 mod effects;
+#[cfg(feature = "qa")]
+pub(crate) mod evidence;
 pub(crate) mod geometry;
 pub(crate) mod impacts;
 mod schema;

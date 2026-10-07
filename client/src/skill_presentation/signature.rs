@@ -1,7 +1,7 @@
 //! The identity of a skill as a player reads it, and the ratchet that keeps two skills from
 //! sharing one. Three axes: the motion family of the release, the body, the impact. Colour,
 //! rate, counts, sizes and sounds are not axes.
-// Read by the identity tests now and by the capture harness once it records identities.
+// Read by the identity tests and, through `evidence`, by the capture harness of a QA build.
 #![cfg_attr(not(test), allow(dead_code))]
 
 use super::category::{self, Category, SkillKey};

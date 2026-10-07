@@ -1374,6 +1374,56 @@ fn stage_oneshots_follow_the_row_of_the_effect() {
     assert_eq!(shot(&orb, end(EndKind::TrueExpiry)), None);
 }
 
+/// AC10: a strip is replicated with its caster-side end first. When the viewer does not see
+/// its owner, its fade is the same wisps in the same order whichever end that is, and the
+/// ground is sampled where its body stands.
+#[test]
+fn a_hidden_owner_strip_fades_the_same_from_either_end() {
+    let registry = target();
+    for (skill, kind) in [
+        (SkillId::DawnRay, K::Beam),
+        (SkillId::WinterDivide, K::BeamWarning),
+    ] {
+        let strip = with(&effect(9, skill, kind), |e| {
+            e.owner_id = 0;
+            e.position = [2.0, 3.0];
+            e.end = [8.0, -1.0];
+        });
+        let turned = with(&strip, |e| std::mem::swap(&mut e.position, &mut e.end));
+        let wisps = |effect: &SkillEffectState| {
+            let event = StageEvent {
+                effect: effect.clone(),
+                change: StageChange::Ended(EndKind::TrueExpiry),
+                owner: None,
+            };
+            assert_eq!(
+                accents::stage_shot(&registry, &event),
+                Some(OneShot::Fade),
+                "{}",
+                skill.id()
+            );
+            let mut wisps: Vec<_> = accents::stage_burst(&registry, &event, 0.25)
+                .into_iter()
+                .map(|wisp| {
+                    (
+                        (wisp.origin * 1e3).round().to_array().map(|v| v as i64),
+                        (wisp.delay * 1e4).round() as i64,
+                    )
+                })
+                .collect();
+            wisps.sort();
+            wisps
+        };
+        let drawn = wisps(&strip);
+        assert!(drawn.iter().any(|wisp| wisp.1 > 0), "{}", skill.id());
+        assert_eq!(drawn, wisps(&turned), "{}", skill.id());
+        assert_eq!(
+            super::super::bodies::root_at(&strip),
+            super::super::bodies::root_at(&turned)
+        );
+    }
+}
+
 #[test]
 fn a_released_telegraph_links_to_its_receipts() {
     let registry = target();

@@ -17,6 +17,9 @@
 //! `OMOBA_STANDARD_QA_AIM=1` adds one still of the aim preview of every modular
 //! skill, taken with its key held before the cast, and a second one when the
 //! slot offers a recast after the cast.
+//! `OMOBA_STANDARD_QA_RECIPE=<skill>,<skill>,<skill>,<skill>` gives the hero of a
+//! phase run an authored kit on the core of its class, so that skills of other
+//! classes are captured on its Q, W, E and R.
 use crate::{
     frontend::{AppScreen, ScreenDriverPaused},
     help_overlay::HelpOverlayVisible,
@@ -46,7 +49,8 @@ use shared::{
     },
 };
 use std::{
-    collections::{BTreeMap, HashSet},
+    collections::{BTreeMap, HashMap, HashSet},
+    f32::consts::TAU,
     path::PathBuf,
     time::{Duration, Instant},
 };
@@ -67,6 +71,9 @@ impl Plugin for StandardKitsQaPlugin {
         let flight = flag("OMOBA_STANDARD_QA_FLIGHT");
         let interleave = flag("OMOBA_STANDARD_QA_INTERLEAVE");
         let aim = flag("OMOBA_STANDARD_QA_AIM");
+        let recipe = std::env::var("OMOBA_STANDARD_QA_RECIPE")
+            .ok()
+            .map(|ids| authored_kit(class, &ids).expect("OMOBA_STANDARD_QA_RECIPE"));
         let release_at = match std::env::var("OMOBA_STANDARD_QA_RELEASE_AT").as_deref() {
             Err(_) => ReleaseAt::Window,
             Ok("contact") => ReleaseAt::Contact,
@@ -97,6 +104,9 @@ impl Plugin for StandardKitsQaPlugin {
             flight,
             interleave,
             aim,
+            recipe,
+            zoom: crate::camera::CAMERA_MIN_ZOOM,
+            idles: HashMap::new(),
             target: None,
             black: None,
             ux: std::env::var_os("OMOBA_COMBAT_UX_QA").is_some(),
@@ -167,6 +177,13 @@ struct Qa {
     interleave: bool,
     /// Phase run that also takes stills of the aim previews.
     aim: bool,
+    /// Phase run on an authored kit instead of the preset of the class.
+    recipe: Option<shared::loadout::BuildRecipe>,
+    /// Camera distance of a phase or handheld run; a phase run widens it for a skill
+    /// whose area or hit the closest view does not hold.
+    zoom: f32,
+    /// The stage crop of every idle still, by file: what later stills are compared with.
+    idles: HashMap<String, Vec<u8>>,
     target: Option<Handle<Image>>,
     /// A frame that read back black; the run fails instead of keeping it.
     black: Option<String>,
@@ -216,6 +233,19 @@ fn label(mut commands: Commands, qa: Res<Qa>) {
         bevy::ui::FocusPolicy::Pass,
     ));
 }
+/// The kit of `class` with four named skills on its Q, W, E and R, as the server admits it.
+fn authored_kit(class: HeroClass, ids: &str) -> Result<shared::loadout::BuildRecipe, String> {
+    let skills = ids
+        .split(',')
+        .map(|id| SkillId::from_id(id.trim()).ok_or_else(|| format!("unknown skill `{id}`")))
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut recipe = shared::loadout::preset_for_class(class)
+        .ok_or("an authored kit needs the core of a modular class")?
+        .recipe();
+    recipe.skills = <[SkillId; 4]>::try_from(skills).map_err(|_| "name four skills")?;
+    shared::loadout::resolve(&recipe).map_err(|error| error.to_string())?;
+    Ok(recipe)
+}
 fn prepare(
     mut qa: ResMut<Qa>,
     mut selection: ResMut<TeamSelection>,
@@ -231,10 +261,10 @@ fn prepare(
     if qa.weapons || qa.phases {
         // Use the closest supported gameplay view for grip and pose inspection.
         *camera = crate::camera::CameraState {
-            zoom: crate::camera::CAMERA_MIN_ZOOM,
+            zoom: qa.zoom,
             ..default()
         };
-        camera_settings.zoom = crate::camera::CAMERA_MIN_ZOOM;
+        camera_settings.zoom = qa.zoom;
     }
     if let Ok(mut window) = windows.single_mut() {
         window.resolution.set_scale_factor_override(Some(1.0));
@@ -1073,13 +1103,36 @@ fn readback(event: On<ScreenshotCaptured>, shots: Query<&Shot>, mut qa: ResMut<Q
     {
         return;
     }
-    let mean = mean_pixel(&event.image);
+    // `None` for a format the PNG writer cannot convert either.
+    let rgb = event
+        .image
+        .clone()
+        .try_into_dynamic()
+        .ok()
+        .map(|image| image.to_rgb8());
+    let mean = rgb.as_ref().and_then(|rgb| mean_pixel(rgb.as_raw()));
+    let qa = &mut *qa;
     if let Some(capture) = qa
         .captures
         .iter_mut()
         .find(|capture| capture["file"] == shot.file.as_str())
     {
         capture["mean_pixel"] = mean.into();
+        // A phase still is measured against the idle still of its own framing.
+        let stage = rgb
+            .as_ref()
+            .filter(|_| capture["phase"].is_string())
+            .and_then(|rgb| stage_crop(rgb.as_raw(), rgb.width(), rgb.height()));
+        if let Some(stage) = stage {
+            if matches!(capture["phase"].as_str(), Some("idle" | "slot_idle")) {
+                qa.idles.insert(shot.file.clone(), stage);
+            } else if let Some(idle) = capture["idle_file"]
+                .as_str()
+                .and_then(|file| qa.idles.get(file))
+            {
+                capture["changed_pixels"] = changed_pixels(&stage, idle).into();
+            }
+        }
     }
     // A locked or hidden desktop presents nothing: such a frame is not evidence.
     if mean == Some(0.0) {
@@ -1088,13 +1141,44 @@ fn readback(event: On<ScreenshotCaptured>, shots: Query<&Shot>, mut qa: ResMut<Q
         qa.readbacks.push(shot.index);
     }
 }
-/// Mean of the colour channels (0 to 255), or `None` for a format the PNG
-/// writer cannot convert either.
-fn mean_pixel(image: &Image) -> Option<f64> {
-    let rgb = image.clone().try_into_dynamic().ok()?.to_rgb8();
-    let bytes = rgb.as_raw();
+/// Mean of the colour channels (0 to 255).
+fn mean_pixel(bytes: &[u8]) -> Option<f64> {
     (!bytes.is_empty())
         .then(|| bytes.iter().map(|&value| f64::from(value)).sum::<f64>() / bytes.len() as f64)
+}
+/// The stage of a phase still: the staged pair without the HUD, as left, top, right and
+/// bottom pixel. `scripts/build_skill_contact_sheets.py` crops its tiles to the same box.
+const STAGE_CROP: [u32; 4] = [330, 55, 1130, 505];
+/// A pixel has changed when one of its colour channels differs by more than this.
+const CHANGED_LEVEL: u8 = 32;
+/// The RGB bytes of the stage crop of a frame, or `None` when the frame does not hold it.
+fn stage_crop(rgb: &[u8], width: u32, height: u32) -> Option<Vec<u8>> {
+    let [left, top, right, bottom] = STAGE_CROP;
+    if right > width || bottom > height || rgb.len() != (width * height * 3) as usize {
+        return None;
+    }
+    Some(
+        (top..bottom)
+            .flat_map(|row| {
+                let start = ((row * width + left) * 3) as usize;
+                &rgb[start..start + ((right - left) * 3) as usize]
+            })
+            .copied()
+            .collect(),
+    )
+}
+/// Pixels of a stage crop that differ from the same crop of another frame: the changed
+/// area the look-alike report calls the energy of a still.
+fn changed_pixels(stage: &[u8], idle: &[u8]) -> usize {
+    stage
+        .chunks_exact(3)
+        .zip(idle.chunks_exact(3))
+        .filter(|(a, b)| {
+            a.iter()
+                .zip(b.iter())
+                .any(|(a, b)| a.abs_diff(*b) > CHANGED_LEVEL)
+        })
+        .count()
 }
 fn fail(qa: &mut Qa, exit: &mut MessageWriter<AppExit>, reason: &str, detail: serde_json::Value) {
     let _=std::fs::write(qa.directory.join("qa-failure.json"),serde_json::to_vec_pretty(&serde_json::json!({"stage":qa.stage,"reason":reason,"detail":detail,"captures":qa.captures,"requests":qa.requests})).unwrap());
@@ -1165,6 +1249,12 @@ fn retarget_main_camera(
 //   impact   a damage receipt for the slot whose burst is 0.03 to 0.2 s old,
 //            or `settled` 0.6 s after the release when no receipt arrived.
 // Every gate reads replicated state only; a miss is never shown as a hit.
+//
+// The staging of a cast follows from the catalog (`Staging`): where the target
+// stands, where the cast is aimed, whether the kit's orb is parked or an allied
+// wave is walked in first, and whether the staged cast can hit at all. A skill
+// whose area or hit the closest view does not hold is captured from farther
+// away and gets an idle still of its own to be compared with.
 // ---------------------------------------------------------------------------
 
 /// `Qa::stage` while `drive_phases` owns the run.
@@ -1230,9 +1320,30 @@ const RECEIPT_GRACE: f64 = 1.0;
 /// Share of the way to the target the basic attack's projectile has gone when the pause
 /// for its still is requested.
 const FLIGHT_SHARE: f64 = 0.3;
-/// How far along the lane the orb of a kit is parked for its aim stills, so that a
-/// preview drawn from the orb is told apart from one drawn from the hero.
+/// How far along the lane the orb of a kit is parked: for its aim stills, so that a
+/// preview drawn from the orb is told apart from one drawn from the hero, and before a
+/// cast that calls it home, so that its way crosses the target.
 const ORB_PARK: f32 = 5.0;
+/// The accepted edge is this fresh, in simulated seconds, in the windup still of a skill
+/// without a telegraph.
+const EDGE_WINDOW: f64 = 0.06;
+/// How often the cast of one skill is staged again because a stalled frame made its
+/// windup still late.
+const RETAKES: u8 = 2;
+/// Distance of the free point a leap to open ground is aimed at.
+const FREE_POINT: f32 = 6.0;
+/// Time scale while an allied wave walks from its base to the stage.
+const MARCH_SCALE: f32 = 2.0;
+/// The wave is stopped when its first minion is this near the hero: out of the reach of
+/// the casts staged there and too far from the target to start a fight.
+const ALLY_STOP: f32 = 5.5;
+/// Reach of the burst of a hit around its receipt (the bound of a hit without area).
+const HIT_REACH: f32 = 1.5;
+/// Share of the stage crop, from the hero to its edge, that what a skill must show may
+/// take; the rest is room for the width of what is drawn there.
+const FRAME_FILL: f32 = 0.92;
+/// Frames the camera has to rest before a framing is measured.
+const FRAME_REST: u32 = 8;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 enum Pass {
@@ -1254,11 +1365,14 @@ enum Phase {
     Aim,
     /// The aim preview with the key held while the slot offers a recast.
     RecastAim,
+    /// The clean slate of one slot whose stills are taken from farther away.
+    SlotIdle,
 }
 impl Phase {
     fn name(self) -> &'static str {
         match self {
             Self::Idle => "idle",
+            Self::SlotIdle => "slot_idle",
             Self::Windup => "windup",
             Self::Release => "release",
             Self::Impact => "impact",
@@ -1272,7 +1386,7 @@ impl Phase {
     /// before them and the recast aim after them.
     fn order(self) -> u8 {
         match self {
-            Self::Idle | Self::Flight | Self::Aim => 0,
+            Self::Idle | Self::SlotIdle | Self::Flight | Self::Aim => 0,
             Self::Windup => 1,
             Self::Release => 2,
             Self::Impact | Self::Settled => 3,
@@ -1288,8 +1402,14 @@ enum Step {
     Arrange,
     /// Placement acknowledged: reset the duel.
     Reset,
+    /// Reset acknowledged: order an allied wave for a cast that needs an ally.
+    Wave,
+    /// The wave marches: wait for it to reach the hero, then stop it.
+    March,
     /// Reset acknowledged: wait until nothing of an earlier cast is left.
     Settle,
+    /// Capture pass: wait for the camera to rest and widen the view if the skill needs it.
+    Frame,
     /// Capture pass: slow motion requested.
     Slow,
     /// Send the cast.
@@ -1302,8 +1422,8 @@ enum Step {
     Gates,
     /// Basic attack sent: wait for its projectile to be in flight.
     Flight,
-    /// The orb was ordered away for an aim still: wait for it to arrive.
-    Park,
+    /// The orb was ordered away: wait for it to arrive, then take the aim still or cast.
+    Park(Parked),
     /// The skill key is held: wait for its aim preview.
     Aim(Phase),
     /// Recast offered outside its gate: wait for the hero to be in reach.
@@ -1314,6 +1434,13 @@ enum Step {
     Read(Phase),
     /// Resume requested after a still.
     Resume,
+}
+
+/// What a parked orb is for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Parked {
+    Aim,
+    Cast,
 }
 
 /// One sandbox request at a time, resent until the server acknowledges it.
@@ -1371,14 +1498,43 @@ impl Wire {
     }
 }
 
-/// Where the target stands for one skill, derived from the catalog.
+/// Where the scripted cast of a skill is aimed.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Aim {
+    /// At the target, bounded by the cast range.
+    Target,
+    /// At the caster: the sandbox has no allied hero for a cast that picks one.
+    Caster,
+    /// At a free point this far up the lane, with no ally in pick reach of it.
+    Ahead(f32),
+    /// At the allied minion that was walked in behind the hero.
+    Ally,
+}
+impl Aim {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Target => "target",
+            Self::Caster => "caster",
+            Self::Ahead(_) => "free_point",
+            Self::Ally => "allied_minion",
+        }
+    }
+}
+
+/// Where the target stands for one skill and how its cast is staged, derived from the
+/// catalog.
 #[derive(Clone, Copy)]
 struct Staging {
     category: &'static str,
     distance: f32,
-    /// Ally-only casts are aimed at the caster.
-    on_caster: bool,
-    can_damage: bool,
+    aim: Aim,
+    /// The kit's orb is parked beyond the target before the cast, so that its way home
+    /// crosses the target.
+    park_orb: bool,
+    /// Why the staged cast yields no damage receipt; `None` when it has to hit.
+    settles: Option<&'static str>,
+    /// Radius of the area the cast strikes around its caster; the stills show all of it.
+    area: f32,
 }
 impl Staging {
     /// The basic attack: its target stands inside the attack range, as far as the frame
@@ -1388,8 +1544,10 @@ impl Staging {
             category: "basic",
             distance: (shared::basic_attack_for_class(class).range * 0.9)
                 .clamp(CLOSE_RANGE, LANE_LIMIT),
-            on_caster: false,
-            can_damage: true,
+            aim: Aim::Target,
+            park_orb: false,
+            settles: None,
+            area: 0.0,
         }
     }
 
@@ -1400,8 +1558,10 @@ impl Staging {
         slot: SkillSlot,
         flight: bool,
     ) -> Self {
+        use crate::skill_presentation::evidence;
         let ability = equipped.ability(slot);
-        let effect = equipped.skill(slot).map(|skill| skill.effect);
+        let definition = equipped.skill(slot);
+        let effect = definition.map(|skill| skill.effect);
         let technique = match effect {
             Some(SkillEffect::Technique { action, .. }) => Some(action),
             _ => None,
@@ -1431,15 +1591,60 @@ impl Staging {
             }
             TargetingMode::SelfTarget => ("self", CLOSE_RANGE),
         };
+        let aim = match technique {
+            // Only an allied hero can be guarded, and the sandbox has none but the caster.
+            Some(Technique::BallGuard) => Aim::Caster,
+            Some(Technique::AllyLeap) => Aim::Ally,
+            // A leap to open ground shows the leap; on the caster it would stand still.
+            Some(Technique::GuardLeap) => Aim::Ahead(FREE_POINT.min(ability.cast_range)),
+            _ => Aim::Target,
+        };
+        // A cast that can deal damage still yields no receipt when its damage waits for
+        // something the stage does not provide.
+        let settles = if !evidence::can_damage(ability.id) {
+            Some("no_damage")
+        } else {
+            match effect {
+                Some(SkillEffect::RecastZone { .. }) => Some("damage_on_recast_or_expiry"),
+                Some(SkillEffect::Technique {
+                    action: Technique::SegmentCage,
+                    ..
+                }) => Some("no_side_touched"),
+                Some(SkillEffect::Technique {
+                    action: Technique::DetonationMark,
+                    ..
+                }) => Some("mark_not_detonated"),
+                _ => None,
+            }
+        };
         Self {
             category,
             distance,
-            on_caster: matches!(technique, Some(Technique::AllyLeap | Technique::BallGuard)),
-            can_damage: match effect {
-                Some(effect) => effect.damage().is_some_and(|damage| damage > 0.0),
-                None => ability.projectile_damage.is_some(),
-            },
+            aim,
+            park_orb: technique == Some(Technique::BallGuard),
+            settles,
+            area: definition
+                .and_then(|skill| evidence::cast_area_radius(skill.id))
+                .unwrap_or(0.0),
         }
+    }
+
+    /// What the stills of the cast have to show, as offsets from the hero: the area of
+    /// the cast and the hit the probe cast observed, with the reach of its burst.
+    fn keep(&self, hit: Option<Vec2>) -> Vec<Vec2> {
+        let ring = |centre: Vec2, radius: f32, points: u8| {
+            (0..points).map(move |i| {
+                centre + Vec2::from_angle(TAU * f32::from(i) / f32::from(points)) * radius
+            })
+        };
+        let mut keep = Vec::new();
+        if self.area > 0.0 {
+            keep.extend(ring(Vec2::ZERO, self.area, 16));
+        }
+        if let Some(hit) = hit {
+            keep.extend(ring(hit, HIT_REACH, 8));
+        }
+        keep
     }
 }
 
@@ -1459,6 +1664,8 @@ struct Receipt {
     seen: f64,
     amount: f32,
     target: u64,
+    /// Where the hit landed, from the hero as it stood when the receipt arrived.
+    offset: Option<Vec2>,
 }
 /// What the server replicated for one cast, from the accepted edge on.
 #[derive(Clone, Default)]
@@ -1481,6 +1688,13 @@ impl CastWatch {
         action: &crate::net::PlayerCosmeticAction,
         now: f64,
     ) {
+        let hero = game.sandbox.as_ref().and_then(|sandbox| {
+            sandbox
+                .actors
+                .iter()
+                .find(|actor| actor.actor == SandboxActor::Player)
+                .map(|actor| Vec2::from_array(actor.position))
+        });
         if self.edge.is_none() && action.sequence > self.action_before && action.slot == self.slot {
             self.edge = Some((now, action.sequence));
         }
@@ -1536,6 +1750,7 @@ impl CastWatch {
                     seen: now,
                     amount: event.amount,
                     target: event.target.id,
+                    offset: hero.map(|hero| Vec2::new(event.x, event.z) - hero),
                 });
         }
     }
@@ -1583,7 +1798,31 @@ impl CastWatch {
                 "amount": receipt.amount,
                 "target": receipt.target,
                 "after_edge_secs": after(receipt.seen),
+                "from_hero": receipt.offset.map(Vec2::length),
             })),
+        })
+    }
+}
+
+/// The most particles and effect parts that were alive at once while a cast was captured.
+#[derive(Clone, Copy, Default)]
+struct Peaks {
+    /// Accent particles of the cast sequence.
+    accent: usize,
+    /// Impact particles of one receipt.
+    impact: usize,
+    live_particles: usize,
+    visible_parts: usize,
+    lights: usize,
+}
+impl Peaks {
+    fn record(&self) -> serde_json::Value {
+        serde_json::json!({
+            "accent_of_cast": self.accent,
+            "impact_of_one_receipt": self.impact,
+            "live_particles": self.live_particles,
+            "effect_visible_parts": self.visible_parts,
+            "effect_lights": self.lights,
         })
     }
 }
@@ -1620,6 +1859,21 @@ struct Phases {
     recast_aim_taken: bool,
     /// The orb was ordered away for the aim still of this slot.
     parked: bool,
+    /// The orb was ordered away for the cast of this pass.
+    orb_out: bool,
+    /// The view of this pass is settled and holds what the skill must show.
+    framed: bool,
+    /// The idle still of this slot's own view was taken.
+    slot_idle_taken: bool,
+    /// The idle still the stills of this slot are compared with.
+    idle_file: String,
+    /// What the stills of this slot have to show, as offsets from the hero.
+    keep: Vec<Vec2>,
+    /// Pixels per unit of the lane at the hero, and the frames it has not changed.
+    span: (f32, u32),
+    peaks: Peaks,
+    /// Casts of this slot that were staged again after a late windup still.
+    retakes: u8,
     /// Why a slot that offered a recast has no still of its aim.
     recast_aim_note: Option<&'static str>,
     aim_stills: Vec<String>,
@@ -1653,6 +1907,9 @@ impl Phases {
         self.frames = 0;
     }
     fn begin_pass(&mut self, pass: Pass) {
+        if pass == Pass::Probe {
+            self.retakes = 0;
+        }
         self.pass = pass;
         self.windup_taken = false;
         self.release_taken = None;
@@ -1660,6 +1917,13 @@ impl Phases {
         self.aim_taken = false;
         self.recast_aim_taken = false;
         self.parked = false;
+        self.orb_out = false;
+        self.framed = false;
+        self.slot_idle_taken = false;
+        self.idle_file = "0-idle.png".into();
+        self.keep.clear();
+        self.span = (0.0, 0);
+        self.peaks = Peaks::default();
         self.recast_aim_note = None;
         self.enter(Step::Arrange);
     }
@@ -1672,9 +1936,13 @@ struct PhaseWorld<'w, 's> {
     registry: Res<'w, crate::skill_presentation::SkillPresentation>,
     audio: Res<'w, crate::game_audio::GameAudioDiagnostics>,
     aim: Res<'w, crate::combat::aim_preview::AimPreviewShown>,
+    origin: Res<'w, crate::skill_presentation::SkillPresentationOrigin>,
+    flights: Res<'w, crate::combat_visuals::CombatVisualRegistry>,
+    receipts: Res<'w, crate::combat_feedback::ReceiptLooks>,
     animations: Res<'w, crate::sandbox::AnimationReadout>,
     context: Res<'w, crate::input_context::GameplayInputContext>,
     map: Res<'w, crate::maps::MapLayout>,
+    zoom: Res<'w, crate::camera::CameraState>,
     local: Query<
         'w,
         's,
@@ -1744,6 +2012,8 @@ struct PhaseWorld<'w, 's> {
             &'static PlayerLoadout,
         ),
     >,
+    team: Query<'w, 's, &'static Team, With<Player>>,
+    minions: Query<'w, 's, (&'static Transform, &'static Team), With<crate::net::NetworkMinion>>,
 }
 impl PhaseWorld<'_, '_> {
     /// The mesh visual of each hero's state, with the parts that are drawn.
@@ -1880,34 +2150,132 @@ impl PhaseWorld<'_, '_> {
         &self,
         equipped: &shared::loadout::EquippedSkills,
         slot: u8,
-        on_caster: bool,
+        aim: Aim,
     ) -> Result<Hold, &'static str> {
-        let aim = self.cast_aim(equipped, slot, on_caster)?;
+        let aim = self.cast_aim(equipped, slot, aim)?;
         let cursor = self.cursor(aim).ok_or("the aim point is not in view")?;
         Ok(Hold { slot, aim, cursor })
     }
-    /// Where the scripted cast of a modular skill is aimed: at the target, bounded by the
-    /// cast range, or at the caster.
+    /// Where the scripted cast of a modular skill is aimed.
     fn cast_aim(
         &self,
         equipped: &shared::loadout::EquippedSkills,
         slot: u8,
-        on_caster: bool,
+        aim: Aim,
     ) -> Result<Vec2, &'static str> {
         let hero = self
             .actor(SandboxActor::Player)
             .ok_or("no hero telemetry")?;
-        let enemy = self
-            .actor(SandboxActor::Enemy)
-            .ok_or("no target telemetry")?;
-        let ability = equipped.ability(SkillSlot::from_index(slot).ok_or("no such slot")?);
         let origin = Vec2::from_array(hero.position);
-        let delta = Vec2::from_array(enemy.position) - origin;
-        Ok(if on_caster {
-            origin
+        Ok(match aim {
+            Aim::Caster => origin,
+            Aim::Ahead(distance) => origin + STAGE_LANE * distance,
+            Aim::Ally => self.ally(origin).ok_or("no allied minion is staged")?,
+            Aim::Target => {
+                let enemy = self
+                    .actor(SandboxActor::Enemy)
+                    .ok_or("no target telemetry")?;
+                let ability = equipped.ability(SkillSlot::from_index(slot).ok_or("no such slot")?);
+                let delta = Vec2::from_array(enemy.position) - origin;
+                origin
+                    + delta.normalize_or(STAGE_LANE)
+                        * delta.length().min(ability.cast_range.max(0.1))
+            }
+        })
+    }
+    /// The allied minion nearest to a point of the ground.
+    fn ally(&self, near: Vec2) -> Option<Vec2> {
+        let team = self.team.single().ok()?;
+        self.minions
+            .iter()
+            .filter(|(_, other)| *other == team)
+            .map(|(pose, _)| pose.translation.xz())
+            .min_by(|a, b| a.distance(near).total_cmp(&b.distance(near)))
+    }
+    /// The pixel of a point of the ground.
+    fn ground_pixel(&self, at: Vec2) -> Option<Vec2> {
+        let (camera, pose) = self.cameras.single().ok()?;
+        let point = Vec3::new(at.x, self.map.terrain_height_3d(at.x, at.y), at.y);
+        let point = if *self.mode == crate::sprite::PlayerVisualMode::Sprite2d {
+            crate::world2d::simulation_xz_to_render_xy(point).extend(0.0)
         } else {
-            origin
-                + delta.normalize_or(STAGE_LANE) * delta.length().min(ability.cast_range.max(0.1))
+            point
+        };
+        camera.world_to_viewport(pose, point).ok()
+    }
+    /// Pixels one unit of the lane takes at the hero: it changes while the camera moves.
+    fn lane_span(&self) -> Option<f32> {
+        let hero = Vec2::from_array(self.actor(SandboxActor::Player)?.position);
+        Some(
+            self.ground_pixel(hero)?
+                .distance(self.ground_pixel(hero + STAGE_LANE)?),
+        )
+    }
+    /// How much of the way from the hero to the edge of the stage crop the farthest of
+    /// these offsets takes: at most 1 when the crop holds them all.
+    fn frame_fit(&self, offsets: &[Vec2]) -> Option<f32> {
+        let hero = Vec2::from_array(self.actor(SandboxActor::Player)?.position);
+        let centre = self.ground_pixel(hero)?;
+        let [left, top, right, bottom] = STAGE_CROP.map(|edge| edge as f32);
+        let share = |delta: f32, low: f32, high: f32, centre: f32| {
+            if delta >= 0.0 {
+                delta / (high - centre)
+            } else {
+                delta / (low - centre)
+            }
+        };
+        offsets.iter().try_fold(0.0_f32, |most, offset| {
+            let delta = self.ground_pixel(hero + *offset)? - centre;
+            Some(
+                most.max(share(delta.x, left, right, centre.x))
+                    .max(share(delta.y, top, bottom, centre.y)),
+            )
+        })
+    }
+    /// Live particles and drawn effect parts of this frame, against the cast that is
+    /// being captured.
+    fn load(&self, cast: Option<u64>) -> Peaks {
+        use crate::game_vfx::ParticleSource as Source;
+        let mut impacts: HashMap<u64, usize> = HashMap::new();
+        let mut peaks = Peaks::default();
+        for slot in &self.particles {
+            let (Some((id, _)), Some((_, source))) = (slot.sample(), slot.source()) else {
+                continue;
+            };
+            peaks.live_particles += 1;
+            match source {
+                Source::Accent if Some(id) == cast => peaks.accent += 1,
+                Source::Impact => *impacts.entry(id).or_default() += 1,
+                _ => {}
+            }
+        }
+        peaks.impact = impacts.into_values().max().unwrap_or(0);
+        for (root, _, visibility, ..) in &self.vfx {
+            for (parent, part, point, spot) in &self.parts {
+                if parent.parent() != root {
+                    continue;
+                }
+                if point || spot {
+                    peaks.lights += 1;
+                } else if *visibility != Visibility::Hidden && *part != Visibility::Hidden {
+                    peaks.visible_parts += 1;
+                }
+            }
+        }
+        peaks
+    }
+    /// The active registry: where it came from, the fingerprint of the packaged file and
+    /// the number of its skill rows.
+    fn registry_record(&self) -> serde_json::Value {
+        use crate::skill_presentation::SkillPresentationOrigin as Origin;
+        let (origin, fnv64) = match *self.origin {
+            Origin::Embedded => ("embedded", None),
+            Origin::Packaged { fnv64 } => ("packaged", Some(format!("{fnv64:016x}"))),
+        };
+        serde_json::json!({
+            "origin": origin,
+            "fnv64": fnv64,
+            "profiles": self.registry.profile_count(),
         })
     }
     /// Chest height of a simulation position, in pixels of the capture.
@@ -2034,11 +2402,13 @@ impl PhaseWorld<'_, '_> {
     }
 }
 
-fn stage_config(class: HeroClass, avatar: &str) -> SandboxConfig {
+fn stage_config(qa: &Qa) -> SandboxConfig {
+    let class = qa.class;
     let mut config = SandboxConfig {
         player: ActorConfig {
             hero: class,
-            avatar: Some(avatar.into()),
+            recipe: qa.recipe.clone(),
+            avatar: Some(qa.avatar.clone()),
             level: 10,
             position: STAGE_HOME.to_array(),
             max_hp: shared::hero_balance::base_hp(class),
@@ -2070,7 +2440,7 @@ fn send_cast(
     world: &PhaseWorld,
     equipped: &shared::loadout::EquippedSkills,
     slot: u8,
-    on_caster: bool,
+    aim: Aim,
     outgoing: &mut MessageWriter<NetworkCommand>,
 ) -> Result<(), &'static str> {
     let hero = world
@@ -2081,7 +2451,7 @@ fn send_cast(
         .ok_or("no target telemetry")?;
     let ability = equipped.ability(SkillSlot::from_index(slot).ok_or("no such slot")?);
     if equipped.resolved().is_some() {
-        let aim = world.cast_aim(equipped, slot, on_caster)?;
+        let aim = world.cast_aim(equipped, slot, aim)?;
         cast(qa, outgoing, slot, aim, world.game.meta.snapshot_tick);
     } else {
         let target = if ability.targeting == TargetingMode::SelfTarget {
@@ -2155,6 +2525,7 @@ fn still_record(
     sandbox: &SandboxSnapshot,
     skill: &str,
 ) -> serde_json::Value {
+    use crate::skill_presentation::evidence;
     let me = world.game.your_id;
     let particles = world.live_particles();
     let edge = run.watch.edge.filter(|_| phase != Phase::Idle);
@@ -2170,6 +2541,10 @@ fn still_record(
                 .filter(|(parent, ..)| parent.parent() == root)
                 .collect();
             let shown = *visibility != Visibility::Hidden;
+            let lights = parts
+                .iter()
+                .filter(|(_, _, point, spot)| *point || *spot)
+                .count();
             serde_json::json!({
                 "name": name.as_str(),
                 "effect_id": visual.id,
@@ -2178,10 +2553,29 @@ fn still_record(
                 // Present when the effect is drawn through the `body` of its row.
                 "body": body.map(body_record),
                 "parts": parts.len(),
+                "mesh_parts": parts.len() - lights,
                 "visible_parts": parts.iter()
                     .filter(|(_, visibility, ..)| shown && **visibility != Visibility::Hidden)
                     .count(),
-                "lights": parts.iter().filter(|(_, _, point, spot)| *point || *spot).count(),
+                "lights": lights,
+            })
+        })
+        .collect();
+    // The hero's replicated effects: the block of the row that draws each of them and the
+    // most mesh parts its body may have.
+    let effect_rows: Vec<_> = world
+        .game
+        .skill_effects
+        .iter()
+        .filter(|effect| effect.owner_id == me)
+        .map(|effect| {
+            let (kind, block) = evidence::binding(effect);
+            serde_json::json!({
+                "id": effect.id,
+                "skill": effect.skill.id(),
+                "kind": kind,
+                "block": block,
+                "part_budget": evidence::part_budget(effect.skill),
             })
         })
         .collect();
@@ -2210,6 +2604,10 @@ fn still_record(
         "simulation_secs": sandbox.simulation_secs,
         "time_scale": sandbox.config.environment.time_scale,
         "paused": sandbox.config.environment.paused,
+        // The camera distance of the still and the idle still of the same view.
+        "zoom": world.zoom.zoom,
+        "idle_file": (!matches!(phase, Phase::Idle | Phase::SlotIdle))
+            .then_some(run.idle_file.as_str()),
         "since_edge_secs": edge.map(|(at, _)| sandbox.simulation_secs - at),
         "animation": world.animation(),
         "clip": world.clip(),
@@ -2243,10 +2641,18 @@ fn still_record(
             "target": receipt.target,
             "since_seen_secs": sandbox.simulation_secs - receipt.seen,
         })),
+        // What drew the burst of each of the newest accepted receipts, oldest first.
+        "receipt_looks": world.receipts.0.iter().map(|look| serde_json::json!({
+            "receipt": look.receipt,
+            "slot": look.slot,
+            "impact": look.impact,
+            "particles": look.particles,
+        })).collect::<Vec<_>>(),
         "damage_numbers": world.numbers.iter().count(),
         "effects": world.game.skill_effects.iter()
             .filter(|effect| effect.owner_id == me)
             .collect::<Vec<&SkillEffectState>>(),
+        "effect_rows": effect_rows,
         "skill_vfx": roots,
         "projectiles": world.own_projectiles(),
         "state_visuals": world.state_visuals(),
@@ -2263,6 +2669,10 @@ fn still_record(
         "effect_lights": total("lights"),
         "hero_pixels": world.actor(SandboxActor::Player)
             .and_then(|actor| world.pixels(actor.position)),
+        // The camera follows the hero: a still taken away from the stage shows other ground
+        // than the idle still it is compared with.
+        "hero_from_home": world.actor(SandboxActor::Player)
+            .map(|actor| Vec2::from_array(actor.position).distance(STAGE_HOME)),
         "target_pixels": world.actor(SandboxActor::Enemy)
             .and_then(|actor| world.pixels(actor.position)),
     })
@@ -2398,10 +2808,12 @@ fn drive_phases(
                     STAGE_HOME + STAGE_LANE * run.staging.map_or(0.0, |staging| staging.distance),
                 )
                 .unwrap_or("the reset acknowledgement"),
+            Step::March => "the allied wave to reach the hero",
+            Step::Frame => "the camera to rest on a view that holds the skill",
             Step::Edge => "the server to accept the cast",
             Step::Gates => "the gate of the next still",
             Step::Flight => "the projectile of the basic attack",
-            Step::Park => "the orb to be parked",
+            Step::Park(_) => "the orb to be parked",
             Step::Aim(_) => "the aim preview of the held key",
             Step::Reach => "the hero to be in reach of its recast",
             Step::Read(_) => "the screenshot read-back",
@@ -2455,6 +2867,18 @@ fn drive_phases(
     ) || step == Step::Aim(Phase::RecastAim)
     {
         run.watch.observe(&world.game, action, now);
+        // What is alive while the cast is captured, also between its stills.
+        if run.pass == Pass::Capture
+            && let Some((_, sequence)) = run.watch.edge
+        {
+            let load = world.load(Some(sequence));
+            let peaks = &mut run.peaks;
+            peaks.accent = peaks.accent.max(load.accent);
+            peaks.impact = peaks.impact.max(load.impact);
+            peaks.live_particles = peaks.live_particles.max(load.live_particles);
+            peaks.visible_parts = peaks.visible_parts.max(load.visible_parts);
+            peaks.lights = peaks.lights.max(load.lights);
+        }
     }
     // An aim still needs a modular skill: a legacy kit casts at a selected unit.
     let previewed = qa.aim && !run.basic && equipped.skill(slot).is_some();
@@ -2465,12 +2889,13 @@ fn drive_phases(
             } else {
                 Staging::of(class.0, &equipped, slot, qa.flight)
             };
-            let mut config = run
-                .config
-                .take()
-                .unwrap_or_else(|| stage_config(qa.class, &qa.avatar));
+            let mut config = run.config.take().unwrap_or_else(|| stage_config(qa));
             config.enemy.actor.position = (STAGE_HOME + STAGE_LANE * staging.distance).to_array();
-            config.environment.time_scale = 1.0;
+            // A cast that needs an ally gets a wave: it marches in from its base.
+            let marches = staging.aim == Aim::Ally;
+            config.environment.minions = marches;
+            config.environment.minions_paused = false;
+            config.environment.time_scale = if marches { MARCH_SCALE } else { 1.0 };
             config.environment.paused = false;
             log_sandbox(qa, &config);
             run.wire.send(
@@ -2494,6 +2919,37 @@ fn drive_phases(
                 SandboxCommand::ResetDuel,
                 &mut outgoing,
             );
+            let marches = run.staging.is_some_and(|staging| staging.aim == Aim::Ally);
+            run.enter(if marches { Step::Wave } else { Step::Settle });
+        }
+        // The reset removed every minion: the wave is ordered after it.
+        Step::Wave if acknowledged => {
+            qa.requests
+                .push(serde_json::json!({"command":"sandbox_spawn_wave","slot":run.slot}));
+            run.wire.send(
+                &world.game,
+                sandbox,
+                SandboxCommand::SpawnWave,
+                &mut outgoing,
+            );
+            run.enter(Step::March);
+        }
+        Step::March
+            if acknowledged
+                && world
+                    .ally(STAGE_HOME)
+                    .is_some_and(|ally| ally.distance(STAGE_HOME) <= ALLY_STOP) =>
+        {
+            let Some(config) = run.config.as_mut() else {
+                return;
+            };
+            config.environment.minions_paused = true;
+            config.environment.time_scale = 1.0;
+            log_sandbox(qa, config);
+            let command = SandboxCommand::ApplyConfig {
+                config: config.clone(),
+            };
+            run.wire.send(&world.game, sandbox, command, &mut outgoing);
             run.enter(Step::Settle);
         }
         Step::Settle if acknowledged && run.frames >= 20 => {
@@ -2508,18 +2964,10 @@ fn drive_phases(
             {
                 return;
             }
-            if run.pass == Pass::Probe {
-                run.enter(Step::Cast);
-            } else if !run.idle_taken {
-                run.gate = "clean_slate";
-                let record = still_record(&world, run, Phase::Idle, sandbox, skill);
-                let index = PHASE_SHOT + run.stills;
-                shoot(&mut commands, qa, index, "0-idle.png".into(), record);
-                run.enter(Step::Read(Phase::Idle));
-            } else if previewed && !run.aim_taken {
-                // A kit with an orb draws its previews from the orb: it is ordered away
-                // from the hero first, by the skill of the kit that moves it.
-                let order = SkillSlot::ALL.iter().position(|slot| {
+            // The orb of a kit is ordered away by the skill of the kit that moves it.
+            let orb_order = SkillSlot::ALL
+                .iter()
+                .position(|slot| {
                     matches!(
                         equipped.skill(*slot).map(|definition| definition.effect),
                         Some(SkillEffect::Technique {
@@ -2527,50 +2975,122 @@ fn drive_phases(
                             ..
                         })
                     )
-                });
-                if let Some(order) = order.filter(|_| world.orb().is_some() && !run.parked) {
-                    let spot = STAGE_HOME + STAGE_LANE * ORB_PARK;
-                    qa.requests.push(serde_json::json!({
-                        "command": "cast_skill",
-                        "purpose": "park_orb",
-                        "slot": order,
-                        "aim": spot.to_array(),
-                        "snapshot_tick": world.game.meta.snapshot_tick,
-                    }));
-                    outgoing.write(NetworkCommand::CastSkill {
-                        slot: order as u8,
-                        aim: spot,
-                    });
+                })
+                .filter(|_| world.orb().is_some());
+            // A cast that calls the orb home is staged with the orb beyond the target.
+            let orb_out = orb_order.filter(|_| staging.park_orb && !run.orb_out);
+            if run.pass == Pass::Probe {
+                if let Some(order) = orb_out {
+                    run.orb_out = true;
+                    park_orb(qa, run, &world, order, Parked::Cast, &mut outgoing);
+                } else {
+                    run.enter(Step::Cast);
+                }
+            } else if !run.idle_taken {
+                run.gate = "clean_slate";
+                let record = still_record(&world, run, Phase::Idle, sandbox, skill);
+                let index = PHASE_SHOT + run.stills;
+                shoot(&mut commands, qa, index, "0-idle.png".into(), record);
+                run.enter(Step::Read(Phase::Idle));
+            } else if !run.framed {
+                // What the probe cast hit is kept in view with the area of the cast.
+                let hit = run
+                    .probe
+                    .as_ref()
+                    .and_then(|probe| probe.receipt.as_ref())
+                    .and_then(|receipt| receipt.offset);
+                run.keep = staging.keep(hit);
+                run.span = (0.0, 0);
+                run.enter(Step::Frame);
+            } else if qa.zoom > crate::camera::CAMERA_MIN_ZOOM && !run.slot_idle_taken {
+                run.gate = "clean_slate";
+                let record = still_record(&world, run, Phase::SlotIdle, sandbox, skill);
+                let file = format!(
+                    "{}-{}-0-idle.png",
+                    run.slot + 1,
+                    ["q", "w", "e", "r"][usize::from(run.slot)]
+                );
+                run.idle_file = file.clone();
+                let index = PHASE_SHOT + run.stills;
+                shoot(&mut commands, qa, index, file, record);
+                run.enter(Step::Read(Phase::SlotIdle));
+            } else if previewed && !run.aim_taken {
+                // A kit with an orb draws its previews from the orb: it is ordered away
+                // from the hero first.
+                if let Some(order) = orb_order.filter(|_| !run.parked) {
                     run.parked = true;
-                    run.enter(Step::Park);
+                    park_orb(qa, run, &world, order, Parked::Aim, &mut outgoing);
                     return;
                 }
-                match world.hold(&equipped, run.slot, staging.on_caster) {
+                match world.hold(&equipped, run.slot, staging.aim) {
                     Ok(hold) => {
                         run.hold = Some(hold);
                         run.enter(Step::Aim(Phase::Aim));
                     }
                     Err(reason) => stop(qa, run, &mut exit, format!("{skill}: {reason}")),
                 }
+            } else if let Some(order) = orb_out {
+                run.orb_out = true;
+                park_orb(qa, run, &world, order, Parked::Cast, &mut outgoing);
             } else {
                 request_speed(qa, run, &world, sandbox, SLOW_MOTION, false, &mut outgoing);
                 run.enter(Step::Slow);
             }
         }
-        Step::Park
+        // The camera follows a change of its distance over some frames: the view is
+        // measured once it rests, and widened until it holds what the skill must show.
+        Step::Frame => {
+            let Some(span) = world.lane_span() else {
+                return;
+            };
+            if (span - run.span.0).abs() <= 0.02 {
+                run.span.1 += 1;
+            } else {
+                run.span = (span, 0);
+            }
+            if run.span.1 < FRAME_REST {
+                return;
+            }
+            match world.frame_fit(&run.keep) {
+                None => stop(
+                    qa,
+                    run,
+                    &mut exit,
+                    format!("{skill}: the stage is not in view"),
+                ),
+                Some(fit)
+                    if fit > FRAME_FILL + 0.01 && qa.zoom < crate::camera::CAMERA_MAX_ZOOM =>
+                {
+                    qa.zoom = (qa.zoom * fit / FRAME_FILL).min(crate::camera::CAMERA_MAX_ZOOM);
+                    run.span = (0.0, 0);
+                }
+                Some(_) => {
+                    run.framed = true;
+                    run.enter(Step::Settle);
+                }
+            }
+        }
+        Step::Park(parked)
             if run.frames >= 20
                 && world
                     .orb()
                     .is_some_and(|orb| orb.distance(STAGE_HOME + STAGE_LANE * ORB_PARK) < 0.05)
                 && world.at_rest() =>
         {
-            let on_caster = run.staging.is_some_and(|staging| staging.on_caster);
-            match world.hold(&equipped, run.slot, on_caster) {
-                Ok(hold) => {
-                    run.hold = Some(hold);
-                    run.enter(Step::Aim(Phase::Aim));
+            let aim = run.staging.map_or(Aim::Target, |staging| staging.aim);
+            match parked {
+                Parked::Aim => match world.hold(&equipped, run.slot, aim) {
+                    Ok(hold) => {
+                        run.hold = Some(hold);
+                        run.enter(Step::Aim(Phase::Aim));
+                    }
+                    Err(reason) => stop(qa, run, &mut exit, format!("{skill}: {reason}")),
+                },
+                Parked::Cast if run.pass == Pass::Probe => run.enter(Step::Cast),
+                Parked::Cast => {
+                    request_speed(qa, run, &world, sandbox, SLOW_MOTION, false, &mut outgoing);
+                    run.enter(Step::Slow);
                 }
-                Err(reason) => stop(qa, run, &mut exit, format!("{skill}: {reason}")),
             }
         }
         // The key has been down for a few frames and the game drew its preview.
@@ -2626,7 +3146,7 @@ fn drive_phases(
                 // preview, and none is staged.
                 run.recast_aim_taken = true;
                 run.recast_aim_note = Some("recast_never_in_reach");
-                finish_skill(run, &equipped, slot, skill);
+                finish_skill(qa, run, &world, &equipped, slot, skill);
                 finished = advance_slot(qa, run, &equipped);
             }
         }
@@ -2671,14 +3191,9 @@ fn drive_phases(
                 run.enter(Step::Flight);
                 return;
             }
-            if let Err(reason) = send_cast(
-                qa,
-                &world,
-                &equipped,
-                run.slot,
-                staging.on_caster,
-                &mut outgoing,
-            ) {
+            if let Err(reason) =
+                send_cast(qa, &world, &equipped, run.slot, staging.aim, &mut outgoing)
+            {
                 stop(qa, run, &mut exit, reason.into());
                 return;
             }
@@ -2793,13 +3308,12 @@ fn drive_phases(
                     .is_some_and(|release| now - release >= SETTLED_AFTER_RELEASE);
                 (waited && settled).then_some((
                     Phase::Settled,
-                    if !staging.can_damage {
-                        "no_damage"
-                    } else if expected.is_none() {
+                    // The reason the staging gives; otherwise a cast that had to hit missed.
+                    staging.settles.unwrap_or(if expected.is_none() {
                         "no_receipt_in_probe"
                     } else {
                         "no_receipt_observed"
-                    },
+                    }),
                 ))
             } else {
                 None
@@ -2822,8 +3336,8 @@ fn drive_phases(
                 return;
             }
             if phase == Phase::RecastAim {
-                let on_caster = run.staging.is_some_and(|staging| staging.on_caster);
-                match world.hold(&equipped, run.slot, on_caster) {
+                let aim = run.staging.map_or(Aim::Target, |staging| staging.aim);
+                match world.hold(&equipped, run.slot, aim) {
                     Ok(hold) => {
                         run.hold = Some(hold);
                         run.enter(Step::Aim(phase));
@@ -2845,6 +3359,37 @@ fn drive_phases(
                     &mut exit,
                     format!(
                         "{skill}: the release still missed its window ({})",
+                        record["since_edge_secs"]
+                    ),
+                );
+                return;
+            }
+            if phase == Phase::Windup
+                && run.gate == "edge"
+                && record["since_edge_secs"]
+                    .as_f64()
+                    .is_none_or(|after| after > EDGE_WINDOW)
+            {
+                // A stalled frame: the still would show the cast after its windup. It
+                // is not taken; the cast is staged again from a clean slate.
+                if run.retakes < RETAKES {
+                    run.retakes += 1;
+                    qa.requests.push(serde_json::json!({
+                        "command": "retake",
+                        "skill": skill,
+                        "late_windup_secs": record["since_edge_secs"],
+                    }));
+                    run.orb_out = false;
+                    run.peaks = Peaks::default();
+                    run.enter(Step::Arrange);
+                    return;
+                }
+                stop(
+                    qa,
+                    run,
+                    &mut exit,
+                    format!(
+                        "{skill}: the windup still was taken too long after the accepted cast ({})",
                         record["since_edge_secs"]
                     ),
                 );
@@ -2903,6 +3448,7 @@ fn drive_phases(
             run.stills += 1;
             match phase {
                 Phase::Idle => run.idle_taken = true,
+                Phase::SlotIdle => run.slot_idle_taken = true,
                 Phase::Windup => run.windup_taken = true,
                 Phase::Release => run.release_taken = Some(now),
                 Phase::Impact | Phase::Settled => run.third_taken = true,
@@ -2927,8 +3473,8 @@ fn drive_phases(
                     "capture": run.watch.timeline(),
                     "stills": std::mem::take(&mut run.skill_stills),
                 }));
-            } else if phase == Phase::Idle && previewed {
-                // The slate is still clean: the aim still comes before the cast.
+            } else if matches!(phase, Phase::Idle | Phase::SlotIdle) {
+                // The slate is still clean: what comes before the cast is decided there.
                 run.enter(Step::Settle);
             } else if phase == Phase::Aim && run.parked {
                 // The orb is away from the hero: the cast starts from a clean slate again.
@@ -2941,9 +3487,9 @@ fn drive_phases(
                     &mut outgoing,
                 );
                 run.enter(Step::Settle);
-            } else if matches!(phase, Phase::Idle | Phase::Aim) {
-                request_speed(qa, run, &world, sandbox, SLOW_MOTION, false, &mut outgoing);
-                run.enter(Step::Slow);
+            } else if phase == Phase::Aim {
+                // Only a key was held: the slate is still clean.
+                run.enter(Step::Settle);
             } else if !(run.windup_taken && run.release_taken.is_some() && run.third_taken) {
                 request_speed(qa, run, &world, sandbox, SLOW_MOTION, false, &mut outgoing);
                 run.enter(Step::Resume);
@@ -2964,8 +3510,8 @@ fn drive_phases(
                         )
                     });
                 if in_reach {
-                    let on_caster = run.staging.is_some_and(|staging| staging.on_caster);
-                    match world.hold(&equipped, run.slot, on_caster) {
+                    let aim = run.staging.map_or(Aim::Target, |staging| staging.aim);
+                    match world.hold(&equipped, run.slot, aim) {
                         Ok(hold) => {
                             run.hold = Some(hold);
                             run.enter(Step::Aim(Phase::RecastAim));
@@ -2977,7 +3523,7 @@ fn drive_phases(
                     run.enter(Step::Reach);
                 }
             } else {
-                finish_skill(run, &equipped, slot, skill);
+                finish_skill(qa, run, &world, &equipped, slot, skill);
                 finished = advance_slot(qa, run, &equipped);
             }
         }
@@ -3002,8 +3548,11 @@ fn drive_phases(
             "aim": qa.aim,
             "manual_interaction_verified": false,
             "physical_device_verified": false,
-            "setup": "live sandbox; level 10; rank 1; infinite resource, normal cooldowns; ResetDuel before every cast; one probe cast at 1x, then one cast at 0.25x paused for each still; stationary enemy hero with 1,000,000 HP that takes hits; ally-only casts target the caster",
+            "setup": "live sandbox; level 10; rank 1; infinite resource, normal cooldowns; ResetDuel before every cast; one probe cast at 1x, then one cast at 0.25x paused for each still; stationary enemy hero with 1,000,000 HP that takes hits; a cast that picks an allied hero targets the caster; a cast that picks any ally gets a minion wave walked in behind the hero",
             "registry_profiles": world.registry.profile_count(),
+            "registry": world.registry_record(),
+            // The authored kit of the hero; absent for the preset of its class.
+            "recipe": qa.recipe.as_ref().map(|recipe| recipe.skills.map(SkillId::id)),
             "skills": run.skills,
             // The still of a flight look; absent for a melee core, which throws nothing.
             "basic": run.basic_record,
@@ -3030,25 +3579,45 @@ fn drive_phases(
 /// Records the finished skill of the current slot: its staging, what the probe and the
 /// captured cast replicated, and its stills.
 fn finish_skill(
+    qa: &Qa,
     run: &mut Phases,
+    world: &PhaseWorld,
     equipped: &shared::loadout::EquippedSkills,
     slot: SkillSlot,
     skill: &str,
 ) {
+    use crate::skill_presentation::evidence;
     let staging = run.staging;
     let probe = run.probe.take();
     let entry = serde_json::json!({
         "slot": run.slot,
         "skill": skill,
+        // The class whose kit owns the skill, and the identity the registry gives it.
+        "home": evidence::home(skill),
+        "identity": evidence::identity(&world.registry, &world.flights, skill),
         "modular": equipped.skill(slot).is_some(),
         "targeting": format!("{:?}", equipped.ability(slot).targeting),
         "cast_range": equipped.ability(slot).cast_range,
         "staging": staging.map(|staging| serde_json::json!({
             "category": staging.category,
             "target_distance": staging.distance,
-            "cast_on_caster": staging.on_caster,
-            "can_damage": staging.can_damage,
+            "aim": staging.aim.name(),
+            "cast_on_caster": staging.aim == Aim::Caster,
+            "orb_parked": staging.park_orb,
+            "can_damage": evidence::can_damage(skill),
+            // Why the staged cast yields no receipt; absent when it has to hit.
+            "settles": staging.settles,
+            "area_radius": (staging.area > 0.0).then_some(staging.area),
         })),
+        // The view of the stills: the closest one unless the skill needs more room.
+        "framing": {
+            "zoom": qa.zoom,
+            "widened": qa.zoom > crate::camera::CAMERA_MIN_ZOOM,
+            "idle_file": run.idle_file,
+        },
+        "peaks": run.peaks.record(),
+        // Casts that were staged again because a stalled frame made the windup still late.
+        "retakes": run.retakes,
         "probe": probe.as_ref().map(CastWatch::timeline),
         "capture": run.watch.timeline(),
         "stills": std::mem::take(&mut run.skill_stills),
@@ -3061,7 +3630,9 @@ fn finish_skill(
 
 /// Moves on to the next skill, or to the basic attack of a flight look. Returns whether
 /// the run is over.
-fn advance_slot(qa: &Qa, run: &mut Phases, equipped: &shared::loadout::EquippedSkills) -> bool {
+fn advance_slot(qa: &mut Qa, run: &mut Phases, equipped: &shared::loadout::EquippedSkills) -> bool {
+    // The next cast starts in the closest view again.
+    qa.zoom = crate::camera::CAMERA_MIN_ZOOM;
     if run.slot < 3 {
         run.slot += 1;
         run.begin_pass(Pass::Probe);
@@ -3077,6 +3648,33 @@ fn advance_slot(qa: &Qa, run: &mut Phases, equipped: &shared::loadout::EquippedS
         return false;
     }
     true
+}
+
+/// Orders the orb of the kit to its parking spot up the lane, with the skill in `order`.
+fn park_orb(
+    qa: &mut Qa,
+    run: &mut Phases,
+    world: &PhaseWorld,
+    order: usize,
+    parked: Parked,
+    outgoing: &mut MessageWriter<NetworkCommand>,
+) {
+    let spot = STAGE_HOME + STAGE_LANE * ORB_PARK;
+    qa.requests.push(serde_json::json!({
+        "command": "cast_skill",
+        "purpose": match parked {
+            Parked::Aim => "park_orb_for_aim",
+            Parked::Cast => "park_orb_for_cast",
+        },
+        "slot": order,
+        "aim": spot.to_array(),
+        "snapshot_tick": world.game.meta.snapshot_tick,
+    }));
+    outgoing.write(NetworkCommand::CastSkill {
+        slot: order as u8,
+        aim: spot,
+    });
+    run.enter(Step::Park(parked));
 }
 
 /// Change the simulation pace; players and target stay as last configured.
@@ -3099,4 +3697,210 @@ fn request_speed(
         config: config.clone(),
     };
     run.wire.send(&world.game, sandbox, command, outgoing);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use shared::loadout::EquippedSkills;
+
+    /// The staging of a skill of a class preset, at its home button.
+    fn staged(class: HeroClass, id: &str) -> Staging {
+        let kit = EquippedSkills::resolve(class, None).unwrap();
+        let slot = SkillSlot::ALL
+            .into_iter()
+            .find(|slot| kit.ability(*slot).id == id)
+            .unwrap_or_else(|| panic!("{id} is not in the kit of {}", class.id()));
+        Staging::of(class, &kit, slot, false)
+    }
+
+    #[test]
+    fn staging_follows_the_catalog() {
+        // A plain skillshot: aimed at the target on the lane, and it has to hit.
+        let bind = staged(HeroClass::Dawnweaver, "dawn_bind");
+        assert_eq!(
+            (bind.category, bind.aim, bind.park_orb, bind.settles),
+            ("skillshot", Aim::Target, false, None)
+        );
+        assert_eq!((bind.distance, bind.area), (LANE_LIMIT, 0.0));
+        // A leap to open ground is aimed at a free point, not at the caster.
+        let step = staged(HeroClass::Stormfist, "anchor_step");
+        assert_eq!(
+            (step.aim, step.settles),
+            (Aim::Ahead(FREE_POINT), Some("no_damage"))
+        );
+        // A leap to an ally needs one: a wave is walked in.
+        let leap = staged(HeroClass::Frostguard, "sheltering_leap");
+        assert_eq!((leap.aim, leap.settles), (Aim::Ally, Some("no_damage")));
+        // Only a hero can be guarded: the caster. The orb is parked so that it hits on its
+        // way home.
+        let guard = staged(HeroClass::Orbitwright, "orbital_guard");
+        assert_eq!(
+            (guard.aim, guard.park_orb, guard.settles),
+            (Aim::Caster, true, None)
+        );
+        assert!(ORB_PARK > guard.distance);
+        // Damage that waits for something the stage does not provide.
+        for (class, id, reason) in [
+            (
+                HeroClass::Dawnweaver,
+                "dawn_field",
+                "damage_on_recast_or_expiry",
+            ),
+            (HeroClass::Chainkeeper, "iron_boundary", "no_side_touched"),
+            (HeroClass::Riftshot, "rift_seal", "mark_not_detonated"),
+            (HeroClass::Edgeweaver, "twin_tempo", "no_damage"),
+            (HeroClass::Warrior, "battle_rally", "no_damage"),
+        ] {
+            assert_eq!(staged(class, id).settles, Some(reason), "{id}");
+        }
+        assert_eq!(staged(HeroClass::Warrior, "shield_bash").settles, None);
+        // The area a cast strikes around its caster is what its stills have to show.
+        let pulse = staged(HeroClass::Stormfist, "thunder_pulse");
+        assert_eq!((pulse.category, pulse.area), ("self_area", 5.0));
+        assert_eq!(staged(HeroClass::Chainkeeper, "chain_sweep").area, 6.0);
+        assert_eq!(staged(HeroClass::Cinderforge, "anvil_charge").area, 3.0);
+        // A cone is not an area around the caster.
+        assert_eq!(staged(HeroClass::Veilstalker, "nightfall").area, 0.0);
+        assert_eq!(Staging::basic(HeroClass::Mage).settles, None);
+    }
+
+    #[test]
+    fn the_view_keeps_the_area_of_the_cast_and_the_burst_of_its_hit() {
+        let pulse = staged(HeroClass::Stormfist, "thunder_pulse");
+        let area = pulse.keep(None);
+        assert_eq!(area.len(), 16);
+        assert!(area.iter().all(|point| (point.length() - 5.0).abs() < 1e-4));
+        // A hit far up the lane, as a kick leaves it.
+        let hit = STAGE_LANE * 12.5;
+        let kick = staged(HeroClass::Stormfist, "thunder_kick").keep(Some(hit));
+        assert_eq!(kick.len(), 8);
+        assert!(
+            kick.iter()
+                .all(|point| (point.distance(hit) - HIT_REACH).abs() < 1e-4)
+        );
+        assert_eq!(pulse.keep(Some(hit)).len(), 24);
+        assert!(
+            staged(HeroClass::Dawnweaver, "dawn_bind")
+                .keep(None)
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn a_still_is_measured_on_its_stage_crop() {
+        let [left, top, right, bottom] = STAGE_CROP;
+        let (width, height) = (1280_u32, 720_u32);
+        let frame = |paint: &dyn Fn(u32, u32) -> [u8; 3]| -> Vec<u8> {
+            (0..height)
+                .flat_map(|y| (0..width).flat_map(move |x| paint(x, y)))
+                .collect()
+        };
+        let idle = frame(&|_, _| [90, 90, 90]);
+        // A box that reaches over the right edge of the crop and one outside it.
+        let cast = frame(&|x, y| {
+            if (right - 10..right + 30).contains(&x) && (top..top + 20).contains(&y) {
+                [90, 90 + CHANGED_LEVEL + 1, 90]
+            } else if x < left && y > bottom {
+                [255, 255, 255]
+            } else if (left..left + 5).contains(&x) && (bottom - 5..bottom).contains(&y) {
+                // At the level, not over it.
+                [90 + CHANGED_LEVEL; 3]
+            } else {
+                [90, 90, 90]
+            }
+        });
+        let crop = stage_crop(&cast, width, height).unwrap();
+        assert_eq!(crop.len(), ((right - left) * (bottom - top) * 3) as usize);
+        let rest = stage_crop(&idle, width, height).unwrap();
+        assert_eq!(changed_pixels(&crop, &rest), 10 * 20);
+        assert_eq!(changed_pixels(&rest, &rest), 0);
+        // A frame of another size holds no stage.
+        assert!(stage_crop(&idle, width, height - 300).is_none());
+        assert!(stage_crop(&idle[..idle.len() - 3], width, height).is_none());
+        assert_eq!(mean_pixel(&[10, 20, 60]), Some(30.0));
+        assert_eq!(mean_pixel(&[]), None);
+    }
+
+    #[test]
+    fn an_authored_kit_is_what_the_server_admits() {
+        let kit = authored_kit(
+            HeroClass::Stormfist,
+            "dawn_ray,winter_shard,furnace_breath,wandering_ember",
+        )
+        .unwrap();
+        assert_eq!(kit.core.class(), HeroClass::Stormfist);
+        assert_eq!(
+            kit.skills.map(SkillId::id),
+            [
+                "dawn_ray",
+                "winter_shard",
+                "furnace_breath",
+                "wandering_ember"
+            ]
+        );
+        // The passive stays that of the core.
+        assert_eq!(
+            kit.passive,
+            shared::loadout::preset_for_class(HeroClass::Stormfist)
+                .unwrap()
+                .passive()
+        );
+        for (class, ids) in [
+            // A legacy class has no core to author a kit on.
+            (
+                HeroClass::Warrior,
+                "dawn_ray,winter_shard,furnace_breath,wandering_ember",
+            ),
+            (HeroClass::Stormfist, "dawn_ray,winter_shard,furnace_breath"),
+            (
+                HeroClass::Stormfist,
+                "dawn_ray,dawn_ray,furnace_breath,wandering_ember",
+            ),
+            (
+                HeroClass::Stormfist,
+                "dawn_ray,shield_bash,furnace_breath,wandering_ember",
+            ),
+            // The field needs a skill that moves the orb.
+            (
+                HeroClass::Stormfist,
+                "dawn_ray,orbital_field,furnace_breath,wandering_ember",
+            ),
+        ] {
+            assert!(authored_kit(class, ids).is_err(), "{ids}");
+        }
+    }
+
+    #[test]
+    fn a_telegraph_fires_by_its_kind_flip_or_by_leaving() {
+        let track = |seen: f64, telegraph: bool, flipped: Option<f64>, gone: Option<f64>| Track {
+            seen,
+            kind: EffectVisualKind::BeamWarning,
+            armed: false,
+            remaining: 1.0,
+            telegraph,
+            flipped,
+            gone,
+        };
+        let mut watch = CastWatch::default();
+        assert_eq!(watch.telegraph(), None);
+        assert!(watch.fuse().is_none());
+        // A warning that became its beam, and a later effect that is no telegraph.
+        watch
+            .tracks
+            .insert(1, track(10.1, true, Some(10.9), Some(11.05)));
+        watch.tracks.insert(2, track(10.0, false, None, Some(10.4)));
+        assert_eq!(watch.telegraph(), Some(10.1));
+        assert_eq!(watch.fuse(), Some((10.1, 10.9, "kind_flip")));
+        // A fuse fires when its effect leaves the snapshot; the first one to fire counts.
+        watch.tracks.insert(3, track(10.2, true, None, Some(10.7)));
+        assert_eq!(watch.fuse(), Some((10.2, 10.7, "fuse_gone")));
+        // A telegraph that is still burning has not fired.
+        let mut burning = CastWatch::default();
+        burning.tracks.insert(1, track(4.0, true, None, None));
+        assert_eq!(burning.telegraph(), Some(4.0));
+        assert!(burning.fuse().is_none());
+        // The windup still of a skill without a telegraph is taken on the fresh edge.
+        assert!(EDGE_WINDOW < RELEASE_WINDOW.0);
+    }
 }
