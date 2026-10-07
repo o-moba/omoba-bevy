@@ -568,6 +568,7 @@ fn apply_snapshot_local_player(
                 };
                 if dash_accepted && !recalled {
                     utility_vfx.write(crate::game_vfx::UtilityVfx::Dash {
+                        actor: your_id,
                         from: local_transform.translation,
                         to: server_translation,
                         seed: local_player_state.utility.dash_sequence,
@@ -730,6 +731,7 @@ fn apply_snapshot_remote_players(
                         })
                     }) {
                         utility_vfx.write(crate::game_vfx::UtilityVfx::Dash {
+                            actor: player.id,
                             from,
                             to: translation,
                             seed: player.id << 16 | player.utility.dash_sequence,

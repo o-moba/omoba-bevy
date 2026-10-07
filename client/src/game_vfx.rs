@@ -6,7 +6,11 @@ use crate::{
     maps::MapLayout,
     net::{PlayerUtility, RemotePlayer},
     player::Player,
-    skill_presentation::vocab::ParticleShape as Shape,
+    skill_presentation::{
+        accents,
+        cast::{MoveObserved, SkillCastObserved, ThemedDashes, action_yaw},
+        vocab::ParticleShape as Shape,
+    },
     sprite::PlayerVisualMode,
     world2d::{layer, simulation_xz_to_render_xy},
 };
@@ -78,8 +82,13 @@ pub(crate) struct ClearCombatVfx;
 /// the ground plane) in both render modes, exactly like [`ImpactBurst`].
 #[derive(Message, Clone, Copy, Debug, PartialEq)]
 pub(crate) enum UtilityVfx {
-    /// An accepted dash moved a hero from `from` to `to`.
-    Dash { from: Vec3, to: Vec3, seed: u64 },
+    /// An accepted dash moved the hero `actor` from `from` to `to`.
+    Dash {
+        actor: u64,
+        from: Vec3,
+        to: Vec3,
+        seed: u64,
+    },
     /// One speed streak left behind a hasted hero travelling along `direction`.
     HasteStreak {
         position: Vec3,
@@ -93,12 +102,10 @@ pub(crate) enum UtilityVfx {
 struct FlightParticles(Vec<Particle>);
 /// Decorative particles of an accepted cast: accents, moves, links and stage one-shots.
 /// They share the decorative half of the pool with flight trails and are admitted first.
-#[cfg_attr(not(test), allow(dead_code))] // written by the cast observer
 #[derive(Message)]
 pub(crate) struct SkillBurst(pub Vec<ParticleSpec>);
 /// Particles of an accepted combat receipt. They are admitted with the wire-style bursts,
-/// ahead of every decorative particle.
-#[cfg_attr(not(test), allow(dead_code))] // written by the receipt collector
+/// ahead of every decorative particle. The receipt collector is their only writer.
 #[derive(Message)]
 pub(crate) struct ConfirmedBurst(pub Vec<ParticleSpec>);
 
@@ -458,7 +465,6 @@ impl ParticleSlot {
     }
     /// The admission class and the source of the live particle.
     #[cfg(feature = "qa")]
-    #[cfg_attr(not(test), allow(dead_code))] // read by the capture assertions
     pub(crate) fn source(&self) -> Option<(ParticleClass, ParticleSource)> {
         self.active.as_ref().map(|p| (p.class, p.source))
     }
@@ -505,6 +511,7 @@ impl Plugin for GameVfxPlugin {
     fn build(&self, app: &mut App) {
         crate::vfx_clock::ensure(app);
         app.init_resource::<PickupReceipts>()
+            .init_resource::<ThemedDashes>()
             .add_message::<ImpactBurst>()
             .add_message::<ClearCombatVfx>()
             .add_message::<crate::game_audio::AudioCueRequest>()
@@ -512,6 +519,9 @@ impl Plugin for GameVfxPlugin {
             .add_message::<FlightParticles>()
             .add_message::<SkillBurst>()
             .add_message::<ConfirmedBurst>()
+            .add_message::<SkillCastObserved>()
+            .add_message::<MoveObserved>()
+            .add_message::<crate::combat_feedback::ConfirmedHit>()
             .add_systems(Startup, setup)
             .add_systems(
                 Update,
@@ -524,6 +534,9 @@ impl Plugin for GameVfxPlugin {
                         pickup_feedback,
                         emit_projectile_particles,
                         emit_skill_cast_particles,
+                        accents::emit_cast,
+                        accents::emit_moves,
+                        accents::emit_links,
                         animate_particles,
                     )
                         .chain(),
@@ -1138,7 +1151,7 @@ fn haste_pulse_particles(position: Vec3, seed: u64) -> Vec<Particle> {
 }
 fn utility_particles(vfx: &UtilityVfx) -> Vec<Particle> {
     match *vfx {
-        UtilityVfx::Dash { from, to, seed } => dash_particles(from, to, seed),
+        UtilityVfx::Dash { from, to, seed, .. } => dash_particles(from, to, seed),
         UtilityVfx::HasteStreak {
             position,
             direction,
@@ -1239,6 +1252,7 @@ fn animate_particles(
     mut bursts: MessageReader<ImpactBurst>,
     mut receipts: MessageReader<ConfirmedBurst>,
     mut utilities: MessageReader<UtilityVfx>,
+    themed: Res<ThemedDashes>,
     mut casts: MessageReader<SkillBurst>,
     mut flight: MessageReader<FlightParticles>,
     mut resets: MessageReader<ClearCombatVfx>,
@@ -1285,8 +1299,10 @@ fn animate_particles(
     }
     // Utility effects are confirmed server actions too (dash acknowledgment,
     // replicated haste), so they queue behind hits rather than with trails.
+    // A relocation the choreography painted this frame replaces the generic dash.
     let utility: Vec<_> = utilities
         .read()
+        .filter(|vfx| !matches!(vfx, UtilityVfx::Dash { actor, .. } if themed.0.contains(actor)))
         .take(96)
         .flat_map(utility_particles)
         .collect();
@@ -1476,17 +1492,18 @@ fn animate_butterflies(
         *global = GlobalTransform::from(*transform);
     }
 }
-/// Cast accents are distinct from impact feedback. Only a new accepted action emits them;
-/// a miss still casts, but it never manufactures an impact on another character.
+/// Built-in cast accents of the rows that carry no `cast` block; a row with one is drawn
+/// from its data by `accents::emit_cast`. Only a new accepted action emits them; a miss
+/// still casts, but it never manufactures an impact on another character.
 fn emit_skill_cast_particles(
     game: Option<Res<crate::net::GameStateSnapshot>>,
     profiles: Option<Res<crate::skill_presentation::SkillPresentation>>,
-    mode: Res<PlayerVisualMode>,
     actors: Query<(
         Entity,
         &Transform,
         &InheritedVisibility,
         &crate::net::PlayerCosmeticAction,
+        &crate::net::PlayerActionFacing,
         &crate::net::NetworkHeroClass,
         Option<&crate::net::PlayerLoadout>,
         &crate::combat::CombatStats,
@@ -1504,7 +1521,7 @@ fn emit_skill_cast_particles(
         receipts.1.clear();
     }
     receipts.1.retain(|entity, _| actors.contains(*entity));
-    for (entity, pose, visibility, action, class, loadout, stats) in &actors {
+    for (entity, pose, visibility, action, facing, class, loadout, stats) in &actors {
         let previous = receipts.1.get(&entity).copied();
         receipts
             .1
@@ -1516,6 +1533,13 @@ fn emit_skill_cast_particles(
         {
             continue;
         }
+        let state = loadout.and_then(|l| l.0.as_ref());
+        let themed = profiles.themed_cast(class.0, state, action.slot);
+        // The accent points along the accepted action, and it is anchored at the hero's
+        // simulation position in both render modes.
+        let direction =
+            accents::CastContext::aim(action_yaw(action, facing), pose.forward().as_vec3());
+        let heading = direction.to_angle();
         if action.slot == shared::BASIC_ATTACK_ACTION_SLOT
             && crate::equipped_skills::resolve(class.0, loadout)
                 .and_then(|skills| skills.resolved())
@@ -1523,50 +1547,41 @@ fn emit_skill_cast_particles(
                     skills.attack_profile() == shared::loadout::AttackProfileId::Melee
                 })
         {
-            let forward = pose.forward().as_vec3();
-            output.write(FlightParticles(vec![Particle {
-                event_id: action.sequence,
-                origin: pose.translation + Vec3::Y * 0.8 + forward * 0.65,
-                velocity: Vec3::ZERO,
-                age: 0.0,
-                lifetime: 0.2,
-                size: 0.8,
-                angle: forward.z.atan2(forward.x),
-                color: Color::srgb(0.75, 0.95, 1.0),
-                shape: Shape::Slash,
-                ..Particle::BASE
-            }]));
+            if !themed {
+                let forward = Vec3::new(direction.x, 0.0, direction.y);
+                output.write(FlightParticles(vec![Particle {
+                    event_id: action.sequence,
+                    origin: pose.translation + Vec3::Y * 0.8 + forward * 0.65,
+                    velocity: Vec3::ZERO,
+                    age: 0.0,
+                    lifetime: 0.2,
+                    size: 0.8,
+                    angle: heading,
+                    color: Color::srgb(0.75, 0.95, 1.0),
+                    shape: Shape::Slash,
+                    ..Particle::BASE
+                }]));
+            }
             continue;
         }
-        let Some(profile) =
-            profiles.action_profile(class.0, loadout.and_then(|l| l.0.as_ref()), action.slot)
-        else {
+        let Some(profile) = profiles.action_profile(class.0, state, action.slot) else {
             continue;
         };
         // Long windups already have a server-owned warning; avoid implying immediate release.
         if profile.windup.is_some() {
             continue;
         }
-        if crate::skill_presentation::equipped_skill(
-            class.0,
-            loadout.and_then(|l| l.0.as_ref()),
-            action.slot,
-        ) == Some(shared::loadout::SkillId::DaggerBluff)
+        if crate::skill_presentation::equipped_skill(class.0, state, action.slot)
+            == Some(shared::loadout::SkillId::DaggerBluff)
         {
             audio.write(crate::game_audio::AudioCueRequest(
                 crate::game_audio::AudioCue::Bluff,
             ));
         }
-        let p = if *mode == PlayerVisualMode::Sprite2d {
-            Vec3::new(pose.translation.x, 0.0, pose.translation.y)
-        } else {
-            pose.translation
-        };
-        let forward = pose.rotation * Vec3::Z;
-        let origin = p + Vec3::Y * 0.8;
+        let origin = pose.translation + Vec3::Y * 0.8;
         use crate::skill_presentation::EffectStyle as S;
-        // A row without a legacy style has a `cast` accent of its own instead.
-        let Some(effect) = profile.effect else {
+        // A row with a `cast` block is drawn from its data, never twice.
+        let Some(effect) = profile.effect.filter(|_| !themed) else {
             continue;
         };
         let (shape, count, size) = match effect {
@@ -1591,7 +1606,7 @@ fn emit_skill_cast_particles(
                         age: 0.0,
                         lifetime: if i == 0 { 0.4 } else { 0.28 },
                         size: if i == 0 { size } else { 0.24 },
-                        angle: forward.z.atan2(forward.x),
+                        angle: heading,
                         color,
                         shape: if i == 0 { shape } else { Shape::Glow },
                         ..Particle::BASE
@@ -2381,6 +2396,7 @@ mod tests {
             for area_damage in [false, true] {
                 let ctx = impacts::ImpactContext {
                     position: Vec3::ZERO,
+                    ground: 0.,
                     direction: Vec2::X,
                     heading: None,
                     area_damage,
@@ -2534,6 +2550,138 @@ mod tests {
             1
         );
         assert_eq!(live(&mut app, |p| p.class == ParticleClass::Confirm), 12);
+    }
+    #[test]
+    fn a_relocation_the_choreography_painted_replaces_the_generic_dash() {
+        use crate::skill_presentation::cast::MoveCause;
+        let mut app = pool();
+        let to = Vec3::X * 5.;
+        let dash = |actor: u64| UtilityVfx::Dash {
+            actor,
+            from: Vec3::ZERO,
+            to,
+            seed: 70 + actor,
+        };
+        // Hero 7 was displaced by something else; hero 8 dashed on its own.
+        app.world_mut().write_message(dash(7));
+        app.world_mut().write_message(dash(8));
+        app.world_mut().write_message(MoveObserved {
+            actor_id: 7,
+            from: Some(Vec3::ZERO),
+            to: Some(to),
+            cause: MoveCause::Forced,
+            skill: None,
+            seed: 501,
+            local: false,
+        });
+        app.world_mut().write_message(MoveObserved {
+            actor_id: 8,
+            from: Some(Vec3::ZERO),
+            to: Some(to),
+            cause: MoveCause::UtilityDash,
+            skill: None,
+            seed: 502,
+            local: false,
+        });
+        app.update();
+        assert_eq!(live(&mut app, |p| p.event_id == 77), 0);
+        assert_eq!(
+            live(&mut app, |p| p.event_id == 501
+                && p.source == ParticleSource::Move
+                && p.class == ParticleClass::Skill),
+            accents::drag_streak(Some(Vec3::ZERO), Some(to), 501).len()
+        );
+        let generic = dash_particles(Vec3::ZERO, to, 78).len();
+        assert_eq!(live(&mut app, |p| p.event_id == 78), generic);
+        assert_eq!(live(&mut app, |p| p.event_id == 502), 0);
+        // The note lasts one frame: a later dash of the same hero is drawn again.
+        app.world_mut().write_message(dash(7));
+        app.update();
+        assert_eq!(live(&mut app, |p| p.event_id == 77), generic);
+    }
+    #[test]
+    fn legacy_accents_follow_the_accepted_yaw_at_the_simulation_position() {
+        use crate::net::{NetworkHeroClass, PlayerActionFacing, PlayerCosmeticAction};
+        use crate::skill_presentation::SkillPresentation;
+        use shared::{HeroClass, PlayerActionKind};
+        let at = Vec3::new(3., 0.5, -7.);
+        let yaw = shared::math::hero_yaw_towards(0.6, 0.8);
+        // The accents of one accepted action of `class` on `slot` under a registry.
+        let accents_of = |registry: SkillPresentation, class: HeroClass, slot: u8| {
+            let mut app = App::new();
+            app.insert_resource(registry)
+                .insert_resource(crate::net::GameStateSnapshot {
+                    meta: shared::protocol::SnapshotMeta::new(7, 1, 1),
+                    state: crate::net::GameState::Running,
+                    ..Default::default()
+                })
+                .add_message::<FlightParticles>()
+                .add_message::<crate::game_audio::AudioCueRequest>()
+                .add_systems(Update, emit_skill_cast_particles);
+            let hero = app
+                .world_mut()
+                .spawn((
+                    // The model still looks the other way.
+                    Transform::from_translation(at).looking_to(Vec3::new(-0.6, 0., -0.8), Vec3::Y),
+                    InheritedVisibility::VISIBLE,
+                    PlayerCosmeticAction::default(),
+                    PlayerActionFacing::default(),
+                    NetworkHeroClass(class),
+                    crate::combat::CombatStats::default(),
+                ))
+                .id();
+            app.update();
+            app.world_mut().entity_mut(hero).insert((
+                PlayerCosmeticAction {
+                    sequence: 1,
+                    kind: PlayerActionKind::Cast,
+                    slot,
+                },
+                PlayerActionFacing {
+                    sequence: 1,
+                    yaw: Some(yaw),
+                },
+            ));
+            app.update();
+            app.world_mut()
+                .resource_mut::<Messages<FlightParticles>>()
+                .drain()
+                .flat_map(|batch| batch.0)
+                .collect::<Vec<_>>()
+        };
+        let accent = accents_of(SkillPresentation::packaged(), HeroClass::Warrior, 0);
+        assert!(!accent.is_empty());
+        for particle in &accent {
+            // Simulation coordinates whatever the render mode: the system reads none.
+            assert_eq!(particle.origin, at + Vec3::Y * 0.8);
+            assert!(Vec2::from_angle(particle.angle).distance(Vec2::new(0.6, 0.8)) < 1e-5);
+            assert_eq!(particle.event_id, 1);
+        }
+        // The melee swing of a basic attack is laid ahead along the same yaw.
+        let swing = accents_of(
+            SkillPresentation::packaged(),
+            HeroClass::Stormfist,
+            shared::BASIC_ATTACK_ACTION_SLOT,
+        );
+        assert_eq!(swing.len(), 1);
+        assert!(
+            swing[0]
+                .origin
+                .distance(at + Vec3::new(0.6, 0., 0.8) * 0.65 + Vec3::Y * 0.8)
+                < 1e-5
+        );
+        assert!(Vec2::from_angle(swing[0].angle).distance(Vec2::new(0.6, 0.8)) < 1e-5);
+        // A row with a `cast` block, and a basic attack with an accent, are drawn from
+        // their data instead.
+        assert!(accents_of(SkillPresentation::target(), HeroClass::Warrior, 0).is_empty());
+        assert!(
+            accents_of(
+                SkillPresentation::target(),
+                HeroClass::Stormfist,
+                shared::BASIC_ATTACK_ACTION_SLOT,
+            )
+            .is_empty()
+        );
     }
     #[test]
     fn delayed_particles_wait_hidden_and_malformed_ones_are_dropped() {

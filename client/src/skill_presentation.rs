@@ -1,6 +1,7 @@
 //! Packaged skill-owned presentation. Recipes select skills; buttons do not select motions.
 //! This module never changes movement, damage, cooldowns or authoritative geometry.
 pub(crate) mod accents;
+pub(crate) mod cast;
 mod category;
 mod effects;
 mod geometry;
@@ -131,6 +132,41 @@ impl SkillPresentation {
     pub(crate) fn profile(&self, skill: SkillId) -> Option<&SkillProfile> {
         self.skills.get(skill.id())
     }
+    /// What the row of an accepted action draws with its particles, resolved with the theme
+    /// of its class. A basic attack without a row resolves to nothing.
+    pub(crate) fn look(&self, key: cast::CastKey) -> Option<Look<'_>> {
+        match key {
+            cast::CastKey::Skill(key) => {
+                let row = self.row(key.id())?;
+                Some(Look {
+                    palette: accents::Palette::of(row, self.theme(key.home())?),
+                    accent: row.cast.as_ref(),
+                    impact: row.impact.as_ref(),
+                })
+            }
+            cast::CastKey::Basic(class) => {
+                let row = self.basic(class)?;
+                Some(Look {
+                    palette: accents::Palette::of_class(self.theme(class)?),
+                    accent: row.accent.as_ref(),
+                    impact: row.impact.as_ref(),
+                })
+            }
+        }
+    }
+    /// Whether the accent of an accepted action is drawn from its row: a skill row with
+    /// `cast`, or a basic attack whose row has an `accent`. Every other action keeps the
+    /// built-in accent.
+    pub(crate) fn themed_cast(
+        &self,
+        class: HeroClass,
+        loadout: Option<&LoadoutState>,
+        slot: u8,
+    ) -> bool {
+        cast::CastKey::of(class, loadout, slot)
+            .and_then(|key| self.look(key))
+            .is_some_and(|look| look.accent.is_some())
+    }
     /// Size of the active registry, recorded as capture evidence.
     #[cfg(feature = "qa")]
     pub(crate) fn profile_count(&self) -> usize {
@@ -148,6 +184,14 @@ pub(crate) fn equipped_skill(
     skills
         .skill(shared::SkillSlot::from_index(slot)?)
         .map(|skill| skill.id)
+}
+
+/// The particle blocks of one row and the colours they are drawn in.
+pub(crate) struct Look<'a> {
+    pub palette: accents::Palette,
+    /// The `cast` block of a skill row, or the `accent` of a basic attack.
+    pub accent: Option<&'a accents::CastAccent>,
+    pub impact: Option<&'a impacts::ImpactRecipe>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -265,13 +309,23 @@ impl Plugin for SkillPresentationPlugin {
             .init_resource::<Pending>()
             .init_asset::<LoadedPresentation>()
             .init_asset_loader::<PresentationLoader>()
+            .add_message::<crate::net::SessionEvent>()
+            .add_message::<cast::SkillCastObserved>()
+            .add_message::<cast::MoveObserved>()
             .add_systems(
                 Startup,
                 |server: Res<AssetServer>, mut pending: ResMut<Pending>| {
                     pending.0 = Some(server.load("config/skills.skillfx"));
                 },
             )
-            .add_systems(Update, apply_config)
+            .add_systems(
+                Update,
+                (
+                    apply_config,
+                    cast::observe_skill_casts
+                        .after(crate::net::ClientNetPipeline::InterpolateRemotePlayers),
+                ),
+            )
             .add_plugins(effects::SkillEffectsPlugin);
     }
 }
@@ -300,3 +354,16 @@ fn apply_config(
 
 #[cfg(test)]
 mod tests;
+
+/// Registries for the tests of the modules that draw from one.
+#[cfg(test)]
+impl SkillPresentation {
+    /// The packaged `skills.skillfx`.
+    pub(crate) fn packaged() -> Self {
+        Self::parse(include_str!("../assets/config/skills.skillfx")).unwrap()
+    }
+    /// The final data of the roster (`fixtures/target.skillfx`).
+    pub(crate) fn target() -> Self {
+        tests::target::target()
+    }
+}

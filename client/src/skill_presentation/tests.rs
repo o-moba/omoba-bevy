@@ -710,6 +710,7 @@ fn draw_registry(registry: &SkillPresentation) -> Drawn {
             for heading in [None, Some(Vec2::Y)] {
                 let ctx = ImpactContext {
                     position: far,
+                    ground: far.y,
                     direction,
                     heading,
                     area_damage,
@@ -919,6 +920,7 @@ fn every_pattern_and_kind_is_bounded() {
                             };
                             let ctx = ImpactContext {
                                 position: at,
+                                ground: at.y,
                                 direction: Vec2::new(0.0, -1.0),
                                 heading: Some(Vec2::X),
                                 area_damage,
@@ -1026,6 +1028,7 @@ fn every_target_row_draws_a_flat_accent_and_impact() {
                 &palette,
                 &ImpactContext {
                     position: at,
+                    ground: at.y,
                     direction: Vec2::Y,
                     heading: None,
                     area_damage: category::area_damage(key),

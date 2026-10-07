@@ -709,6 +709,7 @@ fn impact_output(
             palette,
             &ImpactContext {
                 position: PROBE,
+                ground: PROBE.y,
                 direction: Vec2::X,
                 heading,
                 area_damage,

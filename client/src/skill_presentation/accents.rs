@@ -1,13 +1,24 @@
 //! The pooled-particle language at the caster and at a replicated effect: cast accents, the
 //! outline of a signed-off instant area, moves, links, stage one-shots and cues.
 //! Every generator is a pure function of its arguments, so a row is validated by running
-//! it, and nothing here can read a position the client did not observe.
-use super::geometry::GeoShape;
+//! it, and nothing here can read a position the client did not observe. The systems at the
+//! end hand the generators what the cast observer and the receipt collector reported.
+use super::SkillPresentation;
+use super::cast::{CastKey, MoveCause, MoveObserved, SkillCastObserved, ThemedDashes};
+use super::category::{self, StrikeOrigin};
+use super::geometry::{self, AreaContext, GeoShape};
 pub(crate) use super::schema::{CastAccent, MoveSpec};
 use super::schema::{SkillProfile, Theme};
 use super::vocab::{AccentPattern, ExpireKind, MovePattern, PaletteSlot, ParticleShape};
-use crate::game_vfx::{Curve, Orient, ParticleSource, ParticleSpec, Tint, jitter, unit_radius};
+use crate::combat_feedback::ConfirmedHit;
+use crate::game_vfx::{
+    Curve, Orient, ParticleSource, ParticleSpec, SkillBurst, Tint, jitter, unit_radius,
+};
+use crate::net::GameStateSnapshot;
+use crate::player::Player;
 use bevy::prelude::*;
+use shared::loadout::{SkillEffectState, SkillId};
+use std::collections::HashSet;
 use std::f32::consts::{PI, TAU};
 
 /// Budgets of one generated burst (particles, seconds until the last one is gone).
@@ -183,7 +194,6 @@ pub(crate) struct CastContext {
 impl CastContext {
     /// Direction of an accepted cast: the replicated yaw when the action carries one, else
     /// the way the hero faces.
-    #[cfg_attr(not(test), allow(dead_code))] // read by the cast observer
     pub(crate) fn aim(yaw: Option<f32>, forward: Vec3) -> Vec2 {
         yaw.filter(|yaw| yaw.is_finite())
             .map(|yaw| Vec2::from_array(shared::math::hero_forward(yaw)))
@@ -952,7 +962,6 @@ pub(crate) fn move_particles(
 
 /// Neutral ground skid marks of a hero that something else displaced. No afterimage and no
 /// colour of any skill: the client does not know what moved it.
-#[cfg_attr(not(test), allow(dead_code))] // emitted by the cast observer
 pub(crate) fn drag_streak(from: Option<Vec3>, to: Option<Vec3>, seed: u64) -> Vec<ParticleSpec> {
     let dust = Tint {
         color: Color::srgba(0.78, 0.76, 0.7, 0.7),
@@ -1341,7 +1350,6 @@ pub(crate) fn stage_oneshot(
 
 /// The snap of a trap that triggered on a receipt without damage. It is a cue, not an
 /// impact: it closes inward at the receipt position and throws nothing out.
-#[cfg_attr(not(test), allow(dead_code))] // emitted by the receipt collector
 pub(crate) fn trap_cue(palette: &Palette, at: Vec3, seed: u64) -> Vec<ParticleSpec> {
     if !at.is_finite() {
         return Vec::new();
@@ -1418,6 +1426,323 @@ pub(crate) fn camp_hit(color: Tint, at: Vec3, kill: bool, seed: u64) -> Vec<Part
         })
         .collect();
     tagged(specs, ParticleSource::Cue)
+}
+
+/// A link is drawn for receipts that arrive with the snapshot of the cast or one of the two
+/// after it, for at most three receipts of one cast.
+const LINK_SNAPSHOTS: u64 = 2;
+const LINKS_PER_CAST: usize = 3;
+/// Casts that may wait for their receipts at one time.
+const OPEN_LINKS: usize = 16;
+
+/// The live effect of a skill that its owner's newest cast created.
+fn own_effect(effects: &[SkillEffectState], owner: u64, id: SkillId) -> Option<&SkillEffectState> {
+    effects
+        .iter()
+        .filter(|effect| {
+            owner != 0
+                && effect.owner_id == owner
+                && effect.skill == id
+                && category::own_kinds(id).contains(&effect.kind)
+        })
+        .max_by_key(|effect| effect.id)
+}
+
+/// The accent of one observed cast, from the row of its skill or basic attack. A row without
+/// the block draws nothing here. The accent sits where the hit is resolved from: a skill
+/// that moves first is anchored at the observed arrival, never at the place it left
+/// (rule E-3). `appeared` are the effects that were not in the previous snapshot; a strike
+/// line ends at the caster's own new effect and at nothing else.
+pub(crate) fn cast_burst(
+    registry: &SkillPresentation,
+    cast: &SkillCastObserved,
+    appeared: &[SkillEffectState],
+) -> Vec<ParticleSpec> {
+    let Some((accent, palette)) = registry
+        .look(cast.key)
+        .and_then(|look| look.accent.zip(Some(look.palette)))
+    else {
+        return Vec::new();
+    };
+    let skill = cast.key.skill().and_then(|key| key.modular());
+    let anchor = match skill.map(|id| category::strike_origin(id, cast.recast)) {
+        Some(StrikeOrigin::Arrival) => cast.position,
+        // A skill that strikes from its effect is still cast, and charged, at the caster.
+        Some(StrikeOrigin::Origin | StrikeOrigin::EffectPosition) | None => cast.origin,
+    };
+    let direction = CastContext::aim(cast.yaw, cast.forward);
+    let area = skill
+        .filter(|id| accent.area && !cast.recast && category::AREA_FLASH_SIGNED_OFF.contains(id))
+        .and_then(|id| {
+            geometry::instant_area(
+                id,
+                &AreaContext {
+                    origin: cast.origin.xz(),
+                    arrival: Some(cast.position.xz()),
+                    direction,
+                    recast: cast.recast,
+                },
+            )
+        });
+    let strike_to = skill
+        .filter(|id| category::own_effect_strike(*id))
+        .and_then(|id| own_effect(appeared, cast.actor_id, id))
+        .map(|effect| Vec3::new(effect.position[0], anchor.y, effect.position[1]));
+    accent_particles(
+        accent,
+        &palette,
+        &CastContext {
+            origin: anchor,
+            direction,
+            recast: cast.recast,
+            area,
+            strike_to,
+            sequence: cast.sequence,
+        },
+    )
+}
+
+/// How an observed relocation is painted when it is not left to the utility dash: the move
+/// pattern of the row whose cast moved the hero, or neutral skid marks for a displacement
+/// by something else. `None` keeps the built-in look.
+pub(crate) fn move_burst(
+    registry: Option<&SkillPresentation>,
+    moved: &MoveObserved,
+) -> Option<Vec<ParticleSpec>> {
+    match moved.cause {
+        MoveCause::Recall | MoveCause::UtilityDash => None,
+        MoveCause::Forced => Some(drag_streak(moved.from, moved.to, moved.seed)),
+        MoveCause::SkillCast => {
+            let look = registry?.look(CastKey::Skill(moved.skill?))?;
+            let spec = look.accent?.movement.as_ref()?;
+            Some(move_particles(
+                spec,
+                &look.palette,
+                moved.from,
+                moved.to,
+                moved.seed,
+            ))
+        }
+    }
+}
+
+/// The cue of a trap that snapped on a receipt without damage, in the colours of the row
+/// that set it. A row without a `cast` block draws none.
+pub(crate) fn trap_snap(
+    registry: &SkillPresentation,
+    key: CastKey,
+    at: Vec3,
+    receipt: u64,
+) -> Vec<ParticleSpec> {
+    match (key, registry.look(key)) {
+        (CastKey::Skill(_), Some(look)) if look.accent.is_some() => {
+            trap_cue(&look.palette, at, receipt)
+        }
+        _ => Vec::new(),
+    }
+}
+
+/// A cast whose row links it to its hits, waiting for their receipts.
+struct OpenLink {
+    actor_id: u64,
+    slot: u8,
+    start: Vec3,
+    shape: ParticleShape,
+    palette: Palette,
+    left: usize,
+    /// The count of snapshots when the cast was observed.
+    opened: u64,
+    local: bool,
+}
+
+/// Casts that wait for the receipts of their own source and slot. Nothing here draws
+/// without such a receipt.
+#[derive(Default)]
+pub(crate) struct LinkBook {
+    round: Option<(u64, u64)>,
+    tick: u64,
+    snapshots: u64,
+    open: Vec<OpenLink>,
+}
+
+impl LinkBook {
+    /// Notes the snapshot of this frame and closes the links that waited too long. A new
+    /// round closes them all.
+    pub(crate) fn turn(&mut self, round: Option<(u64, u64)>, tick: u64) {
+        if self.round != round {
+            *self = Self {
+                round,
+                tick,
+                ..default()
+            };
+        } else if self.tick != tick {
+            self.tick = tick;
+            self.snapshots += 1;
+            let now = self.snapshots;
+            self.open.retain(|link| now - link.opened <= LINK_SNAPSHOTS);
+        }
+    }
+
+    /// Opens the link of a cast whose row names one. It starts where the hit is resolved
+    /// from, and a newer cast of the same slot replaces the older one.
+    pub(crate) fn open(&mut self, registry: &SkillPresentation, cast: &SkillCastObserved) {
+        let CastKey::Skill(key) = cast.key else {
+            return;
+        };
+        let Some((shape, palette)) = registry
+            .look(cast.key)
+            .and_then(|look| look.accent?.link.zip(Some(look.palette)))
+        else {
+            return;
+        };
+        // The hit of a travelling body comes long after its cast; a link from the cast
+        // would run ahead of it.
+        if category::travelling_body(key) {
+            return;
+        }
+        let start = match key
+            .modular()
+            .map(|id| category::strike_origin(id, cast.recast))
+        {
+            Some(StrikeOrigin::Arrival) => cast.position,
+            // Resolved from the effect when it releases, which no cast edge reports.
+            Some(StrikeOrigin::EffectPosition) => return,
+            Some(StrikeOrigin::Origin) | None => cast.origin,
+        };
+        self.open
+            .retain(|link| (link.actor_id, link.slot) != (cast.actor_id, cast.slot));
+        if self.open.len() == OPEN_LINKS {
+            self.open.remove(0);
+        }
+        self.open.push(OpenLink {
+            actor_id: cast.actor_id,
+            slot: cast.slot,
+            start,
+            shape,
+            palette,
+            left: LINKS_PER_CAST,
+            opened: self.snapshots,
+            local: cast.local,
+        });
+    }
+
+    /// The streaks to one accepted receipt of an open cast and whether the caster is the
+    /// local hero; `None` when no cast waits for this source and slot.
+    pub(crate) fn link(&mut self, hit: &ConfirmedHit) -> Option<(Vec<ParticleSpec>, bool)> {
+        let link = self
+            .open
+            .iter_mut()
+            .find(|link| link.actor_id == hit.source && link.slot == hit.slot && link.left > 0)?;
+        link.left -= 1;
+        Some((
+            link_particles(
+                link.shape,
+                &link.palette,
+                link.start,
+                hit.position,
+                hit.receipt,
+            ),
+            link.local,
+        ))
+    }
+}
+
+/// A decorative burst with its place in the admission order of the pool: the local hero's
+/// first, then the nearest to the local hero.
+fn ranked(mut specs: Vec<ParticleSpec>, local: bool, at: Vec3, viewer: Option<Vec3>) -> SkillBurst {
+    let key = if local {
+        0
+    } else {
+        1 + viewer.map_or(0.0, |viewer| viewer.distance(at)).min(1.0e4) as u32
+    };
+    for spec in &mut specs {
+        spec.sort_key = key;
+    }
+    SkillBurst(specs)
+}
+
+/// Draws the accent of every cast the observer reported this frame.
+pub(crate) fn emit_cast(
+    registry: Option<Res<SkillPresentation>>,
+    game: Option<Res<GameStateSnapshot>>,
+    viewer: Query<&Transform, With<Player>>,
+    mut known: Local<HashSet<u64>>,
+    mut casts: MessageReader<SkillCastObserved>,
+    mut out: MessageWriter<SkillBurst>,
+) {
+    let effects = game
+        .as_deref()
+        .map_or(&[][..], |game| game.skill_effects.as_slice());
+    match registry {
+        Some(registry) if !casts.is_empty() => {
+            let appeared: Vec<_> = effects
+                .iter()
+                .filter(|effect| !known.contains(&effect.id))
+                .cloned()
+                .collect();
+            let viewer = viewer.single().ok().map(|pose| pose.translation);
+            for cast in casts.read() {
+                let specs = cast_burst(&registry, cast, &appeared);
+                if !specs.is_empty() {
+                    out.write(ranked(specs, cast.local, cast.position, viewer));
+                }
+            }
+        }
+        _ => casts.clear(),
+    }
+    known.clear();
+    known.extend(effects.iter().map(|effect| effect.id));
+}
+
+/// Draws every relocation the observer reported this frame that is not a utility dash and
+/// notes its hero, so the pool leaves the generic dash out.
+pub(crate) fn emit_moves(
+    registry: Option<Res<SkillPresentation>>,
+    viewer: Query<&Transform, With<Player>>,
+    mut themed: ResMut<ThemedDashes>,
+    mut moves: MessageReader<MoveObserved>,
+    mut out: MessageWriter<SkillBurst>,
+) {
+    themed.0.clear();
+    let viewer = viewer.single().ok().map(|pose| pose.translation);
+    for moved in moves.read() {
+        let Some(specs) = move_burst(registry.as_deref(), moved) else {
+            continue;
+        };
+        themed.0.insert(moved.actor_id);
+        let at = moved.to.or(moved.from).unwrap_or_default();
+        out.write(ranked(specs, moved.local, at, viewer));
+    }
+}
+
+/// Draws a link from a cast to each accepted receipt of its own source and slot.
+pub(crate) fn emit_links(
+    registry: Option<Res<SkillPresentation>>,
+    game: Option<Res<GameStateSnapshot>>,
+    viewer: Query<&Transform, With<Player>>,
+    mut book: Local<LinkBook>,
+    mut casts: MessageReader<SkillCastObserved>,
+    mut hits: MessageReader<ConfirmedHit>,
+    mut out: MessageWriter<SkillBurst>,
+) {
+    let (Some(registry), Some(game)) = (registry, game) else {
+        casts.clear();
+        hits.clear();
+        return;
+    };
+    book.turn(
+        Some((game.meta.server_epoch, game.meta.match_id)),
+        game.meta.snapshot_tick,
+    );
+    for cast in casts.read() {
+        book.open(&registry, cast);
+    }
+    let viewer = viewer.single().ok().map(|pose| pose.translation);
+    for hit in hits.read() {
+        if let Some((specs, local)) = book.link(hit) {
+            out.write(ranked(specs, local, hit.position, viewer));
+        }
+    }
 }
 
 #[cfg(test)]

@@ -1,13 +1,17 @@
 //! The pooled-particle burst of one accepted damage receipt. A recipe is drawn at the
 //! receipt position only: nothing follows the target, stays on it or depicts a status, and
 //! a skill without area damage keeps its whole burst close to the unit it hit.
+use super::SkillPresentation;
 use super::accents::{Palette, drift, fly, ground, heading, share, sized, spread, tagged};
+use super::cast::CastKey;
+use super::category::{self, SkillKey};
 pub(crate) use super::schema::ImpactRecipe;
 use super::vocab::{ImpactKind, ParticleShape};
 use crate::game_vfx::{
     Curve, Orient, ParticleSource, ParticleSpec, Tint, blade_depth, jitter, unit_radius,
 };
 use bevy::prelude::*;
+use shared::loadout::{SkillEffectState, SkillId};
 use std::f32::consts::{FRAC_PI_2, FRAC_PI_4, PI, TAU};
 
 /// Budget of one impact burst (particles, seconds until the last one is gone).
@@ -26,7 +30,9 @@ const BLAST_REACH: f32 = 1.6;
 const THUD_RING: f32 = 1.0;
 /// `drain_wisp` motes never drift farther than this toward the source.
 const DRAIN_TRAVEL: f32 = 1.2;
-/// Height of the burst above the receipt position, which is on the ground.
+/// Height of the burst above the receipt position. A receipt is at the aim height of its
+/// target; the built-in burst of the wire style is drawn this far above it too, where the
+/// camera sees it over the body it hit.
 const BODY: f32 = 0.75;
 
 /// What the client knows about one accepted receipt.
@@ -34,6 +40,8 @@ const BODY: f32 = 0.75;
 pub(crate) struct ImpactContext {
     /// The receipt position.
     pub position: Vec3,
+    /// Height of the ground under the receipt, where the ground rings of a recipe lie.
+    pub ground: f32,
     /// Ground direction from the source to the target; zero when the source is not known.
     pub direction: Vec2,
     /// Heading of the live effect of the same owner and skill, when it is in the snapshot.
@@ -452,7 +460,7 @@ pub(crate) fn impact_particles(
     palette: &Palette,
     ctx: &ImpactContext,
 ) -> Vec<ParticleSpec> {
-    if !(ctx.position.is_finite() && ctx.direction.is_finite()) {
+    if !(ctx.position.is_finite() && ctx.ground.is_finite() && ctx.direction.is_finite()) {
         return Vec::new();
     }
     let kind = recipe.kind;
@@ -470,7 +478,7 @@ pub(crate) fn impact_particles(
     let centre = ctx.position + Vec3::Y * BODY;
     let burst = Burst {
         centre,
-        floor: ctx.position,
+        floor: ctx.position.with_y(ctx.ground),
         along: Vec3::new(direction.x, 0.0, direction.y),
         onward: onward.is_some(),
         side: Vec3::new(-direction.y, 0.0, direction.x),
@@ -494,6 +502,65 @@ pub(crate) fn impact_particles(
     tagged(specs, ParticleSource::Impact)
 }
 
+/// One accepted receipt dealt by a hero the client sees.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Receipt {
+    pub id: u64,
+    pub position: Vec3,
+    /// Height of the ground under the receipt.
+    pub ground: f32,
+    /// The hero that dealt it and where the client observes that hero.
+    pub source: u64,
+    pub source_position: Vec3,
+}
+
+/// Heading of the live effect of this skill and owner that is nearest to a receipt.
+fn live_heading(effects: &[SkillEffectState], receipt: &Receipt, id: SkillId) -> Option<Vec2> {
+    let at = receipt.position.xz();
+    effects
+        .iter()
+        .filter(|effect| {
+            receipt.source != 0
+                && effect.owner_id == receipt.source
+                && effect.skill == id
+                && category::own_kinds(id).contains(&effect.kind)
+        })
+        .min_by(|a, b| {
+            let reach = |effect: &SkillEffectState| Vec2::from_array(effect.position).distance(at);
+            reach(a).total_cmp(&reach(b))
+        })
+        .and_then(|effect| {
+            (Vec2::from_array(effect.end) - Vec2::from_array(effect.position)).try_normalize()
+        })
+}
+
+/// The burst of one accepted receipt, from the `impact` recipe of the row that dealt it.
+/// `None` when that row carries no recipe: the built-in burst of the wire style stays.
+/// There is no other way to an impact burst than a receipt.
+pub(crate) fn receipt_burst(
+    registry: &SkillPresentation,
+    key: CastKey,
+    receipt: &Receipt,
+    effects: &[SkillEffectState],
+) -> Option<Vec<ParticleSpec>> {
+    let look = registry.look(key)?;
+    let skill = key.skill();
+    Some(impact_particles(
+        look.impact?,
+        &look.palette,
+        &ImpactContext {
+            position: receipt.position,
+            ground: receipt.ground,
+            direction: (receipt.position - receipt.source_position).xz(),
+            heading: skill
+                .and_then(SkillKey::modular)
+                .and_then(|id| live_heading(effects, receipt, id)),
+            area_damage: skill.is_some_and(category::area_damage),
+            receipt: receipt.id,
+        },
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::category::{self, SkillKey};
@@ -514,6 +581,7 @@ mod tests {
     fn receipt(area_damage: bool) -> ImpactContext {
         ImpactContext {
             position: HIT,
+            ground: HIT.y,
             direction: Vec2::new(0.6, 0.8),
             heading: None,
             area_damage,
@@ -992,5 +1060,143 @@ mod tests {
         let specs = impact_particles(&row, &palette(), &receipt(false));
         assert_eq!(specs[0].color, palette().slot(PaletteSlot::White));
         assert_eq!(specs[3].color, palette().slot(PaletteSlot::Secondary));
+    }
+
+    #[test]
+    fn the_burst_sits_above_the_receipt_and_its_ground_rings_on_the_ground() {
+        // A receipt is at aim height; the ground is below it.
+        let lifted = ImpactContext {
+            ground: HIT.y - 1.05,
+            ..receipt(true)
+        };
+        for kind in ImpactKind::ALL {
+            let row = recipe(*kind, None, 8, 1.0);
+            let flat = impact_particles(&row, &palette(), &receipt(true));
+            let raised = impact_particles(&row, &palette(), &lifted);
+            assert_eq!(flat.len(), raised.len());
+            let mut lowered = 0;
+            for (a, b) in flat.iter().zip(&raised) {
+                // Only the height of a ground piece differs, by the height of the receipt.
+                assert_eq!(a.origin.xz(), b.origin.xz(), "{}", kind.id());
+                assert_eq!((a.velocity, a.size), (b.velocity, b.size));
+                if a.origin.y != b.origin.y {
+                    assert!((a.origin.y - b.origin.y - 1.05).abs() < 1e-5);
+                    assert!(b.origin.y < lifted.ground + 0.2, "{}", kind.id());
+                    lowered += 1;
+                } else {
+                    assert!(b.origin.y >= HIT.y, "{}", kind.id());
+                }
+            }
+            let grounded = matches!(kind, ImpactKind::ThudRing | ImpactKind::Blast);
+            assert_eq!(lowered > 0, grounded, "{}", kind.id());
+        }
+        let broken = ImpactContext {
+            ground: f32::NAN,
+            ..receipt(false)
+        };
+        assert!(
+            impact_particles(
+                &recipe(ImpactKind::ThudRing, None, 4, 1.0),
+                &palette(),
+                &broken
+            )
+            .is_empty()
+        );
+    }
+
+    #[test]
+    fn a_receipt_is_drawn_from_the_row_that_dealt_it() {
+        use shared::loadout::EffectVisualKind;
+        let registry = target();
+        let dawn = SkillId::DawnRay;
+        let key = CastKey::Skill(SkillKey::Modular(dawn));
+        let hit = Receipt {
+            id: 77,
+            position: HIT,
+            ground: HIT.y - 1.05,
+            source: 7,
+            source_position: HIT - Vec3::X * 6.0,
+        };
+        let beam = |owner: u64, skill: SkillId, kind: EffectVisualKind| SkillEffectState {
+            id: 5,
+            owner_id: owner,
+            owner_team: shared::map::Team::Green,
+            skill,
+            kind,
+            position: [HIT.x - 6.0, HIT.z],
+            end: [HIT.x - 6.0, HIT.z - 12.0],
+            radius: 0.6,
+            remaining_secs: 0.1,
+            armed: true,
+            consumed_segments: 0,
+        };
+        let look = registry.look(key).unwrap();
+        let drawn = |heading: Option<Vec2>| {
+            impact_particles(
+                look.impact.unwrap(),
+                &look.palette,
+                &ImpactContext {
+                    position: hit.position,
+                    ground: hit.ground,
+                    direction: Vec2::X,
+                    heading,
+                    area_damage: false,
+                    receipt: 77,
+                },
+            )
+        };
+        // The recipe, the colours and the receipt id come from the row; the hit points away
+        // from the hero that dealt it.
+        let at_rest = receipt_burst(&registry, key, &hit, &[]).unwrap();
+        assert_eq!(at_rest, drawn(None));
+        assert!(at_rest.iter().all(|spec| spec.event_id == 77));
+        // Dawn Ray pierces: the mark flies on along the live beam of this hero (rule E-15),
+        // and along nothing else.
+        let live = [beam(7, dawn, EffectVisualKind::Beam)];
+        let onward = receipt_burst(&registry, key, &hit, &live).unwrap();
+        assert_eq!(onward, drawn(Some(Vec2::NEG_Y)));
+        assert_ne!(onward, at_rest);
+        for other in [
+            beam(8, dawn, EffectVisualKind::Beam),
+            beam(0, dawn, EffectVisualKind::Beam),
+            beam(7, SkillId::HorizonWave, EffectVisualKind::Beam),
+            beam(7, dawn, EffectVisualKind::Orb),
+        ] {
+            assert_eq!(
+                receipt_burst(&registry, key, &hit, &[other]),
+                Some(at_rest.clone())
+            );
+        }
+        let unknown = Receipt { source: 0, ..hit };
+        assert_eq!(
+            receipt_burst(
+                &registry,
+                key,
+                &unknown,
+                &[beam(0, dawn, EffectVisualKind::Beam)]
+            ),
+            Some(at_rest)
+        );
+        // Area damage is a fact of the skill, not of the row: Thunder Pulse may draw wide.
+        let pulse = CastKey::Skill(SkillKey::Modular(SkillId::ThunderPulse));
+        assert!(category::area_damage(SkillKey::Modular(
+            SkillId::ThunderPulse
+        )));
+        assert!(receipt_burst(&registry, pulse, &hit, &[]).is_some());
+        // A row without a recipe, and a basic attack without a row, keep the built-in burst.
+        let step = CastKey::Skill(SkillKey::Modular(SkillId::AnchorStep));
+        assert_eq!(receipt_burst(&registry, step, &hit, &[]), None);
+        let packaged = SkillPresentation::packaged();
+        assert_eq!(receipt_burst(&packaged, key, &hit, &[]), None);
+        assert_eq!(
+            receipt_burst(&packaged, CastKey::Basic(HeroClass::Mage), &hit, &[]),
+            None
+        );
+        let basic = receipt_burst(&registry, CastKey::Basic(HeroClass::Mage), &hit, &[]).unwrap();
+        assert!(
+            basic
+                .iter()
+                .all(|spec| spec.source == ParticleSource::Impact)
+        );
     }
 }

@@ -1634,6 +1634,45 @@ impl PhaseWorld<'_, '_> {
             .filter_map(crate::game_vfx::ParticleSlot::sample)
             .collect()
     }
+    /// Seconds since the burst of a receipt was admitted. A recipe may hold some of its
+    /// particles back, so its age is that of its oldest particle. The particles of the
+    /// built-in burst start together; an accent can carry the same number and is older, so
+    /// there the youngest particle with the receipt id counts.
+    fn impact_age(&self, receipt: u64) -> Option<f32> {
+        use crate::game_vfx::ParticleSource as Source;
+        let ages = |source: Source| {
+            self.particles
+                .iter()
+                .filter(move |slot| slot.source().is_some_and(|(_, seen)| seen == source))
+                .filter_map(crate::game_vfx::ParticleSlot::sample)
+                .filter(move |(id, _)| *id == receipt)
+                .map(|(_, age)| age)
+        };
+        ages(Source::Impact)
+            .max_by(f32::total_cmp)
+            .or_else(|| ages(Source::Engine).min_by(f32::total_cmp))
+    }
+    /// Live particles by what they depict. An action sequence and a receipt id can be the
+    /// same number, so ids alone do not tell an accent from an impact.
+    fn particle_sources(&self) -> serde_json::Value {
+        use crate::game_vfx::ParticleSource as Source;
+        let count = |source: Source| {
+            self.particles
+                .iter()
+                .filter_map(crate::game_vfx::ParticleSlot::source)
+                .filter(|(_, seen)| *seen == source)
+                .count()
+        };
+        serde_json::json!({
+            "engine": count(Source::Engine),
+            "accent": count(Source::Accent),
+            "move": count(Source::Move),
+            "link": count(Source::Link),
+            "stage": count(Source::Stage),
+            "cue": count(Source::Cue),
+            "impact": count(Source::Impact),
+        })
+    }
     fn animation(&self) -> Option<&str> {
         self.animations
             .0
@@ -1776,7 +1815,6 @@ fn still_record(
     let edge = run.watch.edge.filter(|_| phase != Phase::Idle);
     let receipt = run.watch.receipt.as_ref().filter(|_| phase != Phase::Idle);
     let of_event = |id: u64| particles.iter().filter(move |(event, _)| *event == id);
-    let youngest = |id: u64| of_event(id).map(|(_, age)| *age).min_by(f32::total_cmp);
     let roots: Vec<_> = world
         .vfx
         .iter()
@@ -1842,7 +1880,8 @@ fn still_record(
             "with_cast_sequence": edge.map(|(_, sequence)| of_event(sequence).count()),
             "with_receipt_id": receipt.map(|receipt| of_event(receipt.id).count()),
             "ids_collide": edge.zip(receipt).map(|((_, sequence), receipt)| sequence == receipt.id),
-            "impact_age_secs": receipt.and_then(|receipt| youngest(receipt.id)),
+            "impact_age_secs": receipt.and_then(|receipt| world.impact_age(receipt.id)),
+            "by_source": world.particle_sources(),
         },
         "receipt": receipt.map(|receipt| serde_json::json!({
             "id": receipt.id,

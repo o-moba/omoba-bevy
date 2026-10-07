@@ -1,16 +1,25 @@
 //! Presentation consumes accepted server hits, never HP deltas or projectile disappearance.
 // i18n-strict
+use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy::ui::FocusPolicy;
 use shared::combat::{CombatEntityKind, CombatEvent};
+use shared::loadout::{LoadoutState, SkillEffectState};
 
 use crate::{
     camera::MainCamera,
     combat_visuals::CombatVisualRegistry,
+    game_vfx::{ClearCombatVfx, ConfirmedBurst, ImpactBurst, ParticleSpec, SkillBurst},
+    maps::MapLayout,
     net::{
         GameStateSnapshot, NetworkAvatar, NetworkHeroClass, NetworkPlayerId, NetworkSpriteCharacter,
     },
     player::Player,
+    skill_presentation::{
+        SkillPresentation, accents,
+        cast::CastKey,
+        impacts::{Receipt, receipt_burst},
+    },
     sprite::PlayerVisualMode,
     world2d::{layer, simulation_xz_to_render_xy},
 };
@@ -35,6 +44,7 @@ impl Plugin for CombatFeedbackPlugin {
     fn build(&self, app: &mut App) {
         crate::vfx_clock::ensure(app);
         app.init_resource::<CombatFeedback>()
+            .add_message::<ConfirmedHit>()
             .add_systems(
                 Update,
                 collect_hits
@@ -89,6 +99,85 @@ impl HitCursor {
     }
 }
 
+/// A damage receipt the hit cursor accepted from a hero the client sees, for presentation
+/// that may only follow a confirmed hit.
+#[derive(Message, Clone, Copy, Debug, PartialEq)]
+pub(crate) struct ConfirmedHit {
+    pub receipt: u64,
+    /// Id of the hero that dealt it.
+    pub source: u64,
+    pub slot: u8,
+    /// The ground under the receipt.
+    pub position: Vec3,
+}
+
+/// The hero that dealt a receipt, when the client sees it. A hidden or unknown source has
+/// none: its hit keeps the built-in burst of the wire style and points nowhere.
+#[derive(Clone, Copy)]
+struct Source<'a> {
+    position: Vec3,
+    class: shared::HeroClass,
+    avatar: Option<&'a str>,
+    sprite: Option<&'a str>,
+    loadout: Option<&'a LoadoutState>,
+}
+
+impl Source<'_> {
+    /// The row of the action that dealt the receipt.
+    fn key(&self, event: &CombatEvent) -> Option<CastKey> {
+        CastKey::of(self.class, self.loadout, event.action_slot?)
+    }
+}
+
+/// Ground direction of a hit: away from the source the client sees, else none in particular.
+fn hit_direction(source: Option<Vec3>, position: Vec3) -> Vec2 {
+    source
+        .map(|source| (position - source).xz())
+        .unwrap_or(Vec2::X)
+        .normalize_or(Vec2::X)
+}
+
+/// The burst of an accepted receipt from the recipe of the row that dealt it. `None` keeps
+/// the built-in burst: the source is not seen or its row carries no recipe.
+fn themed_impact(
+    skills: Option<&SkillPresentation>,
+    source: Option<&Source>,
+    event: &CombatEvent,
+    ground: f32,
+    effects: &[SkillEffectState],
+) -> Option<Vec<ParticleSpec>> {
+    let source = source?;
+    receipt_burst(
+        skills?,
+        source.key(event)?,
+        &Receipt {
+            id: event.id,
+            position: Vec3::new(event.x, event.y, event.z),
+            ground,
+            source: event.source.id,
+            source_position: source.position,
+        },
+        effects,
+    )
+}
+
+/// Receipts newer than `seen` of a trap that snapped without dealing damage (a shield took
+/// it). The hit cursor passes them over, because they are not hits.
+fn trap_snaps(seen: u64, events: &[CombatEvent]) -> Vec<&CombatEvent> {
+    let mut snaps: Vec<&CombatEvent> = Vec::new();
+    for event in events.iter().take(MAX_HITS) {
+        if event.id > seen
+            && event.trap_triggered
+            && event.amount == 0.0
+            && Vec3::new(event.x, event.y, event.z).is_finite()
+            && snaps.iter().all(|snap| snap.id != event.id)
+        {
+            snaps.push(event);
+        }
+    }
+    snaps
+}
+
 struct Impact {
     position: Vec3,
     age: f32,
@@ -111,15 +200,25 @@ pub(crate) struct DamageNumber {
     color: Color,
 }
 
+/// Where the receipt collector reports to. It is the only writer of `ConfirmedBurst`.
+#[derive(SystemParam)]
+struct HitOutput<'w> {
+    bursts: MessageWriter<'w, ImpactBurst>,
+    confirmed: MessageWriter<'w, ConfirmedBurst>,
+    cues: MessageWriter<'w, SkillBurst>,
+    hits: MessageWriter<'w, ConfirmedHit>,
+    resets: MessageWriter<'w, ClearCombatVfx>,
+}
+
 fn collect_hits(
     mut commands: Commands,
     clock: Res<crate::vfx_clock::VfxClock>,
     snapshot: Res<GameStateSnapshot>,
     registry: Res<CombatVisualRegistry>,
-    skills: Option<Res<crate::skill_presentation::SkillPresentation>>,
+    skills: Option<Res<SkillPresentation>>,
+    layout: Res<MapLayout>,
     mut feedback: ResMut<CombatFeedback>,
-    mut bursts: MessageWriter<crate::game_vfx::ImpactBurst>,
-    mut resets: MessageWriter<crate::game_vfx::ClearCombatVfx>,
+    mut out: HitOutput,
     numbers: Query<Entity, With<DamageNumber>>,
     heroes: Query<(
         &NetworkPlayerId,
@@ -137,6 +236,7 @@ fn collect_hits(
         impact.age += clock.delta;
         impact.age < impact.lifetime
     });
+    let seen = feedback.cursor.high_water;
     let (changed, events) = feedback.cursor.accept(
         (snapshot.meta.server_epoch, snapshot.meta.match_id),
         &snapshot.combat_events,
@@ -144,7 +244,7 @@ fn collect_hits(
     let mut number_count = numbers.iter().count();
     if changed {
         feedback.impacts.clear();
-        resets.write(crate::game_vfx::ClearCombatVfx);
+        out.resets.write(ClearCombatVfx);
         for entity in &numbers {
             commands.entity(entity).despawn();
         }
@@ -153,100 +253,145 @@ fn collect_hits(
     let Ok(local_id) = local.single() else {
         return;
     };
-    for event in events {
-        let position = Vec3::new(event.x, event.y, event.z);
-        // Cull against the viewed battle, including free-camera/minimap focus.
+    // Cull against the viewed battle, including free-camera/minimap focus.
+    let on_screen = |position: Vec3| {
         let render = if *mode == PlayerVisualMode::Models3d {
             position + Vec3::Y * 2.0
         } else {
             simulation_xz_to_render_xy(position).extend(layer::OVERHEAD)
         };
-        if !cameras.single().is_ok_and(|(camera, transform)| {
+        cameras.single().is_ok_and(|(camera, transform)| {
             let Some(size) = camera.logical_viewport_size() else {
                 return false;
             };
             camera
                 .world_to_viewport(&GlobalTransform::from(*transform), render)
                 .is_ok_and(|p| p.x >= 0.0 && p.y >= 0.0 && p.x <= size.x && p.y <= size.y)
-        }) {
+        })
+    };
+    // Resolve only a visible caster's accepted recipe. Hidden sources retain generic feedback.
+    let source_of = |event: &CombatEvent| {
+        let position = (event.source.kind == CombatEntityKind::Player)
+            .then(|| {
+                positions
+                    .iter()
+                    .find(|(id, _, visible)| id.0 == event.source.id && visible.get())
+            })
+            .flatten()
+            .map(|(_, pose, _)| pose.translation)?;
+        heroes.iter().find(|(id, ..)| id.0 == event.source.id).map(
+            |(_, class, avatar, sprite, loadout)| Source {
+                position,
+                class: class.0,
+                avatar: avatar.and_then(|v| v.0.as_deref()),
+                sprite: sprite.and_then(|v| v.0.as_deref()),
+                loadout: loadout.and_then(|l| l.0.as_ref()),
+            },
+        )
+    };
+    // Receipt positions are at aim height; ground rings and links need the floor below.
+    let ground = |position: Vec3| {
+        Vec3::new(
+            position.x,
+            layout.terrain_height_3d(position.x, position.z),
+            position.z,
+        )
+    };
+    if let Some(skills) = skills.as_deref().filter(|_| !changed) {
+        for event in trap_snaps(seen, &snapshot.combat_events) {
+            let position = Vec3::new(event.x, event.y, event.z);
+            let Some(key) = source_of(event)
+                .filter(|_| on_screen(position))
+                .and_then(|source| source.key(event))
+            else {
+                continue;
+            };
+            let cue = accents::trap_snap(skills, key, ground(position), event.id);
+            if !cue.is_empty() {
+                out.cues.write(SkillBurst(cue));
+            }
+        }
+    }
+    for event in events {
+        let position = Vec3::new(event.x, event.y, event.z);
+        if !on_screen(position) {
             continue;
         }
-        let owner = (event.source.kind == CombatEntityKind::Player)
-            .then(|| {
-                heroes
-                    .iter()
-                    .find(|(id, _, _, _, _)| id.0 == event.source.id)
-            })
-            .flatten();
+        let source = source_of(&event);
         let profile = registry.resolve(
-            owner.map(|(_, class, _, _, _)| class.0),
+            source.map(|source| source.class),
             event.style,
             event.action_slot,
-            owner.and_then(|(_, _, avatar, _, _)| avatar.and_then(|v| v.0.as_deref())),
-            owner.and_then(|(_, _, _, sprite, _)| sprite.and_then(|v| v.0.as_deref())),
+            source.and_then(|source| source.avatar),
+            source.and_then(|source| source.sprite),
         );
-        // Resolve only a visible caster's accepted recipe. Hidden sources retain generic feedback.
-        let impact_color = owner
-            .and_then(|(_, class, _, _, loadout)| {
+        let impact_color = source
+            .and_then(|source| {
                 skills
                     .as_ref()?
-                    .action_profile(
-                        class.0,
-                        loadout.and_then(|l| l.0.as_ref()),
-                        event.action_slot?,
-                    )
+                    .action_profile(source.class, source.loadout, event.action_slot?)
                     .map(|p| Color::srgb_from_array(p.color))
             })
             .unwrap_or_else(|| profile.impact.color());
-        let source_position = positions
-            .iter()
-            .find(|(id, _, _)| {
-                event.source.kind == CombatEntityKind::Player && id.0 == event.source.id
-            })
-            .map(|(_, pose, _)| {
-                if *mode == PlayerVisualMode::Sprite2d {
-                    pose.translation.truncate()
-                } else {
-                    Vec2::new(pose.translation.x, pose.translation.z)
-                }
-            });
-        let direction = source_position
-            .map(|source| Vec2::new(position.x, position.z) - source)
-            .unwrap_or(Vec2::X)
-            .normalize_or(Vec2::X);
         let vital = vital_break(
             &event,
             positions
                 .iter()
                 .any(|(id, _, visible)| id.0 == event.target.id && visible.get()),
         );
-        bursts.write(crate::game_vfx::ImpactBurst {
-            position,
-            direction,
-            color: if vital {
-                Color::srgb(1.0, 0.13, 0.43)
-            } else {
-                impact_color
-            },
-            scale: if vital { 1.25 } else { profile.impact.scale },
-            lifetime: if vital { 0.72 } else { profile.impact.lifetime },
-            kind: if vital {
-                crate::game_vfx::BurstKind::VitalBreak
-            } else {
-                crate::game_vfx::BurstKind::for_style(event.style)
-            },
-            seed: event.id,
-        });
-        if feedback.impacts.len() == MAX_HITS {
-            feedback.impacts.remove(0);
+        // The vital break is the engine's own burst; every other receipt is drawn from the
+        // recipe of its row when it has one.
+        let themed = (!vital)
+            .then(|| {
+                themed_impact(
+                    skills.as_deref(),
+                    source.as_ref(),
+                    &event,
+                    ground(position).y,
+                    &snapshot.skill_effects,
+                )
+            })
+            .flatten();
+        if let Some(burst) = themed {
+            out.confirmed.write(ConfirmedBurst(burst));
+        } else {
+            out.bursts.write(ImpactBurst {
+                position,
+                direction: hit_direction(source.map(|source| source.position), position),
+                color: if vital {
+                    Color::srgb(1.0, 0.13, 0.43)
+                } else {
+                    impact_color
+                },
+                scale: if vital { 1.25 } else { profile.impact.scale },
+                lifetime: if vital { 0.72 } else { profile.impact.lifetime },
+                kind: if vital {
+                    crate::game_vfx::BurstKind::VitalBreak
+                } else {
+                    crate::game_vfx::BurstKind::for_style(event.style)
+                },
+                seed: event.id,
+            });
+            // The gizmo star belongs to the built-in burst; a recipe is its own mark.
+            if feedback.impacts.len() == MAX_HITS {
+                feedback.impacts.remove(0);
+            }
+            feedback.impacts.push(Impact {
+                position,
+                age: 0.0,
+                lifetime: profile.impact.lifetime.clamp(0.08, 1.2),
+                scale: profile.impact.scale.clamp(0.1, 2.0),
+                color: impact_color,
+            });
         }
-        feedback.impacts.push(Impact {
-            position,
-            age: 0.0,
-            lifetime: profile.impact.lifetime.clamp(0.08, 1.2),
-            scale: profile.impact.scale.clamp(0.1, 2.0),
-            color: impact_color,
-        });
+        if let Some((_, slot)) = source.zip(event.action_slot) {
+            out.hits.write(ConfirmedHit {
+                receipt: event.id,
+                source: event.source.id,
+                slot,
+                position: ground(position),
+            });
+        }
         if number_count >= MAX_NUMBERS {
             continue;
         }
@@ -419,6 +564,212 @@ mod tests {
             ..default()
         }
     }
+    /// A receipt a hero dealt to another hero with the action of `slot`.
+    fn dealt(id: u64, amount: f32, source: u64, slot: u8) -> CombatEvent {
+        CombatEvent {
+            id,
+            amount,
+            source: shared::combat::CombatEntity {
+                kind: CombatEntityKind::Player,
+                id: source,
+            },
+            target: shared::combat::CombatEntity {
+                kind: CombatEntityKind::Player,
+                id: 9,
+            },
+            x: 4.0,
+            y: 1.05,
+            z: 0.0,
+            action_slot: Some(slot),
+            ..default()
+        }
+    }
+    fn seen_hero(class: shared::HeroClass) -> Source<'static> {
+        Source {
+            position: Vec3::new(0.0, 0.5, 0.0),
+            class,
+            avatar: None,
+            sprite: None,
+            loadout: None,
+        }
+    }
+    fn slot_of(class: shared::HeroClass, skill: shared::loadout::SkillId) -> u8 {
+        shared::loadout::preset_for_class(class)
+            .unwrap()
+            .skills()
+            .iter()
+            .position(|id| *id == skill)
+            .unwrap() as u8
+    }
+    const GROUND: Vec3 = Vec3::new(4.0, 0.0, 0.0);
+    const FLOOR: f32 = 0.0;
+
+    #[test]
+    fn impacts_need_a_receipt() {
+        use crate::game_vfx::ParticleSource;
+        use crate::skill_presentation::cast::{CastObserver, Sighting};
+        use shared::loadout::SkillId;
+        let registry = SkillPresentation::target();
+        let class = shared::HeroClass::Stormfist;
+        let kick = slot_of(class, SkillId::ThunderKick);
+        let source = seen_hero(class);
+
+        // The accepted cast of a damaging skill draws its accent and waits: without a
+        // receipt nothing it draws is an impact, and no link leaves the caster.
+        let mut observer = CastObserver::default();
+        let mut hero = Sighting {
+            actor: World::new().spawn_empty().id(),
+            actor_id: 7,
+            local: false,
+            visible: true,
+            alive: true,
+            position: source.position,
+            forward: Vec3::X,
+            class,
+            loadout: None,
+            action: default(),
+            facing: default(),
+            utility: default(),
+        };
+        observer.observe(Some((1, 1)), true, [hero]);
+        hero.action.sequence = 1;
+        hero.action.slot = kick;
+        let casts = observer.observe(Some((1, 1)), true, [hero]).casts;
+        let accent = accents::cast_burst(&registry, &casts[0], &[]);
+        assert!(!accent.is_empty());
+        assert!(
+            accent
+                .iter()
+                .all(|spec| spec.source == ParticleSource::Accent)
+        );
+        let mut links = accents::LinkBook::default();
+        links.turn(Some((1, 1)), 1);
+        links.open(&registry, &casts[0]);
+
+        let mut cursor = HitCursor::default();
+        cursor.accept((1, 1), &[]);
+        assert!(cursor.accept((1, 1), &[]).1.is_empty());
+        // The receipt arrives: one burst from the recipe of the row, carrying its id.
+        let hit = dealt(5, 40.0, 7, kick);
+        let accepted = cursor.accept((1, 1), std::slice::from_ref(&hit)).1;
+        assert_eq!(accepted.len(), 1);
+        let burst =
+            themed_impact(Some(&registry), Some(&source), &accepted[0], FLOOR, &[]).unwrap();
+        assert!(!burst.is_empty() && burst.len() <= 12);
+        assert!(
+            burst
+                .iter()
+                .all(|spec| spec.source == ParticleSource::Impact && spec.event_id == 5)
+        );
+        // Only now does the link have somewhere to go.
+        let confirmed = ConfirmedHit {
+            receipt: hit.id,
+            source: 7,
+            slot: kick,
+            position: GROUND,
+        };
+        let (link, _) = links.link(&confirmed).unwrap();
+        assert!(link.iter().all(|spec| spec.source == ParticleSource::Link));
+        // A repeated delivery of the same snapshot is not a second hit.
+        assert!(
+            cursor
+                .accept((1, 1), std::slice::from_ref(&hit))
+                .1
+                .is_empty()
+        );
+
+        // The recipe needs a source the client sees, a registry and a row that names one;
+        // every other receipt keeps the built-in burst.
+        assert!(themed_impact(Some(&registry), None, &hit, FLOOR, &[]).is_none());
+        assert!(themed_impact(None, Some(&source), &hit, FLOOR, &[]).is_none());
+        let packaged = SkillPresentation::packaged();
+        assert!(themed_impact(Some(&packaged), Some(&source), &hit, FLOOR, &[]).is_none());
+        let mut unslotted = hit.clone();
+        unslotted.action_slot = None;
+        assert!(themed_impact(Some(&registry), Some(&source), &unslotted, FLOOR, &[]).is_none());
+        // A basic attack is drawn from the row of its class.
+        let basic = dealt(6, 12.0, 7, shared::BASIC_ATTACK_ACTION_SLOT);
+        let burst = themed_impact(Some(&registry), Some(&source), &basic, FLOOR, &[]).unwrap();
+        assert!(
+            burst
+                .iter()
+                .all(|spec| spec.source == ParticleSource::Impact && spec.event_id == 6)
+        );
+        assert!(themed_impact(Some(&packaged), Some(&source), &basic, FLOOR, &[]).is_none());
+    }
+
+    #[test]
+    fn a_trap_that_dealt_no_damage_draws_only_its_cue() {
+        use crate::game_vfx::ParticleSource;
+        use shared::loadout::SkillId;
+        let registry = SkillPresentation::target();
+        let class = shared::HeroClass::Wildspark;
+        let traps = slot_of(class, SkillId::WildTraps);
+        let source = seen_hero(class);
+        let mut cursor = HitCursor::default();
+        cursor.accept((1, 1), &[hit(3, 10.0)]);
+        let seen = cursor.high_water;
+        assert_eq!(seen, 3);
+
+        let snap = |id: u64, amount: f32| CombatEvent {
+            trap_triggered: true,
+            ..dealt(id, amount, 7, traps)
+        };
+        let mut misplaced = snap(7, 0.0);
+        misplaced.z = f32::NAN;
+        let events = [
+            snap(2, 0.0),
+            snap(4, 0.0),
+            snap(4, 0.0),
+            snap(5, 12.0),
+            dealt(6, 0.0, 7, traps),
+            misplaced,
+        ];
+        // A shield took the damage of receipt 4: the cursor passes it over, it is no hit.
+        let accepted = cursor.accept((1, 1), &events).1;
+        assert_eq!(
+            accepted.iter().map(|event| event.id).collect::<Vec<_>>(),
+            [5]
+        );
+        let snaps = trap_snaps(seen, &events);
+        assert_eq!(snaps.iter().map(|event| event.id).collect::<Vec<_>>(), [4]);
+        let key = source.key(snaps[0]).unwrap();
+        let cue = accents::trap_snap(&registry, key, GROUND, snaps[0].id);
+        assert!(!cue.is_empty() && cue.len() <= accents::CUE_MAX);
+        assert!(
+            cue.iter()
+                .all(|spec| spec.source == ParticleSource::Cue && spec.event_id == 4)
+        );
+        // It is not an impact, and a row without a `cast` block draws none.
+        assert!(themed_impact(Some(&registry), Some(&source), snaps[0], FLOOR, &[]).is_some());
+        assert!(accents::trap_snap(&SkillPresentation::packaged(), key, GROUND, 4).is_empty());
+        assert!(accents::trap_snap(&registry, CastKey::Basic(class), GROUND, 4).is_empty());
+        // The trap that did bite is an ordinary hit with the recipe of its row.
+        let bite = themed_impact(Some(&registry), Some(&source), &accepted[0], FLOOR, &[]);
+        assert!(
+            bite.unwrap()
+                .iter()
+                .all(|spec| spec.source == ParticleSource::Impact)
+        );
+        // Nothing is owed after the snapshot was read once.
+        assert!(trap_snaps(cursor.high_water, &events).is_empty());
+    }
+
+    #[test]
+    fn a_hit_points_away_from_a_source_the_client_sees() {
+        let at = Vec3::new(3.0, 1.05, 4.0);
+        // Ground coordinates of the simulation in both render modes; heights do not turn it.
+        assert_eq!(hit_direction(Some(Vec3::new(3.0, 9.0, 0.0)), at), Vec2::Y);
+        assert_eq!(hit_direction(Some(Vec3::new(0.0, 0.5, 4.0)), at), Vec2::X);
+        assert_eq!(
+            hit_direction(Some(Vec3::new(3.0, 0.5, 6.0)), at),
+            Vec2::NEG_Y
+        );
+        // A hidden source gives the hit no direction, and neither does a hit on itself.
+        assert_eq!(hit_direction(None, at), Vec2::X);
+        assert_eq!(hit_direction(Some(at), at), Vec2::X);
+    }
+
     #[test]
     fn retained_history_is_not_replayed_and_duplicates_are_suppressed() {
         let mut cursor = HitCursor::default();

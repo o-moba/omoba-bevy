@@ -24,7 +24,6 @@ impl SkillKey {
         })
     }
 
-    #[cfg_attr(not(test), allow(dead_code))] // names a row in reports and evidence
     pub(crate) fn id(self) -> &'static str {
         match self {
             Self::Modular(skill) => skill.id(),
@@ -549,7 +548,6 @@ pub(crate) fn cone_half_angle(id: SkillId) -> Option<f32> {
 }
 
 /// Where the hit of an accepted cast is resolved from.
-#[cfg_attr(not(test), allow(dead_code))] // read by the cast choreography (accent anchor)
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum StrikeOrigin {
     /// The caster's position at the accepted cast.
@@ -563,7 +561,6 @@ pub(crate) enum StrikeOrigin {
 
 /// Skills that move first and then pick from the new position are anchored at the arrival
 /// (`common/src/skills/advanced.rs:674-686`, `:726-727`, `:776`, `:901-923`).
-#[cfg_attr(not(test), allow(dead_code))] // read by the cast choreography (accent anchor)
 pub(crate) fn strike_origin(id: SkillId, recast: bool) -> StrikeOrigin {
     let SkillEffect::Technique { action, .. } = skill(id).effect else {
         return StrikeOrigin::Origin;
