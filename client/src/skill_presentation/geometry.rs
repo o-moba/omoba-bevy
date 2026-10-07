@@ -1,7 +1,7 @@
 //! One table for every boundary and area a skill may draw. Shapes are functions of the
 //! received effect fields and the catalog only; presentation data cannot scale or move them.
-// The parser, the area flash and the 2D fallback read this table; the body renderer and the
-// aim preview adopt the rest of it.
+// The parser, the area flash, the body renderer and the 2D fallback read this table; the aim
+// preview adopts the rest of it.
 #![cfg_attr(not(test), allow(dead_code))]
 
 use super::category::{cone_half_angle, own_kinds};
@@ -723,76 +723,81 @@ mod tests {
         assert!(GeoShape::None.outline().is_empty());
     }
 
-    /// Parity with the in-process authority for the cone the flat view now draws: Furnace
-    /// Breath hits a target one degree inside either edge of the drawn sector and misses
-    /// one a degree outside it.
-    #[test]
-    fn the_drawn_cone_has_the_edges_the_authority_hits_within() {
+    /// Whether the in-process authority damages a hero who stands still at `offset` from
+    /// the caster of `id`, cast toward `aim` from the caster, within 1.5 s of the cast.
+    fn authority_hits(class: shared::HeroClass, id: SkillId, aim: Vec2, offset: Vec2) -> bool {
         use common::offline::{EPOCH, LOCAL_ADDR, PracticeSession};
         use shared::practice::PracticeCommand;
         use shared::wire::{CharacterChoice, ClientPacket};
 
-        let id = SkillId::FurnaceBreath;
-        let class = shared::HeroClass::Cinderforge;
         let slot = shared::loadout::preset_for_class(class)
             .unwrap()
             .skills()
             .iter()
             .position(|skill| *skill == id)
             .unwrap() as u8;
+        let mut session = PracticeSession::new(std::time::Instant::now());
+        session.command(ClientPacket::Join {
+            handheld: Default::default(),
+            prematch: false,
+            team: shared::map::Team::Green,
+            character: CharacterChoice::Ipfs,
+            hero_class: class,
+            avatar: None,
+            sprite_character: None,
+            session_id: None,
+            passport_ticket: None,
+        });
+        for command in [PracticeCommand::ClearBots, PracticeCommand::SpawnDummy] {
+            session.command(ClientPacket::Practice { command });
+        }
+        // Nothing else may move or hurt the target.
+        session.bots = Default::default();
+        session.world.structures.clear();
+        session.world.minions.clear();
+        session.world.neutrals.clear();
+        let caster = &session.world.players[&LOCAL_ADDR].hero;
+        let origin = Vec2::new(caster.x, caster.z);
+        let target = session
+            .world
+            .players
+            .values_mut()
+            .find(|player| player.hero.identity.is_bot)
+            .unwrap();
+        let target_id = target.hero.identity.id;
+        target.hero.x = origin.x + offset.x;
+        target.hero.z = origin.y + offset.y;
+        let full = target.hero.hp;
+        session.command(ClientPacket::CastSkill {
+            slot,
+            aim: (origin + aim).to_array(),
+            server_epoch: EPOCH,
+            match_id: 1,
+            request_id: 1,
+        });
+        for _ in 0..30 {
+            session.advance(0.05);
+        }
+        let target = session
+            .world
+            .players
+            .values()
+            .find(|player| player.hero.identity.id == target_id)
+            .unwrap();
+        // The target stood still, so the answer is about that one place.
+        assert!((target.hero.x - origin.x - offset.x).abs() < 1e-3);
+        target.hero.hp < full
+    }
+
+    /// Parity with the in-process authority for the cone the flat view now draws: Furnace
+    /// Breath hits a target one degree inside either edge of the drawn sector and misses
+    /// one a degree outside it.
+    #[test]
+    fn the_drawn_cone_has_the_edges_the_authority_hits_within() {
+        let id = SkillId::FurnaceBreath;
         // Whether the breath aimed along +X damages a hero standing `offset` from the caster.
         let hits = |offset: Vec2| {
-            let mut session = PracticeSession::new(std::time::Instant::now());
-            session.command(ClientPacket::Join {
-                handheld: Default::default(),
-                prematch: false,
-                team: shared::map::Team::Green,
-                character: CharacterChoice::Ipfs,
-                hero_class: class,
-                avatar: None,
-                sprite_character: None,
-                session_id: None,
-                passport_ticket: None,
-            });
-            for command in [PracticeCommand::ClearBots, PracticeCommand::SpawnDummy] {
-                session.command(ClientPacket::Practice { command });
-            }
-            // Nothing else may move or hurt the target.
-            session.bots = Default::default();
-            session.world.structures.clear();
-            session.world.minions.clear();
-            session.world.neutrals.clear();
-            let caster = &session.world.players[&LOCAL_ADDR].hero;
-            let origin = Vec2::new(caster.x, caster.z);
-            let target = session
-                .world
-                .players
-                .values_mut()
-                .find(|player| player.hero.identity.is_bot)
-                .unwrap();
-            let target_id = target.hero.identity.id;
-            target.hero.x = origin.x + offset.x;
-            target.hero.z = origin.y + offset.y;
-            let full = target.hero.hp;
-            session.command(ClientPacket::CastSkill {
-                slot,
-                aim: [origin.x + 5.0, origin.y],
-                server_epoch: EPOCH,
-                match_id: 1,
-                request_id: 1,
-            });
-            for _ in 0..30 {
-                session.advance(0.05);
-            }
-            let target = session
-                .world
-                .players
-                .values()
-                .find(|player| player.hero.identity.id == target_id)
-                .unwrap();
-            // The target stood still, so the answer is about that one place.
-            assert!((target.hero.x - origin.x - offset.x).abs() < 1e-3);
-            target.hero.hp < full
+            authority_hits(shared::HeroClass::Cinderforge, id, Vec2::X * 5.0, offset)
         };
 
         let GeoShape::Sector {
@@ -818,6 +823,50 @@ mod tests {
         }
         // Behind the caster nothing is hit, however near.
         assert!(!hits(Vec2::new(-1.5, 0.0)));
+    }
+
+    /// Parity with the in-process authority for the cage the body draws: a hero is struck
+    /// within `CAGE_BAR_HALF_WIDTH` plus its own radius of a side of the pentagon whose
+    /// first corner points along world +X, and not beyond.
+    #[test]
+    fn the_drawn_cage_has_the_band_the_authority_hits_within() {
+        let id = SkillId::IronBoundary;
+        let hits =
+            |offset: Vec2| authority_hits(shared::HeroClass::Chainkeeper, id, Vec2::ZERO, offset);
+        let radius = replicated_radius(id, EffectVisualKind::Cage);
+        assert_eq!(radius, 5.0);
+        let GeoShape::Pentagon {
+            radius: corners, ..
+        } = boundary_shape(
+            id,
+            EffectVisualKind::Cage,
+            &SkillEffectState {
+                radius,
+                ..effect(id, EffectVisualKind::Cage)
+            },
+        )
+        else {
+            panic!("a cage is a pentagon");
+        };
+        assert_eq!(corners, radius);
+        // The middle of side 0 lies between the corners at 0 and 72 degrees.
+        let outward = Vec2::from_angle(TAU / 10.0);
+        let side = radius * (PI / 5.0).cos();
+        let reach = CAGE_BAR_HALF_WIDTH + common::balance::PLAYER_HIT_RADIUS;
+        for toward in [-1.0, 1.0] {
+            assert!(hits(outward * (side + toward * (reach - 0.03))), "{toward}");
+            assert!(
+                !hits(outward * (side + toward * (reach + 0.03))),
+                "{toward}"
+            );
+        }
+        // The orientation: just beyond the reach of a side there is a corner along +X and
+        // none along the middle of a side.
+        let beyond = radius + reach - 0.03;
+        assert!(hits(Vec2::X * beyond));
+        assert!(!hits(outward * beyond));
+        // Nothing happens at the keeper.
+        assert!(!hits(Vec2::new(0.5, 0.5)));
     }
 
     /// A change of a mirrored literal must be deliberate. Parity against the in-process

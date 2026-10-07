@@ -5,6 +5,7 @@ use super::accents::Palette;
 use super::bodies::{self, Load, Paint, PartSlot, Role, Seen, VfxMeshes};
 use super::cast::CastKey;
 use super::category::SkillKey;
+use super::geometry::GeoShape;
 use super::schema::Body;
 use super::stage::{self, EffectKey, EffectMemory};
 use super::vocab::{Model, PaletteSlot};
@@ -154,13 +155,6 @@ struct Instances {
     objects: HashMap<u64, Instance>,
     /// Effects drawn through the `body` of their row.
     bodies: HashMap<EffectKey, BodyInstance>,
-}
-
-/// The body a row gives an effect, when this renderer lays its archetype out.
-fn staged_body<'a>(profiles: &'a SkillPresentation, e: &SkillEffectState) -> Option<&'a Body> {
-    profiles
-        .body_for(e)
-        .filter(|body| bodies::staged(body.archetype))
 }
 
 pub(crate) fn valid_effect(e: &SkillEffectState) -> bool {
@@ -503,7 +497,7 @@ fn sync(
             continue;
         };
         // One path draws an effect: the body of its row, when there is one.
-        if staged_body(&profiles, e).is_some() {
+        if profiles.body_for(e).is_some() {
             continue;
         }
         // A row that dropped its legacy style still shows the objects whose kind names
@@ -997,8 +991,10 @@ struct BodyInstance {
     skill: SkillId,
     kind: EffectVisualKind,
     friendly: bool,
-    /// The block the parts were built from.
+    /// The block the parts were built from, and the family of boundary they were built
+    /// for: the fog can cut a cone down to a line, and a wall can lose its heading.
     body: Body,
+    shape: std::mem::Discriminant<GeoShape>,
     parts: Vec<BodyPart>,
     paints: Paints,
     model: Option<Handle<WorldAsset>>,
@@ -1066,6 +1062,7 @@ fn spawn_body(
         kind: e.kind,
         friendly,
         body: body.clone(),
+        shape: std::mem::discriminant(&seen.shape),
         parts,
         paints,
         model,
@@ -1139,11 +1136,11 @@ fn sync_bodies(
             continue;
         }
         let friendly = frame.local.single().is_ok_and(|team| *team == e.owner_team);
-        let position = Vec2::from_array(e.position);
+        let stands = bodies::root_at(e);
         let ground = frame
             .map
             .as_ref()
-            .map_or(0.0, |map| map.terrain_height_3d(position.x, position.y));
+            .map_or(0.0, |map| map.terrain_height_3d(stands.x, stands.y));
         let owner = frame
             .heroes
             .iter()
@@ -1151,14 +1148,21 @@ fn sync_bodies(
             .map(|(_, pose, _)| pose.translation + Vec3::Y * OWNER_CHEST);
         let memory = frame.memory.as_ref().and_then(|memory| memory.get(key));
         let seen = Seen::of(e, memory, owner, ground, now);
-        // An instance whose skill, kind and owner stand under an unchanged registry is
-        // what it was: its row is not looked up again.
+        // An instance whose skill, kind, owner and family of boundary stand under an
+        // unchanged registry is what it was: its row is not looked up again.
+        let shape = std::mem::discriminant(&seen.shape);
         let known = !recolored
             && instances.bodies.get(&key).is_some_and(|instance| {
-                (instance.owner, instance.kind, instance.skill) == (e.owner_id, e.kind, e.skill)
+                (
+                    instance.owner,
+                    instance.kind,
+                    instance.skill,
+                    instance.shape,
+                ) == (e.owner_id, e.kind, e.skill, shape)
             });
         if !known {
-            let Some((body, look)) = staged_body(profiles, e)
+            let Some((body, look)) = profiles
+                .body_for(e)
                 .zip(profiles.look(CastKey::Skill(SkillKey::Modular(e.skill))))
             else {
                 continue;
@@ -1169,6 +1173,7 @@ fn sync_bodies(
                 instance.owner != e.owner_id
                     || instance.kind != e.kind
                     || instance.body != *body
+                    || instance.shape != shape
                     || (instance.skill != e.skill && matches!(key, EffectKey::Runtime(_)))
             });
             if rebuilt && let Some(previous) = instances.bodies.remove(&key) {
@@ -1478,8 +1483,20 @@ mod tests {
             .add_plugins(SkillEffectsPlugin);
         app
     }
-    /// An effect of `skill` as the server replicates it, heading along +X.
+    /// An effect of `skill` as the server replicates it, heading along +X: `end` is one
+    /// unit ahead for a kind with a heading, the far end of a strip or a cone, the
+    /// half-length of a wall ahead, and the place itself for every other.
     fn replicated(id: u64, skill: SkillId, kind: EffectVisualKind) -> SkillEffectState {
+        use super::super::geometry::{self, GeoClass};
+        let radius = geometry::replicated_radius(skill, kind);
+        let ahead = match geometry::boundary_class(skill, kind) {
+            _ if super::super::category::heading_only(kind) => 1.0,
+            GeoClass::Capsule | GeoClass::Lane | GeoClass::Sector => {
+                shared::loadout::skill(skill).ability.cast_range.min(45.0)
+            }
+            GeoClass::Bar => radius,
+            GeoClass::Ring | GeoClass::Pentagon | GeoClass::None => 0.0,
+        };
         SkillEffectState {
             id,
             owner_id: 7,
@@ -1487,12 +1504,8 @@ mod tests {
             skill,
             kind,
             position: [4.0, 5.0],
-            end: if super::super::category::heading_only(kind) {
-                [5.0, 5.0]
-            } else {
-                [4.0, 5.0]
-            },
-            radius: super::super::geometry::replicated_radius(skill, kind),
+            end: [4.0 + ahead, 5.0],
+            radius,
             remaining_secs: 1.0,
             armed: true,
             consumed_segments: 0,
@@ -1571,14 +1584,19 @@ mod tests {
         assert_eq!(instances.objects.len(), 2);
         let shard = &instances.bodies[&EffectKey::Runtime(2)];
         let orb = &instances.bodies[&ORB];
+        let ray = &instances.bodies[&EffectKey::Runtime(4)];
         assert_eq!(
-            (shard.body.archetype, orb.body.archetype),
-            (Archetype::Traveller, Archetype::Orbiter)
+            (shard.body.archetype, orb.body.archetype, ray.body.archetype),
+            (Archetype::Traveller, Archetype::Orbiter, Archetype::Lane)
         );
-        assert_eq!(instances.bodies.len(), 2);
-        // A strip is not laid out here; without a legacy style it is not drawn yet.
-        assert!(!instances.objects.contains_key(&4));
-        assert!(!instances.bodies.contains_key(&EffectKey::Runtime(4)));
+        assert_eq!(instances.bodies.len(), 3);
+        // The strip has its two edges and its two round ends.
+        let outline = ray
+            .parts
+            .iter()
+            .filter(|part| matches!(part.slot.role, Role::Boundary(_)))
+            .count();
+        assert_eq!(outline, 4);
 
         // The root stands on the replicated position, turned along the heading.
         let root = app.world().get::<Transform>(shard.root).unwrap();
@@ -1783,6 +1801,98 @@ mod tests {
         assert_eq!(alpha(&instance.paints.primary), 1.0);
     }
 
+    /// The parts of a body are those of the boundary it was built for. The fog can cut a
+    /// cone down to a line and give it back whole, and each time the body is built anew.
+    #[test]
+    fn a_body_is_rebuilt_when_the_family_of_its_boundary_changes() {
+        let mut app = app(SkillPresentation::target());
+        // The root of the body of an effect, its boundary parts and its visible parts.
+        let body = |app: &App, id: u64| -> (Entity, usize, usize) {
+            let instance = &bodies(app)[&EffectKey::Runtime(id)];
+            let boundary = instance
+                .parts
+                .iter()
+                .filter(|part| matches!(part.slot.role, Role::Boundary(_)))
+                .count();
+            let visible = instance
+                .parts
+                .iter()
+                .filter(|part| {
+                    *app.world().get::<Visibility>(part.entity).unwrap() != Visibility::Hidden
+                })
+                .count();
+            (instance.root, boundary, visible)
+        };
+        let cone = replicated(5, SkillId::FurnaceBreath, EffectVisualKind::BeamWarning);
+        show(&mut app, vec![cone.clone()]);
+        // Two edges and six chords, the dim fill and two flame tongues; the read-out has
+        // not begun to grow.
+        let (whole, bars, visible) = body(&app, 5);
+        assert_eq!((bars, visible), (8, 11));
+        let mut later = cone.clone();
+        later.remaining_secs = 0.6;
+        show(&mut app, vec![later.clone()]);
+        assert_eq!(body(&app, 5), (whole, 8, 12), "the same entities");
+        // The fog takes a part of the axis: one plain bar and nothing else.
+        let mut cut = later.clone();
+        cut.end = [8.0, 5.0];
+        show(&mut app, vec![cut]);
+        let (line, bars, visible) = body(&app, 5);
+        assert_ne!(line, whole);
+        assert!(app.world().get_entity(whole).is_err());
+        assert_eq!((bars, visible), (1, 1));
+        #[cfg(feature = "qa")]
+        {
+            let evidence = app
+                .world()
+                .get::<super::super::SkillBodyVisual>(line)
+                .unwrap();
+            assert_eq!(evidence.engine, 1);
+            assert_eq!(
+                evidence.boundary,
+                GeoShape::Segment {
+                    from: Vec2::new(4.0, 5.0),
+                    to: Vec2::new(8.0, 5.0)
+                }
+            );
+        }
+        // The whole axis is in sight again.
+        show(&mut app, vec![later]);
+        let (again, bars, visible) = body(&app, 5);
+        assert_ne!(again, line);
+        assert_eq!((bars, visible), (8, 12));
+
+        // A wall stands on its bar; without a heading there is no bar and nothing stands.
+        let wall = replicated(6, SkillId::Northwall, EffectVisualKind::ShieldWall);
+        show(&mut app, vec![wall.clone()]);
+        let (standing, bars, visible) = body(&app, 6);
+        assert_eq!((bars, visible), (1, 6));
+        let mut lost = wall;
+        lost.end = lost.position;
+        show(&mut app, vec![lost]);
+        let (fallen, bars, visible) = body(&app, 6);
+        assert_ne!(fallen, standing);
+        assert_eq!((bars, visible), (0, 0));
+
+        // A cage keeps its entities while its sides break: a broken side is hidden.
+        let cage = replicated(7, SkillId::IronBoundary, EffectVisualKind::Cage);
+        show(&mut app, vec![cage.clone()]);
+        let (fence, bars, visible) = body(&app, 7);
+        assert_eq!((bars, visible), (10, 16));
+        let mut broken = cage;
+        broken.consumed_segments = 0b10010;
+        show(&mut app, vec![broken]);
+        assert_eq!(body(&app, 7), (fence, 10, 12));
+        #[cfg(feature = "qa")]
+        assert_eq!(
+            app.world()
+                .get::<super::super::SkillBodyVisual>(fence)
+                .unwrap()
+                .engine,
+            6
+        );
+    }
+
     /// The cache makes what the parser's material rule counts: three materials for a skill
     /// colour, one for a matter and one for a spark colour, and the engine's own.
     #[test]
@@ -1800,7 +1910,7 @@ mod tests {
                 .chain(super::super::category::aux_kinds(skill));
             for kind in kinds {
                 let effect = replicated(effects.len() as u64 + 1, skill, *kind);
-                if staged_body(&registry, &effect).is_some() {
+                if registry.body_for(&effect).is_some() {
                     rows.insert(id.to_string());
                     // Two instances of each: the second makes no material.
                     let mut twin = effect.clone();
@@ -1810,7 +1920,7 @@ mod tests {
                 }
             }
         }
-        assert_eq!(effects.len(), 26 * 2);
+        assert_eq!(effects.len(), 33 * 2);
         let bits = |color: [f32; 3]| color.map(f32::to_bits);
         let (mut primaries, mut secondaries, mut accents) =
             (BTreeSet::new(), BTreeSet::new(), BTreeSet::new());
@@ -1825,7 +1935,7 @@ mod tests {
         }
         let mut app = app(registry);
         show(&mut app, effects);
-        assert_eq!(bodies(&app).len(), 26 * 2);
+        assert_eq!(bodies(&app).len(), 33 * 2);
         let made = app.world().resource::<BodyPaints>().made.len();
         // White and the two team colours are the engine's share here.
         let most = 3 * primaries.len() + secondaries.len() + accents.len() + 3;

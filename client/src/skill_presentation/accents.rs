@@ -11,7 +11,7 @@ use super::geometry::{self, AreaContext, GeoShape};
 pub(crate) use super::schema::{CastAccent, MoveSpec};
 use super::schema::{SkillProfile, Theme};
 use super::stage::{EndKind, OwnerSeen, StageChange, StageEvent, Transition};
-use super::vocab::{AccentPattern, ExpireKind, MovePattern, PaletteSlot, ParticleShape};
+use super::vocab::{AccentPattern, Archetype, ExpireKind, MovePattern, PaletteSlot, ParticleShape};
 use crate::combat_feedback::ConfirmedHit;
 use crate::game_vfx::{
     Curve, Orient, ParticleSource, ParticleSpec, SkillBurst, Tint, jitter, unit_radius,
@@ -32,6 +32,9 @@ pub(crate) const LINK_MAX: usize = 3;
 pub(crate) const LINK_SECS: f32 = 0.25;
 pub(crate) const STAGE_MAX: usize = 8;
 pub(crate) const STAGE_SECS: f32 = 0.6;
+/// How long the flash of a released telegraph is seen: the payoff of a wait, so it stays
+/// for most of what a stage one-shot may last.
+const DISCHARGE_SECS: f32 = 0.5;
 #[cfg_attr(not(test), allow(dead_code))] // the cues are emitted by the receipt collector
 pub(crate) const CUE_MAX: usize = 6;
 #[cfg_attr(not(test), allow(dead_code))]
@@ -1299,7 +1302,7 @@ pub(crate) fn stage_oneshot(
                         let mut flash = bar(
                             apex + ray * (0.2 * radius),
                             apex + ray * (0.9 * radius),
-                            0.3,
+                            DISCHARGE_SECS,
                             lead,
                         );
                         flash.end_color = Some(spark);
@@ -1312,7 +1315,7 @@ pub(crate) fn stage_oneshot(
             | GeoShape::Lane { from, to, .. } => (0..5)
                 .map(|i| {
                     let (a, b) = (i as f32 / 5.0, (i as f32 + 0.8) / 5.0);
-                    let mut flash = bar(from.lerp(to, a), from.lerp(to, b), 0.3, lead);
+                    let mut flash = bar(from.lerp(to, a), from.lerp(to, b), DISCHARGE_SECS, lead);
                     flash.end_color = Some(spark);
                     flash
                 })
@@ -1322,9 +1325,14 @@ pub(crate) fn stage_oneshot(
                     return Vec::new();
                 };
                 // The boundary itself flashes, with sparks rising inside it.
-                let mut out = vec![ring(centre, radius, Curve::Hold, 0.25, lead)];
+                let mut out = vec![ring(centre, radius, Curve::Hold, DISCHARGE_SECS, lead)];
                 out.extend(inner_points(geo, 6, 0.3 * radius).into_iter().map(|point| {
-                    let mut mote = glow(lift(point, 0.2), (0.15 * radius).min(0.25), 0.35, spark);
+                    let mut mote = glow(
+                        lift(point, 0.2),
+                        (0.15 * radius).min(0.25),
+                        DISCHARGE_SECS,
+                        spark,
+                    );
                     mote.velocity = Vec3::Y * 1.2;
                     mote
                 }));
@@ -1558,8 +1566,17 @@ pub(crate) fn trap_snap(
 /// a row without the block keeps today's look. The flip of a warning pops when it sets a
 /// travelling body off; the beam a warning becomes is its own read.
 pub(crate) fn stage_shot(registry: &SkillPresentation, event: &StageEvent) -> Option<OneShot> {
-    let body = registry.body_for(&event.effect)?;
+    let effect = &event.effect;
+    let body = registry.body_for(effect)?;
+    // Rule F: a cone the fog cut down to a line is not known whole, and says nothing when
+    // it goes.
+    let cut = body.archetype == Archetype::Sector
+        && !matches!(
+            geometry::boundary_shape(effect.skill, effect.kind, effect),
+            GeoShape::Sector { .. }
+        );
     match event.change {
+        StageChange::Ended(_) if cut => None,
         StageChange::Transition(Transition::Armed) => Some(OneShot::ArmPop),
         StageChange::Transition(Transition::KindFlipped) => {
             (event.effect.kind == EffectVisualKind::Bolt).then_some(OneShot::ArmPop)

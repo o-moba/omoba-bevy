@@ -1267,7 +1267,11 @@ fn stage_oneshots_follow_the_row_of_the_effect() {
                     .map(|kind| (*kind, profile.aux.get(category::kind_id(*kind)))),
             );
         for (kind, body) in bodies {
-            let seen = effect(9, skill, kind);
+            // Received whole: the axis of a cone is as long as its cast range.
+            let range = shared::loadout::skill(skill).ability.cast_range;
+            let seen = with(&effect(9, skill, kind), |e| {
+                e.end[1] = e.position[1] + range.max(6.0);
+            });
             let expire = body.map_or(ExpireKind::None, |body| body.expire);
             for ending in [EndKind::TrueExpiry, EndKind::Released, EndKind::Detonated] {
                 let expected = match (ending, expire) {
@@ -1302,6 +1306,21 @@ fn stage_oneshots_follow_the_row_of_the_effect() {
             ("winter_divide", "fade"),
         ]
     );
+
+    // Rule F: a cone the fog cut down to a line is not known whole. It ends without a
+    // flash, whatever was observed of its owner.
+    let cone = effect(7, SkillId::FurnaceBreath, K::BeamWarning);
+    let range = shared::loadout::skill(cone.skill).ability.cast_range;
+    let whole = with(&cone, |e| e.end[1] = e.position[1] + range);
+    let cut = with(&cone, |e| e.end[1] = e.position[1] + range - 0.06);
+    assert_eq!(
+        shot(&whole, end(EndKind::Released)),
+        Some(OneShot::Discharge)
+    );
+    for ending in [EndKind::Released, EndKind::TrueExpiry, EndKind::Detonated] {
+        assert_eq!(shot(&cut, end(ending)), None, "{ending:?}");
+        assert!(accents::stage_burst(&registry, &event(&cut, end(ending)), 0.0).is_empty());
+    }
 
     // The burst: the colours of the row the effect's `skill` names, inside the replicated
     // geometry.

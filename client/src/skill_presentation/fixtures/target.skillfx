@@ -334,7 +334,7 @@
       "body": { "archetype": "lane", "altitude": "ground", "fill": true, "marker": "fill_to_edge", "expire": "fade",
         "core": { "mesh": "block", "slot": "white", "size": [0.3, 0.4, 1.0], "behave": "hide_in_telegraph" },
         "shell": { "mesh": "block", "slot": "primary", "size": [0.85, 0.22, 1.0], "behave": "hide_in_telegraph" },
-        "satellites": { "mesh": "block", "layout": "stagger", "count": 8, "size": [0.5, 0.06, 0.12], "slot": "secondary", "behave": "only_in_telegraph" } },
+        "satellites": { "mesh": "block", "layout": "stagger", "count": 8, "size": [0.55, 0.08, 0.3], "slot": "secondary", "behave": "only_in_telegraph" } },
       "impact": { "kind": "pierce_through", "shape": "streak", "count": 6, "scale": 1.4, "lifetime": 0.7, "slots": ["white", "primary"] },
       "sound": {
         "cast": { "base": "holy", "speed": 1.25, "gain": 0.8, "notes": [{ "delay_ms": 110, "speed": 1.35, "gain": 0.7 }, { "delay_ms": 220, "speed": 1.4, "gain": 0.7 }] },
@@ -403,7 +403,7 @@
       "motion": { "phase": "fuse", "rate": 1.0, "start": 0.25 },
       "cast": { "pattern": "inward_gather", "shape": "diamond", "count": 6, "lifetime": 0.5, "slots": ["primary", "accent"], "link": "drop" },
       "body": { "archetype": "sector", "fill": true, "marker": "fill_to_edge", "expire": "discharge",
-        "satellites": { "mesh": "drop", "layout": "fan", "count": 2, "size": [0.2, 0.2, 0.45], "slot": "accent", "behave": "flicker" } },
+        "satellites": { "mesh": "drop", "layout": "fan", "count": 2, "size": [0.3, 0.3, 0.8], "slot": "primary", "behave": "flicker" } },
       "impact": { "kind": "spark_fork", "shape": "drop", "count": 6, "lifetime": 0.35, "slots": ["primary", "secondary"] },
       "sound": {
         "cast": { "base": "tower", "speed": 0.75, "slice": "tail" },
@@ -766,7 +766,7 @@
       "cast": { "pattern": "toss_arc", "shape": "kite", "count": 5, "scale": 0.9, "lifetime": 0.4, "slots": ["primary", "secondary"] },
       "body": { "archetype": "wall", "altitude": "ground", "fill": false, "expire": "fade",
         "core": { "mesh": "kite", "slot": "primary", "size": [0.24, 0.9, 0.04], "behave": "blink_last" },
-        "satellites": { "mesh": "kite", "layout": "line", "count": 4, "size": [0.2, 0.75, 0.03], "slot": "secondary", "behave": "rise_on_spawn" } },
+        "satellites": { "mesh": "kite", "layout": "line", "count": 4, "size": [0.2, 0.75, 0.03], "slot": "white", "behave": "rise_on_spawn" } },
       "sound": {
         "cast": { "base": "holy", "speed": 1.25, "slice": "tail", "gain": 0.9 } }
     },

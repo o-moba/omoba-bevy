@@ -10,7 +10,22 @@ use EffectVisualKind as K;
 
 const AT: Vec2 = Vec2::new(3.5, -2.25);
 
+/// The heading of every test effect that has one.
+const HEADING_OF: Vec2 = Vec2::new(0.6, 0.8);
+
 fn effect(skill: SkillId, kind: EffectVisualKind) -> SkillEffectState {
+    use geometry::GeoClass;
+    // What the server sends as `end`: one unit ahead for a kind with a heading, the far
+    // end of a strip or a cone at full range, the half-length of a wall ahead, and the
+    // place itself for every other.
+    let ahead = match geometry::boundary_class(skill, kind) {
+        _ if category::heading_only(kind) => 1.0,
+        GeoClass::Capsule | GeoClass::Lane | GeoClass::Sector => {
+            shared::loadout::skill(skill).ability.cast_range.min(45.0)
+        }
+        GeoClass::Bar => geometry::replicated_radius(skill, kind),
+        GeoClass::Ring | GeoClass::Pentagon | GeoClass::None => 0.0,
+    };
     SkillEffectState {
         id: 41,
         owner_id: 7,
@@ -18,12 +33,7 @@ fn effect(skill: SkillId, kind: EffectVisualKind) -> SkillEffectState {
         skill,
         kind,
         position: AT.to_array(),
-        // One unit ahead for a kind with a heading, the place itself for every other.
-        end: if category::heading_only(kind) {
-            [AT.x + 0.6, AT.y + 0.8]
-        } else {
-            AT.to_array()
-        },
+        end: (AT + HEADING_OF * ahead).to_array(),
         radius: geometry::replicated_radius(skill, kind),
         remaining_secs: 2.0,
         armed: true,
@@ -234,6 +244,41 @@ fn the_library_has_sixteen_small_meshes_inside_a_unit_cube() {
     assert_eq!(library.particle(ParticleShape::Glow), None);
 }
 
+/// The engine outlines a strip and fills a cone with two meshes whose measures it mirrors:
+/// the band of the arc and the corners of the kite.
+#[test]
+fn the_mirrored_measures_of_the_arc_and_the_kite_are_those_of_their_meshes() {
+    // A half ring that bulges toward +X and ends on the Y axis.
+    let arc = vertices(PartMesh::Silhouette(Silhouette::Arc));
+    let (inner, outer) = span(arc.iter().map(|point| point.xy().length()));
+    assert!((outer - UNIT_RADIUS).abs() < 1e-6);
+    assert!((inner - UNIT_RADIUS * (1.0 - ARC_BAND)).abs() < 1e-6);
+    assert!(arc.iter().all(|point| point.x >= -1e-6));
+    let (low, high) = span(arc.iter().map(|point| point.y));
+    assert!((low + UNIT_RADIUS).abs() < 1e-6 && (high - UNIT_RADIUS).abs() < 1e-6);
+    // A kite: its point on -X, its widest corners and its far corners.
+    let kite = vertices(PartMesh::Silhouette(Silhouette::Kite));
+    let point = kite
+        .iter()
+        .copied()
+        .min_by(|a, b| a.x.total_cmp(&b.x))
+        .unwrap();
+    assert!(point.xy().distance(Vec2::new(-UNIT_RADIUS, 0.0)) < 1e-6);
+    let from_point = |corner: &Vec3| Vec2::new(corner.x - point.x, corner.y.abs());
+    let widest = kite
+        .iter()
+        .map(from_point)
+        .max_by(|a, b| a.y.total_cmp(&b.y))
+        .unwrap();
+    let farthest = kite
+        .iter()
+        .map(from_point)
+        .max_by(|a, b| a.x.total_cmp(&b.x))
+        .unwrap();
+    assert!(widest.distance(KITE_SHOULDER) < 1e-6, "{widest}");
+    assert!(farthest.distance(KITE_TOP) < 1e-6, "{farthest}");
+}
+
 #[test]
 fn the_archetype_table_counts_the_engine_parts_of_every_shape() {
     let ring = GeoShape::Ring {
@@ -283,12 +328,6 @@ fn the_archetype_table_counts_the_engine_parts_of_every_shape() {
     for archetype in Archetype::ALL {
         assert_eq!(engine_parts(*archetype, &GeoShape::None), 0);
     }
-    let drawn_here: Vec<_> = Archetype::ALL
-        .iter()
-        .filter(|archetype| staged(**archetype))
-        .map(|archetype| archetype.id())
-        .collect();
-    assert_eq!(drawn_here, ["traveller", "orbiter", "zone", "prop"]);
     // The defaults a row gets when it names neither a height band nor a fill.
     for archetype in Archetype::ALL {
         let body = bare(*archetype);
@@ -319,16 +358,10 @@ fn every_target_body_lists_the_parts_its_row_counts() {
     let bodies = target_bodies();
     // 26 rows with a body (two kinds for the ray) and six auxiliary bodies.
     assert_eq!(bodies.len(), 33);
-    let mut staged_bodies = 0;
     for (skill, kind, body) in bodies {
         let e = effect(skill, kind);
         let seen = first(&e, 0.0);
         let parts = part_list(&body, &seen.shape);
-        if !staged(body.archetype) {
-            assert!(parts.is_empty(), "{}", skill.id());
-            continue;
-        }
-        staged_bodies += 1;
         assert_eq!(
             parts.len(),
             part_total(&body, &seen.shape),
@@ -340,10 +373,17 @@ fn every_target_body_lists_the_parts_its_row_counts() {
             count(|role| matches!(role, Role::Boundary(_))),
             usize::from(engine_parts(body.archetype, &seen.shape))
         );
-        // Rule E-10: the soul has no ground ring; every other staged body has one.
+        // Rule E-10: the soul has no ground ring; every other body has the boundary of
+        // its archetype.
+        let boundary = match body.archetype {
+            Archetype::Lane => 4,
+            Archetype::Sector => 8,
+            Archetype::Cage => 10,
+            _ => usize::from(kind != K::Soul),
+        };
         assert_eq!(
             count(|role| matches!(role, Role::Boundary(_))),
-            usize::from(kind != K::Soul),
+            boundary,
             "{}",
             skill.id()
         );
@@ -364,7 +404,6 @@ fn every_target_body_lists_the_parts_its_row_counts() {
             assert_eq!(slot.mesh.is_none(), slot.role == Role::Model);
         }
     }
-    assert_eq!(staged_bodies, 26);
     // Spot checks against the designs' own accounts.
     let total = |skill, kind| {
         let e = effect(skill, kind);
@@ -381,15 +420,90 @@ fn every_target_body_lists_the_parts_its_row_counts() {
     assert_eq!(total(SkillId::WinterDivide, K::BeamWarning), 15);
 }
 
-/// AC "drawn boundaries equal replicated geometry" for the four archetypes laid out here:
-/// the engine ring ends exactly at the received radius around the received position, for
-/// every radius, and nothing a row authors or the client observed can move or scale it.
+/// The boundary parts of a body in the world, one entry for each: the vertices of a part
+/// that is drawn, `None` for a hidden one.
+fn boundary_in_world(body: &Body, seen: &Seen) -> Vec<Option<Vec<Vec3>>> {
+    let root = root_pose(seen);
+    slots(body, seen, |role| matches!(role, Role::Boundary(_)))
+        .iter()
+        .map(|slot| {
+            drawn(slot, seen).map(|points| {
+                points
+                    .into_iter()
+                    .map(|point| root.transform_point(point))
+                    .collect()
+            })
+        })
+        .collect()
+}
+
+/// A ground point in the frame of a segment: to its side, and along it from `from`.
+fn beside(point: Vec2, from: Vec2, to: Vec2) -> Vec2 {
+    let axis = (to - from).normalize();
+    let offset = point - from;
+    Vec2::new(offset.perp_dot(axis), offset.dot(axis))
+}
+
+/// Distance of a ground point from a segment.
+fn off_segment(point: Vec2, from: Vec2, to: Vec2) -> f32 {
+    let Some(axis) = (to - from).try_normalize() else {
+        return point.distance(from);
+    };
+    let along = (point - from).dot(axis).clamp(0.0, from.distance(to));
+    point.distance(from + axis * along)
+}
+
+/// The largest and the smallest of some numbers.
+fn span(values: impl Iterator<Item = f32>) -> (f32, f32) {
+    values.fold((f32::MAX, f32::MIN), |(least, most), value| {
+        (least.min(value), most.max(value))
+    })
+}
+
+/// A body whose authored look is another one: nothing of it may reach the boundary.
+fn altered(body: &Body) -> Body {
+    let mut altered = body.clone();
+    for part in [&mut altered.core, &mut altered.shell]
+        .into_iter()
+        .flatten()
+    {
+        part.size = part.size.map(|extent| extent * 0.37);
+        part.behave = Behaviour::Flicker;
+    }
+    altered.satellites = None;
+    altered.model = None;
+    altered.marker = Marker::None;
+    altered.trail = Trail::None;
+    altered.fill = Some(false);
+    altered
+}
+
+/// What a client could have observed of an instance without any of it moving a boundary.
+fn observed_later<'a>(seen: &Seen<'a>, history: &'a [Vec2]) -> Seen<'a> {
+    Seen {
+        history,
+        renewed: true,
+        resting: true,
+        owner: Some(Vec3::new(9.0, 1.0, 9.0)),
+        peak_remaining_secs: 9.0,
+        now: 91.7,
+        ..*seen
+    }
+}
+
+/// AC "drawn boundaries equal replicated geometry": the engine parts of every archetype lie
+/// exactly on the shape `geometry.rs` derives from the received fields, for every radius
+/// and length, and nothing a row authors or the client observed can move or scale them.
 #[test]
 fn boundary_equals_replicated_geometry() {
+    let history = [AT + Vec2::new(-1.0, 0.5), AT + Vec2::new(-2.0, 1.0)];
     let mut archetypes = BTreeSet::new();
     let mut checked = 0;
     for (skill, kind, body) in target_bodies() {
-        if !staged(body.archetype) || kind == K::Soul {
+        if !matches!(
+            first(&effect(skill, kind), 0.0).shape,
+            GeoShape::Ring { .. }
+        ) {
             continue;
         }
         archetypes.insert(body.archetype);
@@ -422,29 +536,10 @@ fn boundary_equals_replicated_geometry() {
                 // Authored sizes, the layout, the trail, the marker and the model do not
                 // reach it, and neither do the clock or what was observed of the instance.
                 let pose = part_pose(&boundary[0], &seen).0;
-                let mut altered = body.clone();
-                for part in [&mut altered.core, &mut altered.shell]
-                    .into_iter()
-                    .flatten()
-                {
-                    part.size = part.size.map(|extent| extent * 0.37);
-                    part.behave = Behaviour::Flicker;
-                }
-                altered.satellites = None;
-                altered.model = None;
-                altered.marker = Marker::None;
-                altered.trail = Trail::None;
-                let history = [AT + Vec2::new(-1.0, 0.5), AT + Vec2::new(-2.0, 1.0)];
-                let later = Seen {
-                    history: &history,
-                    renewed: true,
-                    resting: true,
-                    owner: Some(Vec3::new(9.0, 1.0, 9.0)),
-                    peak_remaining_secs: 9.0,
-                    now: 91.7,
-                    ..seen
-                };
-                let same = slots(&altered, &later, |role| matches!(role, Role::Boundary(_)));
+                let later = observed_later(&seen, &history);
+                let same = slots(&altered(&body), &later, |role| {
+                    matches!(role, Role::Boundary(_))
+                });
                 assert_eq!(part_pose(&same[0], &later).0, pose, "{}", skill.id());
                 checked += 1;
             }
@@ -464,6 +559,389 @@ fn boundary_equals_replicated_geometry() {
     let e = with(&effect(SkillId::DawnField, K::Field), |e| e.radius = 0.0);
     let seen = first(&e, 0.0);
     assert!(shown(&target_body(SkillId::DawnField, K::Field), &seen, |_| true).is_empty());
+
+    the_outline_of_a_strip_is_the_replicated_capsule(&history);
+    the_outline_of_a_cone_is_the_replicated_sector(&history);
+    the_bar_of_a_wall_is_the_replicated_plane(&history);
+    the_bars_of_a_cage_are_the_replicated_pentagon(&history);
+}
+
+/// `lane`: two edge bars at the replicated half-width and a half ring around each end,
+/// which together outline every point within `radius` of the received segment.
+fn the_outline_of_a_strip_is_the_replicated_capsule(history: &[Vec2]) {
+    let rows = [
+        (SkillId::DawnRay, K::BeamWarning),
+        (SkillId::DawnRay, K::Beam),
+        (SkillId::HorizonWave, K::BeamWarning),
+        (SkillId::WinterDivide, K::BeamWarning),
+    ];
+    for (skill, kind) in rows {
+        let body = target_body(skill, kind);
+        assert_eq!(body.archetype, Archetype::Lane);
+        for radius in [0.3, 0.8, 2.0, 4.5] {
+            for length in [0.5, 3.0, 20.0, 45.0] {
+                for heading in [Vec2::X, HEADING_OF, Vec2::new(-0.8, 0.6)] {
+                    let (from, to) = (AT, AT + heading * length);
+                    let e = with(&effect(skill, kind), |e| {
+                        e.radius = radius;
+                        e.end = to.to_array();
+                    });
+                    let seen = Seen::of(&e, None, None, 1.75, 7.3);
+                    assert_eq!(seen.shape, GeoShape::Capsule { from, to, radius });
+                    let root = root_pose(&seen);
+                    assert_eq!(root.translation, Vec3::new(AT.x, 1.75, AT.y));
+                    assert!((root.rotation * Vec3::Z).xz().distance(heading) < 1e-5);
+                    let what = format!("{} {radius} x {length}", skill.id());
+                    let slack = 1e-4 * (1.0 + radius + length);
+                    let parts = boundary_in_world(&body, &seen);
+                    assert_eq!(parts.len(), 4, "{what}");
+                    for (index, points) in parts.iter().enumerate() {
+                        let points = points.as_ref().expect(&what);
+                        for point in points {
+                            // Nothing of the outline lies outside the capsule, and it is
+                            // a line along its rim.
+                            let off = off_segment(point.xz(), from, to);
+                            assert!(off <= radius + slack, "{what}: part {index} at {off}");
+                            assert!(off >= radius * (1.0 - ARC_BAND) - slack, "{what}");
+                            assert!((point.y - 1.75 - BOUNDARY_LIFT).abs() <= LINE_HEIGHT);
+                        }
+                        let frame: Vec<Vec2> = points
+                            .iter()
+                            .map(|point| beside(point.xz(), from, to))
+                            .collect();
+                        let (_, side) = span(frame.iter().map(|at| at.x.abs()));
+                        let (near, far) = span(frame.iter().map(|at| at.y));
+                        // Every part reaches the replicated half-width.
+                        assert!((side - radius).abs() <= slack, "{what}: {side}");
+                        if index < 2 {
+                            // An edge bar: on one side, from one end to the other.
+                            assert!(near.abs() <= slack && (far - length).abs() <= slack);
+                            let (left, right) = span(frame.iter().map(|at| at.x));
+                            assert!(left * right > 0.0, "{what}: an edge is on one side");
+                        } else {
+                            // A cap: a half ring around its end and beyond it, out to the
+                            // tip of the capsule.
+                            let (end, tip) = if index == 2 {
+                                assert!(far <= slack, "{what}");
+                                (from, -near)
+                            } else {
+                                assert!(near >= length - slack, "{what}");
+                                (to, far - length)
+                            };
+                            assert!((tip - radius).abs() <= slack, "{what}: {tip}");
+                            let (_, rim) = span(points.iter().map(|p| p.xz().distance(end)));
+                            assert!((rim - radius).abs() <= slack, "{what}");
+                        }
+                    }
+                    // The two edges are the two sides.
+                    let side_of =
+                        |index: usize| beside(parts[index].as_ref().unwrap()[0].xz(), from, to).x;
+                    assert!(side_of(0) * side_of(1) < 0.0);
+                    // The whole outline is the team's, and no row or observation moves it.
+                    let boundary = slots(&body, &seen, |role| matches!(role, Role::Boundary(_)));
+                    let later = observed_later(&seen, history);
+                    let same = slots(&altered(&body), &later, |role| {
+                        matches!(role, Role::Boundary(_))
+                    });
+                    for (slot, other) in boundary.iter().zip(&same) {
+                        assert_eq!(part_paint(slot, &seen), Some(Paint::Team));
+                        assert_eq!(part_pose(slot, &seen), part_pose(other, &later), "{what}");
+                    }
+                }
+            }
+        }
+    }
+    // A strip without a length is the circle around its point: no edges, two half rings.
+    let body = target_body(SkillId::WinterDivide, K::BeamWarning);
+    let e = with(&effect(SkillId::WinterDivide, K::BeamWarning), |e| {
+        e.end = e.position
+    });
+    let seen = first(&e, 0.0);
+    let parts = boundary_in_world(&body, &seen);
+    assert!(parts[0].is_none() && parts[1].is_none());
+    for cap in &parts[2..] {
+        let (inner, outer) = span(cap.as_ref().unwrap().iter().map(|p| p.xz().distance(AT)));
+        assert!((outer - e.radius).abs() < 1e-4 && inner >= e.radius * (1.0 - ARC_BAND) - 1e-4);
+    }
+    // A strip with flat ends has its two edges and nothing around the ends.
+    let to = AT + HEADING_OF * 12.0;
+    let e = with(&e, |e| e.end = to.to_array());
+    let flat = Seen {
+        shape: GeoShape::Lane {
+            from: AT,
+            to,
+            half_width: e.radius,
+        },
+        ..first(&e, 0.0)
+    };
+    let parts = boundary_in_world(&body, &flat);
+    assert_eq!(parts.len(), 2);
+    for points in parts {
+        let frame: Vec<Vec2> = points
+            .unwrap()
+            .iter()
+            .map(|point| beside(point.xz(), AT, to))
+            .collect();
+        let (near, far) = span(frame.iter().map(|at| at.y));
+        let (_, side) = span(frame.iter().map(|at| at.x.abs()));
+        assert!(near.abs() < 1e-3 && (far - 12.0).abs() < 1e-3 && (side - e.radius).abs() < 1e-3);
+    }
+}
+
+/// `sector`: two edge bars and six chords of the arc, at the received length and the
+/// half-angle of the skill. Rule F: a received axis shorter than the cast range was cut by
+/// the fog and is one plain bar on the received segment.
+fn the_outline_of_a_cone_is_the_replicated_sector(history: &[Vec2]) {
+    let (skill, kind) = (SkillId::FurnaceBreath, K::BeamWarning);
+    let body = target_body(skill, kind);
+    assert_eq!(body.archetype, Archetype::Sector);
+    let range = shared::loadout::skill(skill).ability.cast_range;
+    let half_angle = category::cone_half_angle(skill).unwrap();
+    assert!((half_angle.cos() - geometry::FURNACE_CONE_COS).abs() < 1e-6);
+    for length in [range - 0.04, range, range + 2.5] {
+        for radius in [1.0, 3.0, 6.0] {
+            for heading in [Vec2::X, HEADING_OF, Vec2::new(-0.8, 0.6)] {
+                let e = with(&effect(skill, kind), |e| {
+                    e.radius = radius;
+                    e.end = (AT + heading * length).to_array();
+                });
+                let seen = Seen::of(&e, None, None, 1.75, 7.3);
+                let GeoShape::Sector {
+                    apex,
+                    axis,
+                    radius: reach,
+                    half_angle: drawn_angle,
+                } = seen.shape
+                else {
+                    panic!("a full axis is a cone");
+                };
+                assert_eq!((apex, drawn_angle), (AT, half_angle));
+                assert!(axis.distance(heading) < 1e-5 && (reach - length).abs() < 1e-5);
+                // The apex is the replicated position; the replicated `radius` is no size
+                // of the cone.
+                assert_eq!(root_pose(&seen).translation, Vec3::new(AT.x, 1.75, AT.y));
+                let parts = boundary_in_world(&body, &seen);
+                assert_eq!(parts.len(), 8);
+                // Where a point is in the cone: its distance from the apex and its angle
+                // from the axis, positive toward the lateral axis of the body.
+                let polar = |point: Vec3| {
+                    let offset = point.xz() - AT;
+                    let side = offset.dot(Vec2::new(heading.y, -heading.x));
+                    (offset.length(), side.atan2(offset.dot(heading)))
+                };
+                let step = 2.0 * half_angle / f32::from(SECTOR_CHORDS);
+                for (index, points) in parts.iter().enumerate() {
+                    let points = points.as_ref().unwrap();
+                    let polar: Vec<(f32, f32)> = points.iter().map(|p| polar(*p)).collect();
+                    for (distance, angle) in &polar {
+                        // Nothing of the outline lies outside the cone.
+                        assert!(*distance <= length + 1e-3, "part {index}: {distance}");
+                        assert!(
+                            *distance < 1e-3 || angle.abs() <= half_angle + 1e-4,
+                            "part {index}: {angle} at {distance}"
+                        );
+                    }
+                    let (_, far) = span(polar.iter().map(|at| at.0));
+                    if index < 2 {
+                        // An edge: its outer side on the edge of the cone, from the apex
+                        // to the arc.
+                        let edge = if index == 0 { -half_angle } else { half_angle };
+                        let on_edge: Vec<f32> = polar
+                            .iter()
+                            .filter(|(distance, angle)| {
+                                *distance > 1e-3 && (angle - edge).abs() < 1e-4
+                            })
+                            .map(|at| at.0)
+                            .collect();
+                        let (_, reaches) = span(on_edge.iter().copied());
+                        assert!((reaches - length).abs() < 1e-2, "edge {index}: {reaches}");
+                        assert!(polar.iter().any(|(distance, _)| *distance < 1e-3));
+                    } else {
+                        // A chord between two points of the arc, a sixth of it apart:
+                        // its outer corners are those points, except where it meets an
+                        // edge and ends on it.
+                        let chord = (index - 2) as f32;
+                        let ends = [
+                            -half_angle + step * chord,
+                            -half_angle + step * (chord + 1.0),
+                        ];
+                        assert!((far - length).abs() < 1e-3, "chord {index}: {far}");
+                        let on_arc: Vec<f32> = polar
+                            .iter()
+                            .filter(|(distance, _)| (distance - length).abs() < 1e-3)
+                            .map(|at| at.1)
+                            .collect();
+                        for end in ends {
+                            let at_an_edge = (end.abs() - half_angle).abs() < 1e-4;
+                            assert!(
+                                at_an_edge || on_arc.iter().any(|angle| (angle - end).abs() < 1e-3),
+                                "chord {index} misses {end}"
+                            );
+                        }
+                        for angle in on_arc {
+                            assert!(ends.iter().any(|end| (angle - end).abs() < 1e-3));
+                        }
+                        // It is a line near the arc, not an area.
+                        let (near, _) = span(polar.iter().map(|at| at.0));
+                        assert!(near >= length * (step * 0.5).cos() - LINE_MAX - 1e-3);
+                    }
+                }
+                let boundary = slots(&body, &seen, |role| matches!(role, Role::Boundary(_)));
+                let later = observed_later(&seen, history);
+                let same = slots(&altered(&body), &later, |role| {
+                    matches!(role, Role::Boundary(_))
+                });
+                for (slot, other) in boundary.iter().zip(&same) {
+                    assert_eq!(part_paint(slot, &seen), Some(Paint::Team));
+                    assert_eq!(part_pose(slot, &seen), part_pose(other, &later));
+                }
+            }
+        }
+    }
+    // Rule F, with and without a visible owner: the received segment and nothing else.
+    for owner in [7, 0] {
+        for length in [0.6, 4.0, range - 0.06] {
+            let to = AT + HEADING_OF * length;
+            let e = with(&effect(skill, kind), |e| {
+                e.owner_id = owner;
+                e.end = to.to_array();
+                e.remaining_secs = 0.5;
+            });
+            let seen = first(&e, 0.4);
+            assert_eq!(seen.shape, GeoShape::Segment { from: AT, to });
+            let parts = boundary_in_world(&body, &seen);
+            assert_eq!(parts.len(), 1);
+            let frame: Vec<Vec2> = parts[0]
+                .as_ref()
+                .unwrap()
+                .iter()
+                .map(|point| beside(point.xz(), AT, to))
+                .collect();
+            let (near, far) = span(frame.iter().map(|at| at.y));
+            let (left, right) = span(frame.iter().map(|at| at.x));
+            assert!(near.abs() < 1e-4 && (far - length).abs() < 1e-4, "{length}");
+            // Constant width, both ends the same: no apex, no taper.
+            assert!((left + right).abs() < 1e-5 && right <= LINE_MAX * 0.5 + 1e-5);
+            // No fill, no growing read-out and no flame of a cone that is not known whole.
+            let all = part_list(&body, &seen.shape);
+            assert_eq!(all.len(), part_total(&body, &seen.shape));
+            let visible: Vec<Role> = all
+                .iter()
+                .filter(|slot| part_pose(slot, &seen).1 != Visibility::Hidden)
+                .map(|slot| slot.role)
+                .collect();
+            assert_eq!(visible, [Role::Boundary(0)], "owner {owner}");
+            assert_eq!(part_paint(&all[0], &seen), Some(Paint::Team));
+        }
+    }
+}
+
+/// `wall`: one bar across the heading, one unit ahead, half as long to each side as the
+/// replicated radius.
+fn the_bar_of_a_wall_is_the_replicated_plane(history: &[Vec2]) {
+    let (skill, kind) = (SkillId::Northwall, K::ShieldWall);
+    let body = target_body(skill, kind);
+    assert_eq!(body.archetype, Archetype::Wall);
+    for radius in [0.8, 2.5, 6.0] {
+        for heading in [Vec2::X, HEADING_OF, Vec2::new(-0.8, 0.6)] {
+            let e = with(&effect(skill, kind), |e| {
+                e.radius = radius;
+                e.end = (AT + heading * radius).to_array();
+            });
+            let seen = Seen::of(&e, None, None, 1.75, 7.3);
+            let root = root_pose(&seen);
+            assert_eq!(root.translation, Vec3::new(AT.x, 1.75, AT.y));
+            assert!((root.rotation * Vec3::Z).xz().distance(heading) < 1e-5);
+            let parts = boundary_in_world(&body, &seen);
+            assert_eq!(parts.len(), 1);
+            // Along the heading from the hero, and across it.
+            let frame: Vec<Vec2> = parts[0]
+                .as_ref()
+                .unwrap()
+                .iter()
+                .map(|point| beside(point.xz(), AT, AT + heading))
+                .collect();
+            let (left, right) = span(frame.iter().map(|at| at.x));
+            let (near, far) = span(frame.iter().map(|at| at.y));
+            assert!((left + radius).abs() < 1e-4 && (right - radius).abs() < 1e-4);
+            assert!(((near + far) * 0.5 - geometry::WALL_AHEAD).abs() < 1e-4);
+            assert!(far - near <= LINE_MAX + 1e-5, "the plane is a line");
+            let slot = slots(&body, &seen, |role| matches!(role, Role::Boundary(_)))[0];
+            assert_eq!(part_paint(&slot, &seen), Some(Paint::Team));
+            let later = observed_later(&seen, history);
+            let same = slots(&altered(&body), &later, |role| {
+                matches!(role, Role::Boundary(_))
+            })[0];
+            assert_eq!(part_pose(&slot, &seen), part_pose(&same, &later));
+        }
+    }
+    // A wall without a heading has no plane, and nothing is stood on one.
+    let e = with(&effect(skill, kind), |e| e.end = e.position);
+    let seen = first(&e, 0.0);
+    assert_eq!(seen.shape, GeoShape::None);
+    assert!(shown(&body, &seen, |_| true).is_empty());
+}
+
+/// `cage`: a low bar and a rail on each side of the pentagon whose corners stand at the
+/// replicated radius, the first one toward world +X (rule E-9).
+fn the_bars_of_a_cage_are_the_replicated_pentagon(history: &[Vec2]) {
+    let (skill, kind) = (SkillId::IronBoundary, K::Cage);
+    let body = target_body(skill, kind);
+    assert_eq!(body.archetype, Archetype::Cage);
+    for radius in [2.0, 5.0, 8.5] {
+        // The heading field of a cage means nothing and turns nothing.
+        for end in [AT, AT + HEADING_OF * 3.0] {
+            let e = with(&effect(skill, kind), |e| {
+                e.radius = radius;
+                e.end = end.to_array();
+            });
+            let seen = Seen::of(&e, None, None, 1.75, 7.3);
+            assert_eq!(root_pose(&seen).translation, Vec3::new(AT.x, 1.75, AT.y));
+            let parts = boundary_in_world(&body, &seen);
+            assert_eq!(parts.len(), 10);
+            let boundary = slots(&body, &seen, |role| matches!(role, Role::Boundary(_)));
+            let corner = |index: usize| AT + Vec2::from_angle(TAU * index as f32 / 5.0) * radius;
+            assert!(corner(0).distance(AT + Vec2::X * radius) < 1e-5);
+            for (index, points) in parts.iter().enumerate() {
+                let points = points.as_ref().unwrap();
+                let (from, to) = (corner(index % 5), corner(index % 5 + 1));
+                let frame: Vec<Vec2> = points
+                    .iter()
+                    .map(|point| beside(point.xz(), from, to))
+                    .collect();
+                // From corner to corner, the same band to both sides of the side.
+                let (near, far) = span(frame.iter().map(|at| at.y));
+                assert!(near.abs() < 1e-3 && (far - from.distance(to)).abs() < 1e-3);
+                let (left, right) = span(frame.iter().map(|at| at.x));
+                let (low, high) = span(points.iter().map(|point| point.y - 1.75));
+                if index < 5 {
+                    // The low bar is the band the server tests around the side.
+                    assert!((right - geometry::CAGE_BAR_HALF_WIDTH).abs() < 1e-4);
+                    assert!((left + geometry::CAGE_BAR_HALF_WIDTH).abs() < 1e-4);
+                    assert!(low > 0.0 && high < 0.1);
+                    assert_eq!(part_paint(&boundary[index], &seen), Some(Paint::Team));
+                } else {
+                    assert!((left + right).abs() < 1e-4 && right <= CAGE_RAIL);
+                    assert!(((low + high) * 0.5 - CAGE_RAIL_HEIGHT).abs() < 1e-4);
+                    assert_eq!(
+                        part_paint(&boundary[index], &seen),
+                        Some(Paint::Slot(PaletteSlot::Primary))
+                    );
+                }
+                // The centre line of each bar ends on the circle of the corners.
+                for point in points {
+                    assert!(point.xz().distance(AT) <= radius + geometry::CAGE_BAR_HALF_WIDTH);
+                }
+            }
+            let later = observed_later(&seen, history);
+            let same = slots(&altered(&body), &later, |role| {
+                matches!(role, Role::Boundary(_))
+            });
+            for (slot, other) in boundary.iter().zip(&same) {
+                assert_eq!(part_pose(slot, &seen), part_pose(other, &later));
+            }
+        }
+    }
 }
 
 /// Whether every vertex of every visible authored part, fill and marker lies inside the
@@ -611,6 +1089,894 @@ fn no_authored_part_leaves_the_boundary_of_a_zone_or_a_prop() {
     inside_the_boundary(&lantern, &first(&small, 0.0), "a small lantern");
 }
 
+/// Every drawn part of a body in the world, with its role.
+fn parts_in_world(body: &Body, seen: &Seen) -> Vec<(Role, Vec<Vec3>)> {
+    let root = root_pose(seen);
+    part_list(body, &seen.shape)
+        .iter()
+        .filter(|slot| slot.role != Role::Model)
+        .filter_map(|slot| drawn(slot, seen).map(|points| (slot.role, points)))
+        .map(|(role, points)| {
+            let points = points
+                .into_iter()
+                .map(|point| root.transform_point(point))
+                .collect();
+            (role, points)
+        })
+        .collect()
+}
+
+/// Asserts that everything a strip, a cone, a wall or a cage shows beside its boundary
+/// lies inside the replicated shape: within the radius of the segment, inside the cone,
+/// between the two ends of the wall bar, inside the circle of the corners of the cage.
+/// `grounded` also asks that nothing dips under the ground.
+fn inside_the_shape(body: &Body, seen: &Seen, grounded: bool, what: &str) {
+    let e = seen.effect;
+    let slack = 1e-4 * (1.0 + e.radius) + 1e-3;
+    for (role, points) in parts_in_world(body, seen) {
+        if matches!(role, Role::Boundary(_)) {
+            continue;
+        }
+        for point in points {
+            let at = point.xz();
+            let inside = match seen.shape {
+                GeoShape::Capsule { from, to, radius } => {
+                    off_segment(at, from, to) <= radius + slack
+                }
+                GeoShape::Sector {
+                    apex,
+                    axis,
+                    radius,
+                    half_angle,
+                } => {
+                    let offset = at - apex;
+                    offset.length() <= radius + slack
+                        && (offset.length() < slack
+                            || axis.angle_to(offset).abs() <= half_angle + 1e-3)
+                }
+                GeoShape::Segment { from, to } => {
+                    let along = beside(at, from, to);
+                    (-slack..=from.distance(to) + slack).contains(&along.y)
+                        && along.x.abs() <= e.radius + slack
+                }
+                GeoShape::Pentagon { center, radius } => at.distance(center) <= radius + slack,
+                other => panic!("{what}: {other:?} is no shape of these bodies"),
+            };
+            assert!(inside, "{what}: {role:?} reaches {at} at {}", seen.now);
+            assert!(
+                !grounded || point.y >= seen.ground,
+                "{what}: {role:?} is under the ground"
+            );
+        }
+    }
+}
+
+#[test]
+fn no_authored_part_leaves_the_boundary_of_a_strip_a_cone_a_wall_or_a_cage() {
+    // The final rows, through their stages, over sizes a server could send.
+    let mut rows = 0;
+    for (skill, kind, body) in target_bodies() {
+        if matches!(
+            body.archetype,
+            Archetype::Traveller | Archetype::Orbiter | Archetype::Zone | Archetype::Prop
+        ) {
+            continue;
+        }
+        rows += 1;
+        for radius in [0.4, 1.0, 2.5, 5.0] {
+            for length in [0.4, 7.0, 30.0] {
+                let e = with(&effect(skill, kind), |e| {
+                    e.radius = radius;
+                    // A cone is whole at its range only; a wall sends its half-length.
+                    if body.archetype == Archetype::Lane {
+                        e.end = (AT + HEADING_OF * length).to_array();
+                    } else if body.archetype == Archetype::Wall {
+                        e.end = (AT + HEADING_OF * radius).to_array();
+                    }
+                });
+                for (state, now) in area_states(&e) {
+                    // The whole telegraph, the firing moment and the time after it.
+                    for remaining in [state.remaining_secs, 0.6, 0.2] {
+                        let state = with(&state, |e| e.remaining_secs = remaining);
+                        let seen = Seen {
+                            peak_remaining_secs: 5.0,
+                            ..first(&state, now)
+                        };
+                        assert!(!matches!(
+                            seen.shape,
+                            GeoShape::None | GeoShape::Ring { .. }
+                        ));
+                        inside_the_shape(&body, &seen, true, skill.id());
+                    }
+                }
+            }
+        }
+    }
+    // The ray as a warning and as a beam, the wave warning, the fissure, the cone, the
+    // wall and the cage.
+    assert_eq!(rows, 7);
+
+    // Everything a row could author: every silhouette at the largest sizes the parser
+    // lets through, with every behaviour, as core, shell and in every layout of the
+    // archetype.
+    let sizes = [
+        [1.0, 3.0, 1.0],
+        [1.0, 1.0, 0.02],
+        [0.3, 0.05, 1.0],
+        [0.14, 0.5, 0.14],
+        [1.0, 1.0, 1.0],
+    ];
+    let cases: [(Archetype, SkillId, EffectVisualKind, &[SatelliteLayout]); 5] = [
+        (
+            Archetype::Lane,
+            SkillId::DawnRay,
+            K::BeamWarning,
+            &[SatelliteLayout::Line, SatelliteLayout::Stagger],
+        ),
+        (
+            Archetype::Lane,
+            SkillId::WinterDivide,
+            K::BeamWarning,
+            &[SatelliteLayout::Line, SatelliteLayout::Stagger],
+        ),
+        (
+            Archetype::Sector,
+            SkillId::FurnaceBreath,
+            K::BeamWarning,
+            &[SatelliteLayout::Fan],
+        ),
+        (
+            Archetype::Wall,
+            SkillId::Northwall,
+            K::ShieldWall,
+            &[SatelliteLayout::Line],
+        ),
+        (
+            Archetype::Cage,
+            SkillId::IronBoundary,
+            K::Cage,
+            &[SatelliteLayout::Rim],
+        ),
+    ];
+    let mut shown_parts = 0;
+    for (archetype, skill, kind, layouts) in cases {
+        let telegraphed = category::telegraph_secs(skill).is_some();
+        for mesh in Silhouette::ALL {
+            for behave in Behaviour::ALL {
+                // The orb's ring and the renewal mark belong to bodies in flight.
+                if matches!(behave, Behaviour::Gyro | Behaviour::OnlyAfterRenew) {
+                    continue;
+                }
+                for size in sizes {
+                    // A part that turns end over end may not be taller than the radius.
+                    if *behave == Behaviour::Tumble && size[1] > 1.0 {
+                        continue;
+                    }
+                    let mut body = bare(archetype);
+                    body.fill = Some(true);
+                    if telegraphed {
+                        body.marker = Marker::FillToEdge;
+                    }
+                    body.core = Some(part(*mesh, size, *behave));
+                    body.shell = Some(part(*mesh, size, *behave));
+                    for layout in layouts {
+                        for count in [1, 2, 5, 8] {
+                            body.satellites = Some(Satellites {
+                                mesh: *mesh,
+                                layout: *layout,
+                                count,
+                                size,
+                                slot: PaletteSlot::Accent,
+                                behave: *behave,
+                            });
+                            for (radius, length) in [(0.4, 0.3), (2.0, 6.0), (1.2, 30.0)] {
+                                let e = with(&effect(skill, kind), |e| {
+                                    e.radius = radius;
+                                    if archetype == Archetype::Lane {
+                                        e.end = (AT + HEADING_OF * length).to_array();
+                                    } else if archetype == Archetype::Wall {
+                                        e.end = (AT + HEADING_OF * radius).to_array();
+                                    }
+                                    e.remaining_secs = 0.45;
+                                });
+                                for now in [0.0, 0.31, 1.7] {
+                                    let seen = first(&e, now);
+                                    // A part that turns end over end may dip into the
+                                    // ground it stands on.
+                                    inside_the_shape(
+                                        &body,
+                                        &seen,
+                                        *behave != Behaviour::Tumble,
+                                        &format!("{mesh:?} {behave:?} {layout:?} x{count}"),
+                                    );
+                                    shown_parts += parts_in_world(&body, &seen).len();
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    // The sweep is not vacuous: parts were drawn in it.
+    assert!(shown_parts > 100_000, "{shown_parts}");
+}
+
+/// AC10: an enemy who does not see the caster gets the fog-cut segment of a strip, and
+/// nothing drawn on it may say at which end the caster stands. With `owner_id == 0` the
+/// whole body is the same when the two received ends change places.
+#[test]
+fn hidden_owner_lane_is_direction_blind() {
+    let lanes = [
+        (SkillId::HorizonWave, K::BeamWarning),
+        (SkillId::DawnRay, K::BeamWarning),
+        (SkillId::DawnRay, K::Beam),
+        (SkillId::WinterDivide, K::BeamWarning),
+    ];
+    let every_pose = |body: &Body, seen: &Seen| -> Vec<_> {
+        part_list(body, &seen.shape)
+            .iter()
+            .map(|slot| {
+                let (pose, visibility) = part_pose(slot, seen);
+                (slot.role, pose, visibility, part_paint(slot, seen))
+            })
+            .collect()
+    };
+    for (skill, kind) in lanes {
+        let body = target_body(skill, kind);
+        // Segments in every direction, so that either end can be the one that sorts first.
+        for toward in [
+            Vec2::new(9.0, 0.0),
+            Vec2::new(-9.0, 0.0),
+            Vec2::new(0.0, 5.0),
+            Vec2::new(0.0, -5.0),
+            Vec2::new(-6.0, 8.0),
+            Vec2::new(6.0, -8.0),
+        ] {
+            let telegraph = category::telegraph_secs(skill).unwrap_or(1.0);
+            let tail = category::tail_secs(skill).unwrap_or(0.0);
+            let hidden = with(&effect(skill, kind), |e| {
+                e.owner_id = 0;
+                e.end = (AT + toward).to_array();
+                e.remaining_secs = tail + telegraph * 0.4;
+            });
+            let swapped = with(&hidden, |e| std::mem::swap(&mut e.position, &mut e.end));
+            for now in [0.0, 0.37, 2.9] {
+                let (one, other) = (first(&hidden, now), first(&swapped, now));
+                assert_eq!(root_pose(&one), root_pose(&other), "{}", skill.id());
+                let poses = every_pose(&body, &one);
+                assert_eq!(poses, every_pose(&body, &other), "{}", skill.id());
+                assert!(
+                    poses
+                        .iter()
+                        .filter(|pose| pose.2 != Visibility::Hidden)
+                        .count()
+                        >= 6
+                );
+                // The ground under the root is asked for at the same end, too.
+                assert_eq!(root_at(&hidden), root_at(&swapped));
+            }
+
+            // A viewer who sees the caster gets the strip from its origin: the frame
+            // stands on the replicated position and heads for the replicated end.
+            let known = with(&hidden, |e| e.owner_id = 7);
+            let back = with(&swapped, |e| e.owner_id = 7);
+            let (one, other) = (first(&known, 0.0), first(&back, 0.0));
+            assert_eq!(root_at(&known), AT);
+            assert_eq!(root_at(&back), AT + toward);
+            let ahead = |seen: &Seen| (root_pose(seen).rotation * Vec3::Z).xz();
+            assert!(ahead(&one).distance(toward.normalize()) < 1e-5);
+            assert!(ahead(&other).distance(-toward.normalize()) < 1e-5);
+            // Rule P-2 for every viewer: the copies of a row stand on the same places
+            // whichever end the strip is laid out from.
+            let places = |seen: &Seen| {
+                let root = root_pose(seen);
+                let mut places: Vec<Vec2> =
+                    shown(&body, seen, |role| matches!(role, Role::Satellite(_)))
+                        .iter()
+                        .map(|pose| root.transform_point(pose.translation).xz())
+                        .collect();
+                // Along the strip from its replicated origin.
+                places.sort_by(|a, b| a.distance(AT).total_cmp(&b.distance(AT)));
+                places
+            };
+            let (here, there) = (places(&one), places(&other));
+            assert_eq!(here.len(), there.len());
+            for (a, b) in here.iter().zip(&there) {
+                assert!(a.distance(*b) < 1e-3, "{}: {a} and {b}", skill.id());
+            }
+        }
+    }
+
+    // A part that has a facing shows it only to a viewer who may know the direction.
+    let mut arrows = bare(Archetype::Lane);
+    arrows.satellites = Some(Satellites {
+        mesh: Silhouette::Chevron,
+        layout: SatelliteLayout::Line,
+        count: 6,
+        size: [0.7, 0.02, 0.7],
+        slot: PaletteSlot::Primary,
+        behave: Behaviour::Steady,
+    });
+    let toward = Vec2::new(-6.0, 8.0);
+    let facing = |owner: u64, swap: bool| -> Vec<Vec2> {
+        let e = with(&effect(SkillId::HorizonWave, K::BeamWarning), |e| {
+            e.owner_id = owner;
+            e.end = (AT + toward).to_array();
+            if swap {
+                std::mem::swap(&mut e.position, &mut e.end);
+            }
+        });
+        let seen = first(&e, 0.0);
+        let root = root_pose(&seen);
+        shown(&arrows, &seen, |role| matches!(role, Role::Satellite(_)))
+            .iter()
+            // A flat mesh points along its own +X.
+            .map(|pose| (root.rotation * pose.rotation * Vec3::X).xz())
+            .collect()
+    };
+    for point in facing(7, false) {
+        assert!(point.distance(toward.normalize()) < 1e-5);
+    }
+    for point in facing(7, true) {
+        assert!(point.distance(-toward.normalize()) < 1e-5);
+    }
+    assert_eq!(facing(0, false), facing(0, true));
+    assert_eq!(facing(0, false).len(), 6);
+
+    // What the fog left of a cone is one bar with two equal ends, for either order.
+    let cone = target_body(SkillId::FurnaceBreath, K::BeamWarning);
+    let cut = with(&effect(SkillId::FurnaceBreath, K::BeamWarning), |e| {
+        e.owner_id = 0;
+        e.end = (AT + toward * 0.4).to_array();
+    });
+    let swapped = with(&cut, |e| std::mem::swap(&mut e.position, &mut e.end));
+    let bar_of = |e: &SkillEffectState| {
+        let seen = first(e, 0.0);
+        let mut points: Vec<[i32; 3]> = boundary_in_world(&cone, &seen)[0]
+            .as_ref()
+            .unwrap()
+            .iter()
+            .map(|point| point.to_array().map(|value| (value * 1e3).round() as i32))
+            .collect();
+        points.sort_unstable();
+        points.dedup();
+        (points, shown(&cone, &seen, |_| true).len())
+    };
+    assert_eq!(bar_of(&cut), bar_of(&swapped));
+    assert_eq!(bar_of(&cut).1, 1);
+}
+
+/// The growing read-out of a telegraph reaches the boundary exactly when the server fires:
+/// progress is 1 when `remaining_secs` reads the tail, also for an effect first seen in
+/// the middle of its telegraph, because nothing but the newest snapshot is read.
+#[test]
+fn fill_completes_when_the_server_fires() {
+    let mut rows = Vec::new();
+    for (skill, kind, body) in target_bodies() {
+        if body.marker != Marker::FillToEdge || kind == K::Beam {
+            continue;
+        }
+        rows.push(skill.id());
+        let (telegraph, tail) = category::telegraph_secs(skill)
+            .zip(category::tail_secs(skill))
+            .unwrap();
+        let e = effect(skill, kind);
+        // How far the read-out reaches at a remaining time, as a share of where the inner
+        // side of the boundary line is; `None` while it is not drawn.
+        let reach = |remaining: f32| -> Option<f32> {
+            let state = with(&e, |e| e.remaining_secs = remaining);
+            let seen = first(&state, 0.0);
+            assert_eq!(seen.view.stage, Stage::Telegraph);
+            let slot = slots(&body, &seen, |role| matches!(role, Role::Marker(_)))[0];
+            let points = drawn(&slot, &seen)?;
+            Some(match seen.shape {
+                GeoShape::Ring { radius, .. } => {
+                    assert_eq!(
+                        part_paint(&slot, &seen),
+                        Some(Paint::Slot(PaletteSlot::Primary))
+                    );
+                    span(points.iter().map(|point| point.xz().length())).1 / (radius * MARKER_REACH)
+                }
+                GeoShape::Capsule { from, to, radius } => {
+                    assert_eq!(part_paint(&slot, &seen), Some(Paint::FillDim));
+                    // Rule P-2: it spreads across the width and always has the whole length.
+                    let (near, far) = span(points.iter().map(|point| point.z));
+                    assert!(near.abs() < 1e-3 && (far - from.distance(to)).abs() < 1e-3);
+                    let (left, right) = span(points.iter().map(|point| point.x));
+                    assert!((left + right).abs() < 1e-4, "it grows from the centre line");
+                    right / (radius * (1.0 - ARC_BAND))
+                }
+                GeoShape::Sector {
+                    radius, half_angle, ..
+                } => {
+                    assert_eq!(part_paint(&slot, &seen), Some(Paint::FillDim));
+                    // It grows from the apex, between the two edges.
+                    for point in &points {
+                        let angle = point.x.atan2(point.z).abs();
+                        assert!(point.xz().length() < 1e-3 || angle <= half_angle + 1e-4);
+                    }
+                    assert!(points.iter().any(|point| point.xz().length() < 1e-3));
+                    span(points.iter().map(|point| point.xz().length())).1 / radius
+                }
+                other => panic!("{other:?}"),
+            })
+        };
+        let near = |reach: Option<f32>, share: f32| {
+            reach.is_some_and(|reach| (reach - share).abs() < 1e-3)
+        };
+        // Nothing at the first moment, half of it half-way, and all of it at the firing
+        // tick, when the effect still has its tail to live.
+        assert!(
+            reach(tail + telegraph).unwrap_or(0.0) < 1e-4,
+            "{}",
+            skill.id()
+        );
+        assert!(near(reach(tail + telegraph * 0.5), 0.5), "{}", skill.id());
+        assert!(near(reach(tail + telegraph * 0.25), 0.75), "{}", skill.id());
+        assert!(near(reach(tail), 1.0), "{}", skill.id());
+        assert!(near(reach((tail - 0.1).max(0.0)), 1.0), "{}", skill.id());
+        // It never runs back.
+        let mut last = 0.0;
+        for step in 0..=40 {
+            let now = reach(tail + telegraph * (1.0 - step as f32 / 40.0)).unwrap_or(0.0);
+            assert!(now >= last - 1e-5, "{}", skill.id());
+            last = now;
+        }
+        // The dim fill under it is whole from the first frame.
+        if fills(&body) {
+            let state = with(&e, |e| e.remaining_secs = tail + telegraph);
+            let seen = first(&state, 0.0);
+            let fill = slots(&body, &seen, |role| role == Role::Fill)[0];
+            assert_eq!(part_paint(&fill, &seen), Some(Paint::FillDim));
+            assert!(drawn(&fill, &seen).is_some(), "{}", skill.id());
+        }
+    }
+    rows.sort_unstable();
+    assert_eq!(
+        rows,
+        [
+            "dawn_ray",
+            "furnace_breath",
+            "horizon_wave",
+            "mirror_guard",
+            "orbital_collapse"
+        ]
+    );
+    // The ray that fired has no read-out left and its fill at full strength.
+    let ray = target_body(SkillId::DawnRay, K::Beam);
+    let e = with(&effect(SkillId::DawnRay, K::Beam), |e| {
+        e.remaining_secs = 0.1
+    });
+    let seen = first(&e, 0.0);
+    assert_eq!(seen.view.stage, Stage::Active);
+    assert!(shown(&ray, &seen, |role| matches!(role, Role::Marker(_))).is_empty());
+    let fill = slots(&ray, &seen, |role| role == Role::Fill)[0];
+    assert_eq!(part_paint(&fill, &seen), Some(Paint::Fill));
+    // The fill of a strip covers the received segment at the replicated width, and the
+    // fill of a cone lies inside it with its far corners on the arc.
+    let sheet = drawn(&fill, &seen).unwrap();
+    let (left, right) = span(sheet.iter().map(|point| point.x));
+    let (near, far) = span(sheet.iter().map(|point| point.z));
+    assert!((right - e.radius).abs() < 1e-4 && (left + e.radius).abs() < 1e-4);
+    assert!(near.abs() < 1e-3 && (far - 45.0).abs() < 1e-3);
+    let cone = target_body(SkillId::FurnaceBreath, K::BeamWarning);
+    let e = effect(SkillId::FurnaceBreath, K::BeamWarning);
+    let seen = first(&e, 0.0);
+    let fill = slots(&cone, &seen, |role| role == Role::Fill)[0];
+    let kite = drawn(&fill, &seen).unwrap();
+    let half_angle = category::cone_half_angle(e.skill).unwrap();
+    let (_, far) = span(kite.iter().map(|point| point.xz().length()));
+    let (_, widest) = span(kite.iter().map(|point| point.x.atan2(point.z).abs()));
+    assert!((far - 7.0).abs() < 1e-3, "{far}");
+    assert!((widest - half_angle).abs() < 1e-3, "{widest}");
+}
+
+/// `rise_on_spawn` reads the age of an instance from its remaining time alone, so an
+/// instance first seen later than its first moments stands at full height at once.
+#[test]
+fn rise_on_spawn_is_full_height_when_first_seen_late() {
+    for (skill, kind, tall) in [
+        (SkillId::Northwall, K::ShieldWall, 0.75),
+        (SkillId::WinterDivide, K::BeamWarning, 1.0),
+    ] {
+        let body = target_body(skill, kind);
+        let copies = body.satellites.as_ref().unwrap();
+        assert_eq!(copies.behave, Behaviour::RiseOnSpawn);
+        assert_eq!(copies.size[1], tall);
+        let e = effect(skill, kind);
+        let spawn = category::spawn_lifetime_secs(skill).unwrap();
+        // The height of every copy at an age of the instance. No memory is given: this is
+        // what a client draws that sees the instance for the first time at that age.
+        let heights = |age: f32| -> Vec<f32> {
+            let state = with(&e, |e| e.remaining_secs = spawn - age);
+            let seen = first(&state, 0.3);
+            slots(&body, &seen, |role| matches!(role, Role::Satellite(_)))
+                .iter()
+                .map(|slot| {
+                    let points = drawn(slot, &seen).unwrap();
+                    let (low, high) = span(points.iter().map(|point| point.y));
+                    assert!((low - GROUND_LIFT).abs() < 1e-4, "it stands on the ground");
+                    high - low
+                })
+                .collect()
+        };
+        // A grown copy is as tall as its mesh makes the authored height.
+        let full = heights(spawn * 0.5)[0];
+        assert!(full <= tall * e.radius + 1e-4 && full >= tall * e.radius * 0.8);
+        let all = |age: f32, share: f32| {
+            let heights = heights(age);
+            assert_eq!(heights.len(), usize::from(copies.count));
+            heights
+                .iter()
+                .all(|height| (height - full * share).abs() < 1e-3)
+        };
+        // They rise together over the first 0.2 s of the instance.
+        assert!(all(0.0, FLAT_SHARE), "{}", skill.id());
+        assert!(all(0.1, 0.5), "{}", skill.id());
+        assert!(all(RISE_SECS, 1.0), "{}", skill.id());
+        // First seen late, at any later age: at full height in that very frame.
+        for age in [0.25, 1.4, spawn - 0.05] {
+            assert!(all(age, 1.0), "{} at {age}", skill.id());
+        }
+        // More time left than the lifetime: the age is not known, nothing is replayed.
+        assert!(all(-0.4, 1.0), "{}", skill.id());
+        // The boundary, and the fill of the fissure, are whole in the first frame: the
+        // effect acts from its first tick.
+        let born = with(&e, |e| e.remaining_secs = spawn);
+        let seen = first(&born, 0.0);
+        let engine = shown(&body, &seen, |role| {
+            matches!(role, Role::Boundary(_) | Role::Fill)
+        })
+        .len();
+        assert_eq!(
+            engine,
+            usize::from(engine_parts(body.archetype, &seen.shape)) + usize::from(fills(&body))
+        );
+    }
+}
+
+/// The pinned assertions of the legacy cage, now against the body: a consumed side is
+/// gone, every other side stands, and everything stays inside the replicated radius.
+#[test]
+fn cage_sides_are_hidden_per_consumed_bit() {
+    let body = target_body(SkillId::IronBoundary, K::Cage);
+    let e = effect(SkillId::IronBoundary, K::Cage);
+    assert_eq!(e.radius, 5.0);
+    for consumed in 0..32u8 {
+        let state = with(&e, |e| e.consumed_segments = consumed);
+        let seen = first(&state, 0.0);
+        let bars = boundary_in_world(&body, &seen);
+        assert_eq!(bars.len(), 10);
+        for (index, bar) in bars.iter().enumerate() {
+            let side = index % 5;
+            assert_eq!(
+                bar.is_none(),
+                consumed & (1 << side) != 0,
+                "side {side} of {consumed:#07b}"
+            );
+        }
+        // The collars on the corners and the link in the middle stay.
+        assert_eq!(
+            shown(&body, &seen, |role| role.authored()).len(),
+            6,
+            "{consumed:#07b}"
+        );
+    }
+    // The case the legacy test pins.
+    let state = with(&e, |e| e.consumed_segments = 0b00101);
+    let seen = first(&state, 0.0);
+    for (index, slot) in slots(&body, &seen, |role| matches!(role, Role::Boundary(_)))
+        .iter()
+        .enumerate()
+    {
+        let (pose, visibility) = part_pose(slot, &seen);
+        let side = index % 5;
+        assert_eq!(visibility == Visibility::Hidden, side == 0 || side == 2);
+        assert!(pose.translation.xz().length() <= e.radius);
+    }
+    // Rule E-9: the low bars are as wide as the band the server tests, and the collars
+    // stand in the corners, the first one toward world +X.
+    let low = slots(&body, &seen, |role| role == Role::Boundary(1))[0];
+    assert_eq!(
+        part_pose(&low, &seen).0.scale.x,
+        2.0 * geometry::CAGE_BAR_HALF_WIDTH
+    );
+    assert_eq!(geometry::CAGE_BAR_HALF_WIDTH * 2.0, 0.8);
+    let root = root_pose(&seen);
+    let collars = shown(&body, &seen, |role| matches!(role, Role::Satellite(_)));
+    assert_eq!(collars.len(), 5);
+    let across = body.satellites.as_ref().unwrap().size[0] * e.radius;
+    for (corner, collar) in collars.iter().enumerate() {
+        let at = root.transform_point(collar.translation).xz() - AT;
+        let angle = TAU * corner as f32 / 5.0;
+        assert!(at.normalize().distance(Vec2::from_angle(angle)) < 1e-4);
+        // Inset by its own half-extent, so it ends on the corner.
+        assert!(at.length() <= e.radius && at.length() >= e.radius - across);
+        // It faces the centre.
+        let facing = (root.rotation * collar.rotation * Vec3::Z).xz();
+        assert!(facing.dot(-at.normalize()).abs() > 0.99);
+    }
+    assert!((collars[0].translation.y - GROUND_LIFT).abs() < 1.0);
+}
+
+/// Rules E-5 and E-8: the plates of a wall stand upright on its bar, across the heading,
+/// in equal slots, and the keystone has the middle one.
+#[test]
+fn the_plates_of_a_wall_stand_in_equal_slots_on_its_bar() {
+    let body = target_body(SkillId::Northwall, K::ShieldWall);
+    let e = effect(SkillId::Northwall, K::ShieldWall);
+    assert_eq!(e.radius, 2.5);
+    let seen = first(&e, 0.0);
+    // Where a part stands: across the bar from its middle, and ahead of the hero.
+    let stands = |body: &Body, seen: &Seen, role: Role| -> Vec<Vec2> {
+        shown(body, seen, move |r| match (r, role) {
+            (Role::Satellite(_), Role::Satellite(_)) => true,
+            _ => r == role,
+        })
+        .iter()
+        .map(|pose| pose.translation.xz())
+        .collect()
+    };
+    let keystone = stands(&body, &seen, Role::Core);
+    assert_eq!(keystone, [Vec2::new(0.0, geometry::WALL_AHEAD)]);
+    let mut flanks: Vec<f32> = stands(&body, &seen, Role::Satellite(0))
+        .iter()
+        .map(|at| {
+            assert!((at.y - geometry::WALL_AHEAD).abs() < 1e-5, "on the bar");
+            at.x
+        })
+        .collect();
+    flanks.sort_by(f32::total_cmp);
+    // Five slots of one unit across a bar of five: the plates stand apart.
+    for (flank, expected) in flanks.iter().zip([-2.0, -1.0, 1.0, 2.0]) {
+        assert!((flank - expected).abs() < 1e-4, "{flanks:?}");
+    }
+    // Upright, facing along the heading, standing on the ground, inside the bar.
+    for (role, points) in parts_in_world(&body, &seen) {
+        if !role.authored() {
+            continue;
+        }
+        let frame: Vec<Vec2> = points
+            .iter()
+            .map(|point| beside(point.xz(), AT, AT + HEADING_OF))
+            .collect();
+        let (near, far) = span(frame.iter().map(|at| at.y));
+        assert!(far - near < 1e-4, "{role:?} is a plate across the heading");
+        let (left, right) = span(frame.iter().map(|at| at.x));
+        assert!(left >= -e.radius && right <= e.radius);
+        let (low, high) = span(points.iter().map(|point| point.y));
+        assert!((low - GROUND_LIFT).abs() < 1e-4 && high > 1.5, "{role:?}");
+    }
+    // Without a keystone the copies share the bar among themselves.
+    let mut rank = body.clone();
+    rank.core = None;
+    let mut alone: Vec<f32> = stands(&rank, &seen, Role::Satellite(0))
+        .iter()
+        .map(|at| at.x)
+        .collect();
+    alone.sort_by(f32::total_cmp);
+    for (plate, expected) in alone.iter().zip([-1.875, -0.625, 0.625, 1.875]) {
+        assert!((plate - expected).abs() < 1e-4, "{alone:?}");
+    }
+    // An odd row has no middle slot to give: the keystone takes the one before it, and
+    // no two parts share a slot.
+    let mut odd = body.clone();
+    odd.satellites.as_mut().unwrap().count = 3;
+    let mut all: Vec<f32> = stands(&odd, &seen, Role::Satellite(0))
+        .iter()
+        .chain(&stands(&odd, &seen, Role::Core))
+        .map(|at| at.x)
+        .collect();
+    all.sort_by(f32::total_cmp);
+    for pair in all.windows(2) {
+        assert!((pair[1] - pair[0] - 1.25).abs() < 1e-4, "{all:?}");
+    }
+    // A plate wider than its slot is kept inside the ends of the bar.
+    let mut wide = body.clone();
+    wide.satellites.as_mut().unwrap().size = [0.9, 0.5, 0.03];
+    for at in stands(&wide, &seen, Role::Satellite(0)) {
+        assert!(at.x.abs() + 0.45 * e.radius <= e.radius + 1e-4);
+    }
+    // Rule E-5: where the sizes of a flat part do not name its normal, it stands in a
+    // wall and lies on the ground of a zone.
+    let equal = part(Silhouette::Kite, [0.3, 0.3, 0.3], Behaviour::Steady);
+    let mut plate = bare(Archetype::Wall);
+    plate.core = Some(equal.clone());
+    let standing = drawn(&slots(&plate, &seen, |role| role == Role::Core)[0], &seen).unwrap();
+    let (near, far) = span(standing.iter().map(|point| point.z));
+    assert!(far - near < 1e-5 && reach(&standing).y > 0.5);
+    let mut tile = bare(Archetype::Zone);
+    tile.core = Some(equal);
+    let zone = effect(SkillId::DawnField, K::Field);
+    let seen = first(&zone, 0.0);
+    let lying = drawn(&slots(&tile, &seen, |role| role == Role::Core)[0], &seen).unwrap();
+    let (low, high) = span(lying.iter().map(|point| point.y));
+    assert!(high - low < 1e-5);
+}
+
+/// Rule E-7 and the two strip layouts: the core and the shell of a lane run the whole
+/// received segment whatever its length, and the copies stand evenly along it.
+#[test]
+fn a_strip_spans_its_core_and_spaces_its_copies_along_the_segment() {
+    let ray = target_body(SkillId::DawnRay, K::Beam);
+    let fissure = target_body(SkillId::WinterDivide, K::BeamWarning);
+    for length in [0.8, 6.0, 20.0, 45.0] {
+        for (skill, kind, body) in [
+            (SkillId::DawnRay, K::Beam, &ray),
+            (SkillId::WinterDivide, K::BeamWarning, &fissure),
+        ] {
+            let e = with(&effect(skill, kind), |e| {
+                e.end = (AT + HEADING_OF * length).to_array();
+            });
+            for now in [0.0, 0.23, 0.61, 1.9] {
+                let seen = first(&e, now);
+                for role in [Role::Core, Role::Shell] {
+                    let slot = slots(body, &seen, |r| r == role)[0];
+                    let points = drawn(&slot, &seen).unwrap();
+                    // From the root to the far end, whatever the part breathes.
+                    let (near, far) = span(points.iter().map(|point| point.z));
+                    assert!(near.abs() < 1e-3 && (far - length).abs() < 1e-3, "{role:?}");
+                    // As wide as authored at most, in multiples of the radius, around the
+                    // centre line.
+                    let (left, right) = span(points.iter().map(|point| point.x));
+                    let half = slot.size.x * e.radius * 0.5;
+                    assert!(left >= -half - 1e-4 && right <= half + 1e-4, "{role:?}");
+                    assert!(right - left >= half * 1.4, "{role:?}");
+                }
+            }
+        }
+    }
+    // `stagger`: eight copies an eighth of the strip apart, left and right in turn,
+    // against the inside of the outline.
+    let e = effect(SkillId::WinterDivide, K::BeamWarning);
+    assert_eq!(
+        (e.radius, Vec2::from_array(e.end).distance(AT)),
+        (2.0, 20.0)
+    );
+    let seen = first(&e, 0.0);
+    let fangs = shown(&fissure, &seen, |role| matches!(role, Role::Satellite(_)));
+    assert_eq!(fangs.len(), 8);
+    let inside = e.radius * (1.0 - ARC_BAND);
+    for (index, fang) in fangs.iter().enumerate() {
+        let at = fang.translation.xz();
+        assert!((at.y - (index as f32 + 0.5) * 2.5).abs() < 1e-4);
+        let side = if index % 2 == 0 { 1.0 } else { -1.0 };
+        // A fang is one unit across.
+        assert!((at.x - side * (inside - 0.5)).abs() < 1e-4, "{at}");
+    }
+    for (index, count, side) in [
+        (0, 8, 1.0),
+        (7, 8, -1.0),
+        (0, 5, 1.0),
+        (1, 5, -1.0),
+        (2, 5, 0.0),
+        (3, 5, 1.0),
+        (4, 5, -1.0),
+        (0, 1, 0.0),
+        (0, 2, 1.0),
+        (1, 2, -1.0),
+    ] {
+        assert_eq!(stagger_side(index, count), side, "{index} of {count}");
+    }
+    // `line`: on the centre line.
+    let warning = target_body(SkillId::HorizonWave, K::BeamWarning);
+    let e = effect(SkillId::HorizonWave, K::BeamWarning);
+    let seen = first(&e, 0.0);
+    let marks = shown(&warning, &seen, |role| matches!(role, Role::Satellite(_)));
+    assert_eq!(marks.len(), 6);
+    for (index, mark) in marks.iter().enumerate() {
+        let at = mark.translation.xz();
+        assert!(at.x.abs() < 1e-5 && (at.y - (index as f32 + 0.5) * 7.5).abs() < 1e-3);
+    }
+    // In a strip shorter than its copies they stand in its middle, not beyond its ends.
+    let short = with(&e, |e| e.end = (AT + HEADING_OF * 0.2).to_array());
+    let seen = first(&short, 0.0);
+    for mark in shown(&warning, &seen, |role| matches!(role, Role::Satellite(_))) {
+        assert!((mark.translation.z - 0.1).abs() < 1e-5);
+    }
+}
+
+/// Rule E-6: the flat core of a stance is posed half a radius ahead of its replicated
+/// position along its replicated heading, upright, and still inside its ring.
+#[test]
+fn the_plate_of_a_stance_stands_half_a_radius_ahead() {
+    let body = target_body(SkillId::MirrorGuard, K::Barrier);
+    assert_eq!(
+        (body.archetype, altitude(&body)),
+        (Archetype::Prop, Altitude::Chest)
+    );
+    for radius in [0.8, 1.6] {
+        let e = with(&effect(SkillId::MirrorGuard, K::Barrier), |e| {
+            e.radius = radius
+        });
+        let seen = first(&e, 0.0);
+        let plate = shown(&body, &seen, |role| role == Role::Core)[0];
+        assert_eq!(plate.translation, Vec3::new(0.0, CHEST, radius * 0.5));
+        let root = root_pose(&seen);
+        let at = root.transform_point(plate.translation).xz();
+        assert!(at.distance(AT + HEADING_OF * radius * 0.5) < 1e-5);
+        // It faces along the heading and its corners stay inside the ring.
+        let slot = slots(&body, &seen, |role| role == Role::Core)[0];
+        let points = drawn(&slot, &seen).unwrap();
+        let (near, far) = span(points.iter().map(|point| point.z));
+        assert!(far - near < 1e-5);
+        for point in points {
+            assert!(point.xz().length() <= radius);
+        }
+    }
+    // Only a flat part is a plate, and only a stance has one: a solid stays on the cast
+    // position, and so does a flat part of any other prop.
+    let e = effect(SkillId::MirrorGuard, K::Barrier);
+    let seen = first(&e, 0.0);
+    let mut solid = bare(Archetype::Prop);
+    solid.core = Some(part(Silhouette::Ball, [0.4, 0.4, 0.4], Behaviour::Steady));
+    assert_eq!(
+        shown(&solid, &seen, |role| role == Role::Core)[0]
+            .translation
+            .xz(),
+        Vec2::ZERO
+    );
+    let trap = effect(SkillId::WildTraps, K::Trap);
+    let seen = first(&trap, 0.0);
+    let mut flat = bare(Archetype::Prop);
+    flat.core = Some(part(Silhouette::Kite, [0.5, 0.02, 0.5], Behaviour::Steady));
+    assert_eq!(
+        shown(&flat, &seen, |role| role == Role::Core)[0]
+            .translation
+            .xz(),
+        Vec2::ZERO
+    );
+}
+
+/// The copies of a `fan` stand across a cone, each turned along its own ray.
+#[test]
+fn a_fan_spreads_its_copies_across_the_cone() {
+    let body = target_body(SkillId::FurnaceBreath, K::BeamWarning);
+    let e = effect(SkillId::FurnaceBreath, K::BeamWarning);
+    let half_angle = category::cone_half_angle(e.skill).unwrap();
+    let seen = first(&e, 0.0);
+    let tongues = shown(&body, &seen, |role| matches!(role, Role::Satellite(_)));
+    assert_eq!(tongues.len(), 2);
+    let angles: Vec<f32> = tongues
+        .iter()
+        .map(|pose| {
+            let at = pose.translation.xz();
+            assert!((at.length() - 7.0 * FAN_DISTANCE).abs() < 1e-4);
+            let angle = at.x.atan2(at.y);
+            // A flat part points along its own +X: outward, along its ray.
+            let points = (pose.rotation * Vec3::X).xz();
+            assert!(points.distance(at.normalize()) < 1e-4);
+            angle
+        })
+        .collect();
+    assert!((angles[0] + angles[1]).abs() < 1e-5, "one to each side");
+    assert!((angles[1] - half_angle * FAN_SPREAD).abs() < 1e-4);
+    // More copies fill the fan between the two; one copy stands on the axis.
+    let mut many = body.clone();
+    many.satellites.as_mut().unwrap().count = 5;
+    let spread: Vec<f32> = shown(&many, &seen, |role| matches!(role, Role::Satellite(_)))
+        .iter()
+        .map(|pose| pose.translation.x.atan2(pose.translation.z))
+        .collect();
+    for pair in spread.windows(2) {
+        assert!((pair[1] - pair[0] - half_angle * FAN_SPREAD * 0.5).abs() < 1e-4);
+    }
+    many.satellites.as_mut().unwrap().count = 1;
+    let alone = shown(&many, &seen, |role| matches!(role, Role::Satellite(_)));
+    assert!(alone[0].translation.x.abs() < 1e-6);
+    // A copy too large for the cone is not drawn across its edge.
+    let narrow = with(&e, |e| e.radius = 9.0);
+    many.satellites.as_mut().unwrap().size = [1.0, 0.2, 1.0];
+    assert!(
+        shown(&many, &first(&narrow, 0.0), |role| matches!(
+            role,
+            Role::Satellite(_)
+        ))
+        .is_empty()
+    );
+}
+
 /// A part is never larger than authored: its vertices stay inside the box of its sizes
 /// around its centre, whatever it is made of and however it is laid.
 #[test]
@@ -663,7 +2029,9 @@ fn a_part_never_exceeds_its_authored_size() {
 /// ground; a cone points along its longest extent.
 #[test]
 fn flat_parts_face_their_thinnest_extent_and_e5_decides_ties() {
-    let flat = |size: [f32; 3], altitude| normal_axis(Vec3::from_array(size), altitude);
+    let flat = |size: [f32; 3], altitude| {
+        normal_axis(Vec3::from_array(size), altitude != Altitude::Ground)
+    };
     // The mirror plate, the Aegis and every part with equal sizes stand across the heading.
     assert_eq!(flat([1.0, 1.7, 0.05], Altitude::Chest), HEADING);
     assert_eq!(flat([0.85, 0.85, 0.05], Altitude::Chest), HEADING);
@@ -1475,6 +2843,7 @@ fn behaviours_follow_the_stage_and_the_remaining_time() {
                 layout: None,
                 trail: Trail::None,
                 marker: Marker::None,
+                has_core: true,
                 shell_like_core: false,
             },
         };
@@ -1501,6 +2870,7 @@ fn behaviours_follow_the_stage_and_the_remaining_time() {
                     layout: None,
                     trail: Trail::None,
                     marker: Marker::None,
+                    has_core: true,
                     shell_like_core: false,
                 },
             };
@@ -1516,9 +2886,6 @@ fn behaviours_follow_the_stage_and_the_remaining_time() {
 #[test]
 fn every_pose_of_every_target_body_is_finite() {
     for (skill, kind, body) in target_bodies() {
-        if !staged(body.archetype) {
-            continue;
-        }
         for radius in [0.0, 0.05, 1.0, 256.0] {
             for (history, resting) in [
                 (vec![], false),
