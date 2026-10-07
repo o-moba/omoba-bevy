@@ -481,12 +481,32 @@ mod tests {
             // Another hero's warning holds nobody: the bystander turns to its target.
             assert!(faces(&app, bystander, -1.0), "sequence {sequence}");
         }
+        // The ray has fired: the body is free for the next action, and so is the facing.
+        app.world_mut()
+            .resource_mut::<GameStateSnapshot>()
+            .skill_effects[0]
+            .kind = EffectVisualKind::Beam;
+        app.world_mut().entity_mut(caster).insert((
+            Transform::IDENTITY,
+            PlayerCosmeticAction {
+                sequence: 4,
+                slot: shared::BASIC_ATTACK_ACTION_SLOT,
+                kind: shared::PlayerActionKind::Attack,
+            },
+            PlayerActionFacing {
+                sequence: 4,
+                yaw: Some(shared::math::hero_yaw_towards(-1.0, 0.0)),
+            },
+        ));
+        app.update();
+        assert!(faces(&app, caster, -1.0), "after the beam fired");
         // A warning of a hidden owner, or of a skill outside the kit, is not the caster's.
         for (owner_id, skill) in [(0, SkillId::DawnRay), (7, SkillId::HorizonWave)] {
             let warning = &mut app
                 .world_mut()
                 .resource_mut::<GameStateSnapshot>()
                 .skill_effects[0];
+            warning.kind = EffectVisualKind::BeamWarning;
             warning.owner_id = owner_id;
             warning.skill = skill;
             app.world_mut().entity_mut(caster).insert((
@@ -503,6 +523,112 @@ mod tests {
             ));
             app.update();
             assert!(faces(&app, caster, -1.0), "{owner_id} {skill:?}");
+        }
+    }
+    /// The facing hold reads the phase of the row: every telegraph that holds a windup holds
+    /// the facing along its replicated direction, and a row without a windup holds nothing.
+    #[test]
+    fn a_fuse_or_a_parry_holds_the_facing_along_its_telegraph() {
+        use crate::skill_presentation::SkillPresentation;
+        use shared::loadout::{CoreId, EffectVisualKind, LoadoutState, SkillEffectState, SkillId};
+        // (core, skill, kind of its telegraph, whether the telegraph has a direction)
+        let cases = [
+            (
+                CoreId::Cinderforge,
+                SkillId::FurnaceBreath,
+                EffectVisualKind::BeamWarning,
+                true,
+            ),
+            (
+                CoreId::Edgeweaver,
+                SkillId::MirrorGuard,
+                EffectVisualKind::Barrier,
+                true,
+            ),
+            (
+                CoreId::Riftshot,
+                SkillId::HorizonWave,
+                EffectVisualKind::BeamWarning,
+                true,
+            ),
+            // The collapse is a ring around the orb: it points nowhere.
+            (
+                CoreId::Orbitwright,
+                SkillId::OrbitalCollapse,
+                EffectVisualKind::BeamWarning,
+                false,
+            ),
+        ];
+        for (registry, final_rows) in [
+            (SkillPresentation::target(), true),
+            (SkillPresentation::packaged(), false),
+        ] {
+            for (core, skill, kind, directed) in cases {
+                let holds = directed && registry.profile(skill).unwrap().windup.is_some();
+                assert_eq!(
+                    holds,
+                    directed && (final_rows || skill == SkillId::HorizonWave)
+                );
+                let mut app = App::new();
+                app.add_plugins(MinimalPlugins)
+                    .init_resource::<GameStateSnapshot>()
+                    .insert_resource(registry.clone())
+                    .add_systems(PostUpdate, face_confirmed_actions);
+                let recipe = core.preset();
+                let caster = app
+                    .world_mut()
+                    .spawn((
+                        Transform::IDENTITY,
+                        CombatStats::default(),
+                        NetworkPlayerId(7),
+                        crate::net::NetworkHeroClass(recipe.core.class()),
+                        PlayerLoadout(Some(LoadoutState {
+                            recipe: Some(recipe),
+                            ..default()
+                        })),
+                        PlayerCosmeticAction::default(),
+                        PlayerActionFacing::default(),
+                    ))
+                    .id();
+                app.update();
+                app.world_mut()
+                    .resource_mut::<GameStateSnapshot>()
+                    .skill_effects
+                    .push(SkillEffectState {
+                        id: 9,
+                        owner_id: 7,
+                        owner_team: shared::map::Team::Green,
+                        skill,
+                        kind,
+                        position: [2.0, 3.0],
+                        end: if directed { [9.0, 3.0] } else { [2.0, 3.0] },
+                        radius: 3.0,
+                        remaining_secs: 0.6,
+                        armed: false,
+                        consumed_segments: 0,
+                    });
+                // A basic attack at a target on -X is accepted during the telegraph.
+                app.world_mut().entity_mut(caster).insert((
+                    PlayerCosmeticAction {
+                        sequence: 1,
+                        slot: shared::BASIC_ATTACK_ACTION_SLOT,
+                        kind: shared::PlayerActionKind::Attack,
+                    },
+                    PlayerActionFacing {
+                        sequence: 1,
+                        yaw: Some(shared::math::hero_yaw_towards(-1.0, 0.0)),
+                    },
+                ));
+                app.update();
+                let forward = app.world().get::<Transform>(caster).unwrap().rotation * Vec3::NEG_Z;
+                let along = if holds { 1.0 } else { -1.0 };
+                assert!(
+                    forward.dot(Vec3::X * along) > 0.999,
+                    "{} with the {} rows faces {forward}",
+                    skill.id(),
+                    if final_rows { "final" } else { "packaged" }
+                );
+            }
         }
     }
 }

@@ -45,8 +45,11 @@ use bevy::{
 };
 use serde::Deserialize;
 use shared::HeroClass;
-use shared::loadout::{EffectVisualKind, LoadoutState, SkillEffectState, SkillId};
+use shared::loadout::{EffectVisualKind, LoadoutState, SkillEffectState, SkillId, WeaponMode};
 use std::collections::BTreeMap;
+
+use category::SkillKey;
+use vocab::MotionPhase;
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -223,12 +226,64 @@ pub(crate) struct Look<'a> {
     pub impact: Option<&'a impacts::ImpactRecipe>,
 }
 
+/// What a hero's body is asked to play.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct MotionCue {
     pub motion: String,
+    /// The pose is held against a telegraph instead of running out.
     pub hold: bool,
+    /// Multiplies the playback speed of the clip.
+    pub rate: f32,
+    /// Fraction of the clip skipped at its start.
+    pub start: f32,
+    /// The clip repeats for as long as it is played.
+    pub looping: bool,
 }
 
+/// The playback rates a windup fitted to its telegraph may take.
+const FITTED_RATES: (f32, f32) = (0.5, 2.0);
+
+impl MotionCue {
+    /// A clip played once from its trigger: a release, a recast or a basic attack.
+    fn action(motion: &str, rate: f32, start: f32) -> Self {
+        Self {
+            motion: motion.into(),
+            hold: false,
+            rate,
+            start,
+            looping: false,
+        }
+    }
+
+    fn release(profile: &SkillProfile) -> Self {
+        Self::action(&profile.release, profile.motion.rate, profile.motion.start)
+    }
+
+    /// The windup of a row, held against the telegraph of its skill: a loop repeats under
+    /// it, and a clip the row fits to it spans it once.
+    fn windup(profile: &SkillProfile, skill: SkillId) -> Option<Self> {
+        let motion = profile.windup.as_ref()?;
+        let clip = crate::humanoid::SharedHumanoidMotion::embedded()
+            .ok()
+            .and_then(|library| library.clips.get(motion));
+        let fitted = clip
+            .zip(category::telegraph_secs(skill))
+            .filter(|(_, telegraph)| profile.motion.fit_windup && *telegraph > 0.0)
+            .map(|(clip, telegraph)| {
+                (clip.duration / telegraph).clamp(FITTED_RATES.0, FITTED_RATES.1)
+            });
+        Some(Self {
+            motion: motion.clone(),
+            hold: true,
+            rate: fitted.unwrap_or(1.0),
+            start: 0.0,
+            looping: clip.is_some_and(|clip| clip.looping),
+        })
+    }
+}
+
+/// What the action in one slot asks of the body, with the effects the hero has replicated.
+/// A basic attack gives the first motion of its class; `motion_plan` alternates them.
 pub(crate) fn motion_cue(
     registry: &SkillPresentation,
     class: shared::HeroClass,
@@ -238,58 +293,147 @@ pub(crate) fn motion_cue(
     effects: &[SkillEffectState],
 ) -> Option<MotionCue> {
     if slot == shared::BASIC_ATTACK_ACTION_SLOT {
-        let equipped = crate::equipped_skills::resolve_state(class, loadout)?;
-        let motion = match equipped.resolved() {
-            Some(kit) if kit.core() == shared::loadout::CoreId::Adventurer => "dagger_stab",
-            Some(kit)
-                if kit.attack_profile() == shared::loadout::AttackProfileId::Repeater
-                    || kit.core() == shared::loadout::CoreId::Riftshot =>
-            {
-                "pistol_shoot"
-            }
-            Some(kit) if kit.attack_profile() == shared::loadout::AttackProfileId::LightBolt => {
-                "cast"
-            }
-            None if class == shared::HeroClass::Ranger => "pistol_shoot",
-            None if matches!(class, shared::HeroClass::Mage | shared::HeroClass::Cleric) => "cast",
-            _ => return None,
-        };
-        return Some(MotionCue {
-            motion: motion.into(),
-            hold: false,
-        });
+        return basic_cue(registry, class, loadout, 1);
     }
     let skill = equipped_skill(class, loadout, slot)?;
     let profile = registry.profile(skill)?;
-    if profile.windup.is_some() {
-        // A vanished warning is not proof that a beam fired (cancel/fog/round change).
-        return effects
-            .iter()
-            .filter(|effect| owner != 0 && effect.owner_id == owner && effect.skill == skill)
-            .find_map(|effect| telegraph_cue(profile, effect));
+    if profile.windup.is_none() {
+        return Some(MotionCue::release(profile));
     }
-    Some(MotionCue {
-        motion: profile.release.clone(),
-        hold: false,
-    })
+    let own = effects
+        .iter()
+        .filter(|effect| owner != 0 && effect.owner_id == owner && effect.skill == skill)
+        .find_map(|effect| telegraph_cue(profile, effect));
+    match profile.phase(SkillKey::Modular(skill)) {
+        // A vanished warning is not proof that a beam fired (cancel/fog/round change).
+        MotionPhase::WarnFire | MotionPhase::Instant => own,
+        // A fuse burns from the accepted cast on. Whoever plays the windup bounds a hold
+        // whose telegraph it never sees.
+        MotionPhase::Fuse => MotionCue::windup(profile, skill),
+        // The stance lasts while the hero parries.
+        MotionPhase::Parry => own.or_else(|| {
+            loadout
+                .filter(|loadout| loadout.parrying)
+                .and_then(|_| MotionCue::windup(profile, skill))
+        }),
+    }
+}
+
+/// The motion of a basic attack: the row of the class of the kit's core (rule E-13), for a
+/// repeater in rocket mode its `rockets` entry. Two motions alternate, the first on odd
+/// action sequences. A class without a row keeps the built-in table.
+fn basic_cue(
+    registry: &SkillPresentation,
+    class: shared::HeroClass,
+    loadout: Option<&LoadoutState>,
+    sequence: u64,
+) -> Option<MotionCue> {
+    let kit = crate::equipped_skills::resolve_state(class, loadout)?.resolved();
+    if let Some(row) = registry.basic(kit.map_or(class, |kit| kit.core().class())) {
+        let rockets = loadout.is_some_and(|loadout| loadout.weapon_mode == WeaponMode::Rockets);
+        let row = row.rockets.as_deref().filter(|_| rockets).unwrap_or(row);
+        let turn = if sequence % 2 == 1 {
+            0
+        } else {
+            row.motions.len().saturating_sub(1)
+        };
+        return row
+            .motions
+            .get(turn)
+            .map(|motion| MotionCue::action(motion, row.rate, row.start));
+    }
+    let motion = match kit {
+        Some(kit) if kit.core() == shared::loadout::CoreId::Adventurer => "dagger_stab",
+        Some(kit)
+            if kit.attack_profile() == shared::loadout::AttackProfileId::Repeater
+                || kit.core() == shared::loadout::CoreId::Riftshot =>
+        {
+            "pistol_shoot"
+        }
+        Some(kit) if kit.attack_profile() == shared::loadout::AttackProfileId::LightBolt => "cast",
+        None if class == shared::HeroClass::Ranger => "pistol_shoot",
+        None if matches!(class, shared::HeroClass::Mage | shared::HeroClass::Cleric) => "cast",
+        _ => return None,
+    };
+    Some(MotionCue::action(motion, 1.0, 0.0))
 }
 
 /// What a row with a windup asks of its caster while this effect of the skill is
-/// replicated: the windup, held, while the effect warns; the release once it is the beam or
-/// the bolt it announced.
+/// replicated. A warning is the held windup and, once it is the beam or the bolt it
+/// announced, the release. A fuse and a parry are the held windup for as long as their
+/// effect is replicated; the stage tracker names the moment they fire.
 fn telegraph_cue(profile: &SkillProfile, effect: &SkillEffectState) -> Option<MotionCue> {
-    let windup = profile.windup.as_ref()?;
-    match effect.kind {
-        EffectVisualKind::BeamWarning => Some(MotionCue {
-            motion: windup.clone(),
-            hold: true,
-        }),
-        EffectVisualKind::Beam | EffectVisualKind::Bolt => Some(MotionCue {
-            motion: profile.release.clone(),
-            hold: false,
-        }),
-        _ => None,
+    profile.windup.as_ref()?;
+    let windup = || MotionCue::windup(profile, effect.skill);
+    match profile.phase(SkillKey::Modular(effect.skill)) {
+        MotionPhase::WarnFire => match effect.kind {
+            EffectVisualKind::BeamWarning => windup(),
+            EffectVisualKind::Beam | EffectVisualKind::Bolt => Some(MotionCue::release(profile)),
+            _ => None,
+        },
+        MotionPhase::Fuse | MotionPhase::Parry => category::own_kinds(effect.skill)
+            .contains(&effect.kind)
+            .then(windup)
+            .flatten(),
+        MotionPhase::Instant => None,
     }
+}
+
+/// The release of a skill whose telegraph fires without a change of kind.
+pub(crate) fn release_cue(registry: &SkillPresentation, skill: SkillId) -> Option<MotionCue> {
+    registry.profile(skill).map(MotionCue::release)
+}
+
+/// What decides the motion of a hero's body in one frame.
+#[derive(Clone, Copy)]
+pub(crate) struct MotionInputs<'a> {
+    pub registry: &'a SkillPresentation,
+    pub class: shared::HeroClass,
+    pub loadout: Option<&'a LoadoutState>,
+    /// The latest accepted action: its slot and its sequence.
+    pub slot: u8,
+    pub sequence: u64,
+    /// The slot offered a recast before that action was accepted.
+    pub recast: bool,
+    pub owner: u64,
+    pub effects: &'a [SkillEffectState],
+}
+
+/// The motion the body is asked for: the held windup of the hero's own telegraph, whatever
+/// was accepted during it, else what the latest accepted action plays. That is the basic
+/// attack of its turn, the recast clip of a recast, the cue of the slot, or the release of
+/// a legacy ability.
+pub(crate) fn motion_plan(inputs: &MotionInputs) -> Option<MotionCue> {
+    let MotionInputs {
+        registry,
+        class,
+        loadout,
+        slot,
+        sequence,
+        recast,
+        owner,
+        effects,
+    } = *inputs;
+    let held = own_windup_cue(registry, class, loadout, owner, effects)
+        .map(|(_, cue)| cue)
+        .filter(|cue| cue.hold);
+    if held.is_some() {
+        return held;
+    }
+    if slot == shared::BASIC_ATTACK_ACTION_SLOT {
+        return basic_cue(registry, class, loadout, sequence);
+    }
+    let profile = registry.action_profile(class, loadout, slot)?;
+    if let Some(clip) = profile.motion.recast.as_ref().filter(|_| recast) {
+        return Some(MotionCue::action(clip, profile.motion.recast_rate, 0.0));
+    }
+    motion_cue(registry, class, loadout, slot, owner, effects).or_else(|| {
+        // A legacy ability has no telegraph: its release follows the accepted cast.
+        profile
+            .windup
+            .is_none()
+            .then(|| MotionCue::release(profile))
+    })
 }
 
 /// The yaw a hero has when it looks along a telegraph, from the replicated geometry of the
@@ -448,5 +592,13 @@ impl SkillPresentation {
     /// The final data of the roster (`fixtures/target.skillfx`).
     pub(crate) fn target() -> Self {
         tests::target::target()
+    }
+    /// The final data with one edit, parsed as a packaged file is.
+    pub(crate) fn target_with(edit: impl FnOnce(&mut serde_json::Value)) -> Self {
+        let mut config =
+            serde_json::from_str(include_str!("skill_presentation/fixtures/target.skillfx"))
+                .unwrap();
+        edit(&mut config);
+        Self::parse(&config.to_string()).unwrap()
     }
 }

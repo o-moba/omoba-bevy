@@ -166,6 +166,7 @@ class LauncherTests(unittest.TestCase):
                     (["--avatar", "agnes"], "need --phases"),
                     (["--release-at", "contact"], "need --phases"),
                     (["--flight"], "need --phases"),
+                    (["--interleave"], "need --phases"),
                     (["--phases", "--avatar", "nobody"], "Unknown avatar"),
                     (["--phases", "--release-at", "3"], "expected `contact` or 0..2 seconds"),
                     (["--phases", "--release-at", "soon"], "invalid release_time value"),

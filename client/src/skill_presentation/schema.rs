@@ -852,6 +852,12 @@ fn motion_block(
         if playback.phase == Some(MotionPhase::Instant) {
             return Err("`windup` needs a non-instant motion.phase".into());
         }
+    } else if playback
+        .phase
+        .is_some_and(|phase| phase != MotionPhase::Instant)
+    {
+        // The release of such a row would wait for a telegraph with no pose to hold.
+        return Err("a non-instant motion.phase needs a `windup`".into());
     }
     if playback.fit_windup {
         let fitted = profile

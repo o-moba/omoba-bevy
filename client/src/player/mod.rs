@@ -15,6 +15,8 @@ pub use shared::hero_balance::DEBUG_SPEED_MULTIPLIER;
 #[cfg(test)]
 use shared::hero_balance::PLAYER_SPEED;
 
+#[cfg(feature = "qa")]
+pub(crate) use animation::HeroClips;
 #[cfg(any(test, feature = "qa"))]
 pub(crate) use animation::PlayerAnimationBinding;
 pub(crate) use animation::register_hero_animation_systems;

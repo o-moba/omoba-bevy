@@ -11,7 +11,9 @@
 //! For a look at projectile bodies, `OMOBA_STANDARD_QA_FLIGHT=1` stands the
 //! target of every unit-target ability far enough for its projectile to be in
 //! flight at the release still and adds one still of the basic attack's
-//! projectile in flight.
+//! projectile in flight. `OMOBA_STANDARD_QA_INTERLEAVE=1` orders one basic
+//! attack as soon as the cast of a skill with a telegraph is accepted, so the
+//! stills show what an action accepted during the telegraph does to the pose.
 use crate::{
     frontend::{AppScreen, ScreenDriverPaused},
     help_overlay::HelpOverlayVisible,
@@ -60,6 +62,7 @@ impl Plugin for StandardKitsQaPlugin {
         let phases = flag("OMOBA_STANDARD_QA_PHASES");
         let offscreen = flag("OMOBA_STANDARD_QA_OFFSCREEN");
         let flight = flag("OMOBA_STANDARD_QA_FLIGHT");
+        let interleave = flag("OMOBA_STANDARD_QA_INTERLEAVE");
         let release_at = match std::env::var("OMOBA_STANDARD_QA_RELEASE_AT").as_deref() {
             Err(_) => ReleaseAt::Window,
             Ok("contact") => ReleaseAt::Contact,
@@ -88,6 +91,7 @@ impl Plugin for StandardKitsQaPlugin {
             phases,
             offscreen,
             flight,
+            interleave,
             target: None,
             black: None,
             ux: std::env::var_os("OMOBA_COMBAT_UX_QA").is_some(),
@@ -150,6 +154,8 @@ struct Qa {
     offscreen: bool,
     /// Phase run staged for a look at projectiles in flight.
     flight: bool,
+    /// Phase run that orders a basic attack during every telegraph.
+    interleave: bool,
     target: Option<Handle<Image>>,
     /// A frame that read back black; the run fails instead of keeping it.
     black: Option<String>,
@@ -1663,8 +1669,16 @@ struct PhaseWorld<'w, 's> {
     >,
     children: Query<'w, 's, &'static Children>,
     drawn: Query<'w, 's, (&'static InheritedVisibility, Has<Mesh3d>)>,
+    hero: Query<'w, 's, Entity, With<Player>>,
+    clips: crate::player::HeroClips<'w, 's>,
 }
 impl PhaseWorld<'_, '_> {
+    /// The clip of the hero's animation state: its seek time, its speed and whether it
+    /// repeats. Sprites have none.
+    fn clip(&self) -> Option<serde_json::Value> {
+        let (seek_secs, speed, repeats) = self.clips.of(self.hero.single().ok()?)?;
+        Some(serde_json::json!({ "seek_secs": seek_secs, "speed": speed, "repeats": repeats }))
+    }
     /// The hero's replicated projectiles and what stands for each of them.
     fn own_projectiles(&self) -> Vec<serde_json::Value> {
         use crate::combat_visuals::FlightBody;
@@ -2008,6 +2022,13 @@ fn still_record(
         "paused": sandbox.config.environment.paused,
         "since_edge_secs": edge.map(|(at, _)| sandbox.simulation_secs - at),
         "animation": world.animation(),
+        "clip": world.clip(),
+        // The hero's latest accepted action: another one than the cast when an
+        // action was accepted after it.
+        "latest_action": world.local.single().ok().map(|(.., action, _)| serde_json::json!({
+            "sequence": action.sequence,
+            "slot": action.slot,
+        })),
         "profile": profile.map(|profile| serde_json::json!({
             "release": profile.release,
             "windup": profile.windup,
@@ -2301,6 +2322,19 @@ fn drive_phases(
             } else {
                 Step::Gates
             };
+            // The telegraph the probe saw is running now: an attack ordered here is
+            // accepted during it, when the target is within the hero's reach.
+            let telegraphed = run.probe.as_ref().is_some_and(|p| p.fuse().is_some());
+            if qa.interleave
+                && run.pass == Pass::Capture
+                && telegraphed
+                && let Some(enemy) = world.actor(SandboxActor::Enemy)
+            {
+                outgoing.write(NetworkCommand::BasicAttack {
+                    target: shared::wire::TargetId::player(enemy.id),
+                });
+                qa.requests.push(serde_json::json!({"command":"basic_attack","target":enemy.id,"during":skill,"snapshot_tick":world.game.meta.snapshot_tick}));
+            }
             run.enter(next);
         }
         Step::Probe
@@ -2541,6 +2575,7 @@ fn drive_phases(
             "release_at": format!("{:?}", qa.release_at),
             "visual_mode": format!("{:?}", *world.mode),
             "flight": qa.flight,
+            "interleave": qa.interleave,
             "manual_interaction_verified": false,
             "physical_device_verified": false,
             "setup": "live sandbox; level 10; rank 1; infinite resource, normal cooldowns; ResetDuel before every cast; one probe cast at 1x, then one cast at 0.25x paused for each still; stationary enemy hero with 1,000,000 HP that takes hits; ally-only casts target the caster",

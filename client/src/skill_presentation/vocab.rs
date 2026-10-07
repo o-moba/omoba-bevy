@@ -33,7 +33,7 @@ vocabulary! {
     MotionPhase {
         Instant = "instant": "the release clip starts on the accepted cast",
         WarnFire = "warn_fire": "the windup is held while the hero's own warning exists; the release follows its change of kind",
-        Fuse = "fuse": "the windup is held while the hero's own telegraph exists; the release follows its inferred firing",
+        Fuse = "fuse": "the windup starts on the accepted cast and is held while the hero's own telegraph exists, 1.2 s at most when that is never seen; the release follows its inferred firing",
         Parry = "parry": "the windup is held while the hero parries; the release follows the riposte",
     }
 }
@@ -444,7 +444,7 @@ pub(crate) fn render_markdown() -> String {
     let sections = [
         section(
             "Motion phases",
-            "`motion.phase`. An explicit value must equal the phase derived for the skill.",
+            "`motion.phase`. An explicit value must equal the phase derived for the skill, and a phase other than `instant` needs a `windup`.",
             MotionPhase::ALL,
             MotionPhase::id,
             MotionPhase::doc,

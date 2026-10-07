@@ -210,7 +210,7 @@ fn own_windup_cue_is_independent_of_the_latest_action_slot() {
             owner_id: owner,
             ..warning.clone()
         };
-        assert_eq!(own(&[other.clone()]), None, "owner {owner}");
+        assert_eq!(own(std::slice::from_ref(&other)), None, "owner {owner}");
         assert_eq!(
             own_windup_cue(&registry, class, Some(&state), 0, &[other]),
             None,
@@ -253,6 +253,492 @@ fn own_windup_cue_is_independent_of_the_latest_action_slot() {
     assert!(wave(tail - 0.2, EffectVisualKind::Bolt).is_some());
     assert_eq!(wave(tail - 0.3, EffectVisualKind::Bolt), None);
     assert_eq!(wave(0.5, EffectVisualKind::Bolt), None);
+}
+
+/// A hero of one class with the preset kit of its core.
+fn preset(core: shared::loadout::CoreId) -> (shared::HeroClass, LoadoutState) {
+    let recipe = core.preset();
+    (
+        recipe.core.class(),
+        LoadoutState {
+            recipe: Some(recipe),
+            ..default()
+        },
+    )
+}
+
+/// The slot that holds a skill in a kit.
+fn slot_of(loadout: &LoadoutState, skill: SkillId) -> u8 {
+    let slot = loadout
+        .recipe
+        .as_ref()
+        .unwrap()
+        .skills
+        .iter()
+        .position(|equipped| *equipped == skill);
+    slot.unwrap() as u8
+}
+
+/// For the two skills that warn and then fire, the plan is what the slot alone gave before,
+/// case by case, on the packaged rows and on the final ones. It differs in one place only:
+/// a warning keeps its windup when another action is the latest.
+#[test]
+fn motion_plan_equals_motion_cue_for_warn_fire() {
+    use shared::BASIC_ATTACK_ACTION_SLOT;
+    use shared::loadout::CoreId;
+    for registry in [SkillPresentation::packaged(), SkillPresentation::target()] {
+        for (core, skill) in [
+            (CoreId::Dawnweaver, SkillId::DawnRay),
+            (CoreId::Riftshot, SkillId::HorizonWave),
+        ] {
+            let (class, state) = preset(core);
+            let own_slot = slot_of(&state, skill);
+            let profile = registry.profile(skill).unwrap();
+            let fired = category::own_kinds(skill).last().copied().unwrap();
+            let at = |kind, owner_id, remaining_secs| SkillEffectState {
+                owner_id,
+                remaining_secs,
+                ..effect(skill, kind)
+            };
+            let tail = category::tail_secs(skill).unwrap();
+            let cases: [(&str, Vec<SkillEffectState>); 8] = [
+                ("nothing replicated", vec![]),
+                (
+                    "warning",
+                    vec![at(EffectVisualKind::BeamWarning, 7, tail + 0.4)],
+                ),
+                ("just fired", vec![at(fired, 7, tail)]),
+                ("fired a while ago", vec![at(fired, 7, tail - 1.0)]),
+                (
+                    "hidden owner",
+                    vec![at(EffectVisualKind::BeamWarning, 0, tail + 0.4)],
+                ),
+                (
+                    "another hero",
+                    vec![at(EffectVisualKind::BeamWarning, 8, tail + 0.4)],
+                ),
+                ("another hero fired", vec![at(fired, 8, tail)]),
+                (
+                    "warning beside another hero's beam",
+                    vec![
+                        at(fired, 8, tail),
+                        at(EffectVisualKind::BeamWarning, 7, tail + 0.4),
+                    ],
+                ),
+            ];
+            for (case, effects) in &cases {
+                let plan = |slot, sequence, recast| {
+                    motion_plan(&MotionInputs {
+                        registry: &registry,
+                        class,
+                        loadout: Some(&state),
+                        slot,
+                        sequence,
+                        recast,
+                        owner: 7,
+                        effects,
+                    })
+                };
+                let by_slot = |slot| motion_cue(&registry, class, Some(&state), slot, 7, effects);
+                let name = format!("{} {case}", skill.id());
+                // The skill's own slot: identical, whatever the sequence.
+                for sequence in [1, 2] {
+                    assert_eq!(plan(own_slot, sequence, false), by_slot(own_slot), "{name}");
+                }
+                let held = by_slot(own_slot).filter(|cue| cue.hold);
+                if effects
+                    .iter()
+                    .any(|own| own.owner_id == 7 && own.kind == EffectVisualKind::BeamWarning)
+                {
+                    assert_eq!(
+                        held.as_ref().map(|cue| &cue.motion),
+                        profile.windup.as_ref(),
+                        "{name}"
+                    );
+                } else {
+                    assert_eq!(held, None, "{name}");
+                }
+                // Any other slot: identical too, except that a live warning keeps the body.
+                for slot in (0..4).filter(|slot| *slot != own_slot) {
+                    assert_eq!(
+                        plan(slot, 1, false),
+                        held.clone().or_else(|| by_slot(slot)),
+                        "{name} slot {slot}"
+                    );
+                }
+                assert_eq!(
+                    plan(BASIC_ATTACK_ACTION_SLOT, 1, false),
+                    held.clone().or_else(|| by_slot(BASIC_ATTACK_ACTION_SLOT)),
+                    "{name} basic"
+                );
+                // A recast accepted during the warning does not take the body either.
+                if let Some(held) = &held {
+                    for slot in 0..4 {
+                        assert_eq!(plan(slot, 2, true).as_ref(), Some(held), "{name} recast");
+                    }
+                }
+            }
+            // The release is the row's clip at the row's rate and start; a fired effect is
+            // never a hold.
+            let release = motion_cue(
+                &registry,
+                class,
+                Some(&state),
+                own_slot,
+                7,
+                &[at(fired, 7, tail)],
+            );
+            assert_eq!(
+                release,
+                Some(MotionCue::action(
+                    &profile.release,
+                    profile.motion.rate,
+                    profile.motion.start
+                )),
+                "{}",
+                skill.id()
+            );
+        }
+    }
+}
+
+/// The windup of a row: a loop repeats under the telegraph, and a clip the row fits spans
+/// the telegraph once.
+#[test]
+fn a_windup_is_a_loop_or_fitted_to_its_telegraph() {
+    let library = crate::humanoid::SharedHumanoidMotion::embedded().unwrap();
+    let target = SkillPresentation::target();
+    let mut held = 0;
+    for (id, profile) in target.rows() {
+        let Some(windup) = &profile.windup else {
+            continue;
+        };
+        let skill = SkillId::from_id(id).unwrap();
+        let cue = MotionCue::windup(profile, skill).unwrap();
+        let clip = &library.clips[windup];
+        assert_eq!(
+            (&cue.motion, cue.hold, cue.start),
+            (windup, true, 0.0),
+            "{id}"
+        );
+        assert_eq!(cue.looping, clip.looping, "{id}");
+        if profile.motion.fit_windup {
+            let telegraph = category::telegraph_secs(skill).unwrap();
+            assert!(!cue.looping, "{id}");
+            assert!((clip.duration / cue.rate - telegraph).abs() < 1e-4, "{id}");
+        } else {
+            assert!(
+                cue.looping,
+                "{id}: a clip that is not fitted would freeze on its last key"
+            );
+            assert_eq!(cue.rate, 1.0, "{id}");
+        }
+        held += 1;
+    }
+    assert_eq!(held, 5);
+    // Dawn Ray: a half-second clip under a 0.8 s warning.
+    let ray = target.profile(SkillId::DawnRay).unwrap();
+    assert_eq!(
+        MotionCue::windup(ray, SkillId::DawnRay).unwrap().rate,
+        0.625
+    );
+    // The packaged rows fit nothing: their windup plays as the clip is.
+    let packaged = profiles();
+    let ray = packaged.profile(SkillId::DawnRay).unwrap();
+    assert_eq!(MotionCue::windup(ray, SkillId::DawnRay).unwrap().rate, 1.0);
+    // Any clip can be fitted, and the fit is clamped to the rates a row may author: a
+    // 0.17 s pose is not stretched to a fifth of its speed, nor a 1.5 s swing rushed past
+    // twice its speed.
+    assert_eq!(FITTED_RATES, (0.5, 2.0));
+    for (skill, clip, rate) in [
+        (SkillId::DawnRay, "cleave_slam", 1.125),
+        (SkillId::DawnRay, "rally_raise", 0.75),
+        (SkillId::DawnRay, "pistol_aim", 0.5),
+        (SkillId::HorizonWave, "attack", 2.0),
+    ] {
+        let mut config = schema_rules::samples();
+        config["skills"][skill.id()]["windup"] = clip.into();
+        config["skills"][skill.id()]["motion"]["fit_windup"] = true.into();
+        let registry = schema_rules::parse(&config).unwrap();
+        let cue = MotionCue::windup(registry.profile(skill).unwrap(), skill).unwrap();
+        assert!((cue.rate - rate).abs() < 1e-4, "{clip}: {}", cue.rate);
+    }
+}
+
+/// A fuse and a parry: the windup is asked for from the accepted cast and held while the
+/// telegraph of the hero is replicated, whatever is accepted during it. The release is not
+/// in the plan: a fuse fires by leaving the snapshot, and the stage tracker names that.
+#[test]
+fn fuse_and_parry_plans_hold_the_windup_from_the_accepted_cast() {
+    use shared::BASIC_ATTACK_ACTION_SLOT;
+    use shared::loadout::CoreId;
+    let registry = SkillPresentation::target();
+    for (core, skill) in [
+        (CoreId::Cinderforge, SkillId::FurnaceBreath),
+        (CoreId::Orbitwright, SkillId::OrbitalCollapse),
+        (CoreId::Edgeweaver, SkillId::MirrorGuard),
+    ] {
+        let (class, mut state) = preset(core);
+        let own_slot = slot_of(&state, skill);
+        let profile = registry.profile(skill).unwrap();
+        let parry = profile.phase(SkillKey::Modular(skill)) == MotionPhase::Parry;
+        let windup = MotionCue::windup(profile, skill).unwrap();
+        assert!(windup.hold && windup.looping, "{}", skill.id());
+        let kind = category::own_kinds(skill)[0];
+        let telegraph = SkillEffectState {
+            id: 9,
+            ..effect(skill, kind)
+        };
+        let plan = |state: &LoadoutState, slot, effects: &[SkillEffectState]| {
+            motion_plan(&MotionInputs {
+                registry: &registry,
+                class,
+                loadout: Some(state),
+                slot,
+                sequence: 3,
+                recast: false,
+                owner: 7,
+                effects,
+            })
+        };
+        let name = skill.id();
+
+        // The accepted cast alone, before any effect reaches the client. A parry also
+        // needs the replicated stance: an edge without it holds nothing.
+        if parry {
+            assert_eq!(plan(&state, own_slot, &[]), None, "{name}");
+            state.parrying = true;
+        }
+        assert_eq!(plan(&state, own_slot, &[]), Some(windup.clone()), "{name}");
+        // Another slot is the latest action and nothing is replicated: that action plays.
+        assert!(
+            plan(&state, BASIC_ATTACK_ACTION_SLOT, &[]).is_some_and(|cue| !cue.hold),
+            "{name}"
+        );
+
+        // The telegraph is replicated: the windup, from every slot, and with its id.
+        let effects = [telegraph.clone()];
+        assert_eq!(
+            own_windup_cue(&registry, class, Some(&state), 7, &effects),
+            Some((9, windup.clone())),
+            "{name}"
+        );
+        for slot in [own_slot, BASIC_ATTACK_ACTION_SLOT, (own_slot + 1) % 4] {
+            assert_eq!(
+                plan(&state, slot, &effects),
+                Some(windup.clone()),
+                "{name} {slot}"
+            );
+        }
+        // The stance flag is not needed while the barrier itself is seen.
+        state.parrying = false;
+        assert_eq!(
+            plan(&state, own_slot, &effects),
+            Some(windup.clone()),
+            "{name}"
+        );
+
+        // Another hero's telegraph, a hidden owner's, and a kind the skill does not
+        // replicate as its telegraph hold nobody.
+        for other in [
+            SkillEffectState {
+                owner_id: 8,
+                ..telegraph.clone()
+            },
+            SkillEffectState {
+                owner_id: 0,
+                ..telegraph.clone()
+            },
+            SkillEffectState {
+                kind: EffectVisualKind::Orb,
+                ..telegraph.clone()
+            },
+        ] {
+            assert_eq!(
+                own_windup_cue(&registry, class, Some(&state), 7, &[other]),
+                None,
+                "{name}"
+            );
+        }
+        // The release of the row, for the moment the tracker reports.
+        assert_eq!(
+            release_cue(&registry, skill),
+            Some(MotionCue::action(
+                &profile.release,
+                profile.motion.rate,
+                profile.motion.start
+            )),
+            "{name}"
+        );
+    }
+    // The packaged rows of these skills hold no windup yet: the cast releases at once.
+    let packaged = profiles();
+    let (class, state) = preset(CoreId::Cinderforge);
+    let slot = slot_of(&state, SkillId::FurnaceBreath);
+    let telegraph = effect(SkillId::FurnaceBreath, EffectVisualKind::BeamWarning);
+    assert_eq!(
+        own_windup_cue(
+            &packaged,
+            class,
+            Some(&state),
+            7,
+            std::slice::from_ref(&telegraph)
+        ),
+        None
+    );
+    assert!(
+        motion_cue(&packaged, class, Some(&state), slot, 7, &[telegraph])
+            .is_some_and(|cue| !cue.hold)
+    );
+}
+
+/// A recast edge plays the recast clip of its row at the recast rate, from its first key.
+#[test]
+fn a_recast_edge_plays_the_recast_clip() {
+    let target = SkillPresentation::target();
+    let mut recasts = 0;
+    for class in shared::HeroClass::ALL {
+        for slot in 0..4 {
+            let profile = target.action_profile(class, None, slot).unwrap();
+            let plan = |registry, recast| {
+                motion_plan(&MotionInputs {
+                    registry,
+                    class,
+                    loadout: None,
+                    slot,
+                    sequence: 5,
+                    recast,
+                    owner: 7,
+                    effects: &[],
+                })
+            };
+            let first = plan(&target, false);
+            match &profile.motion.recast {
+                Some(clip) => {
+                    recasts += 1;
+                    assert_eq!(
+                        plan(&target, true),
+                        Some(MotionCue::action(clip, profile.motion.recast_rate, 0.0)),
+                        "{} {slot}",
+                        class.id()
+                    );
+                    assert_ne!(plan(&target, true), first, "{} {slot}", class.id());
+                }
+                // A row without a recast clip plays what its slot plays.
+                None => assert_eq!(plan(&target, true), first, "{} {slot}", class.id()),
+            }
+            // The packaged rows name no recast clip: a recast is the release again.
+            let packaged = profiles();
+            assert_eq!(plan(&packaged, true), plan(&packaged, false));
+        }
+    }
+    assert_eq!(recasts, 8);
+}
+
+/// AC12 as the engine plays it: every clip that starts on an accepted edge of the final
+/// data shows its contact pose within 0.15 s, measured on the cue the plan returns and not
+/// on the fields of the row. A cue that is held starts no contact: it waits for a telegraph.
+#[test]
+fn contact_rule_holds() {
+    use shared::BASIC_ATTACK_ACTION_SLOT;
+    let target = SkillPresentation::target();
+    let library = crate::humanoid::SharedHumanoidMotion::embedded().unwrap();
+    let mut edges = 0;
+    let mut held = Vec::new();
+    let mut check = |user: String, cue: Option<MotionCue>| {
+        let cue = cue.unwrap_or_else(|| panic!("{user}: the edge plays nothing"));
+        if cue.hold {
+            held.push(user);
+            return;
+        }
+        let clip = &library.clips[&cue.motion];
+        let contact = library
+            .contact(&cue.motion)
+            .unwrap_or_else(|| panic!("{user}: {} has no contact", cue.motion));
+        let delay = (contact - cue.start * clip.duration) / cue.rate;
+        assert!(
+            delay <= schema::CONTACT_LIMIT_SECS + 1e-4,
+            "{user}: {} reaches its contact {delay:.3} s after the edge",
+            cue.motion
+        );
+        assert!(!cue.looping && cue.rate > 0.0, "{user}");
+        edges += 1;
+    };
+    for class in shared::HeroClass::ALL {
+        let kit = shared::loadout::preset_for_class(class);
+        // The accepted cast of a parry comes with the replicated stance.
+        let cast = LoadoutState {
+            recipe: kit.map(|kit| kit.recipe()),
+            parrying: true,
+            ..default()
+        };
+        // A warn_fire row plays nothing on its edge; its own fired effect starts the release.
+        for slot in 0..4u8 {
+            let modular = kit.map(|kit| kit.skills()[usize::from(slot)]);
+            let profile = target.action_profile(class, None, slot).unwrap();
+            let warns = modular.is_some_and(|skill| {
+                profile.phase(SkillKey::Modular(skill)) == MotionPhase::WarnFire
+            });
+            let fired: Vec<SkillEffectState> = modular
+                .filter(|_| warns)
+                .map(|skill| SkillEffectState {
+                    remaining_secs: category::tail_secs(skill).unwrap(),
+                    ..effect(skill, *category::own_kinds(skill).last().unwrap())
+                })
+                .into_iter()
+                .collect();
+            for recast in [false, true] {
+                if recast && !modular.is_some_and(category::has_recast) {
+                    continue;
+                }
+                let cue = motion_plan(&MotionInputs {
+                    registry: &target,
+                    class,
+                    loadout: Some(&cast),
+                    slot,
+                    sequence: 1,
+                    recast,
+                    owner: 7,
+                    effects: &fired,
+                });
+                check(format!("{} {slot} recast {recast}", class.id()), cue);
+            }
+        }
+        for (mode, weapon_mode) in [
+            ("", WeaponMode::Repeater),
+            (":rockets", WeaponMode::Rockets),
+        ] {
+            let state = LoadoutState {
+                recipe: kit.map(|kit| kit.recipe()),
+                weapon_mode,
+                ..default()
+            };
+            for sequence in [1, 2] {
+                let cue = motion_plan(&MotionInputs {
+                    registry: &target,
+                    class,
+                    loadout: Some(&state),
+                    slot: BASIC_ATTACK_ACTION_SLOT,
+                    sequence,
+                    recast: false,
+                    owner: 7,
+                    effects: &[],
+                });
+                check(format!("basic:{}{mode} {sequence}", class.id()), cue);
+            }
+        }
+    }
+    // 68 first casts less the three that hold a fuse or a stance, 8 recasts, and the basic
+    // attack of 17 classes on both turns in both weapon modes.
+    assert_eq!(edges, 68 - 3 + 8 + 17 * 4);
+    assert_eq!(
+        held,
+        [
+            "cinderforge 1 recast false",
+            "edgeweaver 1 recast false",
+            "orbitwright 3 recast false"
+        ]
+    );
 }
 
 #[test]
@@ -442,24 +928,148 @@ fn mismatched_or_malformed_recipes_cannot_select_skill_or_basic_motion() {
     );
 }
 
+/// The motion table of the basic attacks is data: the row of the class when the registry
+/// has one, else the built-in table the packaged rows still rely on.
 #[test]
 fn ranged_basic_attacks_use_aimed_motion_and_dagger_keeps_the_right_hand_thrust() {
     use shared::{BASIC_ATTACK_ACTION_SLOT, HeroClass};
-    for (class, expected) in [
-        (HeroClass::Ranger, "pistol_shoot"),
-        (HeroClass::Wildspark, "pistol_shoot"),
-        (HeroClass::Riftshot, "pistol_shoot"),
-        (HeroClass::Mage, "cast"),
-        (HeroClass::Dawnweaver, "cast"),
-        (HeroClass::Adventurer, "dagger_stab"),
-    ] {
+    let basic = |registry: &SkillPresentation, class| {
+        motion_cue(registry, class, None, BASIC_ATTACK_ACTION_SLOT, 1, &[])
+    };
+    // No packaged row yet: the built-in table, played as the clip is.
+    let packaged = profiles();
+    for class in HeroClass::ALL {
+        let built_in = match class {
+            HeroClass::Ranger | HeroClass::Wildspark | HeroClass::Riftshot => Some("pistol_shoot"),
+            HeroClass::Mage
+            | HeroClass::Cleric
+            | HeroClass::Dawnweaver
+            | HeroClass::Emberveil
+            | HeroClass::Orbitwright
+            | HeroClass::Chainkeeper => Some("cast"),
+            HeroClass::Adventurer => Some("dagger_stab"),
+            // A melee core without a row keeps the attack state of the rig.
+            _ => None,
+        };
+        assert!(packaged.basic(class).is_none(), "{}", class.id());
         assert_eq!(
-            motion_cue(&profiles(), class, None, BASIC_ATTACK_ACTION_SLOT, 1, &[])
-                .unwrap()
-                .motion,
-            expected
+            basic(&packaged, class),
+            built_in.map(|motion| MotionCue::action(motion, 1.0, 0.0)),
+            "{}",
+            class.id()
         );
     }
+    // Every class of the final data has its row, and the row is what plays.
+    let target = SkillPresentation::target();
+    for class in HeroClass::ALL {
+        let row = target.basic(class).unwrap();
+        assert_eq!(
+            basic(&target, class),
+            Some(MotionCue::action(&row.motions[0], row.rate, row.start)),
+            "{}",
+            class.id()
+        );
+    }
+    for registry in [&packaged, &target] {
+        assert_eq!(
+            basic(registry, HeroClass::Adventurer).unwrap().motion,
+            "dagger_stab"
+        );
+    }
+}
+
+/// Rule E-13 and the alternation of two motions: the row is that of the kit's core, the
+/// first motion plays on odd action sequences, and a repeater in rocket mode plays its
+/// `rockets` entry.
+#[test]
+fn basic_attack_motions_follow_the_core_the_sequence_and_the_weapon_mode() {
+    use shared::loadout::CoreId;
+    use shared::{BASIC_ATTACK_ACTION_SLOT, HeroClass};
+    let target = SkillPresentation::target();
+    let plan = |class, loadout: Option<&LoadoutState>, sequence| {
+        motion_plan(&MotionInputs {
+            registry: &target,
+            class,
+            loadout,
+            slot: BASIC_ATTACK_ACTION_SLOT,
+            sequence,
+            recast: false,
+            owner: 7,
+            effects: &[],
+        })
+    };
+    for class in HeroClass::ALL {
+        let row = target.basic(class).unwrap();
+        let (odd, even) = (&row.motions[0], row.motions.last().unwrap());
+        for sequence in [1, 2, 3, 4, 41, 42] {
+            let turn = if sequence % 2 == 1 { odd } else { even };
+            assert_eq!(
+                plan(class, None, sequence),
+                Some(MotionCue::action(turn, row.rate, row.start)),
+                "{} {sequence}",
+                class.id()
+            );
+        }
+    }
+    // Four classes of the final data alternate two motions.
+    let two: Vec<_> = HeroClass::ALL
+        .into_iter()
+        .filter(|class| target.basic(*class).unwrap().motions.len() == 2)
+        .map(HeroClass::id)
+        .collect();
+    assert_eq!(two, ["warden", "dawnweaver", "stormfist", "veilstalker"]);
+
+    // The core decides, also with the skills of other kits in its slots.
+    let mut mixed = CoreId::Stormfist.preset();
+    mixed.skills = [
+        SkillId::DawnRay,
+        SkillId::WildZap,
+        SkillId::DawnField,
+        SkillId::DawnBind,
+    ];
+    let mixed = LoadoutState {
+        recipe: Some(mixed),
+        ..default()
+    };
+    assert_eq!(
+        plan(HeroClass::Stormfist, Some(&mixed), 1),
+        plan(HeroClass::Stormfist, None, 1)
+    );
+    // A recipe that does not resolve for the class moves nothing.
+    assert_eq!(plan(HeroClass::Dawnweaver, Some(&mixed), 1), None);
+
+    // The launcher: the `rockets` entry of the repeater row, for that mode only.
+    let wildspark = target.basic(HeroClass::Wildspark).unwrap();
+    let rockets = wildspark.rockets.as_deref().unwrap();
+    assert_ne!(rockets.rate, wildspark.rate);
+    let armed = |weapon_mode| LoadoutState {
+        recipe: Some(CoreId::Wildspark.preset()),
+        weapon_mode,
+        ..default()
+    };
+    assert_eq!(
+        plan(HeroClass::Wildspark, Some(&armed(WeaponMode::Rockets)), 1),
+        Some(MotionCue::action(
+            &rockets.motions[0],
+            rockets.rate,
+            rockets.start
+        ))
+    );
+    assert_eq!(
+        plan(HeroClass::Wildspark, Some(&armed(WeaponMode::Repeater)), 1),
+        Some(MotionCue::action(
+            &wildspark.motions[0],
+            wildspark.rate,
+            wildspark.start
+        ))
+    );
+    // A class without a `rockets` entry plays its one row in either mode.
+    let mut riftshot = armed(WeaponMode::Rockets);
+    riftshot.recipe = Some(CoreId::Riftshot.preset());
+    assert_eq!(
+        plan(HeroClass::Riftshot, Some(&riftshot), 1),
+        plan(HeroClass::Riftshot, None, 1)
+    );
 }
 
 #[test]

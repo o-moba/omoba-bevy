@@ -498,6 +498,11 @@ fn motion_rules_reject_unknown_clips_wrong_phases_and_late_contacts() {
         "windup released at once",
     );
     rejects(
+        &without("/skills/furnace_breath/windup"),
+        "a non-instant motion.phase needs a `windup`",
+        "phase without a pose to hold",
+    );
+    rejects(
         &with("/skills/dawn_ray/windup", json!("missing_clip")),
         "Unknown motion missing_clip",
         "windup clip",

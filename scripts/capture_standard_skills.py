@@ -23,7 +23,10 @@ accepted cast. For a look at projectile bodies, `--flight` stands the target of
 every unit-target ability far enough for its projectile to be in flight at the
 release still and adds `5-basic-flight.png`, the basic attack's projectile on
 its way (not for a melee core, which throws nothing). Every still lists the
-hero's projectiles and what stands for each of them.
+hero's projectiles and what stands for each of them. `--interleave` orders one
+basic attack as soon as the cast of a skill with a telegraph is accepted; each
+still names the hero's latest accepted action and the clip that carries its
+pose, so the stills show whether the telegraph kept the body.
 """
 import argparse
 import datetime
@@ -98,13 +101,13 @@ def phase_problems(summary, directory):
 
 def capture(hero, client, server, assets, output, timeout=135, roster=False, handhelds=False, sdk_weapon=None,
             phases=False, offscreen=False, visual_mode="models3d", overlays=None, avatar=None, release_at=None,
-            flight=False):
+            flight=False, interleave=False):
     output.mkdir(parents=True)
     children = []
     result = dict(hero=hero, source=source_identity(), client_sha256=sha256(client),
                   locale="en", viewport=[1280, 720], physical_device_verified=False,
                   phases=phases, offscreen=offscreen, visual_mode=visual_mode,
-                  avatar=avatar, release_at=release_at, flight=flight)
+                  avatar=avatar, release_at=release_at, flight=flight, interleave=interleave)
     with tempfile.TemporaryDirectory(prefix="omoba-skill-pilot-") as isolated:
         if overlays:
             assets = overlay_assets(assets, isolated, overlays)
@@ -131,6 +134,8 @@ def capture(hero, client, server, assets, output, timeout=135, roster=False, han
                     env["OMOBA_STANDARD_QA_RELEASE_AT"] = release_at
                 if flight:
                     env["OMOBA_STANDARD_QA_FLIGHT"] = "1"
+                if interleave:
+                    env["OMOBA_STANDARD_QA_INTERLEAVE"] = "1"
             elif roster or handhelds:
                 env["OMOBA_ROSTER_SKILLS_QA"] = "1"
             if offscreen:
@@ -213,13 +218,16 @@ def main(argv=None):
     parser.add_argument("--flight", action="store_true",
                         help="With --phases: unit-target abilities are cast from lane distance and the basic "
                              "attack gets a still of its projectile in flight")
+    parser.add_argument("--interleave", action="store_true",
+                        help="With --phases: a basic attack is ordered as soon as the cast of a skill "
+                             "with a telegraph is accepted")
     parser.add_argument("--timeout", type=float,
                         help="Per-client deadline in seconds (default: 135, or 300 with --phases)")
     args = parser.parse_args(argv)
     if args.phases and (args.roster or args.handhelds):
         parser.error("--phases replaces --roster and --handhelds")
-    if (args.avatar or args.release_at or args.flight) and not args.phases:
-        parser.error("--avatar, --release-at and --flight need --phases")
+    if (args.avatar or args.release_at or args.flight or args.interleave) and not args.phases:
+        parser.error("--avatar, --release-at, --flight and --interleave need --phases")
     if args.timeout is None:
         args.timeout = 300 if args.phases else 135
     if not 0 < args.timeout <= 600:
@@ -263,11 +271,12 @@ def main(argv=None):
                                 for name, path in overlays.items()},
                       locale="en", viewport=[1280, 720], phases=args.phases, offscreen=args.offscreen,
                       visual_mode=args.visual_mode, avatar=args.avatar, release_at=args.release_at,
-                      flight=args.flight)
+                      flight=args.flight, interleave=args.interleave)
         results = [capture(hero, binaries["client"], binaries["server"], assets, output / hero, args.timeout,
                            args.roster or hero not in PILOT_HEROES, args.handhelds, phases=args.phases,
                            offscreen=args.offscreen, visual_mode=args.visual_mode, overlays=overlays,
-                           avatar=args.avatar, release_at=args.release_at, flight=args.flight)
+                           avatar=args.avatar, release_at=args.release_at, flight=args.flight,
+                           interleave=args.interleave)
                    for hero in heroes]
     merge_manifest(output / "manifest.json", header, results)
     print(json.dumps([{key: result.get(key) for key in ("hero", "pass", "client_exit_code", "error", "errors")}

@@ -9,13 +9,13 @@ of `client/assets/animations/humanoid-motion-v1.json` (see `docs/humanoid-motion
 
 ## Motion phases
 
-`motion.phase`. An explicit value must equal the phase derived for the skill.
+`motion.phase`. An explicit value must equal the phase derived for the skill, and a phase other than `instant` needs a `windup`.
 
 | ID | What the player sees |
 | --- | --- |
 | `instant` | the release clip starts on the accepted cast |
 | `warn_fire` | the windup is held while the hero's own warning exists; the release follows its change of kind |
-| `fuse` | the windup is held while the hero's own telegraph exists; the release follows its inferred firing |
+| `fuse` | the windup starts on the accepted cast and is held while the hero's own telegraph exists, 1.2 s at most when that is never seen; the release follows its inferred firing |
 | `parry` | the windup is held while the hero parries; the release follows the riposte |
 
 ## Body archetypes
