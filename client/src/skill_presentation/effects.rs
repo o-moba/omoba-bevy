@@ -1,9 +1,22 @@
 //! Persistent, bounded drawables for authoritative skill objects. Despawn is silent.
+//! An effect whose row gives it a `body` is drawn from that block (`bodies.rs`); every
+//! other effect keeps the legacy style of its row or of its kind.
+use super::accents::Palette;
+use super::bodies::{self, Load, Paint, PartSlot, Role, Seen, VfxMeshes};
+use super::cast::CastKey;
+use super::category::SkillKey;
+use super::schema::Body;
+use super::stage::{self, EffectKey, EffectMemory};
+use super::vocab::{Model, PaletteSlot};
 use super::{EffectStyle, SkillPresentation};
 use crate::game_vfx::hdr_tint;
+use crate::net::NetworkPlayerId;
 use crate::{net::GameStateSnapshot, sprite::PlayerVisualMode};
+use bevy::ecs::system::SystemParam;
+use bevy::light::{NotShadowCaster, NotShadowReceiver};
 use bevy::prelude::*;
-use shared::loadout::{EffectVisualKind, SkillEffectState};
+use bevy::world_serialization::{WorldInstance, WorldInstanceSpawner};
+use shared::loadout::{EffectVisualKind, SkillEffectState, SkillId};
 use std::collections::{HashMap, HashSet};
 
 pub(super) struct SkillEffectsPlugin;
@@ -11,10 +24,12 @@ impl Plugin for SkillEffectsPlugin {
     fn build(&self, app: &mut App) {
         crate::vfx_clock::ensure(app);
         app.init_resource::<Instances>()
-            .add_systems(Startup, setup)
+            .add_systems(Startup, (bodies::setup_meshes, setup))
             .add_systems(
                 PostUpdate,
-                sync.before(bevy::transform::TransformSystems::Propagate),
+                (sync, sync_bodies, finish)
+                    .chain()
+                    .before(bevy::transform::TransformSystems::Propagate),
             );
     }
 }
@@ -36,6 +51,34 @@ struct Geometry {
     props: HashMap<&'static str, Handle<WorldAsset>>,
 }
 
+impl Geometry {
+    /// The packaged scene of a prop a body carries.
+    fn model(&self, model: Model) -> Option<Handle<WorldAsset>> {
+        match model {
+            Model::Rocket => Some(self.rocket.clone()),
+            Model::Trap => Some(self.trap.clone()),
+            Model::Hook | Model::Lantern | Model::Orb => self.props.get(model.id()).cloned(),
+        }
+    }
+}
+
+/// The interior of an area effect darkens and tints the ground under it in the hue of the
+/// skill colour, by `strength`. It sets the bright boundary and core off against pale
+/// ground and keeps the ground's own detail, as the shadow of the fill disc did while
+/// effect parts still cast shadows.
+fn fill_material(color: Color, strength: f32) -> StandardMaterial {
+    let hsl = Hsla::from(color);
+    // A colour without a hue only darkens.
+    let saturation = hsl.saturation.max(FILL_SATURATION) * f32::from(hsl.saturation > 0.02);
+    StandardMaterial {
+        alpha_mode: AlphaMode::Multiply,
+        // Drawn before the lines and parts that lie in it, so that it tints the ground
+        // and not them.
+        depth_bias: FILL_DEPTH_BIAS,
+        ..material(Hsla::new(hsl.hue, saturation, FILL_LIGHTNESS, strength).into())
+    }
+}
+
 fn material(color: Color) -> StandardMaterial {
     StandardMaterial {
         base_color: color,
@@ -53,6 +96,7 @@ fn setup(
     mut materials: ResMut<Assets<StandardMaterial>>,
     server: Res<AssetServer>,
 ) {
+    commands.init_resource::<BodyPaints>();
     commands.insert_resource(Geometry {
         ball: meshes.add(Sphere::new(1.0).mesh().ico(1).unwrap()),
         cone: meshes.add(Cone::new(1.0, 1.0).mesh().resolution(5)),
@@ -97,11 +141,26 @@ struct Instance {
     style: EffectStyle,
     friendly: bool,
     model: Option<Handle<WorldAsset>>,
+    /// Where the root stands, for the choice of the nearest lights.
+    at: Vec3,
+    light: Option<Entity>,
+    /// The meshes of the packaged scene no longer cast or receive shadows.
+    unshadowed: bool,
 }
 #[derive(Resource, Default)]
 struct Instances {
     round: Option<(u64, u64)>,
+    /// Effects drawn through a legacy style, by replicated id.
     objects: HashMap<u64, Instance>,
+    /// Effects drawn through the `body` of their row.
+    bodies: HashMap<EffectKey, BodyInstance>,
+}
+
+/// The body a row gives an effect, when this renderer lays its archetype out.
+fn staged_body<'a>(profiles: &'a SkillPresentation, e: &SkillEffectState) -> Option<&'a Body> {
+    profiles
+        .body_for(e)
+        .filter(|body| bodies::staged(body.archetype))
 }
 
 pub(crate) fn valid_effect(e: &SkillEffectState) -> bool {
@@ -141,6 +200,8 @@ fn spawn_instance(
                 MeshMaterial3d(mat.clone()),
                 Transform::default(),
                 Visibility::default(),
+                NotShadowCaster,
+                NotShadowReceiver,
                 ChildOf(root),
             ))
             .id();
@@ -230,18 +291,6 @@ fn spawn_instance(
     }
     if style == EffectStyle::Rocket {
         part(Part::GroundGlow, &geometry.disc, &fill);
-        commands.spawn((
-            PointLight {
-                color: Color::srgb(1.0, 0.48, 0.12),
-                intensity: 65_000.0,
-                range: 8.0,
-                shadow_maps_enabled: false,
-                ..default()
-            },
-            Transform::from_xyz(0.0, 0.6, -0.6),
-            ChildOf(root),
-            Name::new("RocketFlightLight"),
-        ));
     }
     let model = match style {
         EffectStyle::Rocket => Some(geometry.rocket.clone()),
@@ -273,6 +322,9 @@ fn spawn_instance(
         style,
         friendly,
         model,
+        at: Vec3::ZERO,
+        light: None,
+        unshadowed: false,
     }
 }
 
@@ -418,15 +470,18 @@ fn sync(
     mut geometry: ResMut<Geometry>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     server: Res<AssetServer>,
-    mut poses: Query<(&mut Transform, &mut Visibility)>,
-    scene_instances: Query<&bevy::world_serialization::WorldInstance>,
-    scene_spawner: Option<Res<bevy::world_serialization::WorldInstanceSpawner>>,
+    mut poses: Poses,
+    scene_instances: Query<&WorldInstance>,
+    scene_spawner: Option<Res<WorldInstanceSpawner>>,
 ) {
     let round = game
         .as_ref()
         .map(|g| (g.meta.server_epoch, g.meta.match_id));
     if round != instances.round || *mode != PlayerVisualMode::Models3d {
         for (_, instance) in instances.objects.drain() {
+            commands.entity(instance.root).despawn();
+        }
+        for (_, instance) in instances.bodies.drain() {
             commands.entity(instance.root).despawn();
         }
         instances.round = round;
@@ -447,6 +502,10 @@ fn sync(
         let Some(profile) = profiles.profile(e.skill) else {
             continue;
         };
+        // One path draws an effect: the body of its row, when there is one.
+        if staged_body(&profiles, e).is_some() {
+            continue;
+        }
         // A row that dropped its legacy style still shows the objects whose kind names
         // their look; its other effects wait for the row's `body`.
         let Some(style) = profile
@@ -483,12 +542,10 @@ fn sync(
             .fills
             .entry(color_key)
             .or_insert_with(|| {
-                materials.add(material(Color::srgba(
-                    profile.color[0],
-                    profile.color[1],
-                    profile.color[2],
-                    0.12,
-                )))
+                materials.add(fill_material(
+                    Color::srgb_from_array(profile.color),
+                    FILL_STRENGTH,
+                ))
             })
             .clone();
         let instance = instances.objects.entry(e.id).or_insert_with(|| {
@@ -515,27 +572,20 @@ fn sync(
         );
         let root_pose = Transform::from_xyz(p.x, ground + if planar { 0.15 } else { 0.95 }, p.y)
             .with_rotation(rotation);
-        if let Ok((mut pose, mut visible)) = poses.get_mut(instance.root) {
-            *pose = root_pose;
-            *visible = Visibility::Inherited;
-        } else {
-            commands
-                .entity(instance.root)
-                .insert((root_pose, Visibility::Inherited));
-        }
+        instance.at = root_pose.translation;
+        place(
+            &mut commands,
+            &mut poses,
+            instance.root,
+            root_pose,
+            Visibility::Inherited,
+        );
         let radius = e.radius.max(0.05);
-        let model_ready = instance.model.as_ref().is_some_and(|s| {
-            matches!(
-                server.get_recursive_dependency_load_state(s.id()),
-                Some(bevy::asset::RecursiveDependencyLoadState::Loaded)
-            )
-        }) && instance.parts.iter().any(|(entity, role)| {
-            matches!(role, Part::Model)
-                && scene_instances.get(*entity).is_ok_and(|scene| {
-                    scene_spawner
-                        .as_ref()
-                        .is_some_and(|spawner| spawner.instance_is_ready(**scene))
-                })
+        let model_ready = instance.model.as_ref().is_some_and(|scene| {
+            instance.parts.iter().any(|(entity, role)| {
+                matches!(role, Part::Model)
+                    && scene_ready(&server, scene, *entity, &scene_instances, &scene_spawner)
+            })
         });
         let ground_ring = Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2);
         #[cfg(feature = "qa")]
@@ -550,10 +600,11 @@ fn sync(
             let mut t = Transform::default();
             match (style, role) {
                 (EffectStyle::Rocket, Part::GroundGlow) => {
-                    // Keep the glow above the existing ground telegraph plane.
+                    // Keep the glow above the existing ground telegraph plane. It marks the
+                    // replicated radius; the blast radius is not replicated.
                     t.translation.y = -0.65;
                     t.rotation = ground_ring;
-                    t.scale = Vec3::splat(2.6);
+                    t.scale = Vec3::splat(radius);
                 }
                 (EffectStyle::Rocket, Part::Streak(i)) => {
                     t.translation.z = -1.1 - i as f32 * 0.85;
@@ -753,14 +804,7 @@ fn sync(
             {
                 visibility = Visibility::Hidden;
             }
-            if let Ok((mut pose, mut visible)) = poses.get_mut(entity) {
-                *pose = t;
-                *visible = visibility;
-            } else {
-                // Deferred spawns receive their final pose before transform propagation.
-                // A one-snapshot beam must render on this frame, not one frame later.
-                commands.entity(entity).insert((t, visibility));
-            }
+            place(&mut commands, &mut poses, entity, t, visibility);
         }
     }
     instances.objects.retain(|id, instance| {
@@ -771,6 +815,619 @@ fn sync(
             false
         }
     });
+}
+
+type Poses<'w, 's> =
+    Query<'w, 's, (&'static mut Transform, &'static mut Visibility), Without<NetworkPlayerId>>;
+
+/// Poses one entity of an effect in this frame.
+fn place(
+    commands: &mut Commands,
+    poses: &mut Poses,
+    entity: Entity,
+    pose: Transform,
+    visibility: Visibility,
+) {
+    if let Ok((mut current, mut visible)) = poses.get_mut(entity) {
+        *current = pose;
+        *visible = visibility;
+    } else {
+        // Deferred spawns receive their final pose before transform propagation.
+        // A one-snapshot beam must render on this frame, not one frame later.
+        commands.entity(entity).insert((pose, visibility));
+    }
+}
+
+/// Whether the packaged scene under `entity` is loaded and spawned.
+fn scene_ready(
+    server: &AssetServer,
+    scene: &Handle<WorldAsset>,
+    entity: Entity,
+    scene_instances: &Query<&WorldInstance>,
+    scene_spawner: &Option<Res<WorldInstanceSpawner>>,
+) -> bool {
+    matches!(
+        server.get_recursive_dependency_load_state(scene.id()),
+        Some(bevy::asset::RecursiveDependencyLoadState::Loaded)
+    ) && scene_instances.get(entity).is_ok_and(|instance| {
+        scene_spawner
+            .as_ref()
+            .is_some_and(|spawner| spawner.instance_is_ready(**instance))
+    })
+}
+
+/// HDR gain of the spark colour on a body part. It is one value for every skill, so that
+/// bodies share one material for each spark colour.
+const ACCENT_GAIN: f32 = 4.0;
+/// Lightness and least saturation of the tint of the interior layer of an area effect, and
+/// how strongly it is applied while the effect is live and while it is a telegraph.
+const FILL_LIGHTNESS: f32 = 0.24;
+const FILL_SATURATION: f32 = 0.6;
+const FILL_STRENGTH: f32 = 0.92;
+const FILL_DIM_STRENGTH: f32 = 0.6;
+/// Sorting offset of the interior layer among the translucent parts of an effect.
+const FILL_DEPTH_BIAS: f32 = -4.0;
+/// Share of its own colour a matter part glows with, so that its shaded side is not black.
+const MATTER_GLOW: f32 = 0.3;
+/// Depth bias of light materials: enough to win against a matter part in the same plane.
+const LIGHT_DEPTH_BIAS: f32 = 32.0;
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+enum PaintKind {
+    /// Light: unlit, with HDR gain.
+    Lit,
+    /// Matter: shaded by the scene lights, so that a solid shows its form.
+    Matter,
+    Fill,
+    FillDim,
+}
+
+/// The materials of staged bodies, shared by colour value and kind and never changed after
+/// they are made.
+#[derive(Resource, Default)]
+struct BodyPaints {
+    made: HashMap<(PaintKind, [u32; 3], u32), Handle<StandardMaterial>>,
+}
+
+impl BodyPaints {
+    fn handle(
+        &mut self,
+        materials: &mut Assets<StandardMaterial>,
+        kind: PaintKind,
+        color: Color,
+        gain: f32,
+    ) -> Handle<StandardMaterial> {
+        let srgb = color.to_srgba();
+        let key = (
+            kind,
+            [srgb.red, srgb.green, srgb.blue].map(f32::to_bits),
+            gain.to_bits(),
+        );
+        self.made
+            .entry(key)
+            .or_insert_with(|| {
+                materials.add(match kind {
+                    // A solid part hides what is behind it, so its outline stays sharp. A
+                    // flat light part in the plane of a matter part is drawn over it from
+                    // both sides: the plate shows on its rim wherever the camera stands.
+                    PaintKind::Lit => StandardMaterial {
+                        alpha_mode: AlphaMode::Opaque,
+                        depth_bias: LIGHT_DEPTH_BIAS,
+                        ..material(hdr_tint(color, gain))
+                    },
+                    PaintKind::Matter => StandardMaterial {
+                        alpha_mode: AlphaMode::Opaque,
+                        unlit: false,
+                        emissive: color.to_linear() * MATTER_GLOW,
+                        perceptual_roughness: 0.7,
+                        ..material(color)
+                    },
+                    PaintKind::Fill => fill_material(color, FILL_STRENGTH),
+                    PaintKind::FillDim => fill_material(color, FILL_DIM_STRENGTH),
+                })
+            })
+            .clone()
+    }
+
+    /// The handles one body draws with: the colours of its row and the two sides.
+    fn resolve(&mut self, materials: &mut Assets<StandardMaterial>, palette: &Palette) -> Paints {
+        let primary = palette.slot(PaletteSlot::Primary);
+        let mut made = |kind, color: Color, gain: f32| self.handle(materials, kind, color, gain);
+        Paints {
+            friend: made(PaintKind::Lit, Color::srgb(0.12, 0.95, 0.60), 2.0),
+            foe: made(PaintKind::Lit, Color::srgb(1.0, 0.12, 0.08), 2.0),
+            primary: made(PaintKind::Lit, primary.color, primary.gain),
+            secondary: made(
+                PaintKind::Matter,
+                palette.slot(PaletteSlot::Secondary).color,
+                1.0,
+            ),
+            accent: made(
+                PaintKind::Lit,
+                palette.slot(PaletteSlot::Accent).color,
+                ACCENT_GAIN,
+            ),
+            white: made(PaintKind::Lit, Color::srgb(1.0, 0.97, 0.82), 5.0),
+            fill: made(PaintKind::Fill, primary.color, 0.0),
+            fill_dim: made(PaintKind::FillDim, primary.color, 0.0),
+        }
+    }
+}
+
+/// Material handles of one body, resolved when it is spawned or its colours change.
+struct Paints {
+    friend: Handle<StandardMaterial>,
+    foe: Handle<StandardMaterial>,
+    primary: Handle<StandardMaterial>,
+    secondary: Handle<StandardMaterial>,
+    accent: Handle<StandardMaterial>,
+    white: Handle<StandardMaterial>,
+    fill: Handle<StandardMaterial>,
+    fill_dim: Handle<StandardMaterial>,
+}
+
+impl Paints {
+    fn of(&self, paint: Paint, friendly: bool) -> &Handle<StandardMaterial> {
+        match paint {
+            Paint::Team if friendly => &self.friend,
+            Paint::Team => &self.foe,
+            Paint::Slot(PaletteSlot::Primary) => &self.primary,
+            Paint::Slot(PaletteSlot::Secondary) => &self.secondary,
+            Paint::Slot(PaletteSlot::Accent) => &self.accent,
+            Paint::Slot(PaletteSlot::White) => &self.white,
+            Paint::Fill => &self.fill,
+            Paint::FillDim => &self.fill_dim,
+        }
+    }
+}
+
+struct BodyPart {
+    entity: Entity,
+    slot: PartSlot,
+    /// The material the entity has now; `None` for the packaged model.
+    paint: Option<Paint>,
+    /// The handle behind `paint` changed.
+    repaint: bool,
+}
+
+/// One effect drawn through the `body` of its row.
+struct BodyInstance {
+    root: Entity,
+    owner: u64,
+    skill: SkillId,
+    kind: EffectVisualKind,
+    friendly: bool,
+    /// The block the parts were built from.
+    body: Body,
+    parts: Vec<BodyPart>,
+    paints: Paints,
+    model: Option<Handle<WorldAsset>>,
+    at: Vec3,
+    light: Option<Entity>,
+    unshadowed: bool,
+}
+
+/// The name of a body: the skill and the replicated id of the effect it draws.
+fn body_name(e: &SkillEffectState) -> Name {
+    Name::new(format!("SkillVfx-{}-{}", e.skill.id(), e.id))
+}
+
+fn spawn_body(
+    commands: &mut Commands,
+    e: &SkillEffectState,
+    body: &Body,
+    seen: &Seen,
+    meshes: &VfxMeshes,
+    geometry: &Geometry,
+    paints: Paints,
+    friendly: bool,
+) -> BodyInstance {
+    let root = commands
+        .spawn((Transform::default(), Visibility::Hidden, body_name(e)))
+        .id();
+    let model = body.model.and_then(|model| geometry.model(model));
+    let parts = bodies::part_list(body, &seen.shape)
+        .into_iter()
+        .filter_map(|slot| {
+            let paint = bodies::part_paint(&slot, seen);
+            let entity = match (slot.mesh, paint) {
+                (Some(mesh), Some(paint)) => commands
+                    .spawn((
+                        Mesh3d(meshes.handle(mesh)),
+                        MeshMaterial3d(paints.of(paint, friendly).clone()),
+                        Transform::default(),
+                        Visibility::Hidden,
+                        NotShadowCaster,
+                        NotShadowReceiver,
+                        ChildOf(root),
+                    ))
+                    .id(),
+                _ => commands
+                    .spawn((
+                        WorldAssetRoot(model.clone()?),
+                        Transform::default(),
+                        Visibility::Hidden,
+                        ChildOf(root),
+                    ))
+                    .id(),
+            };
+            Some(BodyPart {
+                entity,
+                slot,
+                paint,
+                repaint: false,
+            })
+        })
+        .collect();
+    BodyInstance {
+        root,
+        owner: e.owner_id,
+        skill: e.skill,
+        kind: e.kind,
+        friendly,
+        body: body.clone(),
+        parts,
+        paints,
+        model,
+        at: Vec3::ZERO,
+        light: None,
+        unshadowed: false,
+    }
+}
+
+/// What the body renderer reads of the frame.
+#[derive(SystemParam)]
+struct BodyFrame<'w, 's> {
+    game: Option<Res<'w, GameStateSnapshot>>,
+    mode: Res<'w, PlayerVisualMode>,
+    profiles: Res<'w, SkillPresentation>,
+    clock: Res<'w, crate::vfx_clock::VfxClock>,
+    map: Option<Res<'w, crate::maps::MapLayout>>,
+    memory: Option<Res<'w, EffectMemory>>,
+    local: Query<'w, 's, &'static crate::team::Team, With<crate::player::Player>>,
+    heroes: Query<
+        'w,
+        's,
+        (
+            &'static NetworkPlayerId,
+            &'static Transform,
+            &'static InheritedVisibility,
+        ),
+    >,
+    camera: Query<'w, 's, &'static GlobalTransform, With<crate::camera::MainCamera>>,
+}
+
+/// Height of a hero's chest above its feet, where a tether ends.
+const OWNER_CHEST: f32 = 1.0;
+
+/// Draws every effect whose row gives it a body. Poses use the received geometry and what
+/// the stage tracker observed of the instance; nothing is predicted.
+fn sync_bodies(
+    mut commands: Commands,
+    frame: BodyFrame,
+    mut instances: ResMut<Instances>,
+    meshes: Res<VfxMeshes>,
+    geometry: Res<Geometry>,
+    mut paints: ResMut<BodyPaints>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    server: Res<AssetServer>,
+    mut poses: Poses,
+    scene_instances: Query<&WorldInstance>,
+    scene_spawner: Option<Res<WorldInstanceSpawner>>,
+) {
+    // `sync` has already dropped every instance of another round or view.
+    let Some(game) = frame
+        .game
+        .as_ref()
+        .filter(|_| *frame.mode == PlayerVisualMode::Models3d)
+    else {
+        return;
+    };
+    let profiles = &*frame.profiles;
+    let now = frame.clock.now as f32;
+    let eye = frame
+        .camera
+        .single()
+        .map_or(Vec3::ZERO, |pose| pose.translation());
+    let recolored = frame.profiles.is_changed();
+    let instances = &mut *instances;
+    let mut live = HashSet::new();
+    let mut drawn = Vec::new();
+    for (key, e) in stage::keyed(&game.skill_effects) {
+        // The legacy path drew this effect.
+        if instances.objects.contains_key(&e.id) {
+            continue;
+        }
+        let friendly = frame.local.single().is_ok_and(|team| *team == e.owner_team);
+        let position = Vec2::from_array(e.position);
+        let ground = frame
+            .map
+            .as_ref()
+            .map_or(0.0, |map| map.terrain_height_3d(position.x, position.y));
+        let owner = frame
+            .heroes
+            .iter()
+            .find(|(id, _, visible)| id.0 == e.owner_id && visible.get())
+            .map(|(_, pose, _)| pose.translation + Vec3::Y * OWNER_CHEST);
+        let memory = frame.memory.as_ref().and_then(|memory| memory.get(key));
+        let seen = Seen::of(e, memory, owner, ground, now);
+        // An instance whose skill, kind and owner stand under an unchanged registry is
+        // what it was: its row is not looked up again.
+        let known = !recolored
+            && instances.bodies.get(&key).is_some_and(|instance| {
+                (instance.owner, instance.kind, instance.skill) == (e.owner_id, e.kind, e.skill)
+            });
+        if !known {
+            let Some((body, look)) = staged_body(profiles, e)
+                .zip(profiles.look(CastKey::Skill(SkillKey::Modular(e.skill))))
+            else {
+                continue;
+            };
+            // An auxiliary object keeps its entities when only the skill that orders it
+            // changes; any other change of what the instance is builds it anew.
+            let rebuilt = instances.bodies.get(&key).is_some_and(|instance| {
+                instance.owner != e.owner_id
+                    || instance.kind != e.kind
+                    || instance.body != *body
+                    || (instance.skill != e.skill && matches!(key, EffectKey::Runtime(_)))
+            });
+            if rebuilt && let Some(previous) = instances.bodies.remove(&key) {
+                commands.entity(previous.root).despawn();
+            }
+            let resolved = paints.resolve(&mut materials, &look.palette);
+            match instances.bodies.get_mut(&key) {
+                Some(instance) => {
+                    instance.paints = resolved;
+                    if instance.skill != e.skill {
+                        commands.entity(instance.root).insert(body_name(e));
+                        instance.skill = e.skill;
+                    }
+                    // The model keeps its own materials.
+                    for part in instance
+                        .parts
+                        .iter_mut()
+                        .filter(|part| part.paint.is_some())
+                    {
+                        part.repaint = true;
+                    }
+                }
+                None => {
+                    let spawned = spawn_body(
+                        &mut commands,
+                        e,
+                        body,
+                        &seen,
+                        &meshes,
+                        &geometry,
+                        resolved,
+                        friendly,
+                    );
+                    instances.bodies.insert(key, spawned);
+                }
+            }
+        }
+        let Some(instance) = instances.bodies.get_mut(&key) else {
+            continue;
+        };
+        live.insert(key);
+        if instance.friendly != friendly {
+            instance.friendly = friendly;
+            for part in &mut instance.parts {
+                part.repaint |= part.paint == Some(Paint::Team);
+            }
+        }
+        let root = bodies::root_pose(&seen);
+        instance.at = root.translation;
+        let model_ready = instance.model.as_ref().is_some_and(|scene| {
+            instance.parts.iter().any(|part| {
+                part.slot.role == Role::Model
+                    && scene_ready(
+                        &server,
+                        scene,
+                        part.entity,
+                        &scene_instances,
+                        &scene_spawner,
+                    )
+            })
+        });
+        let mut parts = Vec::with_capacity(instance.parts.len());
+        let mut load = Load {
+            key,
+            distance: root.translation.distance(eye),
+            kept: 0,
+            authored: 0,
+        };
+        for part in &mut instance.parts {
+            let (pose, mut visibility) = bodies::part_pose(&part.slot, &seen);
+            if part.slot.role == Role::Model && !model_ready {
+                visibility = Visibility::Hidden;
+            }
+            let paint = bodies::part_paint(&part.slot, &seen);
+            if (part.repaint || paint != part.paint)
+                && let Some(paint) = paint
+            {
+                commands.entity(part.entity).insert(MeshMaterial3d(
+                    instance.paints.of(paint, instance.friendly).clone(),
+                ));
+                part.paint = Some(paint);
+                part.repaint = false;
+            }
+            if visibility != Visibility::Hidden {
+                if part.slot.role.authored() {
+                    load.authored += 1;
+                } else {
+                    load.kept += 1;
+                }
+            }
+            parts.push((part.entity, part.slot.role, pose, visibility));
+        }
+        #[cfg(feature = "qa")]
+        let evidence = (
+            super::SkillEffectVisual {
+                id: e.id,
+                model_ready,
+            },
+            super::SkillBodyVisual {
+                archetype: instance.body.archetype,
+                boundary: seen.shape,
+                engine: count_roles(&parts, |role| matches!(role, Role::Boundary(_))),
+                authored: instance
+                    .parts
+                    .iter()
+                    .filter(|part| part.slot.role.authored())
+                    .count(),
+                trail: count_roles(&parts, |role| matches!(role, Role::Trail(_))),
+                budget_hidden: 0,
+            },
+        );
+        drawn.push((
+            load,
+            instance.root,
+            root,
+            parts,
+            #[cfg(feature = "qa")]
+            evidence,
+        ));
+    }
+    instances.bodies.retain(|key, instance| {
+        if live.contains(key) {
+            true
+        } else {
+            commands.entity(instance.root).despawn();
+            false
+        }
+    });
+
+    let loads: Vec<_> = drawn.iter().map(|body| body.0).collect();
+    let legacy = instances
+        .objects
+        .values()
+        .map(|instance| instance.parts.len())
+        .sum();
+    let over = bodies::over_budget(&loads, legacy, bodies::PART_BUDGET);
+    for body in drawn {
+        let (load, root, pose, parts) = (body.0, body.1, body.2, body.3);
+        let hide = over.contains(&load.key);
+        place(&mut commands, &mut poses, root, pose, Visibility::Inherited);
+        #[cfg(feature = "qa")]
+        {
+            let (visual, mut evidence) = body.4;
+            if hide {
+                evidence.budget_hidden = load.authored;
+            }
+            commands.entity(root).insert((visual, evidence));
+        }
+        for (entity, role, pose, visibility) in parts {
+            let visibility = if hide && role.authored() {
+                Visibility::Hidden
+            } else {
+                visibility
+            };
+            place(&mut commands, &mut poses, entity, pose, visibility);
+        }
+    }
+}
+
+/// Visible parts of one body with a role that `wanted` picks.
+#[cfg(feature = "qa")]
+fn count_roles(
+    parts: &[(Entity, Role, Transform, Visibility)],
+    wanted: impl Fn(Role) -> bool,
+) -> usize {
+    parts
+        .iter()
+        .filter(|(_, role, _, visibility)| wanted(*role) && *visibility != Visibility::Hidden)
+        .count()
+}
+
+/// Keeps the flight light of the rockets nearest to the camera and takes the meshes of
+/// packaged props out of the shadow pass once their scene is spawned.
+fn finish(
+    mut commands: Commands,
+    mut instances: ResMut<Instances>,
+    camera: Query<&GlobalTransform, With<crate::camera::MainCamera>>,
+    children: Query<&Children>,
+    shadowed: Query<(), (With<Mesh3d>, Without<NotShadowCaster>)>,
+) {
+    let eye = camera
+        .single()
+        .map_or(Vec3::ZERO, |pose| pose.translation());
+    let instances = &mut *instances;
+    // Per rocket: distance, root, height of the light above the root, and its light.
+    let mut rockets: Vec<(f32, Entity, f32, &mut Option<Entity>)> = Vec::new();
+    let mut props: Vec<(Entity, &mut bool)> = Vec::new();
+    for instance in instances.objects.values_mut() {
+        if instance.style == EffectStyle::Rocket {
+            rockets.push((
+                instance.at.distance(eye),
+                instance.root,
+                0.6,
+                &mut instance.light,
+            ));
+        }
+        let scene = instance
+            .parts
+            .iter()
+            .find(|(_, role)| matches!(role, Part::Model));
+        if let Some((scene, _)) = scene {
+            props.push((*scene, &mut instance.unshadowed));
+        }
+    }
+    for instance in instances.bodies.values_mut() {
+        if instance.body.model == Some(Model::Rocket) {
+            rockets.push((
+                instance.at.distance(eye),
+                instance.root,
+                bodies::LIGHT_HEIGHT,
+                &mut instance.light,
+            ));
+        }
+        let scene = instance
+            .parts
+            .iter()
+            .find(|part| part.slot.role == Role::Model);
+        if let Some(scene) = scene {
+            props.push((scene.entity, &mut instance.unshadowed));
+        }
+    }
+    rockets.sort_by(|a, b| a.0.total_cmp(&b.0));
+    for (rank, (_, root, height, light)) in rockets.into_iter().enumerate() {
+        if rank >= bodies::MAX_EFFECT_LIGHTS {
+            if let Some(light) = light.take() {
+                commands.entity(light).despawn();
+            }
+        } else if light.is_none() {
+            *light = Some(
+                commands
+                    .spawn((
+                        PointLight {
+                            color: Color::srgb(1.0, 0.48, 0.12),
+                            intensity: 65_000.0,
+                            range: 8.0,
+                            shadow_maps_enabled: false,
+                            ..default()
+                        },
+                        Transform::from_xyz(0.0, height, -0.6),
+                        ChildOf(root),
+                        Name::new("RocketFlightLight"),
+                    ))
+                    .id(),
+            );
+        }
+    }
+    for (scene, unshadowed) in props {
+        if *unshadowed {
+            continue;
+        }
+        for mesh in children.iter_descendants(scene) {
+            if shadowed.contains(mesh) {
+                commands
+                    .entity(mesh)
+                    .insert((NotShadowCaster, NotShadowReceiver));
+                *unshadowed = true;
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -809,15 +1466,7 @@ mod tests {
             assert_eq!(pose.scale.z, 12.0);
         }
     }
-    #[test]
-    fn a_row_without_a_legacy_style_keeps_only_the_objects_its_kind_names() {
-        use super::super::tests::schema_rules;
-        // The sample registry migrates `winter_shard` and `orbital_command` (no `effect`)
-        // and leaves `iron_hook` as packaged.
-        let registry = schema_rules::parse(&schema_rules::samples()).unwrap();
-        for id in ["winter_shard", "orbital_command"] {
-            assert!(registry.row(id).unwrap().effect.is_none());
-        }
+    fn app(registry: SkillPresentation) -> App {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, bevy::asset::AssetPlugin::default()))
             .init_asset::<Mesh>()
@@ -827,36 +1476,600 @@ mod tests {
             .init_resource::<GameStateSnapshot>()
             .insert_resource(registry)
             .add_plugins(SkillEffectsPlugin);
-        let effect = |id: u64, skill, kind| SkillEffectState {
+        app
+    }
+    /// An effect of `skill` as the server replicates it, heading along +X.
+    fn replicated(id: u64, skill: SkillId, kind: EffectVisualKind) -> SkillEffectState {
+        SkillEffectState {
             id,
             owner_id: 7,
             owner_team: shared::map::Team::Green,
             skill,
             kind,
             position: [4.0, 5.0],
-            end: [5.0, 5.0],
-            radius: 0.6,
+            end: if super::super::category::heading_only(kind) {
+                [5.0, 5.0]
+            } else {
+                [4.0, 5.0]
+            },
+            radius: super::super::geometry::replicated_radius(skill, kind),
             remaining_secs: 1.0,
             armed: true,
             consumed_segments: 0,
-        };
-        use shared::loadout::SkillId;
+        }
+    }
+    fn show(app: &mut App, effects: Vec<SkillEffectState>) {
         app.world_mut()
             .resource_mut::<GameStateSnapshot>()
-            .skill_effects
-            .extend([
-                effect(1, SkillId::IronHook, EffectVisualKind::Bolt),
-                effect(2, SkillId::WinterShard, EffectVisualKind::Bolt),
-                effect(3, SkillId::OrbitalCommand, EffectVisualKind::Orb),
-            ]);
+            .skill_effects = effects;
         app.update();
+    }
+    fn bodies(app: &App) -> &HashMap<EffectKey, BodyInstance> {
+        &app.world().resource::<Instances>().bodies
+    }
+    fn material(app: &App, entity: Entity) -> Handle<StandardMaterial> {
+        app.world()
+            .get::<MeshMaterial3d<StandardMaterial>>(entity)
+            .unwrap()
+            .0
+            .clone()
+    }
+    fn part(instance: &BodyInstance, role: Role) -> Entity {
+        instance
+            .parts
+            .iter()
+            .find(|part| part.slot.role == role)
+            .unwrap()
+            .entity
+    }
+    /// Body parts that are drawn, by whether a budget may hide them.
+    fn visible_parts(app: &App) -> (usize, usize) {
+        let mut counts = (0, 0);
+        for instance in bodies(app).values() {
+            for part in &instance.parts {
+                if *app.world().get::<Visibility>(part.entity).unwrap() != Visibility::Hidden {
+                    if part.slot.role.authored() {
+                        counts.1 += 1;
+                    } else {
+                        counts.0 += 1;
+                    }
+                }
+            }
+        }
+        counts
+    }
+    const ORB: EffectKey = EffectKey::Aux {
+        owner: 7,
+        kind: EffectVisualKind::Orb,
+        ordinal: 0,
+    };
+
+    #[test]
+    fn an_effect_is_drawn_by_the_body_of_its_row_or_by_a_legacy_style_never_by_both() {
+        use super::super::tests::schema_rules;
+        use super::super::vocab::Archetype;
+        // The sample registry gives `winter_shard`, the orb and `dawn_ray` a body and
+        // leaves `iron_hook` and `horizon_wave` as packaged.
+        let registry = schema_rules::parse(&schema_rules::samples()).unwrap();
+        for id in ["winter_shard", "orbital_command", "dawn_ray"] {
+            assert!(registry.row(id).unwrap().effect.is_none());
+        }
+        let mut app = app(registry);
+        show(
+            &mut app,
+            vec![
+                replicated(1, SkillId::IronHook, EffectVisualKind::Bolt),
+                replicated(2, SkillId::WinterShard, EffectVisualKind::Bolt),
+                replicated(3, SkillId::OrbitalCommand, EffectVisualKind::Orb),
+                replicated(4, SkillId::DawnRay, EffectVisualKind::BeamWarning),
+                replicated(5, SkillId::HorizonWave, EffectVisualKind::BeamWarning),
+            ],
+        );
         let instances = app.world().resource::<Instances>();
         assert_eq!(instances.objects[&1].style, EffectStyle::Hook);
-        assert_eq!(instances.objects[&3].style, EffectStyle::Orb);
-        assert!(
-            !instances.objects.contains_key(&2),
-            "a migrated row is not drawn through a style it no longer names"
+        assert_eq!(instances.objects[&5].style, EffectStyle::Beam);
+        assert_eq!(instances.objects.len(), 2);
+        let shard = &instances.bodies[&EffectKey::Runtime(2)];
+        let orb = &instances.bodies[&ORB];
+        assert_eq!(
+            (shard.body.archetype, orb.body.archetype),
+            (Archetype::Traveller, Archetype::Orbiter)
         );
+        assert_eq!(instances.bodies.len(), 2);
+        // A strip is not laid out here; without a legacy style it is not drawn yet.
+        assert!(!instances.objects.contains_key(&4));
+        assert!(!instances.bodies.contains_key(&EffectKey::Runtime(4)));
+
+        // The root stands on the replicated position, turned along the heading.
+        let root = app.world().get::<Transform>(shard.root).unwrap();
+        assert_eq!(root.translation, Vec3::new(4.0, 0.0, 5.0));
+        assert!((root.rotation * Vec3::Z - Vec3::X).length() < 1e-5);
+        assert_eq!(
+            *app.world().get::<Visibility>(shard.root).unwrap(),
+            Visibility::Inherited
+        );
+        // The shard has no exhaust bars: a ring, a core and three satellites, and no trail
+        // part on its first frame.
+        let roles: Vec<Role> = shard.parts.iter().map(|part| part.slot.role).collect();
+        assert_eq!(
+            roles[..5],
+            [
+                Role::Boundary(0),
+                Role::Core,
+                Role::Satellite(0),
+                Role::Satellite(1),
+                Role::Satellite(2)
+            ]
+        );
+        assert!(roles[5..].iter().all(|role| matches!(role, Role::Trail(_))));
+        // Every mesh part is kept out of the shadow pass, in both paths.
+        let legacy = instances.objects.values().flat_map(|instance| {
+            instance
+                .parts
+                .iter()
+                .filter(|(_, role)| !matches!(role, Part::Model))
+                .map(|(entity, _)| *entity)
+        });
+        let staged = instances.bodies.values().flat_map(|instance| {
+            instance
+                .parts
+                .iter()
+                .filter(|part| part.slot.mesh.is_some())
+                .map(|part| part.entity)
+        });
+        let meshes: Vec<Entity> = legacy.chain(staged).collect();
+        assert!(meshes.len() > 10);
+        for entity in meshes {
+            let part = app.world().entity(entity);
+            assert!(part.contains::<Mesh3d>());
+            assert!(part.contains::<NotShadowCaster>() && part.contains::<NotShadowReceiver>());
+        }
+        #[cfg(feature = "qa")]
+        {
+            let evidence = app
+                .world()
+                .get::<super::super::SkillBodyVisual>(shard.root)
+                .unwrap();
+            assert_eq!(evidence.archetype, Archetype::Traveller);
+            assert_eq!(
+                evidence.boundary,
+                super::super::geometry::GeoShape::Ring {
+                    center: Vec2::new(4.0, 5.0),
+                    radius: 0.6
+                }
+            );
+            assert_eq!(
+                (evidence.engine, evidence.trail, evidence.budget_hidden),
+                (1, 0, 0)
+            );
+            assert_eq!(
+                app.world()
+                    .get::<super::super::SkillEffectVisual>(shard.root)
+                    .unwrap()
+                    .id,
+                2
+            );
+            // A legacy instance carries no body evidence.
+            assert!(
+                app.world()
+                    .get::<super::super::SkillBodyVisual>(instances.objects[&1].root)
+                    .is_none()
+            );
+        }
+    }
+
+    /// Rule E-12: the orb is one object ordered by two skills.
+    #[test]
+    fn an_auxiliary_body_keeps_its_entities_when_only_its_skill_changes() {
+        let mut app = app(SkillPresentation::target());
+        show(
+            &mut app,
+            vec![
+                replicated(u64::MAX, SkillId::OrbitalCommand, EffectVisualKind::Orb),
+                replicated(8, SkillId::WinterShard, EffectVisualKind::Bolt),
+            ],
+        );
+        let orb = &bodies(&app)[&ORB];
+        let (root, shell, core, ring) = (
+            orb.root,
+            part(orb, Role::Shell),
+            part(orb, Role::Core),
+            part(orb, Role::Boundary(0)),
+        );
+        let before = [shell, core, ring].map(|entity| material(&app, entity));
+        let shard = bodies(&app)[&EffectKey::Runtime(8)].root;
+        let made = app.world().resource::<Assets<StandardMaterial>>().len();
+
+        // The other order takes the orb over: same entities, the colours of its row.
+        show(
+            &mut app,
+            vec![
+                replicated(u64::MAX, SkillId::OrbitalGuard, EffectVisualKind::Orb),
+                replicated(8, SkillId::WinterShard, EffectVisualKind::Bolt),
+            ],
+        );
+        let orb = &bodies(&app)[&ORB];
+        assert_eq!(orb.root, root);
+        assert_eq!(orb.skill, SkillId::OrbitalGuard);
+        assert_eq!(
+            (part(orb, Role::Shell), part(orb, Role::Core)),
+            (shell, core)
+        );
+        let after = [shell, core, ring].map(|entity| material(&app, entity));
+        assert_ne!(after[0], before[0], "the shell takes the new skill colour");
+        assert_eq!(after[1], before[1], "the class matter colour is shared");
+        assert_eq!(after[2], before[2], "the side did not change");
+        assert_eq!(bodies(&app)[&EffectKey::Runtime(8)].root, shard);
+
+        // Back again: the handles of the first row are reused, no material is made.
+        let both = app.world().resource::<Assets<StandardMaterial>>().len();
+        assert!(both > made);
+        show(
+            &mut app,
+            vec![
+                replicated(u64::MAX, SkillId::OrbitalCommand, EffectVisualKind::Orb),
+                replicated(8, SkillId::WinterShard, EffectVisualKind::Bolt),
+                replicated(9, SkillId::WinterShard, EffectVisualKind::Bolt),
+            ],
+        );
+        assert_eq!(material(&app, shell), before[0]);
+        assert_eq!(
+            app.world().resource::<Assets<StandardMaterial>>().len(),
+            both,
+            "a second instance of a row shares its materials"
+        );
+        let twin = &bodies(&app)[&EffectKey::Runtime(9)];
+        assert_eq!(
+            material(&app, part(twin, Role::Core)),
+            material(
+                &app,
+                part(&bodies(&app)[&EffectKey::Runtime(8)], Role::Core)
+            )
+        );
+
+        // The viewer turns out to be on the owner's side: the ring changes, nothing respawns.
+        app.world_mut()
+            .spawn((crate::team::Team::Green, crate::player::Player));
+        app.update();
+        assert_eq!(bodies(&app)[&ORB].root, root);
+        assert_ne!(material(&app, ring), before[2]);
+        assert_eq!(material(&app, shell), before[0]);
+
+        // A replicated id is one object: another skill under it is another body.
+        show(
+            &mut app,
+            vec![replicated(8, SkillId::DawnBind, EffectVisualKind::Bolt)],
+        );
+        let rebuilt = &bodies(&app)[&EffectKey::Runtime(8)];
+        assert_ne!(rebuilt.root, shard);
+        assert!(app.world().get_entity(shard).is_err());
+        assert!(
+            app.world().get_entity(root).is_err(),
+            "the orb left the snapshot"
+        );
+        assert_eq!(bodies(&app).len(), 1);
+    }
+
+    #[test]
+    fn the_fill_of_a_telegraph_is_dim_and_swaps_when_the_effect_arms() {
+        let mut app = app(SkillPresentation::target());
+        let mut trap = replicated(3, SkillId::WildTraps, EffectVisualKind::Trap);
+        trap.armed = false;
+        show(&mut app, vec![trap.clone()]);
+        let instance = &bodies(&app)[&EffectKey::Runtime(3)];
+        let (fill, pip) = (part(instance, Role::Fill), part(instance, Role::Marker(0)));
+        assert_eq!(material(&app, fill), instance.paints.fill_dim);
+        assert_eq!(material(&app, pip), instance.paints.secondary);
+        let made = app.world().resource::<Assets<StandardMaterial>>().len();
+        trap.armed = true;
+        show(&mut app, vec![trap]);
+        let instance = &bodies(&app)[&EffectKey::Runtime(3)];
+        assert_eq!(material(&app, fill), instance.paints.fill);
+        assert_eq!(material(&app, pip), instance.paints.primary);
+        assert_ne!(instance.paints.fill, instance.paints.fill_dim);
+        // The step is a change of handle; no material is made or edited for it.
+        assert_eq!(
+            app.world().resource::<Assets<StandardMaterial>>().len(),
+            made
+        );
+        let materials = app.world().resource::<Assets<StandardMaterial>>();
+        let alpha =
+            |handle: &Handle<StandardMaterial>| materials.get(handle).unwrap().base_color.alpha();
+        assert_eq!(alpha(&instance.paints.fill), FILL_STRENGTH);
+        assert_eq!(alpha(&instance.paints.fill_dim), FILL_DIM_STRENGTH);
+        for fill in [&instance.paints.fill, &instance.paints.fill_dim] {
+            assert_eq!(materials.get(fill).unwrap().alpha_mode, AlphaMode::Multiply);
+        }
+        assert_eq!(alpha(&instance.paints.primary), 1.0);
+    }
+
+    /// The cache makes what the parser's material rule counts: three materials for a skill
+    /// colour, one for a matter and one for a spark colour, and the engine's own.
+    #[test]
+    fn every_staged_body_of_the_final_rows_is_drawn_from_shared_materials() {
+        use std::collections::BTreeSet;
+        let registry = SkillPresentation::target();
+        let mut effects = Vec::new();
+        let mut rows = BTreeSet::new();
+        for (id, _) in registry.rows() {
+            let Some(skill) = SkillId::from_id(id) else {
+                continue;
+            };
+            let kinds = super::super::category::own_kinds(skill)
+                .iter()
+                .chain(super::super::category::aux_kinds(skill));
+            for kind in kinds {
+                let effect = replicated(effects.len() as u64 + 1, skill, *kind);
+                if staged_body(&registry, &effect).is_some() {
+                    rows.insert(id.to_string());
+                    // Two instances of each: the second makes no material.
+                    let mut twin = effect.clone();
+                    twin.id += 100;
+                    twin.owner_id = 9;
+                    effects.extend([effect, twin]);
+                }
+            }
+        }
+        assert_eq!(effects.len(), 26 * 2);
+        let bits = |color: [f32; 3]| color.map(f32::to_bits);
+        let (mut primaries, mut secondaries, mut accents) =
+            (BTreeSet::new(), BTreeSet::new(), BTreeSet::new());
+        for id in &rows {
+            let profile = registry.row(id).unwrap();
+            let theme = registry
+                .theme(shared::HeroClass::from_id(&profile.home).unwrap())
+                .unwrap();
+            primaries.insert((bits(profile.color), profile.hdr_gain.to_bits()));
+            secondaries.insert(bits(profile.secondary.unwrap_or(theme.secondary)));
+            accents.insert(bits(profile.accent.unwrap_or(theme.accent)));
+        }
+        let mut app = app(registry);
+        show(&mut app, effects);
+        assert_eq!(bodies(&app).len(), 26 * 2);
+        let made = app.world().resource::<BodyPaints>().made.len();
+        // White and the two team colours are the engine's share here.
+        let most = 3 * primaries.len() + secondaries.len() + accents.len() + 3;
+        assert!(made <= most, "{made} of {most}");
+        assert!(made >= 2 * primaries.len() + 3, "{made}");
+        assert!(most <= bodies::MATERIAL_BUDGET);
+        // Frames that follow make none.
+        for _ in 0..3 {
+            app.update();
+        }
+        assert_eq!(app.world().resource::<BodyPaints>().made.len(), made);
+        // Every pose the app wrote is finite and every body is shown.
+        for instance in bodies(&app).values() {
+            assert_eq!(
+                *app.world().get::<Visibility>(instance.root).unwrap(),
+                Visibility::Inherited
+            );
+            for part in &instance.parts {
+                assert!(
+                    app.world()
+                        .get::<Transform>(part.entity)
+                        .unwrap()
+                        .is_finite()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn at_most_two_effect_lights_are_alive_and_the_nearest_rockets_keep_them() {
+        // Rockets fly at x = 4, 14 and 24; the camera stands at the origin.
+        let rockets = |ids: &[u64]| -> Vec<SkillEffectState> {
+            ids.iter()
+                .map(|id| {
+                    let mut rocket = replicated(*id, SkillId::WildRocket, EffectVisualKind::Rocket);
+                    rocket.position[0] = 4.0 + (*id as f32 - 1.0) * 10.0;
+                    rocket.end[0] = rocket.position[0] + 1.0;
+                    rocket
+                })
+                .collect()
+        };
+        // The packaged row is drawn by the legacy style, the final row by its body.
+        for (registry, staged) in [
+            (SkillPresentation::packaged(), false),
+            (SkillPresentation::target(), true),
+        ] {
+            let mut app = app(registry);
+            app.world_mut()
+                .spawn((crate::camera::MainCamera, GlobalTransform::default()));
+            let lit = |app: &mut App| -> Vec<u64> {
+                let roots: Vec<Entity> = app
+                    .world_mut()
+                    .query_filtered::<&ChildOf, With<PointLight>>()
+                    .iter(app.world())
+                    .map(ChildOf::parent)
+                    .collect();
+                let instances = app.world().resource::<Instances>();
+                let mut ids: Vec<u64> = (1..=3)
+                    .filter(|id| {
+                        let root = if staged {
+                            instances
+                                .bodies
+                                .get(&EffectKey::Runtime(*id))
+                                .map(|i| i.root)
+                        } else {
+                            instances.objects.get(id).map(|i| i.root)
+                        };
+                        root.is_some_and(|root| roots.contains(&root))
+                    })
+                    .collect();
+                assert_eq!(
+                    ids.len(),
+                    roots.len(),
+                    "every light belongs to a live rocket"
+                );
+                ids.sort_unstable();
+                ids
+            };
+            show(&mut app, rockets(&[1, 2, 3]));
+            assert_eq!(
+                app.world().resource::<Instances>().bodies.len(),
+                if staged { 3 } else { 0 }
+            );
+            assert_eq!(lit(&mut app), [1, 2], "staged: {staged}");
+            // The nearest rocket is gone: the next one is lit, and still only two.
+            show(&mut app, rockets(&[2, 3]));
+            assert_eq!(lit(&mut app), [2, 3]);
+            // A nearer rocket arrives: the farthest gives its light up.
+            show(&mut app, rockets(&[1, 2, 3]));
+            assert_eq!(lit(&mut app), [1, 2]);
+            show(&mut app, Vec::new());
+            assert!(lit(&mut app).is_empty());
+        }
+    }
+
+    #[test]
+    fn the_part_budget_keeps_every_boundary_and_the_nearest_looks() {
+        let mut app = app(SkillPresentation::target());
+        app.world_mut()
+            .spawn((crate::camera::MainCamera, GlobalTransform::default()));
+        // Twelve parts each: a ring, a fill and a marker, a core and eight satellites.
+        let zones = |count: u64| -> Vec<SkillEffectState> {
+            (1..=count)
+                .map(|id| {
+                    let mut zone = replicated(id, SkillId::DawnField, EffectVisualKind::Field);
+                    zone.position = [id as f32 * 7.0, 0.0];
+                    zone.end = zone.position;
+                    zone
+                })
+                .collect()
+        };
+        show(&mut app, zones(33));
+        assert_eq!(visible_parts(&app), (33 * 3, 33 * 9));
+        // 34 zones would show 408 parts: the farthest gives up its authored parts.
+        show(&mut app, zones(34));
+        assert_eq!(visible_parts(&app), (34 * 3, 33 * 9));
+        let hidden: Vec<u64> = (1..=34)
+            .filter(|id| {
+                let instance = &bodies(&app)[&EffectKey::Runtime(*id)];
+                *app.world()
+                    .get::<Visibility>(part(instance, Role::Core))
+                    .unwrap()
+                    == Visibility::Hidden
+            })
+            .collect();
+        assert_eq!(hidden, [34]);
+        // The ceiling of the server: every boundary, fill and marker is still drawn.
+        show(&mut app, zones(shared::loadout::MAX_ACTIVE_EFFECTS as u64));
+        let (kept, authored) = visible_parts(&app);
+        assert_eq!(kept, 128 * 3);
+        assert_eq!(authored, 9);
+        assert!(kept + authored <= bodies::PART_BUDGET);
+        let nearest = &bodies(&app)[&EffectKey::Runtime(1)];
+        assert_eq!(
+            *app.world()
+                .get::<Visibility>(part(nearest, Role::Core))
+                .unwrap(),
+            Visibility::Inherited
+        );
+        #[cfg(feature = "qa")]
+        {
+            let far = &bodies(&app)[&EffectKey::Runtime(128)];
+            let evidence = |root| {
+                app.world()
+                    .get::<super::super::SkillBodyVisual>(root)
+                    .unwrap()
+                    .budget_hidden
+            };
+            assert_eq!((evidence(nearest.root), evidence(far.root)), (0, 9));
+        }
+        // With room again the looks return.
+        show(&mut app, zones(5));
+        assert_eq!(visible_parts(&app), (5 * 3, 5 * 9));
+    }
+
+    #[test]
+    fn staged_bodies_clear_on_fog_round_or_2d_switch_and_wait_for_their_model() {
+        let mut app = app(SkillPresentation::target());
+        let hook = replicated(6, SkillId::IronHook, EffectVisualKind::Bolt);
+        show(&mut app, vec![hook.clone()]);
+        let instance = &bodies(&app)[&EffectKey::Runtime(6)];
+        let (root, model) = (instance.root, part(instance, Role::Model));
+        // The packaged scene is not loaded in this app: the prop stays hidden, the rest of
+        // the body is drawn.
+        assert_eq!(
+            *app.world().get::<Visibility>(model).unwrap(),
+            Visibility::Hidden
+        );
+        assert!(app.world().entity(model).contains::<WorldAssetRoot>());
+        assert_eq!(
+            *app.world()
+                .get::<Visibility>(part(instance, Role::Shell))
+                .unwrap(),
+            Visibility::Inherited
+        );
+        // The same object in the next snapshot keeps its entities and follows the position.
+        let mut moved = hook.clone();
+        moved.position = [5.1, 5.0];
+        moved.end = [6.1, 5.0];
+        show(&mut app, vec![moved]);
+        assert_eq!(bodies(&app)[&EffectKey::Runtime(6)].root, root);
+        assert_eq!(
+            app.world().get::<Transform>(root).unwrap().translation.x,
+            5.1
+        );
+        // Omitted by fog: the body and its children are gone, without a one-shot.
+        show(&mut app, Vec::new());
+        assert!(app.world().get_entity(root).is_err());
+        assert!(app.world().get_entity(model).is_err());
+        assert!(bodies(&app).is_empty());
+        // A reused id of another round is another object.
+        show(&mut app, vec![hook.clone()]);
+        let old = bodies(&app)[&EffectKey::Runtime(6)].root;
+        app.world_mut()
+            .resource_mut::<GameStateSnapshot>()
+            .meta
+            .match_id += 1;
+        app.update();
+        assert!(app.world().get_entity(old).is_err());
+        assert_ne!(bodies(&app)[&EffectKey::Runtime(6)].root, old);
+        // The flat view draws no 3D body.
+        *app.world_mut().resource_mut::<PlayerVisualMode>() = PlayerVisualMode::Sprite2d;
+        app.update();
+        assert!(bodies(&app).is_empty());
+        assert_eq!(
+            app.world_mut().query::<&Mesh3d>().iter(app.world()).count(),
+            0
+        );
+    }
+
+    /// The two fixes the packaged build shows: the rocket's ground mark has the replicated
+    /// radius, and effect parts stay out of the shadow pass.
+    #[test]
+    fn the_legacy_rocket_marks_its_replicated_radius() {
+        let mut app = app(SkillPresentation::packaged());
+        let rocket = replicated(9, SkillId::WildRocket, EffectVisualKind::Rocket);
+        assert_eq!(rocket.radius, 1.05);
+        show(&mut app, vec![rocket]);
+        let instance = &app.world().resource::<Instances>().objects[&9];
+        assert_eq!(instance.style, EffectStyle::Rocket);
+        let scale_of = |wanted: fn(&Part) -> bool| {
+            let (entity, _) = instance
+                .parts
+                .iter()
+                .find(|(_, role)| wanted(role))
+                .unwrap();
+            app.world().get::<Transform>(*entity).unwrap().scale
+        };
+        // Both are unit-radius meshes of the legacy path.
+        assert_eq!(
+            scale_of(|role| matches!(role, Part::GroundGlow)),
+            Vec3::splat(1.05)
+        );
+        assert_eq!(
+            scale_of(|role| matches!(role, Part::Boundary)),
+            Vec3::splat(1.05)
+        );
+        for (entity, role) in &instance.parts {
+            let part = app.world().entity(*entity);
+            assert_eq!(
+                part.contains::<NotShadowCaster>() && part.contains::<NotShadowReceiver>(),
+                !matches!(role, Part::Model)
+            );
+        }
     }
     #[test]
     fn live_objects_reuse_identity_and_clear_on_fog_round_or_2d_switch() {

@@ -297,7 +297,7 @@
       "motion": { "rate": 1.25, "start": 0.2 },
       "cast": { "pattern": "muzzle_burst", "shape": "streak", "count": 3, "scale": 1.0, "lifetime": 0.28, "slots": ["primary", "white"] },
       "body": { "archetype": "traveller", "altitude": "chest", "trail": "ribbon",
-        "core": { "mesh": "diamond", "slot": "primary", "size": [0.45, 0.45, 1.6], "behave": "steady" },
+        "core": { "mesh": "diamond", "slot": "primary", "size": [0.52, 0.45, 2.4], "behave": "steady" },
         "shell": { "mesh": "ring", "slot": "white", "size": [0.5, 0.5, 0.5], "behave": "tumble" } },
       "impact": { "kind": "facet_pop", "shape": "diamond", "count": 4, "scale": 1.0, "lifetime": 0.35, "slots": ["primary", "secondary"] },
       "sound": {
@@ -309,8 +309,8 @@
       "motion": { "rate": 1.5 },
       "cast": { "pattern": "muzzle_flash", "shape": "kite", "count": 2, "scale": 0.9, "lifetime": 0.3, "slots": ["primary", "secondary"] },
       "body": { "archetype": "orbiter", "altitude": "chest", "trail": "chevrons",
-        "core": { "mesh": "kite", "slot": "primary", "size": [0.85, 0.85, 1.0], "behave": "pulse" },
-        "shell": { "mesh": "kite", "slot": "secondary", "size": [1.05, 1.05, 1.25], "behave": "steady" } },
+        "core": { "mesh": "kite", "slot": "primary", "size": [0.85, 0.85, 0.05], "behave": "pulse" },
+        "shell": { "mesh": "kite", "slot": "secondary", "size": [1.05, 1.05, 0.05], "behave": "steady" } },
       "sound": {
         "cast": { "base": "holy", "speed": 1.15, "gain": 0.6 } }
     },
@@ -353,7 +353,7 @@
       "motion": { "rate": 1.4 },
       "cast": { "pattern": "muzzle_flash", "shape": "claw", "count": 3, "scale": 1.3, "lifetime": 0.18, "slots": ["primary", "white"] },
       "body": { "archetype": "traveller", "altitude": "chest", "trail": "chevrons",
-        "core": { "mesh": "chevron", "size": [0.5, 0.5, 0.9], "behave": "flicker" },
+        "core": { "mesh": "chevron", "size": [0.5, 0.5, 1.5], "behave": "flicker" },
         "shell": { "mesh": "ball", "slot": "secondary", "size": [0.14, 0.14, 0.3] },
         "satellites": { "mesh": "claw", "layout": "halo", "count": 2, "size": [0.3, 0.3, 0.3], "slot": "white", "behave": "flicker" } },
       "impact": { "kind": "spark_fork", "shape": "chevron", "count": 5, "scale": 0.9, "lifetime": 0.3, "slots": ["primary", "white"] },

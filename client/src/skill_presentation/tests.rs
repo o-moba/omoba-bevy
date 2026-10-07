@@ -1042,8 +1042,8 @@ fn every_target_row_draws_a_flat_accent_and_impact() {
     assert_eq!(rows, 68);
 }
 
-/// The parser measures what a block draws; a burst over its budget is refused with the
-/// number that broke it.
+/// One body draws one effect: the `body` of the row for a kind of the first cast, its `aux`
+/// entry for a secondary object, and nothing for a kind the skill does not replicate.
 #[test]
 fn a_replicated_effect_resolves_to_the_body_its_row_gives_that_kind() {
     use EffectVisualKind as K;
@@ -1097,6 +1097,101 @@ fn a_replicated_effect_resolves_to_the_body_its_row_gives_that_kind() {
     }
 }
 
+/// AC13 from data: every body of the final rows stays inside the part budget of its
+/// cooldown at its largest boundary, and the rows together inside the material budget.
+#[test]
+fn target_bodies_fit_the_part_and_material_budgets() {
+    use std::collections::BTreeSet;
+    let registry = target::target();
+    let mut long_cooldown = Vec::new();
+    let mut bodies_seen = 0;
+    for (id, profile) in registry.rows() {
+        let Some(skill) = SkillId::from_id(id) else {
+            assert!(profile.body.is_none() && profile.aux.is_empty(), "{id}");
+            continue;
+        };
+        let def = shared::loadout::skill(skill);
+        let most = if def.ability.base_cooldown_secs >= bodies::LONG_COOLDOWN_SECS {
+            bodies::MAX_PARTS_LONG_COOLDOWN
+        } else {
+            bodies::MAX_PARTS
+        };
+        let own = profile.body.iter().flat_map(|body| {
+            category::own_kinds(skill)
+                .iter()
+                .map(move |kind| (*kind, body))
+        });
+        let aux = profile.aux.iter().map(|(name, body)| {
+            let kind = category::aux_kinds(skill)
+                .iter()
+                .find(|kind| category::kind_id(**kind) == name)
+                .unwrap();
+            (*kind, body)
+        });
+        for (kind, body) in own.chain(aux) {
+            // The boundary at full length: a whole cone, a strip with both caps.
+            let mut e = effect(skill, kind);
+            e.radius = geometry::replicated_radius(skill, kind);
+            e.end = [
+                e.position[0] + def.ability.cast_range.max(1.0),
+                e.position[1],
+            ];
+            let shape = geometry::boundary_shape(skill, kind, &e);
+            let parts = bodies::part_total(body, &shape);
+            assert!(
+                (1..=most).contains(&parts),
+                "{id} {kind:?}: {parts} of {most}"
+            );
+            if parts > bodies::MAX_PARTS {
+                long_cooldown.push((id, parts));
+            }
+            bodies_seen += 1;
+        }
+    }
+    assert_eq!(bodies_seen, 33);
+    // Only skills on a long cooldown spend more than twelve parts.
+    assert_eq!(
+        long_cooldown,
+        [
+            ("dawn_ray", 16),
+            ("dawn_ray", 16),
+            ("iron_boundary", 16),
+            ("orbital_collapse", 13),
+            ("winter_divide", 15)
+        ]
+    );
+
+    // Three materials for each skill colour and gain, one for each matter and each spark
+    // colour, nine of the engine.
+    let bits = |color: [f32; 3]| color.map(f32::to_bits);
+    let mut primaries = BTreeSet::new();
+    let mut secondaries = BTreeSet::new();
+    let mut accents = BTreeSet::new();
+    for class in shared::HeroClass::ALL {
+        let theme = registry.theme(class).unwrap();
+        secondaries.insert(bits(theme.secondary));
+        accents.insert(bits(theme.accent));
+    }
+    for (_, profile) in registry.rows() {
+        primaries.insert((bits(profile.color), profile.hdr_gain.to_bits()));
+        secondaries.extend(profile.secondary.map(bits));
+        accents.extend(profile.accent.map(bits));
+    }
+    assert_eq!(
+        (primaries.len(), secondaries.len(), accents.len()),
+        (68, 22, 25)
+    );
+    let materials =
+        3 * primaries.len() + secondaries.len() + accents.len() + bodies::SHARED_MATERIALS;
+    assert_eq!(materials, 260);
+    assert!(materials <= bodies::MATERIAL_BUDGET);
+    assert_eq!(bodies::MATERIAL_BUDGET, 272);
+    assert_eq!(bodies::PART_BUDGET, 400);
+    assert_eq!(bodies::MAX_EFFECT_LIGHTS, 2);
+}
+
+/// The parser measures what a block draws; a burst over its budget is refused with the
+/// number that broke it.
 #[test]
 fn output_validation_refuses_bursts_over_their_budget() {
     use crate::game_vfx::ParticleSpec;

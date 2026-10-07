@@ -38,6 +38,9 @@ pub(crate) const HISTORY: usize = 6;
 pub(crate) const FRESH_SECS: f32 = 0.15;
 /// A step shorter than this is no travel; the position is not recorded again.
 const REST_UNITS: f32 = 1e-3;
+/// An instance that has not moved for this long is at rest: more than two snapshot
+/// intervals, so that one repeated position is not a rest.
+pub(crate) const REST_SECS: f64 = 0.12;
 
 /// How one instance is followed from snapshot to snapshot.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -115,6 +118,10 @@ pub(crate) struct Memory {
     pub history_len: u8,
     /// A renewal of this very instance was observed.
     pub renewed: bool,
+    /// Seconds of consecutive sightings since the instance last moved.
+    pub still_secs: f64,
+    /// The longest remaining time any sighting of this instance showed.
+    pub peak_remaining_secs: f32,
 }
 
 impl Memory {
@@ -125,17 +132,26 @@ impl Memory {
             history: [Vec2::ZERO; HISTORY],
             history_len: 0,
             renewed: false,
+            still_secs: 0.0,
+            peak_remaining_secs: effect.remaining_secs,
         }
     }
 
+    /// The instance has stood still for longer than two snapshots are apart. A body at rest
+    /// draws no trail, although the positions it came through are still remembered. A
+    /// paused sandbox repeats one moment and makes nothing rest.
+    pub(crate) fn resting(&self) -> bool {
+        self.still_secs > REST_SECS
+    }
+
     /// The earlier positions, newest first.
-    #[cfg_attr(not(test), allow(dead_code))] // read by the body renderer
     pub(crate) fn trail(&self) -> &[Vec2] {
         &self.history[..usize::from(self.history_len)]
     }
 
-    /// Takes in the next consecutive sighting and what changed with it.
-    fn follow(&mut self, effect: &SkillEffectState, changes: &[Transition]) {
+    /// Takes in the next consecutive sighting, `elapsed` seconds after the one before it,
+    /// and what changed with it.
+    fn follow(&mut self, effect: &SkillEffectState, changes: &[Transition], elapsed: f64) {
         let from = Vec2::from_array(self.last.position);
         let step = from.distance(Vec2::from_array(effect.position));
         if changes.contains(&Transition::Turned) || step > JUMP_UNITS {
@@ -144,6 +160,11 @@ impl Memory {
             self.history.copy_within(..HISTORY - 1, 1);
             self.history[0] = from;
             self.history_len = (self.history_len + 1).min(HISTORY as u8);
+        }
+        if step > REST_UNITS {
+            self.still_secs = 0.0;
+        } else {
+            self.still_secs += elapsed;
         }
         self.renewed |= changes.contains(&Transition::Renewed);
     }
@@ -164,7 +185,6 @@ pub(crate) struct StageView {
     /// for an effect first seen in the middle of its telegraph.
     pub progress: f32,
     /// The replicated remaining time, never negative.
-    #[cfg_attr(not(test), allow(dead_code))] // read by the markers of the body renderer
     pub remaining: f32,
 }
 
@@ -453,7 +473,6 @@ pub(crate) struct EffectMemory {
 }
 
 impl EffectMemory {
-    #[cfg_attr(not(test), allow(dead_code))] // read by the body renderer
     pub(crate) fn get(&self, key: EffectKey) -> Option<&Memory> {
         self.seen.get(&key)
     }
@@ -547,10 +566,11 @@ impl EffectMemory {
                 self.seen.insert(key, Memory::first(effect, now));
                 continue;
             };
-            if (0.0..=MAX_GAP_SECS).contains(&(now - memory.last_seen_secs)) {
+            let elapsed = now - memory.last_seen_secs;
+            if (0.0..=MAX_GAP_SECS).contains(&elapsed) {
                 let rule = category::stage_rule(effect.skill, effect.kind);
                 let changes = transitions(rule, &memory.last, effect);
-                memory.follow(effect, &changes);
+                memory.follow(effect, &changes, elapsed);
                 let owner = owner_of(effect);
                 taken
                     .events
@@ -562,7 +582,9 @@ impl EffectMemory {
             } else {
                 // What the effect did while it was not seen is not known.
                 memory.history_len = 0;
+                memory.still_secs = 0.0;
             }
+            memory.peak_remaining_secs = memory.peak_remaining_secs.max(effect.remaining_secs);
             memory.last = effect.clone();
             memory.last_seen_secs = now;
         }

@@ -523,7 +523,10 @@ impl Plugin for GameVfxPlugin {
             .add_message::<MoveObserved>()
             .add_message::<crate::skill_presentation::stage::StageEvent>()
             .add_message::<crate::combat_feedback::ConfirmedHit>()
-            .add_systems(Startup, setup)
+            .add_systems(
+                Startup,
+                setup.after(crate::skill_presentation::bodies::setup_meshes),
+            )
             .add_systems(
                 Update,
                 emit_haste_trails.after(crate::net::ClientNetPipeline::InterpolateRemotePlayers),
@@ -754,14 +757,21 @@ fn setup(
     mut flat_materials: ResMut<Assets<ColorMaterial>>,
     mode: Res<PlayerVisualMode>,
     map: Res<MapLayout>,
+    library: Option<Res<crate::skill_presentation::bodies::VfxMeshes>>,
 ) {
     let glow = images.add(texture(false));
     let wing_texture = images.add(texture(true));
     let assets = VfxAssets {
         glow_texture: glow.clone(),
+        // The flat silhouettes of skill bodies are these very meshes: one asset for both.
         shapes: Shape::ALL
             .iter()
-            .map(|shape| meshes.add(shape_mesh(*shape)))
+            .map(|shape| {
+                library
+                    .as_ref()
+                    .and_then(|library| library.particle(*shape))
+                    .unwrap_or_else(|| meshes.add(shape_mesh(*shape)))
+            })
             .collect(),
         wing: meshes.add(wing_mesh()),
     };
@@ -2138,6 +2148,57 @@ mod tests {
                 .get(&flat)
                 .unwrap();
             assert_eq!(flat.color, color.with_alpha(expected_alpha));
+        }
+    }
+    /// Budget of shared meshes: the particle pool and the skill bodies draw the nine flat
+    /// silhouettes from one asset each.
+    #[test]
+    fn the_pool_shares_its_flat_meshes_with_the_body_library() {
+        use crate::skill_presentation::bodies::{self, PartMesh, VfxMeshes};
+        use crate::skill_presentation::vocab::Silhouette;
+        let app = |library: bool| {
+            let mut app = App::new();
+            app.add_plugins(MinimalPlugins)
+                .init_resource::<Assets<Mesh>>()
+                .init_resource::<Assets<Image>>()
+                .init_resource::<Assets<StandardMaterial>>()
+                .init_resource::<Assets<ColorMaterial>>()
+                .init_resource::<PlayerVisualMode>()
+                .init_resource::<MapLayout>()
+                .add_plugins(GameVfxPlugin);
+            if library {
+                app.add_systems(Startup, bodies::setup_meshes);
+            }
+            app.update();
+            app
+        };
+        // On its own the pool builds its thirteen shapes and the butterfly wing.
+        assert_eq!(app(false).world().resource::<Assets<Mesh>>().len(), 14);
+        let app = app(true);
+        // Sixteen meshes of the library, four shapes only a particle has, and the wing.
+        assert_eq!(app.world().resource::<Assets<Mesh>>().len(), 16 + 4 + 1);
+        let library = app.world().resource::<VfxMeshes>();
+        let pool = app.world().resource::<VfxAssets>();
+        for (shape, silhouette) in [
+            (Shape::Kite, Silhouette::Kite),
+            (Shape::Star, Silhouette::Star),
+            (Shape::Chevron, Silhouette::Chevron),
+            (Shape::Diamond, Silhouette::Diamond),
+            (Shape::Arc, Silhouette::Arc),
+            (Shape::Drop, Silhouette::Drop),
+            (Shape::Cross, Silhouette::Cross),
+            (Shape::Crescent, Silhouette::Crescent),
+            (Shape::Claw, Silhouette::Claw),
+        ] {
+            assert_eq!(
+                pool.mesh(shape),
+                library.handle(PartMesh::Silhouette(silhouette)),
+                "{shape:?}"
+            );
+            assert_eq!(library.particle(shape), Some(pool.mesh(shape)));
+        }
+        for shape in [Shape::Glow, Shape::Ringlet, Shape::Slash, Shape::Streak] {
+            assert_eq!(library.particle(shape), None);
         }
     }
     #[test]

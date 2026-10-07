@@ -37,6 +37,36 @@ pub(crate) const WALL_AHEAD: f32 = 1.0;
 /// cut by fog and is drawn as a plain segment.
 pub(crate) const SECTOR_CLIP_SLACK: f32 = 0.05;
 
+/// Radii the server replicates for its auxiliary objects
+/// (`common/src/skills/advanced.rs:2377`, `:2388`, `:2398`, `:2408`).
+pub(crate) const ORB_RADIUS: f32 = 0.65;
+pub(crate) const HEALING_RADIUS: f32 = 5.0;
+pub(crate) const ANCHOR_RADIUS: f32 = 0.5;
+pub(crate) const SOUL_RADIUS: f32 = 0.35;
+
+/// The `radius` an effect of this skill and kind is replicated with: the catalog value of
+/// the skill for the effect of the first cast (`common/src/skills/mod.rs:1456-1488`), a
+/// server literal for an auxiliary object. The parser sizes body parts against it; a
+/// drawn boundary always takes the received value.
+pub(crate) fn replicated_radius(id: SkillId, kind: EffectVisualKind) -> f32 {
+    match kind {
+        EffectVisualKind::Orb => ORB_RADIUS,
+        EffectVisualKind::Healing => HEALING_RADIUS,
+        EffectVisualKind::Anchor => ANCHOR_RADIUS,
+        EffectVisualKind::Soul => SOUL_RADIUS,
+        _ => match skill(id).effect {
+            SkillEffect::Technique { radius, .. }
+            | SkillEffect::LinearProjectile { radius, .. }
+            | SkillEffect::ReturningShield { radius, .. }
+            | SkillEffect::RecastZone { radius, .. }
+            | SkillEffect::TrapLine { radius, .. }
+            | SkillEffect::ImpactRocket { radius, .. } => radius,
+            SkillEffect::Beam { width, .. } => width,
+            SkillEffect::WeaponToggle { .. } => 0.0,
+        },
+    }
+}
+
 /// Geometry in simulation ground coordinates.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) enum GeoShape {
@@ -804,5 +834,102 @@ mod tests {
         assert_eq!(CAGE_BAR_HALF_WIDTH, 0.4);
         assert_eq!(WALL_AHEAD, 1.0);
         assert_eq!(SECTOR_CLIP_SLACK, 0.05);
+        assert_eq!(
+            [ORB_RADIUS, HEALING_RADIUS, ANCHOR_RADIUS, SOUL_RADIUS],
+            [0.65, 5.0, 0.5, 0.35]
+        );
+    }
+
+    /// Parity with the in-process authority: every effect a default kit replicates in the
+    /// first second after its cast carries the radius the parser sizes its body against.
+    #[test]
+    fn replicated_radii_equal_what_the_authority_sends() {
+        use common::offline::{EPOCH, LOCAL_ADDR, PracticeSession};
+        use shared::practice::PracticeCommand;
+        use shared::wire::{CharacterChoice, ClientPacket, ServerPacket};
+
+        let mut seen = std::collections::BTreeSet::new();
+        for class in shared::HeroClass::ALL {
+            let Some(kit) = shared::loadout::preset_for_class(class) else {
+                continue;
+            };
+            // The dummy stands in the aim, so skills that need a unit find one: near for
+            // the short picks, far enough for a rocket to be seen in flight.
+            let casts = (0..kit.skills().len() as u8)
+                .flat_map(|slot| [3.0, 12.0].map(|distance| (slot, distance)));
+            for (slot, distance) in casts {
+                let mut session = PracticeSession::new(std::time::Instant::now());
+                session.command(ClientPacket::Join {
+                    handheld: Default::default(),
+                    prematch: false,
+                    team: shared::map::Team::Green,
+                    character: CharacterChoice::Ipfs,
+                    hero_class: class,
+                    avatar: None,
+                    sprite_character: None,
+                    session_id: None,
+                    passport_ticket: None,
+                });
+                for command in [PracticeCommand::ClearBots, PracticeCommand::SpawnDummy] {
+                    session.command(ClientPacket::Practice { command });
+                }
+                session.bots = Default::default();
+                let caster = &session.world.players[&LOCAL_ADDR].hero;
+                let origin = Vec2::new(caster.x, caster.z);
+                let target = session
+                    .world
+                    .players
+                    .values_mut()
+                    .find(|player| player.hero.identity.is_bot)
+                    .unwrap();
+                target.hero.x = origin.x + distance;
+                target.hero.z = origin.y;
+                session.command(ClientPacket::CastSkill {
+                    slot,
+                    aim: [origin.x + distance, origin.y],
+                    server_epoch: EPOCH,
+                    match_id: 1,
+                    request_id: 1,
+                });
+                for _ in 0..20 {
+                    session.advance(0.05);
+                    let ServerPacket::Snapshot { skill_effects, .. } = session.snapshot() else {
+                        panic!("practice publishes a snapshot");
+                    };
+                    for effect in skill_effects {
+                        assert_eq!(
+                            effect.radius,
+                            replicated_radius(effect.skill, effect.kind),
+                            "{} {:?}",
+                            effect.skill.id(),
+                            effect.kind
+                        );
+                        seen.insert((
+                            effect.skill.id(),
+                            super::super::category::kind_id(effect.kind),
+                        ));
+                    }
+                }
+            }
+        }
+        // The loop is not vacuous: travelling bodies, zones, props and auxiliary objects
+        // were all replicated.
+        for expected in [
+            ("dawn_bind", "bolt"),
+            ("dawn_field", "field"),
+            ("wild_traps", "trap"),
+            ("wild_rocket", "rocket"),
+            ("dawn_barrier", "barrier"),
+            ("guiding_lantern", "lantern"),
+            ("iron_boundary", "cage"),
+            ("northwall", "shield_wall"),
+            ("orbital_command", "orb"),
+            ("anchor_step", "anchor"),
+        ] {
+            assert!(
+                seen.contains(&expected),
+                "{expected:?} was not replicated: {seen:?}"
+            );
+        }
     }
 }

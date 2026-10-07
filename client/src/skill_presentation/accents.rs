@@ -1575,8 +1575,8 @@ pub(crate) fn stage_shot(registry: &SkillPresentation, event: &StageEvent) -> Op
 }
 
 /// The particles of one stage event: its one-shot inside the replicated geometry of the
-/// effect, in the colours of the row its `skill` names. `height` is the ground level under
-/// the effect. Never an impact recipe.
+/// effect, in the colours of the row its `skill` names. `height` is the level the effect
+/// is drawn at: the ground under it, or where its body flies. Never an impact recipe.
 pub(crate) fn stage_burst(
     registry: &SkillPresentation,
     event: &StageEvent,
@@ -1841,7 +1841,11 @@ pub(crate) fn emit_stage_oneshots(
             sparked.push(event.effect.id);
         }
         let at = ground_at(map.as_deref(), Vec2::from_array(event.effect.position));
-        let specs = stage_burst(&registry, event, at.y);
+        // A body in flight sparks where it flies, not on the ground under it.
+        let lift = registry
+            .body_for(&event.effect)
+            .map_or(0.0, super::bodies::burst_lift);
+        let specs = stage_burst(&registry, event, at.y + lift);
         if !specs.is_empty() {
             let local = event.owner.is_some_and(|owner| owner.local);
             out.write(ranked(specs, local, at, viewer));

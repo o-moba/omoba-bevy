@@ -1,6 +1,7 @@
 //! Packaged skill-owned presentation. Recipes select skills; buttons do not select motions.
 //! This module never changes movement, damage, cooldowns or authoritative geometry.
 pub(crate) mod accents;
+pub(crate) mod bodies;
 pub(crate) mod cast;
 mod category;
 mod effects;
@@ -19,6 +20,23 @@ pub(crate) use schema::{BasicProfile, SkillProfile, Theme};
 pub(crate) struct SkillEffectVisual {
     pub id: u64,
     pub model_ready: bool,
+}
+
+/// Evidence of an effect drawn through the `body` of its row: the archetype, the boundary
+/// the engine drew for it, and its mesh parts.
+#[cfg(feature = "qa")]
+#[derive(bevy::prelude::Component)]
+pub(crate) struct SkillBodyVisual {
+    pub archetype: vocab::Archetype,
+    pub boundary: geometry::GeoShape,
+    /// Boundary parts.
+    pub engine: usize,
+    /// Authored parts the row gives the body: core, shell, satellites, trail and model.
+    pub authored: usize,
+    /// Trail parts shown in this frame.
+    pub trail: usize,
+    /// Authored parts the part budget hid in this frame.
+    pub budget_hidden: usize,
 }
 
 use bevy::{

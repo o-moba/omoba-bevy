@@ -10,7 +10,7 @@ use super::vocab::{
     Marker, Model, MotionPhase, MovePattern, PaletteSlot, ParticleShape, RecastMarker,
     SatelliteLayout, Silhouette, StageRule, Trail,
 };
-use super::{EffectStyle, SkillPresentation, geometry};
+use super::{EffectStyle, SkillPresentation, bodies, geometry};
 use crate::game_vfx::ParticleSpec;
 use crate::humanoid::SharedHumanoidMotion;
 use bevy::math::{Vec2, Vec3, Vec3Swizzles};
@@ -469,7 +469,39 @@ pub(super) fn validate(config: &SkillPresentation) -> Result<(), String> {
         let key = SkillKey::from_id(id).ok_or_else(|| format!("Unknown skill {id}"))?;
         skill_row(config, key, profile, motion).map_err(|error| format!("{id}: {error}"))?;
     }
-    shared_aux(config)
+    shared_aux(config)?;
+    material_budget(config)
+}
+
+/// Bodies share their materials by colour. Every skill colour needs three (lit, fill and
+/// telegraph fill) for each HDR gain it is drawn with, every matter and every spark colour
+/// one, and the engine keeps a fixed few of its own.
+fn material_budget(config: &SkillPresentation) -> Result<(), String> {
+    let bits = |color: [f32; 3]| color.map(f32::to_bits);
+    let mut primaries = std::collections::BTreeSet::new();
+    let mut secondaries = std::collections::BTreeSet::new();
+    let mut accents = std::collections::BTreeSet::new();
+    for theme in config.themes.values() {
+        secondaries.insert(bits(theme.secondary));
+        accents.insert(bits(theme.accent));
+    }
+    for profile in config.skills.values() {
+        primaries.insert((bits(profile.color), profile.hdr_gain.to_bits()));
+        secondaries.extend(profile.secondary.map(bits));
+        accents.extend(profile.accent.map(bits));
+    }
+    let materials =
+        3 * primaries.len() + secondaries.len() + accents.len() + bodies::SHARED_MATERIALS;
+    if materials > bodies::MATERIAL_BUDGET {
+        return Err(format!(
+            "The rows need {materials} effect materials (at most {}): {} skill colours, {} secondary and {} accent colours",
+            bodies::MATERIAL_BUDGET,
+            primaries.len(),
+            secondaries.len(),
+            accents.len()
+        ));
+    }
+    Ok(())
 }
 
 fn themes(config: &SkillPresentation) -> Result<(), String> {
@@ -728,6 +760,23 @@ fn impact_output(
     Ok(())
 }
 
+/// An effect of the skill as the parser imagines it, `length` long.
+fn probe_effect(id: SkillId, kind: EffectVisualKind, radius: f32, length: f32) -> SkillEffectState {
+    SkillEffectState {
+        id: 1,
+        owner_id: 1,
+        owner_team: shared::map::Team::Green,
+        skill: id,
+        kind,
+        position: [PROBE.x, PROBE.z],
+        end: [PROBE.x + length, PROBE.z],
+        radius,
+        remaining_secs: 0.0,
+        armed: true,
+        consumed_segments: 0,
+    }
+}
+
 /// Runs the one-shot of a body's `expire` over small, usual and large effects of its kind.
 fn expire_output(
     body: &Body,
@@ -739,20 +788,7 @@ fn expire_output(
         return Ok(());
     };
     for (radius, length) in [(0.5, 2.0), (3.0, 12.0), (8.0, PROBE_TRAVEL)] {
-        let effect = SkillEffectState {
-            id: 1,
-            owner_id: 1,
-            owner_team: shared::map::Team::Green,
-            skill: id,
-            kind,
-            position: [PROBE.x, PROBE.z],
-            end: [PROBE.x + length, PROBE.z],
-            radius,
-            remaining_secs: 0.0,
-            armed: true,
-            consumed_segments: 0,
-        };
-        let geo = geometry::boundary_shape(id, kind, &effect);
+        let geo = geometry::boundary_shape(id, kind, &probe_effect(id, kind, radius, length));
         burst_budget(
             &accents::stage_oneshot(oneshot, palette, &geo, PROBE.y, 1),
             accents::STAGE_MAX,
@@ -1111,16 +1147,23 @@ fn body_block(body: &Body, id: SkillId, binding: Binding) -> Result<(), String> 
             kind == EffectVisualKind::Orb,
         ),
     };
-    if !fits {
+    // The kinds a body is bound to share their radius.
+    let kind = match binding {
+        Binding::Own => category::own_kinds(id).first().copied(),
+        Binding::Aux(kind) => Some(kind),
+    };
+    let Some(kind) = kind.filter(|_| fits) else {
         return Err(format!(
             "archetype {} cannot show this effect",
             archetype.id()
         ));
-    }
+    };
+    let radius = geometry::replicated_radius(id, kind);
     if body.core.is_none() && body.model.is_none() && body.satellites.is_none() {
         return Err("needs `core`, `model` or `satellites`".into());
     }
-    let moving = matches!(archetype, A::Traveller | A::Orbiter);
+    let moving = bodies::moving(archetype);
+    let on_ground = bodies::altitude(body) == Altitude::Ground;
 
     let parts = [("core", &body.core), ("shell", &body.shell)]
         .into_iter()
@@ -1139,6 +1182,33 @@ fn body_block(body: &Body, id: SkillId, binding: Binding) -> Result<(), String> 
             .any(|extent| !extent.is_finite() || *extent <= 0.0)
         {
             return Err(format!("{name}.size must be finite and positive"));
+        }
+        let [lateral, vertical, along] = size;
+        if moving {
+            // Metres. The part stays near the hit circle it flies with.
+            let widest = (1.5 * radius).max(0.5);
+            if lateral > widest + 1e-4 {
+                return Err(format!(
+                    "{name}.size is {lateral} wide (at most {widest} for a radius of {radius})"
+                ));
+            }
+            if vertical > 2.0 || along > 3.0 {
+                return Err(format!("{name}.size may be at most 2.0 high and 3.0 long"));
+            }
+            if on_ground && lateral.max(along) * 0.5 > radius + 1e-4 {
+                return Err(format!(
+                    "{name}.size: a part on the ground may reach at most the radius ({radius}) from the centre"
+                ));
+            }
+        } else {
+            // Multiples of the replicated radius. A part that turns end over end sweeps
+            // its height across the ground as well.
+            let turns_over = matches!(behave, Behaviour::Tumble | Behaviour::Gyro);
+            if lateral.max(along) > 1.0 || (turns_over && vertical > 1.0) {
+                return Err(format!(
+                    "{name}.size leaves the boundary: an extent on the ground is at most 1.0 of the radius"
+                ));
+            }
         }
         match behave {
             Behaviour::Gyro if !orb => {
@@ -1212,6 +1282,24 @@ fn body_block(body: &Body, id: SkillId, binding: Binding) -> Result<(), String> 
         return Err(format!(
             "expire {} is not legal for this body",
             body.expire.id()
+        ));
+    }
+    // The most parts the body can have: over its boundary at full length.
+    let def = shared::loadout::skill(id);
+    let shape = geometry::boundary_shape(
+        id,
+        kind,
+        &probe_effect(id, kind, radius, def.ability.cast_range.max(1.0)),
+    );
+    let parts = bodies::part_total(body, &shape);
+    let most = if def.ability.base_cooldown_secs >= bodies::LONG_COOLDOWN_SECS {
+        bodies::MAX_PARTS_LONG_COOLDOWN
+    } else {
+        bodies::MAX_PARTS
+    };
+    if parts > most {
+        return Err(format!(
+            "draws {parts} mesh parts (at most {most} for this cooldown)"
         ));
     }
     Ok(())

@@ -869,6 +869,62 @@ fn the_trail_holds_observed_positions_only() {
     assert!(!feed.memory.get(key).unwrap().renewed);
 }
 
+/// What the body renderer reads beside the trail: whether the instance rests, and the
+/// longest remaining time it was seen with.
+#[test]
+fn the_memory_knows_a_rest_and_the_longest_remaining_time() {
+    let mut feed = Feed::new(target());
+    let key = EffectKey::Runtime(1);
+    let at = |z: f32, remaining: f32| {
+        with(&effect(1, SkillId::WanderingEmber, K::Bolt), |e| {
+            e.position = [2.0, z];
+            e.end = [2.0, z + 1.0];
+            e.remaining_secs = remaining;
+        })
+    };
+    let held = |feed: &Feed| {
+        let memory = feed.memory.get(key).unwrap();
+        (memory.resting(), memory.peak_remaining_secs)
+    };
+    // A first sighting is not known to rest.
+    feed.one(&at(0.0, 2.0));
+    assert_eq!(held(&feed), (false, 2.0));
+    feed.one(&at(1.0, 1.95));
+    assert_eq!(held(&feed), (false, 2.0));
+    // One or two snapshots with the same position are no rest yet: a snapshot can repeat
+    // a position when the simulation steps less often than it is published.
+    feed.one(&at(1.0, 1.9));
+    feed.one(&at(1.0, 1.85));
+    assert_eq!(held(&feed), (false, 2.0));
+    // The third is; the positions it came through stay remembered.
+    feed.one(&at(1.0, 1.8));
+    assert_eq!(held(&feed), (true, 2.0));
+    assert_eq!(feed.memory.get(key).unwrap().trail(), [Vec2::new(2.0, 0.0)]);
+    feed.one(&at(2.0, 1.75));
+    assert_eq!(held(&feed), (false, 2.0));
+    // A renewal raises the longest time; the time that then runs down does not lower it.
+    feed.one(&at(3.0, 3.0));
+    assert_eq!(held(&feed), (false, 3.0));
+    feed.one(&at(4.0, 2.95));
+    assert_eq!(held(&feed), (false, 3.0));
+    // A paused sandbox repeats one moment: nothing moves and no time passes. That is not
+    // a rest, so a still of a body in flight keeps its trail.
+    for _ in 0..8 {
+        feed.now -= STEP;
+        feed.one(&at(4.0, 2.95));
+        assert_eq!(held(&feed), (false, 3.0));
+    }
+    assert_eq!(feed.memory.get(key).unwrap().trail().len(), 4);
+    // After a gap in the sightings a rest is not known either.
+    for _ in 0..3 {
+        feed.one(&at(4.0, 2.9));
+    }
+    assert_eq!(held(&feed), (true, 3.0));
+    feed.now += 1.0;
+    feed.one(&at(4.0, 1.9));
+    assert_eq!(held(&feed), (false, 3.0));
+}
+
 #[test]
 fn auxiliary_objects_are_keyed_by_owner_kind_and_order() {
     let orb = |id: u64, owner: u64, skill: SkillId| {

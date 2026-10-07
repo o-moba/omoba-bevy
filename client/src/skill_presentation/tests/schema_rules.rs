@@ -910,6 +910,189 @@ fn body_rules_reject_shapes_the_replicated_effect_cannot_have() {
 }
 
 #[test]
+fn body_rules_bound_the_size_and_the_number_of_parts() {
+    // `winter_shard`: a traveller at chest height, replicated radius 0.6, cooldown 8 s.
+    let shard =
+        |field: &str, value: Value| with(&format!("/skills/winter_shard/body/{field}"), value);
+    // `dawn_field`: a zone of radius 3, cooldown 10 s.
+    let field =
+        |field: &str, value: Value| with(&format!("/skills/dawn_field/body/{field}"), value);
+
+    // A body in flight is sized in metres and stays near its hit circle.
+    assert!(parse(&shard("core/size", json!([0.9, 2.0, 3.0]))).is_ok());
+    rejects(
+        &shard("core/size", json!([0.95, 0.4, 2.4])),
+        "body: core.size is 0.95 wide (at most 0.90000004 for a radius of 0.6)",
+        "wide part",
+    );
+    rejects(
+        &shard("satellites/size", json!([1.0, 0.2, 0.2])),
+        "body: satellites.size is 1 wide",
+        "wide satellites",
+    );
+    for size in [[0.4, 2.1, 2.4], [0.4, 0.4, 3.1]] {
+        rejects(
+            &shard("core/size", json!(size)),
+            "body: core.size may be at most 2.0 high and 3.0 long",
+            "tall or long part",
+        );
+    }
+    // A thin bolt may still be half a unit wide (`dawn_bind`: radius 0.35).
+    let bolt = |width: f32| {
+        with(
+            "/skills/dawn_bind/body",
+            json!({ "archetype": "traveller",
+                    "core": { "mesh": "ball", "size": [width, 0.3, 0.3] } }),
+        )
+    };
+    assert!(parse(&bolt(0.525)).is_ok());
+    rejects(
+        &bolt(0.53),
+        "dawn_bind: body: core.size is 0.53 wide",
+        "thin bolt",
+    );
+    // On the ground a part reaches at most the radius from the centre.
+    let mut skimming = shard("altitude", json!("ground"));
+    rejects(
+        &skimming,
+        "body: core.size: a part on the ground may reach at most the radius (0.6)",
+        "long part on the ground",
+    );
+    set(
+        &mut skimming,
+        "/skills/winter_shard/body/core/size",
+        json!([0.4, 0.4, 1.2]),
+    );
+    assert!(parse(&skimming).is_ok());
+
+    // An area body is sized in multiples of its radius and stays inside its boundary.
+    assert!(parse(&field("core/size", json!([1.0, 4.0, 1.0]))).is_ok());
+    rejects(
+        &field("core/size", json!([1.1, 0.05, 0.5])),
+        "body: core.size leaves the boundary",
+        "wide part of a zone",
+    );
+    rejects(
+        &field("satellites/size", json!([0.1, 0.1, 1.01])),
+        "body: satellites.size leaves the boundary",
+        "long satellites of a zone",
+    );
+    // A part that turns end over end sweeps its height across the ground.
+    let mut tumbling = field("core/behave", json!("tumble"));
+    set(
+        &mut tumbling,
+        "/skills/dawn_field/body/core/size",
+        json!([0.5, 1.0, 0.5]),
+    );
+    assert!(parse(&tumbling).is_ok());
+    set(
+        &mut tumbling,
+        "/skills/dawn_field/body/core/size",
+        json!([0.5, 1.5, 0.5]),
+    );
+    rejects(
+        &tumbling,
+        "body: core.size leaves the boundary",
+        "tall tumbling part",
+    );
+
+    // Twelve mesh parts: the ring, the core, the satellites and three motes.
+    assert!(parse(&shard("satellites/count", json!(7))).is_ok());
+    rejects(
+        &shard("satellites/count", json!(8)),
+        "winter_shard: body: draws 13 mesh parts (at most 12 for this cooldown)",
+        "part budget",
+    );
+    // The zone is full: ring, fill, marker, core and eight satellites.
+    rejects(
+        &field("shell", json!({ "mesh": "ring", "size": [0.3, 0.3, 0.3] })),
+        "dawn_field: body: draws 13 mesh parts",
+        "zone part budget",
+    );
+    // A cooldown of 40 s or more allows eighteen: the ray has four boundary parts.
+    assert!(
+        parse(&with(
+            "/skills/dawn_ray/body/core",
+            json!({ "mesh": "block", "size": [0.3, 0.4, 1.0] }),
+        ))
+        .is_ok()
+    );
+    let cage = |count: u8| {
+        with(
+            "/skills/iron_boundary/body",
+            json!({ "archetype": "cage",
+                    "core": { "mesh": "torus", "size": [0.1, 0.1, 0.1] },
+                    "satellites": { "mesh": "torus", "layout": "rim", "count": count,
+                                    "size": [0.1, 0.3, 0.1] } }),
+        )
+    };
+    assert!(parse(&cage(7)).is_ok());
+    rejects(
+        &cage(8),
+        "iron_boundary: body: draws 19 mesh parts (at most 18 for this cooldown)",
+        "long cooldown part budget",
+    );
+    // An auxiliary body is held to the budget of the skill that declares it.
+    let mut orbs = samples();
+    for id in ["orbital_command", "orbital_guard"] {
+        set(
+            &mut orbs,
+            &format!("/skills/{id}/aux/orb/satellites/count"),
+            json!(6),
+        );
+    }
+    rejects(
+        &orbs,
+        "aux.orb: draws 13 mesh parts (at most 12 for this cooldown)",
+        "aux part budget",
+    );
+}
+
+#[test]
+fn the_rows_together_fit_the_material_budget() {
+    // One spark colour for each row is still inside the budget.
+    let mut config = samples();
+    let ids: Vec<String> = config["skills"]
+        .as_object()
+        .unwrap()
+        .keys()
+        .cloned()
+        .collect();
+    assert_eq!(ids.len(), 68);
+    for (index, id) in ids.iter().enumerate() {
+        let shade = index as f64 / 100.0;
+        set(
+            &mut config,
+            &format!("/skills/{id}/accent"),
+            json!([shade, 0.9, 0.5]),
+        );
+    }
+    assert!(parse(&config).is_ok());
+    // A skill colour costs three materials. With a colour and a matter colour of its own
+    // for every row that is free to take them, the rows no longer fit.
+    let mut own = 0;
+    for (index, id) in ids.iter().enumerate() {
+        if config["skills"][id].get("cast").is_some() {
+            continue;
+        }
+        own += 1;
+        let shade = index as f64 / 100.0;
+        set(
+            &mut config,
+            &format!("/skills/{id}/color"),
+            json!([0.9, shade, 0.4]),
+        );
+        set(
+            &mut config,
+            &format!("/skills/{id}/secondary"),
+            json!([0.2, 0.3, shade]),
+        );
+    }
+    assert!(own >= 50, "{own}");
+    rejects(&config, "effect materials (at most 272)", "material budget");
+}
+
+#[test]
 fn aux_rules_bind_secondary_objects_to_the_skills_that_own_them() {
     rejects(
         &with("/skills/winter_shard/aux", json!({ "orb": orb() })),

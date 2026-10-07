@@ -1591,6 +1591,7 @@ struct PhaseWorld<'w, 's> {
             &'static Name,
             &'static Visibility,
             &'static crate::skill_presentation::SkillEffectVisual,
+            Option<&'static crate::skill_presentation::SkillBodyVisual>,
         ),
     >,
     parts: Query<
@@ -1802,6 +1803,51 @@ fn send_cast(
     Ok(())
 }
 
+/// The archetype, the boundary the engine drew and the part counts of a staged body.
+fn body_record(body: &crate::skill_presentation::SkillBodyVisual) -> serde_json::Value {
+    use crate::skill_presentation::geometry::GeoShape;
+    let point = |point: Vec2| point.to_array();
+    let boundary = match body.boundary {
+        GeoShape::Ring { center, radius } => {
+            serde_json::json!({"shape": "ring", "center": point(center), "radius": radius})
+        }
+        GeoShape::Capsule { from, to, radius } => serde_json::json!({
+            "shape": "capsule", "from": point(from), "to": point(to), "radius": radius,
+        }),
+        GeoShape::Lane {
+            from,
+            to,
+            half_width,
+        } => serde_json::json!({
+            "shape": "lane", "from": point(from), "to": point(to), "half_width": half_width,
+        }),
+        GeoShape::Sector {
+            apex,
+            axis,
+            radius,
+            half_angle,
+        } => serde_json::json!({
+            "shape": "sector", "apex": point(apex), "axis": point(axis),
+            "radius": radius, "half_angle": half_angle,
+        }),
+        GeoShape::Pentagon { center, radius } => {
+            serde_json::json!({"shape": "pentagon", "center": point(center), "radius": radius})
+        }
+        GeoShape::Segment { from, to } => {
+            serde_json::json!({"shape": "segment", "from": point(from), "to": point(to)})
+        }
+        GeoShape::None => serde_json::json!({"shape": "none"}),
+    };
+    serde_json::json!({
+        "archetype": body.archetype.id(),
+        "boundary": boundary,
+        "engine_parts": body.engine,
+        "authored_parts": body.authored,
+        "trail_parts": body.trail,
+        "budget_hidden": body.budget_hidden,
+    })
+}
+
 /// The state of one still, read in the frame its screenshot is taken.
 fn still_record(
     world: &PhaseWorld,
@@ -1818,7 +1864,7 @@ fn still_record(
     let roots: Vec<_> = world
         .vfx
         .iter()
-        .map(|(root, name, visibility, visual)| {
+        .map(|(root, name, visibility, visual, body)| {
             let parts: Vec<_> = world
                 .parts
                 .iter()
@@ -1830,6 +1876,8 @@ fn still_record(
                 "effect_id": visual.id,
                 "visible": shown,
                 "model_ready": visual.model_ready,
+                // Present when the effect is drawn through the `body` of its row.
+                "body": body.map(body_record),
                 "parts": parts.len(),
                 "visible_parts": parts.iter()
                     .filter(|(_, visibility, ..)| shown && **visibility != Visibility::Hidden)
