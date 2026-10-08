@@ -16,6 +16,10 @@
 //! rocket round. `OMOBA_STANDARD_QA_INTERLEAVE=1` orders one basic
 //! attack as soon as the cast of a skill with a telegraph is accepted, so the
 //! stills show what an action accepted during the telegraph does to the pose.
+//! `OMOBA_STANDARD_QA_DISPLACE=1` moves the hero across its aim through the
+//! sandbox as soon as the cast of a skill whose telegraph the server keeps on
+//! its caster is accepted, so the stills show whether the telegraph stays under
+//! a caster that is moved.
 //! `OMOBA_STANDARD_QA_AIM=1` adds one still of the aim preview of every modular
 //! skill, taken with its key held before the cast, and a second one when the
 //! slot offers a recast after the cast.
@@ -72,6 +76,7 @@ impl Plugin for StandardKitsQaPlugin {
         let offscreen = flag("OMOBA_STANDARD_QA_OFFSCREEN");
         let flight = flag("OMOBA_STANDARD_QA_FLIGHT");
         let interleave = flag("OMOBA_STANDARD_QA_INTERLEAVE");
+        let displace = flag("OMOBA_STANDARD_QA_DISPLACE");
         let aim = flag("OMOBA_STANDARD_QA_AIM");
         let recipe = std::env::var("OMOBA_STANDARD_QA_RECIPE")
             .ok()
@@ -105,6 +110,7 @@ impl Plugin for StandardKitsQaPlugin {
             offscreen,
             flight,
             interleave,
+            displace,
             aim,
             recipe,
             zoom: crate::camera::CAMERA_MIN_ZOOM,
@@ -177,6 +183,8 @@ struct Qa {
     flight: bool,
     /// Phase run that orders a basic attack during every telegraph.
     interleave: bool,
+    /// Phase run that moves the hero during a telegraph that follows its caster.
+    displace: bool,
     /// Phase run that also takes stills of the aim previews.
     aim: bool,
     /// Phase run on an authored kit instead of the preset of the class.
@@ -1269,6 +1277,10 @@ const PHASE_DEADLINE: Duration = Duration::from_secs(280);
 const STEP_STALL: Duration = Duration::from_secs(30);
 /// The hero's spot on the mid lane and the lane direction its target stands in.
 const STAGE_HOME: Vec2 = Vec2::new(-5.0, -5.0);
+/// How far a displace run moves the hero across its aim during a telegraph: far enough to
+/// tell the telegraph from the place of the cast, near enough for the target to stay in
+/// the cone.
+const DISPLACE_UNITS: f32 = 2.5;
 const STAGE_LANE: Vec2 = Vec2::new(
     std::f32::consts::FRAC_1_SQRT_2,
     std::f32::consts::FRAC_1_SQRT_2,
@@ -2679,6 +2691,8 @@ fn still_record(
         // than the idle still it is compared with.
         "hero_from_home": world.actor(SandboxActor::Player)
             .map(|actor| Vec2::from_array(actor.position).distance(STAGE_HOME)),
+        // Where the server has the hero, to read next to the positions of its effects.
+        "hero_position": world.actor(SandboxActor::Player).map(|actor| actor.position),
         "target_pixels": world.actor(SandboxActor::Enemy)
             .and_then(|actor| world.pixels(actor.position)),
     })
@@ -3286,6 +3300,30 @@ fn drive_phases(
                 });
                 qa.requests.push(serde_json::json!({"command":"basic_attack","target":enemy.id,"during":skill,"snapshot_tick":world.game.meta.snapshot_tick}));
             }
+            // The telegraph is running: the sandbox moves its caster now. The probe is
+            // moved too, so that it sees the receipt the capture will see.
+            let follows = equipped.skill(slot).is_some_and(|definition| {
+                matches!(
+                    definition.effect,
+                    SkillEffect::Technique {
+                        action: Technique::ConeBrittle,
+                        ..
+                    }
+                )
+            });
+            if qa.displace
+                && follows
+                && let Some(actor) = world.actor(SandboxActor::Player)
+            {
+                let to = (Vec2::from_array(actor.position) + STAGE_LANE.perp() * DISPLACE_UNITS)
+                    .to_array();
+                qa.requests.push(serde_json::json!({"command":"sandbox_teleport","to":to,"during":skill,"snapshot_tick":world.game.meta.snapshot_tick}));
+                let command = SandboxCommand::Teleport {
+                    actor: SandboxActor::Player,
+                    position: to,
+                };
+                run.wire.send(&world.game, sandbox, command, &mut outgoing);
+            }
             run.enter(next);
         }
         Step::Probe
@@ -3620,6 +3658,7 @@ fn drive_phases(
             "visual_mode": format!("{:?}", *world.mode),
             "flight": qa.flight,
             "interleave": qa.interleave,
+            "displace": qa.displace,
             "aim": qa.aim,
             "manual_interaction_verified": false,
             "physical_device_verified": false,

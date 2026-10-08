@@ -381,6 +381,7 @@ class LauncherTests(unittest.TestCase):
                     (["--release-at", "contact"], "need --phases"),
                     (["--flight"], "need --phases"),
                     (["--interleave"], "need --phases"),
+                    (["--displace"], "need --phases"),
                     (["--aim"], "need --phases"),
                     (["--mixed-recipe"], "need --phases"),
                     (["--phases", "--mixed-recipe", "--hero", "mage"], "names its own hero"),
