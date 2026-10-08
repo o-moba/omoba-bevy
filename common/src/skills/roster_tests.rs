@@ -60,6 +60,95 @@ fn seal_only_owner_detonates_and_spell_refunds_resource() {
     assert_eq!(events.iter().map(|e| e.amount).sum::<f32>(), 44.0);
     assert_eq!(strike(&mut w, owner, victim, now + duration(0.6)).len(), 1);
 }
+fn strike_tower(w: &mut GameWorld, owner: u64, tower: u64, now: Instant) -> f32 {
+    basic_impact(
+        w,
+        TargetId {
+            kind: TargetKind::Structure,
+            id: tower,
+        },
+        10.0,
+        source(owner, shared::BASIC_ATTACK_ACTION_SLOT),
+        Team::Green,
+        0,
+        now,
+    )
+    .iter()
+    .map(|e| e.amount)
+    .sum()
+}
+#[test]
+fn seal_marks_an_unprotected_enemy_structure_and_only_the_owner_attack_detonates_it() {
+    let (mut w, now, _) = fixture(HeroClass::Riftshot);
+    let owner = w.players[&addr(1)].hero.identity.id;
+    let ally = add_player(&mut w, 3, HeroClass::Warrior, Team::Green, [1.0, 0.0], now);
+    w.players.get_mut(&addr(2)).unwrap().hero.z = 20.0;
+    let tower = add_tower(&mut w, Team::Blue, [10.0, 0.0]);
+    let hp = w.structures[&tower].state.hp;
+    cast(&mut w, addr(1), 1, [20.0, 0.0], 1, now);
+    assert!(advance(&mut w, now, 0.6).is_empty(), "the seal is a mark");
+    assert_eq!(w.structures[&tower].state.hp, hp);
+    assert!(
+        w.skill_runtime.effects.is_empty(),
+        "the bolt ends on the structure it marked"
+    );
+    assert_eq!(strike_tower(&mut w, ally, tower, now + duration(0.7)), 10.0);
+    assert_eq!(
+        strike_tower(&mut w, owner, tower, now + duration(0.8)),
+        44.0
+    );
+    assert_eq!(
+        strike_tower(&mut w, owner, tower, now + duration(0.9)),
+        10.0
+    );
+    assert_eq!(w.structures[&tower].state.hp, hp - 64.0);
+}
+#[test]
+fn seal_stops_at_the_first_structure_while_needle_and_protected_towers_do_not_block() {
+    let seal_bonus = |w: &mut GameWorld, now: Instant, victim: u64| {
+        let owner = w.players[&addr(1)].hero.identity.id;
+        strike(w, owner, victim, now)
+            .iter()
+            .map(|e| e.amount)
+            .sum::<f32>()
+            - 10.0
+    };
+    // An unprotected tower stands between the Riftshot and the hero at [6, 0].
+    let (mut w, now, victim) = fixture(HeroClass::Riftshot);
+    let owner = w.players[&addr(1)].hero.identity.id;
+    let tower = add_tower(&mut w, Team::Blue, [3.0, 0.0]);
+    cast(&mut w, addr(1), 1, [20.0, 0.0], 1, now);
+    advance(&mut w, now, 0.6);
+    assert_eq!(seal_bonus(&mut w, now + duration(0.7), victim), 0.0);
+    assert_eq!(
+        strike_tower(&mut w, owner, tower, now + duration(0.8)),
+        44.0
+    );
+
+    // A protected tower cannot take the mark, so the seal flies on to the hero.
+    let (mut w, now, victim) = fixture(HeroClass::Riftshot);
+    let owner = w.players[&addr(1)].hero.identity.id;
+    add_tower(&mut w, Team::Blue, [10.0, 30.0]);
+    let inner = add_tower(&mut w, Team::Blue, [3.0, 0.0]);
+    w.structures.get_mut(&inner).unwrap().state.tier = 1;
+    assert!(crate::sim::towers::structure_is_protected(
+        &w.structures,
+        inner
+    ));
+    cast(&mut w, addr(1), 1, [20.0, 0.0], 1, now);
+    advance(&mut w, now, 0.6);
+    assert_eq!(seal_bonus(&mut w, now + duration(0.7), victim), 34.0);
+    assert_eq!(strike_tower(&mut w, owner, inner, now + duration(0.8)), 0.0);
+
+    // Rift Needle still passes through structures.
+    let (mut w, now, _) = fixture(HeroClass::Riftshot);
+    let tower = add_tower(&mut w, Team::Blue, [3.0, 0.0]);
+    let hp = w.structures[&tower].state.hp;
+    cast(&mut w, addr(1), 0, [20.0, 0.0], 1, now);
+    advance(&mut w, now, 0.6);
+    assert!(w.players[&addr(2)].hero.hp < 1000.0);
+    assert_eq!(w.structures[&tower].state.hp, hp);
+}
 #[test]
 fn four_allied_hits_stun_once_then_grant_immunity() {
     let (mut w, now, victim) = fixture(HeroClass::Frostguard);

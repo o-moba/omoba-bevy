@@ -1266,8 +1266,19 @@ pub(super) fn effect_tick(
         }
         return false;
     }
-    let cs = hits(&candidates(w), e.pos, to, radius);
-    for c in cs.into_iter().filter(|c| hostile(c, e.team)) {
+    // A travelling technique passes through structures. The seal is the one
+    // exception: it also lands on the first enemy structure it can damage.
+    let cs: Vec<_> = hits(&candidates(w), e.pos, to, radius)
+        .into_iter()
+        .filter(|c| {
+            hostile(c, e.team)
+                || (action == Technique::DetonationMark
+                    && c.target.kind == TargetKind::Structure
+                    && c.team != Some(e.team)
+                    && !crate::sim::towers::structure_is_protected(&w.structures, c.target.id))
+        })
+        .collect();
+    for c in cs {
         if e.hits.contains(&key(c.target)) {
             continue;
         }
