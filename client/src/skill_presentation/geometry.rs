@@ -14,7 +14,7 @@ use shared::wire::TargetKind;
 use std::f32::consts::{FRAC_PI_2, PI, TAU};
 
 /// A unit pick takes the nearest candidate within this distance of the aim
-/// (`common/src/skills/advanced.rs:168`).
+/// (`common/src/skills/advanced.rs:186`).
 pub(crate) const PICK_RADIUS: f32 = 2.0;
 /// Furnace Breath hits where the direction cosine exceeds this
 /// (`common/src/skills/advanced.rs:1175`).
@@ -396,23 +396,52 @@ fn pick_order(candidate: &PickCandidate) -> (u8, u64) {
     (kind, candidate.id)
 }
 
+/// The kinds a pick looks among near the aim. A kind that is left out never shadows the
+/// pick: the server filters before it ranks (`Pick`, `common/src/skills/advanced.rs:154-164`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum PickKinds {
+    /// Every kind the side admits.
+    Any,
+    /// Heroes only.
+    Hero,
+    /// Anything that can be moved: no structures.
+    Unit,
+}
+
+/// How a pick skill chooses its unit and what it does without one.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct PickRule {
+    /// The pick is made on the caster's own team.
+    pub ally: bool,
+    /// The kinds the pick is made among.
+    pub kinds: PickKinds,
+    /// The cast is accepted without a pick (`common/src/skills/advanced.rs:503-514`).
+    pub pick_optional: bool,
+}
+
 /// The unit a pick skill takes: the candidate nearest the aim within `PICK_RADIUS` plus its
-/// own radius of it and within the cast range plus its radius of the caster; an ally pick
-/// takes heroes and minions only (`common/src/skills/advanced.rs:153-178`). The server also
-/// asks for vision: the caller passes the units the client sees.
+/// own radius of it and within the cast range plus its radius of the caster, among the
+/// kinds of the rule; an ally pick takes heroes and minions only
+/// (`select`, `common/src/skills/advanced.rs:165-197`). The server also asks for vision: the
+/// caller passes the units the client sees.
 pub(crate) fn server_pick(
     candidates: &[PickCandidate],
     aim: Vec2,
     origin: Vec2,
     range: f32,
-    ally: bool,
+    rule: PickRule,
 ) -> Option<usize> {
     candidates
         .iter()
         .enumerate()
         .filter(|(_, c)| {
-            c.ally == ally
-                && (!ally || matches!(c.kind, TargetKind::Player | TargetKind::Minion))
+            c.ally == rule.ally
+                && (!rule.ally || matches!(c.kind, TargetKind::Player | TargetKind::Minion))
+                && match rule.kinds {
+                    PickKinds::Any => true,
+                    PickKinds::Hero => c.kind == TargetKind::Player,
+                    PickKinds::Unit => c.kind != TargetKind::Structure,
+                }
                 && c.position.distance(aim) <= PICK_RADIUS + c.radius
                 && c.position.distance(origin) <= range + c.radius
         })
@@ -425,35 +454,26 @@ pub(crate) fn server_pick(
         .map(|(index, _)| index)
 }
 
-/// How a pick skill chooses its unit and what it does without one.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct PickRule {
-    /// The pick is made on the caster's own team.
-    pub ally: bool,
-    /// The cast is refused unless the picked unit is a hero
-    /// (`common/src/skills/advanced.rs:486-492`).
-    pub hero_only: bool,
-    /// The cast is accepted without a pick (`common/src/skills/advanced.rs:474-485`).
-    pub pick_optional: bool,
-}
-
 /// The pick rule of a skill that selects a unit near its aim
-/// (`common/src/skills/advanced.rs:461-473`).
+/// (`common/src/skills/advanced.rs:490-502`): heroes only for the duel, the curse and the
+/// orb's guard, no structure for the kick, and every kind of its side for the lash and the
+/// two leaps.
 pub(crate) fn pick_rule(id: SkillId) -> Option<PickRule> {
     let SkillEffect::Technique { action, .. } = skill(id).effect else {
         return None;
     };
-    let rule = |ally, hero_only, pick_optional| PickRule {
+    let rule = |ally, kinds, pick_optional| PickRule {
         ally,
-        hero_only,
+        kinds,
         pick_optional,
     };
     match action {
-        Technique::VitalChallenge | Technique::Curse => Some(rule(false, true, false)),
-        Technique::Lash | Technique::ChainKick => Some(rule(false, false, false)),
-        Technique::GuardLeap => Some(rule(true, false, true)),
-        Technique::AllyLeap => Some(rule(true, false, false)),
-        Technique::BallGuard => Some(rule(true, true, false)),
+        Technique::VitalChallenge | Technique::Curse => Some(rule(false, PickKinds::Hero, false)),
+        Technique::ChainKick => Some(rule(false, PickKinds::Unit, false)),
+        Technique::Lash => Some(rule(false, PickKinds::Any, false)),
+        Technique::GuardLeap => Some(rule(true, PickKinds::Any, true)),
+        Technique::AllyLeap => Some(rule(true, PickKinds::Any, false)),
+        Technique::BallGuard => Some(rule(true, PickKinds::Hero, false)),
         _ => None,
     }
 }
@@ -731,7 +751,7 @@ pub(crate) fn preview_shape(def: &SkillDefinition, ctx: &PreviewContext) -> Prev
                 center: aim,
                 radius: PICK_RADIUS,
             });
-            preview.pick = server_pick(ctx.candidates, aim, origin, range, rule.ally);
+            preview.pick = server_pick(ctx.candidates, aim, origin, range, rule);
             let picked = preview.pick.map(|index| ctx.candidates[index]);
             if let Some(unit) = picked {
                 preview.marks.push(PreviewMark::Picked {
@@ -739,11 +759,9 @@ pub(crate) fn preview_shape(def: &SkillDefinition, ctx: &PreviewContext) -> Prev
                     radius: unit.radius,
                 });
             }
-            let hero = picked.filter(|unit| unit.kind == TargetKind::Player);
-            preview.refused = match picked {
-                None => !rule.pick_optional,
-                Some(_) => rule.hero_only && hero.is_none(),
-            };
+            // A unit of a kind the rule leaves out is never picked, so only the lack of a
+            // pick refuses the cast (`common/src/skills/advanced.rs:503-514`).
+            preview.refused = picked.is_none() && !rule.pick_optional;
             match action {
                 // The leap goes to the picked unit, or to the aim point without one
                 // (`common/src/skills/advanced.rs:763`, `:776`).
@@ -756,7 +774,7 @@ pub(crate) fn preview_shape(def: &SkillDefinition, ctx: &PreviewContext) -> Prev
                 // The orb flies from where it is to the picked hero
                 // (`common/src/skills/advanced.rs:947-971`, `:1933-1938`).
                 Some(Technique::BallGuard) => {
-                    if let Some(ally) = hero {
+                    if let Some(ally) = picked {
                         preview.areas.push(GeoShape::Lane {
                             from: ctx.orb.unwrap_or(origin),
                             to: ally.position,
@@ -765,9 +783,9 @@ pub(crate) fn preview_shape(def: &SkillDefinition, ctx: &PreviewContext) -> Prev
                     }
                 }
                 // The kicked unit is carried away from the caster and strikes what it
-                // passes; a structure is not moved (`common/src/skills/advanced.rs:834-846`).
+                // passes (`common/src/skills/advanced.rs:834-846`).
                 Some(Technique::ChainKick) => {
-                    if let Some(unit) = picked.filter(|unit| unit.kind != TargetKind::Structure) {
+                    if let Some(unit) = picked {
                         let away = server_direction(origin, unit.position);
                         preview.areas.push(GeoShape::Lane {
                             from: unit.position,

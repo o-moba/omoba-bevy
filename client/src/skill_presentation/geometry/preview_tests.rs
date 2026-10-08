@@ -790,19 +790,23 @@ fn orb_skills_are_previewed_from_the_replicated_orb() {
             },
         ],
     );
-    // An allied minion nearer the aim is what the server picks, and it then refuses the
-    // cast: the minion is marked and no path is drawn.
+    // The guard takes heroes only: an allied minion nearer the aim does not shadow the
+    // hero, and the orb's way is still drawn to him.
     let minion = candidate(TargetKind::Minion, 3, aim, true);
-    let preview = with_orb(SkillId::OrbitalGuard, &[ally, minion]);
-    assert_eq!((preview.pick, preview.refused), (Some(1), true));
-    assert_eq!(preview.areas.len(), 1);
+    let shadowed = with_orb(SkillId::OrbitalGuard, &[ally, minion]);
+    assert_eq!(shadowed, preview);
     assert_marks(
-        &preview,
+        &shadowed,
         &[PreviewMark::Picked {
-            at: aim,
-            radius: shared::MINION_TARGET_RADIUS,
+            at: ally.position,
+            radius: shared::PLAYER_TARGET_RADIUS,
         }],
     );
+    // A minion alone is no pick: the cast is refused, nothing is marked and no way drawn.
+    let preview = with_orb(SkillId::OrbitalGuard, &[minion]);
+    assert_eq!((preview.pick, preview.refused), (None, true));
+    assert_eq!(preview.areas.len(), 1);
+    assert!(preview.marks.is_empty());
 }
 
 fn candidate(kind: TargetKind, id: u64, position: Vec2, ally: bool) -> PickCandidate {
@@ -824,9 +828,15 @@ fn candidate(kind: TargetKind, id: u64, position: Vec2, ally: bool) -> PickCandi
 fn server_pick_takes_the_nearest_legal_unit_within_both_reaches() {
     use TargetKind as K;
     let aim = Vec2::new(4.0, 0.0);
-    let pick = |candidates: &[PickCandidate], ally: bool| {
-        server_pick(candidates, aim, Vec2::ZERO, 5.0, ally)
+    let rule = |ally, kinds| PickRule {
+        ally,
+        kinds,
+        pick_optional: false,
     };
+    let among = |candidates: &[PickCandidate], ally: bool, kinds: PickKinds| {
+        server_pick(candidates, aim, Vec2::ZERO, 5.0, rule(ally, kinds))
+    };
+    let pick = |candidates: &[PickCandidate], ally: bool| among(candidates, ally, PickKinds::Any);
     let hero = candidate(K::Player, 20, aim + Vec2::new(1.0, 0.0), false);
     let minion = candidate(K::Minion, 5, aim + Vec2::new(0.0, 0.5), false);
     // The nearest to the aim wins, whatever its kind and whatever the order of the list.
@@ -876,7 +886,13 @@ fn server_pick_takes_the_nearest_legal_unit_within_both_reaches() {
     // So is the cast range, from the caster.
     let reach = |gap: f32| {
         let unit = candidate(K::Player, 1, Vec2::X * (5.0 + 0.62 + gap), false);
-        server_pick(&[unit], Vec2::X * 5.0, Vec2::ZERO, 5.0, false)
+        server_pick(
+            &[unit],
+            Vec2::X * 5.0,
+            Vec2::ZERO,
+            5.0,
+            rule(false, PickKinds::Any),
+        )
     };
     assert_eq!((reach(-0.01), reach(0.01)), (Some(0), None));
 
@@ -895,25 +911,46 @@ fn server_pick_takes_the_nearest_legal_unit_within_both_reaches() {
     assert_eq!(pick(&units, false), Some(3));
     assert_eq!(pick(&units[..3], false), None);
     assert_eq!(pick(&[], true), None);
+
+    // The kinds of the rule are left out before the nearest is looked for, so a nearer
+    // unit of another kind never shadows the pick. Heroes only: the allied hero behind the
+    // allied minion, and nobody among the hostile units here.
+    assert_eq!(among(&units, true, PickKinds::Hero), Some(1));
+    assert_eq!(among(&units, false, PickKinds::Hero), None);
+    let foe = candidate(K::Player, 21, aim + Vec2::new(1.5, 0.0), false);
+    let crowd = [units[3], units[4], minion, foe];
+    assert_eq!(among(&crowd, false, PickKinds::Any), Some(0));
+    assert_eq!(among(&crowd, false, PickKinds::Hero), Some(3));
+    // No structures: the minion beside the tower is taken, and a tower alone is no pick.
+    assert_eq!(among(&crowd[1..], false, PickKinds::Any), Some(0));
+    assert_eq!(among(&crowd[1..], false, PickKinds::Unit), Some(1));
+    assert_eq!(among(&crowd[1..2], false, PickKinds::Unit), None);
+    // A hero is still a hero only within both reaches.
+    let far = PickCandidate {
+        position: aim + Vec2::X * (PICK_RADIUS + foe.radius + 0.01),
+        ..foe
+    };
+    assert_eq!(among(&[minion, far], false, PickKinds::Hero), None);
 }
 
+/// The rule table equals the server's (`common/src/skills/advanced.rs:490-514`).
 #[test]
 fn pick_rules_follow_the_server_gates() {
-    let rule = |ally, hero_only, pick_optional| {
+    let rule = |ally, kinds, pick_optional| {
         Some(PickRule {
             ally,
-            hero_only,
+            kinds,
             pick_optional,
         })
     };
     for (id, expected) in [
-        (SkillId::FourfoldDuel, rule(false, true, false)),
-        (SkillId::PatientCurse, rule(false, true, false)),
-        (SkillId::ShadowLash, rule(false, false, false)),
-        (SkillId::ThunderKick, rule(false, false, false)),
-        (SkillId::AnchorStep, rule(true, false, true)),
-        (SkillId::ShelteringLeap, rule(true, false, false)),
-        (SkillId::OrbitalGuard, rule(true, true, false)),
+        (SkillId::FourfoldDuel, rule(false, PickKinds::Hero, false)),
+        (SkillId::PatientCurse, rule(false, PickKinds::Hero, false)),
+        (SkillId::ShadowLash, rule(false, PickKinds::Any, false)),
+        (SkillId::ThunderKick, rule(false, PickKinds::Unit, false)),
+        (SkillId::AnchorStep, rule(true, PickKinds::Any, true)),
+        (SkillId::ShelteringLeap, rule(true, PickKinds::Any, false)),
+        (SkillId::OrbitalGuard, rule(true, PickKinds::Hero, false)),
     ] {
         assert_eq!(pick_rule(id), expected, "{}", id.id());
     }
@@ -948,8 +985,8 @@ fn a_pick_preview_marks_the_unit_and_says_when_the_cast_is_refused() {
         radius: unit.radius,
     };
 
-    // A duel and a curse need a hero: the nearer minion is what the server picks, so the
-    // cast is refused and the minion is the unit that is marked.
+    // A duel and a curse take heroes only: a minion nearer the aim does not shadow the
+    // hero, and a minion alone is no pick at all.
     for id in [SkillId::FourfoldDuel, SkillId::PatientCurse] {
         let preview = with(id, &[caster, foe]);
         assert_eq!(
@@ -959,14 +996,11 @@ fn a_pick_preview_marks_the_unit_and_says_when_the_cast_is_refused() {
             id.id()
         );
         assert_marks(&preview, &[marked(foe)]);
-        let preview = with(id, &[caster, foe, creep]);
-        assert_eq!(
-            (preview.pick, preview.refused),
-            (Some(2), true),
-            "{}",
-            id.id()
-        );
-        assert_marks(&preview, &[marked(creep)]);
+        let shadowed = with(id, &[caster, foe, creep]);
+        assert_eq!(shadowed, preview, "{}", id.id());
+        let preview = with(id, &[caster, creep]);
+        assert_eq!((preview.pick, preview.refused), (None, true), "{}", id.id());
+        assert!(preview.marks.is_empty(), "{}", id.id());
     }
     // The lash takes any hostile unit, a structure included.
     let tower = candidate(K::Structure, 2, aim, false);
@@ -993,10 +1027,14 @@ fn a_pick_preview_marks_the_unit_and_says_when_the_cast_is_refused() {
             half_width: 1.2
         }
     ));
-    // A structure is hit and not moved: no lane.
+    // A structure cannot be thrown: the kick takes the unit beside it, and a tower alone
+    // is no pick.
+    let kicked = with(SkillId::ThunderKick, &[caster, foe, tower]);
+    assert_eq!(kicked, preview);
     let preview = with(SkillId::ThunderKick, &[caster, tower]);
-    assert_eq!((preview.pick, preview.refused), (Some(1), false));
+    assert_eq!((preview.pick, preview.refused), (None, true));
     assert_eq!(preview.areas.len(), 1);
+    assert!(preview.marks.is_empty());
 
     // The leap of the Frostguard needs an allied hero or minion; he is one himself.
     let leap = skill(SkillId::ShelteringLeap);
@@ -1232,6 +1270,12 @@ impl Duel {
 
     /// The preview of the skill for the hero as it stands, aimed at `aim`.
     fn preview(&mut self, id: SkillId, aim: Vec2) -> Preview {
+        let candidates = self.candidates();
+        self.preview_among(id, aim, &candidates)
+    }
+
+    /// The same preview with the units the client is said to see.
+    fn preview_among(&mut self, id: SkillId, aim: Vec2, candidates: &[PickCandidate]) -> Preview {
         let (flags, effects) = self.replicated();
         let def = skill(id);
         let origin = self.origin();
@@ -1245,10 +1289,69 @@ impl Duel {
                 orb: flags.orb_position.map(Vec2::from_array),
                 hero: self.hero,
                 effects: &effects,
-                candidates: &self.candidates(),
+                candidates,
                 clip: &clip,
             },
         )
+    }
+
+    /// Puts one more living unit of `team` into the authority at `at`, a lane minion or a
+    /// tower, and returns it as the client offers it to the pick rule.
+    fn place(&mut self, kind: TargetKind, team: shared::map::Team, at: Vec2) -> PickCandidate {
+        let world = &mut self.session.world;
+        let ally = team == shared::map::Team::Green;
+        let id = match kind {
+            TargetKind::Minion => {
+                let before: Vec<u64> = world.minions.keys().copied().collect();
+                common::world::spawn_minion_wave_for_team_lane(
+                    &world.map_layout,
+                    &mut world.minions,
+                    &mut world.next_minion_id,
+                    team,
+                    shared::map::Lane::Mid,
+                );
+                let id = *world
+                    .minions
+                    .keys()
+                    .filter(|id| !before.contains(id))
+                    .min()
+                    .expect("a wave has a minion");
+                world
+                    .minions
+                    .retain(|key, _| *key == id || before.contains(key));
+                let minion = world.minions.get_mut(&id).unwrap();
+                (minion.state.x, minion.state.z) = (at.x, at.y);
+                id
+            }
+            TargetKind::Structure => {
+                // A tower of a fresh map, moved to where the test wants it.
+                let mut fresh = PracticeSession::new(self.started).world.structures;
+                let id = *fresh
+                    .iter()
+                    .find(|(_, tower)| {
+                        tower.state.kind == shared::wire::StructureKind::Tower
+                            && tower.state.team == team
+                    })
+                    .expect("the map has a tower of each team")
+                    .0;
+                let mut tower = fresh.remove(&id).unwrap();
+                (tower.state.x, tower.state.z) = (at.x, at.y);
+                world.structures.insert(id, tower);
+                id
+            }
+            other => panic!("{other:?} is not placed here"),
+        };
+        candidate(kind, id, at, ally)
+    }
+
+    /// Whether the authority took the last cast: an accepted technique starts the shared
+    /// recovery.
+    fn taken(&self) -> bool {
+        self.session.world.players[&LOCAL_ADDR]
+            .hero
+            .skills
+            .recovery_until
+            .is_some()
     }
 }
 
@@ -1378,6 +1481,95 @@ fn the_duel_challenges_the_hero_the_pick_ring_takes() {
             duel.replicated().0.challenge_target,
             picked.then_some(duel.target)
         );
+    }
+}
+
+/// Parity with the in-process authority for the kinds a pick is made among: a nearer unit
+/// of a kind the skill leaves out never shadows the hero, and alone it is no pick. The duel
+/// and the curse take heroes only, the kick takes no tower, the lash takes whatever is
+/// nearest.
+#[test]
+fn a_pick_leaves_out_the_kinds_the_authority_leaves_out() {
+    use shared::map::Team;
+    let stands = Vec2::new(2.5, 0.0);
+    // The other unit stands on the aim itself; the hero is inside the ring, farther off.
+    let aim = stands + Vec2::new(0.0, 2.2);
+    assert!(aim.distance(stands) < PICK_RADIUS + PLAYER_HIT_RADIUS);
+    for (class, id) in [
+        (HeroClass::Edgeweaver, SkillId::FourfoldDuel),
+        (HeroClass::Veilstalker, SkillId::PatientCurse),
+        (HeroClass::Stormfist, SkillId::ThunderKick),
+        (HeroClass::Veilstalker, SkillId::ShadowLash),
+    ] {
+        for other in [TargetKind::Minion, TargetKind::Structure] {
+            let case = format!("{} beside a {other:?}", id.id());
+            let left_out = match pick_rule(id).unwrap().kinds {
+                PickKinds::Any => false,
+                PickKinds::Hero => true,
+                PickKinds::Unit => other == TargetKind::Structure,
+            };
+
+            // Both in the ring: the preview marks the unit the authority gives the cast to.
+            let mut duel = Duel::new(class, id, Vec2::ZERO, stands);
+            let unit = duel.place(other, Team::Blue, aim);
+            let [caster, hero] = duel.candidates();
+            let preview = duel.preview_among(id, aim, &[caster, hero, unit]);
+            assert_eq!(preview.pick, Some(if left_out { 1 } else { 2 }), "{case}");
+            assert!(!preview.refused, "{case}");
+            let full = duel.hp(duel.target);
+            duel.cast(aim);
+            assert!(duel.taken(), "{case}");
+            duel.advance(1);
+            match id {
+                SkillId::FourfoldDuel => assert_eq!(
+                    duel.replicated().0.challenge_target,
+                    Some(duel.target),
+                    "{case}"
+                ),
+                SkillId::ThunderKick if left_out => {
+                    assert!(duel.hp(duel.target) < full, "{case}")
+                }
+                // The lash strikes the unit on the aim, not the hero behind it.
+                SkillId::ShadowLash => assert_eq!(duel.hp(duel.target), full, "{case}"),
+                _ => {}
+            }
+
+            // The other unit alone: a pick, or a cast the authority drops for nothing.
+            let mut duel = Duel::new(class, id, Vec2::ZERO, Vec2::new(-30.0, 0.0));
+            let unit = duel.place(other, Team::Blue, aim);
+            let [caster, hero] = duel.candidates();
+            let preview = duel.preview_among(id, aim, &[caster, hero, unit]);
+            assert_eq!(
+                (preview.pick, preview.refused),
+                ((!left_out).then_some(2), left_out),
+                "{case}"
+            );
+            duel.cast(aim);
+            assert_eq!(duel.taken(), !left_out, "{case}");
+        }
+    }
+
+    // The orb's guard, on the caster's own team: an allied minion on the aim, the caster
+    // himself inside the ring. The orb is sent to the hero, and with the hero out of the
+    // ring the cast is dropped.
+    let id = SkillId::OrbitalGuard;
+    for (aim, picked) in [(Vec2::new(0.0, 2.2), true), (Vec2::new(0.0, 6.0), false)] {
+        let mut duel = Duel::new(
+            HeroClass::Orbitwright,
+            id,
+            Vec2::ZERO,
+            Vec2::new(-30.0, 0.0),
+        );
+        let minion = duel.place(TargetKind::Minion, Team::Green, aim);
+        let [caster, foe] = duel.candidates();
+        let preview = duel.preview_among(id, aim, &[caster, foe, minion]);
+        assert_eq!(
+            (preview.pick, preview.refused),
+            (picked.then_some(0), !picked),
+            "{aim}"
+        );
+        duel.cast(aim);
+        assert_eq!(duel.taken(), picked, "{aim}");
     }
 }
 

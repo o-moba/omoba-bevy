@@ -573,8 +573,9 @@ mod held {
             panic!("the orb has a way: {preview:?}");
         };
         assert!(from.distance(orb) < 1e-4 && to.distance(aim + Vec2::new(0.5, 0.0)) < 1e-4);
-        // An enemy hero and an allied minion at the cursor do not make the cast legal:
-        // the minion is nearer, the server would pick it and refuse.
+        // The guard takes heroes only. An enemy hero at the cursor is no ally, and an
+        // allied minion nearer the cursor than the allied hero does not shadow him: the
+        // orb still has its way to the hero.
         app.world_mut().spawn((
             RemotePlayer,
             Transform::from_xyz(aim.x, 0.0, aim.y),
@@ -583,25 +584,29 @@ mod held {
             CombatStats::default(),
             InheritedVisibility::VISIBLE,
         ));
+        let (_, legal) = hold(&mut app, KeyCode::KeyE).unwrap();
+        assert!(!legal.refused);
+        app.world_mut().spawn((
+            NetworkMinion,
+            Transform::from_xyz(aim.x + 0.2, 0.0, aim.y),
+            Team::Green,
+            NetworkMinionId(3),
+            CombatStats::default(),
+            InheritedVisibility::VISIBLE,
+        ));
         let (_, preview) = hold(&mut app, KeyCode::KeyE).unwrap();
-        assert!(!preview.refused);
-        let minion = app
-            .world_mut()
-            .spawn((
-                NetworkMinion,
-                Transform::from_xyz(aim.x + 0.2, 0.0, aim.y),
-                Team::Green,
-                NetworkMinionId(3),
-                CombatStats::default(),
-                InheritedVisibility::VISIBLE,
-            ))
-            .id();
-        let (_, preview) = hold(&mut app, KeyCode::KeyE).unwrap();
-        assert!(preview.refused && preview.areas.len() == 1);
-        // A unit the client hides, and a dead one, are not offered to the rule.
+        assert_eq!(preview.areas, legal.areas);
+        assert_eq!((preview.marks, preview.refused), (legal.marks, false));
+        // A unit the client hides, and a dead one, are not offered to the rule: without
+        // the hero the minion is no pick.
         app.world_mut()
-            .entity_mut(minion)
+            .entity_mut(ally)
             .insert(InheritedVisibility::HIDDEN);
+        let (_, preview) = hold(&mut app, KeyCode::KeyE).unwrap();
+        assert!(preview.refused && preview.pick.is_none() && preview.areas.len() == 1);
+        app.world_mut()
+            .entity_mut(ally)
+            .insert(InheritedVisibility::VISIBLE);
         assert!(!hold(&mut app, KeyCode::KeyE).unwrap().1.refused);
         app.world_mut().entity_mut(ally).insert(CombatStats {
             hp: 0.0,

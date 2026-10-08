@@ -269,9 +269,8 @@ pub(crate) fn pick_candidates(
 }
 
 /// The aim to send for a cast that the server drops unless it finds an ally at the aim: the
-/// place of the unit it takes at `aim`, or `None` when it finds none. A hero-only pick
-/// leaves every other kind out before it looks for the nearest unit
-/// (`common/src/skills/advanced.rs:154-197`, `:490-514`). The picked unit itself is sent, so
+/// place of the unit it takes at `aim`, or `None` when it finds none
+/// (`common/src/skills/advanced.rs:165-197`, `:490-514`). The picked unit itself is sent, so
 /// that the server takes the same unit from its own positions. A unit is picked up to its
 /// radius beyond the cast range, where a point aim is dropped (`:465-467`): the aim stays as
 /// it is then.
@@ -282,12 +281,7 @@ pub(crate) fn ally_aim(
     origin: Vec2,
     range: f32,
 ) -> Option<Vec2> {
-    let eligible: Vec<PickCandidate> = candidates
-        .iter()
-        .filter(|unit| !rule.hero_only || unit.kind == TargetKind::Player)
-        .copied()
-        .collect();
-    let picked = eligible[geometry::server_pick(&eligible, aim, origin, range, rule.ally)?];
+    let picked = candidates[geometry::server_pick(candidates, aim, origin, range, rule)?];
     Some(if origin.distance(picked.position) <= range {
         picked.position
     } else {
