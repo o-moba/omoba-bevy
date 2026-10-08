@@ -423,11 +423,14 @@ pub(crate) fn form_parts(form: ProjectileForm, mesh: Silhouette) -> Vec<FormPart
         (-0.5, 0.5)
     };
     let middle = if flat { (foot + tip) / 2.0 } else { 0.0 };
-    // A flat light part lies just above its rim; a solid one stands inside it.
+    // A flat light part lies just above its rim; a solid one stands inside it. The
+    // white-hot face of a flat body lies above its light.
     let over = |z: f32| Vec3::new(0.0, if flat { 0.04 } else { 0.0 }, z);
+    let face = |z: f32| Vec3::new(0.0, if flat { 0.08 } else { 0.0 }, z);
     let ahead = |z: f32| Vec3::new(0.0, 0.0, z);
     match form {
-        // A long head in its rim, on a dark shaft.
+        // A long head in its rim, white-hot along its middle, on a dark shaft. The team
+        // cue rides the shaft right behind the head, near the end that strikes.
         ProjectileForm::Dart => vec![
             part(
                 mesh,
@@ -450,10 +453,18 @@ pub(crate) fn form_parts(form: ProjectileForm, mesh: Silhouette) -> Vec<FormPart
                 Vec3::new(0.14, 0.14, 2.8),
                 Still,
             ),
-            team_cue(Vec3::new(0.0, 0.16, -1.75)),
+            part(
+                mesh,
+                Core,
+                face(0.38 - middle * 1.15),
+                body(0.24, 1.15, 1.0),
+                Still,
+            ),
+            team_cue(Vec3::new(0.0, 0.16, -1.0)),
         ],
-        // Every copy points back along the path, so a teardrop flies bulb first. The
-        // afterimages cool from the light of the head to its deep shade.
+        // Every copy points back along the path, so a teardrop flies bulb first. The head
+        // is white-hot in its middle, and the afterimages cool from its light to its deep
+        // shade.
         ProjectileForm::Comet => {
             let pulse = Pulse {
                 depth: 0.12,
@@ -474,7 +485,7 @@ pub(crate) fn form_parts(form: ProjectileForm, mesh: Silhouette) -> Vec<FormPart
                 copy(Tint, over(0.0), 1.05, pulse),
                 copy(Tint, over(-1.05), 0.8, Still),
                 copy(Echo, ahead(-1.8), 0.6, Still),
-                copy(Echo, ahead(-2.35), 0.4, Still),
+                copy(Core, face(0.0), 0.5, pulse),
                 team_cue(Vec3::new(0.0, 0.3, -0.6)),
             ]
         }
@@ -1223,7 +1234,7 @@ mod tests {
     const TARGET: &str = include_str!("skill_presentation/fixtures/target_combat_visuals.json");
     /// Mesh parts of each form, its team cue included (`architecture.md` 5.13).
     const PART_COUNTS: [(ProjectileForm, usize); 7] = [
-        (ProjectileForm::Dart, 4),
+        (ProjectileForm::Dart, 5),
         (ProjectileForm::Comet, 6),
         (ProjectileForm::DiscSkim, 3),
         (ProjectileForm::Tumbler, 4),
@@ -1311,6 +1322,21 @@ mod tests {
             );
             assert!(parts[2].size.z > rim_high.z - rim_low.z && parts[2].at.z < 0.0);
             assert!(parts.iter().all(|part| part.motion == FormMotion::Still));
+            // The white-hot middle lies inside the light head, and above it when the
+            // silhouette is flat.
+            assert_eq!((parts[3].mesh, parts[3].paint), (*mesh, FormPaint::Core));
+            let (core_low, core_high) = bounds(&parts[3], 0.0);
+            assert!(core_low.x >= low.x && core_high.x <= high.x, "{mesh:?}");
+            assert!(core_low.z > low.z && core_high.z < high.z, "{mesh:?}");
+            assert!(parts[3].at.y >= parts[1].at.y);
+            assert_eq!(
+                parts[3].at.y > parts[1].at.y,
+                bodies::planar(PartMesh::Silhouette(*mesh)),
+                "{mesh:?}"
+            );
+            // The team cue rides the shaft behind the head, not the far end of it.
+            let cue = parts[4].at.z;
+            assert!(cue < rim_low.z && cue > parts[2].at.z - parts[2].size.z / 2.0 + 0.5);
         }
         // A cone flies point first and a flat silhouette shows its face to the sky.
         let cone = form_parts(ProjectileForm::Dart, Silhouette::Cone)[1];
@@ -1322,7 +1348,7 @@ mod tests {
     }
 
     #[test]
-    fn a_comet_is_a_pulsing_head_and_three_shrinking_afterimages() {
+    fn a_comet_is_a_pulsing_white_hot_head_and_two_shrinking_afterimages() {
         for mesh in Silhouette::ALL {
             let parts = body_of(ProjectileForm::Comet, *mesh);
             // The light head and the deep rim under it swell and shrink as one.
@@ -1351,18 +1377,25 @@ mod tests {
                 (least - 0.88).abs() < 0.01 && (most - 1.12).abs() < 0.01,
                 "{mesh:?}"
             );
-            // Three copies of the head behind it, each smaller and farther back; they
-            // cool from its light to its deep shade.
-            let echoes = &parts[2..5];
-            for pair in [&parts[1..3], &parts[2..4], &parts[3..5]] {
+            // Two copies of the head behind it, each smaller and farther back; they cool
+            // from its light to its deep shade.
+            let echoes = &parts[2..4];
+            for pair in [&parts[1..3], &parts[2..4]] {
                 assert_eq!(pair[1].mesh, *mesh);
                 assert!(pair[1].at.z < pair[0].at.z && pair[1].size.x < pair[0].size.x);
             }
             assert_eq!(
                 echoes.iter().map(|echo| echo.paint).collect::<Vec<_>>(),
-                [FormPaint::Tint, FormPaint::Echo, FormPaint::Echo]
+                [FormPaint::Tint, FormPaint::Echo]
             );
             assert!(echoes.iter().all(|echo| echo.motion == FormMotion::Still));
+            // The white-hot face swells with the head, in its middle and smaller than it.
+            let core = &parts[4];
+            assert_eq!((core.mesh, core.paint), (*mesh, FormPaint::Core));
+            assert_eq!(core.motion, parts[1].motion);
+            assert!(core.size.x < 0.5 * parts[1].size.x + 1e-4);
+            assert!((centre(core) - centre(&parts[1])).abs() < 1e-4, "{mesh:?}");
+            assert!(core.at.y >= parts[1].at.y);
         }
         // A teardrop flies bulb first: its point trails.
         let drop = form_parts(ProjectileForm::Comet, Silhouette::Drop)[1];
@@ -1667,7 +1700,7 @@ mod tests {
         // The same profiles one step larger are refused, and with them the whole file.
         for (id, scale) in [
             ("heroic_strike", 1.4),
-            ("primal_maul", 1.31),
+            ("primal_maul", 1.35),
             ("smite", 1.35),
             ("chainkeeper_links", 0.95),
             ("feral_swipe", 1.05),

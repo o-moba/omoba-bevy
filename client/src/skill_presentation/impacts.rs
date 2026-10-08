@@ -38,16 +38,22 @@ const DRAIN_TRAVEL: f32 = 1.2;
 /// Half extent of a thrown spark as a share of the reach of its recipe, and how far its
 /// centre is thrown: the spark ends with its rim just inside the reach. The glows of the
 /// wire-style burst are as large (0.42 units).
-const SPARK: f32 = 0.26;
+const SPARK: f32 = 0.3;
 const SPARK_THROW: f32 = 0.97 - SPARK;
-/// Half extent of the one solid mark of `flash_star`, `star_shards` and `facet_pop` as a
-/// share of the reach of its recipe: a shape on the unit, not a plate over it.
-const MARK: f32 = 0.62;
+/// Half extent of the one solid mark of `flash_star`, `star_shards`, `facet_pop` and of a
+/// `glow_pop` led by a plate, as a share of the reach of its recipe: a shape on the unit,
+/// narrower than the hero it struck, not a plate over it.
+const MARK: f32 = 0.45;
+/// Half extent of the debris of a kind as a share of the reach of its recipe: thrown
+/// chips, shards, embers and dust, and the smaller motes of a ring, a wisp or a tail. The
+/// shapes of a kind are what tells one hit from another inside the flash.
+const CHIP: f32 = 0.25;
+const MOTE: f32 = 0.22;
 /// Half extent of the flash of the hit as a share of the reach of its recipe, and the share
 /// of the authored lifetime it lasts. It is a dense glow: its middle is covered in the skill
 /// colour and only its outer half fades, so the hit has a core on pale ground.
 const FLASH: f32 = 0.95;
-const FLASH_LIFE: f32 = 0.8;
+const FLASH_LIFE: f32 = 0.7;
 /// Height of the burst above the receipt position. A receipt is at the aim height of its
 /// target; the built-in burst of the wire style is drawn this far above it too, where the
 /// camera sees it over the body it hit.
@@ -131,6 +137,13 @@ impl Burst {
         self.shaped(self.shape, radius, curve)
     }
 
+    /// Whether the lead is a blade, a line or a claw: a shape that crosses a unit without
+    /// covering it.
+    fn narrow(&self) -> bool {
+        blade_depth(self.shape) > 0.0
+            || matches!(self.shape, ParticleShape::Streak | ParticleShape::Claw)
+    }
+
     /// A lead-shaped cut that reaches `extent` reaches from `at`, crosses it, and runs along
     /// the ground angle `axis`. A curved blade runs across its own heading and is drawn
     /// off its centre, so it is set back by its depth and bulges away from the source.
@@ -138,9 +151,11 @@ impl Burst {
         let depth = blade_depth(self.shape);
         // A lead that is neither a blade nor a line is a mark on the unit, not a plate
         // across it.
-        let narrow =
-            depth > 0.0 || matches!(self.shape, ParticleShape::Streak | ParticleShape::Claw);
-        let extent = if narrow { extent } else { extent.min(MARK) };
+        let extent = if self.narrow() {
+            extent
+        } else {
+            extent.min(MARK)
+        };
         let mut cut = self.lead(extent, Curve::Pop);
         cut.origin = at;
         cut.angle = axis;
@@ -223,11 +238,11 @@ impl Burst {
             K::RingBurst => {
                 out.push(self.ring(self.centre, self.reach, Orient::Billboard));
                 for i in 0..n - 1 {
-                    let mut mote = self.shaped(debris, 0.18, Curve::Pop);
+                    let mut mote = self.shaped(debris, MOTE, Curve::Pop);
                     mote.lifetime = self.life * DEBRIS_LIFE;
                     mote.orient = Orient::Velocity;
                     mote.velocity = Vec3::Y * (0.4 + 0.6 * (i % 3) as f32);
-                    out.push(fly(mote, self.outward(i, n - 1), 0.8 * self.reach));
+                    out.push(fly(mote, self.outward(i, n - 1), 0.75 * self.reach));
                 }
             }
             K::SlashCut => {
@@ -246,7 +261,13 @@ impl Burst {
                 } else {
                     Curve::Pop
                 };
-                out.push(self.lead(0.6, curve));
+                // A glow or a line pops across the unit; a plate stays a mark on it.
+                let extent = if self.shape == ParticleShape::Glow || self.narrow() {
+                    0.6
+                } else {
+                    MARK
+                };
+                out.push(self.lead(extent, curve));
                 self.sparks(n - 1, &mut out);
             }
             K::CrossCut => {
@@ -275,7 +296,7 @@ impl Burst {
                 out.push(streak);
                 for i in 1..n {
                     let mut tail = held(
-                        self.lead(0.18, Curve::Pop),
+                        self.lead(MOTE, Curve::Pop),
                         0.1 * self.life * share(i - 1, n - 1),
                     );
                     tail.origin = self.centre
@@ -290,7 +311,7 @@ impl Burst {
                 out.push(self.lead(0.6, Curve::Stretch));
                 for i in 1..n {
                     let mut mark = held(
-                        self.lead(0.18, Curve::Pop),
+                        self.lead(MOTE, Curve::Pop),
                         0.1 * self.life * share(i - 1, n - 1),
                     );
                     mark.origin =
@@ -302,21 +323,21 @@ impl Burst {
                 let forks = n.min(3);
                 for i in 0..forks {
                     let way = ground(self.angle + 0.6 * spread(i, forks));
-                    let mut fork = self.lead(0.36, Curve::Pop);
+                    let mut fork = self.lead(0.42, Curve::Pop);
                     fork.orient = Orient::Velocity;
                     fork.angle = heading(way);
-                    out.push(fly(fork, way, 0.6 * self.reach));
+                    out.push(fly(fork, way, 0.55 * self.reach));
                 }
                 self.sparks(n.saturating_sub(3), &mut out);
             }
             K::ShardBurst => {
                 for i in 0..n {
-                    let mut shard = self.lead(0.24, Curve::Pop);
+                    let mut shard = self.lead(CHIP, Curve::Pop);
                     shard.lifetime = self.life * 1.3;
                     shard.orient = Orient::Velocity;
                     shard.gravity = 9.0;
                     shard.velocity = Vec3::Y * (3.0 + 0.5 * jitter(self.id, i as u64, 63));
-                    out.push(fly(shard, self.outward(i, n), 0.72 * self.reach));
+                    out.push(fly(shard, self.outward(i, n), 0.71 * self.reach));
                 }
             }
             K::FlashStar => {
@@ -335,7 +356,7 @@ impl Burst {
             K::EmberPuff => {
                 for i in 0..n {
                     let outward = self.outward(i, n);
-                    let mut ember = self.lead(0.22, Curve::Pop);
+                    let mut ember = self.lead(CHIP, Curve::Pop);
                     ember.lifetime = self.life * DEBRIS_LIFE;
                     ember = held(ember, 0.3 * self.life * share(i, n));
                     ember.origin = self.centre + outward * (0.25 * self.reach * (i % 2) as f32);
@@ -350,7 +371,7 @@ impl Burst {
                 out.push(self.lead(MARK, Curve::Pop));
                 for i in 1..n {
                     let outward = self.outward(i - 1, n - 1);
-                    let mut chip = self.shaped(ParticleShape::Diamond, 0.2, Curve::Pop);
+                    let mut chip = self.shaped(ParticleShape::Diamond, CHIP, Curve::Pop);
                     chip.color = self.companion;
                     chip.end_color = Some(self.lead);
                     chip.lifetime = self.life * 1.3;
@@ -365,7 +386,7 @@ impl Burst {
                 let ground_ring = self.floor + Vec3::Y * 0.06;
                 out.push(self.ring(ground_ring, self.reach.min(THUD_RING), Orient::Ground));
                 for i in 0..n - 1 {
-                    let mut dust = self.shaped(debris, 0.2, Curve::Pop);
+                    let mut dust = self.shaped(debris, CHIP, Curve::Pop);
                     dust.lifetime = self.life * 1.2;
                     dust.origin = self.floor + Vec3::Y * 0.15;
                     dust.orient = Orient::Velocity;
@@ -416,7 +437,7 @@ impl Burst {
                     out.push(ring);
                 }
                 for i in 2..n {
-                    let mut piece = self.lead(0.16, Curve::Pop);
+                    let mut piece = self.lead(0.2, Curve::Pop);
                     piece.lifetime = self.life * DEBRIS_LIFE;
                     piece.orient = Orient::Velocity;
                     piece.gravity = 9.0;
@@ -426,9 +447,9 @@ impl Burst {
             }
             K::DrainWisp => {
                 // Toward the source, and never far enough to reach it.
-                let travel = (0.85 * self.reach).min(DRAIN_TRAVEL) - 0.18 * self.reach;
+                let travel = (0.85 * self.reach).min(DRAIN_TRAVEL) - MOTE * self.reach;
                 for i in 0..n {
-                    let mut wisp = self.lead(0.18, Curve::Hold);
+                    let mut wisp = self.lead(MOTE, Curve::Hold);
                     wisp.lifetime = self.life * DEBRIS_LIFE;
                     wisp = held(wisp, 0.2 * self.life * share(i, n));
                     wisp.origin = self.centre
@@ -454,7 +475,7 @@ impl Burst {
                     let way = if i % 2 == 0 { 1.0 } else { -1.0 };
                     let lean = 0.8 * jitter(self.id, i as u64, 68);
                     let throw = (self.side * way + self.along * lean).normalize_or_zero();
-                    let mut chip = self.lead(0.2, Curve::Pop);
+                    let mut chip = self.lead(CHIP, Curve::Pop);
                     chip.lifetime = self.life * 1.2;
                     chip.orient = Orient::Velocity;
                     chip.angle = heading(throw);

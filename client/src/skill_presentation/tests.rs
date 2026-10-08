@@ -1917,14 +1917,14 @@ fn target_bodies_fit_the_part_and_material_budgets() {
             accents.len(),
             strengths.len()
         ),
-        (67, 25, 22, 1)
+        (65, 25, 23, 2)
     );
     let materials = 3 * primaries.len()
         + 2 * strengths.len()
         + secondaries.len()
         + accents.len()
         + bodies::SHARED_MATERIALS;
-    assert_eq!(materials, 259);
+    assert_eq!(materials, 256);
     assert!(materials <= bodies::MATERIAL_BUDGET);
     assert_eq!(bodies::MATERIAL_BUDGET, 272);
     assert_eq!(bodies::PART_BUDGET, 400);

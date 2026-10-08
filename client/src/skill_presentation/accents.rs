@@ -47,6 +47,9 @@ pub(crate) const DECORATIVE_REACH: f32 = 2.0;
 /// Half extent of a soft glint of an accent as a share of the reach of its pattern.
 const GLINT: f32 = 0.14;
 
+/// Half length of one skid mark of a forced displacement, at most.
+const SKID: f32 = 0.6;
+
 /// Heights above the ground a pattern is drawn at.
 const FLOOR: f32 = 0.06;
 const HAND: f32 = 0.9;
@@ -335,10 +338,11 @@ impl Frame {
                     arc.orient = Orient::Ground;
                     arc.angle = self.angle + turn;
                     arc.spin = -2.0 * turn / self.life;
+                    // Each arc keeps one colour, so that two cuts are told apart: the
+                    // first in the lead colour, the second 80 ms later in the companion's.
+                    arc.end_color = None;
                     if i == 1 {
-                        // The second arc follows 80 ms later in the companion colour.
                         arc.color = self.companion;
-                        arc.end_color = None;
                         arc = late(arc, (0.08 / self.life).min(0.4));
                     }
                     out.push(arc);
@@ -786,17 +790,19 @@ impl Step {
                 self.ring(to, 0.6, 0.35, Curve::Grow, self.lead),
             ],
             Some(M::VeilStep) => {
-                // The body re-forms: pieces close in on the landing.
-                let mut out = vec![self.ring(to, 0.9, 0.4, Curve::Shrink, self.matter)];
-                out.extend(self.around(3).map(|outward| {
-                    let mut piece = self.piece(chest + outward * 0.8, 0.16, 0.4);
-                    piece.orient = Orient::Velocity;
-                    piece.angle = heading(-outward);
-                    piece.color = self.matter;
-                    piece.end_color = Some(self.lead);
-                    drift(piece, -outward, 0.65)
-                }));
-                out
+                // The body re-forms: pieces close in on the landing, dark at first and in
+                // the colour of the skill when they meet. No ring is drawn around the
+                // hero: a dark ring at its feet read as a mark on it.
+                self.around(4)
+                    .map(|outward| {
+                        let mut piece = self.piece(chest + outward * 0.8, 0.3, 0.4);
+                        piece.orient = Orient::Velocity;
+                        piece.angle = heading(-outward);
+                        piece.color = self.matter;
+                        piece.end_color = Some(self.lead);
+                        drift(piece, -outward, 0.5)
+                    })
+                    .collect()
             }
             None => self
                 .around(2)
@@ -894,42 +900,48 @@ impl Step {
                 (out, 0.2)
             }
             Some(M::VeilStep) => {
-                // The body dissolves: dark pieces drift apart where it stood.
-                let mut out = vec![self.glow(from + Vec3::Y * 0.8, 0.6, 0.35, self.matter)];
-                out.extend(self.around(3).map(|outward| {
-                    let mut piece = self.piece(from + outward * 0.2 + Vec3::Y * 0.8, 0.16, 0.4);
+                // The body dissolves where it stood, and the veil it leaves hangs along
+                // the line it travelled: pieces in the colour of the skill that darken,
+                // the nearest to the origin first.
+                let mut out = vec![self.glow(from + Vec3::Y * 0.8, 0.6, 0.4, self.matter)];
+                out.extend((0..3).map(|i| {
+                    let mut piece = self.piece(on_line(i, 3) + Vec3::Y * 0.8, 0.45, 0.45);
                     piece.orient = Orient::Velocity;
-                    piece.angle = heading(outward);
+                    piece.angle = heading(along);
                     piece.curve = Curve::Shrink;
-                    piece.size = sized(self.shape, 0.16, Curve::Shrink);
-                    piece.color = self.matter;
-                    piece.end_color = None;
+                    piece.size = sized(self.shape, 0.45, Curve::Shrink);
+                    piece.end_color = Some(self.matter);
                     piece.velocity = Vec3::Y * 0.4;
-                    drift(piece, outward, 0.5)
+                    piece.delay = 0.04 * i as f32;
+                    drift(piece, along, 0.3)
                 }));
                 (out, 0.1)
             }
             None => {
                 // Skid marks on the ground along the real displacement, end to end; a
-                // displacement too short to mark leaves only the dust of the arrival.
+                // displacement too short to mark leaves only the dust of the arrival. Each
+                // mark is three furrows with hard edges whose points lead the way the hero
+                // went: a soft streak is lost on pale stone. On a long displacement they
+                // cover more than half of the line, so that where the hero was thrown from
+                // and to is read at a glance.
                 let count = if length < 0.05 { 0 } else { steps(1.0, 6) };
-                let radius = (0.5 * length / count.max(1) as f32).min(0.4);
+                let radius = (0.5 * length / count.max(1) as f32).min(SKID);
                 let out = (0..count)
                     .map(|i| ParticleSpec {
                         event_id: self.id,
                         origin: on_line(i, count) + Vec3::Y * FLOOR,
-                        lifetime: 0.42,
-                        delay: 0.03 * i as f32,
-                        size: sized(ParticleShape::Streak, radius, Curve::Hold),
+                        lifetime: 0.55,
+                        delay: 0.01 * i as f32,
+                        size: sized(ParticleShape::Claw, radius, Curve::Hold),
                         angle: heading(along),
                         color: self.matter,
-                        shape: ParticleShape::Streak,
+                        shape: ParticleShape::Claw,
                         curve: Curve::Hold,
                         orient: Orient::Ground,
                         ..ParticleSpec::BASE
                     })
                     .collect();
-                (out, 0.03 * count as f32)
+                (out, 0.01 * count as f32)
             }
         }
     }
@@ -975,9 +987,9 @@ pub(crate) fn move_particles(
 /// Neutral ground skid marks of a hero that something else displaced. No afterimage and no
 /// colour of any skill: the client does not know what moved it.
 pub(crate) fn drag_streak(from: Option<Vec3>, to: Option<Vec3>, seed: u64) -> Vec<ParticleSpec> {
-    // Darker than the pale stone it is drawn on, and still no colour of any skill.
+    // Far darker than the pale stone it is drawn on, and still no colour of any skill.
     let dust = Tint {
-        color: Color::srgba(0.46, 0.43, 0.38, 0.8),
+        color: Color::srgba(0.25, 0.23, 0.2, 0.9),
         gain: 1.0,
     };
     let step = Step {
@@ -2552,12 +2564,20 @@ mod tests {
         let skid = drag_streak(Some(from), Some(to), 9);
         let marks: Vec<_> = skid
             .iter()
-            .filter(|spec| spec.shape == ParticleShape::Streak)
+            .filter(|spec| spec.shape == ParticleShape::Claw)
             .collect();
         assert_eq!(marks.len(), 6);
+        let way = (to - from).normalize();
         for mark in &marks {
             assert_eq!(mark.orient, Orient::Ground);
             assert!(mark.origin.y - ORIGIN.y < 0.1 && mark.velocity == Vec3::ZERO);
+            // Furrows on the line of the displacement, between its two ends, with their
+            // points toward where the hero went.
+            let along = (mark.origin - from).dot(way);
+            let reach = SKID + 1e-4;
+            assert!(along >= reach && along <= (to - from).length() - reach);
+            assert!((mark.angle - heading(way)).abs() < 1e-5);
+            assert!((mark.size - sized(ParticleShape::Claw, SKID, Curve::Hold)).abs() < 1e-5);
         }
         assert!(
             skid.iter()

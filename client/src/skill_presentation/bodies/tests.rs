@@ -1762,7 +1762,7 @@ fn fill_completes_when_the_server_fires() {
 fn rise_on_spawn_is_full_height_when_first_seen_late() {
     for (skill, kind, tall) in [
         (SkillId::Northwall, K::ShieldWall, 0.8),
-        (SkillId::WinterDivide, K::BeamWarning, 1.0),
+        (SkillId::WinterDivide, K::BeamWarning, 1.2),
     ] {
         let body = target_body(skill, kind);
         let copies = body.satellites.as_ref().unwrap();
@@ -2026,8 +2026,8 @@ fn a_strip_spans_its_core_and_spaces_its_copies_along_the_segment() {
         let at = fang.translation.xz();
         assert!((at.y - (index as f32 + 0.5) * 2.5).abs() < 1e-4);
         let side = if index % 2 == 0 { 1.0 } else { -1.0 };
-        // A fang is one unit across.
-        assert!((at.x - side * (inside - 0.5)).abs() < 1e-4, "{at}");
+        // A fang is 0.6 units across.
+        assert!((at.x - side * (inside - 0.3)).abs() < 1e-4, "{at}");
     }
     for (index, count, side) in [
         (0, 8, 1.0),
@@ -2775,7 +2775,7 @@ fn satellites_of_a_body_in_flight_stay_inside_its_radius() {
             }
         }
     }
-    assert_eq!(rows, 11);
+    assert_eq!(rows, 12);
     // Layouts: copies of one ring are spread evenly and differ from one another.
     let e = effect(SkillId::RiftSeal, K::Bolt);
     let body = target_body(SkillId::RiftSeal, K::Bolt);

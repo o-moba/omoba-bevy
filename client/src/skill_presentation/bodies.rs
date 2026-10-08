@@ -40,9 +40,10 @@ const FILL_LIFT: f32 = 0.04;
 const MARKER_LIFT: f32 = 0.08;
 /// Authored parts and trails on the ground lie above all of them.
 const GROUND_LIFT: f32 = 0.12;
-/// Height of a body that flies at `chest` and at `high`.
+/// Height of a body that flies at `chest` and at `high`. A body at `high` clears a hero
+/// and the bars over its head, which stand between 2.1 and 2.4 units.
 const CHEST: f32 = 0.95;
-const HIGH: f32 = 2.3;
+const HIGH: f32 = 3.1;
 /// Height of a rocket's flight light above the root of its body.
 pub(crate) const LIGHT_HEIGHT: f32 = CHEST + 0.6;
 /// An effect without a replicated heading is laid out toward the side the locked camera

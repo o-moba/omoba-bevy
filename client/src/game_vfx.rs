@@ -207,9 +207,10 @@ const MAX_DELAY: f32 = 0.25;
 /// Share of its life for which a generated particle is drawn at its whole coverage.
 pub(crate) const HOLD_SHARE: f32 = 0.5;
 /// Share of the radius of a dense glow that is covered by `DENSE_COVER` of its colour; the
-/// rest fades to nothing at the rim.
-pub(crate) const DENSE_CORE: f32 = 0.42;
-const DENSE_COVER: f32 = 0.9;
+/// rest fades to nothing at the rim. The core is narrower than the body of a hero and lets
+/// a fifth of it through, so a unit under the flash of a hit keeps its outline.
+pub(crate) const DENSE_CORE: f32 = 0.34;
+const DENSE_COVER: f32 = 0.8;
 
 /// One pooled particle as a pure generator describes it. Positions and velocities are
 /// simulation coordinates in both render modes.
@@ -581,11 +582,11 @@ impl Plugin for GameVfxPlugin {
             );
     }
 }
-/// Coverage of the dense glow at `r` radii from its centre: whole over its core, then a
-/// fall to nothing at the rim that is steeper than the soft glow's.
+/// Coverage of the dense glow at `r` radii from its centre: whole over its core, then an
+/// even fall to nothing at the rim, which keeps more of its colour than the soft glow's.
 fn dense_alpha(r: f32) -> f32 {
     let fade = ((1. - r) / (1. - DENSE_CORE)).clamp(0., 1.);
-    DENSE_COVER * fade.powf(1.3)
+    DENSE_COVER * fade
 }
 fn dense_texture() -> Image {
     let mut pixels = Vec::with_capacity(64 * 64 * 4);
@@ -744,7 +745,8 @@ pub(crate) fn shape_mesh(shape: Shape) -> Mesh {
     use std::f32::consts::{FRAC_PI_2, PI, TAU};
     match shape {
         Shape::Glow => Rectangle::new(1., 1.).into(),
-        Shape::Ringlet => Annulus::new(0.43, 0.5).into(),
+        // The stroke is a fifth of the radius: a small ring is still a line that is seen.
+        Shape::Ringlet => Annulus::new(0.4, 0.5).into(),
         Shape::Slash => band_mesh(-1.2, 1.2, 0.7, 20, |t| (PI * t).sin() * 0.16),
         Shape::Streak => Rectangle::new(1.7, 0.36).into(),
         Shape::Star => {
@@ -756,7 +758,9 @@ pub(crate) fn shape_mesh(shape: Shape) -> Mesh {
                 .collect();
             fan_mesh([0., 0.], &rim)
         }
-        // Two arms from the point; a lit line runs down the middle of each.
+        // Two arms from the point. The inside of the point is lit and each arm deepens
+        // toward its end and toward its outer edge: a mark with a bright corner, not a
+        // bar with a highlight along it, however large it is drawn.
         Shape::Chevron => rimmed(
             planar_mesh(
                 vec![
@@ -774,7 +778,7 @@ pub(crate) fn shape_mesh(shape: Shape) -> Mesh {
                     0, 1, 7, 0, 7, 6, 6, 7, 2, 6, 2, 3, 6, 3, 4, 6, 4, 8, 0, 6, 8, 0, 8, 5,
                 ],
             ),
-            |index| index >= 6,
+            |index| index == 3 || index == 6,
         ),
         Shape::Diamond => fan_mesh([0., 0.], &[[0.5, 0.], [0., 0.3], [-0.5, 0.], [0., -0.3]]),
         Shape::Arc => band_mesh(-FRAC_PI_2, FRAC_PI_2, 0.5, 12, |_| 0.14),
@@ -3368,6 +3372,20 @@ mod tests {
             assert!((blend.opacity(t) - generated).abs() < 1e-6, "{t}");
             assert!((Particle::BASE.opacity(t) - wire).abs() < 1e-6, "{t}");
         }
+        // The dense glow of a hit covers its core evenly, lets a fifth of what it covers
+        // through, and falls evenly to nothing at its rim; half-way out it still covers
+        // more than the soft glow does.
+        assert_eq!(dense_alpha(0.), DENSE_COVER);
+        assert_eq!(dense_alpha(DENSE_CORE), DENSE_COVER);
+        assert_eq!(dense_alpha(1.), 0.);
+        const { assert!(DENSE_COVER <= 0.8 && DENSE_CORE < 0.4) };
+        let mut last = DENSE_COVER;
+        for step in 0..=20 {
+            let cover = dense_alpha(DENSE_CORE + (1. - DENSE_CORE) * step as f32 / 20.);
+            assert!(cover <= last);
+            last = cover;
+        }
+        assert!(dense_alpha(0.67) > 2. * (1. - 0.67_f32).powf(1.6));
         // A ground particle lies flat with its axis along the heading, and turns about the
         // vertical; a billboard keeps facing the camera.
         let facing = Quat::from_rotation_x(-1.);

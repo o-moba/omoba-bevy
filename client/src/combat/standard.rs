@@ -678,6 +678,19 @@ pub(super) fn hero_marks(sight: &HeroSight) -> Vec<HeroMark> {
     marks
 }
 
+/// Whether the fallback lines of an effect are drawn. In the flat view they always are. In
+/// 3D an effect whose row is known is drawn by that row, and a body draws its own boundary
+/// in the colour of the team: lines of another colour over it would hide whose it is. Only
+/// a trap whose row has no body yet keeps the tactical outline over its model.
+pub(super) fn outlined(
+    mode: PlayerVisualMode,
+    kind: EffectVisualKind,
+    known: bool,
+    staged: bool,
+) -> bool {
+    mode != PlayerVisualMode::Models3d || !(staged || (known && kind != EffectVisualKind::Trap))
+}
+
 /// Bounded, snapshot-driven geometry. Effects do not depend on a visible owner.
 pub(super) fn draw_effects(
     mut gizmos: Gizmos<SkillEffectGizmos>,
@@ -712,11 +725,8 @@ pub(super) fn draw_effects(
             continue;
         }
         let profile = profiles.as_ref().and_then(|r| r.profile(e.skill));
-        // Keep the tactical trap outline over the newer 3D trap model.
-        if *mode == PlayerVisualMode::Models3d
-            && e.kind != EffectVisualKind::Trap
-            && profile.is_some()
-        {
+        let staged = profiles.as_ref().is_some_and(|r| r.body_for(e).is_some());
+        if !outlined(*mode, e.kind, profile.is_some(), staged) {
             continue;
         }
         let friendly = local.single().is_ok_and(|t| *t == e.owner_team);
@@ -917,6 +927,25 @@ mod tests {
         // A new kind does not compile in `effect_strokes` until it has an arm; this list
         // keeps the table above complete.
         assert_eq!(kinds.len(), 14);
+    }
+
+    #[test]
+    fn a_staged_body_replaces_the_fallback_lines_of_its_effect_in_3d() {
+        use EffectVisualKind as K;
+        use PlayerVisualMode::{Models3d, Sprite2d};
+        for kind in [K::Trap, K::Field, K::Bolt, K::Cage] {
+            // The flat view has no body: every effect keeps its lines.
+            for (known, staged) in [(false, false), (true, false), (true, true)] {
+                assert!(outlined(Sprite2d, kind, known, staged), "{kind:?}");
+            }
+            // An effect of no known row is drawn by its lines alone.
+            assert!(outlined(Models3d, kind, false, false), "{kind:?}");
+            // A body carries the boundary and the team colour of its effect, a trap's too.
+            assert!(!outlined(Models3d, kind, true, true), "{kind:?}");
+            // A row without a body still draws its effect, except for a trap: its model
+            // has no boundary, so the tactical outline stays.
+            assert_eq!(outlined(Models3d, kind, true, false), kind == K::Trap);
+        }
     }
 
     #[test]

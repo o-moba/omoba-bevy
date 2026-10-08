@@ -24,12 +24,18 @@ use crate::{
 };
 
 pub(crate) const MAX_VISUALS: usize = 384;
-/// Gain of the light parts of a form and of its white-hot core. The light is a little
-/// brighter than a `shape` body; more gain turns a saturated profile colour pale.
-const FORM_GAIN: f32 = 3.0;
+/// Gain of the light parts of a form and of its white-hot core. The light is brighter
+/// than a `shape` body; far more gain turns a saturated profile colour pale.
+const FORM_GAIN: f32 = 3.6;
 /// Length of a long body that is drawn at once behind the place its projectile was first
-/// seen at: an arm's length, inside the hero that threw it.
-const FORM_START: f32 = 0.9;
+/// seen at. A projectile is first seen about half a unit ahead of its hero, so this much
+/// of it ends inside the hero that threw it and not behind its back.
+const FORM_START: f32 = 0.7;
+/// A body that turns about its position or lies across it is first seen at this share of
+/// its size and is whole after this distance of flight: on the frame of the cast it is a
+/// thing in the hand, not a plate over the head of the hero that threw it.
+const FORM_SEED: f32 = 0.4;
+const FORM_GROWTH: f32 = 0.9;
 const CORE_GAIN: f32 = 5.0;
 /// Lightness and opacity of the deep shade of a form's colour.
 const ECHO_LIGHTNESS: f32 = 0.36;
@@ -155,6 +161,9 @@ struct FormBody {
     hugs_ground: bool,
     /// `combat_visuals::form_heading_span` of a body laid out along its path.
     span: Option<(f32, f32)>,
+    /// A form that stays centred on its projectile: it grows over its first stretch of
+    /// flight. The reach streak of a melee contact is whole at once.
+    centred: bool,
 }
 
 /// Capture evidence: what stands for a projectile.
@@ -499,6 +508,11 @@ fn attach_visuals(
                         }
                         _ => None,
                     },
+                    centred: matches!(
+                        body,
+                        FlightBody::Form(form, mesh)
+                            if crate::combat_visuals::form_heading_span(form, mesh).is_none()
+                    ),
                 },
             ));
             continue;
@@ -652,10 +666,18 @@ fn update_visuals(
                 let length = (nose - tail) * visual.profile.scale;
                 let shown = ((visual.travelled + FORM_START) / length).clamp(0.05, 1.0);
                 if let Ok(mut pose) = transforms.get_mut(visual.fallback) {
-                    // It is thinner while it is short, so that it keeps its outline.
-                    let across = shown.sqrt();
+                    // It is thinner while it is short, so that it keeps an outline that
+                    // points along its path.
+                    let across = shown.powf(0.4);
                     pose.translation.z = -nose * shown;
                     pose.scale = Vec3::new(across, across, shown);
+                }
+            } else if form.centred {
+                // Its middle stays on the projectile; no delay is added and it is never
+                // larger than its profile makes it.
+                let grown = FORM_SEED + (1.0 - FORM_SEED) * visual.travelled / FORM_GROWTH;
+                if let Ok(mut pose) = transforms.get_mut(visual.fallback) {
+                    pose.scale = Vec3::splat(grown.clamp(FORM_SEED, 1.0));
                 }
             }
         }
@@ -952,22 +974,22 @@ mod tests {
             form_heading_span(ProjectileForm::Dart, profile.silhouette.unwrap()).unwrap();
         assert!(tail < -1.0 && nose > 1.0, "{tail} {nose}");
         let length = (nose - tail) * profile.scale;
-        let pose = |app: &App| *app.world().get::<Transform>(container).unwrap();
+        let pose = |app: &App, container: Entity| *app.world().get::<Transform>(container).unwrap();
         // The farthest point of the body ahead of and behind the projectile, in units.
         let ends = |app: &App| {
-            let pose = pose(app);
+            let pose = pose(app, container);
             (
                 (pose.translation.z + tail * pose.scale.z) * profile.scale,
                 (pose.translation.z + nose * pose.scale.z) * profile.scale,
             )
         };
-        // First seen: an arm's length of it, none of it ahead.
+        // First seen: its first stretch, none of it ahead.
         let (behind, ahead) = ends(&app);
         assert!(ahead.abs() < 1e-5, "{ahead}");
         assert!((behind + FORM_START).abs() < 1e-4, "{behind}");
-        let start = pose(&app).scale;
+        let start = pose(&app, container).scale;
         assert!(start.z < start.x && start.x < 1.0 && start.x == start.y);
-        // In flight it is never longer than the distance flown and that arm's length, and
+        // In flight it is never longer than the distance flown and that first stretch, and
         // its nose stays on the projectile.
         let mut flown = 0.0;
         while flown < length + 1.0 {
@@ -986,8 +1008,9 @@ mod tests {
             );
             assert!((-behind - (flown + FORM_START).min(length)).abs() < 1e-4);
         }
-        assert_eq!(pose(&app).scale, Vec3::ONE);
-        // A plate that spins about its position keeps its middle there.
+        assert_eq!(pose(&app, container).scale, Vec3::ONE);
+        // A plate that spins about its position keeps its middle there, and grows to its
+        // size over its first stretch of flight.
         assert_eq!(
             form_heading_span(ProjectileForm::DiscSkim, Silhouette::Kite),
             None
@@ -1002,10 +1025,27 @@ mod tests {
         let plate = shoot(&mut app, WARRIOR, ProjectileStyle::Crescent, Some(0));
         let visual = app.world().get::<ProjectileVisual>(plate).unwrap();
         assert_eq!(visual.profile.form, Some(ProjectileForm::DiscSkim));
+        let container = visual.fallback;
+        let seen = pose(&app, container);
         assert_eq!(
-            *app.world().get::<Transform>(visual.fallback).unwrap(),
-            Transform::default()
+            (seen.translation, seen.scale),
+            (Vec3::ZERO, Vec3::splat(FORM_SEED))
         );
+        let mut last = FORM_SEED;
+        for _ in 0..4 {
+            app.world_mut()
+                .get_mut::<Transform>(plate)
+                .unwrap()
+                .translation
+                .x += 0.3;
+            app.update();
+            let grown = pose(&app, container);
+            assert_eq!(grown.translation, Vec3::ZERO);
+            assert!(grown.scale.x >= last && grown.scale.x <= 1.0);
+            assert!(grown.scale.x == grown.scale.y && grown.scale.y == grown.scale.z);
+            last = grown.scale.x;
+        }
+        assert_eq!(pose(&app, container).scale, Vec3::ONE);
     }
 
     #[test]
