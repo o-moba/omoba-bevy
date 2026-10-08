@@ -536,6 +536,19 @@ fn a_receipt_with_a_withheld_source_is_heard_by_its_victim_and_confirms_no_kill(
             .1
             .is_empty()
     );
+    // The same receipt is delivered again with the hero named once the victim's team
+    // sees it: it was heard, and is not played a second time.
+    let mut named = hit.clone();
+    named.source = CombatEntity {
+        kind: CombatEntityKind::Player,
+        id: ENEMY,
+    };
+    assert!(
+        cursor
+            .accept((1, 1), &GameState::Running, Some(local()), &[named])
+            .1
+            .is_empty()
+    );
 
     // A lethal one is the local death and never a kill confirmation.
     hit.id = 2;

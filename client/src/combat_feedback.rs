@@ -115,8 +115,9 @@ pub(crate) struct ConfirmedHit {
     pub position: Vec3,
 }
 
-/// The hero that dealt a receipt, when the client sees it. A hidden or unknown source has
-/// none: its hit keeps the built-in burst of the wire style and points nowhere.
+/// The hero that dealt a receipt, when the client sees it. A hidden or withheld source has
+/// none: its hit keeps the built-in burst of the wire style, without a direction, and opens
+/// no link.
 #[derive(Clone, Copy)]
 struct Source<'a> {
     position: Vec3,
@@ -185,12 +186,17 @@ impl ReceiptLooks {
     }
 }
 
-/// Ground direction of a hit: away from the source the client sees, else none in particular.
-fn hit_direction(source: Option<Vec3>, position: Vec3) -> Vec2 {
-    source
-        .map(|source| (position - source).xz())
-        .unwrap_or(Vec2::X)
-        .normalize_or(Vec2::X)
+/// Ground direction of a hit: away from the hero that dealt it, when the client sees that
+/// hero at `source`. A hit by a hero the client does not see has none, and neither has one
+/// whose dealer the server withholds (`Unknown`, a hero the viewer's team cannot see:
+/// `common/src/vision.rs:273-314`): nothing in its burst may point anywhere. A hit by
+/// anything else keeps the fixed lay the built-in burst has always had.
+fn hit_direction(dealer: CombatEntityKind, source: Option<Vec3>, position: Vec3) -> Option<Vec2> {
+    match (source, dealer) {
+        (Some(source), _) => Some((position - source).xz().normalize_or(Vec2::X)),
+        (None, CombatEntityKind::Player | CombatEntityKind::Unknown) => None,
+        (None, _) => Some(Vec2::X),
+    }
 }
 
 /// The burst of an accepted receipt from the recipe of the row that dealt it. `None` keeps
@@ -480,7 +486,11 @@ fn collect_hits(
         } else {
             out.bursts.write(ImpactBurst {
                 position,
-                direction: hit_direction(source.map(|source| source.position), position),
+                direction: hit_direction(
+                    event.source.kind,
+                    source.map(|source| source.position),
+                    position,
+                ),
                 color: if vital {
                     Color::srgb(1.0, 0.13, 0.43)
                 } else {
@@ -1172,17 +1182,83 @@ mod tests {
 
     #[test]
     fn a_hit_points_away_from_a_source_the_client_sees() {
+        use CombatEntityKind as K;
         let at = Vec3::new(3.0, 1.05, 4.0);
+        let from = |source: Vec3| hit_direction(K::Player, Some(source), at);
         // Ground coordinates of the simulation in both render modes; heights do not turn it.
-        assert_eq!(hit_direction(Some(Vec3::new(3.0, 9.0, 0.0)), at), Vec2::Y);
-        assert_eq!(hit_direction(Some(Vec3::new(0.0, 0.5, 4.0)), at), Vec2::X);
+        assert_eq!(from(Vec3::new(3.0, 9.0, 0.0)), Some(Vec2::Y));
+        assert_eq!(from(Vec3::new(0.0, 0.5, 4.0)), Some(Vec2::X));
+        assert_eq!(from(Vec3::new(3.0, 0.5, 6.0)), Some(Vec2::NEG_Y));
+        // A hit on itself has the fixed lay.
+        assert_eq!(from(at), Some(Vec2::X));
+        // A hero the client does not see, and a dealer the server withholds, give the hit
+        // no direction at all.
+        assert_eq!(hit_direction(K::Player, None, at), None);
+        assert_eq!(hit_direction(K::Unknown, None, at), None);
+        // A minion, a tower and a monster keep the lay their hits have always had.
+        for dealer in [K::Minion, K::Structure, K::Neutral] {
+            assert_eq!(hit_direction(dealer, None, at), Some(Vec2::X), "{dealer:?}");
+        }
+    }
+
+    /// A receipt on a unit the viewer sees from a hero it does not see reaches the client
+    /// with its source withheld (`Unknown`, id 0). It is one hit like any other: the
+    /// built-in burst of its wire style, no recipe, no link, no direction. When the same
+    /// receipt is delivered again with the hero named, it is not a second hit.
+    #[test]
+    fn a_receipt_with_a_withheld_source_is_drawn_once_without_a_direction() {
+        use shared::loadout::SkillId;
+        let registry = SkillPresentation::target();
+        let class = shared::HeroClass::Wildspark;
+        let traps = slot_of(class, SkillId::WildTraps);
+        let named = CombatEvent {
+            trap_triggered: true,
+            ..dealt(8, 22.0, 7, traps)
+        };
+        let withheld = CombatEvent {
+            source: shared::combat::CombatEntity::default(),
+            ..named.clone()
+        };
         assert_eq!(
-            hit_direction(Some(Vec3::new(3.0, 0.5, 6.0)), at),
-            Vec2::NEG_Y
+            (withheld.source.kind, withheld.source.id),
+            (CombatEntityKind::Unknown, 0)
         );
-        // A hidden source gives the hit no direction, and neither does a hit on itself.
-        assert_eq!(hit_direction(None, at), Vec2::X);
-        assert_eq!(hit_direction(Some(at), at), Vec2::X);
+
+        let mut cursor = HitCursor::default();
+        cursor.accept((1, 1), &[hit(3, 10.0)]);
+        // Accepted as a hit although nobody is named: the victim is what makes it one.
+        let accepted = cursor.accept((1, 1), std::slice::from_ref(&withheld)).1;
+        assert_eq!(accepted.len(), 1);
+        assert_eq!(accepted[0].source.kind, CombatEntityKind::Unknown);
+        // No hero answers for it, so no row draws it and nothing points.
+        assert!(themed_impact(Some(&registry), None, &accepted[0], FLOOR, &[], 0).is_none());
+        let at = Vec3::new(withheld.x, withheld.y, withheld.z);
+        assert_eq!(hit_direction(withheld.source.kind, None, at), None);
+        // The same snapshot again, and the same receipt once the victim's team sees the
+        // hero: the id was drawn, whoever it names now.
+        for later in [&withheld, &named] {
+            assert!(
+                cursor
+                    .accept((1, 1), std::slice::from_ref(later))
+                    .1
+                    .is_empty()
+            );
+        }
+        // Newer receipts are not held back by it.
+        let next = CombatEvent {
+            id: 9,
+            ..named.clone()
+        };
+        assert_eq!(cursor.accept((1, 1), &[named.clone(), next]).1.len(), 1);
+        // A shielded trap of an unseen owner is no hit and has no row to take its cue
+        // from: the collector offers it, and without a hero it draws nothing.
+        let snap = CombatEvent {
+            id: 10,
+            amount: 0.0,
+            ..withheld.clone()
+        };
+        assert_eq!(trap_snaps(9, std::slice::from_ref(&snap)).len(), 1);
+        assert!(cursor.accept((1, 1), &[snap]).1.is_empty());
     }
 
     #[test]

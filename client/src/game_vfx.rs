@@ -69,7 +69,9 @@ impl BurstKind {
 #[derive(Message, Clone)]
 pub(crate) struct ImpactBurst {
     pub position: Vec3,
-    pub direction: Vec2,
+    /// The ground heading of the hit. `None` when nothing may say where it came from: the
+    /// burst then has no axis at all.
+    pub direction: Option<Vec2>,
     pub color: Color,
     pub scale: f32,
     pub lifetime: f32,
@@ -1037,14 +1039,18 @@ fn burst_particles(burst: &ImpactBurst) -> Vec<Particle> {
     if !burst.position.is_finite()
         || !burst.scale.is_finite()
         || !burst.lifetime.is_finite()
-        || !burst.direction.is_finite()
+        || burst
+            .direction
+            .is_some_and(|direction| !direction.is_finite())
     {
         return Vec::new();
     }
     let size = burst.scale.clamp(0.1, 2.);
     let lifetime = burst.lifetime.clamp(0.08, 1.2);
     let origin = burst.position + Vec3::Y * 0.75;
-    let angle = burst.direction.y.atan2(burst.direction.x);
+    let angle = burst
+        .direction
+        .map_or(0., |direction| direction.y.atan2(direction.x));
     let first = Particle {
         event_id: burst.seed,
         origin,
@@ -1056,6 +1062,8 @@ fn burst_particles(burst: &ImpactBurst) -> Vec<Particle> {
         color: burst.color,
         shape: match burst.kind {
             BurstKind::Magic => Shape::Ringlet,
+            // A slash has an axis; a hit without a direction is marked by a ring.
+            BurstKind::Melee if burst.direction.is_none() => Shape::Ringlet,
             BurstKind::Melee => Shape::Slash,
             BurstKind::Ranged => Shape::Glow,
             BurstKind::VitalBreak => Shape::Ringlet,
@@ -1958,7 +1966,7 @@ fn pickup_feedback(
         }
         bursts.write(ImpactBurst {
             position: pose.translation,
-            direction: Vec2::Y,
+            direction: Some(Vec2::Y),
             color: Color::srgb(0.35, 1.0, 0.65),
             scale: 1.3,
             lifetime: 0.65,
@@ -2115,7 +2123,7 @@ mod tests {
     fn test_burst() -> ImpactBurst {
         ImpactBurst {
             position: Vec3::ZERO,
-            direction: Vec2::X,
+            direction: Some(Vec2::X),
             color: Color::WHITE,
             scale: 1.,
             lifetime: 1.,
@@ -2439,10 +2447,57 @@ mod tests {
         app.update();
         assert!((age(&mut app).unwrap() - stepped - 0.016 * 0.25).abs() < 1e-6);
     }
+    /// A burst without a direction has no particle with an axis: a ring where a melee hit
+    /// has its slash, and otherwise the same particles as a burst that points along +X.
+    #[test]
+    fn a_burst_without_a_direction_has_no_axis() {
+        let axial = [Shape::Slash, Shape::Streak, Shape::Chevron];
+        for kind in [
+            BurstKind::Melee,
+            BurstKind::Magic,
+            BurstKind::Ranged,
+            BurstKind::VitalBreak,
+        ] {
+            let pointed = burst_particles(&ImpactBurst {
+                kind,
+                ..test_burst()
+            });
+            let blind = burst_particles(&ImpactBurst {
+                kind,
+                direction: None,
+                ..test_burst()
+            });
+            assert_eq!(blind.len(), pointed.len(), "{kind:?}");
+            for (blind, pointed) in blind.iter().zip(&pointed) {
+                assert_eq!(blind.origin, pointed.origin);
+                assert_eq!(blind.velocity, pointed.velocity);
+                assert_eq!(
+                    (blind.size, blind.lifetime),
+                    (pointed.size, pointed.lifetime)
+                );
+            }
+            // The crossed streaks of a vital break are an emblem with a fixed lay.
+            let axes = blind
+                .iter()
+                .filter(|particle| axial.contains(&particle.shape))
+                .count();
+            assert_eq!(axes, if kind == BurstKind::VitalBreak { 2 } else { 0 });
+        }
+        let lead = |direction| {
+            burst_particles(&ImpactBurst {
+                kind: BurstKind::Melee,
+                direction,
+                ..test_burst()
+            })[0]
+                .shape
+        };
+        assert_eq!(lead(Some(Vec2::Y)), Shape::Slash);
+        assert_eq!(lead(None), Shape::Ringlet);
+    }
     #[test]
     fn malformed_bursts_do_not_produce_particles() {
         let mut burst = test_burst();
-        burst.direction.x = f32::NAN;
+        burst.direction = Some(Vec2::new(f32::NAN, 0.));
         assert!(burst_particles(&burst).is_empty());
         burst = test_burst();
         burst.position.y = f32::INFINITY;
@@ -2470,7 +2525,7 @@ mod tests {
         for kind in [BurstKind::Melee, BurstKind::Magic, BurstKind::Ranged] {
             let burst = ImpactBurst {
                 position: Vec3::ZERO,
-                direction: Vec2::X,
+                direction: Some(Vec2::X),
                 color: Color::WHITE,
                 scale: 100.,
                 lifetime: 100.,
@@ -2842,7 +2897,7 @@ mod tests {
         assert_eq!(profile.id, "mage_arcane");
         let burst = ImpactBurst {
             position: Vec3::new(3., 1., -2.),
-            direction: Vec2::X,
+            direction: Some(Vec2::X),
             color: profile.impact.color(),
             scale: profile.impact.scale,
             lifetime: profile.impact.lifetime,
