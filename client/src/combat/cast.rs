@@ -16,7 +16,7 @@ use shared::{
 };
 use std::fmt::Display;
 
-use super::cooldown::{LocalCastCooldown, local_hero_class};
+use super::cooldown::{LocalCastCooldown, local_hero_class, recast_sendable};
 use super::feedback::ActionFeedback;
 use super::selection::TargetState;
 use crate::equipped_skills;
@@ -406,11 +406,32 @@ pub(super) fn resolve_pending_cast_system(
         let aim = pending_cast.aim.or(cursor).unwrap_or_else(|| {
             player_transform.translation.xz() + player_transform.forward().xz() * 10.0
         });
-        let recast = state.is_some_and(|s| s.slots[slot.index()].can_recast);
+        // The replicated flag only opens the recast window. A recast with a gate is also
+        // refused away from the skill's own effect (Mountain Echo).
+        let offered = state.is_some_and(|s| s.slots[slot.index()].can_recast);
+        let recast = state.is_some_and(|s| {
+            recast_sendable(
+                skill,
+                &s.slots[slot.index()],
+                player_transform.translation.xz(),
+                net_id
+                    .map(|id| id.0)
+                    .or(game.as_ref().map(|game| game.your_id))
+                    .unwrap_or(0),
+                game.as_ref().map_or(&[], |game| &game.skill_effects),
+            )
+        });
         if !stats.is_alive()
             || !equipped_skills::unlocked(&skills, &prog)[slot.index()]
             || !aim.is_finite()
         {
+            pending_cast.cancel();
+            return;
+        }
+        if offered && !recast {
+            // The server reads this press as the recast and drops it without a word; a
+            // first cast is not possible while the window is open.
+            report_plain(&mut feedback, "combat.standard.not_ready");
             pending_cast.cancel();
             return;
         }

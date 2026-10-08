@@ -110,6 +110,255 @@ fn dawn_field_recast_bypasses_mana_recovery_and_running_base_cooldown() {
     );
 }
 
+/// A replicated Mountain Echo colossus of hero `owner`.
+fn colossus(owner: u64, at: Vec2) -> shared::loadout::SkillEffectState {
+    shared::loadout::SkillEffectState {
+        id: 40,
+        owner_id: owner,
+        owner_team: shared::map::Team::Green,
+        skill: shared::loadout::SkillId::MountainEcho,
+        kind: shared::loadout::EffectVisualKind::Bolt,
+        position: at.to_array(),
+        end: [0.0; 2],
+        radius: 2.0,
+        remaining_secs: 4.0,
+        armed: true,
+        consumed_segments: 0,
+    }
+}
+
+#[test]
+fn colossus_recast_requires_own_effect_within_gate() {
+    use super::cooldown::{recast_sendable, recast_usable};
+    use shared::loadout::{SkillEffect, SkillId, SkillSlotState, skill};
+
+    let echo = skill(SkillId::MountainEcho);
+    let open = SkillSlotState {
+        can_recast: true,
+        recast_remaining_secs: 3.0,
+        ..default()
+    };
+    let closed = SkillSlotState::default();
+    let hero = Vec2::new(10.0, 5.0);
+    let gate = crate::skill_presentation::geometry::RECAST_GATE_MOUNTAIN_ECHO;
+    let away = |distance: f32| hero + Vec2::new(0.6, -0.8) * distance;
+    let usable = |slot: &SkillSlotState, id: u64, effects: &[_]| {
+        recast_usable(echo, slot, hero, id, effects)
+    };
+
+    // The open window alone is not a recast the server accepts: it needs the hero's own
+    // colossus within the gate (`common/src/skills/advanced.rs`, 4.0 units).
+    assert!(!usable(&open, 1, &[]));
+    assert!(usable(&open, 1, &[colossus(1, away(gate - 0.01))]));
+    assert!(!usable(&open, 1, &[colossus(1, away(gate + 0.01))]));
+    assert!(usable(
+        &open,
+        1,
+        &[colossus(1, away(20.0)), colossus(1, away(3.0))]
+    ));
+    // A closed window, another hero's colossus, one whose owner is hidden and another
+    // effect of the hero open nothing.
+    assert!(!usable(&closed, 1, &[colossus(1, away(1.0))]));
+    assert!(!usable(&open, 1, &[colossus(2, away(1.0))]));
+    assert!(!usable(&open, 0, &[colossus(0, away(1.0))]));
+    let mut pillar = colossus(1, away(1.0));
+    pillar.skill = SkillId::FaultLine;
+    assert!(!usable(&open, 1, &[pillar]));
+
+    // The press that is sent may lead the snapshot by what the colossus travels in a
+    // tenth of a second, and by nothing else.
+    let SkillEffect::Technique { speed, .. } = echo.effect else {
+        panic!("Mountain Echo is a technique");
+    };
+    let lead = speed * 0.1;
+    assert!((lead - 1.2).abs() < 1e-6);
+    let sendable = |slot: &SkillSlotState, id: u64, effects: &[_]| {
+        recast_sendable(echo, slot, hero, id, effects)
+    };
+    assert!(sendable(&open, 1, &[colossus(1, away(gate - 0.01))]));
+    assert!(sendable(&open, 1, &[colossus(1, away(gate + lead - 0.01))]));
+    assert!(!sendable(
+        &open,
+        1,
+        &[colossus(1, away(gate + lead + 0.01))]
+    ));
+    assert!(!sendable(&open, 1, &[]));
+    assert!(!sendable(&closed, 1, &[colossus(1, away(1.0))]));
+    assert!(!sendable(&open, 1, &[colossus(2, away(1.0))]));
+    assert!(!sendable(&open, 0, &[colossus(0, away(1.0))]));
+
+    // Every other recast is what its flag says, wherever the hero stands.
+    for id in SkillId::ALL {
+        if id == SkillId::MountainEcho {
+            continue;
+        }
+        let def = skill(id);
+        assert!(recast_usable(def, &open, hero, 1, &[]), "{}", id.id());
+        assert!(recast_sendable(def, &open, hero, 1, &[]), "{}", id.id());
+        assert!(!recast_usable(def, &closed, hero, 1, &[]), "{}", id.id());
+        assert!(!recast_sendable(def, &closed, hero, 1, &[]), "{}", id.id());
+    }
+}
+
+#[test]
+fn colossus_recast_is_offered_and_sent_only_inside_the_gate() {
+    use super::standard::{StandardStatus, update_status};
+    use crate::i18n::{tr, trf};
+    use crate::net::{PlayerEquipment, PlayerSkillCooldowns};
+
+    const R: usize = 3;
+    let running = PlayerSkillCooldowns {
+        remaining_secs: [0.0, 0.0, 0.0, 45.0],
+        recovery_secs: 0.0,
+    };
+    let mut app = standard_cast_app(HeroClass::Cinderforge, R, true);
+    let mut inspection = super::inspection::SkillInspection::default();
+    inspection.slot = Some(R);
+    app.insert_resource(inspection)
+        .init_resource::<crate::mobile_controls::MobileControls>()
+        .init_resource::<crate::gamepad::GamepadControls>()
+        .insert_resource(GameStateSnapshot {
+            your_id: 1,
+            ..default()
+        })
+        .add_systems(
+            Update,
+            (
+                sync_authoritative_cooldown_durations.before(resolve_pending_cast_system),
+                update_status.after(resolve_pending_cast_system),
+            ),
+        );
+    let label = app
+        .world_mut()
+        .spawn((Text::default(), Node::default(), StandardStatus))
+        .id();
+    let hero = app
+        .world_mut()
+        .query_filtered::<Entity, With<Player>>()
+        .single(app.world())
+        .unwrap();
+    app.world_mut().entity_mut(hero).insert((
+        PlayerEquipment::default(),
+        running,
+        MovementTarget { target: Vec3::X },
+    ));
+    app.world_mut().get_mut::<CombatStats>(hero).unwrap().mana = 100.0;
+    *app.world_mut().resource_mut::<LocalCastCooldown>() = LocalCastCooldown::default();
+    let recast_line = trf(
+        "combat.standard.recast",
+        &[("key", &"R"), ("seconds", &"3.0")],
+    );
+
+    // What one press does with the colossus `distance` away from the hero (none: gone).
+    let press = |app: &mut App, distance: Option<f32>| {
+        app.world_mut()
+            .resource_mut::<GameStateSnapshot>()
+            .skill_effects = distance
+            .map(|distance| colossus(1, Vec2::new(0.0, distance)))
+            .into_iter()
+            .collect();
+        app.world_mut()
+            .resource_mut::<ActionFeedback>()
+            .text
+            .clear();
+        app.world_mut().resource_mut::<PendingCast>().request = Some(PendingCastRequest {
+            slot: R,
+            target_entity: None,
+            target: None,
+            approach_announced: false,
+        });
+        app.update();
+        let sent = sent_commands(app);
+        let cooldowns = app.world().resource::<LocalCastCooldown>();
+        (
+            sent,
+            cooldowns.recast[R],
+            cooldowns.remaining_secs[R],
+            app.world().resource::<ActionFeedback>().text.clone(),
+            app.world()
+                .get::<Text>(label)
+                .unwrap()
+                .0
+                .contains(&recast_line),
+            app.world().entity(hero).contains::<MovementTarget>(),
+        )
+    };
+
+    // The window is open for seconds, but the colossus is still far away: the slot keeps
+    // its running cooldown, the status line offers nothing, and a press is refused aloud
+    // without a command, a predicted cooldown or a lost move order.
+    let (sent, offered, remaining, feedback, listed, walking) = press(&mut app, Some(20.0));
+    assert!(sent.is_empty(), "{sent:?}");
+    assert!(!offered && !listed);
+    assert_eq!(remaining, 45.0);
+    assert_eq!(feedback, tr("combat.standard.not_ready"));
+    assert!(walking);
+    assert!(!app.world().resource::<PendingCast>().is_pending());
+    let cooldowns = app.world().resource::<LocalCastCooldown>();
+    assert_eq!(cooldowns.recovery_secs, 0.0);
+    assert!(cooldowns.pending_slot.is_none());
+
+    // Just outside the gate nothing is offered either, but the press is sent: the
+    // colossus closes that gap before the server reads the command.
+    let (sent, offered, remaining, feedback, listed, _) = press(&mut app, Some(4.6));
+    assert!(matches!(
+        sent.as_slice(),
+        [NetworkCommand::CastSkill { slot: 3, .. }]
+    ));
+    assert!(!offered && !listed);
+    assert_eq!(remaining, 45.0);
+    assert!(feedback.is_empty());
+
+    // Inside the gate the slot is the recast and the press is sent as one: no cooldown is
+    // predicted for it.
+    app.world_mut()
+        .entity_mut(hero)
+        .insert(MovementTarget { target: Vec3::X });
+    let (sent, offered, remaining, feedback, listed, walking) = press(&mut app, Some(3.9));
+    assert!(matches!(
+        sent.as_slice(),
+        [NetworkCommand::CastSkill { slot: 3, .. }]
+    ));
+    assert!(offered && listed);
+    assert_eq!(remaining, 0.0);
+    assert!(feedback.is_empty());
+    assert!(!walking, "a cast that is sent stops the hero as before");
+    assert!(
+        app.world()
+            .resource::<LocalCastCooldown>()
+            .pending_slot
+            .is_none()
+    );
+
+    // The colossus is gone while the window is still open. Until the next snapshot the
+    // mirror has no cooldown to show, and the press must still not go out as a first cast
+    // with a predicted cooldown: the server would read it as the recast and drop it.
+    let (sent, offered, remaining, feedback, listed, _) = press(&mut app, None);
+    assert!(sent.is_empty(), "{sent:?}");
+    assert!(!offered && !listed);
+    assert_eq!(remaining, 0.0);
+    assert_eq!(feedback, tr("combat.standard.not_ready"));
+    assert!(
+        app.world()
+            .resource::<LocalCastCooldown>()
+            .pending_slot
+            .is_none()
+    );
+
+    // The next snapshot brings the real cooldown back and the press is refused again.
+    app.world_mut()
+        .entity_mut(hero)
+        .insert(PlayerSkillCooldowns {
+            remaining_secs: [0.0, 0.0, 0.0, 44.0],
+            recovery_secs: 0.0,
+        });
+    let (sent, offered, remaining, feedback, listed, _) = press(&mut app, None);
+    assert!(sent.is_empty(), "{sent:?}");
+    assert!(!offered && !listed);
+    assert_eq!(remaining, 44.0);
+    assert_eq!(feedback, tr("combat.standard.not_ready"));
+}
+
 #[test]
 fn standard_keyboard_holds_before_cast_and_cancels_when_context_is_lost() {
     for canceled in [false, true] {

@@ -108,6 +108,7 @@ pub(super) fn update_status(
     mut label: Query<(&mut Text, &mut Node), With<StandardStatus>>,
     mobile: Res<crate::mobile_controls::MobileControls>,
     pad: Res<crate::gamepad::GamepadControls>,
+    cooldowns: Res<super::cooldown::LocalCastCooldown>,
 ) {
     let Ok((mut text, mut node)) = label.single_mut() else {
         return;
@@ -207,7 +208,14 @@ pub(super) fn update_status(
             &[("seconds", &format!("{:.1}", state.passive_remaining_secs))],
         ));
     }
-    for (i, slot) in state.slots.iter().enumerate().filter(|(_, s)| s.can_recast) {
+    // Only a recast the server accepts where the hero stands: `recast_usable`, as the slot
+    // mirror keeps it for the hotbar.
+    for (i, slot) in state
+        .slots
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| cooldowns.recast[*i])
+    {
         lines.push(trf(
             "combat.standard.recast",
             &[
