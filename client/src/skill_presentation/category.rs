@@ -555,6 +555,19 @@ pub(crate) fn movement_capable(id: SkillId, recast: bool) -> bool {
     }
 }
 
+/// Whether the effect of the skill lives on when its owner dies or leaves. A hero's death
+/// removes what it left behind, with one exception: a raised pillar blocks for its whole
+/// time, and its effect lives exactly as long (`common/src/skills/advanced.rs:1101-1110`).
+pub(crate) fn outlives_owner(id: SkillId) -> bool {
+    matches!(
+        skill(id).effect,
+        SkillEffect::Technique {
+            action: Technique::TerrainLine,
+            ..
+        }
+    )
+}
+
 /// Whether the cast strikes along a line that ends at its own new effect
 /// (`common/src/skills/advanced.rs:639-662`).
 pub(crate) fn own_effect_strike(id: SkillId) -> bool {

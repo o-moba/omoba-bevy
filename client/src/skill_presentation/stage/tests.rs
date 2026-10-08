@@ -650,7 +650,20 @@ fn true_expiry_only_inside_0_11() {
                 ..seen_out()
             }
         };
-        assert_eq!(at(0.05, owner_is(|o| o.alive = false)), EndKind::Silent);
+        // Death removes what a hero left behind, except a pillar: that one runs out
+        // whether its owner lives, is dead or is no longer held by the client.
+        let orphaned = if category::outlives_owner(id) {
+            EndKind::TrueExpiry
+        } else {
+            EndKind::Silent
+        };
+        assert_eq!(id == SkillId::FaultLine, category::outlives_owner(id));
+        assert_eq!(
+            at(0.05, owner_is(|o| o.alive = false)),
+            orphaned,
+            "{}",
+            id.id()
+        );
         assert_eq!(
             at(0.05, owner_is(|o| o.visible = false)),
             EndKind::TrueExpiry
@@ -659,7 +672,10 @@ fn true_expiry_only_inside_0_11() {
             owner: None,
             ..seen_out()
         };
-        assert_eq!(at(0.05, unheld), EndKind::Silent);
+        assert_eq!(at(0.05, unheld), orphaned, "{}", id.id());
+        // In the middle of its life it ends silently like everything else.
+        assert_eq!(at(1.0, owner_is(|o| o.alive = false)), EndKind::Silent);
+        assert_eq!(at(1.0, unheld), EndKind::Silent);
         // An effect of an owner the server withheld may still run out.
         let ownerless = with(&effect(1, id, kind), |e| {
             e.owner_id = 0;
@@ -2019,6 +2035,191 @@ fn replicated_remaining(class: HeroClass, id: SkillId, kind: K, dt: f32) -> Vec<
     }
     assert!(!seen.is_empty(), "{} was not replicated", id.id());
     seen
+}
+
+/// A practice authority with one hero of `class`, settled and without bots, and the id of
+/// that hero.
+fn alone(class: HeroClass) -> (PracticeSession, u64) {
+    let mut session = PracticeSession::new(Instant::now());
+    session.command(join(class));
+    session.command(ClientPacket::Practice {
+        command: PracticeCommand::ClearBots,
+    });
+    for _ in 0..4 {
+        session.advance(0.05);
+    }
+    let id = session.world.players[&LOCAL_ADDR].hero.identity.id;
+    (session, id)
+}
+
+fn replicated_effects(session: &mut PracticeSession) -> Vec<SkillEffectState> {
+    let ServerPacket::Snapshot { skill_effects, .. } = session.snapshot() else {
+        panic!("practice publishes a snapshot");
+    };
+    skill_effects
+}
+
+/// Parity with the in-process authority for a pillar whose owner dies: its effect stays in
+/// every snapshot for as long as the pillar blocks, it arms and runs out as it would have,
+/// and the client reads that end as its time running out, with the owner dead or no longer
+/// held at all.
+#[test]
+fn a_pillar_runs_out_and_crumbles_without_its_owner() {
+    let class = HeroClass::Cinderforge;
+    let id = SkillId::FaultLine;
+    let registry = target();
+    // The smith dies before the pillar rises, then after it has risen; then the client
+    // does not hold the dead hero at all.
+    for (death_tick, held) in [(6, true), (16, true), (6, false)] {
+        let case = format!("death at tick {death_tick}, held {held}");
+        let (mut session, owner) = alone(class);
+        let hero_at = &session.world.players[&LOCAL_ADDR].hero;
+        let aim = [hero_at.x + 6.0, hero_at.z];
+        session.command(ClientPacket::CastSkill {
+            slot: slot_of(class, id),
+            aim,
+            server_epoch: EPOCH,
+            match_id: 1,
+            request_id: 1,
+        });
+        let mut feed = Feed::new(target());
+        let mut events = Vec::new();
+        let (mut sightings, mut first, mut last) = (0, None, None);
+        for tick in 0..140 {
+            if tick >= death_tick {
+                session.world.players.get_mut(&LOCAL_ADDR).unwrap().hero.hp = 0.0;
+            }
+            let effects = replicated_effects(&mut session);
+            let alive = session.world.players[&LOCAL_ADDR].hero.hp > 0.0;
+            assert_eq!(alive, tick < death_tick, "{case}");
+            let seen = HeroSeen {
+                id: owner,
+                alive,
+                visible: alive,
+                ..hero(class)
+            };
+            let heroes = if alive || held {
+                vec![seen]
+            } else {
+                Vec::new()
+            };
+            let pillar = effects.iter().find(|e| e.skill == id);
+            if let Some(pillar) = pillar {
+                assert_eq!((pillar.owner_id, pillar.kind), (owner, K::Trap), "{case}");
+                // Without a gap from the cast to its end.
+                assert_eq!(*first.get_or_insert(tick) + sightings, tick, "{case}");
+                sightings += 1;
+                last = Some(pillar.clone());
+            }
+            events.extend(feed.snap_with(&effects, &heroes, &[]).events);
+            session.advance(0.05);
+        }
+        // Five seconds of pillar, one snapshot every 50 ms.
+        assert!((99..=101).contains(&sightings), "{case}: {sightings}");
+        let last = last.unwrap();
+        assert!(last.armed && last.remaining_secs <= EXPIRY_SECS, "{case}");
+        let changes: Vec<_> = events.iter().map(|event| event.change).collect();
+        assert_eq!(
+            changes,
+            [
+                step(Transition::Armed),
+                StageChange::Ended(EndKind::TrueExpiry)
+            ],
+            "{case}"
+        );
+        let end = events.last().unwrap();
+        assert_eq!(end.effect, last, "{case}");
+        // The owner the client held was dead, or it held none.
+        assert_eq!(end.owner.map(|owner| owner.alive), held.then_some(false));
+        assert_eq!(
+            accents::stage_shot(&registry, end),
+            Some(OneShot::Crumble),
+            "{case}"
+        );
+        assert!(!accents::stage_burst(&registry, end, 0.0).is_empty());
+    }
+}
+
+/// Parity with the in-process authority for the breath of a caster that walks during its
+/// windup: in every snapshot the telegraph is replicated on the caster, the body of the
+/// effect stands there with its cone along the aim of the cast, nothing is reported of the
+/// steps in between, and the release is drawn from where the caster stood last.
+#[test]
+fn the_breath_telegraph_stands_on_its_walking_caster() {
+    use super::super::bodies::{self, Seen};
+    use super::super::geometry::{self, GeoShape};
+    let class = HeroClass::Cinderforge;
+    let id = SkillId::FurnaceBreath;
+    let registry = target();
+    let (mut session, owner) = alone(class);
+    let start = {
+        let hero = &session.world.players[&LOCAL_ADDR].hero;
+        Vec2::new(hero.x, hero.z)
+    };
+    session.command(ClientPacket::CastSkill {
+        slot: slot_of(class, id),
+        aim: [start.x + 5.0, start.y],
+        server_epoch: EPOCH,
+        match_id: 1,
+        request_id: 1,
+    });
+    let mut feed = Feed::new(target());
+    let mut events = Vec::new();
+    let mut stood = Vec::new();
+    for _ in 0..40 {
+        // The smith walks across his own aim, six units a second.
+        let caster = {
+            let hero = &mut session.world.players.get_mut(&LOCAL_ADDR).unwrap().hero;
+            hero.z += 0.3;
+            Vec2::new(hero.x, hero.z)
+        };
+        session.advance(0.05);
+        let effects = replicated_effects(&mut session);
+        let heroes = [HeroSeen {
+            id: owner,
+            position: Vec3::new(caster.x, 0.5, caster.y),
+            ..hero(class)
+        }];
+        let taken = feed.snap_with(&effects, &heroes, &[]);
+        events.extend(taken.events);
+        let Some(breath) = effects.iter().find(|e| e.skill == id) else {
+            continue;
+        };
+        assert_eq!((breath.owner_id, breath.kind), (owner, K::BeamWarning));
+        // Replicated on the caster, the cone still along the aim of the cast.
+        assert!(Vec2::from_array(breath.position).distance(caster) < 1e-4);
+        let GeoShape::Sector { apex, axis, .. } =
+            geometry::boundary_shape(breath.skill, breath.kind, breath)
+        else {
+            panic!("the breath is a cone");
+        };
+        assert!(apex.distance(caster) < 1e-4 && axis.distance(Vec2::X) < 1e-4);
+        // The body is rooted there, whatever the tracker remembers of earlier places.
+        let memory = feed.memory.get(EffectKey::Runtime(breath.id));
+        assert!(memory.is_some());
+        let seen = Seen::of(breath, memory, None, 0.0, 0.0);
+        assert!(bodies::root_pose(&seen).translation.xz().distance(caster) < 1e-4);
+        assert!(bodies::root_at(breath).distance(caster) < 1e-4);
+        stood.push(caster);
+    }
+    // The whole windup was walked: 0.8 s at six units a second.
+    assert!((15..=17).contains(&stood.len()), "{}", stood.len());
+    assert!(stood.last().unwrap().distance(stood[0]) > 4.0);
+    // A telegraph that moves with its caster neither turns nor jumps nor is renewed: the
+    // one thing reported is that it fired, where the caster stood last.
+    let [fired] = events.as_slice() else {
+        panic!("one event: {events:?}");
+    };
+    assert_eq!(fired.change, StageChange::Ended(EndKind::Released));
+    let last = *stood.last().unwrap();
+    assert!(Vec2::from_array(fired.effect.position).distance(last) < 1e-4);
+    let flash = accents::stage_burst(&registry, fired, 0.0);
+    assert!(!flash.is_empty());
+    for ray in &flash {
+        let from = ray.origin.xz() - last;
+        // Inside the cone that stood on the caster, not the one of the cast.
+        assert!(from.x > 0.0 && from.length() <= 7.0 + 1e-3, "{ray:?}");
+    }
 }
 
 /// Parity with the in-process authority: the three telegraphs that fire on their own are

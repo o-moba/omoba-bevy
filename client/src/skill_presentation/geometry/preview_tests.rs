@@ -1573,6 +1573,60 @@ fn a_pick_leaves_out_the_kinds_the_authority_leaves_out() {
     }
 }
 
+/// Parity with the in-process authority for the recast of Thunder Pulse: the server offers
+/// the second press only when the pulse struck somebody. The marker around the hero and
+/// the preview of the held key read the replicated flag and nothing else, so after an
+/// empty pulse there is no marker and the key previews a first cast.
+#[test]
+fn the_thunder_pulse_recast_is_shown_only_when_the_authority_offers_it() {
+    use super::super::status::recast_markers;
+    use super::super::vocab::RecastMarker;
+    let (class, id) = (HeroClass::Stormfist, SkillId::ThunderPulse);
+    let registry = super::super::SkillPresentation::target();
+    let radius = catalog_radius(id);
+    assert_eq!(radius, 5.0);
+    let edge = radius + PLAYER_HIT_RADIUS;
+    for (distance, struck) in [(edge - MARGIN, true), (edge + MARGIN, false)] {
+        let mut duel = Duel::new(class, id, Vec2::ZERO, Vec2::new(distance, 0.0));
+        let slot = usize::from(duel.slot);
+        let shown = |duel: &mut Duel| {
+            let (flags, effects) = duel.replicated();
+            let markers: Vec<_> =
+                recast_markers(&registry, class, &flags, duel.hero, duel.origin(), &effects)
+                    .into_iter()
+                    .map(|(marker, _)| marker)
+                    .collect();
+            (flags.slots[slot].can_recast, markers)
+        };
+        assert_eq!(shown(&mut duel), (false, Vec::new()), "{distance}");
+        let full = duel.hp(duel.target);
+        duel.cast(Vec2::ZERO);
+        assert!(duel.taken(), "{distance}");
+        duel.advance(1);
+        assert_eq!(duel.hp(duel.target) < full, struck, "{distance}");
+        let offered = if struck {
+            vec![RecastMarker::RingPips]
+        } else {
+            Vec::new()
+        };
+        assert_eq!(shown(&mut duel), (struck, offered), "{distance}");
+        // The held key: nothing to aim in the recast window, the pulse itself without one.
+        let preview = duel.preview(id, Vec2::ZERO);
+        if struck {
+            assert_eq!(preview.shape, PreviewShape::None, "{distance}");
+            assert!(preview.areas.is_empty());
+        } else {
+            assert_areas(
+                &preview,
+                &[GeoShape::Ring {
+                    center: Vec2::ZERO,
+                    radius,
+                }],
+            );
+        }
+    }
+}
+
 /// Parity with the in-process authority for the sweep: Chain Sweep strikes a hero whose
 /// edge is inside the previewed ring in every direction, whatever the aim, and moves it
 /// the previewed push along the aim.

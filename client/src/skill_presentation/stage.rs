@@ -375,9 +375,12 @@ pub(crate) fn classify_end(
         };
     }
     // An effect of an owner the client does not see may still run out; one whose owner is
-    // known must have a living owner, because death removes what a hero left behind.
+    // known must have a living owner, because death removes what a hero left behind. A
+    // pillar is not removed: it runs out whether its owner lives, is dead or is gone.
     let expired = effect.remaining_secs <= EXPIRY_SECS
-        && (effect.owner_id == 0 || owner.is_some_and(|owner| owner.alive))
+        && (effect.owner_id == 0
+            || category::outlives_owner(skill)
+            || owner.is_some_and(|owner| owner.alive))
         // A warning that vanishes never fired; only the beam it became fades.
         && (rule != StageRule::KindGate || effect.kind == EffectVisualKind::Beam);
     if category::detonates(skill) && effect.kind == EffectVisualKind::Field {
