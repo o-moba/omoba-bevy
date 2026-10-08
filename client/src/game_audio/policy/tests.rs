@@ -526,6 +526,7 @@ fn a_receipt_with_a_withheld_source_is_heard_by_its_victim_and_confirms_no_kill(
                     id: 1,
                     source: CombatEntity::default(),
                     slot: None,
+                    style: ProjectileStyle::Arcane,
                 }
     }));
     assert!(!has(&cues, AudioCue::Kill));
