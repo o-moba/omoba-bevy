@@ -1047,6 +1047,137 @@ fn a_cast_on_an_ally_is_sent_exactly_when_the_authority_takes_it() {
     assert!(shielded(&session, LOCAL_ADDR));
 }
 
+/// One touch of the button of `slot` by a hero of `class` that walks at the origin, in the
+/// world that `arrange` fills, through the touch cast and the cast path: a tap, or a drag
+/// along a screen direction to a fraction of the range.
+fn touch_among(
+    class: HeroClass,
+    slot: usize,
+    drag: Option<(Vec2, f32)>,
+    arrange: impl FnOnce(&mut App),
+) -> Press {
+    let mut app = standard_cast_app(class, slot, false);
+    app.world_mut().resource_mut::<PendingCast>().cancel();
+    let mut mobile = crate::mobile_controls::MobileControls::default();
+    mobile.enabled = true;
+    mobile.casts.push(crate::mobile_controls::MobileCastIntent {
+        slot,
+        extent: drag.map_or(0.15, |(_, extent)| extent),
+        aim: drag.map(|(direction, _)| direction),
+    });
+    app.insert_resource(mobile)
+        .init_resource::<TargetState>()
+        .init_resource::<crate::targeting::BasicAttackState>()
+        .insert_resource(PlayerVisualMode::Models3d)
+        .add_systems(
+            Update,
+            super::mobile::mobile_cast_system.before(resolve_pending_cast_system),
+        );
+    app.world_mut()
+        .spawn((MainCamera, Camera::default(), GlobalTransform::IDENTITY));
+    arrange(&mut app);
+    let hero = app
+        .world_mut()
+        .query_filtered::<Entity, With<Player>>()
+        .single(app.world())
+        .unwrap();
+    app.world_mut()
+        .entity_mut(hero)
+        .insert(MovementTarget { target: Vec3::Z });
+    app.update();
+    let sent = sent_commands(&mut app);
+    let cooldowns = app.world().resource::<LocalCastCooldown>();
+    Press {
+        sent,
+        feedback: app.world().resource::<ActionFeedback>().text.clone(),
+        cooldown: cooldowns.remaining_secs[slot],
+        predicted: cooldowns.pending_slot.is_some() || cooldowns.recovery_secs > 0.0,
+        walking: app.world().entity(hero).contains::<MovementTarget>(),
+        queued: app.world().resource::<PendingCast>().is_pending(),
+    }
+}
+
+/// A tap has no aim of its own. For a skill that is cast on an ally it is aimed at an
+/// ally and the cast goes out; it used to be aimed at the nearest enemy, which the server
+/// refuses or turns into a cast on the caster.
+#[test]
+fn a_tap_on_a_skill_cast_on_an_ally_is_sent_to_an_ally_and_never_to_an_enemy() {
+    use shared::loadout::SkillId;
+
+    let enemy = Vec2::X * 2.0;
+    let near = Vec2::X * 4.0;
+    let hurt = Vec2::Y * 8.0;
+    let hurt_hero = |app: &mut App| {
+        let hero = remote_hero(app, 6, Team::Green, hurt);
+        app.world_mut().get_mut::<CombatStats>(hero).unwrap().hp *= 0.3;
+    };
+
+    // Sheltering Leap: the allied hero lowest on health, then an allied minion, then the
+    // caster. The enemy is the nearest unit every time.
+    let class = HeroClass::Frostguard;
+    let w = preset_slot(class, SkillId::ShelteringLeap);
+    touch_among(class, w, None, |app| {
+        remote_hero(app, 2, Team::Blue, enemy);
+        remote_hero(app, 5, Team::Green, near);
+        hurt_hero(app);
+    })
+    .sent_to(w, hurt, "the leap, two allied heroes");
+    touch_among(class, w, None, |app| {
+        remote_hero(app, 2, Team::Blue, enemy);
+        lane_minion(app, 4, Team::Green, Vec2::Y * 6.0);
+    })
+    .sent_to(w, Vec2::Y * 6.0, "the leap, an allied minion");
+    touch_among(class, w, None, |app| {
+        remote_hero(app, 2, Team::Blue, enemy);
+    })
+    .sent_to(w, Vec2::ZERO, "the leap, nobody but the caster");
+
+    // Orbital Guard: the nearest allied hero, else the caster.
+    let class = HeroClass::Orbitwright;
+    let e = preset_slot(class, SkillId::OrbitalGuard);
+    touch_among(class, e, None, |app| {
+        remote_hero(app, 2, Team::Blue, enemy);
+        remote_hero(app, 5, Team::Green, near);
+        hurt_hero(app);
+        lane_minion(app, 4, Team::Green, Vec2::Y);
+    })
+    .sent_to(e, near, "the orb, two allied heroes");
+    touch_among(class, e, None, |app| {
+        remote_hero(app, 2, Team::Blue, enemy);
+        lane_minion(app, 4, Team::Green, Vec2::Y);
+    })
+    .sent_to(e, Vec2::ZERO, "the orb, nobody but the caster");
+
+    // A drag is the player's own aim and is not replaced: nobody stands at its end here,
+    // so the cast is refused with the line, and an ally at its end is taken.
+    let class = HeroClass::Frostguard;
+    touch_among(class, w, Some((Vec2::X, 0.5)), |app| {
+        hurt_hero(app);
+    })
+    .refused_for_want_of_an_ally("a drag past the ally");
+    touch_among(class, w, Some((Vec2::X, 0.5)), |app| {
+        hurt_hero(app);
+        remote_hero(app, 5, Team::Green, Vec2::X * 5.5);
+    })
+    .sent_to(w, Vec2::X * 5.5, "a drag onto an ally");
+
+    // Every other tap keeps its aim on the enemy: a lane, and the leap that may go
+    // without an ally (Anchor Step).
+    let q = preset_slot(class, SkillId::WinterShard);
+    touch_among(class, q, None, |app| {
+        remote_hero(app, 2, Team::Blue, enemy);
+        remote_hero(app, 5, Team::Green, near);
+    })
+    .sent_to(q, enemy, "a lane");
+    let class = HeroClass::Stormfist;
+    let step = preset_slot(class, SkillId::AnchorStep);
+    touch_among(class, step, None, |app| {
+        remote_hero(app, 2, Team::Blue, enemy);
+        remote_hero(app, 5, Team::Green, Vec2::Y * 6.0);
+    })
+    .sent_to(step, enemy, "Anchor Step");
+}
+
 #[test]
 fn standard_keyboard_holds_before_cast_and_cancels_when_context_is_lost() {
     for canceled in [false, true] {

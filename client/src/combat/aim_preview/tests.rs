@@ -622,6 +622,103 @@ mod held {
         );
     }
 
+    /// What `draw_aim` shows for a controller that holds the button of `slot`, with its
+    /// right stick at `stick`.
+    fn held_on_the_pad(app: &mut App, slot: usize, stick: Option<Vec2>) -> Preview {
+        let mut pad = crate::gamepad::GamepadControls::default();
+        pad.active = true;
+        pad.aiming_slot = Some(slot);
+        pad.aim = stick;
+        app.insert_resource(pad);
+        app.update();
+        let (shown, preview) = app.world().resource::<AimPreviewShown>().0.clone().unwrap();
+        assert_eq!(shown, slot);
+        preview
+    }
+
+    /// The preview of a press without the stick is drawn at the aim the cast is sent with:
+    /// for a skill cast on an ally that is an ally (`mobile::ally_quick_cast_target`), not
+    /// the enemy the other skills are aimed at.
+    #[test]
+    fn a_press_without_the_stick_previews_the_ally_the_cast_is_sent_to() {
+        let hero = |app: &mut App, id: u64, at: Vec2, team: Team, health: f32| {
+            let mut stats = CombatStats::default();
+            stats.hp *= health;
+            app.world_mut().spawn((
+                RemotePlayer,
+                Transform::from_xyz(at.x, 0.0, at.y),
+                team,
+                NetworkPlayerId(id),
+                stats,
+                InheritedVisibility::VISIBLE,
+            ));
+        };
+        let enemy = HERO + Vec2::new(1.5, 0.0);
+        let near = HERO + Vec2::new(0.0, 6.0);
+        let hurt = HERO + Vec2::new(-9.0, 0.0);
+        let picked = |at: Vec2| {
+            [PreviewMark::Picked {
+                at,
+                radius: shared::PLAYER_TARGET_RADIUS,
+            }]
+        };
+        // Where the pick ring of a preview stands.
+        let ring = |preview: &Preview| {
+            let GeoShape::Ring { center, radius } = preview.areas[0] else {
+                panic!("a pick has its ring: {preview:?}");
+            };
+            assert_eq!(radius, PICK_RADIUS);
+            center
+        };
+        for (core, slot, ally) in [
+            // Orbital Guard goes to the nearest allied hero.
+            (CoreId::Orbitwright, 2, near),
+            // Sheltering Leap goes to the allied hero lowest on health.
+            (CoreId::Frostguard, 1, hurt),
+        ] {
+            let (mut app, _) = stage(core, default());
+            // Alone, the cast is aimed at the caster himself and is legal.
+            let preview = held_on_the_pad(&mut app, slot, None);
+            assert_eq!(preview.shape, PreviewShape::UnitPick);
+            assert_eq!((preview.pick, preview.refused), (Some(0), false));
+            assert!(ring(&preview).distance(HERO) < 1e-4);
+            assert_eq!(preview.marks, picked(HERO));
+            // An enemy next to the hero does not draw the aim to itself.
+            hero(&mut app, 21, enemy, Team::Blue, 1.0);
+            let preview = held_on_the_pad(&mut app, slot, None);
+            assert!(ring(&preview).distance(HERO) < 1e-4);
+            assert!(!preview.refused);
+            // With allied heroes around, the pick ring stands on the one the cast goes to.
+            hero(&mut app, 9, near, Team::Green, 1.0);
+            hero(&mut app, 10, hurt, Team::Green, 0.3);
+            let preview = held_on_the_pad(&mut app, slot, None);
+            assert!(ring(&preview).distance(ally) < 1e-4, "{core:?}");
+            assert_eq!(preview.marks, picked(ally), "{core:?}");
+            assert!(!preview.refused);
+            // The stick is the player's own aim: the ring follows it and finds nobody.
+            let way = crate::player::mobile_screen_direction(
+                Vec2::X,
+                &GlobalTransform::IDENTITY,
+                PlayerVisualMode::Sprite2d,
+            )
+            .xz();
+            let kit = shared::loadout::preset_for_class(core.class()).unwrap();
+            let range = skill(kit.skills()[slot]).ability.cast_range;
+            let preview = held_on_the_pad(&mut app, slot, Some(Vec2::X));
+            assert!(ring(&preview).distance(HERO + way * range) < 1e-3);
+            assert!(preview.refused && preview.marks.is_empty() && preview.areas.len() == 1);
+        }
+        // A skill that is not cast on an ally is still aimed at the enemy.
+        let (mut app, _) = stage(CoreId::Frostguard, default());
+        hero(&mut app, 21, enemy, Team::Blue, 1.0);
+        hero(&mut app, 9, near, Team::Green, 1.0);
+        let preview = held_on_the_pad(&mut app, 0, None);
+        let GeoShape::Lane { from, to, .. } = preview.areas[0] else {
+            panic!("Winter Shard is a lane: {preview:?}");
+        };
+        assert!((to - from).normalize().distance(Vec2::X) < 1e-4);
+    }
+
     #[test]
     fn a_long_lane_is_handed_to_the_minimap_and_a_ring_is_not() {
         let (mut app, window) = stage(CoreId::Dawnweaver, default());

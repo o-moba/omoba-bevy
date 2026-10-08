@@ -344,15 +344,20 @@ pub(crate) fn draw_aim(
         let assisted = screen
             .is_none()
             .then(|| {
-                super::mobile::quick_cast_target(
-                    origin,
-                    *team,
-                    range,
-                    target.selected_entity,
-                    basic.order.map(|order| order.entity),
-                    &candidates,
-                    &validity,
-                )
+                // The aim the cast would be sent with: an ally for a skill cast on one.
+                world
+                    .ally_quick_cast(Some(def), origin, *team, &candidates)
+                    .or_else(|| {
+                        super::mobile::quick_cast_target(
+                            origin,
+                            *team,
+                            range,
+                            target.selected_entity,
+                            basic.order.map(|order| order.entity),
+                            &candidates,
+                            &validity,
+                        )
+                    })
             })
             .flatten();
         let extent = touch.map(|t| t.extent).unwrap_or_else(|| {

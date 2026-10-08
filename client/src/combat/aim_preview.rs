@@ -4,7 +4,7 @@
 use bevy::ecs::system::SystemParam;
 use bevy::gizmos::config::GizmoConfigGroup;
 use bevy::prelude::*;
-use shared::loadout::{LoadoutState, SkillDefinition};
+use shared::loadout::{LoadoutState, SkillDefinition, SkillEffect};
 use shared::navigation::Disc;
 
 use super::selection::TargetCandidates;
@@ -362,6 +362,31 @@ impl AimWorld<'_, '_> {
         let hero = caster.id.or(game.map(|game| game.your_id)).unwrap_or(0);
         let candidates = pick_candidates(caster.position, hero, caster.team, units, &self.visible);
         ally_aim(rule, &candidates, aim, caster.position, range)
+    }
+
+    /// Where a tap, or a controller press without the stick, aims `def` when it is cast on
+    /// an ally (`mobile::ally_quick_cast_target`), among the units the pick is offered;
+    /// `None` for every other skill. The cast and its preview ask this one question.
+    pub(crate) fn ally_quick_cast(
+        &self,
+        def: Option<&SkillDefinition>,
+        origin: Vec2,
+        team: crate::team::Team,
+        units: &TargetCandidates,
+    ) -> Option<Vec2> {
+        let def = def?;
+        let SkillEffect::Technique { action, .. } = def.effect else {
+            return None;
+        };
+        let seen = |entity: Entity| self.visible.get(entity).map_or(true, |shown| shown.get());
+        super::mobile::ally_quick_cast_target(
+            action,
+            origin,
+            team,
+            def.ability.cast_range,
+            units,
+            seen,
+        )
     }
 
     /// The preview of `def` for a hero that aims at `aim`, from what the client sees now.
