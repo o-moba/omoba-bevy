@@ -42,7 +42,8 @@ pub struct HeroState {
     pub brittle_until: Option<Instant>,
     pub intercept_until: Option<Instant>,
     pub intercept_direction: [f32; 2],
-    pub intercepted: bool,
+    /// Projectiles the current wall has stopped: the first is negated, later ones reduced.
+    pub intercepts: u8,
     pub last_combat: Option<Instant>,
     pub sustain_until: Option<Instant>,
     pub empowered_until: Option<Instant>,
@@ -369,6 +370,13 @@ fn area(
         control(w, c, e.owner, e.team, root, slow, secs, 0.0, now);
     }
     out
+}
+/// Slow source of a standing zone. A hit slows in its caster's name; a zone
+/// renews a short slow on every tick and keeps its own entry, so it never
+/// rewrites, and thereby shortens, a longer slow from the same caster. Hero
+/// and effect ids share one number space; the top bit keeps zone keys apart.
+fn zone_slow_key(e: &ActiveEffect) -> u64 {
+    e.id | (1 << 63)
 }
 fn recast(
     p: &mut ConnectedPlayer,
@@ -798,7 +806,11 @@ pub fn cast(w: &mut GameWorld, addr: SocketAddr, slot: u8, aim: [f32; 2], now: I
                 dash_to(w, owner, destination, now);
                 shield(w, owner, owner, damage * scale, duration_secs, now);
                 if let Some(c) = picked.filter(|c| c.target.kind == TargetKind::Player) {
-                    shield(w, c.target.id, owner, damage * scale, duration_secs, now);
+                    // The caster may pick itself; its shield was granted above
+                    // and must not be granted twice.
+                    if c.target.id != owner {
+                        shield(w, c.target.id, owner, damage * scale, duration_secs, now);
+                    }
                     let p = actor_mut(w, c.target.id).unwrap();
                     p.hero.skills.advanced.defense = 25.0;
                     p.hero.skills.advanced.defense_until = Some(now + duration(duration_secs));
@@ -1056,7 +1068,7 @@ pub fn cast(w: &mut GameWorld, addr: SocketAddr, slot: u8, aim: [f32; 2], now: I
             let p = actor_mut(w, owner).unwrap();
             p.hero.skills.advanced.intercept_until = Some(now + duration(duration_secs));
             p.hero.skills.advanced.intercept_direction = dir;
-            p.hero.skills.advanced.intercepted = false;
+            p.hero.skills.advanced.intercepts = 0;
             e.end = add(origin, dir, radius);
             persistent = true;
         }
@@ -1159,6 +1171,7 @@ pub(super) fn effect_tick(
         }
         Technique::BallField => {
             if !e.fired {
+                // The burst only damages; the slow is the zone's, renewed below.
                 out.extend(area(
                     w,
                     e,
@@ -1166,8 +1179,8 @@ pub(super) fn effect_tick(
                     radius,
                     damage * e.scale,
                     0.0,
-                    0.6,
-                    0.2,
+                    1.0,
+                    0.0,
                     now,
                 ));
                 e.fired = true;
@@ -1177,7 +1190,7 @@ pub(super) fn effect_tick(
                 .filter(|c| distance(c.pos, e.pos) <= radius + c.radius)
             {
                 if hostile(&c, e.team) {
-                    control(w, c, e.owner, e.team, 0.0, 0.6, 0.2, 0.0, now);
+                    control(w, c, zone_slow_key(e), e.team, 0.0, 0.6, 0.2, 0.0, now);
                 } else if c.target.kind == TargetKind::Player {
                     if let Some(p) = actor_mut(w, c.target.id) {
                         // Haste is one timestamp: the field tops it up and never
@@ -1244,9 +1257,9 @@ pub(super) fn effect_tick(
             {
                 if e.hits.insert(key(c.target)) {
                     out.extend(hit(w, e, c, damage * e.scale, now));
-                    control(w, c, e.owner, e.team, 1.0, 0.5, 0.2, 0.0, now);
+                    control(w, c, zone_slow_key(e), e.team, 1.0, 0.5, 0.2, 0.0, now);
                 } else {
-                    control(w, c, e.owner, e.team, 0.0, 0.5, 0.2, 0.0, now);
+                    control(w, c, zone_slow_key(e), e.team, 0.0, 0.5, 0.2, 0.0, now);
                 }
             }
             return true;
@@ -1861,8 +1874,8 @@ pub fn intercept_players(
         .hero
         .skills
         .advanced;
-    let factor = if s.intercepted { 0.35 } else { 0.0 };
-    s.intercepted = true;
+    let factor = if s.intercepts > 0 { 0.35 } else { 0.0 };
+    s.intercepts = s.intercepts.saturating_add(1);
     Some((selected, factor))
 }
 

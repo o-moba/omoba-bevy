@@ -200,6 +200,113 @@ fn shield_intercepts_front_once_reduces_later_and_ignores_rear() {
     assert!(w.players[&addr(1)].hero.hp < before);
 }
 #[test]
+fn northwall_publishes_its_interception_count() {
+    let (mut w, now, _) = fixture(HeroClass::Frostguard);
+    let owner = w.players[&addr(1)].hero.identity.id;
+    let walls = |w: &GameWorld, at: Instant| -> Vec<u8> {
+        effects(w, at)
+            .iter()
+            .filter(|e| e.kind == EffectVisualKind::ShieldWall)
+            .map(|e| e.consumed_segments)
+            .collect()
+    };
+    cast(&mut w, addr(1), 2, [10.0, 0.0], 1, now);
+    assert_eq!(walls(&w, now), [0]);
+    assert_eq!(
+        advanced::intercept(&mut w, Team::Blue, [4.0, 0.0], [0.0, 0.0], 0.2, now),
+        Some((owner, 0.0))
+    );
+    assert_eq!(walls(&w, now), [1], "the free block is spent");
+    assert_eq!(
+        advanced::intercept(&mut w, Team::Blue, [4.0, 0.0], [0.0, 0.0], 0.2, now),
+        Some((owner, 0.35))
+    );
+    assert_eq!(walls(&w, now), [2]);
+    // A shot from behind is not intercepted and does not count.
+    assert_eq!(
+        advanced::intercept(&mut w, Team::Blue, [-3.0, 0.0], [2.0, 0.0], 0.2, now),
+        None
+    );
+    assert_eq!(walls(&w, now), [2]);
+    // The count belongs to the wall: the next one starts with its free block.
+    advance(&mut w, now, 3.2);
+    assert!(walls(&w, now + duration(3.2)).is_empty());
+    let next = now + duration(15.0);
+    cast(&mut w, addr(1), 2, [10.0, 0.0], 2, next);
+    assert_eq!(walls(&w, next), [0]);
+    assert_eq!(
+        advanced::intercept(&mut w, Team::Blue, [4.0, 0.0], [0.0, 0.0], 0.2, next),
+        Some((owner, 0.0))
+    );
+}
+#[test]
+fn sheltering_leap_reaches_the_ally_and_never_doubles_the_self_shield() {
+    let shield = |w: &GameWorld, n: u16, at: Instant| {
+        state(&w.players[&addr(n)], at).map_or(0.0, |s| s.shield_hp)
+    };
+    let defense = |w: &GameWorld, n: u16| w.players[&addr(n)].hero.skills.advanced.defense;
+    // A real leap: the caster lands on the ally and each of them gets one shield.
+    let (mut w, now, _) = fixture(HeroClass::Frostguard);
+    add_player(&mut w, 3, HeroClass::Warrior, Team::Green, [8.0, 0.0], now);
+    cast(&mut w, addr(1), 1, [8.0, 0.0], 1, now);
+    let p = &w.players[&addr(1)].hero;
+    assert_eq!([p.x, p.z], [8.0, 0.0]);
+    assert_eq!((shield(&w, 1, now), shield(&w, 3, now)), (28.0, 28.0));
+    assert_eq!((defense(&w, 1), defense(&w, 3)), (25.0, 25.0));
+
+    // Aimed at its own feet the caster is the picked ally: no move, and still
+    // one shield, not both halves of the skill.
+    let (mut w, now, _) = fixture(HeroClass::Frostguard);
+    cast(&mut w, addr(1), 1, [0.0, 0.0], 1, now);
+    let p = &w.players[&addr(1)];
+    assert_eq!(p.timers.last_cast_at[1], Some(now));
+    assert_eq!([p.hero.x, p.hero.z], [0.0, 0.0]);
+    assert_eq!(shield(&w, 1, now), 28.0);
+    assert_eq!(defense(&w, 1), 25.0);
+
+    // Anchor Step shares the branch and the rule.
+    let (mut w, now, _) = fixture(HeroClass::Stormfist);
+    cast(&mut w, addr(1), 1, [0.0, 0.0], 1, now);
+    assert_eq!(shield(&w, 1, now), 25.0);
+    assert_eq!(defense(&w, 1), 25.0);
+}
+#[test]
+fn winter_shard_slow_survives_winter_divide_refresh() {
+    let (mut w, now, _) = fixture(HeroClass::Frostguard);
+    let movement =
+        |w: &GameWorld, at: Instant| w.players[&addr(2)].hero.skills.control.movement(at);
+    // Winter Divide first: the strip knocks the hero at [6, 0] up for a second.
+    cast(&mut w, addr(1), 3, [20.0, 0.0], 1, now);
+    advance(&mut w, now, 0.5);
+    assert_eq!(movement(&w, now + duration(0.5)), 0.0);
+    // Winter Shard lands inside the strip: 0.55 for 1.5 s.
+    let shard = now + duration(0.5);
+    cast(&mut w, addr(1), 0, [18.0, 0.0], 2, shard);
+    advance(&mut w, shard, 0.7);
+    // Inside the strip the stronger zone slow rules once the knock-up ends.
+    assert_eq!(movement(&w, now + duration(1.2)), 0.5);
+    // The hero steps out: the strip's slow fades, the shard's keeps running.
+    w.players.get_mut(&addr(2)).unwrap().hero.z = 10.0;
+    advance(&mut w, now + duration(1.2), 0.4);
+    assert_eq!(
+        movement(&w, now + duration(1.6)),
+        0.55,
+        "the strip must not cut the shard's slow short"
+    );
+    assert_eq!(movement(&w, now + duration(2.4)), 1.0);
+
+    // Orbital Field is the same kind of zone: enemies are slowed while inside it.
+    let (mut w, now, _) = fixture(HeroClass::Orbitwright);
+    w.players.get_mut(&addr(2)).unwrap().hero.x = 2.0;
+    cast(&mut w, addr(1), 1, [0.0, 0.0], 1, now);
+    advance(&mut w, now, 0.3);
+    assert!(w.players[&addr(2)].hero.hp < 1000.0);
+    assert_eq!(movement(&w, now + duration(0.3)), 0.6);
+    w.players.get_mut(&addr(2)).unwrap().hero.x = 30.0;
+    advance(&mut w, now + duration(0.3), 0.3);
+    assert_eq!(movement(&w, now + duration(0.6)), 1.0);
+}
+#[test]
 fn parry_blocks_damage_and_control_then_stuns_counter_target() {
     let (mut w, now, victim) = fixture(HeroClass::Edgeweaver);
     let owner = w.players[&addr(1)].hero.identity.id;
