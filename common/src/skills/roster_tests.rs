@@ -232,6 +232,106 @@ fn echo_followup_bound_to_hit_target_and_flow_refunds_two_attacks() {
     }
     assert_eq!(w.players[&addr(1)].hero.mana, 80.0);
 }
+/// An ordinary root: it stops movement and leaves casting alone.
+fn root(w: &mut GameWorld, n: u16, until: Instant) {
+    w.players
+        .get_mut(&addr(n))
+        .unwrap()
+        .hero
+        .skills
+        .control
+        .root_until = Some(until);
+}
+fn recast_uses(w: &GameWorld, slot: usize) -> u8 {
+    w.players[&addr(1)].hero.skills.advanced.recasts[slot]
+        .as_ref()
+        .map_or(0, |r| r.uses)
+}
+#[test]
+fn rooted_caster_cannot_take_echo_followup_dash_and_keeps_the_recast() {
+    let (mut w, now, _) = fixture(HeroClass::Stormfist);
+    // The first cast is a projectile and stays legal while rooted.
+    root(&mut w, 1, now + duration(0.2));
+    cast(&mut w, addr(1), 0, [18.0, 0.0], 1, now);
+    assert_eq!(w.players[&addr(1)].timers.last_cast_at[0], Some(now));
+    advance(&mut w, now, 0.3);
+    assert_eq!(recast_uses(&w, 0), 1);
+
+    let at = now + duration(0.4);
+    root(&mut w, 1, at + duration(1.0));
+    let mana = w.players[&addr(1)].hero.mana;
+    let hp = w.players[&addr(2)].hero.hp;
+    cast(&mut w, addr(1), 0, [18.0, 0.0], 2, at);
+    let p = &w.players[&addr(1)];
+    assert_eq!(
+        [p.hero.x, p.hero.z],
+        [0.0, 0.0],
+        "a rooted hero does not dash"
+    );
+    assert_eq!(p.hero.mana, mana);
+    assert_eq!(w.players[&addr(2)].hero.hp, hp);
+    assert_eq!(recast_uses(&w, 0), 1, "the refused press keeps the recast");
+    assert!(state(p, at).unwrap().slots[0].can_recast);
+
+    // The same recast works once the root has ended.
+    let free = at + duration(1.1);
+    cast(&mut w, addr(1), 0, [18.0, 0.0], 3, free);
+    assert!(w.players[&addr(1)].hero.x > 3.0);
+    assert!(w.players[&addr(2)].hero.hp < hp);
+    assert_eq!(recast_uses(&w, 0), 0);
+}
+#[test]
+fn rooted_caster_keeps_anchor_step_sustain_recast_but_cannot_leap() {
+    let (mut w, now, _) = fixture(HeroClass::Stormfist);
+    // The leap moves the caster: refused before any cost.
+    root(&mut w, 1, now + duration(1.0));
+    let mana = w.players[&addr(1)].hero.mana;
+    cast(&mut w, addr(1), 1, [5.0, 0.0], 1, now);
+    let p = &w.players[&addr(1)];
+    assert_eq!(p.timers.last_cast_at[1], None);
+    assert_eq!(([p.hero.x, p.hero.z], p.hero.mana), ([0.0, 0.0], mana));
+
+    let at = now + duration(1.1);
+    cast(&mut w, addr(1), 1, [5.0, 0.0], 2, at);
+    assert_eq!(w.players[&addr(1)].hero.x, 5.0);
+    assert_eq!(recast_uses(&w, 1), 1);
+
+    // The recast moves nobody, so a root does not block it.
+    let later = at + duration(0.5);
+    root(&mut w, 1, later + duration(1.0));
+    let mana = w.players[&addr(1)].hero.mana;
+    cast(&mut w, addr(1), 1, [9.0, 0.0], 3, later);
+    let p = &w.players[&addr(1)];
+    assert!(remaining(p.hero.skills.advanced.sustain_until, later) > 2.9);
+    assert_eq!(p.hero.mana, mana - 25.0);
+    assert_eq!(p.hero.x, 5.0);
+    assert_eq!(recast_uses(&w, 1), 0);
+}
+#[test]
+fn rooted_caster_cannot_ride_hook_followup_and_keeps_the_use() {
+    let (mut w, now, _) = fixture(HeroClass::Chainkeeper);
+    cast(&mut w, addr(1), 0, [18.0, 0.0], 1, now);
+    advance(&mut w, now, 0.4);
+    assert_eq!(recast_uses(&w, 0), 1);
+
+    let at = now + duration(0.5);
+    root(&mut w, 1, at + duration(0.5));
+    cast(&mut w, addr(1), 0, [18.0, 0.0], 2, at);
+    let p = &w.players[&addr(1)];
+    assert_eq!(
+        [p.hero.x, p.hero.z],
+        [0.0, 0.0],
+        "a rooted hero does not ride the chain"
+    );
+    assert_eq!(recast_uses(&w, 0), 1);
+
+    let free = at + duration(0.6);
+    cast(&mut w, addr(1), 0, [18.0, 0.0], 3, free);
+    let hooked = w.players[&addr(2)].hero.x;
+    let p = &w.players[&addr(1)];
+    assert!((p.hero.x - (hooked - 1.0)).abs() < 0.001);
+    assert_eq!(recast_uses(&w, 0), 0);
+}
 #[test]
 fn orb_travels_attaches_and_leashes_instead_of_duplicating() {
     let (mut w, now, _) = fixture(HeroClass::Orbitwright);

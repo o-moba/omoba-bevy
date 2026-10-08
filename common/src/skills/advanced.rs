@@ -457,19 +457,23 @@ pub fn cast(w: &mut GameWorld, addr: SocketAddr, slot: u8, aim: [f32; 2], now: I
     if def.ability.targeting == shared::TargetingMode::Point && len > range + 0.001 {
         return;
     }
-    if remaining(p.hero.skills.control.root_until, now) > 0.0
-        && matches!(
-            action,
-            Technique::Lunge
-                | Technique::CollisionCharge
-                | Technique::SpiritDash
-                | Technique::BlinkShot
-                | Technique::GuardLeap
-                | Technique::AllyLeap
-                | Technique::ExecuteRetreat
-                | Technique::Lash
-        )
-    {
+    // A root forbids moving, not casting: a technique is refused only in the
+    // phase that would displace the caster.
+    let displaces = match action {
+        Technique::Lunge
+        | Technique::CollisionCharge
+        | Technique::SpiritDash
+        | Technique::BlinkShot
+        | Technique::AllyLeap
+        | Technique::ExecuteRetreat
+        | Technique::Lash => true,
+        // The recast only opens the lifesteal window.
+        Technique::GuardLeap => follow.is_none(),
+        // The first cast is a projectile; the recast rides to the marked target.
+        Technique::EchoStrike | Technique::Hook => follow.is_some(),
+        _ => false,
+    };
+    if displaces && remaining(p.hero.skills.control.root_until, now) > 0.0 {
         return;
     }
     if action == Technique::BlinkShot && !legal_landing(w, aim, now) {
