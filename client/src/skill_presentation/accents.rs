@@ -51,9 +51,9 @@ const GLINT: f32 = 0.14;
 /// Half length of one skid mark of a forced displacement, at most.
 const SKID: f32 = 0.6;
 
-/// Height above the ground at which a wall shows that it stopped a projectile: the middle of
-/// its plates.
-const WALL_BLOCK_HEIGHT: f32 = 1.1;
+/// Height above the ground at which a wall shows that it stopped a projectile: on the upper
+/// half of its plates, clear of the hero that stands behind them.
+const WALL_BLOCK_HEIGHT: f32 = 1.7;
 /// Heights above the ground a pattern is drawn at.
 const FLOOR: f32 = 0.06;
 const HAND: f32 = 0.9;
@@ -1293,33 +1293,41 @@ pub(crate) fn stage_oneshot(
                 out
             }
             // A wall stopped a projectile. Where on the wall is not replicated, so the block
-            // is shown on the middle of the bar, where the body has its keystone, and runs
-            // along the bar alone: it names no side the shot came from and no place it
-            // struck. The first block breaks the keystone in two; every block throws chips.
+            // is shown on the whole bar and on its middle, where the body has its keystone,
+            // and runs along the bar alone: it names no side the shot came from and no
+            // place it struck. The first block breaks the keystone in two; every block
+            // lights the bar and throws chips.
             GeoShape::Segment { from, to } => {
                 let middle = from.midpoint(to);
                 let half = 0.5 * from.distance(to);
                 let along = (to - from).normalize_or_zero();
                 let first = index == 0;
-                let mut out = vec![ParticleSpec {
-                    origin: lift(middle, WALL_BLOCK_HEIGHT),
-                    lifetime: 0.3,
-                    size: sized(
-                        ParticleShape::Star,
-                        if first { 0.24 } else { 0.16 } * half,
-                        Curve::Pop,
-                    ),
-                    color: spark,
-                    shape: ParticleShape::Star,
-                    curve: Curve::Pop,
-                    ..base.clone()
-                }];
+                let mut flash = bar(from.lerp(to, 0.04), from.lerp(to, 0.96), 0.25, lead);
+                flash.origin.y = height + WALL_BLOCK_HEIGHT;
+                flash.end_color = Some(spark);
+                let mut out = vec![
+                    flash,
+                    ParticleSpec {
+                        origin: lift(middle, WALL_BLOCK_HEIGHT),
+                        lifetime: 0.4,
+                        size: sized(
+                            ParticleShape::Star,
+                            if first { 0.3 } else { 0.2 } * half,
+                            Curve::Pop,
+                        ),
+                        color: lead,
+                        end_color: Some(spark),
+                        shape: ParticleShape::Star,
+                        curve: Curve::Pop,
+                        ..base.clone()
+                    },
+                ];
                 if first {
                     out.extend([-1.0, 1.0].map(|side: f32| {
                         let mut piece = bar(
                             middle + along * (0.02 * half * side),
-                            middle + along * (0.2 * half * side),
-                            0.45,
+                            middle + along * (0.24 * half * side),
+                            0.5,
                             lead,
                         );
                         piece.origin.y = height + WALL_BLOCK_HEIGHT;
@@ -1331,9 +1339,9 @@ pub(crate) fn stage_oneshot(
                 out.extend((0..4).map(|i| {
                     let side = if i % 2 == 0 { 1.0 } else { -1.0 };
                     let mut chip = ParticleSpec {
-                        origin: lift(middle, WALL_BLOCK_HEIGHT + 0.1 * (i / 2) as f32),
-                        lifetime: 0.5,
-                        size: sized(ParticleShape::Diamond, 0.05 * half, Curve::Pop),
+                        origin: lift(middle, WALL_BLOCK_HEIGHT + 0.15 * (i / 2) as f32),
+                        lifetime: 0.55,
+                        size: sized(ParticleShape::Diamond, 0.08 * half, Curve::Pop),
                         color: lead,
                         end_color: Some(matter),
                         shape: ParticleShape::Diamond,
@@ -1342,11 +1350,11 @@ pub(crate) fn stage_oneshot(
                         gravity: 7.0,
                         ..base.clone()
                     };
-                    chip.velocity = Vec3::Y * (1.6 + 0.5 * (i / 2) as f32);
+                    chip.velocity = Vec3::Y * (2.0 + 0.6 * (i / 2) as f32);
                     fly(
                         chip,
                         Vec3::new(along.x, 0.0, along.y) * side,
-                        (0.16 + 0.1 * (i / 2) as f32) * half,
+                        (0.25 + 0.2 * (i / 2) as f32) * half,
                     )
                 }));
                 out
@@ -3113,7 +3121,7 @@ mod tests {
         let along = (to - from).normalize();
         let first = stage_oneshot(OneShot::SegmentSnap(0), &palette(), &wall, 0.0, 5);
         let later = stage_oneshot(OneShot::SegmentSnap(1), &palette(), &wall, 0.0, 5);
-        assert_eq!((first.len(), later.len()), (7, 5));
+        assert_eq!((first.len(), later.len()), (STAGE_MAX, 6));
         assert_eq!(
             later,
             stage_oneshot(OneShot::SegmentSnap(u8::MAX), &palette(), &wall, 0.0, 5)
@@ -3125,7 +3133,7 @@ mod tests {
                 for point in [start, end] {
                     let offset = point - from.midpoint(to);
                     assert!(offset.perp_dot(along).abs() < 1e-4, "{spec:?}");
-                    assert!(offset.length() <= 0.3 * 2.5 + 1e-4, "{spec:?}");
+                    assert!(offset.length() <= 0.5 * 2.5 + 1e-4, "{spec:?}");
                 }
                 drift += end - start;
                 assert!(spec.origin.y >= 1.0);
@@ -3136,7 +3144,11 @@ mod tests {
         let places = |specs: &[ParticleSpec]| {
             let mut at: Vec<_> = specs
                 .iter()
-                .map(|spec| (spec.shape as u8, landing(spec).to_array().map(f32::to_bits)))
+                // To the millimetre: the two ends of the bar are not the same floats.
+                .map(|spec| {
+                    let at = (landing(spec) * 1000.0).round();
+                    (spec.shape as u8, at.x as i32, at.y as i32)
+                })
                 .collect();
             at.sort();
             at

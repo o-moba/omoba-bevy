@@ -1315,7 +1315,7 @@ fn shield_wall_count_drives_the_block_one_shot() {
         panic!("a wall is a bar");
     };
     let (middle, along) = (from.midpoint(to), (to - from).normalize());
-    for (before, pieces) in [(0, 7), (1, 5), (9, 5)] {
+    for (before, pieces) in [(0, 8), (1, 6), (9, 6)] {
         let block = event(
             &counted(before + 1),
             step(Transition::SegmentBroken(before)),
