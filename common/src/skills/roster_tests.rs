@@ -405,6 +405,130 @@ fn furnace_breath_telegraph_follows_the_caster_until_the_blast() {
     assert_eq!(w.players[&addr(2)].hero.hp, 1000.0);
     assert!(w.players[&addr(3)].hero.hp < 1000.0);
 }
+fn add_team_minion(w: &mut GameWorld, team: Team, pos: [f32; 2]) -> u64 {
+    let before: BTreeSet<_> = w.minions.keys().copied().collect();
+    crate::world::spawn_minion_wave_for_team_lane(
+        &w.map_layout,
+        &mut w.minions,
+        &mut w.next_minion_id,
+        team,
+        shared::map::Lane::Mid,
+    );
+    let id = *w.minions.keys().find(|id| !before.contains(id)).unwrap();
+    w.minions
+        .retain(|key, _| *key == id || before.contains(key));
+    let m = w.minions.get_mut(&id).unwrap();
+    m.state.x = pos[0];
+    m.state.z = pos[1];
+    id
+}
+fn add_tower(w: &mut GameWorld, team: Team, pos: [f32; 2]) -> u64 {
+    let mut next = w.structures.keys().max().map_or(1, |id| id + 1);
+    let id = next;
+    crate::world::add_structure(
+        &mut w.structures,
+        &mut next,
+        shared::wire::StructureKind::Tower,
+        crate::entities::StructureRole::LaneTower {
+            lane: shared::map::Lane::Mid,
+        },
+        team,
+        crate::entities::Vec3f::new(pos[0], 3.0, pos[1]),
+    );
+    id
+}
+#[test]
+fn hero_only_picks_skip_a_nearer_non_hero() {
+    // Patient Curse: a minion and a tower sit nearer the aim than the hero.
+    let (mut w, now, victim) = fixture(HeroClass::Veilstalker);
+    let owner = w.players[&addr(1)].hero.identity.id;
+    add_team_minion(&mut w, Team::Blue, [7.0, 0.0]);
+    add_tower(&mut w, Team::Blue, [7.5, 1.0]);
+    let mana = w.players[&addr(1)].hero.mana;
+    cast(&mut w, addr(1), 1, [7.0, 0.0], 1, now);
+    let p = &w.players[&addr(1)];
+    assert_eq!(p.timers.last_cast_at[1], Some(now));
+    assert!(p.hero.mana < mana);
+    strike(&mut w, owner, victim, now + duration(2.2));
+    assert!(
+        w.players[&addr(2)].hero.skills.advanced.charm.is_some(),
+        "the ripe curse sits on the hero"
+    );
+
+    // Orbital Guard: an allied minion sits nearer the aim than the allied hero.
+    let (mut w, now, _) = fixture(HeroClass::Orbitwright);
+    let ally = add_player(&mut w, 3, HeroClass::Warrior, Team::Green, [10.0, 0.0], now);
+    add_team_minion(&mut w, Team::Green, [11.0, 0.0]);
+    cast(&mut w, addr(1), 2, [11.0, 0.0], 1, now);
+    assert_eq!(w.players[&addr(1)].timers.last_cast_at[2], Some(now));
+    advance(&mut w, now, 0.8);
+    let orb = w.players[&addr(1)]
+        .hero
+        .skills
+        .advanced
+        .orb
+        .as_ref()
+        .unwrap();
+    assert_eq!(orb.attached, Some(ally));
+    assert!(!w.players[&addr(3)].hero.skills.shields.is_empty());
+
+    // With no hero in the circle the cast is still refused before any cost.
+    let (mut w, now, _) = fixture(HeroClass::Veilstalker);
+    w.players.get_mut(&addr(2)).unwrap().hero.x = 12.0;
+    add_team_minion(&mut w, Team::Blue, [7.0, 0.0]);
+    let mana = w.players[&addr(1)].hero.mana;
+    cast(&mut w, addr(1), 1, [7.0, 0.0], 1, now);
+    let p = &w.players[&addr(1)];
+    assert_eq!(p.timers.last_cast_at[1], None);
+    assert_eq!(p.hero.mana, mana);
+}
+#[test]
+fn fourfold_duel_acquires_the_hero_when_a_nearer_minion_shares_the_aim_circle() {
+    let (mut w, now, victim) = fixture(HeroClass::Edgeweaver);
+    add_team_minion(&mut w, Team::Blue, [6.6, 0.0]);
+    cast(&mut w, addr(1), 3, [6.6, 0.0], 1, now);
+    let p = &w.players[&addr(1)];
+    assert_eq!(p.timers.last_cast_at[3], Some(now));
+    assert_eq!(
+        p.hero.skills.advanced.challenge.as_ref().map(|c| c.target),
+        Some(target(victim))
+    );
+    assert_eq!(
+        state(p, now).unwrap().challenge_target,
+        Some(victim),
+        "the duel the caster sees is the one on the hero"
+    );
+}
+#[test]
+fn thunder_kick_ignores_structures_and_picks_the_unit_beside_them() {
+    let (mut w, now, _) = fixture(HeroClass::Stormfist);
+    let tower = add_tower(&mut w, Team::Blue, [4.0, 0.0]);
+    let tower_hp = w.structures[&tower].state.hp;
+    let p = w.players.get_mut(&addr(2)).unwrap();
+    p.hero.x = 3.0;
+    p.hero.z = 2.0;
+    // Aimed at the tower itself: the hero beside it is the nearest unit.
+    cast(&mut w, addr(1), 3, [4.0, 0.0], 1, now);
+    assert_eq!(w.players[&addr(1)].timers.last_cast_at[3], Some(now));
+    let kicked = &w.players[&addr(2)].hero;
+    assert!(kicked.hp < 1000.0);
+    assert!(
+        distance([kicked.x, kicked.z], [3.0, 2.0]) > 3.0,
+        "the kick throws the hero: {:?}",
+        [kicked.x, kicked.z]
+    );
+    assert!(remaining(kicked.skills.control.stun_until, now) > 0.0);
+    assert_eq!(w.structures[&tower].state.hp, tower_hp);
+
+    // A lone tower is not a target: the 40 s cooldown stays.
+    let (mut w, now, _) = fixture(HeroClass::Stormfist);
+    w.players.get_mut(&addr(2)).unwrap().hero.x = 30.0;
+    let tower = add_tower(&mut w, Team::Blue, [4.0, 0.0]);
+    cast(&mut w, addr(1), 3, [4.0, 0.0], 1, now);
+    assert_eq!(w.players[&addr(1)].timers.last_cast_at[3], None);
+    assert_eq!(w.structures[&tower].state.hp, tower_hp);
+    assert!(std::mem::take(&mut w.skill_runtime.pending).is_empty());
+}
 #[test]
 fn invalid_target_nonfinite_out_of_range_casts_leave_pools_and_objects_unchanged() {
     for class in [

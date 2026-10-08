@@ -150,12 +150,24 @@ fn direction(from: [f32; 2], to: [f32; 2]) -> [f32; 2] {
         [(to[0] - from[0]) / d, (to[1] - from[1]) / d]
     }
 }
+/// Which kinds a targeted technique may acquire near the aim point. The pick is
+/// the nearest eligible candidate, so an ineligible one never shadows it.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Pick {
+    /// Every kind the side admits.
+    Any,
+    /// Heroes only.
+    Hero,
+    /// Anything that can be moved: no structures.
+    Unit,
+}
 fn select(
     w: &GameWorld,
     owner: u64,
     aim: [f32; 2],
     range: f32,
     ally: bool,
+    pick: Pick,
     now: Instant,
 ) -> Option<Candidate> {
     let p = actor(w, owner)?;
@@ -165,6 +177,11 @@ fn select(
         .filter(|c| {
             (c.team == Some(p.hero.identity.team)) == ally
                 && (!ally || matches!(c.target.kind, TargetKind::Player | TargetKind::Minion))
+                && match pick {
+                    Pick::Any => true,
+                    Pick::Hero => c.target.kind == TargetKind::Player,
+                    Pick::Unit => c.target.kind != TargetKind::Structure,
+                }
                 && distance(c.pos, aim) <= 2.0 + c.radius
                 && distance(c.pos, origin) <= range + c.radius
                 && (p.modifiers.bypass_vision
@@ -458,18 +475,18 @@ pub fn cast(w: &mut GameWorld, addr: SocketAddr, slot: u8, aim: [f32; 2], now: I
     if action == Technique::BlinkShot && !legal_landing(w, aim, now) {
         return;
     }
-    let picked = if matches!(
-        action,
-        Technique::VitalChallenge | Technique::Curse | Technique::Lash | Technique::ChainKick
-    ) {
-        select(w, owner, aim, range, false, now)
-    } else if matches!(
-        action,
-        Technique::AllyLeap | Technique::GuardLeap | Technique::BallGuard
-    ) {
-        select(w, owner, aim, range, true, now)
-    } else {
-        None
+    let picked = match action {
+        Technique::VitalChallenge | Technique::Curse => {
+            select(w, owner, aim, range, false, Pick::Hero, now)
+        }
+        // A kick throws its target; a structure cannot be thrown.
+        Technique::ChainKick => select(w, owner, aim, range, false, Pick::Unit, now),
+        Technique::Lash => select(w, owner, aim, range, false, Pick::Any, now),
+        Technique::BallGuard => select(w, owner, aim, range, true, Pick::Hero, now),
+        Technique::AllyLeap | Technique::GuardLeap => {
+            select(w, owner, aim, range, true, Pick::Any, now)
+        }
+        _ => None,
     };
     if matches!(
         action,
@@ -480,13 +497,6 @@ pub fn cast(w: &mut GameWorld, addr: SocketAddr, slot: u8, aim: [f32; 2], now: I
             | Technique::AllyLeap
             | Technique::BallGuard
     ) && picked.is_none()
-    {
-        return;
-    }
-    if matches!(
-        action,
-        Technique::VitalChallenge | Technique::Curse | Technique::BallGuard
-    ) && picked.is_some_and(|c| c.target.kind != TargetKind::Player)
     {
         return;
     }
