@@ -1079,6 +1079,211 @@ fn self_target_hotbar_request_needs_no_selected_enemy() {
     );
 }
 
+/// A level-ten legacy hero at the origin that walks to `ORDER`, for the move-order rule.
+fn legacy_hero_with_move_order(class: HeroClass) -> (App, Entity) {
+    let mut app = App::new();
+    app.add_message::<NetworkCommand>()
+        .init_resource::<TeamSelection>()
+        .init_resource::<PendingCast>()
+        .init_resource::<LocalCastCooldown>()
+        .init_resource::<ActionFeedback>()
+        .init_resource::<GameplayInputContext>()
+        .add_systems(Update, resolve_pending_cast_system);
+    let hero = app
+        .world_mut()
+        .spawn((
+            Player,
+            Transform::default(),
+            CombatStats::default(),
+            PlayerProgression {
+                level: 10,
+                ..default()
+            },
+            NetworkPlayerId(1),
+            Team::Green,
+            NetworkHeroClass(class),
+            MovementTarget { target: ORDER },
+            crate::player::MovementRoute {
+                requested_target: ORDER,
+                structure_revision: 1,
+                destination: ORDER,
+                waypoints: vec![ORDER],
+            },
+        ))
+        .id();
+    (app, hero)
+}
+
+const ORDER: Vec3 = Vec3::new(-12.0, 0.0, 5.0);
+
+fn queue_slot(app: &mut App, slot: usize, target: Option<(Entity, TargetId)>) {
+    app.world_mut().resource_mut::<PendingCast>().request = Some(PendingCastRequest {
+        slot,
+        target_entity: target.map(|(entity, _)| entity),
+        target: target.map(|(_, id)| id),
+        approach_announced: false,
+    });
+}
+
+fn sent_commands(app: &mut App) -> Vec<NetworkCommand> {
+    app.world_mut()
+        .resource_mut::<Messages<NetworkCommand>>()
+        .drain()
+        .collect()
+}
+
+fn move_order(app: &App, hero: Entity) -> Option<Vec3> {
+    app.world()
+        .get::<MovementTarget>(hero)
+        .map(|order| order.target)
+}
+
+#[test]
+fn self_target_cast_keeps_the_move_order_and_only_ends_a_cast_approach() {
+    use super::cast::cast_clears_move_order;
+    use shared::TargetingMode::{SelfTarget, UnitTarget};
+
+    let approach = Vec3::new(30.0, 0.0, 0.0);
+    for (targeting, order, expected) in [
+        (SelfTarget, Some(ORDER), false),
+        (SelfTarget, Some(approach), true),
+        (SelfTarget, None, false),
+        (UnitTarget, Some(ORDER), true),
+        (UnitTarget, Some(approach), true),
+    ] {
+        assert_eq!(
+            cast_clears_move_order(targeting, order, Some(approach)),
+            expected,
+            "{targeting:?} {order:?}"
+        );
+    }
+    assert!(!cast_clears_move_order(SelfTarget, Some(ORDER), None));
+
+    // 1. Every legacy self cast is sent and leaves the player's order and route alone.
+    let legacy = HeroClass::ALL
+        .into_iter()
+        .filter(|class| shared::loadout::preset_for_class(*class).is_none());
+    let mut self_casts = 0;
+    for class in legacy {
+        for slot in SkillSlot::ALL {
+            if ability_for_class_slot(class, slot).targeting != SelfTarget {
+                continue;
+            }
+            self_casts += 1;
+            let (mut app, hero) = legacy_hero_with_move_order(class);
+            queue_slot(&mut app, slot.index(), None);
+            app.update();
+            let sent = sent_commands(&mut app);
+            assert!(
+                matches!(
+                    sent.as_slice(),
+                    [NetworkCommand::Cast {
+                        target: TargetId {
+                            kind: TargetKind::Player,
+                            id: 1
+                        },
+                        slot: sent_slot
+                    }] if usize::from(*sent_slot) == slot.index()
+                ),
+                "{class:?} {slot:?}: {sent:?}"
+            );
+            assert_eq!(move_order(&app, hero), Some(ORDER), "{class:?} {slot:?}");
+            assert!(
+                app.world()
+                    .entity(hero)
+                    .contains::<crate::player::MovementRoute>(),
+                "{class:?} {slot:?}"
+            );
+        }
+    }
+    assert_eq!(self_casts, 7);
+
+    // 2. A refused self cast says why and keeps the order as well.
+    let (mut app, hero) = legacy_hero_with_move_order(HeroClass::Ranger);
+    app.world_mut().get_mut::<CombatStats>(hero).unwrap().mana = 0.0;
+    queue_slot(&mut app, SkillSlot::W.index(), None);
+    app.update();
+    assert!(sent_commands(&mut app).is_empty());
+    assert!(!app.world().resource::<ActionFeedback>().text.is_empty());
+    assert!(!app.world().resource::<PendingCast>().is_pending());
+    assert_eq!(move_order(&app, hero), Some(ORDER));
+    assert!(
+        app.world()
+            .entity(hero)
+            .contains::<crate::player::MovementRoute>()
+    );
+
+    // 3. A walk into cast range is not an order of the player: the self cast that
+    // replaces the queued shot ends it, and a later order of the player is kept again.
+    let (mut app, hero) = legacy_hero_with_move_order(HeroClass::Ranger);
+    let target = app
+        .world_mut()
+        .spawn((
+            Transform::from_translation(approach),
+            CombatStats::default(),
+            Team::Blue,
+            NetworkMinionId(77),
+        ))
+        .id();
+    let id = TargetId {
+        kind: TargetKind::Minion,
+        id: 77,
+    };
+    queue_slot(&mut app, SkillSlot::Q.index(), Some((target, id)));
+    app.update();
+    assert_eq!(move_order(&app, hero), Some(approach));
+    assert!(sent_commands(&mut app).is_empty());
+    let skills = crate::equipped_skills::resolve(HeroClass::Ranger, None).unwrap();
+    {
+        let world = app.world_mut();
+        let mut feedback = world.remove_resource::<ActionFeedback>().unwrap();
+        queue_cast_request(
+            SkillSlot::W.index(),
+            &skills,
+            &TargetState::default(),
+            &mut world.resource_mut::<PendingCast>(),
+            &mut feedback,
+        );
+        world.insert_resource(feedback);
+    }
+    app.update();
+    assert!(matches!(
+        sent_commands(&mut app).as_slice(),
+        [NetworkCommand::Cast { slot: 1, .. }]
+    ));
+    assert_eq!(move_order(&app, hero), None);
+    *app.world_mut().resource_mut::<LocalCastCooldown>() = LocalCastCooldown::default();
+    app.world_mut()
+        .entity_mut(hero)
+        .insert(MovementTarget { target: ORDER });
+    queue_slot(&mut app, SkillSlot::W.index(), None);
+    app.update();
+    assert!(matches!(
+        sent_commands(&mut app).as_slice(),
+        [NetworkCommand::Cast { slot: 1, .. }]
+    ));
+    assert_eq!(move_order(&app, hero), Some(ORDER));
+
+    // 4. A cast on a unit stops the hero as before, whoever gave the order.
+    let (mut app, hero) = legacy_hero_with_move_order(HeroClass::Ranger);
+    let target = app
+        .world_mut()
+        .spawn((
+            Transform::from_xyz(2.0, 0.0, 0.0),
+            CombatStats::default(),
+            Team::Blue,
+            NetworkMinionId(77),
+        ))
+        .id();
+    queue_slot(&mut app, SkillSlot::Q.index(), Some((target, id)));
+    app.update();
+    assert!(matches!(
+        sent_commands(&mut app).as_slice(),
+        [NetworkCommand::Cast { slot: 0, .. }]
+    ));
+    assert_eq!(move_order(&app, hero), None);
+}
+
 #[test]
 fn actual_cast_and_upgrade_systems_obey_help_pause_and_debug_context() {
     let mut app = App::new();

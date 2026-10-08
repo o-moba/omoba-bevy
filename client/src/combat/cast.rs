@@ -33,6 +33,10 @@ pub(super) struct PendingCastRequest {
 pub(crate) struct PendingCast {
     pub(super) request: Option<PendingCastRequest>,
     pub(crate) aim: Option<Vec2>,
+    /// Where the latest walk into cast range was sent. A move order that still points
+    /// there is that walk and not an order of the player; it outlives the request so that
+    /// the next cast can still tell the two apart.
+    approach_target: Option<Vec3>,
 }
 
 impl PendingCast {
@@ -55,6 +59,7 @@ impl PendingCast {
                 approach_announced: true,
             }),
             aim: None,
+            approach_target: None,
         }
     }
 
@@ -95,6 +100,19 @@ fn report(
 fn report_plain(feedback: &mut ActionFeedback, key: &'static str) {
     feedback.push_line(tr(key));
     info!("{}", tr_in(key, LocaleId::ENGLISH));
+}
+
+/// Whether a legacy cast, sent or refused, ends the hero's move order. A cast on a unit
+/// stops the hero as it always has: the order may be the walk into range that the cast
+/// started. A self cast has nobody to stop for, and the server neither stops nor turns its
+/// caster (`common/src/sim/cast.rs`), so it ends only such a walk and keeps the order the
+/// player gave.
+pub(super) fn cast_clears_move_order(
+    targeting: TargetingMode,
+    order: Option<Vec3>,
+    approach: Option<Vec3>,
+) -> bool {
+    targeting != TargetingMode::SelfTarget || (order.is_some() && order == approach)
 }
 
 /// Resolves the target and sends a slot cast for the local player's class kit.
@@ -298,6 +316,7 @@ pub(super) fn resolve_pending_cast_system(
             Option<&NetworkPlayerId>,
             Option<&NetworkHeroClass>,
             &Team,
+            Option<&MovementTarget>,
         ),
         With<Player>,
     >,
@@ -343,7 +362,7 @@ pub(super) fn resolve_pending_cast_system(
     let Some(request) = pending_cast.request else {
         return;
     };
-    let Ok((player_entity, player_transform, stats, progression, net_id, class, team)) =
+    let Ok((player_entity, player_transform, stats, progression, net_id, class, team, order)) =
         local_player.single()
     else {
         pending_cast.cancel();
@@ -463,6 +482,11 @@ pub(super) fn resolve_pending_cast_system(
         pending_cast.cancel();
         return;
     }
+    let clears_move_order = cast_clears_move_order(
+        definition.targeting,
+        order.map(|order| order.target),
+        pending_cast.approach_target,
+    );
     let rejection = if !stats.is_alive() {
         Some(tr("combat.cast.wait_respawn").to_string())
     } else if !equipped_skills::unlocked(&skills, &prog)[slot.index()] {
@@ -507,9 +531,11 @@ pub(super) fn resolve_pending_cast_system(
     if let Some(message) = rejection {
         feedback.push_line(message);
         pending_cast.cancel();
-        commands
-            .entity(player_entity)
-            .remove::<(MovementTarget, crate::player::MovementRoute)>();
+        if clears_move_order {
+            commands
+                .entity(player_entity)
+                .remove::<(MovementTarget, crate::player::MovementRoute)>();
+        }
         return;
     }
 
@@ -549,6 +575,7 @@ pub(super) fn resolve_pending_cast_system(
             commands.entity(player_entity).insert(MovementTarget {
                 target: target_transform.translation,
             });
+            pending_cast.approach_target = Some(target_transform.translation);
             if !request.approach_announced {
                 report(&mut feedback, "combat.cast.approaching", definition, &[]);
                 if let Some(request) = pending_cast.request.as_mut() {
@@ -559,7 +586,9 @@ pub(super) fn resolve_pending_cast_system(
         }
     }
 
-    commands.entity(player_entity).remove::<MovementTarget>();
+    if clears_move_order {
+        commands.entity(player_entity).remove::<MovementTarget>();
+    }
     let sent = try_cast_slot(
         request.slot,
         &skills,
