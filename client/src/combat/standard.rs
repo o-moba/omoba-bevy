@@ -1469,16 +1469,422 @@ mod tests {
             Vec2::ONE
         );
     }
+
+    /// The lantern `id` of the allied hero `owner`, planted at `at`.
+    fn lantern(id: u64, owner: u64, at: Vec2) -> SkillEffectState {
+        SkillEffectState {
+            id,
+            owner_id: owner,
+            position: at.to_array(),
+            end: at.to_array(),
+            ..effect(SkillId::GuidingLantern, EffectVisualKind::Lantern)
+        }
+    }
+
+    #[test]
+    fn the_lantern_prompt_follows_every_condition_of_the_server() {
+        use crate::team::Team;
+        let hero = Vec2::new(2.0, -1.0);
+        let beside = hero + Vec2::new(0.0, 1.0);
+        let way = Vec2::new(0.6, 0.8);
+        // The hero 7 of the green team, and where the owner 9 of the lantern stands.
+        let offered = |effects: &[SkillEffectState], can_move: bool, owner: Option<Vec2>| {
+            usable_lantern(effects, 7, Team::Green, hero, can_move, |id| {
+                owner.filter(|_| id == 9)
+            })
+        };
+        let near = Some(hero + way * 10.0);
+        let one = [lantern(4, 9, beside)];
+        assert_eq!(offered(&one, true, near), Some(4));
+
+        // Within 3.0 of the lantern.
+        assert_eq!(
+            offered(&[lantern(4, 9, hero + way * 2.99)], true, near),
+            Some(4)
+        );
+        assert_eq!(
+            offered(&[lantern(4, 9, hero + way * 3.01)], true, near),
+            None
+        );
+        // The leash: the owner within 24.0 of the hero, wherever the lantern stands.
+        assert_eq!(offered(&one, true, Some(hero + way * 23.99)), Some(4));
+        assert_eq!(offered(&one, true, Some(hero + way * 24.01)), None);
+        // A hero that cannot move is refused.
+        assert_eq!(offered(&one, false, near), None);
+        // An owner the client does not know, or one that is dead, has no position.
+        assert_eq!(offered(&one, true, None), None);
+        // The hero's own lantern, an enemy one and an effect that is no lantern.
+        assert_eq!(offered(&[lantern(4, 7, beside)], true, near), None);
+        let mut enemy = lantern(4, 9, beside);
+        enemy.owner_team = shared::map::Team::Blue;
+        assert_eq!(offered(&[enemy], true, near), None);
+        let mut orb = lantern(4, 9, beside);
+        orb.skill = SkillId::OrbitalCommand;
+        assert_eq!(offered(&[orb], true, near), None);
+
+        // Two lanterns: the lowest id among those the server would accept, not among
+        // those that are merely near.
+        let two = [lantern(6, 11, beside), lantern(4, 9, beside)];
+        let both = |id: u64| matches!(id, 9 | 11).then_some(hero + way * 5.0);
+        let far_first = |id: u64| match id {
+            9 => Some(hero + way * 30.0),
+            11 => Some(hero + way * 5.0),
+            _ => None,
+        };
+        assert_eq!(
+            usable_lantern(&two, 7, Team::Green, hero, true, both),
+            Some(4)
+        );
+        assert_eq!(
+            usable_lantern(&two, 7, Team::Green, hero, true, far_first),
+            Some(6)
+        );
+        assert_eq!(
+            usable_lantern(&two, 7, Team::Green, hero, false, both),
+            None
+        );
+    }
+
+    #[test]
+    fn the_interact_prompt_is_shown_and_sent_only_for_a_lantern_the_hero_may_take() {
+        use crate::net::{NetworkCommand, NetworkPlayerId};
+        use crate::team::Team;
+
+        let mut app = App::new();
+        app.init_resource::<crate::input_context::GameplayInputContext>()
+            .init_resource::<ButtonInput<KeyCode>>()
+            .init_resource::<crate::gamepad::GamepadControls>()
+            .add_message::<NetworkCommand>()
+            .insert_resource(GameStateSnapshot {
+                your_id: 7,
+                skill_effects: vec![lantern(4, 9, Vec2::new(1.0, 0.0))],
+                ..default()
+            })
+            .add_systems(Update, interact);
+        let button = app
+            .world_mut()
+            .spawn((Node::default(), Interaction::None, InteractButton))
+            .id();
+        let hero = app
+            .world_mut()
+            .spawn((
+                Player,
+                Transform::default(),
+                Team::Green,
+                crate::combat::CombatStats::default(),
+                NetworkPlayerId(7),
+                PlayerLoadout(None),
+            ))
+            .id();
+        let owner = app
+            .world_mut()
+            .spawn((
+                Transform::from_xyz(10.0, 0.0, 0.0),
+                NetworkPlayerId(9),
+                crate::combat::CombatStats::default(),
+            ))
+            .id();
+        // One frame with F pressed: whether the prompt is shown and what is sent.
+        let press = |app: &mut App| {
+            let mut keys = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+            keys.reset_all();
+            keys.press(KeyCode::KeyF);
+            app.update();
+            let shown = app.world().get::<Node>(button).unwrap().display == Display::Flex;
+            let sent: Vec<_> = app
+                .world_mut()
+                .resource_mut::<Messages<NetworkCommand>>()
+                .drain()
+                .collect();
+            (shown, sent)
+        };
+        let taken = |outcome: (bool, Vec<NetworkCommand>)| match outcome {
+            (true, sent) => {
+                assert!(
+                    matches!(sent.as_slice(), [NetworkCommand::Interact { object_id: 4 }]),
+                    "{sent:?}"
+                );
+                true
+            }
+            (false, sent) => {
+                assert!(sent.is_empty(), "{sent:?}");
+                false
+            }
+        };
+
+        assert!(taken(press(&mut app)));
+        // The owner beyond its leash of the hero.
+        app.world_mut()
+            .entity_mut(owner)
+            .insert(Transform::from_xyz(24.5, 0.0, 0.0));
+        assert!(!taken(press(&mut app)));
+        app.world_mut()
+            .entity_mut(owner)
+            .insert(Transform::from_xyz(23.5, 0.0, 0.0));
+        assert!(taken(press(&mut app)));
+        // A rooted or stunned hero: the root flag covers both.
+        app.world_mut()
+            .entity_mut(hero)
+            .insert(PlayerLoadout(Some(LoadoutState {
+                root_remaining_secs: 0.4,
+                ..default()
+            })));
+        assert!(!taken(press(&mut app)));
+        // A slow does not stop the rescue.
+        app.world_mut()
+            .entity_mut(hero)
+            .insert(PlayerLoadout(Some(LoadoutState {
+                movement_multiplier: 0.5,
+                ..default()
+            })));
+        assert!(taken(press(&mut app)));
+        // A dead owner, and an owner the client does not have.
+        app.world_mut()
+            .entity_mut(owner)
+            .insert(crate::combat::CombatStats {
+                hp: 0.0,
+                ..default()
+            });
+        assert!(!taken(press(&mut app)));
+        app.world_mut().entity_mut(owner).despawn();
+        assert!(!taken(press(&mut app)));
+    }
+
+    /// A step that is clearly inside or outside a boundary and far smaller than a hero.
+    const MARGIN: f32 = 0.03;
+
+    /// On the practice authority an allied Chainkeeper plants its lantern, the commanded
+    /// hero stands `reach` from the lantern and the Chainkeeper `leash` from that hero;
+    /// `arrange` may then change the world. Returns whether the authority lets the hero
+    /// take the lantern and whether the prompt offers it from the snapshot of that moment.
+    fn rescue(
+        reach: f32,
+        leash: f32,
+        arrange: impl FnOnce(&mut common::offline::PracticeSession, std::net::SocketAddr),
+    ) -> (bool, bool) {
+        use common::offline::{EPOCH, LOCAL_ADDR, PracticeSession};
+        use shared::practice::PracticeCommand;
+        use shared::wire::{CharacterChoice, ClientPacket, ServerPacket};
+        const W: usize = 1;
+
+        let mut session = PracticeSession::new(std::time::Instant::now());
+        session.command(ClientPacket::Join {
+            handheld: Default::default(),
+            prematch: false,
+            team: shared::map::Team::Green,
+            character: CharacterChoice::Ipfs,
+            hero_class: HeroClass::Warrior,
+            avatar: None,
+            sprite_character: None,
+            session_id: None,
+            passport_ticket: None,
+        });
+        for command in [PracticeCommand::ClearBots, PracticeCommand::SpawnDummy] {
+            session.command(ClientPacket::Practice { command });
+        }
+        session.bots = Default::default();
+        session.world.structures.clear();
+        session.world.minions.clear();
+        session.world.neutrals.clear();
+        let hero = session.world.players[&LOCAL_ADDR].hero.identity.id;
+        let (keeper_addr, keeper) = session
+            .world
+            .players
+            .iter()
+            .find(|(_, player)| player.hero.identity.is_bot)
+            .map(|(addr, player)| (*addr, player.hero.identity.id))
+            .expect("the dummy");
+        let kit = shared::loadout::preset_for_class(HeroClass::Chainkeeper).unwrap();
+        assert_eq!(kit.skills()[W], SkillId::GuidingLantern);
+        {
+            let keeper = session.world.players.get_mut(&keeper_addr).unwrap();
+            keeper.hero.identity.team = shared::map::Team::Green;
+            keeper.hero.identity.hero_class = HeroClass::Chainkeeper;
+            keeper.hero.skills.loadout = Some(kit);
+            keeper.hero.progress.level = 18;
+            keeper.hero.progress.ranks = [1; 4];
+            keeper.hero.mana = keeper.hero.max_mana;
+            (keeper.hero.x, keeper.hero.z) = (0.0, 0.0);
+        }
+        common::command::apply(
+            &mut session.world,
+            keeper_addr,
+            &ClientPacket::CastSkill {
+                slot: W as u8,
+                aim: [0.0, 6.0],
+                server_epoch: EPOCH,
+                match_id: session.match_id,
+                request_id: 1,
+            },
+            EPOCH,
+            session.match_id,
+            session.now,
+        );
+        let lanterns = |session: &mut PracticeSession| {
+            let ServerPacket::Snapshot { skill_effects, .. } = session.snapshot() else {
+                panic!("practice publishes a snapshot");
+            };
+            skill_effects
+                .into_iter()
+                .filter(|effect| effect.skill == SkillId::GuidingLantern)
+                .collect::<Vec<_>>()
+        };
+        let planted = lanterns(&mut session);
+        let [lantern] = planted.as_slice() else {
+            panic!("the keeper planted one lantern: {planted:?}");
+        };
+        let stand = Vec2::from_array(lantern.position) - Vec2::X * reach;
+        for (addr, at) in [(LOCAL_ADDR, stand), (keeper_addr, stand + Vec2::Y * leash)] {
+            let hero = &mut session.world.players.get_mut(&addr).unwrap().hero;
+            (hero.x, hero.z) = (at.x, at.y);
+        }
+        arrange(&mut session, keeper_addr);
+
+        // What the client knows at this moment, and what its prompt makes of it.
+        let ServerPacket::Snapshot {
+            players,
+            skill_effects,
+            ..
+        } = session.snapshot()
+        else {
+            panic!("practice publishes a snapshot");
+        };
+        let me = players.iter().find(|player| player.id == hero).unwrap();
+        assert_eq!(me.team, shared::map::Team::Green);
+        let offered = usable_lantern(
+            &skill_effects,
+            hero,
+            crate::team::Team::Green,
+            Vec2::new(me.x, me.z),
+            movement_factor(Some(&PlayerLoadout(me.loadout.clone()))) > 0.0,
+            |id| {
+                players
+                    .iter()
+                    .find(|player| player.id == id && player.hp > 0.0)
+                    .map(|player| Vec2::new(player.x, player.z))
+            },
+        );
+        assert!(offered.is_none_or(|id| id == lantern.id && lantern.owner_id == keeper));
+
+        session.command(ClientPacket::Interact {
+            object_id: lantern.id,
+            server_epoch: EPOCH,
+            match_id: session.match_id,
+            request_id: 1,
+        });
+        // An accepted request spends the lantern.
+        (lanterns(&mut session).is_empty(), offered.is_some())
+    }
+
+    /// Parity with the in-process authority: the prompt is offered exactly when the
+    /// authority lets the hero take the lantern, at the edge of the reach, at the edge of
+    /// the owner's leash, for a hero that cannot move and for an owner that is dead.
+    #[test]
+    fn the_lantern_prompt_is_offered_exactly_when_the_authority_accepts_it() {
+        let later = |session: &common::offline::PracticeSession| {
+            Some(session.now + std::time::Duration::from_secs(2))
+        };
+        assert_eq!(rescue(2.0, 10.0, |_, _| {}), (true, true));
+        for (gap, accepted) in [(-MARGIN, true), (MARGIN, false)] {
+            assert_eq!(
+                rescue(LANTERN_REACH + gap, 10.0, |_, _| {}),
+                (accepted, accepted),
+                "reach {gap}"
+            );
+            assert_eq!(
+                rescue(2.0, LANTERN_LEASH + gap, |_, _| {}),
+                (accepted, accepted),
+                "leash {gap}"
+            );
+        }
+        let me = common::offline::LOCAL_ADDR;
+        assert_eq!(
+            rescue(2.0, 10.0, |session, _| {
+                let until = later(session);
+                let hero = &mut session.world.players.get_mut(&me).unwrap().hero;
+                hero.skills.control.root_until = until;
+            }),
+            (false, false),
+            "rooted"
+        );
+        assert_eq!(
+            rescue(2.0, 10.0, |session, _| {
+                let until = later(session);
+                let hero = &mut session.world.players.get_mut(&me).unwrap().hero;
+                hero.skills.control.stun_until = until;
+            }),
+            (false, false),
+            "stunned"
+        );
+        assert_eq!(
+            rescue(2.0, 10.0, |session, keeper| {
+                session.world.players.get_mut(&keeper).unwrap().hero.hp = 0.0;
+            }),
+            (false, false),
+            "the owner is dead"
+        );
+    }
 }
 
 #[derive(Component)]
 pub(super) struct InteractButton;
 
+/// How near a hero has to stand to a lantern to take it, and how near the owner of the
+/// lantern has to be to that hero (`interact`, `common/src/skills/advanced.rs`).
+const LANTERN_REACH: f32 = 3.0;
+const LANTERN_LEASH: f32 = 24.0;
+
+/// The lantern the server would let the hero at `hero` take now: an allied lantern of
+/// another hero within reach, while the hero can move and the owner of the lantern lives
+/// within its leash of the hero. `owner_position` is where a living hero stands, if the
+/// client knows it. Of several such lanterns, the one with the lowest id.
+pub(super) fn usable_lantern(
+    effects: &[SkillEffectState],
+    your_id: u64,
+    team: crate::team::Team,
+    hero: Vec2,
+    can_move: bool,
+    owner_position: impl Fn(u64) -> Option<Vec2>,
+) -> Option<u64> {
+    effects
+        .iter()
+        .filter(|e| {
+            can_move
+                && team == e.owner_team
+                && e.owner_id != your_id
+                && matches!(
+                    shared::loadout::skill(e.skill).effect,
+                    shared::loadout::SkillEffect::Technique {
+                        action: shared::loadout::Technique::Lantern,
+                        ..
+                    }
+                )
+                && Vec2::from_array(e.position).distance(hero) <= LANTERN_REACH
+                && owner_position(e.owner_id)
+                    .is_some_and(|owner| owner.distance(hero) <= LANTERN_LEASH)
+        })
+        .map(|e| e.id)
+        .min()
+}
+
 /// One explicit action for keyboard, touch and the controller's left-stick click.
 pub(super) fn interact(
     game: Option<Res<GameStateSnapshot>>,
     context: Res<crate::input_context::GameplayInputContext>,
-    local: Query<(&Transform, &crate::team::Team, &super::CombatStats), With<Player>>,
+    local: Query<
+        (
+            &Transform,
+            &crate::team::Team,
+            &super::CombatStats,
+            Option<&PlayerLoadout>,
+        ),
+        With<Player>,
+    >,
+    heroes: Query<(
+        &Transform,
+        &crate::net::NetworkPlayerId,
+        &super::CombatStats,
+    )>,
     keys: Res<ButtonInput<KeyCode>>,
     pad: Res<crate::gamepad::GamepadControls>,
     mut held: Local<bool>,
@@ -1495,24 +1901,22 @@ pub(super) fn interact(
         local
             .single()
             .ok()
-            .filter(|(_, _, stats)| stats.is_alive() && context.gameplay_allowed())
-            .and_then(|(pose, team, _)| {
-                game.skill_effects
-                    .iter()
-                    .filter(|e| {
-                        e.owner_team == *team
-                            && e.owner_id != game.your_id
-                            && matches!(
-                                shared::loadout::skill(e.skill).effect,
-                                shared::loadout::SkillEffect::Technique {
-                                    action: shared::loadout::Technique::Lantern,
-                                    ..
-                                }
-                            )
-                            && Vec2::from_array(e.position).distance(pose.translation.xz()) <= 3.0
-                    })
-                    .min_by_key(|e| e.id)
-                    .map(|e| e.id)
+            .filter(|(_, _, stats, _)| stats.is_alive() && context.gameplay_allowed())
+            .and_then(|(pose, team, _, loadout)| {
+                usable_lantern(
+                    &game.skill_effects,
+                    game.your_id,
+                    *team,
+                    pose.translation.xz(),
+                    // The server refuses a hero that is rooted or stunned.
+                    movement_factor(loadout) > 0.0,
+                    |owner| {
+                        heroes
+                            .iter()
+                            .find(|(_, id, stats)| id.0 == owner && stats.is_alive())
+                            .map(|(pose, ..)| pose.translation.xz())
+                    },
+                )
             })
     });
     let mut clicked = false;
