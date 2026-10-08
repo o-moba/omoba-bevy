@@ -344,7 +344,7 @@ mod tests {
         // The registry decides: a row with a `cast` block is drawn by the particle pool.
         use crate::skill_presentation::SkillPresentation;
         for (registry, drawn) in [
-            (SkillPresentation::packaged(), 1),
+            (SkillPresentation::unmigrated(), 1),
             (SkillPresentation::target(), 0),
         ] {
             let mut app = App::new();

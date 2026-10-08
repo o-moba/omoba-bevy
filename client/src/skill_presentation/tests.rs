@@ -286,7 +286,7 @@ fn slot_of(loadout: &LoadoutState, skill: SkillId) -> u8 {
 fn motion_plan_equals_motion_cue_for_warn_fire() {
     use shared::BASIC_ATTACK_ACTION_SLOT;
     use shared::loadout::CoreId;
-    for registry in [SkillPresentation::packaged(), SkillPresentation::target()] {
+    for registry in [SkillPresentation::unmigrated(), SkillPresentation::target()] {
         for (core, skill) in [
             (CoreId::Dawnweaver, SkillId::DawnRay),
             (CoreId::Riftshot, SkillId::HorizonWave),
@@ -929,15 +929,15 @@ fn mismatched_or_malformed_recipes_cannot_select_skill_or_basic_motion() {
 }
 
 /// The motion table of the basic attacks is data: the row of the class when the registry
-/// has one, else the built-in table the packaged rows still rely on.
+/// has one, else the built-in table a class without a row still relies on.
 #[test]
 fn ranged_basic_attacks_use_aimed_motion_and_dagger_keeps_the_right_hand_thrust() {
     use shared::{BASIC_ATTACK_ACTION_SLOT, HeroClass};
     let basic = |registry: &SkillPresentation, class| {
         motion_cue(registry, class, None, BASIC_ATTACK_ACTION_SLOT, 1, &[])
     };
-    // No packaged row yet: the built-in table, played as the clip is.
-    let packaged = profiles();
+    // No row: the built-in table, played as the clip is.
+    let packaged = SkillPresentation::unmigrated();
     for class in HeroClass::ALL {
         let built_in = match class {
             HeroClass::Ranger | HeroClass::Wildspark | HeroClass::Riftshot => Some("pistol_shoot"),
@@ -1083,16 +1083,25 @@ fn version_1_files_are_rejected_with_the_reason() {
     assert!(SkillPresentation::parse("{").is_err_and(|error| !error.contains("schema_version")));
 }
 
+/// The rows no content package has reached yet are still what the first schema held.
 #[test]
 fn migration_preserves_v1_fields() {
     let v1: serde_json::Value = serde_json::from_str(include_str!("fixtures/v1.skillfx")).unwrap();
     let rows = v1["skills"].as_object().unwrap();
     let registry = profiles();
     assert_eq!(registry.rows().count(), rows.len());
+    let mut waiting = 0;
     for (id, old) in rows {
         let new = registry
             .row(id)
             .unwrap_or_else(|| panic!("{id} was dropped"));
+        let home = category::SkillKey::from_id(id).unwrap().home();
+        if target::PROMOTED.contains(&home) {
+            // A promoted row is the final one (`shipped_rows_equal_target_for_promoted_classes`).
+            assert!(new.migrated() && new.effect.is_none(), "{id}");
+            continue;
+        }
+        waiting += 1;
         assert_eq!(old["release"], new.release.as_str(), "{id}");
         assert_eq!(
             old.get("windup").and_then(|windup| windup.as_str()),
@@ -1117,20 +1126,33 @@ fn migration_preserves_v1_fields() {
                 && new.motion == schema::MotionPlayback::default(),
             "{id}"
         );
-        assert_eq!(
-            new.home,
-            category::SkillKey::from_id(id).unwrap().home().id(),
-            "{id}"
-        );
+        assert_eq!(new.home, home.id(), "{id}");
+    }
+    assert_eq!(waiting, 4 * (HeroClass::ALL.len() - target::PROMOTED.len()));
+    // The registry the tests of unmigrated rows read is that first schema for every skill.
+    let unmigrated = SkillPresentation::unmigrated();
+    assert_eq!(unmigrated.rows().count(), rows.len());
+    assert!(unmigrated.basic_attacks.is_empty());
+    assert_eq!(unmigrated.themes, registry.themes);
+    for (id, old) in rows {
+        let row = unmigrated.row(id).unwrap();
+        let effect: EffectStyle = serde_json::from_value(old["effect"].clone()).unwrap();
+        assert!(!row.migrated() && row.effect == Some(effect), "{id}");
+        assert_eq!(old["release"], row.release.as_str(), "{id}");
     }
 }
 
 #[test]
-fn the_packaged_registry_has_a_theme_for_every_class_and_no_basic_rows_yet() {
+fn the_packaged_registry_has_a_theme_for_every_class_and_basic_rows_for_the_promoted_ones() {
     let registry = profiles();
     for class in shared::HeroClass::ALL {
         assert!(registry.theme(class).is_some(), "{}", class.id());
-        assert!(registry.basic(class).is_none(), "{}", class.id());
+        assert_eq!(
+            registry.basic(class).is_some(),
+            target::PROMOTED.contains(&class),
+            "{}",
+            class.id()
+        );
     }
     assert_eq!(registry.themes.len(), shared::HeroClass::ALL.len());
     let frost = registry.theme(shared::HeroClass::Frostguard).unwrap();
@@ -1242,9 +1264,9 @@ fn identity_reads_motion_family_body_and_impact() {
     assert_eq!(
         identity("heroic_strike").body,
         BodySig::Projectile {
-            body: ProjectileBody::Shape(crate::combat_visuals::ProjectileShape::Crescent, None),
-            silhouette: None,
-            presentation: vocab::ProjectilePresentation::Projectile,
+            body: ProjectileBody::Form(vocab::ProjectileForm::Wavefront),
+            silhouette: Some(vocab::Silhouette::Crescent),
+            presentation: vocab::ProjectilePresentation::Wave,
         }
     );
     assert_eq!(identity("heroic_strike").motion, "slash_down");
@@ -1260,7 +1282,7 @@ fn identity_reads_motion_family_body_and_impact() {
     assert!(signature::identity(&registry, &projectiles, "fireball").is_none());
 
     // Migrating twelve rows can only lower the counters that describe unmigrated rows.
-    let before = signature::ratchet(&profiles(), &projectiles).unwrap();
+    let before = signature::ratchet(&SkillPresentation::unmigrated(), &projectiles).unwrap();
     let after = signature::ratchet(&registry, &projectiles).unwrap();
     assert_eq!(after.rows_without_cast, before.rows_without_cast - 12);
     assert_eq!(after.rows_with_effect, before.rows_with_effect - 12);
@@ -1435,6 +1457,7 @@ fn draw_registry(registry: &SkillPresentation) -> Drawn {
                     heading,
                     area_damage,
                     receipt: 4,
+                    reserved: 0,
                 };
                 let specs = impacts::impact_particles(recipe, palette, &ctx);
                 assert!(!specs.is_empty(), "{what}: impact");
@@ -1647,6 +1670,7 @@ fn every_pattern_and_kind_is_bounded() {
                                 heading: Some(Vec2::X),
                                 area_damage,
                                 receipt: u64::from(count) * 13,
+                                reserved: 0,
                             };
                             let specs = impacts::impact_particles(&recipe, &palette, &ctx);
                             let name =
@@ -1756,6 +1780,7 @@ fn every_target_row_draws_a_flat_accent_and_impact() {
                     heading: None,
                     area_damage: category::area_damage(key),
                     receipt: 3,
+                    reserved: 0,
                 },
             );
             assert!(!specs.is_empty() && specs.iter().all(flat), "{id}: impact");

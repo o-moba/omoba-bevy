@@ -2002,9 +2002,9 @@ mod tests {
                 })
                 .collect()
         };
-        // The packaged row is drawn by the legacy style, the final row by its body.
+        // The unmigrated row is drawn by the legacy style, the final row by its body.
         for (registry, staged) in [
-            (SkillPresentation::packaged(), false),
+            (SkillPresentation::unmigrated(), false),
             (SkillPresentation::target(), true),
         ] {
             let mut app = app(registry);
@@ -2175,7 +2175,7 @@ mod tests {
     /// radius, and effect parts stay out of the shadow pass.
     #[test]
     fn the_legacy_rocket_marks_its_replicated_radius() {
-        let mut app = app(SkillPresentation::packaged());
+        let mut app = app(SkillPresentation::unmigrated());
         let rocket = replicated(9, SkillId::WildRocket, EffectVisualKind::Rocket);
         assert_eq!(rocket.radius, 1.05);
         show(&mut app, vec![rocket]);

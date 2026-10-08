@@ -38,9 +38,10 @@ const DISCHARGE_SECS: f32 = 0.5;
 /// Wisps of a fade, and the pause between one pair of them and the next.
 const FADE_WISPS: usize = 6;
 const FADE_STEP_SECS: f32 = 0.03;
-#[cfg_attr(not(test), allow(dead_code))] // the cues are emitted by the receipt collector
+/// Budget of a cue of the receipt collector, the trap cue and the camp hit: particles
+/// and seconds.
+#[cfg(test)]
 pub(crate) const CUE_MAX: usize = 6;
-#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) const CUE_SECS: f32 = 0.4;
 /// A decorative accent stays within this distance of the caster on the ground plane.
 pub(crate) const DECORATIVE_REACH: f32 = 2.0;
@@ -463,13 +464,13 @@ impl Frame {
                 for i in 0..n {
                     let outward = self.turned(first + TAU * i as f32 / n as f32);
                     let lift = 0.4 * ((i % 3) as f32 - 1.0);
-                    let mut mote = late(self.lead(0.14, Curve::Hold), 0.1 * (i % 4) as f32);
+                    let mut mote = late(self.lead(0.2, Curve::Hold), 0.1 * (i % 4) as f32);
                     mote.origin =
-                        self.origin + outward * (0.85 * self.reach) + Vec3::Y * (CHEST + lift);
+                        self.origin + outward * (0.8 * self.reach) + Vec3::Y * (CHEST + lift);
                     mote.orient = Orient::Velocity;
                     mote.angle = heading(-outward);
                     mote.velocity = Vec3::Y * (-lift / mote.lifetime);
-                    out.push(drift(mote, -outward, 0.7 * self.reach));
+                    out.push(drift(mote, -outward, 0.66 * self.reach));
                 }
             }
             P::SpiralUp => {
@@ -478,7 +479,7 @@ impl Frame {
                     let rise = share(i, n);
                     let outward = self.turned(rise * TAU * 1.25);
                     let tangent = Vec3::new(-outward.z, 0.0, outward.x);
-                    let mut mote = late(self.lead(0.2, Curve::Pop), 0.5 * rise);
+                    let mut mote = late(self.lead(0.26, Curve::Pop), 0.5 * rise);
                     mote.origin =
                         self.origin + outward * (0.55 * self.reach) + Vec3::Y * (0.2 + 1.7 * rise);
                     mote.orient = Orient::Velocity;
@@ -515,7 +516,7 @@ impl Frame {
                     let turn = TAU * i as f32 / n as f32;
                     let outward = self.turned(turn);
                     let tangent = Vec3::new(-outward.z, 0.0, outward.x);
-                    let mut mark = self.lead(0.28, Curve::Pop);
+                    let mut mark = self.lead(0.32, Curve::Pop);
                     mark.origin = self.origin + outward * (0.55 * self.reach) + Vec3::Y * RUNE;
                     mark.orient = Orient::Ground;
                     mark.angle = self.angle + turn;
@@ -1441,7 +1442,6 @@ pub(crate) fn trap_cue(palette: &Palette, at: Vec3, seed: u64) -> Vec<ParticleSp
 
 /// Rising drops over a neutral camp that a hero with a camp bonus hit: two, or four on a
 /// kill, in the spark colour of the hero's class.
-#[cfg_attr(not(test), allow(dead_code))] // emitted by the receipt collector
 pub(crate) fn camp_hit(color: Tint, at: Vec3, kill: bool, seed: u64) -> Vec<ParticleSpec> {
     if !at.is_finite() {
         return Vec::new();
@@ -1459,7 +1459,7 @@ pub(crate) fn camp_hit(color: Tint, at: Vec3, kill: bool, seed: u64) -> Vec<Part
             velocity: Vec3::Y * 1.6,
             lifetime: CUE_SECS - 0.04 * i as f32,
             delay: 0.04 * i as f32,
-            size: sized(ParticleShape::Drop, 0.14, Curve::Pop),
+            size: sized(ParticleShape::Drop, 0.28, Curve::Pop),
             color,
             shape: ParticleShape::Drop,
             drag: 1.0,
@@ -2396,6 +2396,39 @@ mod tests {
             accent_particles(&fewer, &palette(), &ctx),
             marks[..5].to_vec()
         );
+    }
+
+    /// The two cuts of a double arc are told apart: the first is the lead colour and the
+    /// second, a moment later and turned the other way, the companion's. Neither fades
+    /// into the other.
+    #[test]
+    fn the_arcs_of_a_double_arc_are_one_colour_each() {
+        let palette = palette();
+        let specs = accent_particles(
+            &accent(AccentPattern::DoubleArc, ParticleShape::Claw, 4),
+            &palette,
+            &cast(Vec2::X),
+        );
+        assert_eq!(specs.len(), 4);
+        let (first, second) = (&specs[0], &specs[1]);
+        assert_eq!(
+            (first.shape, second.shape),
+            (ParticleShape::Claw, ParticleShape::Claw)
+        );
+        assert_eq!(
+            (first.color, first.end_color),
+            (palette.slot(PaletteSlot::Primary), None)
+        );
+        assert_eq!(
+            (second.color, second.end_color),
+            (palette.slot(PaletteSlot::Accent), None)
+        );
+        assert_eq!(first.delay, 0.0);
+        assert!((second.delay - 0.08).abs() < 1e-6);
+        assert!((first.end_secs() - second.end_secs()).abs() < 1e-6);
+        // They cross: one starts turned to each side and sweeps toward the other.
+        assert!(first.angle < 0.0 && second.angle > 0.0);
+        assert!(first.spin > 0.0 && second.spin < 0.0);
     }
 
     #[test]

@@ -792,13 +792,13 @@ fn a_resolved_receipt_replaces_the_style_cue_and_an_unresolved_one_keeps_it() {
             && after[0].notes == [None; MAX_NOTES]
             && after[0].detune() == 1.0
     };
-    let packaged = SkillPresentation::packaged();
+    let unmigrated = SkillPresentation::unmigrated();
     assert!(
-        kept(&packaged, &warrior, dealt(4, me, Some(bash))),
+        kept(&unmigrated, &warrior, dealt(4, me, Some(bash))),
         "shipped"
     );
     assert!(
-        kept(&packaged, &warrior, dealt(4, me, Some(BASIC))),
+        kept(&unmigrated, &warrior, dealt(4, me, Some(BASIC))),
         "shipped"
     );
     let hidden = [HeroHeard {
@@ -1056,13 +1056,13 @@ fn the_68_target_cast_voices_are_distinct() {
             | AudioCue::Tower
             | AudioCue::Bluff
     )));
-    // The packaged rows name no voice yet: nothing is added to what plays today.
-    let packaged = SkillPresentation::packaged();
+    // The unmigrated rows name no voice yet: nothing is added to what plays today.
+    let unmigrated = SkillPresentation::unmigrated();
     for class in HeroClass::ALL {
         for slot in [0, 1, 2, 3, BASIC] {
             let casts = [observed(local().id, class, slot, 9)];
             assert!(
-                voiced(&packaged, &[], &casts, &[], Vec::new()).is_empty(),
+                voiced(&unmigrated, &[], &casts, &[], Vec::new()).is_empty(),
                 "{} {slot}",
                 class.id()
             );
@@ -1276,7 +1276,7 @@ fn a_telegraph_that_fired_plays_the_release_voice_of_its_row() {
         );
         assert!(fired(event).is_empty(), "{change:?}");
     }
-    // A row without the voice plays none, and no packaged row has one.
+    // A row without the voice plays none, and no unmigrated row has one.
     let field = stage(
         SkillId::DawnField,
         EffectVisualKind::Field,
@@ -1290,7 +1290,16 @@ fn a_telegraph_that_fired_plays_the_release_voice_of_its_row() {
         flipped,
         Some(true),
     );
-    assert!(voiced(&SkillPresentation::packaged(), &[], &[], &[ray], Vec::new()).is_empty());
+    assert!(
+        voiced(
+            &SkillPresentation::unmigrated(),
+            &[],
+            &[],
+            &[ray],
+            Vec::new()
+        )
+        .is_empty()
+    );
 
     // The beam of a hero the client does not see sounds where it was received: by the
     // distance to the effect, with the first note alone.
@@ -1307,7 +1316,7 @@ fn a_telegraph_that_fired_plays_the_release_voice_of_its_row() {
 #[test]
 fn an_enemy_attack_has_one_voice() {
     let registry = target();
-    let packaged = SkillPresentation::packaged();
+    let unmigrated = SkillPresentation::unmigrated();
     // The style cue of an accepted attack of enemy 8, action `sequence`.
     let attack = |sequence: u64| {
         let mut cursor = AttackCursor::default();
@@ -1403,10 +1412,10 @@ fn an_enemy_attack_has_one_voice() {
         assert_eq!(stand_in[0].variant(), Variant::from(AudioCue::Melee));
         assert_eq!(stand_in[0].origin, styled[0].origin);
     }
-    // With the packaged rows every attack keeps the cue of the class style.
+    // With the unmigrated rows every attack keeps the cue of the class style.
     for heroes in [&swinging, &casting] {
         let cues = voiced(
-            &packaged,
+            &unmigrated,
             heroes,
             std::slice::from_ref(&cast),
             &[],

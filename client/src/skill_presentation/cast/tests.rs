@@ -593,7 +593,7 @@ fn hidden_destination_draws_departure_only() {
 
 #[test]
 fn moves_are_painted_by_their_cause() {
-    let (target, packaged) = (target(), SkillPresentation::packaged());
+    let (target, unmigrated) = (target(), SkillPresentation::unmigrated());
     let moved = |cause: MoveCause, skill: Option<SkillId>| MoveObserved {
         actor_id: 7,
         from: Some(HOME),
@@ -614,7 +614,10 @@ fn moves_are_painted_by_their_cause() {
     let forced = moved(MoveCause::Forced, None);
     let dragged = accents::move_burst(None, &forced).unwrap();
     assert_eq!(dragged, accents::drag_streak(Some(HOME), Some(AWAY), 41));
-    assert_eq!(accents::move_burst(Some(&packaged), &forced), Some(dragged));
+    assert_eq!(
+        accents::move_burst(Some(&unmigrated), &forced),
+        Some(dragged)
+    );
     // A skill move is the pattern of the row, in its colours, seeded by the action.
     let leap = moved(MoveCause::SkillCast, Some(SkillId::AnchorStep));
     let row = target.profile(SkillId::AnchorStep).unwrap();
@@ -628,7 +631,7 @@ fn moves_are_painted_by_their_cause() {
     assert!(themed.len() <= accents::MOVE_MAX);
     assert!(themed.iter().all(|spec| spec.event_id == 41));
     // A row without the block keeps the built-in dash, and so does a missing registry.
-    assert_eq!(accents::move_burst(Some(&packaged), &leap), None);
+    assert_eq!(accents::move_burst(Some(&unmigrated), &leap), None);
     assert_eq!(accents::move_burst(None, &leap), None);
     assert_eq!(
         accents::move_burst(
@@ -702,14 +705,14 @@ fn first_cast_legacy(class: HeroClass, slot: SkillSlot) -> (CastObserver, Sighti
 
 #[test]
 fn rows_without_the_block_and_basic_rows_resolve_as_data_says() {
-    let (target, packaged) = (target(), SkillPresentation::packaged());
+    let (target, unmigrated) = (target(), SkillPresentation::unmigrated());
     let (mut observer, cast) = first_cast_legacy(HeroClass::Warrior, SkillSlot::Q);
     let seen = observer.observe(ROUND, true, [cast]);
-    // No packaged row carries `cast` yet: the built-in accent stays.
-    assert_eq!(accents::cast_burst(&packaged, &seen.casts[0], &[]), []);
-    assert!(!packaged.themed_cast(HeroClass::Warrior, None, 0));
+    // No unmigrated row carries `cast` yet: the built-in accent stays.
+    assert_eq!(accents::cast_burst(&unmigrated, &seen.casts[0], &[]), []);
+    assert!(!unmigrated.themed_cast(HeroClass::Warrior, None, 0));
     assert!(target.themed_cast(HeroClass::Warrior, None, 0));
-    assert!(!packaged.themed_cast(HeroClass::Warrior, None, BASIC_ATTACK_ACTION_SLOT));
+    assert!(!unmigrated.themed_cast(HeroClass::Warrior, None, BASIC_ATTACK_ACTION_SLOT));
     assert!(target.themed_cast(HeroClass::Warrior, None, BASIC_ATTACK_ACTION_SLOT));
 
     // A basic attack is drawn from the row of its class, in the class colours.
@@ -733,7 +736,7 @@ fn rows_without_the_block_and_basic_rows_resolve_as_data_says() {
         )
     );
     assert_eq!(burst.len(), 2);
-    assert_eq!(accents::cast_burst(&packaged, &basic.casts[0], &[]), []);
+    assert_eq!(accents::cast_burst(&unmigrated, &basic.casts[0], &[]), []);
 }
 
 #[test]
@@ -1019,7 +1022,7 @@ fn link_needs_a_matching_receipt() {
     basic.key = CastKey::Basic(class);
     assert!(none_opened(&registry, basic));
     assert!(none_opened(
-        &SkillPresentation::packaged(),
+        &SkillPresentation::unmigrated(),
         cast_of(class, SkillId::ThunderKick)
     ));
 

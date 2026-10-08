@@ -588,9 +588,25 @@ mod tests;
 /// Registries for the tests of the modules that draw from one.
 #[cfg(test)]
 impl SkillPresentation {
-    /// The packaged `skills.skillfx`.
-    pub(crate) fn packaged() -> Self {
-        Self::parse(include_str!("../assets/config/skills.skillfx")).unwrap()
+    /// The packaged file as it was before any content package: every skill keeps its
+    /// legacy `effect` and names no block, and no class has a basic row. Tests of the
+    /// paths a row without a block takes read this; the packaged file loses such rows
+    /// family by family.
+    pub(crate) fn unmigrated_config() -> serde_json::Value {
+        let mut config: serde_json::Value =
+            serde_json::from_str(include_str!("../assets/config/skills.skillfx")).unwrap();
+        let v1: serde_json::Value =
+            serde_json::from_str(include_str!("skill_presentation/fixtures/v1.skillfx")).unwrap();
+        let mut skills = v1["skills"].clone();
+        for (id, row) in skills.as_object_mut().unwrap() {
+            row["home"] = category::SkillKey::from_id(id).unwrap().home().id().into();
+        }
+        config["skills"] = skills;
+        config["basic_attacks"] = serde_json::json!({});
+        config
+    }
+    pub(crate) fn unmigrated() -> Self {
+        Self::parse(&Self::unmigrated_config().to_string()).unwrap()
     }
     /// The final data of the roster (`fixtures/target.skillfx`).
     pub(crate) fn target() -> Self {

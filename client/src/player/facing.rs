@@ -418,7 +418,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .init_resource::<GameStateSnapshot>()
-            .insert_resource(crate::skill_presentation::SkillPresentation::packaged())
+            .insert_resource(crate::skill_presentation::SkillPresentation::unmigrated())
             .add_systems(PostUpdate, face_confirmed_actions);
         let hero = |app: &mut App, id: u64| {
             app.world_mut()
@@ -561,7 +561,7 @@ mod tests {
         ];
         for (registry, final_rows) in [
             (SkillPresentation::target(), true),
-            (SkillPresentation::packaged(), false),
+            (SkillPresentation::unmigrated(), false),
         ] {
             for (core, skill, kind, directed) in cases {
                 let holds = directed && registry.profile(skill).unwrap().windup.is_some();
@@ -626,7 +626,7 @@ mod tests {
                     forward.dot(Vec3::X * along) > 0.999,
                     "{} with the {} rows faces {forward}",
                     skill.id(),
-                    if final_rows { "final" } else { "packaged" }
+                    if final_rows { "final" } else { "unmigrated" }
                 );
             }
         }

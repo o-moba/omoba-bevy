@@ -1142,11 +1142,13 @@ fn a_fresh_own_warning_stands_in_for_a_cast_edge_the_snapshot_hid() {
         });
         assert_eq!(paused, Taken::default());
 
-        // The packaged row holds its windup against the same warning, so the cast is
+        // The unmigrated row holds its windup against the same warning, so the cast is
         // reported, and it draws nothing because the row has no `cast` block yet.
-        let packaged = warned(SkillPresentation::packaged(), &seen, &seen, &warning, &[]);
-        assert_eq!(packaged, casts);
-        assert!(accents::cast_burst(&SkillPresentation::packaged(), &packaged[0], &[]).is_empty());
+        let unmigrated = warned(SkillPresentation::unmigrated(), &seen, &seen, &warning, &[]);
+        assert_eq!(unmigrated, casts);
+        assert!(
+            accents::cast_burst(&SkillPresentation::unmigrated(), &unmigrated[0], &[]).is_empty()
+        );
     }
 
     // A telegraph of another kind of skill is no stand-in: its cast edge releases nothing
@@ -1353,7 +1355,7 @@ fn stage_oneshots_follow_the_row_of_the_effect() {
     assert_ne!(faded[0].color, burst[0].color);
 
     // A row without a body keeps today's look: no event of its effects draws anything.
-    let packaged = SkillPresentation::packaged();
+    let unmigrated = SkillPresentation::unmigrated();
     for (seen, change) in [
         (&trap, step(Transition::Armed)),
         (&cage, step(Transition::SegmentBroken(0))),
@@ -1366,8 +1368,8 @@ fn stage_oneshots_follow_the_row_of_the_effect() {
         ),
     ] {
         let event = event(seen, change);
-        assert_eq!(accents::stage_shot(&packaged, &event), None);
-        assert!(accents::stage_burst(&packaged, &event, 0.0).is_empty());
+        assert_eq!(accents::stage_shot(&unmigrated, &event), None);
+        assert!(accents::stage_burst(&unmigrated, &event, 0.0).is_empty());
     }
     // Neither does an auxiliary object, whatever is reported for it.
     let orb = effect(6, SkillId::OrbitalCommand, K::Orb);
@@ -1518,7 +1520,7 @@ fn a_released_telegraph_links_to_its_receipts() {
         // A row without the block links nothing.
         let mut book = LinkBook::default();
         book.turn(ROUND, 10);
-        book.release(&SkillPresentation::packaged(), &seen, &owner, ground);
+        book.release(&SkillPresentation::unmigrated(), &seen, &owner, ground);
         assert_eq!(book.link(&hit(1, OWNER, slot)), None);
     }
     // The collapse names no link.
@@ -1732,8 +1734,8 @@ fn a_turn_and_a_renewal_of_one_snapshot_spark_once() {
     );
     assert_ne!(bursts[0][0].origin, bursts[1][0].origin);
 
-    // With the packaged rows the same snapshots draw nothing.
-    let (mut app, _) = stage(SkillPresentation::packaged(), HeroClass::Chainkeeper);
+    // With the unmigrated rows the same snapshots draw nothing.
+    let (mut app, _) = stage(SkillPresentation::unmigrated(), HeroClass::Chainkeeper);
     apply(&mut app, std::slice::from_ref(&cage));
     assert_eq!(apply(&mut app, std::slice::from_ref(&broken)), NOTHING);
 }

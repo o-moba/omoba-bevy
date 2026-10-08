@@ -19,7 +19,35 @@
     "frostguard": {"secondary":[0.86,0.94,1.0],"accent":[0.55,0.6,1.0]},
     "adventurer": {"secondary":[0.48,0.31,0.18],"accent":[1.0,0.16,0.24]}
   },
-  "basic_attacks": {},
+  "basic_attacks": {
+    "warrior": {
+      "motions": ["slash_rising"], "rate": 1.2,
+      "accent": { "pattern": "muzzle_flash", "shape": "slash", "count": 2, "scale": 0.7, "lifetime": 0.25, "slots": ["secondary", "accent"] },
+      "impact": { "kind": "spark_fork", "count": 5, "scale": 0.8, "lifetime": 0.3, "slots": ["secondary", "accent"] },
+      "sound": { "base": "melee", "speed": 0.85, "slice": "tick", "gain": 0.55 }
+    },
+    "mage": {
+      "motions": ["toss_underhand"], "rate": 1.2,
+      "impact": { "kind": "glow_pop", "shape": "glow", "count": 5, "scale": 0.8, "lifetime": 0.3, "slots": ["accent", "secondary"] },
+      "sound": { "base": "arcane", "speed": 1.0, "slice": "tick", "gain": 0.5 }
+    },
+    "ranger": {
+      "motions": ["aim_loose_r"], "rate": 1.5,
+      "impact": { "kind": "glow_pop", "count": 5, "scale": 0.8, "lifetime": 0.3, "slots": ["white", "secondary"] },
+      "sound": { "base": "arrow", "speed": 1.0, "slice": "full", "gain": 0.7 }
+    },
+    "cleric": {
+      "motions": ["cast"], "rate": 1.15,
+      "impact": { "kind": "facet_pop", "shape": "star", "count": 3, "scale": 0.8, "lifetime": 0.3, "slots": ["white", "accent"] },
+      "sound": { "base": "holy", "speed": 1.1, "slice": "body", "gain": 0.55 }
+    },
+    "warden": {
+      "motions": ["slash_down", "slash_down_m"], "rate": 1.3,
+      "accent": { "pattern": "rake_triple", "shape": "claw", "count": 3, "scale": 0.6, "lifetime": 0.25, "slots": ["accent", "secondary"] },
+      "impact": { "kind": "slash_cut", "shape": "claw", "count": 5, "scale": 0.8, "lifetime": 0.3, "slots": ["accent", "secondary"] },
+      "sound": { "base": "melee", "speed": 1.1, "slice": "tail", "gain": 0.6 }
+    }
+  },
   "skills": {
     "dagger_deadly_blow": {"home":"adventurer","release":"dagger_stab","effect":"slash","color":[0.55,0.95,1.0],"hdr_gain":3.2},
     "dagger_bluff": {"home":"adventurer","release":"dagger_feint","effect":"pulse","color":[0.74,0.4,1.0],"hdr_gain":3.0},
@@ -69,25 +97,171 @@
     "sheltering_leap": {"home":"frostguard","release":"guard","effect":"aegis","color":[0.22,0.8,1],"hdr_gain":3.2},
     "northwall": {"home":"frostguard","release":"guard","effect":"wall","color":[0.22,0.8,1],"hdr_gain":3.2},
     "winter_divide": {"home":"frostguard","release":"shoulder_drive","effect":"fissure","color":[0.22,0.8,1],"hdr_gain":3.8},
-    "shield_bash": {"home":"warrior","release":"shoulder_drive","effect":"aegis","color":[1,0.48,0.1],"hdr_gain":3.2},
-    "battle_rally": {"home":"warrior","release":"spell_finish","effect":"pulse","color":[1,0.48,0.1],"hdr_gain":3.2},
-    "heroic_strike": {"home":"warrior","release":"attack","effect":"slash","color":[1,0.48,0.1],"hdr_gain":3.2},
-    "rampage": {"home":"warrior","release":"attack","effect":"slash","color":[1,0.48,0.1],"hdr_gain":3.8},
-    "arc_bolt": {"home":"mage","release":"cast","effect":"orb","color":[0.72,0.28,1],"hdr_gain":3.2},
-    "mana_surge": {"home":"mage","release":"spell_finish","effect":"pulse","color":[0.72,0.28,1],"hdr_gain":3.2},
-    "frost_lance": {"home":"mage","release":"cast","effect":"needle","color":[0.2,0.85,1],"hdr_gain":3.2},
-    "pyroblast": {"home":"mage","release":"cast","effect":"ember","color":[1,0.24,0.035],"hdr_gain":3.8},
-    "quick_shot": {"home":"ranger","release":"cast","effect":"needle","color":[0.36,1,0.24],"hdr_gain":3.2},
-    "field_dressing": {"home":"ranger","release":"interact","effect":"pulse","color":[0.36,1,0.24],"hdr_gain":3.2},
-    "piercing_arrow": {"home":"ranger","release":"cast","effect":"needle","color":[0.36,1,0.24],"hdr_gain":3.2},
-    "longshot": {"home":"ranger","release":"cast","effect":"lance","color":[0.36,1,0.24],"hdr_gain":3.8},
-    "smite": {"home":"cleric","release":"cast","effect":"lance","color":[1,0.79,0.18],"hdr_gain":3.2},
-    "renew": {"home":"cleric","release":"spell_finish","effect":"pulse","color":[1,0.79,0.18],"hdr_gain":3.2},
-    "divine_favor": {"home":"cleric","release":"guard","effect":"aegis","color":[1,0.79,0.18],"hdr_gain":3.2},
-    "guardians_blessing": {"home":"cleric","release":"spell_finish","effect":"pulse","color":[1,0.79,0.18],"hdr_gain":3.8},
-    "feral_swipe": {"home":"warden","release":"punch","effect":"slash","color":[0.48,0.92,0.1],"hdr_gain":3.2},
-    "barkskin": {"home":"warden","release":"guard","effect":"aegis","color":[0.48,0.92,0.1],"hdr_gain":3.2},
-    "hunters_mark": {"home":"warden","release":"cast","effect":"needle","color":[0.48,0.92,0.1],"hdr_gain":3.2},
-    "primal_maul": {"home":"warden","release":"shoulder_drive","effect":"slash","color":[0.48,0.92,0.1],"hdr_gain":3.8}
+    "shield_bash": {
+      "home": "warrior", "release": "two_hand_push", "color": [0.9, 0.64, 0.22], "hdr_gain": 3.4, "secondary": [0.55, 0.33, 0.1],
+      "motion": { "rate": 1.15 },
+      "cast": { "pattern": "thrust_line", "shape": "kite", "count": 6, "scale": 1.0, "lifetime": 0.5, "slots": ["primary", "accent"] },
+      "impact": { "kind": "thud_ring", "shape": "kite", "count": 12, "scale": 1.0, "lifetime": 0.7, "slots": ["primary", "secondary"] },
+      "sound": {
+        "cast": { "base": "melee", "speed": 0.85, "slice": "body", "gain": 0.8 },
+        "impact": { "base": "melee", "speed": 0.75, "slice": "tail" } }
+    },
+    "battle_rally": {
+      "home": "warrior", "release": "rally_raise", "color": [1.0, 0.62, 0.12], "hdr_gain": 4.0, "secondary": [0.55, 0.33, 0.1],
+      "motion": { "rate": 0.85, "start": 0.1 },
+      "cast": { "pattern": "rising_motes", "shape": "chevron", "count": 8, "scale": 1.5, "lifetime": 0.5, "slots": ["primary", "secondary"] },
+      "sound": {
+        "cast": { "base": "melee", "speed": 0.8, "slice": "tail", "gain": 0.7, "notes": [{ "delay_ms": 140, "speed": 0.95, "gain": 0.5 }] } }
+    },
+    "heroic_strike": {
+      "home": "warrior", "release": "slash_down", "color": [1.0, 0.42, 0.08], "hdr_gain": 3.4, "secondary": [0.45, 0.12, 0.0],
+      "motion": { "rate": 0.85, "start": 0.12 },
+      "cast": { "pattern": "muzzle_burst", "shape": "crescent", "count": 5, "scale": 1.4, "lifetime": 0.45, "slots": ["primary", "accent"] },
+      "impact": { "kind": "slash_cut", "count": 12, "scale": 1.3, "lifetime": 0.7, "slots": ["accent", "primary"] },
+      "sound": {
+        "cast": { "base": "melee", "speed": 0.75, "slice": "body" },
+        "impact": { "base": "melee", "speed": 0.75, "slice": "full" } }
+    },
+    "rampage": {
+      "home": "warrior", "release": "spin_cleave", "color": [0.94, 0.13, 0.15], "hdr_gain": 2.6,
+      "motion": { "rate": 1.2 },
+      "cast": { "pattern": "arc_sweep", "shape": "arc", "count": 8, "scale": 1.25, "lifetime": 0.5, "slots": ["primary", "primary"] },
+      "impact": { "kind": "cross_cut", "count": 12, "scale": 1.6, "lifetime": 0.9, "slots": ["white", "primary"] },
+      "sound": {
+        "cast": { "base": "melee", "speed": 0.7, "slice": "body", "notes": [{ "delay_ms": 90, "speed": 0.8, "gain": 0.8 }, { "delay_ms": 180, "speed": 0.9, "gain": 0.9 }] },
+        "impact": { "base": "melee", "speed": 0.7, "slice": "full" } }
+    },
+    "arc_bolt": {
+      "home": "mage", "release": "cast_thrust_r", "color": [0.52, 0.22, 1.0], "hdr_gain": 3.0, "secondary": [0.9, 0.95, 1.0],
+      "motion": { "rate": 1.7, "start": 0.25 },
+      "cast": { "pattern": "muzzle_burst", "shape": "arc", "count": 3, "scale": 0.8, "lifetime": 0.4, "slots": ["primary", "accent"] },
+      "impact": { "kind": "ring_burst", "shape": "ringlet", "count": 12, "scale": 1.0, "lifetime": 0.7, "slots": ["primary", "accent"] },
+      "sound": {
+        "cast": { "base": "arcane", "speed": 1.1, "slice": "tick", "gain": 0.7 },
+        "impact": { "base": "arcane", "speed": 1.05, "slice": "body", "gain": 0.75 } }
+    },
+    "mana_surge": {
+      "home": "mage", "release": "draw_in", "color": [0.22, 0.58, 1.0], "hdr_gain": 4.5,
+      "motion": { "rate": 0.7, "start": 0.05 },
+      "cast": { "pattern": "inward_gather", "shape": "chevron", "count": 8, "scale": 1.3, "lifetime": 0.5, "slots": ["primary", "secondary"] },
+      "sound": {
+        "cast": { "base": "arcane", "speed": 0.95, "slice": "tail", "gain": 0.8, "notes": [{ "delay_ms": 200, "speed": 1.15, "gain": 0.7 }] } }
+    },
+    "frost_lance": {
+      "home": "mage", "release": "cast", "color": [0.25, 0.8, 1.0], "hdr_gain": 4.2,
+      "motion": { "rate": 0.8 },
+      "cast": { "pattern": "thrust_line", "shape": "star", "count": 4, "scale": 1.0, "lifetime": 0.4, "slots": ["accent", "primary"] },
+      "impact": { "kind": "star_shards", "shape": "star", "count": 12, "scale": 1.15, "lifetime": 0.8, "slots": ["white", "secondary"] },
+      "sound": {
+        "cast": { "base": "arcane", "speed": 1.05, "slice": "body", "gain": 0.85 },
+        "impact": { "base": "arcane", "speed": 1.3, "slice": "tick", "gain": 0.9 } }
+    },
+    "pyroblast": {
+      "home": "mage", "release": "two_hand_push", "color": [1.0, 0.42, 0.07], "hdr_gain": 5.0, "secondary": [0.45, 0.12, 0.0], "accent": [1.0, 0.8, 0.4],
+      "motion": { "rate": 0.65, "start": 0.15 },
+      "cast": { "pattern": "muzzle_flash", "shape": "drop", "count": 6, "scale": 2.0, "lifetime": 0.45, "slots": ["primary", "accent"] },
+      "impact": { "kind": "ember_puff", "shape": "drop", "count": 12, "scale": 1.6, "lifetime": 0.9, "slots": ["primary", "secondary"] },
+      "sound": {
+        "cast": { "base": "arcane", "speed": 0.9, "slice": "full", "gain": 1.0, "notes": [{ "delay_ms": 110, "speed": 0.7, "gain": 0.9 }] },
+        "impact": { "base": "arcane", "speed": 0.75, "slice": "full", "gain": 1.0 } }
+    },
+    "quick_shot": {
+      "home": "ranger", "release": "burst_fire", "color": [0.78, 1.0, 0.12], "hdr_gain": 2.6, "secondary": [0.05, 0.3, 0.02],
+      "motion": { "rate": 1.3, "start": 0.33 },
+      "cast": { "pattern": "muzzle_flash", "shape": "arc", "count": 4, "scale": 1.2, "lifetime": 0.4, "slots": ["primary", "accent"] },
+      "impact": { "kind": "splinter", "shape": "streak", "count": 12, "scale": 1.0, "lifetime": 0.7, "slots": ["white", "primary"] },
+      "sound": {
+        "cast": { "base": "arrow", "speed": 1.1, "slice": "tick", "gain": 0.8 },
+        "impact": { "base": "arrow", "speed": 1.25, "slice": "tail", "gain": 0.6 } }
+    },
+    "field_dressing": {
+      "home": "ranger", "release": "kneel_plant", "color": [0.5, 0.95, 0.3], "hdr_gain": 3.5, "secondary": [0.05, 0.3, 0.02],
+      "motion": { "rate": 1.0, "start": 0.3 },
+      "cast": { "pattern": "spiral_up", "shape": "drop", "count": 8, "scale": 1.5, "lifetime": 0.5, "slots": ["primary", "secondary"] },
+      "sound": {
+        "cast": { "base": "arrow", "speed": 1.05, "slice": "tail", "gain": 0.5, "notes": [{ "delay_ms": 110, "speed": 1.15, "gain": 0.4 }] } }
+    },
+    "piercing_arrow": {
+      "home": "ranger", "release": "sky_shot", "color": [0.26, 0.74, 0.13], "hdr_gain": 4.0, "secondary": [0.86, 0.92, 0.88],
+      "motion": { "rate": 1.1, "start": 0.2 },
+      "cast": { "pattern": "muzzle_burst", "shape": "chevron", "count": 5, "scale": 1.3, "lifetime": 0.4, "slots": ["primary", "white"] },
+      "impact": { "kind": "flash_star", "shape": "star", "count": 6, "scale": 1.25, "lifetime": 0.7, "slots": ["white", "primary"] },
+      "sound": {
+        "cast": { "base": "arrow", "speed": 0.9, "slice": "body", "gain": 0.9, "notes": [{ "delay_ms": 60, "speed": 0.75, "gain": 0.5 }] },
+        "impact": { "base": "arrow", "speed": 0.85, "slice": "body", "gain": 0.85 } }
+    },
+    "longshot": {
+      "home": "ranger", "release": "shot_heavy", "color": [0.15, 1.0, 0.35], "hdr_gain": 2.8, "secondary": [0.05, 0.3, 0.02],
+      "motion": { "rate": 1.25 },
+      "cast": { "pattern": "thrust_line", "shape": "streak", "count": 6, "scale": 1.0, "lifetime": 0.4, "slots": ["primary", "accent"] },
+      "impact": { "kind": "facet_pop", "shape": "diamond", "count": 8, "scale": 1.5, "lifetime": 0.9, "slots": ["white", "secondary"] },
+      "sound": {
+        "cast": { "base": "arrow", "speed": 0.75, "slice": "full", "gain": 1.0, "notes": [{ "delay_ms": 50, "speed": 0.7, "gain": 0.7 }] },
+        "impact": { "base": "arrow", "speed": 0.7, "slice": "body", "gain": 1.0, "notes": [{ "delay_ms": 80, "speed": 1.0, "gain": 0.5 }] } }
+    },
+    "smite": {
+      "home": "cleric", "release": "rally_raise", "color": [1.0, 0.8, 0.1], "hdr_gain": 4.2,
+      "motion": { "rate": 1.6 },
+      "cast": { "pattern": "muzzle_burst", "shape": "cross", "count": 3, "scale": 1.0, "lifetime": 0.4, "slots": ["primary", "white"] },
+      "impact": { "kind": "flash_star", "shape": "cross", "count": 3, "scale": 1.5, "lifetime": 0.5, "slots": ["white", "primary"] },
+      "sound": {
+        "cast": { "base": "holy", "speed": 1.1, "slice": "tick", "gain": 0.8 },
+        "impact": { "base": "holy", "speed": 0.95, "slice": "body" } }
+    },
+    "renew": {
+      "home": "cleric", "release": "spell_finish", "color": [1.0, 0.66, 0.05], "hdr_gain": 2.6, "accent": [0.3, 0.85, 0.3],
+      "motion": { "rate": 0.85, "start": 0.3 },
+      "cast": { "pattern": "rune_mark", "shape": "ringlet", "count": 8, "scale": 1.8, "lifetime": 0.5, "slots": ["primary", "accent"] },
+      "sound": {
+        "cast": { "base": "holy", "speed": 1.05, "slice": "full", "gain": 0.8, "notes": [{ "delay_ms": 120, "speed": 1.3, "gain": 0.5 }] } }
+    },
+    "divine_favor": {
+      "home": "cleric", "release": "point_command", "color": [0.3, 0.55, 1.0], "hdr_gain": 3.6,
+      "motion": { "rate": 0.75, "start": 0.15 },
+      "cast": { "pattern": "inward_gather", "shape": "star", "count": 8, "scale": 1.3, "lifetime": 0.45, "slots": ["primary", "accent"] },
+      "sound": {
+        "cast": { "base": "holy", "speed": 1.0, "slice": "tail", "gain": 0.9, "notes": [{ "delay_ms": 140, "speed": 0.85, "gain": 0.5 }] } }
+    },
+    "guardians_blessing": {
+      "home": "cleric", "release": "hover_pulse", "color": [1.0, 0.83, 0.22], "hdr_gain": 5.0,
+      "motion": { "rate": 0.8, "start": 0.1 },
+      "cast": { "pattern": "spiral_up", "shape": "crescent", "count": 8, "scale": 2.0, "lifetime": 0.5, "slots": ["primary", "accent"] },
+      "sound": {
+        "cast": { "base": "holy", "speed": 0.9, "slice": "full", "notes": [{ "delay_ms": 120, "speed": 1.15, "gain": 0.8 }, { "delay_ms": 240, "speed": 1.35, "gain": 0.7 }] } }
+    },
+    "feral_swipe": {
+      "home": "warden", "release": "jab_cross", "color": [0.53, 0.85, 0.17], "hdr_gain": 3.0,
+      "motion": { "rate": 1.15 },
+      "cast": { "pattern": "double_arc", "shape": "claw", "count": 4, "scale": 1.0, "lifetime": 0.4, "slots": ["primary", "accent"] },
+      "impact": { "kind": "claw_rake", "shape": "claw", "count": 12, "scale": 1.0, "lifetime": 0.7, "slots": ["accent", "primary"] },
+      "sound": {
+        "cast": { "base": "melee", "speed": 1.05, "slice": "tick", "gain": 0.8, "notes": [{ "delay_ms": 70, "speed": 0.95, "gain": 0.7 }, { "delay_ms": 140, "speed": 0.9, "gain": 0.6 }] },
+        "impact": { "base": "melee", "speed": 1.1, "slice": "body", "gain": 0.9 } }
+    },
+    "barkskin": {
+      "home": "warden", "release": "guard", "color": [0.5, 0.9, 0.3], "hdr_gain": 3.5,
+      "motion": { "rate": 1.2, "start": 0.2 },
+      "cast": { "pattern": "inward_gather", "shape": "drop", "count": 8, "scale": 1.2, "lifetime": 0.5, "slots": ["accent", "primary"] },
+      "sound": {
+        "cast": { "base": "tower", "speed": 1.2, "slice": "tail", "gain": 0.6 } }
+    },
+    "hunters_mark": {
+      "home": "warden", "release": "hurl_overhand", "color": [0.96, 0.64, 0.12], "hdr_gain": 3.2,
+      "motion": { "rate": 1.0, "start": 0.25 },
+      "cast": { "pattern": "muzzle_burst", "shape": "drop", "count": 3, "scale": 1.1, "lifetime": 0.4, "slots": ["primary", "secondary"] },
+      "impact": { "kind": "splinter", "shape": "chevron", "count": 12, "scale": 1.15, "lifetime": 0.7, "slots": ["primary", "secondary"] },
+      "sound": {
+        "cast": { "base": "melee", "speed": 1.0, "slice": "tail", "gain": 0.8 },
+        "impact": { "base": "arrow", "speed": 0.75, "slice": "body", "gain": 0.9 } }
+    },
+    "primal_maul": {
+      "home": "warden", "release": "cleave_slam", "color": [0.55, 0.95, 0.1], "hdr_gain": 4.0,
+      "motion": { "rate": 1.1, "start": 0.25 },
+      "cast": { "pattern": "ground_slam", "shape": "drop", "count": 5, "scale": 0.9, "lifetime": 0.5, "slots": ["primary", "secondary"] },
+      "impact": { "kind": "thud_ring", "shape": "drop", "count": 12, "scale": 1.0, "lifetime": 0.9, "slots": ["primary", "secondary"] },
+      "sound": {
+        "cast": { "base": "melee", "speed": 0.9, "slice": "body", "gain": 1.0, "notes": [{ "delay_ms": 110, "speed": 0.7, "gain": 0.9 }] },
+        "impact": { "base": "tower", "speed": 0.8, "slice": "tick", "gain": 1.0 } }
+    }
   }
 }

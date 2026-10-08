@@ -1149,7 +1149,7 @@ fn own_effect(
 
 /// The triage cases of the Dawn Ray windup: a basic attack accepted during the warning, a
 /// recast accepted during it, and a cast edge that is never observed because the snapshot
-/// that brings the warning already carries a later action. Each runs on the packaged rows
+/// that brings the warning already carries a later action. Each runs on the unmigrated rows
 /// and on the final ones.
 #[test]
 fn windup_survives_interleaved_basic_and_recast_and_releases_once() {
@@ -1174,7 +1174,7 @@ fn windup_survives_interleaved_basic_and_recast_and_releases_once() {
             PlayerActionKind::Attack,
         ),
     ];
-    for registry in [SkillPresentation::packaged, SkillPresentation::target] {
+    for registry in [SkillPresentation::unmigrated, SkillPresentation::target] {
         for (case, own_edge, slot, kind) in cases {
             let ray = registry().profile(SkillId::DawnRay).unwrap().clone();
             let mut rig = Rig::new(
@@ -1569,7 +1569,7 @@ fn fuse_and_parry_windups_start_on_the_cast_hold_and_release_when_the_telegraph_
 }
 
 /// `rate`, `start`, the recast clip, the alternating basic attack and the fitted windup of
-/// the final rows, as the animation player holds them. A packaged row, which has none of
+/// the final rows, as the animation player holds them. An unmigrated row, which has none of
 /// these, plays as before.
 #[test]
 fn action_clips_enter_at_their_start_and_play_at_their_rate() {
@@ -1727,10 +1727,10 @@ fn action_clips_enter_at_their_start_and_play_at_their_rate() {
     assert_eq!(rig.clip().speed(), 1.0);
     assert_eq!(rig.clip().repeat_mode(), RepeatAnimation::Forever);
 
-    // A packaged row has no playback values: its clip plays from its first key at speed 1.
-    let packaged = SkillPresentation::packaged();
-    let shipped = packaged.profile(SkillId::DawnField).unwrap().clone();
-    let mut rig = Rig::new(packaged, class_of(&kit), kit.clone());
+    // An unmigrated row has no playback values: its clip plays from its first key at speed 1.
+    let unmigrated = SkillPresentation::unmigrated();
+    let shipped = unmigrated.profile(SkillId::DawnField).unwrap().clone();
+    let mut rig = Rig::new(unmigrated, class_of(&kit), kit.clone());
     rig.report_cast(7, 1, field, true);
     rig.act(1, field, PlayerActionKind::Cast);
     assert_eq!(rig.state(), rig.set.motion(&shipped.release));

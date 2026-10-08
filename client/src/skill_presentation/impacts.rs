@@ -1,8 +1,8 @@
 //! The pooled-particle burst of one accepted damage receipt. A recipe is drawn at the
 //! receipt position only: nothing follows the target, stays on it or depicts a status, and
-//! a skill without area damage keeps its whole burst close to the unit it hit. Every burst
-//! opens with the flash of the hit, so the frame that shows the receipt shows the burst at
-//! its brightest.
+//! a skill without area damage keeps its whole burst close to the unit it hit. The mark of
+//! a kind is whole on the frame that shows the receipt, and every burst closes with the
+//! flash of the hit behind it, as wide as that kind of mark needs.
 use super::SkillPresentation;
 use super::accents::{Palette, drift, fly, ground, heading, share, sized, spread, tagged};
 use super::cast::CastKey;
@@ -49,11 +49,35 @@ const MARK: f32 = 0.45;
 /// shapes of a kind are what tells one hit from another inside the flash.
 const CHIP: f32 = 0.25;
 const MOTE: f32 = 0.22;
-/// Half extent of the flash of the hit as a share of the reach of its recipe, and the share
-/// of the authored lifetime it lasts. It is a dense glow: its middle is covered in the skill
-/// colour and only its outer half fades, so the hit has a core on pale ground.
-const FLASH: f32 = 0.95;
-const FLASH_LIFE: f32 = 0.7;
+/// Half extent of the flash of the hit as a share of the reach of its recipe, by what the
+/// kind draws on the unit, and the share of the authored lifetime it lasts. The flash is a
+/// dense glow: its middle is covered in the skill colour and only its outer half fades, so
+/// the hit has a core on pale ground. Where the kind is a glow, a puff or a blast the flash
+/// is the hit itself; behind a ring, a facet or a burst of shards it is the core; and
+/// under a cut it is the spark of the contact, so that the cut is what is seen and the
+/// unit that was struck stays in sight.
+const FLASH_BLOOM: f32 = 0.95;
+const FLASH_CORE: f32 = 0.86;
+const FLASH_SPARK: f32 = 0.75;
+const FLASH_LIFE: f32 = 0.5;
+
+const fn flash_share(kind: ImpactKind) -> f32 {
+    use ImpactKind as K;
+    match kind {
+        K::GlowPop | K::EmberPuff | K::Blast => FLASH_BLOOM,
+        K::RingBurst
+        | K::ThudRing
+        | K::FlashStar
+        | K::StarShards
+        | K::FacetPop
+        | K::ShardBurst
+        | K::DrainWisp
+        | K::ChainSnap => FLASH_CORE,
+        K::SlashCut | K::CrossCut | K::ClawRake | K::SparkFork | K::Splinter | K::PierceThrough => {
+            FLASH_SPARK
+        }
+    }
+}
 /// Height of the burst above the receipt position. A receipt is at the aim height of its
 /// target; the built-in burst of the wire style is drawn this far above it too, where the
 /// camera sees it over the body it hit.
@@ -77,6 +101,9 @@ pub(crate) struct ImpactContext {
     pub area_damage: bool,
     /// The receipt id: the `event_id` of every particle and the seed of its jitter.
     pub receipt: u64,
+    /// Particles of the budget that the engine draws for this receipt itself (the camp
+    /// hit); the recipe is laid out with that many fewer.
+    pub reserved: usize,
 }
 
 /// Particles a kind draws when the row names no `count`.
@@ -110,8 +137,9 @@ struct Burst {
     shape: ParticleShape,
     lead: Tint,
     companion: Tint,
-    /// The colour of the flash of the hit.
+    /// The colour of the flash of the hit and its half extent in reaches.
     flash: Tint,
+    flash_share: f32,
     id: u64,
 }
 
@@ -137,6 +165,12 @@ impl Burst {
         self.shaped(self.shape, radius, curve)
     }
 
+    /// The mark a kind leaves on the unit: the lead shape, whole from the frame the receipt
+    /// is drawn on. A hit has no moment to give to a mark that swells.
+    fn mark(&self, radius: f32) -> ParticleSpec {
+        self.lead(radius, Curve::Hold)
+    }
+
     /// Whether the lead is a blade, a line or a claw: a shape that crosses a unit without
     /// covering it.
     fn narrow(&self) -> bool {
@@ -156,7 +190,7 @@ impl Burst {
         } else {
             extent.min(MARK)
         };
-        let mut cut = self.lead(extent, Curve::Pop);
+        let mut cut = self.mark(extent);
         cut.origin = at;
         cut.angle = axis;
         if depth > 0.0 {
@@ -182,28 +216,29 @@ impl Burst {
     }
 
     /// The flash of the hit: a glow in the skill colour that is whole on the frame the
-    /// receipt is drawn and shrinks from there. The marks and the debris of a kind need a
-    /// moment to swell or to fly out; the hit itself has none to give.
+    /// receipt is drawn, stands for a moment and fades where it is. The debris of a kind
+    /// needs a moment to fly out; the hit itself has none to give.
     fn flash(&self) -> ParticleSpec {
         ParticleSpec {
             color: self.flash,
             end_color: None,
             lifetime: self.life * FLASH_LIFE,
             dense: true,
-            ..self.shaped(ParticleShape::Glow, FLASH, Curve::Shrink)
+            ..self.shaped(ParticleShape::Glow, self.flash_share, Curve::Hold)
         }
     }
 
-    /// A ring in the lead colour that grows to `radius` units.
+    /// A ring in the lead colour that swells to `radius` units in its first moments and
+    /// holds it: the ring of a hit is read while the burst is bright, not as it fades.
     fn ring(&self, origin: Vec3, radius: f32, orient: Orient) -> ParticleSpec {
         ParticleSpec {
             event_id: self.id,
             origin,
             lifetime: self.life,
-            size: sized(ParticleShape::Ringlet, radius, Curve::Grow),
+            size: sized(ParticleShape::Ringlet, radius, Curve::Pop),
             color: self.lead,
             shape: ParticleShape::Ringlet,
-            curve: Curve::Grow,
+            curve: Curve::Pop,
             orient,
             ..ParticleSpec::BASE
         }
@@ -259,7 +294,7 @@ impl Burst {
                 let curve = if self.shape == ParticleShape::Glow {
                     Curve::Shrink
                 } else {
-                    Curve::Pop
+                    Curve::Hold
                 };
                 // A glow or a line pops across the unit; a plate stays a mark on it.
                 let extent = if self.shape == ParticleShape::Glow || self.narrow() {
@@ -323,7 +358,7 @@ impl Burst {
                 let forks = n.min(3);
                 for i in 0..forks {
                     let way = ground(self.angle + 0.6 * spread(i, forks));
-                    let mut fork = self.lead(0.42, Curve::Pop);
+                    let mut fork = self.mark(0.42);
                     fork.orient = Orient::Velocity;
                     fork.angle = heading(way);
                     out.push(fly(fork, way, 0.55 * self.reach));
@@ -344,8 +379,9 @@ impl Burst {
                 // One mark and its echoes, all at rest: no debris. The flash of the hit is
                 // the width of the burst; the mark stays a shape on the unit it struck.
                 for i in 0..n {
+                    let curve = if i == 0 { Curve::Hold } else { Curve::Pop };
                     let mut flash = held(
-                        self.lead(MARK * 0.6_f32.powi(i as i32), Curve::Pop),
+                        self.lead(MARK * 0.6_f32.powi(i as i32), curve),
                         0.1 * self.life * i as f32,
                     );
                     flash.angle = self.angle + PI / 4.0 * i as f32;
@@ -368,7 +404,7 @@ impl Burst {
                 }
             }
             K::StarShards => {
-                out.push(self.lead(MARK, Curve::Pop));
+                out.push(self.mark(MARK));
                 for i in 1..n {
                     let outward = self.outward(i - 1, n - 1);
                     let mut chip = self.shaped(ParticleShape::Diamond, CHIP, Curve::Pop);
@@ -399,7 +435,7 @@ impl Burst {
                 // Rule E-15: the facet lies along the hit direction, turned a little by the
                 // receipt id. Nothing moves.
                 let lie = self.angle + 0.35 * jitter(self.id, 0, 65);
-                let mut facet = self.lead(MARK, Curve::Pop);
+                let mut facet = self.mark(MARK);
                 facet.angle = lie;
                 out.push(facet);
                 if n > 1 {
@@ -424,16 +460,12 @@ impl Burst {
                 flash.end_color = None;
                 out.push(flash);
                 if n > 1 {
-                    // The ground ring swells to its radius in the first moments and holds
-                    // it: the area is read while the burst is bright, not as it fades.
                     let mut ring = self.ring(
                         self.floor + Vec3::Y * 0.08,
                         0.95 * self.reach,
                         Orient::Ground,
                     );
                     ring.color = self.companion;
-                    ring.curve = Curve::Pop;
-                    ring.size = sized(ParticleShape::Ringlet, 0.95 * self.reach, Curve::Pop);
                     out.push(ring);
                 }
                 for i in 2..n {
@@ -528,7 +560,9 @@ pub(crate) fn impact_particles(
         return Vec::new();
     }
     let kind = recipe.kind;
-    let count = usize::from(recipe.count.unwrap_or(default_count(kind))).clamp(1, IMPACT_MAX - 1);
+    // The flash is one particle and a kind needs one of its own.
+    let room = IMPACT_MAX - 1 - ctx.reserved.min(IMPACT_MAX - 2);
+    let count = usize::from(recipe.count.unwrap_or(default_count(kind))).clamp(1, room);
     let [lead, companion] = palette.pair(recipe.slots);
     // Whatever colours the row picks for its marks, the flash is the skill colour, at no
     // more than the gain of the pool: a broad glow above it turns pale on pale ground.
@@ -565,6 +599,7 @@ pub(crate) fn impact_particles(
         lead,
         companion,
         flash,
+        flash_share: flash_share(kind),
         id: ctx.receipt,
     };
     let mut specs = burst.particles(kind, count);
@@ -585,6 +620,8 @@ pub(crate) struct Receipt {
     /// The hero that dealt it and where the client observes that hero.
     pub source: u64,
     pub source_position: Vec3,
+    /// Particles the engine adds to the burst of this receipt on its own.
+    pub reserved: usize,
 }
 
 /// Heading of the live effect of this skill and owner that is nearest to a receipt.
@@ -630,6 +667,7 @@ pub(crate) fn receipt_burst(
                 .and_then(|id| live_heading(effects, receipt, id)),
             area_damage: skill.is_some_and(category::area_damage),
             receipt: receipt.id,
+            reserved: receipt.reserved,
         },
     ))
 }
@@ -658,6 +696,7 @@ mod tests {
             heading: None,
             area_damage,
             receipt: 501,
+            reserved: 0,
         }
     }
 
@@ -832,7 +871,7 @@ mod tests {
                 let flash = &specs[own];
                 assert_eq!(
                     (flash.shape, flash.curve, flash.origin, flash.velocity),
-                    (ParticleShape::Glow, Curve::Shrink, centre, Vec3::ZERO),
+                    (ParticleShape::Glow, Curve::Hold, centre, Vec3::ZERO),
                     "{}",
                     kind.id()
                 );
@@ -848,7 +887,7 @@ mod tests {
                 } else {
                     REACH
                 };
-                assert!((wide[own].reach(centre) - FLASH * per_scale).abs() < 1e-5);
+                assert!((wide[own].reach(centre) - flash_share(*kind) * per_scale).abs() < 1e-5);
                 assert!(flash.reach(centre) <= wide[own].reach(centre) + 1e-6);
                 for spec in &specs {
                     assert_eq!((spec.event_id, spec.source), (501, ParticleSource::Impact));
@@ -912,7 +951,7 @@ mod tests {
                 let specs = marks(kind, shape, 7);
                 assert_eq!(
                     (specs[0].shape, specs[0].curve),
-                    (ParticleShape::Ringlet, Curve::Grow)
+                    (ParticleShape::Ringlet, Curve::Pop)
                 );
                 assert_eq!(specs[0].color, lead);
                 assert!(specs[1..].iter().all(|spec| spec.shape == debris));
@@ -1004,9 +1043,45 @@ mod tests {
         let pop = draw(ImpactKind::GlowPop, Some(ParticleShape::Diamond), 4);
         assert_eq!(
             (pop[0].shape, pop[0].curve),
-            (ParticleShape::Diamond, Curve::Pop)
+            (ParticleShape::Diamond, Curve::Hold)
         );
         assert_eq!(draw(ImpactKind::GlowPop, None, 4)[0].curve, Curve::Shrink);
+        // The mark of a kind is whole on the frame of the receipt: it does not swell. What
+        // is thrown out of the hit still does.
+        for (kind, marks) in [
+            (ImpactKind::SlashCut, 1),
+            (ImpactKind::CrossCut, 2),
+            (ImpactKind::ClawRake, 3),
+            (ImpactKind::SparkFork, 3),
+            (ImpactKind::FlashStar, 1),
+            (ImpactKind::StarShards, 1),
+            (ImpactKind::FacetPop, 1),
+        ] {
+            let burst = draw(kind, None, 8);
+            for (index, spec) in burst[..8].iter().enumerate() {
+                assert_eq!(
+                    spec.curve == Curve::Hold,
+                    index < marks,
+                    "{} {index}",
+                    kind.id()
+                );
+            }
+        }
+        // The flash is as wide as the kind of mark needs: all of a glow, the core of a
+        // ring or a burst of shards, the spark under a cut.
+        const { assert!(FLASH_SPARK < FLASH_CORE && FLASH_CORE < FLASH_BLOOM && FLASH_BLOOM < 1.0) };
+        for (kind, share) in [
+            (ImpactKind::GlowPop, FLASH_BLOOM),
+            (ImpactKind::EmberPuff, FLASH_BLOOM),
+            (ImpactKind::Blast, FLASH_BLOOM),
+            (ImpactKind::ThudRing, FLASH_CORE),
+            (ImpactKind::StarShards, FLASH_CORE),
+            (ImpactKind::SlashCut, FLASH_SPARK),
+            (ImpactKind::ClawRake, FLASH_SPARK),
+            (ImpactKind::PierceThrough, FLASH_SPARK),
+        ] {
+            assert_eq!(flash_share(kind), share, "{}", kind.id());
+        }
 
         // A pierce moves on past the target along the heading of the live effect, and
         // nothing goes back or sideways.
@@ -1251,6 +1326,33 @@ mod tests {
         );
     }
 
+    /// Room the engine keeps for its own add-on comes out of the recipe, which is laid out
+    /// as if the row had asked for fewer particles; the hit keeps a mark and its flash.
+    #[test]
+    fn a_reserve_leaves_room_in_the_budget() {
+        for kind in ImpactKind::ALL {
+            let area = *kind == ImpactKind::Blast;
+            let full = recipe(*kind, None, u8::MAX, 1.0);
+            for reserved in 0..=IMPACT_MAX + 2 {
+                let ctx = ImpactContext {
+                    reserved,
+                    ..receipt(area)
+                };
+                let burst = impact_particles(&full, &palette(), &ctx);
+                let room = IMPACT_MAX - reserved.min(IMPACT_MAX - 2);
+                assert_eq!(burst.len(), room, "{} {reserved}", kind.id());
+                assert!(burst.len() >= 2 && burst.last().unwrap().dense);
+                let fewer = recipe(*kind, None, room as u8 - 1, 1.0);
+                assert_eq!(
+                    burst,
+                    impact_particles(&fewer, &palette(), &receipt(area)),
+                    "{} {reserved}",
+                    kind.id()
+                );
+            }
+        }
+    }
+
     #[test]
     fn a_receipt_is_drawn_from_the_row_that_dealt_it() {
         use shared::loadout::EffectVisualKind;
@@ -1263,6 +1365,7 @@ mod tests {
             ground: HIT.y - 1.05,
             source: 7,
             source_position: HIT - Vec3::X * 6.0,
+            reserved: 0,
         };
         let beam = |owner: u64, skill: SkillId, kind: EffectVisualKind| SkillEffectState {
             id: 5,
@@ -1289,6 +1392,7 @@ mod tests {
                     heading,
                     area_damage: false,
                     receipt: 77,
+                    reserved: 0,
                 },
             )
         };
@@ -1333,10 +1437,10 @@ mod tests {
         // A row without a recipe, and a basic attack without a row, keep the built-in burst.
         let step = CastKey::Skill(SkillKey::Modular(SkillId::AnchorStep));
         assert_eq!(receipt_burst(&registry, step, &hit, &[]), None);
-        let packaged = SkillPresentation::packaged();
-        assert_eq!(receipt_burst(&packaged, key, &hit, &[]), None);
+        let unmigrated = SkillPresentation::unmigrated();
+        assert_eq!(receipt_burst(&unmigrated, key, &hit, &[]), None);
         assert_eq!(
-            receipt_burst(&packaged, CastKey::Basic(HeroClass::Mage), &hit, &[]),
+            receipt_burst(&unmigrated, CastKey::Basic(HeroClass::Mage), &hit, &[]),
             None
         );
         let basic = receipt_burst(&registry, CastKey::Basic(HeroClass::Mage), &hit, &[]).unwrap();

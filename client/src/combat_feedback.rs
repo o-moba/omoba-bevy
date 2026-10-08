@@ -12,13 +12,15 @@ use crate::{
     game_vfx::{ClearCombatVfx, ConfirmedBurst, ImpactBurst, ParticleSpec, SkillBurst},
     maps::MapLayout,
     net::{
-        GameStateSnapshot, NetworkAvatar, NetworkHeroClass, NetworkPlayerId, NetworkSpriteCharacter,
+        GameStateSnapshot, NetworkAvatar, NetworkHeroClass, NetworkNeutralCampType,
+        NetworkNeutralId, NetworkPlayerId, NetworkSpriteCharacter,
     },
     player::Player,
     skill_presentation::{
         SkillPresentation, accents,
         cast::CastKey,
         impacts::{Receipt, receipt_burst},
+        vocab::PaletteSlot,
     },
     sprite::PlayerVisualMode,
     world2d::{layer, simulation_xz_to_render_xy},
@@ -190,13 +192,15 @@ fn hit_direction(source: Option<Vec3>, position: Vec3) -> Vec2 {
 }
 
 /// The burst of an accepted receipt from the recipe of the row that dealt it. `None` keeps
-/// the built-in burst: the source is not seen or its row carries no recipe.
+/// the built-in burst: the source is not seen or its row carries no recipe. `reserved`
+/// particles of the budget of the receipt are left to the engine's own add-on.
 fn themed_impact(
     skills: Option<&SkillPresentation>,
     source: Option<&Source>,
     event: &CombatEvent,
     ground: f32,
     effects: &[SkillEffectState],
+    reserved: usize,
 ) -> Option<Vec<ParticleSpec>> {
     let source = source?;
     receipt_burst(
@@ -208,8 +212,44 @@ fn themed_impact(
             ground,
             source: event.source.id,
             source_position: source.position,
+            reserved,
         },
         effects,
+    )
+}
+
+/// The camp hit: drops that rise from a neutral monster when a hero whose class deals
+/// bonus damage to it lands a hit, and more of them when that hit kills an ordinary camp.
+/// It follows the server's own condition for the bonus (`common/src/sim/neutrals.rs`): a
+/// hero without a loadout whose class has a neutral damage multiplier above one. `boss` is
+/// what the client last saw of the target; an unseen camp gets no kill flourish. Nothing
+/// is drawn for a hero target, a source the client does not see, or a class without the
+/// bonus, and nothing says how much was dealt.
+fn camp_hit(
+    skills: Option<&SkillPresentation>,
+    source: Option<&Source>,
+    event: &CombatEvent,
+    boss: Option<bool>,
+    at: Vec3,
+) -> Vec<ParticleSpec> {
+    let Some((source, theme)) = source.and_then(|source| {
+        let theme = skills?.theme(source.class)?;
+        Some((source, theme))
+    }) else {
+        return Vec::new();
+    };
+    let bonus = |boss| shared::jungle::neutral_damage_multiplier(source.class, boss) > 1.0;
+    if event.target.kind != CombatEntityKind::Neutral
+        || source.loadout.is_some()
+        || !boss.map_or(bonus(false) && bonus(true), bonus)
+    {
+        return Vec::new();
+    }
+    accents::camp_hit(
+        accents::Palette::of_class(theme).slot(PaletteSlot::Accent),
+        at,
+        event.killed && boss == Some(false),
+        event.id,
     )
 }
 
@@ -241,6 +281,9 @@ struct Impact {
 struct CombatFeedback {
     cursor: HitCursor,
     impacts: Vec<Impact>,
+    /// Whether each neutral monster the client has seen this round is a boss. A killed
+    /// monster leaves the snapshot with its last receipt, so its kind is kept from before.
+    camps: std::collections::HashMap<u64, bool>,
 }
 #[derive(Component)]
 pub(crate) struct DamageNumber {
@@ -281,6 +324,7 @@ fn collect_hits(
     )>,
     local: Query<&NetworkPlayerId, With<Player>>,
     positions: Query<(&NetworkPlayerId, &Transform, &InheritedVisibility)>,
+    neutrals: Query<(&NetworkNeutralId, &NetworkNeutralCampType)>,
     cameras: Query<(&Camera, &Transform), With<MainCamera>>,
     mode: Res<PlayerVisualMode>,
     #[cfg(feature = "qa")] mut shown: ResMut<ReceiptLooks>,
@@ -289,6 +333,9 @@ fn collect_hits(
         impact.age += clock.delta;
         impact.age < impact.lifetime
     });
+    for (id, camp) in &neutrals {
+        feedback.camps.insert(id.0, camp.0.is_boss());
+    }
     let seen = feedback.cursor.high_water;
     let (changed, events) = feedback.cursor.accept(
         (snapshot.meta.server_epoch, snapshot.meta.match_id),
@@ -297,6 +344,7 @@ fn collect_hits(
     let mut number_count = numbers.iter().count();
     if changed {
         feedback.impacts.clear();
+        feedback.camps.clear();
         out.resets.write(ClearCombatVfx);
         for entity in &numbers {
             commands.entity(entity).despawn();
@@ -392,6 +440,14 @@ fn collect_hits(
                 .iter()
                 .any(|(id, _, visible)| id.0 == event.target.id && visible.get()),
         );
+        // The camp hit shares the budget of its receipt: the recipe leaves it room.
+        let drops = camp_hit(
+            skills.as_deref(),
+            source.as_ref(),
+            &event,
+            feedback.camps.get(&event.target.id).copied(),
+            ground(position),
+        );
         // The vital break is the engine's own burst; every other receipt is drawn from the
         // recipe of its row when it has one.
         let themed = (!vital)
@@ -402,6 +458,7 @@ fn collect_hits(
                     &event,
                     ground(position).y,
                     &snapshot.skill_effects,
+                    drops.len(),
                 )
             })
             .flatten();
@@ -412,7 +469,11 @@ fn collect_hits(
             &event,
             themed.as_deref(),
         ));
-        if let Some(burst) = themed {
+        if themed.is_none() && !drops.is_empty() {
+            out.confirmed.write(ConfirmedBurst(drops.clone()));
+        }
+        if let Some(mut burst) = themed {
+            burst.extend(drops);
             out.confirmed.write(ConfirmedBurst(burst));
         } else {
             out.bursts.write(ImpactBurst {
@@ -714,7 +775,7 @@ mod tests {
         let accepted = cursor.accept((1, 1), std::slice::from_ref(&hit)).1;
         assert_eq!(accepted.len(), 1);
         let burst =
-            themed_impact(Some(&registry), Some(&source), &accepted[0], FLOOR, &[]).unwrap();
+            themed_impact(Some(&registry), Some(&source), &accepted[0], FLOOR, &[], 0).unwrap();
         assert!(!burst.is_empty() && burst.len() <= 12);
         assert!(
             burst
@@ -740,22 +801,158 @@ mod tests {
 
         // The recipe needs a source the client sees, a registry and a row that names one;
         // every other receipt keeps the built-in burst.
-        assert!(themed_impact(Some(&registry), None, &hit, FLOOR, &[]).is_none());
-        assert!(themed_impact(None, Some(&source), &hit, FLOOR, &[]).is_none());
-        let packaged = SkillPresentation::packaged();
-        assert!(themed_impact(Some(&packaged), Some(&source), &hit, FLOOR, &[]).is_none());
+        assert!(themed_impact(Some(&registry), None, &hit, FLOOR, &[], 0).is_none());
+        assert!(themed_impact(None, Some(&source), &hit, FLOOR, &[], 0).is_none());
+        let unmigrated = SkillPresentation::unmigrated();
+        assert!(themed_impact(Some(&unmigrated), Some(&source), &hit, FLOOR, &[], 0).is_none());
         let mut unslotted = hit.clone();
         unslotted.action_slot = None;
-        assert!(themed_impact(Some(&registry), Some(&source), &unslotted, FLOOR, &[]).is_none());
+        assert!(themed_impact(Some(&registry), Some(&source), &unslotted, FLOOR, &[], 0).is_none());
         // A basic attack is drawn from the row of its class.
         let basic = dealt(6, 12.0, 7, shared::BASIC_ATTACK_ACTION_SLOT);
-        let burst = themed_impact(Some(&registry), Some(&source), &basic, FLOOR, &[]).unwrap();
+        let burst = themed_impact(Some(&registry), Some(&source), &basic, FLOOR, &[], 0).unwrap();
         assert!(
             burst
                 .iter()
                 .all(|spec| spec.source == ParticleSource::Impact && spec.event_id == 6)
         );
-        assert!(themed_impact(Some(&packaged), Some(&source), &basic, FLOOR, &[]).is_none());
+        assert!(themed_impact(Some(&unmigrated), Some(&source), &basic, FLOOR, &[], 0).is_none());
+    }
+
+    /// A receipt on the neutral monster 50 from the hero 7.
+    fn on_camp(id: u64, slot: u8, killed: bool) -> CombatEvent {
+        let mut event = dealt(id, 30.0, 7, slot);
+        event.target = shared::combat::CombatEntity {
+            kind: CombatEntityKind::Neutral,
+            id: 50,
+        };
+        event.killed = killed;
+        event
+    }
+
+    /// Forest Tracker is seen on a neutral monster and nowhere else.
+    #[test]
+    fn camp_hit_needs_a_neutral_target_and_a_seen_hero_with_the_camp_bonus() {
+        use crate::game_vfx::ParticleSource;
+        use shared::HeroClass;
+        let registry = SkillPresentation::target();
+        let warden = seen_hero(HeroClass::Warden);
+        let drops = |source: Option<&Source>, event: &CombatEvent, boss: Option<bool>| {
+            camp_hit(Some(&registry), source, event, boss, GROUND)
+        };
+        // A hit on an ordinary camp: two drops in the spark colour of the class, above the
+        // monster, carrying the receipt.
+        let hit = drops(Some(&warden), &on_camp(5, 0, false), Some(false));
+        assert_eq!(hit.len(), 2);
+        let spark = accents::Palette::of_class(registry.theme(HeroClass::Warden).unwrap())
+            .slot(PaletteSlot::Accent);
+        for drop in &hit {
+            assert_eq!((drop.source, drop.event_id), (ParticleSource::Cue, 5));
+            assert_eq!(drop.color, spark);
+            assert!(drop.origin.y > GROUND.y + 1.0 && drop.velocity.y > 0.0);
+            assert!(drop.origin.xz().distance(GROUND.xz()) < 0.5);
+        }
+        // The kill of an ordinary camp is the one flourish. A boss gives the smaller bonus
+        // and no flourish, and a camp the client never saw is not known to be ordinary.
+        let kill = on_camp(6, 0, true);
+        assert_eq!(drops(Some(&warden), &kill, Some(false)).len(), 4);
+        assert_eq!(drops(Some(&warden), &kill, Some(true)).len(), 2);
+        assert_eq!(drops(Some(&warden), &kill, None).len(), 2);
+        assert_eq!(
+            drops(Some(&warden), &on_camp(7, 0, false), Some(true)).len(),
+            2
+        );
+        // Every action of the hero counts, the basic attack included.
+        for slot in [0, 2, 3, shared::BASIC_ATTACK_ACTION_SLOT] {
+            assert_eq!(
+                drops(Some(&warden), &on_camp(8, slot, false), Some(false)).len(),
+                2
+            );
+        }
+
+        // Never on a hero, a minion or a structure, whatever dealt the hit.
+        for kind in [
+            CombatEntityKind::Player,
+            CombatEntityKind::Minion,
+            CombatEntityKind::Structure,
+            CombatEntityKind::Unknown,
+        ] {
+            let mut other = on_camp(9, 0, true);
+            other.target.kind = kind;
+            assert!(
+                drops(Some(&warden), &other, Some(false)).is_empty(),
+                "{kind:?}"
+            );
+        }
+        // A source the client does not see draws nothing, and neither does a missing registry.
+        assert!(drops(None, &kill, Some(false)).is_empty());
+        assert!(camp_hit(None, Some(&warden), &kill, Some(false), GROUND).is_empty());
+        // Only a class the server gives the bonus to, and only without a loadout: the
+        // server skips the multiplier for a hero that plays a recipe.
+        for class in HeroClass::ALL {
+            let hero = seen_hero(class);
+            let bonus = shared::jungle::neutral_damage_multiplier(class, false) > 1.0;
+            assert_eq!(bonus, class == HeroClass::Warden);
+            assert_eq!(
+                !drops(Some(&hero), &kill, Some(false)).is_empty(),
+                bonus,
+                "{}",
+                class.id()
+            );
+        }
+        let recipe = LoadoutState::default();
+        let mixed = Source {
+            loadout: Some(&recipe),
+            ..warden
+        };
+        assert!(drops(Some(&mixed), &kill, Some(false)).is_empty());
+    }
+
+    /// The drops are part of the burst of their receipt: the recipe of the row is laid out
+    /// with as many particles fewer, so the two together stay inside the impact budget.
+    #[test]
+    fn camp_hit_shares_the_budget_of_its_receipt() {
+        use crate::game_vfx::ParticleSource;
+        use crate::skill_presentation::impacts::IMPACT_MAX;
+        use shared::HeroClass;
+        let registry = SkillPresentation::target();
+        let warden = seen_hero(HeroClass::Warden);
+        let mut trimmed = 0;
+        for slot in [0, 2, 3, shared::BASIC_ATTACK_ACTION_SLOT] {
+            for (killed, count) in [(false, 2), (true, 4)] {
+                let event = on_camp(11, slot, killed);
+                let drops = camp_hit(Some(&registry), Some(&warden), &event, Some(false), GROUND);
+                assert_eq!(drops.len(), count);
+                let burst = |reserved: usize| {
+                    themed_impact(Some(&registry), Some(&warden), &event, FLOOR, &[], reserved)
+                        .unwrap()
+                };
+                let (alone, shared) = (burst(0), burst(count));
+                assert!(shared.len() + drops.len() <= IMPACT_MAX, "slot {slot}");
+                assert_eq!(shared.len(), alone.len().min(IMPACT_MAX - count));
+                trimmed += usize::from(shared.len() < alone.len());
+                // The recipe is laid out anew, not cut off: it keeps its first mark and
+                // closes with the flash of the hit, and all of it is still the impact.
+                for (kept, whole) in [
+                    (&shared[0], &alone[0]),
+                    (shared.last().unwrap(), alone.last().unwrap()),
+                ] {
+                    assert_eq!(
+                        (kept.shape, kept.origin, kept.color, kept.dense),
+                        (whole.shape, whole.origin, whole.color, whole.dense)
+                    );
+                    assert!((kept.size - whole.size).abs() < 1e-3);
+                }
+                assert!(shared.last().unwrap().dense);
+                assert!(
+                    shared
+                        .iter()
+                        .all(|spec| spec.source == ParticleSource::Impact)
+                );
+            }
+        }
+        // The three abilities of the Warden fill the budget on their own.
+        assert!(trimmed >= 6, "{trimmed}");
     }
 
     /// The capture evidence of a receipt names the recipe that drew its burst, and no recipe
@@ -772,7 +969,7 @@ mod tests {
             (SkillId::EchoStrike, "spark_fork"),
         ] {
             let hit = dealt(5, 40.0, 7, slot_of(class, skill));
-            let burst = themed_impact(Some(&registry), Some(&source), &hit, FLOOR, &[]);
+            let burst = themed_impact(Some(&registry), Some(&source), &hit, FLOOR, &[], 0);
             let look = ReceiptLook::of(Some(&registry), Some(&source), &hit, burst.as_deref());
             assert_eq!(
                 look,
@@ -787,9 +984,9 @@ mod tests {
         // A row without a recipe, and a source the client does not see, keep the built-in
         // burst: the evidence names no recipe and counts no particle of one.
         let hit = dealt(6, 40.0, 7, slot_of(class, SkillId::ThunderKick));
-        let packaged = SkillPresentation::packaged();
-        for (skills, source) in [(&packaged, Some(&source)), (&registry, None)] {
-            let burst = themed_impact(Some(skills), source, &hit, FLOOR, &[]);
+        let unmigrated = SkillPresentation::unmigrated();
+        for (skills, source) in [(&unmigrated, Some(&source)), (&registry, None)] {
+            let burst = themed_impact(Some(skills), source, &hit, FLOOR, &[], 0);
             assert!(burst.is_none());
             let look = ReceiptLook::of(Some(skills), source, &hit, burst.as_deref());
             assert_eq!((look.impact, look.particles), (None, 0));
@@ -847,11 +1044,11 @@ mod tests {
                 .all(|spec| spec.source == ParticleSource::Cue && spec.event_id == 4)
         );
         // It is not an impact, and a row without a `cast` block draws none.
-        assert!(themed_impact(Some(&registry), Some(&source), snaps[0], FLOOR, &[]).is_some());
-        assert!(accents::trap_snap(&SkillPresentation::packaged(), key, GROUND, 4).is_empty());
+        assert!(themed_impact(Some(&registry), Some(&source), snaps[0], FLOOR, &[], 0).is_some());
+        assert!(accents::trap_snap(&SkillPresentation::unmigrated(), key, GROUND, 4).is_empty());
         assert!(accents::trap_snap(&registry, CastKey::Basic(class), GROUND, 4).is_empty());
         // The trap that did bite is an ordinary hit with the recipe of its row.
-        let bite = themed_impact(Some(&registry), Some(&source), &accepted[0], FLOOR, &[]);
+        let bite = themed_impact(Some(&registry), Some(&source), &accepted[0], FLOOR, &[], 0);
         assert!(
             bite.unwrap()
                 .iter()

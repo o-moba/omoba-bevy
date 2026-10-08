@@ -2652,6 +2652,7 @@ mod tests {
                     heading: None,
                     area_damage,
                     receipt: 42,
+                    reserved: 0,
                 };
                 bounded(impacts::impact_particles(&recipe, &palette, &ctx), 12, 1.7);
             }
@@ -3028,7 +3029,7 @@ mod tests {
                 .flat_map(|batch| batch.0)
                 .collect::<Vec<_>>()
         };
-        let accent = accents_of(SkillPresentation::packaged(), HeroClass::Warrior, 0);
+        let accent = accents_of(SkillPresentation::unmigrated(), HeroClass::Warrior, 0);
         assert!(!accent.is_empty());
         for particle in &accent {
             // Simulation coordinates whatever the render mode: the system reads none.
@@ -3038,7 +3039,7 @@ mod tests {
         }
         // The melee swing of a basic attack is laid ahead along the same yaw.
         let swing = accents_of(
-            SkillPresentation::packaged(),
+            SkillPresentation::unmigrated(),
             HeroClass::Stormfist,
             shared::BASIC_ATTACK_ACTION_SLOT,
         );
@@ -3112,17 +3113,53 @@ mod tests {
             .iter()
             .position(|skill| *skill == SkillId::DaggerBluff)
             .unwrap() as u8;
-        // The packaged row names no voice, so Bluff keeps the cue it always had.
+        // The unmigrated row names no voice, so Bluff keeps the cue it always had.
         assert_eq!(
-            requests(SkillPresentation::packaged(), bluff),
+            requests(SkillPresentation::unmigrated(), bluff),
             [AudioCue::Bluff]
         );
         // A row with `sound.cast` is voiced by the audio layer, once.
         assert!(requests(SkillPresentation::target(), bluff).is_empty());
         for slot in (0..4).filter(|slot| *slot != bluff) {
-            assert!(requests(SkillPresentation::packaged(), slot).is_empty());
+            assert!(requests(SkillPresentation::unmigrated(), slot).is_empty());
             assert!(requests(SkillPresentation::target(), slot).is_empty());
         }
+    }
+    /// The arcane style default draws the hit of a Mage the client cannot see. It strikes
+    /// one unit, so its ring and its sparks stay at that unit like a recipe would.
+    #[test]
+    fn the_arcane_default_burst_stays_at_the_unit_it_struck() {
+        use crate::combat_visuals::CombatVisualRegistry;
+        use crate::skill_presentation::impacts::SINGLE_TARGET_REACH;
+        let registry =
+            CombatVisualRegistry::from_json(include_str!("../assets/config/combat_visuals.json"))
+                .unwrap();
+        let profile = registry.resolve_style(ProjectileStyle::Arcane);
+        assert_eq!(profile.id, "mage_arcane");
+        let burst = ImpactBurst {
+            position: Vec3::new(3., 1., -2.),
+            direction: Vec2::X,
+            color: profile.impact.color(),
+            scale: profile.impact.scale,
+            lifetime: profile.impact.lifetime,
+            kind: BurstKind::for_style(ProjectileStyle::Arcane),
+            seed: 7,
+        };
+        let particles = burst_particles(&burst);
+        assert_eq!(particles.len(), 12);
+        let reach = particles
+            .iter()
+            .flat_map(|particle| {
+                (0..=20).map(move |step| {
+                    let mut live = particle.clone();
+                    live.age = particle.lifetime * step as f32 / 20.;
+                    let pose = live.pose(false, Quat::IDENTITY);
+                    (pose.translation - burst.position).xz().length()
+                        + unit_radius(live.shape) * pose.scale.x
+                })
+            })
+            .fold(0., f32::max);
+        assert!(reach > 1.0 && reach <= SINGLE_TARGET_REACH, "{reach}");
     }
     #[test]
     fn no_flight_puff_where_a_form_is_drawn() {
@@ -3132,9 +3169,7 @@ mod tests {
             "skill_presentation/fixtures/target_combat_visuals.json"
         ))
         .unwrap();
-        let shipped =
-            CombatVisualRegistry::from_json(include_str!("../assets/config/combat_visuals.json"))
-                .unwrap();
+        let embedded = CombatVisualRegistry::default();
         let at = Vec3::new(2., 0.85, -3.);
         // The particles one projectile of `class` leaves in a tick: where the renderer
         // draws forms, where it draws shapes in 3D, and in the flat backend.
@@ -3209,7 +3244,7 @@ mod tests {
             Some(0),
         );
         assert!(shapes.is_empty() && flat.is_empty());
-        // The packaged profiles name no form: a magic bolt keeps its puff and its glows
+        // The embedded profiles name no form: a magic bolt keeps its puff and its glows
         // in both backends, and an arrow or a blade no longer leaves an exhaust.
         for (class, style, count) in [
             (HeroClass::Mage, ProjectileStyle::Arcane, 3),
@@ -3219,7 +3254,7 @@ mod tests {
             (HeroClass::Warden, ProjectileStyle::Claw, 0),
             (HeroClass::Wildspark, ProjectileStyle::Bullet, 0),
         ] {
-            for particles in puffs(&shipped, Some(class), style, Some(0)) {
+            for particles in puffs(&embedded, Some(class), style, Some(0)) {
                 assert_eq!(particles.len(), count, "{}", class.id());
             }
         }

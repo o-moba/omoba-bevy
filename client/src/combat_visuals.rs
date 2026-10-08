@@ -1636,20 +1636,27 @@ mod tests {
                 default_silhouette(*form)
             );
         }
-        // The embedded and the packaged profiles name no form yet: every body is a shape.
-        for registry in [
-            CombatVisualRegistry::default(),
+        // The embedded profiles name no form: every body is a shape. A packaged profile is
+        // a shape until a content package gives it a form or makes it a melee contact.
+        for profile in CombatVisualRegistry::default().config.profiles.values() {
+            assert_eq!(
+                profile.flight_body(true, true),
+                FlightBody::Shape,
+                "{}",
+                profile.id
+            );
+        }
+        let packaged =
             CombatVisualRegistry::from_json(include_str!("../assets/config/combat_visuals.json"))
-                .unwrap(),
-        ] {
-            for profile in registry.config.profiles.values() {
-                assert_eq!(
-                    profile.flight_body(true, true),
-                    FlightBody::Shape,
-                    "{}",
-                    profile.id
-                );
-            }
+                .unwrap();
+        for profile in packaged.config.profiles.values() {
+            assert_eq!(
+                profile.flight_body(true, true) == FlightBody::Shape,
+                profile.form.is_none()
+                    && profile.presentation != ProjectilePresentation::MeleeContact,
+                "{}",
+                profile.id
+            );
         }
     }
 

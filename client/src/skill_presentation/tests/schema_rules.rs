@@ -28,10 +28,10 @@ fn orb() -> Value {
     })
 }
 
-/// The packaged registry with complete schema-2 rows for skills of every category and two
+/// The unmigrated registry with complete schema-2 rows for skills of every category and two
 /// basic attacks. Every case below changes one thing in it.
 pub(in crate::skill_presentation) fn samples() -> Value {
-    let mut config = shipped();
+    let mut config = SkillPresentation::unmigrated_config();
     let rows = json!({
         "winter_shard": {
             "home": "frostguard", "release": "punch", "color": [0.10, 0.45, 0.85], "hdr_gain": 3.2,

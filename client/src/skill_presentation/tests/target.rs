@@ -34,6 +34,15 @@ pub(in crate::skill_presentation) fn target_visuals() -> CombatVisualRegistry {
         .unwrap_or_else(|error| panic!("target_combat_visuals.json: {error}"))
 }
 
+/// The classes whose rows the content packages have moved into the packaged files.
+pub(in crate::skill_presentation) const PROMOTED: [HeroClass; 5] = [
+    HeroClass::Warrior,
+    HeroClass::Mage,
+    HeroClass::Ranger,
+    HeroClass::Cleric,
+    HeroClass::Warden,
+];
+
 fn shipped() -> SkillPresentation {
     SkillPresentation::parse(include_str!("../../../assets/config/skills.skillfx")).unwrap()
 }
@@ -211,6 +220,68 @@ fn target_parses() {
         assert_eq!(
             (&now.id, now.shape, now.color, now.scale, now.form),
             (&before.id, before.shape, before.color, before.scale, None)
+        );
+    }
+}
+
+/// A promoted class ships the final data: its theme, its basic row, its four skill rows and
+/// the projectile profiles its actions resolve to are the target's, value for value. A
+/// content package tunes a promoted row in both files; the rest of the roster still waits.
+#[test]
+fn shipped_rows_equal_target_for_promoted_classes() {
+    let (registry, packaged) = (target(), shipped());
+    let (visuals, packaged_visuals) = (target_visuals(), shipped_visuals());
+    // Parsed rows are compared as the client holds them, whatever the files spell.
+    let own = |registry: &SkillPresentation, class: HeroClass| -> Vec<(String, String)> {
+        rows(registry)
+            .into_iter()
+            .filter(|(_, key, _)| key.home() == class)
+            .map(|(id, _, row)| (id.to_string(), format!("{row:?}")))
+            .collect()
+    };
+    for class in PROMOTED {
+        let name = class.id();
+        assert_eq!(packaged.theme(class), registry.theme(class), "{name}");
+        assert!(packaged.basic(class).is_some(), "{name}");
+        assert_eq!(packaged.basic(class), registry.basic(class), "{name}");
+        let kit = own(&packaged, class);
+        assert_eq!(kit.len(), 4, "{name}");
+        for (shipped, target) in kit.iter().zip(own(&registry, class)) {
+            assert_eq!(*shipped, target, "{name}");
+        }
+        // Every body the class throws, and the look of a hit or a projectile of its wire
+        // style whose owner the client cannot resolve.
+        let mut styles = vec![ProjectileStyle::for_class(class)];
+        if repeater(class) {
+            styles = vec![ProjectileStyle::Bullet, ProjectileStyle::Rocket];
+        }
+        for style in styles {
+            for slot in [0, 1, 2, 3, BASIC_ATTACK_ACTION_SLOT] {
+                assert_eq!(
+                    format!("{:?}", projectile(&packaged_visuals, class, style, slot)),
+                    format!("{:?}", projectile(&visuals, class, style, slot)),
+                    "{name} {style:?} {slot}"
+                );
+            }
+            assert_eq!(
+                format!("{:?}", packaged_visuals.resolve_style(style)),
+                format!("{:?}", visuals.resolve_style(style)),
+                "{name} {style:?}"
+            );
+        }
+    }
+    // Rows are promoted by class and whole: a row is final exactly when its class is.
+    for (id, key, row) in rows(&packaged) {
+        let promoted = PROMOTED.contains(&key.home());
+        assert_eq!(row.migrated(), promoted, "{id}");
+        assert_eq!(row.effect.is_none(), promoted, "{id}");
+    }
+    for class in HeroClass::ALL {
+        assert_eq!(
+            packaged.basic(class).is_some(),
+            PROMOTED.contains(&class),
+            "{}",
+            class.id()
         );
     }
 }

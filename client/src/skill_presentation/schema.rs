@@ -766,6 +766,7 @@ fn impact_output(
                 heading,
                 area_damage,
                 receipt: 1,
+                reserved: 0,
             },
         );
         burst_budget(&specs, impacts::IMPACT_MAX, impacts::IMPACT_SECS, "impact")?;
