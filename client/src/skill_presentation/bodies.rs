@@ -924,6 +924,19 @@ struct Motion {
     lift: f32,
 }
 
+/// Share of its height the keystone of a wall keeps once the wall has stopped a projectile,
+/// and how far it then leans along the bar, in radians.
+const CRACK_SHARE: f32 = 0.72;
+const CRACK_LEAN: f32 = 0.24;
+
+/// Whether the wall has stopped a projectile: the block that costs its holder nothing is
+/// spent (`common/src/skills/advanced.rs:1877-1878`). The count is replicated in
+/// `consumed_segments` (`common/src/skills/mod.rs:1509-1520`), so a wall first seen with it
+/// is drawn cracked at once.
+pub(crate) fn cracked(effect: &SkillEffectState) -> bool {
+    effect.kind == EffectVisualKind::ShieldWall && effect.consumed_segments > 0
+}
+
 /// `None` hides the part.
 fn motion(slot: &PartSlot, seen: &Seen) -> Option<Motion> {
     let now = seen.now;
@@ -1018,6 +1031,11 @@ fn footprint(slot: &PartSlot, extent: Vec3) -> Vec2 {
 fn authored(slot: &PartSlot, seen: &Seen, at: Vec3, yaw: f32) -> Option<Transform> {
     let mesh = slot.mesh?;
     let mut motion = motion(slot, seen)?;
+    if slot.role == Role::Core && cracked(seen.effect) {
+        // The keystone stands broken: shorter, and leaning in the plane of the wall.
+        motion.share[VERTICAL] *= CRACK_SHARE;
+        motion.turn = Quat::from_rotation_z(CRACK_LEAN) * motion.turn;
+    }
     if spans_strip(slot) {
         // The length of a strip is not the part's to change, and a part that long cannot
         // turn inside it.
@@ -1677,6 +1695,8 @@ pub(crate) fn part_paint(slot: &PartSlot, seen: &Seen) -> Option<Paint> {
         Role::Boundary(_) => Paint::Team,
         Role::Fill if seen.view.stage == Stage::Telegraph => Paint::FillDim,
         Role::Fill => Paint::Fill,
+        // The broken keystone of a wall has lost its light: it is matter.
+        Role::Core if cracked(seen.effect) => Paint::Slot(PaletteSlot::Secondary),
         Role::Core | Role::Shell | Role::Satellite(_) => Paint::Slot(slot.slot),
         Role::Trail(_) if slot.plan.trail == Trail::Links => Paint::Slot(PaletteSlot::Secondary),
         Role::Trail(_) => Paint::Slot(PaletteSlot::Primary),

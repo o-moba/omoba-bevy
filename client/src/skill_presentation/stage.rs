@@ -236,7 +236,9 @@ pub(crate) enum Transition {
     Armed,
     /// A warning became the beam or the bolt it announced, on the same id.
     KindFlipped,
-    /// The cage lost the side with this index.
+    /// The cage lost the side with this index; or a shield wall stopped a projectile, and
+    /// this is how many it had stopped before (0 for the block that costs its holder
+    /// nothing).
     SegmentBroken(u8),
     /// The heading changed by more than 45 degrees.
     Turned,
@@ -282,6 +284,15 @@ pub(crate) fn transitions(
                 .filter(|side| broken & (1 << side) != 0)
                 .map(Transition::SegmentBroken),
         );
+    }
+    // A wall publishes how many projectiles its holder has stopped with it
+    // (`common/src/skills/mod.rs:1509-1520`). A rise is one block, however many it counts.
+    // A fall is the count of a newer wall of the same hero and says nothing.
+    if before.kind == K::ShieldWall
+        && now.kind == K::ShieldWall
+        && now.consumed_segments > before.consumed_segments
+    {
+        changes.push(Transition::SegmentBroken(before.consumed_segments));
     }
     if heading(before)
         .zip(heading(now))

@@ -368,8 +368,15 @@ fn transitions_have_exact_thresholds_and_need_their_rule() {
         of(&cage, &with(&cage, |e| e.consumed_segments = 0b1110_0110)),
         []
     );
+    // A wall counts what it has stopped: a rise is one block, a fall and the cage's bits
+    // on another kind are nothing.
     let wall = effect(6, SkillId::Northwall, K::ShieldWall);
-    assert_eq!(of(&wall, &with(&wall, |e| e.consumed_segments = 1)), []);
+    assert_eq!(
+        of(&wall, &with(&wall, |e| e.consumed_segments = 1)),
+        [Transition::SegmentBroken(0)]
+    );
+    let field = effect(6, SkillId::DawnField, K::Field);
+    assert_eq!(of(&field, &with(&field, |e| e.consumed_segments = 1)), []);
 
     // An auxiliary object has no transitions, and neither has an id that changed its skill.
     let orb = with(&effect(7, SkillId::OrbitalCommand, K::Orb), |e| {
@@ -1226,6 +1233,142 @@ fn kind_flip_pops_only_after_an_observed_warning() {
     );
     assert_eq!(accents::stage_shot(&registry, &flip), None);
     assert!(accents::stage_burst(&registry, &flip, 0.0).is_empty());
+}
+
+/// The Northwall publishes how many projectiles it has stopped in `consumed_segments`. A
+/// rise is drawn as one block on the wall, the keystone stands broken for as long as the
+/// count is not zero, and nothing is drawn for a count the client did not see rise.
+#[test]
+fn shield_wall_count_drives_the_block_one_shot() {
+    use super::super::bodies::{self, Paint, Role, Seen};
+    use super::super::geometry::{self, GeoShape};
+    use super::super::vocab::PaletteSlot;
+    let registry = target();
+    let wall = with(&effect(40, SkillId::Northwall, K::ShieldWall), |e| {
+        e.radius = 2.5;
+        e.end = [2.0, 5.5];
+        e.remaining_secs = 2.5;
+    });
+    let counted = |count: u8| with(&wall, |e| e.consumed_segments = count);
+    let of = |before: u8, now: u8| transitions(rule(&wall), &counted(before), &counted(now));
+
+    // The transition: one for every rise, with the count before it; none for a count that
+    // stays or falls.
+    assert_eq!(of(0, 1), [Transition::SegmentBroken(0)]);
+    assert_eq!(of(1, 2), [Transition::SegmentBroken(1)]);
+    assert_eq!(of(0, 3), [Transition::SegmentBroken(0)]);
+    assert_eq!(of(254, 255), [Transition::SegmentBroken(254)]);
+    for (before, now) in [(0, 0), (2, 2), (1, 0), (255, 0), (3, 1)] {
+        assert_eq!(of(before, now), [], "{before} to {now}");
+    }
+
+    // The tracker: a block per rise, once.
+    let mut feed = Feed::new(target());
+    assert_eq!(feed.one(&counted(0)), []);
+    assert_eq!(
+        feed.one(&counted(1)),
+        [(40, step(Transition::SegmentBroken(0)))]
+    );
+    assert_eq!(feed.one(&counted(1)), []);
+    // Two projectiles between two snapshots are one block.
+    assert_eq!(
+        feed.one(&counted(3)),
+        [(40, step(Transition::SegmentBroken(1)))]
+    );
+    // The count falls with a newer wall of the same hero: a silent reset, and the next
+    // rise is a block again.
+    assert_eq!(feed.one(&counted(0)), []);
+    assert_eq!(
+        feed.one(&counted(1)),
+        [(40, step(Transition::SegmentBroken(0)))]
+    );
+    // A wall first seen with a count, and one seen again after a gap, show no block: the
+    // rise was not observed.
+    let mut feed = Feed::new(target());
+    assert_eq!(feed.one(&counted(2)), []);
+    feed.now += 2.0 * MAX_GAP_SECS;
+    assert_eq!(feed.one(&counted(4)), []);
+    assert_eq!(
+        feed.one(&counted(5)),
+        [(40, step(Transition::SegmentBroken(4)))]
+    );
+
+    // The one-shot: the engine's segment snap, on the bar of the wall and nowhere else.
+    let GeoShape::Segment { from, to } = geometry::boundary_shape(wall.skill, wall.kind, &wall)
+    else {
+        panic!("a wall is a bar");
+    };
+    let (middle, along) = (from.midpoint(to), (to - from).normalize());
+    for (before, pieces) in [(0, 7), (1, 5), (9, 5)] {
+        let block = event(
+            &counted(before + 1),
+            step(Transition::SegmentBroken(before)),
+        );
+        assert_eq!(
+            accents::stage_shot(&registry, &block),
+            Some(OneShot::SegmentSnap(before))
+        );
+        let burst = accents::stage_burst(&registry, &block, 0.25);
+        assert_eq!(burst.len(), pieces, "{before}");
+        assert!(burst.len() <= accents::STAGE_MAX);
+        for spec in &burst {
+            assert_eq!((spec.event_id, spec.source), (40, ParticleSource::Stage));
+            assert!(spec.end_secs() <= accents::STAGE_SECS);
+            // On the bar: it names no side the projectile came from.
+            let offset = spec.origin.xz() - middle;
+            assert!(offset.perp_dot(along).abs() < 1e-4, "{spec:?}");
+            assert!(offset.length() < 0.5 * from.distance(to));
+            assert!(spec.velocity.xz().perp_dot(along).abs() < 1e-4, "{spec:?}");
+            assert!(spec.origin.y > 1.0);
+        }
+    }
+    // No row, no block; and the snap of a wall is not that of a cage side.
+    let block = event(&counted(1), step(Transition::SegmentBroken(0)));
+    assert!(accents::stage_burst(&SkillPresentation::default(), &block, 0.0).is_empty());
+
+    // The state: the keystone is broken while the count is at least one, whether or not
+    // the client saw it rise, and whole again when the count is back at zero.
+    let body = registry.body_for(&wall).unwrap();
+    let keystone = |count: u8| {
+        let effect = counted(count);
+        let seen = Seen::of(&effect, None, None, 0.0, 0.0);
+        let slot = bodies::part_list(body, &seen.shape)
+            .into_iter()
+            .find(|slot| slot.role == Role::Core)
+            .unwrap();
+        let (pose, visibility) = bodies::part_pose(&slot, &seen);
+        assert_ne!(visibility, Visibility::Hidden);
+        let others: Vec<_> = bodies::part_list(body, &seen.shape)
+            .into_iter()
+            .filter(|slot| slot.role != Role::Core)
+            .map(|slot| {
+                (
+                    bodies::part_pose(&slot, &seen).0,
+                    bodies::part_paint(&slot, &seen),
+                )
+            })
+            .collect();
+        (pose, bodies::part_paint(&slot, &seen), others)
+    };
+    let (whole, paint, plates) = keystone(0);
+    assert_eq!(paint, Some(Paint::Slot(PaletteSlot::Primary)));
+    for count in [1, 2, 255] {
+        let (broken, paint, others) = keystone(count);
+        assert_eq!(paint, Some(Paint::Slot(PaletteSlot::Secondary)), "{count}");
+        // Shorter, leaning, on the same place of the bar; every other part is untouched.
+        assert!(broken.scale.max_element() < 0.8 * whole.scale.max_element());
+        assert!(broken.rotation.angle_between(whole.rotation) > 0.2);
+        assert!(broken.translation.xz().distance(whole.translation.xz()) < 1e-5);
+        assert!(broken.translation.y < whole.translation.y);
+        assert_eq!(others, plates, "{count}");
+    }
+    assert_eq!(keystone(0).0, whole);
+    // Only a wall counts in this byte: the bits of a cage break no keystone.
+    let cage = with(&effect(41, SkillId::IronBoundary, K::Cage), |e| {
+        e.consumed_segments = 0b00101;
+    });
+    assert!(!bodies::cracked(&cage) && bodies::cracked(&counted(1)));
+    assert!(!bodies::cracked(&counted(0)));
 }
 
 #[test]

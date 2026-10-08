@@ -51,6 +51,9 @@ const GLINT: f32 = 0.14;
 /// Half length of one skid mark of a forced displacement, at most.
 const SKID: f32 = 0.6;
 
+/// Height above the ground at which a wall shows that it stopped a projectile: the middle of
+/// its plates.
+const WALL_BLOCK_HEIGHT: f32 = 1.1;
 /// Heights above the ground a pattern is drawn at.
 const FLOOR: f32 = 0.06;
 const HAND: f32 = 0.9;
@@ -1069,7 +1072,8 @@ pub(crate) fn link_particles(
 pub(crate) enum OneShot {
     /// The effect armed.
     ArmPop,
-    /// The cage lost the side with this index.
+    /// The cage lost the side with this index; or a wall stopped a projectile after it had
+    /// stopped this many.
     SegmentSnap(u8),
     /// A travelling body turned or was renewed.
     TurnSpark,
@@ -1250,44 +1254,105 @@ pub(crate) fn stage_oneshot(
             }));
             out
         }
-        OneShot::SegmentSnap(index) => {
-            let GeoShape::Pentagon { center, radius } = *geo else {
-                return Vec::new();
-            };
-            let corner = |i: u8| center + Vec2::from_angle(TAU * f32::from(i % 5) / 5.0) * radius;
-            let (from, to) = (corner(index), corner(index % 5 + 1));
-            let middle = from.midpoint(to);
-            let inward = (center - middle).normalize_or_zero();
-            // The two halves of the bar sink a little toward the inside.
-            let nudge = inward * 0.12;
-            let mut out: Vec<_> = [(from, middle), (middle, to)]
-                .into_iter()
-                .map(|(a, b)| {
-                    let mut half = bar(a.lerp(b, 0.1) + nudge, a.lerp(b, 0.9) + nudge, 0.35, lead);
-                    half.origin.y = height + 0.5;
-                    half.gravity = 4.0;
-                    half
-                })
-                .collect();
-            out.extend((0..4).map(|i| {
-                let way = (inward + inward.perp() * (0.5 * spread(i, 4))).normalize_or_zero();
-                let mut chip = ParticleSpec {
-                    origin: lift(middle + inward * 0.25, 0.6),
-                    lifetime: 0.45,
-                    size: sized(ParticleShape::Diamond, 0.12, Curve::Pop),
-                    color: lead,
-                    end_color: Some(matter),
-                    shape: ParticleShape::Diamond,
+        OneShot::SegmentSnap(index) => match *geo {
+            GeoShape::Pentagon { center, radius } => {
+                let corner =
+                    |i: u8| center + Vec2::from_angle(TAU * f32::from(i % 5) / 5.0) * radius;
+                let (from, to) = (corner(index), corner(index % 5 + 1));
+                let middle = from.midpoint(to);
+                let inward = (center - middle).normalize_or_zero();
+                // The two halves of the bar sink a little toward the inside.
+                let nudge = inward * 0.12;
+                let mut out: Vec<_> = [(from, middle), (middle, to)]
+                    .into_iter()
+                    .map(|(a, b)| {
+                        let mut half =
+                            bar(a.lerp(b, 0.1) + nudge, a.lerp(b, 0.9) + nudge, 0.35, lead);
+                        half.origin.y = height + 0.5;
+                        half.gravity = 4.0;
+                        half
+                    })
+                    .collect();
+                out.extend((0..4).map(|i| {
+                    let way = (inward + inward.perp() * (0.5 * spread(i, 4))).normalize_or_zero();
+                    let mut chip = ParticleSpec {
+                        origin: lift(middle + inward * 0.25, 0.6),
+                        lifetime: 0.45,
+                        size: sized(ParticleShape::Diamond, 0.12, Curve::Pop),
+                        color: lead,
+                        end_color: Some(matter),
+                        shape: ParticleShape::Diamond,
+                        curve: Curve::Pop,
+                        orient: Orient::Velocity,
+                        gravity: 6.0,
+                        ..base.clone()
+                    };
+                    chip.velocity = Vec3::Y * 1.5;
+                    fly(chip, Vec3::new(way.x, 0.0, way.y), 0.3 * radius)
+                }));
+                out
+            }
+            // A wall stopped a projectile. Where on the wall is not replicated, so the block
+            // is shown on the middle of the bar, where the body has its keystone, and runs
+            // along the bar alone: it names no side the shot came from and no place it
+            // struck. The first block breaks the keystone in two; every block throws chips.
+            GeoShape::Segment { from, to } => {
+                let middle = from.midpoint(to);
+                let half = 0.5 * from.distance(to);
+                let along = (to - from).normalize_or_zero();
+                let first = index == 0;
+                let mut out = vec![ParticleSpec {
+                    origin: lift(middle, WALL_BLOCK_HEIGHT),
+                    lifetime: 0.3,
+                    size: sized(
+                        ParticleShape::Star,
+                        if first { 0.24 } else { 0.16 } * half,
+                        Curve::Pop,
+                    ),
+                    color: spark,
+                    shape: ParticleShape::Star,
                     curve: Curve::Pop,
-                    orient: Orient::Velocity,
-                    gravity: 6.0,
                     ..base.clone()
-                };
-                chip.velocity = Vec3::Y * 1.5;
-                fly(chip, Vec3::new(way.x, 0.0, way.y), 0.3 * radius)
-            }));
-            out
-        }
+                }];
+                if first {
+                    out.extend([-1.0, 1.0].map(|side: f32| {
+                        let mut piece = bar(
+                            middle + along * (0.02 * half * side),
+                            middle + along * (0.2 * half * side),
+                            0.45,
+                            lead,
+                        );
+                        piece.origin.y = height + WALL_BLOCK_HEIGHT;
+                        piece.end_color = Some(matter);
+                        piece.gravity = 5.0;
+                        piece
+                    }));
+                }
+                out.extend((0..4).map(|i| {
+                    let side = if i % 2 == 0 { 1.0 } else { -1.0 };
+                    let mut chip = ParticleSpec {
+                        origin: lift(middle, WALL_BLOCK_HEIGHT + 0.1 * (i / 2) as f32),
+                        lifetime: 0.5,
+                        size: sized(ParticleShape::Diamond, 0.05 * half, Curve::Pop),
+                        color: lead,
+                        end_color: Some(matter),
+                        shape: ParticleShape::Diamond,
+                        curve: Curve::Pop,
+                        orient: Orient::Velocity,
+                        gravity: 7.0,
+                        ..base.clone()
+                    };
+                    chip.velocity = Vec3::Y * (1.6 + 0.5 * (i / 2) as f32);
+                    fly(
+                        chip,
+                        Vec3::new(along.x, 0.0, along.y) * side,
+                        (0.16 + 0.1 * (i / 2) as f32) * half,
+                    )
+                }));
+                out
+            }
+            _ => return Vec::new(),
+        },
         OneShot::Fade => {
             // Soft and grey: a dissipation must not read as a hit.
             let mist = Tint {
@@ -2990,7 +3055,8 @@ mod tests {
             // A one-shot is drawn only for a boundary it can follow.
             let expected = match kind {
                 OneShot::Detonate => 4,
-                OneShot::SegmentSnap(_) => 1,
+                // The cage and the wall.
+                OneShot::SegmentSnap(_) => 2,
                 OneShot::ArmPop | OneShot::TurnSpark => 8,
                 OneShot::Fade | OneShot::Crumble | OneShot::Discharge => 9,
             };
@@ -3038,6 +3104,52 @@ mod tests {
         assert_eq!(
             stage_oneshot(OneShot::SegmentSnap(u8::MAX), &palette(), &cage, 0.0, 5),
             stage_oneshot(OneShot::SegmentSnap(0), &palette(), &cage, 0.0, 5)
+        );
+        // A wall shows a block on the middle of its bar and along the bar alone, the same
+        // from either end. Its first block breaks the keystone; a later one only chips it.
+        let (from, to) = (centre + Vec2::new(-2.0, 1.5), centre + Vec2::new(2.0, -1.5));
+        let wall = GeoShape::Segment { from, to };
+        let turned = GeoShape::Segment { from: to, to: from };
+        let along = (to - from).normalize();
+        let first = stage_oneshot(OneShot::SegmentSnap(0), &palette(), &wall, 0.0, 5);
+        let later = stage_oneshot(OneShot::SegmentSnap(1), &palette(), &wall, 0.0, 5);
+        assert_eq!((first.len(), later.len()), (7, 5));
+        assert_eq!(
+            later,
+            stage_oneshot(OneShot::SegmentSnap(u8::MAX), &palette(), &wall, 0.0, 5)
+        );
+        for specs in [&first, &later] {
+            let mut drift = Vec2::ZERO;
+            for spec in specs.iter() {
+                let (start, end) = (spec.origin.xz(), landing(spec));
+                for point in [start, end] {
+                    let offset = point - from.midpoint(to);
+                    assert!(offset.perp_dot(along).abs() < 1e-4, "{spec:?}");
+                    assert!(offset.length() <= 0.3 * 2.5 + 1e-4, "{spec:?}");
+                }
+                drift += end - start;
+                assert!(spec.origin.y >= 1.0);
+            }
+            // As much goes to one end as to the other.
+            assert!(drift.length() < 1e-4);
+        }
+        let places = |specs: &[ParticleSpec]| {
+            let mut at: Vec<_> = specs
+                .iter()
+                .map(|spec| (spec.shape as u8, landing(spec).to_array().map(f32::to_bits)))
+                .collect();
+            at.sort();
+            at
+        };
+        assert_eq!(
+            places(&stage_oneshot(
+                OneShot::SegmentSnap(0),
+                &palette(),
+                &turned,
+                0.0,
+                5
+            )),
+            places(&first)
         );
         // A fade is grey and unlit, so it cannot be taken for a hit.
         for wisp in stage_oneshot(OneShot::Fade, &palette(), &cage, 0.0, 5) {

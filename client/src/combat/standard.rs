@@ -488,10 +488,33 @@ pub(super) fn effect_strokes(e: &SkillEffectState) -> Vec<Stroke> {
                 ink: Ink::Skill,
             });
         }
-        K::ShieldWall | K::Cage => {}
+        K::ShieldWall => {
+            // A wall that has stopped a projectile is cracked in the middle of its bar, as
+            // its keystone is in 3D.
+            if let (true, GeoShape::Segment { from, to }) =
+                (crate::skill_presentation::bodies::cracked(e), geo)
+            {
+                let middle = from.midpoint(to);
+                let along = (to - from).normalize_or_zero() * WALL_CRACK;
+                let across = along.perp();
+                strokes.push(Stroke {
+                    points: vec![
+                        middle + across - along * 0.4,
+                        middle + along * 0.4,
+                        middle - along * 0.4,
+                        middle - across + along * 0.4,
+                    ],
+                    ink: Ink::Team,
+                });
+            }
+        }
+        K::Cage => {}
     }
     strokes
 }
+
+/// Half the length of the crack across a wall in the flat view.
+const WALL_CRACK: f32 = 0.45;
 
 /// A gizmo line around a hero, in simulation ground coordinates.
 #[derive(Clone, Debug, PartialEq)]
@@ -1095,6 +1118,42 @@ mod tests {
         assert!((inner(0.2).unwrap().1 - 5.0).abs() < 1e-4);
         // Below the tail the ring stays on the edge and never leaves it.
         assert!((inner(0.05).unwrap().1 - 5.0).abs() < 1e-4);
+    }
+
+    /// The flat view marks a wall that has stopped a projectile with a crack across the
+    /// middle of its bar; the bar itself stays the replicated plane.
+    #[test]
+    fn a_wall_that_stopped_a_projectile_is_cracked_in_the_flat_view() {
+        let mut wall = effect(SkillId::Northwall, EffectVisualKind::ShieldWall);
+        wall.radius = 2.5;
+        wall.end = [3.0, 0.5];
+        let geo = geometry::boundary_shape(wall.skill, wall.kind, &wall);
+        let GeoShape::Segment { from, to } = geo else {
+            panic!("a wall is a bar: {geo:?}");
+        };
+        assert_eq!(effect_strokes(&wall).len(), 1);
+        for count in [1, 2, 255] {
+            wall.consumed_segments = count;
+            assert_eq!(boundary(&wall), geo.outline(), "{count}");
+            let strokes = effect_strokes(&wall);
+            let [_, crack] = strokes.as_slice() else {
+                panic!("the bar and its crack: {strokes:?}");
+            };
+            assert_eq!((crack.ink, crack.points.len()), (Ink::Team, 4));
+            // It crosses the bar at its middle and stays within half a unit of it.
+            let middle = from.midpoint(to);
+            let along = (to - from).normalize();
+            let sides: Vec<f32> = crack
+                .points
+                .iter()
+                .map(|at| (*at - middle).perp_dot(along))
+                .collect();
+            assert!(sides[0] * sides[3] < 0.0, "{sides:?}");
+            assert!(crack.points.iter().all(|at| at.distance(middle) <= 0.5));
+        }
+        // The bits of a cage are its lost sides, never a crack.
+        wall.consumed_segments = 0;
+        assert_eq!(effect_strokes(&wall).len(), 1);
     }
 
     #[test]
