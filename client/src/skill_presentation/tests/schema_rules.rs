@@ -28,10 +28,11 @@ fn orb() -> Value {
     })
 }
 
-/// The unmigrated registry with complete schema-2 rows for skills of every category and two
-/// basic attacks. Every case below changes one thing in it.
+/// The packaged registry with twelve rows for skills of every category and two basic
+/// attacks replaced by rows written for these cases, so that a case does not depend on the
+/// tuning of the packaged look. Every case below changes one thing in it.
 pub(in crate::skill_presentation) fn samples() -> Value {
-    let mut config = SkillPresentation::unmigrated_config();
+    let mut config = shipped();
     let rows = json!({
         "winter_shard": {
             "home": "frostguard", "release": "punch", "color": [0.10, 0.45, 0.85], "hdr_gain": 3.2,
@@ -198,7 +199,9 @@ pub(in crate::skill_presentation) fn samples() -> Value {
     for (id, row) in rows.as_object().unwrap() {
         config["skills"][id] = row.clone();
     }
-    config["basic_attacks"] = basics;
+    for (class, row) in basics.as_object().unwrap() {
+        config["basic_attacks"][class] = row.clone();
+    }
     config
 }
 
@@ -255,7 +258,6 @@ fn sample_rows_of_every_category_parse() {
     let registry = parse(&samples()).unwrap();
     assert_eq!(registry.rows().count(), shared::HeroClass::ALL.len() * 4);
     let shard = registry.profile(SkillId::WinterShard).unwrap();
-    assert!(shard.migrated() && shard.effect.is_none());
     assert_eq!(shard.motion.rate, 0.9);
     assert_eq!(shard.body.as_ref().unwrap().trail, vocab::Trail::Motes);
     // Blocks a row does not name keep their defaults.
@@ -263,20 +265,40 @@ fn sample_rows_of_every_category_parse() {
     assert_eq!(rally.cast.as_ref().unwrap().lifetime, 0.35);
     assert_eq!(rally.cast.as_ref().unwrap().scale, 1.0);
     assert!(rally.body.is_none() && rally.impact.is_none() && rally.aux.is_empty());
-    let untouched = registry.profile(SkillId::IronHook).unwrap();
-    assert!(!untouched.migrated());
-    assert_eq!(untouched.motion, schema::MotionPlayback::default());
-    assert_eq!(untouched.hdr_gain, 3.2);
+    assert_eq!(
+        registry.row("dagger_bluff").unwrap().motion,
+        schema::MotionPlayback {
+            rate: 1.1,
+            ..Default::default()
+        }
+    );
     // The phase follows the skill's own telegraph only when the row holds a windup.
     let phase = |id: SkillId| registry.profile(id).unwrap().phase(SkillKey::Modular(id));
     assert_eq!(phase(SkillId::DawnRay), vocab::MotionPhase::WarnFire);
     assert_eq!(phase(SkillId::FurnaceBreath), vocab::MotionPhase::Fuse);
     assert_eq!(phase(SkillId::HorizonWave), vocab::MotionPhase::WarnFire);
     assert_eq!(phase(SkillId::WinterShard), vocab::MotionPhase::Instant);
-    assert_eq!(phase(SkillId::MirrorGuard), vocab::MotionPhase::Instant);
+    let mut unheld = samples();
+    for field in ["windup", "motion/phase", "sound/release"] {
+        remove(&mut unheld, &format!("/skills/furnace_breath/{field}"));
+    }
+    let unheld = parse(&unheld).unwrap();
+    assert_eq!(
+        unheld
+            .profile(SkillId::FurnaceBreath)
+            .unwrap()
+            .phase(SkillKey::Modular(SkillId::FurnaceBreath)),
+        vocab::MotionPhase::Instant
+    );
     let wildspark = registry.basic(shared::HeroClass::Wildspark).unwrap();
     assert_eq!(wildspark.rockets.as_ref().unwrap().rate, 0.8);
-    assert!(registry.basic(shared::HeroClass::Mage).is_none());
+    // The rows the samples do not replace are the packaged ones.
+    let packaged = parse(&shipped()).unwrap();
+    assert_eq!(
+        registry.basic(shared::HeroClass::Mage),
+        packaged.basic(shared::HeroClass::Mage)
+    );
+    assert_eq!(registry.themes, packaged.themes);
 }
 
 #[test]
@@ -387,11 +409,21 @@ fn row_rules_reject_wrong_homes_palettes_and_missing_blocks() {
         "Invalid HDR gain",
         "gain",
     );
-    // The legacy look stays until `cast` replaces it; afterwards every block is required.
+    // The legacy look is no field any more, and every block a skill needs is required.
     rejects(
-        &without("/skills/iron_hook/effect"),
-        "iron_hook: `effect` is required",
-        "unmigrated row without effect",
+        &with("/skills/winter_shard/effect", json!("lance")),
+        "unknown field `effect`",
+        "legacy style",
+    );
+    rejects(
+        &without("/skills/winter_shard/cast"),
+        "winter_shard: a row needs `cast`",
+        "row without cast",
+    );
+    rejects(
+        &without("/skills/battle_rally/cast"),
+        "battle_rally: a row needs `cast`",
+        "legacy ability without cast",
     );
     rejects(
         &without("/skills/winter_shard/body"),
@@ -1128,7 +1160,8 @@ fn body_rules_bound_the_size_and_the_number_of_parts() {
 
 #[test]
 fn the_rows_together_fit_the_material_budget() {
-    // One spark colour for each row is still inside the budget.
+    // A spark colour of its own costs a row one material. The rows leave room for some,
+    // and not for one on every row.
     let mut config = samples();
     let ids: Vec<String> = config["skills"]
         .as_object()
@@ -1137,37 +1170,23 @@ fn the_rows_together_fit_the_material_budget() {
         .cloned()
         .collect();
     assert_eq!(ids.len(), 68);
-    for (index, id) in ids.iter().enumerate() {
+    let mut fitted = 0;
+    let refused = ids.iter().enumerate().find_map(|(index, id)| {
         let shade = index as f64 / 100.0;
         set(
             &mut config,
             &format!("/skills/{id}/accent"),
             json!([shade, 0.9, 0.5]),
         );
-    }
-    assert!(parse(&config).is_ok());
-    // A skill colour costs three materials. With a colour and a matter colour of its own
-    // for every row that is free to take them, the rows no longer fit.
-    let mut own = 0;
-    for (index, id) in ids.iter().enumerate() {
-        if config["skills"][id].get("cast").is_some() {
-            continue;
-        }
-        own += 1;
-        let shade = index as f64 / 100.0;
-        set(
-            &mut config,
-            &format!("/skills/{id}/color"),
-            json!([0.9, shade, 0.4]),
-        );
-        set(
-            &mut config,
-            &format!("/skills/{id}/secondary"),
-            json!([0.2, 0.3, shade]),
-        );
-    }
-    assert!(own >= 50, "{own}");
-    rejects(&config, "effect materials (at most 272)", "material budget");
+        let refused = parse(&config).err();
+        fitted += usize::from(refused.is_none());
+        refused
+    });
+    assert!(
+        refused.is_some_and(|error| error.contains("effect materials (at most 272)")),
+        "material budget"
+    );
+    assert!((4..40).contains(&fitted), "{fitted}");
 }
 
 #[test]
@@ -1227,6 +1246,14 @@ fn basic_attack_rules_keep_the_class_body_inside_its_theme() {
         "basic_attacks.bard: unknown class",
         "class id",
     );
+    // Every class has its row: the built-in motion table is gone.
+    for class in shared::HeroClass::ALL {
+        rejects(
+            &without(&format!("/basic_attacks/{}", class.id())),
+            &format!("basic_attacks: no row for {}", class.id()),
+            class.id(),
+        );
+    }
     rejects(
         &basic("color", json!([1, 1, 1])),
         "unknown field `color`",

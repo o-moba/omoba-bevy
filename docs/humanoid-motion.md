@@ -16,7 +16,7 @@ contract and remaining phase/weapon work.
 
 ## Skill motion vocabulary
 
-The library holds 58 motions: the six base states, ten further full-rate
+The library holds 55 motions: the six base states, seven further full-rate
 clips, four dagger edits and 38 pose-key motions for the class skill kits
 (blade, fist, leap, two-handed, gun and caster families plus five windup
 holds). The 38 come from one exporter table,

@@ -1231,7 +1231,7 @@ mod tests {
         }
     }
 
-    const TARGET: &str = include_str!("skill_presentation/fixtures/target_combat_visuals.json");
+    const PACKAGED: &str = include_str!("../assets/config/combat_visuals.json");
     /// Mesh parts of each form, its team cue included (`architecture.md` 5.13).
     const PART_COUNTS: [(ProjectileForm, usize); 7] = [
         (ProjectileForm::Dart, 5),
@@ -1547,7 +1547,7 @@ mod tests {
 
     #[test]
     fn a_melee_contact_draws_the_reach_streak_only_for_a_known_basic_attack() {
-        let registry = CombatVisualRegistry::from_json(TARGET).unwrap();
+        let registry = CombatVisualRegistry::from_json(PACKAGED).unwrap();
         // Two low parts and no blade: a sliver of light on its deep rim, on the ground.
         let streak = reach_streak();
         assert_eq!(FlightBody::Reach.parts(), streak);
@@ -1595,7 +1595,7 @@ mod tests {
 
     #[test]
     fn form_beats_model_when_meshes_exist() {
-        let registry = CombatVisualRegistry::from_json(TARGET).unwrap();
+        let registry = CombatVisualRegistry::from_json(PACKAGED).unwrap();
         let rocket = registry.resolve(
             Some(HeroClass::Wildspark),
             ProjectileStyle::Rocket,
@@ -1637,7 +1637,7 @@ mod tests {
             );
         }
         // The embedded profiles name no form: every body is a shape. A packaged profile is
-        // a shape until a content package gives it a form or makes it a melee contact.
+        // a shape unless it names a form or is a melee contact.
         for profile in CombatVisualRegistry::default().config.profiles.values() {
             assert_eq!(
                 profile.flight_body(true, true),
@@ -1646,9 +1646,7 @@ mod tests {
                 profile.id
             );
         }
-        let packaged =
-            CombatVisualRegistry::from_json(include_str!("../assets/config/combat_visuals.json"))
-                .unwrap();
+        let packaged = CombatVisualRegistry::from_json(PACKAGED).unwrap();
         for profile in packaged.config.profiles.values() {
             assert_eq!(
                 profile.flight_body(true, true) == FlightBody::Shape,
@@ -1664,7 +1662,7 @@ mod tests {
     /// hero wide and a volley fans out over at most 0.6 units, after scale.
     #[test]
     fn the_width_of_a_wave_and_of_a_volley_is_capped() {
-        let target: serde_json::Value = serde_json::from_str(TARGET).unwrap();
+        let target: serde_json::Value = serde_json::from_str(PACKAGED).unwrap();
         let parse = |edit: &dyn Fn(&mut serde_json::Value)| {
             let mut json = target.clone();
             edit(&mut json["profiles"]);
@@ -1786,7 +1784,7 @@ mod tests {
             }
         }
         // The bound rows of the final data at their scale: inside half their cap.
-        let registry = CombatVisualRegistry::from_json(TARGET).unwrap();
+        let registry = CombatVisualRegistry::from_json(PACKAGED).unwrap();
         for (id, cap) in [
             ("heroic_strike", WAVE_WIDTH),
             ("primal_maul", WAVE_WIDTH),
@@ -1813,7 +1811,7 @@ mod tests {
 
     #[test]
     fn only_a_thrown_shape_of_a_magic_style_leaves_puffs_and_only_a_thrown_body_a_trail() {
-        let registry = CombatVisualRegistry::from_json(TARGET).unwrap();
+        let registry = CombatVisualRegistry::from_json(PACKAGED).unwrap();
         let profile = |id: &str| &registry.config.profiles[id];
         let magic = [ProjectileStyle::Arcane, ProjectileStyle::Holy];
         for style in [

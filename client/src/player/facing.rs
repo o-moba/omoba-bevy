@@ -418,7 +418,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .init_resource::<GameStateSnapshot>()
-            .insert_resource(crate::skill_presentation::SkillPresentation::unmigrated())
+            .insert_resource(crate::skill_presentation::SkillPresentation::target())
             .add_systems(PostUpdate, face_confirmed_actions);
         let hero = |app: &mut App, id: u64| {
             app.world_mut()
@@ -558,77 +558,76 @@ mod tests {
                 EffectVisualKind::BeamWarning,
                 false,
             ),
+            // A bolt has a direction, and its row holds no windup against it.
+            (
+                CoreId::Dawnweaver,
+                SkillId::DawnBind,
+                EffectVisualKind::Bolt,
+                true,
+            ),
         ];
-        for (registry, final_rows) in [
-            (SkillPresentation::target(), true),
-            (SkillPresentation::unmigrated(), false),
-        ] {
-            for (core, skill, kind, directed) in cases {
-                let holds = directed && registry.profile(skill).unwrap().windup.is_some();
-                assert_eq!(
-                    holds,
-                    directed && (final_rows || skill == SkillId::HorizonWave)
-                );
-                let mut app = App::new();
-                app.add_plugins(MinimalPlugins)
-                    .init_resource::<GameStateSnapshot>()
-                    .insert_resource(registry.clone())
-                    .add_systems(PostUpdate, face_confirmed_actions);
-                let recipe = core.preset();
-                let caster = app
-                    .world_mut()
-                    .spawn((
-                        Transform::IDENTITY,
-                        CombatStats::default(),
-                        NetworkPlayerId(7),
-                        crate::net::NetworkHeroClass(recipe.core.class()),
-                        PlayerLoadout(Some(LoadoutState {
-                            recipe: Some(recipe),
-                            ..default()
-                        })),
-                        PlayerCosmeticAction::default(),
-                        PlayerActionFacing::default(),
-                    ))
-                    .id();
-                app.update();
-                app.world_mut()
-                    .resource_mut::<GameStateSnapshot>()
-                    .skill_effects
-                    .push(SkillEffectState {
-                        id: 9,
-                        owner_id: 7,
-                        owner_team: shared::map::Team::Green,
-                        skill,
-                        kind,
-                        position: [2.0, 3.0],
-                        end: if directed { [9.0, 3.0] } else { [2.0, 3.0] },
-                        radius: 3.0,
-                        remaining_secs: 0.6,
-                        armed: false,
-                        consumed_segments: 0,
-                    });
-                // A basic attack at a target on -X is accepted during the telegraph.
-                app.world_mut().entity_mut(caster).insert((
-                    PlayerCosmeticAction {
-                        sequence: 1,
-                        slot: shared::BASIC_ATTACK_ACTION_SLOT,
-                        kind: shared::PlayerActionKind::Attack,
-                    },
-                    PlayerActionFacing {
-                        sequence: 1,
-                        yaw: Some(shared::math::hero_yaw_towards(-1.0, 0.0)),
-                    },
-                ));
-                app.update();
-                let forward = app.world().get::<Transform>(caster).unwrap().rotation * Vec3::NEG_Z;
-                let along = if holds { 1.0 } else { -1.0 };
-                assert!(
-                    forward.dot(Vec3::X * along) > 0.999,
-                    "{} with the {} rows faces {forward}",
-                    skill.id(),
-                    if final_rows { "final" } else { "unmigrated" }
-                );
-            }
+        let registry = SkillPresentation::target();
+        for (core, skill, kind, directed) in cases {
+            let holds = directed && registry.profile(skill).unwrap().windup.is_some();
+            assert_eq!(holds, directed && skill != SkillId::DawnBind);
+            let mut app = App::new();
+            app.add_plugins(MinimalPlugins)
+                .init_resource::<GameStateSnapshot>()
+                .insert_resource(registry.clone())
+                .add_systems(PostUpdate, face_confirmed_actions);
+            let recipe = core.preset();
+            let caster = app
+                .world_mut()
+                .spawn((
+                    Transform::IDENTITY,
+                    CombatStats::default(),
+                    NetworkPlayerId(7),
+                    crate::net::NetworkHeroClass(recipe.core.class()),
+                    PlayerLoadout(Some(LoadoutState {
+                        recipe: Some(recipe),
+                        ..default()
+                    })),
+                    PlayerCosmeticAction::default(),
+                    PlayerActionFacing::default(),
+                ))
+                .id();
+            app.update();
+            app.world_mut()
+                .resource_mut::<GameStateSnapshot>()
+                .skill_effects
+                .push(SkillEffectState {
+                    id: 9,
+                    owner_id: 7,
+                    owner_team: shared::map::Team::Green,
+                    skill,
+                    kind,
+                    position: [2.0, 3.0],
+                    end: if directed { [9.0, 3.0] } else { [2.0, 3.0] },
+                    radius: 3.0,
+                    remaining_secs: 0.6,
+                    armed: false,
+                    consumed_segments: 0,
+                });
+            // A basic attack at a target on -X is accepted during the telegraph.
+            app.world_mut().entity_mut(caster).insert((
+                PlayerCosmeticAction {
+                    sequence: 1,
+                    slot: shared::BASIC_ATTACK_ACTION_SLOT,
+                    kind: shared::PlayerActionKind::Attack,
+                },
+                PlayerActionFacing {
+                    sequence: 1,
+                    yaw: Some(shared::math::hero_yaw_towards(-1.0, 0.0)),
+                },
+            ));
+            app.update();
+            let forward = app.world().get::<Transform>(caster).unwrap().rotation * Vec3::NEG_Z;
+            let along = if holds { 1.0 } else { -1.0 };
+            assert!(
+                forward.dot(Vec3::X * along) > 0.999,
+                "{} faces {forward}",
+                skill.id()
+            );
         }
     }
 }

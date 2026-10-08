@@ -10,7 +10,7 @@ use super::vocab::{
     Marker, Model, MotionPhase, MovePattern, PaletteSlot, ParticleShape, RecastMarker,
     SatelliteLayout, Silhouette, StageRule, Trail,
 };
-use super::{EffectStyle, SkillPresentation, bodies, geometry};
+use super::{SkillPresentation, bodies, geometry};
 use crate::game_vfx::ParticleSpec;
 use crate::humanoid::SharedHumanoidMotion;
 use bevy::math::{Vec2, Vec3, Vec3Swizzles};
@@ -55,20 +55,21 @@ pub(crate) struct SkillProfile {
     pub secondary: Option<[f32; 3]>,
     #[serde(default)]
     pub accent: Option<[f32; 3]>,
-    /// The legacy look; required until the blocks below replace it.
-    #[serde(default)]
-    pub effect: Option<EffectStyle>,
     #[serde(default)]
     pub motion: MotionPlayback,
+    /// What the accepted cast draws at the caster. Every row has one.
     #[serde(default)]
     pub cast: Option<CastAccent>,
+    /// The body of the effect of the first cast; a row of a replicated effect has one.
     #[serde(default)]
     pub body: Option<Body>,
     /// Bodies of the secondary objects of the skill, keyed by their replicated kind.
     #[serde(default)]
     pub aux: BTreeMap<String, Body>,
+    /// The hit of a confirmed receipt; a row that can deal damage has one.
     #[serde(default)]
     pub impact: Option<ImpactRecipe>,
+    /// The voices of the row. Every row has `sound.cast`.
     #[serde(default)]
     pub sound: Option<Sound>,
 }
@@ -81,11 +82,6 @@ fn one() -> f32 {
 }
 
 impl SkillProfile {
-    /// A row is migrated once it has `cast`; from then on every rule is a hard error.
-    pub(crate) fn migrated(&self) -> bool {
-        self.cast.is_some()
-    }
-
     /// The phase the release follows: the authored one, else the skill's own telegraph when
     /// the row holds a windup against it, else the accepted cast.
     pub(crate) fn phase(&self, key: SkillKey) -> MotionPhase {
@@ -342,7 +338,8 @@ pub(crate) struct BasicProfile {
     pub accent: Option<CastAccent>,
     #[serde(default)]
     pub impact: Option<ImpactRecipe>,
-    /// Played on the confirmed hit.
+    /// Played on the confirmed hit, and for an enemy's accepted attack in place of the cue
+    /// of its wire style.
     #[serde(default)]
     pub sound: Option<SoundCue>,
     /// The rocket mode of the repeater attack profile.
@@ -467,6 +464,11 @@ pub(super) fn validate(config: &SkillPresentation) -> Result<(), String> {
     }
     let motion = SharedHumanoidMotion::embedded()?;
     themes(config)?;
+    for class in HeroClass::ALL {
+        if !config.basic_attacks.contains_key(class.id()) {
+            return Err(format!("basic_attacks: no row for {}", class.id()));
+        }
+    }
     for (class, basic) in &config.basic_attacks {
         basic_row(config, class, basic, motion, false)
             .map_err(|error| format!("basic_attacks.{class}: {error}"))?;
@@ -568,21 +570,19 @@ fn skill_row(
     let category = category::category(key);
     let replicated = category == Category::ReplicatedEffect;
     let damaging = category::can_damage(key);
-    if profile.effect.is_none() && !profile.migrated() {
-        return Err("`effect` is required until the row has `cast`".into());
-    }
     if profile.impact.is_some() && !damaging {
         return Err("`impact` needs a skill that can deal damage".into());
     }
-    if let Some(accent) = &profile.cast {
-        cast_accent(
-            accent,
-            AccentOwner::Skill {
-                key,
-                windup: profile.windup.is_some(),
-            },
-        )?;
-    }
+    let Some(accent) = &profile.cast else {
+        return Err("a row needs `cast`".into());
+    };
+    cast_accent(
+        accent,
+        AccentOwner::Skill {
+            key,
+            windup: profile.windup.is_some(),
+        },
+    )?;
     match (&profile.body, key.modular().filter(|_| replicated)) {
         (Some(body), Some(id)) => {
             body_block(body, id, Binding::Own).map_err(|error| format!("body: {error}"))?;
@@ -607,36 +607,30 @@ fn skill_row(
         sound_block(sound, key, profile.phase(key), damaging)?;
     }
 
-    if profile.migrated() {
-        if replicated && profile.body.is_none() {
-            return Err("a row with `cast` for a replicated effect needs `body`".into());
-        }
-        if damaging && profile.impact.is_none() {
-            return Err("a damaging row with `cast` needs `impact`".into());
-        }
-        if profile
-            .sound
-            .as_ref()
-            .is_none_or(|sound| sound.cast.is_none())
-        {
-            return Err("a row with `cast` needs `sound.cast`".into());
-        }
-        if let Some(late) = contact_violation(profile, key, motion) {
-            return Err(late);
-        }
-        // `themes` was checked to cover every class.
-        if let Some(flat) = config
-            .themes
-            .get(home.id())
-            .and_then(|theme| luminance_violation(profile, theme))
-        {
-            return Err(flat);
-        }
+    if replicated && profile.body.is_none() {
+        return Err("a row of a replicated effect needs `body`".into());
     }
-    match config.themes.get(home.id()) {
-        Some(theme) => generated(profile, key, &Palette::of(profile, theme)),
-        None => Ok(()),
+    if damaging && profile.impact.is_none() {
+        return Err("a damaging row needs `impact`".into());
     }
+    if profile
+        .sound
+        .as_ref()
+        .is_none_or(|sound| sound.cast.is_none())
+    {
+        return Err("a row needs `sound.cast`".into());
+    }
+    if let Some(late) = contact_violation(profile, key, motion) {
+        return Err(late);
+    }
+    // `themes` was checked to cover every class.
+    let Some(theme) = config.themes.get(home.id()) else {
+        return Ok(());
+    };
+    if let Some(flat) = luminance_violation(profile, theme) {
+        return Err(flat);
+    }
+    generated(profile, key, &Palette::of(profile, theme))
 }
 
 /// Why a generated burst cannot be drawn within its budget.

@@ -1526,13 +1526,13 @@ mod tests {
             SkillId::ThunderPulse
         )));
         assert!(receipt_burst(&registry, pulse, &hit, &[]).is_some());
-        // A row without a recipe, and a basic attack without a row, keep the built-in burst.
+        // A row without a recipe, and a registry without the row, keep the built-in burst.
         let step = CastKey::Skill(SkillKey::Modular(SkillId::AnchorStep));
         assert_eq!(receipt_burst(&registry, step, &hit, &[]), None);
-        let unmigrated = SkillPresentation::unmigrated();
-        assert_eq!(receipt_burst(&unmigrated, key, &hit, &[]), None);
+        let empty = SkillPresentation::default();
+        assert_eq!(receipt_burst(&empty, key, &hit, &[]), None);
         assert_eq!(
-            receipt_burst(&unmigrated, CastKey::Basic(HeroClass::Mage), &hit, &[]),
+            receipt_burst(&empty, CastKey::Basic(HeroClass::Mage), &hit, &[]),
             None
         );
         let basic = receipt_burst(&registry, CastKey::Basic(HeroClass::Mage), &hit, &[]).unwrap();

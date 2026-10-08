@@ -1149,8 +1149,7 @@ fn own_effect(
 
 /// The triage cases of the Dawn Ray windup: a basic attack accepted during the warning, a
 /// recast accepted during it, and a cast edge that is never observed because the snapshot
-/// that brings the warning already carries a later action. Each runs on the unmigrated rows
-/// and on the final ones.
+/// that brings the warning already carries a later action.
 #[test]
 fn windup_survives_interleaved_basic_and_recast_and_releases_once() {
     use crate::skill_presentation::SkillPresentation;
@@ -1174,79 +1173,8 @@ fn windup_survives_interleaved_basic_and_recast_and_releases_once() {
             PlayerActionKind::Attack,
         ),
     ];
-    for registry in [SkillPresentation::unmigrated, SkillPresentation::target] {
-        for (case, own_edge, slot, kind) in cases {
-            let ray = registry().profile(SkillId::DawnRay).unwrap().clone();
-            let mut rig = Rig::new(
-                registry(),
-                HeroClass::Dawnweaver,
-                LoadoutState {
-                    recipe: Some(CoreId::Dawnweaver.preset()),
-                    ..default()
-                },
-            );
-            let windup = rig.set.motion(ray.windup.as_deref().unwrap());
-            let release = rig.set.motion(&ray.release);
-            assert_ne!(windup, release, "{case}");
-
-            if own_edge {
-                rig.act(1, RAY, PlayerActionKind::Cast);
-                assert_eq!(
-                    rig.state(),
-                    HeroAnimationState::Idle,
-                    "{case}: no guessed pose"
-                );
-                rig.effects().push(own_effect(
-                    9,
-                    SkillId::DawnRay,
-                    EffectVisualKind::BeamWarning,
-                ));
-                rig.app.update();
-            } else {
-                rig.effects().push(own_effect(
-                    9,
-                    SkillId::DawnRay,
-                    EffectVisualKind::BeamWarning,
-                ));
-                rig.act(2, slot, kind);
-            }
-            assert_eq!(rig.state(), windup, "{case}: the warning starts the windup");
-            rig.mark();
-
-            // The action accepted during the warning does not take the body, however often
-            // it is repeated, and does not restart the held pose.
-            for sequence in [2, 3] {
-                rig.act(sequence, slot, kind);
-                assert_eq!(rig.state(), windup, "{case}: sequence {sequence}");
-                assert!(rig.marked(), "{case}: the held windup restarted");
-            }
-
-            // The same effect as a beam: the release, once.
-            rig.effects()[0].kind = EffectVisualKind::Beam;
-            rig.app.update();
-            assert_eq!(rig.state(), release, "{case}: the flip releases");
-            assert_eq!(rig.clip().seek_time(), 0.0, "{case}: the release starts");
-            rig.mark();
-            for _ in 0..3 {
-                rig.app.update();
-                assert_eq!(rig.state(), release, "{case}");
-                assert!(rig.marked(), "{case}: the release replayed");
-            }
-            // The beam leaves the snapshot: nothing more is played for it.
-            rig.effects().clear();
-            rig.app.update();
-            assert!(
-                rig.marked(),
-                "{case}: the release replayed when the beam left"
-            );
-
-            // The body is free again: the next accepted action takes it.
-            rig.act(4, BASIC_ATTACK_ACTION_SLOT, PlayerActionKind::Attack);
-            assert!(!rig.marked(), "{case}: the next action plays");
-            assert_ne!(rig.state(), windup, "{case}");
-        }
-
-        // A warning that vanishes fired nothing, also with an action accepted during it.
+    let registry = SkillPresentation::target;
+    for (case, own_edge, slot, kind) in cases {
         let ray = registry().profile(SkillId::DawnRay).unwrap().clone();
         let mut rig = Rig::new(
             registry(),
@@ -1256,23 +1184,93 @@ fn windup_survives_interleaved_basic_and_recast_and_releases_once() {
                 ..default()
             },
         );
-        rig.effects().push(own_effect(
-            9,
-            SkillId::DawnRay,
-            EffectVisualKind::BeamWarning,
-        ));
-        rig.act(1, RAY, PlayerActionKind::Cast);
-        rig.act(2, BASIC_ATTACK_ACTION_SLOT, PlayerActionKind::Attack);
-        assert_eq!(rig.state(), rig.set.motion(ray.windup.as_deref().unwrap()));
-        rig.effects().clear();
-        for _ in 0..3 {
-            rig.app.update();
+        let windup = rig.set.motion(ray.windup.as_deref().unwrap());
+        let release = rig.set.motion(&ray.release);
+        assert_ne!(windup, release, "{case}");
+
+        if own_edge {
+            rig.act(1, RAY, PlayerActionKind::Cast);
             assert_eq!(
                 rig.state(),
                 HeroAnimationState::Idle,
-                "a vanished warning releases nothing"
+                "{case}: no guessed pose"
             );
+            rig.effects().push(own_effect(
+                9,
+                SkillId::DawnRay,
+                EffectVisualKind::BeamWarning,
+            ));
+            rig.app.update();
+        } else {
+            rig.effects().push(own_effect(
+                9,
+                SkillId::DawnRay,
+                EffectVisualKind::BeamWarning,
+            ));
+            rig.act(2, slot, kind);
         }
+        assert_eq!(rig.state(), windup, "{case}: the warning starts the windup");
+        rig.mark();
+
+        // The action accepted during the warning does not take the body, however often
+        // it is repeated, and does not restart the held pose.
+        for sequence in [2, 3] {
+            rig.act(sequence, slot, kind);
+            assert_eq!(rig.state(), windup, "{case}: sequence {sequence}");
+            assert!(rig.marked(), "{case}: the held windup restarted");
+        }
+
+        // The same effect as a beam: the release, once.
+        rig.effects()[0].kind = EffectVisualKind::Beam;
+        rig.app.update();
+        assert_eq!(rig.state(), release, "{case}: the flip releases");
+        assert_eq!(rig.clip().seek_time(), 0.0, "{case}: the release starts");
+        rig.mark();
+        for _ in 0..3 {
+            rig.app.update();
+            assert_eq!(rig.state(), release, "{case}");
+            assert!(rig.marked(), "{case}: the release replayed");
+        }
+        // The beam leaves the snapshot: nothing more is played for it.
+        rig.effects().clear();
+        rig.app.update();
+        assert!(
+            rig.marked(),
+            "{case}: the release replayed when the beam left"
+        );
+
+        // The body is free again: the next accepted action takes it.
+        rig.act(4, BASIC_ATTACK_ACTION_SLOT, PlayerActionKind::Attack);
+        assert!(!rig.marked(), "{case}: the next action plays");
+        assert_ne!(rig.state(), windup, "{case}");
+    }
+
+    // A warning that vanishes fired nothing, also with an action accepted during it.
+    let ray = registry().profile(SkillId::DawnRay).unwrap().clone();
+    let mut rig = Rig::new(
+        registry(),
+        HeroClass::Dawnweaver,
+        LoadoutState {
+            recipe: Some(CoreId::Dawnweaver.preset()),
+            ..default()
+        },
+    );
+    rig.effects().push(own_effect(
+        9,
+        SkillId::DawnRay,
+        EffectVisualKind::BeamWarning,
+    ));
+    rig.act(1, RAY, PlayerActionKind::Cast);
+    rig.act(2, BASIC_ATTACK_ACTION_SLOT, PlayerActionKind::Attack);
+    assert_eq!(rig.state(), rig.set.motion(ray.windup.as_deref().unwrap()));
+    rig.effects().clear();
+    for _ in 0..3 {
+        rig.app.update();
+        assert_eq!(
+            rig.state(),
+            HeroAnimationState::Idle,
+            "a vanished warning releases nothing"
+        );
     }
 }
 
@@ -1569,8 +1567,8 @@ fn fuse_and_parry_windups_start_on_the_cast_hold_and_release_when_the_telegraph_
 }
 
 /// `rate`, `start`, the recast clip, the alternating basic attack and the fitted windup of
-/// the final rows, as the animation player holds them. An unmigrated row, which has none of
-/// these, plays as before.
+/// the final rows, as the animation player holds them. A row that names none of these plays
+/// its clip as it is.
 #[test]
 fn action_clips_enter_at_their_start_and_play_at_their_rate() {
     use crate::skill_presentation::SkillPresentation;
@@ -1727,13 +1725,16 @@ fn action_clips_enter_at_their_start_and_play_at_their_rate() {
     assert_eq!(rig.clip().speed(), 1.0);
     assert_eq!(rig.clip().repeat_mode(), RepeatAnimation::Forever);
 
-    // An unmigrated row has no playback values: its clip plays from its first key at speed 1.
-    let unmigrated = SkillPresentation::unmigrated();
-    let shipped = unmigrated.profile(SkillId::DawnField).unwrap().clone();
-    let mut rig = Rig::new(unmigrated, class_of(&kit), kit.clone());
-    rig.report_cast(7, 1, field, true);
-    rig.act(1, field, PlayerActionKind::Cast);
-    assert_eq!(rig.state(), rig.set.motion(&shipped.release));
+    // A row without playback values: its clip plays from its first key at speed 1.
+    let (class, dagger_kit, backstab) = kit_with(CoreId::Adventurer, SkillId::DaggerBackstab);
+    let plain = SkillPresentation::target()
+        .profile(SkillId::DaggerBackstab)
+        .unwrap()
+        .clone();
+    assert_eq!((plain.motion.rate, plain.motion.start), (1.0, 0.0));
+    let mut rig = Rig::new(SkillPresentation::target(), class, dagger_kit);
+    rig.act(1, backstab, PlayerActionKind::Cast);
+    assert_eq!(rig.state(), rig.set.motion(&plain.release));
     assert_eq!((rig.clip().seek_time(), rig.clip().speed()), (0.0, 1.0));
 
     // A rig without the named clip plays its cast clip in that place, as that clip is:
@@ -1757,6 +1758,119 @@ fn action_clips_enter_at_their_start_and_play_at_their_rate() {
     rig.clip().seek_to(1.0);
     rig.app.update();
     assert_eq!(rig.state(), HeroAnimationState::Cast);
+}
+
+/// A remote hero stands where grounding puts it. Interpolation writes the flat height of
+/// the server earlier in the frame, so whatever the transform holds before grounding is not
+/// where the hero stands: read there, a hero that never moves changes height from frame to
+/// frame and sprints on the spot. The driver is ordered after grounding.
+#[test]
+fn a_standing_remote_hero_idles_whatever_height_it_has_before_grounding() {
+    use super::animation::{HeroAnimationSet, order_hero_animation};
+    const TERRAIN: f32 = 0.0025;
+    let mut clips = Assets::<AnimationClip>::default();
+    let handles: Vec<_> = (0..5)
+        .map(|_| {
+            let mut clip = AnimationClip::default();
+            clip.set_duration(1.0);
+            clips.add(clip)
+        })
+        .collect();
+    let (graph, nodes) = AnimationGraph::from_clips(handles);
+    let mut graphs = Assets::<AnimationGraph>::default();
+    let mut sets = PlayerAnimationLibrary::default();
+    sets.sets.insert(
+        AvatarKey::Roster("agnes".into()),
+        CharacterAnimationSet {
+            graph: graphs.add(graph),
+            idle_node: nodes[0],
+            run_node: nodes[1],
+            walk_node: None,
+            runtime: false,
+            attack_node: Some(nodes[2]),
+            cast_node: Some(nodes[3]),
+            death_node: Some(nodes[4]),
+            motion_nodes: Vec::new(),
+        },
+    );
+    let mut app = App::new();
+    app.insert_resource(Time::<()>::default())
+        .insert_resource(sets)
+        .insert_resource(graphs)
+        .insert_resource(clips)
+        .insert_resource(crate::skill_presentation::SkillPresentation::target())
+        .init_resource::<GameStateSnapshot>()
+        .add_message::<crate::skill_presentation::stage::StageEvent>()
+        .add_message::<crate::skill_presentation::cast::SkillCastObserved>();
+    // The ordering the client registers, and the two systems it orders.
+    order_hero_animation(&mut app);
+    app.add_systems(
+        PostUpdate,
+        (bind_player_animation_players, sync_player_animation_state)
+            .chain()
+            .in_set(HeroAnimationSet),
+    );
+    let hero = app
+        .world_mut()
+        .spawn((
+            RemotePlayer,
+            Transform::from_xyz(3.0, TERRAIN, -2.0),
+            CombatStats::default(),
+            NetworkCharacterChoice(CharacterChoice::Cube),
+            NetworkAvatar(Some("agnes".into())),
+            crate::net::NetworkPlayerId(8),
+            crate::net::NetworkHeroClass(shared::HeroClass::Mage),
+            PlayerCosmeticAction::default(),
+            crate::net::PlayerLoadout(Some(default())),
+        ))
+        .id();
+    let child = app
+        .world_mut()
+        .spawn((AnimationPlayer::default(), ChildOf(hero)))
+        .id();
+    // Interpolation: the height of the server's flat plane, never the same twice here, so
+    // that any reader ahead of grounding sees the hero move.
+    app.add_systems(
+        Update,
+        move |mut heroes: Query<&mut Transform, With<RemotePlayer>>, mut frame: Local<u32>| {
+            *frame += 1;
+            heroes.get_mut(hero).unwrap().translation.y = 0.5 + (*frame % 2) as f32 * 0.1;
+        },
+    );
+    // Grounding: the height of the local terrain. Added last, so that nothing but the
+    // registered ordering puts it ahead of the driver.
+    app.add_systems(
+        PostUpdate,
+        (move |mut heroes: Query<&mut Transform, With<RemotePlayer>>| {
+            heroes.get_mut(hero).unwrap().translation.y = TERRAIN;
+        })
+        .in_set(crate::net::NetworkGroundingSet),
+    );
+    let state = |app: &App| {
+        app.world()
+            .get::<PlayerAnimationBinding>(child)
+            .unwrap()
+            .playback
+            .state
+    };
+    for frame in 0..40 {
+        app.world_mut()
+            .resource_mut::<Time>()
+            .advance_by(std::time::Duration::from_millis(16));
+        app.update();
+        assert_eq!(state(&app), HeroAnimationState::Idle, "frame {frame}");
+    }
+    // A hero that does move still runs: the same harness, one step sideways.
+    app.world_mut()
+        .get_mut::<Transform>(hero)
+        .unwrap()
+        .translation
+        .x += 0.5;
+    app.world_mut()
+        .resource_mut::<Time>()
+        .advance_by(std::time::Duration::from_millis(16));
+    app.update();
+    assert_eq!(state(&app), HeroAnimationState::Run);
 }
 
 fn class_of(kit: &shared::loadout::LoadoutState) -> shared::HeroClass {

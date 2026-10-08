@@ -10,6 +10,7 @@ pub(crate) mod evidence;
 pub(crate) mod geometry;
 pub(crate) mod impacts;
 mod schema;
+#[cfg(any(test, feature = "qa"))]
 mod signature;
 pub(crate) mod stage;
 pub(crate) mod status;
@@ -54,32 +55,6 @@ use std::collections::BTreeMap;
 use category::SkillKey;
 use vocab::MotionPhase;
 
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub(crate) enum EffectStyle {
-    Lance,
-    Aegis,
-    Field,
-    Beam,
-    Repeater,
-    Shock,
-    Trap,
-    Rocket,
-    Orb,
-    Hook,
-    Lantern,
-    Pillar,
-    Colossus,
-    Wall,
-    Cage,
-    Fissure,
-    Cone,
-    Slash,
-    Pulse,
-    Needle,
-    Ember,
-}
-
 /// The registry as packaged: raw rows only. Resolved colours and handles live in consumers.
 #[derive(Resource, Clone, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -87,7 +62,7 @@ pub(crate) struct SkillPresentation {
     schema_version: u32,
     /// Class colours, one entry per hero class.
     themes: BTreeMap<String, Theme>,
-    /// Basic attacks by class; a class without a row keeps the built-in motion table.
+    /// Basic attacks, one row per hero class.
     basic_attacks: BTreeMap<String, BasicProfile>,
     skills: BTreeMap<String, SkillProfile>,
 }
@@ -129,6 +104,7 @@ impl SkillPresentation {
         schema::validate(&config)?;
         Ok(config)
     }
+    #[cfg(test)]
     pub(crate) fn rows(&self) -> impl Iterator<Item = (&str, &SkillProfile)> {
         self.skills
             .iter()
@@ -180,7 +156,7 @@ impl SkillPresentation {
         }
     }
     /// What the row of an accepted action draws with its particles, resolved with the theme
-    /// of its class. A basic attack without a row resolves to nothing.
+    /// of its class.
     pub(crate) fn look(&self, key: cast::CastKey) -> Option<Look<'_>> {
         match key {
             cast::CastKey::Skill(key) => {
@@ -201,9 +177,8 @@ impl SkillPresentation {
             }
         }
     }
-    /// Whether the accent of an accepted action is drawn from its row: a skill row with
-    /// `cast`, or a basic attack whose row has an `accent`. Every other action keeps the
-    /// built-in accent.
+    /// Whether the accent of an accepted action is drawn from its row: the `cast` of a
+    /// skill, or the `accent` of a basic attack whose row names one.
     pub(crate) fn themed_cast(
         &self,
         class: HeroClass,
@@ -336,41 +311,23 @@ pub(crate) fn motion_cue(
 
 /// The motion of a basic attack: the row of the class of the kit's core (rule E-13), for a
 /// repeater in rocket mode its `rockets` entry. Two motions alternate, the first on odd
-/// action sequences. A class without a row keeps the built-in table.
+/// action sequences.
 fn basic_cue(
     registry: &SkillPresentation,
     class: shared::HeroClass,
     loadout: Option<&LoadoutState>,
     sequence: u64,
 ) -> Option<MotionCue> {
-    let kit = crate::equipped_skills::resolve_state(class, loadout)?.resolved();
-    if let Some(row) = cast::CastKey::of(class, loadout, shared::BASIC_ATTACK_ACTION_SLOT)
-        .and_then(|key| registry.basic_round(key))
-    {
-        let turn = if sequence % 2 == 1 {
-            0
-        } else {
-            row.motions.len().saturating_sub(1)
-        };
-        return row
-            .motions
-            .get(turn)
-            .map(|motion| MotionCue::action(motion, row.rate, row.start));
-    }
-    let motion = match kit {
-        Some(kit) if kit.core() == shared::loadout::CoreId::Adventurer => "dagger_stab",
-        Some(kit)
-            if kit.attack_profile() == shared::loadout::AttackProfileId::Repeater
-                || kit.core() == shared::loadout::CoreId::Riftshot =>
-        {
-            "pistol_shoot"
-        }
-        Some(kit) if kit.attack_profile() == shared::loadout::AttackProfileId::LightBolt => "cast",
-        None if class == shared::HeroClass::Ranger => "pistol_shoot",
-        None if matches!(class, shared::HeroClass::Mage | shared::HeroClass::Cleric) => "cast",
-        _ => return None,
+    let key = cast::CastKey::of(class, loadout, shared::BASIC_ATTACK_ACTION_SLOT)?;
+    let row = registry.basic_round(key)?;
+    let turn = if sequence % 2 == 1 {
+        0
+    } else {
+        row.motions.len().saturating_sub(1)
     };
-    Some(MotionCue::action(motion, 1.0, 0.0))
+    row.motions
+        .get(turn)
+        .map(|motion| MotionCue::action(motion, row.rate, row.start))
 }
 
 /// What a row with a windup asks of its caster while this effect of the skill is
@@ -537,7 +494,8 @@ struct Pending(Option<Handle<LoadedPresentation>>);
 pub(crate) struct SkillPresentationPlugin;
 impl Plugin for SkillPresentationPlugin {
     fn build(&self, app: &mut App) {
-        // Invalid rebuilt defaults fall back to the existing geometric renderer.
+        // An invalid embedded file leaves an empty registry: effects then keep the
+        // fallback lines of `combat::standard`.
         let registry = SkillPresentation::parse(include_str!("../assets/config/skills.skillfx"))
             .unwrap_or_else(|error| {
                 error!("Embedded skill presentation is invalid: {error}");
@@ -600,35 +558,14 @@ mod tests;
 /// Registries for the tests of the modules that draw from one.
 #[cfg(test)]
 impl SkillPresentation {
-    /// The packaged file as it was before any content package: every skill keeps its
-    /// legacy `effect` and names no block, and no class has a basic row. Tests of the
-    /// paths a row without a block takes read this; the packaged file loses such rows
-    /// family by family.
-    pub(crate) fn unmigrated_config() -> serde_json::Value {
-        let mut config: serde_json::Value =
-            serde_json::from_str(include_str!("../assets/config/skills.skillfx")).unwrap();
-        let v1: serde_json::Value =
-            serde_json::from_str(include_str!("skill_presentation/fixtures/v1.skillfx")).unwrap();
-        let mut skills = v1["skills"].clone();
-        for (id, row) in skills.as_object_mut().unwrap() {
-            row["home"] = category::SkillKey::from_id(id).unwrap().home().id().into();
-        }
-        config["skills"] = skills;
-        config["basic_attacks"] = serde_json::json!({});
-        config
-    }
-    pub(crate) fn unmigrated() -> Self {
-        Self::parse(&Self::unmigrated_config().to_string()).unwrap()
-    }
-    /// The final data of the roster (`fixtures/target.skillfx`).
+    /// The final data of the roster: the packaged file.
     pub(crate) fn target() -> Self {
         tests::target::target()
     }
     /// The final data with one edit, parsed as a packaged file is.
     pub(crate) fn target_with(edit: impl FnOnce(&mut serde_json::Value)) -> Self {
         let mut config =
-            serde_json::from_str(include_str!("skill_presentation/fixtures/target.skillfx"))
-                .unwrap();
+            serde_json::from_str(include_str!("../assets/config/skills.skillfx")).unwrap();
         edit(&mut config);
         Self::parse(&config.to_string()).unwrap()
     }

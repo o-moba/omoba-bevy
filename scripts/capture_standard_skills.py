@@ -279,20 +279,22 @@ def body_problems(still, rows, flat=False):
     effects = {effect["id"]: effect for effect in still.get("effects") or []}
     for entry in still.get("effect_rows") or []:
         row = rows.get(entry["skill"]) or {}
-        body = row.get("body") if entry["block"] == "body" else (row.get("aux") or {}).get(entry["kind"])
-        legacy = entry["block"] == "body" and row.get("effect")
-        if body is None and not legacy:
-            continue  # the row draws nothing for this kind
+        own = entry["block"] == "body"
+        body = row.get("body") if own else (row.get("aux") or {}).get(entry["kind"])
         name = f"{entry['skill']} {entry['kind']}"
+        if body is None:
+            # The effect of a first cast has the body of its row; a secondary object the
+            # row gives no body is not drawn.
+            if own:
+                problems.append(f"{name}: its row has no body")
+            continue
         root = roots.get(entry["id"])
         if root is None or not root.get("visible"):
             problems.append(f"{name}: no visible root")
             continue
         drawn = root.get("body")
-        if body is None:
-            continue  # still drawn by its legacy style
         if drawn is None:
-            problems.append(f"{name}: drawn by a legacy style, its row has a body")
+            problems.append(f"{name}: its root is not the body of its row")
             continue
         if drawn["archetype"] != body["archetype"]:
             problems.append(f"{name}: archetype {drawn['archetype']}, the row says {body['archetype']}")
@@ -375,14 +377,12 @@ def hard_problems(summary, expected):
             problems.append(f"{skill}: the staged cast yields no receipt ({settles}), its third still is "
                             f"{third['phase']} ({third.get('gate')})")
         peaks = record.get("peaks") or {}
-        accent = row.get("cast")
-        if accent is not None:
-            seen = peaks.get("accent_of_cast")
-            if accent.get("pattern") == "none":
-                if seen != 0:
-                    problems.append(f"{skill}: {seen} accent particles, its row draws none")
-            elif seen is None or not 0 < seen <= ACCENT_PARTICLES:
-                problems.append(f"{skill}: {seen} accent particles of the cast, expected 1 to {ACCENT_PARTICLES}")
+        seen = peaks.get("accent_of_cast")
+        if (row.get("cast") or {}).get("pattern") == "none":
+            if seen != 0:
+                problems.append(f"{skill}: {seen} accent particles, its row draws none")
+        elif seen is None or not 0 < seen <= ACCENT_PARTICLES:
+            problems.append(f"{skill}: {seen} accent particles of the cast, expected 1 to {ACCENT_PARTICLES}")
         for value, most, what in ((peaks.get("impact_of_one_receipt"), IMPACT_PARTICLES, "impact particles of one receipt"),
                                   (peaks.get("live_particles"), PARTICLE_SLOTS, "live particles"),
                                   (peaks.get("effect_visible_parts"), VISIBLE_PARTS, "visible effect parts"),

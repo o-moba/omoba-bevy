@@ -1,22 +1,24 @@
 //! The identity of a skill as a player reads it, and the ratchet that keeps two skills from
 //! sharing one. Three axes: the motion family of the release, the body, the impact. Colour,
-//! rate, counts, sizes and sounds are not axes.
-// Read by the identity tests and, through `evidence`, by the capture harness of a QA build.
-#![cfg_attr(not(test), allow(dead_code))]
+//! rate, counts, sizes and sounds are not axes. Read by the identity tests and, through
+//! `evidence`, by the capture harness of a QA build.
 
+use super::SkillPresentation;
 use super::category::{self, Category, SkillKey};
-use super::schema::{self, Body, SkillProfile};
+use super::schema::{Body, SkillProfile};
 use super::vocab::{
-    AccentPattern, Archetype, AudioBase, AudioSlice, ImpactKind, Model, MovePattern, ParticleShape,
-    ProjectileForm, ProjectilePresentation, SatelliteLayout, Silhouette, Trail,
+    AccentPattern, Archetype, ImpactKind, Model, MovePattern, ParticleShape, ProjectileForm,
+    ProjectilePresentation, SatelliteLayout, Silhouette, Trail,
 };
-use super::{EffectStyle, SkillPresentation};
 use crate::combat_visuals::{CombatVisualProfile, CombatVisualRegistry, ProjectileShape};
-use crate::humanoid::SharedHumanoidMotion;
-use shared::HeroClass;
 use shared::combat::ProjectileStyle;
-use shared::loadout::AttackProfileId;
-use std::collections::{BTreeMap, BTreeSet};
+#[cfg(test)]
+use {
+    super::vocab::{AudioBase, AudioSlice},
+    shared::HeroClass,
+    shared::loadout::AttackProfileId,
+    std::collections::{BTreeMap, BTreeSet},
+};
 
 /// A baked mirror shows the movement of its source, so it is the same family. Look gate G1
 /// failed: `aim_loose_r` reaches the pose of `cast_thrust_r` at its contact key, so the two
@@ -67,8 +69,6 @@ pub(crate) enum BodySig {
         lead: Option<ParticleShape>,
         movement: Option<MovePattern>,
     },
-    /// A row that still draws through its legacy style.
-    Legacy(Option<EffectStyle>),
 }
 
 impl BodySig {
@@ -92,7 +92,6 @@ impl BodySig {
                 (None, _) => "-".into(),
             },
             Self::Choreography { lead, .. } => lead.map_or("-", ParticleShape::id).into(),
-            Self::Legacy(style) => format!("legacy:{style:?}"),
         }
     }
 
@@ -109,7 +108,6 @@ impl BodySig {
                 ..
             } => format!("shape:{shape:?}"),
             Self::Choreography { pattern, .. } => pattern.id().to_string(),
-            Self::Legacy(_) => "legacy".to_string(),
         };
         (head, self.silhouette())
     }
@@ -119,19 +117,17 @@ impl BodySig {
 pub(crate) enum ImpactSig {
     /// The skill cannot produce a damage receipt.
     None,
-    /// A damaging row without a recipe: the shared wire-style burst.
-    Unthemed,
     Themed {
         kind: ImpactKind,
         lead: ParticleShape,
     },
 }
 
+#[cfg(test)]
 impl ImpactSig {
     fn kind(&self) -> Option<&'static str> {
         match self {
             Self::None => None,
-            Self::Unthemed => Some("unthemed"),
             Self::Themed { kind, .. } => Some(kind.id()),
         }
     }
@@ -197,43 +193,39 @@ fn legacy_projectile(
     }
 }
 
+/// The identity of a row. The parser admits no row without the block that carries its
+/// body or its impact, so a parsed row always has one.
 fn row_identity(
     profile: &SkillProfile,
     key: SkillKey,
     projectiles: &CombatVisualRegistry,
-) -> Identity {
+) -> Option<Identity> {
     let body = if let Some(projectile) = legacy_projectile(projectiles, key) {
         projectile_body(projectile)
     } else if category::category(key) == Category::ReplicatedEffect {
-        profile
-            .body
-            .as_ref()
-            .map_or(BodySig::Legacy(profile.effect), world_body)
+        world_body(profile.body.as_ref()?)
     } else {
-        profile
-            .cast
-            .as_ref()
-            .map_or(BodySig::Legacy(profile.effect), |cast| {
-                BodySig::Choreography {
-                    pattern: cast.pattern,
-                    lead: cast.lead(),
-                    movement: cast.movement.as_ref().map(|movement| movement.pattern),
-                }
-            })
+        let cast = profile.cast.as_ref()?;
+        BodySig::Choreography {
+            pattern: cast.pattern,
+            lead: cast.lead(),
+            movement: cast.movement.as_ref().map(|movement| movement.pattern),
+        }
     };
-    let impact = match &profile.impact {
-        _ if !category::can_damage(key) => ImpactSig::None,
-        Some(impact) => ImpactSig::Themed {
+    let impact = if category::can_damage(key) {
+        let impact = profile.impact.as_ref()?;
+        ImpactSig::Themed {
             kind: impact.kind,
             lead: impact.lead(),
-        },
-        None => ImpactSig::Unthemed,
+        }
+    } else {
+        ImpactSig::None
     };
-    Identity {
+    Some(Identity {
         motion: motion_family(&profile.release).to_string(),
         body,
         impact,
-    }
+    })
 }
 
 /// The identity of one row, or `None` when the registry has no such skill.
@@ -243,11 +235,12 @@ pub(crate) fn identity(
     id: &str,
 ) -> Option<Identity> {
     let key = SkillKey::from_id(id)?;
-    Some(row_identity(reg.row(id)?, key, projectiles))
+    row_identity(reg.row(id)?, key, projectiles)
 }
 
-/// How far a registry is from the final rules. Every counter is zero when all rows are
-/// migrated and no two skills can be mistaken for each other.
+/// How far a registry is from the identity rules. Every counter is zero when no two skills
+/// can be mistaken for each other. What a single row must have is the parser's business.
+#[cfg(test)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct RatchetCounts {
     /// U2: pairs of skills that differ on fewer than two of motion, body, impact.
@@ -266,24 +259,16 @@ pub(crate) struct RatchetCounts {
     pub families_over_three_skills: usize,
     /// U5: impact kinds used by more than five skills.
     pub impact_kinds_over_five_skills: usize,
-    pub rows_without_cast: usize,
-    /// Rows of a replicated effect without `body`.
-    pub effect_rows_without_body: usize,
-    pub damaging_rows_without_impact: usize,
-    pub rows_with_effect: usize,
-    pub rows_breaking_contact_rule: usize,
-    pub rows_breaking_luminance: usize,
     pub legacy_projectiles_without_form: usize,
-    pub rows_without_cast_voice: usize,
     /// U6: rows whose cast voice another row already has.
     pub duplicate_cast_voices: usize,
-    pub classes_without_basic_row: usize,
     /// Thrown basic-attack bodies that another class already has.
     pub basic_projectile_key_duplicates: usize,
 }
 
+#[cfg(test)]
 impl RatchetCounts {
-    pub(crate) fn entries(&self) -> [(&'static str, usize); 19] {
+    pub(crate) fn entries(&self) -> [(&'static str, usize); 11] {
         [
             ("pairs_under_two_axes", self.pairs_under_two_axes),
             ("full_tuple_duplicates", self.full_tuple_duplicates),
@@ -308,25 +293,11 @@ impl RatchetCounts {
                 "impact_kinds_over_five_skills",
                 self.impact_kinds_over_five_skills,
             ),
-            ("rows_without_cast", self.rows_without_cast),
-            ("effect_rows_without_body", self.effect_rows_without_body),
-            (
-                "damaging_rows_without_impact",
-                self.damaging_rows_without_impact,
-            ),
-            ("rows_with_effect", self.rows_with_effect),
-            (
-                "rows_breaking_contact_rule",
-                self.rows_breaking_contact_rule,
-            ),
-            ("rows_breaking_luminance", self.rows_breaking_luminance),
             (
                 "legacy_projectiles_without_form",
                 self.legacy_projectiles_without_form,
             ),
-            ("rows_without_cast_voice", self.rows_without_cast_voice),
             ("duplicate_cast_voices", self.duplicate_cast_voices),
-            ("classes_without_basic_row", self.classes_without_basic_row),
             (
                 "basic_projectile_key_duplicates",
                 self.basic_projectile_key_duplicates,
@@ -335,8 +306,8 @@ impl RatchetCounts {
     }
 }
 
-/// The shipped registry today. A data package lowers these as it migrates rows; the last
-/// one sets every counter to zero.
+/// The shipped registry: every counter is closed, and none may rise again.
+#[cfg(test)]
 pub(crate) const SHIPPED_RATCHET: RatchetCounts = RatchetCounts {
     pairs_under_two_axes: 0,
     full_tuple_duplicates: 0,
@@ -346,20 +317,21 @@ pub(crate) const SHIPPED_RATCHET: RatchetCounts = RatchetCounts {
     classes_repeating_impact_kind: 0,
     families_over_three_skills: 0,
     impact_kinds_over_five_skills: 0,
-    rows_without_cast: 0,
-    effect_rows_without_body: 0,
-    damaging_rows_without_impact: 0,
-    rows_with_effect: 0,
-    rows_breaking_contact_rule: 0,
-    rows_breaking_luminance: 0,
     legacy_projectiles_without_form: 0,
-    rows_without_cast_voice: 0,
     duplicate_cast_voices: 0,
-    classes_without_basic_row: 0,
     basic_projectile_key_duplicates: 0,
 };
 
+/// The cast voice of a row as a listener tells it apart: base, speed and slice. Speeds lie
+/// on a 0.05 grid, so the step number names the speed exactly.
+#[cfg(test)]
+fn cast_voice(profile: &SkillProfile) -> Option<(AudioBase, u32, AudioSlice)> {
+    let cue = profile.sound.as_ref()?.cast.as_ref()?;
+    Some((cue.base, (cue.speed * 20.0).round() as u32, cue.slice))
+}
+
 /// How many items repeat one that came before.
+#[cfg(test)]
 fn repeats<T: Ord>(items: impl IntoIterator<Item = T>) -> usize {
     let mut seen = BTreeSet::new();
     let mut repeated = 0;
@@ -369,6 +341,7 @@ fn repeats<T: Ord>(items: impl IntoIterator<Item = T>) -> usize {
     repeated
 }
 
+#[cfg(test)]
 fn users_over<T: Ord>(items: impl IntoIterator<Item = T>, limit: usize) -> usize {
     let mut users = BTreeMap::new();
     for item in items {
@@ -379,6 +352,7 @@ fn users_over<T: Ord>(items: impl IntoIterator<Item = T>, limit: usize) -> usize
 
 /// The body of every basic attack that is thrown. Melee cores resolve contact at once and
 /// throw nothing (`common/src/basic_attack.rs:187-202`).
+#[cfg(test)]
 fn basic_projectile_bodies(projectiles: &CombatVisualRegistry) -> Vec<BodySig> {
     let mut bodies = Vec::new();
     for class in HeroClass::ALL {
@@ -403,16 +377,16 @@ fn basic_projectile_bodies(projectiles: &CombatVisualRegistry) -> Vec<BodySig> {
     bodies
 }
 
+#[cfg(test)]
 pub(crate) fn ratchet(
     reg: &SkillPresentation,
     projectiles: &CombatVisualRegistry,
-) -> Result<RatchetCounts, String> {
-    let motion = SharedHumanoidMotion::embedded()?;
+) -> RatchetCounts {
     let rows: Vec<(SkillKey, &SkillProfile, Identity)> = reg
         .rows()
         .filter_map(|(id, profile)| {
             let key = SkillKey::from_id(id)?;
-            Some((key, profile, row_identity(profile, key, projectiles)))
+            Some((key, profile, row_identity(profile, key, projectiles)?))
         })
         .collect();
     let mut counts = RatchetCounts::default();
@@ -439,7 +413,6 @@ pub(crate) fn ratchet(
             usize::from(repeats(kit.iter().map(|identity| identity.body.silhouette())) > 0);
         counts.classes_repeating_impact_kind +=
             usize::from(repeats(kit.iter().filter_map(|identity| identity.impact.kind())) > 0);
-        counts.classes_without_basic_row += usize::from(reg.basic(class).is_none());
     }
     counts.families_over_three_skills =
         users_over(rows.iter().map(|(_, _, identity)| &identity.motion), 3);
@@ -449,31 +422,15 @@ pub(crate) fn ratchet(
         5,
     );
 
-    let mut voices: Vec<(AudioBase, u32, AudioSlice)> = Vec::new();
-    for (key, profile, _) in &rows {
-        let category = category::category(*key);
-        counts.rows_without_cast += usize::from(profile.cast.is_none());
-        counts.effect_rows_without_body +=
-            usize::from(category == Category::ReplicatedEffect && profile.body.is_none());
-        counts.damaging_rows_without_impact +=
-            usize::from(category::can_damage(*key) && profile.impact.is_none());
-        counts.rows_with_effect += usize::from(profile.effect.is_some());
-        counts.rows_breaking_contact_rule +=
-            usize::from(schema::contact_violation(profile, *key, motion).is_some());
-        counts.rows_breaking_luminance += usize::from(
-            reg.theme(key.home())
-                .is_none_or(|theme| schema::luminance_violation(profile, theme).is_some()),
-        );
+    for (key, _, _) in &rows {
         counts.legacy_projectiles_without_form += usize::from(
             legacy_projectile(projectiles, *key).is_some_and(|profile| profile.form.is_none()),
         );
-        match profile.sound.as_ref().and_then(|sound| sound.cast.as_ref()) {
-            // Speeds lie on a 0.05 grid, so the step number names the speed exactly.
-            Some(cue) => voices.push((cue.base, (cue.speed * 20.0).round() as u32, cue.slice)),
-            None => counts.rows_without_cast_voice += 1,
-        }
     }
-    counts.duplicate_cast_voices = repeats(voices);
+    counts.duplicate_cast_voices = repeats(
+        rows.iter()
+            .filter_map(|(_, profile, _)| cast_voice(profile)),
+    );
     // The two melee-contact basics share the engine's reach streak by design.
     counts.basic_projectile_key_duplicates = {
         let thrown: Vec<_> = basic_projectile_bodies(projectiles)
@@ -494,7 +451,7 @@ pub(crate) fn ratchet(
             .filter(|(index, body)| thrown[..*index].contains(body))
             .count()
     };
-    Ok(counts)
+    counts
 }
 
 /// Items whose key an earlier item already has, each named with the first holder.
@@ -536,13 +493,12 @@ fn crowded<K: Ord + std::fmt::Debug>(
 pub(crate) fn findings(
     reg: &SkillPresentation,
     projectiles: &CombatVisualRegistry,
-) -> Result<Vec<(&'static str, String)>, String> {
-    let motion = SharedHumanoidMotion::embedded()?;
+) -> Vec<(&'static str, String)> {
     let rows: Vec<(&str, SkillKey, &SkillProfile, Identity)> = reg
         .rows()
         .filter_map(|(id, profile)| {
             let key = SkillKey::from_id(id)?;
-            Some((id, key, profile, row_identity(profile, key, projectiles)))
+            Some((id, key, profile, row_identity(profile, key, projectiles)?))
         })
         .collect();
     let mut found: Vec<(&'static str, String)> = Vec::new();
@@ -608,9 +564,6 @@ pub(crate) fn findings(
                 identity.impact.kind().map(|kind| (kind, named(id)))
             }))),
         );
-        if reg.basic(class).is_none() {
-            note("classes_without_basic_row", vec![named(class.id())]);
-        }
     }
     note(
         "families_over_three_skills",
@@ -630,47 +583,14 @@ pub(crate) fn findings(
         ),
     );
 
-    let mut voices = Vec::new();
-    for (id, key, profile, _) in &rows {
-        let category = category::category(*key);
-        let mut row = |counter: &'static str, counted: bool| {
-            if counted {
-                note(counter, vec![named(id)]);
-            }
-        };
-        row("rows_without_cast", profile.cast.is_none());
-        row(
-            "effect_rows_without_body",
-            category == Category::ReplicatedEffect && profile.body.is_none(),
-        );
-        row(
-            "damaging_rows_without_impact",
-            category::can_damage(*key) && profile.impact.is_none(),
-        );
-        row("rows_with_effect", profile.effect.is_some());
-        row(
-            "legacy_projectiles_without_form",
-            legacy_projectile(projectiles, *key).is_some_and(|profile| profile.form.is_none()),
-        );
-        if let Some(late) = schema::contact_violation(profile, *key, motion) {
-            note("rows_breaking_contact_rule", vec![format!("{id}: {late}")]);
-        }
-        match reg.theme(key.home()) {
-            Some(theme) => {
-                if let Some(flat) = schema::luminance_violation(profile, theme) {
-                    note("rows_breaking_luminance", vec![format!("{id}: {flat}")]);
-                }
-            }
-            None => note("rows_breaking_luminance", vec![format!("{id}: no theme")]),
-        }
-        match profile.sound.as_ref().and_then(|sound| sound.cast.as_ref()) {
-            Some(cue) => voices.push((
-                (cue.base, (cue.speed * 20.0).round() as u32, cue.slice),
-                named(id),
-            )),
-            None => note("rows_without_cast_voice", vec![named(id)]),
+    for (id, key, _, _) in &rows {
+        if legacy_projectile(projectiles, *key).is_some_and(|profile| profile.form.is_none()) {
+            note("legacy_projectiles_without_form", vec![named(id)]);
         }
     }
+    let voices = rows
+        .iter()
+        .filter_map(|(id, _, profile, _)| Some((cast_voice(profile)?, named(id))));
     note("duplicate_cast_voices", repeated(voices));
     let thrown: Vec<BodySig> = basic_projectile_bodies(projectiles)
         .into_iter()
@@ -693,5 +613,5 @@ pub(crate) fn findings(
             .map(|(_, body)| format!("{body:?}"))
             .collect(),
     );
-    Ok(found)
+    found
 }

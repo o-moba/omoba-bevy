@@ -341,10 +341,11 @@ mod tests {
         feedback.observe_with(entity, Vec3::ZERO, 0.0, cast(3), || true);
         assert_eq!(kinds(&feedback), [EffectKind::Cast, EffectKind::Death]);
 
-        // The registry decides: a row with a `cast` block is drawn by the particle pool.
+        // The registry decides: the cast of a row is drawn by the particle pool. Without
+        // the row the ring of this module stays.
         use crate::skill_presentation::SkillPresentation;
         for (registry, drawn) in [
-            (SkillPresentation::unmigrated(), 1),
+            (SkillPresentation::default(), 1),
             (SkillPresentation::target(), 0),
         ] {
             let mut app = App::new();

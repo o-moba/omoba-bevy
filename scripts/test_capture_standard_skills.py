@@ -31,7 +31,8 @@ def phase_summary(third="impact"):
 
 
 # A small registry and motion library in the shape of the packaged files: a thrown bolt, a
-# warned ray whose row holds a windup, a self cast that draws no accent and an unmigrated row.
+# warned ray whose row holds a windup, a self cast that draws no accent and a ground slam
+# that plays a base clip.
 CLIPS = {"hurl_overhand": dict(duration=0.8), "cast": dict(duration=0.5), "spell_prepare": dict(duration=1.0),
          "rally_raise": dict(duration=1.0), "attack": dict(duration=0.6)}
 ROWS = {
@@ -41,13 +42,15 @@ ROWS = {
                 body=dict(archetype="lane"), aux=dict(orb=dict(archetype="orbiter")),
                 impact=dict(kind="pierce_through")),
     "calm": dict(release="rally_raise", cast=dict(pattern="none")),
-    "old": dict(release="attack", effect="lance"),
+    "slam": dict(release="attack", cast=dict(pattern="ground_ring"), body=dict(archetype="zone"),
+                 impact=dict(kind="ring_burst")),
 }
-SKILLS = ["bolt", "ray", "calm", "old"]
+SKILLS = ["bolt", "ray", "calm", "slam"]
 
 
 def expected():
-    rows = dict(ROWS, **{f"filler_{index}": dict(release="cast") for index in range(launcher.REGISTRY_ROWS - len(ROWS))})
+    rows = dict(copy.deepcopy(ROWS),
+                **{f"filler_{index}": dict(release="cast") for index in range(launcher.REGISTRY_ROWS - len(ROWS))})
     return dict(rows=rows, fingerprint="00000000000000ab", clips=CLIPS)
 
 
@@ -77,12 +80,12 @@ def hard_summary():
                               boundary=dict(shape="capsule", radius=0.8, **{"from": [0.0, 0.0], "to": [3.0, 4.0]})), 16),
                  root(9, ring("orbiter", (1.0, 1.0), 0.65), 7)]),
         "calm": ([], [], []),
-        "old": ([effect(6, "old", "bolt")], [dict(id=6, skill="old", kind="bolt", block="body", part_budget=12)],
-                [root(6, None, 30, lights=2)]),
+        "slam": ([effect(6, "slam", "field")], [dict(id=6, skill="slam", kind="field", block="body", part_budget=12)],
+                 [root(6, ring("zone"), 9)]),
     }
     for slot, skill in enumerate(SKILLS):
         key = launcher.SLOT_KEYS[slot]
-        hits = skill in ("bolt", "ray", "old")
+        hits = skill in ("bolt", "ray", "slam")
         effects, rows, roots = worlds[skill]
         for order, phase in enumerate(("windup", "release", "impact" if hits else "settled"), start=1):
             still = dict(file=f"{slot + 1}-{key}-{order}-{phase}.png", phase=phase, slot=slot, skill=skill,
@@ -103,7 +106,7 @@ def hard_summary():
             third["gate"] = "no_damage"
         skills.append(dict(slot=slot, skill=skill, home="mage", identity=dict(motion=ROWS[skill]["release"]),
                            staging=dict(settles=None if hits else "no_damage"),
-                           peaks=dict(accent_of_cast=0 if skill in ("calm", "old") else 6, impact_of_one_receipt=8,
+                           peaks=dict(accent_of_cast=0 if skill == "calm" else 6, impact_of_one_receipt=8,
                                       live_particles=20, effect_visible_parts=24, effect_lights=0)))
     return dict(visual_mode="Models3d", registry=dict(origin="packaged", fnv64="00000000000000ab",
                                                       profiles=launcher.REGISTRY_ROWS),
@@ -296,7 +299,7 @@ class LauncherTests(unittest.TestCase):
         hit = dict(file="5-basic-impact.png", phase="impact", slot=255, receipt=dict(id=9),
                    receipt_looks=[dict(receipt=9, impact="facet_pop", particles=6)])
         self.assertEqual(problems(melee, [hit]), [])
-        # A class without a row keeps the built-in burst, which names no recipe.
+        # A row that names no impact keeps the burst of the wire style, which names no recipe.
         hit["receipt_looks"][0]["impact"] = None
         self.assertEqual(problems({"class": "warrior", "basic": melee["basic"]}, [hit]), [])
 
@@ -433,7 +436,7 @@ class HardAssertionTests(unittest.TestCase):
         rows = expected()["rows"]
         release = dict(phase="release", slot=0, since_edge_secs=0.1, latest_action=dict(slot=0))
         self.assertEqual(launcher.expected_label(rows["bolt"], CLIPS, release), "hurl_overhand")
-        self.assertEqual(launcher.expected_label(rows["old"], CLIPS, release), "Attack")
+        self.assertEqual(launcher.expected_label(rows["slam"], CLIPS, release), "Attack")
         # The clip of `bolt` runs for 0.8 * (1 - 0.25) / 2 = 0.3 s: after it nothing is known.
         self.assertEqual(launcher.expected_label(rows["bolt"], CLIPS, dict(release, since_edge_secs=0.24)),
                          "hurl_overhand")
@@ -460,7 +463,7 @@ class HardAssertionTests(unittest.TestCase):
         for edit, text in (
                 (lambda s: still_of(s, "1-q-1-windup.png").update(skill_vfx=[]), "bolt bolt: no visible root"),
                 (lambda s: body(s, "1-q-1-windup.png").update(visible=False), "bolt bolt: no visible root"),
-                (lambda s: body(s, "1-q-1-windup.png").update(body=None), "drawn by a legacy style"),
+                (lambda s: body(s, "1-q-1-windup.png").update(body=None), "bolt bolt: its root is not the body of its row"),
                 (lambda s: body(s, "1-q-1-windup.png")["body"].update(archetype="zone"),
                  "archetype zone, the row says traveller"),
                 (lambda s: body(s, "1-q-1-windup.png")["body"]["boundary"].update(radius=0.6), "ring is not"),
@@ -473,9 +476,16 @@ class HardAssertionTests(unittest.TestCase):
                 (lambda s: body(s)["body"].update(boundary=dict(shape="ring", center=[0.0, 0.0], radius=0.8)),
                  "a ring boundary on a lane"),
                 (lambda s: body(s, index=1)["body"].update(archetype="zone"), "ray orb: archetype zone"),
-                (lambda s: still_of(s, "4-r-3-impact.png").update(skill_vfx=[]), "old bolt: no visible root"),
+                (lambda s: still_of(s, "4-r-3-impact.png").update(skill_vfx=[]), "slam field: no visible root"),
+                (lambda s: body(s, "4-r-1-windup.png").update(mesh_parts=99), "99 mesh parts, budget 12"),
         ):
             self.assert_one(edit, text)
+        # The effect of a first cast is drawn by the `body` of its row: a row without one fails.
+        bodiless = expected()
+        del bodiless["rows"]["slam"]["body"]
+        self.assertEqual(self.problems(None, bodiless),
+                         [f"4-r-{order}-{phase}.png: slam field: its row has no body"
+                          for order, phase in enumerate(("windup", "release", "impact"), start=1)])
         # The orb is drawn by the `aux` block of the row; a kind the row gives no body draws nothing.
         def no_aux(summary):
             for still in summary["captures"]:
@@ -494,8 +504,6 @@ class HardAssertionTests(unittest.TestCase):
             flat(summary)
             still_of(summary, "1-q-2-release.png")["skill_vfx"] = [dict(root(2, ring("traveller")), name="SkillVfx-bolt-2")]
         self.assert_one(flat_with_body, "1-q-2-release.png: SkillVfx-bolt-2: a 3D body in the flat view")
-        # An unmigrated row keeps its legacy style, whatever that style is made of.
-        self.assertEqual(self.problems(lambda s: still_of(s, "4-r-1-windup.png")["skill_vfx"][0].update(mesh_parts=99)), [])
 
     def test_boundaries_of_every_shape_follow_the_replicated_fields(self):
         cases = [
@@ -539,8 +547,9 @@ class HardAssertionTests(unittest.TestCase):
                 (lambda s: still_of(s, release).update(effect_lights=3), "3 effect lights"),
         ):
             self.assert_one(edit, text)
-        # A row without `cast` keeps the built-in accent, which is not counted here.
-        self.assertEqual(self.problems(lambda s: s["skills"][3]["peaks"].update(accent_of_cast=0)), [])
+        # Every row has a `cast`; a run that saw no accent of one that draws is no evidence of it.
+        self.assert_one(lambda s: s["skills"][3]["peaks"].update(accent_of_cast=None),
+                        "slam: None accent particles of the cast")
 
     def test_a_hit_is_drawn_by_the_recipe_of_its_row(self):
         impact = "1-q-3-impact.png"
@@ -550,9 +559,8 @@ class HardAssertionTests(unittest.TestCase):
                         "drawn as None, the row of bolt says spark_fork")
         self.assert_one(lambda s: still_of(s, impact)["receipt_looks"][0].update(particles=13), "13 impact particles")
         self.assert_one(lambda s: still_of(s, impact).update(receipt_looks=[]), "was not drawn")
-        # A damaging row without a recipe keeps the built-in burst.
         self.assert_one(lambda s: still_of(s, "4-r-3-impact.png")["receipt_looks"][0].update(impact="blast"),
-                        "drawn as blast, the row of old says None")
+                        "drawn as blast, the row of slam says ring_burst")
 
     def test_the_third_still_is_an_impact_exactly_when_the_staged_cast_has_to_hit(self):
         def settle(summary):
@@ -617,9 +625,11 @@ class HardAssertionTests(unittest.TestCase):
                                                    impact="pierce_through"))
         self.assertEqual(reports[1]["profile"]["windup_clip"], "spell_prepare")
         self.assertEqual([report["matches"] for report in reports[:2]], [dict(clip=True, body=True, impact=True)] * 2)
-        # A self cast has no body and no hit; an unmigrated row has neither block.
+        # A self cast has no body and no hit.
+        self.assertEqual(reports[2]["shown"]["body"], [])
         self.assertEqual(reports[2]["matches"], dict(clip=True, body=True, impact=None))
-        self.assertEqual(reports[3]["shown"]["body"], [])
+        self.assertEqual(reports[3]["shown"], dict(clip="Attack", windup_clip="Attack", body=["zone"],
+                                                   impact="ring_burst"))
         self.assertEqual(reports[3]["matches"], dict(clip=True, body=True, impact=True))
         summary = hard_summary()
         still_of(summary, "1-q-3-impact.png")["receipt_looks"][0]["impact"] = "blast"
@@ -641,9 +651,8 @@ class HardAssertionTests(unittest.TestCase):
         for slot, skill in enumerate(recipe["skills"]):
             self.assertNotEqual(catalog[skill]["slot"], launcher.SLOT_KEYS[slot], skill)
         # Four different bodies, all of which the staged target can be hit by.
-        final = json.loads((ROOT / "client/src/skill_presentation/fixtures/target.skillfx").read_text())["skills"]
-        self.assertEqual(len({final[skill]["body"]["archetype"] for skill in recipe["skills"]}), 4)
-        self.assertTrue(all(final[skill].get("impact") for skill in recipe["skills"]))
+        self.assertEqual(len({rows[skill]["body"]["archetype"] for skill in recipe["skills"]}), 4)
+        self.assertTrue(all(rows[skill].get("impact") for skill in recipe["skills"]))
         self.assertNotIn(launcher.MIXED_NAME, launcher.HEROES)
 
     def test_a_slot_captured_from_farther_away_has_the_idle_still_of_its_view(self):

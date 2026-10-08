@@ -2702,20 +2702,18 @@ fn the_part_budget_hides_authored_parts_of_the_farthest_bodies_first() {
         load(5, 21.0, 1, 4),
     ];
     // 17 kept and 34 authored parts.
-    assert_eq!(over_budget(&loads, 0, 51), [] as [u8; 0]);
+    assert_eq!(over_budget(&loads, 51), [] as [u8; 0]);
     // One part too many: the farthest body that has authored parts gives all of its own.
-    assert_eq!(over_budget(&loads, 0, 50), [2]);
-    assert_eq!(over_budget(&loads, 0, 41), [2]);
-    assert_eq!(over_budget(&loads, 0, 40), [2, 5]);
-    assert_eq!(over_budget(&loads, 0, 37), [2, 5]);
-    assert_eq!(over_budget(&loads, 0, 36), [2, 5, 3]);
-    // Parts no body can give up count against the same budget.
-    assert_eq!(over_budget(&loads, 1, 51), [2]);
+    assert_eq!(over_budget(&loads, 50), [2]);
+    assert_eq!(over_budget(&loads, 41), [2]);
+    assert_eq!(over_budget(&loads, 40), [2, 5]);
+    assert_eq!(over_budget(&loads, 37), [2, 5]);
+    assert_eq!(over_budget(&loads, 36), [2, 5, 3]);
     // Engine parts survive: when they alone are over the budget every authored part goes
     // and nothing else does.
-    assert_eq!(over_budget(&loads, 0, 3), [2, 5, 3, 1]);
-    assert_eq!(over_budget(&loads, 400, 3), [2, 5, 3, 1]);
-    assert!(over_budget::<u8>(&[], 9, 3).is_empty());
+    assert_eq!(over_budget(&loads, 3), [2, 5, 3, 1]);
+    assert_eq!(over_budget(&loads, 0), [2, 5, 3, 1]);
+    assert!(over_budget::<u8>(&[], 3).is_empty());
 
     // The ceiling of the server: 128 zones of twelve parts each. The budget holds, every
     // boundary, fill and marker stays, and the nearest bodies keep their look.
@@ -2729,7 +2727,7 @@ fn the_part_budget_hides_authored_parts_of_the_farthest_bodies_first() {
     let field: Vec<_> = (0..128u8)
         .map(|key| load(key, f32::from(key) * 1.5, kept, authored))
         .collect();
-    let hidden = over_budget(&field, 0, PART_BUDGET);
+    let hidden = over_budget(&field, PART_BUDGET);
     let visible = 128 * kept + (128 - hidden.len()) * authored;
     assert!(visible <= PART_BUDGET && visible + authored > PART_BUDGET);
     assert_eq!(hidden.len(), 127);

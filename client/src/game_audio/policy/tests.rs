@@ -792,15 +792,9 @@ fn a_resolved_receipt_replaces_the_style_cue_and_an_unresolved_one_keeps_it() {
             && after[0].notes == [None; MAX_NOTES]
             && after[0].detune() == 1.0
     };
-    let unmigrated = SkillPresentation::unmigrated();
-    assert!(
-        kept(&unmigrated, &warrior, dealt(4, me, Some(bash))),
-        "shipped"
-    );
-    assert!(
-        kept(&unmigrated, &warrior, dealt(4, me, Some(BASIC))),
-        "shipped"
-    );
+    let empty = SkillPresentation::default();
+    assert!(kept(&empty, &warrior, dealt(4, me, Some(bash))), "no row");
+    assert!(kept(&empty, &warrior, dealt(4, me, Some(BASIC))), "no row");
     let hidden = [HeroHeard {
         visible: false,
         ..warrior[0]
@@ -1056,13 +1050,13 @@ fn the_68_target_cast_voices_are_distinct() {
             | AudioCue::Tower
             | AudioCue::Bluff
     )));
-    // The unmigrated rows name no voice yet: nothing is added to what plays today.
-    let unmigrated = SkillPresentation::unmigrated();
+    // A registry without the rows adds no voice to the cues of the wire styles.
+    let empty = SkillPresentation::default();
     for class in HeroClass::ALL {
         for slot in [0, 1, 2, 3, BASIC] {
             let casts = [observed(local().id, class, slot, 9)];
             assert!(
-                voiced(&unmigrated, &[], &casts, &[], Vec::new()).is_empty(),
+                voiced(&empty, &[], &casts, &[], Vec::new()).is_empty(),
                 "{} {slot}",
                 class.id()
             );
@@ -1276,7 +1270,7 @@ fn a_telegraph_that_fired_plays_the_release_voice_of_its_row() {
         );
         assert!(fired(event).is_empty(), "{change:?}");
     }
-    // A row without the voice plays none, and no unmigrated row has one.
+    // A row without the voice plays none, and neither does a registry without the row.
     let field = stage(
         SkillId::DawnField,
         EffectVisualKind::Field,
@@ -1290,16 +1284,7 @@ fn a_telegraph_that_fired_plays_the_release_voice_of_its_row() {
         flipped,
         Some(true),
     );
-    assert!(
-        voiced(
-            &SkillPresentation::unmigrated(),
-            &[],
-            &[],
-            &[ray],
-            Vec::new()
-        )
-        .is_empty()
-    );
+    assert!(voiced(&SkillPresentation::default(), &[], &[], &[ray], Vec::new()).is_empty());
 
     // The beam of a hero the client does not see sounds where it was received: by the
     // distance to the effect, with the first note alone.
@@ -1438,14 +1423,14 @@ fn rockets_variant_voice_follows_the_style_of_the_receipt_and_the_mode_of_the_at
     assert_eq!(swing[0].variant(), plain.0);
     assert_eq!(row_of(&swing[0]), Some((Moment::Attack, "riftshot")));
     // A registry without the row keeps the cue of the wire style.
-    let unmigrated = SkillPresentation::unmigrated();
+    let empty = SkillPresentation::default();
     let state = armed(CoreId::Wildspark, WeaponMode::Rockets);
     let seen = [HeroHeard {
         loadout: Some(&state),
         ..heard_hero(me, class, BASIC)
     }];
     let kept = voiced(
-        &unmigrated,
+        &empty,
         &seen,
         &[],
         &[],
@@ -1458,7 +1443,7 @@ fn rockets_variant_voice_follows_the_style_of_the_receipt_and_the_mode_of_the_at
 #[test]
 fn an_enemy_attack_has_one_voice() {
     let registry = target();
-    let unmigrated = SkillPresentation::unmigrated();
+    let empty = SkillPresentation::default();
     // The style cue of an accepted attack of enemy 8, action `sequence`.
     let attack = |sequence: u64| {
         let mut cursor = AttackCursor::default();
@@ -1554,15 +1539,9 @@ fn an_enemy_attack_has_one_voice() {
         assert_eq!(stand_in[0].variant(), Variant::from(AudioCue::Melee));
         assert_eq!(stand_in[0].origin, styled[0].origin);
     }
-    // With the unmigrated rows every attack keeps the cue of the class style.
+    // Without the rows every attack keeps the cue of the class style.
     for heroes in [&swinging, &casting] {
-        let cues = voiced(
-            &unmigrated,
-            heroes,
-            std::slice::from_ref(&cast),
-            &[],
-            attack(6),
-        );
+        let cues = voiced(&empty, heroes, std::slice::from_ref(&cast), &[], attack(6));
         assert_eq!(cues.len(), 1);
         assert_eq!(cues[0].variant(), Variant::from(AudioCue::Melee));
         assert_eq!(cues[0].origin, styled[0].origin);

@@ -732,11 +732,11 @@ fn recast_marker_needs_can_recast() {
     mixed.slots[2].can_recast = true;
     mixed.recipe.as_mut().unwrap().skills[1] = SkillId::DawnField;
     assert!(recast_markers(&registry, class, &mixed, 7, at, &[]).is_empty());
-    // The unmigrated rows have no marker yet.
-    let unmigrated = SkillPresentation::unmigrated();
+    // A registry without the row shows no marker.
     mixed.recipe.as_mut().unwrap().skills = CoreId::Wildspark.preset().skills;
     mixed.recipe.as_mut().unwrap().skills[2] = SkillId::DawnField;
-    assert!(recast_markers(&unmigrated, class, &mixed, 7, at, &[]).is_empty());
+    assert!(!recast_markers(&registry, class, &mixed, 7, at, &[]).is_empty());
+    assert!(recast_markers(&SkillPresentation::default(), class, &mixed, 7, at, &[]).is_empty());
 }
 
 /// The Mountain Echo marker is shown only where the server accepts the recast: within

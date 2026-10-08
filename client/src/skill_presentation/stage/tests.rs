@@ -1142,12 +1142,10 @@ fn a_fresh_own_warning_stands_in_for_a_cast_edge_the_snapshot_hid() {
         });
         assert_eq!(paused, Taken::default());
 
-        // The unmigrated row holds its windup against the same warning, so the cast is
-        // reported, and it draws nothing because the row has no `cast` block yet.
-        let unmigrated = warned(SkillPresentation::unmigrated(), &seen, &seen, &warning, &[]);
-        assert_eq!(unmigrated, casts);
-        assert!(
-            accents::cast_burst(&SkillPresentation::unmigrated(), &unmigrated[0], &[]).is_empty()
+        // A registry without the row knows no windup to release: nothing is reported.
+        assert_eq!(
+            warned(SkillPresentation::default(), &seen, &seen, &warning, &[]),
+            []
         );
     }
 
@@ -1354,8 +1352,8 @@ fn stage_oneshots_follow_the_row_of_the_effect() {
     assert!(!faded.is_empty());
     assert_ne!(faded[0].color, burst[0].color);
 
-    // A row without a body keeps today's look: no event of its effects draws anything.
-    let unmigrated = SkillPresentation::unmigrated();
+    // A registry without the rows draws nothing for any event of their effects.
+    let empty = SkillPresentation::default();
     for (seen, change) in [
         (&trap, step(Transition::Armed)),
         (&cage, step(Transition::SegmentBroken(0))),
@@ -1368,8 +1366,8 @@ fn stage_oneshots_follow_the_row_of_the_effect() {
         ),
     ] {
         let event = event(seen, change);
-        assert_eq!(accents::stage_shot(&unmigrated, &event), None);
-        assert!(accents::stage_burst(&unmigrated, &event, 0.0).is_empty());
+        assert_eq!(accents::stage_shot(&empty, &event), None);
+        assert!(accents::stage_burst(&empty, &event, 0.0).is_empty());
     }
     // Neither does an auxiliary object, whatever is reported for it.
     let orb = effect(6, SkillId::OrbitalCommand, K::Orb);
@@ -1517,10 +1515,10 @@ fn a_released_telegraph_links_to_its_receipts() {
             },
         );
         assert_eq!(book.link(&hit(1, OWNER, slot)), None, "{}", id.id());
-        // A row without the block links nothing.
+        // A registry without the row links nothing.
         let mut book = LinkBook::default();
         book.turn(ROUND, 10);
-        book.release(&SkillPresentation::unmigrated(), &seen, &owner, ground);
+        book.release(&SkillPresentation::default(), &seen, &owner, ground);
         assert_eq!(book.link(&hit(1, OWNER, slot)), None);
     }
     // The collapse names no link.
@@ -1701,6 +1699,51 @@ fn the_tracker_feeds_the_one_shots_and_the_release_link() {
     assert_eq!(apply(&mut app, &[]), NOTHING);
 }
 
+/// The Thorn Volley recast strikes at once, but while the spike of the first cast is in
+/// the snapshot, or was in the one before, a receipt may be the spike's own. The emitter
+/// shows the effects of every snapshot to its book, so a recast in that time opens no lash.
+#[test]
+fn the_emitter_holds_the_recast_lash_until_the_spike_has_left_the_snapshots() {
+    let class = HeroClass::Veilstalker;
+    let slot = slot_of(class, SkillId::ThornVolley);
+    let spike = with(&effect(90, SkillId::ThornVolley, K::Bolt), |e| {
+        e.position = [HOME.x + 2.0, HOME.z];
+        e.end = [HOME.x + 3.0, HOME.z];
+    });
+    let recast = SkillCastObserved {
+        actor_id: OWNER,
+        key: CastKey::Skill(SkillKey::Modular(SkillId::ThornVolley)),
+        slot,
+        sequence: 5,
+        recast: true,
+        origin: HOME,
+        position: HOME,
+        yaw: None,
+        forward: Vec3::NEG_Z,
+        local: false,
+    };
+    // (snapshots without the spike since it was last seen, whether the lash is drawn)
+    for (since, lashed) in [(0, false), (1, false), (2, true)] {
+        let (mut app, _) = stage(target(), class);
+        assert_eq!(apply(&mut app, std::slice::from_ref(&spike)), NOTHING);
+        for _ in 0..since {
+            assert_eq!(apply(&mut app, &[]), NOTHING);
+        }
+        app.world_mut().write_message(recast.clone());
+        app.world_mut().write_message(ConfirmedHit {
+            receipt: 91,
+            source: OWNER,
+            slot,
+            position: HOME + Vec3::X * 4.0,
+        });
+        let links = sources(&frame(&mut app))
+            .into_iter()
+            .filter(|source| *source == ParticleSource::Link)
+            .count();
+        assert_eq!(links, usize::from(lashed), "{since} snapshots later");
+    }
+}
+
 #[test]
 fn a_turn_and_a_renewal_of_one_snapshot_spark_once() {
     let (mut app, _) = stage(target(), HeroClass::Emberveil);
@@ -1734,8 +1777,8 @@ fn a_turn_and_a_renewal_of_one_snapshot_spark_once() {
     );
     assert_ne!(bursts[0][0].origin, bursts[1][0].origin);
 
-    // With the unmigrated rows the same snapshots draw nothing.
-    let (mut app, _) = stage(SkillPresentation::unmigrated(), HeroClass::Chainkeeper);
+    // Without the rows the same snapshots draw nothing.
+    let (mut app, _) = stage(SkillPresentation::default(), HeroClass::Chainkeeper);
     apply(&mut app, std::slice::from_ref(&cage));
     assert_eq!(apply(&mut app, std::slice::from_ref(&broken)), NOTHING);
 }

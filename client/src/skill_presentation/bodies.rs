@@ -1714,14 +1714,13 @@ pub(crate) struct Load<K> {
 }
 
 /// The bodies that hide their authored parts so that at most `budget` parts stay visible,
-/// the farthest first. `fixed` counts visible parts no body can give up. Engine parts are
-/// never hidden, so the sum can stay above the budget when they alone exceed it.
-pub(crate) fn over_budget<K: Copy>(loads: &[Load<K>], fixed: usize, budget: usize) -> Vec<K> {
-    let mut total = fixed
-        + loads
-            .iter()
-            .map(|load| load.kept + load.authored)
-            .sum::<usize>();
+/// the farthest first. Engine parts are never hidden, so the sum can stay above the budget
+/// when they alone exceed it.
+pub(crate) fn over_budget<K: Copy>(loads: &[Load<K>], budget: usize) -> Vec<K> {
+    let mut total = loads
+        .iter()
+        .map(|load| load.kept + load.authored)
+        .sum::<usize>();
     let mut farthest: Vec<&Load<K>> = loads.iter().filter(|load| load.authored > 0).collect();
     farthest.sort_by(|a, b| b.distance.total_cmp(&a.distance));
     let mut hidden = Vec::new();

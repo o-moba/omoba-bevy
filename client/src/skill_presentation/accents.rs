@@ -1607,9 +1607,9 @@ pub(crate) fn trap_snap(
     }
 }
 
-/// The one-shot of one stage event. Only a row that gives the effect a body draws one, so
-/// a row without the block keeps today's look. The flip of a warning pops when it sets a
-/// travelling body off; the beam a warning becomes is its own read.
+/// The one-shot of one stage event. Only a row that gives the effect a body draws one. The
+/// flip of a warning pops when it sets a travelling body off; the beam a warning becomes is
+/// its own read.
 pub(crate) fn stage_shot(registry: &SkillPresentation, event: &StageEvent) -> Option<OneShot> {
     let effect = &event.effect;
     let body = registry.body_for(effect)?;

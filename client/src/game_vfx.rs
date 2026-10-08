@@ -8,7 +8,7 @@ use crate::{
     player::Player,
     skill_presentation::{
         accents,
-        cast::{MoveObserved, SkillCastObserved, ThemedDashes, action_yaw},
+        cast::{MoveObserved, SkillCastObserved, ThemedDashes},
         vocab::ParticleShape as Shape,
     },
     sprite::PlayerVisualMode,
@@ -172,7 +172,7 @@ pub(crate) enum ParticleClass {
 /// action sequence and a receipt id can be the same number.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ParticleSource {
-    /// Wire-style bursts, utility effects, flight puffs and accents of rows without `cast`.
+    /// Wire-style bursts, utility effects and flight puffs.
     Engine,
     Accent,
     Move,
@@ -324,6 +324,8 @@ impl ParticleSpec {
 
 #[derive(Clone)]
 struct Particle {
+    /// The action sequence, receipt id or seed the particle was drawn for.
+    #[cfg_attr(not(feature = "qa"), allow(dead_code))] // read by capture evidence
     event_id: u64,
     origin: Vec3,
     velocity: Vec3,
@@ -572,7 +574,6 @@ impl Plugin for GameVfxPlugin {
                     (
                         pickup_feedback,
                         emit_projectile_particles,
-                        emit_skill_cast_particles,
                         accents::emit_cast,
                         accents::emit_moves,
                         accents::emit_stage_oneshots,
@@ -1479,11 +1480,7 @@ fn animate_particles(
     for batch in flight.read() {
         let room = 48usize.saturating_sub(decorative.len());
         decorative.extend(batch.0.iter().take(room).map(|p| Particle {
-            class: if p.event_id == 0 {
-                ParticleClass::Trail
-            } else {
-                ParticleClass::Skill
-            },
+            class: ParticleClass::Trail,
             ..p.clone()
         }));
     }
@@ -1660,140 +1657,6 @@ fn animate_butterflies(
         *global = GlobalTransform::from(*transform);
     }
 }
-/// Built-in cast accents of the rows that carry no `cast` block; a row with one is drawn
-/// from its data by `accents::emit_cast`. Only a new accepted action emits them; a miss
-/// still casts, but it never manufactures an impact on another character.
-fn emit_skill_cast_particles(
-    game: Option<Res<crate::net::GameStateSnapshot>>,
-    profiles: Option<Res<crate::skill_presentation::SkillPresentation>>,
-    actors: Query<(
-        Entity,
-        &Transform,
-        &InheritedVisibility,
-        &crate::net::PlayerCosmeticAction,
-        &crate::net::PlayerActionFacing,
-        &crate::net::NetworkHeroClass,
-        Option<&crate::net::PlayerLoadout>,
-        &crate::combat::CombatStats,
-    )>,
-    mut receipts: Local<(Option<(u64, u64)>, std::collections::HashMap<Entity, u64>)>,
-    mut output: MessageWriter<FlightParticles>,
-    mut audio: MessageWriter<crate::game_audio::AudioCueRequest>,
-) {
-    let (Some(game), Some(profiles)) = (game, profiles) else {
-        return;
-    };
-    let round = Some((game.meta.server_epoch, game.meta.match_id));
-    if receipts.0 != round {
-        receipts.0 = round;
-        receipts.1.clear();
-    }
-    receipts.1.retain(|entity, _| actors.contains(*entity));
-    for (entity, pose, visibility, action, facing, class, loadout, stats) in &actors {
-        let previous = receipts.1.get(&entity).copied();
-        receipts
-            .1
-            .insert(entity, previous.unwrap_or(0).max(action.sequence));
-        if !cast_is_new(previous, action.sequence)
-            || !visibility.get()
-            || !stats.is_alive()
-            || !matches!(game.state, crate::net::GameState::Running)
-        {
-            continue;
-        }
-        let state = loadout.and_then(|l| l.0.as_ref());
-        let themed = profiles.themed_cast(class.0, state, action.slot);
-        // The accent points along the accepted action, and it is anchored at the hero's
-        // simulation position in both render modes.
-        let direction =
-            accents::CastContext::aim(action_yaw(action, facing), pose.forward().as_vec3());
-        let heading = direction.to_angle();
-        if action.slot == shared::BASIC_ATTACK_ACTION_SLOT
-            && crate::equipped_skills::resolve(class.0, loadout)
-                .and_then(|skills| skills.resolved())
-                .is_some_and(|skills| {
-                    skills.attack_profile() == shared::loadout::AttackProfileId::Melee
-                })
-        {
-            if !themed {
-                let forward = Vec3::new(direction.x, 0.0, direction.y);
-                output.write(FlightParticles(vec![Particle {
-                    event_id: action.sequence,
-                    origin: pose.translation + Vec3::Y * 0.8 + forward * 0.65,
-                    velocity: Vec3::ZERO,
-                    age: 0.0,
-                    lifetime: 0.2,
-                    size: 0.8,
-                    angle: heading,
-                    color: Color::srgb(0.75, 0.95, 1.0),
-                    shape: Shape::Slash,
-                    ..Particle::BASE
-                }]));
-            }
-            continue;
-        }
-        let Some(profile) = profiles.action_profile(class.0, state, action.slot) else {
-            continue;
-        };
-        // Long windups already have a server-owned warning; avoid implying immediate release.
-        if profile.windup.is_some() {
-            continue;
-        }
-        // A Bluff row that names its cast voice is voiced from that data by the audio
-        // layer. A row without one keeps the cue it always had.
-        if profile
-            .sound
-            .as_ref()
-            .is_none_or(|sound| sound.cast.is_none())
-            && crate::skill_presentation::equipped_skill(class.0, state, action.slot)
-                == Some(shared::loadout::SkillId::DaggerBluff)
-        {
-            audio.write(crate::game_audio::AudioCueRequest(
-                crate::game_audio::AudioCue::Bluff,
-            ));
-        }
-        let origin = pose.translation + Vec3::Y * 0.8;
-        use crate::skill_presentation::EffectStyle as S;
-        // A row with a `cast` block is drawn from its data, never twice.
-        let Some(effect) = profile.effect.filter(|_| !themed) else {
-            continue;
-        };
-        let (shape, count, size) = match effect {
-            S::Slash => (Shape::Slash, 5, 1.6),
-            S::Needle | S::Lance | S::Shock | S::Repeater => (Shape::Streak, 4, 1.1),
-            S::Aegis | S::Pulse | S::Field | S::Wall => (Shape::Ringlet, 7, 1.4),
-            _ => (Shape::Glow, 7, 1.0),
-        };
-        let color = Color::srgb_from_array(profile.color);
-        output.write(FlightParticles(
-            (0..count)
-                .map(|i| {
-                    let angle = i as f32 * std::f32::consts::TAU / count as f32;
-                    Particle {
-                        event_id: action.sequence,
-                        origin,
-                        velocity: if i == 0 {
-                            Vec3::ZERO
-                        } else {
-                            Vec3::new(angle.cos(), 0.3, angle.sin()) * 1.8
-                        },
-                        age: 0.0,
-                        lifetime: if i == 0 { 0.4 } else { 0.28 },
-                        size: if i == 0 { size } else { 0.24 },
-                        angle: heading,
-                        color,
-                        shape: if i == 0 { shape } else { Shape::Glow },
-                        ..Particle::BASE
-                    }
-                })
-                .collect(),
-        ));
-    }
-}
-fn cast_is_new(previous: Option<u64>, current: u64) -> bool {
-    previous.is_some_and(|previous| current > previous)
-}
-
 /// The glow puff and the two orbiting glows a projectile leaves behind in one tick. Only
 /// a thrown `shape` body of a magic style leaves them: a form carries its own wake, and a
 /// wave or a melee contact is no missile in either render mode. `forms` says whether the
@@ -2119,13 +1982,6 @@ fn pickup_feedback(
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[test]
-    fn cast_receipts_do_not_replay_initial_duplicate_or_older_actions() {
-        assert!(!cast_is_new(None, 12));
-        assert!(!cast_is_new(Some(12), 12));
-        assert!(!cast_is_new(Some(12), 11));
-        assert!(cast_is_new(Some(12), 13));
-    }
     #[test]
     fn pickup_receipts_seed_once_ignore_rollbacks_and_respect_hidden_collectors() {
         use crate::net::{GameState, GameStateSnapshot, NetworkPlayerId};
@@ -2785,31 +2641,16 @@ mod tests {
         }
     }
     #[test]
-    fn flight_puffs_are_trails_and_legacy_accents_are_skill_particles() {
+    fn flight_puffs_are_trail_particles() {
         let mut app = pool();
-        app.world_mut().write_message(FlightParticles(vec![
-            Particle {
+        app.world_mut()
+            .write_message(FlightParticles(vec![Particle {
                 lifetime: 100.,
                 ..Particle::BASE
-            },
-            Particle {
-                event_id: 12,
-                lifetime: 100.,
-                ..Particle::BASE
-            },
-        ]));
+            }]));
         app.world_mut().write_message(test_burst());
         app.update();
-        assert_eq!(
-            live(&mut app, |p| p.event_id == 0
-                && p.class == ParticleClass::Trail),
-            1
-        );
-        assert_eq!(
-            live(&mut app, |p| p.event_id == 12
-                && p.class == ParticleClass::Skill),
-            1
-        );
+        assert_eq!(live(&mut app, |p| p.class == ParticleClass::Trail), 1);
         assert_eq!(live(&mut app, |p| p.class == ParticleClass::Confirm), 12);
     }
     #[test]
@@ -2988,152 +2829,6 @@ mod tests {
         app.update();
         assert!(drain(&mut app).is_empty());
     }
-    #[test]
-    fn legacy_accents_follow_the_accepted_yaw_at_the_simulation_position() {
-        use crate::net::{NetworkHeroClass, PlayerActionFacing, PlayerCosmeticAction};
-        use crate::skill_presentation::SkillPresentation;
-        use shared::{HeroClass, PlayerActionKind};
-        let at = Vec3::new(3., 0.5, -7.);
-        let yaw = shared::math::hero_yaw_towards(0.6, 0.8);
-        // The accents of one accepted action of `class` on `slot` under a registry.
-        let accents_of = |registry: SkillPresentation, class: HeroClass, slot: u8| {
-            let mut app = App::new();
-            app.insert_resource(registry)
-                .insert_resource(crate::net::GameStateSnapshot {
-                    meta: shared::protocol::SnapshotMeta::new(7, 1, 1),
-                    state: crate::net::GameState::Running,
-                    ..Default::default()
-                })
-                .add_message::<FlightParticles>()
-                .add_message::<crate::game_audio::AudioCueRequest>()
-                .add_systems(Update, emit_skill_cast_particles);
-            let hero = app
-                .world_mut()
-                .spawn((
-                    // The model still looks the other way.
-                    Transform::from_translation(at).looking_to(Vec3::new(-0.6, 0., -0.8), Vec3::Y),
-                    InheritedVisibility::VISIBLE,
-                    PlayerCosmeticAction::default(),
-                    PlayerActionFacing::default(),
-                    NetworkHeroClass(class),
-                    crate::combat::CombatStats::default(),
-                ))
-                .id();
-            app.update();
-            app.world_mut().entity_mut(hero).insert((
-                PlayerCosmeticAction {
-                    sequence: 1,
-                    kind: PlayerActionKind::Cast,
-                    slot,
-                },
-                PlayerActionFacing {
-                    sequence: 1,
-                    yaw: Some(yaw),
-                },
-            ));
-            app.update();
-            app.world_mut()
-                .resource_mut::<Messages<FlightParticles>>()
-                .drain()
-                .flat_map(|batch| batch.0)
-                .collect::<Vec<_>>()
-        };
-        let accent = accents_of(SkillPresentation::unmigrated(), HeroClass::Warrior, 0);
-        assert!(!accent.is_empty());
-        for particle in &accent {
-            // Simulation coordinates whatever the render mode: the system reads none.
-            assert_eq!(particle.origin, at + Vec3::Y * 0.8);
-            assert!(Vec2::from_angle(particle.angle).distance(Vec2::new(0.6, 0.8)) < 1e-5);
-            assert_eq!(particle.event_id, 1);
-        }
-        // The melee swing of a basic attack is laid ahead along the same yaw.
-        let swing = accents_of(
-            SkillPresentation::unmigrated(),
-            HeroClass::Stormfist,
-            shared::BASIC_ATTACK_ACTION_SLOT,
-        );
-        assert_eq!(swing.len(), 1);
-        assert!(
-            swing[0]
-                .origin
-                .distance(at + Vec3::new(0.6, 0., 0.8) * 0.65 + Vec3::Y * 0.8)
-                < 1e-5
-        );
-        assert!(Vec2::from_angle(swing[0].angle).distance(Vec2::new(0.6, 0.8)) < 1e-5);
-        // A row with a `cast` block, and a basic attack with an accent, are drawn from
-        // their data instead.
-        assert!(accents_of(SkillPresentation::target(), HeroClass::Warrior, 0).is_empty());
-        assert!(
-            accents_of(
-                SkillPresentation::target(),
-                HeroClass::Stormfist,
-                shared::BASIC_ATTACK_ACTION_SLOT,
-            )
-            .is_empty()
-        );
-    }
-    #[test]
-    fn the_bluff_cue_is_requested_only_while_its_row_names_no_cast_voice() {
-        use crate::game_audio::{AudioCue, AudioCueRequest};
-        use crate::net::{NetworkHeroClass, PlayerActionFacing, PlayerCosmeticAction};
-        use crate::skill_presentation::SkillPresentation;
-        use shared::{HeroClass, PlayerActionKind, loadout::SkillId};
-        // The cue requests of one accepted action of an Adventurer on `slot`.
-        let requests = |registry: SkillPresentation, slot: u8| {
-            let mut app = App::new();
-            app.insert_resource(registry)
-                .insert_resource(crate::net::GameStateSnapshot {
-                    meta: shared::protocol::SnapshotMeta::new(7, 1, 1),
-                    state: crate::net::GameState::Running,
-                    ..Default::default()
-                })
-                .add_message::<FlightParticles>()
-                .add_message::<AudioCueRequest>()
-                .add_systems(Update, emit_skill_cast_particles);
-            let hero = app
-                .world_mut()
-                .spawn((
-                    Transform::default(),
-                    InheritedVisibility::VISIBLE,
-                    PlayerCosmeticAction::default(),
-                    PlayerActionFacing::default(),
-                    NetworkHeroClass(HeroClass::Adventurer),
-                    crate::combat::CombatStats::default(),
-                ))
-                .id();
-            app.update();
-            app.world_mut()
-                .entity_mut(hero)
-                .insert(PlayerCosmeticAction {
-                    sequence: 1,
-                    kind: PlayerActionKind::Cast,
-                    slot,
-                });
-            app.update();
-            app.world_mut()
-                .resource_mut::<Messages<AudioCueRequest>>()
-                .drain()
-                .map(|request| request.0)
-                .collect::<Vec<_>>()
-        };
-        let kit = shared::loadout::preset_for_class(HeroClass::Adventurer).unwrap();
-        let bluff = kit
-            .skills()
-            .iter()
-            .position(|skill| *skill == SkillId::DaggerBluff)
-            .unwrap() as u8;
-        // The unmigrated row names no voice, so Bluff keeps the cue it always had.
-        assert_eq!(
-            requests(SkillPresentation::unmigrated(), bluff),
-            [AudioCue::Bluff]
-        );
-        // A row with `sound.cast` is voiced by the audio layer, once.
-        assert!(requests(SkillPresentation::target(), bluff).is_empty());
-        for slot in (0..4).filter(|slot| *slot != bluff) {
-            assert!(requests(SkillPresentation::unmigrated(), slot).is_empty());
-            assert!(requests(SkillPresentation::target(), slot).is_empty());
-        }
-    }
     /// The arcane style default draws the hit of a Mage the client cannot see. It strikes
     /// one unit, so its ring and its sparks stay at that unit like a recipe would.
     #[test]
@@ -3174,10 +2869,9 @@ mod tests {
     fn no_flight_puff_where_a_form_is_drawn() {
         use crate::combat_visuals::CombatVisualRegistry;
         use shared::HeroClass;
-        let target = CombatVisualRegistry::from_json(include_str!(
-            "skill_presentation/fixtures/target_combat_visuals.json"
-        ))
-        .unwrap();
+        let target =
+            CombatVisualRegistry::from_json(include_str!("../assets/config/combat_visuals.json"))
+                .unwrap();
         let embedded = CombatVisualRegistry::default();
         let at = Vec3::new(2., 0.85, -3.);
         // The particles one projectile of `class` leaves in a tick: where the renderer

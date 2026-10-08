@@ -742,16 +742,10 @@ pub(super) fn duel_facets(duelist: &Duelist, target: &FacetTarget) -> Vec<HeroMa
 }
 
 /// Whether the fallback lines of an effect are drawn. In the flat view they always are. In
-/// 3D an effect whose row is known is drawn by that row, and a body draws its own boundary
-/// in the colour of the team: lines of another colour over it would hide whose it is. Only
-/// a trap whose row has no body yet keeps the tactical outline over its model.
-pub(super) fn outlined(
-    mode: PlayerVisualMode,
-    kind: EffectVisualKind,
-    known: bool,
-    staged: bool,
-) -> bool {
-    mode != PlayerVisualMode::Models3d || !(staged || (known && kind != EffectVisualKind::Trap))
+/// 3D a body draws its own boundary in the colour of the team, and lines of another colour
+/// over it would hide whose it is; an effect no row gives a body keeps its lines.
+pub(super) fn outlined(mode: PlayerVisualMode, staged: bool) -> bool {
+    mode != PlayerVisualMode::Models3d || !staged
 }
 
 /// Bounded, snapshot-driven geometry. Effects do not depend on a visible owner.
@@ -789,7 +783,7 @@ pub(super) fn draw_effects(
         }
         let profile = profiles.as_ref().and_then(|r| r.profile(e.skill));
         let staged = profiles.as_ref().is_some_and(|r| r.body_for(e).is_some());
-        if !outlined(*mode, e.kind, profile.is_some(), staged) {
+        if !outlined(*mode, staged) {
             continue;
         }
         let friendly = local.single().is_ok_and(|t| *t == e.owner_team);
@@ -990,19 +984,31 @@ mod tests {
     fn a_staged_body_replaces_the_fallback_lines_of_its_effect_in_3d() {
         use EffectVisualKind as K;
         use PlayerVisualMode::{Models3d, Sprite2d};
-        for kind in [K::Trap, K::Field, K::Bolt, K::Cage] {
-            // The flat view has no body: every effect keeps its lines.
-            for (known, staged) in [(false, false), (true, false), (true, true)] {
-                assert!(outlined(Sprite2d, kind, known, staged), "{kind:?}");
-            }
-            // An effect of no known row is drawn by its lines alone.
-            assert!(outlined(Models3d, kind, false, false), "{kind:?}");
-            // A body carries the boundary and the team colour of its effect, a trap's too.
-            assert!(!outlined(Models3d, kind, true, true), "{kind:?}");
-            // A row without a body still draws its effect, except for a trap: its model
-            // has no boundary, so the tactical outline stays.
-            assert_eq!(outlined(Models3d, kind, true, false), kind == K::Trap);
+        // The flat view has no body: every effect keeps its lines.
+        assert!(outlined(Sprite2d, false) && outlined(Sprite2d, true));
+        // A body carries the boundary and the team colour of its effect.
+        assert!(!outlined(Models3d, true));
+        // An effect no row gives a body is drawn by its lines alone.
+        assert!(outlined(Models3d, false));
+        // Every object a skill of the final rows replicates has its body, a trap's too, and
+        // a kind the skill does not replicate has none.
+        let registry = SkillPresentation::target();
+        for (skill, kind) in [
+            (SkillId::WildTraps, K::Trap),
+            (SkillId::DawnField, K::Field),
+            (SkillId::WinterShard, K::Bolt),
+            (SkillId::IronBoundary, K::Cage),
+        ] {
+            assert!(
+                registry.body_for(&effect(skill, kind)).is_some(),
+                "{kind:?}"
+            );
         }
+        assert!(
+            registry
+                .body_for(&effect(SkillId::WinterShard, K::Cage))
+                .is_none()
+        );
     }
 
     #[test]

@@ -44,13 +44,10 @@ CLIPS = (
     ("spell_prepare", "Spell_Simple_Enter", False),
     ("spell_finish", "Spell_Simple_Exit", False),
     ("pistol_shoot", "Pistol_Shoot", False),
-    ("pistol_reload", "Pistol_Reload", False),
     ("pistol_aim", "Pistol_Aim_Neutral", False),
-    ("interact", "Interact", False),
     ("punch", "Punch_Cross", False),
     ("guard", "Punch_Enter", False),
     ("shoulder_drive", "Punch_Jab", False),
-    ("roll", "Roll", False),
 )
 # Right-hand Cross drives the hand holding the dagger; Jab is a left-hand feint.
 # Skill-owned edits of the CC0 source: a short thrust, a partial jab withdrawn
@@ -74,13 +71,10 @@ CONTACTS = {
     "spell_prepare": 0.4166667,
     "spell_finish": 0.25,
     "pistol_shoot": 0.0416667,
-    "pistol_reload": 0.3333333,
     "pistol_aim": 0.0,
-    "interact": 0.5,
     "punch": 0.25,
     "guard": 0.3333333,
     "shoulder_drive": 0.2083333,
-    "roll": 0.375,
     "dagger_stab": 0.22,
     "dagger_feint": 0.155,
     "dagger_heavy_thrust": 0.336,

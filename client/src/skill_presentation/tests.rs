@@ -8,6 +8,14 @@ fn profiles() -> SkillPresentation {
     SkillPresentation::parse(include_str!("../../assets/config/skills.skillfx")).unwrap()
 }
 
+/// A file of the first schema: rows of a release, a legacy style and a colour.
+const SCHEMA_1: &str = r#"{
+  "schema_version": 1,
+  "skills": {
+    "dawn_bind": {"release":"cast","effect":"lance","color":[1.0,0.65,0.1],"hdr_gain":3.5}
+  }
+}"#;
+
 #[test]
 fn dagger_skills_keep_distinct_motions_when_mixed_into_another_core() {
     let mut recipe = shared::loadout::CoreId::Dawnweaver.preset();
@@ -281,125 +289,124 @@ fn slot_of(loadout: &LoadoutState, skill: SkillId) -> u8 {
 }
 
 /// For the two skills that warn and then fire, the plan is what the slot alone gave before,
-/// case by case, on the packaged rows and on the final ones. It differs in one place only:
-/// a warning keeps its windup when another action is the latest.
+/// case by case. It differs in one place only: a warning keeps its windup when another
+/// action is the latest.
 #[test]
 fn motion_plan_equals_motion_cue_for_warn_fire() {
     use shared::BASIC_ATTACK_ACTION_SLOT;
     use shared::loadout::CoreId;
-    for registry in [SkillPresentation::unmigrated(), SkillPresentation::target()] {
-        for (core, skill) in [
-            (CoreId::Dawnweaver, SkillId::DawnRay),
-            (CoreId::Riftshot, SkillId::HorizonWave),
-        ] {
-            let (class, state) = preset(core);
-            let own_slot = slot_of(&state, skill);
-            let profile = registry.profile(skill).unwrap();
-            let fired = category::own_kinds(skill).last().copied().unwrap();
-            let at = |kind, owner_id, remaining_secs| SkillEffectState {
-                owner_id,
-                remaining_secs,
-                ..effect(skill, kind)
+    let registry = SkillPresentation::target();
+    for (core, skill) in [
+        (CoreId::Dawnweaver, SkillId::DawnRay),
+        (CoreId::Riftshot, SkillId::HorizonWave),
+    ] {
+        let (class, state) = preset(core);
+        let own_slot = slot_of(&state, skill);
+        let profile = registry.profile(skill).unwrap();
+        let fired = category::own_kinds(skill).last().copied().unwrap();
+        let at = |kind, owner_id, remaining_secs| SkillEffectState {
+            owner_id,
+            remaining_secs,
+            ..effect(skill, kind)
+        };
+        let tail = category::tail_secs(skill).unwrap();
+        let cases: [(&str, Vec<SkillEffectState>); 8] = [
+            ("nothing replicated", vec![]),
+            (
+                "warning",
+                vec![at(EffectVisualKind::BeamWarning, 7, tail + 0.4)],
+            ),
+            ("just fired", vec![at(fired, 7, tail)]),
+            ("fired a while ago", vec![at(fired, 7, tail - 1.0)]),
+            (
+                "hidden owner",
+                vec![at(EffectVisualKind::BeamWarning, 0, tail + 0.4)],
+            ),
+            (
+                "another hero",
+                vec![at(EffectVisualKind::BeamWarning, 8, tail + 0.4)],
+            ),
+            ("another hero fired", vec![at(fired, 8, tail)]),
+            (
+                "warning beside another hero's beam",
+                vec![
+                    at(fired, 8, tail),
+                    at(EffectVisualKind::BeamWarning, 7, tail + 0.4),
+                ],
+            ),
+        ];
+        for (case, effects) in &cases {
+            let plan = |slot, sequence, recast| {
+                motion_plan(&MotionInputs {
+                    registry: &registry,
+                    class,
+                    loadout: Some(&state),
+                    slot,
+                    sequence,
+                    recast,
+                    owner: 7,
+                    effects,
+                })
             };
-            let tail = category::tail_secs(skill).unwrap();
-            let cases: [(&str, Vec<SkillEffectState>); 8] = [
-                ("nothing replicated", vec![]),
-                (
-                    "warning",
-                    vec![at(EffectVisualKind::BeamWarning, 7, tail + 0.4)],
-                ),
-                ("just fired", vec![at(fired, 7, tail)]),
-                ("fired a while ago", vec![at(fired, 7, tail - 1.0)]),
-                (
-                    "hidden owner",
-                    vec![at(EffectVisualKind::BeamWarning, 0, tail + 0.4)],
-                ),
-                (
-                    "another hero",
-                    vec![at(EffectVisualKind::BeamWarning, 8, tail + 0.4)],
-                ),
-                ("another hero fired", vec![at(fired, 8, tail)]),
-                (
-                    "warning beside another hero's beam",
-                    vec![
-                        at(fired, 8, tail),
-                        at(EffectVisualKind::BeamWarning, 7, tail + 0.4),
-                    ],
-                ),
-            ];
-            for (case, effects) in &cases {
-                let plan = |slot, sequence, recast| {
-                    motion_plan(&MotionInputs {
-                        registry: &registry,
-                        class,
-                        loadout: Some(&state),
-                        slot,
-                        sequence,
-                        recast,
-                        owner: 7,
-                        effects,
-                    })
-                };
-                let by_slot = |slot| motion_cue(&registry, class, Some(&state), slot, 7, effects);
-                let name = format!("{} {case}", skill.id());
-                // The skill's own slot: identical, whatever the sequence.
-                for sequence in [1, 2] {
-                    assert_eq!(plan(own_slot, sequence, false), by_slot(own_slot), "{name}");
-                }
-                let held = by_slot(own_slot).filter(|cue| cue.hold);
-                if effects
-                    .iter()
-                    .any(|own| own.owner_id == 7 && own.kind == EffectVisualKind::BeamWarning)
-                {
-                    assert_eq!(
-                        held.as_ref().map(|cue| &cue.motion),
-                        profile.windup.as_ref(),
-                        "{name}"
-                    );
-                } else {
-                    assert_eq!(held, None, "{name}");
-                }
-                // Any other slot: identical too, except that a live warning keeps the body.
-                for slot in (0..4).filter(|slot| *slot != own_slot) {
-                    assert_eq!(
-                        plan(slot, 1, false),
-                        held.clone().or_else(|| by_slot(slot)),
-                        "{name} slot {slot}"
-                    );
-                }
+            let by_slot = |slot| motion_cue(&registry, class, Some(&state), slot, 7, effects);
+            let name = format!("{} {case}", skill.id());
+            // The skill's own slot: identical, whatever the sequence.
+            for sequence in [1, 2] {
+                assert_eq!(plan(own_slot, sequence, false), by_slot(own_slot), "{name}");
+            }
+            let held = by_slot(own_slot).filter(|cue| cue.hold);
+            if effects
+                .iter()
+                .any(|own| own.owner_id == 7 && own.kind == EffectVisualKind::BeamWarning)
+            {
                 assert_eq!(
-                    plan(BASIC_ATTACK_ACTION_SLOT, 1, false),
-                    held.clone().or_else(|| by_slot(BASIC_ATTACK_ACTION_SLOT)),
-                    "{name} basic"
+                    held.as_ref().map(|cue| &cue.motion),
+                    profile.windup.as_ref(),
+                    "{name}"
                 );
-                // A recast accepted during the warning does not take the body either.
-                if let Some(held) = &held {
-                    for slot in 0..4 {
-                        assert_eq!(plan(slot, 2, true).as_ref(), Some(held), "{name} recast");
-                    }
+            } else {
+                assert_eq!(held, None, "{name}");
+            }
+            // Any other slot: identical too, except that a live warning keeps the body.
+            for slot in (0..4).filter(|slot| *slot != own_slot) {
+                assert_eq!(
+                    plan(slot, 1, false),
+                    held.clone().or_else(|| by_slot(slot)),
+                    "{name} slot {slot}"
+                );
+            }
+            assert_eq!(
+                plan(BASIC_ATTACK_ACTION_SLOT, 1, false),
+                held.clone().or_else(|| by_slot(BASIC_ATTACK_ACTION_SLOT)),
+                "{name} basic"
+            );
+            // A recast accepted during the warning does not take the body either.
+            if let Some(held) = &held {
+                for slot in 0..4 {
+                    assert_eq!(plan(slot, 2, true).as_ref(), Some(held), "{name} recast");
                 }
             }
-            // The release is the row's clip at the row's rate and start; a fired effect is
-            // never a hold.
-            let release = motion_cue(
-                &registry,
-                class,
-                Some(&state),
-                own_slot,
-                7,
-                &[at(fired, 7, tail)],
-            );
-            assert_eq!(
-                release,
-                Some(MotionCue::action(
-                    &profile.release,
-                    profile.motion.rate,
-                    profile.motion.start
-                )),
-                "{}",
-                skill.id()
-            );
         }
+        // The release is the row's clip at the row's rate and start; a fired effect is
+        // never a hold.
+        let release = motion_cue(
+            &registry,
+            class,
+            Some(&state),
+            own_slot,
+            7,
+            &[at(fired, 7, tail)],
+        );
+        assert_eq!(
+            release,
+            Some(MotionCue::action(
+                &profile.release,
+                profile.motion.rate,
+                profile.motion.start
+            )),
+            "{}",
+            skill.id()
+        );
     }
 }
 
@@ -443,9 +450,11 @@ fn a_windup_is_a_loop_or_fitted_to_its_telegraph() {
         MotionCue::windup(ray, SkillId::DawnRay).unwrap().rate,
         0.625
     );
-    // An unmigrated row fits nothing: its windup plays as the clip is.
-    let unmigrated = SkillPresentation::unmigrated();
-    let ray = unmigrated.profile(SkillId::DawnRay).unwrap();
+    // A row that does not ask for the fit plays its windup as the clip is.
+    let unfitted = SkillPresentation::target_with(|config| {
+        config["skills"]["dawn_ray"]["motion"]["fit_windup"] = false.into();
+    });
+    let ray = unfitted.profile(SkillId::DawnRay).unwrap();
     assert_eq!(MotionCue::windup(ray, SkillId::DawnRay).unwrap().rate, 1.0);
     // Any clip can be fitted, and the fit is clamped to the rates a row may author: a
     // 0.17 s pose is not stretched to a fifth of its speed, nor a 1.5 s swing rushed past
@@ -572,25 +581,6 @@ fn fuse_and_parry_plans_hold_the_windup_from_the_accepted_cast() {
             "{name}"
         );
     }
-    // An unmigrated row of these skills holds no windup: the cast releases at once.
-    let unmigrated = SkillPresentation::unmigrated();
-    let (class, state) = preset(CoreId::Cinderforge);
-    let slot = slot_of(&state, SkillId::FurnaceBreath);
-    let telegraph = effect(SkillId::FurnaceBreath, EffectVisualKind::BeamWarning);
-    assert_eq!(
-        own_windup_cue(
-            &unmigrated,
-            class,
-            Some(&state),
-            7,
-            std::slice::from_ref(&telegraph)
-        ),
-        None
-    );
-    assert!(
-        motion_cue(&unmigrated, class, Some(&state), slot, 7, &[telegraph])
-            .is_some_and(|cue| !cue.hold)
-    );
 }
 
 /// A recast edge plays the recast clip of its row at the recast rate, from its first key.
@@ -628,9 +618,6 @@ fn a_recast_edge_plays_the_recast_clip() {
                 // A row without a recast clip plays what its slot plays.
                 None => assert_eq!(plan(&target, true), first, "{} {slot}", class.id()),
             }
-            // An unmigrated row names no recast clip: a recast is the release again.
-            let unmigrated = SkillPresentation::unmigrated();
-            assert_eq!(plan(&unmigrated, true), plan(&unmigrated, false));
         }
     }
     assert_eq!(recasts, 8);
@@ -829,7 +816,7 @@ fn all_roster_abilities_have_profiles_and_valid_recipes_override_default_slots()
         let b = registry
             .profile(state.recipe.as_ref().unwrap().skills[slot as usize])
             .unwrap();
-        assert_eq!(a.effect, b.effect);
+        assert!(std::ptr::eq(a, b));
         assert_eq!(a.release, b.release);
     }
     assert!(
@@ -929,54 +916,32 @@ fn mismatched_or_malformed_recipes_cannot_select_skill_or_basic_motion() {
     );
 }
 
-/// The motion table of the basic attacks is data: the row of the class when the registry
-/// has one, else the built-in table a class without a row still relies on.
+/// The motion table of the basic attacks is data: the row of the class is what plays.
 #[test]
 fn ranged_basic_attacks_use_aimed_motion_and_dagger_keeps_the_right_hand_thrust() {
     use shared::{BASIC_ATTACK_ACTION_SLOT, HeroClass};
-    let basic = |registry: &SkillPresentation, class| {
-        motion_cue(registry, class, None, BASIC_ATTACK_ACTION_SLOT, 1, &[])
-    };
-    // No row: the built-in table, played as the clip is.
-    let packaged = SkillPresentation::unmigrated();
+    let registry = SkillPresentation::target();
+    let basic = |class| motion_cue(&registry, class, None, BASIC_ATTACK_ACTION_SLOT, 1, &[]);
     for class in HeroClass::ALL {
-        let built_in = match class {
-            HeroClass::Ranger | HeroClass::Wildspark | HeroClass::Riftshot => Some("pistol_shoot"),
-            HeroClass::Mage
-            | HeroClass::Cleric
-            | HeroClass::Dawnweaver
-            | HeroClass::Emberveil
-            | HeroClass::Orbitwright
-            | HeroClass::Chainkeeper => Some("cast"),
-            HeroClass::Adventurer => Some("dagger_stab"),
-            // A melee core without a row keeps the attack state of the rig.
-            _ => None,
-        };
-        assert!(packaged.basic(class).is_none(), "{}", class.id());
+        let row = registry.basic(class).unwrap();
         assert_eq!(
-            basic(&packaged, class),
-            built_in.map(|motion| MotionCue::action(motion, 1.0, 0.0)),
-            "{}",
-            class.id()
-        );
-    }
-    // Every class of the final data has its row, and the row is what plays.
-    let target = SkillPresentation::target();
-    for class in HeroClass::ALL {
-        let row = target.basic(class).unwrap();
-        assert_eq!(
-            basic(&target, class),
+            basic(class),
             Some(MotionCue::action(&row.motions[0], row.rate, row.start)),
             "{}",
             class.id()
         );
     }
-    for registry in [&packaged, &target] {
-        assert_eq!(
-            basic(registry, HeroClass::Adventurer).unwrap().motion,
-            "dagger_stab"
-        );
+    // The classes that throw a body aim or throw it; none swings a blade at range.
+    for (class, motion) in [
+        (HeroClass::Ranger, "aim_loose_r"),
+        (HeroClass::Wildspark, "pistol_shoot"),
+        (HeroClass::Riftshot, "cast_thrust_r"),
+        (HeroClass::Mage, "toss_underhand"),
+        (HeroClass::Cleric, "cast"),
+    ] {
+        assert_eq!(basic(class).unwrap().motion, motion, "{}", class.id());
     }
+    assert_eq!(basic(HeroClass::Adventurer).unwrap().motion, "dagger_stab");
 }
 
 /// Rule E-13 and the alternation of two motions: the row is that of the kit's core, the
@@ -1075,87 +1040,23 @@ fn basic_attack_motions_follow_the_core_the_sequence_and_the_weapon_mode() {
 
 #[test]
 fn version_1_files_are_rejected_with_the_reason() {
-    let v1 = include_str!("fixtures/v1.skillfx");
     assert_eq!(
-        SkillPresentation::parse(v1).err().as_deref(),
+        SkillPresentation::parse(SCHEMA_1).err().as_deref(),
         Some("Unsupported skill presentation schema_version 1 (expected 2)")
     );
     // Any other failure of the file keeps its own message.
     assert!(SkillPresentation::parse("{").is_err_and(|error| !error.contains("schema_version")));
 }
 
-/// The rows no content package has reached yet are still what the first schema held.
 #[test]
-fn migration_preserves_v1_fields() {
-    let v1: serde_json::Value = serde_json::from_str(include_str!("fixtures/v1.skillfx")).unwrap();
-    let rows = v1["skills"].as_object().unwrap();
-    let registry = profiles();
-    assert_eq!(registry.rows().count(), rows.len());
-    let mut waiting = 0;
-    for (id, old) in rows {
-        let new = registry
-            .row(id)
-            .unwrap_or_else(|| panic!("{id} was dropped"));
-        let home = category::SkillKey::from_id(id).unwrap().home();
-        if target::PROMOTED.contains(&home) {
-            // A promoted row is the final one (`shipped_rows_equal_target_for_promoted_classes`).
-            assert!(new.migrated() && new.effect.is_none(), "{id}");
-            continue;
-        }
-        waiting += 1;
-        assert_eq!(old["release"], new.release.as_str(), "{id}");
-        assert_eq!(
-            old.get("windup").and_then(|windup| windup.as_str()),
-            new.windup.as_deref(),
-            "{id}"
-        );
-        let effect: EffectStyle = serde_json::from_value(old["effect"].clone()).unwrap();
-        assert_eq!(new.effect, Some(effect), "{id}");
-        let color: [f32; 3] = serde_json::from_value(old["color"].clone()).unwrap();
-        assert_eq!(new.color, color, "{id}");
-        let hdr_gain: f32 = serde_json::from_value(old["hdr_gain"].clone()).unwrap();
-        assert_eq!(new.hdr_gain, hdr_gain, "{id}");
-        // The migration adds the home class and nothing that a consumer reads.
-        assert!(
-            !new.migrated()
-                && new.body.is_none()
-                && new.aux.is_empty()
-                && new.impact.is_none()
-                && new.sound.is_none()
-                && new.secondary.is_none()
-                && new.accent.is_none()
-                && new.motion == schema::MotionPlayback::default(),
-            "{id}"
-        );
-        assert_eq!(new.home, home.id(), "{id}");
-    }
-    assert_eq!(waiting, 4 * (HeroClass::ALL.len() - target::PROMOTED.len()));
-    // The registry the tests of unmigrated rows read is that first schema for every skill.
-    let unmigrated = SkillPresentation::unmigrated();
-    assert_eq!(unmigrated.rows().count(), rows.len());
-    assert!(unmigrated.basic_attacks.is_empty());
-    assert_eq!(unmigrated.themes, registry.themes);
-    for (id, old) in rows {
-        let row = unmigrated.row(id).unwrap();
-        let effect: EffectStyle = serde_json::from_value(old["effect"].clone()).unwrap();
-        assert!(!row.migrated() && row.effect == Some(effect), "{id}");
-        assert_eq!(old["release"], row.release.as_str(), "{id}");
-    }
-}
-
-#[test]
-fn the_packaged_registry_has_a_theme_for_every_class_and_basic_rows_for_the_promoted_ones() {
+fn the_packaged_registry_has_a_theme_and_a_basic_row_for_every_class() {
     let registry = profiles();
     for class in shared::HeroClass::ALL {
         assert!(registry.theme(class).is_some(), "{}", class.id());
-        assert_eq!(
-            registry.basic(class).is_some(),
-            target::PROMOTED.contains(&class),
-            "{}",
-            class.id()
-        );
+        assert!(registry.basic(class).is_some(), "{}", class.id());
     }
     assert_eq!(registry.themes.len(), shared::HeroClass::ALL.len());
+    assert_eq!(registry.basic_attacks.len(), shared::HeroClass::ALL.len());
     let frost = registry.theme(shared::HeroClass::Frostguard).unwrap();
     assert_eq!(frost.secondary, [0.86, 0.94, 1.0]);
     assert_eq!(frost.accent, [0.55, 0.6, 1.0]);
@@ -1171,7 +1072,7 @@ fn the_origin_fingerprint_is_fnv_1a_of_the_packaged_bytes() {
     assert_eq!(loaded.fnv64, fnv64(bytes));
     assert_eq!(loaded.registry.rows().count(), 68);
     assert!(LoadedPresentation::from_bytes(&[0xff, 0xfe]).is_err());
-    assert!(LoadedPresentation::from_bytes(include_bytes!("fixtures/v1.skillfx")).is_err());
+    assert!(LoadedPresentation::from_bytes(SCHEMA_1.as_bytes()).is_err());
 
     // The packaged file replaces the embedded copy and says so.
     let mut app = App::new();
@@ -1271,44 +1172,27 @@ fn identity_reads_motion_family_body_and_impact() {
         }
     );
     assert_eq!(identity("heroic_strike").motion, "slash_down");
-    // Rows that are not migrated keep the look of their legacy style and the shared burst.
-    let hook = identity("iron_hook");
-    assert_eq!(hook.body, BodySig::Legacy(Some(EffectStyle::Hook)));
+    // A prop is named by its model, and a skill that deals no damage has no impact.
     assert_eq!(
-        hook.body.key(),
-        ("legacy".into(), "legacy:Some(Hook)".into())
+        identity("guiding_lantern").body.key(),
+        ("zone".into(), "model:lantern".into())
     );
-    assert_eq!(hook.impact, ImpactSig::Unthemed);
     assert_eq!(identity("guiding_lantern").impact, ImpactSig::None);
     assert!(signature::identity(&registry, &projectiles, "fireball").is_none());
-
-    // Migrating twelve rows can only lower the counters that describe unmigrated rows.
-    let before = signature::ratchet(&SkillPresentation::unmigrated(), &projectiles).unwrap();
-    let after = signature::ratchet(&registry, &projectiles).unwrap();
-    assert_eq!(after.rows_without_cast, before.rows_without_cast - 12);
-    assert_eq!(after.rows_with_effect, before.rows_with_effect - 12);
-    assert_eq!(
-        after.rows_without_cast_voice,
-        before.rows_without_cast_voice - 12
-    );
-    assert_eq!(
-        after.classes_without_basic_row,
-        before.classes_without_basic_row - 2
-    );
-    assert_eq!(after.duplicate_cast_voices, 0);
-    assert!(after.pairs_under_two_axes < before.pairs_under_two_axes);
-    assert!(after.rows_breaking_luminance <= before.rows_breaking_luminance);
 }
 
-/// The ratchet: the packaged registry may not move away from the final rules, and a
-/// package that moves it closer lowers the checked-in counters.
+/// The ratchet: every counter of the packaged registry is closed and stays closed.
 #[test]
 fn shipped_identity_ratchet() {
     let projectiles = crate::combat_visuals::CombatVisualRegistry::from_json(include_str!(
         "../../assets/config/combat_visuals.json"
     ))
     .unwrap();
-    let counts = signature::ratchet(&profiles(), &projectiles).unwrap();
+    let counts = signature::ratchet(&profiles(), &projectiles);
+    assert_eq!(
+        signature::SHIPPED_RATCHET,
+        signature::RatchetCounts::default()
+    );
     for ((name, count), (_, ceiling)) in counts
         .entries()
         .into_iter()
@@ -1317,10 +1201,6 @@ fn shipped_identity_ratchet() {
         assert!(
             count <= ceiling,
             "{name} rose from {ceiling} to {count}: the packaged skills became less distinct"
-        );
-        assert!(
-            count >= ceiling,
-            "{name} fell from {ceiling} to {count}: lower it in SHIPPED_RATCHET"
         );
     }
 }
@@ -1533,34 +1413,13 @@ fn draw_registry(registry: &SkillPresentation) -> Drawn {
 }
 
 /// AC13 from data: every accent, move, link, impact and expire one-shot of the packaged
-/// file and of the final rows stays inside its budget with finite poses in both backends.
+/// file stays inside its budget with finite poses in both backends.
 #[test]
 fn budget_from_data() {
-    // The packaged rows gain their blocks class by class; whatever they have is held to
-    // the same budgets.
-    let shipped = profiles();
-    let packaged = draw_registry(&shipped);
+    // 68 skill accents and 14 basic ones, 51 skill impacts and 18 basic ones, and every
+    // modifier of the data contract.
     assert_eq!(
-        packaged.accents,
-        shipped.rows().filter(|(_, row)| row.cast.is_some()).count()
-            + shared::HeroClass::ALL
-                .into_iter()
-                .filter_map(|class| shipped.basic(class))
-                .map(|basic| {
-                    usize::from(basic.accent.is_some())
-                        + usize::from(
-                            basic
-                                .rockets
-                                .as_ref()
-                                .is_some_and(|row| row.accent.is_some()),
-                        )
-                })
-                .sum::<usize>()
-    );
-    // The final rows: 68 skill accents and 14 basic ones, 51 skill impacts and 18 basic
-    // ones, and every modifier of the data contract.
-    assert_eq!(
-        draw_registry(&target::target()),
+        draw_registry(&profiles()),
         Drawn {
             accents: 68 + 14,
             silent_accents: 1,
@@ -1829,21 +1688,12 @@ fn a_replicated_effect_resolves_to_the_body_its_row_gives_that_kind() {
         (wave.archetype, warning.archetype),
         (vocab::Archetype::Traveller, vocab::Archetype::Lane)
     );
-    // Both orders of the orb share its body; a row without the block gives none.
+    // Both orders of the orb share its body.
     assert_eq!(
         seen(SkillId::OrbitalCommand, K::Orb),
         seen(SkillId::OrbitalGuard, K::Orb)
     );
     assert!(seen(SkillId::OrbitalCommand, K::Orb).is_some());
-    let unmigrated = SkillPresentation::unmigrated();
-    for id in SkillId::ALL {
-        for kind in category::own_kinds(id)
-            .iter()
-            .chain(category::aux_kinds(id))
-        {
-            assert_eq!(unmigrated.body_for(&effect(id, *kind)), None, "{}", id.id());
-        }
-    }
 }
 
 /// AC13 from data: every body of the final rows stays inside the part budget of its
@@ -2012,14 +1862,14 @@ fn output_validation_refuses_bursts_over_their_budget() {
 fn a_row_cannot_name_a_state_visual() {
     use status::StateVisual;
     let pick_list = vocab::render_markdown();
-    let fixture: serde_json::Value =
-        serde_json::from_str(include_str!("fixtures/target.skillfx")).unwrap();
+    let packaged: serde_json::Value =
+        serde_json::from_str(include_str!("../../assets/config/skills.skillfx")).unwrap();
     let refused = |edit: &dyn Fn(&mut serde_json::Value)| {
-        let mut config = fixture.clone();
+        let mut config = packaged.clone();
         edit(&mut config);
         SkillPresentation::parse(&config.to_string()).is_err()
     };
-    // The unedited fixture parses, so every refusal below is caused by its edit.
+    // The unedited file parses, so every refusal below is caused by its edit.
     assert!(!refused(&|_| {}));
     for state in StateVisual::PRIORITY {
         let id = state.id();

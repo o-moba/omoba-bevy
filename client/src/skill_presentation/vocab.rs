@@ -1,8 +1,6 @@
 //! The closed vocabulary of skill presentation. Every ID a data row may name is a variant
 //! here, so a new look is a code change with a test and never a data edit.
 //! `docs/skill-vocabulary.md` is rendered from these lists.
-// The pick list is complete; renderers and generators adopt the IDs package by package.
-#![cfg_attr(not(test), allow(dead_code))]
 
 use serde::Deserialize;
 
@@ -15,12 +13,17 @@ macro_rules! vocabulary {
         pub(crate) enum $name {
             $($(#[$variant_meta])* #[doc = $doc] #[serde(rename = $id)] $variant,)+
         }
+        // Every list has the same accessors. The game reads the ones it needs; the pick
+        // list, which the tests render, reads all of them.
         impl $name {
+            #[cfg_attr(not(test), allow(dead_code))]
             pub(crate) const ALL: &'static [Self] = &[$(Self::$variant,)+];
+            #[cfg_attr(not(test), allow(dead_code))]
             pub(crate) const fn id(self) -> &'static str {
                 match self { $(Self::$variant => $id,)+ }
             }
             /// What the player sees, as printed in the pick list.
+            #[cfg(test)]
             pub(crate) const fn doc(self) -> &'static str {
                 match self { $(Self::$variant => $doc,)+ }
             }

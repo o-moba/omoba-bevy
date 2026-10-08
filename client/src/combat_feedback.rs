@@ -805,8 +805,8 @@ mod tests {
         // every other receipt keeps the built-in burst.
         assert!(themed_impact(Some(&registry), None, &hit, FLOOR, &[], 0).is_none());
         assert!(themed_impact(None, Some(&source), &hit, FLOOR, &[], 0).is_none());
-        let unmigrated = SkillPresentation::unmigrated();
-        assert!(themed_impact(Some(&unmigrated), Some(&source), &hit, FLOOR, &[], 0).is_none());
+        let empty = SkillPresentation::default();
+        assert!(themed_impact(Some(&empty), Some(&source), &hit, FLOOR, &[], 0).is_none());
         let mut unslotted = hit.clone();
         unslotted.action_slot = None;
         assert!(themed_impact(Some(&registry), Some(&source), &unslotted, FLOOR, &[], 0).is_none());
@@ -818,7 +818,7 @@ mod tests {
                 .iter()
                 .all(|spec| spec.source == ParticleSource::Impact && spec.event_id == 6)
         );
-        assert!(themed_impact(Some(&unmigrated), Some(&source), &basic, FLOOR, &[], 0).is_none());
+        assert!(themed_impact(Some(&empty), Some(&source), &basic, FLOOR, &[], 0).is_none());
     }
 
     /// A receipt on the neutral monster 50 from the hero 7.
@@ -983,11 +983,11 @@ mod tests {
                 }
             );
         }
-        // A row without a recipe, and a source the client does not see, keep the built-in
-        // burst: the evidence names no recipe and counts no particle of one.
+        // A registry without the row, and a source the client does not see, keep the
+        // built-in burst: the evidence names no recipe and counts no particle of one.
         let hit = dealt(6, 40.0, 7, slot_of(class, SkillId::ThunderKick));
-        let unmigrated = SkillPresentation::unmigrated();
-        for (skills, source) in [(&unmigrated, Some(&source)), (&registry, None)] {
+        let empty = SkillPresentation::default();
+        for (skills, source) in [(&empty, Some(&source)), (&registry, None)] {
             let burst = themed_impact(Some(skills), source, &hit, FLOOR, &[], 0);
             assert!(burst.is_none());
             let look = ReceiptLook::of(Some(skills), source, &hit, burst.as_deref());
@@ -1155,9 +1155,9 @@ mod tests {
             cue.iter()
                 .all(|spec| spec.source == ParticleSource::Cue && spec.event_id == 4)
         );
-        // It is not an impact, and a row without a `cast` block draws none.
+        // It is not an impact, and a registry without the row draws none.
         assert!(themed_impact(Some(&registry), Some(&source), snaps[0], FLOOR, &[], 0).is_some());
-        assert!(accents::trap_snap(&SkillPresentation::unmigrated(), key, GROUND, 4).is_empty());
+        assert!(accents::trap_snap(&SkillPresentation::default(), key, GROUND, 4).is_empty());
         assert!(accents::trap_snap(&registry, CastKey::Basic(class), GROUND, 4).is_empty());
         // The trap that did bite is an ordinary hit with the recipe of its row.
         let bite = themed_impact(Some(&registry), Some(&source), &accepted[0], FLOOR, &[], 0);

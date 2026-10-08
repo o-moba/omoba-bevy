@@ -21,7 +21,7 @@ bone names, optional joints and rest orientations after validated binding.
   - https://raw.githubusercontent.com/J-Ponzo/gltf-universal-animation-library/main/glTF/AnimationLibrary_Godot_Standard.bin
 
 The generated library records the SHA-256 of both inputs. No new download is
-needed to regenerate it. Three exporter tables define its 58 motions.
+needed to regenerate it. Three exporter tables define its 55 motions.
 
 ### Full-rate clips (`CLIPS` in `scripts/export_humanoid_motion.py`)
 
@@ -39,13 +39,10 @@ key at which the strike or gesture is fully formed.
 | `spell_prepare` | `Spell_Simple_Enter` | No | 0.417 s | Dawn ray preparation; hold last pose until authoritative release |
 | `spell_finish` | `Spell_Simple_Exit` | No | 0.25 s | Dawn field gesture |
 | `pistol_shoot` | `Pistol_Shoot` | No | 0.042 s | Wildspark shooting and Repeater basic attacks |
-| `pistol_reload` | `Pistol_Reload` | No | 0.333 s | Wildspark weapon-mode switch |
 | `pistol_aim` | `Pistol_Aim_Neutral` | No | 0 s | Static aim pose for profile authoring |
-| `interact` | `Interact` | No | 0.5 s | Barrier / trap placement gesture |
 | `punch` | `Punch_Cross` | No | 0.25 s | Right cross |
 | `guard` | `Punch_Enter` | No | 0.333 s | Hands up into the fist guard |
 | `shoulder_drive` | `Punch_Jab` | No | 0.208 s | Left jab |
-| `roll` | `Roll` | No | 0.375 s | Forward roll |
 
 ### Dagger timing edits (`DAGGER_MOTIONS`)
 
@@ -120,7 +117,7 @@ are hemisphere-corrected between keys. Row fields:
 | `draw_in` | `PickUp_Table` | 5 / 0.5 | 0.125 s | Reach forward and pull across the chest |
 | `hurl_overhand` | `Sword_Attack`, `Spell_Simple_Shoot`, `Spell_Simple_Exit`, `Idle_Loop`; one stance mirrored | 6 / 0.5 | 0.2 s | Overhand throw from high behind into a pointing arm (approx.) |
 | `toss_underhand` | `PickUp_Table`, `Idle_Loop` | 4 / 0.4 | 0.13 s | Underhand toss with the left hand (approx.) |
-| `place_quick` | `Interact` | 5 / 0.6 | 0.15 s | Quick placing gesture (0.6 s instead of the 2 s `interact`) |
+| `place_quick` | `Interact` | 5 / 0.6 | 0.15 s | Quick placing gesture (0.6 s where the source clip takes 2 s) |
 | `kneel_plant` | `Fixing_Kneeling` | 7 / 0.75 | 0.36 s | Kneel, set both hands low, stand |
 | `dagger_backstab` | `Punch_Cross`, `Crouch_Idle_Loop` | 6 / 0.65 | 0.11 s | Dagger stab, then a drop into a crouch (approx.) |
 
@@ -166,7 +163,7 @@ GLB-writing functions. Do not rerun legacy baking to add Run to models.
 
 ## Shared asset contract (version 1)
 
-The JSON resource is roughly 1.58 MiB and contains 58 motions (698 keys) for 52
+The JSON resource is roughly 1.30 MiB and contains 55 motions (572 keys) for 52
 semantic bones. Its schema uses glTF right-handed, Y-up coordinates and
 `[x, y, z, w]` unit quaternions. Numeric values are rounded to seven decimal
 places.

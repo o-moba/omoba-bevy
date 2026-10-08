@@ -1,7 +1,6 @@
-//! The final data of the roster as a fixture: 68 skill rows, 17 basic attacks and the
-//! projectile profiles of the class designs, parsed and held to the identity rules before
-//! any renderer draws them. Engine packages test their generators against these rows;
-//! content packages move them into the packaged files.
+//! The final data of the roster, as the packaged files hold it: 68 skill rows, 17 basic
+//! attacks and the projectile profiles of the class designs, parsed and held to the identity
+//! rules. The tests of the generators and the renderers draw these rows.
 use super::super::category::{self, Category, SkillKey};
 use super::super::schema::{Body, CastAccent, ImpactRecipe, SoundCue};
 use super::super::signature::{self, RatchetCounts};
@@ -20,48 +19,18 @@ use shared::loadout::AttackProfileId;
 use shared::{BASIC_ATTACK_ACTION_SLOT, HeroClass};
 use std::collections::{BTreeMap, BTreeSet};
 
-const TARGET: &str = include_str!("../fixtures/target.skillfx");
-const TARGET_VISUALS: &str = include_str!("../fixtures/target_combat_visuals.json");
+const TARGET: &str = include_str!("../../../assets/config/skills.skillfx");
+const TARGET_VISUALS: &str = include_str!("../../../assets/config/combat_visuals.json");
 
-/// The final `skills.skillfx`.
+/// The packaged `skills.skillfx`.
 pub(in crate::skill_presentation) fn target() -> SkillPresentation {
-    SkillPresentation::parse(TARGET).unwrap_or_else(|error| panic!("target.skillfx: {error}"))
+    SkillPresentation::parse(TARGET).unwrap_or_else(|error| panic!("skills.skillfx: {error}"))
 }
 
-/// The final `combat_visuals.json`.
+/// The packaged `combat_visuals.json`.
 pub(in crate::skill_presentation) fn target_visuals() -> CombatVisualRegistry {
     CombatVisualRegistry::from_json(TARGET_VISUALS)
-        .unwrap_or_else(|error| panic!("target_combat_visuals.json: {error}"))
-}
-
-/// The classes whose rows the content packages have moved into the packaged files.
-pub(in crate::skill_presentation) const PROMOTED: [HeroClass; 17] = [
-    HeroClass::Warrior,
-    HeroClass::Mage,
-    HeroClass::Ranger,
-    HeroClass::Cleric,
-    HeroClass::Warden,
-    HeroClass::Dawnweaver,
-    HeroClass::Emberveil,
-    HeroClass::Orbitwright,
-    HeroClass::Veilstalker,
-    HeroClass::Cinderforge,
-    HeroClass::Edgeweaver,
-    HeroClass::Stormfist,
-    HeroClass::Adventurer,
-    HeroClass::Wildspark,
-    HeroClass::Riftshot,
-    HeroClass::Chainkeeper,
-    HeroClass::Frostguard,
-];
-
-fn shipped() -> SkillPresentation {
-    SkillPresentation::parse(include_str!("../../../assets/config/skills.skillfx")).unwrap()
-}
-
-fn shipped_visuals() -> CombatVisualRegistry {
-    CombatVisualRegistry::from_json(include_str!("../../../assets/config/combat_visuals.json"))
-        .unwrap()
+        .unwrap_or_else(|error| panic!("combat_visuals.json: {error}"))
 }
 
 /// Every row with its key, in registry order.
@@ -89,7 +58,7 @@ fn repeater(class: HeroClass) -> bool {
 
 #[test]
 fn target_parses() {
-    // Both files are read by the loaders an overlay run goes through.
+    // Both files are read by the loaders of the client.
     assert!(TARGET.len() < schema::MAX_BYTES);
     assert_eq!(
         LoadedPresentation::from_bytes(TARGET.as_bytes())
@@ -101,14 +70,9 @@ fn target_parses() {
     );
     let registry = target();
     let visuals = target_visuals();
-    let packaged = shipped();
 
-    // The target changes rows, not the roster: the same 68 skills and the packaged themes.
-    assert_eq!(
-        registry.rows().map(|(id, _)| id).collect::<Vec<_>>(),
-        packaged.rows().map(|(id, _)| id).collect::<Vec<_>>()
-    );
-    assert_eq!(registry.themes, packaged.themes);
+    // One theme and one basic row for each class.
+    assert_eq!(registry.themes.len(), HeroClass::ALL.len());
     assert_eq!(registry.basic_attacks.len(), HeroClass::ALL.len());
     for class in HeroClass::ALL {
         let basic = registry.basic(class).unwrap();
@@ -120,12 +84,13 @@ fn target_parses() {
         );
     }
 
-    // Every row is final: drawn by its own blocks, nothing left to the legacy style.
+    // Every row is drawn by its own blocks.
     let rows = rows(&registry);
     let count = |pick: fn(&SkillProfile) -> bool| {
         rows.iter().filter(|(_, _, profile)| pick(profile)).count()
     };
-    assert_eq!(count(|row| row.migrated() && row.effect.is_none()), 68);
+    assert_eq!(rows.len(), 68);
+    assert_eq!(count(|row| row.cast.is_some()), 68);
     assert_eq!(count(|row| row.body.is_some()), 26);
     assert_eq!(count(|row| row.impact.is_some()), 51);
     assert_eq!(count(|row| row.windup.is_some()), 5);
@@ -222,91 +187,25 @@ fn target_parses() {
             basic.id
         );
     }
-    // Hits of hidden or unresolved sources keep the packaged arcane and holy looks.
-    let packaged_visuals = shipped_visuals();
-    for style in [ProjectileStyle::Arcane, ProjectileStyle::Holy] {
-        let (now, before) = (
-            visuals.resolve_style(style),
-            packaged_visuals.resolve_style(style),
-        );
-        assert_eq!(
-            (&now.id, now.shape, now.color, now.scale, now.form),
-            (&before.id, before.shape, before.color, before.scale, None)
-        );
+    // Hits of hidden or unresolved sources keep the plain arcane and holy looks.
+    for (style, id) in [
+        (ProjectileStyle::Arcane, "mage_arcane"),
+        (ProjectileStyle::Holy, "cleric_holy"),
+    ] {
+        let default = visuals.resolve_style(style);
+        assert_eq!((default.id.as_str(), default.form), (id, None));
     }
 }
 
-/// A promoted class ships the final data: its theme, its basic row, its four skill rows and
-/// the projectile profiles its actions resolve to are the target's, value for value. A
-/// content package tunes a promoted row in both files; the rest of the roster still waits.
-#[test]
-fn shipped_rows_equal_target_for_promoted_classes() {
-    let (registry, packaged) = (target(), shipped());
-    let (visuals, packaged_visuals) = (target_visuals(), shipped_visuals());
-    // Parsed rows are compared as the client holds them, whatever the files spell.
-    let own = |registry: &SkillPresentation, class: HeroClass| -> Vec<(String, String)> {
-        rows(registry)
-            .into_iter()
-            .filter(|(_, key, _)| key.home() == class)
-            .map(|(id, _, row)| (id.to_string(), format!("{row:?}")))
-            .collect()
-    };
-    for class in PROMOTED {
-        let name = class.id();
-        assert_eq!(packaged.theme(class), registry.theme(class), "{name}");
-        assert!(packaged.basic(class).is_some(), "{name}");
-        assert_eq!(packaged.basic(class), registry.basic(class), "{name}");
-        let kit = own(&packaged, class);
-        assert_eq!(kit.len(), 4, "{name}");
-        for (shipped, target) in kit.iter().zip(own(&registry, class)) {
-            assert_eq!(*shipped, target, "{name}");
-        }
-        // Every body the class throws, and the look of a hit or a projectile of its wire
-        // style whose owner the client cannot resolve.
-        let mut styles = vec![ProjectileStyle::for_class(class)];
-        if repeater(class) {
-            styles = vec![ProjectileStyle::Bullet, ProjectileStyle::Rocket];
-        }
-        for style in styles {
-            for slot in [0, 1, 2, 3, BASIC_ATTACK_ACTION_SLOT] {
-                assert_eq!(
-                    format!("{:?}", projectile(&packaged_visuals, class, style, slot)),
-                    format!("{:?}", projectile(&visuals, class, style, slot)),
-                    "{name} {style:?} {slot}"
-                );
-            }
-            assert_eq!(
-                format!("{:?}", packaged_visuals.resolve_style(style)),
-                format!("{:?}", visuals.resolve_style(style)),
-                "{name} {style:?}"
-            );
-        }
-    }
-    // Rows are promoted by class and whole: a row is final exactly when its class is.
-    for (id, key, row) in rows(&packaged) {
-        let promoted = PROMOTED.contains(&key.home());
-        assert_eq!(row.migrated(), promoted, "{id}");
-        assert_eq!(row.effect.is_none(), promoted, "{id}");
-    }
-    for class in HeroClass::ALL {
-        assert_eq!(
-            packaged.basic(class).is_some(),
-            PROMOTED.contains(&class),
-            "{}",
-            class.id()
-        );
-    }
-}
-
-/// U1 to U6 and the migration counters: nothing is left to do on the target.
+/// U1 to U6 and the two projectile counters: no two skills can be mistaken for each other.
 #[test]
 fn target_identity_is_unique() {
     let registry = target();
     let visuals = target_visuals();
-    let found = signature::findings(&registry, &visuals).unwrap();
+    let found = signature::findings(&registry, &visuals);
     assert!(
         found.is_empty(),
-        "the target breaks the identity rules:\n{}",
+        "the packaged rows break the identity rules:\n{}",
         found
             .iter()
             .map(|(counter, rows)| format!("  {counter}: {rows}"))
@@ -314,7 +213,7 @@ fn target_identity_is_unique() {
             .join("\n")
     );
     assert_eq!(
-        signature::ratchet(&registry, &visuals).unwrap(),
+        signature::ratchet(&registry, &visuals),
         RatchetCounts::default()
     );
 
@@ -335,7 +234,7 @@ fn target_identity_is_unique() {
         serde_json::json!({ "rate": 0.8, "start": 0.1 });
     let first_choice = schema_rules::parse(&first_choice).unwrap();
     assert_eq!(
-        signature::findings(&first_choice, &visuals).unwrap(),
+        signature::findings(&first_choice, &visuals),
         [(
             "families_over_three_skills",
             r#""cast_thrust_r" has 4: arc_bolt, dawn_bind, orbital_guard, piercing_arrow"#
@@ -348,7 +247,7 @@ fn target_identity_is_unique() {
     same_spark["profiles"]["mage_basic"]["form"] = "comet".into();
     let same_spark = CombatVisualRegistry::from_json(&same_spark.to_string()).unwrap();
     assert_eq!(
-        signature::ratchet(&registry, &same_spark).unwrap(),
+        signature::ratchet(&registry, &same_spark),
         RatchetCounts {
             basic_projectile_key_duplicates: 1,
             ..RatchetCounts::default()
@@ -506,29 +405,29 @@ fn basic_projectile_bodies_are_unique() {
 /// The helper that explains a failing ratchet counts exactly what the ratchet counts.
 #[test]
 fn findings_name_what_the_ratchet_counts() {
+    let (packaged, visuals) = (target(), target_visuals());
     let samples = schema_rules::parse(&schema_rules::samples()).unwrap();
+    // Rampage as a second Heroic Strike: its swing and its hit and, in the cosmetics file,
+    // its thrown body.
+    let mut twin: serde_json::Value = serde_json::from_str(TARGET).unwrap();
+    for block in ["release", "motion", "impact"] {
+        twin["skills"]["rampage"][block] = twin["skills"]["heroic_strike"][block].clone();
+    }
+    let twin = schema_rules::parse(&twin).unwrap();
+    let mut twin_visuals: serde_json::Value = serde_json::from_str(TARGET_VISUALS).unwrap();
+    for field in ["form", "silhouette", "presentation"] {
+        twin_visuals["profiles"]["rampage"][field] =
+            twin_visuals["profiles"]["heroic_strike"][field].clone();
+    }
+    let twin_visuals = CombatVisualRegistry::from_json(&twin_visuals.to_string()).unwrap();
     for (name, registry, visuals) in [
-        ("packaged", shipped(), shipped_visuals()),
-        (
-            "unmigrated",
-            SkillPresentation::unmigrated(),
-            shipped_visuals(),
-        ),
-        ("samples", samples, shipped_visuals()),
-        (
-            "target on packaged projectiles",
-            target(),
-            shipped_visuals(),
-        ),
-        (
-            "packaged on target projectiles",
-            shipped(),
-            target_visuals(),
-        ),
-        ("target", target(), target_visuals()),
+        ("packaged", &packaged, &visuals),
+        ("samples", &samples, &visuals),
+        ("twin swing and hit", &twin, &visuals),
+        ("twin", &twin, &twin_visuals),
     ] {
-        let counts = signature::ratchet(&registry, &visuals).unwrap();
-        let found = signature::findings(&registry, &visuals).unwrap();
+        let counts = signature::ratchet(registry, visuals);
+        let found = signature::findings(registry, visuals);
         for (counter, count) in counts.entries() {
             assert_eq!(
                 found.iter().filter(|(of, _)| *of == counter).count(),
@@ -546,17 +445,43 @@ fn findings_name_what_the_ratchet_counts() {
             "{name}: a finding without a counter"
         );
     }
-    // A finding names the rows, not just a number. The packaged file has none left, so
-    // the rows it had before the content packages are asked.
-    let found = signature::findings(&SkillPresentation::unmigrated(), &shipped_visuals()).unwrap();
-    assert!(found.iter().any(|(counter, rows)| {
-        *counter == "full_tuple_duplicates" && rows.contains(" / ") && rows.contains("share")
-    }));
+    // The packaged rows have no finding; the twin has one on every axis, and each names its
+    // rows, not just a number.
+    assert_eq!(
+        signature::ratchet(&packaged, &visuals),
+        RatchetCounts::default()
+    );
+    let found = signature::findings(&twin, &twin_visuals);
+    for (counter, rows) in [
+        (
+            "full_tuple_duplicates",
+            "heroic_strike / rampage share motion, body, impact",
+        ),
+        (
+            "pairs_under_two_axes",
+            "heroic_strike / rampage share motion, body, impact",
+        ),
+    ] {
+        assert!(
+            found.contains(&(counter, rows.to_string())),
+            "{counter}: {found:?}"
+        );
+    }
+    let counts = signature::ratchet(&twin, &twin_visuals);
+    assert_eq!(
+        (
+            counts.duplicate_body_keys,
+            counts.classes_repeating_motion_family,
+            counts.classes_repeating_body_silhouette,
+            counts.classes_repeating_impact_kind
+        ),
+        (1, 1, 1, 1)
+    );
+    assert_eq!(signature::ratchet(&twin, &visuals).full_tuple_duplicates, 0);
 }
 
 /// The clips a final row plays, as a release, a windup, a recast or a basic attack.
-/// `attack` and `pistol_aim` stay in the library without a user; `interact`,
-/// `pistol_reload` and `roll` are retired with the legacy paths.
+/// `attack` and `pistol_aim` stay in the library without a user.
 const REQUIRED_MOTIONS: [&str; 49] = [
     "cast",
     "spell_prepare",
@@ -609,7 +534,7 @@ const REQUIRED_MOTIONS: [&str; 49] = [
     "kneel_plant",
 ];
 
-/// The vocabulary IDs the target draws, by pick list.
+/// The vocabulary IDs the packaged rows draw, by pick list.
 #[derive(Default)]
 struct Used<'a> {
     ids: BTreeMap<&'static str, BTreeSet<&'a str>>,
@@ -832,7 +757,7 @@ fn target_uses_every_required_vocabulary_id() {
         let unused: Vec<_> = required.difference(&used).collect();
         let unlisted: Vec<_> = used.difference(&required).collect();
         if !unused.is_empty() {
-            gaps.push(format!("{list}: no target row uses {unused:?}"));
+            gaps.push(format!("{list}: no packaged row uses {unused:?}"));
         }
         if !unlisted.is_empty() {
             gaps.push(format!("{list}: outside the required set: {unlisted:?}"));
@@ -845,7 +770,7 @@ fn target_uses_every_required_vocabulary_id() {
         used.ids.keys()
     );
 
-    // The clips are the library minus the base states and the five without a final user.
+    // The clips are the library minus the base states and the two without a user.
     let library = SharedHumanoidMotion::embedded().unwrap();
     let spare: BTreeSet<&str> = library
         .clips
@@ -855,17 +780,7 @@ fn target_uses_every_required_vocabulary_id() {
         .collect();
     assert_eq!(
         spare,
-        BTreeSet::from([
-            "attack",
-            "death",
-            "idle",
-            "interact",
-            "pistol_aim",
-            "pistol_reload",
-            "roll",
-            "run",
-            "walk"
-        ])
+        BTreeSet::from(["attack", "death", "idle", "pistol_aim", "run", "walk"])
     );
     // The five 2D shapes stay in use, and the voices spread over the whole speed grid.
     for shape in [

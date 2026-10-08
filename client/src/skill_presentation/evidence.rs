@@ -67,7 +67,6 @@ pub(crate) fn identity(
         "body": [body, silhouette],
         "impact": match identity.impact {
             ImpactSig::None => serde_json::Value::Null,
-            ImpactSig::Unthemed => "unthemed".into(),
             ImpactSig::Themed { kind, lead } => serde_json::json!([kind.id(), lead.id()]),
         },
     }))

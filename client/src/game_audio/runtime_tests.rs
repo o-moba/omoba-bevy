@@ -533,9 +533,9 @@ fn receipts_and_releases_are_voiced_by_their_rows_and_the_packaged_rows_add_noth
     assert!(near(chord[2], 1.40 * detune));
     assert_eq!(diagnostics(&app).cue_plays.get("holy"), Some(&3));
 
-    // The unmigrated rows name no voice: the receipt keeps the cue of its wire style, played
-    // as recorded, and neither the cast nor the beam is heard.
-    let mut app = skill_setup(SkillPresentation::unmigrated());
+    // A registry without the rows names no voice: the receipt keeps the cue of its wire
+    // style, played as recorded, and neither the cast nor the beam is heard.
+    let mut app = skill_setup(SkillPresentation::default());
     app.world_mut()
         .resource_mut::<GameStateSnapshot>()
         .combat_events

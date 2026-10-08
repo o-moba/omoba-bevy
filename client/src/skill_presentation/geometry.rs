@@ -1,8 +1,7 @@
 //! One table for every boundary and area a skill may draw. Shapes are functions of the
 //! received effect fields and the catalog only; presentation data cannot scale or move them.
-// The parser, the area flash, the body renderer, the 2D fallback and the aim preview read
-// this table.
-#![cfg_attr(not(test), allow(dead_code))]
+//! The parser, the area flash, the body renderer, the 2D fallback and the aim preview read
+//! this table.
 
 use super::category::{cone_half_angle, own_kinds};
 use super::vocab::{Archetype, PreviewShape};

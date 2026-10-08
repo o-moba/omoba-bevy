@@ -865,7 +865,7 @@ mod tests {
     use crate::skill_presentation::vocab::{ProjectileForm, Silhouette};
     use shared::HeroClass;
 
-    const TARGET: &str = include_str!("skill_presentation/fixtures/target_combat_visuals.json");
+    const PACKAGED: &str = include_str!("../assets/config/combat_visuals.json");
     const WARRIOR: u64 = 1;
     const WILDSPARK: u64 = 2;
     const CLERIC: u64 = 3;
@@ -879,7 +879,7 @@ mod tests {
             .init_asset::<Mesh>()
             .init_asset::<StandardMaterial>()
             .init_asset::<WorldAsset>()
-            .insert_resource(CombatVisualRegistry::from_json(TARGET).unwrap())
+            .insert_resource(CombatVisualRegistry::from_json(PACKAGED).unwrap())
             .insert_resource(PlayerVisualMode::Models3d)
             .insert_resource(crate::vfx_clock::VfxClock {
                 now: 0.0,

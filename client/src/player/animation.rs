@@ -15,7 +15,23 @@ use std::collections::{HashMap, HashSet};
 use super::motion::Jumping;
 
 /// The real animation pipeline is also used by the opt-in native motion audit.
+/// The systems that bind a hero's animation player and choose what it plays.
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub(super) struct HeroAnimationSet;
+
+/// A hero runs when it moves, and it stands where grounding puts it: interpolation writes
+/// the flat height of the server first, and local terrain replaces it later in the frame.
+/// Read between the two, a remote hero that stands still changes height from frame to
+/// frame and sprints on the spot.
+pub(super) fn order_hero_animation(app: &mut App) {
+    app.configure_sets(
+        PostUpdate,
+        HeroAnimationSet.after(crate::net::NetworkGroundingSet),
+    );
+}
+
 pub(crate) fn register_hero_animation_systems(app: &mut App) {
+    order_hero_animation(app);
     app.init_resource::<PlayerAnimationLibrary>()
         .init_resource::<crate::humanoid::HumanoidRuntimeLibrary>()
         .add_systems(
@@ -30,6 +46,7 @@ pub(crate) fn register_hero_animation_systems(app: &mut App) {
                 sync_player_animation_state,
             )
                 .chain()
+                .in_set(HeroAnimationSet)
                 .before(bevy::app::AnimationSystems),
         );
 }
