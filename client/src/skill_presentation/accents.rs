@@ -665,6 +665,13 @@ pub(crate) fn accent_particles(
     )
 }
 
+/// The veil of `veil_step`: how many pieces hang on the travelled line, how far each drifts
+/// along it, and the half extent of a piece in units, on a short step and at most.
+const VEIL_PIECES: usize = 3;
+const VEIL_DRIFT: f32 = 0.3;
+const VEIL_PIECE: f32 = 0.45;
+const VEIL_PIECE_MAX: f32 = 0.9;
+
 /// The lead shape of a move when the row names none.
 const fn move_lead(pattern: MovePattern) -> ParticleShape {
     match pattern {
@@ -903,18 +910,23 @@ impl Step {
             Some(M::VeilStep) => {
                 // The body dissolves where it stood, and the veil it leaves hangs along
                 // the line it travelled: pieces in the colour of the skill that darken,
-                // the nearest to the origin first.
+                // the nearest to the origin first. On a long step they are as large as
+                // their third of the line allows, so that the line is read at a glance;
+                // none reaches past either end of it.
+                let radius = (length / VEIL_PIECES as f32 * 0.5 - VEIL_DRIFT)
+                    .clamp(VEIL_PIECE, VEIL_PIECE_MAX);
                 let mut out = vec![self.glow(from + Vec3::Y * 0.8, 0.6, 0.4, self.matter)];
-                out.extend((0..3).map(|i| {
-                    let mut piece = self.piece(on_line(i, 3) + Vec3::Y * 0.8, 0.45, 0.45);
+                out.extend((0..VEIL_PIECES).map(|i| {
+                    let mut piece =
+                        self.piece(on_line(i, VEIL_PIECES) + Vec3::Y * 0.8, radius, 0.45);
                     piece.orient = Orient::Velocity;
                     piece.angle = heading(along);
                     piece.curve = Curve::Shrink;
-                    piece.size = sized(self.shape, 0.45, Curve::Shrink);
+                    piece.size = sized(self.shape, radius, Curve::Shrink);
                     piece.end_color = Some(self.matter);
                     piece.velocity = Vec3::Y * 0.4;
                     piece.delay = 0.04 * i as f32;
-                    drift(piece, along, 0.3)
+                    drift(piece, along, VEIL_DRIFT)
                 }));
                 (out, 0.1)
             }
@@ -1474,6 +1486,9 @@ pub(crate) fn camp_hit(color: Tint, at: Vec3, kill: bool, seed: u64) -> Vec<Part
 /// A link is drawn for receipts that arrive with the snapshot of the cast or one of the two
 /// after it, for at most three receipts of one cast.
 const LINK_SNAPSHOTS: u64 = 2;
+/// A thrown body counts as in flight while it was in one of this many newest snapshots: its
+/// receipt may come with the snapshot that drops it.
+const BODY_SNAPSHOTS: u64 = 2;
 const LINKS_PER_CAST: usize = 3;
 /// Casts that may wait for their receipts at one time.
 const OPEN_LINKS: usize = 16;
@@ -1648,6 +1663,9 @@ struct OpenLink {
     /// The count of snapshots when the cast was observed.
     opened: u64,
     local: bool,
+    /// The skill whose recast opened this link although its first cast throws a body: no
+    /// receipt is linked while that body may still be what struck.
+    after_body: Option<SkillId>,
 }
 
 /// Casts that wait for the receipts of their own source and slot. Nothing here draws
@@ -1658,6 +1676,9 @@ pub(crate) struct LinkBook {
     tick: u64,
     snapshots: u64,
     open: Vec<OpenLink>,
+    /// Bodies in flight of the skills whose recast hits at once: owner, skill and the count
+    /// of snapshots when the body was last in one.
+    flying: Vec<(u64, SkillId, u64)>,
 }
 
 impl LinkBook {
@@ -1675,7 +1696,39 @@ impl LinkBook {
             self.snapshots += 1;
             let now = self.snapshots;
             self.open.retain(|link| now - link.opened <= LINK_SNAPSHOTS);
+            self.flying.retain(|(.., seen)| now - seen < BODY_SNAPSHOTS);
         }
+    }
+
+    /// Notes the bodies in flight of the snapshot of this frame that a recast link has to
+    /// wait for. Call it after `turn`.
+    pub(crate) fn sight(&mut self, effects: &[SkillEffectState]) {
+        let now = self.snapshots;
+        for effect in effects {
+            let thrown = matches!(
+                effect.kind,
+                EffectVisualKind::Bolt | EffectVisualKind::Rocket
+            );
+            if !thrown || !category::recast_instant_hit(effect.skill) {
+                continue;
+            }
+            let body = (effect.owner_id, effect.skill);
+            match self
+                .flying
+                .iter_mut()
+                .find(|(owner, skill, _)| (*owner, *skill) == body)
+            {
+                Some((.., seen)) => *seen = now,
+                None => self.flying.push((body.0, body.1, now)),
+            }
+        }
+    }
+
+    /// Whether the body of `skill` thrown by `owner` was in this snapshot or the one before.
+    fn in_flight(&self, owner: u64, skill: SkillId) -> bool {
+        self.flying.iter().any(|(by, thrown, seen)| {
+            (*by, *thrown) == (owner, skill) && self.snapshots - seen < BODY_SNAPSHOTS
+        })
     }
 
     /// Opens the link of a cast whose row names one. It starts where the hit is resolved
@@ -1692,9 +1745,21 @@ impl LinkBook {
         };
         // The hit of a travelling body comes long after its cast, and so does the hit of a
         // telegraph that fires on its own; a link from the cast would run ahead of either.
+        // The one exception is a recast that throws nothing and hits at once: it is linked
+        // unless the body of the first cast may still be what strikes.
+        let mut after_body = None;
         if category::travelling_body(key) || key.modular().is_some_and(category::strikes_on_release)
         {
-            return;
+            let Some(id) = key.modular().filter(|id| category::recast_instant_hit(*id)) else {
+                return;
+            };
+            // Whatever an earlier recast of the slot left open ends with this edge.
+            self.open
+                .retain(|open| (open.actor_id, open.slot) != (cast.actor_id, cast.slot));
+            if !cast.recast || self.in_flight(cast.actor_id, id) {
+                return;
+            }
+            after_body = Some(id);
         }
         let start = match key
             .modular()
@@ -1714,6 +1779,7 @@ impl LinkBook {
             left: LINKS_PER_CAST,
             opened: self.snapshots,
             local: cast.local,
+            after_body,
         });
     }
 
@@ -1747,6 +1813,7 @@ impl LinkBook {
             left: LINKS_PER_CAST,
             opened: self.snapshots,
             local: owner.local,
+            after_body: None,
         });
     }
 
@@ -1763,10 +1830,18 @@ impl LinkBook {
     /// The streaks to one accepted receipt of an open cast and whether the caster is the
     /// local hero; `None` when no cast waits for this source and slot.
     pub(crate) fn link(&mut self, hit: &ConfirmedHit) -> Option<(Vec<ParticleSpec>, bool)> {
-        let link = self
-            .open
-            .iter_mut()
-            .find(|link| link.actor_id == hit.source && link.slot == hit.slot && link.left > 0)?;
+        let at = self.open.iter().position(|link| {
+            link.actor_id == hit.source && link.slot == hit.slot && link.left > 0
+        })?;
+        // A receipt that the body of the first cast may have dealt is never drawn as the
+        // lash of a recast; a missing lash is the lesser fault.
+        if self.open[at]
+            .after_body
+            .is_some_and(|skill| self.in_flight(hit.source, skill))
+        {
+            return None;
+        }
+        let link = &mut self.open[at];
         link.left -= 1;
         Some((
             link_particles(
@@ -1918,6 +1993,7 @@ pub(crate) fn emit_links(
         Some((game.meta.server_epoch, game.meta.match_id)),
         game.meta.snapshot_tick,
     );
+    book.sight(&game.skill_effects);
     for cast in casts.read() {
         book.open(&registry, cast);
     }
@@ -2617,6 +2693,94 @@ mod tests {
                 .all(|spec| spec.color.gain == 1.0 && spec.end_color.is_none())
         );
         assert!(skid.iter().all(|spec| spec.color == skid[0].color));
+    }
+
+    /// The veil of `veil_step`: a dark dissolve where the hero stood, three pieces on the
+    /// line it really travelled that are as large as their third of that line allows, and
+    /// pieces that close on the landing. Nothing is a ring at the hero's feet and nothing
+    /// lies past either observed end.
+    #[test]
+    fn the_veil_hangs_on_the_travelled_line() {
+        let way = Vec3::new(0.6, 0.0, 0.8);
+        let veil = |length: f32| {
+            move_particles(
+                &MoveSpec {
+                    pattern: MovePattern::VeilStep,
+                    shape: None,
+                },
+                &palette(),
+                Some(ORIGIN),
+                Some(ORIGIN + way * length),
+                9,
+            )
+        };
+        let half = |length: f32| {
+            (length / VEIL_PIECES as f32 * 0.5 - VEIL_DRIFT).clamp(VEIL_PIECE, VEIL_PIECE_MAX)
+        };
+        let colours = palette();
+        for length in [0.5, 2.0, 4.5, 7.0, 12.0, 40.0] {
+            let all = veil(length);
+            assert_eq!(all.len(), MOVE_MAX, "{length}");
+            assert!(
+                all.iter().all(|spec| {
+                    spec.is_sound()
+                        && spec.delay + spec.lifetime <= MOVE_SECS + 1e-4
+                        && spec.shape != ParticleShape::Ringlet
+                }),
+                "{length}"
+            );
+            let (dissolve, rest) = all.split_first().unwrap();
+            let (pieces, landing) = rest.split_at(VEIL_PIECES);
+            // The dissolve is dark and stays where the hero stood.
+            assert_eq!(dissolve.shape, ParticleShape::Glow);
+            assert_eq!(dissolve.color, colours.secondary);
+            assert!((dissolve.origin - ORIGIN).xz().length() < 1e-4);
+            assert_eq!(dissolve.velocity.xz(), Vec2::ZERO);
+            // The pieces: the lead shape in the colour of the skill, darkening, one after
+            // another from the origin, each on its own third of the line.
+            for (i, piece) in pieces.iter().enumerate() {
+                assert_eq!(piece.shape, ParticleShape::Crescent, "{length}");
+                assert_eq!(piece.color, colours.primary, "{length}");
+                assert_eq!(piece.end_color, Some(colours.secondary), "{length}");
+                assert!((piece.delay - 0.04 * i as f32).abs() < 1e-5, "{length}");
+                assert!(
+                    (piece.size - sized(ParticleShape::Crescent, half(length), Curve::Shrink))
+                        .abs()
+                        < 1e-5,
+                    "{length}"
+                );
+                let offset = (piece.origin - ORIGIN).xz();
+                assert!(offset.perp_dot(way.xz()).abs() < 1e-4, "{length}");
+                let start = offset.dot(way.xz());
+                assert!(
+                    (start - length * (i as f32 + 0.5) / VEIL_PIECES as f32).abs() < 1e-4,
+                    "{length}"
+                );
+                // From where it appears to where it has drifted, the piece stays between
+                // the two observed ends once the step is long enough to hold three.
+                let end = start + piece.velocity.xz().dot(way.xz()) * piece.lifetime;
+                assert!((end - start - VEIL_DRIFT).abs() < 1e-4, "{length}");
+                if length >= 2.0 * VEIL_PIECES as f32 * (VEIL_PIECE + VEIL_DRIFT) {
+                    assert!(start - half(length) >= -1e-4, "{length}");
+                    assert!(end + half(length) <= length + 1e-4, "{length}");
+                }
+            }
+            // The landing: dark pieces that close on the hero and end in the skill colour.
+            assert_eq!(landing.len(), 4, "{length}");
+            for piece in landing {
+                let from_landing = (piece.origin - (ORIGIN + way * length)).xz();
+                assert!((from_landing.length() - 0.8).abs() < 1e-4, "{length}");
+                assert!(piece.velocity.xz().dot(from_landing) < 0.0, "{length}");
+                assert_eq!(piece.color, colours.secondary, "{length}");
+                assert_eq!(piece.end_color, Some(colours.primary), "{length}");
+            }
+        }
+        // A short step keeps the small pieces; a long one grows them up to the cap.
+        assert_eq!(half(0.5), VEIL_PIECE);
+        assert_eq!(half(4.5), VEIL_PIECE);
+        assert!(half(7.0) > 1.8 * VEIL_PIECE && half(7.0) < VEIL_PIECE_MAX);
+        assert_eq!(half(12.0), VEIL_PIECE_MAX);
+        assert_eq!(half(40.0), VEIL_PIECE_MAX);
     }
 
     #[test]

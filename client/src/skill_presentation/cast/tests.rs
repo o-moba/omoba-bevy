@@ -1059,6 +1059,151 @@ fn link_needs_a_matching_receipt() {
     }
 }
 
+/// Thorn Volley throws a spike and then recasts without one: only a recast is linked to its
+/// receipts, and never while the spike may still be what struck.
+#[test]
+fn recast_link_only_after_a_recast_edge() {
+    let registry = target();
+    let class = HeroClass::Veilstalker;
+    let slot = slot_of(class, SkillId::ThornVolley);
+    let first = {
+        let (mut observer, cast) = first_cast(class, SkillId::ThornVolley);
+        observer.observe(ROUND, true, [cast]).casts.remove(0)
+    };
+    assert!(!first.recast);
+    let recast = SkillCastObserved {
+        sequence: first.sequence + 1,
+        recast: true,
+        ..first.clone()
+    };
+    let hit = |receipt: u64| ConfirmedHit {
+        receipt,
+        source: 7,
+        slot,
+        position: AWAY,
+    };
+    let spike = |owner: u64, skill: SkillId| SkillEffectState {
+        kind: EffectVisualKind::Bolt,
+        ..effect(40, owner, skill, HOME + Vec3::X)
+    };
+    let opened = || {
+        let mut book = LinkBook::default();
+        book.turn(ROUND, 10);
+        book
+    };
+    let row = registry.profile(SkillId::ThornVolley).unwrap();
+    let shape = row.cast.as_ref().unwrap().link.unwrap();
+
+    // The first cast throws the spike: its hit, even one at point-blank range that never
+    // shows a body, is not a lash.
+    let mut thrown = opened();
+    thrown.open(&registry, &first);
+    assert_eq!(thrown.link(&hit(1)), None);
+
+    // A recast with no spike in flight: the receipt of its own source and slot is linked
+    // from the caster, in the shape the row names.
+    let mut lashed = opened();
+    lashed.open(&registry, &recast);
+    assert_eq!(
+        lashed.link(&ConfirmedHit {
+            source: 8,
+            ..hit(1)
+        }),
+        None
+    );
+    assert_eq!(
+        lashed.link(&ConfirmedHit {
+            slot: (slot + 1) % 4,
+            ..hit(1)
+        }),
+        None
+    );
+    let (link, _) = lashed.link(&hit(2)).unwrap();
+    assert_eq!(link.len(), accents::LINK_MAX);
+    assert_eq!(sources(&link), [ParticleSource::Link]);
+    for spec in &link {
+        assert_eq!(spec.shape, shape);
+        let [start, end] = ground_span(spec);
+        assert!(start.distance(HOME.xz()) < 0.2);
+        assert!(end.distance(AWAY.xz()) < 1e-3);
+    }
+    // The bonus of the mark is a second receipt of the same recast.
+    assert!(lashed.link(&hit(3)).is_some());
+
+    // The spike in this snapshot or in the one before: a receipt may be its own, so the
+    // recast opens nothing. Two snapshots after the spike was last seen it does.
+    for (since, linked) in [(0, false), (1, false), (2, true)] {
+        let mut book = opened();
+        book.sight(&[spike(7, SkillId::ThornVolley)]);
+        for tick in 1..=since {
+            book.turn(ROUND, 10 + tick);
+            book.sight(&[]);
+        }
+        book.open(&registry, &recast);
+        assert_eq!(book.link(&hit(1)).is_some(), linked, "{since}");
+    }
+    // A recast that was refused for a spike stays refused when its receipt comes late.
+    let mut late = opened();
+    late.sight(&[spike(7, SkillId::ThornVolley)]);
+    late.turn(ROUND, 11);
+    late.sight(&[]);
+    late.open(&registry, &recast);
+    late.turn(ROUND, 12);
+    late.sight(&[]);
+    assert_eq!(late.link(&hit(1)), None);
+    // The spike of another hero, or a body of another skill, is not this caster's.
+    let mut book = opened();
+    book.sight(&[
+        spike(8, SkillId::ThornVolley),
+        spike(7, SkillId::DawnBind),
+        effect(41, 7, SkillId::ThornVolley, HOME),
+    ]);
+    book.open(&registry, &recast);
+    assert!(book.link(&hit(1)).is_some());
+
+    // A link that is open is held back as well while a spike is seen, and for the snapshot
+    // after it; by then the link has run out.
+    let mut held = opened();
+    held.open(&registry, &recast);
+    held.turn(ROUND, 11);
+    held.sight(&[spike(7, SkillId::ThornVolley)]);
+    assert_eq!(held.link(&hit(1)), None);
+    held.turn(ROUND, 12);
+    held.sight(&[]);
+    assert_eq!(held.link(&hit(1)), None);
+    held.turn(ROUND, 13);
+    assert_eq!(held.link(&hit(1)), None);
+
+    // A new first cast ends what a recast left open; a new round forgets the spike.
+    let mut again = opened();
+    again.open(&registry, &recast);
+    again.open(&registry, &first);
+    assert_eq!(again.link(&hit(1)), None);
+    let mut next = opened();
+    next.sight(&[spike(7, SkillId::ThornVolley)]);
+    next.turn(Some((3, 2)), 11);
+    next.open(&registry, &recast);
+    assert!(next.link(&hit(1)).is_some());
+
+    // No other thrown skill is linked on a recast edge, whatever its row would say.
+    let mut hooked = registry.clone();
+    hooked
+        .skills
+        .get_mut(SkillId::EchoStrike.id())
+        .unwrap()
+        .cast
+        .as_mut()
+        .unwrap()
+        .link = Some(ParticleShape::Streak);
+    let storm = HeroClass::Stormfist;
+    let (mut observer, cast) = first_cast(storm, SkillId::EchoStrike);
+    let mut echo = observer.observe(ROUND, true, [cast]).casts.remove(0);
+    echo.recast = true;
+    let mut book = opened();
+    book.open(&hooked, &echo);
+    assert!((0..4).all(|slot| { book.link(&ConfirmedHit { slot, ..hit(1) }).is_none() }));
+}
+
 /// An app with the observer and the three emitters, a running round and one remote hero.
 fn stage(registry: SkillPresentation, mode: PlayerVisualMode) -> (App, Entity) {
     stage_as(registry, mode, HeroClass::Stormfist)

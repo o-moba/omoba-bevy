@@ -442,9 +442,9 @@ fn a_windup_is_a_loop_or_fitted_to_its_telegraph() {
         MotionCue::windup(ray, SkillId::DawnRay).unwrap().rate,
         0.625
     );
-    // The packaged rows fit nothing: their windup plays as the clip is.
-    let packaged = profiles();
-    let ray = packaged.profile(SkillId::DawnRay).unwrap();
+    // An unmigrated row fits nothing: its windup plays as the clip is.
+    let unmigrated = SkillPresentation::unmigrated();
+    let ray = unmigrated.profile(SkillId::DawnRay).unwrap();
     assert_eq!(MotionCue::windup(ray, SkillId::DawnRay).unwrap().rate, 1.0);
     // Any clip can be fitted, and the fit is clamped to the rates a row may author: a
     // 0.17 s pose is not stretched to a fifth of its speed, nor a 1.5 s swing rushed past
@@ -627,9 +627,9 @@ fn a_recast_edge_plays_the_recast_clip() {
                 // A row without a recast clip plays what its slot plays.
                 None => assert_eq!(plan(&target, true), first, "{} {slot}", class.id()),
             }
-            // The packaged rows name no recast clip: a recast is the release again.
-            let packaged = profiles();
-            assert_eq!(plan(&packaged, true), plan(&packaged, false));
+            // An unmigrated row names no recast clip: a recast is the release again.
+            let unmigrated = SkillPresentation::unmigrated();
+            assert_eq!(plan(&unmigrated, true), plan(&unmigrated, false));
         }
     }
     assert_eq!(recasts, 8);
@@ -1834,13 +1834,13 @@ fn a_replicated_effect_resolves_to_the_body_its_row_gives_that_kind() {
         seen(SkillId::OrbitalGuard, K::Orb)
     );
     assert!(seen(SkillId::OrbitalCommand, K::Orb).is_some());
-    let packaged = profiles();
+    let unmigrated = SkillPresentation::unmigrated();
     for id in SkillId::ALL {
         for kind in category::own_kinds(id)
             .iter()
             .chain(category::aux_kinds(id))
         {
-            assert_eq!(packaged.body_for(&effect(id, *kind)), None, "{}", id.id());
+            assert_eq!(unmigrated.body_for(&effect(id, *kind)), None, "{}", id.id());
         }
     }
 }

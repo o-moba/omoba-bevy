@@ -3491,6 +3491,27 @@ mod tests {
             .is_sound()
         );
     }
+    /// The stroke of a ringlet is a fifth of its radius, so that a small ring of a hit or
+    /// an accent is still a line that is seen at the camera distance of a match.
+    #[test]
+    fn the_stroke_of_a_ringlet_is_a_fifth_of_its_radius() {
+        let mesh = shape_mesh(Shape::Ringlet);
+        let (inner, outer) = mesh
+            .attribute(Mesh::ATTRIBUTE_POSITION)
+            .and_then(|values| values.as_float3())
+            .unwrap()
+            .iter()
+            .map(|p| Vec2::new(p[0], p[1]).length())
+            .fold((f32::MAX, f32::MIN), |(low, high), reach| {
+                (low.min(reach), high.max(reach))
+            });
+        assert!((outer - unit_radius(Shape::Ringlet)).abs() < 1e-4);
+        assert!(
+            ((outer - inner) / outer - 0.2).abs() < 1e-3,
+            "{inner} {outer}"
+        );
+    }
+
     #[test]
     fn every_particle_shape_has_a_small_symmetric_mesh_inside_its_unit_radius() {
         assert_eq!(Shape::ALL.len(), 13);
