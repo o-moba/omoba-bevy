@@ -33,7 +33,10 @@ pose, so the stills show whether the telegraph kept the body. `--displace` moves
 the hero 2.5 units across its aim through the sandbox as soon as the cast of a
 skill whose telegraph the server keeps on its caster is accepted (Furnace
 Breath); each still lists `hero_position` next to the replicated effects, so the
-stills show whether the telegraph stays under a caster that is moved. `--aim` adds, for
+stills show whether the telegraph stays under a caster that is moved. `--block`
+makes the target cast its first skill at the hero as soon as the cast of a
+skill that raises a shield wall is accepted (Northwall), so the later stills
+show a wall that has stopped a projectile. `--aim` adds, for
 every modular skill, `<n>-<key>-0-aim.png`: the aim preview with the skill key
 held before the cast, and `<n>-<key>-4-recast-aim.png` when the slot offers a
 recast after the cast (for a recast with a gate, once the hero is in reach).
@@ -486,7 +489,7 @@ def phase_problems(summary, directory):
 
 def capture(hero, client, server, assets, output, timeout=135, roster=False, handhelds=False, sdk_weapon=None,
             phases=False, offscreen=False, visual_mode="models3d", overlays=None, avatar=None, release_at=None,
-            flight=False, interleave=False, aim=False, recipe=None, displace=False):
+            flight=False, interleave=False, aim=False, recipe=None, displace=False, block=False):
     """One client against one local server. `recipe` gives the hero four named skills on its own core."""
     output.mkdir(parents=True)
     children = []
@@ -494,7 +497,7 @@ def capture(hero, client, server, assets, output, timeout=135, roster=False, han
                   locale="en", viewport=[1280, 720], physical_device_verified=False,
                   phases=phases, offscreen=offscreen, visual_mode=visual_mode,
                   avatar=avatar, release_at=release_at, flight=flight, interleave=interleave, aim=aim,
-                  displace=displace)
+                  displace=displace, block=block)
     expected = None
     with tempfile.TemporaryDirectory(prefix="omoba-skill-pilot-") as isolated:
         if overlays:
@@ -529,6 +532,8 @@ def capture(hero, client, server, assets, output, timeout=135, roster=False, han
                     env["OMOBA_STANDARD_QA_INTERLEAVE"] = "1"
                 if displace:
                     env["OMOBA_STANDARD_QA_DISPLACE"] = "1"
+                if block:
+                    env["OMOBA_STANDARD_QA_BLOCK"] = "1"
                 if aim:
                     env["OMOBA_STANDARD_QA_AIM"] = "1"
                 if recipe:
@@ -633,6 +638,9 @@ def main(argv=None):
     parser.add_argument("--displace", action="store_true",
                         help="With --phases: the sandbox moves the hero across its aim as soon as the cast "
                              "of a skill whose telegraph follows its caster is accepted")
+    parser.add_argument("--block", action="store_true",
+                        help="With --phases: the target casts its first skill at the hero as soon as the "
+                             "cast of a skill that raises a shield wall is accepted")
     parser.add_argument("--aim", action="store_true",
                         help="With --phases: one more still per modular skill with its key held, showing "
                              "the aim preview, and one in the recast window of a slot that offers one")
@@ -644,10 +652,10 @@ def main(argv=None):
     args = parser.parse_args(argv)
     if args.phases and (args.roster or args.handhelds):
         parser.error("--phases replaces --roster and --handhelds")
-    if ((args.avatar or args.release_at or args.flight or args.interleave or args.displace or args.aim
-         or args.mixed_recipe) and not args.phases):
-        parser.error("--avatar, --release-at, --flight, --interleave, --displace, --aim and --mixed-recipe "
-                     "need --phases")
+    if ((args.avatar or args.release_at or args.flight or args.interleave or args.displace or args.block
+         or args.aim or args.mixed_recipe) and not args.phases):
+        parser.error("--avatar, --release-at, --flight, --interleave, --displace, --block, --aim and "
+                     "--mixed-recipe need --phases")
     if args.mixed_recipe and args.hero:
         parser.error("--mixed-recipe names its own hero")
     if args.timeout is None:
@@ -697,7 +705,7 @@ def main(argv=None):
                       locale="en", viewport=[1280, 720], phases=args.phases, offscreen=args.offscreen,
                       visual_mode=args.visual_mode, avatar=args.avatar, release_at=args.release_at,
                       flight=args.flight, interleave=args.interleave, aim=args.aim,
-                      displace=args.displace)
+                      displace=args.displace, block=args.block)
         results = {}
         for name in heroes:
             mixed = MIXED_RECIPE if name == MIXED_NAME else {}
@@ -707,7 +715,7 @@ def main(argv=None):
                                     phases=args.phases, offscreen=args.offscreen, visual_mode=args.visual_mode,
                                     overlays=overlays, avatar=args.avatar, release_at=args.release_at,
                                     flight=args.flight, interleave=args.interleave, aim=args.aim,
-                                    recipe=mixed.get("skills"), displace=args.displace)
+                                    recipe=mixed.get("skills"), displace=args.displace, block=args.block)
     merge_manifest(output / "manifest.json", header, results)
     print(json.dumps([dict(run=name, **{key: result.get(key) for key in
                                         ("hero", "pass", "client_exit_code", "error", "errors")})

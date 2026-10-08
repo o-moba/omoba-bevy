@@ -19,7 +19,10 @@
 //! `OMOBA_STANDARD_QA_DISPLACE=1` moves the hero across its aim through the
 //! sandbox as soon as the cast of a skill whose telegraph the server keeps on
 //! its caster is accepted, so the stills show whether the telegraph stays under
-//! a caster that is moved.
+//! a caster that is moved. `OMOBA_STANDARD_QA_BLOCK=1` makes the target cast
+//! its first skill at the hero as soon as the cast of a skill that raises a
+//! shield wall is accepted, so the later stills show a wall that has stopped a
+//! projectile.
 //! `OMOBA_STANDARD_QA_AIM=1` adds one still of the aim preview of every modular
 //! skill, taken with its key held before the cast, and a second one when the
 //! slot offers a recast after the cast.
@@ -77,6 +80,7 @@ impl Plugin for StandardKitsQaPlugin {
         let flight = flag("OMOBA_STANDARD_QA_FLIGHT");
         let interleave = flag("OMOBA_STANDARD_QA_INTERLEAVE");
         let displace = flag("OMOBA_STANDARD_QA_DISPLACE");
+        let block = flag("OMOBA_STANDARD_QA_BLOCK");
         let aim = flag("OMOBA_STANDARD_QA_AIM");
         let recipe = std::env::var("OMOBA_STANDARD_QA_RECIPE")
             .ok()
@@ -111,6 +115,7 @@ impl Plugin for StandardKitsQaPlugin {
             flight,
             interleave,
             displace,
+            block,
             aim,
             recipe,
             zoom: crate::camera::CAMERA_MIN_ZOOM,
@@ -185,6 +190,8 @@ struct Qa {
     interleave: bool,
     /// Phase run that moves the hero during a telegraph that follows its caster.
     displace: bool,
+    /// Phase run in which the target shoots at a shield wall as it is raised.
+    block: bool,
     /// Phase run that also takes stills of the aim previews.
     aim: bool,
     /// Phase run on an authored kit instead of the preset of the class.
@@ -3324,6 +3331,27 @@ fn drive_phases(
                 };
                 run.wire.send(&world.game, sandbox, command, &mut outgoing);
             }
+            // The wall is up: the target throws its first skill at it, in the probe and
+            // in the capture. Nothing is staged beyond that order; whether the wall
+            // stops the projectile is the server's business.
+            let walls = equipped.skill(slot).is_some_and(|definition| {
+                matches!(
+                    definition.effect,
+                    SkillEffect::Technique {
+                        action: Technique::InterceptShield,
+                        ..
+                    }
+                )
+            });
+            if qa.block && walls {
+                qa.requests.push(serde_json::json!({"command":"sandbox_force_cast","actor":"enemy","slot":0,"target":world.game.your_id,"during":skill,"snapshot_tick":world.game.meta.snapshot_tick}));
+                let command = SandboxCommand::ForceCast {
+                    actor: SandboxActor::Enemy,
+                    slot: 0,
+                    target_id: Some(world.game.your_id),
+                };
+                run.wire.send(&world.game, sandbox, command, &mut outgoing);
+            }
             run.enter(next);
         }
         Step::Probe
@@ -3659,6 +3687,7 @@ fn drive_phases(
             "flight": qa.flight,
             "interleave": qa.interleave,
             "displace": qa.displace,
+            "block": qa.block,
             "aim": qa.aim,
             "manual_interaction_verified": false,
             "physical_device_verified": false,
