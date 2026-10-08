@@ -571,14 +571,14 @@ fn fuse_and_parry_plans_hold_the_windup_from_the_accepted_cast() {
             "{name}"
         );
     }
-    // The packaged rows of these skills hold no windup yet: the cast releases at once.
-    let packaged = profiles();
+    // An unmigrated row of these skills holds no windup: the cast releases at once.
+    let unmigrated = SkillPresentation::unmigrated();
     let (class, state) = preset(CoreId::Cinderforge);
     let slot = slot_of(&state, SkillId::FurnaceBreath);
     let telegraph = effect(SkillId::FurnaceBreath, EffectVisualKind::BeamWarning);
     assert_eq!(
         own_windup_cue(
-            &packaged,
+            &unmigrated,
             class,
             Some(&state),
             7,
@@ -587,7 +587,7 @@ fn fuse_and_parry_plans_hold_the_windup_from_the_accepted_cast() {
         None
     );
     assert!(
-        motion_cue(&packaged, class, Some(&state), slot, 7, &[telegraph])
+        motion_cue(&unmigrated, class, Some(&state), slot, 7, &[telegraph])
             .is_some_and(|cue| !cue.hold)
     );
 }

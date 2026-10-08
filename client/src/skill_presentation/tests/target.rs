@@ -35,7 +35,7 @@ pub(in crate::skill_presentation) fn target_visuals() -> CombatVisualRegistry {
 }
 
 /// The classes whose rows the content packages have moved into the packaged files.
-pub(in crate::skill_presentation) const PROMOTED: [HeroClass; 9] = [
+pub(in crate::skill_presentation) const PROMOTED: [HeroClass; 13] = [
     HeroClass::Warrior,
     HeroClass::Mage,
     HeroClass::Ranger,
@@ -45,6 +45,10 @@ pub(in crate::skill_presentation) const PROMOTED: [HeroClass; 9] = [
     HeroClass::Emberveil,
     HeroClass::Orbitwright,
     HeroClass::Veilstalker,
+    HeroClass::Cinderforge,
+    HeroClass::Edgeweaver,
+    HeroClass::Stormfist,
+    HeroClass::Adventurer,
 ];
 
 fn shipped() -> SkillPresentation {

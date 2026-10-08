@@ -232,23 +232,6 @@ pub(super) fn point(p: Vec2, mode: PlayerVisualMode, map: Option<&crate::maps::M
     }
 }
 
-fn ring<G: GizmoConfigGroup>(
-    gizmos: &mut Gizmos<G>,
-    p: Vec2,
-    radius: f32,
-    mode: PlayerVisualMode,
-    map: Option<&crate::maps::MapLayout>,
-    color: Color,
-) {
-    gizmos.linestrip(
-        (0..=48).map(|i| {
-            let angle = i as f32 * std::f32::consts::TAU / 48.0;
-            point(p + Vec2::new(angle.cos(), angle.sin()) * radius, mode, map)
-        }),
-        color,
-    );
-}
-
 /// The aim preview while a key, touch drag or controller button is held: the rule the
 /// server would apply to the cast, as `geometry::preview_shape` derives it.
 pub(crate) fn draw_aim(
@@ -678,6 +661,86 @@ pub(super) fn hero_marks(sight: &HeroSight) -> Vec<HeroMark> {
     marks
 }
 
+/// Distance of a vital side from the hero it stands around.
+const FACET_DISTANCE: f32 = 1.4;
+/// Half the length of a facet, along the line out of the hero.
+const FACET_LENGTH: f32 = 0.42;
+/// Half the width of a facet.
+const FACET_WIDTH: f32 = 0.2;
+/// How far apart the two halves of a broken side lie.
+const FACET_GAP: f32 = 0.15;
+
+/// A received hero state as the vital sides it names are drawn.
+pub(super) struct Duelist<'a> {
+    pub flags: &'a LoadoutState,
+    pub team: Option<crate::team::Team>,
+    /// It is the state of the local hero: only that hero is shown the side of its passive.
+    pub own: bool,
+}
+
+/// A hero as vital sides are drawn around it.
+pub(super) struct FacetTarget {
+    pub id: u64,
+    pub team: Option<crate::team::Team>,
+    /// The hero is drawn and alive.
+    pub seen: bool,
+    pub p: Vec2,
+}
+
+/// The vital sides a duelist has on a hostile hero the client sees: all four while that
+/// hero is the one the duelist challenged, a struck side as two grey halves; otherwise,
+/// for the local hero with the Vitals passive, the one side its next hit must come from.
+/// The sides lie on the world axes in the order the server counts them (+x, +z, -x, -z).
+/// Lines on the ground only: nothing here is a state of the target.
+pub(super) fn duel_facets(duelist: &Duelist, target: &FacetTarget) -> Vec<HeroMark> {
+    let duel = duelist.flags;
+    if !target.seen || duelist.team == target.team {
+        return Vec::new();
+    }
+    let challenged = duel.challenge_target == Some(target.id);
+    let vitals = duelist.own
+        && duel
+            .recipe
+            .as_ref()
+            .is_some_and(|recipe| recipe.passive == shared::loadout::PassiveId::Vitals);
+    let rotating = (target.id as u8).wrapping_add(duel.vital_rotation) % 4;
+    let mut marks = Vec::new();
+    for side in (0..4u8).filter(|side| challenged || (vitals && *side == rotating)) {
+        let out = Vec2::from_angle(f32::from(side) * std::f32::consts::FRAC_PI_2);
+        let center = target.p + out * FACET_DISTANCE;
+        let (tip, wing) = (out * FACET_LENGTH, out.perp() * FACET_WIDTH);
+        if challenged && duel.challenge_sides & (1 << side) != 0 {
+            // A struck side: the diamond lies open, in two halves.
+            let color = Color::srgb(0.3, 0.35, 0.4);
+            for half in [1.0, -1.0] {
+                let base = center + out * (FACET_GAP * 0.5) * half;
+                marks.push(HeroMark {
+                    points: vec![base + wing, center + tip * half, base - wing],
+                    color,
+                });
+            }
+        } else {
+            // An open side: the whole diamond with the line of the hit through it.
+            let color = Color::srgb(1.0, 0.75, 0.2);
+            marks.push(HeroMark {
+                points: vec![
+                    center + tip,
+                    center + wing,
+                    center - tip,
+                    center - wing,
+                    center + tip,
+                ],
+                color,
+            });
+            marks.push(HeroMark {
+                points: vec![center - tip, center + tip],
+                color,
+            });
+        }
+    }
+    marks
+}
+
 /// Whether the fallback lines of an effect are drawn. In the flat view they always are. In
 /// 3D an effect whose row is known is drawn by that row, and a body draws its own boundary
 /// in the colour of the team: lines of another colour over it would hide whose it is. Only
@@ -767,53 +830,47 @@ pub(super) fn draw_effects(
             );
         }
     }
-    let duelist = actors
+    // Every received state that can name a vital side: the local hero's own, and any other
+    // whose challenge the server sends (today it sends that of the local hero alone).
+    let duelists: Vec<Duelist> = actors
         .iter()
-        .find(|(_, _, _, id, ..)| id.is_some_and(|id| id.0 == game.your_id))
-        .and_then(|(_, l, _, _, team, ..)| {
-            l.0.as_ref()
-                .filter(|s| {
-                    s.recipe
-                        .as_ref()
-                        .is_some_and(|r| r.passive == shared::loadout::PassiveId::Vitals)
-                        || s.challenge_target.is_some()
-                })
-                .map(|s| (s, team))
-        });
+        .filter_map(|(_, loadout, _, id, team, ..)| {
+            Some(Duelist {
+                flags: loadout.0.as_ref()?,
+                team: team.copied(),
+                own: id.is_some_and(|id| id.0 == game.your_id),
+            })
+        })
+        .collect();
     let now = clock.map_or(0.0, |clock| clock.now as f32);
     for (pose, loadout, class, id, team, visible, stats) in &actors {
-        if let (Some((duel, own_team)), Some(id)) = (duelist, id) {
-            if team != own_team {
-                let p = pose.translation.xz();
-                let challenge = duel.challenge_target == Some(id.0);
-                for side in 0..4 {
-                    if challenge || side == (id.0 as u8).wrapping_add(duel.vital_rotation) % 4 {
-                        let a = side as f32 * std::f32::consts::FRAC_PI_2;
-                        let color = if challenge && duel.challenge_sides & (1 << side) != 0 {
-                            Color::srgb(0.3, 0.35, 0.4)
-                        } else {
-                            Color::srgb(1.0, 0.75, 0.2)
-                        };
-                        ring(
-                            &mut gizmos,
-                            p + Vec2::new(a.cos(), a.sin()) * 1.4,
-                            0.3,
-                            *mode,
-                            map,
-                            color,
-                        );
-                    }
-                }
+        let p = pose.translation.xz();
+        let visible = visible.is_some_and(|visible| visible.get());
+        let alive = stats.is_none_or(|stats| stats.is_alive());
+        if let Some(id) = id {
+            let target = FacetTarget {
+                id: id.0,
+                team: team.copied(),
+                seen: visible && alive,
+                p,
+            };
+            for mark in duelists
+                .iter()
+                .flat_map(|duelist| duel_facets(duelist, &target))
+            {
+                gizmos.linestrip(
+                    mark.points.iter().map(|at| point(*at, *mode, map)),
+                    mark.color,
+                );
             }
         }
         let Some(state) = &loadout.0 else {
             continue;
         };
-        let p = pose.translation.xz();
         let sight = HeroSight {
             mode: *mode,
-            visible: visible.is_some_and(|visible| visible.get()),
-            alive: stats.is_none_or(|stats| stats.is_alive()),
+            visible,
+            alive,
             class: class.map(|class| class.0),
             id: id.map(|id| id.0),
             flags: state,
@@ -1473,6 +1530,237 @@ mod tests {
             both[..1],
             hero_state_marks(Models3d, true, true, &casting, p)[..]
         );
+    }
+
+    /// The four sides in the order the server counts them: the attacker stands to +x, +z,
+    /// -x or -z of the hero it strikes.
+    const SIDES: [Vec2; 4] = [Vec2::X, Vec2::Y, Vec2::NEG_X, Vec2::NEG_Y];
+    const GOLD: Color = Color::srgb(1.0, 0.75, 0.2);
+    const GREY: Color = Color::srgb(0.3, 0.35, 0.4);
+
+    fn duelist(flags: &LoadoutState, own: bool) -> Duelist<'_> {
+        Duelist {
+            flags,
+            team: Some(crate::team::Team::Green),
+            own,
+        }
+    }
+
+    fn hostile(id: u64, p: Vec2) -> FacetTarget {
+        FacetTarget {
+            id,
+            team: Some(crate::team::Team::Blue),
+            seen: true,
+            p,
+        }
+    }
+
+    /// The sides `marks` draw around `p`, each with whether it is struck. Every mark must
+    /// be one of the two glyphs: a closed gold diamond with the line of the hit through it,
+    /// or two grey halves that do not meet.
+    fn facets(marks: &[HeroMark], p: Vec2) -> Vec<(usize, bool)> {
+        let near = |a: Vec2, b: Vec2| a.distance(b) < 1e-4;
+        marks
+            .chunks(2)
+            .map(|glyph| {
+                let [first, second] = glyph else {
+                    panic!("a side is two lines: {glyph:?}");
+                };
+                let middle = first.points[..first.points.len().min(4)]
+                    .iter()
+                    .chain(&second.points)
+                    .fold(Vec2::ZERO, |sum, at| sum + *at)
+                    / (first.points.len().min(4) + second.points.len()) as f32;
+                let side = SIDES
+                    .iter()
+                    .position(|out| near(p + *out * 1.4, middle))
+                    .unwrap_or_else(|| panic!("no side at {middle}"));
+                let (out, center) = (SIDES[side], p + SIDES[side] * 1.4);
+                let (tip, wing) = (out * 0.42, out.perp() * 0.2);
+                let struck = first.color == GREY;
+                if struck {
+                    assert_eq!(second.color, GREY);
+                    for (half, sign) in [(first, 1.0), (second, -1.0)] {
+                        let base = center + out * 0.075 * sign;
+                        let expected = [base + wing, center + tip * sign, base - wing];
+                        assert_eq!(half.points.len(), 3);
+                        assert!(
+                            half.points
+                                .iter()
+                                .zip(expected)
+                                .all(|(at, expected)| near(*at, expected)),
+                            "{half:?}"
+                        );
+                    }
+                    // The halves are 0.15 apart and stay inside the diamond they were.
+                    assert!(near(first.points[0] - second.points[0], out * FACET_GAP));
+                } else {
+                    assert_eq!((first.color, second.color), (GOLD, GOLD));
+                    let outline = [
+                        center + tip,
+                        center + wing,
+                        center - tip,
+                        center - wing,
+                        center + tip,
+                    ];
+                    assert_eq!(first.points.len(), 5);
+                    assert!(
+                        first
+                            .points
+                            .iter()
+                            .zip(outline)
+                            .all(|(at, expected)| near(*at, expected)),
+                        "{first:?}"
+                    );
+                    assert_eq!(second.points.len(), 2);
+                    assert!(
+                        near(second.points[0], center - tip)
+                            && near(second.points[1], center + tip)
+                    );
+                }
+                (side, struck)
+            })
+            .collect()
+    }
+
+    /// The sides of a duel are drawn for no one but a duelist: the rotating side needs the
+    /// Vitals passive of the local hero, the four sides need the challenge, and a recipe
+    /// that has the challenge without the passive shows nothing on the other enemies.
+    #[test]
+    fn duel_facets_need_the_vitals_passive_or_a_challenge() {
+        use shared::loadout::{CoreId, PassiveId};
+        const P: Vec2 = Vec2::new(3.0, -2.0);
+        let edgeweaver = CoreId::Edgeweaver.preset();
+        assert_eq!(edgeweaver.passive, PassiveId::Vitals);
+        let mixed = shared::loadout::BuildRecipe {
+            passive: PassiveId::Tempered,
+            ..edgeweaver.clone()
+        };
+        let sides = |flags: &LoadoutState, own: bool, id: u64| {
+            facets(&duel_facets(&duelist(flags, own), &hostile(id, P)), P)
+        };
+
+        // Neither the passive nor a challenge: nothing, whoever the state belongs to.
+        for recipe in [
+            None,
+            Some(mixed.clone()),
+            Some(CoreId::Cinderforge.preset()),
+        ] {
+            for rotation in 0..4 {
+                let flags = LoadoutState {
+                    recipe: recipe.clone(),
+                    vital_rotation: rotation,
+                    challenge_sides: 0b0101,
+                    ..default()
+                };
+                for (own, id) in [(true, 9), (false, 9), (true, 10)] {
+                    assert!(sides(&flags, own, id).is_empty(), "{recipe:?}");
+                }
+            }
+        }
+
+        // The passive alone: the one side the server expects next, `(id + rotation) % 4`
+        // (`common/src/skills/advanced.rs:1689`), on every hostile hero, for its owner only.
+        for rotation in 0..4u8 {
+            for id in [0u64, 1, 2, 3, 9, 10, 255, 256, 1027] {
+                let flags = LoadoutState {
+                    recipe: Some(edgeweaver.clone()),
+                    vital_rotation: rotation,
+                    ..default()
+                };
+                let expected = usize::from((id as u8).wrapping_add(rotation) % 4);
+                assert_eq!(
+                    sides(&flags, true, id),
+                    [(expected, false)],
+                    "{id} {rotation}"
+                );
+                assert!(sides(&flags, false, id).is_empty());
+            }
+        }
+
+        // A challenge without the passive: four sides on the challenged hero and nothing on
+        // any other. The state may be anyone's: the server names the target.
+        let challenge = LoadoutState {
+            recipe: Some(mixed),
+            vital_rotation: 2,
+            challenge_target: Some(9),
+            ..default()
+        };
+        let all = [(0, false), (1, false), (2, false), (3, false)];
+        for own in [true, false] {
+            assert_eq!(sides(&challenge, own, 9), all);
+            assert!(sides(&challenge, own, 10).is_empty());
+        }
+
+        // Both: four on the challenged hero, the rotating side on the others.
+        let both = LoadoutState {
+            recipe: Some(edgeweaver),
+            ..challenge.clone()
+        };
+        assert_eq!(sides(&both, true, 9), all);
+        assert_eq!(sides(&both, true, 10), [(0, false)]);
+        assert_eq!(sides(&both, false, 9), all);
+        assert!(sides(&both, false, 10).is_empty());
+
+        // Never around an ally, the duelist itself, a hero that is not drawn or a dead one.
+        let own = duelist(&both, true);
+        for target in [
+            FacetTarget {
+                team: own.team,
+                ..hostile(9, P)
+            },
+            FacetTarget {
+                seen: false,
+                ..hostile(9, P)
+            },
+            FacetTarget {
+                seen: false,
+                ..hostile(10, P)
+            },
+        ] {
+            assert!(duel_facets(&own, &target).is_empty());
+        }
+    }
+
+    /// A side of a challenge is whole and gold until the server reports it struck, then
+    /// two grey halves: the drawing follows `challenge_sides` bit for bit and stays a
+    /// ground glyph 1.4 units from the hero.
+    #[test]
+    fn duel_facets_break_with_the_replicated_challenge_sides() {
+        const P: Vec2 = Vec2::new(-4.0, 7.5);
+        for mask in 0..16u8 {
+            let flags = LoadoutState {
+                challenge_target: Some(9),
+                challenge_sides: mask,
+                ..default()
+            };
+            let marks = duel_facets(&duelist(&flags, true), &hostile(9, P));
+            assert_eq!(marks.len(), 8, "{mask}");
+            assert_eq!(
+                facets(&marks, P),
+                (0..4)
+                    .map(|side| (side, mask & (1 << side) != 0))
+                    .collect::<Vec<_>>(),
+                "{mask}"
+            );
+            // Around the hero, never on it: outside its bars and its state rings.
+            for at in marks.iter().flat_map(|mark| &mark.points) {
+                let distance = at.distance(P);
+                assert!(
+                    (FACET_DISTANCE - FACET_LENGTH - 1e-4..=FACET_DISTANCE + FACET_LENGTH + 1e-4)
+                        .contains(&distance),
+                    "{mask} {distance}"
+                );
+            }
+        }
+        // Bits above the four sides are not sides.
+        let flags = LoadoutState {
+            challenge_target: Some(9),
+            challenge_sides: 0b1111_0000,
+            ..default()
+        };
+        let marks = duel_facets(&duelist(&flags, true), &hostile(9, P));
+        assert!(facets(&marks, P).iter().all(|(_, struck)| !struck));
     }
 
     #[test]

@@ -58,6 +58,11 @@ const CHEST: f32 = 1.0;
 /// The ring of `rune_mark` lies on the ground around the caster, clear of the decals under
 /// it: over the head it covered the health bars of the caster.
 const RUNE: f32 = 0.14;
+/// Half extent of a mark of `strike_line` in units per unit of the row scale, at most:
+/// eight marks of scale 2 join into one crack along the 15 units of a fault line. And the
+/// share of its life in which the crack runs from the caster to the other end.
+const STRIKE_MARK: f32 = 0.5;
+const STRIKE_RUN: f32 = 0.3;
 
 /// The four colours a row may name, resolved for one skill or one class.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -545,10 +550,12 @@ impl Frame {
                 let Some(along) = line.try_normalize() else {
                     return out;
                 };
-                // The marks tile the segment and never reach past either end.
-                let radius = (0.3 * self.scale).min(0.5 * line.length() / n as f32);
+                // The marks tile the segment and never reach past either end; on a line
+                // longer than the row covers they keep their size and stand apart.
+                let radius = (STRIKE_MARK * self.scale).min(0.5 * line.length() / n as f32);
                 for i in 0..n {
-                    let mut mark = late(self.piece(radius, Curve::Pop), 0.5 * share(i, n));
+                    // The crack runs out from the caster and is whole while it cools.
+                    let mut mark = late(self.piece(radius, Curve::Pop), STRIKE_RUN * share(i, n));
                     mark.origin =
                         self.origin.lerp(end, (i as f32 + 0.5) / n as f32) + Vec3::Y * FLOOR;
                     mark.orient = Orient::Ground;
@@ -2574,6 +2581,63 @@ mod tests {
                 assert!((Vec2::from_angle(mark.angle) - line).length() < 1e-4);
             }
         }
+    }
+
+    /// A fault line is one crack, not a row of crumbs: over the 15 units of the skill the
+    /// eight marks of the shipped row lie end to end from the caster to the pillar, the
+    /// crack has run its length well before it fades, and it ends as one. A longer line
+    /// than the row covers keeps the size of its marks and shows gaps instead.
+    #[test]
+    fn strike_line_marks_join_into_one_crack() {
+        let registry = target();
+        let row = registry
+            .profile(SkillId::FaultLine)
+            .and_then(|profile| profile.cast.clone())
+            .unwrap();
+        assert_eq!(row.pattern, AccentPattern::StrikeLine);
+        let laid = |length: f32| {
+            let ctx = CastContext {
+                strike_to: Some(ORIGIN + Vec3::new(0.8, 0.0, -0.6) * length),
+                ..cast(Vec2::X)
+            };
+            let marks = accent_particles(&row, &palette(), &ctx);
+            let line = Vec2::new(0.8, -0.6);
+            marks
+                .into_iter()
+                .map(|mark| {
+                    let along = (mark.origin - ORIGIN).xz().dot(line);
+                    let half = unit_radius(mark.shape) * mark.size * mark.curve.peak();
+                    (along - half, along + half, mark.delay, mark.lifetime)
+                })
+                .collect::<Vec<_>>()
+        };
+        // The skill's own length (`common/src/skills/advanced.rs:639-662`) and a short one.
+        for length in [15.0, 4.0] {
+            let marks = laid(length);
+            assert_eq!(marks.len(), 8);
+            assert!(marks[0].0.abs() < 1e-4, "{length}");
+            assert!((marks[7].1 - length).abs() < 1e-4, "{length}");
+            for pair in marks.windows(2) {
+                assert!((pair[0].1 - pair[1].0).abs() < 1e-4, "{length}: {pair:?}");
+                // It runs away from the caster.
+                assert!(pair[1].2 > pair[0].2);
+            }
+            let life = marks[0].3;
+            for (_, _, delay, lifetime) in &marks {
+                assert!((delay + lifetime - life).abs() < 1e-5);
+                // Whole before a mark begins to fade at half its life.
+                assert!(*delay <= STRIKE_RUN * life + 1e-5);
+            }
+            assert!(marks[7].2 < crate::game_vfx::HOLD_SHARE * life);
+        }
+        // Past the reach of the row the marks are no longer than its scale allows.
+        let far = laid(28.0);
+        let half = STRIKE_MARK * row.scale;
+        for pair in far.windows(2) {
+            assert!((pair[0].1 - pair[0].0 - 2.0 * half).abs() < 1e-4);
+            assert!(pair[1].0 - pair[0].1 > 1.0);
+        }
+        assert!(far[0].0 >= -1e-4 && far[7].1 <= 28.0 + 1e-4);
     }
 
     #[test]

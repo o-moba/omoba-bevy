@@ -211,6 +211,13 @@ pub(crate) const HOLD_SHARE: f32 = 0.5;
 /// a fifth of it through, so a unit under the flash of a hit keeps its outline.
 pub(crate) const DENSE_CORE: f32 = 0.34;
 const DENSE_COVER: f32 = 0.8;
+/// A dense glow is the flash behind a hit. It is sorted this many units behind where it
+/// stands, so that the mark and the debris of its burst are drawn over it from every side
+/// and not only when they happen to lie nearer to the camera. Less than one unit: the depth
+/// bias of the rasteriser stays zero and the pool keeps one pipeline.
+const DENSE_BEHIND: f32 = 0.9;
+/// The same order in the flat view, as a step down inside the layer of the particles.
+const DENSE_BELOW: f32 = 0.01;
 
 /// One pooled particle as a pure generator describes it. Positions and velocities are
 /// simulation coordinates in both render modes.
@@ -432,7 +439,8 @@ impl Particle {
         let t = (self.age / self.lifetime).clamp(0., 1.);
         let p = self.origin + self.travel(self.age);
         let position = if flat {
-            simulation_xz_to_render_xy(p).extend(layer::VFX + 0.1)
+            let below = if self.dense { DENSE_BELOW } else { 0. };
+            simulation_xz_to_render_xy(p).extend(layer::VFX + 0.1 - below)
         } else {
             p
         };
@@ -1511,6 +1519,7 @@ fn animate_particles(
             m.base_color = hdr_tint(p.color, p.gain);
             m.base_color_texture = texture.clone();
             m.alpha_mode = AlphaMode::Blend;
+            m.depth_bias = if p.dense { -DENSE_BEHIND } else { 0. };
         }
         if let Some(mut m) = flats.get_mut(&slot.flat) {
             m.color = p.color;
@@ -3322,6 +3331,67 @@ mod tests {
             app.update();
         }
         assert_eq!(shown(&mut app), Some(true));
+    }
+    /// The flash of a hit is drawn behind the rest of its burst in both views, whatever
+    /// side the camera is on: a mark at the same place as the flash would otherwise be
+    /// covered or not by the order of two pool entities. A slot that held a flash sorts in
+    /// place again for the next particle.
+    #[test]
+    fn a_dense_glow_is_sorted_behind_the_particles_of_its_burst() {
+        let mark = ParticleSpec {
+            event_id: 5,
+            lifetime: 0.05,
+            shape: Shape::Streak,
+            ..ParticleSpec::BASE
+        };
+        let flash = ParticleSpec {
+            dense: true,
+            ..mark.clone()
+        };
+        // The flat view: one step down inside the layer of the particles.
+        let (over, under) = (
+            mark.pose_at(0., true, Quat::IDENTITY).translation,
+            flash.pose_at(0., true, Quat::IDENTITY).translation,
+        );
+        assert_eq!(over.xy(), under.xy());
+        assert!((over.z - under.z - DENSE_BELOW).abs() < 1e-5);
+        assert!(under.z > layer::VFX);
+        // In 3D both stand at the receipt; only the sort key of the flash is moved, by less
+        // than the unit that would change the pipeline.
+        assert_eq!(
+            mark.pose_at(0., false, Quat::IDENTITY).translation,
+            flash.pose_at(0., false, Quat::IDENTITY).translation
+        );
+        assert!(DENSE_BEHIND > 0. && (-DENSE_BEHIND) as i32 == 0);
+        let biases = |app: &mut App| {
+            let slots: Vec<(bool, Handle<StandardMaterial>)> = app
+                .world_mut()
+                .query::<&ParticleSlot>()
+                .iter(app.world())
+                .filter_map(|slot| Some((slot.active.as_ref()?.dense, slot.material.clone())))
+                .collect();
+            let materials = app.world().resource::<Assets<StandardMaterial>>();
+            let mut biases: Vec<(bool, f32)> = slots
+                .into_iter()
+                .map(|(dense, material)| (dense, materials.get(&material).unwrap().depth_bias))
+                .collect();
+            biases.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            biases
+        };
+        let mut app = pool();
+        app.world_mut()
+            .write_message(SkillBurst(vec![flash.clone(), mark.clone()]));
+        app.update();
+        assert_eq!(biases(&mut app), [(false, 0.), (true, -DENSE_BEHIND)]);
+        // Both end; the freed slots take two marks.
+        for _ in 0..6 {
+            app.update();
+        }
+        assert!(biases(&mut app).is_empty());
+        app.world_mut()
+            .write_message(SkillBurst(vec![mark.clone(), mark]));
+        app.update();
+        assert_eq!(biases(&mut app), [(false, 0.), (false, 0.)]);
     }
     #[test]
     fn generated_particles_follow_drag_gravity_curves_colours_and_orientation() {
