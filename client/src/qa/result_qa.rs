@@ -8,6 +8,7 @@
 //! resources, nothing sent — through the production screen, systems and
 //! kit: finalizing, saved, a guest's defeat on a rematch server, abandoned.
 //! Set `OMOBA_RESULT_QA_ABANDONED_ONLY=1` for just the abandoned result.
+//! Set `OMOBA_RESULT_QA_LOADING_ONLY=1` for just the connecting loading screen.
 //! The loading frames are real: the connecting body while the session
 //! waits, then its failure once the session gives up (`T_WAIT_MAX`).
 //! Size and profile come from `OMOBA_QA_WIDTH`/`OMOBA_QA_HEIGHT` and
@@ -98,7 +99,9 @@ impl Plugin for ResultQaPlugin {
                 dimension("OMOBA_QA_HEIGHT", 720),
             ),
             started: Instant::now(),
-            stage: if std::env::var("OMOBA_RESULT_QA_ABANDONED_ONLY").as_deref() == Ok("1") {
+            stage: if std::env::var("OMOBA_RESULT_QA_LOADING_ONLY").as_deref() == Ok("1") {
+                4
+            } else if std::env::var("OMOBA_RESULT_QA_ABANDONED_ONLY").as_deref() == Ok("1") {
                 3
             } else if std::env::var("OMOBA_RESULT_QA_SAVED_ONLY").as_deref() == Ok("1") {
                 1
@@ -386,6 +389,7 @@ fn shoot(
             qa.entered = false;
             qa.stage = if std::env::var("OMOBA_RESULT_QA_ABANDONED_ONLY").as_deref() == Ok("1")
                 || std::env::var("OMOBA_RESULT_QA_SAVED_ONLY").as_deref() == Ok("1")
+                || std::env::var("OMOBA_RESULT_QA_LOADING_ONLY").as_deref() == Ok("1")
             {
                 STAGES.len()
             } else {

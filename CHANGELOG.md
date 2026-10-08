@@ -5,6 +5,8 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Improve the first match with an objective-first guide, loading tips navigable by buttons or swipe, and a remembered beginner-tips switch in Settings → HUD. Compact creature health bars, reduce melee/hit/tower sound gains, and use a closer default phone camera while preserving saved zoom choices.
+
 Beta and uploaded iOS remain 0.41.0 (20), protocol 9. The quality iteration below requires a coordinated server/client update; the compatibility handshake intentionally rejects old peers.
 
 ## [0.42.0] - 2026-10-05

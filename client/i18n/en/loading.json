@@ -1,8 +1,8 @@
 {
-  "loading.tip.last_hit": "Last-hitting minions is the safest gold in the lane.",
-  "loading.tip.towers": "Towers hit harder than you do early. Bring minions with you.",
-  "loading.tip.jungle": "Jungle camps respawn: clear them between waves.",
-  "loading.tip.minimap": "Watch the minimap before you rotate; a missing enemy is a warning.",
+  "loading.tip.last_hit": "Defeat enemy minions: their deaths earn your team experience and gold. Upgrade abilities and buy items at your base.",
+  "loading.tip.towers": "Wait for your minions to enter the enemy tower’s range and take its fire. Attack, then retreat when they are gone.",
+  "loading.tip.jungle": "Return to your base to heal and buy items. Do not chase enemies alone.",
+  "loading.tip.minimap": "Watch the minimap for enemies. On a phone, adjust your view in Settings → Camera.",
   "loading.tip.ultimate": "Your ultimate is not an escape. Buy the item that is.",
   "loading.assets.battlefield": "Loading the battlefield…",
   "loading.assets.team_heroes": "Preparing the team’s heroes…",
@@ -26,5 +26,9 @@
   "loading.ready_count_timed": "{ready} / {total} players ready · up to {seconds}s remaining",
   "loading.connecting": "Connecting to the battlefield…",
   "loading.shell.failed": "Connection problem",
-  "loading.shell.slow": "This is taking longer than usual. Cancel to return to the menu."
+  "loading.shell.slow": "This is taking longer than usual. Cancel to return to the menu.",
+  "loading.tip.objective": "Destroy the towers in one lane, then the enemy main tower. Follow your minions.",
+  "loading.tip.previous": "‹",
+  "loading.tip.next": "›",
+  "loading.tip.counter": "Tip {current} / {total}"
 }

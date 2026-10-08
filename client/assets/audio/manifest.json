@@ -7,7 +7,7 @@
   "cues": {
     "melee": {
       "path": "audio/sfx/melee.ogg",
-      "gain": 0.6
+      "gain": 0.35
     },
     "arrow": {
       "path": "audio/sfx/arrow.ogg",
@@ -27,11 +27,11 @@
     },
     "tower": {
       "path": "audio/sfx/tower.ogg",
-      "gain": 0.7
+      "gain": 0.45
     },
     "hit": {
       "path": "audio/sfx/hit.ogg",
-      "gain": 0.6
+      "gain": 0.3
     },
     "kill": {
       "path": "audio/sfx/kill.ogg",

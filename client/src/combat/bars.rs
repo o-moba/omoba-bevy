@@ -11,8 +11,8 @@ use bevy::{camera::primitives::Aabb, math::primitives::Rectangle, prelude::*};
 use super::marker::{TARGET_MARKER_INNER_RADIUS, TargetMarker};
 use super::selection::TargetState;
 
-const BAR_WIDTH: f32 = 1.45;
-const BAR_HEIGHT: f32 = 0.09;
+const BAR_WIDTH: f32 = 1.25;
+const BAR_HEIGHT: f32 = 0.075;
 const BAR_LAYER_OFFSET: f32 = 0.01;
 const MANA_BAR_OFFSET_Y: f32 = -0.15;
 const BAR_HEAD_CLEARANCE: f32 = 0.28;
@@ -158,9 +158,16 @@ pub(super) fn spawn_combat_bars_system(
         let show_mana_bar =
             structure_kind.is_none() && minion_marker.is_none() && neutral_marker.is_none();
         let mut bars = CombatBars::default();
+        let bar_scale = if minion_marker.is_some() {
+            Vec3::new(0.55, 0.8, 1.0)
+        } else if neutral_marker.is_some() {
+            Vec3::new(0.75, 0.9, 1.0)
+        } else {
+            Vec3::ONE
+        };
         let bar_root = commands
             .spawn((
-                Transform::from_xyz(0.0, bar_y, 0.0),
+                Transform::from_xyz(0.0, bar_y, 0.0).with_scale(bar_scale),
                 Visibility::default(),
                 CombatBarRoot,
                 CombatBarAnchor {

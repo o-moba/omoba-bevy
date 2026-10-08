@@ -1,6 +1,6 @@
 {
   "help.eyebrow": "战场指南  /  翠绿竞技场",
-  "help.title": "迈出你的第一步。",
+  "help.title": "摧毁敌方基地。",
   "help.card.move.title": "移动",
   "help.card.move.body": "右键点击地面即可前往。路线会显示在小地图上。",
   "help.card.attack.title": "攻击",
@@ -12,7 +12,7 @@
   "help.card.shop.title": "商店",
   "help.card.shop.body": "在基地按 P。用赚到的金币购买适合你职业的装备。",
   "help.card.objective.title": "目标",
-  "help.card.objective.body": "跟随你的小兵。摧毁一条兵线上的所有防御塔，然后摧毁敌方基地。让小兵吸收防御塔的火力。阵亡后请等待复活。",
+  "help.card.objective.body": "跟随己方小兵，等待防御塔向小兵开火。摧毁一条路线上的防御塔，再摧毁敌方主塔。小兵阵亡后及时撤退。",
   "help.card.field.title": "观察战场",
   "help.card.field.body": "你的英雄脚下有双圈；友军显示方形标记；敌人显示三角形标记。",
   "help.card.camera.title": "镜头",
@@ -37,11 +37,11 @@
   "help.phone.card.grow.title": "成长",
   "help.phone.card.grow.body": "技能随等级提升解锁。轻触“加点”，再轻触发光的技能即可分配技能点。",
   "help.phone.card.win.title": "胜利",
-  "help.phone.card.win.body": "跟随你的小兵，摧毁一条兵线上的所有防御塔，然后摧毁敌方基地。",
+  "help.phone.card.win.body": "摧毁一条路线的防御塔，再摧毁敌方主塔。跟随己方小兵攻塔。",
   "help.phone.card.recover.title": "恢复",
   "help.phone.card.recover.body": "回到基地回复生命值并购买装备。阵亡后请等待复活。",
   "help.phone.card.look.title": "视野",
-  "help.phone.card.look.body": "轻触小地图可侦察。移动摇杆即可重新跟随英雄。",
+  "help.phone.card.look.body": "点击小地图查看战场，移动摇杆恢复跟随。在设置 → 镜头调整缩放。",
   "help.phone.footer": "菜单打开期间，对局仍在继续。请保持连接，迎接下一局。",
   "help.phone.dismiss": "知道了，开始游戏"
 }

@@ -47,5 +47,7 @@
   "pause.hud.combat_x": "技能 · 水平位置",
   "pause.hud.combat_y": "技能 · 垂直位置",
   "pause.hud.reset": "重置按钮位置",
-  "pause.render.show_fps": "显示 FPS"
+  "pause.render.show_fps": "显示 FPS",
+  "pause.tips.enabled": "新手提示",
+  "pause.tips.hint": "显示加载提示和首场对局指南。关闭后仍可手动打开帮助。"
 }

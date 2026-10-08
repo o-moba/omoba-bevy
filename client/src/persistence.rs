@@ -13,6 +13,7 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::audio_settings::AudioSettings;
+use crate::help_overlay::BeginnerTips;
 use crate::mobile_controls::HudPositionSettings;
 use crate::render_settings::RenderSettings;
 use bevy::prelude::*;
@@ -32,7 +33,7 @@ use crate::world::{
     MIN_LIGHT_YAW_DEG,
 };
 
-const SCHEMA_VERSION: u32 = 7;
+const SCHEMA_VERSION: u32 = 8;
 const LEGACY_DEFAULT_MODEL_TARGET_HEIGHT: f32 = 1.15;
 const SCHEMA_3_DEFAULT_MODEL_TARGET_HEIGHT: f32 = 1.45;
 const PREFS_FILENAME: &str = "client_preferences.json";
@@ -62,6 +63,7 @@ impl Plugin for ClientPersistencePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<FileGameServerAddr>()
             .init_resource::<AudioSettings>()
+            .init_resource::<BeginnerTips>()
             .init_resource::<RenderSettings>()
             .init_resource::<HudPositionSettings>()
             .init_resource::<CameraSettings>()
@@ -115,6 +117,8 @@ struct ClientPreferencesFile {
     light_yaw_deg: Option<f32>,
     #[serde(default)]
     audio: AudioSettings,
+    #[serde(default)]
+    beginner_tips: BeginnerTips,
     #[serde(default)]
     render: RenderSettings,
     #[serde(default)]
@@ -294,6 +298,7 @@ pub(crate) fn load_persistent_client_settings(
     mut initial_save_pending: ResMut<ClientPreferencesInitialSavePending>,
     mut gate: ResMut<ClientPrefsSaveGate>,
     mut audio: ResMut<AudioSettings>,
+    mut tips: ResMut<BeginnerTips>,
     mut render: ResMut<RenderSettings>,
     mut hud_position: ResMut<HudPositionSettings>,
     mut camera: ResMut<CameraSettings>,
@@ -333,6 +338,7 @@ pub(crate) fn load_persistent_client_settings(
     // queue the migrated schema so the one-time default migration is persisted.
     initial_save_pending.0 = disk.schema_version < SCHEMA_VERSION;
     *audio = disk.audio.sanitized();
+    *tips = disk.beginner_tips;
     *render = disk.render.sanitized();
     *hud_position = disk.hud_position.sanitized();
     motion.reduce = disk.reduce_motion;
@@ -415,6 +421,7 @@ fn build_file_from_state(
         light_pitch_deg: Some(lighting.light_pitch_deg),
         light_yaw_deg: Some(lighting.light_yaw_deg),
         audio: audio.sanitized(),
+        beginner_tips: BeginnerTips::default(),
         render: RenderSettings::default(),
         hud_position: HudPositionSettings::default(),
         camera_zoom: Some(camera.sanitized().zoom),
@@ -449,6 +456,7 @@ pub(crate) fn save_client_preferences_to_disk(
     handheld: Option<&shared::handheld::HandheldSelection>,
     render: Option<&RenderSettings>,
     hud_position: Option<&HudPositionSettings>,
+    tips: Option<&BeginnerTips>,
 ) -> io::Result<()> {
     let Some(path) = preferences_path() else {
         return Err(io::Error::new(
@@ -482,6 +490,10 @@ pub(crate) fn save_client_preferences_to_disk(
         .or_else(|| previous.as_ref().map(|p| p.hud_position))
         .unwrap_or_default()
         .sanitized();
+    prefs.beginner_tips = tips
+        .copied()
+        .or_else(|| previous.as_ref().map(|p| p.beginner_tips))
+        .unwrap_or_default();
     prefs.handheld = handheld
         .cloned()
         .or_else(|| previous.map(|p| p.handheld))
@@ -506,6 +518,7 @@ fn save_client_preferences_on_change(
     motion: Res<MotionSettings>,
     locale: Option<Res<crate::i18n::Locale>>,
     saved_language: Res<SavedLanguage>,
+    tips: Res<BeginnerTips>,
 ) {
     if gate.suppress_saves > 0 {
         gate.suppress_saves -= 1;
@@ -518,6 +531,7 @@ fn save_client_preferences_on_change(
         || resolved_addr.is_changed()
         || client_session_id.is_changed()
         || audio.is_changed()
+        || tips.is_changed()
         || render.is_changed()
         || hud_position.is_changed()
         || camera.is_changed()
@@ -545,6 +559,7 @@ fn save_client_preferences_on_change(
         Some(&team.handheld),
         Some(&render),
         Some(&hud_position),
+        Some(&tips),
     ) {
         warn!("Failed to save client preferences: {e}");
     }
@@ -582,6 +597,7 @@ pub(crate) fn reset_graphics_to_defaults(
         None,
         None,
         None,
+        None,
     ) {
         warn!("Failed to save preferences after reset: {e}");
     }
@@ -602,6 +618,49 @@ mod tests {
         ));
         fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn beginner_tips_default_on_and_disabled_choice_loads_from_disk() {
+        if crate::i18n::testing::isolated(
+            "persistence::tests::beginner_tips_default_on_and_disabled_choice_loads_from_disk",
+        ) {
+            return;
+        }
+        let legacy: ClientPreferencesFile =
+            serde_json::from_str(r#"{"schema_version":7}"#).unwrap();
+        assert!(legacy.beginner_tips.enabled);
+        let dir = scratch_dir("beginner-tips");
+        // SAFETY: this test is isolated in its own process before changing env.
+        unsafe {
+            std::env::set_var("OMOBA_CLIENT_CONFIG_DIR", &dir);
+        }
+        let launch = || {
+            let mut app = App::new();
+            app.init_resource::<LightingSettings>()
+                .init_resource::<ModelScaleSettings>()
+                .init_resource::<crate::team::TeamSelection>()
+                .add_plugins(ClientPersistencePlugin);
+            app
+        };
+        let mut app = launch();
+        for _ in 0..5 {
+            app.update();
+        }
+        app.world_mut().resource_mut::<BeginnerTips>().enabled = false;
+        app.world_mut().resource_mut::<CameraSettings>().zoom = 0.9;
+        app.update();
+        assert!(
+            !read_preferences_file(&dir.join(PREFS_FILENAME))
+                .unwrap()
+                .beginner_tips
+                .enabled
+        );
+        let mut next = launch();
+        next.update();
+        assert!(!next.world().resource::<BeginnerTips>().enabled);
+        assert_eq!(next.world().resource::<CameraSettings>().zoom, 0.9);
+        fs::remove_dir_all(dir).unwrap();
     }
 
     /// O7: the settings file is replaced by rename, never truncated in place.
@@ -808,6 +867,7 @@ mod tests {
             Some(&shared::handheld::HandheldSelection::Item(
                 "forge-hammer".into(),
             )),
+            None,
             None,
             None,
         )

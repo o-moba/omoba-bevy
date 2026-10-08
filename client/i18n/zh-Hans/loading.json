@@ -1,8 +1,8 @@
 {
-  "loading.tip.last_hit": "补刀小兵是兵线上最稳妥的金币来源。",
-  "loading.tip.towers": "前期防御塔比你伤害更高。推塔时带上小兵。",
-  "loading.tip.jungle": "野怪营地会刷新：在兵线间隙清理它们。",
-  "loading.tip.minimap": "转线前先看小地图；敌人消失就是警报。",
+  "loading.tip.last_hit": "消灭敌方小兵可为己方队伍提供经验和金币。升级技能，并在己方基地购买装备。",
+  "loading.tip.towers": "等待己方小兵进入敌塔范围并吸引火力后再攻击。小兵阵亡后及时撤退。",
+  "loading.tip.jungle": "返回己方基地恢复生命并购买装备。不要独自追击敌人。",
+  "loading.tip.minimap": "留意小地图上的敌人。手机上可在设置 → 镜头调整缩放。",
   "loading.tip.ultimate": "大招不是逃生技能。买一件能保命的装备。",
   "loading.assets.battlefield": "正在加载战场…",
   "loading.assets.team_heroes": "正在准备队伍的英雄…",
@@ -26,5 +26,9 @@
   "loading.ready_count_timed": "{ready} / {total} 名玩家已就绪 · 最多剩余 {seconds} 秒",
   "loading.connecting": "正在连接战场…",
   "loading.shell.failed": "连接失败",
-  "loading.shell.slow": "耗时比平常更久。可以取消并返回主菜单。"
+  "loading.shell.slow": "耗时比平常更久。可以取消并返回主菜单。",
+  "loading.tip.objective": "摧毁一条路线上的防御塔，再摧毁敌方主塔。跟随己方小兵前进。",
+  "loading.tip.previous": "‹",
+  "loading.tip.next": "›",
+  "loading.tip.counter": "提示 {current} / {total}"
 }

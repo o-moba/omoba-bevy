@@ -26,6 +26,18 @@ use crate::ui::widgets::surfaces::{self, BadgeKind, InfoCard};
 use crate::ui::widgets::{ButtonSize, button_node, spawn_button};
 use crate::ui::{Activated, ModalId, ModalRoot, ScrollArea, TestId, UiActionAppExt};
 
+/// Automatic beginner advice; the Help button remains available when disabled.
+#[derive(Resource, Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+pub(crate) struct BeginnerTips {
+    pub enabled: bool,
+}
+impl Default for BeginnerTips {
+    fn default() -> Self {
+        Self { enabled: true }
+    }
+}
+
 pub struct HelpOverlayPlugin;
 
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -35,7 +47,8 @@ pub(crate) enum HelpOverlaySet {
 
 impl Plugin for HelpOverlayPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<HelpOverlayVisible>()
+        app.init_resource::<BeginnerTips>()
+            .init_resource::<HelpOverlayVisible>()
             .init_resource::<HelpOverlayShown>()
             .init_resource::<HelpAutoShowState>()
             .add_ui_action::<HelpAction>()
@@ -83,13 +96,14 @@ fn auto_show_help_on_first_match_start(
     session: Option<Res<ClientSession>>,
     mut state: ResMut<HelpAutoShowState>,
     mut visible: ResMut<HelpOverlayVisible>,
+    tips: Option<Res<BeginnerTips>>,
 ) {
     let running = matches!(snapshot.state, GameState::Running)
         && session
             .as_ref()
             .is_none_or(|session| session.join_confirmed());
     if running && !state.was_running && state.pending && !crate::sandbox::requested() {
-        visible.0 = true;
+        visible.0 = tips.as_ref().is_none_or(|tips| tips.enabled);
         state.pending = false;
     }
     state.was_running = running;
@@ -185,6 +199,13 @@ struct DesktopCard {
 
 const DESKTOP_CARDS: [DesktopCard; 6] = [
     DesktopCard {
+        id: "objective",
+        icon: Icon::HudTower,
+        title: "help.card.objective.title",
+        body: "help.card.objective.body",
+        legend: &[],
+    },
+    DesktopCard {
         id: "move",
         icon: Icon::HudDash,
         title: "help.card.move.title",
@@ -225,17 +246,16 @@ const DESKTOP_CARDS: [DesktopCard; 6] = [
         body: "help.card.shop.body",
         legend: &[Legend::Key("P")],
     },
-    DesktopCard {
-        id: "objective",
-        icon: Icon::HudTower,
-        title: "help.card.objective.title",
-        body: "help.card.objective.body",
-        legend: &[],
-    },
 ];
 
 /// The phone cards: id, icon, title and body keys (one dictionary line each).
 const PHONE_CARDS: [(&str, Icon, &str, &str); 10] = [
+    (
+        "win",
+        Icon::HudTower,
+        "help.phone.card.win.title",
+        "help.phone.card.win.body",
+    ),
     (
         "move",
         Icon::HudDash,
@@ -277,12 +297,6 @@ const PHONE_CARDS: [(&str, Icon, &str, &str); 10] = [
         Icon::NavPlus,
         "help.phone.card.grow.title",
         "help.phone.card.grow.body",
-    ),
-    (
-        "win",
-        Icon::HudTower,
-        "help.phone.card.win.title",
-        "help.phone.card.win.body",
     ),
     (
         "recover",
@@ -696,7 +710,10 @@ fn spawn_phone_guide(root: &mut ChildSpawnerCommands) {
                     Node {
                         display: Display::Grid,
                         grid_template_columns: RepeatedGridTrack::flex(2, 1.0),
-                        grid_auto_rows: vec![GridTrack::px(PHONE_CARD_H)],
+                        grid_auto_rows: vec![GridTrack::minmax(
+                            MinTrackSizingFunction::Px(PHONE_CARD_H),
+                            MaxTrackSizingFunction::MaxContent,
+                        )],
                         column_gap: Val::Px(space::S8),
                         row_gap: Val::Px(space::S8),
                         flex_shrink: 0.0,
@@ -1140,6 +1157,25 @@ mod tests {
         assert!(body.contains("press F1"));
     }
     #[test]
+    fn disabling_beginner_tips_suppresses_auto_help_but_keeps_manual_help() {
+        let mut app = App::new();
+        app.init_resource::<ButtonInput<KeyCode>>()
+            .insert_resource(BeginnerTips { enabled: false })
+            .insert_resource(GameStateSnapshot {
+                state: GameState::Running,
+                ..default()
+            })
+            .add_plugins(HelpOverlayPlugin);
+        app.update();
+        assert!(!app.world().resource::<HelpOverlayVisible>().0);
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(crate::input_bindings::HELP_TOGGLE_KEY);
+        app.update();
+        assert!(app.world().resource::<HelpOverlayVisible>().0);
+    }
+
+    #[test]
     fn first_match_help_button_dismisses_and_does_not_reopen_on_rematch() {
         let mut app = App::new();
         app.init_resource::<ButtonInput<KeyCode>>()
@@ -1295,12 +1331,12 @@ mod tests {
         assert_eq!(rect(&mut app, "HelpEyebrow"), [120.0, 48.0, 1040.0, 16.0]);
         assert_eq!(rect(&mut app, "HelpTitle"), [120.0, 68.0, 1040.0, 40.0]);
         for (id, x, y) in [
-            ("move", 120.0, 124.0),
-            ("attack", 472.0, 124.0),
-            ("target", 824.0, 124.0),
-            ("abilities", 120.0, 340.0),
-            ("shop", 472.0, 340.0),
-            ("objective", 824.0, 340.0),
+            ("objective", 120.0, 124.0),
+            ("move", 472.0, 124.0),
+            ("attack", 824.0, 124.0),
+            ("target", 120.0, 340.0),
+            ("abilities", 472.0, 340.0),
+            ("shop", 824.0, 340.0),
         ] {
             assert_eq!(
                 rect(&mut app, &format!("HelpCard-{id}")),
@@ -1396,23 +1432,26 @@ mod tests {
         );
         assert_eq!(rect(&mut app, "HelpBody"), [75.0, 80.0, 694.0, 265.0]);
         let names = [
-            "move", "attack", "target", "farm", "utility", "skills", "grow", "win", "recover",
+            "win", "move", "attack", "target", "farm", "utility", "skills", "grow", "recover",
             "look",
         ];
         for (index, id) in names.iter().enumerate() {
             let [x, _, w, h] = rect(&mut app, &format!("HelpCard-{id}"));
             assert_eq!(
-                (x, w, h),
-                (if index % 2 == 0 { 75.0 } else { 426.0 }, 343.0, 96.0),
+                (x, w),
+                (if index % 2 == 0 { 75.0 } else { 426.0 }, 343.0),
                 "{id}"
+            );
+            assert!(
+                h >= PHONE_CARD_H,
+                "{id} must fit its text at a readable size"
             );
         }
         let list = named(&mut app, "HelpBody");
         let node = app.world().get::<ComputedNode>(list).unwrap();
-        assert_eq!(
-            node.content_size().y.round(),
-            554.0,
-            "5 × 96 + 4 × 8 + 8 + 34"
+        assert!(
+            node.content_size().y.round() >= 554.0,
+            "five card rows plus the footer remain scrollable"
         );
         assert!(app.world().get::<ScrollArea>(list).is_some());
         let thumb = named(&mut app, "HelpScrollThumb");

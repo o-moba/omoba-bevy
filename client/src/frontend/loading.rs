@@ -16,6 +16,7 @@
 use bevy::{
     asset::RecursiveDependencyLoadState,
     ecs::system::SystemParam,
+    input::touch::{TouchInput, TouchPhase},
     prelude::*,
     scene::{SceneInstance, SceneSpawner},
     window::PrimaryWindow,
@@ -37,10 +38,10 @@ use crate::{
     sprite::{PlayerSpriteVisual, PlayerVisualMode},
     team::{AvatarThumbnails, CharacterChoice},
     ui::{
-        Activated, FocusEntry, TestId, UiActionAppExt,
+        Activated, FocusEntry, ScrollArea, TestId, UiActionAppExt,
         kit_assets::{Background, CoverImage, Frame, Icon, KitImage},
         theme::{self, ButtonKind, Form, TextStyle},
-        tokens::{TextRole, border, color, radius, size, space},
+        tokens::{TextRole, color, radius, size, space},
         widgets::{
             ButtonSize, button_node,
             game::RingSize,
@@ -56,11 +57,11 @@ use crate::{
 
 /// Dictionary keys of the loading tips.
 const TIPS: [&str; 5] = [
-    "loading.tip.last_hit",
+    "loading.tip.objective",
     "loading.tip.towers",
+    "loading.tip.last_hit",
     "loading.tip.jungle",
     "loading.tip.minimap",
-    "loading.tip.ultimate",
 ];
 /// The dictionary key of the tip shown for `index` (show it with `tr`).
 pub fn tip_for(index: usize) -> &'static str {
@@ -76,7 +77,7 @@ impl Plugin for LoadingScreenPlugin {
             .add_systems(OnEnter(AppScreen::Loading), enter_loading)
             .add_systems(
                 Update,
-                (loading_actions, assess_readiness)
+                (loading_actions, loading_tip_swipes, assess_readiness)
                     .chain()
                     .in_set(DraftSet::Input)
                     .run_if(in_state(AppScreen::Loading)),
@@ -143,6 +144,7 @@ fn loading_actions(
     mut activated: MessageReader<Activated<LoadingAction>>,
     mut state: ResMut<DraftClient>,
     mut session: MessageWriter<SessionUiCommand>,
+    mut latch: Option<ResMut<LoadingLatch>>,
 ) {
     let mut cancel = false;
     let mut retry = false;
@@ -150,6 +152,16 @@ fn loading_actions(
         match pressed.action {
             LoadingAction::Cancel => cancel = true,
             LoadingAction::Retry => retry = true,
+            LoadingAction::PreviousTip => {
+                if let Some(latch) = latch.as_deref_mut() {
+                    latch.tip = (latch.tip + TIPS.len() - 1) % TIPS.len();
+                }
+            }
+            LoadingAction::NextTip => {
+                if let Some(latch) = latch.as_deref_mut() {
+                    latch.tip = (latch.tip + 1) % TIPS.len();
+                }
+            }
         }
     }
     if cancel {
@@ -407,7 +419,7 @@ fn matching_avatar_asset<T: Asset>(
 pub(super) struct LoadingLatch {
     /// `Time::elapsed_secs` on entry (the slow line after 30 s).
     entered_at: f32,
-    /// The tip, fixed for the whole wait: a teardown resets the match id.
+    /// The currently selected advice card; each wait starts with the objective.
     tip: usize,
     /// The first `countdown_ms` of the current `GameState::Starting` run
     /// (servers without a draft; the client does not know the constant).
@@ -421,12 +433,11 @@ pub(super) struct LoadingLatch {
 fn enter_loading(
     mut latch: ResMut<LoadingLatch>,
     mut state: ResMut<DraftClient>,
-    game: Res<GameStateSnapshot>,
     time: Option<Res<Time>>,
 ) {
     *latch = LoadingLatch {
         entered_at: time.map_or(0.0, |time| time.elapsed_secs()),
-        tip: game.meta.match_id as usize,
+        tip: 0,
         ..default()
     };
     state.local_assets.clear();
@@ -584,6 +595,8 @@ struct LoadingParts {
 enum LoadingAction {
     Cancel,
     Retry,
+    PreviousTip,
+    NextTip,
 }
 
 /// The phone header countdown ring sits `safe left + 432` (after the title
@@ -601,6 +614,7 @@ fn render_loading(
     locale: Option<Res<Locale>>,
     mobile: Option<Res<MobileControls>>,
     latch: Option<Res<LoadingLatch>>,
+    tips: Option<Res<crate::help_overlay::BeginnerTips>>,
     mut party_stage: Option<ResMut<super::party_stage::PartyStage>>,
     mut last: Local<String>,
 ) {
@@ -619,11 +633,13 @@ fn render_loading(
     let phase = game.prematch.as_ref().map(|p| p.phase);
     let roster_key = game.prematch.as_ref().map(|p| (&p.players, &p.error));
     let key = format!(
-        "{phase:?}:{}:{}:{}:{}:{form:?}",
+        "{phase:?}:{}:{}:{}:{}:{form:?}:{}:{}",
         serde_json::to_string(&roster_key).unwrap_or_default(),
         window.width(),
         window.height(),
-        locale.as_ref().map_or(0, |locale| locale.generation())
+        locale.as_ref().map_or(0, |locale| locale.generation()),
+        latch.as_ref().map_or(0, |latch| latch.tip),
+        tips.as_ref().is_none_or(|tips| tips.enabled),
     );
     if *last == key && !roots.is_empty() {
         return;
@@ -640,11 +656,8 @@ fn render_loading(
         }
     }
     let safe = mobile.as_deref().map(|mobile| mobile.safe);
-    let tip = tip_for(
-        latch
-            .as_ref()
-            .map_or(game.meta.match_id as usize, |latch| latch.tip),
-    );
+    let tip_index = latch.as_ref().map_or(0, |latch| latch.tip);
+    let show_tips = tips.as_ref().is_none_or(|tips| tips.enabled);
     let countdown = phase == Some(PrematchPhase::Countdown);
     let mut parts = None;
     commands
@@ -697,12 +710,13 @@ fn render_loading(
                         &scroll,
                         party_stage.as_deref(),
                         Vec2::new(window.width(), window.height()),
+                        show_tips,
                     );
                     ShellParts::default()
                 }
-                None => spawn_connecting_body(root, &shell),
+                None => spawn_connecting_body(root, &shell, show_tips),
             };
-            let footer = spawn_footer(root, &shell, tip, game.prematch.is_none());
+            let footer = spawn_footer(root, &shell, tip_index, show_tips);
             parts = Some(LoadingParts {
                 ring: ring.or(body.ring),
                 headline: body.headline,
@@ -955,13 +969,15 @@ fn spawn_roster(
     scroll: &DraftScrollMemory,
     stage: Option<&super::party_stage::PartyStage>,
     viewport: Vec2,
+    show_tips: bool,
 ) {
     let compact = !shell.desktop();
-    let (left, right, top, bottom) = if shell.desktop() {
-        (shell.left, 188.0, 104.0, 112.0)
+    let (left, right, top) = if shell.desktop() {
+        (shell.left, 188.0, 104.0)
     } else {
-        (shell.left, shell.right, shell.top + 50.0, 64.0)
+        (shell.left, shell.right, shell.top + 50.0)
     };
+    let bottom = shell.bottom + if show_tips { 112.0 } else { 44.0 };
     let available = viewport.x - left - right;
     let opponents_width = if compact { 208.0 } else { 250.0 };
     let stage_width = (available - opponents_width - 12.0).max(180.0);
@@ -1040,16 +1056,28 @@ struct ShellParts {
 
 /// The connecting body (loading-shell.md): ring, headline, detail and
 /// Retry in one centred block between the header and the footer.
-fn spawn_connecting_body(root: &mut ChildSpawnerCommands, shell: &Shell) -> ShellParts {
+fn spawn_connecting_body(
+    root: &mut ChildSpawnerCommands,
+    shell: &Shell,
+    show_tips: bool,
+) -> ShellParts {
     let desktop = shell.desktop();
     let mut parts = ShellParts::default();
     // Desktop: centred between the header (ends y 92) and the footer (starts
     // 104 above the bottom). Phone: from 52 below the header line (y 64 at
     // the reference safe top 0).
     let (top, bottom, width) = if desktop {
-        (92.0, 104.0, 560.0)
+        (
+            92.0,
+            shell.bottom + if show_tips { 112.0 } else { 44.0 },
+            560.0,
+        )
     } else {
-        (shell.top + 52.0, 0.0, 500.0)
+        (
+            shell.top + 52.0,
+            shell.bottom + if show_tips { 112.0 } else { 44.0 },
+            500.0,
+        )
     };
     let mut body = root.spawn((
         Node {
@@ -1060,15 +1088,27 @@ fn spawn_connecting_body(root: &mut ChildSpawnerCommands, shell: &Shell) -> Shel
             } else {
                 JustifyContent::FlexStart
             },
+            overflow: if desktop {
+                Overflow::visible()
+            } else {
+                Overflow::scroll_y()
+            },
             ..absolute(Val::Px(0.0), Val::Px(0.0), Val::Px(top), Val::Px(bottom))
         },
         Name::new("LoadingBody"),
     ));
+    if !desktop {
+        body.insert(ScrollArea::phone_panel());
+    }
     body.with_children(|block| {
         parts.ring = Some(status_ring(
             block,
             RingMode::Indeterminate,
-            RingSize::Medium,
+            if desktop {
+                RingSize::Medium
+            } else {
+                RingSize::Small
+            },
         ));
         let line = |gap: f32, height: f32| Node {
             width: Val::Px(width),
@@ -1083,7 +1123,7 @@ fn spawn_connecting_body(root: &mut ChildSpawnerCommands, shell: &Shell) -> Shel
         block
             .spawn((
                 line(
-                    if desktop { space::S16 } else { space::S12 },
+                    if desktop { space::S16 } else { space::S8 },
                     if desktop { 28.0 } else { 24.0 },
                 ),
                 Name::new("LoadingHeadline"),
@@ -1111,7 +1151,7 @@ fn spawn_connecting_body(root: &mut ChildSpawnerCommands, shell: &Shell) -> Shel
                 Node {
                     align_items: AlignItems::FlexStart,
                     ..line(
-                        if desktop { space::S16 } else { 10.0 },
+                        if desktop { space::S16 } else { 6.0 },
                         if desktop { 36.0 } else { 34.0 },
                     )
                 },
@@ -1141,7 +1181,7 @@ fn spawn_connecting_body(root: &mut ChildSpawnerCommands, shell: &Shell) -> Shel
             });
         block
             .spawn(Node {
-                margin: UiRect::top(Val::Px(if desktop { space::S16 } else { 6.0 })),
+                margin: UiRect::top(Val::Px(if desktop { space::S16 } else { space::S4 })),
                 ..default()
             })
             .with_children(|slot| {
@@ -1172,42 +1212,184 @@ fn spawn_connecting_body(root: &mut ChildSpawnerCommands, shell: &Shell) -> Shel
 /// The footer (loading-teams.md): stage or ready count and the tip on the
 /// first line, the asset line under them. Returns the count, the asset line
 /// and its alert icon.
+#[derive(Component)]
+struct LoadingTipArea;
+
+/// Swipes belong only to the advice text; roster scrolling and buttons retain
+/// their existing touch ownership. A canceled/multitouch gesture never advances.
+fn loading_tip_swipes(
+    mut events: MessageReader<TouchInput>,
+    windows: Query<(Entity, &Window), With<PrimaryWindow>>,
+    areas: Query<(&ComputedNode, &UiGlobalTransform), With<LoadingTipArea>>,
+    mut held: Local<Option<(u64, Vec2)>>,
+    mut latch: ResMut<LoadingLatch>,
+    tips: Option<Res<crate::help_overlay::BeginnerTips>>,
+) {
+    let Ok((window_entity, window)) = windows.single() else {
+        return;
+    };
+    if tips.as_ref().is_some_and(|tips| !tips.enabled) {
+        *held = None;
+        events.clear();
+        return;
+    }
+    for event in events.read().filter(|e| e.window == window_entity) {
+        match event.phase {
+            TouchPhase::Started => {
+                if held.is_some() {
+                    *held = None;
+                    continue;
+                }
+                let inside = areas.iter().any(|(node, transform)| {
+                    let dpi = window.scale_factor();
+                    Rect::from_center_size(
+                        transform.translation / dpi,
+                        node.size() * transform.to_scale_angle_translation().0.abs() / dpi,
+                    )
+                    .contains(event.position)
+                });
+                if inside {
+                    *held = Some((event.id, event.position));
+                }
+            }
+            TouchPhase::Ended => {
+                if let Some((id, start)) = *held
+                    && id == event.id
+                {
+                    let delta = event.position - start;
+                    if delta.x.abs() >= 44.0 && delta.x.abs() > delta.y.abs() * 1.5 {
+                        latch.tip = if delta.x < 0.0 {
+                            (latch.tip + 1) % TIPS.len()
+                        } else {
+                            (latch.tip + TIPS.len() - 1) % TIPS.len()
+                        };
+                    }
+                    *held = None;
+                }
+            }
+            TouchPhase::Canceled => *held = None,
+            TouchPhase::Moved => {}
+        }
+    }
+}
+
 fn spawn_footer(
     root: &mut ChildSpawnerCommands,
     shell: &Shell,
-    tip: &'static str,
-    connecting: bool,
+    tip_index: usize,
+    show_tips: bool,
 ) -> (Entity, Entity, Entity) {
+    let position = if shell.desktop() {
+        Node {
+            width: Val::Px(904.0),
+            margin: UiRect::left(Val::Px(-452.0)),
+            ..absolute(
+                Val::Percent(50.0),
+                Val::Auto,
+                Val::Auto,
+                Val::Px(shell.bottom),
+            )
+        }
+    } else {
+        absolute(
+            Val::Px(shell.left),
+            Val::Px(shell.right),
+            Val::Auto,
+            Val::Px(shell.bottom),
+        )
+    };
     let mut stage = Entity::PLACEHOLDER;
     let mut assets = Entity::PLACEHOLDER;
     let mut assets_icon = Entity::PLACEHOLDER;
-    let count = |text: &str| {
-        (
-            Text::new(text),
-            theme::role_text(TextRole::Label),
-            TextColor(color::TEXT_GOLD),
-            TextLayout::new(Justify::Left, LineBreak::NoWrap),
-            Name::new("LoadingReadyCount"),
-        )
-    };
-    let asset_line = |parent: &mut ChildSpawnerCommands,
-                      justify: JustifyContent,
-                      icon: &mut Entity,
-                      text: &mut Entity| {
-        parent
+    root.spawn((
+        Node {
+            max_width: Val::Px(904.0),
+            min_height: Val::Px(if show_tips { 100.0 } else { 32.0 }),
+            padding: UiRect::all(Val::Px(8.0)),
+            flex_direction: FlexDirection::Column,
+            row_gap: Val::Px(4.0),
+            border_radius: BorderRadius::all(Val::Px(radius::MD)),
+            ..position
+        },
+        BackgroundColor(theme::perceptual(color::SURFACE_GLASS_STRONG)),
+        Name::new("LoadingFooter"),
+    ))
+    .with_children(|footer| {
+        if show_tips {
+            footer
+                .spawn(Node {
+                    column_gap: Val::Px(8.0),
+                    align_items: AlignItems::Center,
+                    min_height: Val::Px(60.0),
+                    ..default()
+                })
+                .with_children(|row| {
+                    draft::action_button(
+                        row,
+                        tr("loading.tip.previous"),
+                        LoadingAction::PreviousTip,
+                        "LoadingTipPrevious",
+                        44.0,
+                        false,
+                        false,
+                    );
+                    row.spawn((
+                        Node {
+                            flex_grow: 1.0,
+                            flex_basis: Val::Px(0.0),
+                            min_width: Val::Px(0.0),
+                            flex_direction: FlexDirection::Column,
+                            row_gap: Val::Px(4.0),
+                            ..default()
+                        },
+                        LoadingTipArea,
+                        TestId::new("LoadingTipArea"),
+                        Name::new("LoadingTip"),
+                    ))
+                    .with_children(|text| {
+                        text.spawn((
+                            Text::new(trf(
+                                "loading.tip.counter",
+                                &[("current", &(tip_index + 1)), ("total", &TIPS.len())],
+                            )),
+                            theme::role_text(TextRole::Caption),
+                            TextColor(color::TEXT_GOLD),
+                        ));
+                        text.spawn((
+                            Text::new(tr(tip_for(tip_index))),
+                            theme::role_text(TextRole::Caption),
+                            TextColor(color::TEXT_SECONDARY),
+                            TextLayout::new(Justify::Left, LineBreak::WordBoundary),
+                            TestId::new("LoadingTipText"),
+                        ));
+                    });
+                    draft::action_button(
+                        row,
+                        tr("loading.tip.next"),
+                        LoadingAction::NextTip,
+                        "LoadingTipNext",
+                        44.0,
+                        false,
+                        false,
+                    );
+                });
+        }
+        footer
             .spawn(Node {
-                column_gap: Val::Px(space::S8),
+                column_gap: Val::Px(8.0),
                 align_items: AlignItems::Center,
-                justify_content: justify,
-                flex_grow: 1.0,
-                min_width: Val::Px(0.0),
-                overflow: Overflow::clip(),
                 ..default()
             })
-            .with_children(|line| {
-                // Shown only for an unavailable Studio hero (then it takes
-                // its room; otherwise it takes none).
-                *icon = line
+            .with_children(|row| {
+                stage = row
+                    .spawn((
+                        Text::new(""),
+                        theme::role_text(TextRole::Caption),
+                        TextColor(color::TEXT_GOLD),
+                        Name::new("LoadingReadyCount"),
+                    ))
+                    .id();
+                assets_icon = row
                     .spawn(icon_node(
                         Icon::NavAlertTriangle,
                         size::ICON_SM,
@@ -1216,148 +1398,25 @@ fn spawn_footer(
                     .insert(Node {
                         width: Val::Px(size::ICON_SM),
                         height: Val::Px(size::ICON_SM),
-                        flex_shrink: 0.0,
                         display: Display::None,
                         ..default()
                     })
                     .id();
-                *text = line
+                assets = row
                     .spawn((
                         Text::new(tr("loading.assets.preparing")),
                         theme::role_text(TextRole::Caption),
                         TextColor(color::TEXT_SECONDARY),
-                        TextLayout::new(Justify::Left, LineBreak::NoWrap),
                         Name::new("LoadingAssetStatus"),
+                        Node {
+                            flex_grow: 1.0,
+                            min_width: Val::Px(0.0),
+                            ..default()
+                        },
                     ))
                     .id();
             });
-    };
-    let tip_line = |parent: &mut ChildSpawnerCommands, justify: JustifyContent| {
-        parent
-            .spawn((
-                Node {
-                    column_gap: Val::Px(space::S8),
-                    align_items: AlignItems::Center,
-                    justify_content: justify,
-                    ..default()
-                },
-                Name::new("LoadingTip"),
-            ))
-            .with_children(|line| {
-                line.spawn(icon_node(Icon::NavInfo, size::ICON_SM, color::TEXT_GOLD));
-                line.spawn((
-                    Text::new(tr(tip)),
-                    theme::role_text(TextRole::Caption),
-                    TextColor(color::TEXT_MUTED),
-                    TextLayout::new(Justify::Right, LineBreak::NoWrap),
-                ));
-            });
-    };
-    if shell.desktop() {
-        root.spawn((
-            Node {
-                width: Val::Px(904.0),
-                max_width: Val::Percent(100.0),
-                height: Val::Px(56.0),
-                margin: UiRect::left(Val::Px(-452.0)),
-                padding: UiRect::axes(Val::Px(space::S16), Val::Px(space::S8)),
-                flex_direction: FlexDirection::Column,
-                row_gap: Val::Px(space::S4),
-                border: UiRect::all(Val::Px(border::HAIRLINE)),
-                border_radius: BorderRadius::all(Val::Px(radius::MD)),
-                ..absolute(
-                    Val::Percent(50.0),
-                    Val::Auto,
-                    Val::Auto,
-                    Val::Px(shell.bottom),
-                )
-            },
-            BackgroundColor(theme::perceptual(color::SURFACE_GLASS_STRONG)),
-            BorderColor::all(theme::perceptual(color::BORDER_HAIRLINE)),
-            Name::new("LoadingFooter"),
-        ))
-        .with_children(|footer| {
-            footer
-                .spawn(Node {
-                    height: Val::Px(20.0),
-                    column_gap: Val::Px(space::S16),
-                    align_items: AlignItems::Center,
-                    ..default()
-                })
-                .with_children(|row| {
-                    stage = row
-                        .spawn((
-                            count(""),
-                            Node {
-                                width: Val::Px(436.0),
-                                flex_shrink: 0.0,
-                                ..default()
-                            },
-                        ))
-                        .id();
-                    row.spawn(Node {
-                        flex_grow: 1.0,
-                        justify_content: JustifyContent::FlexEnd,
-                        ..default()
-                    })
-                    .with_children(|slot| tip_line(slot, JustifyContent::FlexEnd));
-                });
-            footer
-                .spawn(Node {
-                    height: Val::Px(18.0),
-                    ..default()
-                })
-                .with_children(|row| {
-                    asset_line(
-                        row,
-                        JustifyContent::FlexStart,
-                        &mut assets_icon,
-                        &mut assets,
-                    );
-                });
-        });
-    } else {
-        if connecting {
-            // Kept on phone here (loading-teams phone drops it for the cards).
-            root.spawn(Node {
-                justify_content: JustifyContent::Center,
-                ..absolute(
-                    Val::Px(0.0),
-                    Val::Px(0.0),
-                    Val::Auto,
-                    Val::Px(shell.bottom + 33.0),
-                )
-            })
-            .with_children(|slot| tip_line(slot, JustifyContent::Center));
-        }
-        root.spawn((
-            Node {
-                height: Val::Px(20.0),
-                column_gap: Val::Px(space::S16),
-                align_items: AlignItems::Center,
-                ..absolute(
-                    Val::Px(shell.left + 3.0),
-                    Val::Px(shell.right + 3.0),
-                    Val::Auto,
-                    Val::Px(shell.bottom),
-                )
-            },
-            Name::new("LoadingFooter"),
-        ))
-        .with_children(|row| {
-            stage = row
-                .spawn((
-                    count(""),
-                    Node {
-                        width: Val::Px(340.0),
-                        flex_shrink: 0.0,
-                        ..default()
-                    },
-                ))
-                .id();
-            asset_line(row, JustifyContent::FlexEnd, &mut assets_icon, &mut assets);
-        });
-    }
+    });
     (stage, assets, assets_icon)
 }
 
@@ -1518,6 +1577,93 @@ fn sync_loading(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn swipes_only_advance_inside_the_advice_area_and_honor_cancel() {
+        let mut app = App::new();
+        app.init_resource::<LoadingLatch>()
+            .init_resource::<crate::help_overlay::BeginnerTips>()
+            .add_message::<TouchInput>()
+            .add_systems(Update, loading_tip_swipes);
+        let mut window = Window::default();
+        window.resolution.set_scale_factor_override(Some(2.0));
+        let window = app.world_mut().spawn((window, PrimaryWindow)).id();
+        app.world_mut().spawn((
+            LoadingTipArea,
+            ComputedNode {
+                size: Vec2::new(400.0, 120.0),
+                ..default()
+            },
+            UiGlobalTransform::from_translation(Vec2::new(400.0, 200.0)),
+        ));
+        let touch = |app: &mut App, phase, x, y| {
+            app.world_mut().write_message(TouchInput {
+                window,
+                phase,
+                position: Vec2::new(x, y),
+                id: 1,
+                force: None,
+            });
+        };
+        touch(&mut app, TouchPhase::Started, 240.0, 100.0);
+        touch(&mut app, TouchPhase::Ended, 160.0, 100.0);
+        app.update();
+        assert_eq!(app.world().resource::<LoadingLatch>().tip, 1);
+        touch(&mut app, TouchPhase::Started, 160.0, 100.0);
+        touch(&mut app, TouchPhase::Ended, 240.0, 100.0);
+        app.update();
+        assert_eq!(app.world().resource::<LoadingLatch>().tip, 0);
+        for (start, end) in [
+            (Vec2::new(20.0, 20.0), Vec2::new(160.0, 100.0)),
+            (Vec2::new(240.0, 100.0), Vec2::new(230.0, 180.0)),
+        ] {
+            touch(&mut app, TouchPhase::Started, start.x, start.y);
+            touch(&mut app, TouchPhase::Ended, end.x, end.y);
+            app.update();
+            assert_eq!(app.world().resource::<LoadingLatch>().tip, 0);
+        }
+        touch(&mut app, TouchPhase::Started, 240.0, 100.0);
+        touch(&mut app, TouchPhase::Canceled, 160.0, 100.0);
+        touch(&mut app, TouchPhase::Ended, 160.0, 100.0);
+        app.update();
+        assert_eq!(app.world().resource::<LoadingLatch>().tip, 0);
+        app.world_mut()
+            .resource_mut::<crate::help_overlay::BeginnerTips>()
+            .enabled = false;
+        touch(&mut app, TouchPhase::Started, 240.0, 100.0);
+        touch(&mut app, TouchPhase::Ended, 160.0, 100.0);
+        app.update();
+        assert_eq!(app.world().resource::<LoadingLatch>().tip, 0);
+    }
+
+    #[test]
+    fn advice_buttons_wrap_and_hidden_advice_has_no_controls() {
+        use crate::ui::test_id::harness;
+        let mut app = harness::kit_app();
+        app.init_resource::<DraftClient>()
+            .init_resource::<LoadingLatch>()
+            .add_message::<SessionUiCommand>()
+            .add_ui_action::<LoadingAction>()
+            .add_systems(Update, loading_actions.after(crate::ui::UiSet::Dispatch));
+        harness::spawn_ui(app.world_mut(), |root| {
+            spawn_footer(root, &Shell::of(Form::Phone, None), 0, true);
+        });
+        app.update();
+        harness::press(app.world_mut(), "LoadingTipPrevious");
+        app.update();
+        assert_eq!(app.world().resource::<LoadingLatch>().tip, TIPS.len() - 1);
+        app.update();
+        assert_eq!(app.world().resource::<LoadingLatch>().tip, TIPS.len() - 1);
+        harness::press(app.world_mut(), "LoadingTipNext");
+        app.update();
+        assert_eq!(app.world().resource::<LoadingLatch>().tip, 0);
+        let mut hidden = harness::kit_app();
+        harness::spawn_ui(hidden.world_mut(), |root| {
+            spawn_footer(root, &Shell::of(Form::Phone, None), 0, false);
+        });
+        assert!(harness::find(hidden.world_mut(), "LoadingTipNext").is_none());
+        assert!(harness::find(hidden.world_mut(), "LoadingTipText").is_none());
+    }
+
     #[test]
     fn the_connecting_body_follows_the_status_priority() {
         let idle = GameState::Lobby;

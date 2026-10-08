@@ -73,7 +73,13 @@ pub struct CameraSettings {
 
 impl Default for CameraSettings {
     fn default() -> Self {
-        Self { zoom: 1.0 }
+        Self {
+            zoom: if crate::platform::ui_profile() == crate::platform::UiProfile::Mobile {
+                0.8
+            } else {
+                1.0
+            },
+        }
     }
 }
 
