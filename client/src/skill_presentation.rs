@@ -48,7 +48,7 @@ use bevy::{
 };
 use serde::Deserialize;
 use shared::HeroClass;
-use shared::loadout::{EffectVisualKind, LoadoutState, SkillEffectState, SkillId, WeaponMode};
+use shared::loadout::{EffectVisualKind, LoadoutState, SkillEffectState, SkillId};
 use std::collections::BTreeMap;
 
 use category::SkillKey;
@@ -143,6 +143,18 @@ impl SkillPresentation {
     pub(crate) fn basic(&self, class: HeroClass) -> Option<&BasicProfile> {
         self.basic_attacks.get(class.id())
     }
+    /// The row of the round a basic attack fires: the row of the class, and for the rocket
+    /// of a repeater its `rockets` entry. A row without that entry serves both rounds.
+    pub(crate) fn basic_round(&self, key: cast::CastKey) -> Option<&BasicProfile> {
+        match key {
+            cast::CastKey::Basic(class) => self.basic(class),
+            cast::CastKey::Rockets(class) => {
+                let row = self.basic(class)?;
+                Some(row.rockets.as_deref().unwrap_or(row))
+            }
+            cast::CastKey::Skill(_) => None,
+        }
+    }
     /// Accepted recipes take precedence; legacy ability IDs share the same registry.
     pub(crate) fn action_profile(
         &self,
@@ -179,8 +191,8 @@ impl SkillPresentation {
                     impact: row.impact.as_ref(),
                 })
             }
-            cast::CastKey::Basic(class) => {
-                let row = self.basic(class)?;
+            cast::CastKey::Basic(class) | cast::CastKey::Rockets(class) => {
+                let row = self.basic_round(key)?;
                 Some(Look {
                     palette: accents::Palette::of_class(self.theme(class)?),
                     accent: row.accent.as_ref(),
@@ -332,9 +344,9 @@ fn basic_cue(
     sequence: u64,
 ) -> Option<MotionCue> {
     let kit = crate::equipped_skills::resolve_state(class, loadout)?.resolved();
-    if let Some(row) = registry.basic(kit.map_or(class, |kit| kit.core().class())) {
-        let rockets = loadout.is_some_and(|loadout| loadout.weapon_mode == WeaponMode::Rockets);
-        let row = row.rockets.as_deref().filter(|_| rockets).unwrap_or(row);
+    if let Some(row) = cast::CastKey::of(class, loadout, shared::BASIC_ATTACK_ACTION_SLOT)
+        .and_then(|key| registry.basic_round(key))
+    {
         let turn = if sequence % 2 == 1 {
             0
         } else {

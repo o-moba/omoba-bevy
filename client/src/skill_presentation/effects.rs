@@ -2215,10 +2215,7 @@ mod tests {
             .init_asset::<WorldAsset>()
             .insert_resource(PlayerVisualMode::Models3d)
             .init_resource::<GameStateSnapshot>()
-            .insert_resource(
-                SkillPresentation::parse(include_str!("../../assets/config/skills.skillfx"))
-                    .unwrap(),
-            )
+            .insert_resource(SkillPresentation::unmigrated())
             .add_plugins(SkillEffectsPlugin);
         let mut e = SkillEffectState {
             id: 9,

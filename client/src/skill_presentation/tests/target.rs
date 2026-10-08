@@ -35,7 +35,7 @@ pub(in crate::skill_presentation) fn target_visuals() -> CombatVisualRegistry {
 }
 
 /// The classes whose rows the content packages have moved into the packaged files.
-pub(in crate::skill_presentation) const PROMOTED: [HeroClass; 13] = [
+pub(in crate::skill_presentation) const PROMOTED: [HeroClass; 17] = [
     HeroClass::Warrior,
     HeroClass::Mage,
     HeroClass::Ranger,
@@ -49,6 +49,10 @@ pub(in crate::skill_presentation) const PROMOTED: [HeroClass; 13] = [
     HeroClass::Edgeweaver,
     HeroClass::Stormfist,
     HeroClass::Adventurer,
+    HeroClass::Wildspark,
+    HeroClass::Riftshot,
+    HeroClass::Chainkeeper,
+    HeroClass::Frostguard,
 ];
 
 fn shipped() -> SkillPresentation {
@@ -505,6 +509,11 @@ fn findings_name_what_the_ratchet_counts() {
     let samples = schema_rules::parse(&schema_rules::samples()).unwrap();
     for (name, registry, visuals) in [
         ("packaged", shipped(), shipped_visuals()),
+        (
+            "unmigrated",
+            SkillPresentation::unmigrated(),
+            shipped_visuals(),
+        ),
         ("samples", samples, shipped_visuals()),
         (
             "target on packaged projectiles",
@@ -537,8 +546,9 @@ fn findings_name_what_the_ratchet_counts() {
             "{name}: a finding without a counter"
         );
     }
-    // A finding names the rows, not just a number.
-    let found = signature::findings(&shipped(), &shipped_visuals()).unwrap();
+    // A finding names the rows, not just a number. The packaged file has none left, so
+    // the rows it had before the content packages are asked.
+    let found = signature::findings(&SkillPresentation::unmigrated(), &shipped_visuals()).unwrap();
     assert!(found.iter().any(|(counter, rows)| {
         *counter == "full_tuple_duplicates" && rows.contains(" / ") && rows.contains("share")
     }));

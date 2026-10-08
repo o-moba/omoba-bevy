@@ -333,6 +333,7 @@ pub(super) enum Origin {
         id: u64,
         source: CombatEntity,
         slot: Option<u8>,
+        style: ProjectileStyle,
     },
     /// The class style of an accepted attack of an enemy, until a row answers for it.
     Attack { actor: u64, sequence: u64 },
@@ -575,6 +576,7 @@ impl EventCursor {
                         id: event.id,
                         source: event.source,
                         slot: event.action_slot,
+                        style: event.style,
                     },
                 ));
             }
@@ -675,7 +677,7 @@ pub(super) struct Heard<'a> {
 fn row_id(key: CastKey) -> &'static str {
     match key {
         CastKey::Skill(key) => key.id(),
-        CastKey::Basic(class) => class.id(),
+        CastKey::Basic(class) | CastKey::Rockets(class) => class.id(),
     }
 }
 
@@ -696,18 +698,20 @@ fn cast_cue<'a>(
 }
 
 /// The voice of a confirmed hit: `sound.impact` of the skill that dealt it, or the cue of
-/// the basic attack.
+/// the round of the basic attack.
 fn hit_cue(registry: &SkillPresentation, key: CastKey) -> Option<&SoundCue> {
     match key {
         CastKey::Skill(key) => registry.row(key.id())?.sound.as_ref()?.impact.as_ref(),
-        CastKey::Basic(class) => registry.basic(class)?.sound.as_ref(),
+        CastKey::Basic(_) | CastKey::Rockets(_) => registry.basic_round(key)?.sound.as_ref(),
     }
 }
 
 /// Gives the frame the voices of its rows. A receipt whose source is a hero the client
 /// sees takes the hit voice of the row of that action; a receipt no row answers for keeps
 /// the cue of its wire style. An enemy's accepted attack takes the voice of its basic
-/// attack, or leaves the word to the cast voice of its skill. Every observed cast and
+/// attack, or leaves the word to the cast voice of its skill. A repeater has a voice for
+/// each of its two rounds: the receipt names the round by its wire style, the accepted
+/// attack by the weapon mode of the snapshot that carries it. Every observed cast and
 /// every telegraph that fired adds the voice of its row, if the row has one.
 pub(super) fn voice_rows(heard: &Heard, candidates: &mut Vec<Candidate>) {
     let Heard {
@@ -719,12 +723,20 @@ pub(super) fn voice_rows(heard: &Heard, candidates: &mut Vec<Candidate>) {
     } = *heard;
     let hero = |id: u64| heroes.iter().find(|hero| hero.id == id);
     candidates.retain_mut(|candidate| match candidate.origin {
-        Origin::Receipt { id, source, slot } => {
+        Origin::Receipt {
+            id,
+            source,
+            slot,
+            style,
+        } => {
             let dealt = (source.kind == CombatEntityKind::Player)
                 .then(|| hero(source.id))
                 .flatten()
                 .filter(|hero| hero.visible)
-                .and_then(|hero| Some((hero, CastKey::of(hero.class, hero.loadout, slot?)?)));
+                .and_then(|hero| {
+                    let key = CastKey::of(hero.class, hero.loadout, slot?)?;
+                    Some((hero, key.struck_as(style)))
+                });
             if let Some((hero, key)) = dealt
                 && let Some(cue) = hit_cue(registry, key)
             {
@@ -753,7 +765,8 @@ pub(super) fn voice_rows(heard: &Heard, candidates: &mut Vec<Candidate>) {
             }) {
                 return false;
             }
-            if let Some(key @ CastKey::Basic(_)) = CastKey::of(hero.class, hero.loadout, hero.slot)
+            if let Some(key @ (CastKey::Basic(_) | CastKey::Rockets(_))) =
+                CastKey::of(hero.class, hero.loadout, hero.slot)
                 && let Some(cue) = hit_cue(registry, key)
             {
                 *candidate = Candidate::voiced(

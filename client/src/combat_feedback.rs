@@ -127,9 +127,11 @@ struct Source<'a> {
 }
 
 impl Source<'_> {
-    /// The row of the action that dealt the receipt.
+    /// The row of the action that dealt the receipt. A basic attack of a repeater is the
+    /// round its wire style names: the shot may land after the hero switched modes.
     fn key(&self, event: &CombatEvent) -> Option<CastKey> {
         CastKey::of(self.class, self.loadout, event.action_slot?)
+            .map(|key| key.struck_as(event.style))
     }
 }
 
@@ -999,6 +1001,116 @@ mod tests {
         }
         assert_eq!(looks.0.len(), ReceiptLooks::KEPT);
         assert_eq!((looks.0[0].receipt, looks.0[31].receipt), (8, 39));
+    }
+
+    /// The hit of a repeater's basic attack is drawn from the row of the round that
+    /// struck. The wire style of the receipt names it; the mode the hero is in when the
+    /// shot lands does not.
+    #[test]
+    fn rockets_variant_impact_follows_the_wire_style_of_the_receipt() {
+        use crate::skill_presentation::impacts::{ImpactContext, impact_particles};
+        use shared::BASIC_ATTACK_ACTION_SLOT;
+        use shared::combat::ProjectileStyle;
+        use shared::loadout::{CoreId, SkillId, WeaponMode};
+        let registry = SkillPresentation::target();
+        let class = shared::HeroClass::Wildspark;
+        let row = registry.basic(class).unwrap();
+        let nested = row.rockets.as_deref().unwrap();
+        let palette = accents::Palette::of_class(registry.theme(class).unwrap());
+        let armed = |core: CoreId, weapon_mode| LoadoutState {
+            recipe: Some(core.preset()),
+            weapon_mode,
+            ..default()
+        };
+        let styled = |slot, style| CombatEvent {
+            style,
+            ..dealt(5, 40.0, 7, slot)
+        };
+        let drawn_from = |round: &crate::skill_presentation::BasicProfile| {
+            impact_particles(
+                round.impact.as_ref().unwrap(),
+                &palette,
+                &ImpactContext {
+                    position: Vec3::new(4.0, 1.05, 0.0),
+                    ground: FLOOR,
+                    direction: Vec2::X * 4.0,
+                    heading: None,
+                    area_damage: false,
+                    receipt: 5,
+                    reserved: 0,
+                },
+            )
+        };
+        let (bullet, rocket) = (drawn_from(row), drawn_from(nested));
+        assert_ne!(bullet, rocket);
+        for mode in [WeaponMode::Repeater, WeaponMode::Rockets] {
+            let state = armed(CoreId::Wildspark, mode);
+            let source = Source {
+                loadout: Some(&state),
+                ..seen_hero(class)
+            };
+            let basic = |style| {
+                let hit = styled(BASIC_ATTACK_ACTION_SLOT, style);
+                themed_impact(Some(&registry), Some(&source), &hit, FLOOR, &[], 0).unwrap()
+            };
+            assert_eq!(basic(ProjectileStyle::Rocket), rocket, "{mode:?}");
+            assert_eq!(basic(ProjectileStyle::Bullet), bullet, "{mode:?}");
+            // The rocket's splash is not drawn as an area: every victim has its own
+            // receipt, and its burst stays at the unit as any other basic hit does.
+            assert!(
+                rocket
+                    .iter()
+                    .all(|spec| spec.reach(Vec3::new(4.0, 1.8, 0.0)) <= 1.5 + 1e-3)
+            );
+            #[cfg(feature = "qa")]
+            for (style, kind) in [
+                (
+                    ProjectileStyle::Rocket,
+                    nested.impact.as_ref().unwrap().kind,
+                ),
+                (ProjectileStyle::Bullet, row.impact.as_ref().unwrap().kind),
+            ] {
+                let hit = styled(BASIC_ATTACK_ACTION_SLOT, style);
+                let look = ReceiptLook::of(Some(&registry), Some(&source), &hit, Some(&[]));
+                assert_eq!(look.impact, Some(kind.id()));
+            }
+            // A skill of the kit is its own row in either mode and whatever style it sends.
+            let slot = slot_of(class, SkillId::WildZap);
+            assert_eq!(
+                themed_impact(
+                    Some(&registry),
+                    Some(&source),
+                    &styled(slot, ProjectileStyle::Rocket),
+                    FLOOR,
+                    &[],
+                    0
+                ),
+                themed_impact(
+                    Some(&registry),
+                    Some(&source),
+                    &styled(slot, ProjectileStyle::Arcane),
+                    FLOOR,
+                    &[],
+                    0
+                )
+            );
+        }
+        // A class without the entry has one hit, even for a receipt that says `Rocket`
+        // while its state says rocket mode.
+        let other = shared::HeroClass::Riftshot;
+        let state = armed(CoreId::Riftshot, WeaponMode::Rockets);
+        let source = Source {
+            loadout: Some(&state),
+            ..seen_hero(other)
+        };
+        let hit = |style| {
+            let hit = styled(BASIC_ATTACK_ACTION_SLOT, style);
+            themed_impact(Some(&registry), Some(&source), &hit, FLOOR, &[], 0).unwrap()
+        };
+        assert_eq!(hit(ProjectileStyle::Rocket), hit(ProjectileStyle::Standard));
+        // A source the client does not see keeps the built-in burst of the wire style.
+        let unseen = styled(BASIC_ATTACK_ACTION_SLOT, ProjectileStyle::Rocket);
+        assert!(themed_impact(Some(&registry), None, &unseen, FLOOR, &[], 0).is_none());
     }
 
     #[test]

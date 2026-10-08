@@ -21,9 +21,12 @@ rig and `--release-at contact|SECONDS` moves the release still of skills
 without a telegraph to the clip's contact time or to a fixed time after the
 accepted cast. For a look at projectile bodies, `--flight` stands the target of
 every unit-target ability far enough for its projectile to be in flight at the
-release still and adds `5-basic-flight.png`, the basic attack's projectile on
-its way (not for a melee core, which throws nothing). Every still lists the
-hero's projectiles and what stands for each of them. `--interleave` orders one
+release still and adds the basic attack: `5-basic-flight.png`, its projectile
+on its way (not for a melee core, which throws nothing), and
+`5-basic-impact.png`, its hit. A repeater then casts its weapon switch and adds
+`6-rockets-flight.png` and `6-rockets-impact.png`, the same of its rocket
+round. Every still lists the hero's projectiles and what stands for each of
+them. `--interleave` orders one
 basic attack as soon as the cast of a skill with a telegraph is accepted; each
 still names the hero's latest accepted action and the clip that carries its
 pose, so the stills show whether the telegraph kept the body. `--aim` adds, for
@@ -67,6 +70,8 @@ PILOT_HEROES = ["dawnweaver", "wildspark"]
 ROSTER_HEROES = ["chainkeeper", "frostguard", "orbitwright", "cinderforge", "edgeweaver", "stormfist",
                  "veilstalker", "emberveil", "riftshot", "warrior", "mage", "ranger", "cleric", "warden"]
 SLOT_KEYS = ["q", "w", "e", "r"]
+# The action slot of a basic attack (`shared::BASIC_ATTACK_ACTION_SLOT`).
+BASIC_SLOT = 255
 OVERLAYS = {"skillfx": "skills.skillfx", "combat_visuals": "combat_visuals.json"}
 ERROR_MARKERS = ("panicked at", "does not exist", "Path not found", "STANDARD_KITS_QA stage=",
                  "Skill presentation unavailable")
@@ -134,7 +139,55 @@ def expectations(assets):
     """What the stills of a run are judged against: the registry and motion library of its asset root."""
     registry = (Path(assets) / "config" / OVERLAYS["skillfx"]).read_bytes()
     library = json.loads((Path(assets) / "animations" / "humanoid-motion-v1.json").read_text())
-    return dict(rows=json.loads(registry)["skills"], fingerprint=f"{fnv64(registry):016x}", clips=library["clips"])
+    visuals = json.loads((Path(assets) / "config" / OVERLAYS["combat_visuals"]).read_text())
+    rows = json.loads(registry)
+    return dict(rows=rows["skills"], basic_attacks=rows.get("basic_attacks") or {},
+                projectiles=visuals.get("profiles") or {},
+                fingerprint=f"{fnv64(registry):016x}", clips=library["clips"])
+
+
+def basic_rounds(summary):
+    """The rounds of the basic attack a flight look captured: its record and, for a repeater, the
+    record of its rocket round."""
+    basic = summary.get("basic") or {}
+    return [(name, record) for name, record in (("basic", basic), ("rockets", basic.get("rockets"))) if record]
+
+
+def basic_problems(summary, expected, stills, flat):
+    """Why the stills of the basic attack are not what its row and its projectile profile describe."""
+    problems = []
+    row = (expected.get("basic_attacks") or {}).get(summary.get("class")) or {}
+    for name, record in basic_rounds(summary):
+        fired = (row.get("rockets") or row) if name == "rockets" else row
+        mine = {s["phase"]: s for s in stills if s["file"] in record.get("stills", [])}
+        if name == "rockets" and record.get("weapon_mode") != "Rockets":
+            problems.append(f"the rocket round was captured in weapon mode {record.get('weapon_mode')}")
+        flight = mine.get("flight")
+        for shot in (flight or {}).get("projectiles") or []:
+            if shot.get("action_slot") != BASIC_SLOT:
+                continue
+            if name == "rockets" and shot.get("style") != "rocket":
+                problems.append(f"{flight['file']}: the rocket round threw a projectile of style {shot.get('style')}")
+            # A profile that names a form is drawn as that form, whatever model it carries.
+            form = ((expected.get("projectiles") or {}).get(shot.get("profile")) or {}).get("form")
+            if form and not flat and not str(shot.get("body")).startswith(f"{form}+"):
+                problems.append(f"{flight['file']}: {shot.get('profile')} is drawn as {shot.get('body')}, "
+                                f"its profile says the form {form}")
+        impact = mine.get("impact")
+        if impact is None:
+            problems.append(f"the {name} round has no still of its hit")
+            continue
+        receipt = (impact.get("receipt") or {}).get("id")
+        look = next((l for l in impact.get("receipt_looks") or [] if l["receipt"] == receipt), None)
+        wanted = (fired.get("impact") or {}).get("kind")
+        if look is None:
+            problems.append(f"{impact['file']}: the receipt of the still was not drawn")
+        elif look["impact"] != wanted:
+            problems.append(f"{impact['file']}: the hit is drawn as {look['impact']}, the row of the "
+                            f"{name} round says {wanted}")
+        elif look["particles"] > IMPACT_PARTICLES:
+            problems.append(f"{impact['file']}: {look['particles']} impact particles, at most {IMPACT_PARTICLES}")
+    return problems
 
 
 def label(clip):
@@ -348,7 +401,7 @@ def hard_problems(summary, expected):
                                 f"says {wanted}")
             elif look["particles"] > IMPACT_PARTICLES:
                 problems.append(f"{impact['file']}: {look['particles']} impact particles, at most {IMPACT_PARTICLES}")
-    return problems
+    return problems + basic_problems(summary, expected, stills, flat)
 
 
 def slot_reports(summary, expected):
@@ -419,10 +472,11 @@ def phase_problems(summary, directory):
                 problems.append(f"{still['file']} records no aim preview")
         if summary.get("aim") and record.get("modular") and [s["phase"] for s in taken][:1] != ["aim"]:
             problems.append(f"slot {key} has no aim still")
-    # A flight look ends with the basic attack; its record names the still.
-    flights = [s["file"] for s in stills if s["phase"] == "flight"]
-    if flights != (summary.get("basic") or {}).get("stills", []):
-        problems.append(f"flight stills {flights} do not match the basic attack record")
+    # A flight look ends with the basic attack; the records of its rounds name their stills.
+    taken = [s["file"] for s in stills if s.get("slot") == BASIC_SLOT]
+    named = [file for _, record in basic_rounds(summary) for file in record.get("stills", [])]
+    if taken != named:
+        problems.append(f"basic attack stills {taken} do not match the basic attack record")
     return problems
 
 
@@ -564,7 +618,8 @@ def main(argv=None):
                              "clip's contact time, or this long after the accepted cast (default: 0.10 s)")
     parser.add_argument("--flight", action="store_true",
                         help="With --phases: unit-target abilities are cast from lane distance and the basic "
-                             "attack gets a still of its projectile in flight")
+                             "attack gets a still of its projectile in flight and one of its hit (a "
+                             "repeater also of its rocket round)")
     parser.add_argument("--interleave", action="store_true",
                         help="With --phases: a basic attack is ordered as soon as the cast of a skill "
                              "with a telegraph is accepted")

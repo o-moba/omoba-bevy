@@ -739,6 +739,144 @@ fn rows_without_the_block_and_basic_rows_resolve_as_data_says() {
     assert_eq!(accents::cast_burst(&unmigrated, &basic.casts[0], &[]), []);
 }
 
+/// A repeater has a row for each of its two rounds. An accepted attack is the round of
+/// the weapon mode the snapshot of its edge replicates; a receipt is the round its wire
+/// style names. No other class has a second round, whatever its state says.
+#[test]
+fn rockets_variant_follows_the_mode_at_the_edge_and_the_style_of_the_receipt() {
+    use shared::combat::ProjectileStyle;
+    let (target, unmigrated) = (target(), SkillPresentation::unmigrated());
+    let wildspark = HeroClass::Wildspark;
+    let (bullets, rockets) = (CastKey::Basic(wildspark), CastKey::Rockets(wildspark));
+    let armed = |core: CoreId, weapon_mode| LoadoutState {
+        recipe: Some(core.preset()),
+        weapon_mode,
+        ..default()
+    };
+    let launcher = armed(CoreId::Wildspark, WeaponMode::Rockets);
+    let repeater = armed(CoreId::Wildspark, WeaponMode::Repeater);
+    fn basic(class: HeroClass, loadout: Option<&LoadoutState>) -> Option<CastKey> {
+        CastKey::of(class, loadout, BASIC_ATTACK_ACTION_SLOT)
+    }
+    assert_eq!(basic(wildspark, Some(&launcher)), Some(rockets));
+    assert_eq!(basic(wildspark, Some(&repeater)), Some(bullets));
+    assert_eq!(basic(wildspark, None), Some(bullets));
+    // The mode says nothing about a skill, and nothing for a kit that is no repeater.
+    for slot in 0..4 {
+        assert_eq!(
+            CastKey::of(wildspark, Some(&launcher), slot),
+            CastKey::of(wildspark, Some(&repeater), slot)
+        );
+    }
+    for class in HeroClass::ALL {
+        let Some(kit) = shared::loadout::preset_for_class(class) else {
+            assert_eq!(basic(class, None), Some(CastKey::Basic(class)));
+            continue;
+        };
+        let state = armed(kit.core(), WeaponMode::Rockets);
+        let fires_rockets = kit.attack_profile() == AttackProfileId::Repeater;
+        assert_eq!(fires_rockets, class == wildspark, "{}", class.id());
+        assert_eq!(
+            basic(class, Some(&state)),
+            Some(if fires_rockets {
+                CastKey::Rockets(class)
+            } else {
+                CastKey::Basic(class)
+            }),
+            "{}",
+            class.id()
+        );
+    }
+
+    // The two rounds are two rows: the nested entry for the rocket, the row for the bullet.
+    let row = target.basic(wildspark).unwrap();
+    let nested = row.rockets.as_deref().unwrap();
+    assert_eq!(target.basic_round(bullets), Some(row));
+    assert_eq!(target.basic_round(rockets), Some(nested));
+    assert_ne!(row.accent, nested.accent);
+    assert_ne!(row.impact, nested.impact);
+    assert_ne!(row.sound, nested.sound);
+    let look = |key| {
+        let look = target.look(key).unwrap();
+        (look.accent.cloned(), look.impact.cloned())
+    };
+    assert_eq!(look(bullets), (row.accent.clone(), row.impact.clone()));
+    assert_eq!(
+        look(rockets),
+        (nested.accent.clone(), nested.impact.clone())
+    );
+    // A row without the entry serves both rounds, and a registry without the row neither.
+    let riftshot = HeroClass::Riftshot;
+    assert_eq!(
+        target.basic_round(CastKey::Rockets(riftshot)),
+        target.basic(riftshot)
+    );
+    assert!(target.basic(riftshot).unwrap().rockets.is_none());
+    assert_eq!(unmigrated.basic_round(rockets), None);
+    assert!(unmigrated.look(rockets).is_none());
+    assert_eq!(
+        target.basic_round(CastKey::Skill(SkillKey::Modular(SkillId::WildRocket))),
+        None
+    );
+
+    // The edge: the accent of an accepted attack is that of the mode its snapshot carries.
+    let shot = |before: &LoadoutState, now: &LoadoutState| {
+        let mut observer = CastObserver::default();
+        let mut hero = hero(wildspark);
+        hero.loadout = Some(before);
+        observer.observe(ROUND, true, [acted(hero, 1, 0)]);
+        hero.loadout = Some(now);
+        let seen = observer.observe(ROUND, true, [acted(hero, 2, BASIC_ATTACK_ACTION_SLOT)]);
+        assert_eq!(seen.casts.len(), 1);
+        seen.casts[0].clone()
+    };
+    let accent = |row: &crate::skill_presentation::BasicProfile, sequence| {
+        accents::accent_particles(
+            row.accent.as_ref().unwrap(),
+            &Palette::of_class(target.theme(wildspark).unwrap()),
+            &CastContext {
+                origin: HOME,
+                direction: Vec2::NEG_Y,
+                recast: false,
+                area: None,
+                strike_to: None,
+                sequence,
+            },
+        )
+    };
+    for (before, now, key, fired) in [
+        (&repeater, &repeater, bullets, row),
+        (&launcher, &launcher, rockets, nested),
+        // The mode of the snapshot of the edge decides, not the one before it.
+        (&repeater, &launcher, rockets, nested),
+        (&launcher, &repeater, bullets, row),
+    ] {
+        let cast = shot(before, now);
+        assert_eq!(cast.key, key);
+        let burst = accents::cast_burst(&target, &cast, &[]);
+        assert_eq!(burst, accent(fired, 2));
+        assert!(!burst.is_empty());
+        assert_eq!(accents::cast_burst(&unmigrated, &cast, &[]), []);
+    }
+    assert_ne!(accent(row, 2), accent(nested, 2));
+
+    // The receipt: the wire style of the hit names the round, in whichever mode the hero
+    // is when it lands. Only `Rocket` is the rocket.
+    for key in [bullets, rockets] {
+        assert_eq!(key.struck_as(ProjectileStyle::Rocket), rockets);
+        for style in [
+            ProjectileStyle::Bullet,
+            ProjectileStyle::Standard,
+            ProjectileStyle::Arcane,
+            ProjectileStyle::TowerBolt,
+        ] {
+            assert_eq!(key.struck_as(style), bullets, "{style:?}");
+        }
+    }
+    let zap = CastKey::Skill(SkillKey::Modular(SkillId::WildZap));
+    assert_eq!(zap.struck_as(ProjectileStyle::Rocket), zap);
+}
+
 #[test]
 fn area_only_on_a_signed_first_cast() {
     let registry = target();

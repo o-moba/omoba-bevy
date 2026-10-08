@@ -206,24 +206,99 @@ class LauncherTests(unittest.TestCase):
             summary["skills"].pop()
             self.assertIn("expected four skill records", launcher.phase_problems(summary, directory))
 
-    def test_flight_look_ends_with_the_still_its_basic_record_names(self):
+    def test_flight_look_ends_with_the_stills_its_basic_record_names(self):
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)
             summary = phase_summary()
-            flight = dict(file="5-basic-flight.png", phase="flight", slot=255, skill="basic", mean_pixel=91.0)
-            summary["captures"].append(flight)
+            still = lambda file, phase: dict(file=file, phase=phase, slot=255, skill="basic", mean_pixel=91.0)
+            summary["captures"] += [still("5-basic-flight.png", "flight"), still("5-basic-impact.png", "impact")]
             touch_stills(directory, summary)
             # A still nobody recorded, and a record without its still, are both refused.
-            mismatch = "flight stills ['5-basic-flight.png'] do not match the basic attack record"
-            self.assertEqual(launcher.phase_problems(summary, directory), [mismatch])
-            summary["basic"] = dict(slot=255, stills=["5-basic-flight.png"])
+            both = ["5-basic-flight.png", "5-basic-impact.png"]
+            self.assertEqual(launcher.phase_problems(summary, directory),
+                             [f"basic attack stills {both} do not match the basic attack record"])
+            summary["basic"] = dict(slot=255, stills=both)
             self.assertEqual(launcher.phase_problems(summary, directory), [])
             summary["captures"].pop()
             self.assertEqual(launcher.phase_problems(summary, directory),
-                             ["flight stills [] do not match the basic attack record"])
-            # A melee core throws nothing: no record and no still.
+                             ["basic attack stills ['5-basic-flight.png'] do not match the basic attack record"])
+            # The rocket round of a repeater has a record of its own inside the first.
+            rockets = ["6-rockets-flight.png", "6-rockets-impact.png"]
+            summary["captures"] += [still("5-basic-impact.png", "impact"), still(rockets[0], "flight"),
+                                    still(rockets[1], "impact")]
+            touch_stills(directory, summary)
+            self.assertEqual(launcher.phase_problems(summary, directory),
+                             [f"basic attack stills {both + rockets} do not match the basic attack record"])
+            summary["basic"]["rockets"] = dict(slot=255, weapon_mode="Rockets", stills=rockets)
+            self.assertEqual(launcher.phase_problems(summary, directory), [])
+            # A run without a flight look has neither a record nor a still.
+            del summary["captures"][-4:]
             summary["basic"] = None
             self.assertEqual(launcher.phase_problems(summary, directory), [])
+
+    def test_the_rounds_of_a_basic_attack_are_drawn_from_their_rows_and_profiles(self):
+        expected = dict(
+            basic_attacks=dict(wildspark=dict(impact=dict(kind="splinter"),
+                                              rockets=dict(impact=dict(kind="ember_puff"))),
+                               frostguard=dict(impact=dict(kind="facet_pop"))),
+            projectiles=dict(wild_bullet=dict(form="dart"), wild_rocket=dict(form="tumbler", model={})))
+
+        def shot(profile, body, style):
+            return dict(action_slot=255, profile=profile, body=body, style=style)
+
+        def run():
+            flight = lambda file, shots: dict(file=file, phase="flight", slot=255, projectiles=shots)
+            hit = lambda file, receipt, kind: dict(
+                file=file, phase="impact", slot=255, receipt=dict(id=receipt),
+                receipt_looks=[dict(receipt=receipt, impact=kind, particles=6)])
+            stills = [flight("5-basic-flight.png", [shot("wild_bullet", "dart+block", "bullet")]),
+                      hit("5-basic-impact.png", 4, "splinter"),
+                      flight("6-rockets-flight.png", [shot("wild_rocket", "tumbler+block", "rocket")]),
+                      hit("6-rockets-impact.png", 5, "ember_puff")]
+            summary = {"class": "wildspark", "basic": dict(
+                stills=["5-basic-flight.png", "5-basic-impact.png"],
+                rockets=dict(weapon_mode="Rockets", stills=["6-rockets-flight.png", "6-rockets-impact.png"]))}
+            return summary, stills
+
+        problems = lambda summary, stills, flat=False: launcher.basic_problems(summary, expected, stills, flat)
+        self.assertEqual(problems(*run()), [])
+        # No basic record, no claim.
+        self.assertEqual(problems({"class": "wildspark", "basic": None}, []), [])
+        # The rocket round shows the form of its profile, not the model the profile carries.
+        summary, stills = run()
+        stills[2]["projectiles"][0]["body"] = "shape"
+        self.assertEqual(problems(summary, stills),
+                         ["6-rockets-flight.png: wild_rocket is drawn as shape, its profile says the form tumbler"])
+        # The flat view draws its own shapes.
+        self.assertEqual(problems(summary, stills, flat=True), [])
+        # It is fired in rocket mode and replicated as a rocket.
+        summary, stills = run()
+        summary["basic"]["rockets"]["weapon_mode"] = "Repeater"
+        stills[2]["projectiles"][0]["style"] = "bullet"
+        self.assertEqual(problems(summary, stills),
+                         ["the rocket round was captured in weapon mode Repeater",
+                          "6-rockets-flight.png: the rocket round threw a projectile of style bullet"])
+        # Each round is hit with the recipe of its own row.
+        summary, stills = run()
+        stills[3]["receipt_looks"][0]["impact"] = "splinter"
+        self.assertEqual(problems(summary, stills),
+                         ["6-rockets-impact.png: the hit is drawn as splinter, the row of the rockets round "
+                          "says ember_puff"])
+        summary, stills = run()
+        stills[1]["receipt_looks"] = []
+        self.assertEqual(problems(summary, stills), ["5-basic-impact.png: the receipt of the still was not drawn"])
+        # A round without a still of its hit is not evidence of it.
+        summary, stills = run()
+        summary["basic"]["stills"].pop()
+        self.assertEqual(problems(summary, stills), ["the basic round has no still of its hit"])
+        # A melee core throws nothing: its round is the hit alone.
+        melee = {"class": "frostguard", "basic": dict(stills=["5-basic-impact.png"])}
+        hit = dict(file="5-basic-impact.png", phase="impact", slot=255, receipt=dict(id=9),
+                   receipt_looks=[dict(receipt=9, impact="facet_pop", particles=6)])
+        self.assertEqual(problems(melee, [hit]), [])
+        # A class without a row keeps the built-in burst, which names no recipe.
+        hit["receipt_looks"][0]["impact"] = None
+        self.assertEqual(problems({"class": "warrior", "basic": melee["basic"]}, [hit]), [])
 
     def test_aim_stills_belong_to_their_skill_record_and_carry_a_preview(self):
         with tempfile.TemporaryDirectory() as temporary:

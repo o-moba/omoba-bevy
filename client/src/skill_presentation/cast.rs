@@ -11,7 +11,8 @@ use crate::net::{
 };
 use crate::player::Player;
 use bevy::prelude::*;
-use shared::loadout::LoadoutState;
+use shared::combat::ProjectileStyle;
+use shared::loadout::{AttackProfileId, LoadoutState, WeaponMode};
 use shared::utility::UtilityState;
 use shared::{BASIC_ATTACK_ACTION_SLOT, HeroClass, SkillSlot};
 use std::collections::{HashMap, HashSet};
@@ -26,18 +27,29 @@ pub(crate) enum CastKey {
     Skill(SkillKey),
     /// The basic attack of the kit whose core is this class.
     Basic(HeroClass),
+    /// That basic attack as the rocket of a repeater: the `rockets` entry of the row of
+    /// the class, and the row itself where it has none.
+    Rockets(HeroClass),
 }
 
 impl CastKey {
     /// Resolved from the accepted recipe, as the motion of the action is: the skill in the
-    /// slot, or for a basic attack the core of the kit (rule E-13). A malformed recipe
-    /// resolves to nothing.
+    /// slot, or for a basic attack the core of the kit (rule E-13). A repeater fires the
+    /// round of the weapon mode this loadout state replicates, so the state of the
+    /// snapshot that carries an action edge names the round of that action. A malformed
+    /// recipe resolves to nothing.
     pub(crate) fn of(class: HeroClass, loadout: Option<&LoadoutState>, slot: u8) -> Option<Self> {
         let equipped = crate::equipped_skills::resolve_state(class, loadout)?;
         if slot == BASIC_ATTACK_ACTION_SLOT {
-            return Some(Self::Basic(
-                equipped.resolved().map_or(class, |kit| kit.core().class()),
-            ));
+            let kit = equipped.resolved();
+            let core = kit.map_or(class, |kit| kit.core().class());
+            let rockets = kit.is_some_and(|kit| kit.attack_profile() == AttackProfileId::Repeater)
+                && loadout.is_some_and(|loadout| loadout.weapon_mode == WeaponMode::Rockets);
+            return Some(if rockets {
+                Self::Rockets(core)
+            } else {
+                Self::Basic(core)
+            });
         }
         SkillKey::from_id(equipped.ability(SkillSlot::from_index(slot)?).id).map(Self::Skill)
     }
@@ -45,7 +57,21 @@ impl CastKey {
     pub(crate) fn skill(self) -> Option<SkillKey> {
         match self {
             Self::Skill(key) => Some(key),
-            Self::Basic(_) => None,
+            Self::Basic(_) | Self::Rockets(_) => None,
+        }
+    }
+
+    /// The row of the action behind a receipt of this wire style. The mode of a repeater
+    /// is frozen into its projectile when it is fired (`common/src/basic_attack.rs`), so
+    /// the style of the receipt says which round struck, whatever mode the hero is in when
+    /// it lands. A skill is the skill it was.
+    pub(crate) fn struck_as(self, style: ProjectileStyle) -> Self {
+        match self {
+            Self::Basic(class) | Self::Rockets(class) if style == ProjectileStyle::Rocket => {
+                Self::Rockets(class)
+            }
+            Self::Basic(class) | Self::Rockets(class) => Self::Basic(class),
+            Self::Skill(_) => self,
         }
     }
 }

@@ -1,4 +1,5 @@
 use super::*;
+use shared::loadout::WeaponMode;
 
 pub(super) mod schema_rules;
 pub(super) mod target;

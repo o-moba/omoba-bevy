@@ -517,7 +517,9 @@ impl EffectMemory {
                 .filter(|cast| !cast.recast)
                 .filter_map(|cast| match cast.key {
                     CastKey::Skill(SkillKey::Modular(skill)) => Some((cast.actor_id, skill, now)),
-                    CastKey::Skill(SkillKey::Legacy(..)) | CastKey::Basic(_) => None,
+                    CastKey::Skill(SkillKey::Legacy(..))
+                    | CastKey::Basic(_)
+                    | CastKey::Rockets(_) => None,
                 }),
         );
         let current = keyed(frame.effects);

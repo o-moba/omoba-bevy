@@ -10,8 +10,10 @@
 //! of a skill without a telegraph to the clip's contact time or a fixed time.
 //! For a look at projectile bodies, `OMOBA_STANDARD_QA_FLIGHT=1` stands the
 //! target of every unit-target ability far enough for its projectile to be in
-//! flight at the release still and adds one still of the basic attack's
-//! projectile in flight. `OMOBA_STANDARD_QA_INTERLEAVE=1` orders one basic
+//! flight at the release still and adds the basic attack: one still of its
+//! projectile in flight (a melee core throws none) and one of its hit. A
+//! repeater then casts its weapon switch and shows the same two stills of its
+//! rocket round. `OMOBA_STANDARD_QA_INTERLEAVE=1` orders one basic
 //! attack as soon as the cast of a skill with a telegraph is accepted, so the
 //! stills show what an action accepted during the telegraph does to the pose.
 //! `OMOBA_STANDARD_QA_AIM=1` adds one still of the aim preview of every modular
@@ -1422,6 +1424,8 @@ enum Step {
     Gates,
     /// Basic attack sent: wait for its projectile to be in flight.
     Flight,
+    /// The switch of a repeater was cast: wait for the replicated rocket mode.
+    Mode,
     /// The orb was ordered away: wait for it to arrive, then take the aim still or cast.
     Park(Parked),
     /// The skill key is held: wait for its aim preview.
@@ -1854,6 +1858,8 @@ struct Phases {
     skills: Vec<serde_json::Value>,
     /// The basic attack is being captured, after the four skills.
     basic: bool,
+    /// The basic attack is being captured a second time, as the rocket of a repeater.
+    rockets: bool,
     basic_record: Option<serde_json::Value>,
     aim_taken: bool,
     recast_aim_taken: bool,
@@ -2813,6 +2819,7 @@ fn drive_phases(
             Step::Edge => "the server to accept the cast",
             Step::Gates => "the gate of the next still",
             Step::Flight => "the projectile of the basic attack",
+            Step::Mode => "the replicated rocket mode",
             Step::Park(_) => "the orb to be parked",
             Step::Aim(_) => "the aim preview of the held key",
             Step::Reach => "the hero to be in reach of its recast",
@@ -3147,7 +3154,7 @@ fn drive_phases(
                 run.recast_aim_taken = true;
                 run.recast_aim_note = Some("recast_never_in_reach");
                 finish_skill(qa, run, &world, &equipped, slot, skill);
-                finished = advance_slot(qa, run, &equipped);
+                finished = advance_slot(qa, run);
             }
         }
         Step::Slow if acknowledged && sandbox.config.environment.time_scale == SLOW_MOTION => {
@@ -3180,6 +3187,26 @@ fn drive_phases(
                 ..default()
             };
             if run.basic {
+                // The rocket round: the kit's own switch is cast first, and the attack
+                // waits for the mode the server replicates.
+                let in_rocket_mode = loadout
+                    .0
+                    .as_ref()
+                    .is_some_and(|flags| flags.weapon_mode == WeaponMode::Rockets);
+                if run.rockets && !in_rocket_mode {
+                    let Some(switch) = weapon_switch(&equipped) else {
+                        stop(qa, run, &mut exit, "the kit has no weapon switch".into());
+                        return;
+                    };
+                    if let Err(reason) =
+                        send_cast(qa, &world, &equipped, switch, Aim::Target, &mut outgoing)
+                    {
+                        stop(qa, run, &mut exit, reason.into());
+                        return;
+                    }
+                    run.enter(Step::Mode);
+                    return;
+                }
                 let Some(enemy) = world.actor(SandboxActor::Enemy) else {
                     stop(qa, run, &mut exit, "no target telemetry".into());
                     return;
@@ -3187,8 +3214,13 @@ fn drive_phases(
                 outgoing.write(NetworkCommand::BasicAttack {
                     target: shared::wire::TargetId::player(enemy.id),
                 });
-                qa.requests.push(serde_json::json!({"command":"basic_attack","target":enemy.id,"snapshot_tick":world.game.meta.snapshot_tick}));
-                run.enter(Step::Flight);
+                qa.requests.push(serde_json::json!({"command":"basic_attack","target":enemy.id,"rockets":run.rockets,"snapshot_tick":world.game.meta.snapshot_tick}));
+                // A melee core resolves its attack at once: its hit is the only still.
+                run.enter(if throws(&equipped) {
+                    Step::Flight
+                } else {
+                    Step::Gates
+                });
                 return;
             }
             if let Err(reason) =
@@ -3198,6 +3230,16 @@ fn drive_phases(
                 return;
             }
             run.enter(Step::Edge);
+        }
+        // The mode is replicated and the switch has run out: the attack starts from rest.
+        Step::Mode
+            if loadout
+                .0
+                .as_ref()
+                .is_some_and(|flags| flags.weapon_mode == WeaponMode::Rockets)
+                && world.at_rest() =>
+        {
+            run.enter(Step::Cast);
         }
         Step::Flight => {
             let Some(staging) = run.staging else {
@@ -3256,6 +3298,21 @@ fn drive_phases(
             run.begin_pass(Pass::Capture);
         }
         Step::Gates => {
+            if run.basic {
+                // The hit of the basic attack: gated on its own receipt, never staged.
+                let landed = run
+                    .watch
+                    .receipt
+                    .as_ref()
+                    .is_some_and(|receipt| now - receipt.seen >= f64::from(IMPACT_AGE.0));
+                if landed {
+                    run.gate = "receipt";
+                    run.frozen = (now, 0);
+                    request_speed(qa, run, &world, sandbox, SLOW_MOTION, true, &mut outgoing);
+                    run.enter(Step::Pause(Phase::Impact));
+                }
+                return;
+            }
             let (Some(staging), Some(probe), Some((edge, _))) =
                 (run.staging, run.probe.as_ref(), run.watch.edge)
             else {
@@ -3428,8 +3485,9 @@ fn drive_phases(
                 );
                 return;
             }
-            let file = if phase == Phase::Flight {
-                "5-basic-flight.png".to_string()
+            let file = if run.basic {
+                let round = if run.rockets { "6-rockets" } else { "5-basic" };
+                format!("{round}-{}.png", phase.name())
             } else {
                 format!(
                     "{}-{}-{}-{}.png",
@@ -3452,7 +3510,7 @@ fn drive_phases(
                 Phase::Windup => run.windup_taken = true,
                 Phase::Release => run.release_taken = Some(now),
                 Phase::Impact | Phase::Settled => run.third_taken = true,
-                Phase::Flight => finished = true,
+                Phase::Flight => {}
                 Phase::Aim => run.aim_taken = true,
                 Phase::RecastAim => run.recast_aim_taken = true,
             }
@@ -3462,17 +3520,34 @@ fn drive_phases(
                 .0
                 .as_ref()
                 .is_some_and(|flags| flags.slots[usize::from(run.slot)].can_recast);
-            if phase == Phase::Flight {
+            if run.basic && phase == Phase::Flight {
+                // The shot flies on: its hit is the second still of the round.
+                request_speed(qa, run, &world, sandbox, SLOW_MOTION, false, &mut outgoing);
+                run.enter(Step::Resume);
+            } else if run.basic && phase == Phase::Impact {
                 let staging = run.staging;
-                run.basic_record = Some(serde_json::json!({
+                let round = serde_json::json!({
                     "slot": shared::BASIC_ATTACK_ACTION_SLOT,
+                    // The replicated mode of the hero when the round was captured.
+                    "weapon_mode": loadout.0.as_ref().map(|flags| format!("{:?}", flags.weapon_mode)),
                     "staging": staging.map(|staging| serde_json::json!({
                         "category": staging.category,
                         "target_distance": staging.distance,
                     })),
                     "capture": run.watch.timeline(),
                     "stills": std::mem::take(&mut run.skill_stills),
-                }));
+                });
+                match run.basic_record.as_mut().filter(|_| run.rockets) {
+                    Some(record) => record["rockets"] = round,
+                    None => run.basic_record = Some(round),
+                }
+                // A repeater has a second round: it is captured after its switch.
+                if !run.rockets && weapon_switch(&equipped).is_some() {
+                    run.rockets = true;
+                    run.begin_pass(Pass::Capture);
+                } else {
+                    finished = true;
+                }
             } else if matches!(phase, Phase::Idle | Phase::SlotIdle) {
                 // The slate is still clean: what comes before the cast is decided there.
                 run.enter(Step::Settle);
@@ -3524,7 +3599,7 @@ fn drive_phases(
                 }
             } else {
                 finish_skill(qa, run, &world, &equipped, slot, skill);
-                finished = advance_slot(qa, run, &equipped);
+                finished = advance_slot(qa, run);
             }
         }
         Step::Resume if acknowledged && !sandbox.config.environment.paused => {
@@ -3554,7 +3629,8 @@ fn drive_phases(
             // The authored kit of the hero; absent for the preset of its class.
             "recipe": qa.recipe.as_ref().map(|recipe| recipe.skills.map(SkillId::id)),
             "skills": run.skills,
-            // The still of a flight look; absent for a melee core, which throws nothing.
+            // The basic attack of a flight look: its projectile in flight (a melee core
+            // throws none) and its hit, and for a repeater the same of its rocket round.
             "basic": run.basic_record,
             "requests": qa.requests,
             "captures": qa.captures,
@@ -3630,7 +3706,7 @@ fn finish_skill(
 
 /// Moves on to the next skill, or to the basic attack of a flight look. Returns whether
 /// the run is over.
-fn advance_slot(qa: &mut Qa, run: &mut Phases, equipped: &shared::loadout::EquippedSkills) -> bool {
+fn advance_slot(qa: &mut Qa, run: &mut Phases) -> bool {
     // The next cast starts in the closest view again.
     qa.zoom = crate::camera::CAMERA_MIN_ZOOM;
     if run.slot < 3 {
@@ -3638,16 +3714,33 @@ fn advance_slot(qa: &mut Qa, run: &mut Phases, equipped: &shared::loadout::Equip
         run.begin_pass(Pass::Probe);
         return false;
     }
-    // A melee core resolves its basic attack at once and throws nothing.
-    let throws = equipped
-        .resolved()
-        .is_none_or(|kit| kit.attack_profile() != shared::loadout::AttackProfileId::Melee);
-    if qa.flight && throws {
+    if qa.flight {
         run.basic = true;
         run.begin_pass(Pass::Capture);
         return false;
     }
     true
+}
+
+/// Whether the basic attack of the kit throws a projectile. A melee core resolves its
+/// attack at once and throws nothing.
+fn throws(equipped: &shared::loadout::EquippedSkills) -> bool {
+    equipped
+        .resolved()
+        .is_none_or(|kit| kit.attack_profile() != shared::loadout::AttackProfileId::Melee)
+}
+
+/// The slot of the skill that switches the weapon of a repeater.
+fn weapon_switch(equipped: &shared::loadout::EquippedSkills) -> Option<u8> {
+    SkillSlot::ALL
+        .iter()
+        .position(|slot| {
+            matches!(
+                equipped.skill(*slot).map(|definition| definition.effect),
+                Some(SkillEffect::WeaponToggle { .. })
+            )
+        })
+        .map(|slot| slot as u8)
 }
 
 /// Orders the orb of the kit to its parking spot up the lane, with the skill in `order`.

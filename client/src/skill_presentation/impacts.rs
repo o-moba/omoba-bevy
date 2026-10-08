@@ -244,6 +244,23 @@ impl Burst {
         }
     }
 
+    /// The ground ring of a blast, `radius` units wide at its widest. A ring that stands is
+    /// read as the edge of something, and the client knows no edge of a blast: neither its
+    /// radius nor its centre is replicated. So the ring stands only where it is no wider
+    /// than a hit on one unit may be drawn; a wider one runs out as a shock wave, growing
+    /// for as long as it lives and gone when it is widest.
+    fn blast_ring(&self, origin: Vec3, radius: f32) -> ParticleSpec {
+        let ring = self.ring(origin, radius, Orient::Ground);
+        if radius <= SINGLE_TARGET_REACH {
+            return ring;
+        }
+        ParticleSpec {
+            size: sized(ParticleShape::Ringlet, radius, Curve::Grow),
+            curve: Curve::Grow,
+            ..ring
+        }
+    }
+
     /// The direction of debris `index` of `count`, evenly around the receipt from a seeded
     /// start.
     fn outward(&self, index: usize, count: usize) -> Vec3 {
@@ -460,11 +477,7 @@ impl Burst {
                 flash.end_color = None;
                 out.push(flash);
                 if n > 1 {
-                    let mut ring = self.ring(
-                        self.floor + Vec3::Y * 0.08,
-                        0.95 * self.reach,
-                        Orient::Ground,
-                    );
+                    let mut ring = self.blast_ring(self.floor + Vec3::Y * 0.08, 0.95 * self.reach);
                     ring.color = self.companion;
                     out.push(ring);
                 }
@@ -1223,9 +1236,9 @@ mod tests {
             (blast[0].shape, blast[1].shape, blast[1].orient),
             (ParticleShape::Glow, ParticleShape::Ringlet, Orient::Ground)
         );
-        // Its ring holds the radius it reaches: 0.95 of the reach, from the first quarter of
-        // its life on.
-        assert_eq!(blast[1].curve, Curve::Pop);
+        // Its ring runs out to 0.95 of the reach. At this scale that is wider than a hit
+        // on one unit, so it is a wave and not a ring that stands.
+        assert_eq!(blast[1].curve, Curve::Grow);
         let radius = unit_radius(blast[1].shape) * blast[1].size * blast[1].curve.peak();
         assert!((radius - 0.95 * BLAST_REACH).abs() < 1e-5);
         assert!(
@@ -1282,6 +1295,85 @@ mod tests {
         assert_eq!(flash.color.color, hot.slot(PaletteSlot::Primary).color);
         assert_eq!(flash.color.gain, ParticleSpec::BASE.color.gain);
         assert_eq!(burst[0].color.gain, hot.slot(PaletteSlot::Primary).gain);
+    }
+
+    /// The radius of a blast is not replicated and its centre is not known, so no ring
+    /// may stand where only a blast would explain it.
+    #[test]
+    fn the_ring_of_a_blast_stands_only_inside_the_reach_of_a_hit_on_one_unit() {
+        let ring_of = |scale: f32| {
+            let blast = impact_particles(
+                &recipe(ImpactKind::Blast, Some(ParticleShape::Star), 12, scale),
+                &palette(),
+                &receipt(true),
+            );
+            assert_eq!(
+                (blast[1].shape, blast[1].orient),
+                (ParticleShape::Ringlet, Orient::Ground)
+            );
+            blast[1].clone()
+        };
+        // The radius of the mesh at life fraction `t`.
+        let radius_at = |ring: &ParticleSpec, t: f32| {
+            let scale = ring.pose_at(t * ring.lifetime, false, Quat::IDENTITY).scale;
+            assert!((scale.x - scale.y).abs() < 1e-5);
+            unit_radius(ring.shape) * scale.x
+        };
+        for scale in [0.3, 0.6, 0.9, 0.98, 1.0, 1.2, 1.8, 2.0] {
+            let ring = ring_of(scale);
+            let widest = 0.95 * BLAST_REACH * scale;
+            let stands = widest <= SINGLE_TARGET_REACH;
+            assert_eq!(stands, scale < 1.0, "{scale}");
+            let steps: Vec<f32> = (0..=20)
+                .map(|i| radius_at(&ring, i as f32 / 20.0))
+                .collect();
+            let peak = steps.iter().copied().fold(0.0, f32::max);
+            assert!((peak - widest).abs() < 1e-4, "{scale}: {peak}");
+            if stands {
+                // Whole from the first quarter of its life on, and never past the bound.
+                assert_eq!(ring.curve, Curve::Pop);
+                assert!(
+                    steps[5..]
+                        .iter()
+                        .all(|radius| (radius - widest).abs() < 1e-4)
+                );
+            } else {
+                // Never at rest: wider with every step, and widest only as it ends.
+                assert_eq!(ring.curve, Curve::Grow);
+                assert!(steps.windows(2).all(|pair| pair[1] > pair[0] + 1e-4));
+                assert_eq!(steps.last().copied(), Some(peak));
+                // While it is drawn at its full strength it is well inside what it
+                // finally reaches.
+                assert!(radius_at(&ring, 0.5) <= 0.6 * widest + 1e-4);
+            }
+        }
+        // The two rows of the roster that draw a blast: the rocket's is wider than one
+        // unit and runs out; the collapse's fits and stands, inside the zone that names
+        // the real area.
+        let registry = target();
+        let ring_of_row = |id: &str| {
+            let row = registry.row(id).unwrap();
+            let key = SkillKey::from_id(id).unwrap();
+            assert!(category::area_damage(key), "{id}");
+            let palette = Palette::of(row, registry.theme(key.home()).unwrap());
+            impact_particles(row.impact.as_ref().unwrap(), &palette, &receipt(true))[1].clone()
+        };
+        let blasts: Vec<&str> = registry
+            .rows()
+            .filter(|(_, row)| {
+                row.impact
+                    .as_ref()
+                    .is_some_and(|impact| impact.kind == ImpactKind::Blast)
+            })
+            .map(|(id, _)| id)
+            .collect();
+        assert_eq!(blasts, ["orbital_collapse", "wild_rocket"]);
+        let rocket = ring_of_row("wild_rocket");
+        assert_eq!(rocket.curve, Curve::Grow);
+        assert!(rocket.reach(HIT) > SINGLE_TARGET_REACH);
+        let collapse = ring_of_row("orbital_collapse");
+        assert_eq!(collapse.curve, Curve::Pop);
+        assert!(collapse.reach(HIT) <= SINGLE_TARGET_REACH);
     }
 
     #[test]

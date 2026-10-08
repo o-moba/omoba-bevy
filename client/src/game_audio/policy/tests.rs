@@ -1313,6 +1313,148 @@ fn a_telegraph_that_fired_plays_the_release_voice_of_its_row() {
     assert!(fired(unseen).is_empty());
 }
 
+/// A repeater has a voice for each of its two rounds. The hit sounds as the round its
+/// receipt names by its wire style; the accepted attack of an enemy as the round of the
+/// weapon mode its snapshot replicates. No other class has a second voice.
+#[test]
+fn rockets_variant_voice_follows_the_style_of_the_receipt_and_the_mode_of_the_attack() {
+    use shared::loadout::{CoreId, LoadoutState, WeaponMode};
+    let registry = target();
+    let me = local().id;
+    let class = HeroClass::Wildspark;
+    let row = registry.basic(class).unwrap();
+    let nested = row.rockets.as_deref().unwrap();
+    let voice_of = |row: &crate::skill_presentation::BasicProfile| {
+        let cue = row.sound.as_ref().unwrap();
+        (
+            played(AudioCue::for_base(cue.base), cue.speed, cue.slice),
+            cue.gain,
+        )
+    };
+    let (bullet, rocket) = (voice_of(row), voice_of(nested));
+    assert_ne!(bullet.0, rocket.0);
+    let armed = |core: CoreId, weapon_mode| LoadoutState {
+        recipe: Some(core.preset()),
+        weapon_mode,
+        ..Default::default()
+    };
+    let styled = |id, source, style| CombatEvent {
+        style,
+        ..dealt(id, source, Some(BASIC))
+    };
+    let attack = |style| {
+        let mut cursor = AttackCursor::default();
+        let mut enemy = AttackObservation {
+            id: ENEMY,
+            sequence: 5,
+            attacking: true,
+            visible: true,
+            alive: true,
+            team: Team::Blue,
+            position: Vec3::ZERO,
+            style,
+        };
+        cursor.accept((1, 1), true, Some(local()), [enemy]);
+        enemy.sequence = 6;
+        cursor.accept((1, 1), true, Some(local()), [enemy])
+    };
+    for mode in [WeaponMode::Repeater, WeaponMode::Rockets] {
+        let state = armed(CoreId::Wildspark, mode);
+        let hero = |id| HeroHeard {
+            loadout: Some(&state),
+            ..heard_hero(id, class, BASIC)
+        };
+        // The hit: the round of the receipt, in either mode of the hero.
+        for (style, (variant, gain)) in [
+            (ProjectileStyle::Rocket, rocket),
+            (ProjectileStyle::Bullet, bullet),
+        ] {
+            let hit = voiced(
+                &registry,
+                &[hero(me)],
+                &[],
+                &[],
+                receipts(&[styled(1, me, style)]),
+            );
+            assert_eq!(hit.len(), 1);
+            assert_eq!(hit[0].variant(), variant, "{mode:?} {style:?}");
+            assert!(close(hit[0].gain, gain));
+            assert_eq!(row_of(&hit[0]), Some((Moment::Impact, "wildspark")));
+        }
+        // The attack of an enemy: the round of the mode, whatever style its class cue has.
+        let (variant, gain) = if mode == WeaponMode::Rockets {
+            rocket
+        } else {
+            bullet
+        };
+        for style in [ProjectileStyle::Bullet, ProjectileStyle::Rocket] {
+            let swing = voiced(&registry, &[hero(ENEMY)], &[], &[], attack(style));
+            assert_eq!(swing.len(), 1);
+            assert_eq!(swing[0].variant(), variant, "{mode:?} {style:?}");
+            assert!(close(swing[0].gain, gain));
+            assert_eq!(row_of(&swing[0]), Some((Moment::Attack, "wildspark")));
+        }
+        // A skill of the kit keeps the hit voice of its row.
+        let zap = slot_of(class, "wild_zap");
+        let hit = |style| {
+            let receipt = CombatEvent {
+                style,
+                ..dealt(2, me, Some(zap))
+            };
+            voiced(&registry, &[hero(me)], &[], &[], receipts(&[receipt]))
+        };
+        assert_eq!(
+            hit(ProjectileStyle::Rocket)[0].variant(),
+            hit(ProjectileStyle::Arcane)[0].variant()
+        );
+        assert_eq!(
+            row_of(&hit(ProjectileStyle::Rocket)[0]),
+            Some((Moment::Impact, "wild_zap"))
+        );
+    }
+    // A class that is no repeater has one voice, in rocket mode and for a `Rocket` receipt.
+    let other = HeroClass::Riftshot;
+    let state = armed(CoreId::Riftshot, WeaponMode::Rockets);
+    let plain = voice_of(registry.basic(other).unwrap());
+    let hero = |id| HeroHeard {
+        loadout: Some(&state),
+        ..heard_hero(id, other, BASIC)
+    };
+    let hit = voiced(
+        &registry,
+        &[hero(me)],
+        &[],
+        &[],
+        receipts(&[styled(3, me, ProjectileStyle::Rocket)]),
+    );
+    assert_eq!(hit[0].variant(), plain.0);
+    let swing = voiced(
+        &registry,
+        &[hero(ENEMY)],
+        &[],
+        &[],
+        attack(ProjectileStyle::Rocket),
+    );
+    assert_eq!(swing[0].variant(), plain.0);
+    assert_eq!(row_of(&swing[0]), Some((Moment::Attack, "riftshot")));
+    // A registry without the row keeps the cue of the wire style.
+    let unmigrated = SkillPresentation::unmigrated();
+    let state = armed(CoreId::Wildspark, WeaponMode::Rockets);
+    let seen = [HeroHeard {
+        loadout: Some(&state),
+        ..heard_hero(me, class, BASIC)
+    }];
+    let kept = voiced(
+        &unmigrated,
+        &seen,
+        &[],
+        &[],
+        receipts(&[styled(4, me, ProjectileStyle::Rocket)]),
+    );
+    assert_eq!(kept[0].variant(), Variant::from(AudioCue::Tower));
+    assert!(matches!(kept[0].origin, Origin::Receipt { .. }));
+}
+
 #[test]
 fn an_enemy_attack_has_one_voice() {
     let registry = target();
@@ -1503,6 +1645,7 @@ fn a_voice_is_a_sample_a_speed_and_a_slice_detuned_by_three_percent_at_most() {
             id: 41,
             source: CombatEntity::default(),
             slot: None,
+            style: ProjectileStyle::Standard,
         },
     ] {
         assert_eq!(voice(origin).detune(), 1.0);
