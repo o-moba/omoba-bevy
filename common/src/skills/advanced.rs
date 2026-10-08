@@ -1061,21 +1061,28 @@ pub(super) fn effect_tick(
     else {
         return false;
     };
+    // A pillar blocks for its whole timer whoever is alive, so the effect that
+    // replicates it lives exactly as long as the pillar does.
+    if action == Technique::TerrainLine {
+        return w
+            .skill_runtime
+            .advanced
+            .pillars
+            .iter()
+            .any(|p| p.owner == e.owner && p.pos == e.pos && p.until > now);
+    }
     let Some(owner_pos) = position(w, e.owner) else {
         return false;
     };
+    // The blast is resolved around the caster, so its telegraph stays on the caster.
+    if action == Technique::ConeBrittle {
+        e.pos = owner_pos;
+        e.end = add(owner_pos, e.direction, def.ability.cast_range);
+    }
     if now < e.armed_at {
         return true;
     }
     match action {
-        Technique::TerrainLine => {
-            return w
-                .skill_runtime
-                .advanced
-                .pillars
-                .iter()
-                .any(|p| p.owner == e.owner && p.pos == e.pos && p.until > now);
-        }
         Technique::InterceptShield => {
             e.pos = owner_pos;
             e.end = add(owner_pos, e.direction, radius);

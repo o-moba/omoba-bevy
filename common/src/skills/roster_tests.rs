@@ -345,6 +345,67 @@ fn pillar_arms_later_blocks_sweeps_and_charge_consumes_it() {
     assert!(advanced::terrain(&w, at).is_empty());
 }
 #[test]
+fn pillar_stays_replicated_while_it_blocks_after_owner_death() {
+    let replicated = |w: &GameWorld, at: Instant| -> Vec<[f32; 2]> {
+        effects(w, at)
+            .iter()
+            .filter(|e| e.skill == SkillId::FaultLine && e.kind == EffectVisualKind::Trap)
+            .map(|e| e.position)
+            .collect()
+    };
+    let blocking = |w: &GameWorld, at: Instant| -> Vec<[f32; 2]> {
+        advanced::terrain(w, at).iter().map(|d| d.center).collect()
+    };
+    // The smith dies before the pillar rises, then after it has risen.
+    for death in [0.3, 0.8] {
+        let (mut w, now, _) = fixture(HeroClass::Cinderforge);
+        cast(&mut w, addr(1), 0, [15.0, 0.0], 1, now);
+        advance(&mut w, now, death);
+        w.players.get_mut(&addr(1)).unwrap().hero.hp = 0.0;
+        advance(&mut w, now + duration(death), 1.0);
+        let at = now + duration(death + 1.0);
+        assert_eq!(blocking(&w, at), [[15.0, 0.0]]);
+        assert_eq!(
+            replicated(&w, at),
+            blocking(&w, at),
+            "a pillar that blocks movement stays replicated"
+        );
+        // Both end together when the pillar's own timer runs out.
+        advance(&mut w, at, 4.1 - death);
+        let end = now + duration(5.1);
+        assert!(blocking(&w, end).is_empty());
+        assert!(replicated(&w, end).is_empty());
+    }
+}
+#[test]
+fn furnace_breath_telegraph_follows_the_caster_until_the_blast() {
+    let (mut w, now, _) = fixture(HeroClass::Cinderforge);
+    add_player(&mut w, 3, HeroClass::Warrior, Team::Blue, [5.0, 12.0], now);
+    let telegraph = |w: &GameWorld, at: Instant| {
+        let effects = effects(w, at);
+        let e = effects
+            .iter()
+            .find(|e| e.skill == SkillId::FurnaceBreath)
+            .expect("the breath is telegraphed until it fires");
+        assert_eq!(e.kind, EffectVisualKind::BeamWarning);
+        (e.position, e.end)
+    };
+    cast(&mut w, addr(1), 1, [7.0, 0.0], 1, now);
+    assert_eq!(telegraph(&w, now), ([0.0, 0.0], [7.0, 0.0]));
+    // The smith moves during the windup; the hero at [6, 0] stays in the old cone.
+    w.players.get_mut(&addr(1)).unwrap().hero.z = 12.0;
+    advance(&mut w, now, 0.4);
+    assert_eq!(
+        telegraph(&w, now + duration(0.4)),
+        ([0.0, 12.0], [7.0, 12.0]),
+        "the telegraph is drawn where the blast will be resolved"
+    );
+    let events = advance(&mut w, now + duration(0.4), 0.5);
+    assert!(!events.is_empty());
+    assert_eq!(w.players[&addr(2)].hero.hp, 1000.0);
+    assert!(w.players[&addr(3)].hero.hp < 1000.0);
+}
+#[test]
 fn invalid_target_nonfinite_out_of_range_casts_leave_pools_and_objects_unchanged() {
     for class in [
         HeroClass::Edgeweaver,
