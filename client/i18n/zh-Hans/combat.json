@@ -40,6 +40,7 @@
   "combat.skill.cooldown": "冷却 {seconds} 秒",
   "combat.skill.hint_touch": "松开关闭 · 轻触或拖动施放",
   "combat.standard.not_ready": "技能正在冷却。",
+  "combat.standard.blocked_landing": "无法闪现到该位置：位置被占用。",
   "combat.standard.radiance": "辉光 · 法术印记强化普攻",
   "combat.standard.momentum": "势能 · 参与击杀获得加速",
   "combat.standard.repeater": "连射",

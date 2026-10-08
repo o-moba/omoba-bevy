@@ -40,6 +40,7 @@
   "combat.skill.cooldown": "{seconds}s cooldown",
   "combat.skill.hint_touch": "Release to close · tap or drag to cast",
   "combat.standard.not_ready": "Skill is cooling down.",
+  "combat.standard.blocked_landing": "Cannot blink to that point: it is blocked.",
   "combat.standard.radiance": "Radiance · spell marks empower attacks",
   "combat.standard.momentum": "Momentum · takedowns grant acceleration",
   "combat.standard.repeater": "Repeater",

@@ -340,6 +340,8 @@ pub(super) fn resolve_pending_cast_system(
         Query<&Window, With<bevy::window::PrimaryWindow>>,
         Query<(&Camera, &GlobalTransform), With<crate::camera::MainCamera>>,
         Option<Res<crate::sprite::PlayerVisualMode>>,
+        super::aim_preview::AimWorld,
+        super::selection::TargetCandidates,
     ),
 ) {
     let no_cooldowns = sticks.2.as_ref().is_some_and(|debug| debug.no_cooldowns)
@@ -457,6 +459,20 @@ pub(super) fn resolve_pending_cast_system(
             definition.targeting,
             scaled_cast_range(definition, rank),
         );
+        if matches!(
+            skill.effect,
+            shared::loadout::SkillEffect::Technique {
+                action: shared::loadout::Technique::BlinkShot,
+                ..
+            }
+        ) && !aim_view.3.blink_legal(aim, &aim_view.4)
+        {
+            // The server drops a blink onto a landing it does not allow without a word.
+            // Nothing is sent, so no cooldown is predicted and the move order stays.
+            report_plain(&mut feedback, "combat.standard.blocked_landing");
+            pending_cast.cancel();
+            return;
+        }
         command_writer.write(NetworkCommand::CastSkill {
             slot: slot.index() as u8,
             aim,

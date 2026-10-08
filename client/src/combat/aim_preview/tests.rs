@@ -642,4 +642,85 @@ mod held {
         assert_eq!(preview.shape, PreviewShape::None);
         assert!(preview.areas.is_empty());
     }
+
+    #[test]
+    fn a_blink_onto_a_landing_the_server_refuses_is_painted_as_refused() {
+        use crate::net::{NetworkStructure, NetworkStructureId, StructureKind};
+
+        let (mut app, window) = stage(CoreId::Riftshot, default());
+        let aim = HERO + Vec2::new(4.0, 0.0);
+        let map = shared::navigation::world_navigation();
+        assert!(
+            [HERO, aim, aim + Vec2::X]
+                .into_iter()
+                .all(|at| map.point_clear(at.to_array()))
+        );
+        point_at(&mut app, window, aim);
+        // Rift Step is the E of the Riftshot. On open ground its landing is legal.
+        let (slot, preview) = hold(&mut app, KeyCode::KeyE).unwrap();
+        assert_eq!((slot, preview.shape), (2, PreviewShape::BlinkLanding));
+        let [PreviewMark::Landing(landing)] = preview.marks[..] else {
+            panic!("a blink has one landing: {preview:?}");
+        };
+        assert!(landing.distance(aim) < 1e-3, "{landing}");
+        assert!(!preview.refused);
+        let open = strokes(&preview);
+
+        // A tower whose disc holds the landing: the same lines, in the refusal colour.
+        let tower = app
+            .world_mut()
+            .spawn((
+                NetworkStructure,
+                NetworkStructureId(4),
+                Transform::from_xyz(aim.x + 1.29, 0.0, aim.y),
+                CombatStats::default(),
+                Team::Blue,
+                StructureKind::Tower,
+            ))
+            .id();
+        let (_, preview) = hold(&mut app, KeyCode::KeyE).unwrap();
+        assert!(preview.refused);
+        assert_eq!(strokes(&preview), open);
+        assert_eq!(color(Ink::Mark, preview.refused), color(Ink::Area, true));
+        // Only the blink is judged by its landing: a lane aimed into the tower is not.
+        assert!(!hold(&mut app, KeyCode::KeyQ).unwrap().1.refused);
+        // A step further from the tower, and at a tower that fell, the landing is legal.
+        app.world_mut()
+            .entity_mut(tower)
+            .insert(Transform::from_xyz(aim.x + 1.31, 0.0, aim.y));
+        assert!(!hold(&mut app, KeyCode::KeyE).unwrap().1.refused);
+        app.world_mut().entity_mut(tower).insert((
+            Transform::from_xyz(aim.x + 1.0, 0.0, aim.y),
+            CombatStats {
+                hp: 0.0,
+                ..default()
+            },
+        ));
+        assert!(!hold(&mut app, KeyCode::KeyE).unwrap().1.refused);
+
+        // An armed pillar the client sees keeps a hero's radius more than its own.
+        let pillar = |armed: bool, apart: f32| SkillEffectState {
+            id: 5,
+            owner_id: 9,
+            owner_team: shared::map::Team::Blue,
+            skill: SkillId::FaultLine,
+            kind: shared::loadout::EffectVisualKind::Trap,
+            position: [aim.x, aim.y + apart],
+            end: [aim.x, aim.y + apart],
+            radius: 1.0,
+            remaining_secs: 3.0,
+            armed,
+            consumed_segments: 0,
+        };
+        for (armed, apart, refused) in [(true, 1.4, true), (true, 1.6, false), (false, 1.4, false)]
+        {
+            app.insert_resource(GameStateSnapshot {
+                your_id: 7,
+                skill_effects: vec![pillar(armed, apart)],
+                ..default()
+            });
+            let (_, preview) = hold(&mut app, KeyCode::KeyE).unwrap();
+            assert_eq!(preview.refused, refused, "{armed} {apart}");
+        }
+    }
 }

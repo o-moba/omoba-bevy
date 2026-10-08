@@ -40,6 +40,7 @@
   "combat.skill.cooldown": "Перезарядка: {seconds} с",
   "combat.skill.hint_touch": "Отпустите, чтобы закрыть · нажмите или потяните, чтобы применить",
   "combat.standard.not_ready": "Умение перезаряжается.",
+  "combat.standard.blocked_landing": "Скачок в эту точку невозможен: она занята.",
   "combat.standard.radiance": "Сияние · метки усиливают атаки",
   "combat.standard.momentum": "Разгон · добивания дают ускорение",
   "combat.standard.repeater": "Скорострельный режим",

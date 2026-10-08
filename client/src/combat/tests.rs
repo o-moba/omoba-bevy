@@ -360,6 +360,149 @@ fn colossus_recast_is_offered_and_sent_only_inside_the_gate() {
 }
 
 #[test]
+fn rift_step_onto_a_landing_the_server_refuses_is_not_sent() {
+    use crate::i18n::tr;
+    use shared::loadout::{EffectVisualKind, SkillEffectState, SkillId};
+
+    const E: usize = 2;
+    assert_eq!(
+        shared::loadout::preset_for_class(HeroClass::Riftshot)
+            .unwrap()
+            .skills()[E],
+        SkillId::RiftStep
+    );
+    let tower = Vec2::new(5.0, 0.0);
+    let pillar = Vec2::new(0.0, 5.0);
+    let map = shared::navigation::world_navigation();
+    assert!(
+        [Vec2::ZERO, tower, pillar, Vec2::X * 7.0]
+            .into_iter()
+            .all(|at| map.point_clear(at.to_array()))
+    );
+    let fault = |armed: bool| SkillEffectState {
+        id: 41,
+        owner_id: 2,
+        owner_team: shared::map::Team::Blue,
+        skill: SkillId::FaultLine,
+        kind: EffectVisualKind::Trap,
+        position: pillar.to_array(),
+        end: pillar.to_array(),
+        radius: 1.0,
+        remaining_secs: 3.0,
+        armed,
+        consumed_segments: 0,
+    };
+    // One press of `slot` aimed at `aim`, next to a tower with `tower_hp` and the given
+    // effects: the commands, the feedback, the predicted cooldown of the slot, whether a
+    // prediction waits for the server and whether the hero still walks.
+    let press = |slot: usize, aim: Vec2, tower_hp: f32, effects: Vec<SkillEffectState>| {
+        let mut app = standard_cast_app(HeroClass::Riftshot, slot, false);
+        app.insert_resource(GameStateSnapshot {
+            your_id: 1,
+            skill_effects: effects,
+            ..default()
+        });
+        app.world_mut().spawn((
+            NetworkStructure,
+            NetworkStructureId(9),
+            Transform::from_xyz(tower.x, 0.0, tower.y),
+            CombatStats {
+                hp: tower_hp,
+                ..default()
+            },
+            Team::Blue,
+            StructureKind::Tower,
+        ));
+        let hero = app
+            .world_mut()
+            .query_filtered::<Entity, With<Player>>()
+            .single(app.world())
+            .unwrap();
+        app.world_mut()
+            .entity_mut(hero)
+            .insert(MovementTarget { target: Vec3::Z });
+        app.world_mut().resource_mut::<PendingCast>().aim = Some(aim);
+        app.update();
+        let sent = sent_commands(&mut app);
+        let cooldowns = app.world().resource::<LocalCastCooldown>();
+        (
+            sent,
+            app.world().resource::<ActionFeedback>().text.clone(),
+            cooldowns.remaining_secs[slot],
+            cooldowns.pending_slot.is_some() || cooldowns.recovery_secs > 0.0,
+            app.world().entity(hero).contains::<MovementTarget>(),
+            app.world().resource::<PendingCast>().is_pending(),
+        )
+    };
+    let refused = |outcome: (Vec<NetworkCommand>, String, f32, bool, bool, bool), case: &str| {
+        let (sent, feedback, cooldown, predicted, walking, pending) = outcome;
+        assert!(sent.is_empty(), "{case}: {sent:?}");
+        assert_eq!(feedback, tr("combat.standard.blocked_landing"), "{case}");
+        assert_eq!(cooldown, 0.0, "{case}: no phantom cooldown");
+        assert!(!predicted && walking && !pending, "{case}");
+    };
+    let landed =
+        |outcome: (Vec<NetworkCommand>, String, f32, bool, bool, bool), aim: Vec2, case: &str| {
+            let (sent, feedback, cooldown, predicted, walking, pending) = outcome;
+            assert!(
+                matches!(
+                    sent.as_slice(),
+                    [NetworkCommand::CastSkill { slot: 2, aim: sent_aim }]
+                        if sent_aim.distance(aim) < 1e-4
+                ),
+                "{case}: {sent:?}"
+            );
+            assert!(feedback.is_empty(), "{case}: {feedback}");
+            assert!(
+                cooldown > 0.0 && predicted && !walking && !pending,
+                "{case}"
+            );
+        };
+
+    // A standing tower keeps the landing out of its disc of 1.3 units.
+    refused(
+        press(E, tower - Vec2::X * 1.29, 100.0, vec![]),
+        "inside the tower",
+    );
+    let beside = tower - Vec2::X * 1.31;
+    landed(press(E, beside, 100.0, vec![]), beside, "beside the tower");
+    // A tower that fell does not.
+    let rubble = tower - Vec2::X * 1.29;
+    landed(press(E, rubble, 0.0, vec![]), rubble, "a fallen tower");
+    // An armed pillar keeps a hero's radius more than its own; before it rises it does not.
+    refused(
+        press(E, pillar - Vec2::Y * 1.4, 100.0, vec![fault(true)]),
+        "at the pillar",
+    );
+    let clear = pillar - Vec2::Y * 1.6;
+    landed(
+        press(E, clear, 100.0, vec![fault(true)]),
+        clear,
+        "clear of the pillar",
+    );
+    let rising = pillar - Vec2::Y * 1.4;
+    landed(
+        press(E, rising, 100.0, vec![fault(false)]),
+        rising,
+        "a pillar that has not risen",
+    );
+    // The aim is bounded by the cast range first: the landing that is judged is the one
+    // that is sent.
+    landed(
+        press(E, Vec2::X * 30.0, 100.0, vec![]),
+        Vec2::X * 7.0,
+        "past the tower, bounded to the range",
+    );
+    // Only the blink has a landing: another skill aimed into the tower is sent.
+    let (sent, feedback, ..) = press(0, tower, 100.0, vec![]);
+    assert!(matches!(
+        sent.as_slice(),
+        [NetworkCommand::CastSkill { slot: 0, .. }]
+    ));
+    assert!(feedback.is_empty());
+}
+
+#[test]
 fn standard_keyboard_holds_before_cast_and_cancels_when_context_is_lost() {
     for canceled in [false, true] {
         let mut app = standard_cast_app(HeroClass::Dawnweaver, 0, false);
