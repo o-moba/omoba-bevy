@@ -2,6 +2,7 @@
   "combat.cast.locked": "{ability}: доступно с уровня {level}.",
   "combat.cast.cooling_down": "{ability}: перезарядка, осталось {seconds} с.",
   "combat.cast.no_target": "Нет цели. Щелкните или коснитесь врага или используйте Tab для выбора.",
+  "combat.cast.no_ally": "В этой точке нет союзного героя. Наведите на героя своей команды или на себя.",
   "combat.cast.not_connected": "Нет подключения; способность на себя пока недоступна.",
   "combat.cast.no_mana": "Недостаточно маны для {ability} ({mana}/{cost}).",
   "combat.cast.casting": "Применяется {ability}.",

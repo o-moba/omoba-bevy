@@ -2,6 +2,7 @@
   "combat.cast.locked": "{ability}需要 {level} 级解锁。",
   "combat.cast.cooling_down": "{ability}冷却中，还需 {seconds} 秒。",
   "combat.cast.no_target": "没有目标。点击或轻触敌人，或按 Tab 选择。",
+  "combat.cast.no_ally": "该位置没有友方英雄。请瞄准队友或自己。",
   "combat.cast.not_connected": "尚未连接，无法对自己释放。",
   "combat.cast.no_mana": "法力不足，无法释放{ability}（{mana}/{cost}）。",
   "combat.cast.casting": "释放{ability}。",

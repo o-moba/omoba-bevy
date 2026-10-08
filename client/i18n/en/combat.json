@@ -2,6 +2,7 @@
   "combat.cast.locked": "{ability} is locked until level {level}.",
   "combat.cast.cooling_down": "{ability} is cooling down for {seconds}s.",
   "combat.cast.no_target": "No target available. Click or tap an enemy, or use Tab to select.",
+  "combat.cast.no_ally": "No allied hero at that point. Aim at a teammate or at yourself.",
   "combat.cast.not_connected": "Not connected yet; self-cast unavailable.",
   "combat.cast.no_mana": "Not enough mana for {ability} ({mana}/{cost}).",
   "combat.cast.casting": "Casting {ability}.",

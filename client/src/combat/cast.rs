@@ -473,6 +473,30 @@ pub(super) fn resolve_pending_cast_system(
             pending_cast.cancel();
             return;
         }
+        // A cast on an ally is dropped without a word as well when the server finds no ally
+        // it may take at the aim: an allied hero for Orbital Guard, an allied hero or minion
+        // for Sheltering Leap, the caster being one of them. What is sent is the unit that
+        // was found.
+        let needs_ally = crate::skill_presentation::geometry::pick_rule(skill.id)
+            .filter(|rule| !recast && rule.ally && !rule.pick_optional);
+        let aim = if let Some(rule) = needs_ally {
+            let caster = super::aim_preview::Caster {
+                position: player_transform.translation.xz(),
+                id: net_id.map(|id| id.0),
+                team: *team,
+                flags: state,
+                slot: slot.index(),
+            };
+            let range = scaled_cast_range(definition, rank);
+            let Some(ally) = aim_view.3.ally_aim(rule, &caster, range, aim, &aim_view.4) else {
+                report_plain(&mut feedback, "combat.cast.no_ally");
+                pending_cast.cancel();
+                return;
+            };
+            ally
+        } else {
+            aim
+        };
         command_writer.write(NetworkCommand::CastSkill {
             slot: slot.index() as u8,
             aim,

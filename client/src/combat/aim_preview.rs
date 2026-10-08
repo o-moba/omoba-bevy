@@ -11,7 +11,7 @@ use super::selection::TargetCandidates;
 use super::standard::point;
 use crate::net::{GameStateSnapshot, StructureKind, TargetKind};
 use crate::skill_presentation::geometry::{
-    self, GeoShape, PickCandidate, Preview, PreviewContext, PreviewMark,
+    self, GeoShape, PickCandidate, PickRule, Preview, PreviewContext, PreviewMark,
 };
 use crate::skill_presentation::vocab::PreviewShape;
 use crate::sprite::PlayerVisualMode;
@@ -268,6 +268,33 @@ pub(crate) fn pick_candidates(
     candidates
 }
 
+/// The aim to send for a cast that the server drops unless it finds an ally at the aim: the
+/// place of the unit it takes at `aim`, or `None` when it finds none. A hero-only pick
+/// leaves every other kind out before it looks for the nearest unit
+/// (`common/src/skills/advanced.rs:154-197`, `:490-514`). The picked unit itself is sent, so
+/// that the server takes the same unit from its own positions. A unit is picked up to its
+/// radius beyond the cast range, where a point aim is dropped (`:465-467`): the aim stays as
+/// it is then.
+pub(crate) fn ally_aim(
+    rule: PickRule,
+    candidates: &[PickCandidate],
+    aim: Vec2,
+    origin: Vec2,
+    range: f32,
+) -> Option<Vec2> {
+    let eligible: Vec<PickCandidate> = candidates
+        .iter()
+        .filter(|unit| !rule.hero_only || unit.kind == TargetKind::Player)
+        .copied()
+        .collect();
+    let picked = eligible[geometry::server_pick(&eligible, aim, origin, range, rule.ally)?];
+    Some(if origin.distance(picked.position) <= range {
+        picked.position
+    } else {
+        aim
+    })
+}
+
 /// Where a ground move from one point toward another ends: the static map, then the
 /// living structures, then the armed pillars the client sees, in the order of the server
 /// (`common/src/skills/advanced.rs:277-279`).
@@ -319,6 +346,22 @@ impl AimWorld<'_, '_> {
     pub(super) fn blink_legal(&self, point: Vec2, units: &TargetCandidates) -> bool {
         let (structures, terrain) = self.solids(units);
         crate::navigation::blink_point_legal(point, &structures, &terrain)
+    }
+
+    /// The aim to send for a cast that needs an ally under `rule`, from what the client
+    /// sees now; `None` when the server would drop the cast as it is aimed.
+    pub(super) fn ally_aim(
+        &self,
+        rule: PickRule,
+        caster: &Caster,
+        range: f32,
+        aim: Vec2,
+        units: &TargetCandidates,
+    ) -> Option<Vec2> {
+        let game = self.game.as_deref();
+        let hero = caster.id.or(game.map(|game| game.your_id)).unwrap_or(0);
+        let candidates = pick_candidates(caster.position, hero, caster.team, units, &self.visible);
+        ally_aim(rule, &candidates, aim, caster.position, range)
     }
 
     /// The preview of `def` for a hero that aims at `aim`, from what the client sees now.
