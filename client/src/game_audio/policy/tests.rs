@@ -506,6 +506,48 @@ fn trap_receipt_plays_once_only_after_confirmed_trigger() {
 }
 
 #[test]
+fn a_receipt_with_a_withheld_source_is_heard_by_its_victim_and_confirms_no_kill() {
+    let mut cursor = EventCursor::default();
+    cursor.accept((1, 1), &GameState::Running, Some(local()), &[]);
+    // The server withholds a hero the viewer cannot see: the source is Unknown / 0.
+    let mut hit = event(1, ProjectileStyle::Arcane);
+    hit.source = CombatEntity::default();
+    hit.target.id = local().id;
+    hit.trap_triggered = true;
+    let cues = cursor
+        .accept((1, 1), &GameState::Running, Some(local()), &[hit.clone()])
+        .1;
+    assert!(has(&cues, AudioCue::TrapTrigger));
+    assert!(has(&cues, AudioCue::Hit));
+    assert!(cues.iter().any(|candidate| {
+        candidate.cue == AudioCue::for_style(ProjectileStyle::Arcane)
+            && candidate.origin
+                == Origin::Receipt {
+                    id: 1,
+                    source: CombatEntity::default(),
+                    slot: None,
+                }
+    }));
+    assert!(!has(&cues, AudioCue::Kill));
+    assert!(
+        cursor
+            .accept((1, 1), &GameState::Running, Some(local()), &[hit.clone()])
+            .1
+            .is_empty()
+    );
+
+    // A lethal one is the local death and never a kill confirmation.
+    hit.id = 2;
+    hit.trap_triggered = false;
+    hit.killed = true;
+    let cues = cursor
+        .accept((1, 1), &GameState::Running, Some(local()), &[hit])
+        .1;
+    assert!(has(&cues, AudioCue::Death));
+    assert!(!has(&cues, AudioCue::Kill) && !has(&cues, AudioCue::Hit));
+}
+
+#[test]
 fn shielded_trap_is_audible_once_without_inventing_damage_or_remote_hits() {
     let mut cursor = EventCursor::default();
     cursor.accept((1, 1), &GameState::Running, Some(local()), &[]);
