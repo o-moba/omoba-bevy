@@ -370,6 +370,93 @@ fn orb_travels_attaches_and_leashes_instead_of_duplicating() {
     );
 }
 #[test]
+fn orb_leash_return_hits_each_enemy_once() {
+    let (mut w, now, victim) = fixture(HeroClass::Orbitwright);
+    // The orb flies out over the hero at [6, 0] and parks at [12, 0].
+    cast(&mut w, addr(1), 0, [12.0, 0.0], 1, now);
+    let out = advance(&mut w, now, 1.0);
+    assert_eq!(out.iter().filter(|e| e.target.id == victim).count(), 1);
+    // Its owner is carried far away (a recall does this); the leash pulls the
+    // orb back along the same line, over the same hero.
+    w.players.get_mut(&addr(1)).unwrap().hero.x = -30.0;
+    let back = advance(&mut w, now + duration(1.0), 3.0);
+    assert_eq!(
+        back.iter().filter(|e| e.target.id == victim).count(),
+        1,
+        "one return flight is one hit per enemy"
+    );
+    let orb = w.players[&addr(1)]
+        .hero
+        .skills
+        .advanced
+        .orb
+        .as_ref()
+        .unwrap();
+    assert!(distance(orb.pos, [-30.0, 0.0]) < 0.01);
+}
+#[test]
+fn orbital_field_haste_never_shortens_a_longer_haste() {
+    let (mut w, now, _) = fixture(HeroClass::Orbitwright);
+    add_player(&mut w, 3, HeroClass::Warrior, Team::Green, [2.0, 0.0], now);
+    // The ally already carries a two-second haste from another source.
+    let long = now + duration(2.0);
+    w.players
+        .get_mut(&addr(3))
+        .unwrap()
+        .hero
+        .skills
+        .advanced
+        .speed_until = Some(long);
+    cast(&mut w, addr(1), 1, [0.0, 0.0], 1, now);
+    advance(&mut w, now, 0.3);
+    let at = now + duration(0.3);
+    assert_eq!(
+        w.players[&addr(3)].hero.skills.advanced.speed_until,
+        Some(long)
+    );
+    // An ally without one is hastened for as long as it stands in the field.
+    assert!(remaining(w.players[&addr(1)].hero.skills.advanced.speed_until, at) > 0.0);
+    // Stepping out keeps the rest of the longer haste.
+    w.players.get_mut(&addr(3)).unwrap().hero.x = 30.0;
+    advance(&mut w, at, 0.5);
+    assert!(
+        w.players[&addr(3)]
+            .hero
+            .skills
+            .movement(now + duration(0.8))
+            > 1.0
+    );
+}
+#[test]
+fn orb_guard_does_not_replace_a_stronger_active_defense() {
+    let (mut w, now, _) = fixture(HeroClass::Orbitwright);
+    add_player(
+        &mut w,
+        3,
+        HeroClass::Frostguard,
+        Team::Green,
+        [5.0, 0.0],
+        now,
+    );
+    // The orb at home guards its owner with the aura.
+    advance(&mut w, now, 0.1);
+    let holder = |w: &GameWorld| w.players[&addr(1)].hero.skills.advanced.clone();
+    assert_eq!(holder(&w).defense, 15.0);
+    // A Frostguard leaps onto her: 25 defense for three seconds.
+    let leap = now + duration(0.1);
+    cast(&mut w, addr(3), 1, [0.0, 0.0], 1, leap);
+    assert_eq!(holder(&w).defense, 25.0);
+    advance(&mut w, leap, 0.5);
+    let s = holder(&w);
+    assert_eq!(s.defense, 25.0, "the aura must not weaken its holder");
+    assert!(remaining(s.defense_until, leap + duration(0.5)) > 2.4);
+    // When the leap's protection runs out the aura takes over again.
+    advance(&mut w, leap + duration(0.5), 2.7);
+    let s = holder(&w);
+    assert_eq!(s.defense, 15.0);
+    assert!(remaining(s.defense_until, leap + duration(3.2)) > 0.0);
+}
+#[test]
 fn lantern_requires_allied_nearby_explicit_action_and_cannot_replay() {
     let (mut w, now, _) = fixture(HeroClass::Chainkeeper);
     add_player(&mut w, 3, HeroClass::Warrior, Team::Green, [5.0, 0.0], now);

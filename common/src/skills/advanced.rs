@@ -1180,7 +1180,10 @@ pub(super) fn effect_tick(
                     control(w, c, e.owner, e.team, 0.0, 0.6, 0.2, 0.0, now);
                 } else if c.target.kind == TargetKind::Player {
                     if let Some(p) = actor_mut(w, c.target.id) {
-                        p.hero.skills.advanced.speed_until = Some(now + duration(0.2));
+                        // Haste is one timestamp: the field tops it up and never
+                        // cuts a longer haste the ally already carries.
+                        let s = &mut p.hero.skills.advanced;
+                        s.speed_until = s.speed_until.max(Some(now + duration(0.2)));
                     }
                 }
             }
@@ -1944,6 +1947,7 @@ pub fn tick(w: &mut GameWorld, t: TickCtx, out: &mut Vec<CombatEvent>) {
             heal(w, owner, 6.0 * t.dt);
         }
         if let Some(mut orb) = actor_mut(w, owner).and_then(|p| p.hero.skills.advanced.orb.take()) {
+            let returning = orb.moving && orb.attached == Some(owner);
             if let Some(ally) = orb.attached.and_then(|id| position(w, id)) {
                 orb.end = ally;
             } else if orb.attached.is_some() {
@@ -1955,7 +1959,11 @@ pub fn tick(w: &mut GameWorld, t: TickCtx, out: &mut Vec<CombatEvent>) {
                 orb.attached = Some(owner);
                 orb.end = pos;
                 orb.moving = true;
-                orb.hits.clear();
+                // The leash starts one return flight with one hit set. It keeps
+                // holding while the orb is still far, so clear only at its start.
+                if !returning {
+                    orb.hits.clear();
+                }
             }
             if orb.moving {
                 let SkillEffect::Technique {
@@ -2006,8 +2014,13 @@ pub fn tick(w: &mut GameWorld, t: TickCtx, out: &mut Vec<CombatEvent>) {
             }
             if let Some(ally) = orb.attached.filter(|_| !orb.moving) {
                 if let Some(p) = actor_mut(w, ally) {
-                    p.hero.skills.advanced.defense = 15.0;
-                    p.hero.skills.advanced.defense_until = Some(now + duration(0.2));
+                    // Defense is one value with one expiry: the aura never
+                    // replaces a stronger defense that is still running.
+                    let s = &mut p.hero.skills.advanced;
+                    if s.defense <= 15.0 || remaining(s.defense_until, now) == 0.0 {
+                        s.defense = 15.0;
+                        s.defense_until = Some(now + duration(0.2));
+                    }
                 }
             }
             if let Some(p) = actor_mut(w, owner) {
