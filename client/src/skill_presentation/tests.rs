@@ -1884,12 +1884,13 @@ fn target_bodies_fit_the_part_and_material_budgets() {
         ]
     );
 
-    // Three materials for each skill colour and gain, one for each matter and each spark
-    // colour, nine of the engine.
+    // Three materials for each skill colour and gain, two for each further fill strength
+    // of a colour, one for each matter and each spark colour, nine of the engine.
     let bits = |color: [f32; 3]| color.map(f32::to_bits);
     let mut primaries = BTreeSet::new();
     let mut secondaries = BTreeSet::new();
     let mut accents = BTreeSet::new();
+    let mut strengths = BTreeSet::new();
     for class in shared::HeroClass::ALL {
         let theme = registry.theme(class).unwrap();
         secondaries.insert(bits(theme.secondary));
@@ -1899,14 +1900,31 @@ fn target_bodies_fit_the_part_and_material_budgets() {
         primaries.insert((bits(profile.color), profile.hdr_gain.to_bits()));
         secondaries.extend(profile.secondary.map(bits));
         accents.extend(profile.accent.map(bits));
+        strengths.extend(
+            profile
+                .body
+                .iter()
+                .chain(profile.aux.values())
+                .filter_map(|body| body.fill_strength)
+                .filter(|strength| *strength != bodies::FILL_STRENGTH)
+                .map(|strength| (bits(profile.color), strength.to_bits())),
+        );
     }
     assert_eq!(
-        (primaries.len(), secondaries.len(), accents.len()),
-        (68, 22, 25)
+        (
+            primaries.len(),
+            secondaries.len(),
+            accents.len(),
+            strengths.len()
+        ),
+        (67, 25, 22, 1)
     );
-    let materials =
-        3 * primaries.len() + secondaries.len() + accents.len() + bodies::SHARED_MATERIALS;
-    assert_eq!(materials, 260);
+    let materials = 3 * primaries.len()
+        + 2 * strengths.len()
+        + secondaries.len()
+        + accents.len()
+        + bodies::SHARED_MATERIALS;
+    assert_eq!(materials, 259);
     assert!(materials <= bodies::MATERIAL_BUDGET);
     assert_eq!(bodies::MATERIAL_BUDGET, 272);
     assert_eq!(bodies::PART_BUDGET, 400);

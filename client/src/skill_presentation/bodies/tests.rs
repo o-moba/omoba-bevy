@@ -117,6 +117,8 @@ fn mesh_of(mesh: PartMesh) -> Mesh {
         PartMesh::Silhouette(mesh) => silhouette_mesh(mesh),
         PartMesh::Disc => disc_mesh(),
         PartMesh::Wedge => wedge_mesh(),
+        PartMesh::Cap => cap_mesh(),
+        PartMesh::Band => band_mesh(),
     }
 }
 
@@ -165,13 +167,18 @@ fn reach(points: &[Vec3]) -> Vec3 {
 }
 
 #[test]
-fn the_library_has_seventeen_small_meshes_inside_a_unit_cube() {
+fn the_library_has_nineteen_small_meshes_inside_a_unit_cube() {
     let meshes: Vec<PartMesh> = Silhouette::ALL
         .iter()
         .map(|mesh| PartMesh::Silhouette(*mesh))
-        .chain([PartMesh::Disc, PartMesh::Wedge])
+        .chain([
+            PartMesh::Disc,
+            PartMesh::Wedge,
+            PartMesh::Cap,
+            PartMesh::Band,
+        ])
         .collect();
-    assert_eq!(meshes.len(), 17);
+    assert_eq!(meshes.len(), 19);
     for mesh in meshes {
         let built = mesh_of(mesh);
         let points = vertices(mesh);
@@ -197,8 +204,14 @@ fn the_library_has_seventeen_small_meshes_inside_a_unit_cube() {
             assert!((rim - UNIT_RADIUS).abs() < 2e-2, "{mesh:?}: {rim}");
         }
     }
-    // The boundary ring and the fill disc end exactly on the unit circle.
-    for mesh in [PartMesh::Silhouette(Silhouette::Ring), PartMesh::Disc] {
+    // The boundary rings, the cap of a strip and the fill disc end exactly on the unit
+    // circle.
+    for mesh in [
+        PartMesh::Silhouette(Silhouette::Ring),
+        PartMesh::Disc,
+        PartMesh::Cap,
+        PartMesh::Band,
+    ] {
         let rim = vertices(mesh)
             .iter()
             .map(|point| point.xy().length())
@@ -236,10 +249,18 @@ fn the_library_has_seventeen_small_meshes_inside_a_unit_cube() {
     let handles: BTreeSet<_> = Silhouette::ALL
         .iter()
         .map(|mesh| library.handle(PartMesh::Silhouette(*mesh)).id())
-        .chain([PartMesh::Disc, PartMesh::Wedge].map(|mesh| library.handle(mesh).id()))
+        .chain(
+            [
+                PartMesh::Disc,
+                PartMesh::Wedge,
+                PartMesh::Cap,
+                PartMesh::Band,
+            ]
+            .map(|mesh| library.handle(mesh).id()),
+        )
         .collect();
-    assert_eq!(handles.len(), 17);
-    assert_eq!(assets.len(), 17);
+    assert_eq!(handles.len(), 19);
+    assert_eq!(assets.len(), 19);
     // The layer over the inside of a cone is the kite point for point, and nothing shades
     // it: a fan or a plate silhouette is lit in its middle and deep on its outline, the
     // bands that bound a strip and every solid are of one colour.
@@ -247,7 +268,12 @@ fn the_library_has_seventeen_small_meshes_inside_a_unit_cube() {
         vertices(PartMesh::Wedge),
         vertices(PartMesh::Silhouette(Silhouette::Kite))
     );
-    for mesh in [PartMesh::Disc, PartMesh::Wedge] {
+    for mesh in [
+        PartMesh::Disc,
+        PartMesh::Wedge,
+        PartMesh::Cap,
+        PartMesh::Band,
+    ] {
         assert!(mesh_of(mesh).attribute(Mesh::ATTRIBUTE_COLOR).is_none());
     }
     for mesh in Silhouette::ALL {
@@ -294,14 +320,24 @@ fn the_library_has_seventeen_small_meshes_inside_a_unit_cube() {
 }
 
 /// The engine outlines a strip and fills a cone with two meshes whose measures it mirrors:
-/// the band of the arc and the corners of the kite.
+/// the band of the cap and the corners of the kite.
 #[test]
-fn the_mirrored_measures_of_the_arc_and_the_kite_are_those_of_their_meshes() {
-    // A half ring that bulges toward +X and ends on the Y axis.
-    let arc = vertices(PartMesh::Silhouette(Silhouette::Arc));
+fn the_mirrored_measures_of_the_cap_and_the_kite_are_those_of_their_meshes() {
+    // The ring under a small body in flight is heavier than the ring of a zone.
+    let ring = vertices(PartMesh::Band);
+    let (inner, outer) = span(ring.iter().map(|point| point.xy().length()));
+    assert!((outer - UNIT_RADIUS).abs() < 1e-6);
+    assert!((inner - UNIT_RADIUS * (1.0 - FLIGHT_BAND)).abs() < 1e-6);
+    assert!(inner < UNIT_RADIUS * MARKER_REACH);
+    // A half ring that bulges toward +X and ends on the Y axis, thinner than the arc a row
+    // may name.
+    let named = vertices(PartMesh::Silhouette(Silhouette::Arc));
+    let (named_inner, _) = span(named.iter().map(|point| point.xy().length()));
+    let arc = vertices(PartMesh::Cap);
     let (inner, outer) = span(arc.iter().map(|point| point.xy().length()));
     assert!((outer - UNIT_RADIUS).abs() < 1e-6);
     assert!((inner - UNIT_RADIUS * (1.0 - ARC_BAND)).abs() < 1e-6);
+    assert!(inner > named_inner);
     assert!(arc.iter().all(|point| point.x >= -1e-6));
     let (low, high) = span(arc.iter().map(|point| point.y));
     assert!((low + UNIT_RADIUS).abs() < 1e-6 && (high - UNIT_RADIUS).abs() < 1e-6);
@@ -580,7 +616,26 @@ fn boundary_equals_replicated_geometry() {
                     "{} at {radius}: the ring ends at {outer}",
                     skill.id()
                 );
-                assert!(inner >= radius * 0.9, "the boundary is a line, not an area");
+                // A line, not an area: the ring of a zone, and the heavier one under a small
+                // body in flight, both inside the replicated radius.
+                let band = if moving(body.archetype) && radius <= FLIGHT_BAND_RADIUS {
+                    FLIGHT_BAND
+                } else {
+                    1.0 - MARKER_REACH
+                };
+                assert!(
+                    (inner - radius * (1.0 - band)).abs() <= radius * 1e-4,
+                    "{} at {radius}: the line starts at {inner}",
+                    skill.id()
+                );
+                assert_eq!(
+                    boundary[0].mesh,
+                    Some(if band == FLIGHT_BAND {
+                        PartMesh::Band
+                    } else {
+                        PartMesh::Silhouette(Silhouette::Ring)
+                    })
+                );
 
                 // Authored sizes, the layout, the trail, the marker and the model do not
                 // reach it, and neither do the clock or what was observed of the instance.
@@ -1706,7 +1761,7 @@ fn fill_completes_when_the_server_fires() {
 #[test]
 fn rise_on_spawn_is_full_height_when_first_seen_late() {
     for (skill, kind, tall) in [
-        (SkillId::Northwall, K::ShieldWall, 0.75),
+        (SkillId::Northwall, K::ShieldWall, 0.8),
         (SkillId::WinterDivide, K::BeamWarning, 1.0),
     ] {
         let body = target_body(skill, kind);

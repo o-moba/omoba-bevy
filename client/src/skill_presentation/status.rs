@@ -56,7 +56,7 @@ const BRITTLE_LEAN: f32 = 0.35;
 const PIP: f32 = 0.6;
 const PIP_STEP: f32 = 0.46;
 /// Two chevrons sink beside the feet of a slowed hero, from the first height by the drop.
-const SLOW_CHEVRON: f32 = 0.8;
+const SLOW_CHEVRON: f32 = 0.62;
 const SLOW_APART: f32 = 0.62;
 const SLOW_TOP: f32 = 0.95;
 const SLOW_DROP: f32 = 0.45;

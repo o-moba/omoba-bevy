@@ -909,7 +909,7 @@ enum AccentOwner {
     Basic,
 }
 
-/// `rune_mark` circles the caster's head; a diamond or a star there would read as a status.
+/// `rune_mark` circles the caster; a diamond or a star around a hero would read as a status.
 fn accent_lead_legal(pattern: AccentPattern, lead: ParticleShape) -> bool {
     pattern != AccentPattern::RuneMark
         || matches!(
@@ -1211,8 +1211,8 @@ fn body_block(body: &Body, id: SkillId, binding: Binding) -> Result<(), String> 
         }
         let [lateral, vertical, along] = size;
         if moving {
-            // Metres. The part stays near the hit circle it flies with.
-            let widest = (1.5 * radius).max(0.5);
+            // Metres. The part is no wider than the hit circle it flies with.
+            let widest = bodies::flight_width(radius);
             if lateral > widest + 1e-4 {
                 return Err(format!(
                     "{name}.size is {lateral} wide (at most {widest} for a radius of {radius})"
@@ -1297,7 +1297,7 @@ fn body_block(body: &Body, id: SkillId, binding: Binding) -> Result<(), String> 
         in_range(scale, bodies::TRAIL_SCALES, "trail_scale")?;
         // A trail part is held to the hit circle it follows, like every part in flight.
         let width = bodies::trail_width(body.trail, radius, scale);
-        let widest = (1.5 * radius).max(0.5);
+        let widest = bodies::flight_width(radius);
         if width > widest + 1e-4 || (on_ground && width * 0.5 > radius + 1e-4) {
             return Err(format!(
                 "trail_scale makes the trail {width:.2} wide (at most {:.2} for a radius of {radius})",

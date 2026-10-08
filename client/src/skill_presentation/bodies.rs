@@ -78,14 +78,20 @@ const GYRO_TILT: f32 = 0.9;
 /// the share is that of the boundary ring.
 const LINE_SHARE: f32 = 1.0 - MARKER_REACH;
 const LINE_MIN: f32 = 0.08;
-const LINE_MAX: f32 = 0.3;
+const LINE_MAX: f32 = 0.22;
 /// Height of a boundary bar and of the sheet that fills or marks a strip.
 const LINE_HEIGHT: f32 = 0.05;
 const SHEET_HEIGHT: f32 = 0.01;
-/// Band of the arc mesh that rounds the end of a strip, as a share of its radius
-/// (`game_vfx::shape_mesh`). The edge bars of the strip are as wide, so its outline is one
-/// line.
-const ARC_BAND: f32 = 0.28;
+/// Band of the half ring that rounds the end of a strip, as a share of its radius
+/// (`cap_mesh`). The edge bars of the strip are as wide, so its outline is one line, about
+/// as heavy as the ring of a zone of the same size.
+const ARC_BAND: f32 = 0.12;
+/// Band of the ring under a small body in flight, as a share of its radius, and the
+/// largest radius that is small. The ring of a zone (`MARKER_REACH`) would be a hairline
+/// there, and it is the one mark of whose skillshot it is. The band lies inside the
+/// replicated radius.
+const FLIGHT_BAND: f32 = 0.25;
+const FLIGHT_BAND_RADIUS: f32 = 1.25;
 /// Chord bars that stand for the arc of a cone.
 const SECTOR_CHORDS: u8 = 6;
 /// Height and thickness of the upper rail of a cage side.
@@ -109,6 +115,10 @@ pub(crate) enum PartMesh {
     /// The kite that covers the inside of a cone: the outline of the silhouette without
     /// its shading, so that the layer tints the ground evenly.
     Wedge,
+    /// The half ring that rounds one end of a strip.
+    Cap,
+    /// The boundary ring of a small body in flight.
+    Band,
 }
 
 /// The shared meshes of skill bodies. Each one fits a unit cube around its origin, has at
@@ -119,6 +129,8 @@ pub(crate) struct VfxMeshes {
     silhouettes: Vec<Handle<Mesh>>,
     disc: Handle<Mesh>,
     wedge: Handle<Mesh>,
+    cap: Handle<Mesh>,
+    band: Handle<Mesh>,
 }
 
 impl VfxMeshes {
@@ -130,6 +142,8 @@ impl VfxMeshes {
                 .collect(),
             disc: meshes.add(disc_mesh()),
             wedge: meshes.add(wedge_mesh()),
+            cap: meshes.add(cap_mesh()),
+            band: meshes.add(band_mesh()),
         }
     }
 
@@ -138,6 +152,8 @@ impl VfxMeshes {
             PartMesh::Silhouette(mesh) => self.silhouettes[mesh as usize].clone(),
             PartMesh::Disc => self.disc.clone(),
             PartMesh::Wedge => self.wedge.clone(),
+            PartMesh::Cap => self.cap.clone(),
+            PartMesh::Band => self.band.clone(),
         }
     }
 
@@ -246,6 +262,44 @@ pub(crate) fn wedge_mesh() -> Mesh {
     mesh
 }
 
+/// A half ring that bulges toward +X and ends on the Y axis, `ARC_BAND` of its radius
+/// wide.
+pub(crate) fn cap_mesh() -> Mesh {
+    const STEPS: u32 = 16;
+    let mut positions = Vec::new();
+    let mut indices = Vec::new();
+    for step in 0..=STEPS {
+        let angle = -FRAC_PI_2 + PI * step as f32 / STEPS as f32;
+        for radius in [UNIT_RADIUS * (1.0 - ARC_BAND), UNIT_RADIUS] {
+            positions.push([angle.cos() * radius, angle.sin() * radius, 0.0]);
+        }
+        if step < STEPS {
+            let first = step * 2;
+            indices.extend_from_slice(&[
+                first,
+                first + 1,
+                first + 2,
+                first + 1,
+                first + 3,
+                first + 2,
+            ]);
+        }
+    }
+    let count = positions.len();
+    Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::default(),
+    )
+    .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, positions)
+    .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, vec![[0.0, 0.0, 1.0]; count])
+    .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, vec![[0.5, 0.5]; count])
+    .with_inserted_indices(bevy::mesh::Indices::U32(indices))
+}
+
+pub(crate) fn band_mesh() -> Mesh {
+    Annulus::new(UNIT_RADIUS * (1.0 - FLIGHT_BAND), UNIT_RADIUS).into()
+}
+
 /// The vertices of a mesh of the library.
 pub(crate) fn outline(mesh: PartMesh) -> &'static [Vec3] {
     static OUTLINES: OnceLock<Vec<Vec<Vec3>>> = OnceLock::new();
@@ -264,13 +318,15 @@ pub(crate) fn outline(mesh: PartMesh) -> &'static [Vec3] {
         Silhouette::ALL
             .iter()
             .map(|mesh| points(silhouette_mesh(*mesh)))
-            .chain([points(disc_mesh())])
+            .chain([points(disc_mesh()), points(cap_mesh()), points(band_mesh())])
             .collect()
     });
     match mesh {
         PartMesh::Silhouette(mesh) => &outlines[mesh as usize],
         PartMesh::Disc => &outlines[Silhouette::ALL.len()],
         PartMesh::Wedge => &outlines[Silhouette::Kite as usize],
+        PartMesh::Cap => &outlines[Silhouette::ALL.len() + 1],
+        PartMesh::Band => &outlines[Silhouette::ALL.len() + 2],
     }
 }
 
@@ -302,6 +358,12 @@ pub(crate) fn fills(body: &Body) -> bool {
 /// How strongly the interior layer of the body tints the ground.
 pub(crate) fn fill_strength(body: &Body) -> f32 {
     body.fill_strength.unwrap_or(FILL_STRENGTH)
+}
+
+/// The widest a part of a body in flight may be, in metres: the hit circle it flies with.
+/// A thin bolt may still be half a unit wide, so that it is seen at all.
+pub(crate) fn flight_width(radius: f32) -> f32 {
+    (2.0 * radius).max(0.5)
 }
 
 /// Width of the widest trail part of a body in flight with this replicated radius, in
@@ -545,11 +607,16 @@ pub(crate) fn part_list(body: &Body, shape: &GeoShape) -> Vec<PartSlot> {
     };
     let ring = PartMesh::Silhouette(Silhouette::Ring);
     let block = PartMesh::Silhouette(Silhouette::Block);
-    // A circle is a ring; every other boundary is made of bars, and the two round ends of
-    // a strip are half rings.
+    // A circle is a ring, a heavier one under a small body in flight; every other boundary
+    // is made of bars, and the two round ends of a strip are half rings.
     let boundary = |index: u8| match shape {
+        GeoShape::Ring { radius, .. }
+            if moving(body.archetype) && *radius <= FLIGHT_BAND_RADIUS =>
+        {
+            PartMesh::Band
+        }
         GeoShape::Ring { .. } | GeoShape::None => ring,
-        GeoShape::Capsule { .. } if index >= 2 => PartMesh::Silhouette(Silhouette::Arc),
+        GeoShape::Capsule { .. } if index >= 2 => PartMesh::Cap,
         _ => block,
     };
     // What covers the inside of the shape: a disc, a sheet over a strip, a kite in a cone.
@@ -755,7 +822,7 @@ const HEADING: usize = 2;
 
 pub(crate) fn planar(mesh: PartMesh) -> bool {
     match mesh {
-        PartMesh::Disc | PartMesh::Wedge => true,
+        PartMesh::Disc | PartMesh::Wedge | PartMesh::Cap | PartMesh::Band => true,
         PartMesh::Silhouette(mesh) => !matches!(
             mesh,
             Silhouette::Ball | Silhouette::Block | Silhouette::Shard | Silhouette::Cone

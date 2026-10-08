@@ -27,6 +27,9 @@ pub(crate) const MAX_VISUALS: usize = 384;
 /// Gain of the light parts of a form and of its white-hot core. The light is a little
 /// brighter than a `shape` body; more gain turns a saturated profile colour pale.
 const FORM_GAIN: f32 = 3.0;
+/// Length of a long body that is drawn at once behind the place its projectile was first
+/// seen at: an arm's length, inside the hero that threw it.
+const FORM_START: f32 = 0.9;
 const CORE_GAIN: f32 = 5.0;
 /// Lightness and opacity of the deep shade of a form's colour.
 const ECHO_LIGHTNESS: f32 = 0.36;
@@ -133,6 +136,8 @@ struct TrailPoint {
 struct ProjectileVisual {
     profile: CombatVisualProfile,
     previous: Vec3,
+    /// Distance flown since the projectile was first seen.
+    travelled: f32,
     age: f32,
     trail: VecDeque<TrailPoint>,
     facing: Entity,
@@ -148,6 +153,8 @@ struct FormBody {
     phase: f32,
     /// The body slides along the terrain under the replicated position.
     hugs_ground: bool,
+    /// `combat_visuals::form_heading_span` of a body laid out along its path.
+    span: Option<(f32, f32)>,
 }
 
 /// Capture evidence: what stands for a projectile.
@@ -474,6 +481,7 @@ fn attach_visuals(
                 ProjectileVisual {
                     profile,
                     previous: transform.translation,
+                    travelled: 0.0,
                     age: 0.0,
                     trail: VecDeque::new(),
                     facing,
@@ -485,6 +493,12 @@ fn attach_visuals(
                     // An irrational step spreads the ids over the turn.
                     phase: (projectile.id % 97) as f32 * 0.618,
                     hugs_ground,
+                    span: match body {
+                        FlightBody::Form(form, mesh) => {
+                            crate::combat_visuals::form_heading_span(form, mesh)
+                        }
+                        _ => None,
+                    },
                 },
             ));
             continue;
@@ -536,6 +550,7 @@ fn attach_visuals(
         commands.entity(owner).insert(ProjectileVisual {
             profile,
             previous: transform.translation,
+            travelled: 0.0,
             age: 0.0,
             trail: VecDeque::new(),
             facing,
@@ -618,11 +633,29 @@ fn update_visuals(
                 facing.translation.y = ground + GROUND_LIFT - at.y;
             }
         }
+        let step = at.distance(visual.previous);
+        // A correction across the map is no flight.
+        if step.is_finite() && step < 30.0 {
+            visual.travelled += step;
+        }
         advance_trail(&mut visual, at, clock.delta);
         if let Some(form) = form {
             for (entity, part) in &form.parts {
                 if let Ok(mut pose) = transforms.get_mut(*entity) {
                     *pose = part.pose(visual.age + form.phase);
+                }
+            }
+            // The nose of a long body is the replicated position, and the body grows out
+            // of the place the projectile was first seen at: nothing of it runs ahead of
+            // the projectile, and no more than an arm's length of it lies behind its start.
+            if let Some((tail, nose)) = form.span {
+                let length = (nose - tail) * visual.profile.scale;
+                let shown = ((visual.travelled + FORM_START) / length).clamp(0.05, 1.0);
+                if let Ok(mut pose) = transforms.get_mut(visual.fallback) {
+                    // It is thinner while it is short, so that it keeps its outline.
+                    let across = shown.sqrt();
+                    pose.translation.z = -nose * shown;
+                    pose.scale = Vec3::new(across, across, shown);
                 }
             }
         }
@@ -728,6 +761,7 @@ mod tests {
         let mut visual = ProjectileVisual {
             profile,
             previous: Vec3::ZERO,
+            travelled: 0.0,
             age: 0.0,
             trail: VecDeque::new(),
             facing: Entity::PLACEHOLDER,
@@ -901,6 +935,79 @@ mod tests {
         *app.world().get::<Transform>(visual.facing).unwrap()
     }
 
+    /// A body that is laid out along its path has its nose on the replicated position and
+    /// grows out of the place the projectile was first seen at; a body that turns about
+    /// its position stays centred on it.
+    #[test]
+    fn a_long_body_ends_at_the_projectile_and_grows_from_its_start() {
+        use crate::combat_visuals::form_heading_span;
+        let mut app = drawing(true);
+        let bullet = shoot(&mut app, WILDSPARK, ProjectileStyle::Bullet, None);
+        let (profile, container) = {
+            let visual = app.world().get::<ProjectileVisual>(bullet).unwrap();
+            (visual.profile.clone(), visual.fallback)
+        };
+        assert_eq!(profile.form, Some(ProjectileForm::Dart));
+        let (tail, nose) =
+            form_heading_span(ProjectileForm::Dart, profile.silhouette.unwrap()).unwrap();
+        assert!(tail < -1.0 && nose > 1.0, "{tail} {nose}");
+        let length = (nose - tail) * profile.scale;
+        let pose = |app: &App| *app.world().get::<Transform>(container).unwrap();
+        // The farthest point of the body ahead of and behind the projectile, in units.
+        let ends = |app: &App| {
+            let pose = pose(app);
+            (
+                (pose.translation.z + tail * pose.scale.z) * profile.scale,
+                (pose.translation.z + nose * pose.scale.z) * profile.scale,
+            )
+        };
+        // First seen: an arm's length of it, none of it ahead.
+        let (behind, ahead) = ends(&app);
+        assert!(ahead.abs() < 1e-5, "{ahead}");
+        assert!((behind + FORM_START).abs() < 1e-4, "{behind}");
+        let start = pose(&app).scale;
+        assert!(start.z < start.x && start.x < 1.0 && start.x == start.y);
+        // In flight it is never longer than the distance flown and that arm's length, and
+        // its nose stays on the projectile.
+        let mut flown = 0.0;
+        while flown < length + 1.0 {
+            app.world_mut()
+                .get_mut::<Transform>(bullet)
+                .unwrap()
+                .translation
+                .x += 0.5;
+            flown += 0.5;
+            app.update();
+            let (behind, ahead) = ends(&app);
+            assert!(ahead.abs() < 1e-5, "{ahead} after {flown}");
+            assert!(
+                -behind <= flown + FORM_START + 1e-4,
+                "{behind} after {flown}"
+            );
+            assert!((-behind - (flown + FORM_START).min(length)).abs() < 1e-4);
+        }
+        assert_eq!(pose(&app).scale, Vec3::ONE);
+        // A plate that spins about its position keeps its middle there.
+        assert_eq!(
+            form_heading_span(ProjectileForm::DiscSkim, Silhouette::Kite),
+            None
+        );
+        for form in [
+            ProjectileForm::Tumbler,
+            ProjectileForm::TwinHelix,
+            ProjectileForm::Wavefront,
+        ] {
+            assert_eq!(form_heading_span(form, Silhouette::Diamond), None);
+        }
+        let plate = shoot(&mut app, WARRIOR, ProjectileStyle::Crescent, Some(0));
+        let visual = app.world().get::<ProjectileVisual>(plate).unwrap();
+        assert_eq!(visual.profile.form, Some(ProjectileForm::DiscSkim));
+        assert_eq!(
+            *app.world().get::<Transform>(visual.fallback).unwrap(),
+            Transform::default()
+        );
+    }
+
     #[test]
     fn form_beats_model_when_meshes_exist() {
         // The launcher round of the Repeater names a form and the rocket model.
@@ -1042,10 +1149,10 @@ mod tests {
             assert_eq!(world.query::<&Mesh3d>().iter(world).count(), 0);
         }
         // The three projectile meshes of the `shape` bodies, the shared silhouettes and the
-        // two meshes the library keeps for interior layers.
+        // four meshes the library keeps for interior layers and boundaries.
         let shared = app.world().resource::<Assets<Mesh>>().len();
         assert_eq!(counts.unwrap().0, shared);
-        assert_eq!(shared, 3 + Silhouette::ALL.len() + 2);
+        assert_eq!(shared, 3 + Silhouette::ALL.len() + 4);
 
         // Every part is where the form table puts it at the age of the flight; a paused
         // clock holds the whole body still.

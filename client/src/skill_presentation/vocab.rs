@@ -184,7 +184,7 @@ vocabulary! {
         InwardGather = "inward_gather": "shapes converging on the caster",
         SpiralUp = "spiral_up": "a helix of shapes around the caster",
         ShieldFlash = "shield_flash": "one flat plate in front of the caster, facing the aim",
-        RuneMark = "rune_mark": "flat shapes on a small ring above the caster's head, turning",
+        RuneMark = "rune_mark": "flat shapes on a small ring on the ground around the caster, turning",
         TossArc = "toss_arc": "shapes on a short upward arc ahead",
         StrikeLine = "strike_line": "shapes laid on the ground from the caster to the skill's own new effect",
         None = "none": "nothing; the telegraph body is the cast read",

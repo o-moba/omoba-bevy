@@ -923,16 +923,16 @@ fn body_rules_bound_the_size_and_the_number_of_parts() {
     let field =
         |field: &str, value: Value| with(&format!("/skills/dawn_field/body/{field}"), value);
 
-    // A body in flight is sized in metres and stays near its hit circle.
-    assert!(parse(&shard("core/size", json!([0.9, 2.0, 3.0]))).is_ok());
+    // A body in flight is sized in metres and is no wider than its hit circle.
+    assert!(parse(&shard("core/size", json!([1.2, 2.0, 3.0]))).is_ok());
     rejects(
-        &shard("core/size", json!([0.95, 0.4, 2.4])),
-        "body: core.size is 0.95 wide (at most 0.90000004 for a radius of 0.6)",
+        &shard("core/size", json!([1.25, 0.4, 2.4])),
+        "body: core.size is 1.25 wide (at most 1.2 for a radius of 0.6)",
         "wide part",
     );
     rejects(
-        &shard("satellites/size", json!([1.0, 0.2, 0.2])),
-        "body: satellites.size is 1 wide",
+        &shard("satellites/size", json!([1.3, 0.2, 0.2])),
+        "body: satellites.size is 1.3 wide",
         "wide satellites",
     );
     for size in [[0.4, 2.1, 2.4], [0.4, 0.4, 3.1]] {
@@ -950,12 +950,16 @@ fn body_rules_bound_the_size_and_the_number_of_parts() {
                     "core": { "mesh": "ball", "size": [width, 0.3, 0.3] } }),
         )
     };
-    assert!(parse(&bolt(0.525)).is_ok());
+    assert!(parse(&bolt(0.7)).is_ok());
     rejects(
-        &bolt(0.53),
-        "dawn_bind: body: core.size is 0.53 wide",
+        &bolt(0.71),
+        "dawn_bind: body: core.size is 0.71 wide",
         "thin bolt",
     );
+    // A needle may still be half a unit wide (`wild_zap`: radius 0.3 would give 0.6;
+    // a radius of 0.2 would give the floor).
+    assert!((bodies::flight_width(0.2) - 0.5).abs() < 1e-6);
+    assert!((bodies::flight_width(0.6) - 1.2).abs() < 1e-6);
     // On the ground a part reaches at most the radius from the centre.
     let mut skimming = shard("altitude", json!("ground"));
     rejects(
@@ -1045,11 +1049,11 @@ fn body_rules_bound_the_size_and_the_number_of_parts() {
     set(
         &mut chevrons,
         "/skills/winter_shard/body/trail_scale",
-        json!(1.2),
+        json!(1.5),
     );
     rejects(
         &chevrons,
-        "body: trail_scale makes the trail 1.01 wide (at most 0.90 for a radius of 0.6)",
+        "body: trail_scale makes the trail 1.26 wide (at most 1.20 for a radius of 0.6)",
         "wide trail",
     );
     let mut bare = shard("trail_scale", json!(1.5));

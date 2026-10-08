@@ -35,16 +35,19 @@ const BLAST_REACH: f32 = 1.6;
 const THUD_RING: f32 = 1.0;
 /// `drain_wisp` motes never drift farther than this toward the source.
 const DRAIN_TRAVEL: f32 = 1.2;
-/// Half extent of a thrown spark as a share of the reach of its recipe.
-const SPARK: f32 = 0.16;
+/// Half extent of a thrown spark as a share of the reach of its recipe, and how far its
+/// centre is thrown: the spark ends with its rim just inside the reach. The glows of the
+/// wire-style burst are as large (0.42 units).
+const SPARK: f32 = 0.26;
+const SPARK_THROW: f32 = 0.97 - SPARK;
 /// Half extent of the one solid mark of `flash_star`, `star_shards` and `facet_pop` as a
 /// share of the reach of its recipe: a shape on the unit, not a plate over it.
 const MARK: f32 = 0.62;
 /// Half extent of the flash of the hit as a share of the reach of its recipe, and the share
-/// of the authored lifetime it lasts. A glow fades toward its rim, so the part of it that
-/// reads is about half as wide.
+/// of the authored lifetime it lasts. It is a dense glow: its middle is covered in the skill
+/// colour and only its outer half fades, so the hit has a core on pale ground.
 const FLASH: f32 = 0.95;
-const FLASH_LIFE: f32 = 0.65;
+const FLASH_LIFE: f32 = 0.8;
 /// Height of the burst above the receipt position. A receipt is at the aim height of its
 /// target; the built-in burst of the wire style is drawn this far above it too, where the
 /// camera sees it over the body it hit.
@@ -171,6 +174,7 @@ impl Burst {
             color: self.flash,
             end_color: None,
             lifetime: self.life * FLASH_LIFE,
+            dense: true,
             ..self.shaped(ParticleShape::Glow, FLASH, Curve::Shrink)
         }
     }
@@ -196,13 +200,13 @@ impl Burst {
         ground(jitter(self.id, 0, 61) * PI + TAU * index as f32 / count.max(1) as f32)
     }
 
-    /// Sparks thrown outward that live as long as debris.
-    fn sparks(&self, count: usize, distance: f32, out: &mut Vec<ParticleSpec>) {
+    /// Sparks thrown outward to the reach of the recipe that live as long as debris.
+    fn sparks(&self, count: usize, out: &mut Vec<ParticleSpec>) {
         out.extend((0..count).map(|i| {
             let mut spark = self.spark(SPARK);
             spark.lifetime = self.life * DEBRIS_LIFE;
             spark.velocity = Vec3::Y * (0.4 + 0.6 * (i % 3) as f32);
-            fly(spark, self.outward(i, count), distance * self.reach)
+            fly(spark, self.outward(i, count), SPARK_THROW * self.reach)
         }));
     }
 
@@ -234,7 +238,7 @@ impl Burst {
                     core.lifetime = self.life * 0.65;
                     out.push(core);
                 }
-                self.sparks(n.saturating_sub(2), 0.8, &mut out);
+                self.sparks(n.saturating_sub(2), &mut out);
             }
             K::GlowPop => {
                 let curve = if self.shape == ParticleShape::Glow {
@@ -243,14 +247,14 @@ impl Burst {
                     Curve::Pop
                 };
                 out.push(self.lead(0.6, curve));
-                self.sparks(n - 1, 0.8, &mut out);
+                self.sparks(n - 1, &mut out);
             }
             K::CrossCut => {
                 for (i, turn) in [FRAC_PI_4, -FRAC_PI_4].into_iter().enumerate().take(n) {
                     let cut = self.stroke(0.9, self.angle + turn, self.centre);
                     out.push(held(cut, 0.12 * self.life * i as f32));
                 }
-                self.sparks(n.saturating_sub(2), 0.8, &mut out);
+                self.sparks(n.saturating_sub(2), &mut out);
             }
             K::ClawRake => {
                 let marks = n.min(3);
@@ -261,7 +265,7 @@ impl Burst {
                     mark.velocity = ground(rake) * (0.12 * self.reach / self.life);
                     out.push(held(mark, 0.1 * self.life * i as f32));
                 }
-                self.sparks(n.saturating_sub(3), 0.8, &mut out);
+                self.sparks(n.saturating_sub(3), &mut out);
             }
             K::PierceThrough if self.onward => {
                 // Everything moves on past the target; nothing is thrown back or sideways.
@@ -303,7 +307,7 @@ impl Burst {
                     fork.angle = heading(way);
                     out.push(fly(fork, way, 0.6 * self.reach));
                 }
-                self.sparks(n.saturating_sub(3), 0.8, &mut out);
+                self.sparks(n.saturating_sub(3), &mut out);
             }
             K::ShardBurst => {
                 for i in 0..n {
@@ -399,12 +403,16 @@ impl Burst {
                 flash.end_color = None;
                 out.push(flash);
                 if n > 1 {
+                    // The ground ring swells to its radius in the first moments and holds
+                    // it: the area is read while the burst is bright, not as it fades.
                     let mut ring = self.ring(
                         self.floor + Vec3::Y * 0.08,
                         0.95 * self.reach,
                         Orient::Ground,
                     );
                     ring.color = self.companion;
+                    ring.curve = Curve::Pop;
+                    ring.size = sized(ParticleShape::Ringlet, 0.95 * self.reach, Curve::Pop);
                     out.push(ring);
                 }
                 for i in 2..n {
@@ -1119,6 +1127,11 @@ mod tests {
             (blast[0].shape, blast[1].shape, blast[1].orient),
             (ParticleShape::Glow, ParticleShape::Ringlet, Orient::Ground)
         );
+        // Its ring holds the radius it reaches: 0.95 of the reach, from the first quarter of
+        // its life on.
+        assert_eq!(blast[1].curve, Curve::Pop);
+        let radius = unit_radius(blast[1].shape) * blast[1].size * blast[1].curve.peak();
+        assert!((radius - 0.95 * BLAST_REACH).abs() < 1e-5);
         assert!(
             blast[2..blast.len() - 1]
                 .iter()

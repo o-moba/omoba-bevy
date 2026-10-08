@@ -168,7 +168,7 @@ of `client/assets/animations/humanoid-motion-v1.json` (see `docs/humanoid-motion
 | `inward_gather` | shapes converging on the caster | `glow` | 1.5 | yes |
 | `spiral_up` | a helix of shapes around the caster | `star` | 1.0 | yes |
 | `shield_flash` | one flat plate in front of the caster, facing the aim | `kite` | 1.0 | no |
-| `rune_mark` | flat shapes on a small ring above the caster's head, turning | `diamond` | 0.8 | yes |
+| `rune_mark` | flat shapes on a small ring on the ground around the caster, turning | `diamond` | 0.8 | yes |
 | `toss_arc` | shapes on a short upward arc ahead | `glow` | 1.5 | no |
 | `strike_line` | shapes laid on the ground from the caster to the skill's own new effect | `diamond` | 0.0 | no |
 | `none` | nothing; the telegraph body is the cast read | - | 0.0 | yes |

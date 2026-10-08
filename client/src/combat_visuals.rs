@@ -652,6 +652,36 @@ pub(crate) fn form_lateral_extent(form: ProjectileForm, silhouette: Silhouette) 
         .fold(0.0, f32::max)
 }
 
+/// How far a form that is laid out along its path reaches behind and ahead of the
+/// replicated position at profile scale 1, its team cue and the swell of a pulsing part
+/// included: `(tail, nose)`, the tail negative. `None` for a form that turns about the
+/// position it flies at (a plate, a tumbler, a helix) or lies across it (a wave): there the
+/// middle of the body is where the projectile is.
+pub(crate) fn form_heading_span(
+    form: ProjectileForm,
+    silhouette: Silhouette,
+) -> Option<(f32, f32)> {
+    if !matches!(
+        form,
+        ProjectileForm::Dart | ProjectileForm::Comet | ProjectileForm::Volley
+    ) {
+        return None;
+    }
+    let mut span = (f32::MAX, f32::MIN);
+    for part in form_parts(form, silhouette) {
+        let pose = part.pose(0.0);
+        let swell = match part.motion {
+            FormMotion::Pulse { depth, .. } => 1.0 + depth,
+            _ => 1.0,
+        };
+        for vertex in outline(part.mesh) {
+            let z = pose.translation.z + (pose.rotation * (*vertex * pose.scale * swell)).z;
+            span = (span.0.min(z), span.1.max(z));
+        }
+    }
+    Some(span)
+}
+
 #[derive(Clone, Debug, Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct AnimationAliases {

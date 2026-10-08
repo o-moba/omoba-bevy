@@ -206,6 +206,10 @@ pub(crate) const fn blade_depth(shape: Shape) -> f32 {
 const MAX_DELAY: f32 = 0.25;
 /// Share of its life for which a generated particle is drawn at its whole coverage.
 pub(crate) const HOLD_SHARE: f32 = 0.5;
+/// Share of the radius of a dense glow that is covered by `DENSE_COVER` of its colour; the
+/// rest fades to nothing at the rim.
+pub(crate) const DENSE_CORE: f32 = 0.42;
+const DENSE_COVER: f32 = 0.9;
 
 /// One pooled particle as a pure generator describes it. Positions and velocities are
 /// simulation coordinates in both render modes.
@@ -237,6 +241,9 @@ pub(crate) struct ParticleSpec {
     /// first, then by distance.
     pub sort_key: u32,
     pub source: ParticleSource,
+    /// A glow drawn with the dense texture: covered in its colour over the inner
+    /// `DENSE_CORE` of its radius, fading only from there to its rim.
+    pub dense: bool,
 }
 impl ParticleSpec {
     pub(crate) const BASE: Self = Self {
@@ -260,6 +267,7 @@ impl ParticleSpec {
         orient: Orient::Billboard,
         sort_key: 0,
         source: ParticleSource::Engine,
+        dense: false,
     };
     /// Seconds after the burst at which the particle is gone.
     pub(crate) fn end_secs(&self) -> f32 {
@@ -329,6 +337,7 @@ struct Particle {
     class: ParticleClass,
     #[cfg_attr(not(feature = "qa"), allow(dead_code))] // read by capture evidence
     source: ParticleSource,
+    dense: bool,
 }
 impl Particle {
     /// The fields a wire-style burst, a utility effect and a flight puff leave alone.
@@ -351,6 +360,7 @@ impl Particle {
         orient: Orient::Billboard,
         class: ParticleClass::Confirm,
         source: ParticleSource::Engine,
+        dense: false,
     };
     fn from_spec(spec: &ParticleSpec, class: ParticleClass) -> Self {
         Self {
@@ -372,6 +382,7 @@ impl Particle {
             orient: spec.orient,
             class,
             source: spec.source,
+            dense: spec.dense,
         }
     }
     /// Seconds of undamped flight that cover the same distance as `age` seconds with drag.
@@ -510,6 +521,8 @@ struct PickupReceipts {
 #[derive(Resource)]
 struct VfxAssets {
     glow_texture: Handle<Image>,
+    /// The glow of a `dense` particle.
+    dense_texture: Handle<Image>,
     /// One mesh per particle shape, in the order of `Shape::ALL`.
     shapes: Vec<Handle<Mesh>>,
     wing: Handle<Mesh>,
@@ -567,6 +580,34 @@ impl Plugin for GameVfxPlugin {
                     .before(bevy::camera::visibility::VisibilitySystems::CheckVisibility),
             );
     }
+}
+/// Coverage of the dense glow at `r` radii from its centre: whole over its core, then a
+/// fall to nothing at the rim that is steeper than the soft glow's.
+fn dense_alpha(r: f32) -> f32 {
+    let fade = ((1. - r) / (1. - DENSE_CORE)).clamp(0., 1.);
+    DENSE_COVER * fade.powf(1.3)
+}
+fn dense_texture() -> Image {
+    let mut pixels = Vec::with_capacity(64 * 64 * 4);
+    for y in 0..64 {
+        for x in 0..64 {
+            let u = (x as f32 + 0.5) / 64.;
+            let v = (y as f32 + 0.5) / 64.;
+            let r = Vec2::new(u * 2. - 1., v * 2. - 1.).length();
+            pixels.extend_from_slice(&[255, 255, 255, (dense_alpha(r) * 255.) as u8]);
+        }
+    }
+    Image::new(
+        Extent3d {
+            width: 64,
+            height: 64,
+            depth_or_array_layers: 1,
+        },
+        TextureDimension::D2,
+        pixels,
+        TextureFormat::Rgba8UnormSrgb,
+        RenderAssetUsages::default(),
+    )
 }
 fn texture(wing: bool) -> Image {
     let mut pixels = Vec::with_capacity(64 * 64 * 4);
@@ -837,6 +878,7 @@ fn setup(
     let wing_texture = images.add(texture(true));
     let assets = VfxAssets {
         glow_texture: glow.clone(),
+        dense_texture: images.add(dense_texture()),
         // The flat silhouettes of skill bodies are these very meshes: one asset for both.
         shapes: Shape::ALL
             .iter()
@@ -1456,8 +1498,11 @@ fn animate_particles(
         };
         let mesh = assets.mesh(p.shape);
         // Glows and streaks use the radial texture; every other shape needs a solid tint.
-        let texture =
-            matches!(p.shape, Shape::Glow | Shape::Streak).then(|| assets.glow_texture.clone());
+        let texture = match p.shape {
+            Shape::Glow if p.dense => Some(assets.dense_texture.clone()),
+            Shape::Glow | Shape::Streak => Some(assets.glow_texture.clone()),
+            _ => None,
+        };
         if let Some(mut m) = materials.get_mut(&slot.material) {
             m.base_color = hdr_tint(p.color, p.gain);
             m.base_color_texture = texture.clone();
@@ -2314,8 +2359,8 @@ mod tests {
         // On its own the pool builds its thirteen shapes and the butterfly wing.
         assert_eq!(app(false).world().resource::<Assets<Mesh>>().len(), 14);
         let app = app(true);
-        // Seventeen meshes of the library, four shapes only a particle has, and the wing.
-        assert_eq!(app.world().resource::<Assets<Mesh>>().len(), 17 + 4 + 1);
+        // Nineteen meshes of the library, four shapes only a particle has, and the wing.
+        assert_eq!(app.world().resource::<Assets<Mesh>>().len(), 19 + 4 + 1);
         let library = app.world().resource::<VfxMeshes>();
         let pool = app.world().resource::<VfxAssets>();
         for (shape, silhouette) in [

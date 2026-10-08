@@ -51,7 +51,9 @@ const GLINT: f32 = 0.14;
 const FLOOR: f32 = 0.06;
 const HAND: f32 = 0.9;
 const CHEST: f32 = 1.0;
-const OVERHEAD: f32 = 2.35;
+/// The ring of `rune_mark` lies on the ground around the caster, clear of the decals under
+/// it: over the head it covered the health bars of the caster.
+const RUNE: f32 = 0.14;
 
 /// The four colours a row may name, resolved for one skill or one class.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -499,7 +501,7 @@ impl Frame {
             // Rule E-4: `count` copies evenly on the ring, each pointing outward.
             P::RuneMark if n == 1 => {
                 let mut mark = self.lead(0.45, Curve::Pop);
-                mark.origin = self.origin + Vec3::Y * OVERHEAD;
+                mark.origin = self.origin + Vec3::Y * RUNE;
                 mark.orient = Orient::Ground;
                 mark.spin = 2.5;
                 out.push(mark);
@@ -510,7 +512,7 @@ impl Frame {
                     let outward = self.turned(turn);
                     let tangent = Vec3::new(-outward.z, 0.0, outward.x);
                     let mut mark = self.lead(0.28, Curve::Pop);
-                    mark.origin = self.origin + outward * (0.55 * self.reach) + Vec3::Y * OVERHEAD;
+                    mark.origin = self.origin + outward * (0.55 * self.reach) + Vec3::Y * RUNE;
                     mark.orient = Orient::Ground;
                     mark.angle = self.angle + turn;
                     // The ring turns: a mark slides along its tangent and keeps pointing out.
@@ -973,8 +975,9 @@ pub(crate) fn move_particles(
 /// Neutral ground skid marks of a hero that something else displaced. No afterimage and no
 /// colour of any skill: the client does not know what moved it.
 pub(crate) fn drag_streak(from: Option<Vec3>, to: Option<Vec3>, seed: u64) -> Vec<ParticleSpec> {
+    // Darker than the pale stone it is drawn on, and still no colour of any skill.
     let dust = Tint {
-        color: Color::srgba(0.78, 0.76, 0.7, 0.7),
+        color: Color::srgba(0.46, 0.43, 0.38, 0.8),
         gain: 1.0,
     };
     let step = Step {
@@ -1981,7 +1984,8 @@ mod tests {
     fn palette_resolves_the_row_the_theme_and_the_overrides() {
         let registry = target();
         let theme = |class: HeroClass| registry.theme(class).unwrap().clone();
-        let strike = registry.row("heroic_strike").unwrap();
+        let strike = registry.row("rampage").unwrap();
+        assert!(strike.secondary.is_none() && strike.accent.is_none());
         let palette = Palette::of(strike, &theme(HeroClass::Warrior));
         assert_eq!(
             palette.slot(PaletteSlot::Primary),
@@ -2000,7 +2004,7 @@ mod tests {
             palette.slot(PaletteSlot::White),
             tint([1.0; 3], strike.hdr_gain)
         );
-        let pulse = registry.profile(SkillId::ThunderPulse).unwrap();
+        let pulse = registry.profile(SkillId::ThunderKick).unwrap();
         assert!(pulse.secondary.is_some());
         assert_eq!(
             Palette::of(pulse, &theme(HeroClass::Stormfist)).slot(PaletteSlot::Secondary),
@@ -2395,14 +2399,15 @@ mod tests {
             let offset = mark.origin - ORIGIN;
             assert_eq!(mark.shape, ParticleShape::Chevron);
             assert_eq!(mark.orient, Orient::Ground);
-            // Above the head, on the ring, a quarter turn apart, pointing away from it.
-            assert!(offset.y > 2.0);
+            // On the ground around the caster and under the health bars, on the ring, a
+            // quarter turn apart, pointing away from it.
+            assert!(offset.y > 0.0 && offset.y < 0.3);
             assert!((offset.xz().length() - ring).abs() < 1e-4);
             assert!((offset.xz().to_angle().rem_euclid(TAU) - TAU * i as f32 / 4.0).abs() < 1e-4);
             assert!(Vec2::from_angle(mark.angle).distance(offset.xz().normalize()) < 1e-4);
             assert!(mark.spin > 0.0 && mark.end_color.is_some());
         }
-        // One copy is the single mark over the head.
+        // One copy is the single mark under the caster.
         let single = CastAccent {
             count: Some(1),
             ..row
@@ -2410,6 +2415,7 @@ mod tests {
         let mark = accent_particles(&single, &palette(), &cast(Vec2::X));
         assert_eq!(mark.len(), 1);
         assert_eq!((mark[0].origin - ORIGIN).xz(), Vec2::ZERO);
+        assert!((mark[0].origin - ORIGIN).y < 0.3);
         assert_eq!(mark[0].velocity, Vec3::ZERO);
     }
 
