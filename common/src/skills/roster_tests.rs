@@ -901,6 +901,67 @@ fn reveal_pulse_recast_only_slows_original_victims() {
     );
 }
 #[test]
+fn reveal_pulse_that_hits_nobody_grants_no_recast() {
+    let (mut w, now, _) = fixture(HeroClass::Stormfist);
+    w.players.get_mut(&addr(2)).unwrap().hero.x = 20.0;
+    let mana = w.players[&addr(1)].hero.mana;
+    cast(&mut w, addr(1), 2, [0.0, 0.0], 1, now);
+    let p = &w.players[&addr(1)];
+    assert_eq!(
+        p.timers.last_cast_at[2],
+        Some(now),
+        "the empty pulse is still cast"
+    );
+    let spent = p.hero.mana;
+    assert!(spent < mana);
+    assert!(p.hero.skills.advanced.recasts[2].is_none());
+    assert!(!state(p, now).unwrap().slots[2].can_recast);
+    // A second press is an ordinary cast on cooldown and charges nothing.
+    cast(&mut w, addr(1), 2, [0.0, 0.0], 2, now + duration(0.5));
+    assert_eq!(w.players[&addr(1)].hero.mana, spent);
+}
+#[test]
+fn thorn_recast_faces_the_unit_it_hits() {
+    let (mut w, now, _) = fixture(HeroClass::Veilstalker);
+    cast(&mut w, addr(1), 0, [13.0, 0.0], 1, now);
+    advance(&mut w, now, 0.3);
+    // The recast is aimed away from the marked hero at [6, 0] and strikes it anyway.
+    let hp = w.players[&addr(2)].hero.hp;
+    cast(&mut w, addr(1), 0, [0.0, 13.0], 2, now + duration(0.5));
+    assert!(w.players[&addr(2)].hero.hp < hp);
+    let toward_victim = shared::math::hero_yaw_towards(6.0, 0.0);
+    let p = &w.players[&addr(1)];
+    assert_eq!(p.hero.yaw, toward_victim);
+    assert_eq!(p.hero.last_action.yaw, Some(toward_victim));
+
+    // With nobody in reach the recast strikes nothing and keeps the aimed facing.
+    w.players.get_mut(&addr(2)).unwrap().hero.x = 60.0;
+    cast(&mut w, addr(1), 0, [0.0, 13.0], 3, now + duration(0.7));
+    let toward_aim = shared::math::hero_yaw_towards(0.0, 13.0);
+    let p = &w.players[&addr(1)];
+    assert_eq!(recast_uses(&w, 0), 1);
+    assert_eq!(p.hero.yaw, toward_aim);
+    assert_eq!(p.hero.last_action.yaw, Some(toward_aim));
+}
+#[test]
+fn hook_pull_never_carries_the_victim_past_the_caster() {
+    // Caught at `from`, held at `to`: two units closer, but never nearer than
+    // the one-unit stand-off and never through the caster at the origin.
+    for (from, to) in [(6.0, 4.0), (2.5, 1.0), (1.5, 1.0), (0.8, 0.8)] {
+        let (mut w, now, _) = fixture(HeroClass::Chainkeeper);
+        w.players.get_mut(&addr(2)).unwrap().hero.x = from;
+        cast(&mut w, addr(1), 0, [18.0, 0.0], 1, now);
+        advance(&mut w, now, 0.4);
+        assert_eq!(recast_uses(&w, 0), 1, "caught from {from}");
+        let held = &w.players[&addr(2)].hero;
+        assert!(
+            (held.x - to).abs() < 0.001 && held.z.abs() < 0.001,
+            "caught at {from}, held at {:?}",
+            [held.x, held.z]
+        );
+    }
+}
+#[test]
 fn blink_uses_legal_landing_and_advances_authoritative_movement_sequence() {
     let (mut w, now, _) = fixture(HeroClass::Riftshot);
     let sequence = w.players[&addr(1)].hero.utility.dash_sequence;

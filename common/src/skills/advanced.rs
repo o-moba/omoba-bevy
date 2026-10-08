@@ -634,6 +634,14 @@ pub fn cast(w: &mut GameWorld, addr: SocketAddr, slot: u8, aim: [f32; 2], now: I
                         && crate::vision::target_visible(team, c.target, w, now)
                 });
                 if let Some(c) = priority.or_else(|| nearest(w, owner, origin, range, now)) {
+                    // The recast ignores the aim, so the hero turns to the unit it strikes.
+                    if distance(c.pos, origin) > 0.001 {
+                        crate::sim::cast::face_player_action(
+                            actor_mut(w, owner).unwrap(),
+                            c.pos[0] - origin[0],
+                            c.pos[1] - origin[1],
+                        );
+                    }
                     out.extend(hit(w, &e, c, damage * scale, now));
                 }
             } else {
@@ -833,16 +841,19 @@ pub fn cast(w: &mut GameWorld, addr: SocketAddr, slot: u8, aim: [f32; 2], now: I
                     out.extend(hit(w, &e, *c, damage * scale, now));
                     control(w, *c, owner, team, 0.0, 1.0, 0.0, duration_secs, now);
                 }
-                recast(
-                    actor_mut(w, owner).unwrap(),
-                    slot,
-                    def.id,
-                    now,
-                    duration_secs,
-                    1,
-                    None,
-                    victims.iter().map(|c| c.target).collect(),
-                );
+                // The recast slows these victims; without any there is nothing to offer.
+                if !victims.is_empty() {
+                    recast(
+                        actor_mut(w, owner).unwrap(),
+                        slot,
+                        def.id,
+                        now,
+                        duration_secs,
+                        1,
+                        None,
+                        victims.iter().map(|c| c.target).collect(),
+                    );
+                }
             }
         }
         Technique::ChainKick => {
@@ -1382,12 +1393,17 @@ pub(super) fn effect_tick(
                     now,
                 );
                 if action == Technique::Hook {
-                    move_to(
-                        w,
-                        c.target,
-                        add(c.pos, direction(c.pos, owner_pos), 2.0),
-                        now,
-                    );
+                    // The pull stops one unit short of the caster, where the
+                    // recast also lands; a close catch is never dragged past.
+                    let pull = (distance(c.pos, owner_pos) - 1.0).clamp(0.0, 2.0);
+                    if pull > 0.0 {
+                        move_to(
+                            w,
+                            c.target,
+                            add(c.pos, direction(c.pos, owner_pos), pull),
+                            now,
+                        );
+                    }
                 }
             }
             Technique::ReturningColossus => {
