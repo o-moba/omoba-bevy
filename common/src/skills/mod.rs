@@ -1506,10 +1506,16 @@ pub fn effects(w: &GameWorld, now: Instant) -> Vec<SkillEffectState> {
                 radius,
                 remaining_secs: remaining(Some(e.expires), now),
                 armed: now >= e.armed_at,
-                consumed_segments: if kind == EffectVisualKind::Cage {
-                    e.hit_count
-                } else {
-                    0
+                consumed_segments: match kind {
+                    EffectVisualKind::Cage => e.hit_count,
+                    // The wall has no segments: the byte carries how many
+                    // projectiles its holder has intercepted with it.
+                    EffectVisualKind::ShieldWall => w
+                        .players
+                        .values()
+                        .find(|p| p.hero.identity.id == e.owner)
+                        .map_or(0, |p| p.hero.skills.advanced.intercepts),
+                    _ => 0,
                 },
             }
         })

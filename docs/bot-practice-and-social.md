@@ -62,7 +62,9 @@ instead of reusing historical identities. Connected humans stay for that reset.
 
 Bots spend earned gold on their class's recommended items whenever they stand
 in their base shop, rank every unlocked skill (ultimate first) and cast their
-whole hostile-target kit.
+whole hostile-target kit. Self skills are cast by need: a heal only below 28%
+health, the largest heal first, and a mana restore whenever the bar can hold all
+of it, whatever the health, and never at a full bar.
 
 ### Practice sandbox
 

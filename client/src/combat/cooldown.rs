@@ -2,9 +2,52 @@
 use crate::equipped_skills;
 use crate::net::{GameStateSnapshot, NetworkHeroClass, PlayerProgression};
 use crate::player::Player;
+use crate::skill_presentation::status;
 use crate::team::TeamSelection;
 use bevy::prelude::*;
+use shared::loadout::{SkillDefinition, SkillEffect, SkillEffectState, SkillSlotState};
 use shared::{HeroClass, SkillSlot};
+
+/// Seconds a recast command may be on its way to the server past the snapshot the client
+/// stands on.
+const RECAST_SEND_LEAD_SECS: f32 = 0.1;
+
+/// Whether a press of the slot is a recast the server accepts where the hero stands. The
+/// replicated flag only says that the recast window is open; a recast with a gate (Mountain
+/// Echo) is also refused away from the skill's own effect, with the rule the recast marker
+/// and the aim preview already follow (`status::recast_in_reach`).
+pub(crate) fn recast_usable(
+    def: &SkillDefinition,
+    slot: &SkillSlotState,
+    hero: Vec2,
+    your_id: u64,
+    effects: &[SkillEffectState],
+) -> bool {
+    slot.can_recast && status::recast_in_reach(def.id, your_id, hero, effects)
+}
+
+/// The same question for the press that is about to be sent. The server answers it later
+/// than the snapshot shows, and the body of the skill travels meanwhile: an effect that
+/// closes the gap within `RECAST_SEND_LEAD_SECS` still sends, so that a press the server
+/// would take is not refused here. Nothing shown to the player uses this wider reach.
+pub(super) fn recast_sendable(
+    def: &SkillDefinition,
+    slot: &SkillSlotState,
+    hero: Vec2,
+    your_id: u64,
+    effects: &[SkillEffectState],
+) -> bool {
+    let lead = match def.effect {
+        SkillEffect::Technique { speed, .. } => speed.max(0.0) * RECAST_SEND_LEAD_SECS,
+        _ => 0.0,
+    };
+    recast_usable(def, slot, hero, your_id, effects)
+        || slot.can_recast
+            && effects.iter().any(|effect| {
+                let closer = hero.move_towards(Vec2::from_array(effect.position), lead);
+                status::recast_in_reach(def.id, your_id, closer, std::slice::from_ref(effect))
+            })
+}
 
 /// Local per-slot cast cooldown mirror for HUD feedback (the server remains
 /// authoritative; values come from the shared class kit numbers).
@@ -67,12 +110,15 @@ pub(super) fn sync_authoritative_cooldown_durations(
             &crate::net::PlayerEquipment,
             Option<Ref<crate::net::PlayerSkillCooldowns>>,
             Option<&crate::net::PlayerLoadout>,
+            Option<&Transform>,
+            Option<&crate::net::NetworkPlayerId>,
         ),
         With<Player>,
     >,
     mut cooldowns: ResMut<LocalCastCooldown>,
 ) {
-    let Ok((progression, class, equipment, authoritative, loadout)) = player.single() else {
+    let Ok((progression, class, equipment, authoritative, loadout, pose, id)) = player.single()
+    else {
         return;
     };
     let sandbox_actor = game
@@ -103,16 +149,35 @@ pub(super) fn sync_authoritative_cooldown_durations(
     }
     cooldowns.recast = [false; 4];
     cooldowns.recast_secs = [0.0; 4];
+    let skills = equipped_skills::resolve(class.0, loadout);
     if let Some(state) = loadout.and_then(|l| l.0.as_ref()) {
+        let hero = id
+            .map(|id| id.0)
+            .or(game.as_ref().map(|game| game.your_id))
+            .unwrap_or(0);
+        let effects = game.as_ref().map_or(&[][..], |game| &game.skill_effects);
         for (i, slot) in state.slots.iter().enumerate() {
-            cooldowns.recast[i] = slot.can_recast;
+            // An open recast window the server would refuse where the hero stands is not
+            // offered: the slot keeps the cooldown that is really running.
+            let usable = match (
+                skills
+                    .as_ref()
+                    .and_then(|skills| skills.skill(SkillSlot::ALL[i])),
+                pose,
+            ) {
+                (Some(def), Some(pose)) => {
+                    recast_usable(def, slot, pose.translation.xz(), hero, effects)
+                }
+                _ => slot.can_recast,
+            };
+            cooldowns.recast[i] = usable;
             cooldowns.recast_secs[i] = slot.recast_remaining_secs;
-            if slot.can_recast {
+            if usable {
                 cooldowns.remaining_secs[i] = 0.0;
             }
         }
     }
-    let Some(skills) = equipped_skills::resolve(class.0, loadout) else {
+    let Some(skills) = skills else {
         cooldowns.total_secs = [0.0; 4];
         return;
     };

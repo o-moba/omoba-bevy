@@ -4,14 +4,14 @@
 use bevy::ecs::system::SystemParam;
 use bevy::gizmos::config::GizmoConfigGroup;
 use bevy::prelude::*;
-use shared::loadout::{LoadoutState, SkillDefinition};
+use shared::loadout::{LoadoutState, SkillDefinition, SkillEffect};
 use shared::navigation::Disc;
 
 use super::selection::TargetCandidates;
 use super::standard::point;
 use crate::net::{GameStateSnapshot, StructureKind, TargetKind};
 use crate::skill_presentation::geometry::{
-    self, GeoShape, PickCandidate, Preview, PreviewContext, PreviewMark,
+    self, GeoShape, PickCandidate, PickRule, Preview, PreviewContext, PreviewMark,
 };
 use crate::skill_presentation::vocab::PreviewShape;
 use crate::sprite::PlayerVisualMode;
@@ -268,6 +268,33 @@ pub(crate) fn pick_candidates(
     candidates
 }
 
+/// The aim to send for a cast that the server drops unless it finds an ally at the aim: the
+/// place of the unit it takes at `aim`, or `None` when it finds none. A hero-only pick
+/// leaves every other kind out before it looks for the nearest unit
+/// (`common/src/skills/advanced.rs:154-197`, `:490-514`). The picked unit itself is sent, so
+/// that the server takes the same unit from its own positions. A unit is picked up to its
+/// radius beyond the cast range, where a point aim is dropped (`:465-467`): the aim stays as
+/// it is then.
+pub(crate) fn ally_aim(
+    rule: PickRule,
+    candidates: &[PickCandidate],
+    aim: Vec2,
+    origin: Vec2,
+    range: f32,
+) -> Option<Vec2> {
+    let eligible: Vec<PickCandidate> = candidates
+        .iter()
+        .filter(|unit| !rule.hero_only || unit.kind == TargetKind::Player)
+        .copied()
+        .collect();
+    let picked = eligible[geometry::server_pick(&eligible, aim, origin, range, rule.ally)?];
+    Some(if origin.distance(picked.position) <= range {
+        picked.position
+    } else {
+        aim
+    })
+}
+
 /// Where a ground move from one point toward another ends: the static map, then the
 /// living structures, then the armed pillars the client sees, in the order of the server
 /// (`common/src/skills/advanced.rs:277-279`).
@@ -295,6 +322,73 @@ pub(crate) struct AimWorld<'w, 's> {
 }
 
 impl AimWorld<'_, '_> {
+    /// The discs of the structures that stand and of the armed pillars the client sees.
+    fn solids(&self, units: &TargetCandidates) -> (Vec<Disc>, Vec<Disc>) {
+        let structures = units
+            .structures
+            .iter()
+            .filter(|(_, _, _, stats, ..)| stats.is_alive())
+            .map(|(_, pose, _, _, _, kind)| Disc {
+                center: pose.translation.xz().to_array(),
+                radius: crate::navigation::structure_collision_radius(*kind)
+                    - shared::navigation::HERO_RADIUS,
+            })
+            .collect();
+        (
+            structures,
+            crate::navigation::skill_terrain(self.game.as_deref()),
+        )
+    }
+
+    /// Whether the server would let a blink land on `point`, from what the client sees
+    /// now. The preview and the cast ask this one question, so a landing painted as
+    /// refused is a cast that is not sent.
+    pub(super) fn blink_legal(&self, point: Vec2, units: &TargetCandidates) -> bool {
+        let (structures, terrain) = self.solids(units);
+        crate::navigation::blink_point_legal(point, &structures, &terrain)
+    }
+
+    /// The aim to send for a cast that needs an ally under `rule`, from what the client
+    /// sees now; `None` when the server would drop the cast as it is aimed.
+    pub(super) fn ally_aim(
+        &self,
+        rule: PickRule,
+        caster: &Caster,
+        range: f32,
+        aim: Vec2,
+        units: &TargetCandidates,
+    ) -> Option<Vec2> {
+        let game = self.game.as_deref();
+        let hero = caster.id.or(game.map(|game| game.your_id)).unwrap_or(0);
+        let candidates = pick_candidates(caster.position, hero, caster.team, units, &self.visible);
+        ally_aim(rule, &candidates, aim, caster.position, range)
+    }
+
+    /// Where a tap, or a controller press without the stick, aims `def` when it is cast on
+    /// an ally (`mobile::ally_quick_cast_target`), among the units the pick is offered;
+    /// `None` for every other skill. The cast and its preview ask this one question.
+    pub(crate) fn ally_quick_cast(
+        &self,
+        def: Option<&SkillDefinition>,
+        origin: Vec2,
+        team: crate::team::Team,
+        units: &TargetCandidates,
+    ) -> Option<Vec2> {
+        let def = def?;
+        let SkillEffect::Technique { action, .. } = def.effect else {
+            return None;
+        };
+        let seen = |entity: Entity| self.visible.get(entity).map_or(true, |shown| shown.get());
+        super::mobile::ally_quick_cast_target(
+            action,
+            origin,
+            team,
+            def.ability.cast_range,
+            units,
+            seen,
+        )
+    }
+
     /// The preview of `def` for a hero that aims at `aim`, from what the client sees now.
     pub(super) fn preview(
         &self,
@@ -306,19 +400,9 @@ impl AimWorld<'_, '_> {
         let game = self.game.as_deref();
         let hero = caster.id.or(game.map(|game| game.your_id)).unwrap_or(0);
         let candidates = pick_candidates(caster.position, hero, caster.team, units, &self.visible);
-        let structures: Vec<_> = units
-            .structures
-            .iter()
-            .filter(|(_, _, _, stats, ..)| stats.is_alive())
-            .map(|(_, pose, _, _, _, kind)| Disc {
-                center: pose.translation.xz().to_array(),
-                radius: crate::navigation::structure_collision_radius(*kind)
-                    - shared::navigation::HERO_RADIUS,
-            })
-            .collect();
-        let terrain = crate::navigation::skill_terrain(game);
+        let (structures, terrain) = self.solids(units);
         let clip = |from: Vec2, to: Vec2| movement_clip(&structures, &terrain, from, to);
-        geometry::preview_shape(
+        let mut preview = geometry::preview_shape(
             def,
             &PreviewContext {
                 origin: caster.position,
@@ -335,7 +419,14 @@ impl AimWorld<'_, '_> {
                 candidates: &candidates,
                 clip: &clip,
             },
-        )
+        );
+        // A blink is not clipped to a legal point: the server drops the cast instead.
+        if preview.shape == PreviewShape::BlinkLanding
+            && !crate::navigation::blink_point_legal(aim, &structures, &terrain)
+        {
+            preview.refused = true;
+        }
+        preview
     }
 }
 

@@ -12,7 +12,7 @@
   "ability.mana_surge.name": "Прилив маны",
   "ability.mana_surge.desc": "Мгновенно восстанавливает ману, цель не требуется.",
   "ability.frost_lance.name": "Ледяное копьё",
-  "ability.frost_lance.desc": "Пробивающий осколок с сильным уроном.",
+  "ability.frost_lance.desc": "Ледяной осколок с сильным уроном.",
   "ability.pyroblast.name": "Огненная глыба",
   "ability.pyroblast.desc": "Огромный огненный шар с самым дальним радиусом действия в арсенале мага.",
   "ability.quick_shot.name": "Быстрый выстрел",
@@ -22,7 +22,7 @@
   "ability.piercing_arrow.name": "Пробивающая стрела",
   "ability.piercing_arrow.desc": "Тяжелая стрела с увеличенной дистанцией.",
   "ability.longshot.name": "Дальний выстрел",
-  "ability.longshot.desc": "Снайперский выстрел на максимальной дистанции.",
+  "ability.longshot.desc": "Снайперский выстрел с самым дальним радиусом действия в арсенале следопыта.",
   "ability.smite.name": "Кара",
   "ability.smite.desc": "Сияющий снаряд на выбранного врага.",
   "ability.renew.name": "Обновление",
@@ -132,7 +132,7 @@
   "ability.dagger_bluff.name": "Блеф",
   "ability.dagger_bluff.desc": "Оглушает вражеского героя рядом на 1 секунду и разворачивает его спиной к вам.",
   "ability.dagger_backstab.name": "Удар в спину",
-  "ability.dagger_backstab.desc": "Удар в спину наносит урон ×2,5. Если он ранил героя, но не убил, с шансом 2% у цели остаётся 1 HP.",
+  "ability.dagger_backstab.desc": "Удар в спину вражескому герою наносит урон ×2,5. Если он ранил героя, но не убил, с шансом 2% у цели остаётся 1 HP.",
   "ability.dagger_lethal_blow.name": "Роковой выпад",
-  "ability.dagger_lethal_blow.desc": "Мощный удар кинжалом в ближнем бою. Урон со спины ×1,5."
+  "ability.dagger_lethal_blow.desc": "Мощный удар кинжалом в ближнем бою. Урон вражескому герою со спины ×1,5."
 }

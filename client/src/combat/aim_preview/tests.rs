@@ -622,6 +622,103 @@ mod held {
         );
     }
 
+    /// What `draw_aim` shows for a controller that holds the button of `slot`, with its
+    /// right stick at `stick`.
+    fn held_on_the_pad(app: &mut App, slot: usize, stick: Option<Vec2>) -> Preview {
+        let mut pad = crate::gamepad::GamepadControls::default();
+        pad.active = true;
+        pad.aiming_slot = Some(slot);
+        pad.aim = stick;
+        app.insert_resource(pad);
+        app.update();
+        let (shown, preview) = app.world().resource::<AimPreviewShown>().0.clone().unwrap();
+        assert_eq!(shown, slot);
+        preview
+    }
+
+    /// The preview of a press without the stick is drawn at the aim the cast is sent with:
+    /// for a skill cast on an ally that is an ally (`mobile::ally_quick_cast_target`), not
+    /// the enemy the other skills are aimed at.
+    #[test]
+    fn a_press_without_the_stick_previews_the_ally_the_cast_is_sent_to() {
+        let hero = |app: &mut App, id: u64, at: Vec2, team: Team, health: f32| {
+            let mut stats = CombatStats::default();
+            stats.hp *= health;
+            app.world_mut().spawn((
+                RemotePlayer,
+                Transform::from_xyz(at.x, 0.0, at.y),
+                team,
+                NetworkPlayerId(id),
+                stats,
+                InheritedVisibility::VISIBLE,
+            ));
+        };
+        let enemy = HERO + Vec2::new(1.5, 0.0);
+        let near = HERO + Vec2::new(0.0, 6.0);
+        let hurt = HERO + Vec2::new(-9.0, 0.0);
+        let picked = |at: Vec2| {
+            [PreviewMark::Picked {
+                at,
+                radius: shared::PLAYER_TARGET_RADIUS,
+            }]
+        };
+        // Where the pick ring of a preview stands.
+        let ring = |preview: &Preview| {
+            let GeoShape::Ring { center, radius } = preview.areas[0] else {
+                panic!("a pick has its ring: {preview:?}");
+            };
+            assert_eq!(radius, PICK_RADIUS);
+            center
+        };
+        for (core, slot, ally) in [
+            // Orbital Guard goes to the nearest allied hero.
+            (CoreId::Orbitwright, 2, near),
+            // Sheltering Leap goes to the allied hero lowest on health.
+            (CoreId::Frostguard, 1, hurt),
+        ] {
+            let (mut app, _) = stage(core, default());
+            // Alone, the cast is aimed at the caster himself and is legal.
+            let preview = held_on_the_pad(&mut app, slot, None);
+            assert_eq!(preview.shape, PreviewShape::UnitPick);
+            assert_eq!((preview.pick, preview.refused), (Some(0), false));
+            assert!(ring(&preview).distance(HERO) < 1e-4);
+            assert_eq!(preview.marks, picked(HERO));
+            // An enemy next to the hero does not draw the aim to itself.
+            hero(&mut app, 21, enemy, Team::Blue, 1.0);
+            let preview = held_on_the_pad(&mut app, slot, None);
+            assert!(ring(&preview).distance(HERO) < 1e-4);
+            assert!(!preview.refused);
+            // With allied heroes around, the pick ring stands on the one the cast goes to.
+            hero(&mut app, 9, near, Team::Green, 1.0);
+            hero(&mut app, 10, hurt, Team::Green, 0.3);
+            let preview = held_on_the_pad(&mut app, slot, None);
+            assert!(ring(&preview).distance(ally) < 1e-4, "{core:?}");
+            assert_eq!(preview.marks, picked(ally), "{core:?}");
+            assert!(!preview.refused);
+            // The stick is the player's own aim: the ring follows it and finds nobody.
+            let way = crate::player::mobile_screen_direction(
+                Vec2::X,
+                &GlobalTransform::IDENTITY,
+                PlayerVisualMode::Sprite2d,
+            )
+            .xz();
+            let kit = shared::loadout::preset_for_class(core.class()).unwrap();
+            let range = skill(kit.skills()[slot]).ability.cast_range;
+            let preview = held_on_the_pad(&mut app, slot, Some(Vec2::X));
+            assert!(ring(&preview).distance(HERO + way * range) < 1e-3);
+            assert!(preview.refused && preview.marks.is_empty() && preview.areas.len() == 1);
+        }
+        // A skill that is not cast on an ally is still aimed at the enemy.
+        let (mut app, _) = stage(CoreId::Frostguard, default());
+        hero(&mut app, 21, enemy, Team::Blue, 1.0);
+        hero(&mut app, 9, near, Team::Green, 1.0);
+        let preview = held_on_the_pad(&mut app, 0, None);
+        let GeoShape::Lane { from, to, .. } = preview.areas[0] else {
+            panic!("Winter Shard is a lane: {preview:?}");
+        };
+        assert!((to - from).normalize().distance(Vec2::X) < 1e-4);
+    }
+
     #[test]
     fn a_long_lane_is_handed_to_the_minimap_and_a_ring_is_not() {
         let (mut app, window) = stage(CoreId::Dawnweaver, default());
@@ -641,5 +738,86 @@ mod held {
         let (_, preview) = hold(&mut app, KeyCode::KeyE).unwrap();
         assert_eq!(preview.shape, PreviewShape::None);
         assert!(preview.areas.is_empty());
+    }
+
+    #[test]
+    fn a_blink_onto_a_landing_the_server_refuses_is_painted_as_refused() {
+        use crate::net::{NetworkStructure, NetworkStructureId, StructureKind};
+
+        let (mut app, window) = stage(CoreId::Riftshot, default());
+        let aim = HERO + Vec2::new(4.0, 0.0);
+        let map = shared::navigation::world_navigation();
+        assert!(
+            [HERO, aim, aim + Vec2::X]
+                .into_iter()
+                .all(|at| map.point_clear(at.to_array()))
+        );
+        point_at(&mut app, window, aim);
+        // Rift Step is the E of the Riftshot. On open ground its landing is legal.
+        let (slot, preview) = hold(&mut app, KeyCode::KeyE).unwrap();
+        assert_eq!((slot, preview.shape), (2, PreviewShape::BlinkLanding));
+        let [PreviewMark::Landing(landing)] = preview.marks[..] else {
+            panic!("a blink has one landing: {preview:?}");
+        };
+        assert!(landing.distance(aim) < 1e-3, "{landing}");
+        assert!(!preview.refused);
+        let open = strokes(&preview);
+
+        // A tower whose disc holds the landing: the same lines, in the refusal colour.
+        let tower = app
+            .world_mut()
+            .spawn((
+                NetworkStructure,
+                NetworkStructureId(4),
+                Transform::from_xyz(aim.x + 1.29, 0.0, aim.y),
+                CombatStats::default(),
+                Team::Blue,
+                StructureKind::Tower,
+            ))
+            .id();
+        let (_, preview) = hold(&mut app, KeyCode::KeyE).unwrap();
+        assert!(preview.refused);
+        assert_eq!(strokes(&preview), open);
+        assert_eq!(color(Ink::Mark, preview.refused), color(Ink::Area, true));
+        // Only the blink is judged by its landing: a lane aimed into the tower is not.
+        assert!(!hold(&mut app, KeyCode::KeyQ).unwrap().1.refused);
+        // A step further from the tower, and at a tower that fell, the landing is legal.
+        app.world_mut()
+            .entity_mut(tower)
+            .insert(Transform::from_xyz(aim.x + 1.31, 0.0, aim.y));
+        assert!(!hold(&mut app, KeyCode::KeyE).unwrap().1.refused);
+        app.world_mut().entity_mut(tower).insert((
+            Transform::from_xyz(aim.x + 1.0, 0.0, aim.y),
+            CombatStats {
+                hp: 0.0,
+                ..default()
+            },
+        ));
+        assert!(!hold(&mut app, KeyCode::KeyE).unwrap().1.refused);
+
+        // An armed pillar the client sees keeps a hero's radius more than its own.
+        let pillar = |armed: bool, apart: f32| SkillEffectState {
+            id: 5,
+            owner_id: 9,
+            owner_team: shared::map::Team::Blue,
+            skill: SkillId::FaultLine,
+            kind: shared::loadout::EffectVisualKind::Trap,
+            position: [aim.x, aim.y + apart],
+            end: [aim.x, aim.y + apart],
+            radius: 1.0,
+            remaining_secs: 3.0,
+            armed,
+            consumed_segments: 0,
+        };
+        for (armed, apart, refused) in [(true, 1.4, true), (true, 1.6, false), (false, 1.4, false)]
+        {
+            app.insert_resource(GameStateSnapshot {
+                your_id: 7,
+                skill_effects: vec![pillar(armed, apart)],
+                ..default()
+            });
+            let (_, preview) = hold(&mut app, KeyCode::KeyE).unwrap();
+            assert_eq!(preview.refused, refused, "{armed} {apart}");
+        }
     }
 }

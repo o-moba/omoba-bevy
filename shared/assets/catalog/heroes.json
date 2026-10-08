@@ -118,7 +118,7 @@
         {
           "id": "frost_lance",
           "name": "Frost Lance",
-          "description": "Piercing shard with strong impact damage.",
+          "description": "Ice shard with strong impact damage.",
           "targeting": "unit_target",
           "mana_cost": 28.0,
           "cooldown_secs": 3.0,
@@ -205,7 +205,7 @@
         {
           "id": "longshot",
           "name": "Longshot",
-          "description": "Sniper shot across the longest range of any kit.",
+          "description": "Sniper shot with the longest reach in the ranger kit.",
           "targeting": "unit_target",
           "mana_cost": 36.0,
           "cooldown_secs": 12.0,
