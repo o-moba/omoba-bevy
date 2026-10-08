@@ -12,7 +12,7 @@
   "ability.mana_surge.name": "法力涌动",
   "ability.mana_surge.desc": "立即恢复法力，无需目标。",
   "ability.frost_lance.name": "冰霜长矛",
-  "ability.frost_lance.desc": "穿透冰晶，造成强力冲击伤害。",
+  "ability.frost_lance.desc": "冰晶造成强力冲击伤害。",
   "ability.pyroblast.name": "炎爆术",
   "ability.pyroblast.desc": "巨型火球，法师技能中射程最远。",
   "ability.quick_shot.name": "快速射击",
@@ -22,7 +22,7 @@
   "ability.piercing_arrow.name": "穿刺箭",
   "ability.piercing_arrow.desc": "射程更远的重箭。",
   "ability.longshot.name": "远射",
-  "ability.longshot.desc": "所有技能中射程最远的狙击。",
+  "ability.longshot.desc": "游侠技能中射程最远的狙击。",
   "ability.smite.name": "惩击",
   "ability.smite.desc": "向选中的敌人射出圣光飞弹。",
   "ability.renew.name": "恢复",
@@ -132,7 +132,7 @@
   "ability.dagger_bluff.name": "转身计",
   "ability.dagger_bluff.desc": "使附近的敌方英雄眩晕 1 秒，并转身背对你。",
   "ability.dagger_backstab.name": "背刺",
-  "ability.dagger_backstab.desc": "从背后攻击造成 2.5x 伤害。如果命中并使英雄损失生命且仍存活，有 2% 几率使其只剩 1 点生命。",
+  "ability.dagger_backstab.desc": "从背后攻击敌方英雄造成 2.5x 伤害。如果命中并使英雄损失生命且仍存活，有 2% 几率使其只剩 1 点生命。",
   "ability.dagger_lethal_blow.name": "终结一击",
-  "ability.dagger_lethal_blow.desc": "强力的近距离短刀攻击，从背后命中造成 1.5x 伤害。"
+  "ability.dagger_lethal_blow.desc": "强力的近距离短刀攻击，从背后命中敌方英雄造成 1.5x 伤害。"
 }
