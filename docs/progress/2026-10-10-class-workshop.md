@@ -16,8 +16,8 @@ of web class authoring until later artist gates.
   rules are shared with the resolver rather than copied into a web balance table.
   The launcher accepts `--class-build` and isolates local test configuration.
 - Existing OMOBA Account API/PostgreSQL stores owner-private class preferences,
-  with quota50, optimistic versions, transactional idempotency and current consent.
-  Migrations004/005 and minimal runtime grants are source changes only; no hosted
+  with quota 50, optimistic versions, transactional idempotency and current consent.
+  Migrations 004/005 and minimal runtime grants are source changes only; no hosted
   database was touched.
 - An explicit Ekza library device flow binds an encrypted project-scoped grant to
   the OMOBA profile. Browser responses contain display state, not credentials.
@@ -41,40 +41,40 @@ Both include source provenance and consumer integrity checks. The workshop's
 source commit follows consumed source paths, so committing its generated snapshot
 or unrelated documentation does not make `--check` stale.
 
-Build document schema1, gameplay catalogue `standard-kits-6`, protocol11 and
+Build document schema 1, gameplay catalogue `standard-kits-6`, protocol 11 and
 `combat-2026-10-08-mechanics` are retained. Public/ranked custom recipe admission
 is unchanged. Match host validation remains authoritative.
 
 ## Verification
 
-- Shared134 tests, asset exporter18, launcher5 and source-provenance regression1
+- Shared 134 tests, asset exporter 18, launcher 5 and source-provenance regression 1
   passed. Snapshot check passed after the separate generated-snapshot commit.
-- Account API29 tests passed, including all real PostgreSQL integration suites:
+- Account API 29 tests passed, including all real PostgreSQL integration suites:
   signed pairing, owner separation/injection, strict recipes, version conflicts,
   idempotency, concurrent quota, revoked sessions and restricted-role grants.
   Ekza tests cover wrong scope/project, encrypted owner binding, outage retention,
   expired/revoked grants and response whitelisting.
 - The existing Account API and synthetic Registry protocol fixture ran against a
-  dedicated local PostgreSQL18 cluster at55581. The demo runtime role is not the
+  dedicated local PostgreSQL 18 cluster at 55581. The demo runtime role is not the
   database owner. Hosted accounts, production secrets and infrastructure were not
   used or changed.
 - An actual browser download, “Radiant Rift Browser Proof,” uses Dawnweaver with
   `rift_needle`, `dawn_barrier`, `dawn_field`, `dawn_ray`. Converting that document
   with compiled Rust produced exactly the same full JSON preset as the browser's
   separate Combat Test download.
-- A freshly built current server admitted that exact downloaded level6 preset.
-  An ordinary Q cast damaged the training dummy by33.4443 and consumed mana
-  (160 to147.13 with regeneration). This uses normal resources, server-owned
+- A freshly built current server admitted that exact downloaded level 6 preset.
+  An ordinary Q cast damaged the training dummy by 33.4443 and consumed mana
+  (160 to 147.13 with regeneration). This uses normal resources, server-owned
   damage, a real cast packet and authoritative analytics, not synthetic damage.
-- A freshly built current client rendered the same mixed recipe with all68
-  packaged presentation profiles and matching fingerprint`02c190ee87f9aab3`.
+- A freshly built current client rendered the same mixed recipe with all 68
+  packaged presentation profiles and matching fingerprint `02c190ee87f9aab3`.
   Rift Needle's release/impact and borrowed Q icon with Dawnweaver WER icons were
-  visually inspected. One English1280×720 native view was used. Existing capture
+  visually inspected. One English 1280×720 native view was used. Existing capture
   tooling recorded the four-slot sequence in one run; no class/device matrix.
-  That visual fixture intentionally uses level10, infinite resource and Agnes for
-  repeatability, separate from the normal-resource level6 download proof above.
+  That visual fixture intentionally uses level 10, infinite resource and Agnes for
+  repeatability, separate from the normal-resource level 6 download proof above.
   Input was machine-driven; manual/physical-device input is not claimed.
-- Independent API/shared and portal review found and fixed upstream404/403 being
+- Independent API/shared and portal review found and fixed upstream 404/403 being
   mistaken for revoked consent, incompatible browser recovery being overwritten,
   delayed saves attaching to a replacement editor, and JSON normalization
   differences. The portal owns its final browser regression/build evidence in
