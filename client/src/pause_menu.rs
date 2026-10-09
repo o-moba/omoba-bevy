@@ -1538,11 +1538,14 @@ fn close_pause_menu_when_disconnected(
 pub(crate) fn toggle_pause_menu(
     back: crate::ui::BackInput,
     social: Option<Res<crate::social::SocialClient>>,
+    splash: Option<Res<crate::frontend::boot::BootSplash>>,
     mut menu_state: ResMut<PauseMenuState>,
 ) {
+    // A key pressed under the boot splash must not leave a menu open behind it.
     if social
         .as_ref()
         .is_some_and(|social| social.blocks_gameplay())
+        || splash.is_some_and(|splash| splash.blocks_input())
     {
         return;
     }
@@ -3583,6 +3586,32 @@ mod tests {
                 .0
         );
         assert!(!app.world().resource::<PauseMenuState>().open);
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .reset_all();
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::Escape);
+        app.update();
+        assert!(app.world().resource::<PauseMenuState>().open);
+    }
+
+    #[test]
+    fn escape_waits_for_the_boot_splash() {
+        let mut app = App::new();
+        app.init_resource::<ButtonInput<KeyCode>>()
+            .init_resource::<PauseMenuState>()
+            .insert_resource(crate::frontend::boot::BootSplash::loading_for_test())
+            .add_systems(Update, toggle_pause_menu);
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::Escape);
+        app.update();
+        assert!(
+            !app.world().resource::<PauseMenuState>().open,
+            "no menu opens behind the splash"
+        );
+        app.insert_resource(crate::frontend::boot::BootSplash::default());
         app.world_mut()
             .resource_mut::<ButtonInput<KeyCode>>()
             .reset_all();

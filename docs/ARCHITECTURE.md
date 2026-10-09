@@ -79,7 +79,9 @@ the actual offline match with cosmetic mist Auto/Stretch/hidden), `OMOBA_FOG_COV
 with a uniform mask: Auto negative control, then actual production Stretch;
 private harness in `team_vision/coverage_qa.rs`), `OMOBA_CAREER_QA_OUTPUT`,
 `OMOBA_SUPPORTER_QA_DIR`, `OMOBA_HELP_QA_SHOTS` (the controls guide's
-controller focus and Settings → Controls return), and
+controller focus and Settings → Controls return), `OMOBA_BOOT_SPLASH_SHOTS`
+(the boot splash and the Home it reveals; every other harness starts without
+the splash), and
 `OMOBA_SANDBOX_QA_OUTPUT` (the Combat Test
 panel harness, which stays in `sandbox/ui/qa.rs` because it drives the
 panel's private types). `cargo clippy -p client --lib --no-default-features`

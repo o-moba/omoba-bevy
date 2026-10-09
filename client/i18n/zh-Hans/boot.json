@@ -1,0 +1,6 @@
+{
+  "boot.status.interface": "正在加载界面…",
+  "boot.status.world": "正在加载战场…",
+  "boot.status.ready": "正在进入竞技场…",
+  "boot.status.line": "{stage} · {percent}%"
+}

@@ -1,5 +1,9 @@
 # Feature Inventory
 
+## Boot splash (0.44.0 candidate)
+
+A normal launch opens on a full-screen splash instead of an empty Home: the living Verdant arena artwork, the OMOBA title and tagline, the build label, a spinner and a progress line ("Loading the interface…", "Loading the world…", "Entering the arena…") fed by the startup fonts and world scenes. It stays at least 1.4 seconds and at most 15, blocks the menu underneath as the top modal (and the Escape and help keys), and leaves through a short dip into the base colour. On iOS the native launch screen shows the same dark base colour before the first engine frame (Xcode and TestFlight builds; `make iphone` bundles do not compile the asset catalog). Normal desktop launcher settings (`OMOBA_ASSET_DIR`, `OMOBA_MATCH_MODE`, `OMOBA_TEAM_SIZE`, `OMOBA_DEBUG_UI=0`) keep the splash. Harness, capture, sandbox and enabled debug-UI launches start without it; `OMOBA_BOOT_SPLASH_SHOTS=<dir>` captures it. There is no Android native splash theme yet.
+
 ## Mobile playtest quality (0.44.0 candidate)
 
 The new candidate removes automatic account-history result popups, gives textured
@@ -136,7 +140,7 @@ Server-authoritative aim, cooldowns, costs, control, shields, weapon modes, effe
 
 ## iPad phone-layout preview (0.28.6)
 
-On an eligible landscape iPad, Settings → Graphics → iPhone 16 layout preview temporarily centres the actual game window at 852×393 logical points. Existing phone menus, HUD and window-local touch input work without a separate renderer. A native Return to iPad button remains outside the game; returning, backgrounding or rotating restores the tablet window. The option is absent on phones, Android and desktops, cannot be enabled through a stale action, and is not saved in preferences. This previews layout using the game's phone safe-area policy, not iPhone GPU performance or exact physical screen size.
+On an eligible landscape iPad, Settings → Graphics → iPhone 16 layout preview temporarily centres the actual game window at 852×393 logical points. Existing phone menus, HUD and window-local touch input work without a separate renderer. A native Return to iPad button remains outside the game; returning, backgrounding or a real change of the host geometry restores the tablet window, while tilting the tablet no longer does (0.44.0 candidate). The option is absent on phones, Android and desktops, cannot be enabled through a stale action, and is not saved in preferences. This previews layout using the game's phone safe-area policy, not iPhone GPU performance or exact physical screen size.
 
 ## Party and prematch stage (0.28.5)
 

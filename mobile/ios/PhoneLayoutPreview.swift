@@ -18,15 +18,20 @@ private final class PhoneLayoutPreview {
     private var previewFrame = CGRect.zero
     private var timer: Timer?
     private var observers: [NSObjectProtocol] = []
+    private var reapplied = 0
+    private var reappliedTotal = 0
+    private var reapplyWindowStart: TimeInterval = 0
     var active: Bool { backdrop != nil }
 
     private init() {
-        for name in [UIApplication.willResignActiveNotification,
-                     UIDevice.orientationDidChangeNotification] {
-            observers.append(NotificationCenter.default.addObserver(
-                forName: name, object: nil, queue: .main
-            ) { [weak self] _ in self?.restore() })
-        }
+        // Only losing the foreground ends the preview from a notification.
+        // UIDevice orientation notifications also arrive for face-up,
+        // face-down and portrait tilts that never rotate this landscape-only
+        // interface, and each of them used to end the preview on a hand-held
+        // iPad. validate() notices a host whose geometry really changed.
+        observers.append(NotificationCenter.default.addObserver(
+            forName: UIApplication.willResignActiveNotification, object: nil, queue: .main
+        ) { [weak self] _ in self?.restore("the application resigned active") })
     }
 
     private func gameWindow() -> UIWindow? {
@@ -43,13 +48,20 @@ private final class PhoneLayoutPreview {
         window.windowScene?.coordinateSpace.bounds ?? window.screen.bounds
     }
 
+    /// Why this host cannot show the preview, or nil when it can.
+    private func ineligibility(_ window: UIWindow, _ frame: CGRect) -> String? {
+        if UIDevice.current.userInterfaceIdiom != .pad { return "the device is not an iPad" }
+        if UIApplication.shared.applicationState != .active { return "the application is not active" }
+        if !window.transform.isIdentity { return "the game window is transformed" }
+        if frame.width < phone.width || frame.height < phone.height + 160 || frame.width < frame.height {
+            return "the host \(frame.size) is too small or not landscape"
+        }
+        if window.rootViewController?.view.transform.isIdentity != true { return "the game view is transformed" }
+        return nil
+    }
+
     private func eligible(_ window: UIWindow, _ frame: CGRect) -> Bool {
-        UIDevice.current.userInterfaceIdiom == .pad
-            && UIApplication.shared.applicationState == .active
-            && window.transform.isIdentity
-            && frame.width >= phone.width && frame.height >= phone.height + 160
-            && frame.width >= frame.height
-            && window.rootViewController?.view.transform.isIdentity == true
+        ineligibility(window, frame) == nil
     }
 
     var available: Bool {
@@ -58,7 +70,7 @@ private final class PhoneLayoutPreview {
     }
 
     func set(_ enabled: Bool, title: String) {
-        guard enabled else { restore(); return }
+        guard enabled else { restore("the player left the preview"); return }
         guard !active, let window = gameWindow(), eligible(window, window.frame) else { return }
         game = window
         originalFrame = window.frame
@@ -83,34 +95,56 @@ private final class PhoneLayoutPreview {
         button.configuration = style
         button.accessibilityIdentifier = "PhonePreviewReturnToIPad"
         button.frame = CGRect(x: 20, y: 20, width: min(originalFrame.width - 40, 340), height: 48)
-        button.addAction(UIAction { [weak self] _ in self?.restore() }, for: .touchUpInside)
+        button.addAction(UIAction { [weak self] _ in
+            self?.restore("the player pressed the return button")
+        }, for: .touchUpInside)
         controller.view.addSubview(button)
         background.rootViewController = controller
         backdrop = background
         // Keep the game's key window and its input focus. The lower window
         // receives only points outside the centered game's window rectangle.
         background.isHidden = false
-        window.frame = previewFrame
-        window.rootViewController?.view.frame = window.bounds
-        window.layoutIfNeeded()
+        reapplied = 0
+        reappliedTotal = 0
+        applyPreviewFrame(window)
         timer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { [weak self] _ in
             self?.validate()
         }
         validate()
     }
 
-    func validate() {
-        guard active else { return }
-        guard let window = game, eligible(window, originalFrame),
-              !window.isHidden, window.frame == previewFrame,
-              window.bounds.size == phone, hostBounds(window) == screenBounds,
-              window.rootViewController?.view.bounds.size == phone else {
-            restore(); return
-        }
+    private func applyPreviewFrame(_ window: UIWindow) {
+        window.frame = previewFrame
+        window.rootViewController?.view.frame = window.bounds
+        window.layoutIfNeeded()
     }
 
-    func restore() {
+    func validate() {
         guard active else { return }
+        guard let window = game, !window.isHidden else { restore("the game window is gone"); return }
+        if let reason = ineligibility(window, originalFrame) { restore(reason); return }
+        guard hostBounds(window) == screenBounds else { restore("the host geometry changed"); return }
+        if window.frame == previewFrame, window.bounds.size == phone,
+           window.rootViewController?.view.bounds.size == phone { return }
+        // UIKit laid the window out again while the host stayed the same
+        // (a scene refresh, the keyboard). Put the preview back; a host that
+        // keeps undoing it, in a burst or slowly for the whole session, ends
+        // the preview instead of fighting it.
+        let now = ProcessInfo.processInfo.systemUptime
+        if now - reapplyWindowStart > 2 {
+            reapplyWindowStart = now
+            reapplied = 0
+        }
+        reapplied += 1
+        reappliedTotal += 1
+        guard reapplied <= 5, reappliedTotal <= 20 else { restore("the window frame kept changing"); return }
+        applyPreviewFrame(window)
+    }
+
+    func restore(_ reason: String) {
+        guard active else { return }
+        // The only trace of why a preview ended on a device; keep it.
+        NSLog("Omoba phone preview ended: %@", reason)
         timer?.invalidate()
         timer = nil
         if let window = game {

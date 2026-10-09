@@ -759,11 +759,13 @@ fn toggle_help_overlay(
     career: Option<Res<crate::career::CareerClient>>,
     social: Option<Res<crate::social::SocialClient>>,
     screen: Option<Res<State<crate::frontend::AppScreen>>>,
+    splash: Option<Res<crate::frontend::boot::BootSplash>>,
 ) {
     if social
         .as_ref()
         .is_some_and(|social| social.blocks_gameplay())
         || career.as_ref().is_some_and(|career| career.modal_open())
+        || splash.is_some_and(|splash| splash.blocks_input())
     {
         return;
     }

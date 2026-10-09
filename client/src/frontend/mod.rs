@@ -17,6 +17,7 @@
 //! `lobby`, `draft`, …); the shell's own text is in `frontend`.
 // i18n-strict
 
+pub(crate) mod boot;
 pub mod card;
 pub mod collection;
 pub mod draft;

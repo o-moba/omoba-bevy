@@ -169,6 +169,7 @@ impl PluginGroup for UiPlugins {
             .add(MobileControlsPlugin)
             .add(MobileUiPlugin)
             .add(FrontendPlugin)
+            .add(crate::frontend::boot::BootSplashPlugin)
             .add(TeamSelectPlugin)
             .add(GameStateUiPlugin)
             .add(crate::hud_layout::HudLayoutPlugin)
