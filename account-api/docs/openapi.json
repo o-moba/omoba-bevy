@@ -6092,7 +6092,7 @@
           "skills"
         ],
         "additionalProperties": false,
-        "description": "Validated by the shared game resolver, including core/passive dependency and skill unlock ordering. Catalogue changes require an explicit valid recipe; no silent migration."
+        "description": "Validated by the shared game resolver, including distinct skill identities and capability dependencies. Original skill unlock levels apply at runtime independently of key binding. Catalogue changes require an explicit valid recipe; no silent migration."
       },
       "ClassBuildDocument": {
         "type": "object",
