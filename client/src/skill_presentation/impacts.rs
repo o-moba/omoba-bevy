@@ -685,6 +685,84 @@ pub(crate) fn receipt_burst(
     ))
 }
 
+/// One authoritative Wildspark detonation: compact ignition, travelling ground wave,
+/// falling casing fragments and rising embers. Never derives a centre from a victim.
+pub(crate) fn rocket_blast(
+    area: shared::combat::AreaImpact,
+    floor: Vec3,
+    receipt: u64,
+) -> Vec<ParticleSpec> {
+    if !area.valid() || !floor.is_finite() || area.skill != SkillId::WildRocket {
+        return Vec::new();
+    }
+    let hot = Tint {
+        color: Color::srgb(1.0, 0.58, 0.12),
+        gain: 2.4,
+    };
+    let ember = Tint {
+        color: Color::srgb(0.65, 0.13, 0.035),
+        gain: 1.0,
+    };
+    let base = ParticleSpec {
+        event_id: receipt,
+        origin: floor + Vec3::Y * 1.1,
+        color: hot,
+        end_color: Some(ember),
+        source: ParticleSource::Impact,
+        ..ParticleSpec::BASE
+    };
+    let mut out = vec![
+        ParticleSpec {
+            lifetime: 0.16,
+            size: sized(ParticleShape::Glow, 0.85, Curve::Shrink),
+            dense: true,
+            ..base.clone()
+        },
+        ParticleSpec {
+            origin: floor + Vec3::Y * 0.08,
+            shape: ParticleShape::Ringlet,
+            orient: Orient::Ground,
+            curve: Curve::Grow,
+            size: sized(ParticleShape::Ringlet, area.radius, Curve::Grow),
+            lifetime: 0.48,
+            ..base.clone()
+        },
+    ];
+    for i in 0..6 {
+        let angle = TAU * i as f32 / 6.0 + jitter(receipt, 0, 91);
+        out.push(ParticleSpec {
+            shape: ParticleShape::Diamond,
+            size: 0.18,
+            velocity: Vec3::new(
+                angle.cos() * 2.1,
+                2.5 + (i % 3) as f32 * 0.45,
+                angle.sin() * 2.1,
+            ),
+            gravity: 8.0,
+            spin: 4.0,
+            orient: Orient::Velocity,
+            lifetime: 0.75,
+            delay: 0.035,
+            ..base.clone()
+        });
+    }
+    for i in 0..4 {
+        let angle = TAU * i as f32 / 4.0;
+        out.push(ParticleSpec {
+            origin: base.origin + Vec3::new(angle.cos() * 0.6, 0.0, angle.sin() * 0.6),
+            shape: ParticleShape::Glow,
+            size: 0.32,
+            curve: Curve::Pop,
+            velocity: Vec3::new(angle.cos() * 0.35, 0.8, angle.sin() * 0.35),
+            gravity: -0.3,
+            lifetime: 0.8,
+            delay: 0.15,
+            ..base.clone()
+        });
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::category::{self, SkillKey};
@@ -693,6 +771,47 @@ mod tests {
     use shared::HeroClass;
 
     const HIT: Vec3 = Vec3::new(-6.0, 0.5, 9.0);
+
+    #[test]
+    fn rocket_wave_uses_server_center_radius_and_keeps_victims_readable() {
+        let area = shared::combat::AreaImpact {
+            id: 1,
+            skill: SkillId::WildRocket,
+            center: [10.0, 20.0],
+            radius: 3.0,
+        };
+        let floor = Vec3::new(10.0, 0.5, 20.0);
+        let burst = rocket_blast(area, floor, 17);
+        assert_eq!(burst.len(), IMPACT_MAX);
+        assert!(
+            burst
+                .iter()
+                .all(|p| p.is_sound() && p.end_secs() <= IMPACT_SECS && p.event_id == 17)
+        );
+        let wave = &burst[1];
+        assert_eq!(wave.origin.xz(), Vec2::from_array(area.center));
+        assert!(
+            (unit_radius(wave.shape) * wave.size * wave.curve.peak() - area.radius).abs() < 1e-5
+        );
+        assert!(burst[0].lifetime < 0.2 && burst[0].reach(floor) < 1.0);
+        assert!(burst[2..8].iter().all(|p| p.gravity > 0.0));
+        assert!(
+            burst[8..]
+                .iter()
+                .all(|p| p.delay > 0.1 && p.velocity.y > 0.0)
+        );
+        assert!(
+            rocket_blast(
+                shared::combat::AreaImpact {
+                    radius: f32::NAN,
+                    ..area
+                },
+                floor,
+                17
+            )
+            .is_empty()
+        );
+    }
 
     fn palette() -> Palette {
         Palette::of_class(&super::super::Theme {

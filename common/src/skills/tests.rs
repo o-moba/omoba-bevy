@@ -6,6 +6,9 @@ use shared::{BASIC_ATTACK_ACTION_SLOT, HeroClass};
 #[path = "equipped_tests.rs"]
 mod equipped_tests;
 
+#[path = "wildspark_tests.rs"]
+mod wildspark_tests;
+
 fn addr(n: u16) -> SocketAddr {
     format!("127.0.0.1:{}", 56000 + n).parse().unwrap()
 }

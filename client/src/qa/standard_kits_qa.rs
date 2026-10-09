@@ -64,6 +64,9 @@ use std::{
     time::{Duration, Instant},
 };
 
+#[path = "wildspark_demo.rs"]
+mod wildspark_demo;
+
 pub(crate) struct StandardKitsQaPlugin;
 impl Plugin for StandardKitsQaPlugin {
     fn build(&self, app: &mut App) {
@@ -75,7 +78,8 @@ impl Plugin for StandardKitsQaPlugin {
             .and_then(|s| HeroClass::from_id(&s))
             .unwrap_or(HeroClass::Dawnweaver);
         let flag = |name: &str| std::env::var(name).as_deref() == Ok("1");
-        let phases = flag("OMOBA_STANDARD_QA_PHASES");
+        let demo = flag("OMOBA_WILDSPARK_DEMO");
+        let phases = flag("OMOBA_STANDARD_QA_PHASES") || demo;
         let offscreen = flag("OMOBA_STANDARD_QA_OFFSCREEN");
         let flight = flag("OMOBA_STANDARD_QA_FLIGHT");
         let interleave = flag("OMOBA_STANDARD_QA_INTERLEAVE");
@@ -110,6 +114,7 @@ impl Plugin for StandardKitsQaPlugin {
             class,
             avatar: std::env::var("OMOBA_STANDARD_QA_AVATAR").unwrap_or_else(|_| "agnes".into()),
             release_at,
+            demo,
             phases,
             offscreen,
             flight,
@@ -158,7 +163,15 @@ impl Plugin for StandardKitsQaPlugin {
         } else {
             app.add_systems(PreUpdate, super::combat_qa::focus_capture_window);
         }
-        if phases {
+        if demo {
+            app.init_resource::<wildspark_demo::Demo>().add_systems(
+                PostUpdate,
+                wildspark_demo::drive
+                    .after(observe)
+                    .after(crate::game_vfx::VfxPresentation)
+                    .after(bevy::camera::visibility::VisibilitySystems::CheckVisibility),
+            );
+        } else if phases {
             app.init_resource::<Phases>().add_systems(
                 PostUpdate,
                 drive_phases
@@ -180,6 +193,7 @@ struct Qa {
     /// Rig of the hero in a phase run; the other runs stage their own rigs.
     avatar: String,
     release_at: ReleaseAt,
+    demo: bool,
     /// Three state-gated stills per skill instead of the roster frame.
     phases: bool,
     /// Hidden window; the main camera renders to `target`.
@@ -222,12 +236,20 @@ struct Qa {
 }
 impl Qa {
     fn pixels(&self) -> (u32, u32) {
-        if self.ux { (1180, 820) } else { (1280, 720) }
+        if self.demo {
+            (960, 1280)
+        } else if self.ux {
+            (1180, 820)
+        } else {
+            (1280, 720)
+        }
     }
 }
 fn label(mut commands: Commands, qa: Res<Qa>) {
     commands.spawn((
-        Text::new(if qa.hud {
+        Text::new(if qa.demo {
+            "OMOBA · COMBAT TEST · scripted gameplay"
+        } else if qa.hud {
             "QA · live practice · authoritative bots and kill notices"
         } else if qa.phases {
             "QA · live sandbox · scripted casts · stills paused at 0.25x"
@@ -279,6 +301,11 @@ fn prepare(
         // Use the closest supported gameplay view for grip and pose inspection.
         *camera = crate::camera::CameraState {
             zoom: qa.zoom,
+            orbit_yaw: if qa.demo {
+                -std::f32::consts::FRAC_PI_4
+            } else {
+                0.0
+            },
             ..default()
         };
         camera_settings.zoom = qa.zoom;
@@ -1956,6 +1983,7 @@ impl Phases {
 
 #[derive(SystemParam)]
 struct PhaseWorld<'w, 's> {
+    mechanical_parts: Query<'w, 's, (&'static Name, &'static Transform)>,
     game: Res<'w, GameStateSnapshot>,
     mode: Res<'w, crate::sprite::PlayerVisualMode>,
     registry: Res<'w, crate::skill_presentation::SkillPresentation>,
@@ -2784,6 +2812,12 @@ fn restore_cursor(mut run: ResMut<Phases>, mut windows: Query<&mut Window, With<
     }
 }
 
+#[derive(Default)]
+struct MotionFrames {
+    frames: Vec<serde_json::Value>,
+    last: f64,
+}
+
 fn drive_phases(
     mut commands: Commands,
     mut qa: ResMut<Qa>,
@@ -2792,6 +2826,7 @@ fn drive_phases(
     windows: Query<Entity, With<PrimaryWindow>>,
     mut outgoing: MessageWriter<NetworkCommand>,
     mut exit: MessageWriter<AppExit>,
+    mut motion: Local<MotionFrames>,
 ) {
     if qa.stage != PHASE_STAGE {
         return;
@@ -2907,6 +2942,35 @@ fn drive_phases(
             peaks.visible_parts = peaks.visible_parts.max(load.visible_parts);
             peaks.lights = peaks.lights.max(load.lights);
         }
+    }
+    // Optional real-time sequence of the live probe, with simulation timestamps and
+    // mechanical joint poses. It observes normal casts without pausing or staging hits.
+    if std::env::var("OMOBA_STANDARD_QA_MOTION").as_deref() == Ok("1")
+        && (run.pass == Pass::Probe || run.basic)
+        && matches!(step, Step::Edge | Step::Probe | Step::Flight | Step::Gates)
+        && !sandbox.config.environment.paused
+        && run.watch.edge.is_some()
+        && now - motion.last >= 1.0 / 30.0
+        && motion.frames.len() < 240
+    {
+        motion.last = now;
+        let file = format!("motion-{:03}.png", motion.frames.len());
+        let joints: Vec<_> = world.mechanical_parts.iter()
+            .filter(|(name, _)| name.as_str().starts_with("Wildspark"))
+            .map(|(name, pose)| serde_json::json!({"name":name.as_str(),"translation":pose.translation.to_array(),"rotation":pose.rotation.to_array()}))
+            .collect();
+        motion.frames.push(serde_json::json!({"file":file,"skill":skill,"rockets":run.rockets,"simulation_secs":now,"action_sequence":action.sequence,"animation":world.animation(),"joints":joints,"effects":world.game.skill_effects,"receipts":world.game.combat_events}));
+        let screenshot = match &qa.target {
+            Some(target) => Screenshot::image(target.clone()),
+            None => Screenshot::primary_window(),
+        };
+        commands
+            .spawn(screenshot)
+            .observe(save_to_disk(qa.directory.join(&file)));
+        let _ = std::fs::write(
+            qa.directory.join("motion.json"),
+            serde_json::to_vec_pretty(&motion.frames).unwrap(),
+        );
     }
     // An aim still needs a modular skill: a legacy kit casts at a selected unit.
     let previewed = qa.aim && !run.basic && equipped.skill(slot).is_some();

@@ -1049,41 +1049,30 @@ mod tests {
     }
 
     #[test]
-    fn form_beats_model_when_meshes_exist() {
-        // The launcher round of the Repeater names a form and the rocket model.
-        let mut app = drawing(true);
-        let rocket = shoot(&mut app, WILDSPARK, ProjectileStyle::Rocket, Some(255));
-        assert_eq!(part_names(&mut app, rocket), ["Projectile-FormPart"; 4]);
-        let models = |app: &mut App| {
+    fn launcher_uses_its_model_with_or_without_shared_form_meshes() {
+        for library in [false, true] {
+            let mut app = drawing(library);
+            let rocket = shoot(&mut app, WILDSPARK, ProjectileStyle::Rocket, Some(255));
+            assert_eq!(
+                part_names(&mut app, rocket),
+                [
+                    "Projectile-Bolt-Core",
+                    "Projectile-Bolt-Streak",
+                    "Projectile-Team-Cue"
+                ]
+            );
             let world = app.world_mut();
-            world.query::<&WorldAssetRoot>().iter(world).count()
-        };
-        assert_eq!(models(&mut app), 0);
-        // The model is not even requested.
-        let assets = app.world().resource::<ProjectileAssets>();
-        assert!(assets.profiles.is_empty() && assets.forms.len() == 1);
-        #[cfg(feature = "qa")]
-        assert_eq!(
-            app.world()
-                .get::<ProjectileBodyVisual>(rocket)
-                .unwrap()
-                .body,
-            FlightBody::Form(ProjectileForm::Tumbler, Silhouette::Block)
-        );
-
-        // Without the shared meshes the same profile is its `shape` and brings its model.
-        let mut app = drawing(false);
-        let rocket = shoot(&mut app, WILDSPARK, ProjectileStyle::Rocket, Some(255));
-        assert_eq!(
-            part_names(&mut app, rocket),
-            [
-                "Projectile-Bolt-Core",
-                "Projectile-Bolt-Streak",
-                "Projectile-Team-Cue"
-            ]
-        );
-        assert_eq!(models(&mut app), 1);
-        assert!(app.world().get::<FormBody>(rocket).is_none());
+            assert_eq!(world.query::<&WorldAssetRoot>().iter(world).count(), 1);
+            assert!(app.world().get::<FormBody>(rocket).is_none());
+            #[cfg(feature = "qa")]
+            assert_eq!(
+                app.world()
+                    .get::<ProjectileBodyVisual>(rocket)
+                    .unwrap()
+                    .body,
+                FlightBody::Shape
+            );
+        }
     }
 
     #[test]

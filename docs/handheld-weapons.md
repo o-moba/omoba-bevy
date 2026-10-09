@@ -45,8 +45,7 @@ The prop follows the skeletal hierarchy during idle, run, attack and death.
 Unequip, avatar replacement, actor removal and switching to Sprite2d remove the
 attachment. Model normalization scales the prop together with the character.
 No IK, new collider, root motion or per-frame transform copying is required.
-Adventurer uses a right-hand thrust for contact attacks; Wildspark uses the
-shared pistol action. The new bow currently uses the existing ranged avatar
+Adventurer uses a right-hand thrust for contact attacks. Wildspark uses a burst-fire motion for the repeater and a heavy shot for launcher rounds; its named rotor and recoil slide are animated only after accepted actions. W/R temporarily select the launcher for class-default equipment. The default repeater uses `weapons/wildspark-repeater.glb`; Riftshot and explicit legacy repeater skins retain `wild-repeater.glb`. Pausing the sandbox freezes these parts and muzzle flashes use the real hand socket. The new bow currently uses the existing ranged avatar
 motion path: dedicated bow-draw animation, string deformation and two-handed IK
 remain separate work. No visual prop changes the accepted attack profile.
 

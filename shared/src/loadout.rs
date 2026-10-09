@@ -10,7 +10,7 @@ use crate::{AbilityDefinition, HeroClass, MAX_ABILITY_RANK, SkillSlot, Targeting
 use serde::{Deserialize, Serialize};
 use std::sync::LazyLock;
 
-pub const CATALOG_REVISION: &str = "standard-kits-6";
+pub const CATALOG_REVISION: &str = "standard-kits-7";
 pub const RECIPE_SCHEMA_VERSION: u16 = 1;
 pub const MAX_ACTIVE_EFFECTS: usize = 128;
 pub const MAX_EFFECTS_PER_OWNER: usize = 16;
@@ -630,6 +630,8 @@ pub enum SkillEffect {
     },
     ImpactRocket {
         speed: f32,
+        launch_speed: f32,
+        acceleration: f32,
         radius: f32,
         blast_radius: f32,
         damage: f32,
@@ -745,6 +747,8 @@ impl SkillEffect {
             }
             Self::ImpactRocket {
                 speed,
+                launch_speed,
+                acceleration,
                 radius,
                 blast_radius,
                 damage,
@@ -752,9 +756,18 @@ impl SkillEffect {
                 max_distance,
                 missing_health_ratio,
             } => {
-                [speed, radius, blast_radius, damage, max_distance]
-                    .into_iter()
-                    .all(positive)
+                [
+                    speed,
+                    launch_speed,
+                    acceleration,
+                    radius,
+                    blast_radius,
+                    damage,
+                    max_distance,
+                ]
+                .into_iter()
+                .all(positive)
+                    && launch_speed <= speed
                     && multiplier(min_damage_multiplier)
                     && multiplier(missing_health_ratio)
             }

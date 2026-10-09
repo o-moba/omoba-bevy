@@ -351,10 +351,7 @@ fn basic_projectile_bodies_are_unique() {
     };
     assert_eq!(
         body_of(HeroClass::Wildspark, ProjectileStyle::Rocket),
-        (
-            FlightBody::Form(ProjectileForm::Tumbler, Silhouette::Block),
-            None
-        )
+        (FlightBody::Shape, Some(ProjectileShape::Bolt))
     );
     assert_eq!(
         body_of(HeroClass::Ranger, ProjectileStyle::Arrow),
@@ -482,7 +479,7 @@ fn findings_name_what_the_ratchet_counts() {
 
 /// The clips a final row plays, as a release, a windup, a recast or a basic attack.
 /// `attack` and `pistol_aim` stay in the library without a user.
-const REQUIRED_MOTIONS: [&str; 49] = [
+const REQUIRED_MOTIONS: [&str; 48] = [
     "cast",
     "spell_prepare",
     "spell_finish",
@@ -519,7 +516,6 @@ const REQUIRED_MOTIONS: [&str; 49] = [
     "shot_heavy",
     "burst_fire",
     "sky_shot",
-    "ground_shot",
     "reload_snap",
     "aim_hold_loop",
     "aim_loose_r",
@@ -780,7 +776,15 @@ fn target_uses_every_required_vocabulary_id() {
         .collect();
     assert_eq!(
         spare,
-        BTreeSet::from(["attack", "death", "idle", "pistol_aim", "run", "walk"])
+        BTreeSet::from([
+            "attack",
+            "death",
+            "ground_shot",
+            "idle",
+            "pistol_aim",
+            "run",
+            "walk"
+        ])
     );
     // The five 2D shapes stay in use, and the voices spread over the whole speed grid.
     for shape in [

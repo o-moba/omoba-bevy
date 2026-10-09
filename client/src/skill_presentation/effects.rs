@@ -294,6 +294,7 @@ struct BodyInstance {
     at: Vec3,
     light: Option<Entity>,
     unshadowed: bool,
+    jaw_fold: f32,
 }
 
 /// The name of a body: the skill and the replicated id of the effect it draws.
@@ -362,6 +363,7 @@ fn spawn_body(
         at: Vec3::ZERO,
         light: None,
         unshadowed: false,
+        jaw_fold: 0.0,
     }
 }
 
@@ -524,6 +526,18 @@ fn sync_bodies(
         }
         let root = bodies::root_pose(&seen);
         instance.at = root.translation;
+        if let shared::loadout::SkillEffect::TrapLine {
+            arm_secs,
+            duration_secs,
+            ..
+        } = shared::loadout::skill(e.skill).effect
+        {
+            instance.jaw_fold = if e.armed {
+                0.0
+            } else {
+                ((e.remaining_secs - (duration_secs - arm_secs)) / arm_secs).clamp(0.0, 1.0)
+            };
+        }
         let model_ready = instance.model.as_ref().is_some_and(|scene| {
             instance.parts.iter().any(|part| {
                 part.slot.role == Role::Model
@@ -649,6 +663,7 @@ fn finish(
     camera: Query<&GlobalTransform, With<crate::camera::MainCamera>>,
     children: Query<&Children>,
     shadowed: Query<(), (With<Mesh3d>, Without<NotShadowCaster>)>,
+    mut joints: Query<(&Name, &mut Transform)>,
 ) {
     let eye = camera
         .single()
@@ -670,6 +685,18 @@ fn finish(
             .iter()
             .find(|part| part.slot.role == Role::Model);
         if let Some(scene) = scene {
+            if instance.body.model == Some(Model::Trap) {
+                for child in children.iter_descendants(scene.entity) {
+                    if let Ok((name, mut pose)) = joints.get_mut(child) {
+                        let side = match name.as_str() {
+                            "WildsparkJawLeft" => -1.0,
+                            "WildsparkJawRight" => 1.0,
+                            _ => continue,
+                        };
+                        pose.rotation = Quat::from_rotation_z(side * 1.15 * instance.jaw_fold);
+                    }
+                }
+            }
             props.push((scene.entity, &mut instance.unshadowed));
         }
     }

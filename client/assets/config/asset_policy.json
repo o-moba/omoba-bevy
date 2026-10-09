@@ -175,14 +175,16 @@
   },
   "approved_skill_models": {
     "cosmetics/standard/rocket.glb": {
-      "sha256": "9b8ecef314aa746463aecc7c986eca5c6fb3139733da4883acacfcf46c3a577a",
-      "source": "scripts/build_standard_skill_models.py",
-      "provenance": "original project-authored geometry"
+      "sha256": "b369a17b747e4492a098a02e1838318ab5cf8b7202592d061464741e6696b51f",
+      "source": "scripts/build_wildspark_models.py",
+      "provenance": "original project-authored geometry",
+      "license": "CC-BY-4.0"
     },
     "cosmetics/standard/trap.glb": {
-      "sha256": "4b4f72de7c0af8f8cbdf5f232e630f86e1c6684498640095de8b0ab92f1210a5",
-      "source": "scripts/build_standard_skill_models.py",
-      "provenance": "original project-authored geometry"
+      "sha256": "c4837f1ab11029b6df3179012d435464ca14ccba68a8ed537054c01c2ce55510",
+      "source": "scripts/build_wildspark_models.py",
+      "provenance": "original project-authored geometry",
+      "license": "CC-BY-4.0"
     },
     "cosmetics/standard/hook.glb": {
       "sha256": "c4eafd6b3115397c68d12273fc704591dee549fa1653269d462fee478d21e4c5",
@@ -236,8 +238,8 @@
       "license": "CC-BY-4.0"
     },
     "weapons/wild-launcher.glb": {
-      "sha256": "45d1b78660cc0df623cad9ff0f7951c506aa3b895d81050d02e303e12277b554",
-      "source": "scripts/build_ranged_handhelds.py",
+      "sha256": "f89e32ad001c94fb0178f9740ddfe9c177f28847818153703c2ae9c007ecacf0",
+      "source": "scripts/build_wildspark_models.py",
       "provenance": "original project-authored geometry",
       "license": "CC-BY-4.0"
     },
@@ -248,8 +250,14 @@
       "license": "CC-BY-4.0"
     },
     "weapons/wild-rocket.glb": {
-      "sha256": "eb80c8c58b884eea820f990dd190cedde5ee263f65da15aeeaf836519b30a208",
-      "source": "scripts/build_ranged_handhelds.py",
+      "sha256": "a6743a59dbbb27ba75b315c665cdcca570021e6bc79b5e10f2f57690d7116ac9",
+      "source": "scripts/build_wildspark_models.py",
+      "provenance": "original project-authored geometry",
+      "license": "CC-BY-4.0"
+    },
+    "weapons/wildspark-repeater.glb": {
+      "sha256": "09edd94f6296e15ce0b19e80c06970e987c06827707aad9bec13e42ecc9df29e",
+      "source": "scripts/build_wildspark_models.py",
       "provenance": "original project-authored geometry",
       "license": "CC-BY-4.0"
     }

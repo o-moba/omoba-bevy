@@ -1,5 +1,29 @@
 # Feature Inventory
 
+## Wildspark reference iteration (0.44.0 candidate)
+
+Switchfire keeps a fast, stacking single-target repeater and a slower launcher:
+each accepted rocket autoattack costs 4 mana and splashes in a 2 m radius.
+Shockline is an aimed long-range shot that stops at its first enemy and slows it;
+Snapline opens three mechanical traps during their 0.6 s arming period.
+Last Spark now accelerates from 18 to 45 m/s at 54 m/s², passes minions, and
+explodes at its first enemy hero. Its base damage rises from 50% to 100% over
+20 m, then adds 25% of **each** nearby enemy's missing health. The blast radius
+is 3 m (unit collision radii participate); five sufficiently wounded heroes can
+all die in one blast. Healthy and out-of-range controls remain separate.
+
+Original gunmetal/brass models add a rotating barrel assembly, launcher recoil,
+opening trap jaws and finned rockets. Accepted W/R temporarily draw the launcher;
+explicit skins remain selected. Barrel flashes follow the actual hand socket.
+One server-confirmed detonation produces one compact ignition, expanding shockwave,
+falling fragments and delayed embers, regardless of victim count. Damage numbers
+remain per victim; a shielded detonation never prints invented damage. Fog hides
+unseen blast centres, and a vanished projectile alone produces no explosion.
+
+Protocol 11 remains additive-compatible; gameplay revision
+`wildspark-2026-10-09-reference` and catalog `standard-kits-7` require matching
+client and server. See [implementation and verification](progress/2026-10-09-wildspark-reference.md).
+
 ## First-match guidance and mobile comfort (0.44.0 candidate)
 
 The guide starts with the objective: clear one lane with allied minions, then destroy the enemy main tower. Loading shows five advice cards, navigable with arrows or a single-finger horizontal swipe in the text area. Settings → HUD → Beginner tips remembers whether loading advice and the automatic first-match guide appear; manual Help remains available. Older preferences enable advice by default.
@@ -15,8 +39,7 @@ effect, a hit recipe drawn on the confirmed receipt and a voice made from the
 existing samples. No two skills share motion family, body and impact, and a
 skill keeps its look on any button and in any recipe. Warrior and Warden basic
 attacks no longer throw a blade, every legacy projectile ability has a flight
-form of its own, and the Wildspark launcher round is a canister rather than the
-rocket model. Aim previews of the 48 modular skills are drawn from the server
+form of its own; the later Wildspark iteration above replaces its canister with a finned launcher rocket. Aim previews of the 48 modular skills are drawn from the server
 rule. Status effects are mesh shapes read from replicated flags, and Northwall
 shows each projectile it stops.
 
