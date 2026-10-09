@@ -11,12 +11,18 @@ pub(super) struct SkillEffectGizmos;
 #[derive(Resource, Default)]
 pub(crate) struct SkillAimVector(pub Option<(Vec2, Vec2, f32)>);
 
-use shared::loadout::{EffectVisualKind, WeaponMode};
+use shared::loadout::{EffectVisualKind, LoadoutState, SkillEffectState, WeaponMode};
 use shared::{HeroClass, TargetingMode};
 
+use super::aim_preview;
 use crate::i18n::{data, tr, trf};
 use crate::net::{GameStateSnapshot, NetworkHeroClass, PlayerLoadout};
 use crate::player::Player;
+use crate::skill_presentation::SkillPresentation;
+use crate::skill_presentation::geometry::{self, GeoShape};
+use crate::skill_presentation::stage::{self, Stage};
+use crate::skill_presentation::status::{self, StateVisual};
+use crate::skill_presentation::vocab::RecastMarker;
 use crate::sprite::PlayerVisualMode;
 
 pub(crate) fn bounded_aim(origin: Vec2, aim: Vec2, targeting: TargetingMode, range: f32) -> Vec2 {
@@ -102,6 +108,7 @@ pub(super) fn update_status(
     mut label: Query<(&mut Text, &mut Node), With<StandardStatus>>,
     mobile: Res<crate::mobile_controls::MobileControls>,
     pad: Res<crate::gamepad::GamepadControls>,
+    cooldowns: Res<super::cooldown::LocalCastCooldown>,
 ) {
     let Ok((mut text, mut node)) = label.single_mut() else {
         return;
@@ -201,7 +208,14 @@ pub(super) fn update_status(
             &[("seconds", &format!("{:.1}", state.passive_remaining_secs))],
         ));
     }
-    for (i, slot) in state.slots.iter().enumerate().filter(|(_, s)| s.can_recast) {
+    // Only a recast the server accepts where the hero stands: `recast_usable`, as the slot
+    // mirror keeps it for the hotbar.
+    for (i, slot) in state
+        .slots
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| cooldowns.recast[*i])
+    {
         lines.push(trf(
             "combat.standard.recast",
             &[
@@ -213,7 +227,7 @@ pub(super) fn update_status(
     text.0 = lines.join("\n");
 }
 
-fn point(p: Vec2, mode: PlayerVisualMode, map: Option<&crate::maps::MapLayout>) -> Vec3 {
+pub(super) fn point(p: Vec2, mode: PlayerVisualMode, map: Option<&crate::maps::MapLayout>) -> Vec3 {
     let world = Vec3::new(
         p.x,
         map.map_or(0.08, |m| m.terrain_height_3d(p.x, p.y) + 0.12),
@@ -226,39 +240,8 @@ fn point(p: Vec2, mode: PlayerVisualMode, map: Option<&crate::maps::MapLayout>) 
     }
 }
 
-fn ground_line<G: GizmoConfigGroup>(
-    gizmos: &mut Gizmos<G>,
-    a: Vec2,
-    b: Vec2,
-    mode: PlayerVisualMode,
-    map: Option<&crate::maps::MapLayout>,
-    color: Color,
-) {
-    let steps = (a.distance(b) / 1.5).ceil().clamp(1.0, 192.0) as usize;
-    gizmos.linestrip(
-        (0..=steps).map(|i| point(a.lerp(b, i as f32 / steps as f32), mode, map)),
-        color,
-    );
-}
-
-fn ring<G: GizmoConfigGroup>(
-    gizmos: &mut Gizmos<G>,
-    p: Vec2,
-    radius: f32,
-    mode: PlayerVisualMode,
-    map: Option<&crate::maps::MapLayout>,
-    color: Color,
-) {
-    gizmos.linestrip(
-        (0..=48).map(|i| {
-            let angle = i as f32 * std::f32::consts::TAU / 48.0;
-            point(p + Vec2::new(angle.cos(), angle.sin()) * radius, mode, map)
-        }),
-        color,
-    );
-}
-
-/// Authored aim geometry while a key, touch drag or controller button is held.
+/// The aim preview while a key, touch drag or controller button is held: the rule the
+/// server would apply to the cast, as `geometry::preview_shape` derives it.
 pub(crate) fn draw_aim(
     mut gizmos: Gizmos<SkillAimGizmos>,
     mut vector: ResMut<SkillAimVector>,
@@ -270,6 +253,7 @@ pub(crate) fn draw_aim(
             &super::CombatStats,
             &crate::team::Team,
             Option<&crate::net::PlayerLoadout>,
+            Option<&crate::net::NetworkPlayerId>,
         ),
         With<Player>,
     >,
@@ -278,19 +262,27 @@ pub(crate) fn draw_aim(
     mode: Res<PlayerVisualMode>,
     map: Option<Res<crate::maps::MapLayout>>,
     context: Res<crate::input_context::GameplayInputContext>,
-    keyboard: Res<ButtonInput<KeyCode>>,
-    mobile: Option<Res<crate::mobile_controls::MobileControls>>,
-    pad: Option<Res<crate::gamepad::GamepadControls>>,
+    (keyboard, mobile, pad): (
+        Res<ButtonInput<KeyCode>>,
+        Option<Res<crate::mobile_controls::MobileControls>>,
+        Option<Res<crate::gamepad::GamepadControls>>,
+    ),
     candidates: super::selection::TargetCandidates,
     validity: crate::targeting::TargetValidity,
     target: Res<super::selection::TargetState>,
     basic: Res<crate::targeting::BasicAttackState>,
+    world: aim_preview::AimWorld,
+    #[cfg(feature = "qa")] mut shown: ResMut<aim_preview::AimPreviewShown>,
 ) {
     vector.0 = None;
+    #[cfg(feature = "qa")]
+    {
+        shown.0 = None;
+    }
     if !context.gameplay_allowed() {
         return;
     }
-    let Ok((pose, class, progression, stats, team, loadout)) = local.single() else {
+    let Ok((pose, class, progression, stats, team, loadout, id)) = local.single() else {
         return;
     };
     if !stats.is_alive() {
@@ -318,12 +310,12 @@ pub(crate) fn draw_aim(
     let Some(def) = skills.skill(shared::SkillSlot::ALL[slot]) else {
         return;
     };
-    if def.ability.targeting == TargetingMode::SelfTarget {
-        return;
-    }
     let origin = pose.translation.xz();
     let range = shared::scaled_cast_range(&def.ability, progression.ranks[slot].max(1));
-    let aim = if touch.is_some() || controller.is_some() {
+    let aim = if def.ability.targeting == TargetingMode::SelfTarget {
+        // A self cast has no aim: its preview stands on the hero or on its orb.
+        origin
+    } else if touch.is_some() || controller.is_some() {
         let screen = touch
             .and_then(|t| t.aim)
             .or_else(|| controller.and_then(|p| p.aim));
@@ -335,15 +327,20 @@ pub(crate) fn draw_aim(
         let assisted = screen
             .is_none()
             .then(|| {
-                super::mobile::quick_cast_target(
-                    origin,
-                    *team,
-                    range,
-                    target.selected_entity,
-                    basic.order.map(|order| order.entity),
-                    &candidates,
-                    &validity,
-                )
+                // The aim the cast would be sent with: an ally for a skill cast on one.
+                world
+                    .ally_quick_cast(Some(def), origin, *team, &candidates)
+                    .or_else(|| {
+                        super::mobile::quick_cast_target(
+                            origin,
+                            *team,
+                            range,
+                            target.selected_entity,
+                            basic.order.map(|order| order.entity),
+                            &candidates,
+                            &validity,
+                        )
+                    })
             })
             .flatten();
         let extent = touch.map(|t| t.extent).unwrap_or_else(|| {
@@ -375,79 +372,425 @@ pub(crate) fn draw_aim(
         p.xz()
     };
     let aim = bounded_aim(origin, aim, def.ability.targeting, range);
-    let direction = (aim - origin).normalize_or_zero();
-    let color = Color::linear_rgb(0.015, 0.8, 5.0);
-    let map = map.as_deref();
-    match def.effect {
-        shared::loadout::SkillEffect::RecastZone { radius, .. } => {
-            ring(&mut gizmos, aim, radius, *mode, map, color)
+    let caster = aim_preview::Caster {
+        position: origin,
+        id: id.map(|id| id.0),
+        team: *team,
+        flags: loadout.and_then(|loadout| loadout.0.as_ref()),
+        slot,
+    };
+    let preview = world.preview(def, &caster, aim, &candidates);
+    vector.0 = aim_preview::minimap_vector(&preview);
+    aim_preview::draw(&mut gizmos, &preview, *mode, map.as_deref());
+    #[cfg(feature = "qa")]
+    {
+        shown.0 = Some((slot, preview));
+    }
+}
+
+/// What a line of the fallback drawing of an effect is painted with.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Ink {
+    /// The colour of the skill: the exact boundary of the effect, or the mark of an object
+    /// that has none.
+    Skill,
+    /// The team colour: reading aids that claim no area.
+    Team,
+    /// The team colour at half strength.
+    TeamFaint,
+    /// The cross of a trap that is armed.
+    Armed,
+    /// The cross of a trap that is not armed yet.
+    Arming,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(super) struct Stroke {
+    pub points: Vec<Vec2>,
+    pub ink: Ink,
+}
+
+/// The lines the fallback draws for one replicated effect, in simulation ground
+/// coordinates: first its boundary exactly as `geometry::boundary_shape` derives it from
+/// the received fields, then reading aids. The sides a cage has lost are left out.
+pub(super) fn effect_strokes(e: &SkillEffectState) -> Vec<Stroke> {
+    use EffectVisualKind as K;
+    let geo = geometry::boundary_shape(e.skill, e.kind, e);
+    let mut strokes: Vec<Stroke> = geo
+        .outline()
+        .into_iter()
+        .enumerate()
+        .filter(|(side, _)| e.kind != K::Cage || e.consumed_segments & (1 << side) == 0)
+        .map(|(_, points)| Stroke {
+            points,
+            ink: Ink::Skill,
+        })
+        .collect();
+    let p = Vec2::from_array(e.position);
+    let end = Vec2::from_array(e.end);
+    let radius = e.radius;
+    let ring = |radius: f32, ink: Ink| Stroke {
+        points: GeoShape::Ring { center: p, radius }.outline().remove(0),
+        ink,
+    };
+    let line = |from: Vec2, to: Vec2, ink: Ink| Stroke {
+        points: vec![from, to],
+        ink,
+    };
+    match e.kind {
+        K::Field | K::Healing | K::Anchor | K::Orb | K::Lantern => {
+            strokes.push(ring(radius * 0.86, Ink::TeamFaint));
         }
-        shared::loadout::SkillEffect::TrapLine {
-            radius,
-            count,
-            spacing,
-            ..
-        } => {
-            let side = Vec2::new(-direction.y, direction.x);
-            for i in 0..count {
-                ring(
-                    &mut gizmos,
-                    aim + side * (i as f32 - (count - 1) as f32 / 2.0) * spacing,
-                    radius,
-                    *mode,
-                    map,
-                    color,
-                );
-            }
-        }
-        _ => {
-            let radius = match def.effect {
-                shared::loadout::SkillEffect::Technique { radius, .. }
-                | shared::loadout::SkillEffect::LinearProjectile { radius, .. }
-                | shared::loadout::SkillEffect::ReturningShield { radius, .. }
-                | shared::loadout::SkillEffect::ImpactRocket { radius, .. } => radius,
-                shared::loadout::SkillEffect::Beam { width, .. } => width,
-                _ => 0.2,
-            };
-            let side = Vec2::new(-direction.y, direction.x) * radius;
+        K::Trap => {
+            strokes.push(ring(radius * 0.86, Ink::TeamFaint));
+            let offset = radius * 0.7;
+            let ink = if e.armed { Ink::Armed } else { Ink::Arming };
             for sign in [-1.0, 1.0] {
-                ground_line(
-                    &mut gizmos,
-                    origin + side * sign,
-                    origin + direction * range + side * sign,
-                    *mode,
-                    map,
-                    color,
-                );
+                strokes.push(line(
+                    p + Vec2::new(-offset, sign * offset),
+                    p + Vec2::new(offset, -sign * offset),
+                    ink,
+                ));
             }
-            if direction.length_squared() > 0.5 {
-                if range >= 35.0 {
-                    vector.0 = Some((origin, origin + direction * range, radius));
-                }
-                let distance = range.min(14.0);
-                let tip = origin + direction * distance;
-                let wing = Vec2::new(-direction.y, direction.x) * radius.max(0.5);
-                for sign in [-1.0, 1.0] {
-                    ground_line(
-                        &mut gizmos,
-                        tip - direction * 1.5 + wing * sign,
-                        tip,
-                        *mode,
-                        map,
-                        color,
-                    );
-                }
+        }
+        K::BeamWarning => {
+            // A circular warning fills toward its edge and is full exactly when the server
+            // fires, as its marker does in 3D.
+            let view = stage::view(e);
+            let filled = radius * view.progress;
+            if matches!(geo, GeoShape::Ring { .. })
+                && view.stage == Stage::Telegraph
+                && filled > 0.05
+            {
+                strokes.push(ring(filled, Ink::Team));
             }
+        }
+        K::Beam => {
+            let side = (end - p).normalize_or_zero().perp() * radius;
+            strokes.extend((-2..=2).map(|i| {
+                let side = side * (i as f32 / 3.0);
+                line(p + side, end + side, Ink::Team)
+            }));
+        }
+        K::Bolt | K::Barrier | K::Rocket => {
+            let direction = (end - p).normalize_or_zero();
+            strokes.push(line(
+                p - direction * radius * 3.0,
+                p + direction * radius,
+                Ink::Team,
+            ));
+        }
+        K::Soul => {
+            // No reach is replicated for a soul, so it gets a mark and no ring.
+            let corners = [Vec2::X, Vec2::Y, Vec2::NEG_X, Vec2::NEG_Y, Vec2::X];
+            strokes.push(Stroke {
+                points: corners.map(|corner| p + corner * radius).to_vec(),
+                ink: Ink::Skill,
+            });
+        }
+        K::ShieldWall => {
+            // A wall that has stopped a projectile is cracked in the middle of its bar, as
+            // its keystone is in 3D.
+            if let (true, GeoShape::Segment { from, to }) =
+                (crate::skill_presentation::bodies::cracked(e), geo)
+            {
+                let middle = from.midpoint(to);
+                let along = (to - from).normalize_or_zero() * WALL_CRACK;
+                let across = along.perp();
+                strokes.push(Stroke {
+                    points: vec![
+                        middle + across - along * 0.4,
+                        middle + along * 0.4,
+                        middle - along * 0.4,
+                        middle - across + along * 0.4,
+                    ],
+                    ink: Ink::Team,
+                });
+            }
+        }
+        K::Cage => {}
+    }
+    strokes
+}
+
+/// Half the length of the crack across a wall in the flat view.
+const WALL_CRACK: f32 = 0.45;
+
+/// A gizmo line around a hero, in simulation ground coordinates.
+#[derive(Clone, Debug, PartialEq)]
+pub(super) struct HeroMark {
+    pub points: Vec<Vec2>,
+    pub color: Color,
+}
+
+fn circle(center: Vec2, radius: f32) -> Vec<Vec2> {
+    GeoShape::Ring { center, radius }.outline().remove(0)
+}
+
+/// Radius of the small ground ring of a slow.
+const SLOW_RING: f32 = 0.42;
+
+/// The gizmo of one state of the hero at `p`: the ring each state has had, and a small
+/// ring for a slow. A stun is drawn as the root it is replicated with. Camouflage and
+/// forging have no gizmo.
+pub(super) fn state_marks(state: StateVisual, flags: &LoadoutState, p: Vec2) -> Vec<HeroMark> {
+    let ring = |radius: f32, color: Color| {
+        vec![HeroMark {
+            points: circle(p, radius),
+            color,
+        }]
+    };
+    match state {
+        StateVisual::Stunned | StateVisual::Rooted => ring(0.7, Color::srgb(1.0, 0.3, 0.55)),
+        StateVisual::ParryStance => ring(1.4, Color::WHITE),
+        StateVisual::Shielded => ring(0.95, Color::srgb(0.5, 0.9, 1.0)),
+        StateVisual::Marked => ring(1.15, Color::srgb(1.0, 0.9, 0.3)),
+        StateVisual::Brittle => ring(1.2, Color::srgb(1.0, 0.6, 0.1)),
+        StateVisual::Concussed => (0..flags.concussion_stacks.min(4))
+            .map(|i| HeroMark {
+                points: circle(p + Vec2::new(-0.6 + f32::from(i) * 0.4, 1.4), 0.12),
+                color: Color::srgb(0.6, 0.9, 1.0),
+            })
+            .collect(),
+        StateVisual::Slowed => ring(SLOW_RING, Color::srgb(0.4, 0.65, 1.0)),
+        StateVisual::CamouflageVeil | StateVisual::Forging => Vec::new(),
+    }
+}
+
+/// The state gizmos of one hero: one for every state its flags report, except the state
+/// its mesh visual shows. The flat view has no mesh visual, so there every state keeps its
+/// gizmo; in 3D a slow that another state outranks keeps its small ring.
+pub(super) fn hero_state_marks(
+    mode: PlayerVisualMode,
+    visible: bool,
+    alive: bool,
+    flags: &LoadoutState,
+    p: Vec2,
+) -> Vec<HeroMark> {
+    let meshed = StateVisual::shown(mode, visible, alive, flags);
+    StateVisual::of(flags)
+        .filter(|state| Some(*state) != meshed)
+        .flat_map(|state| state_marks(state, flags, p))
+        .collect()
+}
+
+/// Distance of a recast marker from the feet of its hero.
+const MARKER_RING: f32 = 0.85;
+/// Radians per second at which the marks of `orbit_motes` circle.
+const MARKER_TURN: f32 = 2.6;
+
+/// The ground lines of a recast marker for the hero at `p` that faces `forward`.
+pub(super) fn marker_strokes(
+    marker: RecastMarker,
+    p: Vec2,
+    forward: Vec2,
+    now: f32,
+) -> Vec<Vec<Vec2>> {
+    use std::f32::consts::{FRAC_PI_2, FRAC_PI_4, PI};
+    let pip = |center: Vec2, half: f32| {
+        [Vec2::X, Vec2::Y, Vec2::NEG_X, Vec2::NEG_Y, Vec2::X]
+            .map(|corner| center + corner * half)
+            .to_vec()
+    };
+    match marker {
+        RecastMarker::RingPips => std::iter::once(circle(p, MARKER_RING))
+            .chain((0..4).map(|i| {
+                let turn = FRAC_PI_4 + i as f32 * FRAC_PI_2;
+                pip(p + Vec2::from_angle(turn) * MARKER_RING, 0.16)
+            }))
+            .collect(),
+        RecastMarker::OrbitMotes => (0..2)
+            .map(|i| {
+                let turn = now * MARKER_TURN + i as f32 * PI;
+                pip(p + Vec2::from_angle(turn) * MARKER_RING, 0.22)
+            })
+            .collect(),
+        RecastMarker::GroundArrows => (0..3)
+            .map(|i| {
+                let tip = p + forward * (MARKER_RING + 0.35 + i as f32 * 0.45);
+                let wing = forward.perp() * 0.36;
+                vec![tip - forward * 0.3 + wing, tip, tip - forward * 0.3 - wing]
+            })
+            .collect(),
+    }
+}
+
+/// The colour of the aid that leads a hero to its own orb in the flat view: that of the
+/// skill its replicated orb belongs to.
+fn orb_aid_color(
+    profiles: Option<&SkillPresentation>,
+    owner: Option<u64>,
+    effects: &[SkillEffectState],
+) -> Color {
+    owner
+        .and_then(|owner| {
+            effects.iter().find(|effect| {
+                effect.kind == EffectVisualKind::Orb && owner != 0 && effect.owner_id == owner
+            })
+        })
+        .and_then(|orb| profiles?.profile(orb.skill))
+        .map_or(Color::srgb(0.9, 0.7, 1.0), |profile| {
+            Color::srgb_from_array(profile.color)
+        })
+}
+
+/// One hero as its gizmos are drawn from it.
+pub(super) struct HeroSight<'a> {
+    pub mode: PlayerVisualMode,
+    /// The hero is drawn: nothing hides its entity.
+    pub visible: bool,
+    pub alive: bool,
+    pub class: Option<HeroClass>,
+    pub id: Option<u64>,
+    pub flags: &'a LoadoutState,
+    pub p: Vec2,
+    /// The way the hero faces, on the ground.
+    pub forward: Vec2,
+    pub now: f32,
+    pub profiles: Option<&'a SkillPresentation>,
+    pub effects: &'a [SkillEffectState],
+}
+
+/// Every gizmo line of one hero's replicated state: the aid to its own orb, the states its
+/// mesh visual does not show, and the marker of each recast the server offers it.
+pub(super) fn hero_marks(sight: &HeroSight) -> Vec<HeroMark> {
+    let HeroSight {
+        mode,
+        visible,
+        alive,
+        flags,
+        p,
+        ..
+    } = *sight;
+    let mut marks = Vec::new();
+    // The orb position is replicated to its owner alone. In 3D the orb is a body of its
+    // own; the flat view leads the owner to it with a ring and a line.
+    if mode == PlayerVisualMode::Sprite2d
+        && let Some(orb) = flags.orb_position
+    {
+        let orb = Vec2::from_array(orb);
+        let color = orb_aid_color(sight.profiles, sight.id, sight.effects);
+        marks.push(HeroMark {
+            points: circle(orb, 0.65),
+            color,
+        });
+        marks.push(HeroMark {
+            points: vec![p, orb],
+            color: color.with_alpha(0.3),
+        });
+    }
+    marks.extend(hero_state_marks(mode, visible, alive, flags, p));
+    // A recast the server offers a living hero the client sees, in the colour of its skill.
+    if visible
+        && alive
+        && let (Some(profiles), Some(class), Some(id)) = (sight.profiles, sight.class, sight.id)
+    {
+        for (marker, color) in status::recast_markers(profiles, class, flags, id, p, sight.effects)
+        {
+            marks.extend(
+                marker_strokes(marker, p, sight.forward, sight.now)
+                    .into_iter()
+                    .map(|points| HeroMark { points, color }),
+            );
         }
     }
+    marks
+}
+
+/// Distance of a vital side from the hero it stands around.
+const FACET_DISTANCE: f32 = 1.4;
+/// Half the length of a facet, along the line out of the hero.
+const FACET_LENGTH: f32 = 0.42;
+/// Half the width of a facet.
+const FACET_WIDTH: f32 = 0.2;
+/// How far apart the two halves of a broken side lie.
+const FACET_GAP: f32 = 0.15;
+
+/// A received hero state as the vital sides it names are drawn.
+pub(super) struct Duelist<'a> {
+    pub flags: &'a LoadoutState,
+    pub team: Option<crate::team::Team>,
+    /// It is the state of the local hero: only that hero is shown the side of its passive.
+    pub own: bool,
+}
+
+/// A hero as vital sides are drawn around it.
+pub(super) struct FacetTarget {
+    pub id: u64,
+    pub team: Option<crate::team::Team>,
+    /// The hero is drawn and alive.
+    pub seen: bool,
+    pub p: Vec2,
+}
+
+/// The vital sides a duelist has on a hostile hero the client sees: all four while that
+/// hero is the one the duelist challenged, a struck side as two grey halves; otherwise,
+/// for the local hero with the Vitals passive, the one side its next hit must come from.
+/// The sides lie on the world axes in the order the server counts them (+x, +z, -x, -z).
+/// Lines on the ground only: nothing here is a state of the target.
+pub(super) fn duel_facets(duelist: &Duelist, target: &FacetTarget) -> Vec<HeroMark> {
+    let duel = duelist.flags;
+    if !target.seen || duelist.team == target.team {
+        return Vec::new();
+    }
+    let challenged = duel.challenge_target == Some(target.id);
+    let vitals = duelist.own
+        && duel
+            .recipe
+            .as_ref()
+            .is_some_and(|recipe| recipe.passive == shared::loadout::PassiveId::Vitals);
+    let rotating = (target.id as u8).wrapping_add(duel.vital_rotation) % 4;
+    let mut marks = Vec::new();
+    for side in (0..4u8).filter(|side| challenged || (vitals && *side == rotating)) {
+        let out = Vec2::from_angle(f32::from(side) * std::f32::consts::FRAC_PI_2);
+        let center = target.p + out * FACET_DISTANCE;
+        let (tip, wing) = (out * FACET_LENGTH, out.perp() * FACET_WIDTH);
+        if challenged && duel.challenge_sides & (1 << side) != 0 {
+            // A struck side: the diamond lies open, in two halves.
+            let color = Color::srgb(0.3, 0.35, 0.4);
+            for half in [1.0, -1.0] {
+                let base = center + out * (FACET_GAP * 0.5) * half;
+                marks.push(HeroMark {
+                    points: vec![base + wing, center + tip * half, base - wing],
+                    color,
+                });
+            }
+        } else {
+            // An open side: the whole diamond with the line of the hit through it.
+            let color = Color::srgb(1.0, 0.75, 0.2);
+            marks.push(HeroMark {
+                points: vec![
+                    center + tip,
+                    center + wing,
+                    center - tip,
+                    center - wing,
+                    center + tip,
+                ],
+                color,
+            });
+            marks.push(HeroMark {
+                points: vec![center - tip, center + tip],
+                color,
+            });
+        }
+    }
+    marks
+}
+
+/// Whether the fallback lines of an effect are drawn. In the flat view they always are. In
+/// 3D a body draws its own boundary in the colour of the team, and lines of another colour
+/// over it would hide whose it is; an effect no row gives a body keeps its lines.
+pub(super) fn outlined(mode: PlayerVisualMode, staged: bool) -> bool {
+    mode != PlayerVisualMode::Models3d || !staged
 }
 
 /// Bounded, snapshot-driven geometry. Effects do not depend on a visible owner.
 pub(super) fn draw_effects(
     mut gizmos: Gizmos<SkillEffectGizmos>,
-    profiles: Option<Res<crate::skill_presentation::SkillPresentation>>,
+    profiles: Option<Res<SkillPresentation>>,
     game: Option<Res<GameStateSnapshot>>,
     mode: Res<PlayerVisualMode>,
+    clock: Option<Res<crate::vfx_clock::VfxClock>>,
     map: Option<Res<crate::maps::MapLayout>>,
     local: Query<&crate::team::Team, With<Player>>,
     actors: Query<(
@@ -456,6 +799,8 @@ pub(super) fn draw_effects(
         Option<&NetworkHeroClass>,
         Option<&crate::net::NetworkPlayerId>,
         Option<&crate::team::Team>,
+        Option<&InheritedVisibility>,
+        Option<&super::CombatStats>,
     )>,
 ) {
     let Some(game) = game else {
@@ -467,22 +812,18 @@ pub(super) fn draw_effects(
         .iter()
         .take(shared::loadout::MAX_ACTIVE_EFFECTS)
     {
-        if !e.position.into_iter().chain(e.end).all(f32::is_finite) || !e.radius.is_finite() {
-            continue;
-        }
-        let p = Vec2::from_array(e.position);
-        // Keep the tactical trap outline over the newer 3D trap model.
-        if *mode == PlayerVisualMode::Models3d
-            && e.kind != EffectVisualKind::Trap
-            && profiles
-                .as_ref()
-                .is_some_and(|r| r.profile(e.skill).is_some())
+        if !e.position.into_iter().chain(e.end).all(f32::is_finite)
+            || !(0.0..=256.0).contains(&e.radius)
         {
             continue;
         }
-        let end = Vec2::from_array(e.end);
+        let profile = profiles.as_ref().and_then(|r| r.profile(e.skill));
+        let staged = profiles.as_ref().is_some_and(|r| r.body_for(e).is_some());
+        if !outlined(*mode, staged) {
+            continue;
+        }
         let friendly = local.single().is_ok_and(|t| *t == e.owner_team);
-        let color = if e.kind == EffectVisualKind::Trap {
+        let team = if e.kind == EffectVisualKind::Trap {
             if friendly {
                 Color::linear_rgb(0.015, 0.8, 5.0)
             } else {
@@ -493,188 +834,87 @@ pub(super) fn draw_effects(
         } else {
             Color::srgb(1.0, 0.3, 0.28)
         };
-        let radius = e.radius.clamp(0.05, 256.0);
-        match e.kind {
-            EffectVisualKind::Cage => {
-                for i in 0..5 {
-                    if e.consumed_segments & (1 << i) != 0 {
-                        continue;
-                    }
-                    let a = i as f32 * std::f32::consts::TAU / 5.0;
-                    let b = (i + 1) as f32 * std::f32::consts::TAU / 5.0;
-                    gizmos.line(
-                        point(p + Vec2::new(a.cos(), a.sin()) * radius, *mode, map),
-                        point(p + Vec2::new(b.cos(), b.sin()) * radius, *mode, map),
-                        color,
-                    );
-                }
-            }
-            EffectVisualKind::ShieldWall => {
-                let d = (end - p).normalize_or_zero();
-                let center = p + d;
-                let side = Vec2::new(-d.y, d.x) * radius;
-                gizmos.line(
-                    point(center - side, *mode, map),
-                    point(center + side, *mode, map),
-                    color,
-                );
-            }
-
-            EffectVisualKind::Field
-            | EffectVisualKind::Trap
-            | EffectVisualKind::Healing
-            | EffectVisualKind::Anchor
-            | EffectVisualKind::Soul
-            | EffectVisualKind::Orb
-            | EffectVisualKind::Lantern => {
-                ring(&mut gizmos, p, radius, *mode, map, color);
-                ring(
-                    &mut gizmos,
-                    p,
-                    radius * 0.86,
-                    *mode,
-                    map,
-                    color.with_alpha(0.5),
-                );
-                if e.kind == EffectVisualKind::Trap {
-                    let offset = radius * 0.7;
-                    for sign in [-1.0, 1.0] {
-                        gizmos.line(
-                            point(p + Vec2::new(-offset, sign * offset), *mode, map),
-                            point(p + Vec2::new(offset, -sign * offset), *mode, map),
-                            if e.armed {
-                                Color::WHITE
-                            } else {
-                                Color::srgb(1.0, 0.75, 0.15)
-                            },
-                        );
-                    }
-                }
-            }
-            EffectVisualKind::BeamWarning | EffectVisualKind::Beam => {
-                let d = (end - p).normalize_or_zero();
-                let side = Vec2::new(-d.y, d.x) * radius;
-                for offset in [-1.0, 1.0] {
-                    gizmos.line(
-                        point(p + side * offset, *mode, map),
-                        point(end + side * offset, *mode, map),
-                        color,
-                    );
-                }
-                if e.kind == EffectVisualKind::Beam {
-                    for i in -3..=3 {
-                        let side = side * (i as f32 / 3.0);
-                        gizmos.line(
-                            point(p + side, *mode, map),
-                            point(end + side, *mode, map),
-                            color,
-                        );
-                    }
-                }
-            }
-            EffectVisualKind::Bolt | EffectVisualKind::Barrier | EffectVisualKind::Rocket => {
-                ring(&mut gizmos, p, radius, *mode, map, color);
-                let direction = (end - p).normalize_or_zero();
-                gizmos.line(
-                    point(p - direction * radius * 3.0, *mode, map),
-                    point(p + direction * radius, *mode, map),
-                    color,
-                );
-                if e.kind == EffectVisualKind::Barrier {
-                    ring(
-                        &mut gizmos,
-                        p,
-                        radius * 1.4,
-                        *mode,
-                        map,
-                        Color::srgb(0.95, 0.85, 0.4),
-                    );
-                }
-            }
+        // The flat view has no body for the effect, so its outline carries the colour of
+        // the skill. Over a 3D model the outline stays a team marker.
+        let skill = profile
+            .filter(|_| *mode == PlayerVisualMode::Sprite2d)
+            .map_or(team, |profile| Color::srgb_from_array(profile.color));
+        for stroke in effect_strokes(e) {
+            let color = match stroke.ink {
+                Ink::Skill => skill,
+                Ink::Team => team,
+                Ink::TeamFaint => team.with_alpha(0.5),
+                Ink::Armed => Color::WHITE,
+                Ink::Arming => Color::srgb(1.0, 0.75, 0.15),
+            };
+            // Long edges are split so that they follow the ground in 3D.
+            let points = stroke.points.windows(2).flat_map(|edge| {
+                let steps = (edge[0].distance(edge[1]) / 1.5).ceil().clamp(1.0, 192.0) as usize;
+                (0..steps).map(move |i| edge[0].lerp(edge[1], i as f32 / steps as f32))
+            });
+            gizmos.linestrip(
+                points
+                    .chain(stroke.points.last().copied())
+                    .map(|at| point(at, *mode, map)),
+                color,
+            );
         }
     }
-    let duelist = actors
+    // Every received state that can name a vital side: the local hero's own, and any other
+    // whose challenge the server sends (today it sends that of the local hero alone).
+    let duelists: Vec<Duelist> = actors
         .iter()
-        .find(|(_, _, _, id, _)| id.is_some_and(|id| id.0 == game.your_id))
-        .and_then(|(_, l, _, _, team)| {
-            l.0.as_ref()
-                .filter(|s| {
-                    s.recipe
-                        .as_ref()
-                        .is_some_and(|r| r.passive == shared::loadout::PassiveId::Vitals)
-                        || s.challenge_target.is_some()
-                })
-                .map(|s| (s, team))
-        });
-    for (pose, loadout, class, id, team) in &actors {
-        if let (Some((duel, own_team)), Some(id)) = (duelist, id) {
-            if team != own_team {
-                let p = pose.translation.xz();
-                let challenge = duel.challenge_target == Some(id.0);
-                for side in 0..4 {
-                    if challenge || side == (id.0 as u8).wrapping_add(duel.vital_rotation) % 4 {
-                        let a = side as f32 * std::f32::consts::FRAC_PI_2;
-                        let color = if challenge && duel.challenge_sides & (1 << side) != 0 {
-                            Color::srgb(0.3, 0.35, 0.4)
-                        } else {
-                            Color::srgb(1.0, 0.75, 0.2)
-                        };
-                        ring(
-                            &mut gizmos,
-                            p + Vec2::new(a.cos(), a.sin()) * 1.4,
-                            0.3,
-                            *mode,
-                            map,
-                            color,
-                        );
-                    }
-                }
+        .filter_map(|(_, loadout, _, id, team, ..)| {
+            Some(Duelist {
+                flags: loadout.0.as_ref()?,
+                team: team.copied(),
+                own: id.is_some_and(|id| id.0 == game.your_id),
+            })
+        })
+        .collect();
+    let now = clock.map_or(0.0, |clock| clock.now as f32);
+    for (pose, loadout, class, id, team, visible, stats) in &actors {
+        let p = pose.translation.xz();
+        let visible = visible.is_some_and(|visible| visible.get());
+        let alive = stats.is_none_or(|stats| stats.is_alive());
+        if let Some(id) = id {
+            let target = FacetTarget {
+                id: id.0,
+                team: team.copied(),
+                seen: visible && alive,
+                p,
+            };
+            for mark in duelists
+                .iter()
+                .flat_map(|duelist| duel_facets(duelist, &target))
+            {
+                gizmos.linestrip(
+                    mark.points.iter().map(|at| point(*at, *mode, map)),
+                    mark.color,
+                );
             }
         }
         let Some(state) = &loadout.0 else {
             continue;
         };
-        let p = pose.translation.xz();
-        if let Some(orb) = state.orb_position {
-            let orb = Vec2::from_array(orb);
-            ring(
-                &mut gizmos,
-                orb,
-                0.65,
-                *mode,
-                map,
-                Color::srgb(0.9, 0.7, 1.0),
+        let sight = HeroSight {
+            mode: *mode,
+            visible,
+            alive,
+            class: class.map(|class| class.0),
+            id: id.map(|id| id.0),
+            flags: state,
+            p,
+            forward: pose.forward().xz().normalize_or(Vec2::NEG_Y),
+            now,
+            profiles: profiles.as_deref(),
+            effects: &game.skill_effects,
+        };
+        for mark in hero_marks(&sight) {
+            gizmos.linestrip(
+                mark.points.iter().map(|at| point(*at, *mode, map)),
+                mark.color,
             );
-            gizmos.line(
-                point(p, *mode, map),
-                point(orb, *mode, map),
-                Color::srgba(0.8, 0.7, 1.0, 0.3),
-            );
-        }
-        for i in 0..state.concussion_stacks.min(4) {
-            ring(
-                &mut gizmos,
-                p + Vec2::new(-0.6 + i as f32 * 0.4, 1.4),
-                0.12,
-                *mode,
-                map,
-                Color::srgb(0.6, 0.9, 1.0),
-            );
-        }
-        if state.brittle {
-            ring(&mut gizmos, p, 1.2, *mode, map, Color::srgb(1.0, 0.6, 0.1));
-        }
-        if state.parrying {
-            ring(&mut gizmos, p, 1.4, *mode, map, Color::WHITE);
-        }
-        if state.shield_hp > 0.0 {
-            ring(&mut gizmos, p, 0.95, *mode, map, Color::srgb(0.5, 0.9, 1.0));
-        }
-        if state.root_remaining_secs > 0.0 {
-            ring(&mut gizmos, p, 0.7, *mode, map, Color::srgb(1.0, 0.3, 0.55));
-        }
-        if state.mark_remaining_secs > 0.0 {
-            ring(&mut gizmos, p, 1.15, *mode, map, Color::srgb(1.0, 0.9, 0.3));
         }
         if state.recipe.is_some()
             && let Some(class) = class
@@ -701,6 +941,906 @@ pub(super) fn draw_effects(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use shared::loadout::SkillId;
+
+    fn effect(skill: SkillId, kind: EffectVisualKind) -> SkillEffectState {
+        SkillEffectState {
+            id: 1,
+            owner_id: 7,
+            owner_team: shared::map::Team::Green,
+            skill,
+            kind,
+            position: [3.0, -2.0],
+            end: [3.0, 5.0],
+            radius: 1.5,
+            remaining_secs: 1.0,
+            armed: false,
+            consumed_segments: 0,
+        }
+    }
+
+    /// The strokes painted in the colour of the skill.
+    fn boundary(e: &SkillEffectState) -> Vec<Vec<Vec2>> {
+        effect_strokes(e)
+            .into_iter()
+            .filter(|stroke| stroke.ink == Ink::Skill)
+            .map(|stroke| stroke.points)
+            .collect()
+    }
+
+    #[test]
+    fn every_effect_kind_has_a_flat_outline_that_equals_its_boundary() {
+        use EffectVisualKind as K;
+        // One skill for every kind the server can replicate.
+        let cases = [
+            (SkillId::OrbitalCommand, K::Orb),
+            (SkillId::IronHook, K::Soul),
+            (SkillId::AnchorStep, K::Anchor),
+            (SkillId::FourfoldDuel, K::Healing),
+            (SkillId::Northwall, K::ShieldWall),
+            (SkillId::IronBoundary, K::Cage),
+            (SkillId::GuidingLantern, K::Lantern),
+            (SkillId::WinterShard, K::Bolt),
+            (SkillId::DawnBarrier, K::Barrier),
+            (SkillId::DawnField, K::Field),
+            (SkillId::DawnRay, K::BeamWarning),
+            (SkillId::DawnRay, K::Beam),
+            (SkillId::WildTraps, K::Trap),
+            (SkillId::WildRocket, K::Rocket),
+        ];
+        let mut kinds = Vec::new();
+        for (skill, kind) in cases {
+            let e = effect(skill, kind);
+            let strokes = effect_strokes(&e);
+            assert!(!strokes.is_empty(), "{kind:?}");
+            for stroke in &strokes {
+                assert!(stroke.points.len() >= 2, "{kind:?}");
+                assert!(stroke.points.iter().all(|at| at.is_finite()), "{kind:?}");
+            }
+            // The outline is the boundary of the received fields and nothing else.
+            let geo = geometry::boundary_shape(skill, kind, &e);
+            if kind == K::Soul {
+                // No reach is replicated for a soul: a mark, and no ring.
+                assert_eq!(geo, GeoShape::None);
+                assert_eq!(boundary(&e).len(), 1);
+                assert_eq!(boundary(&e)[0].len(), 5);
+            } else {
+                assert_eq!(boundary(&e), geo.outline(), "{kind:?}");
+            }
+            if !kinds.contains(&kind) {
+                kinds.push(kind);
+            }
+        }
+        // A new kind does not compile in `effect_strokes` until it has an arm; this list
+        // keeps the table above complete.
+        assert_eq!(kinds.len(), 14);
+    }
+
+    #[test]
+    fn a_staged_body_replaces_the_fallback_lines_of_its_effect_in_3d() {
+        use EffectVisualKind as K;
+        use PlayerVisualMode::{Models3d, Sprite2d};
+        // The flat view has no body: every effect keeps its lines.
+        assert!(outlined(Sprite2d, false) && outlined(Sprite2d, true));
+        // A body carries the boundary and the team colour of its effect.
+        assert!(!outlined(Models3d, true));
+        // An effect no row gives a body is drawn by its lines alone.
+        assert!(outlined(Models3d, false));
+        // Every object a skill of the final rows replicates has its body, a trap's too, and
+        // a kind the skill does not replicate has none.
+        let registry = SkillPresentation::target();
+        for (skill, kind) in [
+            (SkillId::WildTraps, K::Trap),
+            (SkillId::DawnField, K::Field),
+            (SkillId::WinterShard, K::Bolt),
+            (SkillId::IronBoundary, K::Cage),
+        ] {
+            assert!(
+                registry.body_for(&effect(skill, kind)).is_some(),
+                "{kind:?}"
+            );
+        }
+        assert!(
+            registry
+                .body_for(&effect(SkillId::WinterShard, K::Cage))
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn the_fissure_is_a_capsule_the_cone_a_sector_and_the_collapse_a_ring() {
+        use EffectVisualKind as K;
+        let fissure = effect(SkillId::WinterDivide, K::BeamWarning);
+        assert_eq!(
+            boundary(&fissure),
+            GeoShape::Capsule {
+                from: Vec2::new(3.0, -2.0),
+                to: Vec2::new(3.0, 5.0),
+                radius: 1.5
+            }
+            .outline()
+        );
+        // Both round ends are part of the outline.
+        let tips = [Vec2::new(3.0, 6.5), Vec2::new(3.0, -3.5)];
+        for tip in tips {
+            assert!(
+                boundary(&fissure)[0]
+                    .iter()
+                    .any(|at| at.distance(tip) < 1e-3)
+            );
+        }
+        // It has no timed telegraph: no read-out is drawn inside it.
+        assert_eq!(effect_strokes(&fissure).len(), 1);
+
+        // The cone at its full range is a sector with the server's half-angle; a cone the
+        // fog cut short is the received line and nothing wider.
+        let range = shared::loadout::skill(SkillId::FurnaceBreath)
+            .ability
+            .cast_range;
+        let mut cone = effect(SkillId::FurnaceBreath, K::BeamWarning);
+        cone.end = [3.0, -2.0 + range];
+        let outline = boundary(&cone);
+        let widest = outline[0]
+            .iter()
+            .map(|at| (*at - Vec2::new(3.0, -2.0)).angle_to(Vec2::Y).abs())
+            .fold(0.0, f32::max);
+        assert!((widest.cos() - geometry::FURNACE_CONE_COS).abs() < 1e-4);
+        cone.end = [3.0, -2.0 + range - 1.0];
+        assert_eq!(
+            boundary(&cone),
+            [vec![Vec2::new(3.0, -2.0), Vec2::new(3.0, -3.0 + range)]]
+        );
+
+        // The collapse is a ring of the replicated radius. Its inner ring is full exactly
+        // when the server fires, also when the warning is first seen late.
+        let mut collapse = effect(SkillId::OrbitalCollapse, K::BeamWarning);
+        collapse.end = collapse.position;
+        collapse.radius = 5.0;
+        let mut inner = |remaining: f32| {
+            collapse.remaining_secs = remaining;
+            let strokes = effect_strokes(&collapse);
+            assert_eq!(
+                strokes[0].points,
+                GeoShape::Ring {
+                    center: Vec2::new(3.0, -2.0),
+                    radius: 5.0
+                }
+                .outline()[0]
+            );
+            strokes
+                .get(1)
+                .map(|stroke| (stroke.ink, stroke.points[0].distance(Vec2::new(3.0, -2.0))))
+        };
+        assert_eq!(inner(0.9), None);
+        let (ink, half) = inner(0.55).unwrap();
+        assert_eq!(ink, Ink::Team);
+        assert!((half - 2.5).abs() < 1e-4);
+        assert!((inner(0.2).unwrap().1 - 5.0).abs() < 1e-4);
+        // Below the tail the ring stays on the edge and never leaves it.
+        assert!((inner(0.05).unwrap().1 - 5.0).abs() < 1e-4);
+    }
+
+    /// The flat view marks a wall that has stopped a projectile with a crack across the
+    /// middle of its bar; the bar itself stays the replicated plane.
+    #[test]
+    fn a_wall_that_stopped_a_projectile_is_cracked_in_the_flat_view() {
+        let mut wall = effect(SkillId::Northwall, EffectVisualKind::ShieldWall);
+        wall.radius = 2.5;
+        wall.end = [3.0, 0.5];
+        let geo = geometry::boundary_shape(wall.skill, wall.kind, &wall);
+        let GeoShape::Segment { from, to } = geo else {
+            panic!("a wall is a bar: {geo:?}");
+        };
+        assert_eq!(effect_strokes(&wall).len(), 1);
+        for count in [1, 2, 255] {
+            wall.consumed_segments = count;
+            assert_eq!(boundary(&wall), geo.outline(), "{count}");
+            let strokes = effect_strokes(&wall);
+            let [_, crack] = strokes.as_slice() else {
+                panic!("the bar and its crack: {strokes:?}");
+            };
+            assert_eq!((crack.ink, crack.points.len()), (Ink::Team, 4));
+            // It crosses the bar at its middle and stays within half a unit of it.
+            let middle = from.midpoint(to);
+            let along = (to - from).normalize();
+            let sides: Vec<f32> = crack
+                .points
+                .iter()
+                .map(|at| (*at - middle).perp_dot(along))
+                .collect();
+            assert!(sides[0] * sides[3] < 0.0, "{sides:?}");
+            assert!(crack.points.iter().all(|at| at.distance(middle) <= 0.5));
+        }
+        // The bits of a cage are its lost sides, never a crack.
+        wall.consumed_segments = 0;
+        assert_eq!(effect_strokes(&wall).len(), 1);
+    }
+
+    #[test]
+    fn a_cage_draws_only_the_sides_it_still_has() {
+        let mut cage = effect(SkillId::IronBoundary, EffectVisualKind::Cage);
+        cage.radius = 6.0;
+        let sides = GeoShape::Pentagon {
+            center: Vec2::new(3.0, -2.0),
+            radius: 6.0,
+        }
+        .outline();
+        assert_eq!(boundary(&cage), sides);
+        cage.consumed_segments = 0b01010;
+        assert_eq!(
+            boundary(&cage),
+            [sides[0].clone(), sides[2].clone(), sides[4].clone()]
+        );
+        cage.consumed_segments = 0b11111;
+        assert!(effect_strokes(&cage).is_empty());
+    }
+
+    #[test]
+    fn reading_aids_stay_with_the_received_geometry() {
+        use EffectVisualKind as K;
+        let centre = Vec2::new(3.0, -2.0);
+        // The inner ring of a round effect and the cross of a trap lie inside its radius.
+        let mut trap = effect(SkillId::WildTraps, K::Trap);
+        let aids = |e: &SkillEffectState| -> Vec<Stroke> {
+            effect_strokes(e)
+                .into_iter()
+                .filter(|stroke| stroke.ink != Ink::Skill)
+                .collect()
+        };
+        for stroke in aids(&trap) {
+            assert!(stroke.points.iter().all(|at| at.distance(centre) <= 1.5));
+        }
+        assert_eq!(
+            aids(&trap).iter().map(|s| s.ink).collect::<Vec<_>>(),
+            [Ink::TeamFaint, Ink::Arming, Ink::Arming]
+        );
+        trap.armed = true;
+        assert_eq!(aids(&trap)[1].ink, Ink::Armed);
+        // A fired beam is hatched between its two edges.
+        let beam = effect(SkillId::DawnRay, K::Beam);
+        let hatch = aids(&beam);
+        assert_eq!(hatch.len(), 5);
+        for stroke in hatch {
+            assert!(stroke.points.iter().all(|at| (at.x - 3.0).abs() < 1.5));
+            assert_eq!((stroke.points[0].y, stroke.points[1].y), (-2.0, 5.0));
+        }
+        // A travelling body shows its replicated heading and no second ring.
+        for (skill, kind) in [
+            (SkillId::WinterShard, K::Bolt),
+            (SkillId::DawnBarrier, K::Barrier),
+            (SkillId::WildRocket, K::Rocket),
+        ] {
+            let mut body = effect(skill, kind);
+            body.end = [3.0, -1.0];
+            assert_eq!(
+                aids(&body),
+                [Stroke {
+                    points: vec![Vec2::new(3.0, -6.5), Vec2::new(3.0, -0.5)],
+                    ink: Ink::Team
+                }],
+                "{kind:?}"
+            );
+        }
+    }
+
+    /// A ring of `state_marks` as its distance from `p` and its colour.
+    fn rings(marks: &[HeroMark], p: Vec2) -> Vec<(f32, Color)> {
+        marks
+            .iter()
+            .map(|mark| {
+                let radius = mark.points[0].distance(p);
+                assert!(
+                    mark.points
+                        .iter()
+                        .all(|at| (at.distance(p) - radius).abs() < 1e-4)
+                );
+                ((radius * 100.0).round() / 100.0, mark.color)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_state_keeps_its_gizmo_unless_the_mesh_visual_shows_it() {
+        use PlayerVisualMode::{Models3d, Sprite2d};
+        let p = Vec2::new(3.0, -2.0);
+        let pink = Color::srgb(1.0, 0.3, 0.55);
+        let cyan = Color::srgb(0.5, 0.9, 1.0);
+        let yellow = Color::srgb(1.0, 0.9, 0.3);
+        let slow = (SLOW_RING, Color::srgb(0.4, 0.65, 1.0));
+        let marks = |mode, visible, alive, flags: &LoadoutState| {
+            rings(&hero_state_marks(mode, visible, alive, flags, p), p)
+        };
+
+        // Shield, mark and slow together. In 3D the shield is the mesh visual, so its
+        // ring is left out; the mark keeps its ring and the slow its small one.
+        let flags = LoadoutState {
+            shield_hp: 20.0,
+            mark_remaining_secs: 2.0,
+            slow_multiplier: 0.6,
+            ..default()
+        };
+        assert_eq!(marks(Models3d, true, true, &flags), [(1.15, yellow), slow]);
+        // The flat view has no mesh visual: every state keeps its gizmo.
+        let all = [(0.95, cyan), (1.15, yellow), slow];
+        assert_eq!(marks(Sprite2d, true, true, &flags), all);
+        // A hero without a mesh visual in 3D (not drawn, or dead) keeps them as well.
+        assert_eq!(marks(Models3d, false, true, &flags), all);
+        assert_eq!(marks(Models3d, true, false, &flags), all);
+
+        // A slow alone is the mesh visual in 3D and the small ring in the flat view.
+        let slowed = LoadoutState {
+            slow_multiplier: 0.5,
+            ..default()
+        };
+        assert!(marks(Models3d, true, true, &slowed).is_empty());
+        // The smallest ring a hero can have, inside the corners of its kit mark.
+        assert_eq!(marks(Sprite2d, true, true, &slowed), [slow]);
+        assert_eq!(slow.0, 0.42);
+
+        // A stun is replicated with a root of the same length: one ring in the flat view,
+        // as before, and none under the stars in 3D.
+        let stunned = LoadoutState {
+            stun_remaining_secs: 1.0,
+            root_remaining_secs: 1.0,
+            ..default()
+        };
+        assert_eq!(marks(Sprite2d, true, true, &stunned), [(0.7, pink)]);
+        assert!(marks(Models3d, true, true, &stunned).is_empty());
+        let rooted = LoadoutState {
+            root_remaining_secs: 1.0,
+            ..default()
+        };
+        assert_eq!(marks(Sprite2d, true, true, &rooted), [(0.7, pink)]);
+        assert!(marks(Models3d, true, true, &rooted).is_empty());
+
+        // The rings every state has had, by state; camouflage and forging have none.
+        let every = LoadoutState {
+            stun_remaining_secs: 1.0,
+            root_remaining_secs: 1.0,
+            parrying: true,
+            shield_hp: 20.0,
+            mark_remaining_secs: 2.0,
+            brittle: true,
+            concussion_stacks: 0,
+            slow_multiplier: 0.6,
+            camouflaged: true,
+            forge_remaining_secs: 1.0,
+            ..default()
+        };
+        assert_eq!(
+            marks(Sprite2d, true, true, &every),
+            [
+                (0.7, pink),
+                (1.4, Color::WHITE),
+                (0.95, cyan),
+                (1.15, yellow),
+                (1.2, Color::srgb(1.0, 0.6, 0.1)),
+                slow,
+            ]
+        );
+        // In 3D the stars stand for the stun; everything below keeps its gizmo.
+        assert_eq!(
+            marks(Models3d, true, true, &every),
+            marks(Sprite2d, true, true, &every)[1..]
+        );
+        // Concussion pips stay small rings beside the hero, one per stack.
+        for stacks in 0..=6u8 {
+            let flags = LoadoutState {
+                concussion_stacks: stacks,
+                ..default()
+            };
+            let pips = hero_state_marks(Sprite2d, true, true, &flags, p);
+            assert_eq!(pips.len(), usize::from(stacks.min(4)));
+            for (i, pip) in pips.iter().enumerate() {
+                let center = p + Vec2::new(-0.6 + i as f32 * 0.4, 1.4);
+                assert!(
+                    pip.points
+                        .iter()
+                        .all(|at| (at.distance(center) - 0.12).abs() < 1e-4)
+                );
+            }
+            // In 3D the pips are the mesh visual.
+            assert!(hero_state_marks(Models3d, true, true, &flags, p).is_empty());
+        }
+        // No flag, no gizmo.
+        assert!(hero_state_marks(Sprite2d, true, true, &LoadoutState::default(), p).is_empty());
+    }
+
+    #[test]
+    fn recast_markers_are_ground_lines_at_the_feet_of_the_hero() {
+        let p = Vec2::new(3.0, -2.0);
+        for marker in RecastMarker::ALL {
+            for step in 0..24 {
+                let forward = Vec2::from_angle(step as f32 * 0.4);
+                let now = step as f32 * 0.31;
+                let strokes = marker_strokes(*marker, p, forward, now);
+                assert!(!strokes.is_empty(), "{}", marker.id());
+                for stroke in &strokes {
+                    assert!(stroke.len() >= 2, "{}", marker.id());
+                    for at in stroke {
+                        assert!(at.is_finite(), "{}", marker.id());
+                        // Around the feet, clear of the body and within two and a half
+                        // units: a marker claims no area.
+                        let reach = at.distance(p);
+                        assert!((0.6..=2.5).contains(&reach), "{} {reach}", marker.id());
+                    }
+                }
+            }
+        }
+
+        // `ring_pips`: a ring and four pips on it, the same at every moment and facing.
+        let pips = marker_strokes(RecastMarker::RingPips, p, Vec2::X, 0.0);
+        assert_eq!(pips.len(), 5);
+        assert_eq!(pips[0], circle(p, MARKER_RING));
+        for pip in &pips[1..] {
+            let center = pip[..4].iter().sum::<Vec2>() / 4.0;
+            assert!((center.distance(p) - MARKER_RING).abs() < 1e-4);
+        }
+        assert_eq!(
+            pips,
+            marker_strokes(RecastMarker::RingPips, p, Vec2::Y, 9.0)
+        );
+
+        // `orbit_motes`: two marks opposite each other that circle the feet.
+        let center = |stroke: &Vec<Vec2>| stroke[..4].iter().sum::<Vec2>() / 4.0;
+        let motes = |now: f32| -> Vec<Vec2> {
+            marker_strokes(RecastMarker::OrbitMotes, p, Vec2::X, now)
+                .iter()
+                .map(center)
+                .collect()
+        };
+        let (early, late) = (motes(0.0), motes(0.5));
+        assert_eq!(early.len(), 2);
+        for at in early.iter().chain(&late) {
+            assert!((at.distance(p) - MARKER_RING).abs() < 1e-4);
+        }
+        assert!((early[0] + early[1] - p * 2.0).length() < 1e-4);
+        let turned = (early[0] - p).angle_to(late[0] - p);
+        assert!((turned - 0.5 * MARKER_TURN).abs() < 1e-4);
+
+        // `ground_arrows`: three arrows ahead of the hero that point the way it faces.
+        for forward in [Vec2::X, Vec2::NEG_Y, Vec2::new(0.6, 0.8)] {
+            let arrows = marker_strokes(RecastMarker::GroundArrows, p, forward, 3.0);
+            assert_eq!(arrows.len(), 3);
+            let mut last = 0.0;
+            for arrow in &arrows {
+                assert_eq!(arrow.len(), 3);
+                let tip = arrow[1];
+                // The tip lies on the facing line, ahead of both wings and of the last tip.
+                assert!((tip - p).perp_dot(forward).abs() < 1e-4);
+                let ahead = (tip - p).dot(forward);
+                assert!(ahead > last);
+                last = ahead;
+                for wing in [arrow[0], arrow[2]] {
+                    assert!((wing - p).dot(forward) < ahead);
+                    assert!((wing - p).dot(forward) > 0.0);
+                }
+                assert!(
+                    ((arrow[0] - tip) + (arrow[2] - tip))
+                        .perp_dot(forward)
+                        .abs()
+                        < 1e-4
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_orb_aid_takes_the_colour_of_the_skill_of_the_replicated_orb() {
+        // The final rows give every skill of the kit a colour of its own.
+        let registry = SkillPresentation::target();
+        let lilac = Color::srgb(0.9, 0.7, 1.0);
+        let mut orb = effect(SkillId::OrbitalCommand, EffectVisualKind::Orb);
+        let skill = |id: SkillId| Color::srgb_from_array(registry.profile(id).unwrap().color);
+        assert_eq!(
+            orb_aid_color(Some(&registry), Some(7), std::slice::from_ref(&orb)),
+            skill(SkillId::OrbitalCommand)
+        );
+        // The orb is re-ordered by another skill of the kit: the aid follows it.
+        orb.skill = SkillId::OrbitalGuard;
+        assert_eq!(
+            orb_aid_color(Some(&registry), Some(7), std::slice::from_ref(&orb)),
+            skill(SkillId::OrbitalGuard)
+        );
+        assert_ne!(skill(SkillId::OrbitalGuard), skill(SkillId::OrbitalCommand));
+        // Another hero's orb, a hidden owner, another kind of effect or no registry give
+        // the neutral colour.
+        assert_eq!(
+            orb_aid_color(Some(&registry), Some(8), std::slice::from_ref(&orb)),
+            lilac
+        );
+        assert_eq!(
+            orb_aid_color(Some(&registry), None, std::slice::from_ref(&orb)),
+            lilac
+        );
+        assert_eq!(
+            orb_aid_color(None, Some(7), std::slice::from_ref(&orb)),
+            lilac
+        );
+        let mut hidden = orb.clone();
+        hidden.owner_id = 0;
+        assert_eq!(orb_aid_color(Some(&registry), Some(0), &[hidden]), lilac);
+        orb.kind = EffectVisualKind::Field;
+        assert_eq!(orb_aid_color(Some(&registry), Some(7), &[orb]), lilac);
+    }
+
+    #[test]
+    fn hero_gizmos_are_the_orb_aid_of_the_flat_view_the_states_and_the_offered_recasts() {
+        use PlayerVisualMode::{Models3d, Sprite2d};
+        use shared::loadout::CoreId;
+        const P: Vec2 = Vec2::new(3.0, -2.0);
+        fn sight<'a>(
+            registry: &'a SkillPresentation,
+            mode: PlayerVisualMode,
+            class: HeroClass,
+            flags: &'a LoadoutState,
+            effects: &'a [SkillEffectState],
+        ) -> HeroSight<'a> {
+            HeroSight {
+                mode,
+                visible: true,
+                alive: true,
+                class: Some(class),
+                id: Some(7),
+                flags,
+                p: P,
+                forward: Vec2::X,
+                now: 0.0,
+                profiles: Some(registry),
+                effects,
+            }
+        }
+        let registry = SkillPresentation::target();
+        let (registry, p) = (&registry, P);
+
+        // The owner's orb: a ring around it and a faint line to it, in the colour of the
+        // skill the replicated orb belongs to. Only the flat view draws the aid.
+        let at = Vec2::new(6.0, 1.0);
+        let orbiting = LoadoutState {
+            recipe: Some(CoreId::Orbitwright.preset()),
+            orb_position: Some(at.to_array()),
+            ..default()
+        };
+        let orbs = [effect(SkillId::OrbitalCommand, EffectVisualKind::Orb)];
+        let colour =
+            Color::srgb_from_array(registry.profile(SkillId::OrbitalCommand).unwrap().color);
+        assert_eq!(
+            hero_marks(&sight(
+                registry,
+                Sprite2d,
+                HeroClass::Orbitwright,
+                &orbiting,
+                &orbs
+            )),
+            [
+                HeroMark {
+                    points: circle(at, 0.65),
+                    color: colour
+                },
+                HeroMark {
+                    points: vec![p, at],
+                    color: colour.with_alpha(0.3)
+                },
+            ]
+        );
+        assert!(
+            hero_marks(&sight(
+                registry,
+                Models3d,
+                HeroClass::Orbitwright,
+                &orbiting,
+                &orbs
+            ))
+            .is_empty()
+        );
+
+        // A recast the server offers: the marker of the row, in the colour of its skill,
+        // in both views. Dawn Field is the E of the Dawnweaver kit.
+        let mut casting = LoadoutState {
+            recipe: Some(CoreId::Dawnweaver.preset()),
+            ..default()
+        };
+        let slot = casting
+            .recipe
+            .as_ref()
+            .unwrap()
+            .skills
+            .iter()
+            .position(|skill| *skill == SkillId::DawnField)
+            .unwrap();
+        for mode in [Models3d, Sprite2d] {
+            assert!(
+                hero_marks(&sight(registry, mode, HeroClass::Dawnweaver, &casting, &[])).is_empty()
+            );
+        }
+        casting.slots[slot].can_recast = true;
+        let field = Color::srgb_from_array(registry.profile(SkillId::DawnField).unwrap().color);
+        let pips: Vec<_> = marker_strokes(RecastMarker::RingPips, p, Vec2::X, 0.0)
+            .into_iter()
+            .map(|points| HeroMark {
+                points,
+                color: field,
+            })
+            .collect();
+        for mode in [Models3d, Sprite2d] {
+            let offered = sight(registry, mode, HeroClass::Dawnweaver, &casting, &[]);
+            assert_eq!(hero_marks(&offered), pips);
+            // Not for a hero that is hidden or dead, nor without its class, its id or
+            // the registry.
+            for unseen in [
+                HeroSight {
+                    visible: false,
+                    ..sight(registry, mode, HeroClass::Dawnweaver, &casting, &[])
+                },
+                HeroSight {
+                    alive: false,
+                    ..sight(registry, mode, HeroClass::Dawnweaver, &casting, &[])
+                },
+                HeroSight {
+                    class: None,
+                    ..sight(registry, mode, HeroClass::Dawnweaver, &casting, &[])
+                },
+                HeroSight {
+                    id: None,
+                    ..sight(registry, mode, HeroClass::Dawnweaver, &casting, &[])
+                },
+                HeroSight {
+                    profiles: None,
+                    ..sight(registry, mode, HeroClass::Dawnweaver, &casting, &[])
+                },
+            ] {
+                assert!(hero_marks(&unseen).is_empty());
+            }
+        }
+        // The marker joins the state gizmos of the hero; it replaces none of them.
+        casting.mark_remaining_secs = 2.0;
+        casting.shield_hp = 10.0;
+        let both = hero_marks(&sight(
+            registry,
+            Models3d,
+            HeroClass::Dawnweaver,
+            &casting,
+            &[],
+        ));
+        assert_eq!(both.len(), 1 + pips.len());
+        assert_eq!(both[1..], pips[..]);
+        assert_eq!(
+            both[..1],
+            hero_state_marks(Models3d, true, true, &casting, p)[..]
+        );
+    }
+
+    /// The four sides in the order the server counts them: the attacker stands to +x, +z,
+    /// -x or -z of the hero it strikes.
+    const SIDES: [Vec2; 4] = [Vec2::X, Vec2::Y, Vec2::NEG_X, Vec2::NEG_Y];
+    const GOLD: Color = Color::srgb(1.0, 0.75, 0.2);
+    const GREY: Color = Color::srgb(0.3, 0.35, 0.4);
+
+    fn duelist(flags: &LoadoutState, own: bool) -> Duelist<'_> {
+        Duelist {
+            flags,
+            team: Some(crate::team::Team::Green),
+            own,
+        }
+    }
+
+    fn hostile(id: u64, p: Vec2) -> FacetTarget {
+        FacetTarget {
+            id,
+            team: Some(crate::team::Team::Blue),
+            seen: true,
+            p,
+        }
+    }
+
+    /// The sides `marks` draw around `p`, each with whether it is struck. Every mark must
+    /// be one of the two glyphs: a closed gold diamond with the line of the hit through it,
+    /// or two grey halves that do not meet.
+    fn facets(marks: &[HeroMark], p: Vec2) -> Vec<(usize, bool)> {
+        let near = |a: Vec2, b: Vec2| a.distance(b) < 1e-4;
+        marks
+            .chunks(2)
+            .map(|glyph| {
+                let [first, second] = glyph else {
+                    panic!("a side is two lines: {glyph:?}");
+                };
+                let middle = first.points[..first.points.len().min(4)]
+                    .iter()
+                    .chain(&second.points)
+                    .fold(Vec2::ZERO, |sum, at| sum + *at)
+                    / (first.points.len().min(4) + second.points.len()) as f32;
+                let side = SIDES
+                    .iter()
+                    .position(|out| near(p + *out * 1.4, middle))
+                    .unwrap_or_else(|| panic!("no side at {middle}"));
+                let (out, center) = (SIDES[side], p + SIDES[side] * 1.4);
+                let (tip, wing) = (out * 0.42, out.perp() * 0.2);
+                let struck = first.color == GREY;
+                if struck {
+                    assert_eq!(second.color, GREY);
+                    for (half, sign) in [(first, 1.0), (second, -1.0)] {
+                        let base = center + out * 0.075 * sign;
+                        let expected = [base + wing, center + tip * sign, base - wing];
+                        assert_eq!(half.points.len(), 3);
+                        assert!(
+                            half.points
+                                .iter()
+                                .zip(expected)
+                                .all(|(at, expected)| near(*at, expected)),
+                            "{half:?}"
+                        );
+                    }
+                    // The halves are 0.15 apart and stay inside the diamond they were.
+                    assert!(near(first.points[0] - second.points[0], out * FACET_GAP));
+                } else {
+                    assert_eq!((first.color, second.color), (GOLD, GOLD));
+                    let outline = [
+                        center + tip,
+                        center + wing,
+                        center - tip,
+                        center - wing,
+                        center + tip,
+                    ];
+                    assert_eq!(first.points.len(), 5);
+                    assert!(
+                        first
+                            .points
+                            .iter()
+                            .zip(outline)
+                            .all(|(at, expected)| near(*at, expected)),
+                        "{first:?}"
+                    );
+                    assert_eq!(second.points.len(), 2);
+                    assert!(
+                        near(second.points[0], center - tip)
+                            && near(second.points[1], center + tip)
+                    );
+                }
+                (side, struck)
+            })
+            .collect()
+    }
+
+    /// The sides of a duel are drawn for no one but a duelist: the rotating side needs the
+    /// Vitals passive of the local hero, the four sides need the challenge, and a recipe
+    /// that has the challenge without the passive shows nothing on the other enemies.
+    #[test]
+    fn duel_facets_need_the_vitals_passive_or_a_challenge() {
+        use shared::loadout::{CoreId, PassiveId};
+        const P: Vec2 = Vec2::new(3.0, -2.0);
+        let edgeweaver = CoreId::Edgeweaver.preset();
+        assert_eq!(edgeweaver.passive, PassiveId::Vitals);
+        let mixed = shared::loadout::BuildRecipe {
+            passive: PassiveId::Tempered,
+            ..edgeweaver.clone()
+        };
+        let sides = |flags: &LoadoutState, own: bool, id: u64| {
+            facets(&duel_facets(&duelist(flags, own), &hostile(id, P)), P)
+        };
+
+        // Neither the passive nor a challenge: nothing, whoever the state belongs to.
+        for recipe in [
+            None,
+            Some(mixed.clone()),
+            Some(CoreId::Cinderforge.preset()),
+        ] {
+            for rotation in 0..4 {
+                let flags = LoadoutState {
+                    recipe: recipe.clone(),
+                    vital_rotation: rotation,
+                    challenge_sides: 0b0101,
+                    ..default()
+                };
+                for (own, id) in [(true, 9), (false, 9), (true, 10)] {
+                    assert!(sides(&flags, own, id).is_empty(), "{recipe:?}");
+                }
+            }
+        }
+
+        // The passive alone: the one side the server expects next, `(id + rotation) % 4`
+        // (`common/src/skills/advanced.rs:1689`), on every hostile hero, for its owner only.
+        for rotation in 0..4u8 {
+            for id in [0u64, 1, 2, 3, 9, 10, 255, 256, 1027] {
+                let flags = LoadoutState {
+                    recipe: Some(edgeweaver.clone()),
+                    vital_rotation: rotation,
+                    ..default()
+                };
+                let expected = usize::from((id as u8).wrapping_add(rotation) % 4);
+                assert_eq!(
+                    sides(&flags, true, id),
+                    [(expected, false)],
+                    "{id} {rotation}"
+                );
+                assert!(sides(&flags, false, id).is_empty());
+            }
+        }
+
+        // A challenge without the passive: four sides on the challenged hero and nothing on
+        // any other. The state may be anyone's: the server names the target.
+        let challenge = LoadoutState {
+            recipe: Some(mixed),
+            vital_rotation: 2,
+            challenge_target: Some(9),
+            ..default()
+        };
+        let all = [(0, false), (1, false), (2, false), (3, false)];
+        for own in [true, false] {
+            assert_eq!(sides(&challenge, own, 9), all);
+            assert!(sides(&challenge, own, 10).is_empty());
+        }
+
+        // Both: four on the challenged hero, the rotating side on the others.
+        let both = LoadoutState {
+            recipe: Some(edgeweaver),
+            ..challenge.clone()
+        };
+        assert_eq!(sides(&both, true, 9), all);
+        assert_eq!(sides(&both, true, 10), [(0, false)]);
+        assert_eq!(sides(&both, false, 9), all);
+        assert!(sides(&both, false, 10).is_empty());
+
+        // Never around an ally, the duelist itself, a hero that is not drawn or a dead one.
+        let own = duelist(&both, true);
+        for target in [
+            FacetTarget {
+                team: own.team,
+                ..hostile(9, P)
+            },
+            FacetTarget {
+                seen: false,
+                ..hostile(9, P)
+            },
+            FacetTarget {
+                seen: false,
+                ..hostile(10, P)
+            },
+        ] {
+            assert!(duel_facets(&own, &target).is_empty());
+        }
+    }
+
+    /// A side of a challenge is whole and gold until the server reports it struck, then
+    /// two grey halves: the drawing follows `challenge_sides` bit for bit and stays a
+    /// ground glyph 1.4 units from the hero.
+    #[test]
+    fn duel_facets_break_with_the_replicated_challenge_sides() {
+        const P: Vec2 = Vec2::new(-4.0, 7.5);
+        for mask in 0..16u8 {
+            let flags = LoadoutState {
+                challenge_target: Some(9),
+                challenge_sides: mask,
+                ..default()
+            };
+            let marks = duel_facets(&duelist(&flags, true), &hostile(9, P));
+            assert_eq!(marks.len(), 8, "{mask}");
+            assert_eq!(
+                facets(&marks, P),
+                (0..4)
+                    .map(|side| (side, mask & (1 << side) != 0))
+                    .collect::<Vec<_>>(),
+                "{mask}"
+            );
+            // Around the hero, never on it: outside its bars and its state rings.
+            for at in marks.iter().flat_map(|mark| &mark.points) {
+                let distance = at.distance(P);
+                assert!(
+                    (FACET_DISTANCE - FACET_LENGTH - 1e-4..=FACET_DISTANCE + FACET_LENGTH + 1e-4)
+                        .contains(&distance),
+                    "{mask} {distance}"
+                );
+            }
+        }
+        // Bits above the four sides are not sides.
+        let flags = LoadoutState {
+            challenge_target: Some(9),
+            challenge_sides: 0b1111_0000,
+            ..default()
+        };
+        let marks = duel_facets(&duelist(&flags, true), &hostile(9, P));
+        assert!(facets(&marks, P).iter().all(|(_, struck)| !struck));
+    }
+
     #[test]
     fn point_aim_clamps_but_direction_retains_its_ray() {
         assert_eq!(
@@ -716,16 +1856,422 @@ mod tests {
             Vec2::ONE
         );
     }
+
+    /// The lantern `id` of the allied hero `owner`, planted at `at`.
+    fn lantern(id: u64, owner: u64, at: Vec2) -> SkillEffectState {
+        SkillEffectState {
+            id,
+            owner_id: owner,
+            position: at.to_array(),
+            end: at.to_array(),
+            ..effect(SkillId::GuidingLantern, EffectVisualKind::Lantern)
+        }
+    }
+
+    #[test]
+    fn the_lantern_prompt_follows_every_condition_of_the_server() {
+        use crate::team::Team;
+        let hero = Vec2::new(2.0, -1.0);
+        let beside = hero + Vec2::new(0.0, 1.0);
+        let way = Vec2::new(0.6, 0.8);
+        // The hero 7 of the green team, and where the owner 9 of the lantern stands.
+        let offered = |effects: &[SkillEffectState], can_move: bool, owner: Option<Vec2>| {
+            usable_lantern(effects, 7, Team::Green, hero, can_move, |id| {
+                owner.filter(|_| id == 9)
+            })
+        };
+        let near = Some(hero + way * 10.0);
+        let one = [lantern(4, 9, beside)];
+        assert_eq!(offered(&one, true, near), Some(4));
+
+        // Within 3.0 of the lantern.
+        assert_eq!(
+            offered(&[lantern(4, 9, hero + way * 2.99)], true, near),
+            Some(4)
+        );
+        assert_eq!(
+            offered(&[lantern(4, 9, hero + way * 3.01)], true, near),
+            None
+        );
+        // The leash: the owner within 24.0 of the hero, wherever the lantern stands.
+        assert_eq!(offered(&one, true, Some(hero + way * 23.99)), Some(4));
+        assert_eq!(offered(&one, true, Some(hero + way * 24.01)), None);
+        // A hero that cannot move is refused.
+        assert_eq!(offered(&one, false, near), None);
+        // An owner the client does not know, or one that is dead, has no position.
+        assert_eq!(offered(&one, true, None), None);
+        // The hero's own lantern, an enemy one and an effect that is no lantern.
+        assert_eq!(offered(&[lantern(4, 7, beside)], true, near), None);
+        let mut enemy = lantern(4, 9, beside);
+        enemy.owner_team = shared::map::Team::Blue;
+        assert_eq!(offered(&[enemy], true, near), None);
+        let mut orb = lantern(4, 9, beside);
+        orb.skill = SkillId::OrbitalCommand;
+        assert_eq!(offered(&[orb], true, near), None);
+
+        // Two lanterns: the lowest id among those the server would accept, not among
+        // those that are merely near.
+        let two = [lantern(6, 11, beside), lantern(4, 9, beside)];
+        let both = |id: u64| matches!(id, 9 | 11).then_some(hero + way * 5.0);
+        let far_first = |id: u64| match id {
+            9 => Some(hero + way * 30.0),
+            11 => Some(hero + way * 5.0),
+            _ => None,
+        };
+        assert_eq!(
+            usable_lantern(&two, 7, Team::Green, hero, true, both),
+            Some(4)
+        );
+        assert_eq!(
+            usable_lantern(&two, 7, Team::Green, hero, true, far_first),
+            Some(6)
+        );
+        assert_eq!(
+            usable_lantern(&two, 7, Team::Green, hero, false, both),
+            None
+        );
+    }
+
+    #[test]
+    fn the_interact_prompt_is_shown_and_sent_only_for_a_lantern_the_hero_may_take() {
+        use crate::net::{NetworkCommand, NetworkPlayerId};
+        use crate::team::Team;
+
+        let mut app = App::new();
+        app.init_resource::<crate::input_context::GameplayInputContext>()
+            .init_resource::<ButtonInput<KeyCode>>()
+            .init_resource::<crate::gamepad::GamepadControls>()
+            .add_message::<NetworkCommand>()
+            .insert_resource(GameStateSnapshot {
+                your_id: 7,
+                skill_effects: vec![lantern(4, 9, Vec2::new(1.0, 0.0))],
+                ..default()
+            })
+            .add_systems(Update, interact);
+        let button = app
+            .world_mut()
+            .spawn((Node::default(), Interaction::None, InteractButton))
+            .id();
+        let hero = app
+            .world_mut()
+            .spawn((
+                Player,
+                Transform::default(),
+                Team::Green,
+                crate::combat::CombatStats::default(),
+                NetworkPlayerId(7),
+                PlayerLoadout(None),
+            ))
+            .id();
+        let owner = app
+            .world_mut()
+            .spawn((
+                Transform::from_xyz(10.0, 0.0, 0.0),
+                NetworkPlayerId(9),
+                crate::combat::CombatStats::default(),
+            ))
+            .id();
+        // One frame with F pressed: whether the prompt is shown and what is sent.
+        let press = |app: &mut App| {
+            let mut keys = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+            keys.reset_all();
+            keys.press(KeyCode::KeyF);
+            app.update();
+            let shown = app.world().get::<Node>(button).unwrap().display == Display::Flex;
+            let sent: Vec<_> = app
+                .world_mut()
+                .resource_mut::<Messages<NetworkCommand>>()
+                .drain()
+                .collect();
+            (shown, sent)
+        };
+        let taken = |outcome: (bool, Vec<NetworkCommand>)| match outcome {
+            (true, sent) => {
+                assert!(
+                    matches!(sent.as_slice(), [NetworkCommand::Interact { object_id: 4 }]),
+                    "{sent:?}"
+                );
+                true
+            }
+            (false, sent) => {
+                assert!(sent.is_empty(), "{sent:?}");
+                false
+            }
+        };
+
+        assert!(taken(press(&mut app)));
+        // The owner beyond its leash of the hero.
+        app.world_mut()
+            .entity_mut(owner)
+            .insert(Transform::from_xyz(24.5, 0.0, 0.0));
+        assert!(!taken(press(&mut app)));
+        app.world_mut()
+            .entity_mut(owner)
+            .insert(Transform::from_xyz(23.5, 0.0, 0.0));
+        assert!(taken(press(&mut app)));
+        // A rooted or stunned hero: the root flag covers both.
+        app.world_mut()
+            .entity_mut(hero)
+            .insert(PlayerLoadout(Some(LoadoutState {
+                root_remaining_secs: 0.4,
+                ..default()
+            })));
+        assert!(!taken(press(&mut app)));
+        // A slow does not stop the rescue.
+        app.world_mut()
+            .entity_mut(hero)
+            .insert(PlayerLoadout(Some(LoadoutState {
+                movement_multiplier: 0.5,
+                ..default()
+            })));
+        assert!(taken(press(&mut app)));
+        // A dead owner, and an owner the client does not have.
+        app.world_mut()
+            .entity_mut(owner)
+            .insert(crate::combat::CombatStats {
+                hp: 0.0,
+                ..default()
+            });
+        assert!(!taken(press(&mut app)));
+        app.world_mut().entity_mut(owner).despawn();
+        assert!(!taken(press(&mut app)));
+    }
+
+    /// A step that is clearly inside or outside a boundary and far smaller than a hero.
+    const MARGIN: f32 = 0.03;
+
+    /// On the practice authority an allied Chainkeeper plants its lantern, the commanded
+    /// hero stands `reach` from the lantern and the Chainkeeper `leash` from that hero;
+    /// `arrange` may then change the world. Returns whether the authority lets the hero
+    /// take the lantern and whether the prompt offers it from the snapshot of that moment.
+    fn rescue(
+        reach: f32,
+        leash: f32,
+        arrange: impl FnOnce(&mut common::offline::PracticeSession, std::net::SocketAddr),
+    ) -> (bool, bool) {
+        use common::offline::{EPOCH, LOCAL_ADDR, PracticeSession};
+        use shared::practice::PracticeCommand;
+        use shared::wire::{CharacterChoice, ClientPacket, ServerPacket};
+        const W: usize = 1;
+
+        let mut session = PracticeSession::new(std::time::Instant::now());
+        session.command(ClientPacket::Join {
+            handheld: Default::default(),
+            prematch: false,
+            team: shared::map::Team::Green,
+            character: CharacterChoice::Ipfs,
+            hero_class: HeroClass::Warrior,
+            avatar: None,
+            sprite_character: None,
+            session_id: None,
+            passport_ticket: None,
+        });
+        for command in [PracticeCommand::ClearBots, PracticeCommand::SpawnDummy] {
+            session.command(ClientPacket::Practice { command });
+        }
+        session.bots = Default::default();
+        session.world.structures.clear();
+        session.world.minions.clear();
+        session.world.neutrals.clear();
+        let hero = session.world.players[&LOCAL_ADDR].hero.identity.id;
+        let (keeper_addr, keeper) = session
+            .world
+            .players
+            .iter()
+            .find(|(_, player)| player.hero.identity.is_bot)
+            .map(|(addr, player)| (*addr, player.hero.identity.id))
+            .expect("the dummy");
+        let kit = shared::loadout::preset_for_class(HeroClass::Chainkeeper).unwrap();
+        assert_eq!(kit.skills()[W], SkillId::GuidingLantern);
+        {
+            let keeper = session.world.players.get_mut(&keeper_addr).unwrap();
+            keeper.hero.identity.team = shared::map::Team::Green;
+            keeper.hero.identity.hero_class = HeroClass::Chainkeeper;
+            keeper.hero.skills.loadout = Some(kit);
+            keeper.hero.progress.level = 18;
+            keeper.hero.progress.ranks = [1; 4];
+            keeper.hero.mana = keeper.hero.max_mana;
+            (keeper.hero.x, keeper.hero.z) = (0.0, 0.0);
+        }
+        common::command::apply(
+            &mut session.world,
+            keeper_addr,
+            &ClientPacket::CastSkill {
+                slot: W as u8,
+                aim: [0.0, 6.0],
+                server_epoch: EPOCH,
+                match_id: session.match_id,
+                request_id: 1,
+            },
+            EPOCH,
+            session.match_id,
+            session.now,
+        );
+        let lanterns = |session: &mut PracticeSession| {
+            let ServerPacket::Snapshot { skill_effects, .. } = session.snapshot() else {
+                panic!("practice publishes a snapshot");
+            };
+            skill_effects
+                .into_iter()
+                .filter(|effect| effect.skill == SkillId::GuidingLantern)
+                .collect::<Vec<_>>()
+        };
+        let planted = lanterns(&mut session);
+        let [lantern] = planted.as_slice() else {
+            panic!("the keeper planted one lantern: {planted:?}");
+        };
+        let stand = Vec2::from_array(lantern.position) - Vec2::X * reach;
+        for (addr, at) in [(LOCAL_ADDR, stand), (keeper_addr, stand + Vec2::Y * leash)] {
+            let hero = &mut session.world.players.get_mut(&addr).unwrap().hero;
+            (hero.x, hero.z) = (at.x, at.y);
+        }
+        arrange(&mut session, keeper_addr);
+
+        // What the client knows at this moment, and what its prompt makes of it.
+        let ServerPacket::Snapshot {
+            players,
+            skill_effects,
+            ..
+        } = session.snapshot()
+        else {
+            panic!("practice publishes a snapshot");
+        };
+        let me = players.iter().find(|player| player.id == hero).unwrap();
+        assert_eq!(me.team, shared::map::Team::Green);
+        let offered = usable_lantern(
+            &skill_effects,
+            hero,
+            crate::team::Team::Green,
+            Vec2::new(me.x, me.z),
+            movement_factor(Some(&PlayerLoadout(me.loadout.clone()))) > 0.0,
+            |id| {
+                players
+                    .iter()
+                    .find(|player| player.id == id && player.hp > 0.0)
+                    .map(|player| Vec2::new(player.x, player.z))
+            },
+        );
+        assert!(offered.is_none_or(|id| id == lantern.id && lantern.owner_id == keeper));
+
+        session.command(ClientPacket::Interact {
+            object_id: lantern.id,
+            server_epoch: EPOCH,
+            match_id: session.match_id,
+            request_id: 1,
+        });
+        // An accepted request spends the lantern.
+        (lanterns(&mut session).is_empty(), offered.is_some())
+    }
+
+    /// Parity with the in-process authority: the prompt is offered exactly when the
+    /// authority lets the hero take the lantern, at the edge of the reach, at the edge of
+    /// the owner's leash, for a hero that cannot move and for an owner that is dead.
+    #[test]
+    fn the_lantern_prompt_is_offered_exactly_when_the_authority_accepts_it() {
+        let later = |session: &common::offline::PracticeSession| {
+            Some(session.now + std::time::Duration::from_secs(2))
+        };
+        assert_eq!(rescue(2.0, 10.0, |_, _| {}), (true, true));
+        for (gap, accepted) in [(-MARGIN, true), (MARGIN, false)] {
+            assert_eq!(
+                rescue(LANTERN_REACH + gap, 10.0, |_, _| {}),
+                (accepted, accepted),
+                "reach {gap}"
+            );
+            assert_eq!(
+                rescue(2.0, LANTERN_LEASH + gap, |_, _| {}),
+                (accepted, accepted),
+                "leash {gap}"
+            );
+        }
+        let me = common::offline::LOCAL_ADDR;
+        assert_eq!(
+            rescue(2.0, 10.0, |session, _| {
+                let until = later(session);
+                let hero = &mut session.world.players.get_mut(&me).unwrap().hero;
+                hero.skills.control.root_until = until;
+            }),
+            (false, false),
+            "rooted"
+        );
+        assert_eq!(
+            rescue(2.0, 10.0, |session, _| {
+                let until = later(session);
+                let hero = &mut session.world.players.get_mut(&me).unwrap().hero;
+                hero.skills.control.stun_until = until;
+            }),
+            (false, false),
+            "stunned"
+        );
+        assert_eq!(
+            rescue(2.0, 10.0, |session, keeper| {
+                session.world.players.get_mut(&keeper).unwrap().hero.hp = 0.0;
+            }),
+            (false, false),
+            "the owner is dead"
+        );
+    }
 }
 
 #[derive(Component)]
 pub(super) struct InteractButton;
 
+/// How near a hero has to stand to a lantern to take it, and how near the owner of the
+/// lantern has to be to that hero (`interact`, `common/src/skills/advanced.rs`).
+const LANTERN_REACH: f32 = 3.0;
+const LANTERN_LEASH: f32 = 24.0;
+
+/// The lantern the server would let the hero at `hero` take now: an allied lantern of
+/// another hero within reach, while the hero can move and the owner of the lantern lives
+/// within its leash of the hero. `owner_position` is where a living hero stands, if the
+/// client knows it. Of several such lanterns, the one with the lowest id.
+pub(super) fn usable_lantern(
+    effects: &[SkillEffectState],
+    your_id: u64,
+    team: crate::team::Team,
+    hero: Vec2,
+    can_move: bool,
+    owner_position: impl Fn(u64) -> Option<Vec2>,
+) -> Option<u64> {
+    effects
+        .iter()
+        .filter(|e| {
+            can_move
+                && team == e.owner_team
+                && e.owner_id != your_id
+                && matches!(
+                    shared::loadout::skill(e.skill).effect,
+                    shared::loadout::SkillEffect::Technique {
+                        action: shared::loadout::Technique::Lantern,
+                        ..
+                    }
+                )
+                && Vec2::from_array(e.position).distance(hero) <= LANTERN_REACH
+                && owner_position(e.owner_id)
+                    .is_some_and(|owner| owner.distance(hero) <= LANTERN_LEASH)
+        })
+        .map(|e| e.id)
+        .min()
+}
+
 /// One explicit action for keyboard, touch and the controller's left-stick click.
 pub(super) fn interact(
     game: Option<Res<GameStateSnapshot>>,
     context: Res<crate::input_context::GameplayInputContext>,
-    local: Query<(&Transform, &crate::team::Team, &super::CombatStats), With<Player>>,
+    local: Query<
+        (
+            &Transform,
+            &crate::team::Team,
+            &super::CombatStats,
+            Option<&PlayerLoadout>,
+        ),
+        With<Player>,
+    >,
+    heroes: Query<(
+        &Transform,
+        &crate::net::NetworkPlayerId,
+        &super::CombatStats,
+    )>,
     keys: Res<ButtonInput<KeyCode>>,
     pad: Res<crate::gamepad::GamepadControls>,
     mut held: Local<bool>,
@@ -742,24 +2288,22 @@ pub(super) fn interact(
         local
             .single()
             .ok()
-            .filter(|(_, _, stats)| stats.is_alive() && context.gameplay_allowed())
-            .and_then(|(pose, team, _)| {
-                game.skill_effects
-                    .iter()
-                    .filter(|e| {
-                        e.owner_team == *team
-                            && e.owner_id != game.your_id
-                            && matches!(
-                                shared::loadout::skill(e.skill).effect,
-                                shared::loadout::SkillEffect::Technique {
-                                    action: shared::loadout::Technique::Lantern,
-                                    ..
-                                }
-                            )
-                            && Vec2::from_array(e.position).distance(pose.translation.xz()) <= 3.0
-                    })
-                    .min_by_key(|e| e.id)
-                    .map(|e| e.id)
+            .filter(|(_, _, stats, _)| stats.is_alive() && context.gameplay_allowed())
+            .and_then(|(pose, team, _, loadout)| {
+                usable_lantern(
+                    &game.skill_effects,
+                    game.your_id,
+                    *team,
+                    pose.translation.xz(),
+                    // The server refuses a hero that is rooted or stunned.
+                    movement_factor(loadout) > 0.0,
+                    |owner| {
+                        heroes
+                            .iter()
+                            .find(|(_, id, stats)| id.0 == owner && stats.is_alive())
+                            .map(|(pose, ..)| pose.translation.xz())
+                    },
+                )
             })
     });
     let mut clicked = false;

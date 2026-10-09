@@ -1,4 +1,5 @@
 // i18n-strict
+pub(crate) mod aim_preview;
 mod bars;
 mod cast;
 mod cooldown;
@@ -57,6 +58,8 @@ impl Plugin for CombatPlugin {
     fn build(&self, app: &mut App) {
         use crate::ui::UiActionAppExt;
         app.add_plugins(tower_zones::TowerZonesPlugin);
+        #[cfg(feature = "qa")]
+        app.init_resource::<aim_preview::AimPreviewShown>();
         app.insert_gizmo_config(
             standard::SkillAimGizmos,
             bevy::gizmos::config::GizmoConfig {

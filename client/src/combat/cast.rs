@@ -16,7 +16,7 @@ use shared::{
 };
 use std::fmt::Display;
 
-use super::cooldown::{LocalCastCooldown, local_hero_class};
+use super::cooldown::{LocalCastCooldown, local_hero_class, recast_sendable};
 use super::feedback::ActionFeedback;
 use super::selection::TargetState;
 use crate::equipped_skills;
@@ -33,6 +33,10 @@ pub(super) struct PendingCastRequest {
 pub(crate) struct PendingCast {
     pub(super) request: Option<PendingCastRequest>,
     pub(crate) aim: Option<Vec2>,
+    /// Where the latest walk into cast range was sent. A move order that still points
+    /// there is that walk and not an order of the player; it outlives the request so that
+    /// the next cast can still tell the two apart.
+    approach_target: Option<Vec3>,
 }
 
 impl PendingCast {
@@ -55,6 +59,7 @@ impl PendingCast {
                 approach_announced: true,
             }),
             aim: None,
+            approach_target: None,
         }
     }
 
@@ -95,6 +100,19 @@ fn report(
 fn report_plain(feedback: &mut ActionFeedback, key: &'static str) {
     feedback.push_line(tr(key));
     info!("{}", tr_in(key, LocaleId::ENGLISH));
+}
+
+/// Whether a legacy cast, sent or refused, ends the hero's move order. A cast on a unit
+/// stops the hero as it always has: the order may be the walk into range that the cast
+/// started. A self cast has nobody to stop for, and the server neither stops nor turns its
+/// caster (`common/src/sim/cast.rs`), so it ends only such a walk and keeps the order the
+/// player gave.
+pub(super) fn cast_clears_move_order(
+    targeting: TargetingMode,
+    order: Option<Vec3>,
+    approach: Option<Vec3>,
+) -> bool {
+    targeting != TargetingMode::SelfTarget || (order.is_some() && order == approach)
 }
 
 /// Resolves the target and sends a slot cast for the local player's class kit.
@@ -298,6 +316,7 @@ pub(super) fn resolve_pending_cast_system(
             Option<&NetworkPlayerId>,
             Option<&NetworkHeroClass>,
             &Team,
+            Option<&MovementTarget>,
         ),
         With<Player>,
     >,
@@ -321,6 +340,8 @@ pub(super) fn resolve_pending_cast_system(
         Query<&Window, With<bevy::window::PrimaryWindow>>,
         Query<(&Camera, &GlobalTransform), With<crate::camera::MainCamera>>,
         Option<Res<crate::sprite::PlayerVisualMode>>,
+        super::aim_preview::AimWorld,
+        super::selection::TargetCandidates,
     ),
 ) {
     let no_cooldowns = sticks.2.as_ref().is_some_and(|debug| debug.no_cooldowns)
@@ -343,7 +364,7 @@ pub(super) fn resolve_pending_cast_system(
     let Some(request) = pending_cast.request else {
         return;
     };
-    let Ok((player_entity, player_transform, stats, progression, net_id, class, team)) =
+    let Ok((player_entity, player_transform, stats, progression, net_id, class, team, order)) =
         local_player.single()
     else {
         pending_cast.cancel();
@@ -387,11 +408,32 @@ pub(super) fn resolve_pending_cast_system(
         let aim = pending_cast.aim.or(cursor).unwrap_or_else(|| {
             player_transform.translation.xz() + player_transform.forward().xz() * 10.0
         });
-        let recast = state.is_some_and(|s| s.slots[slot.index()].can_recast);
+        // The replicated flag only opens the recast window. A recast with a gate is also
+        // refused away from the skill's own effect (Mountain Echo).
+        let offered = state.is_some_and(|s| s.slots[slot.index()].can_recast);
+        let recast = state.is_some_and(|s| {
+            recast_sendable(
+                skill,
+                &s.slots[slot.index()],
+                player_transform.translation.xz(),
+                net_id
+                    .map(|id| id.0)
+                    .or(game.as_ref().map(|game| game.your_id))
+                    .unwrap_or(0),
+                game.as_ref().map_or(&[], |game| &game.skill_effects),
+            )
+        });
         if !stats.is_alive()
             || !equipped_skills::unlocked(&skills, &prog)[slot.index()]
             || !aim.is_finite()
         {
+            pending_cast.cancel();
+            return;
+        }
+        if offered && !recast {
+            // The server reads this press as the recast and drops it without a word; a
+            // first cast is not possible while the window is open.
+            report_plain(&mut feedback, "combat.standard.not_ready");
             pending_cast.cancel();
             return;
         }
@@ -417,6 +459,44 @@ pub(super) fn resolve_pending_cast_system(
             definition.targeting,
             scaled_cast_range(definition, rank),
         );
+        if matches!(
+            skill.effect,
+            shared::loadout::SkillEffect::Technique {
+                action: shared::loadout::Technique::BlinkShot,
+                ..
+            }
+        ) && !aim_view.3.blink_legal(aim, &aim_view.4)
+        {
+            // The server drops a blink onto a landing it does not allow without a word.
+            // Nothing is sent, so no cooldown is predicted and the move order stays.
+            report_plain(&mut feedback, "combat.standard.blocked_landing");
+            pending_cast.cancel();
+            return;
+        }
+        // A cast on an ally is dropped without a word as well when the server finds no ally
+        // it may take at the aim: an allied hero for Orbital Guard, an allied hero or minion
+        // for Sheltering Leap, the caster being one of them. What is sent is the unit that
+        // was found.
+        let needs_ally = crate::skill_presentation::geometry::pick_rule(skill.id)
+            .filter(|rule| !recast && rule.ally && !rule.pick_optional);
+        let aim = if let Some(rule) = needs_ally {
+            let caster = super::aim_preview::Caster {
+                position: player_transform.translation.xz(),
+                id: net_id.map(|id| id.0),
+                team: *team,
+                flags: state,
+                slot: slot.index(),
+            };
+            let range = scaled_cast_range(definition, rank);
+            let Some(ally) = aim_view.3.ally_aim(rule, &caster, range, aim, &aim_view.4) else {
+                report_plain(&mut feedback, "combat.cast.no_ally");
+                pending_cast.cancel();
+                return;
+            };
+            ally
+        } else {
+            aim
+        };
         command_writer.write(NetworkCommand::CastSkill {
             slot: slot.index() as u8,
             aim,
@@ -463,6 +543,11 @@ pub(super) fn resolve_pending_cast_system(
         pending_cast.cancel();
         return;
     }
+    let clears_move_order = cast_clears_move_order(
+        definition.targeting,
+        order.map(|order| order.target),
+        pending_cast.approach_target,
+    );
     let rejection = if !stats.is_alive() {
         Some(tr("combat.cast.wait_respawn").to_string())
     } else if !equipped_skills::unlocked(&skills, &prog)[slot.index()] {
@@ -507,9 +592,11 @@ pub(super) fn resolve_pending_cast_system(
     if let Some(message) = rejection {
         feedback.push_line(message);
         pending_cast.cancel();
-        commands
-            .entity(player_entity)
-            .remove::<(MovementTarget, crate::player::MovementRoute)>();
+        if clears_move_order {
+            commands
+                .entity(player_entity)
+                .remove::<(MovementTarget, crate::player::MovementRoute)>();
+        }
         return;
     }
 
@@ -549,6 +636,7 @@ pub(super) fn resolve_pending_cast_system(
             commands.entity(player_entity).insert(MovementTarget {
                 target: target_transform.translation,
             });
+            pending_cast.approach_target = Some(target_transform.translation);
             if !request.approach_announced {
                 report(&mut feedback, "combat.cast.approaching", definition, &[]);
                 if let Some(request) = pending_cast.request.as_mut() {
@@ -559,7 +647,9 @@ pub(super) fn resolve_pending_cast_system(
         }
     }
 
-    commands.entity(player_entity).remove::<MovementTarget>();
+    if clears_move_order {
+        commands.entity(player_entity).remove::<MovementTarget>();
+    }
     let sent = try_cast_slot(
         request.slot,
         &skills,

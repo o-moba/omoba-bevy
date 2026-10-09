@@ -510,6 +510,62 @@ fn visible_incoming_effect_survives_hidden_owner_and_does_not_publish_destinatio
     assert!(distance(skill_effects[0].position, skill_effects[0].end) <= 1.001);
 }
 #[test]
+fn trap_sprung_out_of_its_owners_sight_reaches_the_victim_without_naming_the_owner() {
+    let (mut w, now, victim) = fixture(HeroClass::Wildspark);
+    let owner = w.players[&addr(1)].hero.identity.id;
+    cast(&mut w, addr(1), 2, [6.0, 0.0], 1, now);
+    // The owner leaves the victim's sight before the traps arm.
+    w.players.get_mut(&addr(1)).unwrap().hero.x = -60.0;
+    let events = advance(&mut w, now, 0.7);
+    assert_eq!(events.len(), 1);
+    assert!(events[0].trap_triggered);
+    assert_eq!(events[0].source.id, owner);
+    let at = now + duration(0.7);
+    let mut log = crate::combat_feedback::CombatLog::default();
+    log.extend(at, events);
+    let viewer = &w.players[&addr(2)];
+    let mut packet = shared::wire::ServerPacket::Snapshot {
+        vision: None,
+        sandbox: None,
+        debug_access: None,
+        match_mode: "dev".into(),
+        geometry_id: shared::map::GEOMETRY_ID.into(),
+        map_profile: "verdant_default".into(),
+        meta: Default::default(),
+        join_error: None,
+        your_id: victim,
+        players: crate::snapshot::build_players_snapshot(&w, Some(victim), at),
+        scoreboard: None,
+        prematch: None,
+        skill_effects: effects(&w, at),
+        projectiles: Vec::new(),
+        combat_events: log.snapshot(at),
+        structures: Vec::new(),
+        minions: Vec::new(),
+        neutrals: Vec::new(),
+        team_buffs: Vec::new(),
+        forest_pickups: Vec::new(),
+        game_state: GameState::Running,
+        rematch_in_secs: None,
+    };
+    crate::vision::filter_snapshot(&mut packet, viewer, &w, at);
+    let shared::wire::ServerPacket::Snapshot {
+        players,
+        combat_events,
+        ..
+    } = packet
+    else {
+        unreachable!()
+    };
+    assert!(!players.iter().any(|p| p.id == owner));
+    assert_eq!(combat_events.len(), 1);
+    let receipt = &combat_events[0];
+    assert_eq!(receipt.source, shared::combat::CombatEntity::default());
+    assert_eq!(receipt.target.id, victim);
+    assert!(receipt.trap_triggered && receipt.amount > 0.0);
+    assert_eq!(receipt.action_slot, Some(2));
+}
+#[test]
 fn beam_warning_clips_hidden_origin_but_preserves_visible_threat() {
     let (mut w, now, _) = fixture(HeroClass::Dawnweaver);
     w.players.get_mut(&addr(2)).unwrap().hero.x = 40.0;

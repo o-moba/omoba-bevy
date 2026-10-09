@@ -1040,7 +1040,9 @@ pub struct SkillEffectState {
     pub radius: f32,
     pub remaining_secs: f32,
     pub armed: bool,
-    /// Consumed cage walls; lower five bits, zero for other effects.
+    /// Cage: consumed walls in the lower five bits. Shield wall: how many
+    /// projectiles it has intercepted so far (the first is negated, later ones
+    /// reduced). Zero for every other effect.
     #[serde(default)]
     pub consumed_segments: u8,
 }

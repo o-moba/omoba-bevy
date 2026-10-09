@@ -37,6 +37,17 @@ pub fn apply_skill_upgrade(player: &mut ConnectedPlayer, slot: u8) {
     }
 }
 
+/// Rank and level scale of every legacy ability primitive (damage, heal and
+/// mana restore). Callers that judge whether a cast is useful read the same
+/// number the accepted cast applies.
+pub fn legacy_effect_scale(caster: &ConnectedPlayer, rank: u8) -> f32 {
+    rank_effect_scale(rank)
+        * shared::hero_balance::ability_power_multiplier(
+            caster.hero.identity.hero_class,
+            caster.hero.progress.level,
+        )
+}
+
 pub fn handle_cast_request(
     world: &mut GameWorld,
     caster_addr: SocketAddr,
@@ -95,11 +106,7 @@ pub fn handle_cast_request(
     if hero_timers::skill_recovery_remaining(caster, now) > 0.0 {
         return;
     }
-    let effect_scale = rank_effect_scale(rank)
-        * shared::hero_balance::ability_power_multiplier(
-            caster.hero.identity.hero_class,
-            caster.hero.progress.level,
-        );
+    let effect_scale = legacy_effect_scale(caster, rank);
     if def.targeting == TargetingMode::SelfTarget {
         let Some(caster_mut) = world.players.get_mut(&caster_addr) else {
             return;

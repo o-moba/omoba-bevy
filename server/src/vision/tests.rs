@@ -318,6 +318,125 @@ fn hostile_action_reveal_expires_and_self_cast_does_not_reveal() {
     assert!(!revealed(p, now));
 }
 #[test]
+fn weapon_toggle_in_brush_does_not_reveal_but_a_hostile_cast_does() {
+    let (mut rt, a, b, now) = fixture();
+    let p = rt.world.players.get_mut(&b).unwrap();
+    p.hero.skills.loadout = shared::loadout::preset_for_class(HeroClass::Wildspark);
+    p.modifiers.unlock_all = true;
+    let hidden = |rt: &mut ServerRuntime, at: Instant| {
+        let ServerPacket::Snapshot { vision, .. } = snapshot(rt, b, at) else {
+            panic!()
+        };
+        vision.unwrap().local_hidden
+    };
+    assert!(hidden(&mut rt, now));
+
+    // Wild Switch is accepted and stamps its slot like any other cast.
+    let origin = [rt.world.players[&b].hero.x, rt.world.players[&b].hero.z];
+    crate::skills::cast(&mut rt.world, b, 0, origin, 1, now);
+    let p = &rt.world.players[&b];
+    assert_eq!(p.hero.skills.mode, shared::loadout::WeaponMode::Rockets);
+    assert_eq!(p.timers.last_cast_at[0], Some(now));
+    assert!(!revealed(p, now));
+    assert!(!target_visible(Team::Green, target(&rt, b), &rt.world, now));
+    assert!(hidden(&mut rt, now));
+
+    // An aimed skill from the same brush still reveals for the usual window.
+    let at = now + Duration::from_millis(400);
+    let aim = [rt.world.players[&a].hero.x, rt.world.players[&a].hero.z];
+    crate::skills::cast(&mut rt.world, b, 1, aim, 2, at);
+    assert_eq!(rt.world.players[&b].timers.last_cast_at[1], Some(at));
+    assert!(revealed(&rt.world.players[&b], at));
+    assert!(target_visible(Team::Green, target(&rt, b), &rt.world, at));
+    assert!(!hidden(&mut rt, at));
+    assert!(!target_visible(
+        Team::Green,
+        target(&rt, b),
+        &rt.world,
+        at + Duration::from_secs(2)
+    ));
+}
+#[test]
+fn receipt_from_a_hidden_hero_reaches_the_victim_with_the_source_withheld() {
+    let (mut rt, a, b, now) = fixture();
+    let (ta, tb) = (target(&rt, a), target(&rt, b));
+    // B is concealed in brush; A stands in the open and takes the hit.
+    let victim = &rt.world.players[&a].hero;
+    let at = [victim.x, victim.z];
+    let hit = CombatEvent {
+        source: CombatEntity {
+            kind: CombatEntityKind::Player,
+            id: tb.id,
+        },
+        target: CombatEntity {
+            kind: CombatEntityKind::Player,
+            id: ta.id,
+        },
+        x: victim.x,
+        y: victim.y,
+        z: victim.z,
+        amount: 20.0,
+        action_slot: Some(2),
+        trap_triggered: true,
+        ..Default::default()
+    };
+    // A hidden unit that is not a hero keeps the old rule: no receipt.
+    rt.world
+        .minions
+        .insert(501, minion(501, Team::Blue, [101.125, 99.375]));
+    let from_minion = CombatEvent {
+        source: CombatEntity {
+            kind: CombatEntityKind::Minion,
+            id: 501,
+        },
+        action_slot: None,
+        trap_triggered: false,
+        ..hit.clone()
+    };
+    rt.combat_log.extend(now, [hit, from_minion]);
+
+    let ServerPacket::Snapshot {
+        players,
+        combat_events,
+        ..
+    } = snapshot(&mut rt, a, now)
+    else {
+        panic!()
+    };
+    assert_eq!(players.len(), 1, "the attacker itself stays hidden");
+    assert_eq!(combat_events.len(), 1);
+    let seen = combat_events[0].clone();
+    assert_eq!(seen.source, CombatEntity::default());
+    assert_eq!(seen.target.id, ta.id);
+    assert_eq!(
+        (seen.amount, seen.action_slot, seen.trap_triggered),
+        (20.0, Some(2), true)
+    );
+    assert_eq!([seen.x, seen.z], at);
+
+    // The attacker's own view names the attacker.
+    let ServerPacket::Snapshot { combat_events, .. } = snapshot(&mut rt, b, now) else {
+        panic!()
+    };
+    let own = combat_events
+        .iter()
+        .find(|event| event.id == seen.id)
+        .unwrap();
+    assert_eq!(own.source.id, tb.id);
+
+    // Once the victim sees the attacker, the same retained receipt names it too.
+    rt.world.players.get_mut(&a).unwrap().hero.x = map_coordinate(-20.0);
+    let ServerPacket::Snapshot { combat_events, .. } = snapshot(&mut rt, a, now) else {
+        panic!()
+    };
+    let named = combat_events
+        .iter()
+        .find(|event| event.id == seen.id)
+        .unwrap();
+    assert_eq!(named.source.id, tb.id);
+    assert_eq!(named.source.kind, CombatEntityKind::Player);
+}
+#[test]
 fn recipient_payloads_hide_actors_projectiles_events_and_pickup_receipts() {
     let (mut rt, a, b, now) = fixture();
     let ta = target(&rt, a);

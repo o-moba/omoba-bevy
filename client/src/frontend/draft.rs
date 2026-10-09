@@ -1314,6 +1314,28 @@ mod tests {
             .collect()
     }
 
+    /// Every prematch request the app has sent, in the order it sent them.
+    ///
+    /// A test that drives several updates must not look for a request in
+    /// `Messages<NetworkCommand>` afterwards. With `TimePlugin` in the app Bevy
+    /// swaps the message buffers after a fixed-timestep tick, so how many updates
+    /// a message survives depends on how long those updates took, and a loaded
+    /// machine drops it before the test looks. The game reads the messages every
+    /// frame; so does this recorder.
+    #[derive(Resource, Default)]
+    struct SentRequests(Vec<PrematchRequest>);
+
+    fn record_requests(
+        mut commands: MessageReader<NetworkCommand>,
+        mut sent: ResMut<SentRequests>,
+    ) {
+        for command in commands.read() {
+            if let NetworkCommand::Prematch(request) = command {
+                sent.0.push(request.clone());
+            }
+        }
+    }
+
     #[test]
     fn phone_avatar_picker_has_visible_tiles_and_raw_taps_switch_tabs_and_select() {
         use bevy::camera::{ComputedCameraValues, RenderTargetInfo};
@@ -1338,8 +1360,10 @@ mod tests {
         .init_resource::<AvatarThumbnails>()
         .insert_resource(crate::ui::UiPlatform(crate::platform::UiProfile::Mobile))
         .init_resource::<crate::ui::GestureEpoch>()
+        .init_resource::<SentRequests>()
         .add_message::<SessionUiCommand>()
         .add_ui_action::<DraftAction>()
+        .add_systems(Update, record_requests.after(send_requests))
         .add_systems(
             Update,
             crate::ui::gesture::recognize_presses.before(UiSet::Dispatch),
@@ -1446,7 +1470,15 @@ mod tests {
                 .as_deref(),
             Some(slug.as_str())
         );
-        assert!(drain_requests(&mut app).iter().any(|request| matches!(&request.action,PrematchAction::Select {avatar:Some(avatar),..} if avatar == &slug)));
+        let sent = &app.world().resource::<SentRequests>().0;
+        assert!(
+            sent.iter().any(|request| matches!(
+                &request.action,
+                PrematchAction::Select { avatar: Some(avatar), .. } if avatar == &slug
+            )),
+            "no Select request for {slug} among the {} requests sent",
+            sent.len()
+        );
     }
 
     #[test]

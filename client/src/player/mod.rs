@@ -15,6 +15,8 @@ pub use shared::hero_balance::DEBUG_SPEED_MULTIPLIER;
 #[cfg(test)]
 use shared::hero_balance::PLAYER_SPEED;
 
+#[cfg(feature = "qa")]
+pub(crate) use animation::HeroClips;
 #[cfg(any(test, feature = "qa"))]
 pub(crate) use animation::PlayerAnimationBinding;
 pub(crate) use animation::register_hero_animation_systems;
@@ -22,7 +24,7 @@ pub(crate) use input::{mobile_screen_direction, viewport_to_simulation_world};
 
 use animation::{PlayerAnimationLibrary, sync_jump_fallback_mode};
 use input::{handle_player_input, move_player_analog, plan_movement_routes};
-pub(crate) use motion::Jumping;
+pub(crate) use motion::{Jumping, SandboxVisualClock};
 use motion::{animate_jump, apply_gravity, move_player, resolve_player_structure_overlap};
 use respawn_ui::{RespawnCountdown, respawn_countdown_system, setup_respawn_ui};
 

@@ -1,5 +1,36 @@
 # План обновления визуала боёвки
 
+## Implementation checkpoint — 2026-10-09 (class visual identity)
+
+The 0.44.0 candidate implements the presentation half of this plan for the
+whole roster (17 classes, 68 skills, 17 basic attacks) as presentation v2:
+`skills.skillfx` schema 2, a closed authoring vocabulary, per-skill motion from
+a 55-clip library, bodies built on replicated geometry, hit recipes on
+confirmed receipts, state visuals from replicated flags, per-skill voices from
+the existing samples and aim previews from the server rule. The current
+contract is in [combat cosmetics](../combat-cosmetics.md#class-visual-identity-presentation-v2-0440-candidate),
+the checks and limits in [the iteration note](../progress/2026-10-09-class-visual-identity.md).
+
+How the stages of the September plan below stand. This is a summary by
+stage: the CV items keep their September wording and their boxes were not
+ticked one by one, because each has acceptance points (hit reactions, grips,
+device checks) that this pass does not cover.
+
+| Stage | Where it stands |
+| --- | --- |
+| 0, the base (skill-owned presentation, stages, honest feedback) | built for presentation: staged casts, end classification, receipts-only hits, fog rules, status visuals from flags. No new wire field was added; instance and cast identities are used as replicated |
+| 1, one fully finished kit | superseded: all 17 kits were taken through the same pass together |
+| 2, interactive and defensive objects | hook, lantern, cage, wall, traps, pillar and orb are bodies of their own; Northwall shows its blocks |
+| 3, shooting, mobility and duels | accents, projectile forms and move cues exist. There is no server-driven jump or flight timeline; a dash or blink is drawn between two authoritative positions |
+| 4, base classes | honest forms for the five legacy kits. Warrior and Warden are still homing projectiles drawn as melee contact; a real melee is an owner decision |
+
+Still open from this plan: victim hit reactions on the body, weapon grips and
+IK, bow and kick clips (three stand-ins are in use), a true 2D effect renderer,
+kill moments and camera effects, and everything that needs a protocol change
+(the Patient Curse mark and the attached Rift Seal are not replicated and are
+not drawn). Nothing was verified on a phone, in motion or in a match with
+people.
+
 ## Current implementation checkpoint — 2026-10-04
 
 The inventory below is the historical September plan. Version **0.40.0 /

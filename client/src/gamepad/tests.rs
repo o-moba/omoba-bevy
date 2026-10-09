@@ -738,3 +738,80 @@ fn skill_release_queues_the_aimed_target_and_north_upgrades_only_when_eligible()
     app.update();
     assert!(emitted(&mut app).is_empty(), "the ultimate is still locked");
 }
+
+/// The aim a release of `slot` by a hero of `class` leaves in the cast queue, with the
+/// right stick at `stick`. Two enemies stand next to the hero, an allied hero at full
+/// health five units along +X and a hurt one eight units along +Z.
+fn released_aim(class: shared::HeroClass, slot: usize, stick: Option<Vec2>) -> Vec2 {
+    let (mut app, player, ..) = combat_fixture();
+    app.world_mut().entity_mut(player).insert((
+        NetworkHeroClass(class),
+        crate::net::PlayerLoadout(Some(shared::loadout::LoadoutState {
+            recipe: shared::loadout::preset_for_class(class).map(|kit| kit.recipe()),
+            ..default()
+        })),
+    ));
+    for (id, at, health) in [(7, Vec2::new(5.0, 0.3), 1.0), (8, Vec2::new(0.0, 8.3), 0.3)] {
+        let mut stats = CombatStats::default();
+        stats.hp *= health;
+        app.world_mut().spawn((
+            RemotePlayer,
+            Transform::from_xyz(at.x, 0.0, at.y),
+            Team::Green,
+            stats,
+            NetworkPlayerId(id),
+            InheritedVisibility::VISIBLE,
+        ));
+    }
+    {
+        let mut pad = pad_mut(&mut app);
+        pad.aim = stick;
+        pad.cast = Some(slot);
+    }
+    app.update();
+    let pending = app.world().resource::<PendingCast>();
+    assert!(pending.has_queued_request(), "{class:?} {slot}");
+    pending.aim.expect("a modular cast is queued with its aim")
+}
+
+#[test]
+fn a_press_without_the_stick_aims_a_skill_cast_on_an_ally_at_an_ally() {
+    use shared::HeroClass;
+    use shared::loadout::{SkillId, preset_for_class, skill};
+
+    let slot_of = |class, id| {
+        let kit = preset_for_class(class).unwrap();
+        kit.skills().iter().position(|skill| *skill == id).unwrap()
+    };
+    let origin = Vec2::new(0.0, 0.3);
+    let leap = (HeroClass::Frostguard, SkillId::ShelteringLeap);
+    let guard = (HeroClass::Orbitwright, SkillId::OrbitalGuard);
+    // The leap goes to the allied hero lowest on health, the orb to the nearest one: not
+    // straight ahead, where nobody stands, and not at the enemies beside the hero.
+    let aim = released_aim(leap.0, slot_of(leap.0, leap.1), None);
+    assert!(aim.distance(Vec2::new(0.0, 8.3)) < 1e-4, "{aim}");
+    let aim = released_aim(guard.0, slot_of(guard.0, guard.1), None);
+    assert!(aim.distance(Vec2::new(5.0, 0.3)) < 1e-4, "{aim}");
+    // The stick is the player's own aim and is not replaced.
+    for (class, id) in [leap, guard] {
+        let aim = released_aim(class, slot_of(class, id), Some(Vec2::X));
+        let range = skill(id).ability.cast_range;
+        assert!(
+            aim.distance(origin + Vec2::X * range) < 1e-4,
+            "{id:?} {aim}"
+        );
+    }
+    // Every other skill is still sent straight ahead without the stick: a lane, and the
+    // leap that may go without an ally (Anchor Step).
+    for (class, id) in [
+        (HeroClass::Frostguard, SkillId::WinterShard),
+        (HeroClass::Stormfist, SkillId::AnchorStep),
+    ] {
+        let aim = released_aim(class, slot_of(class, id), None);
+        let range = skill(id).ability.cast_range;
+        assert!(
+            aim.distance(origin + Vec2::NEG_Y * range) < 1e-4,
+            "{id:?} {aim}"
+        );
+    }
+}

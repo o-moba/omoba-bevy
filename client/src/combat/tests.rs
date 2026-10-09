@@ -110,6 +110,1074 @@ fn dawn_field_recast_bypasses_mana_recovery_and_running_base_cooldown() {
     );
 }
 
+/// A replicated Mountain Echo colossus of hero `owner`.
+fn colossus(owner: u64, at: Vec2) -> shared::loadout::SkillEffectState {
+    shared::loadout::SkillEffectState {
+        id: 40,
+        owner_id: owner,
+        owner_team: shared::map::Team::Green,
+        skill: shared::loadout::SkillId::MountainEcho,
+        kind: shared::loadout::EffectVisualKind::Bolt,
+        position: at.to_array(),
+        end: [0.0; 2],
+        radius: 2.0,
+        remaining_secs: 4.0,
+        armed: true,
+        consumed_segments: 0,
+    }
+}
+
+#[test]
+fn colossus_recast_requires_own_effect_within_gate() {
+    use super::cooldown::{recast_sendable, recast_usable};
+    use shared::loadout::{SkillEffect, SkillId, SkillSlotState, skill};
+
+    let echo = skill(SkillId::MountainEcho);
+    let open = SkillSlotState {
+        can_recast: true,
+        recast_remaining_secs: 3.0,
+        ..default()
+    };
+    let closed = SkillSlotState::default();
+    let hero = Vec2::new(10.0, 5.0);
+    let gate = crate::skill_presentation::geometry::RECAST_GATE_MOUNTAIN_ECHO;
+    let away = |distance: f32| hero + Vec2::new(0.6, -0.8) * distance;
+    let usable = |slot: &SkillSlotState, id: u64, effects: &[_]| {
+        recast_usable(echo, slot, hero, id, effects)
+    };
+
+    // The open window alone is not a recast the server accepts: it needs the hero's own
+    // colossus within the gate (`common/src/skills/advanced.rs`, 4.0 units).
+    assert!(!usable(&open, 1, &[]));
+    assert!(usable(&open, 1, &[colossus(1, away(gate - 0.01))]));
+    assert!(!usable(&open, 1, &[colossus(1, away(gate + 0.01))]));
+    assert!(usable(
+        &open,
+        1,
+        &[colossus(1, away(20.0)), colossus(1, away(3.0))]
+    ));
+    // A closed window, another hero's colossus, one whose owner is hidden and another
+    // effect of the hero open nothing.
+    assert!(!usable(&closed, 1, &[colossus(1, away(1.0))]));
+    assert!(!usable(&open, 1, &[colossus(2, away(1.0))]));
+    assert!(!usable(&open, 0, &[colossus(0, away(1.0))]));
+    let mut pillar = colossus(1, away(1.0));
+    pillar.skill = SkillId::FaultLine;
+    assert!(!usable(&open, 1, &[pillar]));
+
+    // The press that is sent may lead the snapshot by what the colossus travels in a
+    // tenth of a second, and by nothing else.
+    let SkillEffect::Technique { speed, .. } = echo.effect else {
+        panic!("Mountain Echo is a technique");
+    };
+    let lead = speed * 0.1;
+    assert!((lead - 1.2).abs() < 1e-6);
+    let sendable = |slot: &SkillSlotState, id: u64, effects: &[_]| {
+        recast_sendable(echo, slot, hero, id, effects)
+    };
+    assert!(sendable(&open, 1, &[colossus(1, away(gate - 0.01))]));
+    assert!(sendable(&open, 1, &[colossus(1, away(gate + lead - 0.01))]));
+    assert!(!sendable(
+        &open,
+        1,
+        &[colossus(1, away(gate + lead + 0.01))]
+    ));
+    assert!(!sendable(&open, 1, &[]));
+    assert!(!sendable(&closed, 1, &[colossus(1, away(1.0))]));
+    assert!(!sendable(&open, 1, &[colossus(2, away(1.0))]));
+    assert!(!sendable(&open, 0, &[colossus(0, away(1.0))]));
+
+    // Every other recast is what its flag says, wherever the hero stands.
+    for id in SkillId::ALL {
+        if id == SkillId::MountainEcho {
+            continue;
+        }
+        let def = skill(id);
+        assert!(recast_usable(def, &open, hero, 1, &[]), "{}", id.id());
+        assert!(recast_sendable(def, &open, hero, 1, &[]), "{}", id.id());
+        assert!(!recast_usable(def, &closed, hero, 1, &[]), "{}", id.id());
+        assert!(!recast_sendable(def, &closed, hero, 1, &[]), "{}", id.id());
+    }
+}
+
+#[test]
+fn colossus_recast_is_offered_and_sent_only_inside_the_gate() {
+    use super::standard::{StandardStatus, update_status};
+    use crate::i18n::{tr, trf};
+    use crate::net::{PlayerEquipment, PlayerSkillCooldowns};
+
+    const R: usize = 3;
+    let running = PlayerSkillCooldowns {
+        remaining_secs: [0.0, 0.0, 0.0, 45.0],
+        recovery_secs: 0.0,
+    };
+    let mut app = standard_cast_app(HeroClass::Cinderforge, R, true);
+    let mut inspection = super::inspection::SkillInspection::default();
+    inspection.slot = Some(R);
+    app.insert_resource(inspection)
+        .init_resource::<crate::mobile_controls::MobileControls>()
+        .init_resource::<crate::gamepad::GamepadControls>()
+        .insert_resource(GameStateSnapshot {
+            your_id: 1,
+            ..default()
+        })
+        .add_systems(
+            Update,
+            (
+                sync_authoritative_cooldown_durations.before(resolve_pending_cast_system),
+                update_status.after(resolve_pending_cast_system),
+            ),
+        );
+    let label = app
+        .world_mut()
+        .spawn((Text::default(), Node::default(), StandardStatus))
+        .id();
+    let hero = app
+        .world_mut()
+        .query_filtered::<Entity, With<Player>>()
+        .single(app.world())
+        .unwrap();
+    app.world_mut().entity_mut(hero).insert((
+        PlayerEquipment::default(),
+        running,
+        MovementTarget { target: Vec3::X },
+    ));
+    app.world_mut().get_mut::<CombatStats>(hero).unwrap().mana = 100.0;
+    *app.world_mut().resource_mut::<LocalCastCooldown>() = LocalCastCooldown::default();
+    let recast_line = trf(
+        "combat.standard.recast",
+        &[("key", &"R"), ("seconds", &"3.0")],
+    );
+
+    // What one press does with the colossus `distance` away from the hero (none: gone).
+    let press = |app: &mut App, distance: Option<f32>| {
+        app.world_mut()
+            .resource_mut::<GameStateSnapshot>()
+            .skill_effects = distance
+            .map(|distance| colossus(1, Vec2::new(0.0, distance)))
+            .into_iter()
+            .collect();
+        app.world_mut()
+            .resource_mut::<ActionFeedback>()
+            .text
+            .clear();
+        app.world_mut().resource_mut::<PendingCast>().request = Some(PendingCastRequest {
+            slot: R,
+            target_entity: None,
+            target: None,
+            approach_announced: false,
+        });
+        app.update();
+        let sent = sent_commands(app);
+        let cooldowns = app.world().resource::<LocalCastCooldown>();
+        (
+            sent,
+            cooldowns.recast[R],
+            cooldowns.remaining_secs[R],
+            app.world().resource::<ActionFeedback>().text.clone(),
+            app.world()
+                .get::<Text>(label)
+                .unwrap()
+                .0
+                .contains(&recast_line),
+            app.world().entity(hero).contains::<MovementTarget>(),
+        )
+    };
+
+    // The window is open for seconds, but the colossus is still far away: the slot keeps
+    // its running cooldown, the status line offers nothing, and a press is refused aloud
+    // without a command, a predicted cooldown or a lost move order.
+    let (sent, offered, remaining, feedback, listed, walking) = press(&mut app, Some(20.0));
+    assert!(sent.is_empty(), "{sent:?}");
+    assert!(!offered && !listed);
+    assert_eq!(remaining, 45.0);
+    assert_eq!(feedback, tr("combat.standard.not_ready"));
+    assert!(walking);
+    assert!(!app.world().resource::<PendingCast>().is_pending());
+    let cooldowns = app.world().resource::<LocalCastCooldown>();
+    assert_eq!(cooldowns.recovery_secs, 0.0);
+    assert!(cooldowns.pending_slot.is_none());
+
+    // Just outside the gate nothing is offered either, but the press is sent: the
+    // colossus closes that gap before the server reads the command.
+    let (sent, offered, remaining, feedback, listed, _) = press(&mut app, Some(4.6));
+    assert!(matches!(
+        sent.as_slice(),
+        [NetworkCommand::CastSkill { slot: 3, .. }]
+    ));
+    assert!(!offered && !listed);
+    assert_eq!(remaining, 45.0);
+    assert!(feedback.is_empty());
+
+    // Inside the gate the slot is the recast and the press is sent as one: no cooldown is
+    // predicted for it.
+    app.world_mut()
+        .entity_mut(hero)
+        .insert(MovementTarget { target: Vec3::X });
+    let (sent, offered, remaining, feedback, listed, walking) = press(&mut app, Some(3.9));
+    assert!(matches!(
+        sent.as_slice(),
+        [NetworkCommand::CastSkill { slot: 3, .. }]
+    ));
+    assert!(offered && listed);
+    assert_eq!(remaining, 0.0);
+    assert!(feedback.is_empty());
+    assert!(!walking, "a cast that is sent stops the hero as before");
+    assert!(
+        app.world()
+            .resource::<LocalCastCooldown>()
+            .pending_slot
+            .is_none()
+    );
+
+    // The colossus is gone while the window is still open. Until the next snapshot the
+    // mirror has no cooldown to show, and the press must still not go out as a first cast
+    // with a predicted cooldown: the server would read it as the recast and drop it.
+    let (sent, offered, remaining, feedback, listed, _) = press(&mut app, None);
+    assert!(sent.is_empty(), "{sent:?}");
+    assert!(!offered && !listed);
+    assert_eq!(remaining, 0.0);
+    assert_eq!(feedback, tr("combat.standard.not_ready"));
+    assert!(
+        app.world()
+            .resource::<LocalCastCooldown>()
+            .pending_slot
+            .is_none()
+    );
+
+    // The next snapshot brings the real cooldown back and the press is refused again.
+    app.world_mut()
+        .entity_mut(hero)
+        .insert(PlayerSkillCooldowns {
+            remaining_secs: [0.0, 0.0, 0.0, 44.0],
+            recovery_secs: 0.0,
+        });
+    let (sent, offered, remaining, feedback, listed, _) = press(&mut app, None);
+    assert!(sent.is_empty(), "{sent:?}");
+    assert!(!offered && !listed);
+    assert_eq!(remaining, 44.0);
+    assert_eq!(feedback, tr("combat.standard.not_ready"));
+}
+
+#[test]
+fn rift_step_onto_a_landing_the_server_refuses_is_not_sent() {
+    use crate::i18n::tr;
+    use shared::loadout::{EffectVisualKind, SkillEffectState, SkillId};
+
+    const E: usize = 2;
+    assert_eq!(
+        shared::loadout::preset_for_class(HeroClass::Riftshot)
+            .unwrap()
+            .skills()[E],
+        SkillId::RiftStep
+    );
+    let tower = Vec2::new(5.0, 0.0);
+    let pillar = Vec2::new(0.0, 5.0);
+    let map = shared::navigation::world_navigation();
+    assert!(
+        [Vec2::ZERO, tower, pillar, Vec2::X * 7.0]
+            .into_iter()
+            .all(|at| map.point_clear(at.to_array()))
+    );
+    let fault = |armed: bool| SkillEffectState {
+        id: 41,
+        owner_id: 2,
+        owner_team: shared::map::Team::Blue,
+        skill: SkillId::FaultLine,
+        kind: EffectVisualKind::Trap,
+        position: pillar.to_array(),
+        end: pillar.to_array(),
+        radius: 1.0,
+        remaining_secs: 3.0,
+        armed,
+        consumed_segments: 0,
+    };
+    // One press of `slot` aimed at `aim`, next to a tower with `tower_hp` and the given
+    // effects: the commands, the feedback, the predicted cooldown of the slot, whether a
+    // prediction waits for the server and whether the hero still walks.
+    let press = |slot: usize, aim: Vec2, tower_hp: f32, effects: Vec<SkillEffectState>| {
+        let mut app = standard_cast_app(HeroClass::Riftshot, slot, false);
+        app.insert_resource(GameStateSnapshot {
+            your_id: 1,
+            skill_effects: effects,
+            ..default()
+        });
+        app.world_mut().spawn((
+            NetworkStructure,
+            NetworkStructureId(9),
+            Transform::from_xyz(tower.x, 0.0, tower.y),
+            CombatStats {
+                hp: tower_hp,
+                ..default()
+            },
+            Team::Blue,
+            StructureKind::Tower,
+        ));
+        let hero = app
+            .world_mut()
+            .query_filtered::<Entity, With<Player>>()
+            .single(app.world())
+            .unwrap();
+        app.world_mut()
+            .entity_mut(hero)
+            .insert(MovementTarget { target: Vec3::Z });
+        app.world_mut().resource_mut::<PendingCast>().aim = Some(aim);
+        app.update();
+        let sent = sent_commands(&mut app);
+        let cooldowns = app.world().resource::<LocalCastCooldown>();
+        (
+            sent,
+            app.world().resource::<ActionFeedback>().text.clone(),
+            cooldowns.remaining_secs[slot],
+            cooldowns.pending_slot.is_some() || cooldowns.recovery_secs > 0.0,
+            app.world().entity(hero).contains::<MovementTarget>(),
+            app.world().resource::<PendingCast>().is_pending(),
+        )
+    };
+    let refused = |outcome: (Vec<NetworkCommand>, String, f32, bool, bool, bool), case: &str| {
+        let (sent, feedback, cooldown, predicted, walking, pending) = outcome;
+        assert!(sent.is_empty(), "{case}: {sent:?}");
+        assert_eq!(feedback, tr("combat.standard.blocked_landing"), "{case}");
+        assert_eq!(cooldown, 0.0, "{case}: no phantom cooldown");
+        assert!(!predicted && walking && !pending, "{case}");
+    };
+    let landed =
+        |outcome: (Vec<NetworkCommand>, String, f32, bool, bool, bool), aim: Vec2, case: &str| {
+            let (sent, feedback, cooldown, predicted, walking, pending) = outcome;
+            assert!(
+                matches!(
+                    sent.as_slice(),
+                    [NetworkCommand::CastSkill { slot: 2, aim: sent_aim }]
+                        if sent_aim.distance(aim) < 1e-4
+                ),
+                "{case}: {sent:?}"
+            );
+            assert!(feedback.is_empty(), "{case}: {feedback}");
+            assert!(
+                cooldown > 0.0 && predicted && !walking && !pending,
+                "{case}"
+            );
+        };
+
+    // A standing tower keeps the landing out of its disc of 1.3 units.
+    refused(
+        press(E, tower - Vec2::X * 1.29, 100.0, vec![]),
+        "inside the tower",
+    );
+    let beside = tower - Vec2::X * 1.31;
+    landed(press(E, beside, 100.0, vec![]), beside, "beside the tower");
+    // A tower that fell does not.
+    let rubble = tower - Vec2::X * 1.29;
+    landed(press(E, rubble, 0.0, vec![]), rubble, "a fallen tower");
+    // An armed pillar keeps a hero's radius more than its own; before it rises it does not.
+    refused(
+        press(E, pillar - Vec2::Y * 1.4, 100.0, vec![fault(true)]),
+        "at the pillar",
+    );
+    let clear = pillar - Vec2::Y * 1.6;
+    landed(
+        press(E, clear, 100.0, vec![fault(true)]),
+        clear,
+        "clear of the pillar",
+    );
+    let rising = pillar - Vec2::Y * 1.4;
+    landed(
+        press(E, rising, 100.0, vec![fault(false)]),
+        rising,
+        "a pillar that has not risen",
+    );
+    // The aim is bounded by the cast range first: the landing that is judged is the one
+    // that is sent.
+    landed(
+        press(E, Vec2::X * 30.0, 100.0, vec![]),
+        Vec2::X * 7.0,
+        "past the tower, bounded to the range",
+    );
+    // Only the blink has a landing: another skill aimed into the tower is sent.
+    let (sent, feedback, ..) = press(0, tower, 100.0, vec![]);
+    assert!(matches!(
+        sent.as_slice(),
+        [NetworkCommand::CastSkill { slot: 0, .. }]
+    ));
+    assert!(feedback.is_empty());
+}
+
+/// A hero of another player that the client shows.
+fn remote_hero(app: &mut App, id: u64, team: Team, at: Vec2) -> Entity {
+    app.world_mut()
+        .spawn((
+            RemotePlayer,
+            NetworkPlayerId(id),
+            Transform::from_xyz(at.x, 0.0, at.y),
+            CombatStats::default(),
+            team,
+            InheritedVisibility::VISIBLE,
+        ))
+        .id()
+}
+
+/// A lane minion that the client shows.
+fn lane_minion(app: &mut App, id: u64, team: Team, at: Vec2) -> Entity {
+    app.world_mut()
+        .spawn((
+            crate::net::NetworkMinion,
+            NetworkMinionId(id),
+            Transform::from_xyz(at.x, 0.0, at.y),
+            CombatStats::default(),
+            team,
+            InheritedVisibility::VISIBLE,
+        ))
+        .id()
+}
+
+/// What one press of a modular skill came to.
+struct Press {
+    sent: Vec<NetworkCommand>,
+    feedback: String,
+    cooldown: f32,
+    /// A prediction waits for the server.
+    predicted: bool,
+    /// The hero still follows its move order.
+    walking: bool,
+    queued: bool,
+}
+
+impl Press {
+    /// Nothing went out and nothing was predicted: one line, and the hero walks on.
+    fn refused_for_want_of_an_ally(&self, case: &str) {
+        assert!(self.sent.is_empty(), "{case}: {:?}", self.sent);
+        assert_eq!(
+            self.feedback,
+            crate::i18n::tr("combat.cast.no_ally"),
+            "{case}"
+        );
+        assert_eq!(self.cooldown, 0.0, "{case}: no phantom cooldown");
+        assert!(!self.predicted && self.walking && !self.queued, "{case}");
+    }
+
+    /// One cast of `slot` went out, aimed at `aim`, and its cooldown is predicted.
+    fn sent_to(&self, slot: usize, aim: Vec2, case: &str) {
+        assert!(
+            matches!(
+                self.sent.as_slice(),
+                [NetworkCommand::CastSkill { slot: sent, aim: at }]
+                    if usize::from(*sent) == slot && at.distance(aim) < 1e-4
+            ),
+            "{case}: {:?}",
+            self.sent
+        );
+        assert!(self.feedback.is_empty(), "{case}: {}", self.feedback);
+        assert!(
+            self.cooldown > 0.0 && self.predicted && !self.walking && !self.queued,
+            "{case}"
+        );
+    }
+}
+
+/// One press of `slot` by a hero of `class` that walks at the origin, in the world that
+/// `arrange` fills. Without an `aim` the press has neither a cursor nor a stick.
+fn press_among(
+    class: HeroClass,
+    slot: usize,
+    aim: Option<Vec2>,
+    arrange: impl FnOnce(&mut App),
+) -> Press {
+    let mut app = standard_cast_app(class, slot, false);
+    arrange(&mut app);
+    let hero = app
+        .world_mut()
+        .query_filtered::<Entity, With<Player>>()
+        .single(app.world())
+        .unwrap();
+    app.world_mut()
+        .entity_mut(hero)
+        .insert(MovementTarget { target: Vec3::Z });
+    app.world_mut().resource_mut::<PendingCast>().aim = aim;
+    app.update();
+    let sent = sent_commands(&mut app);
+    let cooldowns = app.world().resource::<LocalCastCooldown>();
+    Press {
+        sent,
+        feedback: app.world().resource::<ActionFeedback>().text.clone(),
+        cooldown: cooldowns.remaining_secs[slot],
+        predicted: cooldowns.pending_slot.is_some() || cooldowns.recovery_secs > 0.0,
+        walking: app.world().entity(hero).contains::<MovementTarget>(),
+        queued: app.world().resource::<PendingCast>().is_pending(),
+    }
+}
+
+/// The slot a class casts `id` from.
+fn preset_slot(class: HeroClass, id: shared::loadout::SkillId) -> usize {
+    shared::loadout::preset_for_class(class)
+        .unwrap()
+        .skills()
+        .iter()
+        .position(|skill| *skill == id)
+        .unwrap()
+}
+
+#[test]
+fn orbital_guard_is_sent_to_the_allied_hero_at_its_aim_or_refused_with_a_line() {
+    use shared::loadout::SkillId;
+
+    let class = HeroClass::Orbitwright;
+    let e = preset_slot(class, SkillId::OrbitalGuard);
+    assert_eq!(e, 2);
+    let range = shared::loadout::skill(SkillId::OrbitalGuard)
+        .ability
+        .cast_range;
+    // How far from the aim the server still takes a hero.
+    let reach = 2.0 + shared::PLAYER_TARGET_RADIUS;
+    let ally = Vec2::new(6.0, 2.0);
+    let beside = ally + Vec2::X;
+
+    // Nobody to guard: nothing is sent, nothing is predicted, one line says why. So it is
+    // for a press without a cursor, which aims ten units ahead.
+    for aim in [Some(Vec2::new(30.0, 0.0)), Some(beside), None] {
+        press_among(class, e, aim, |_| {}).refused_for_want_of_an_ally("no ally");
+    }
+    // An allied hero at the aim: the cast goes out, aimed at that hero.
+    press_among(class, e, Some(beside), |app| {
+        remote_hero(app, 9, Team::Green, ally);
+    })
+    .sent_to(e, ally, "an ally at the aim");
+    // An enemy at the aim is nobody to guard.
+    press_among(class, e, Some(beside), |app| {
+        remote_hero(app, 9, Team::Blue, beside);
+    })
+    .refused_for_want_of_an_ally("an enemy at the aim");
+    // The caster is a hero of his own team: aimed at himself, the orb comes home.
+    press_among(class, e, Some(Vec2::X * 1.5), |_| {}).sent_to(e, Vec2::ZERO, "self aim");
+
+    // The server takes heroes only and leaves the other kinds out before it looks for the
+    // nearest: an allied minion nearer the aim does not shadow the hero, and alone it is
+    // nobody to guard.
+    press_among(class, e, Some(beside), |app| {
+        remote_hero(app, 9, Team::Green, ally);
+        lane_minion(app, 4, Team::Green, beside);
+    })
+    .sent_to(e, ally, "a minion nearer the aim");
+    press_among(class, e, Some(beside), |app| {
+        lane_minion(app, 4, Team::Green, beside);
+    })
+    .refused_for_want_of_an_ally("an allied minion alone");
+    // A dead hero and one the client hides are not offered to the rule.
+    press_among(class, e, Some(beside), |app| {
+        let fallen = remote_hero(app, 9, Team::Green, ally);
+        app.world_mut().entity_mut(fallen).insert(CombatStats {
+            hp: 0.0,
+            ..default()
+        });
+    })
+    .refused_for_want_of_an_ally("a dead ally");
+    press_among(class, e, Some(beside), |app| {
+        let unseen = remote_hero(app, 9, Team::Green, ally);
+        app.world_mut()
+            .entity_mut(unseen)
+            .insert(InheritedVisibility::HIDDEN);
+    })
+    .refused_for_want_of_an_ally("a hidden ally");
+
+    // The pick reaches two units and the radius of the hero from the aim.
+    press_among(class, e, Some(ally + Vec2::X * (reach - 0.03)), |app| {
+        remote_hero(app, 9, Team::Green, ally);
+    })
+    .sent_to(e, ally, "inside the pick reach");
+    press_among(class, e, Some(ally + Vec2::X * (reach + 0.03)), |app| {
+        remote_hero(app, 9, Team::Green, ally);
+    })
+    .refused_for_want_of_an_ally("outside the pick reach");
+    // A hero is taken up to its radius beyond the cast range, but a point aim beyond the
+    // range is dropped: the bounded aim is sent as it is there.
+    let edge = Vec2::X * (range + shared::PLAYER_TARGET_RADIUS);
+    press_among(class, e, Some(Vec2::X * 30.0), |app| {
+        remote_hero(app, 9, Team::Green, edge - Vec2::X * 0.03);
+    })
+    .sent_to(e, Vec2::X * range, "a hero at the edge of the range");
+    press_among(class, e, Some(Vec2::X * 30.0), |app| {
+        remote_hero(app, 9, Team::Green, edge + Vec2::X * 0.03);
+    })
+    .refused_for_want_of_an_ally("a hero beyond the range");
+    // Of two heroes the nearer to the aim is taken, and the lower id at the same distance.
+    press_among(class, e, Some(beside), |app| {
+        remote_hero(app, 5, Team::Green, beside + Vec2::X);
+        remote_hero(app, 9, Team::Green, beside - Vec2::X * 0.5);
+    })
+    .sent_to(e, beside - Vec2::X * 0.5, "the nearer of two");
+    press_among(class, e, Some(beside), |app| {
+        remote_hero(app, 9, Team::Green, beside + Vec2::X);
+        remote_hero(app, 5, Team::Green, beside - Vec2::X);
+    })
+    .sent_to(e, beside - Vec2::X, "the lower id of two");
+}
+
+#[test]
+fn sheltering_leap_is_sent_to_the_ally_at_its_aim_or_refused_with_a_line() {
+    use shared::loadout::SkillId;
+
+    let class = HeroClass::Frostguard;
+    let w = preset_slot(class, SkillId::ShelteringLeap);
+    assert_eq!(w, 1);
+    let aim = Vec2::new(5.0, -3.0);
+
+    // The leap needs an ally to leap to.
+    for aim in [Some(Vec2::new(30.0, 0.0)), Some(aim), None] {
+        press_among(class, w, aim, |_| {}).refused_for_want_of_an_ally("no ally");
+    }
+    press_among(class, w, Some(aim), |app| {
+        remote_hero(app, 9, Team::Blue, aim);
+        lane_minion(app, 4, Team::Blue, aim);
+    })
+    .refused_for_want_of_an_ally("enemies at the aim");
+    // An allied minion is one, and so is the caster.
+    let minion = aim + Vec2::Y * 0.8;
+    press_among(class, w, Some(aim), |app| {
+        lane_minion(app, 4, Team::Green, minion);
+    })
+    .sent_to(w, minion, "an allied minion");
+    press_among(class, w, Some(Vec2::X * 1.5), |_| {}).sent_to(w, Vec2::ZERO, "self aim");
+    // The nearest ally to the aim is taken whatever its kind; a hero before a minion at
+    // the same distance.
+    let hero = aim - Vec2::Y;
+    press_among(class, w, Some(aim), |app| {
+        remote_hero(app, 9, Team::Green, hero);
+        lane_minion(app, 4, Team::Green, minion);
+    })
+    .sent_to(w, minion, "the minion is nearer");
+    press_among(class, w, Some(aim), |app| {
+        remote_hero(app, 9, Team::Green, hero);
+        lane_minion(app, 4, Team::Green, aim + Vec2::Y);
+    })
+    .sent_to(w, hero, "a hero first at the same distance");
+}
+
+/// Only a cast the server refuses without an ally is judged by its pick: every other
+/// modular skill aimed at open ground is sent as before, the leap that may go without an
+/// ally (Anchor Step) and the casts on an enemy among them.
+#[test]
+fn only_a_cast_that_needs_an_ally_is_refused_for_want_of_one() {
+    use crate::skill_presentation::geometry::pick_rule;
+    use shared::loadout::SkillId;
+
+    let mut needing = Vec::new();
+    for class in HeroClass::ALL {
+        let Some(kit) = shared::loadout::preset_for_class(class) else {
+            continue;
+        };
+        for (slot, id) in kit.skills().iter().copied().enumerate() {
+            let press = press_among(class, slot, Some(Vec2::new(30.0, 0.0)), |_| {});
+            if pick_rule(id).is_some_and(|rule| rule.ally && !rule.pick_optional) {
+                press.refused_for_want_of_an_ally(&format!("{id:?}"));
+                needing.push(id);
+            } else {
+                assert!(
+                    matches!(
+                        press.sent.as_slice(),
+                        [NetworkCommand::CastSkill { slot: sent, .. }] if usize::from(*sent) == slot
+                    ),
+                    "{id:?}: {:?} {}",
+                    press.sent,
+                    press.feedback
+                );
+            }
+        }
+    }
+    assert_eq!(needing, [SkillId::OrbitalGuard, SkillId::ShelteringLeap]);
+}
+
+/// One cast of `id` by the local hero of the practice authority, among the units
+/// `arrange` places: the client world is built from the snapshot of that moment, the press
+/// goes through the cast path, and what the client sends (or, when it sends nothing, the
+/// aim it refused) is handed to the authority. Returns the aim the client sent, whether the
+/// authority took the cast, the session a second later and the address of the dummy.
+fn ally_cast_on_the_authority(
+    class: HeroClass,
+    id: shared::loadout::SkillId,
+    aim: Vec2,
+    arrange: impl FnOnce(&mut common::offline::PracticeSession, std::net::SocketAddr),
+) -> (
+    Option<Vec2>,
+    bool,
+    common::offline::PracticeSession,
+    std::net::SocketAddr,
+) {
+    use common::offline::{EPOCH, LOCAL_ADDR, PracticeSession};
+    use shared::practice::PracticeCommand;
+    use shared::wire::{CharacterChoice, ClientPacket, ServerPacket};
+
+    let slot = preset_slot(class, id);
+    let mut session = PracticeSession::new(std::time::Instant::now());
+    session.command(ClientPacket::Join {
+        handheld: Default::default(),
+        prematch: false,
+        team: shared::map::Team::Green,
+        character: CharacterChoice::Ipfs,
+        hero_class: class,
+        avatar: None,
+        sprite_character: None,
+        session_id: None,
+        passport_ticket: None,
+    });
+    for command in [PracticeCommand::ClearBots, PracticeCommand::SpawnDummy] {
+        session.command(ClientPacket::Practice { command });
+    }
+    session.bots = Default::default();
+    session.world.structures.clear();
+    session.world.minions.clear();
+    session.world.neutrals.clear();
+    let dummy = *session
+        .world
+        .players
+        .iter()
+        .find(|(_, player)| player.hero.identity.is_bot)
+        .expect("the dummy")
+        .0;
+    {
+        let caster = &mut session.world.players.get_mut(&LOCAL_ADDR).unwrap().hero;
+        (caster.x, caster.z) = (0.0, 0.0);
+    }
+    arrange(&mut session, dummy);
+
+    // What the client knows at this moment.
+    let ServerPacket::Snapshot {
+        your_id,
+        players,
+        minions,
+        ..
+    } = session.snapshot()
+    else {
+        panic!("practice publishes a snapshot");
+    };
+    let mut app = standard_cast_app(class, slot, false);
+    let local = app
+        .world_mut()
+        .query_filtered::<Entity, With<Player>>()
+        .single(app.world())
+        .unwrap();
+    for player in &players {
+        let at = Vec2::new(player.x, player.z);
+        let entity = if player.id == your_id {
+            app.world_mut().entity_mut(local).insert((
+                NetworkPlayerId(player.id),
+                Transform::from_xyz(at.x, 0.0, at.y),
+            ));
+            local
+        } else {
+            remote_hero(&mut app, player.id, player.team.into(), at)
+        };
+        let mut stats = app.world_mut().get_mut::<CombatStats>(entity).unwrap();
+        (stats.hp, stats.max_hp) = (player.hp, player.max_hp);
+    }
+    for minion in &minions {
+        let at = Vec2::new(minion.x, minion.z);
+        lane_minion(&mut app, minion.id, minion.team.into(), at);
+    }
+    app.world_mut().resource_mut::<PendingCast>().aim = Some(aim);
+    app.update();
+    let sent = match sent_commands(&mut app).as_slice() {
+        [] => None,
+        [NetworkCommand::CastSkill { slot: sent, aim }] if usize::from(*sent) == slot => Some(*aim),
+        other => panic!("one cast of the slot at most: {other:?}"),
+    };
+
+    let definition = shared::loadout::skill(id);
+    let refused = super::standard::bounded_aim(
+        Vec2::ZERO,
+        aim,
+        definition.ability.targeting,
+        definition.ability.cast_range,
+    );
+    session.command(ClientPacket::CastSkill {
+        slot: slot as u8,
+        aim: sent.unwrap_or(refused).to_array(),
+        server_epoch: EPOCH,
+        match_id: session.match_id,
+        request_id: 1,
+    });
+    // An accepted technique starts the shared recovery.
+    let taken = session.world.players[&LOCAL_ADDR]
+        .hero
+        .skills
+        .recovery_until
+        .is_some();
+    for _ in 0..20 {
+        session.advance(0.05);
+    }
+    (sent, taken, session, dummy)
+}
+
+/// Parity with the in-process authority for a cast on an ally: the client sends it exactly
+/// when the authority takes it, and the unit the client aims it at is the unit the
+/// authority gives it to. At the edge of the pick reach, at the edge of the cast range,
+/// with a minion nearer the aim than the hero, on an enemy and on the caster.
+#[test]
+fn a_cast_on_an_ally_is_sent_exactly_when_the_authority_takes_it() {
+    use common::offline::{LOCAL_ADDR, PracticeSession};
+    use shared::loadout::SkillId;
+    use std::net::SocketAddr;
+
+    const MARGIN: f32 = 0.03;
+    let reach = 2.0 + shared::PLAYER_TARGET_RADIUS;
+    let green = shared::map::Team::Green;
+    // The dummy as a hero of `team` at `at`.
+    let stand = |session: &mut PracticeSession, dummy: SocketAddr, team, at: Vec2| {
+        let hero = &mut session.world.players.get_mut(&dummy).unwrap().hero;
+        hero.identity.team = team;
+        (hero.x, hero.z) = (at.x, at.y);
+    };
+    // One allied lane minion at `at`.
+    let march = |session: &mut PracticeSession, at: Vec2| {
+        let world = &mut session.world;
+        common::world::spawn_minion_wave_for_team_lane(
+            &world.map_layout,
+            &mut world.minions,
+            &mut world.next_minion_id,
+            green,
+            shared::map::Lane::Mid,
+        );
+        let id = *world.minions.keys().min().expect("a wave has a minion");
+        world.minions.retain(|key, _| *key == id);
+        let minion = world.minions.get_mut(&id).unwrap();
+        (minion.state.x, minion.state.z) = (at.x, at.y);
+    };
+    let shielded = |session: &PracticeSession, addr: SocketAddr| {
+        !session.world.players[&addr].hero.skills.shields.is_empty()
+    };
+    let place = |session: &PracticeSession, addr: SocketAddr| {
+        let hero = &session.world.players[&addr].hero;
+        Vec2::new(hero.x, hero.z)
+    };
+
+    let guard = (HeroClass::Orbitwright, SkillId::OrbitalGuard);
+    let leap = (HeroClass::Frostguard, SkillId::ShelteringLeap);
+    let ally = Vec2::new(6.0, 2.0);
+    let away = Vec2::new(-20.0, 0.0);
+    for (gap, inside) in [(-MARGIN, true), (MARGIN, false)] {
+        for (class, id) in [guard, leap] {
+            let range = shared::loadout::skill(id).ability.cast_range;
+            // An allied hero at the edge of the pick reach.
+            let (sent, taken, session, dummy) = ally_cast_on_the_authority(
+                class,
+                id,
+                ally + Vec2::X * (reach + gap),
+                |s, dummy| stand(s, dummy, green, ally),
+            );
+            assert_eq!(
+                (sent, taken),
+                (inside.then_some(ally), inside),
+                "{id:?} reach {gap}"
+            );
+            assert_eq!(shielded(&session, dummy), inside, "{id:?} reach {gap}");
+            // An allied hero at the edge of the cast range, the aim far beyond it.
+            let edge = Vec2::X * (range + shared::PLAYER_TARGET_RADIUS + gap);
+            let (sent, taken, ..) =
+                ally_cast_on_the_authority(class, id, Vec2::X * 40.0, |s, dummy| {
+                    stand(s, dummy, green, edge)
+                });
+            assert_eq!(
+                (sent, taken),
+                (inside.then_some(Vec2::X * range), inside),
+                "{id:?} range {gap}"
+            );
+            // The caster himself, the dummy out of the way.
+            let (sent, taken, session, _) =
+                ally_cast_on_the_authority(class, id, Vec2::Y * (reach + gap), |s, dummy| {
+                    stand(s, dummy, green, away)
+                });
+            assert_eq!(
+                (sent, taken),
+                (inside.then_some(Vec2::ZERO), inside),
+                "{id:?} self {gap}"
+            );
+            assert_eq!(shielded(&session, LOCAL_ADDR), inside, "{id:?} self {gap}");
+        }
+    }
+    for (class, id) in [guard, leap] {
+        // An enemy hero at the aim is no ally.
+        let (sent, taken, ..) = ally_cast_on_the_authority(class, id, ally, |s, dummy| {
+            stand(s, dummy, shared::map::Team::Blue, ally)
+        });
+        assert_eq!((sent, taken), (None, false), "{id:?} on an enemy");
+    }
+
+    // An allied minion nearer the aim than the allied hero. The orb takes heroes only and
+    // goes to the hero; the leap takes the nearest ally and lands on the minion.
+    let minion = ally + Vec2::X;
+    let (sent, taken, session, dummy) =
+        ally_cast_on_the_authority(guard.0, guard.1, minion, |s, dummy| {
+            stand(s, dummy, green, ally);
+            march(s, minion);
+        });
+    assert_eq!(
+        (sent, taken),
+        (Some(ally), true),
+        "the orb passes the minion by"
+    );
+    assert!(shielded(&session, dummy));
+    let orb = session.world.players[&LOCAL_ADDR]
+        .hero
+        .skills
+        .advanced
+        .orb
+        .as_ref()
+        .expect("the orb is out");
+    assert!(
+        Vec2::from_array(orb.pos).distance(ally) < 1e-3,
+        "{:?}",
+        orb.pos
+    );
+    // An allied minion alone is nobody to guard.
+    let (sent, taken, ..) = ally_cast_on_the_authority(guard.0, guard.1, minion, |s, dummy| {
+        stand(s, dummy, green, away);
+        march(s, minion);
+    });
+    assert_eq!((sent, taken), (None, false), "a minion alone");
+
+    let (sent, taken, session, _) =
+        ally_cast_on_the_authority(leap.0, leap.1, minion, |s, dummy| {
+            stand(s, dummy, green, ally);
+            march(s, minion);
+        });
+    assert_eq!(
+        (sent, taken),
+        (Some(minion), true),
+        "the leap takes the minion"
+    );
+    assert!(place(&session, LOCAL_ADDR).distance(minion) < 0.2);
+    assert!(shielded(&session, LOCAL_ADDR));
+}
+
+/// One touch of the button of `slot` by a hero of `class` that walks at the origin, in the
+/// world that `arrange` fills, through the touch cast and the cast path: a tap, or a drag
+/// along a screen direction to a fraction of the range.
+fn touch_among(
+    class: HeroClass,
+    slot: usize,
+    drag: Option<(Vec2, f32)>,
+    arrange: impl FnOnce(&mut App),
+) -> Press {
+    let mut app = standard_cast_app(class, slot, false);
+    app.world_mut().resource_mut::<PendingCast>().cancel();
+    let mut mobile = crate::mobile_controls::MobileControls::default();
+    mobile.enabled = true;
+    mobile.casts.push(crate::mobile_controls::MobileCastIntent {
+        slot,
+        extent: drag.map_or(0.15, |(_, extent)| extent),
+        aim: drag.map(|(direction, _)| direction),
+    });
+    app.insert_resource(mobile)
+        .init_resource::<TargetState>()
+        .init_resource::<crate::targeting::BasicAttackState>()
+        .insert_resource(PlayerVisualMode::Models3d)
+        .add_systems(
+            Update,
+            super::mobile::mobile_cast_system.before(resolve_pending_cast_system),
+        );
+    app.world_mut()
+        .spawn((MainCamera, Camera::default(), GlobalTransform::IDENTITY));
+    arrange(&mut app);
+    let hero = app
+        .world_mut()
+        .query_filtered::<Entity, With<Player>>()
+        .single(app.world())
+        .unwrap();
+    app.world_mut()
+        .entity_mut(hero)
+        .insert(MovementTarget { target: Vec3::Z });
+    app.update();
+    let sent = sent_commands(&mut app);
+    let cooldowns = app.world().resource::<LocalCastCooldown>();
+    Press {
+        sent,
+        feedback: app.world().resource::<ActionFeedback>().text.clone(),
+        cooldown: cooldowns.remaining_secs[slot],
+        predicted: cooldowns.pending_slot.is_some() || cooldowns.recovery_secs > 0.0,
+        walking: app.world().entity(hero).contains::<MovementTarget>(),
+        queued: app.world().resource::<PendingCast>().is_pending(),
+    }
+}
+
+/// A tap has no aim of its own. For a skill that is cast on an ally it is aimed at an
+/// ally and the cast goes out; it used to be aimed at the nearest enemy, which the server
+/// refuses or turns into a cast on the caster.
+#[test]
+fn a_tap_on_a_skill_cast_on_an_ally_is_sent_to_an_ally_and_never_to_an_enemy() {
+    use shared::loadout::SkillId;
+
+    let enemy = Vec2::X * 2.0;
+    let near = Vec2::X * 4.0;
+    let hurt = Vec2::Y * 8.0;
+    let hurt_hero = |app: &mut App| {
+        let hero = remote_hero(app, 6, Team::Green, hurt);
+        app.world_mut().get_mut::<CombatStats>(hero).unwrap().hp *= 0.3;
+    };
+
+    // Sheltering Leap: the allied hero lowest on health, then an allied minion, then the
+    // caster. The enemy is the nearest unit every time.
+    let class = HeroClass::Frostguard;
+    let w = preset_slot(class, SkillId::ShelteringLeap);
+    touch_among(class, w, None, |app| {
+        remote_hero(app, 2, Team::Blue, enemy);
+        remote_hero(app, 5, Team::Green, near);
+        hurt_hero(app);
+    })
+    .sent_to(w, hurt, "the leap, two allied heroes");
+    touch_among(class, w, None, |app| {
+        remote_hero(app, 2, Team::Blue, enemy);
+        lane_minion(app, 4, Team::Green, Vec2::Y * 6.0);
+    })
+    .sent_to(w, Vec2::Y * 6.0, "the leap, an allied minion");
+    touch_among(class, w, None, |app| {
+        remote_hero(app, 2, Team::Blue, enemy);
+    })
+    .sent_to(w, Vec2::ZERO, "the leap, nobody but the caster");
+
+    // Orbital Guard: the nearest allied hero, else the caster.
+    let class = HeroClass::Orbitwright;
+    let e = preset_slot(class, SkillId::OrbitalGuard);
+    touch_among(class, e, None, |app| {
+        remote_hero(app, 2, Team::Blue, enemy);
+        remote_hero(app, 5, Team::Green, near);
+        hurt_hero(app);
+        lane_minion(app, 4, Team::Green, Vec2::Y);
+    })
+    .sent_to(e, near, "the orb, two allied heroes");
+    touch_among(class, e, None, |app| {
+        remote_hero(app, 2, Team::Blue, enemy);
+        lane_minion(app, 4, Team::Green, Vec2::Y);
+    })
+    .sent_to(e, Vec2::ZERO, "the orb, nobody but the caster");
+
+    // A drag is the player's own aim and is not replaced: nobody stands at its end here,
+    // so the cast is refused with the line, and an ally at its end is taken.
+    let class = HeroClass::Frostguard;
+    touch_among(class, w, Some((Vec2::X, 0.5)), |app| {
+        hurt_hero(app);
+    })
+    .refused_for_want_of_an_ally("a drag past the ally");
+    touch_among(class, w, Some((Vec2::X, 0.5)), |app| {
+        hurt_hero(app);
+        remote_hero(app, 5, Team::Green, Vec2::X * 5.5);
+    })
+    .sent_to(w, Vec2::X * 5.5, "a drag onto an ally");
+
+    // Every other tap keeps its aim on the enemy: a lane, and the leap that may go
+    // without an ally (Anchor Step).
+    let q = preset_slot(class, SkillId::WinterShard);
+    touch_among(class, q, None, |app| {
+        remote_hero(app, 2, Team::Blue, enemy);
+        remote_hero(app, 5, Team::Green, near);
+    })
+    .sent_to(q, enemy, "a lane");
+    let class = HeroClass::Stormfist;
+    let step = preset_slot(class, SkillId::AnchorStep);
+    touch_among(class, step, None, |app| {
+        remote_hero(app, 2, Team::Blue, enemy);
+        remote_hero(app, 5, Team::Green, Vec2::Y * 6.0);
+    })
+    .sent_to(step, enemy, "Anchor Step");
+}
+
 #[test]
 fn standard_keyboard_holds_before_cast_and_cancels_when_context_is_lost() {
     for canceled in [false, true] {
@@ -1077,6 +2145,211 @@ fn self_target_hotbar_request_needs_no_selected_enemy() {
             approach_announced: false,
         })
     );
+}
+
+/// A level-ten legacy hero at the origin that walks to `ORDER`, for the move-order rule.
+fn legacy_hero_with_move_order(class: HeroClass) -> (App, Entity) {
+    let mut app = App::new();
+    app.add_message::<NetworkCommand>()
+        .init_resource::<TeamSelection>()
+        .init_resource::<PendingCast>()
+        .init_resource::<LocalCastCooldown>()
+        .init_resource::<ActionFeedback>()
+        .init_resource::<GameplayInputContext>()
+        .add_systems(Update, resolve_pending_cast_system);
+    let hero = app
+        .world_mut()
+        .spawn((
+            Player,
+            Transform::default(),
+            CombatStats::default(),
+            PlayerProgression {
+                level: 10,
+                ..default()
+            },
+            NetworkPlayerId(1),
+            Team::Green,
+            NetworkHeroClass(class),
+            MovementTarget { target: ORDER },
+            crate::player::MovementRoute {
+                requested_target: ORDER,
+                structure_revision: 1,
+                destination: ORDER,
+                waypoints: vec![ORDER],
+            },
+        ))
+        .id();
+    (app, hero)
+}
+
+const ORDER: Vec3 = Vec3::new(-12.0, 0.0, 5.0);
+
+fn queue_slot(app: &mut App, slot: usize, target: Option<(Entity, TargetId)>) {
+    app.world_mut().resource_mut::<PendingCast>().request = Some(PendingCastRequest {
+        slot,
+        target_entity: target.map(|(entity, _)| entity),
+        target: target.map(|(_, id)| id),
+        approach_announced: false,
+    });
+}
+
+fn sent_commands(app: &mut App) -> Vec<NetworkCommand> {
+    app.world_mut()
+        .resource_mut::<Messages<NetworkCommand>>()
+        .drain()
+        .collect()
+}
+
+fn move_order(app: &App, hero: Entity) -> Option<Vec3> {
+    app.world()
+        .get::<MovementTarget>(hero)
+        .map(|order| order.target)
+}
+
+#[test]
+fn self_target_cast_keeps_the_move_order_and_only_ends_a_cast_approach() {
+    use super::cast::cast_clears_move_order;
+    use shared::TargetingMode::{SelfTarget, UnitTarget};
+
+    let approach = Vec3::new(30.0, 0.0, 0.0);
+    for (targeting, order, expected) in [
+        (SelfTarget, Some(ORDER), false),
+        (SelfTarget, Some(approach), true),
+        (SelfTarget, None, false),
+        (UnitTarget, Some(ORDER), true),
+        (UnitTarget, Some(approach), true),
+    ] {
+        assert_eq!(
+            cast_clears_move_order(targeting, order, Some(approach)),
+            expected,
+            "{targeting:?} {order:?}"
+        );
+    }
+    assert!(!cast_clears_move_order(SelfTarget, Some(ORDER), None));
+
+    // 1. Every legacy self cast is sent and leaves the player's order and route alone.
+    let legacy = HeroClass::ALL
+        .into_iter()
+        .filter(|class| shared::loadout::preset_for_class(*class).is_none());
+    let mut self_casts = 0;
+    for class in legacy {
+        for slot in SkillSlot::ALL {
+            if ability_for_class_slot(class, slot).targeting != SelfTarget {
+                continue;
+            }
+            self_casts += 1;
+            let (mut app, hero) = legacy_hero_with_move_order(class);
+            queue_slot(&mut app, slot.index(), None);
+            app.update();
+            let sent = sent_commands(&mut app);
+            assert!(
+                matches!(
+                    sent.as_slice(),
+                    [NetworkCommand::Cast {
+                        target: TargetId {
+                            kind: TargetKind::Player,
+                            id: 1
+                        },
+                        slot: sent_slot
+                    }] if usize::from(*sent_slot) == slot.index()
+                ),
+                "{class:?} {slot:?}: {sent:?}"
+            );
+            assert_eq!(move_order(&app, hero), Some(ORDER), "{class:?} {slot:?}");
+            assert!(
+                app.world()
+                    .entity(hero)
+                    .contains::<crate::player::MovementRoute>(),
+                "{class:?} {slot:?}"
+            );
+        }
+    }
+    assert_eq!(self_casts, 7);
+
+    // 2. A refused self cast says why and keeps the order as well.
+    let (mut app, hero) = legacy_hero_with_move_order(HeroClass::Ranger);
+    app.world_mut().get_mut::<CombatStats>(hero).unwrap().mana = 0.0;
+    queue_slot(&mut app, SkillSlot::W.index(), None);
+    app.update();
+    assert!(sent_commands(&mut app).is_empty());
+    assert!(!app.world().resource::<ActionFeedback>().text.is_empty());
+    assert!(!app.world().resource::<PendingCast>().is_pending());
+    assert_eq!(move_order(&app, hero), Some(ORDER));
+    assert!(
+        app.world()
+            .entity(hero)
+            .contains::<crate::player::MovementRoute>()
+    );
+
+    // 3. A walk into cast range is not an order of the player: the self cast that
+    // replaces the queued shot ends it, and a later order of the player is kept again.
+    let (mut app, hero) = legacy_hero_with_move_order(HeroClass::Ranger);
+    let target = app
+        .world_mut()
+        .spawn((
+            Transform::from_translation(approach),
+            CombatStats::default(),
+            Team::Blue,
+            NetworkMinionId(77),
+        ))
+        .id();
+    let id = TargetId {
+        kind: TargetKind::Minion,
+        id: 77,
+    };
+    queue_slot(&mut app, SkillSlot::Q.index(), Some((target, id)));
+    app.update();
+    assert_eq!(move_order(&app, hero), Some(approach));
+    assert!(sent_commands(&mut app).is_empty());
+    let skills = crate::equipped_skills::resolve(HeroClass::Ranger, None).unwrap();
+    {
+        let world = app.world_mut();
+        let mut feedback = world.remove_resource::<ActionFeedback>().unwrap();
+        queue_cast_request(
+            SkillSlot::W.index(),
+            &skills,
+            &TargetState::default(),
+            &mut world.resource_mut::<PendingCast>(),
+            &mut feedback,
+        );
+        world.insert_resource(feedback);
+    }
+    app.update();
+    assert!(matches!(
+        sent_commands(&mut app).as_slice(),
+        [NetworkCommand::Cast { slot: 1, .. }]
+    ));
+    assert_eq!(move_order(&app, hero), None);
+    *app.world_mut().resource_mut::<LocalCastCooldown>() = LocalCastCooldown::default();
+    app.world_mut()
+        .entity_mut(hero)
+        .insert(MovementTarget { target: ORDER });
+    queue_slot(&mut app, SkillSlot::W.index(), None);
+    app.update();
+    assert!(matches!(
+        sent_commands(&mut app).as_slice(),
+        [NetworkCommand::Cast { slot: 1, .. }]
+    ));
+    assert_eq!(move_order(&app, hero), Some(ORDER));
+
+    // 4. A cast on a unit stops the hero as before, whoever gave the order.
+    let (mut app, hero) = legacy_hero_with_move_order(HeroClass::Ranger);
+    let target = app
+        .world_mut()
+        .spawn((
+            Transform::from_xyz(2.0, 0.0, 0.0),
+            CombatStats::default(),
+            Team::Blue,
+            NetworkMinionId(77),
+        ))
+        .id();
+    queue_slot(&mut app, SkillSlot::Q.index(), Some((target, id)));
+    app.update();
+    assert!(matches!(
+        sent_commands(&mut app).as_slice(),
+        [NetworkCommand::Cast { slot: 0, .. }]
+    ));
+    assert_eq!(move_order(&app, hero), None);
 }
 
 #[test]

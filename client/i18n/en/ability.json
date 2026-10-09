@@ -12,7 +12,7 @@
   "ability.mana_surge.name": "Mana Surge",
   "ability.mana_surge.desc": "Restores mana instantly; no target required.",
   "ability.frost_lance.name": "Frost Lance",
-  "ability.frost_lance.desc": "Piercing shard with strong impact damage.",
+  "ability.frost_lance.desc": "Ice shard with strong impact damage.",
   "ability.pyroblast.name": "Pyroblast",
   "ability.pyroblast.desc": "Massive fireball with the longest reach in the mage kit.",
   "ability.quick_shot.name": "Quick Shot",
@@ -22,7 +22,7 @@
   "ability.piercing_arrow.name": "Piercing Arrow",
   "ability.piercing_arrow.desc": "Heavy arrow with extended reach.",
   "ability.longshot.name": "Longshot",
-  "ability.longshot.desc": "Sniper shot across the longest range of any kit.",
+  "ability.longshot.desc": "Sniper shot with the longest reach in the ranger kit.",
   "ability.smite.name": "Smite",
   "ability.smite.desc": "Radiant bolt against a selected enemy.",
   "ability.renew.name": "Renew",
@@ -132,7 +132,7 @@
   "ability.dagger_bluff.name": "Bluff",
   "ability.dagger_bluff.desc": "Stun a nearby enemy hero for 1 second and turn their back to you.",
   "ability.dagger_backstab.name": "Backstab",
-  "ability.dagger_backstab.desc": "Strike for 2.5x damage from behind. A rear hit that wounds a surviving hero has a 2% chance to leave 1 HP.",
+  "ability.dagger_backstab.desc": "Strike for 2.5x damage from behind an enemy hero. A rear hit that wounds a surviving hero has a 2% chance to leave 1 HP.",
   "ability.dagger_lethal_blow.name": "Lethal Blow",
-  "ability.dagger_lethal_blow.desc": "A heavy close-range dagger strike; 1.5x damage from behind."
+  "ability.dagger_lethal_blow.desc": "A heavy close-range dagger strike; 1.5x damage from behind an enemy hero."
 }

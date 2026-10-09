@@ -42,7 +42,8 @@ pub struct HeroState {
     pub brittle_until: Option<Instant>,
     pub intercept_until: Option<Instant>,
     pub intercept_direction: [f32; 2],
-    pub intercepted: bool,
+    /// Projectiles the current wall has stopped: the first is negated, later ones reduced.
+    pub intercepts: u8,
     pub last_combat: Option<Instant>,
     pub sustain_until: Option<Instant>,
     pub empowered_until: Option<Instant>,
@@ -150,12 +151,24 @@ fn direction(from: [f32; 2], to: [f32; 2]) -> [f32; 2] {
         [(to[0] - from[0]) / d, (to[1] - from[1]) / d]
     }
 }
+/// Which kinds a targeted technique may acquire near the aim point. The pick is
+/// the nearest eligible candidate, so an ineligible one never shadows it.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Pick {
+    /// Every kind the side admits.
+    Any,
+    /// Heroes only.
+    Hero,
+    /// Anything that can be moved: no structures.
+    Unit,
+}
 fn select(
     w: &GameWorld,
     owner: u64,
     aim: [f32; 2],
     range: f32,
     ally: bool,
+    pick: Pick,
     now: Instant,
 ) -> Option<Candidate> {
     let p = actor(w, owner)?;
@@ -165,6 +178,11 @@ fn select(
         .filter(|c| {
             (c.team == Some(p.hero.identity.team)) == ally
                 && (!ally || matches!(c.target.kind, TargetKind::Player | TargetKind::Minion))
+                && match pick {
+                    Pick::Any => true,
+                    Pick::Hero => c.target.kind == TargetKind::Player,
+                    Pick::Unit => c.target.kind != TargetKind::Structure,
+                }
                 && distance(c.pos, aim) <= 2.0 + c.radius
                 && distance(c.pos, origin) <= range + c.radius
                 && (p.modifiers.bypass_vision
@@ -353,6 +371,13 @@ fn area(
     }
     out
 }
+/// Slow source of a standing zone. A hit slows in its caster's name; a zone
+/// renews a short slow on every tick and keeps its own entry, so it never
+/// rewrites, and thereby shortens, a longer slow from the same caster. Hero
+/// and effect ids share one number space; the top bit keeps zone keys apart.
+fn zone_slow_key(e: &ActiveEffect) -> u64 {
+    e.id | (1 << 63)
+}
 fn recast(
     p: &mut ConnectedPlayer,
     slot: u8,
@@ -440,36 +465,40 @@ pub fn cast(w: &mut GameWorld, addr: SocketAddr, slot: u8, aim: [f32; 2], now: I
     if def.ability.targeting == shared::TargetingMode::Point && len > range + 0.001 {
         return;
     }
-    if remaining(p.hero.skills.control.root_until, now) > 0.0
-        && matches!(
-            action,
-            Technique::Lunge
-                | Technique::CollisionCharge
-                | Technique::SpiritDash
-                | Technique::BlinkShot
-                | Technique::GuardLeap
-                | Technique::AllyLeap
-                | Technique::ExecuteRetreat
-                | Technique::Lash
-        )
-    {
+    // A root forbids moving, not casting: a technique is refused only in the
+    // phase that would displace the caster.
+    let displaces = match action {
+        Technique::Lunge
+        | Technique::CollisionCharge
+        | Technique::SpiritDash
+        | Technique::BlinkShot
+        | Technique::AllyLeap
+        | Technique::ExecuteRetreat
+        | Technique::Lash => true,
+        // The recast only opens the lifesteal window.
+        Technique::GuardLeap => follow.is_none(),
+        // The first cast is a projectile; the recast rides to the marked target.
+        Technique::EchoStrike | Technique::Hook => follow.is_some(),
+        _ => false,
+    };
+    if displaces && remaining(p.hero.skills.control.root_until, now) > 0.0 {
         return;
     }
     if action == Technique::BlinkShot && !legal_landing(w, aim, now) {
         return;
     }
-    let picked = if matches!(
-        action,
-        Technique::VitalChallenge | Technique::Curse | Technique::Lash | Technique::ChainKick
-    ) {
-        select(w, owner, aim, range, false, now)
-    } else if matches!(
-        action,
-        Technique::AllyLeap | Technique::GuardLeap | Technique::BallGuard
-    ) {
-        select(w, owner, aim, range, true, now)
-    } else {
-        None
+    let picked = match action {
+        Technique::VitalChallenge | Technique::Curse => {
+            select(w, owner, aim, range, false, Pick::Hero, now)
+        }
+        // A kick throws its target; a structure cannot be thrown.
+        Technique::ChainKick => select(w, owner, aim, range, false, Pick::Unit, now),
+        Technique::Lash => select(w, owner, aim, range, false, Pick::Any, now),
+        Technique::BallGuard => select(w, owner, aim, range, true, Pick::Hero, now),
+        Technique::AllyLeap | Technique::GuardLeap => {
+            select(w, owner, aim, range, true, Pick::Any, now)
+        }
+        _ => None,
     };
     if matches!(
         action,
@@ -480,13 +509,6 @@ pub fn cast(w: &mut GameWorld, addr: SocketAddr, slot: u8, aim: [f32; 2], now: I
             | Technique::AllyLeap
             | Technique::BallGuard
     ) && picked.is_none()
-    {
-        return;
-    }
-    if matches!(
-        action,
-        Technique::VitalChallenge | Technique::Curse | Technique::BallGuard
-    ) && picked.is_some_and(|c| c.target.kind != TargetKind::Player)
     {
         return;
     }
@@ -620,6 +642,14 @@ pub fn cast(w: &mut GameWorld, addr: SocketAddr, slot: u8, aim: [f32; 2], now: I
                         && crate::vision::target_visible(team, c.target, w, now)
                 });
                 if let Some(c) = priority.or_else(|| nearest(w, owner, origin, range, now)) {
+                    // The recast ignores the aim, so the hero turns to the unit it strikes.
+                    if distance(c.pos, origin) > 0.001 {
+                        crate::sim::cast::face_player_action(
+                            actor_mut(w, owner).unwrap(),
+                            c.pos[0] - origin[0],
+                            c.pos[1] - origin[1],
+                        );
+                    }
                     out.extend(hit(w, &e, c, damage * scale, now));
                 }
             } else {
@@ -776,7 +806,11 @@ pub fn cast(w: &mut GameWorld, addr: SocketAddr, slot: u8, aim: [f32; 2], now: I
                 dash_to(w, owner, destination, now);
                 shield(w, owner, owner, damage * scale, duration_secs, now);
                 if let Some(c) = picked.filter(|c| c.target.kind == TargetKind::Player) {
-                    shield(w, c.target.id, owner, damage * scale, duration_secs, now);
+                    // The caster may pick itself; its shield was granted above
+                    // and must not be granted twice.
+                    if c.target.id != owner {
+                        shield(w, c.target.id, owner, damage * scale, duration_secs, now);
+                    }
                     let p = actor_mut(w, c.target.id).unwrap();
                     p.hero.skills.advanced.defense = 25.0;
                     p.hero.skills.advanced.defense_until = Some(now + duration(duration_secs));
@@ -819,16 +853,19 @@ pub fn cast(w: &mut GameWorld, addr: SocketAddr, slot: u8, aim: [f32; 2], now: I
                     out.extend(hit(w, &e, *c, damage * scale, now));
                     control(w, *c, owner, team, 0.0, 1.0, 0.0, duration_secs, now);
                 }
-                recast(
-                    actor_mut(w, owner).unwrap(),
-                    slot,
-                    def.id,
-                    now,
-                    duration_secs,
-                    1,
-                    None,
-                    victims.iter().map(|c| c.target).collect(),
-                );
+                // The recast slows these victims; without any there is nothing to offer.
+                if !victims.is_empty() {
+                    recast(
+                        actor_mut(w, owner).unwrap(),
+                        slot,
+                        def.id,
+                        now,
+                        duration_secs,
+                        1,
+                        None,
+                        victims.iter().map(|c| c.target).collect(),
+                    );
+                }
             }
         }
         Technique::ChainKick => {
@@ -1031,7 +1068,7 @@ pub fn cast(w: &mut GameWorld, addr: SocketAddr, slot: u8, aim: [f32; 2], now: I
             let p = actor_mut(w, owner).unwrap();
             p.hero.skills.advanced.intercept_until = Some(now + duration(duration_secs));
             p.hero.skills.advanced.intercept_direction = dir;
-            p.hero.skills.advanced.intercepted = false;
+            p.hero.skills.advanced.intercepts = 0;
             e.end = add(origin, dir, radius);
             persistent = true;
         }
@@ -1061,21 +1098,28 @@ pub(super) fn effect_tick(
     else {
         return false;
     };
+    // A pillar blocks for its whole timer whoever is alive, so the effect that
+    // replicates it lives exactly as long as the pillar does.
+    if action == Technique::TerrainLine {
+        return w
+            .skill_runtime
+            .advanced
+            .pillars
+            .iter()
+            .any(|p| p.owner == e.owner && p.pos == e.pos && p.until > now);
+    }
     let Some(owner_pos) = position(w, e.owner) else {
         return false;
     };
+    // The blast is resolved around the caster, so its telegraph stays on the caster.
+    if action == Technique::ConeBrittle {
+        e.pos = owner_pos;
+        e.end = add(owner_pos, e.direction, def.ability.cast_range);
+    }
     if now < e.armed_at {
         return true;
     }
     match action {
-        Technique::TerrainLine => {
-            return w
-                .skill_runtime
-                .advanced
-                .pillars
-                .iter()
-                .any(|p| p.owner == e.owner && p.pos == e.pos && p.until > now);
-        }
         Technique::InterceptShield => {
             e.pos = owner_pos;
             e.end = add(owner_pos, e.direction, radius);
@@ -1127,6 +1171,7 @@ pub(super) fn effect_tick(
         }
         Technique::BallField => {
             if !e.fired {
+                // The burst only damages; the slow is the zone's, renewed below.
                 out.extend(area(
                     w,
                     e,
@@ -1134,8 +1179,8 @@ pub(super) fn effect_tick(
                     radius,
                     damage * e.scale,
                     0.0,
-                    0.6,
-                    0.2,
+                    1.0,
+                    0.0,
                     now,
                 ));
                 e.fired = true;
@@ -1145,10 +1190,13 @@ pub(super) fn effect_tick(
                 .filter(|c| distance(c.pos, e.pos) <= radius + c.radius)
             {
                 if hostile(&c, e.team) {
-                    control(w, c, e.owner, e.team, 0.0, 0.6, 0.2, 0.0, now);
+                    control(w, c, zone_slow_key(e), e.team, 0.0, 0.6, 0.2, 0.0, now);
                 } else if c.target.kind == TargetKind::Player {
                     if let Some(p) = actor_mut(w, c.target.id) {
-                        p.hero.skills.advanced.speed_until = Some(now + duration(0.2));
+                        // Haste is one timestamp: the field tops it up and never
+                        // cuts a longer haste the ally already carries.
+                        let s = &mut p.hero.skills.advanced;
+                        s.speed_until = s.speed_until.max(Some(now + duration(0.2)));
                     }
                 }
             }
@@ -1209,9 +1257,9 @@ pub(super) fn effect_tick(
             {
                 if e.hits.insert(key(c.target)) {
                     out.extend(hit(w, e, c, damage * e.scale, now));
-                    control(w, c, e.owner, e.team, 1.0, 0.5, 0.2, 0.0, now);
+                    control(w, c, zone_slow_key(e), e.team, 1.0, 0.5, 0.2, 0.0, now);
                 } else {
-                    control(w, c, e.owner, e.team, 0.0, 0.5, 0.2, 0.0, now);
+                    control(w, c, zone_slow_key(e), e.team, 0.0, 0.5, 0.2, 0.0, now);
                 }
             }
             return true;
@@ -1231,8 +1279,19 @@ pub(super) fn effect_tick(
         }
         return false;
     }
-    let cs = hits(&candidates(w), e.pos, to, radius);
-    for c in cs.into_iter().filter(|c| hostile(c, e.team)) {
+    // A travelling technique passes through structures. The seal is the one
+    // exception: it also lands on the first enemy structure it can damage.
+    let cs: Vec<_> = hits(&candidates(w), e.pos, to, radius)
+        .into_iter()
+        .filter(|c| {
+            hostile(c, e.team)
+                || (action == Technique::DetonationMark
+                    && c.target.kind == TargetKind::Structure
+                    && c.team != Some(e.team)
+                    && !crate::sim::towers::structure_is_protected(&w.structures, c.target.id))
+        })
+        .collect();
+    for c in cs {
         if e.hits.contains(&key(c.target)) {
             continue;
         }
@@ -1361,12 +1420,17 @@ pub(super) fn effect_tick(
                     now,
                 );
                 if action == Technique::Hook {
-                    move_to(
-                        w,
-                        c.target,
-                        add(c.pos, direction(c.pos, owner_pos), 2.0),
-                        now,
-                    );
+                    // The pull stops one unit short of the caster, where the
+                    // recast also lands; a close catch is never dragged past.
+                    let pull = (distance(c.pos, owner_pos) - 1.0).clamp(0.0, 2.0);
+                    if pull > 0.0 {
+                        move_to(
+                            w,
+                            c.target,
+                            add(c.pos, direction(c.pos, owner_pos), pull),
+                            now,
+                        );
+                    }
                 }
             }
             Technique::ReturningColossus => {
@@ -1810,8 +1874,8 @@ pub fn intercept_players(
         .hero
         .skills
         .advanced;
-    let factor = if s.intercepted { 0.35 } else { 0.0 };
-    s.intercepted = true;
+    let factor = if s.intercepts > 0 { 0.35 } else { 0.0 };
+    s.intercepts = s.intercepts.saturating_add(1);
     Some((selected, factor))
 }
 
@@ -1907,6 +1971,7 @@ pub fn tick(w: &mut GameWorld, t: TickCtx, out: &mut Vec<CombatEvent>) {
             heal(w, owner, 6.0 * t.dt);
         }
         if let Some(mut orb) = actor_mut(w, owner).and_then(|p| p.hero.skills.advanced.orb.take()) {
+            let returning = orb.moving && orb.attached == Some(owner);
             if let Some(ally) = orb.attached.and_then(|id| position(w, id)) {
                 orb.end = ally;
             } else if orb.attached.is_some() {
@@ -1918,7 +1983,11 @@ pub fn tick(w: &mut GameWorld, t: TickCtx, out: &mut Vec<CombatEvent>) {
                 orb.attached = Some(owner);
                 orb.end = pos;
                 orb.moving = true;
-                orb.hits.clear();
+                // The leash starts one return flight with one hit set. It keeps
+                // holding while the orb is still far, so clear only at its start.
+                if !returning {
+                    orb.hits.clear();
+                }
             }
             if orb.moving {
                 let SkillEffect::Technique {
@@ -1969,8 +2038,13 @@ pub fn tick(w: &mut GameWorld, t: TickCtx, out: &mut Vec<CombatEvent>) {
             }
             if let Some(ally) = orb.attached.filter(|_| !orb.moving) {
                 if let Some(p) = actor_mut(w, ally) {
-                    p.hero.skills.advanced.defense = 15.0;
-                    p.hero.skills.advanced.defense_until = Some(now + duration(0.2));
+                    // Defense is one value with one expiry: the aura never
+                    // replaces a stronger defense that is still running.
+                    let s = &mut p.hero.skills.advanced;
+                    if s.defense <= 15.0 || remaining(s.defense_until, now) == 0.0 {
+                        s.defense = 15.0;
+                        s.defense_until = Some(now + duration(0.2));
+                    }
                 }
             }
             if let Some(p) = actor_mut(w, owner) {

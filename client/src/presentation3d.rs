@@ -102,7 +102,21 @@ impl CombatPresentation {
         });
     }
 
+    #[cfg(test)]
     fn observe(&mut self, entity: Entity, position: Vec3, hp: f32, action: PlayerCosmeticAction) {
+        self.observe_with(entity, position, hp, action, || false);
+    }
+
+    /// `themed` is asked for a new action only: an action whose accent is drawn from its
+    /// row leaves the generic gizmo out. A death is never themed.
+    fn observe_with(
+        &mut self,
+        entity: Entity,
+        position: Vec3,
+        hp: f32,
+        action: PlayerCosmeticAction,
+        themed: impl FnOnce() -> bool,
+    ) {
         let new = Observation {
             hp,
             action_sequence: action.sequence,
@@ -114,7 +128,7 @@ impl CombatPresentation {
         if old.hp > 0.0 && hp <= 0.0 {
             self.emit(position, EffectKind::Death);
         }
-        if hp > 0.0 && old.hp > 0.0 && action.sequence > old.action_sequence {
+        if hp > 0.0 && old.hp > 0.0 && action.sequence > old.action_sequence && !themed() {
             match action.kind {
                 PlayerActionKind::Attack => self.emit(position, EffectKind::Attack),
                 PlayerActionKind::Cast => self.emit(position, EffectKind::Cast),
@@ -128,12 +142,15 @@ fn collect_feedback(
     time: Res<Time>,
     game_state: Option<Res<GameStateSnapshot>>,
     mode: Res<PlayerVisualMode>,
+    registry: Option<Res<crate::skill_presentation::SkillPresentation>>,
     mut feedback: ResMut<CombatPresentation>,
     actors: Query<(
         Entity,
         &Transform,
         &CombatStats,
         Option<&PlayerCosmeticAction>,
+        Option<&crate::net::NetworkHeroClass>,
+        Option<&crate::net::PlayerLoadout>,
     )>,
 ) {
     feedback.advance(time.delta_secs());
@@ -151,7 +168,7 @@ fn collect_feedback(
     feedback
         .previous
         .retain(|entity, _| actors.contains(*entity));
-    for (entity, transform, stats, action) in &actors {
+    for (entity, transform, stats, action, class, loadout) in &actors {
         if round_changed {
             // The first received packet may already carry action 1: do not
             // require the initial action-0 snapshot to have survived UDP loss.
@@ -163,12 +180,19 @@ fn collect_feedback(
                 },
             );
         }
-        feedback.observe(
-            entity,
-            transform.translation,
-            stats.hp,
-            action.copied().unwrap_or_default(),
-        );
+        let action = action.copied().unwrap_or_default();
+        feedback.observe_with(entity, transform.translation, stats.hp, action, || {
+            registry
+                .as_ref()
+                .zip(class)
+                .is_some_and(|(registry, class)| {
+                    registry.themed_cast(
+                        class.0,
+                        loadout.and_then(|loadout| loadout.0.as_ref()),
+                        action.slot,
+                    )
+                })
+        });
     }
 }
 
@@ -285,6 +309,68 @@ mod tests {
         );
         feedback.advance(2.0);
         assert!(feedback.effects.is_empty());
+    }
+
+    #[test]
+    fn themed_actions_leave_the_generic_gizmo_out_but_never_a_death() {
+        let mut world = World::new();
+        let entity = world.spawn_empty().id();
+        let mut feedback = CombatPresentation::default();
+        let cast = |sequence| PlayerCosmeticAction {
+            sequence,
+            kind: PlayerActionKind::Cast,
+            slot: 0,
+        };
+        let kinds = |feedback: &CombatPresentation| {
+            feedback
+                .effects
+                .iter()
+                .map(|effect| effect.kind)
+                .collect::<Vec<_>>()
+        };
+        feedback.observe(entity, Vec3::ZERO, 100.0, default());
+        // The question is asked for a new action only.
+        feedback.observe_with(entity, Vec3::ZERO, 100.0, default(), || unreachable!());
+        feedback.observe_with(entity, Vec3::ZERO, 100.0, cast(1), || true);
+        assert!(feedback.effects.is_empty());
+        // The action was seen: it is not drawn a frame later either.
+        feedback.observe_with(entity, Vec3::ZERO, 100.0, cast(1), || false);
+        assert!(feedback.effects.is_empty());
+        feedback.observe_with(entity, Vec3::ZERO, 100.0, cast(2), || false);
+        assert_eq!(kinds(&feedback), [EffectKind::Cast]);
+        feedback.observe_with(entity, Vec3::ZERO, 0.0, cast(3), || true);
+        assert_eq!(kinds(&feedback), [EffectKind::Cast, EffectKind::Death]);
+
+        // The registry decides: the cast of a row is drawn by the particle pool. Without
+        // the row the ring of this module stays.
+        use crate::skill_presentation::SkillPresentation;
+        for (registry, drawn) in [
+            (SkillPresentation::default(), 1),
+            (SkillPresentation::target(), 0),
+        ] {
+            let mut app = App::new();
+            app.insert_resource(Time::<()>::default())
+                .insert_resource(PlayerVisualMode::Models3d)
+                .insert_resource(registry)
+                .init_resource::<CombatPresentation>()
+                .add_systems(Update, collect_feedback);
+            let hero = app
+                .world_mut()
+                .spawn((
+                    Transform::default(),
+                    CombatStats::default(),
+                    PlayerCosmeticAction::default(),
+                    crate::net::NetworkHeroClass(shared::HeroClass::Warrior),
+                ))
+                .id();
+            app.update();
+            app.world_mut().entity_mut(hero).insert(cast(1));
+            app.update();
+            assert_eq!(
+                app.world().resource::<CombatPresentation>().effects.len(),
+                drawn
+            );
+        }
     }
 
     #[test]
