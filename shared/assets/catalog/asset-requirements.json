@@ -1,0 +1,445 @@
+{
+  "schemaVersion": 1,
+  "requirements": [
+    {
+      "id": "warrior.handheld.sword",
+      "name": "Warrior sword",
+      "role": "held_weapon",
+      "status": "supported",
+      "uses": [
+        {
+          "basicAttackId": "warrior",
+          "phase": "attack"
+        }
+      ],
+      "brief": "Static handheld reference for the current class default. Existing Studio weapon submissions are supported; publication and generic game approval do not approve this exact requirement. The game currently equips one selected item.",
+      "profile": {
+        "id": "handheld-glb-v1",
+        "version": 1
+      },
+      "baseline": {
+        "kind": "model",
+        "sourcePath": "client/assets/weapons/forge-sword.glb",
+        "license": "CC-BY-4.0",
+        "attribution": "Open Moba contributors"
+      }
+    },
+    {
+      "id": "adventurer.handheld.dagger",
+      "name": "Adventurer dagger",
+      "role": "held_weapon",
+      "status": "supported",
+      "uses": [
+        {
+          "basicAttackId": "adventurer",
+          "phase": "attack"
+        }
+      ],
+      "brief": "Static handheld reference for the current class default. Existing Studio weapon submissions are supported; publication and generic game approval do not approve this exact requirement. The game currently equips one selected item.",
+      "profile": {
+        "id": "handheld-glb-v1",
+        "version": 1
+      },
+      "baseline": {
+        "kind": "model",
+        "sourcePath": "client/assets/weapons/dagger.glb",
+        "license": "CC-BY-4.0",
+        "attribution": "Open Moba contributors"
+      }
+    },
+    {
+      "id": "ranger.handheld.bow",
+      "name": "Ranger bow",
+      "role": "held_weapon",
+      "status": "supported",
+      "uses": [
+        {
+          "basicAttackId": "ranger",
+          "phase": "attack"
+        }
+      ],
+      "brief": "Static handheld reference for the current class default. Existing Studio weapon submissions are supported; publication and generic game approval do not approve this exact requirement. The game currently equips one selected item.",
+      "profile": {
+        "id": "handheld-glb-v1",
+        "version": 1
+      },
+      "baseline": {
+        "kind": "model",
+        "sourcePath": "client/assets/weapons/verdant-bow.glb",
+        "license": "CC-BY-4.0",
+        "attribution": "Open Moba contributors"
+      }
+    },
+    {
+      "id": "dawnweaver.handheld.scepter",
+      "name": "Dawnweaver scepter",
+      "role": "held_weapon",
+      "status": "supported",
+      "uses": [
+        {
+          "basicAttackId": "dawnweaver",
+          "phase": "attack"
+        }
+      ],
+      "brief": "Static handheld reference for the current class default. Existing Studio weapon submissions are supported; publication and generic game approval do not approve this exact requirement. The game currently equips one selected item.",
+      "profile": {
+        "id": "handheld-glb-v1",
+        "version": 1
+      },
+      "baseline": {
+        "kind": "model",
+        "sourcePath": "client/assets/weapons/dawn-scepter.glb",
+        "license": "CC-BY-4.0",
+        "attribution": "Open Moba contributors"
+      }
+    },
+    {
+      "id": "wildspark.handheld.repeater",
+      "name": "Wildspark repeater",
+      "role": "held_weapon",
+      "status": "supported",
+      "uses": [
+        {
+          "basicAttackId": "wildspark",
+          "phase": "attack",
+          "state": "repeater"
+        },
+        {
+          "basicAttackId": "riftshot",
+          "phase": "attack"
+        },
+        {
+          "skillId": "wild_switch",
+          "phase": "equipped",
+          "state": "repeater"
+        }
+      ],
+      "brief": "Default repeater, reused by Riftshot. Submit a static handheld through the existing weapon profile. A coordinated two-gun set is planned; the current explicit item selection stays selected in both modes.",
+      "profile": {
+        "id": "handheld-glb-v1",
+        "version": 1
+      },
+      "baseline": {
+        "kind": "model",
+        "sourcePath": "client/assets/weapons/wild-repeater.glb",
+        "license": "CC-BY-4.0",
+        "attribution": "Open Moba contributors"
+      }
+    },
+    {
+      "id": "wildspark.handheld.launcher",
+      "name": "Wildspark launcher",
+      "role": "held_weapon",
+      "status": "supported",
+      "uses": [
+        {
+          "basicAttackId": "wildspark",
+          "phase": "attack",
+          "state": "rockets"
+        },
+        {
+          "skillId": "wild_switch",
+          "phase": "equipped",
+          "state": "rockets"
+        }
+      ],
+      "brief": "The second gun in the class-default Q switch. Individual static handheld submission is supported. Mode-specific cosmetic set approval and equipment are future work; this is not a third Q weapon.",
+      "profile": {
+        "id": "handheld-glb-v1",
+        "version": 1
+      },
+      "baseline": {
+        "kind": "model",
+        "sourcePath": "client/assets/weapons/wild-launcher.glb",
+        "license": "CC-BY-4.0",
+        "attribution": "Open Moba contributors"
+      }
+    },
+    {
+      "id": "wildspark.projectile.basic-rocket",
+      "name": "Rocket-mode basic attack body",
+      "role": "projectile",
+      "status": "engine_owned",
+      "uses": [
+        {
+          "basicAttackId": "wildspark",
+          "phase": "attack",
+          "state": "rockets"
+        }
+      ],
+      "brief": "The effective body is the engine-owned tumbler form. The configured wild-rocket.glb is a fallback and is not the normal rendered baseline. Damage, trajectory and collision remain authoritative.",
+      "profile": null,
+      "baseline": {
+        "kind": "procedural",
+        "sourcePath": "client/assets/config/combat_visuals.json",
+        "details": {
+          "profile": "wild_rocket",
+          "effectiveForm": "tumbler",
+          "fallbackSourcePath": "client/assets/weapons/wild-rocket.glb"
+        }
+      }
+    },
+    {
+      "id": "wildspark.projectile.ultimate",
+      "name": "Last Spark flying rocket",
+      "role": "projectile",
+      "status": "planned",
+      "uses": [
+        {
+          "skillId": "wild_rocket",
+          "phase": "flight"
+        }
+      ],
+      "brief": "Bundled model is used by this presentation. A dedicated validated contribution profile and game binding are future work. Public model download is withheld because its asset-specific redistribution license is unresolved.",
+      "profile": null,
+      "baseline": {
+        "kind": "reference",
+        "sourcePath": "client/assets/cosmetics/standard/rocket.glb",
+        "details": {
+          "model": "rocket",
+          "downloadUnavailableReason": "Asset-specific redistribution license has not been resolved."
+        }
+      }
+    },
+    {
+      "id": "wildspark.prop.trap",
+      "name": "Snapline trap",
+      "role": "world_prop",
+      "status": "planned",
+      "uses": [
+        {
+          "skillId": "wild_traps",
+          "phase": "placed"
+        }
+      ],
+      "brief": "Bundled model is used by this presentation. A dedicated validated contribution profile and game binding are future work. Public model download is withheld because its asset-specific redistribution license is unresolved.",
+      "profile": null,
+      "baseline": {
+        "kind": "reference",
+        "sourcePath": "client/assets/cosmetics/standard/trap.glb",
+        "details": {
+          "model": "trap",
+          "downloadUnavailableReason": "Asset-specific redistribution license has not been resolved."
+        }
+      }
+    },
+    {
+      "id": "chainkeeper.projectile.hook",
+      "name": "Iron Hook flying hook",
+      "role": "projectile",
+      "status": "planned",
+      "uses": [
+        {
+          "skillId": "iron_hook",
+          "phase": "flight"
+        }
+      ],
+      "brief": "Bundled model is used by this presentation. A dedicated validated contribution profile and game binding are future work. Public model download is withheld because its asset-specific redistribution license is unresolved.",
+      "profile": null,
+      "baseline": {
+        "kind": "reference",
+        "sourcePath": "client/assets/cosmetics/standard/hook.glb",
+        "details": {
+          "model": "hook",
+          "downloadUnavailableReason": "Asset-specific redistribution license has not been resolved."
+        }
+      }
+    },
+    {
+      "id": "chainkeeper.prop.lantern",
+      "name": "Guiding Lantern",
+      "role": "world_prop",
+      "status": "planned",
+      "uses": [
+        {
+          "skillId": "guiding_lantern",
+          "phase": "placed"
+        }
+      ],
+      "brief": "Bundled model is used by this presentation. A dedicated validated contribution profile and game binding are future work. Public model download is withheld because its asset-specific redistribution license is unresolved.",
+      "profile": null,
+      "baseline": {
+        "kind": "reference",
+        "sourcePath": "client/assets/cosmetics/standard/lantern.glb",
+        "details": {
+          "model": "lantern",
+          "downloadUnavailableReason": "Asset-specific redistribution license has not been resolved."
+        }
+      }
+    },
+    {
+      "id": "orbitwright.prop.orb",
+      "name": "Orbitwright persistent orb",
+      "role": "world_prop",
+      "status": "planned",
+      "uses": [
+        {
+          "skillId": "orbital_command",
+          "phase": "active"
+        },
+        {
+          "skillId": "orbital_guard",
+          "phase": "active"
+        }
+      ],
+      "brief": "Bundled model is used by this presentation. A dedicated validated contribution profile and game binding are future work. Public model download is withheld because its asset-specific redistribution license is unresolved.",
+      "profile": null,
+      "baseline": {
+        "kind": "reference",
+        "sourcePath": "client/assets/cosmetics/standard/orb.glb",
+        "details": {
+          "model": "orb",
+          "downloadUnavailableReason": "Asset-specific redistribution license has not been resolved."
+        }
+      }
+    },
+    {
+      "id": "wildspark.effect.shockline",
+      "name": "Shockline flight and hit",
+      "role": "engine_effect",
+      "status": "engine_owned",
+      "uses": [
+        {
+          "skillId": "wild_zap",
+          "phase": "flight"
+        },
+        {
+          "skillId": "wild_zap",
+          "phase": "impact"
+        }
+      ],
+      "brief": "Engine-owned procedural presentation. Use the skill art and semantic motion as references; no replaceable GLB upload slot exists.",
+      "profile": null,
+      "baseline": {
+        "kind": "procedural",
+        "sourcePath": "client/assets/config/skills.skillfx"
+      }
+    },
+    {
+      "id": "wildspark.effect.explosion",
+      "name": "Last Spark impact effects",
+      "role": "engine_effect",
+      "status": "engine_owned",
+      "uses": [
+        {
+          "skillId": "wild_rocket",
+          "phase": "impact"
+        }
+      ],
+      "brief": "Engine-owned flash, rings, debris and embers following confirmed impact. Future cosmetic parameters must preserve authoritative damage radius and visual budgets.",
+      "profile": null,
+      "baseline": {
+        "kind": "procedural",
+        "sourcePath": "client/assets/config/skills.skillfx"
+      }
+    }
+  ],
+  "sourceEvidence": [
+    {
+      "sourcePath": "shared/src/handheld.rs",
+      "sha256": "fe7c7e8567c1fd11d23833ad5a6bda0af850b4478f3b01336ef3528e21c684b8"
+    },
+    {
+      "sourcePath": "client/src/skill_presentation/effects.rs",
+      "sha256": "150bcaa471335400d1716f36661464a96dcabcbfecabb5987aee817761e8231e"
+    },
+    {
+      "sourcePath": "client/src/skill_icons.rs",
+      "sha256": "13fe192b4d6e81142863617f689a288ee81716204787690ba15a26a624e97a60"
+    },
+    {
+      "sourcePath": "shared/src/loadout.rs",
+      "sha256": "880f96b28b8cef4f3e4736c92efee88b4b46bf63ef7dc2a26d05bb7bb3dcfaba"
+    }
+  ],
+  "iconAtlases": [
+    {
+      "path": "ui/skills/skills-atlas.png",
+      "skillIds": [
+        "shield_bash",
+        "battle_rally",
+        "heroic_strike",
+        "rampage",
+        "arc_bolt",
+        "mana_surge",
+        "frost_lance",
+        "pyroblast",
+        "quick_shot",
+        "field_dressing",
+        "piercing_arrow",
+        "longshot",
+        "smite",
+        "renew",
+        "divine_favor",
+        "guardians_blessing",
+        "feral_swipe",
+        "barkskin",
+        "hunters_mark",
+        "primal_maul"
+      ]
+    },
+    {
+      "path": "ui/skills/standard-skills.png",
+      "skillIds": [
+        "dawn_bind",
+        "dawn_barrier",
+        "dawn_field",
+        "dawn_ray",
+        "wild_switch",
+        "wild_zap",
+        "wild_traps",
+        "wild_rocket"
+      ]
+    },
+    {
+      "path": "ui/skills/roster-skills.png",
+      "skillIds": [
+        "fault_line",
+        "furnace_breath",
+        "anvil_charge",
+        "mountain_echo",
+        "edge_lunge",
+        "mirror_guard",
+        "twin_tempo",
+        "fourfold_duel",
+        "echo_strike",
+        "anchor_step",
+        "thunder_pulse",
+        "thunder_kick",
+        "thorn_volley",
+        "patient_curse",
+        "shadow_lash",
+        "nightfall",
+        "wandering_ember",
+        "kindled_wisps",
+        "heart_tether",
+        "flame_dance",
+        "orbital_command",
+        "orbital_field",
+        "orbital_guard",
+        "orbital_collapse",
+        "rift_needle",
+        "rift_seal",
+        "rift_step",
+        "horizon_wave",
+        "iron_hook",
+        "guiding_lantern",
+        "chain_sweep",
+        "iron_boundary",
+        "winter_shard",
+        "sheltering_leap",
+        "northwall",
+        "winter_divide"
+      ]
+    },
+    {
+      "path": "ui/skills/dagger-skills.png",
+      "skillIds": [
+        "dagger_deadly_blow",
+        "dagger_bluff",
+        "dagger_backstab",
+        "dagger_lethal_blow"
+      ]
+    }
+  ]
+}

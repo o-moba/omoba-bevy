@@ -1,5 +1,20 @@
 # Feature Inventory
 
+## Creator asset catalogue (first iteration)
+
+The [asset catalogue exporter](asset-catalog.md) joins canonical class recipes,
+skills, presentations and authored asset briefs into a versioned static snapshot.
+It distinguishes licensed bundled handheld references, engine-owned effects and
+motions, and planned projectile/prop bindings. The companion `omoba-web` gallery
+uses the same snapshot; offline Blender thumbnails and content-addressed GLB
+downloads show current defaults without requiring a running game or Account API.
+
+An artist can prepare a requirement/revision-pinned brief and use the existing
+Studio upload route. This is discovery and preparation: Studio does not yet
+persist exact requirement bindings, and the game does not yet equip coordinated
+sets or remote projectile/prop skins. See the [iteration record](progress/2026-10-10-asset-catalog.md)
+and parent [design PR #78](https://github.com/o-moba/omoba-bevy/pull/78).
+
 ## First-match guidance and mobile comfort (0.44.0 candidate)
 
 The guide starts with the objective: clear one lane with allied minions, then destroy the enemy main tower. Loading shows five advice cards, navigable with arrows or a single-finger horizontal swipe in the text area. Settings → HUD → Beginner tips remembers whether loading advice and the automatic first-match guide appear; manual Help remains available. Older preferences enable advice by default.
