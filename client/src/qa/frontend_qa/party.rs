@@ -106,7 +106,7 @@ fn setup(mut commands: Commands) {
         },
         Text::new("QA · SYNTHETIC ROSTER · production renderer · scripted touch"),
         TextFont {
-            font_size: 9.0,
+            font_size: (9.0).into(),
             ..default()
         },
         TextColor(Color::WHITE),
@@ -393,7 +393,7 @@ fn capture(
         Option<&InheritedVisibility>,
         Option<&ScrollPosition>,
     )>,
-    scenes: Query<(&Name, &SceneRoot)>,
+    scenes: Query<(&Name, &WorldAssetRoot)>,
     cameras: Query<&Camera, With<StageCamera>>,
     assets: Res<AssetServer>,
     modals: Res<crate::ui::ModalStack>,

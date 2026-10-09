@@ -1,15 +1,36 @@
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, time::Duration};
 
 use bevy::prelude::*;
 use serde::Deserialize;
-use shared::combat::{CombatEntityKind, CombatEvent, ProjectileStyle};
+use shared::{
+    HeroClass,
+    combat::{CombatEntity, CombatEntityKind, CombatEvent, ProjectileStyle},
+    loadout::LoadoutState,
+};
 
-use crate::{net::GameState, team::Team};
+use crate::{
+    net::GameState,
+    skill_presentation::{
+        SkillPresentation, SoundCue,
+        cast::{CastKey, SkillCastObserved},
+        stage::{EndKind, StageChange, StageEvent, Transition},
+        vocab::{AudioBase, AudioSlice},
+    },
+    team::Team,
+};
 
 pub(super) const MAX_VOICES: usize = 12;
 pub(super) const MAX_FRAME_CUES: usize = 4;
 pub(super) const EFFECT_MAX_AGE: f64 = 4.0;
 pub(super) const PENDING_MAX_AGE: f64 = 0.3;
+/// Sample speeds are whole steps of 0.05; this many play the sample as recorded.
+pub(super) const UNIT_STEP: u8 = 20;
+const SPEED_STEP: f32 = 0.05;
+/// Later notes one voice may carry.
+pub(super) const MAX_NOTES: usize = 2;
+/// A voice of a row is played up to this much faster or slower than its row says, so a
+/// skill that hits many times does not repeat one identical sound.
+pub(super) const MAX_DETUNE: f32 = 0.03;
 
 /// Stable presentation IDs. Requests do not modify gameplay or confer authority.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -111,6 +132,19 @@ impl AudioCue {
             Self::Caster => 0.2,
             Self::UiClick | Self::UiConfirm => 0.08,
             _ => 0.12,
+        }
+    }
+
+    /// The sample a voice of a skill row is built from.
+    const fn for_base(base: AudioBase) -> Self {
+        match base {
+            AudioBase::Melee => Self::Melee,
+            AudioBase::Arrow => Self::Arrow,
+            AudioBase::Arcane => Self::Arcane,
+            AudioBase::Holy => Self::Holy,
+            AudioBase::Caster => Self::Caster,
+            AudioBase::Tower => Self::Tower,
+            AudioBase::Bluff => Self::Bluff,
         }
     }
 
@@ -223,16 +257,187 @@ pub(super) struct LocalState {
     pub team: Team,
 }
 
-#[derive(Clone, Copy)]
-pub(super) struct Candidate {
+/// One way to play a sample: its speed and the part of it that sounds. Every variant has a
+/// cooldown of its own.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub(super) struct Variant {
     pub cue: AudioCue,
+    /// Playback speed in steps of 0.05.
+    pub step: u8,
+    pub slice: AudioSlice,
+}
+
+impl From<AudioCue> for Variant {
+    /// The sample as recorded.
+    fn from(cue: AudioCue) -> Self {
+        Self {
+            cue,
+            step: UNIT_STEP,
+            slice: AudioSlice::Full,
+        }
+    }
+}
+
+impl Variant {
+    pub fn speed(self) -> f32 {
+        f32::from(self.step) * SPEED_STEP
+    }
+
+    /// The part of the sample that sounds: where it starts, and how long it lasts when it
+    /// does not run to the end. Both are times of the sample, whatever its playback speed.
+    pub fn span(self) -> (Option<Duration>, Option<Duration>) {
+        let ms = Duration::from_millis;
+        match self.slice {
+            AudioSlice::Full => (None, None),
+            AudioSlice::Tick => (None, Some(ms(120))),
+            AudioSlice::Body => (Some(ms(60)), Some(ms(340))),
+            AudioSlice::Tail => (Some(ms(200)), None),
+        }
+    }
+}
+
+/// The moments of an action that a row of the skill registry gives a voice.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Moment {
+    Cast,
+    Recast,
+    /// A telegraph fired.
+    Release,
+    /// A confirmed hit.
+    Impact,
+    /// An accepted basic attack of an enemy, in the voice of its hit.
+    Attack,
+}
+
+impl Moment {
+    #[cfg(feature = "qa")]
+    pub const fn id(self) -> &'static str {
+        match self {
+            Self::Cast => "cast",
+            Self::Recast => "recast",
+            Self::Release => "release",
+            Self::Impact => "impact",
+            Self::Attack => "attack",
+        }
+    }
+}
+
+/// Where a candidate comes from, as far as the skill registry is concerned.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) enum Origin {
+    /// Game state, the interface or an explicit request. No row answers for it.
+    Other,
+    /// The wire style of an accepted damage receipt, until the row of the action that
+    /// dealt it gives the hit a voice of its own.
+    Receipt {
+        id: u64,
+        source: CombatEntity,
+        slot: Option<u8>,
+        style: ProjectileStyle,
+    },
+    /// The class style of an accepted attack of an enemy, until a row answers for it.
+    Attack { actor: u64, sequence: u64 },
+    /// A row gave the voice: the id of the row, the hero that acted (0 when the client
+    /// does not know it) and the action sequence, receipt or effect that set it off.
+    Row {
+        moment: Moment,
+        row: &'static str,
+        actor: u64,
+        id: u64,
+    },
+}
+
+/// A later note of a voice: the same sample and slice again, after a delay.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) struct Note {
+    pub delay_secs: f64,
+    /// Playback speed in steps of 0.05.
+    pub step: u8,
     pub gain: f32,
 }
 
+#[derive(Clone, Copy, Debug)]
+pub(super) struct Candidate {
+    pub cue: AudioCue,
+    pub gain: f32,
+    /// Playback speed in steps of 0.05.
+    pub step: u8,
+    pub slice: AudioSlice,
+    /// Later notes. Only a voice of the local hero's own action carries any.
+    pub notes: [Option<Note>; MAX_NOTES],
+    pub origin: Origin,
+}
+
 impl Candidate {
-    pub fn local(cue: AudioCue) -> Self {
-        Self { cue, gain: 1.0 }
+    /// The sample as recorded.
+    const fn plain(cue: AudioCue, gain: f32, origin: Origin) -> Self {
+        Self {
+            cue,
+            gain,
+            step: UNIT_STEP,
+            slice: AudioSlice::Full,
+            notes: [None; MAX_NOTES],
+            origin,
+        }
     }
+
+    pub fn local(cue: AudioCue) -> Self {
+        Self::plain(cue, 1.0, Origin::Other)
+    }
+
+    /// The voice a row gives one moment, heard at `gain`. The later notes belong to the
+    /// local hero's own action; everyone else is heard with the first note alone.
+    fn voiced(cue: &SoundCue, gain: f32, own: bool, origin: Origin) -> Self {
+        let step = |speed: f32| (speed / SPEED_STEP).round() as u8;
+        let mut notes = [None; MAX_NOTES];
+        if own {
+            for (slot, note) in notes.iter_mut().zip(&cue.notes) {
+                *slot = Some(Note {
+                    delay_secs: f64::from(note.delay_ms) / 1000.0,
+                    step: step(note.speed),
+                    gain: gain * note.gain,
+                });
+            }
+        }
+        Self {
+            cue: AudioCue::for_base(cue.base),
+            gain: gain * cue.gain,
+            step: step(cue.speed),
+            slice: cue.slice,
+            notes,
+            origin,
+        }
+    }
+
+    pub fn variant(&self) -> Variant {
+        Variant {
+            cue: self.cue,
+            step: self.step,
+            slice: self.slice,
+        }
+    }
+
+    /// What the rate budget has to admit before the first note may sound.
+    pub fn admission(&self) -> Admission {
+        Admission {
+            variant: self.variant(),
+            notes: 1 + self.notes.iter().flatten().count(),
+        }
+    }
+
+    /// The speed factor of this play: a voice of a row is detuned by a fixed amount that
+    /// follows from the action, receipt or effect behind it. Everything else is exact.
+    pub fn detune(&self) -> f32 {
+        match self.origin {
+            Origin::Row { id, .. } => detune(id),
+            Origin::Other | Origin::Receipt { .. } | Origin::Attack { .. } => 1.0,
+        }
+    }
+}
+
+/// A speed factor within `MAX_DETUNE` of 1, the same for the same seed.
+pub(super) fn detune(seed: u64) -> f32 {
+    1.0 + MAX_DETUNE * crate::game_vfx::jitter(seed, 0, 0xA0D1)
 }
 
 #[derive(Default)]
@@ -331,10 +536,11 @@ impl EventCursor {
                 event.source.kind == CombatEntityKind::Player && event.source.id == local.id;
             let gain = distance_gain(local.position, Vec3::new(event.x, event.y, event.z));
             if event.trap_triggered && (outgoing || incoming || gain > 0.0) {
-                cues.push(Candidate {
-                    cue: AudioCue::TrapTrigger,
-                    gain: if outgoing || incoming { 1.0 } else { gain },
-                });
+                cues.push(Candidate::plain(
+                    AudioCue::TrapTrigger,
+                    if outgoing || incoming { 1.0 } else { gain },
+                    Origin::Other,
+                ));
             }
             // A shield can absorb the damage while the trap still activates.
             // Its explicit receipt is audible without inventing a damage hit.
@@ -346,10 +552,11 @@ impl EventCursor {
                 && event.target.kind == CombatEntityKind::Player
                 && (outgoing || incoming || gain > 0.0)
             {
-                cues.push(Candidate {
-                    cue: AudioCue::VitalBreak,
-                    gain: if outgoing || incoming { 1.0 } else { gain },
-                });
+                cues.push(Candidate::plain(
+                    AudioCue::VitalBreak,
+                    if outgoing || incoming { 1.0 } else { gain },
+                    Origin::Other,
+                ));
             }
             if incoming {
                 if event.killed {
@@ -362,10 +569,16 @@ impl EventCursor {
                 cues.push(Candidate::local(AudioCue::Kill));
             }
             if gain > 0.0 {
-                cues.push(Candidate {
-                    cue: AudioCue::for_style(event.style),
+                cues.push(Candidate::plain(
+                    AudioCue::for_style(event.style),
                     gain,
-                });
+                    Origin::Receipt {
+                        id: event.id,
+                        source: event.source,
+                        slot: event.action_slot,
+                        style: event.style,
+                    },
+                ));
             }
         }
         if death {
@@ -422,15 +635,218 @@ impl AttackCursor {
             {
                 let gain = distance_gain(local.position, actor.position);
                 if gain > 0.0 {
-                    cues.push(Candidate {
-                        cue: AudioCue::for_style(actor.style),
+                    cues.push(Candidate::plain(
+                        AudioCue::for_style(actor.style),
                         gain,
-                    });
+                        Origin::Attack {
+                            actor: actor.id,
+                            sequence: actor.sequence,
+                        },
+                    ));
                 }
             }
         }
         self.seen = live;
         cues
+    }
+}
+
+/// A hero as the frame holds it, for the rows its actions resolve to.
+#[derive(Clone, Copy)]
+pub(super) struct HeroHeard<'a> {
+    pub id: u64,
+    /// The entity is drawn. Only a hero the client sees lends its rows to a receipt.
+    pub visible: bool,
+    pub class: HeroClass,
+    pub loadout: Option<&'a LoadoutState>,
+    /// The slot of the hero's latest accepted action.
+    pub slot: u8,
+}
+
+/// What one frame observed that the skill registry may give a voice.
+#[derive(Clone, Copy)]
+pub(super) struct Heard<'a> {
+    pub registry: &'a SkillPresentation,
+    pub listener: LocalState,
+    pub heroes: &'a [HeroHeard<'a>],
+    /// The accepted actions the cast observer and the stage tracker reported.
+    pub casts: &'a [SkillCastObserved],
+    pub stages: &'a [StageEvent],
+}
+
+fn row_id(key: CastKey) -> &'static str {
+    match key {
+        CastKey::Skill(key) => key.id(),
+        CastKey::Basic(class) | CastKey::Rockets(class) => class.id(),
+    }
+}
+
+/// The voice of an accepted cast: `sound.recast` on a recast edge of a row that has one,
+/// else `sound.cast`. A basic attack is voiced by its hit, not by its swing.
+fn cast_cue<'a>(
+    registry: &'a SkillPresentation,
+    cast: &SkillCastObserved,
+) -> Option<(Moment, &'a SoundCue)> {
+    let CastKey::Skill(key) = cast.key else {
+        return None;
+    };
+    let sound = registry.row(key.id())?.sound.as_ref()?;
+    match sound.recast.as_ref().filter(|_| cast.recast) {
+        Some(cue) => Some((Moment::Recast, cue)),
+        None => sound.cast.as_ref().map(|cue| (Moment::Cast, cue)),
+    }
+}
+
+/// The voice of a confirmed hit: `sound.impact` of the skill that dealt it, or the cue of
+/// the round of the basic attack.
+fn hit_cue(registry: &SkillPresentation, key: CastKey) -> Option<&SoundCue> {
+    match key {
+        CastKey::Skill(key) => registry.row(key.id())?.sound.as_ref()?.impact.as_ref(),
+        CastKey::Basic(_) | CastKey::Rockets(_) => registry.basic_round(key)?.sound.as_ref(),
+    }
+}
+
+/// Gives the frame the voices of its rows. A receipt whose source is a hero the client
+/// sees takes the hit voice of the row of that action; a receipt no row answers for keeps
+/// the cue of its wire style. An enemy's accepted attack takes the voice of its basic
+/// attack, or leaves the word to the cast voice of its skill. A repeater has a voice for
+/// each of its two rounds: the receipt names the round by its wire style, the accepted
+/// attack by the weapon mode of the snapshot that carries it. Every observed cast and
+/// every telegraph that fired adds the voice of its row, if the row has one.
+pub(super) fn voice_rows(heard: &Heard, candidates: &mut Vec<Candidate>) {
+    let Heard {
+        registry,
+        listener,
+        heroes,
+        casts,
+        stages,
+    } = *heard;
+    let hero = |id: u64| heroes.iter().find(|hero| hero.id == id);
+    candidates.retain_mut(|candidate| match candidate.origin {
+        Origin::Receipt {
+            id,
+            source,
+            slot,
+            style,
+        } => {
+            let dealt = (source.kind == CombatEntityKind::Player)
+                .then(|| hero(source.id))
+                .flatten()
+                .filter(|hero| hero.visible)
+                .and_then(|hero| {
+                    let key = CastKey::of(hero.class, hero.loadout, slot?)?;
+                    Some((hero, key.struck_as(style)))
+                });
+            if let Some((hero, key)) = dealt
+                && let Some(cue) = hit_cue(registry, key)
+            {
+                *candidate = Candidate::voiced(
+                    cue,
+                    candidate.gain,
+                    hero.id == listener.id,
+                    Origin::Row {
+                        moment: Moment::Impact,
+                        row: row_id(key),
+                        actor: hero.id,
+                        id,
+                    },
+                );
+            }
+            true
+        }
+        Origin::Attack { actor, sequence } => {
+            let Some(hero) = hero(actor) else {
+                return true;
+            };
+            // The cast voice of the same action stands for the attack.
+            if casts.iter().any(|cast| {
+                (cast.actor_id, cast.sequence, cast.slot) == (actor, sequence, hero.slot)
+                    && cast_cue(registry, cast).is_some()
+            }) {
+                return false;
+            }
+            if let Some(key @ (CastKey::Basic(_) | CastKey::Rockets(_))) =
+                CastKey::of(hero.class, hero.loadout, hero.slot)
+                && let Some(cue) = hit_cue(registry, key)
+            {
+                *candidate = Candidate::voiced(
+                    cue,
+                    candidate.gain,
+                    false,
+                    Origin::Row {
+                        moment: Moment::Attack,
+                        row: row_id(key),
+                        actor,
+                        id: sequence,
+                    },
+                );
+            }
+            true
+        }
+        Origin::Other | Origin::Row { .. } => true,
+    });
+
+    let heard_at = |own: bool, at: Vec3| {
+        if own {
+            1.0
+        } else {
+            distance_gain(listener.position, at)
+        }
+    };
+    // The local hero's own casts ask the rate budget first.
+    for own in [true, false] {
+        for cast in casts.iter().filter(|cast| cast.local == own) {
+            let Some((moment, cue)) = cast_cue(registry, cast) else {
+                continue;
+            };
+            let gain = heard_at(own, cast.position);
+            if gain > 0.0 {
+                candidates.push(Candidate::voiced(
+                    cue,
+                    gain,
+                    own,
+                    Origin::Row {
+                        moment,
+                        row: row_id(cast.key),
+                        actor: cast.actor_id,
+                        id: cast.sequence,
+                    },
+                ));
+            }
+        }
+    }
+    for event in stages {
+        // A warning became the beam or the bolt it announced, or a fuse burned down.
+        if !matches!(
+            event.change,
+            StageChange::Transition(Transition::KindFlipped)
+                | StageChange::Ended(EndKind::Released)
+        ) {
+            continue;
+        }
+        let effect = &event.effect;
+        let Some(cue) = registry
+            .profile(effect.skill)
+            .and_then(|profile| profile.sound.as_ref()?.release.as_ref())
+        else {
+            continue;
+        };
+        let own = event.owner.is_some_and(|owner| owner.local);
+        // The release sounds where the effect was received, never where a hero stands.
+        let gain = heard_at(own, Vec3::new(effect.position[0], 0.0, effect.position[1]));
+        if gain > 0.0 {
+            candidates.push(Candidate::voiced(
+                cue,
+                gain,
+                own,
+                Origin::Row {
+                    moment: Moment::Release,
+                    row: effect.skill.id(),
+                    actor: effect.owner_id,
+                    id: effect.id,
+                },
+            ));
+        }
     }
 }
 
@@ -446,10 +862,28 @@ pub(super) fn expired(age: f64, has_sink: bool) -> bool {
     age >= EFFECT_MAX_AGE || (!has_sink && age >= PENDING_MAX_AGE)
 }
 
+/// What the rate budget is asked to admit: one variant of a sample and how many notes of
+/// it, the first one included.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) struct Admission {
+    pub variant: Variant,
+    pub notes: usize,
+}
+
+impl From<AudioCue> for Admission {
+    /// One note of the sample as recorded.
+    fn from(cue: AudioCue) -> Self {
+        Self {
+            variant: cue.into(),
+            notes: 1,
+        }
+    }
+}
+
 pub(super) struct RateBudget {
     tokens: f64,
     updated: f64,
-    last: BTreeMap<AudioCue, f64>,
+    last: BTreeMap<Variant, f64>,
 }
 
 impl Default for RateBudget {
@@ -463,21 +897,32 @@ impl Default for RateBudget {
 }
 
 impl RateBudget {
-    pub fn allow(&mut self, cue: AudioCue, now: f64, active: usize, frame: usize) -> bool {
+    /// Admits a voice with every note it has, or refuses it whole: the voice limit, the
+    /// frame limit and the tokens must cover all of its notes in the frame that asks. The
+    /// cooldown is kept per variant, so two variants of one sample do not silence each
+    /// other. `active` counts the voices that sound and the notes already admitted.
+    pub fn allow(
+        &mut self,
+        voice: impl Into<Admission>,
+        now: f64,
+        active: usize,
+        frame: usize,
+    ) -> bool {
+        let Admission { variant, notes } = voice.into();
         self.tokens = (self.tokens + (now - self.updated).max(0.0) * 8.0).min(4.0);
         self.updated = now;
-        if active >= MAX_VOICES
-            || frame >= MAX_FRAME_CUES
-            || self.tokens < 1.0
+        if active + notes > MAX_VOICES
+            || frame + notes > MAX_FRAME_CUES
+            || self.tokens < notes as f64
             || self
                 .last
-                .get(&cue)
-                .is_some_and(|last| now - *last < cue.cooldown())
+                .get(&variant)
+                .is_some_and(|last| now - *last < variant.cue.cooldown())
         {
             return false;
         }
-        self.tokens -= 1.0;
-        self.last.insert(cue, now);
+        self.tokens -= notes as f64;
+        self.last.insert(variant, now);
         true
     }
 }

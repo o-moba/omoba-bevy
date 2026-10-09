@@ -235,7 +235,7 @@ pub(super) fn sync_enemy_portraits(
                         String::new()
                     }),
                     TextFont {
-                        font_size: 19.0,
+                        font_size: (19.0).into(),
                         ..default()
                     },
                     TextColor(Color::WHITE),

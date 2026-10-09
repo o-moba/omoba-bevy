@@ -360,6 +360,7 @@ mod tests {
             bevy::picking::InteractionPlugin,
         ))
         .init_resource::<Assets<bevy::mesh::Mesh>>()
+        .init_resource::<Assets<bevy::mesh::skinning::SkinnedMeshInverseBindposes>>()
         .init_resource::<Assets<TextureAtlasLayout>>();
         add_systems(&mut app);
         let mut window = Window::default();

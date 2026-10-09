@@ -443,7 +443,7 @@ fn update_buff_chips(
                             Text::new(line.clone()),
                             theme_caption(),
                             TextColor(color::TEXT_GOLD),
-                            TextLayout::new_with_no_wrap(),
+                            TextLayout::no_wrap(),
                             Name::new("MatchBuffText"),
                         ));
                     });
@@ -596,6 +596,9 @@ pub(crate) fn team_buff_hud_text(buffs: &[TeamBuffState], local_team: Team) -> S
             match buff.kind {
                 TeamBuffKind::WendigoFavor => trf("hud.buff.wendigo", &[("secs", &secs)]),
                 TeamBuffKind::MutatioMight => trf("hud.buff.mutatio", &[("secs", &secs)]),
+                TeamBuffKind::DragonSpeed => trf("hud.buff.dragon_speed", &[("secs", &secs)]),
+                TeamBuffKind::DragonDefense => trf("hud.buff.dragon_defense", &[("secs", &secs)]),
+                TeamBuffKind::DragonAttack => trf("hud.buff.dragon_attack", &[("secs", &secs)]),
             }
         })
         .collect::<Vec<_>>()

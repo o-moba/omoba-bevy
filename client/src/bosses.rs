@@ -9,7 +9,7 @@
 
 use bevy::gltf::Gltf;
 use bevy::prelude::*;
-use bevy::scene::SceneRoot;
+use bevy::world_serialization::WorldAssetRoot;
 use std::collections::HashMap;
 
 use crate::camera::MainCamera;
@@ -48,6 +48,8 @@ struct BossNameplate {
 pub(crate) fn boss_name_id(camp_type: NeutralCampType) -> &'static str {
     match camp_type {
         NeutralCampType::WendigoBoss => "Wendigo", // i18n-allow: stable id
+        NeutralCampType::WindDragon => "Wind Dragon", // i18n-allow: stable QA id
+        NeutralCampType::StoneDragon => "Stone Dragon", // i18n-allow: stable QA id
         NeutralCampType::KingMutatioBoss => "King Mutatio", // i18n-allow: stable id
         _ => "Neutral",                            // i18n-allow: stable id
     }
@@ -56,7 +58,9 @@ pub(crate) fn boss_name_id(camp_type: NeutralCampType) -> &'static str {
 /// Asset path slug under `client/assets/bosses/` for a boss camp type.
 fn boss_slug(camp_type: NeutralCampType) -> Option<&'static str> {
     match camp_type {
-        NeutralCampType::KingMutatioBoss => Some("verdant-dragon"),
+        NeutralCampType::KingMutatioBoss
+        | NeutralCampType::WindDragon
+        | NeutralCampType::StoneDragon => Some("verdant-dragon"),
         _ => None,
     }
 }
@@ -65,7 +69,7 @@ fn boss_slug(camp_type: NeutralCampType) -> Option<&'static str> {
 /// intentionally has no model path or imported animation dependency.
 #[derive(Resource, Default)]
 pub struct BossAssetCache {
-    handles: HashMap<NeutralCampType, (Handle<Scene>, Handle<Gltf>)>,
+    handles: HashMap<NeutralCampType, (Handle<WorldAsset>, Handle<Gltf>)>,
 }
 
 #[derive(Clone)]
@@ -130,6 +134,8 @@ fn load_boss_assets(
     for camp_type in [
         NeutralCampType::WendigoBoss,
         NeutralCampType::KingMutatioBoss,
+        NeutralCampType::WindDragon,
+        NeutralCampType::StoneDragon,
     ] {
         let Some(slug) = boss_slug(camp_type) else {
             continue;
@@ -182,7 +188,7 @@ fn attach_boss_models(
                 })
                 .with_children(|parent| {
                     parent.spawn((
-                        SceneRoot(scene.clone()),
+                        WorldAssetRoot(scene.clone()),
                         // Authored dragon faces glTF -Z; authoritative neutral yaw faces +Z.
                         Transform::from_rotation(Quat::from_rotation_y(std::f32::consts::PI)),
                         Visibility::default(),
@@ -201,7 +207,7 @@ fn attach_boss_models(
         commands.spawn((
             crate::i18n::Localized::new(crate::i18n::data::boss_key(visual.camp_type)).into_text(),
             TextFont {
-                font_size: 18.0,
+                font_size: (18.0).into(),
                 ..default()
             },
             TextColor(NAMEPLATE_COLOR),
@@ -393,7 +399,7 @@ fn force_boss_models_double_sided(
             if patched.contains(&id) {
                 continue;
             }
-            if let Some(material) = materials.get_mut(&handle.0) {
+            if let Some(mut material) = materials.get_mut(&handle.0) {
                 material.double_sided = true;
                 material.cull_mode = None;
                 patched.insert(id);
@@ -472,7 +478,7 @@ mod tests {
             assert!(app.world().entity(king).get::<ModelScaleSource>().is_some());
             assert_eq!(
                 app.world_mut()
-                    .query::<&SceneRoot>()
+                    .query::<&WorldAssetRoot>()
                     .iter(app.world())
                     .count(),
                 1
@@ -484,7 +490,7 @@ mod tests {
                 .map(|(plate, text)| (plate.boss, text.0.clone()))
                 .collect();
             assert!(plates.contains(&(guardian, "Wendigo".into())));
-            assert!(plates.contains(&(king, "Verdant Dragon".into())));
+            assert!(plates.contains(&(king, "Flame Dragon · 3/3".into())));
             assert_eq!(plates.len(), 2);
             for _snapshot in 0..100 {
                 app.world_mut()
@@ -525,7 +531,7 @@ mod tests {
             );
             assert_eq!(
                 app.world_mut()
-                    .query::<&SceneRoot>()
+                    .query::<&WorldAssetRoot>()
                     .iter(app.world())
                     .count(),
                 0
@@ -562,7 +568,7 @@ mod tests {
         );
         assert_eq!(
             app.world_mut()
-                .query::<&SceneRoot>()
+                .query::<&WorldAssetRoot>()
                 .iter(app.world())
                 .count(),
             0

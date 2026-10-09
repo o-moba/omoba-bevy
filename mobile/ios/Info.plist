@@ -29,7 +29,10 @@
         <string>UIInterfaceOrientationLandscapeRight</string>
     </array>
     <key>UIViewControllerBasedStatusBarAppearance</key><true/>
-    <key>UILaunchScreen</key><dict/>
+    <!-- `color.bg.base`, the boot splash's base colour (client/src/frontend/boot.rs). -->
+    <key>UILaunchScreen</key><dict>
+        <key>UIColorName</key><string>LaunchBackground</string>
+    </dict>
     <key>NSLocalNetworkUsageDescription</key>
     <string>Omoba connects to the game server you choose for multiplayer playtests on your local network.</string>
 </dict></plist>

@@ -99,7 +99,7 @@ fn setup(mut commands: Commands, mut next: ResMut<NextState<AppScreen>>) {
             },
         ),
         TextFont {
-            font_size: 8.0,
+            font_size: (8.0).into(),
             ..default()
         },
         TextColor(Color::WHITE),
@@ -220,7 +220,7 @@ fn capture(
         &UiGlobalTransform,
         Option<&InheritedVisibility>,
     )>,
-    scenes: Query<(&Name, &SceneRoot)>,
+    scenes: Query<(&Name, &WorldAssetRoot)>,
     cameras: Query<&Camera, With<PreviewCamera>>,
     thumbnails: Res<crate::team::AvatarThumbnails>,
     images: Res<Assets<Image>>,

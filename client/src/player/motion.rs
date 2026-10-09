@@ -160,12 +160,12 @@ pub(super) fn move_player(
 
 /// A local presentation clock: pause/frame steps follow authority, never global Time.
 #[derive(Default)]
-pub(super) struct SandboxVisualClock {
+pub(crate) struct SandboxVisualClock {
     last: Option<((u64, u64), f64)>,
     paused: bool,
 }
 impl SandboxVisualClock {
-    pub(super) fn delta(&mut self, time: &Time, game: Option<&GameStateSnapshot>) -> f32 {
+    pub(crate) fn delta(&mut self, time: &Time, game: Option<&GameStateSnapshot>) -> f32 {
         let Some((game, snapshot)) = game.and_then(|g| g.sandbox.as_ref().map(|s| (g, s))) else {
             self.last = None;
             self.paused = false;

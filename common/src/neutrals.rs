@@ -49,7 +49,9 @@ pub fn neutral_template(camp_type: NeutralCampType) -> NeutralTemplate {
             kill_gold: WENDIGO_KILL_GOLD,
             kill_xp: WENDIGO_KILL_XP,
         },
-        NeutralCampType::KingMutatioBoss => NeutralTemplate {
+        NeutralCampType::KingMutatioBoss
+        | NeutralCampType::WindDragon
+        | NeutralCampType::StoneDragon => NeutralTemplate {
             max_hp: MUTATIO_MAX_HP,
             attack_damage: MUTATIO_ATTACK_DAMAGE,
             attack_range: MUTATIO_ATTACK_RANGE,
@@ -64,14 +66,18 @@ pub fn neutral_template(camp_type: NeutralCampType) -> NeutralTemplate {
 pub fn boss_spawn_delay(camp_type: NeutralCampType) -> Option<Duration> {
     match camp_type {
         NeutralCampType::WendigoBoss => Some(BOTTOM_BOSS_SPAWN_DELAY),
-        NeutralCampType::KingMutatioBoss => Some(TOP_BOSS_SPAWN_DELAY),
+        NeutralCampType::KingMutatioBoss
+        | NeutralCampType::WindDragon
+        | NeutralCampType::StoneDragon => Some(TOP_BOSS_SPAWN_DELAY),
         _ => None,
     }
 }
 
 /// Per-type respawn cooldown after death (bosses respawn slower than camps).
 pub fn neutral_respawn_cooldown(camp_type: NeutralCampType) -> Duration {
-    if camp_type.is_boss() {
+    if camp_type.is_dragon() {
+        Duration::from_secs(75)
+    } else if camp_type.is_boss() {
         BOSS_RESPAWN_COOLDOWN
     } else {
         NEUTRAL_RESPAWN_COOLDOWN
@@ -122,7 +128,7 @@ pub fn boss_blueprints() -> Vec<(Vec3f, NeutralCampType)> {
         ),
         (
             Vec3f::new(-boss_inner, y, boss_outer),
-            NeutralCampType::KingMutatioBoss,
+            NeutralCampType::WindDragon,
         ),
     ]
 }
@@ -195,6 +201,9 @@ pub fn build_boss_neutrals(next_id: &mut u64) -> HashMap<u64, Neutral> {
 /// machinery brings it up at its pit with full HP exactly on schedule.
 pub fn schedule_boss_spawns(neutrals: &mut HashMap<u64, Neutral>, now: Instant) {
     for neutral in neutrals.values_mut() {
+        if neutral.state.camp_type.is_dragon() {
+            neutral.state.camp_type = NeutralCampType::WindDragon;
+        }
         let Some(delay) = boss_spawn_delay(neutral.state.camp_type) else {
             continue;
         };

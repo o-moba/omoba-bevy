@@ -84,6 +84,19 @@ pub fn regenerate_team_buff_hp(world: &mut GameWorld, tick: TickCtx) {
         return;
     }
     for player in players.values_mut() {
+        let team = player.hero.identity.team;
+        player.economy.dragon_speed =
+            if team_buffs.is_active(team, shared::wire::TeamBuffKind::DragonSpeed, now) {
+                1.08
+            } else {
+                1.0
+            };
+        player.economy.dragon_armor =
+            if team_buffs.is_active(team, shared::wire::TeamBuffKind::DragonDefense, now) {
+                20.0
+            } else {
+                0.0
+            };
         if !player.joined || player.hero.hp <= 0.0 {
             continue;
         }

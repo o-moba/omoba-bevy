@@ -109,7 +109,7 @@ pub(super) fn setup_combat_ui(
         Text::new(""),
         theme::styled_text(TextStyle::keep_case(TextRole::Caption)),
         TextColor(color::TEXT_PRIMARY),
-        TextLayout::new_with_justify(Justify::Center),
+        TextLayout::justify(Justify::Center),
         BackgroundColor(theme::perceptual(color::SURFACE_GLASS_STRONG)),
         BorderColor::all(theme::perceptual(color::BORDER_HAIRLINE)),
         UiTransform::IDENTITY,
@@ -243,7 +243,7 @@ pub(super) fn setup_combat_ui(
                 Localized::new("combat.hotbar.upgrade").into_text(),
                 theme::role_text(TextRole::Eyebrow),
                 TextColor(color::TEXT_ON_GOLD),
-                TextLayout::new_with_no_wrap(),
+                TextLayout::no_wrap(),
             ));
             crate::ui::widgets::surfaces::keycap(
                 chip,

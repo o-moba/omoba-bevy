@@ -152,7 +152,7 @@ fn focus_capture_window(
     });
 }
 #[derive(SystemParam)]
-struct Scene<'w, 's> {
+struct WorldAsset<'w, 's> {
     heroes: Query<
         'w,
         's,
@@ -186,7 +186,7 @@ struct Scene<'w, 's> {
 fn observe(
     mut commands: Commands,
     mut qa: ResMut<VisionQa>,
-    scene: Scene,
+    scene: WorldAsset,
     snapshot: Res<GameStateSnapshot>,
     session: Res<ClientSession>,
     help: Res<HelpOverlayVisible>,
@@ -302,9 +302,8 @@ fn observe(
     };
     let brush = shared::vision::brush_layout()[0];
     let center = Vec2::from_array(brush.center);
-    // The admitted allied observer occupies the return destination. Normal
-    // player collision keeps our hero PLAYER_SIZE away; do not force overlap.
-    let return_tolerance = crate::player::PLAYER_SIZE + 0.05;
+    // Return beside the stationary observer, not through its solid body.
+    let return_destination = center + Vec2::new(8.0, 3.0);
     let location_ok = match qa.stage {
         2 => {
             vision.local_brush == Some(brush.id)
@@ -312,7 +311,7 @@ fn observe(
         }
         3 => {
             vision.local_brush.is_none()
-                && position.translation.xz().distance(center + Vec2::X * 8.0) < return_tolerance
+                && position.translation.xz().distance(return_destination) < 0.6
         }
         _ => true,
     };
@@ -380,7 +379,11 @@ fn observe(
         .unwrap(),
     );
     if next == 2 || next == 3 {
-        let destination = center + Vec2::X * if next == 2 { 2.0 } else { 8.0 };
+        let destination = if next == 2 {
+            center + Vec2::X * 2.0
+        } else {
+            return_destination
+        };
         commands.entity(local).insert(MovementTarget {
             target: Vec3::new(destination.x, position.translation.y, destination.y),
         });

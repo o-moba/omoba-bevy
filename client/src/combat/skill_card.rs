@@ -227,7 +227,7 @@ pub(crate) fn spawn_skill_card(commands: &mut Commands, form: Form, bundle: impl
                     Text::new(""),
                     theme::styled_text(TextStyle::keep_case(TextRole::Label)),
                     TextColor(color::TEXT_PRIMARY),
-                    TextLayout::new_with_no_wrap(),
+                    TextLayout::no_wrap(),
                     Node {
                         flex_grow: 1.0,
                         min_width: Val::Px(0.0),

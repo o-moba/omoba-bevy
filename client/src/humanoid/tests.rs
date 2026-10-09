@@ -292,7 +292,7 @@ fn actual_ecs_clipless_binding_survives_async_readiness_scene_refresh_and_despaw
         .add(empty_gltf(node_handles, skin));
     let (first, first_joints) = spawn_instance(app.world_mut(), &model, &rig, inverse.clone());
     let (second, second_joints) = spawn_instance(app.world_mut(), &model, &rig, inverse);
-    app.update(); // Scene may exist before its shared motion asset is prepared.
+    app.update(); // WorldAsset may exist before its shared motion asset is prepared.
     assert!(app.world().get::<RuntimeHumanoidPlayer>(first).is_none());
     let (clips, animated_nodes) = retarget::retarget_all(&rig, &motion()).unwrap();
     let mut handles: HashMap<_, _> = clips
@@ -562,6 +562,52 @@ fn malformed_shared_motion_is_rejected_before_runtime_assets_exist() {
             .unwrap_err()
             .contains("sample times")
     );
+}
+
+#[test]
+fn contacts_cover_every_action_clip_and_the_library_is_parsed_once() {
+    let motion = motion();
+    assert!(motion.clips.len() <= 64);
+    for (name, clip) in &motion.clips {
+        let contact = motion.contact(name);
+        if clip.looping || name == "death" {
+            assert_eq!(contact, None, "{name} is never released");
+        } else {
+            let contact = contact.unwrap_or_else(|| panic!("{name} lacks a contact"));
+            assert!((0.0..=clip.duration).contains(&contact), "{name}");
+        }
+    }
+    assert_eq!(motion.contact("no_such_clip"), None);
+    let embedded = SharedHumanoidMotion::embedded().unwrap();
+    assert!(std::ptr::eq(
+        embedded,
+        SharedHumanoidMotion::embedded().unwrap()
+    ));
+    assert_eq!(embedded.contact("cast"), motion.contact("cast"));
+    assert_eq!(embedded.clips.len(), motion.clips.len());
+}
+
+#[test]
+fn a_contact_must_name_a_clip_and_lie_inside_it() {
+    let source: serde_json::Value = serde_json::from_str(include_str!(
+        "../../assets/animations/humanoid-motion-v1.json"
+    ))
+    .unwrap();
+    for (clip, contact) in [("cast", 9.0), ("cast", -0.1), ("no_such_clip", 0.1)] {
+        let mut value = source.clone();
+        value["contacts"][clip] = serde_json::json!(contact);
+        assert!(
+            SharedHumanoidMotion::parse(&value.to_string())
+                .unwrap_err()
+                .contains("contact"),
+            "{clip} at {contact}"
+        );
+    }
+    // A library written before contacts existed still loads, without any.
+    let mut value = source;
+    value.as_object_mut().unwrap().remove("contacts");
+    let motion = SharedHumanoidMotion::parse(&value.to_string()).unwrap();
+    assert_eq!(motion.contact("cast"), None);
 }
 
 #[test]

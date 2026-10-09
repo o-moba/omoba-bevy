@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "revision": "standard-kits-5",
+  "revision": "standard-kits-6",
   "skills": [
     {
       "id": "dawn_bind",
@@ -162,7 +162,7 @@
       "effect": {
         "kind": "impact_rocket",
         "speed": 45,
-        "radius": 0.7,
+        "radius": 1.05,
         "blast_radius": 3,
         "damage": 84,
         "min_damage_multiplier": 0.5,
@@ -937,7 +937,7 @@
       "id": "dagger_backstab",
       "slot": "e",
       "name": "Backstab",
-      "description": "Strike for 2.5x damage from behind. A rear hit that wounds a surviving hero has a 2% chance to leave 1 HP.",
+      "description": "Strike for 2.5x damage from behind an enemy hero. A rear hit that wounds a surviving hero has a 2% chance to leave 1 HP.",
       "targeting": "point",
       "mana_cost": 18,
       "cooldown_secs": 9,
@@ -957,7 +957,7 @@
       "id": "dagger_lethal_blow",
       "slot": "r",
       "name": "Lethal Blow",
-      "description": "A heavy close-range dagger strike; 1.5x damage from behind.",
+      "description": "A heavy close-range dagger strike; 1.5x damage from behind an enemy hero.",
       "targeting": "point",
       "mana_cost": 28,
       "cooldown_secs": 22,

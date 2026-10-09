@@ -193,10 +193,10 @@ pub mod metric {
     /// The pause panel as spawned (desktop), `(width, settings height)`.
     pub const PAUSE_PANEL: (f32, f32) = (480.0, 560.0);
     /// Desktop pause panel height on the main page.
-    pub const PAUSE_MAIN_H: f32 = 380.0;
+    pub const PAUSE_MAIN_H: f32 = 560.0;
     /// Widest phone pause panel, and its main-page height cap.
     pub const PHONE_PAUSE_W: f32 = 650.0;
-    pub const PHONE_PAUSE_MAIN_H: f32 = 360.0;
+    pub const PHONE_PAUSE_MAIN_H: f32 = 560.0;
 
     /// Pause panel height. On a phone `available` is the safe-area height;
     /// the desktop ignores it.
@@ -521,8 +521,8 @@ pub(crate) fn apply_theme_font(
             || span.is_some_and(|text| needs_cjk_font(&text.0))
             || world.is_some_and(|text| needs_cjk_font(&text.0));
         let next = if cjk { &theme.cjk_font } else { &theme.font };
-        if font.font != *next {
-            font.font = next.clone();
+        if font.font != next.clone().into() {
+            font.font = next.clone().into();
         }
     }
 }
@@ -626,7 +626,7 @@ pub(super) fn index_font_coverage(
             if let Some(font) = fonts.get(*id) {
                 coverage
                     .faces
-                    .push((family, super::font_cmap::characters(&font.data)));
+                    .push((family, super::font_cmap::characters(font.data.as_ref())));
                 indexed = true;
             }
         }
@@ -743,11 +743,11 @@ pub(crate) fn apply_text_styles(
             text.0 = cased;
         }
         let handle = theme.family(resolved.family);
-        if font.font != handle {
-            font.font = handle;
+        if font.font != handle.clone().into() {
+            font.font = handle.into();
         }
-        if !phone_sized && font.font_size != resolved.size {
-            font.font_size = resolved.size;
+        if !phone_sized && font.font_size != resolved.size.into() {
+            font.font_size = resolved.size.into();
         }
         let next = bevy::text::LineHeight::RelativeToFont(resolved.line_height);
         match line_height {
@@ -769,7 +769,7 @@ pub(crate) struct PhoneSized;
 /// [`TextStyle`] roles).
 pub(crate) fn text(size: f32) -> TextFont {
     TextFont {
-        font_size: size,
+        font_size: (size).into(),
         ..default()
     }
 }
@@ -801,7 +801,7 @@ pub(crate) fn panel_node() -> Node {
 mod tests {
     use super::*;
     fn packaged_font(name: &str) -> Font {
-        Font::try_from_bytes(
+        Font::from_bytes(
             std::fs::read(
                 std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
                     .join("assets")
@@ -809,7 +809,6 @@ mod tests {
             )
             .unwrap(),
         )
-        .unwrap()
     }
 
     fn theme_with(fonts: &mut Assets<Font>) -> UiTheme {
@@ -844,19 +843,31 @@ mod tests {
             .spawn((Text::new("QA Дмитрий"), TextFont::default()))
             .id();
         app.update();
-        assert_eq!(app.world().get::<TextFont>(entity).unwrap().font, font);
+        assert_eq!(
+            app.world().get::<TextFont>(entity).unwrap().font,
+            font.clone().into()
+        );
         app.world_mut().get_mut::<Text>(entity).unwrap().0 = "QA 小明".into();
         app.update();
-        assert_eq!(app.world().get::<TextFont>(entity).unwrap().font, cjk_font);
+        assert_eq!(
+            app.world().get::<TextFont>(entity).unwrap().font,
+            cjk_font.clone().into()
+        );
         app.world_mut().get_mut::<Text>(entity).unwrap().0 = "QA Дмитрий".into();
         app.update();
-        assert_eq!(app.world().get::<TextFont>(entity).unwrap().font, font);
+        assert_eq!(
+            app.world().get::<TextFont>(entity).unwrap().font,
+            font.clone().into()
+        );
         let span = app
             .world_mut()
             .spawn((TextSpan::new("한글"), TextFont::default()))
             .id();
         app.update();
-        assert_eq!(app.world().get::<TextFont>(span).unwrap().font, cjk_font);
+        assert_eq!(
+            app.world().get::<TextFont>(span).unwrap().font,
+            cjk_font.clone().into()
+        );
     }
 
     /// World-space labels (lane and boss plates, nameplates) switch fonts
@@ -890,7 +901,10 @@ mod tests {
             .spawn((Text2d::new("Wendigo"), TextFont::default()))
             .id();
         app.update();
-        assert_eq!(app.world().get::<TextFont>(lane).unwrap().font, font);
+        assert_eq!(
+            app.world().get::<TextFont>(lane).unwrap().font,
+            font.clone().into()
+        );
         let zh = crate::i18n::LocaleId::parse("zh-Hans").unwrap();
         app.world_mut()
             .resource_mut::<crate::i18n::Locale>()
@@ -898,8 +912,14 @@ mod tests {
         app.world_mut().get_mut::<Text2d>(plate).unwrap().0 = "温迪戈".into();
         app.update();
         assert_eq!(app.world().get::<Text2d>(lane).unwrap().0, "上路");
-        assert_eq!(app.world().get::<TextFont>(lane).unwrap().font, cjk_font);
-        assert_eq!(app.world().get::<TextFont>(plate).unwrap().font, cjk_font);
+        assert_eq!(
+            app.world().get::<TextFont>(lane).unwrap().font,
+            cjk_font.clone().into()
+        );
+        assert_eq!(
+            app.world().get::<TextFont>(plate).unwrap().font,
+            cjk_font.clone().into()
+        );
     }
 
     fn coverage_of(families: &[FontFamily]) -> FontCoverage {
@@ -1060,9 +1080,9 @@ mod tests {
         assert_eq!(metric::menu_control_height(Form::Phone, 60.0, 1.0), 60.0);
         // Pause panel.
         assert_eq!(metric::pause_panel_height(Form::Desktop, true, 0.0), 560.0);
-        assert_eq!(metric::pause_panel_height(Form::Desktop, false, 0.0), 380.0);
+        assert_eq!(metric::pause_panel_height(Form::Desktop, false, 0.0), 560.0);
         assert_eq!(metric::pause_panel_height(Form::Phone, true, 350.0), 350.0);
-        assert_eq!(metric::pause_panel_height(Form::Phone, false, 390.0), 360.0);
+        assert_eq!(metric::pause_panel_height(Form::Phone, false, 390.0), 390.0);
         assert_eq!(metric::pause_panel_height(Form::Phone, false, 300.0), 300.0);
         assert_eq!(metric::PAUSE_PANEL, (480.0, 560.0));
         // Phone hero select and shop.

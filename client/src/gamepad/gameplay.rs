@@ -123,6 +123,7 @@ pub(crate) fn pad_combat(
     mut pending: ResMut<PendingCast>,
     mut feedback: ResMut<ActionFeedback>,
     mut commands: MessageWriter<NetworkCommand>,
+    world: crate::combat::aim_preview::AimWorld,
 ) {
     let (mode, selection) = view;
     if !pad.active {
@@ -276,8 +277,15 @@ pub(crate) fn pad_combat(
             } else {
                 1.0
             };
+            // Without the stick a skill that is cast on an ally is aimed at one.
+            let origin = position.translation.xz();
+            let ally = pad
+                .aim
+                .is_none()
+                .then(|| world.ally_quick_cast(skills.skill(skill), origin, *team, &candidates))
+                .flatten();
             queue_cast_request(slot, &skills, &target, &mut pending, &mut feedback);
-            pending.aim = Some(position.translation.xz() + direction * range * extent);
+            pending.aim = Some(ally.unwrap_or(origin + direction * range * extent));
             return;
         }
         if skills.ability(skill).targeting == TargetingMode::UnitTarget {

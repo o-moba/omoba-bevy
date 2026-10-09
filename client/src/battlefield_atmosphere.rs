@@ -55,7 +55,9 @@ fn setup(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
             display: Display::None,
             ..default()
         },
-        ImageNode::new(texture),
+        // This vignette is defined in screen UVs. Auto contains the square
+        // texture in Bevy 0.19 and creates hard vertical seams on landscape.
+        ImageNode::new(texture).with_mode(NodeImageMode::Stretch),
         GlobalZIndex(-100),
         FocusPolicy::Pass,
         Pickable::IGNORE,
@@ -105,6 +107,10 @@ mod tests {
         let node = app.world().get::<Node>(entity).unwrap();
         assert_eq!(node.width, Val::Percent(100.0));
         assert_eq!(node.display, Display::None);
+        assert_eq!(
+            app.world().get::<ImageNode>(entity).unwrap().image_mode,
+            NodeImageMode::Stretch
+        );
         assert_eq!(app.world().get::<Pickable>(entity), Some(&Pickable::IGNORE));
         assert_eq!(
             *app.world().get::<FocusPolicy>(entity).unwrap(),

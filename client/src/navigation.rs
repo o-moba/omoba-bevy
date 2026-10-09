@@ -121,6 +121,21 @@ pub(crate) fn clip_skill_terrain(
     Vec3::new(p[0], to.y, p[1])
 }
 
+/// Whether the server lets a blink put the hero's centre on `point` (`legal_landing`,
+/// `common/src/skills/advanced.rs`): the static map is clear there, the point is outside
+/// the disc of every standing structure, and it is a hero's radius away from every armed
+/// pillar. `structures` are the discs a ground move is clipped against. The server keeps a
+/// landing out of a structure's disc only, which is nearer than a walking hero gets; the
+/// client must not be stricter than that, or it would refuse casts the server accepts.
+pub(crate) fn blink_point_legal(point: Vec2, structures: &[Disc], terrain: &[Disc]) -> bool {
+    let apart = |disc: &Disc| point.distance(Vec2::from_array(disc.center));
+    world_navigation().point_clear(point.to_array())
+        && structures.iter().all(|disc| apart(disc) > disc.radius)
+        && terrain
+            .iter()
+            .all(|disc| apart(disc) > disc.radius + HERO_RADIUS)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -399,5 +414,283 @@ mod tests {
         );
         let excessive = vec![(Vec3::ZERO, StructureKind::Tower); MAX_OBSTACLES + 1];
         assert!(plan_route(&layout, Vec3::ZERO, Vec3::X, &excessive).is_none());
+    }
+
+    /// The disc a ground move is clipped against for a structure at `center`.
+    fn structure(center: Vec2, kind: StructureKind) -> Disc {
+        Disc {
+            center: center.to_array(),
+            radius: structure_collision_radius(kind) - HERO_RADIUS,
+        }
+    }
+
+    #[test]
+    fn a_blink_lands_outside_structure_discs_and_a_hero_radius_from_pillars() {
+        let map = world_navigation();
+        let middle = Vec2::ZERO;
+        let way = Vec2::new(0.6, 0.8);
+        assert!((0..=8).all(|step| map.point_clear((middle + way * step as f32).to_array())));
+        assert!(blink_point_legal(middle, &[], &[]));
+
+        // The server keeps a landing out of the disc of a structure: 1.3 for a tower and
+        // 3.2 for a base, not the 1.8 and 3.7 a walking hero is held at.
+        for (kind, disc) in [(StructureKind::Tower, 1.3), (StructureKind::BaseTower, 3.2)] {
+            let solid = [structure(middle, kind)];
+            assert!(!blink_point_legal(
+                middle + way * (disc - 0.01),
+                &solid,
+                &[]
+            ));
+            assert!(blink_point_legal(middle + way * (disc + 0.01), &solid, &[]));
+            assert!(!blink_point_legal(middle, &solid, &[]));
+            // A structure that fell is not in the list any more.
+            assert!(blink_point_legal(middle + way * (disc - 0.01), &[], &[]));
+        }
+
+        // An armed pillar is a disc of radius 1.0 and keeps a hero's radius more.
+        let pillar = [Disc {
+            center: middle.to_array(),
+            radius: 1.0,
+        }];
+        assert!(!blink_point_legal(middle + way * 1.4, &[], &pillar));
+        assert!(blink_point_legal(middle + way * 1.6, &[], &pillar));
+        // Every solid has to allow the landing.
+        let tower = [structure(middle + way * 3.0, StructureKind::Tower)];
+        assert!(blink_point_legal(middle + way * 1.6, &tower, &pillar));
+        assert!(!blink_point_legal(middle + way * 1.75, &tower, &pillar));
+        assert!(blink_point_legal(middle + way * 4.35, &tower, &pillar));
+
+        // The static map: a point in the forest, one off the map and no point at all.
+        let forest = (1..80)
+            .map(|step| Vec2::X * step as f32)
+            .find(|at| !map.point_clear(at.to_array()))
+            .expect("the forest is somewhere along +X");
+        assert!(!blink_point_legal(forest, &[], &[]));
+        assert!(!blink_point_legal(Vec2::splat(10_000.0), &[], &[]));
+        assert!(!blink_point_legal(Vec2::new(f32::NAN, 0.0), &[], &[]));
+    }
+
+    /// A practice authority with one hero that has Fault Line on Q and Rift Step on E,
+    /// alone on the real map with its towers.
+    struct Authority {
+        session: common::offline::PracticeSession,
+        request: u64,
+    }
+
+    impl Authority {
+        const FAULT_LINE: u8 = 0;
+        const RIFT_STEP: u8 = 2;
+
+        fn new() -> Self {
+            use shared::loadout::{CoreId, SkillId};
+            let mut session = common::offline::PracticeSession::new(std::time::Instant::now());
+            session.command(shared::wire::ClientPacket::Join {
+                handheld: Default::default(),
+                prematch: false,
+                team: shared::map::Team::Green,
+                character: shared::wire::CharacterChoice::Ipfs,
+                hero_class: shared::HeroClass::Riftshot,
+                avatar: None,
+                sprite_character: None,
+                session_id: None,
+                passport_ticket: None,
+            });
+            session.command(shared::wire::ClientPacket::Practice {
+                command: shared::practice::PracticeCommand::ClearBots,
+            });
+            session.bots = Default::default();
+            session.world.minions.clear();
+            session.world.neutrals.clear();
+            let mut recipe = CoreId::Riftshot.preset();
+            assert_eq!(
+                recipe.skills[usize::from(Self::RIFT_STEP)],
+                SkillId::RiftStep
+            );
+            recipe.skills[usize::from(Self::FAULT_LINE)] = SkillId::FaultLine;
+            session
+                .world
+                .players
+                .get_mut(&common::offline::LOCAL_ADDR)
+                .unwrap()
+                .hero
+                .skills
+                .loadout = Some(shared::loadout::resolve(&recipe).expect("a legal mixed kit"));
+            Self {
+                session,
+                request: 0,
+            }
+        }
+
+        fn hero(&self) -> Vec2 {
+            let hero = &self.session.world.players[&common::offline::LOCAL_ADDR].hero;
+            Vec2::new(hero.x, hero.z)
+        }
+
+        fn stand(&mut self, at: Vec2) {
+            let hero = &mut self
+                .session
+                .world
+                .players
+                .get_mut(&common::offline::LOCAL_ADDR)
+                .unwrap()
+                .hero;
+            (hero.x, hero.z) = (at.x, at.y);
+        }
+
+        fn cast(&mut self, slot: u8, aim: Vec2) {
+            self.request += 1;
+            self.session.command(shared::wire::ClientPacket::CastSkill {
+                slot,
+                aim: aim.to_array(),
+                server_epoch: common::offline::EPOCH,
+                match_id: self.session.match_id,
+                request_id: self.request,
+            });
+        }
+
+        fn advance(&mut self, ticks: u32) {
+            for _ in 0..ticks {
+                self.session.advance(0.05);
+            }
+        }
+
+        /// Whether a Rift Step cast from `from` puts the hero on `aim`.
+        fn lands(&mut self, from: Vec2, aim: Vec2) -> bool {
+            self.stand(from);
+            self.cast(Self::RIFT_STEP, aim);
+            self.advance(1);
+            let blinked = self.hero().distance(aim) < 1e-3;
+            assert!(blinked || self.hero().distance(from) < 1e-3);
+            blinked
+        }
+
+        /// The standing structure of `kind` with the lowest id: its id, centre and disc.
+        fn structure(&self, kind: StructureKind) -> (u64, Vec2, Disc) {
+            let wire = match kind {
+                StructureKind::Tower => shared::wire::StructureKind::Tower,
+                StructureKind::BaseTower => shared::wire::StructureKind::BaseTower,
+            };
+            let (id, found) = self
+                .session
+                .world
+                .structures
+                .iter()
+                .filter(|(_, structure)| structure.state.kind == wire && structure.state.hp > 0.0)
+                .min_by_key(|(id, _)| **id)
+                .expect("the map has a structure of each kind");
+            let center = Vec2::new(found.state.x, found.state.z);
+            (*id, center, structure(center, kind))
+        }
+
+        /// The armed pillars as the client derives them from the replicated effects.
+        fn pillars(&mut self) -> Vec<Disc> {
+            let shared::wire::ServerPacket::Snapshot { skill_effects, .. } =
+                self.session.snapshot()
+            else {
+                panic!("practice publishes a snapshot");
+            };
+            skill_terrain(Some(&crate::net::GameStateSnapshot {
+                skill_effects,
+                ..default()
+            }))
+        }
+    }
+
+    /// A direction in which the static map is clear from `near` to `far` units of `center`.
+    fn open_way(center: Vec2, near: f32, far: f32) -> Vec2 {
+        let map = world_navigation();
+        (0..16)
+            .map(|step| Vec2::from_angle(step as f32 * std::f32::consts::TAU / 16.0))
+            .find(|way| {
+                (0..=20).all(|step| {
+                    let at = center + *way * (near + (far - near) * step as f32 / 20.0);
+                    map.point_clear(at.to_array())
+                })
+            })
+            .expect("some side of the structure is open ground")
+    }
+
+    /// A step that is clearly inside or outside a boundary and far smaller than a hero.
+    const MARGIN: f32 = 0.03;
+
+    /// Parity with the in-process authority: Rift Step lands exactly where
+    /// `blink_point_legal` says it may, at the edge of a tower, of a base, of a tower that
+    /// fell and of an armed pillar, and in the forest.
+    #[test]
+    fn a_blink_is_legal_exactly_where_the_authority_lets_rift_step_land() {
+        for (kind, radius) in [(StructureKind::Tower, 1.3), (StructureKind::BaseTower, 3.2)] {
+            for (gap, expected) in [(-MARGIN, false), (MARGIN, true)] {
+                let mut authority = Authority::new();
+                let (_, center, disc) = authority.structure(kind);
+                assert_eq!(disc.radius, radius);
+                let way = open_way(center, radius - MARGIN, radius + 5.0);
+                let aim = center + way * (radius + gap);
+                let landed = authority.lands(center + way * (radius + 5.0), aim);
+                assert_eq!(landed, expected, "{kind:?} {gap}");
+                assert_eq!(
+                    blink_point_legal(aim, &[disc], &[]),
+                    landed,
+                    "{kind:?} {gap}"
+                );
+            }
+        }
+
+        // A tower that fell blocks nothing, and the client does not list it.
+        let mut authority = Authority::new();
+        let (id, center, disc) = authority.structure(StructureKind::Tower);
+        let way = open_way(center, 0.5, 6.0);
+        let aim = center + way * 0.6;
+        assert!(!blink_point_legal(aim, &[disc], &[]));
+        authority
+            .session
+            .world
+            .structures
+            .get_mut(&id)
+            .unwrap()
+            .state
+            .hp = 0.0;
+        assert!(authority.lands(center + way * 6.0, aim));
+        assert!(blink_point_legal(aim, &[], &[]));
+
+        // An armed pillar, as the client reads it from the replicated effect.
+        for (gap, expected) in [(-MARGIN, false), (MARGIN, true)] {
+            let mut authority = Authority::new();
+            let start = Vec2::ZERO;
+            authority.stand(start);
+            assert!(authority.pillars().is_empty());
+            authority.cast(Authority::FAULT_LINE, start + Vec2::new(0.0, 10.0));
+            authority.advance(30);
+            let pillars = authority.pillars();
+            let [pillar] = pillars.as_slice() else {
+                panic!("one armed pillar: {pillars:?}");
+            };
+            let center = Vec2::from_array(pillar.center);
+            let reach = pillar.radius + HERO_RADIUS;
+            assert_eq!(reach, 1.5);
+            let way = open_way(center, reach - MARGIN, reach + 5.0);
+            let aim = center + way * (reach + gap);
+            let landed = authority.lands(center + way * (reach + 5.0), aim);
+            assert_eq!(landed, expected, "pillar {gap}");
+            assert_eq!(
+                blink_point_legal(aim, &[], &pillars),
+                landed,
+                "pillar {gap}"
+            );
+        }
+
+        // The forest: the first blocked point along +X from the middle of the map.
+        let map = world_navigation();
+        let forest = (1..80)
+            .map(|step| Vec2::X * step as f32)
+            .find(|at| !map.point_clear(at.to_array()))
+            .expect("the forest is somewhere along +X");
+        let open = forest - Vec2::X * 1.5;
+        assert!(map.point_clear(open.to_array()));
+        let mut authority = Authority::new();
+        assert!(!authority.lands(forest - Vec2::X * 5.0, forest));
+        assert!(!blink_point_legal(forest, &[], &[]));
+        let mut authority = Authority::new();
+        assert!(authority.lands(forest - Vec2::X * 5.0, open));
+        assert!(blink_point_legal(open, &[], &[]));
     }
 }

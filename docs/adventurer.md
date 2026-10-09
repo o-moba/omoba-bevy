@@ -6,12 +6,14 @@ An original OMOBA adaptation of the close-range positional dagger play described
 
 | Slot | Skill | Rank-one damage | Cooldown | Mana | Behavior |
 |---|---|---:|---:|---:|---|
-| Q | Deadly Blow | 22 | 5s | 12 | Reliable single-target dagger strike in melee. |
+| Q | Deadly Blow | 34 | 5s | 12 | Reliable single-target dagger strike in melee. |
 | W | Bluff | 0 | 14s | 20 | Stuns a hostile hero for 1s and turns their back toward the caster. |
-| E | Backstab | 16 / 40 from behind | 9s | 18 | Rear strike deals 2.5× damage; eligible survivors have a 2% vital-break chance. |
-| R | Lethal Blow | 38 / 57 from behind | 22s | 28 | Stronger mastery strike; rear bonus 1.5×. Unlocks through the existing R progression. |
+| E | Backstab | 24 / 60 from behind an enemy hero | 9s | 18 | Rear strike on an enemy hero deals 2.5× damage; eligible survivors have a 2% vital-break chance. |
+| R | Lethal Blow | 48 / 72 from behind an enemy hero | 22s | 28 | Stronger mastery strike; rear bonus 1.5× against enemy heroes. Unlocks through the existing R progression. |
 
-Strikes reach 2.6 world units, Bluff 2.8, with the existing target collision-radius allowance. Existing rank, level, item and team-buff scaling applies. Hero baseline: 190 HP, 18 basic damage, 0.85s basic interval, 2.6 basic range; primary role Jungle. Dagger Mastery adds 10% to basic attacks from behind enemy heroes. The recommended purchase path prioritizes physical damage, movement and lifesteal within the existing 16-item economy.
+Numbers are those of catalogue `standard-kits-6` (`shared/assets/catalog/skills.json`, `heroes.json`); the dagger damage was tuned in 0.42.0. The rear multiplier of Backstab and Lethal Blow, like Dagger Mastery, applies to enemy heroes only: a minion, a monster or a structure has no rear, and the skill descriptions say so since the 0.44.0 candidate.
+
+Strikes reach 2.6 world units, Bluff 2.8, with the existing target collision-radius allowance. Existing rank, level, item and team-buff scaling applies. Hero baseline: 190 HP, 24 basic damage, 0.7s basic interval, 2.6 basic range; primary role Jungle. Dagger Mastery adds 10% to basic attacks from behind enemy heroes. The recommended purchase path prioritizes physical damage, movement and lifesteal within the existing 16-item economy.
 
 The rear region is a 120-degree cone behind the victim. The server compares victim facing with the vector toward the attacker; coincident/nonfinite positions never qualify. Accepted attacks update authoritative facing as well as animation facing. Bluff holds the victim under the ordinary stun gates, so movement, basic attacks, skills and utilities cannot silently turn the victim out of the setup.
 
@@ -27,6 +29,8 @@ This is a deliberately rare swing, not a dependable execution ability. The initi
 
 Hero/core id: `adventurer`. Skill ids: `dagger_deadly_blow`, `dagger_bluff`, `dagger_backstab`, `dagger_lethal_blow`. The preset assigns Q/W/E/R; the reusable skill ids can be placed in other validated hybrid recipes. Default equipment uses the built-in `dagger` through the normal hand-bone attachment catalogue, while normal cosmetic selection can override it independently of combat statistics.
 
+Presentation: each of the four skills has its own row in `client/assets/config/skills.skillfx` (motions `dagger_stab`, `dagger_feint`, `dagger_backstab`, `dagger_heavy_thrust`; the Backstab clip was re-keyed so its stab pose comes 0.11 s into the clip), and Bluff's sound follows distance like every other cast voice. See [combat cosmetics](combat-cosmetics.md#the-68-rows).
+
 The reusable recipe/authority and animation paths are covered here. A player-facing custom-kit editor is not included. Existing generic mobile input/HUD paths still derive some ability metadata from the class preset, so arbitrary custom recipes need a separate end-to-end UI integration pass; the shipped Adventurer preset uses matching definitions throughout.
 
-Version 0.38.0, catalogue `standard-kits-3`, protocol 7. The strict core/skill/passive enums require matching client and server. No new production dependency, server rollout or mobile upload is part of this implementation task. See [verification and delivery state](progress/2026-10-04-adventurer.md).
+Introduced in version 0.38.0 (catalogue `standard-kits-3`, protocol 7); the table above follows the current catalogue. The strict core/skill/passive enums require matching client and server. No new production dependency, server rollout or mobile upload is part of this implementation task. See [verification and delivery state](progress/2026-10-04-adventurer.md).

@@ -4,6 +4,8 @@ mod components;
 mod ingest;
 mod interpolate;
 mod offline;
+#[cfg(feature = "qa")]
+pub(crate) use offline::{qa_finish_match, qa_practice_positions};
 mod public_transport;
 pub(crate) mod recovery;
 pub(crate) mod recovery_ui;

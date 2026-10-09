@@ -23,9 +23,9 @@ use bevy::{
     ecs::system::{NonSendMarker, SystemParam},
     prelude::*,
     render::view::screenshot::{Screenshot, ScreenshotCaptured, save_to_disk},
-    scene::{SceneInstance, SceneSpawner},
     ui::FocusPolicy,
     window::PrimaryWindow,
+    world_serialization::{WorldInstance, WorldInstanceSpawner},
 };
 use shared::{
     HeroClass,
@@ -125,7 +125,7 @@ fn label(mut commands: Commands) {
         },
         Text::new("QA: scripted commands · live server combat"),
         TextFont {
-            font_size: 10.0,
+            font_size: (10.0).into(),
             ..default()
         },
         TextColor(Color::WHITE),
@@ -202,7 +202,7 @@ fn prepare(
 }
 
 #[derive(SystemParam)]
-struct Scene<'w, 's> {
+struct WorldAsset<'w, 's> {
     window_focus: Query<'w, 's, &'static Window, With<PrimaryWindow>>,
     context: Res<'w, crate::input_context::GameplayInputContext>,
     particles: Query<
@@ -281,11 +281,11 @@ struct Scene<'w, 's> {
         ),
     >,
     cameras: Query<'w, 's, (&'static Camera, &'static GlobalTransform), With<MainCamera>>,
-    scenes: Query<'w, 's, (&'static SceneRoot, Option<&'static SceneInstance>)>,
+    scenes: Query<'w, 's, (&'static WorldAssetRoot, Option<&'static WorldInstance>)>,
     sprites: Query<'w, 's, &'static Sprite>,
     windows: Query<'w, 's, Entity, With<PrimaryWindow>>,
 }
-fn on_screen(scene: &Scene, mode: PlayerVisualMode, position: Vec3) -> Option<Vec2> {
+fn on_screen(scene: &WorldAsset, mode: PlayerVisualMode, position: Vec3) -> Option<Vec2> {
     let (camera, transform) = scene.cameras.single().ok()?;
     let position = if mode == PlayerVisualMode::Sprite2d {
         simulation_xz_to_render_xy(position).extend(layer::PROJECTILE)
@@ -297,7 +297,7 @@ fn on_screen(scene: &Scene, mode: PlayerVisualMode, position: Vec3) -> Option<Ve
     (p.x > 8.0 && p.y > 8.0 && p.x < size.x - 8.0 && p.y < size.y - 8.0).then_some(p)
 }
 
-fn visible_projectile_parts(scene: &Scene, owner: Entity) -> usize {
+fn visible_projectile_parts(scene: &WorldAsset, owner: Entity) -> usize {
     let Some((root, _)) = scene
         .presentations
         .iter()
@@ -331,14 +331,14 @@ fn visible_projectile_parts(scene: &Scene, owner: Entity) -> usize {
 fn observe(
     mut commands: Commands,
     mut qa: ResMut<CombatQa>,
-    scene: Scene,
+    scene: WorldAsset,
     snapshot: Res<GameStateSnapshot>,
     session: Res<ClientSession>,
     help: Res<HelpOverlayVisible>,
     mobile: Res<MobileControls>,
     mode: Res<PlayerVisualMode>,
     assets: Res<AssetServer>,
-    spawner: Res<SceneSpawner>,
+    spawner: Res<WorldInstanceSpawner>,
     mut outgoing: MessageWriter<NetworkCommand>,
     mut exit: MessageWriter<AppExit>,
 ) {

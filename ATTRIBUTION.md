@@ -108,6 +108,13 @@ clip names and retargeting. The same CC0 library supplies the engine-owned
 `Sprint_Loop` running motion. Its source hashes and adaptations are recorded in
 the asset and animation README. The native package includes that attribution record.
 
+The skill motions of that library are Open Moba edits of the same CC0 clips:
+pose keys picked, retimed, mirrored, turned or lifted by
+`scripts/export_humanoid_motion.py` from the rows of
+`assets-src/animations/derived-motions.json`. Each exported clip names its
+source clips in `source_clip`. No further animation source and no further
+licence is involved.
+
 ## Starter reaction artwork — 0.19.0-rc.7
 
 The original AI-assisted starter reaction atlas introduced in rc.7 is recorded

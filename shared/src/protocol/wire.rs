@@ -433,21 +433,43 @@ pub enum NeutralCampType {
     WendigoBoss,
     /// Top raid boss ("King Mutatio", Baron-slot objective).
     KingMutatioBoss,
+    WindDragon,
+    StoneDragon,
 }
 
 impl NeutralCampType {
     pub const fn is_boss(self) -> bool {
         matches!(
             self,
-            NeutralCampType::WendigoBoss | NeutralCampType::KingMutatioBoss
+            NeutralCampType::WendigoBoss
+                | NeutralCampType::KingMutatioBoss
+                | NeutralCampType::WindDragon
+                | NeutralCampType::StoneDragon
         )
+    }
+
+    /// Ordered, finite dragon objective chain. The final dragon never respawns.
+    pub const fn is_dragon(self) -> bool {
+        matches!(
+            self,
+            Self::WindDragon | Self::StoneDragon | Self::KingMutatioBoss
+        )
+    }
+    pub const fn next_dragon(self) -> Option<Self> {
+        match self {
+            Self::WindDragon => Some(Self::StoneDragon),
+            Self::StoneDragon => Some(Self::KingMutatioBoss),
+            _ => None,
+        }
     }
 
     /// Team buff granted to the killer's team when this neutral dies.
     pub const fn team_buff_kind(self) -> Option<TeamBuffKind> {
         match self {
             NeutralCampType::WendigoBoss => Some(TeamBuffKind::WendigoFavor),
-            NeutralCampType::KingMutatioBoss => Some(TeamBuffKind::MutatioMight),
+            NeutralCampType::KingMutatioBoss => Some(TeamBuffKind::DragonAttack),
+            NeutralCampType::WindDragon => Some(TeamBuffKind::DragonSpeed),
+            NeutralCampType::StoneDragon => Some(TeamBuffKind::DragonDefense),
             _ => None,
         }
     }
@@ -491,16 +513,28 @@ pub enum TeamBuffKind {
     WendigoFavor,
     /// Top boss (King Mutatio): +ability damage and HP regen.
     MutatioMight,
+    DragonSpeed,
+    DragonDefense,
+    DragonAttack,
 }
 
 impl TeamBuffKind {
-    pub const ALL: [TeamBuffKind; 2] = [TeamBuffKind::WendigoFavor, TeamBuffKind::MutatioMight];
+    pub const ALL: [TeamBuffKind; 5] = [
+        Self::WendigoFavor,
+        Self::MutatioMight,
+        Self::DragonSpeed,
+        Self::DragonDefense,
+        Self::DragonAttack,
+    ];
 
     /// Stable slot in `ALL`, for per-kind tables.
     pub const fn index(self) -> usize {
         match self {
             TeamBuffKind::WendigoFavor => 0,
             TeamBuffKind::MutatioMight => 1,
+            Self::DragonSpeed => 2,
+            Self::DragonDefense => 3,
+            Self::DragonAttack => 4,
         }
     }
 }
@@ -1248,7 +1282,7 @@ mod tests {
         assert!(NeutralCampType::WendigoBoss.is_boss());
         assert_eq!(
             NeutralCampType::KingMutatioBoss.team_buff_kind(),
-            Some(TeamBuffKind::MutatioMight)
+            Some(TeamBuffKind::DragonAttack)
         );
         assert_eq!(
             NeutralCampType::from(JungleCampKind::Spitter),

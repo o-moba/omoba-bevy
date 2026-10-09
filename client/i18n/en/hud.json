@@ -16,5 +16,8 @@
   "hud.buff.mutatio": "Dragon's Might: +25% ability damage, +2 HP/s - {secs}s",
   "hud.brush.concealed": "BRUSH · CONCEALED",
   "hud.brush.revealed": "BRUSH · REVEALED",
-  "hud.fps": "{value} FPS"
+  "hud.fps": "{value} FPS",
+  "hud.buff.dragon_speed": "Wind: +8% movement · {secs}s",
+  "hud.buff.dragon_defense": "Stone: +20 armor/resistance · {secs}s",
+  "hud.buff.dragon_attack": "Flame: +12% damage · {secs}s"
 }

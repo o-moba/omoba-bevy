@@ -15,9 +15,11 @@ use this feature; an older server that omits `vision` uses the legacy presentati
 - Enemy heroes inside grass are hidden from observers outside that patch, even
   inside normal sight range. Any living allied sight source in the same patch can
   reveal them within its radius. Minions and neutral creatures use radial sight.
-- Accepted basic attacks and hostile unit-targeted skills reveal the attacker for
-  two seconds through grass, provided they are within the opposing team's radial
-  sight. Self skills and rejected commands do not trigger this reveal.
+- Accepted basic attacks, hostile unit-targeted skills and every accepted cast of
+  an equipped kit skill reveal the attacker for two seconds through grass,
+  provided they are within the opposing team's radial sight. Legacy self skills,
+  a weapon toggle (Switchfire, `wild_switch`, on whatever button it is bound) and rejected
+  commands do not trigger this reveal.
 - A local `BRUSH · CONCEALED` / `BRUSH · REVEALED` label reports the server's current
   concealment result. An already-launched homing projectile still follows and
   damages its target after concealment. New target-locked attacks require current
@@ -37,6 +39,16 @@ recipient's live actor list. Projectile endpoints/owners, combat events, minion
 target IDs and butterfly collection receipts are filtered or scrubbed as well.
 A visible killing-hit receipt survives removal of a dead nonhero target, while
 unseen impact locations and hidden living targets remain filtered.
+A receipt whose victim and impact point the recipient sees is kept even when the
+hero that dealt it is hidden (fog, grass, a trap left behind). Its source is
+withheld (`Unknown`, id 0), so the hit is seen and heard without naming or
+locating the attacker; style, action slot and the trap flag stay. A hidden source
+that is not a hero still drops the receipt.
+The client draws such a receipt as the built-in burst of its wire style without
+a direction (a ring where a melee hit has its slash), with its number and its
+sound, no skill recipe and no link to an attacker. It is drawn and heard once,
+also when the attacker becomes visible while the server still retains the
+receipt. A shielded trap of an unseen owner is audible and not drawn.
 Public scoreboard identity and statistics remain available. Public lobby/draft
 rosters are unaffected. Hidden actors and their child visuals are despawned and
 recreated normally on reacquisition; target validation clears stale selections.

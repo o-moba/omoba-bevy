@@ -252,6 +252,27 @@ fn four_distinct_ultimates_stay_locked_until_six_then_execute_in_their_bindings(
 }
 
 #[test]
+fn moved_weapon_toggle_never_reveals_and_the_skill_in_its_old_binding_does() {
+    let (mut w, now, _) = fixture(HeroClass::Wildspark);
+    // Wild Traps take Q; Wild Switch moves to E.
+    let mut skills = CoreId::Wildspark.preset().skills;
+    skills.swap(0, 2);
+    equip(&mut w, 1, CoreId::Wildspark, skills);
+    cast(&mut w, addr(1), 2, [0.0, 0.0], 1, now);
+    let p = &w.players[&addr(1)];
+    assert_eq!(p.hero.skills.mode, WeaponMode::Rockets);
+    assert_eq!(p.timers.last_cast_at[2], Some(now));
+    assert!(!crate::vision::revealed(p, now));
+
+    let at = now + duration(0.3);
+    cast(&mut w, addr(1), 0, [6.0, 0.0], 2, at);
+    let p = &w.players[&addr(1)];
+    assert_eq!(p.timers.last_cast_at[0], Some(at));
+    assert!(crate::vision::revealed(p, at));
+    assert!(!crate::vision::revealed(p, at + duration(2.0)));
+}
+
+#[test]
 fn moved_zone_recasts_only_its_binding_and_preserves_event_source() {
     let (mut w, now, _) = fixture(HeroClass::Dawnweaver);
     let mut skills = CoreId::Dawnweaver.preset().skills;

@@ -73,9 +73,15 @@ environment variable is set: `OMOBA_ANIMATION_QA` (runs instead of the game),
 `navigation`, `targeting`, `combat`, `map`, `forest-pickups` or
 `team-vision`), `OMOBA_FRONTEND_QA_OUTPUT` (with `OMOBA_AVATAR_QA` or
 `OMOBA_FRONTEND_QA_FLOW`), `OMOBA_SOCIAL_QA_OUTPUT`, `OMOBA_AUDIO_QA_OUTPUT`,
-`OMOBA_OFFLINE_SMOKE_DIR`, `OMOBA_CAREER_QA_OUTPUT`,
+`OMOBA_OFFLINE_SMOKE_DIR` (use `OMOBA_OFFLINE_DEBUG_TOP_QA_ONLY=1` for
+just the debug toggles; `OMOBA_OFFLINE_OVERLAY_QA_ONLY=1` captures Home and
+the actual offline match with cosmetic mist Auto/Stretch/hidden), `OMOBA_FOG_COVERAGE_QA_DIR` (production fog node
+with a uniform mask: Auto negative control, then actual production Stretch;
+private harness in `team_vision/coverage_qa.rs`), `OMOBA_CAREER_QA_OUTPUT`,
 `OMOBA_SUPPORTER_QA_DIR`, `OMOBA_HELP_QA_SHOTS` (the controls guide's
-controller focus and Settings → Controls return), and
+controller focus and Settings → Controls return), `OMOBA_BOOT_SPLASH_SHOTS`
+(the boot splash and the Home it reveals; every other harness starts without
+the splash), and
 `OMOBA_SANDBOX_QA_OUTPUT` (the Combat Test
 panel harness, which stays in `sandbox/ui/qa.rs` because it drives the
 panel's private types). `cargo clippy -p client --lib --no-default-features`

@@ -1,5 +1,7 @@
 {
   "boss.wendigo": "Вендиго",
-  "boss.king_mutatio": "Изумрудный дракон",
-  "boss.neutral": "Нейтральный"
+  "boss.king_mutatio": "Огненный дракон · 3/3",
+  "boss.neutral": "Нейтральный",
+  "boss.wind_dragon": "Дракон ветра · 1/3",
+  "boss.stone_dragon": "Каменный дракон · 2/3"
 }

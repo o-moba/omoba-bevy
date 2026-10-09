@@ -73,7 +73,10 @@ def stage_waypoints(command):
     if command["stage"] != 5:
         return [destination]
     x, z = command["brush"]["center"]
-    return [[x + 4., z + 2.], [x + 12., z + 2.], destination]
+    # The compact Verdant map places a rock on the old straight exit line.
+    # Cross the clear northern side, then reach the exact requested destination.
+    return [[x + 4., z + 2.], [x + 12., z + 2.],
+            [x + 36., z + 6.], [x + 46., z + 6.], destination]
 
 
 def verify(summary, green, blue, mobile):
@@ -182,7 +185,7 @@ def self_test():
                                 ("total_entities", 4, 1097), ("total_entities", 5, 1097)):
         broken=copy.deepcopy(summary); broken["captures"][stage][field]=value
         assert not verify(broken,green,blue,False)["pass"]
-    assert stage_waypoints(dict(stage=5,brush=dict(center=[-22.,-8.]),enemy_destination=[22.,-8.])) == [[-18.,-6.],[-10.,-6.],[22.,-8.]]
+    assert stage_waypoints(dict(stage=5,brush=dict(center=[-22.,-8.]),enemy_destination=[22.,-8.])) == [[-18.,-6.],[-10.,-6.],[14.,-2.],[24.,-2.],[22.,-8.]]
     print("PASS: ten verifier checks and derived waypoint route; synthetic test data is never capture evidence")
 
 

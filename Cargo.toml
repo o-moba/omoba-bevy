@@ -3,7 +3,7 @@ members = ["account-api", "arena-sync", "career-store", "client", "common", "har
 resolver = "2"
 
 [workspace.package]
-version = "0.42.0"
+version = "0.44.0"
 edition = "2024"
 license = "MPL-2.0"
 
@@ -20,11 +20,11 @@ too_many_arguments = "allow"
 type_complexity = "allow"
 
 [workspace.dependencies]
-bevy = "0.18.0"
+bevy = "0.19.1"
 crossbeam-channel = "0.5.15"
 # One pinned SDK revision for every crate. Its features are opt-in per crate:
 # the desktop client takes the defaults (Bevy helpers, HTTP), passport `http`.
-ekza-bevy-sdk = { git = "https://github.com/ekza-space/ekza-bevy-sdk", rev = "927fc0d4efd1b6e04ca3d331c53eb812baad403d", default-features = false }
+ekza-bevy-sdk = { git = "https://github.com/ekza-space/ekza-bevy-sdk", rev = "a9a253cba110bcb308a7f81f6dfb5a4b2243f545", default-features = false }
 serde = { version = "1.0.219", features = ["derive"] }
 serde_json = "1.0.140"
 winit = "=0.30.12"

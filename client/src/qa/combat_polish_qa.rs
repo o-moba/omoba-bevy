@@ -166,7 +166,7 @@ fn prepare(
     mut state: (
         ResMut<crate::combat::TargetState>,
         ResMut<crate::pause_menu::PauseMenuState>,
-        ResMut<crate::pause_menu::SettingsTab>,
+        ResMut<crate::pause_menu::SelectedSettingsTab>,
     ),
     mut utilities: Query<&mut crate::net::PlayerUtility, With<Player>>,
     _main_thread: bevy::ecs::system::NonSendMarker,
@@ -289,7 +289,7 @@ fn prepare(
         state.1.open = qa.settings();
         state.1.in_settings = qa.settings();
         if qa.settings() {
-            *state.2 = if qa.stage == 5 {
+            state.2.0 = if qa.stage == 5 {
                 crate::pause_menu::SettingsTab::Graphics
             } else {
                 crate::pause_menu::SettingsTab::Hud
@@ -492,7 +492,10 @@ fn capture(
     pacing: Res<crate::render_settings::FramePacingDiagnostics>,
     geometry: Query<(&Name, Option<&Mesh3d>, Option<&ViewVisibility>)>,
     mut qa: ResMut<Qa>,
-    roots: Query<(&SceneRoot, Option<&bevy::scene::SceneInstance>)>,
+    roots: Query<(
+        &WorldAssetRoot,
+        Option<&bevy::world_serialization::WorldInstance>,
+    )>,
     assets: Res<AssetServer>,
     context: Res<crate::input_context::GameplayInputContext>,
     mobile: Res<crate::mobile_controls::MobileControls>,

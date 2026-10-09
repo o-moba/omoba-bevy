@@ -270,7 +270,7 @@ pub(crate) fn list_row<T: UiActionT>(
                     title.into_text(),
                     theme::styled_text(TextStyle::keep_case(TextRole::Label)),
                     TextColor(color::TEXT_PRIMARY),
-                    TextLayout::new_with_no_wrap(),
+                    TextLayout::no_wrap(),
                 ))
                 .id(),
             );
@@ -279,7 +279,7 @@ pub(crate) fn list_row<T: UiActionT>(
                     subtitle.into_text(),
                     theme::role_text(TextRole::Caption),
                     TextColor(color::TEXT_MUTED),
-                    TextLayout::new_with_no_wrap(),
+                    TextLayout::no_wrap(),
                 ))
                 .id(),
             );
@@ -856,7 +856,7 @@ pub(crate) fn info_card(
                 title.into_text(),
                 theme::styled_text(TextStyle::new(TextRole::Heading).sized(INFO_CARD_TITLE)),
                 TextColor(color::TEXT_GOLD),
-                TextLayout::new_with_no_wrap(),
+                TextLayout::no_wrap(),
             ));
             if phone {
                 // Below the phone heading minimum: the card owns the size.

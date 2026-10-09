@@ -227,7 +227,11 @@ fn observe(
         With<crate::net::RemotePlayer>,
     >,
     (models, actors, held, bones, animations): (
-        Query<(&Name, &crate::model_scale::ModelScaleSource, &SceneRoot)>,
+        Query<(
+            &Name,
+            &crate::model_scale::ModelScaleSource,
+            &WorldAssetRoot,
+        )>,
         Query<
             (
                 Entity,
@@ -242,7 +246,7 @@ fn observe(
             &crate::held_weapons::HeldWeapon,
             &Transform,
             &GlobalTransform,
-            &SceneRoot,
+            &WorldAssetRoot,
         )>,
         Query<&GlobalTransform>,
         Res<crate::sandbox::AnimationReadout>,
@@ -274,7 +278,7 @@ fn observe(
         exit.write(AppExit::error());
         return;
     }
-    let loaded = |scene: &SceneRoot| {
+    let loaded = |scene: &WorldAssetRoot| {
         matches!(
             assets.get_recursive_dependency_load_state(scene.0.id()),
             Some(bevy::asset::RecursiveDependencyLoadState::Loaded)

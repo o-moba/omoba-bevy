@@ -22,6 +22,7 @@ impl FacingState {
         alive: bool,
         delta: f32,
         preparing: bool,
+        prepared_yaw: Option<f32>,
     ) -> Option<f32> {
         self.remaining = (self.remaining - delta.max(0.0)).max(0.0);
         if self
@@ -43,8 +44,15 @@ impl FacingState {
             self.yaw = None;
             self.remaining = 0.0;
         }
-        if preparing && alive && self.yaw.is_some() {
-            self.remaining = self.remaining.max(0.35);
+        if preparing && alive {
+            // The hero's own telegraph owns the facing: an action accepted during it does
+            // not turn the hero away from the lane it warns.
+            if let Some(yaw) = prepared_yaw.filter(|yaw| yaw.is_finite()) {
+                self.yaw = Some(yaw);
+            }
+            if self.yaw.is_some() {
+                self.remaining = self.remaining.max(0.35);
+            }
         }
         (self.remaining > 0.0).then_some(self.yaw).flatten()
     }
@@ -54,6 +62,7 @@ pub(super) fn face_confirmed_actions(
     time: Res<Time>,
     game: Option<Res<GameStateSnapshot>>,
     mode: Option<Res<crate::sprite::PlayerVisualMode>>,
+    registry: Option<Res<crate::skill_presentation::SkillPresentation>>,
     mut clock: Local<super::motion::SandboxVisualClock>,
     mut state: Local<(Option<(u64, u64)>, HashMap<Entity, FacingState>)>,
     mut actors: Query<(
@@ -99,30 +108,32 @@ pub(super) fn face_confirmed_actions(
             }
             continue;
         }
-        let skill = class.and_then(|class| {
-            crate::skill_presentation::equipped_skill(
-                class.0,
-                loadout.and_then(|l| l.0.as_ref()),
-                action.slot,
-            )
-        });
-        let preparing = game.as_ref().is_some_and(|g| {
-            g.skill_effects.iter().any(|e| {
-                Some(e.owner_id) == id.map(|id| id.0)
-                    && Some(e.skill) == skill
-                    && e.kind == shared::loadout::EffectVisualKind::BeamWarning
-                    && matches!(
-                        e.skill,
-                        shared::loadout::SkillId::DawnRay | shared::loadout::SkillId::HorizonWave
-                    )
+        // The hero's own telegraph, found by its owner and not by the latest action slot.
+        let effects = game
+            .as_ref()
+            .map_or(&[][..], |g| g.skill_effects.as_slice());
+        let warning = registry
+            .as_deref()
+            .zip(class)
+            .zip(id)
+            .and_then(|((registry, class), id)| {
+                crate::skill_presentation::own_windup_cue(
+                    registry,
+                    class.0,
+                    loadout.and_then(|l| l.0.as_ref()),
+                    id.0,
+                    effects,
+                )
             })
-        });
+            .filter(|(_, cue)| cue.hold)
+            .and_then(|(effect, _)| effects.iter().find(|e| e.id == effect));
         if let Some(yaw) = state.1.entry(entity).or_default().update(
             *action,
             *facing,
             stats.is_alive(),
             delta,
-            preparing,
+            warning.is_some(),
+            warning.and_then(crate::skill_presentation::telegraph_yaw),
         ) {
             // Hero -Z forward is shared with path following and semantic VRM alignment.
             pose.rotation = Quat::from_rotation_y(yaw);
@@ -269,25 +280,34 @@ mod tests {
             yaw: Some(1.2),
         };
         assert_eq!(
-            state.update(action, facing, true, 0.01, false),
+            state.update(action, facing, true, 0.01, false, None),
             None,
             "first snapshot is history"
         );
         action.sequence = 11;
         facing.sequence = 11;
-        assert_eq!(state.update(action, facing, true, 0.01, false), Some(1.2));
-        assert_eq!(state.update(action, facing, true, 0.2, false), Some(1.2));
         assert_eq!(
-            state.update(action, facing, true, 1.0, false),
+            state.update(action, facing, true, 0.01, false, None),
+            Some(1.2)
+        );
+        assert_eq!(
+            state.update(action, facing, true, 0.2, false, None),
+            Some(1.2)
+        );
+        assert_eq!(
+            state.update(action, facing, true, 1.0, false, None),
             None,
             "duplicate never restarts hold"
         );
         action.sequence = 12;
         facing.sequence = 12;
-        assert_eq!(state.update(action, facing, true, 0.01, false), Some(1.2));
-        assert_eq!(state.update(action, facing, false, 0.01, true), None);
         assert_eq!(
-            state.update(action, facing, true, 0.01, false),
+            state.update(action, facing, true, 0.01, false, None),
+            Some(1.2)
+        );
+        assert_eq!(state.update(action, facing, false, 0.01, true, None), None);
+        assert_eq!(
+            state.update(action, facing, true, 0.01, false, None),
             None,
             "respawn does not replay"
         );
@@ -307,15 +327,307 @@ mod tests {
             sequence: 2,
             yaw: Some(-0.7),
         };
-        assert_eq!(state.update(action, facing, true, 0.01, true), Some(-0.7));
-        assert_eq!(state.update(action, facing, true, 1.0, true), Some(-0.7));
+        assert_eq!(
+            state.update(action, facing, true, 0.01, true, None),
+            Some(-0.7)
+        );
+        assert_eq!(
+            state.update(action, facing, true, 1.0, true, None),
+            Some(-0.7)
+        );
         action.sequence = 3;
         facing.sequence = 3;
         facing.yaw = None;
-        assert_eq!(state.update(action, facing, true, 0.01, false), None);
+        assert_eq!(state.update(action, facing, true, 0.01, false, None), None);
         action.sequence = 4;
         facing.sequence = 4;
         facing.yaw = Some(f32::NAN);
-        assert_eq!(state.update(action, facing, true, 0.01, false), None);
+        assert_eq!(state.update(action, facing, true, 0.01, false, None), None);
+    }
+    #[test]
+    fn windup_facing_ignores_interleaved_action_yaw() {
+        let lane = Some(-0.7);
+        let mut state = FacingState {
+            sequence: Some(1),
+            ..default()
+        };
+        let mut action = PlayerCosmeticAction {
+            sequence: 2,
+            slot: 3,
+            kind: shared::PlayerActionKind::Cast,
+        };
+        let mut facing = PlayerActionFacing {
+            sequence: 2,
+            yaw: Some(-0.7),
+        };
+        assert_eq!(state.update(action, facing, true, 0.01, true, lane), lane);
+        // A basic attack at another target, accepted during the warning.
+        action.sequence = 3;
+        action.slot = shared::BASIC_ATTACK_ACTION_SLOT;
+        facing.sequence = 3;
+        facing.yaw = Some(2.0);
+        assert_eq!(state.update(action, facing, true, 0.2, true, lane), lane);
+        // A recast, which carries no yaw.
+        action.sequence = 4;
+        action.slot = 2;
+        facing.sequence = 4;
+        facing.yaw = None;
+        assert_eq!(state.update(action, facing, true, 0.2, true, lane), lane);
+        // The warning holds the facing for as long as it lasts, and past the 0.45 s and
+        // 0.7 s an action alone would hold it.
+        assert_eq!(state.update(action, facing, true, 5.0, true, lane), lane);
+        // After it the lane is kept through the release and then given back.
+        assert_eq!(state.update(action, facing, true, 0.2, false, None), lane);
+        assert_eq!(state.update(action, facing, true, 0.2, false, None), None);
+
+        // The lane owns the facing even when the cast itself was never observed: the
+        // first snapshot of a hero is history, its warning is not.
+        let mut state = FacingState::default();
+        action.sequence = 9;
+        action.slot = shared::BASIC_ATTACK_ACTION_SLOT;
+        facing.sequence = 9;
+        facing.yaw = Some(2.0);
+        assert_eq!(
+            state.update(action, facing, true, 0.01, true, Some(0.4)),
+            Some(0.4)
+        );
+        // A malformed direction changes nothing, and a dead caster faces no lane.
+        assert_eq!(
+            state.update(action, facing, true, 0.01, true, Some(f32::NAN)),
+            Some(0.4)
+        );
+        assert_eq!(
+            state.update(action, facing, false, 0.01, true, Some(0.4)),
+            None
+        );
+        // Without the geometry the newest action still turns the hero, as before.
+        let mut state = FacingState {
+            sequence: Some(1),
+            ..default()
+        };
+        action.sequence = 2;
+        facing.sequence = 2;
+        assert_eq!(
+            state.update(action, facing, true, 0.01, true, None),
+            Some(2.0)
+        );
+    }
+    #[test]
+    fn own_beam_warning_owns_facing_over_a_basic_attack() {
+        use shared::loadout::{CoreId, EffectVisualKind, LoadoutState, SkillEffectState, SkillId};
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<GameStateSnapshot>()
+            .insert_resource(crate::skill_presentation::SkillPresentation::target())
+            .add_systems(PostUpdate, face_confirmed_actions);
+        let hero = |app: &mut App, id: u64| {
+            app.world_mut()
+                .spawn((
+                    Transform::IDENTITY,
+                    CombatStats::default(),
+                    NetworkPlayerId(id),
+                    crate::net::NetworkHeroClass(shared::HeroClass::Dawnweaver),
+                    PlayerLoadout(Some(LoadoutState {
+                        recipe: Some(CoreId::Dawnweaver.preset()),
+                        ..default()
+                    })),
+                    PlayerCosmeticAction::default(),
+                    PlayerActionFacing::default(),
+                ))
+                .id()
+        };
+        let caster = hero(&mut app, 7);
+        let bystander = hero(&mut app, 8);
+        app.update();
+        // The caster's ray warns along +X. Its cast edge is never seen: the same snapshot
+        // already carries a basic attack at a target on -X, for both heroes.
+        app.world_mut()
+            .resource_mut::<GameStateSnapshot>()
+            .skill_effects
+            .push(SkillEffectState {
+                id: 9,
+                owner_id: 7,
+                owner_team: shared::map::Team::Green,
+                skill: SkillId::DawnRay,
+                kind: EffectVisualKind::BeamWarning,
+                position: [0.0; 2],
+                end: [45.0, 0.0],
+                radius: 0.8,
+                remaining_secs: 0.8,
+                armed: false,
+                consumed_segments: 0,
+            });
+        let faces = |app: &App, entity: Entity, x: f32| {
+            (app.world().get::<Transform>(entity).unwrap().rotation * Vec3::NEG_Z).dot(Vec3::X * x)
+                > 0.999
+        };
+        for sequence in 1..=3 {
+            for entity in [caster, bystander] {
+                app.world_mut().entity_mut(entity).insert((
+                    Transform::IDENTITY,
+                    PlayerCosmeticAction {
+                        sequence,
+                        slot: shared::BASIC_ATTACK_ACTION_SLOT,
+                        kind: shared::PlayerActionKind::Attack,
+                    },
+                    PlayerActionFacing {
+                        sequence,
+                        yaw: Some(shared::math::hero_yaw_towards(-1.0, 0.0)),
+                    },
+                ));
+            }
+            app.update();
+            assert!(faces(&app, caster, 1.0), "sequence {sequence}");
+            // Another hero's warning holds nobody: the bystander turns to its target.
+            assert!(faces(&app, bystander, -1.0), "sequence {sequence}");
+        }
+        // The ray has fired: the body is free for the next action, and so is the facing.
+        app.world_mut()
+            .resource_mut::<GameStateSnapshot>()
+            .skill_effects[0]
+            .kind = EffectVisualKind::Beam;
+        app.world_mut().entity_mut(caster).insert((
+            Transform::IDENTITY,
+            PlayerCosmeticAction {
+                sequence: 4,
+                slot: shared::BASIC_ATTACK_ACTION_SLOT,
+                kind: shared::PlayerActionKind::Attack,
+            },
+            PlayerActionFacing {
+                sequence: 4,
+                yaw: Some(shared::math::hero_yaw_towards(-1.0, 0.0)),
+            },
+        ));
+        app.update();
+        assert!(faces(&app, caster, -1.0), "after the beam fired");
+        // A warning of a hidden owner, or of a skill outside the kit, is not the caster's.
+        for (owner_id, skill) in [(0, SkillId::DawnRay), (7, SkillId::HorizonWave)] {
+            let warning = &mut app
+                .world_mut()
+                .resource_mut::<GameStateSnapshot>()
+                .skill_effects[0];
+            warning.kind = EffectVisualKind::BeamWarning;
+            warning.owner_id = owner_id;
+            warning.skill = skill;
+            app.world_mut().entity_mut(caster).insert((
+                Transform::IDENTITY,
+                PlayerCosmeticAction {
+                    sequence: 10 + owner_id,
+                    slot: shared::BASIC_ATTACK_ACTION_SLOT,
+                    kind: shared::PlayerActionKind::Attack,
+                },
+                PlayerActionFacing {
+                    sequence: 10 + owner_id,
+                    yaw: Some(shared::math::hero_yaw_towards(-1.0, 0.0)),
+                },
+            ));
+            app.update();
+            assert!(faces(&app, caster, -1.0), "{owner_id} {skill:?}");
+        }
+    }
+    /// The facing hold reads the phase of the row: every telegraph that holds a windup holds
+    /// the facing along its replicated direction, and a row without a windup holds nothing.
+    #[test]
+    fn a_fuse_or_a_parry_holds_the_facing_along_its_telegraph() {
+        use crate::skill_presentation::SkillPresentation;
+        use shared::loadout::{CoreId, EffectVisualKind, LoadoutState, SkillEffectState, SkillId};
+        // (core, skill, kind of its telegraph, whether the telegraph has a direction)
+        let cases = [
+            (
+                CoreId::Cinderforge,
+                SkillId::FurnaceBreath,
+                EffectVisualKind::BeamWarning,
+                true,
+            ),
+            (
+                CoreId::Edgeweaver,
+                SkillId::MirrorGuard,
+                EffectVisualKind::Barrier,
+                true,
+            ),
+            (
+                CoreId::Riftshot,
+                SkillId::HorizonWave,
+                EffectVisualKind::BeamWarning,
+                true,
+            ),
+            // The collapse is a ring around the orb: it points nowhere.
+            (
+                CoreId::Orbitwright,
+                SkillId::OrbitalCollapse,
+                EffectVisualKind::BeamWarning,
+                false,
+            ),
+            // A bolt has a direction, and its row holds no windup against it.
+            (
+                CoreId::Dawnweaver,
+                SkillId::DawnBind,
+                EffectVisualKind::Bolt,
+                true,
+            ),
+        ];
+        let registry = SkillPresentation::target();
+        for (core, skill, kind, directed) in cases {
+            let holds = directed && registry.profile(skill).unwrap().windup.is_some();
+            assert_eq!(holds, directed && skill != SkillId::DawnBind);
+            let mut app = App::new();
+            app.add_plugins(MinimalPlugins)
+                .init_resource::<GameStateSnapshot>()
+                .insert_resource(registry.clone())
+                .add_systems(PostUpdate, face_confirmed_actions);
+            let recipe = core.preset();
+            let caster = app
+                .world_mut()
+                .spawn((
+                    Transform::IDENTITY,
+                    CombatStats::default(),
+                    NetworkPlayerId(7),
+                    crate::net::NetworkHeroClass(recipe.core.class()),
+                    PlayerLoadout(Some(LoadoutState {
+                        recipe: Some(recipe),
+                        ..default()
+                    })),
+                    PlayerCosmeticAction::default(),
+                    PlayerActionFacing::default(),
+                ))
+                .id();
+            app.update();
+            app.world_mut()
+                .resource_mut::<GameStateSnapshot>()
+                .skill_effects
+                .push(SkillEffectState {
+                    id: 9,
+                    owner_id: 7,
+                    owner_team: shared::map::Team::Green,
+                    skill,
+                    kind,
+                    position: [2.0, 3.0],
+                    end: if directed { [9.0, 3.0] } else { [2.0, 3.0] },
+                    radius: 3.0,
+                    remaining_secs: 0.6,
+                    armed: false,
+                    consumed_segments: 0,
+                });
+            // A basic attack at a target on -X is accepted during the telegraph.
+            app.world_mut().entity_mut(caster).insert((
+                PlayerCosmeticAction {
+                    sequence: 1,
+                    slot: shared::BASIC_ATTACK_ACTION_SLOT,
+                    kind: shared::PlayerActionKind::Attack,
+                },
+                PlayerActionFacing {
+                    sequence: 1,
+                    yaw: Some(shared::math::hero_yaw_towards(-1.0, 0.0)),
+                },
+            ));
+            app.update();
+            let forward = app.world().get::<Transform>(caster).unwrap().rotation * Vec3::NEG_Z;
+            let along = if holds { 1.0 } else { -1.0 };
+            assert!(
+                forward.dot(Vec3::X * along) > 0.999,
+                "{} faces {forward}",
+                skill.id()
+            );
+        }
     }
 }

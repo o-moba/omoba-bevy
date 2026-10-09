@@ -10,7 +10,7 @@ use crate::{AbilityDefinition, HeroClass, MAX_ABILITY_RANK, SkillSlot, Targeting
 use serde::{Deserialize, Serialize};
 use std::sync::LazyLock;
 
-pub const CATALOG_REVISION: &str = "standard-kits-5";
+pub const CATALOG_REVISION: &str = "standard-kits-6";
 pub const RECIPE_SCHEMA_VERSION: u16 = 1;
 pub const MAX_ACTIVE_EFFECTS: usize = 128;
 pub const MAX_EFFECTS_PER_OWNER: usize = 16;
@@ -1040,7 +1040,9 @@ pub struct SkillEffectState {
     pub radius: f32,
     pub remaining_secs: f32,
     pub armed: bool,
-    /// Consumed cage walls; lower five bits, zero for other effects.
+    /// Cage: consumed walls in the lower five bits. Shield wall: how many
+    /// projectiles it has intercepted so far (the first is negated, later ones
+    /// reduced). Zero for every other effect.
     #[serde(default)]
     pub consumed_segments: u8,
 }

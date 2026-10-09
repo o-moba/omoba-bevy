@@ -36,6 +36,7 @@ fn setup_game_state_ui(mut commands: Commands) {
     commands
         .spawn((
             Node {
+                display: Display::None,
                 position_type: PositionType::Absolute,
                 left: Val::Px(0.0),
                 right: Val::Px(0.0),
@@ -74,7 +75,7 @@ fn setup_game_state_ui(mut commands: Commands) {
                     card.spawn((
                         Text::new(""),
                         TextFont {
-                            font_size: 28.0,
+                            font_size: (28.0).into(),
                             ..default()
                         },
                         TextColor(Color::WHITE),
@@ -111,10 +112,13 @@ fn update_game_state_ui(
     client_session: Res<ClientSession>,
     career: Option<Res<crate::career::CareerClient>>,
     screen: Option<Res<State<crate::frontend::AppScreen>>>,
-    mut overlay_query: Query<(&mut Visibility, &mut BackgroundColor), With<GameStateOverlay>>,
+    mut overlay_query: Query<
+        (&mut Visibility, &mut BackgroundColor, &mut Node),
+        With<GameStateOverlay>,
+    >,
     mut text_query: Query<&mut Text, With<GameStateLabel>>,
 ) {
-    let Ok((mut visibility, mut background)) = overlay_query.single_mut() else {
+    let Ok((mut visibility, mut background, mut node)) = overlay_query.single_mut() else {
         return;
     };
     let Ok(mut label) = text_query.single_mut() else {
@@ -130,7 +134,7 @@ fn update_game_state_ui(
         || result_screen
         || !client_session.is_connected()
     {
-        hide(&mut visibility, &mut background, &mut label);
+        hide(&mut visibility, &mut background, &mut label, &mut node);
         return;
     }
 
@@ -139,6 +143,7 @@ fn update_game_state_ui(
         .and_then(|career| crate::career::queue_text(&career.view.queue))
     {
         *visibility = Visibility::Visible;
+        node.display = Display::Flex;
         *background = BackgroundColor(LOBBY_COLOR);
         label.0 = status;
         return;
@@ -149,14 +154,21 @@ fn update_game_state_ui(
     match matchmaking_status_text(&game_state.state, client_session.join_in_flight()) {
         Some(text) => {
             *visibility = Visibility::Visible;
+            node.display = Display::Flex;
             *background = BackgroundColor(LOBBY_COLOR);
             label.0 = text;
         }
-        None => hide(&mut visibility, &mut background, &mut label),
+        None => hide(&mut visibility, &mut background, &mut label, &mut node),
     }
 }
 
-fn hide(visibility: &mut Visibility, background: &mut BackgroundColor, label: &mut Text) {
+fn hide(
+    visibility: &mut Visibility,
+    background: &mut BackgroundColor,
+    label: &mut Text,
+    node: &mut Node,
+) {
+    node.display = Display::None;
     *visibility = Visibility::Hidden;
     *background = BackgroundColor(Color::NONE);
     label.0.clear();

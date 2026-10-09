@@ -18,8 +18,8 @@ use bevy::{
     ecs::system::SystemParam,
     input::touch::{TouchInput, TouchPhase},
     prelude::*,
-    scene::{SceneInstance, SceneSpawner},
     window::PrimaryWindow,
+    world_serialization::{WorldInstance, WorldInstanceSpawner},
 };
 use shared::prematch::PrematchPhase;
 
@@ -176,7 +176,7 @@ fn loading_actions(
 #[derive(SystemParam)]
 struct LoadingAssets<'w, 's> {
     server: Res<'w, AssetServer>,
-    spawner: Res<'w, SceneSpawner>,
+    spawner: Res<'w, WorldInstanceSpawner>,
     cache: Res<'w, AvatarAssetCache>,
     mode: Res<'w, PlayerVisualMode>,
     meshes: Res<'w, Assets<Mesh>>,
@@ -194,7 +194,7 @@ struct LoadingAssets<'w, 's> {
             Option<&'static ModelScaleSource>,
         ),
     >,
-    scenes: Query<'w, 's, (&'static SceneRoot, Option<&'static SceneInstance>)>,
+    scenes: Query<'w, 's, (&'static WorldAssetRoot, Option<&'static WorldInstance>)>,
     children: Query<'w, 's, &'static Children>,
     map: Query<
         'w,
@@ -421,6 +421,9 @@ pub(super) struct LoadingLatch {
     entered_at: f32,
     /// The currently selected advice card; each wait starts with the objective.
     tip: usize,
+    /// All contacts, including those starting outside the advice area.
+    tip_contacts: std::collections::HashSet<u64>,
+    tip_swipe: Option<(u64, Vec2)>,
     /// The first `countdown_ms` of the current `GameState::Starting` run
     /// (servers without a draft; the client does not know the constant).
     starting_total: Option<u32>,
@@ -1221,7 +1224,6 @@ fn loading_tip_swipes(
     mut events: MessageReader<TouchInput>,
     windows: Query<(Entity, &Window), With<PrimaryWindow>>,
     areas: Query<(&ComputedNode, &UiGlobalTransform), With<LoadingTipArea>>,
-    mut held: Local<Option<(u64, Vec2)>>,
     mut latch: ResMut<LoadingLatch>,
     tips: Option<Res<crate::help_overlay::BeginnerTips>>,
 ) {
@@ -1229,15 +1231,17 @@ fn loading_tip_swipes(
         return;
     };
     if tips.as_ref().is_some_and(|tips| !tips.enabled) {
-        *held = None;
+        latch.tip_swipe = None;
+        latch.tip_contacts.clear();
         events.clear();
         return;
     }
     for event in events.read().filter(|e| e.window == window_entity) {
         match event.phase {
             TouchPhase::Started => {
-                if held.is_some() {
-                    *held = None;
+                latch.tip_contacts.insert(event.id);
+                if latch.tip_contacts.len() != 1 {
+                    latch.tip_swipe = None;
                     continue;
                 }
                 let inside = areas.iter().any(|(node, transform)| {
@@ -1249,11 +1253,12 @@ fn loading_tip_swipes(
                     .contains(event.position)
                 });
                 if inside {
-                    *held = Some((event.id, event.position));
+                    latch.tip_swipe = Some((event.id, event.position));
                 }
             }
             TouchPhase::Ended => {
-                if let Some((id, start)) = *held
+                latch.tip_contacts.remove(&event.id);
+                if let Some((id, start)) = latch.tip_swipe
                     && id == event.id
                 {
                     let delta = event.position - start;
@@ -1264,10 +1269,13 @@ fn loading_tip_swipes(
                             (latch.tip + TIPS.len() - 1) % TIPS.len()
                         };
                     }
-                    *held = None;
+                    latch.tip_swipe = None;
                 }
             }
-            TouchPhase::Canceled => *held = None,
+            TouchPhase::Canceled => {
+                latch.tip_contacts.remove(&event.id);
+                latch.tip_swipe = None;
+            }
             TouchPhase::Moved => {}
         }
     }
@@ -1633,6 +1641,61 @@ mod tests {
         touch(&mut app, TouchPhase::Ended, 160.0, 100.0);
         app.update();
         assert_eq!(app.world().resource::<LoadingLatch>().tip, 0);
+    }
+
+    #[test]
+    fn advice_rejects_multitouch_even_when_the_first_finger_is_outside() {
+        let mut app = App::new();
+        app.init_resource::<LoadingLatch>()
+            .init_resource::<DraftClient>()
+            .add_message::<TouchInput>()
+            .add_systems(Update, loading_tip_swipes);
+        let window = app
+            .world_mut()
+            .spawn((Window::default(), PrimaryWindow))
+            .id();
+        app.world_mut().spawn((
+            LoadingTipArea,
+            ComputedNode {
+                size: Vec2::new(400.0, 120.0),
+                ..default()
+            },
+            UiGlobalTransform::from_translation(Vec2::new(200.0, 100.0)),
+        ));
+        let touch = |app: &mut App, id, phase, position| {
+            app.world_mut().write_message(TouchInput {
+                window,
+                phase,
+                position,
+                id,
+                force: None,
+            });
+            app.update();
+        };
+        let start = Vec2::new(240.0, 100.0);
+        let end = Vec2::new(160.0, 100.0);
+        for first in [Vec2::ZERO, start] {
+            for fingers in [2, 3] {
+                touch(&mut app, 1, TouchPhase::Started, first);
+                for id in 2..=fingers {
+                    touch(&mut app, id, TouchPhase::Started, start);
+                }
+                for id in (1..=fingers).rev() {
+                    touch(&mut app, id, TouchPhase::Ended, end);
+                }
+                assert_eq!(app.world().resource::<LoadingLatch>().tip, 0);
+            }
+        }
+        touch(&mut app, 4, TouchPhase::Started, start);
+        touch(&mut app, 4, TouchPhase::Ended, end);
+        assert_eq!(app.world().resource::<LoadingLatch>().tip, 1);
+        // Leaving loading while a finger is down must not poison the next wait.
+        touch(&mut app, 5, TouchPhase::Started, start);
+        use bevy::ecs::system::RunSystemOnce;
+        app.world_mut().run_system_once(enter_loading).unwrap();
+        touch(&mut app, 6, TouchPhase::Started, start);
+        touch(&mut app, 6, TouchPhase::Ended, end);
+        assert_eq!(app.world().resource::<LoadingLatch>().tip, 1);
     }
 
     #[test]

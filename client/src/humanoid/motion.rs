@@ -1,5 +1,5 @@
 use serde::Deserialize;
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, sync::OnceLock};
 
 pub(super) const STATES: [&str; 6] = ["idle", "walk", "run", "attack", "cast", "death"];
 
@@ -11,6 +11,9 @@ pub(crate) struct SharedHumanoidMotion {
     pub source_reference_facing: [f32; 3],
     pub bones: Vec<String>,
     pub clips: BTreeMap<String, MotionClip>,
+    /// Seconds from a clip's start to its contact pose, for action clips only.
+    #[serde(default)]
+    contacts: BTreeMap<String, f32>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -29,6 +32,24 @@ impl SharedHumanoidMotion {
             .map_err(|error| format!("Invalid shared humanoid motion JSON: {error}"))?;
         motion.validate()?;
         Ok(motion)
+    }
+
+    /// The packaged library, parsed and validated once per process.
+    pub(crate) fn embedded() -> Result<&'static Self, String> {
+        static LIBRARY: OnceLock<Result<SharedHumanoidMotion, String>> = OnceLock::new();
+        LIBRARY
+            .get_or_init(|| {
+                Self::parse(include_str!(
+                    "../../assets/animations/humanoid-motion-v1.json"
+                ))
+            })
+            .as_ref()
+            .map_err(Clone::clone)
+    }
+
+    /// When the clip reaches its contact pose; loops and `death` have none.
+    pub(crate) fn contact(&self, clip: &str) -> Option<f32> {
+        self.contacts.get(clip).copied()
     }
 
     fn validate(&self) -> Result<(), String> {
@@ -103,6 +124,14 @@ impl SharedHumanoidMotion {
             }
             if matches!(name.as_str(), "idle" | "walk" | "run") && !clip.looping {
                 return Err(format!("Shared locomotion {name} must loop"));
+            }
+        }
+        for (name, contact) in &self.contacts {
+            let inside = self.clips.get(name).is_some_and(|clip| {
+                contact.is_finite() && (0.0..=clip.duration + 0.0001).contains(contact)
+            });
+            if !inside {
+                return Err(format!("Shared motion contact {name} is outside its clip"));
             }
         }
         Ok(())

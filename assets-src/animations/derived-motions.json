@@ -1,0 +1,456 @@
+{
+  "schema_version": 1,
+  "motions": {
+    "slash_down": {
+      "duration": 0.55, "looping": false, "contact": 0.165, "approx": false,
+      "keys": [
+        {"clip": "Sword_Attack", "phase": 0.2},
+        {"clip": "Sword_Attack", "phase": 0.25},
+        {"clip": "Sword_Attack", "phase": 0.31},
+        {"clip": "Sword_Attack", "phase": 0.4},
+        {"clip": "Sword_Attack", "phase": 0.72},
+        {"clip": "Sword_Attack", "phase": 1.0}
+      ]
+    },
+    "slash_rising": {
+      "duration": 0.5, "looping": false, "contact": 0.125, "approx": false,
+      "keys": [
+        {"clip": "Sword_Attack", "phase": 0.44},
+        {"clip": "Sword_Attack", "phase": 0.56},
+        {"clip": "Sword_Attack", "phase": 0.67},
+        {"clip": "Sword_Attack", "phase": 0.78},
+        {"clip": "Sword_Attack", "phase": 1.0}
+      ]
+    },
+    "cleave_slam": {
+      "duration": 0.9, "looping": false, "contact": 0.3, "approx": false,
+      "keys": [
+        {"clip": "Sword_Attack", "phase": 0.17},
+        {"clip": "Sword_Attack", "phase": 0.22},
+        {"clip": "Sword_Attack", "phase": 0.28},
+        {"clip": "Sword_Attack", "phase": 0.36},
+        {"clip": "Sword_Attack", "phase": 0.44},
+        {"clip": "Sword_Attack", "phase": 0.83},
+        {"clip": "Sword_Attack", "phase": 1.0}
+      ]
+    },
+    "spin_cleave": {
+      "duration": 0.6, "looping": false, "contact": 0.1, "approx": false,
+      "ops": {"spin_deg": [0, 45, 90, 135, 180, 225, 270, 315, 360, 360]},
+      "keys": [
+        {"clip": "Sword_Attack", "phase": 0.22},
+        {"clip": "Sword_Attack", "phase": 0.255},
+        {"clip": "Sword_Attack", "phase": 0.29},
+        {"clip": "Sword_Attack", "phase": 0.325},
+        {"clip": "Sword_Attack", "phase": 0.36},
+        {"clip": "Sword_Attack", "phase": 0.395},
+        {"clip": "Sword_Attack", "phase": 0.43},
+        {"clip": "Sword_Attack", "phase": 0.465},
+        {"clip": "Sword_Attack", "phase": 0.5},
+        {"clip": "Sword_Attack", "phase": 1.0}
+      ]
+    },
+    "slash_down_m": {
+      "duration": 0.55, "looping": false, "contact": 0.165, "approx": false,
+      "ops": {"mirror": true},
+      "keys": [
+        {"clip": "Sword_Attack", "phase": 0.2},
+        {"clip": "Sword_Attack", "phase": 0.25},
+        {"clip": "Sword_Attack", "phase": 0.31},
+        {"clip": "Sword_Attack", "phase": 0.4},
+        {"clip": "Sword_Attack", "phase": 0.72},
+        {"clip": "Sword_Attack", "phase": 1.0}
+      ]
+    },
+    "slash_rising_m": {
+      "duration": 0.5, "looping": false, "contact": 0.125, "approx": false,
+      "ops": {"mirror": true},
+      "keys": [
+        {"clip": "Sword_Attack", "phase": 0.44},
+        {"clip": "Sword_Attack", "phase": 0.56},
+        {"clip": "Sword_Attack", "phase": 0.67},
+        {"clip": "Sword_Attack", "phase": 0.78},
+        {"clip": "Sword_Attack", "phase": 1.0}
+      ]
+    },
+    "blade_flourish": {
+      "duration": 0.45, "looping": false, "contact": 0.15, "approx": true,
+      "keys": [
+        {"clip": "Sword_Idle", "phase": 0},
+        {"clip": "Sword_Attack", "phase": 0.31},
+        {"clip": "Sword_Attack", "phase": 0.64},
+        {"clip": "Sword_Idle", "phase": 0}
+      ]
+    },
+    "blade_ready_loop": {
+      "duration": 1.6666667, "looping": true, "approx": false,
+      "keys": [
+        {"clip": "Sword_Idle", "phase": 0},
+        {"clip": "Sword_Idle", "phase": 0.2},
+        {"clip": "Sword_Idle", "phase": 0.4},
+        {"clip": "Sword_Idle", "phase": 0.6},
+        {"clip": "Sword_Idle", "phase": 0.8},
+        {"clip": "Sword_Idle", "phase": 1.0}
+      ]
+    },
+    "thrust_lunge": {
+      "duration": 0.45, "looping": false, "contact": 0.1125, "approx": false,
+      "ops": {"mirror": true},
+      "keys": [
+        {"clip": "Punch_Jab", "phase": 0},
+        {"clip": "Punch_Jab", "phase": 0.25},
+        {"clip": "Punch_Jab", "phase": 0.3},
+        {"clip": "Punch_Jab", "phase": 0.6},
+        {"clip": "Punch_Jab", "phase": 1.0}
+      ]
+    },
+    "jab_cross": {
+      "duration": 0.6, "looping": false, "contact": 0.1, "approx": false,
+      "keys": [
+        {"clip": "Punch_Jab", "phase": 0.1},
+        {"clip": "Punch_Jab", "phase": 0.3},
+        {"clip": "Punch_Jab", "phase": 0.55},
+        {"clip": "Punch_Cross", "phase": 0.17},
+        {"clip": "Punch_Cross", "phase": 0.25},
+        {"clip": "Punch_Cross", "phase": 0.5},
+        {"clip": "Punch_Cross", "phase": 1.0}
+      ]
+    },
+    "fist_guard_loop": {
+      "duration": 1.0, "looping": true, "approx": false,
+      "keys": [
+        {"clip": "Punch_Cross", "phase": 0},
+        {"clip": "Punch_Cross", "phase": 0}
+      ]
+    },
+    "ground_pound": {
+      "duration": 0.7, "looping": false, "contact": 0.17, "approx": true,
+      "times": [0, 0.17, 0.3, 0.5, 0.7],
+      "keys": [
+        {"clip": "Punch_Enter", "phase": 0.4},
+        {"clip": "Jump_Land", "phase": 0.2},
+        {"clip": "Jump_Land", "phase": 0.3},
+        {"clip": "Jump_Land", "phase": 0.6},
+        {"clip": "Jump_Land", "phase": 1.0}
+      ]
+    },
+    "flying_knee": {
+      "duration": 0.7, "looping": false, "contact": 0.17, "approx": true,
+      "times": [0, 0.08, 0.17, 0.25, 0.36, 0.48, 0.7],
+      "ops": {"hips_y": [0, 0.3, 0.5, 0.42, 0, 0, 0]},
+      "keys": [
+        {"clip": "Jump_Start", "phase": 0},
+        {"clip": "Jump_Start", "phase": 0.19},
+        {"clip": "Jump_Start", "phase": 0.28},
+        {"clip": "Jump_Start", "phase": 0.37},
+        {"clip": "Jump_Land", "phase": 0.1},
+        {"clip": "Jump_Land", "phase": 0.3},
+        {"clip": "Jump_Land", "phase": 1.0}
+      ]
+    },
+    "leap_land": {
+      "duration": 0.65, "looping": false, "contact": 0.12, "approx": false,
+      "times": [0, 0.06, 0.12, 0.2, 0.42, 0.65],
+      "ops": {"hips_y": [0.9, 0.4, 0, 0, 0, 0]},
+      "keys": [
+        {"clip": "Jump_Start", "phase": 0.37},
+        {"clip": "Jump_Land", "phase": 0},
+        {"clip": "Jump_Land", "phase": 0.1},
+        {"clip": "Jump_Land", "phase": 0.2},
+        {"clip": "Jump_Land", "phase": 0.6},
+        {"clip": "Jump_Land", "phase": 1.0}
+      ]
+    },
+    "dive_lunge": {
+      "duration": 0.6, "looping": false, "contact": 0.12, "approx": true,
+      "times": [0, 0.12, 0.2, 0.32, 0.45, 0.6],
+      "keys": [
+        {"clip": "Swim_Fwd_Loop", "phase": 0.37},
+        {"clip": "Swim_Fwd_Loop", "phase": 0.37},
+        {"clip": "Jump_Land", "phase": 0.1},
+        {"clip": "Jump_Land", "phase": 0.3},
+        {"clip": "Jump_Land", "phase": 0.6},
+        {"clip": "Jump_Land", "phase": 1.0}
+      ]
+    },
+    "vault_flip": {
+      "duration": 0.7, "looping": false, "contact": 0.35, "approx": false,
+      "keys": [
+        {"clip": "Roll", "phase": 0.09},
+        {"clip": "Roll", "phase": 0.17},
+        {"clip": "Roll", "phase": 0.26},
+        {"clip": "Roll", "phase": 0.34},
+        {"clip": "Roll", "phase": 0.51},
+        {"clip": "Roll", "phase": 0.69},
+        {"clip": "Roll", "phase": 1.0}
+      ]
+    },
+    "backflip_retreat": {
+      "duration": 0.6, "looping": false, "contact": 0.1, "approx": true,
+      "keys": [
+        {"clip": "Roll", "phase": 0.6},
+        {"clip": "Roll", "phase": 0.43},
+        {"clip": "Roll", "phase": 0.34},
+        {"clip": "Roll", "phase": 0.26},
+        {"clip": "Roll", "phase": 0.17},
+        {"clip": "Roll", "phase": 0.09},
+        {"clip": "Roll", "phase": 0}
+      ]
+    },
+    "dance_twirl": {
+      "duration": 0.5, "looping": false, "contact": 0.1428571, "approx": true,
+      "ops": {"spin_deg": [0, 45, 90, 150, 210, 270, 315, 360]},
+      "keys": [
+        {"clip": "Dance_Loop", "phase": 0},
+        {"clip": "Dance_Loop", "phase": 0.143},
+        {"clip": "Dance_Loop", "phase": 0.286},
+        {"clip": "Dance_Loop", "phase": 0.429},
+        {"clip": "Dance_Loop", "phase": 0.571},
+        {"clip": "Dance_Loop", "phase": 0.714},
+        {"clip": "Dance_Loop", "phase": 0.857},
+        {"clip": "Dance_Loop", "phase": 1.0}
+      ]
+    },
+    "overhead_plant": {
+      "duration": 0.7, "looping": false, "contact": 0.26, "approx": true,
+      "times": [0, 0.18, 0.26, 0.48, 0.7],
+      "keys": [
+        {"clip": "Idle_Loop", "phase": 0},
+        {"clip": "Pistol_Aim_Up", "phase": 0},
+        {"clip": "Pistol_Aim_Down", "phase": 0},
+        {"clip": "Pistol_Aim_Down", "phase": 0},
+        {"clip": "Idle_Loop", "phase": 0}
+      ]
+    },
+    "rally_raise": {
+      "duration": 0.6, "looping": false, "contact": 0.15, "approx": false,
+      "times": [0, 0.15, 0.45, 0.6],
+      "keys": [
+        {"clip": "Idle_Loop", "phase": 0},
+        {"clip": "Pistol_Aim_Up", "phase": 0},
+        {"clip": "Pistol_Aim_Up", "phase": 0},
+        {"clip": "Idle_Loop", "phase": 0}
+      ]
+    },
+    "raise_from_earth": {
+      "duration": 0.8, "looping": false, "contact": 0.2, "approx": true,
+      "times": [0, 0.1, 0.2, 0.38, 0.56, 0.8],
+      "keys": [
+        {"clip": "Fixing_Kneeling", "phase": 0.03},
+        {"clip": "Fixing_Kneeling", "phase": 0.1},
+        {"clip": "Fixing_Kneeling", "phase": 0.19},
+        {"clip": "Fixing_Kneeling", "phase": 0.9},
+        {"clip": "Pistol_Aim_Up", "phase": 0},
+        {"clip": "Idle_Loop", "phase": 0}
+      ]
+    },
+    "two_hand_push": {
+      "duration": 0.6, "looping": false, "contact": 0.1, "approx": true,
+      "times": [0, 0.1, 0.3, 0.46, 0.6],
+      "keys": [
+        {"clip": "Punch_Enter", "phase": 0.3},
+        {"clip": "Push_Loop", "phase": 0},
+        {"clip": "Push_Loop", "phase": 0},
+        {"clip": "Punch_Enter", "phase": 0.15},
+        {"clip": "Idle_Loop", "phase": 0}
+      ]
+    },
+    "shot_heavy": {
+      "duration": 0.8, "looping": false, "contact": 0.17, "approx": true,
+      "times": [0, 0.05, 0.17, 0.35, 0.62, 0.8],
+      "keys": [
+        {"clip": "Pistol_Aim_Neutral", "phase": 0},
+        {"clip": "Pistol_Shoot", "phase": 0.067},
+        {"clip": "Hit_Chest", "phase": 0},
+        {"clip": "Hit_Chest", "phase": 0.5},
+        {"clip": "Pistol_Aim_Neutral", "phase": 0},
+        {"clip": "Pistol_Aim_Neutral", "phase": 0}
+      ]
+    },
+    "burst_fire": {
+      "duration": 0.45, "looping": false, "contact": 0.075, "approx": false,
+      "keys": [
+        {"clip": "Pistol_Shoot", "phase": 0},
+        {"clip": "Pistol_Shoot", "phase": 0.067},
+        {"clip": "Pistol_Shoot", "phase": 0},
+        {"clip": "Pistol_Shoot", "phase": 0.067},
+        {"clip": "Pistol_Shoot", "phase": 0},
+        {"clip": "Pistol_Shoot", "phase": 0.067},
+        {"clip": "Pistol_Shoot", "phase": 1.0}
+      ]
+    },
+    "sky_shot": {
+      "duration": 0.6, "looping": false, "contact": 0.15, "approx": false,
+      "times": [0, 0.15, 0.24, 0.34, 0.46, 0.6],
+      "keys": [
+        {"clip": "Pistol_Aim_Neutral", "phase": 0},
+        {"clip": "Pistol_Aim_Up", "phase": 0},
+        {"clip": "Pistol_Aim_Up", "phase": 0},
+        {"clip": "Pistol_Shoot", "phase": 0.067},
+        {"clip": "Pistol_Aim_Neutral", "phase": 0},
+        {"clip": "Idle_Loop", "phase": 0}
+      ]
+    },
+    "ground_shot": {
+      "duration": 0.5, "looping": false, "contact": 0.14, "approx": false,
+      "times": [0, 0.14, 0.26, 0.38, 0.5],
+      "keys": [
+        {"clip": "Pistol_Aim_Neutral", "phase": 0},
+        {"clip": "Pistol_Aim_Down", "phase": 0},
+        {"clip": "Pistol_Shoot", "phase": 0.067},
+        {"clip": "Pistol_Aim_Neutral", "phase": 0},
+        {"clip": "Idle_Loop", "phase": 0}
+      ]
+    },
+    "reload_snap": {
+      "duration": 0.6, "looping": false, "contact": 0.34, "approx": false,
+      "times": [0, 0.08, 0.16, 0.26, 0.34, 0.6],
+      "keys": [
+        {"clip": "Pistol_Reload", "phase": 0.1},
+        {"clip": "Pistol_Reload", "phase": 0.2},
+        {"clip": "Pistol_Reload", "phase": 0.3},
+        {"clip": "Pistol_Reload", "phase": 0.4},
+        {"clip": "Pistol_Reload", "phase": 0.5},
+        {"clip": "Pistol_Reload", "phase": 1.0}
+      ]
+    },
+    "aim_hold_loop": {
+      "duration": 1.6666667, "looping": true, "approx": false,
+      "keys": [
+        {"clip": "Pistol_Idle_Loop", "phase": 0},
+        {"clip": "Pistol_Idle_Loop", "phase": 0.2},
+        {"clip": "Pistol_Idle_Loop", "phase": 0.4},
+        {"clip": "Pistol_Idle_Loop", "phase": 0.6},
+        {"clip": "Pistol_Idle_Loop", "phase": 0.8},
+        {"clip": "Pistol_Idle_Loop", "phase": 1.0}
+      ]
+    },
+    "aim_loose_r": {
+      "duration": 0.55, "looping": false, "contact": 0.14, "approx": true,
+      "times": [0, 0.08, 0.14, 0.3, 0.38, 0.46, 0.55],
+      "ops": {"mirror": true},
+      "keys": [
+        {"clip": "Spell_Simple_Enter", "phase": 0.67},
+        {"clip": "Spell_Simple_Enter", "phase": 1.0},
+        {"clip": "Spell_Simple_Shoot", "phase": 0.17},
+        {"clip": "Spell_Simple_Shoot", "phase": 0.5},
+        {"clip": "Spell_Simple_Exit", "phase": 0.2},
+        {"clip": "Spell_Simple_Exit", "phase": 0.6},
+        {"clip": "Spell_Simple_Exit", "phase": 1.0}
+      ]
+    },
+    "cast_thrust_r": {
+      "duration": 0.6, "looping": false, "contact": 0.24, "approx": false,
+      "ops": {"mirror": true},
+      "keys": [
+        {"clip": "Spell_Simple_Enter", "phase": 0.33},
+        {"clip": "Spell_Simple_Enter", "phase": 1.0},
+        {"clip": "Spell_Simple_Shoot", "phase": 0.17},
+        {"clip": "Spell_Simple_Shoot", "phase": 1.0},
+        {"clip": "Spell_Simple_Exit", "phase": 0.5},
+        {"clip": "Spell_Simple_Exit", "phase": 1.0}
+      ]
+    },
+    "point_command": {
+      "duration": 0.5, "looping": false, "contact": 0.16, "approx": false,
+      "times": [0, 0.16, 0.34, 0.5],
+      "keys": [
+        {"clip": "Idle_Loop", "phase": 0},
+        {"clip": "Idle_Torch_Loop", "phase": 0},
+        {"clip": "Idle_Torch_Loop", "phase": 0.4},
+        {"clip": "Idle_Loop", "phase": 0}
+      ]
+    },
+    "hover_pulse": {
+      "duration": 0.6, "looping": false, "contact": 0.15, "approx": true,
+      "ops": {"hips_y": [0, 0.2, 0.2, 0.1, 0]},
+      "keys": [
+        {"clip": "Idle_Loop", "phase": 0},
+        {"clip": "Swim_Idle_Loop", "phase": 0},
+        {"clip": "Swim_Idle_Loop", "phase": 0.25},
+        {"clip": "Swim_Idle_Loop", "phase": 0.5},
+        {"clip": "Idle_Loop", "phase": 0}
+      ]
+    },
+    "levitate_loop": {
+      "duration": 1.6, "looping": true, "approx": true,
+      "ops": {"hips_y": [0.25, 0.25, 0.25, 0.25, 0.25, 0.25, 0.25, 0.25]},
+      "keys": [
+        {"clip": "Swim_Idle_Loop", "phase": 0},
+        {"clip": "Swim_Idle_Loop", "phase": 0.143},
+        {"clip": "Swim_Idle_Loop", "phase": 0.286},
+        {"clip": "Swim_Idle_Loop", "phase": 0.429},
+        {"clip": "Swim_Idle_Loop", "phase": 0.571},
+        {"clip": "Swim_Idle_Loop", "phase": 0.714},
+        {"clip": "Swim_Idle_Loop", "phase": 0.857},
+        {"clip": "Swim_Idle_Loop", "phase": 1.0}
+      ]
+    },
+    "draw_in": {
+      "duration": 0.5, "looping": false, "contact": 0.125, "approx": false,
+      "keys": [
+        {"clip": "PickUp_Table", "phase": 0},
+        {"clip": "PickUp_Table", "phase": 0.3},
+        {"clip": "PickUp_Table", "phase": 0.45},
+        {"clip": "PickUp_Table", "phase": 0.6},
+        {"clip": "PickUp_Table", "phase": 1.0}
+      ]
+    },
+    "hurl_overhand": {
+      "duration": 0.5, "looping": false, "contact": 0.2, "approx": true,
+      "keys": [
+        {"clip": "Sword_Attack", "phase": 0.17},
+        {"clip": "Sword_Attack", "phase": 0.22},
+        {"clip": "Sword_Attack", "phase": 0.28},
+        {"clip": "Spell_Simple_Shoot", "phase": 0, "mirror": true},
+        {"clip": "Spell_Simple_Exit", "phase": 0.6, "mirror": true},
+        {"clip": "Idle_Loop", "phase": 0}
+      ]
+    },
+    "toss_underhand": {
+      "duration": 0.4, "looping": false, "contact": 0.13, "approx": true,
+      "times": [0, 0.13, 0.27, 0.4],
+      "keys": [
+        {"clip": "PickUp_Table", "phase": 0.6},
+        {"clip": "PickUp_Table", "phase": 0.3},
+        {"clip": "PickUp_Table", "phase": 0},
+        {"clip": "Idle_Loop", "phase": 0}
+      ]
+    },
+    "place_quick": {
+      "duration": 0.6, "looping": false, "contact": 0.15, "approx": false,
+      "keys": [
+        {"clip": "Interact", "phase": 0},
+        {"clip": "Interact", "phase": 0.25},
+        {"clip": "Interact", "phase": 0.42},
+        {"clip": "Interact", "phase": 0.75},
+        {"clip": "Interact", "phase": 1.0}
+      ]
+    },
+    "kneel_plant": {
+      "duration": 0.75, "looping": false, "contact": 0.36, "approx": false,
+      "times": [0, 0.12, 0.24, 0.36, 0.5, 0.625, 0.75],
+      "keys": [
+        {"clip": "Fixing_Kneeling", "phase": 0},
+        {"clip": "Fixing_Kneeling", "phase": 0.06},
+        {"clip": "Fixing_Kneeling", "phase": 0.13},
+        {"clip": "Fixing_Kneeling", "phase": 0.19},
+        {"clip": "Fixing_Kneeling", "phase": 0.9},
+        {"clip": "Fixing_Kneeling", "phase": 0.97},
+        {"clip": "Fixing_Kneeling", "phase": 1.0}
+      ]
+    },
+    "dagger_backstab": {
+      "duration": 0.65, "looping": false, "contact": 0.11, "approx": true,
+      "times": [0, 0.11, 0.22, 0.38, 0.5, 0.65],
+      "keys": [
+        {"clip": "Punch_Cross", "phase": 0.17},
+        {"clip": "Punch_Cross", "phase": 0.25},
+        {"clip": "Punch_Cross", "phase": 0.45},
+        {"clip": "Crouch_Idle_Loop", "phase": 0},
+        {"clip": "Crouch_Idle_Loop", "phase": 0.25},
+        {"clip": "Punch_Cross", "phase": 1.0}
+      ]
+    }
+  }
+}

@@ -11,8 +11,49 @@ motions. `config/skills.skillfx` selects them by skill ID in the accepted
 recipe; Q/W/E/R are input slots. Runtime retargeting caches every named motion
 and instances play independently. Dawn Ray preparation/release follows its
 replicated warning/beam, with cancellation and death priority. See
-[combat cosmetics](combat-cosmetics.md#skill-presentation-pilot) for the current
-contract and remaining phase/weapon work.
+[combat cosmetics](combat-cosmetics.md#class-visual-identity-presentation-v2-0440-candidate)
+for the current contract; the pilot itself is described
+[further down that page](combat-cosmetics.md#skill-presentation-pilot).
+
+## Skill motion vocabulary
+
+The library holds 55 motions: the six base states, seven further full-rate
+clips, four dagger edits and 38 pose-key motions for the class skill kits
+(blade, fist, leap, two-handed, gun and caster families plus five windup
+holds). The 38 come from one exporter table,
+`assets-src/animations/derived-motions.json`: each key names a source clip and
+a phase of the checked-in CC0 library, and a row may mirror keys, bake one
+whole-body turn, lift the hips or close a decimated loop. No pose is drawn by
+hand and no new source asset or licence is involved. Every derived clip keeps
+hips X/Z at zero, so a leap, roll or lunge plays in place while the server
+alone moves the hero.
+
+A top-level `contacts` map gives, for every action clip, the seconds from the
+clip start to its contact pose (the strike fully extended, the gesture fully
+formed). `SharedHumanoidMotion::contact` exposes it; the client parses the
+library once per process. Presentation code uses the value to keep a strike on
+screen within a short time of the authoritative event; no gameplay waits for
+it.
+
+The source library has no kick, bow draw, shield raise, whip or chain swing
+and no two-handed great-weapon swing. `flying_knee`, `aim_loose_r` and
+`two_hand_push` are stand-ins for a kick, a bow release and a shield bash and
+must be described as such. Rows marked `approx` join poses that were never
+authored as one movement; a skill may use them only after a look on two rigs.
+The table, its fields and the full clip list are in
+[the animation source README](../assets-src/animations/README.md).
+
+Which clip a skill plays, at what `rate`, from which `start`, with which windup
+pose and with which clip on a recast is data of its row in
+`config/skills.skillfx`; basic attacks read the 17 basic rows, and no motion
+table is left in code. A windup is held while the hero's own telegraph exists
+(four phases: `instant`, `warn_fire`, `fuse`, `parry`). For a clip released on
+the cast edge the shipped data keeps `(contact - start * duration) / rate` at
+or below 0.15 s, so the strike is on screen within that time of the accepted
+cast. Nothing in the game waits for a clip: the server has already resolved
+the action when the clip starts. `interact`, `pistol_reload` and `roll` were
+retired from the library with this pass; the derived clips that sample those
+sources are unaffected. `pistol_aim` is kept and unused.
 
 ```mermaid
 flowchart LR
@@ -62,7 +103,7 @@ To deliver clipless VRM directly through Studio, publish a versioned runtime-hum
 
 ## Reproducible motion data and evidence
 
-`python3 scripts/export_humanoid_motion.py --check` verifies the committed shared asset against existing CC0 inputs. The source and buffer hashes, attribution and clip mapping are recorded in the JSON and animation README. `Sprint_Loop` has a 0.667-second cycle; Walk is a different 1.333-second motion. Loop endpoints are closed and net locomotion root drift removed.
+`python3 scripts/export_humanoid_motion.py --check` verifies the committed shared asset against existing CC0 inputs and the derived-motion table. The source and buffer hashes, attribution and clip mapping are recorded in the JSON and animation README. `Sprint_Loop` has a 0.667-second cycle; Walk is a different 1.333-second motion. Loop endpoints are closed and net locomotion root drift removed.
 
 The task evidence includes deterministic conversion tests, numeric audits of all 15 shipped rigs, real ECS instance isolation and replacement tests, parser rejection cases, and a native audit that records changing leg rotations/hips translations alongside screenshots. Native scripted scenes are labeled fixtures, not a multiplayer or physical-device playtest.
 

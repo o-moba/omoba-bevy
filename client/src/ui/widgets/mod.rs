@@ -282,6 +282,9 @@ pub(crate) fn paint_slabs(
             }
             None => continue,
         }
+        // Legacy screen-owned buttons also use the slab image's own fill.
+        // A second native rectangle extends outside its decorative frame.
+        commands.entity(entity).insert(BackgroundColor(Color::NONE));
         if let ButtonKind::Team(team) = style.kind {
             let has_bar =
                 children.is_some_and(|children| children.iter().any(|c| bars.contains(c)));
@@ -339,7 +342,9 @@ fn skin_fill(skin: KitSkin, style: &ButtonStyle, state: ButtonState) -> Option<C
         KitSkin::Plate => Some(theme::perceptual(color::SURFACE_GLASS_STRONG)),
         KitSkin::Cycle | KitSkin::HeroTile => Some(color::SURFACE_2),
         KitSkin::Input => Some(color::SURFACE_0),
-        KitSkin::Slab | KitSkin::Native => None,
+        // The nine-slice texture already owns fill and rounded edges.
+        KitSkin::Slab => Some(Color::NONE),
+        KitSkin::Native => None,
     }
 }
 
@@ -926,7 +931,7 @@ pub(crate) fn spawn_button<T: UiActionT>(
                     label.into_text(),
                     theme::styled_text(style),
                     TextColor(theme::button_label_color(kind, false, ButtonState::Idle)),
-                    TextLayout::new_with_justify(Justify::Center),
+                    TextLayout::justify(Justify::Center),
                     label_extra,
                 ))
                 .id(),
@@ -1003,7 +1008,7 @@ pub(crate) fn value_label<M: Component>(
                 flex_shrink: 0.0,
                 ..default()
             },
-            TextLayout::new_with_justify(Justify::Center),
+            TextLayout::justify(Justify::Center),
             theme::role_text(TextRole::Number),
             TextColor(color::TEXT_PRIMARY),
             marker,
@@ -1326,7 +1331,7 @@ mod tests {
         let resume = super::super::test_id::harness::find(app.world_mut(), "Resume").unwrap();
         assert_eq!(
             app.world().get::<BackgroundColor>(resume).unwrap().0,
-            theme::PRIMARY
+            Color::NONE
         );
         let label = app.world().get::<KitParts>(resume).unwrap().label.unwrap();
         assert_eq!(
@@ -1339,7 +1344,7 @@ mod tests {
         app.update();
         assert_eq!(
             app.world().get::<BackgroundColor>(resume).unwrap().0,
-            theme::PRIMARY_HOVER
+            Color::NONE
         );
         // A disabled button never lights, and its label dims.
         app.world_mut()
@@ -1349,7 +1354,7 @@ mod tests {
         app.update();
         assert_eq!(
             app.world().get::<BackgroundColor>(resume).unwrap().0,
-            theme::PRIMARY
+            Color::NONE
         );
         assert_eq!(
             app.world().get::<TextColor>(label).unwrap().0,

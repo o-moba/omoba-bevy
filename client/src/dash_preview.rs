@@ -31,6 +31,15 @@ fn draw(
     transforms: bevy::transform::helper::TransformHelper,
     mode: Res<PlayerVisualMode>,
     layout: Res<crate::maps::MapLayout>,
+    game: Res<crate::net::GameStateSnapshot>,
+    structures: Query<
+        (
+            &Transform,
+            &crate::net::StructureKind,
+            &crate::domain::CombatStats,
+        ),
+        With<crate::net::NetworkStructure>,
+    >,
 ) {
     let Some(mobile) = mobile.filter(|m| m.enabled && m.focused && m.landscape) else {
         return;
@@ -52,7 +61,24 @@ fn draw(
         return;
     }
     let from = hero.translation;
-    let end = layout.clamp_position(from + direction * shared::utility::DASH_DISTANCE);
+    let requested = layout.clamp_position(from + direction * shared::utility::DASH_DISTANCE);
+    let mut solids = crate::navigation::skill_terrain(Some(&game));
+    solids.extend(
+        structures
+            .iter()
+            .filter(|(_, _, stats)| stats.is_alive())
+            .map(|(pose, kind, _)| shared::navigation::Disc {
+                center: pose.translation.xz().to_array(),
+                radius: crate::navigation::structure_collision_radius(*kind)
+                    - shared::navigation::HERO_RADIUS,
+            }),
+    );
+    let landing = shared::navigation::world_navigation().blink_landing(
+        from.xz().to_array(),
+        requested.xz().to_array(),
+        &solids,
+    );
+    let end = Vec3::new(landing[0], from.y, landing[1]);
     let color = Color::srgba(0.28, 0.9, 1.0, 0.95);
     if *mode == PlayerVisualMode::Sprite2d {
         let a = crate::world2d::simulation_xz_to_render_xy(from);

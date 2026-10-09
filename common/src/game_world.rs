@@ -45,6 +45,65 @@ pub struct GameWorld {
 }
 
 impl GameWorld {
+    /// Place newly spawned heroes without intersecting scenery or an existing
+    /// living hero. Stable id ordering makes rematches reproducible.
+    pub fn separate_spawn(&mut self, addr: SocketAddr) {
+        let Some(player) = self.players.get(&addr) else {
+            return;
+        };
+        let origin = [player.hero.x, player.hero.z];
+        let clearance = shared::PLAYER_TARGET_RADIUS * 2.0 + 0.35;
+        // Fill the arena-facing side first, rather than placing Blue heroes
+        // behind their nexus where a small spawn crowd can block the exit.
+        let heading = (-origin[1]).atan2(-origin[0]);
+        let navigation = shared::navigation::world_navigation();
+        let position = (0..6)
+            .flat_map(|ring| {
+                (0..24).map(move |step| {
+                    let angle = heading + step as f32 * std::f32::consts::TAU / 24.0;
+                    let radius = ring as f32 * clearance;
+                    [
+                        origin[0] + angle.cos() * radius,
+                        origin[1] + angle.sin() * radius,
+                    ]
+                })
+            })
+            .find(|point| {
+                navigation.point_clear(*point)
+                    && self.structures.values().all(|structure| {
+                        structure.state.hp <= 0.0
+                            || (structure.state.x - point[0]).hypot(structure.state.z - point[1])
+                                >= crate::world::structure_collision_radius(structure.state.kind)
+                                    + shared::navigation::HERO_RADIUS
+                                    + 0.2
+                    })
+                    && self.players.iter().all(|(other_addr, other)| {
+                        *other_addr == addr
+                            || !other.joined
+                            || other.hero.hp <= 0.0
+                            || (other.hero.x - point[0]).hypot(other.hero.z - point[1]) >= clearance
+                    })
+            });
+        if let Some([x, z]) = position {
+            let player = self.players.get_mut(&addr).unwrap();
+            player.hero.x = x;
+            player.hero.z = z;
+        }
+    }
+
+    pub fn separate_team_spawns(&mut self) {
+        let mut addresses: Vec<_> = self
+            .players
+            .iter()
+            .filter(|(_, p)| p.joined)
+            .map(|(addr, p)| (p.hero.identity.id, *addr))
+            .collect();
+        addresses.sort_by_key(|(id, _)| *id);
+        for (_, addr) in addresses {
+            self.separate_spawn(addr);
+        }
+    }
+
     pub fn new(map_config: shared::map::ResolvedMap, now: Instant) -> Self {
         let map_layout = build_map_layout();
         let mut next_neutral_id: u64 = 9_001;

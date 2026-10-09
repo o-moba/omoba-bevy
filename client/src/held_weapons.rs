@@ -98,7 +98,7 @@ fn sync_held_weapons(
                 id: def.id.clone(),
             },
             Name::new(format!("Handheld-{}", def.id)),
-            SceneRoot(assets.load(format!("{}#Scene0", def.model))),
+            WorldAssetRoot(assets.load(format!("{}#Scene0", def.model))),
             transform,
             Visibility::Inherited,
             ChildOf(hand),

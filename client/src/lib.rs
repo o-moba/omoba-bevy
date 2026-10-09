@@ -72,6 +72,7 @@ mod team;
 mod team_vision;
 mod ui;
 mod verdant3d;
+mod vfx_clock;
 mod world;
 mod world2d;
 
@@ -147,3 +148,6 @@ pub fn main() {
         std::process::exit(i32::from(code.get()));
     }
 }
+
+#[cfg(test)]
+mod test_support;

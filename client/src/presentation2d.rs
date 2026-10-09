@@ -357,7 +357,7 @@ fn spawn_structure_cues(
         parent.spawn((
             crate::i18n::Localized::new(key).text2d(),
             TextFont {
-                font_size: 16.0,
+                font_size: (16.0).into(),
                 ..default()
             },
             TextColor(Color::WHITE),
@@ -571,7 +571,7 @@ fn attach_actor(
             parent.spawn((
                 crate::i18n::Localized::new(crate::i18n::data::boss_key(camp)).text2d(),
                 TextFont {
-                    font_size: 18.0,
+                    font_size: (18.0).into(),
                     ..default()
                 },
                 TextColor(Color::srgb(1.0, 0.86, 0.45)),
@@ -611,8 +611,18 @@ fn boss_key(boss: &BossVisual, state: NeutralAiState) -> &'static str {
     match (boss.camp_type, aggro) {
         (crate::net::NeutralCampType::WendigoBoss, false) => "wendigo_idle",
         (crate::net::NeutralCampType::WendigoBoss, true) => "wendigo_aggro",
-        (crate::net::NeutralCampType::KingMutatioBoss, false) => "king_mutatio_idle",
-        (crate::net::NeutralCampType::KingMutatioBoss, true) => "king_mutatio_aggro",
+        (
+            crate::net::NeutralCampType::KingMutatioBoss
+            | crate::net::NeutralCampType::WindDragon
+            | crate::net::NeutralCampType::StoneDragon,
+            false,
+        ) => "king_mutatio_idle",
+        (
+            crate::net::NeutralCampType::KingMutatioBoss
+            | crate::net::NeutralCampType::WindDragon
+            | crate::net::NeutralCampType::StoneDragon,
+            true,
+        ) => "king_mutatio_aggro",
         _ => "neutral",
     }
 }

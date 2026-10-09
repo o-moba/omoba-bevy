@@ -1,7 +1,7 @@
 //! Server-owned sight; no client visibility claims participate in combat or replication.
 use std::time::Instant;
 
-use shared::combat::CombatEntityKind;
+use shared::combat::{CombatEntity, CombatEntityKind};
 use shared::map::Team;
 use shared::vision::*;
 use shared::wire::{
@@ -69,10 +69,19 @@ pub fn revealed(player: &ConnectedPlayer, now: Instant) -> bool {
         .is_some_and(|until| now < until)
         || player.timers.last_basic_attack_at.is_some_and(recent)
         || SkillSlot::ALL.into_iter().any(|slot| {
-            (player.hero.skills.loadout.is_some()
-                || ability_for_class_slot(player.hero.identity.hero_class, slot).targeting
-                    == TargetingMode::UnitTarget)
-                && player.timers.last_cast_at[slot.index()].is_some_and(recent)
+            // Every accepted modular cast reveals, except a weapon toggle: it
+            // changes the hero's own weapon and threatens nobody.
+            let hostile = match player.hero.skills.loadout {
+                Some(loadout) => !matches!(
+                    loadout.skill(slot).effect,
+                    shared::loadout::SkillEffect::WeaponToggle { .. }
+                ),
+                None => {
+                    ability_for_class_slot(player.hero.identity.hero_class, slot).targeting
+                        == TargetingMode::UnitTarget
+                }
+            };
+            hostile && player.timers.last_cast_at[slot.index()].is_some_and(recent)
         })
 }
 pub fn player_visible(sight: &[VisionSource], player: &ConnectedPlayer, now: Instant) -> bool {
@@ -261,7 +270,7 @@ pub fn filter_snapshot(
                 )
             })
     });
-    combat_events.retain(|event| {
+    combat_events.retain_mut(|event| {
         // Lethal simulation removes dynamic victims before the snapshot is built.
         // Preserve the final visible impact without reintroducing a living hidden
         // target or bypassing hero brush concealment.
@@ -278,8 +287,7 @@ pub fn filter_snapshot(
                     .is_none_or(|p| p.state.hp <= 0.0),
                 _ => false,
             };
-        visible(event.source.kind, event.source.id)
-            && (visible(event.target.kind, event.target.id) || removed_victim)
+        let impact_visible = (visible(event.target.kind, event.target.id) || removed_victim)
             && point_visible(
                 &sight,
                 [event.x, event.z],
@@ -288,7 +296,21 @@ pub fn filter_snapshot(
                         .values()
                         .find(|p| p.hero.identity.id == event.target.id)
                         .is_none_or(|p| !revealed(p, now)),
-            )
+            );
+        if !impact_visible {
+            return false;
+        }
+        if visible(event.source.kind, event.source.id) {
+            return true;
+        }
+        // The viewer sees the victim and the impact, but not the hero that
+        // dealt it: fog, brush, or a trap left behind. The hit stays seen and
+        // heard; who dealt it is withheld, like the owner of a visible effect.
+        if event.source.kind != CombatEntityKind::Player {
+            return false;
+        }
+        event.source = CombatEntity::default();
+        true
     });
     forest_pickups.retain(|p| point_visible(&sight, p.position, false));
     for pickup in forest_pickups {

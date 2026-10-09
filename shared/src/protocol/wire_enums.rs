@@ -27,7 +27,7 @@ use std::path::Path;
 use crate::protocol::PROTOCOL_VERSION;
 
 /// The protocol version this variant list was last reviewed for.
-const POLICY_PROTOCOL_VERSION: u16 = 10;
+const POLICY_PROTOCOL_VERSION: u16 = 11;
 // CompatibilityDatagram is an independent pre-game envelope; review its
 // variants against HANDSHAKE_VERSION, not the gameplay PROTOCOL_VERSION.
 const POLICY_HANDSHAKE_VERSION: u16 = 1;
@@ -105,9 +105,9 @@ wire_enums! {
     crate::combat::MinionKind => Tolerant [Caster, Melee],
     crate::protocol::wire::MinionBrainState => Strict [Marching, Chasing, Attacking, Dead],
     crate::protocol::wire::MinionTargetKind => Strict [Player, Minion, Structure],
-    crate::protocol::wire::NeutralCampType => Strict [Skirmisher, Bruiser, Spitter, WendigoBoss, KingMutatioBoss],
+    crate::protocol::wire::NeutralCampType => Strict [Skirmisher, Bruiser, Spitter, WendigoBoss, KingMutatioBoss, WindDragon, StoneDragon],
     crate::protocol::wire::NeutralAiState => Strict [Idle, Aggro],
-    crate::protocol::wire::TeamBuffKind => Strict [WendigoFavor, MutatioMight],
+    crate::protocol::wire::TeamBuffKind => Strict [WendigoFavor, MutatioMight, DragonSpeed, DragonDefense, DragonAttack],
     crate::sandbox::SandboxActor => Strict [Player, Enemy, Dummy],
     crate::social::SocialChannel => Strict [Team, Match],
     crate::prematch::Role => Strict [Solo, Jungle, Mid, Carry, Support],

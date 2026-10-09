@@ -944,7 +944,7 @@ fn overlay(
         commands.spawn((
             Text::new(text),
             TextFont {
-                font_size: 12.0,
+                font_size: (12.0).into(),
                 ..default()
             },
             TextColor(theme::IVORY),

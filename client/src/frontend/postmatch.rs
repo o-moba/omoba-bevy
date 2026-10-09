@@ -398,7 +398,10 @@ pub(super) fn current_result<'a>(
     game: &GameStateSnapshot,
 ) -> Option<&'a MatchResult> {
     career.view.last_result.as_ref().filter(|result| {
-        result.server_epoch == game.meta.server_epoch && result.match_id == game.meta.match_id
+        game.meta.server_epoch != 0
+            && game.meta.match_id != 0
+            && result.server_epoch == game.meta.server_epoch
+            && result.match_id == game.meta.match_id
     })
 }
 
@@ -1114,7 +1117,7 @@ fn team_row(
                 row.spawn((
                     Text::new(value),
                     TextFont {
-                        font_size: if phone { 11.0 } else { 14.0 },
+                        font_size: (if phone { 11.0 } else { 14.0 }).into(),
                         ..default()
                     },
                     TextColor(ink),
@@ -2168,6 +2171,7 @@ mod tests {
             bevy::picking::InteractionPlugin,
         ))
         .init_resource::<Assets<bevy::mesh::Mesh>>()
+        .init_resource::<Assets<bevy::mesh::skinning::SkinnedMeshInverseBindposes>>()
         .init_resource::<Assets<TextureAtlasLayout>>();
         let mut mobile = MobileControls::default();
         mobile.enabled = true;

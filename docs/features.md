@@ -1,5 +1,78 @@
 # Feature Inventory
 
+## First-match guidance and mobile comfort (0.44.0 candidate)
+
+The guide starts with the objective: clear one lane with allied minions, then destroy the enemy main tower. Loading shows five advice cards, navigable with arrows or a single-finger horizontal swipe in the text area. Settings → HUD → Beginner tips remembers whether loading advice and the automatic first-match guide appear; manual Help remains available. Older preferences enable advice by default.
+
+Creature health bars are smaller, especially for minions and neutrals. Melee, hit and tower effects use lower audio gains. The mobile profile starts at 0.8 camera zoom; saved zoom choices remain intact. Phone help cards grow to fit their text inside the scrolling guide. See [the integration review](progress/2026-10-09-first-match-merge-review.md).
+
+## Class visual identity and skill fixes (0.44.0 candidate)
+
+Every skill of every class has its own staged presentation. The 68 skills and
+17 basic attacks each read a row of data: a cast accent, a motion from the
+shared 55-clip library, a body built around the replicated geometry of the
+effect, a hit recipe drawn on the confirmed receipt and a voice made from the
+existing samples. No two skills share motion family, body and impact, and a
+skill keeps its look on any button and in any recipe. Warrior and Warden basic
+attacks no longer throw a blade, every legacy projectile ability has a flight
+form of its own, and the Wildspark launcher round is a canister rather than the
+rocket model. Aim previews of the 48 modular skills are drawn from the server
+rule. Status effects are mesh shapes read from replicated flags, and Northwall
+shows each projectile it stops.
+
+The presentation follows fixed honesty rules: a hit, a link or a number needs
+an accepted combat receipt; a boundary equals the replicated geometry; an
+effect that vanishes is not drawn as a hit; nothing of a hero in fog is drawn
+or implied. A few looks are smaller than the shapes they replace for that
+reason; the list
+is in [combat cosmetics](combat-cosmetics.md#where-the-new-look-is-weaker).
+
+The same candidate fixes skill mechanics that contradicted their own
+descriptions, without changing a catalog number: hero-only picks for Patient
+Curse, Fourfold Duel and Orbital Guard, no Thunder Kick on a tower, a root that
+blocks the recast dash of Echo Strike and Iron Hook, a Thunder Pulse recast
+only after a hit, Rift Seal on unprotected enemy structures, no doubled self
+shield on Sheltering Leap and Anchor Step, orb and field effects that no
+longer cut longer ones short, a Fault Line pillar and a Furnace Breath
+telegraph replicated as the server uses them, and receipts from unseen heroes
+that reach their victim without naming the attacker. Two of these fixes are
+rule changes that await the owner's decision: Anchor Step lost its doubled
+self shield together with Sheltering Leap, and Rift Seal now marks an
+unprotected enemy structure. Practice bots heal and restore mana by need. The
+client refuses, with a line of feedback, casts the server would drop: a Rift
+Step onto a blocked point and an ally skill without an ally; a tap on
+Sheltering Leap or Orbital Guard aims at an ally.
+
+Gameplay revision `combat-2026-10-08-mechanics` with protocol 11 and catalog
+standard-kits-6: client and server ship together. Verified on stills of one
+English 1280x720 desktop viewport and by tests; no physical device, no phone
+frame time, no multiplayer session with people, nothing judged in motion. See
+[the iteration note](progress/2026-10-09-class-visual-identity.md).
+
+## Boot splash (0.44.0 candidate)
+
+A normal launch opens on a full-screen splash instead of an empty Home: the living Verdant arena artwork, the OMOBA title and tagline, the build label, a spinner and a progress line ("Loading the interface…", "Loading the world…", "Entering the arena…") fed by the startup fonts and world scenes. It stays at least 1.4 seconds and at most 15, blocks the menu underneath as the top modal (and the Escape and help keys), and leaves through a short dip into the base colour. On iOS the native launch screen shows the same dark base colour before the first engine frame (Xcode and TestFlight builds; `make iphone` bundles do not compile the asset catalog). Normal desktop launcher settings (`OMOBA_ASSET_DIR`, `OMOBA_MATCH_MODE`, `OMOBA_TEAM_SIZE`, `OMOBA_DEBUG_UI=0`) keep the splash. Harness, capture, sandbox and enabled debug-UI launches start without it; `OMOBA_BOOT_SPLASH_SHOTS=<dir>` captures it. There is no Android native splash theme yet.
+
+## Mobile playtest quality (0.44.0 candidate)
+
+The new candidate removes automatic account-history result popups, gives textured
+buttons a single fill, separates collection navigation from its scrolling grid,
+and makes phone previews and pause-menu actions more consistent. Brush darkness
+no longer paints through scenery; concealed avatars use an opaque muted tint and
+the eye-off indicator to preserve clean VRM surfaces. FPS measures render
+submissions independently of the simulation clock.
+
+Wildspark's rocket accepts grazing hero hits with a 1.05 m projectile radius;
+long touch drags reduce angular sensitivity while keeping preview and release in
+sync. Round starts and practice bot creation separate occupied spawn positions.
+The dragon pit hosts Wind, Stone and Flame in that order, with no fourth spawn:
+90 s initial delay, 75 s between kills/spawns, 180 s team buffs of +8% movement,
++20 armor and resistance, and +12% damage respectively. Buffs do not stack with
+themselves, expire normally, affect respawned teammates and reset each round.
+Wendigo is unchanged. Protocol 11 / standard-kits-6 requires matching client and
+server; the gameplay revision of the candidate is now
+`combat-2026-10-08-mechanics` (see the section above). See [verification status](progress/2026-10-06-mobile-playtest-quality.md).
+
 ## Release compatibility (0.41.0)
 
 A stable pre-game check compares protocol, skill catalogue, map and gameplay revisions independently of release labels. Mismatches have an actionable explanation; unanswered checks remain unverified. All network endpoints are checked, while offline practice stays local. The release builder retains a contract manifest; the CLI compares artifacts and probes servers. [Contract, release sequence and rollout limits](release-compatibility.md).
@@ -117,7 +190,7 @@ Server-authoritative aim, cooldowns, costs, control, shields, weapon modes, effe
 
 ## iPad phone-layout preview (0.28.6)
 
-On an eligible landscape iPad, Settings → Graphics → iPhone 16 layout preview temporarily centres the actual game window at 852×393 logical points. Existing phone menus, HUD and window-local touch input work without a separate renderer. A native Return to iPad button remains outside the game; returning, backgrounding or rotating restores the tablet window. The option is absent on phones, Android and desktops, cannot be enabled through a stale action, and is not saved in preferences. This previews layout using the game's phone safe-area policy, not iPhone GPU performance or exact physical screen size.
+On an eligible landscape iPad, Settings → Graphics → iPhone 16 layout preview temporarily centres the actual game window at 852×393 logical points. Existing phone menus, HUD and window-local touch input work without a separate renderer. A native Return to iPad button remains outside the game; returning, backgrounding or a real change of the host geometry restores the tablet window, while tilting the tablet no longer does (0.44.0 candidate). The option is absent on phones, Android and desktops, cannot be enabled through a stale action, and is not saved in preferences. This previews layout using the game's phone safe-area policy, not iPhone GPU performance or exact physical screen size.
 
 ## Party and prematch stage (0.28.5)
 
@@ -1012,3 +1085,7 @@ Practice bot matches expose zero cooldowns, disposable moving/attacking targets 
 Release protocol/catalogue/geometry revisions require matching 0.42-compatible peers. Existing production and TestFlight 0.41.0 are unchanged by this source iteration. See `docs/progress/2026-10-05-playtest-quality.md` for verification and limitations.
 
 Allied portraits also show remaining respawn seconds. Nexus motion rotates the original central GLB armillary rings; the extra upper rings are removed.
+
+### Engine baseline — 0.43.0
+
+The game and Ekza SDK use Bevy 0.19.1 with Rust 1.95.0. Existing avatar/weapon account flows, humanoid animation and 0.42 gameplay remain supported. GLB scene labels are retained while engine scene types move to world serialization. The upgrade does not claim improved phone FPS without physical-device measurement.

@@ -23,9 +23,14 @@ const MAX_RENDER_SOURCES: usize = 256;
 const UPDATE_SECS: f32 = 0.075;
 const DARK_ALPHA: f32 = 0.64;
 
+#[cfg(feature = "qa")]
+mod coverage_qa;
+
 pub(crate) struct TeamVisionPlugin;
 impl Plugin for TeamVisionPlugin {
     fn build(&self, app: &mut App) {
+        #[cfg(feature = "qa")]
+        coverage_qa::install(app);
         app.add_systems(Startup, setup)
             .add_systems(
                 Update,
@@ -62,6 +67,7 @@ pub(crate) struct VisionPresentation {
     minimap: Handle<Image>,
     elapsed: f32,
     identity: Option<(u64, u64)>,
+    camera_matrix: Option<Mat4>,
 }
 #[derive(Component)]
 struct FogOverlay;
@@ -196,8 +202,17 @@ fn sync_concealed_materials(
             continue;
         };
         let mut faded = source.clone();
-        faded.base_color = faded.base_color.with_alpha(faded.base_color.alpha() * 0.45);
-        faded.alpha_mode = AlphaMode::Blend;
+        // Preserve depth and cutouts: per-mesh blending exposes eyes, teeth and
+        // clothing underneath a VRM. A cool, muted surface plus the eye-off HUD
+        // communicates concealment without changing the model's opacity contract.
+        let color = faded.base_color.to_linear();
+        let luma = color.red * 0.2126 + color.green * 0.7152 + color.blue * 0.0722;
+        faded.base_color = Color::linear_rgba(
+            color.red * 0.55 + luma * 0.30,
+            color.green * 0.55 + luma * 0.38,
+            color.blue * 0.55 + luma * 0.45,
+            color.alpha,
+        );
         let faded = materials.add(faded);
         commands.entity(entity).insert(ConcealedMaterial {
             original: binding.0.clone(),
@@ -242,6 +257,7 @@ fn setup(
         clearest: 0,
         elapsed: UPDATE_SECS,
         identity: None,
+        camera_matrix: None,
     });
     commands.spawn((
         Name::new("Team fog of war"),
@@ -255,7 +271,9 @@ fn setup(
             display: Display::None,
             ..default()
         },
-        ImageNode::new(texture),
+        // The mask is projected in viewport UVs. Auto preserves the source
+        // aspect ratio in Bevy 0.19, leaving bright strips outside the image.
+        ImageNode::new(texture).with_mode(NodeImageMode::Stretch),
         GlobalZIndex(-90),
         FocusPolicy::Pass,
         Pickable::IGNORE,
@@ -289,7 +307,7 @@ fn setup(
                 .sized(crate::ui::tokens::TextRole::Caption.style().size),
         ),
         TextColor(crate::ui::tokens::color::TEXT_SECONDARY),
-        TextLayout::new_with_no_wrap(),
+        TextLayout::no_wrap(),
         Node {
             position_type: PositionType::Absolute,
             padding: UiRect::axes(
@@ -512,7 +530,7 @@ fn attach_minimap_mask(
             height: Val::Percent(100.),
             ..default()
         },
-        ImageNode::new(art.minimap.clone()),
+        ImageNode::new(art.minimap.clone()).with_mode(NodeImageMode::Stretch),
         ZIndex(1),
         FocusPolicy::Pass,
         Pickable::IGNORE,
@@ -602,10 +620,13 @@ fn sync_visibility(
 /// Only presentation feathers the hard authoritative boundary; hidden enemies
 /// have already been removed from the recipient snapshot.
 fn fog_alpha(sources: &[VisionSource], point: [f32; 2]) -> u8 {
+    fog_alpha_with_brush(sources, point, true)
+}
+fn fog_alpha_with_brush(sources: &[VisionSource], point: [f32; 2], include_brush: bool) -> u8 {
     if !point.iter().all(|x| x.is_finite()) {
         return (DARK_ALPHA * 255.) as u8;
     }
-    let brush = brush_at(point);
+    let brush = include_brush.then(|| brush_at(point)).flatten();
     let mut light = 0.0_f32;
     for source in sources.iter().take(MAX_RENDER_SOURCES) {
         if !source.radius.is_finite()
@@ -658,9 +679,6 @@ fn update_mask(
     };
     art.elapsed += time.delta_secs();
     let identity = (game.meta.server_epoch, game.meta.match_id);
-    if art.elapsed < UPDATE_SECS && art.identity == Some(identity) {
-        return;
-    }
     let Ok((camera, pose)) = cameras.single() else {
         return;
     };
@@ -672,11 +690,19 @@ fn update_mask(
     if !view.is_finite() || !world.is_finite() {
         return;
     }
+    let camera_matrix = world * view;
+    if art.elapsed < UPDATE_SECS
+        && art.identity == Some(identity)
+        && art.camera_matrix == Some(camera_matrix)
+    {
+        return;
+    }
+    art.camera_matrix = Some(camera_matrix);
     art.elapsed = 0.;
     art.identity = Some(identity);
     let mut darkest = 0;
     let mut clearest = 255;
-    if let Some(image) = images.get_mut(&art.texture)
+    if let Some(mut image) = images.get_mut(&art.texture)
         && let Some(data) = image.data.as_mut()
     {
         for y in 0..MASK_HEIGHT {
@@ -685,8 +711,9 @@ fn update_mask(
                     (x as f32 + 0.5) / MASK_WIDTH as f32,
                     (y as f32 + 0.5) / MASK_HEIGHT as f32,
                 );
-                let alpha = ground_point(view, world, uv)
-                    .map_or((DARK_ALPHA * 255.) as u8, |p| fog_alpha(&vision.sources, p));
+                let alpha = ground_point(view, world, uv).map_or((DARK_ALPHA * 255.) as u8, |p| {
+                    fog_alpha_with_brush(&vision.sources, p, false)
+                });
                 let i = ((y * MASK_WIDTH + x) * 4) as usize;
                 data[i..i + 4].copy_from_slice(&[8, 18, 24, alpha]);
                 darkest = darkest.max(alpha);
@@ -694,7 +721,7 @@ fn update_mask(
             }
         }
     }
-    if let Some(image) = images.get_mut(&art.minimap)
+    if let Some(mut image) = images.get_mut(&art.minimap)
         && let Some(data) = image.data.as_mut()
     {
         for y in 0..MAP_SIZE {
@@ -721,6 +748,17 @@ fn update_mask(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn world_fog_does_not_project_brush_shapes_over_tree_canopies() {
+        let brush = brush_layout()[0];
+        let source = VisionSource {
+            position: [brush.center[0] + brush.radius + 0.2, brush.center[1]],
+            radius: 40.0,
+        };
+        assert!(fog_alpha(&[source], brush.center) > 0);
+        assert_eq!(fog_alpha_with_brush(&[source], brush.center, false), 0);
+    }
 
     #[test]
     fn concealment_is_local_restores_bindings_and_handles_late_weapon_meshes() {
@@ -773,8 +811,11 @@ mod tests {
             AlphaMode::Mask(0.3)
         );
         assert_eq!(materials.get(&source).unwrap().base_color.alpha(), 0.8);
-        assert_eq!(materials.get(&faded).unwrap().alpha_mode, AlphaMode::Blend);
-        assert!((materials.get(&faded).unwrap().base_color.alpha() - 0.36).abs() < 0.001);
+        assert_eq!(
+            materials.get(&faded).unwrap().alpha_mode,
+            AlphaMode::Mask(0.3)
+        );
+        assert!((materials.get(&faded).unwrap().base_color.alpha() - 0.8).abs() < 0.001);
         let weapon = app
             .world_mut()
             .spawn((MeshMaterial3d(source.clone()), ChildOf(joint)))
@@ -903,7 +944,7 @@ mod tests {
             .init_resource::<GameStateSnapshot>()
             .add_plugins(TeamVisionPlugin);
         app.update();
-        let count = app.world().entities().len();
+        let count = app.world().entities().count_spawned();
         let roots: Vec<_> = app
             .world_mut()
             .query::<(Entity, &BrushArt, &Transform, &Visibility)>()
@@ -960,7 +1001,7 @@ mod tests {
                 !app.world().resource::<VisionPresentation>().active,
                 "3D fog is unchanged in sprite mode"
             );
-            assert_eq!(app.world().entities().len(), count);
+            assert_eq!(app.world().entities().count_spawned(), count);
         }
     }
     #[test]
@@ -974,10 +1015,22 @@ mod tests {
             .init_resource::<MapLayout>()
             .insert_resource(PlayerVisualMode::Models3d)
             .init_resource::<GameStateSnapshot>()
+            .init_resource::<crate::pause_menu::PauseMenuState>()
+            .init_resource::<crate::input_context::GameplayInputContext>()
             .add_plugins(TeamVisionPlugin);
         app.update();
-        let count = app.world().entities().len();
+        let count = app.world().entities().count_spawned();
         let images = app.world().resource::<Assets<Image>>().len();
+        let fog_image = app
+            .world_mut()
+            .query_filtered::<&ImageNode, With<FogOverlay>>()
+            .single(app.world())
+            .unwrap();
+        assert_eq!(
+            fog_image.image_mode,
+            NodeImageMode::Stretch,
+            "screen-space mask UVs must fill every viewport aspect ratio"
+        );
         assert_eq!(images, 2);
         assert_eq!(
             app.world_mut()
@@ -1022,6 +1075,19 @@ mod tests {
             .single(app.world())
             .unwrap();
         assert_eq!(*pick, Pickable::IGNORE);
+        let minimap = app
+            .world_mut()
+            .spawn((Node::default(), crate::minimap::MinimapContainer))
+            .id();
+        app.update();
+        let (image, parent) = app
+            .world_mut()
+            .query_filtered::<(&ImageNode, &ChildOf), With<MinimapFog>>()
+            .single(app.world())
+            .unwrap();
+        assert_eq!(parent.parent(), minimap);
+        assert_eq!(image.image_mode, NodeImageMode::Stretch);
+        app.world_mut().entity_mut(minimap).despawn();
         app.insert_resource(crate::pause_menu::PauseMenuState {
             open: true,
             in_settings: true,
@@ -1061,7 +1127,7 @@ mod tests {
         app.world_mut().resource_mut::<GameStateSnapshot>().state = GameState::Lobby;
         app.update();
         assert!(!app.world().resource::<VisionPresentation>().active);
-        assert_eq!(app.world().entities().len(), count);
+        assert_eq!(app.world().entities().count_spawned(), count);
         assert_eq!(app.world().resource::<Assets<Image>>().len(), images);
     }
 }

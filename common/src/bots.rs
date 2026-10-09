@@ -16,7 +16,7 @@ use crate::balance::PLAYER_GROUND_Y;
 use crate::entities::{ConnectedPlayer, MapLayoutState, StructureRole};
 use crate::host::CombatHost;
 use crate::session::{handle_join_request_with_sprite, handle_transform_request_with_structures};
-use crate::sim::cast::{apply_skill_upgrade, handle_cast_request};
+use crate::sim::cast::{apply_skill_upgrade, handle_cast_request, legacy_effect_scale};
 use crate::sim::towers::structure_is_protected;
 use crate::world::{build_minion_path, spawn_position_for_team, structure_collision_radius};
 use crate::{basic_attack, hero_stats, match_stats, shop, vision};
@@ -485,6 +485,39 @@ pub fn seated_count(
         .count()
 }
 
+/// Legacy self-target slots worth pressing now, in press order. Every accepted
+/// cast starts the shared recovery, so the order decides which one lands first.
+/// A heal is the emergency button: only at low health, the largest first. A
+/// mana restore follows whenever the bar can hold all of it, whatever the
+/// health, and never at a full bar.
+fn self_sustain_order(player: &ConnectedPlayer, low_health: bool) -> Vec<u8> {
+    let hero = &player.hero;
+    let mut heals = Vec::new();
+    let mut restores = Vec::new();
+    for slot in SkillSlot::ALL {
+        let def = ability_for_class_slot(hero.identity.hero_class, slot);
+        if def.targeting != TargetingMode::SelfTarget {
+            continue;
+        }
+        let rank = hero.progress.ranks[slot.index()].clamp(1, def.max_rank);
+        let scale = legacy_effect_scale(player, rank);
+        if let Some(heal) = def.self_heal.filter(|_| low_health) {
+            heals.push((slot.index() as u8, heal * scale));
+        } else if def
+            .self_mana_restore
+            .is_some_and(|restore| hero.max_mana - hero.mana >= restore * scale)
+        {
+            restores.push(slot.index() as u8);
+        }
+    }
+    heals.sort_by(|a, b| b.1.total_cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    heals
+        .into_iter()
+        .map(|(slot, _)| slot)
+        .chain(restores)
+        .collect()
+}
+
 /// Spend every skill point the way a player would
 /// (`shared::progression::skill_upgrade_order`: the ultimate first once it
 /// unlocks, then Q, W and E, never into a locked slot), through the ordinary
@@ -585,6 +618,7 @@ impl CombatHost<'_> {
             &self.world.map_layout,
             now,
         );
+        self.world.separate_spawn(addr);
         self.bots.controllers.insert(
             addr,
             Controller {
@@ -984,23 +1018,16 @@ impl CombatHost<'_> {
                         handle_cast_request(self.world, addr, target, slot, now);
                     }
                 }
-                if low_health {
-                    for slot in 0..4 {
-                        let p = &self.world.players[&addr];
-                        if ability_for_class_slot(
-                            p.hero.identity.hero_class,
-                            SkillSlot::from_index(slot).unwrap(),
-                        )
-                        .targeting
-                            == TargetingMode::SelfTarget
-                        {
-                            let target = TargetId {
-                                kind: TargetKind::Player,
-                                id: p.hero.identity.id,
-                            };
-                            handle_cast_request(self.world, addr, target, slot, now);
-                        }
-                    }
+                // The cast path still enforces unlock, mana, cooldown and the
+                // shared recovery, so a refused attempt falls through to the
+                // next slot of the order.
+                let bot = &self.world.players[&addr];
+                let target = TargetId {
+                    kind: TargetKind::Player,
+                    id: bot.hero.identity.id,
+                };
+                for slot in self_sustain_order(bot, low_health) {
+                    handle_cast_request(self.world, addr, target, slot, now);
                 }
             }
             // Mobility casts may displace the actor during this think tick.
@@ -1595,5 +1622,161 @@ mod turret_tests {
         assert!(!hero.identity.is_bot, "takeover retains human identity");
         host.bots.detach(address);
         assert!(host.bots.controllers.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod sustain_tests {
+    use super::*;
+    use crate::{
+        combat_feedback::CombatLog,
+        game_world::GameWorld,
+        match_rules::{MatchMode, MatchRules},
+    };
+
+    const MAX_HP: f32 = 1000.0;
+    const MAX_MANA: f32 = 500.0;
+
+    /// One level-10 legacy bot alone on an empty map: with nothing to fight,
+    /// every accepted cast is a self-sustain decision.
+    fn lone_bot(class: HeroClass, now: Instant) -> (GameWorld, BotControllers, SocketAddr) {
+        let mut world = GameWorld::empty();
+        let address: SocketAddr = "[::]:32001".parse().unwrap();
+        world.ensure_connected(address, now);
+        crate::session::handle_join_request(
+            world.players.get_mut(&address).unwrap(),
+            Team::Green,
+            shared::wire::CharacterChoice::Ipfs,
+            class,
+            None,
+            &world.map_layout,
+            now,
+        );
+        let p = world.players.get_mut(&address).unwrap();
+        // Away from the base shop, so the build and the bars stay as authored here.
+        p.hero.x = 0.0;
+        p.hero.z = 0.0;
+        p.hero.hp = MAX_HP;
+        p.hero.max_hp = MAX_HP;
+        p.hero.mana = MAX_MANA;
+        p.hero.max_mana = MAX_MANA;
+        p.hero.progress.level = 10;
+        p.hero.progress.ranks = [3; 4];
+        p.hero.progress.skill_points = 0;
+        let mut bots = BotControllers::default();
+        bots.attach_existing(address, class, now);
+        (world, bots, address)
+    }
+
+    fn think(world: &mut GameWorld, bots: &mut BotControllers, now: Instant) {
+        let mut log = CombatLog::default();
+        CombatHost {
+            world,
+            bots,
+            combat_log: &mut log,
+            rules: MatchRules::for_mode(MatchMode::Release, 1),
+            match_id: 1,
+        }
+        .simulate_bots(now, 0.05);
+    }
+
+    fn restore_amount(player: &ConnectedPlayer, slot: SkillSlot) -> f32 {
+        let def = ability_for_class_slot(player.hero.identity.hero_class, slot);
+        def.self_mana_restore.unwrap() * legacy_effect_scale(player, 3)
+    }
+
+    #[test]
+    fn legacy_bot_restores_mana_on_need_and_heals_only_at_low_health() {
+        let now = Instant::now();
+        // Mage: W is the mana restore, there is no heal.
+        let (mut world, _, address) = lone_bot(HeroClass::Mage, now);
+        let p = world.players.get_mut(&address).unwrap();
+        assert!(self_sustain_order(p, false).is_empty());
+        assert!(self_sustain_order(p, true).is_empty());
+        p.hero.mana = MAX_MANA - restore_amount(p, SkillSlot::W);
+        assert_eq!(self_sustain_order(p, false), [1]);
+        assert_eq!(self_sustain_order(p, true), [1]);
+
+        // Warrior: W is a heal, there is no mana restore.
+        let (mut world, _, address) = lone_bot(HeroClass::Warrior, now);
+        let p = world.players.get_mut(&address).unwrap();
+        p.hero.mana = 0.0;
+        assert!(self_sustain_order(p, false).is_empty());
+        assert_eq!(self_sustain_order(p, true), [1]);
+
+        // Cleric: W and R heal (R is larger), E restores mana.
+        let (mut world, _, address) = lone_bot(HeroClass::Cleric, now);
+        let p = world.players.get_mut(&address).unwrap();
+        assert!(self_sustain_order(p, false).is_empty());
+        assert_eq!(self_sustain_order(p, true), [3, 1]);
+        p.hero.mana = MAX_MANA - restore_amount(p, SkillSlot::E);
+        assert_eq!(self_sustain_order(p, false), [2]);
+        assert_eq!(self_sustain_order(p, true), [3, 1, 2]);
+    }
+
+    #[test]
+    fn healthy_bot_restores_missing_mana_and_ignores_a_full_bar() {
+        let mut now = Instant::now();
+        let (mut world, mut bots, address) = lone_bot(HeroClass::Mage, now);
+        let restore = restore_amount(&world.players[&address], SkillSlot::W);
+
+        // A full bar, then a gap the restore would overfill: nothing to gain.
+        for mana in [MAX_MANA, MAX_MANA - restore + 1.0] {
+            world.players.get_mut(&address).unwrap().hero.mana = mana;
+            now += Duration::from_millis(300);
+            think(&mut world, &mut bots, now);
+            let p = &world.players[&address];
+            assert_eq!(p.timers.last_cast_at, [None; 4]);
+            assert_eq!(p.hero.mana, mana);
+        }
+
+        let mana = MAX_MANA - restore - 10.0;
+        world.players.get_mut(&address).unwrap().hero.mana = mana;
+        now += Duration::from_millis(300);
+        think(&mut world, &mut bots, now);
+        let p = &world.players[&address];
+        assert_eq!(p.timers.last_cast_at, [None, Some(now), None, None]);
+        assert!((p.hero.mana - (mana + restore)).abs() < 0.001);
+        assert_eq!(p.hero.hp, MAX_HP, "a healthy bot spends no heal");
+    }
+
+    #[test]
+    fn low_health_bot_does_not_burn_a_mana_restore_at_full_mana() {
+        let now = Instant::now();
+        let (mut world, mut bots, address) = lone_bot(HeroClass::Mage, now);
+        world.players.get_mut(&address).unwrap().hero.hp = MAX_HP * 0.2;
+        think(&mut world, &mut bots, now + Duration::from_millis(10));
+        let p = &world.players[&address];
+        assert_eq!(
+            p.timers.last_cast_at, [None; 4],
+            "a full mana bar keeps the restore and its cooldown"
+        );
+        assert_eq!(p.hero.mana, MAX_MANA);
+    }
+
+    #[test]
+    fn low_health_cleric_bot_casts_the_largest_heal_first() {
+        let mut now = Instant::now();
+        let (mut world, mut bots, address) = lone_bot(HeroClass::Cleric, now);
+        world.players.get_mut(&address).unwrap().hero.hp = MAX_HP * 0.1;
+        now += Duration::from_millis(10);
+        think(&mut world, &mut bots, now);
+        let first = now;
+        let p = &world.players[&address];
+        assert_eq!(
+            p.timers.last_cast_at,
+            [None, None, None, Some(first)],
+            "the ultimate heal is the emergency button; shared recovery holds the rest"
+        );
+        let after_ultimate = p.hero.hp;
+        assert!(after_ultimate > MAX_HP * 0.1 && after_ultimate < MAX_HP * 0.28);
+
+        // Past the shared recovery the smaller heal follows; the mana restore
+        // still waits because the bar cannot hold all of it yet.
+        now += Duration::from_millis(500);
+        think(&mut world, &mut bots, now);
+        let p = &world.players[&address];
+        assert_eq!(p.timers.last_cast_at, [None, Some(now), None, Some(first)]);
+        assert!(p.hero.hp > after_ultimate);
     }
 }

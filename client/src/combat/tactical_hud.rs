@@ -148,7 +148,7 @@ fn spawn_overhead_plate(commands: &mut Commands) -> [Entity; 4] {
     let text = commands
         .spawn((
             label(String::new(), 11.0, Color::WHITE),
-            TextLayout::new_with_no_wrap(),
+            TextLayout::no_wrap(),
             Node {
                 position_type: PositionType::Absolute,
                 left: Val::Px(2.0),
@@ -507,7 +507,7 @@ pub(super) fn update_tactical_hud(
                         font_size,
                         team_color(killer.team.into()),
                     ),
-                    TextLayout::new_with_no_wrap(),
+                    TextLayout::no_wrap(),
                     Node {
                         min_width: Val::Px(0.0),
                         max_width: Val::Px(if phone { 72.0 } else { 104.0 }),
@@ -531,7 +531,7 @@ pub(super) fn update_tactical_hud(
                         font_size,
                         team_color(victim.team.into()),
                     ),
-                    TextLayout::new_with_no_wrap(),
+                    TextLayout::no_wrap(),
                     Node {
                         min_width: Val::Px(0.0),
                         max_width: Val::Px(if phone { 72.0 } else { 104.0 }),
@@ -566,6 +566,7 @@ mod tests {
             bevy::picking::InteractionPlugin,
         ));
         app.init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<bevy::mesh::skinning::SkinnedMeshInverseBindposes>>()
             .init_resource::<Assets<TextureAtlasLayout>>();
         let mut window = Window::default();
         window.resolution.set_scale_factor_override(Some(1.0));

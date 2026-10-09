@@ -593,7 +593,7 @@ pub(crate) fn slider(
                     width: Val::Px(SLIDER_VALUE_W),
                     ..default()
                 },
-                TextLayout::new_with_justify(Justify::Right),
+                TextLayout::justify(Justify::Right),
                 theme::role_text(TextRole::Number),
                 TextColor(color::TEXT_PRIMARY),
             ))
@@ -880,7 +880,7 @@ pub(crate) fn cycle_row<T: UiActionT, M: Component>(
                             Text::new(value),
                             theme::styled_text(TextStyle::keep_case(TextRole::Label)),
                             TextColor(color::TEXT_PRIMARY),
-                            TextLayout::new_with_justify(Justify::Center),
+                            TextLayout::justify(Justify::Center),
                             value_marker,
                             id.child("Value"),
                         ))

@@ -66,7 +66,7 @@ pub(crate) enum PauseMenuSet {
 impl Plugin for PauseMenuPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<PauseMenuState>()
-            .init_resource::<SettingsTab>()
+            .init_resource::<SelectedSettingsTab>()
             .init_resource::<AudioSettings>()
             .init_resource::<BeginnerTips>()
             .init_resource::<RenderSettings>()
@@ -151,7 +151,7 @@ pub(crate) struct PauseMenuState {
     pub(crate) in_settings: bool,
 }
 
-#[derive(Resource, Component, Default, Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Component, Default, Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum SettingsTab {
     #[default]
     Sound,
@@ -160,6 +160,11 @@ pub(crate) enum SettingsTab {
     Hud,
     Language,
 }
+
+// Bevy resources are unique entity components. The selected value must use a
+// different type from the per-panel tab markers.
+#[derive(Resource, Default)]
+pub(crate) struct SelectedSettingsTab(pub(crate) SettingsTab);
 
 #[derive(Component)]
 struct SettingsRail;
@@ -206,7 +211,7 @@ fn settings_group(
 }
 
 fn settings_tabs(
-    mut selected: ResMut<SettingsTab>,
+    mut selected: ResMut<SelectedSettingsTab>,
     mut events: MessageReader<Activated<PauseAction>>,
     mut groups: Query<(&SettingsTab, &mut Node)>,
     mut buttons: Query<(&UiAction<PauseAction>, &mut widgets::ButtonStyle)>,
@@ -216,14 +221,14 @@ fn settings_tabs(
 ) {
     for event in events.read() {
         if let PauseAction::SettingsTab(tab) = event.action {
-            *selected = tab;
+            selected.0 = tab;
             for mut position in &mut scroll {
                 position.y = 0.0;
             }
         }
     }
     for (tab, mut node) in &mut groups {
-        node.display = if *tab == *selected {
+        node.display = if *tab == selected.0 {
             Display::Flex
         } else {
             Display::None
@@ -231,7 +236,7 @@ fn settings_tabs(
     }
     for (action, mut style) in &mut buttons {
         if let PauseAction::SettingsTab(tab) = action.0 {
-            widgets::ButtonStyle::set_selected(&mut style, tab == *selected);
+            widgets::ButtonStyle::set_selected(&mut style, tab == selected.0);
         }
     }
     for (name, mut text) in &mut titles {
@@ -257,7 +262,7 @@ pub(crate) struct SettingsHelpReturn(pub(crate) bool);
 struct PauseMenuRoot;
 
 #[derive(Component)]
-struct MainMenuSection;
+pub(crate) struct MainMenuSection;
 
 #[derive(Component)]
 struct MainMenuFooter;
@@ -372,7 +377,7 @@ fn size_desktop_pause_panel(
     let height = if menu.in_settings {
         Val::Percent(92.0)
     } else {
-        Val::Px(440.0)
+        Val::Px(metric::PAUSE_MAIN_H)
     };
     for mut panel in &mut panels {
         panel.width = if menu.in_settings {
@@ -679,6 +684,10 @@ fn layout_pause_contents(
                     0.0
                 });
             }
+            "PauseMenuMainSection" => {
+                node.width = Val::Percent(100.0);
+                node.align_items = AlignItems::Center;
+            }
             "PauseMenuHeader" => node.padding.bottom = Val::Px(if compact { 0.0 } else { 8.0 }),
             "PauseMenuAudioTitleGroup" => {
                 node.display = if compact {
@@ -843,7 +852,7 @@ fn setting_row(
         });
 }
 
-fn menu_button(
+pub(crate) fn menu_button(
     parent: &mut ChildSpawnerCommands,
     key: &'static str,
     kind: ButtonKind,
@@ -1547,11 +1556,14 @@ fn close_pause_menu_when_disconnected(
 pub(crate) fn toggle_pause_menu(
     back: crate::ui::BackInput,
     social: Option<Res<crate::social::SocialClient>>,
+    splash: Option<Res<crate::frontend::boot::BootSplash>>,
     mut menu_state: ResMut<PauseMenuState>,
 ) {
+    // A key pressed under the boot splash must not leave a menu open behind it.
     if social
         .as_ref()
         .is_some_and(|social| social.blocks_gameplay())
+        || splash.is_some_and(|splash| splash.blocks_input())
     {
         return;
     }
@@ -1832,7 +1844,7 @@ fn apply_render_and_hud_settings(
     }
 }
 
-/// Sound levels and mute; only while the settings page is the front-most modal.
+/// Automatic advice; only while the settings page is the front-most modal.
 fn apply_beginner_tips(
     mut activated: MessageReader<Activated<PauseAction>>,
     menu: Res<PauseMenuState>,
@@ -1851,6 +1863,7 @@ fn apply_beginner_tips(
     }
 }
 
+/// Sound levels and mute; only while the settings page is the front-most modal.
 fn apply_pause_audio(
     mut activated: MessageReader<Activated<PauseAction>>,
     menu: Res<PauseMenuState>,
@@ -2173,6 +2186,7 @@ mod tests {
             bevy::picking::InteractionPlugin,
         ));
         app.init_resource::<Assets<bevy::mesh::Mesh>>()
+            .init_resource::<Assets<bevy::mesh::skinning::SkinnedMeshInverseBindposes>>()
             .init_resource::<Assets<TextureAtlasLayout>>()
             .init_resource::<ClientSession>()
             .insert_resource(crate::ui::UiPlatform(if mobile_enabled {
@@ -2302,7 +2316,7 @@ mod tests {
     #[test]
     fn tablet_graphics_rows_share_label_slider_and_value_columns() {
         let (mut app, _) = layout_app(Vec2::new(1180.0, 820.0), 2.0, true);
-        app.insert_resource(SettingsTab::Graphics)
+        app.insert_resource(SelectedSettingsTab(SettingsTab::Graphics))
             .add_systems(Update, settings_tabs);
         app.update();
         app.update();
@@ -2430,6 +2444,10 @@ mod tests {
             (Vec2::new(1180.0, 820.0), 2.0),
         ] {
             let (mut app, window) = layout_app(size, dpi, true);
+            // Exercise the production Graphics tab, rather than laying out all
+            // tab bodies simultaneously (which the actual menu never does).
+            app.insert_resource(SelectedSettingsTab(SettingsTab::Graphics))
+                .add_systems(Update, settings_tabs.after(apply_pause_navigation));
             app.insert_resource(ClientSession::admitted_for_test());
             app.update();
             app.update();
@@ -2449,7 +2467,12 @@ mod tests {
             let close_before = rect(&app, close, dpi);
             let before = *app.world().resource::<AudioSettings>();
             let area = rect(&app, body, dpi);
-            for id in 1..10 {
+            // Text metrics can change with the layout engine. Verify that real
+            // drags reach the final control, without assuming nine fixed swipes.
+            for id in 1..60 {
+                if rect(&app, reset, dpi).height() >= 44.0 {
+                    break;
+                }
                 for (phase, point) in [
                     (TouchPhase::Started, area.center()),
                     (TouchPhase::Moved, area.center() - Vec2::Y * 200.0),
@@ -2538,7 +2561,7 @@ mod tests {
     #[test]
     fn tablet_sound_fits_without_scrolling_and_tabs_keep_their_controls_separate() {
         let (mut app, _) = layout_app(Vec2::new(1180.0, 820.0), 2.0, true);
-        app.init_resource::<SettingsTab>()
+        app.init_resource::<SelectedSettingsTab>()
             .add_systems(Update, settings_tabs.after(apply_pause_navigation));
         app.update();
         app.update();
@@ -2564,11 +2587,21 @@ mod tests {
         });
         app.update();
         app.update();
-        for (tab, node) in app
-            .world_mut()
-            .query::<(&SettingsTab, &Node)>()
+        let mut groups = app.world_mut().query::<(&SettingsTab, &Node)>();
+        let present: std::collections::HashSet<_> = groups
             .iter(app.world())
-        {
+            .map(|(tab, _)| *tab as u8)
+            .collect();
+        assert_eq!(
+            present.len(),
+            5,
+            "all five tab markers must survive spawning"
+        );
+        assert_eq!(
+            app.world().resource::<SelectedSettingsTab>().0,
+            SettingsTab::Language
+        );
+        for (tab, node) in groups.iter(app.world()) {
             assert_eq!(
                 node.display,
                 if *tab == SettingsTab::Language {
@@ -2583,7 +2616,7 @@ mod tests {
     #[test]
     fn phone_sound_keeps_all_volume_controls_and_header_navigation_in_view() {
         let (mut app, _) = layout_app(Vec2::new(844.0, 390.0), 3.0, true);
-        app.init_resource::<SettingsTab>()
+        app.init_resource::<SelectedSettingsTab>()
             .add_systems(Update, settings_tabs.after(apply_pause_navigation));
         app.update();
         app.update();
@@ -2647,6 +2680,7 @@ mod tests {
                 let close_before = rect(&app, close, 1.0);
                 let footer_before = rect(&app, footer, 1.0);
                 app.world_mut().write_message(MouseWheel {
+                    phase: bevy::input::touch::TouchPhase::Moved,
                     unit: MouseScrollUnit::Pixel,
                     x: 0.0,
                     y: -2000.0,
@@ -2971,6 +3005,7 @@ mod tests {
             ))
             .id();
         app.world_mut().write_message(MouseWheel {
+            phase: bevy::input::touch::TouchPhase::Moved,
             unit: MouseScrollUnit::Line,
             x: 0.0,
             y: -2.0,
@@ -2983,6 +3018,7 @@ mod tests {
             "32 px per line"
         );
         app.world_mut().write_message(MouseWheel {
+            phase: bevy::input::touch::TouchPhase::Moved,
             unit: MouseScrollUnit::Line,
             x: 0.0,
             y: -50.0,
@@ -3620,6 +3656,32 @@ mod tests {
                 .0
         );
         assert!(!app.world().resource::<PauseMenuState>().open);
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .reset_all();
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::Escape);
+        app.update();
+        assert!(app.world().resource::<PauseMenuState>().open);
+    }
+
+    #[test]
+    fn escape_waits_for_the_boot_splash() {
+        let mut app = App::new();
+        app.init_resource::<ButtonInput<KeyCode>>()
+            .init_resource::<PauseMenuState>()
+            .insert_resource(crate::frontend::boot::BootSplash::loading_for_test())
+            .add_systems(Update, toggle_pause_menu);
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::Escape);
+        app.update();
+        assert!(
+            !app.world().resource::<PauseMenuState>().open,
+            "no menu opens behind the splash"
+        );
+        app.insert_resource(crate::frontend::boot::BootSplash::default());
         app.world_mut()
             .resource_mut::<ButtonInput<KeyCode>>()
             .reset_all();
