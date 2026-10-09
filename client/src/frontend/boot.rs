@@ -107,9 +107,13 @@ impl BootSplash {
     }
 }
 
-/// Player-facing switches. Any other `OMOBA_*` variable is a harness, a
-/// capture or a debug launch that expects the shell without a splash.
-const PLAYER_SWITCHES: [&str; 7] = [
+/// Player-facing switches, including the environment shared by the desktop
+/// launcher and its server. Other non-empty `OMOBA_*` variables bypass the
+/// splash for automation; the debug toggle is checked by value below.
+const PLAYER_SWITCHES: [&str; 10] = [
+    "OMOBA_ASSET_DIR",
+    "OMOBA_MATCH_MODE",
+    "OMOBA_TEAM_SIZE",
     "OMOBA_LANGUAGE",
     "OMOBA_PLAYER_VISUAL_MODE",
     "OMOBA_CLIENT_CONFIG_DIR",
@@ -123,19 +127,26 @@ const PLAYER_SWITCHES: [&str; 7] = [
 // The name avoids the `_QA_DIR` suffix, which sends the shell into a match.
 pub(crate) const BOOT_QA_DIR: &str = "OMOBA_BOOT_SPLASH_SHOTS";
 
-/// Whether a launch with these (non-empty) environment keys shows the splash.
-fn enabled_for(keys: impl Iterator<Item = String>) -> bool {
-    keys.into_iter()
-        .all(|key| !key.starts_with("OMOBA_") || PLAYER_SWITCHES.contains(&key.as_str()))
+/// Whether a launch with these environment entries shows the splash. The
+/// launcher explicitly sets `OMOBA_DEBUG_UI=0`: presence is not activation.
+fn enabled_for(vars: impl Iterator<Item = (String, String)>) -> bool {
+    vars.into_iter().all(|(key, value)| {
+        value.is_empty()
+            || !key.starts_with("OMOBA_")
+            || PLAYER_SWITCHES.contains(&key.as_str())
+            || (key == crate::debug::console::DEBUG_UI_ENV_VAR
+                && !crate::debug::console::parse_debug_ui_flag(&value))
+    })
 }
 
 fn enabled() -> bool {
     !crate::sandbox::requested()
-        && enabled_for(
-            std::env::vars_os()
-                .filter(|(_, value)| !value.is_empty())
-                .map(|(key, _)| key.to_string_lossy().into_owned()),
-        )
+        && enabled_for(std::env::vars_os().map(|(key, value)| {
+            (
+                key.to_string_lossy().into_owned(),
+                value.to_string_lossy().into_owned(),
+            )
+        }))
 }
 
 /// Settled assets out of the tracked ones; nothing tracked is complete.
@@ -483,11 +494,56 @@ fn drive_splash(
 mod tests {
     use super::*;
 
-    fn keys(keys: &[&str]) -> impl Iterator<Item = String> {
+    fn keys(keys: &[&str]) -> impl Iterator<Item = (String, String)> {
         keys.iter()
-            .map(|key| (*key).to_owned())
+            .map(|key| ((*key).to_owned(), "1".to_owned()))
             .collect::<Vec<_>>()
             .into_iter()
+    }
+
+    #[test]
+    fn desktop_launcher_environment_keeps_the_player_splash() {
+        // scripts/beta_launcher.py shares this environment between the client
+        // and server for join, practice and local-release sessions.
+        for mode in ["practice", "release"] {
+            let vars = [
+                ("OMOBA_ASSET_DIR", "/packaged game/assets"),
+                ("OMOBA_PLAYER_VISUAL_MODE", "models3d"),
+                ("OMOBA_DEBUG_UI", "0"),
+                ("OMOBA_MATCH_MODE", mode),
+                ("OMOBA_TEAM_SIZE", "5"),
+                ("OMOBA_CLIENT_CONFIG_DIR", "/packaged game/user-data"),
+                ("GAME_SERVER_ADDR", "127.0.0.1:4000"),
+            ];
+            let owned = || vars.map(|(key, value)| (key.to_owned(), value.to_owned()));
+            assert!(enabled_for(owned().into_iter()), "{mode}");
+            // Player settings must not override an actual capture launch.
+            assert!(!enabled_for(
+                owned()
+                    .into_iter()
+                    .chain(keys(&["OMOBA_OFFLINE_SMOKE_DIR"]))
+            ));
+        }
+    }
+
+    #[test]
+    fn only_an_enabled_debug_ui_bypasses_the_splash() {
+        for value in ["", "0", "false", "FALSE"] {
+            assert!(enabled_for(std::iter::once((
+                "OMOBA_DEBUG_UI".into(),
+                value.into()
+            ))));
+        }
+        for value in ["1", "true", "TRUE"] {
+            assert!(!enabled_for(std::iter::once((
+                "OMOBA_DEBUG_UI".into(),
+                value.into()
+            ))));
+        }
+        assert!(enabled_for(std::iter::once((
+            "OMOBA_OFFLINE_SMOKE_DIR".into(),
+            String::new()
+        ))));
     }
 
     #[test]
