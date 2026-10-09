@@ -93,7 +93,7 @@ built from these same sources:
 | script tests (`scripts`, `mobile/ios`) | 208 and 45 passed |
 | `python3 scripts/export_humanoid_motion.py --check` | exit 0, 55 motions |
 | headless gameplay harness (test binaries built before the merge from identical harness and server-side sources, run against the server binary of this tree) | 24 unit and 26 integration tests passed |
-| captures: 17 classes, the mixed recipe and a Sprite2d smoke of this tree; the flight run of the commit before the documentation (same binaries and assets) | every `capture-run.json` passes; no black frame, no panic |
+| captures: 17 classes, the mixed recipe and a Sprite2d smoke of the final code and assets, taken before the last documentation-only corrections; the flight run of the commit before the documentation (same binaries and assets) | every `capture-run.json` passes; no black frame, no panic |
 
 **Not run on the final tree:** `cargo clippy --workspace --all-targets --no-deps
 -- -D warnings`, the clippy run without the `qa` feature, and the tests of
