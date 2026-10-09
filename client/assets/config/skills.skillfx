@@ -68,7 +68,7 @@
     "cinderforge": {
       "motions": ["cleave_slam"], "rate": 0.85, "start": 0.3,
       "accent": { "pattern": "toss_arc", "shape": "streak", "count": 3, "scale": 0.8, "lifetime": 0.3, "slots": ["accent", "secondary"] },
-      "impact": { "kind": "glow_pop", "shape": "streak", "count": 5, "scale": 0.8, "lifetime": 0.35, "slots": ["accent", "secondary"] },
+      "impact": { "kind": "glow_pop", "shape": "streak", "count": 8, "scale": 1.0, "lifetime": 0.4, "slots": ["secondary", "secondary"] },
       "sound": { "base": "tower", "speed": 0.85, "slice": "tick", "gain": 0.8 }
     },
     "edgeweaver": {
@@ -86,7 +86,7 @@
     "veilstalker": {
       "motions": ["slash_rising_m", "slash_down"], "rate": 1.4, "start": 0.1,
       "accent": { "pattern": "arc_sweep", "shape": "crescent", "count": 2, "scale": 0.55, "lifetime": 0.25, "slots": ["secondary", "accent"] },
-      "impact": { "kind": "slash_cut", "shape": "crescent", "count": 5, "scale": 0.8, "lifetime": 0.3, "slots": ["accent", "secondary"] },
+      "impact": { "kind": "slash_cut", "shape": "crescent", "count": 8, "scale": 1.0, "lifetime": 0.4, "slots": ["secondary", "accent"] },
       "sound": { "base": "melee", "speed": 0.85, "slice": "body", "gain": 0.7 }
     },
     "emberveil": {
@@ -423,13 +423,13 @@
         "impact": { "base": "arcane", "speed": 0.7, "slice": "body", "gain": 0.9 } }
     },
     "wandering_ember": {
-      "home": "emberveil", "release": "toss_underhand", "color": [1.0, 0.32, 0.1], "hdr_gain": 2.8, "accent": [1.0, 0.75, 0.2],
+      "home": "emberveil", "release": "toss_underhand", "color": [1.0, 0.32, 0.1], "hdr_gain": 2.8, "accent": [1.0, 0.58, 0.08],
       "motion": { "rate": 0.9, "start": 0.1 },
-      "cast": { "pattern": "toss_arc", "shape": "drop", "count": 6, "scale": 1.2, "lifetime": 0.5 },
+      "cast": { "pattern": "toss_arc", "shape": "drop", "count": 8, "scale": 1.33, "lifetime": 0.5 },
       "body": { "archetype": "orbiter", "altitude": "chest", "trail": "ribbon", "trail_scale": 2.0,
         "core": { "mesh": "ball", "slot": "accent", "size": [1.0, 1.0, 1.0], "behave": "flicker" },
         "shell": { "mesh": "drop", "slot": "white", "size": [1.2, 1.9, 1.2], "behave": "only_after_renew" },
-        "satellites": { "mesh": "drop", "layout": "orbit", "count": 6, "size": [0.4, 2.0, 0.4], "behave": "flicker" } },
+        "satellites": { "mesh": "drop", "layout": "orbit", "count": 6, "size": [0.5, 2.0, 0.5], "behave": "flicker" } },
       "impact": { "kind": "ember_puff", "shape": "drop", "count": 12, "scale": 1.0, "lifetime": 0.9, "slots": ["accent", "secondary"] },
       "sound": {
         "cast": { "base": "arcane", "speed": 1.3 },
