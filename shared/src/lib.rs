@@ -37,6 +37,7 @@ pub mod transport;
 pub mod utility;
 pub mod vision;
 pub mod web_account;
+pub mod workshop;
 
 /// Gameplay wire protocol: the only definition of the UDP/JSON packet types.
 pub use protocol::wire;

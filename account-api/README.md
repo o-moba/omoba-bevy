@@ -4,7 +4,7 @@ Rust 0.21.0-rc.1 HTTP adapter for the existing game career store. Axum 0.8.9,
 SQLx PostgreSQL, ring 0.17.14. No HTTP endpoint can settle matches or change rewards.
 The adapter reuses the game friendship transaction and nickname validation rules.
 [OpenAPI 3.1](docs/openapi.json) describes the wire contract. Game core schema is
-version 3 (revocable device keys); portal schema has its own version 3 and never runs Prisma/Drizzle push.
+version 3 (revocable device keys); portal schema has its own version 5 and never runs Prisma/Drizzle push.
 
 ## Database and migration
 
@@ -18,7 +18,7 @@ psql "$MIGRATION_DATABASE_URL" -v portal_role=omoba_portal -v game_role=omoba_ga
 ```
 
 The migration command initializes the game’s existing v1 migration when needed,
-then applies portal v1–v3 under an advisory lock. Repeated execution is safe. Existing
+then applies portal v1–v5 under an advisory lock. Repeated execution is safe. Existing
 unknown versions fail closed. Runtime startup verifies versions and performs no DDL.
 For game-only initialization, `cargo run -p server --bin migrate-career --locked` uses
 `OMOBA_DATABASE_URL`. This replaces implicit DDL at game-worker startup.
@@ -132,3 +132,44 @@ See [Supporter operations](../docs/supporter.md) for enrollment/recovery, billin
 provider configuration, test boundaries and schema/runtime grants. Web sessions
 now explicitly authorize device/recovery management; native confirmations display
 these capabilities. Old limited sessions are invalidated by the account upgrade.
+
+## Private class workshop prototype
+
+Portal migration 004 adds owner-scoped private class preferences; 005 adds the
+separate encrypted Ekza library connection. Startup also accepts existing portal
+v3/v4 schemas without running DDL. Missing class-build tables return
+503 `class_builds_unavailable`; missing Ekza connection tables return 200 with
+`state: unavailable` until their migrations are applied. No new browser authorization scopes are
+added: private named builds use the existing personal-settings consent.
+
+`GET/POST /v1/me/class-builds` lists/creates up to 50 documents per profile.
+`GET/PATCH/DELETE /v1/me/class-builds/{id}` reads, replaces or deletes an owned
+64-hex ID. POST accepts `{document}`, PATCH accepts `{expected_version,document}`,
+and DELETE requires `?version=N` and an empty body. Versions are decimal strings.
+Mutations require `Idempotency-Key` and commit the owner-scoped change, replay
+receipt and audit event in one transaction. Reusing a key with another method,
+path or payload conflicts. Foreign and absent IDs both return 404.
+
+Every saved `omoba.class-build.v1` document is validated by
+`shared::workshop::ClassBuildDocument` and the game recipe resolver. This stores
+private preferences only; it does not publish a class or admit it to ranked play.
+The current 8 KiB body bound, session expiry/revocation and API rate limits apply.
+
+For the isolated community demo, compile the API binary and `seed-local-portal`
+example, then use `python3 account-api/ops/workshop_fixture.py init`. The helper
+creates only its dedicated local PostgreSQL cluster on 127.0.0.1:55581, explicit
+`workshop_test`/`workshop_demo` databases and unprivileged runtime roles. It never
+uses an ambient database URL or changes a production service. Run `serve` to
+start Account API on 127.0.0.1:40560 for portal origin 127.0.0.1:3010. The separate
+labelled Registry fixture must listen on 40561. Synthetic game key seed 7 is
+registered for the demo's real signed pairing flow.
+
+```sh
+OMOBA_PORTAL_TEST_DATABASE_URL=postgres://workshop_owner@127.0.0.1:55581/workshop_test \
+OMOBA_PORTAL_ROLE_TEST_URL=postgres://workshop_portal@127.0.0.1:55581/workshop_test \
+cargo test -p omoba-account-api --test class_builds_postgres --test ekza_library_postgres --locked -- --ignored --test-threads=1
+```
+
+The fixture helper does not remove clusters or databases. Stop the API with Ctrl-C
+and stop the dedicated cluster explicitly with PostgreSQL's `pg_ctl` when the
+demo no longer needs it. Keep generated fixture secrets and DB files untracked.

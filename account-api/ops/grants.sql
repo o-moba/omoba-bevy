@@ -13,6 +13,8 @@ GRANT SELECT,INSERT,UPDATE,DELETE ON portal.web_pairings,portal.web_sessions,
   portal.profile_settings,portal.operation_receipts,portal.rate_limits,
   portal.audit_events,portal.projected_results,portal.player_match_facts TO :"portal_role";
 GRANT USAGE ON ALL SEQUENCES IN SCHEMA portal TO :"portal_role";
+GRANT SELECT,INSERT,UPDATE,DELETE ON portal.ekza_library_links TO :"portal_role";
+GRANT SELECT,INSERT,UPDATE,DELETE ON portal.class_builds TO :"portal_role";
 GRANT SELECT,INSERT,UPDATE,DELETE ON portal.device_enrollments,portal.recovery_codes,
   portal.supporter_nonces TO :"portal_role";
 GRANT SELECT,INSERT ON portal.supporter_events TO :"portal_role";

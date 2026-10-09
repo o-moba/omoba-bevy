@@ -457,6 +457,32 @@ impl std::fmt::Display for LoadoutError {
 }
 impl std::error::Error for LoadoutError {}
 
+/// Capability requirements shared by recipe admission and authoring metadata.
+/// These describe dependencies only; no consumer may override combat values.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SkillRequirements {
+    pub attack_profile: Option<AttackProfileId>,
+    pub any_of_skills: &'static [SkillId],
+}
+
+pub fn requirements(id: SkillId) -> SkillRequirements {
+    let mut requirements = SkillRequirements {
+        attack_profile: None,
+        any_of_skills: &[],
+    };
+    match skill(id).effect {
+        SkillEffect::WeaponToggle { .. } => {
+            requirements.attack_profile = Some(AttackProfileId::Repeater);
+        }
+        SkillEffect::Technique {
+            action: Technique::BallField | Technique::BallPull,
+            ..
+        } => requirements.any_of_skills = &[SkillId::OrbitalCommand, SkillId::OrbitalGuard],
+        _ => {}
+    }
+    requirements
+}
+
 pub fn resolve(recipe: &BuildRecipe) -> Result<ResolvedLoadout, LoadoutError> {
     if recipe.schema_version != RECIPE_SCHEMA_VERSION {
         return Err(LoadoutError::SchemaVersion);
@@ -466,31 +492,23 @@ pub fn resolve(recipe: &BuildRecipe) -> Result<ResolvedLoadout, LoadoutError> {
     }
     let attack_profile = recipe.core.attack_profile();
     for (index, id) in recipe.skills.into_iter().enumerate() {
-        let def = skill(id);
         // Stateful/recast skills have one identity per actor. Distinct skills
         // may use any binding; duplicate identities require a separate design.
         if recipe.skills[..index].contains(&id) {
             return Err(LoadoutError::DuplicateSkill { skill: id });
         }
-        if matches!(
-            def.effect,
-            SkillEffect::Technique {
-                action: Technique::BallField | Technique::BallPull,
-                ..
-            }
-        ) && !recipe.skills.iter().any(|id| {
-            matches!(
-                skill(*id).effect,
-                SkillEffect::Technique {
-                    action: Technique::BallMove | Technique::BallGuard,
-                    ..
-                }
-            )
-        }) {
+        let requirements = requirements(id);
+        if !requirements.any_of_skills.is_empty()
+            && !requirements
+                .any_of_skills
+                .iter()
+                .any(|id| recipe.skills.contains(id))
+        {
             return Err(LoadoutError::RequiresOrbController { skill: id });
         }
-        if matches!(def.effect, SkillEffect::WeaponToggle { .. })
-            && attack_profile != AttackProfileId::Repeater
+        if requirements
+            .attack_profile
+            .is_some_and(|required| required != attack_profile)
         {
             return Err(LoadoutError::RequiresRepeater { skill: id });
         }

@@ -1104,3 +1104,20 @@ Allied portraits also show remaining respawn seconds. Nexus motion rotates the o
 ### Engine baseline — 0.43.0
 
 The game and Ekza SDK use Bevy 0.19.1 with Rust 1.95.0. Existing avatar/weapon account flows, humanoid animation and 0.42 gameplay remain supported. GLB scene labels are retained while engine scene types move to world serialization. The upgrade does not claim improved phone FPS without physical-device measurement.
+
+
+## Community class workshop prototype
+
+The companion portal adds `/workshop` alongside the public `/creators` gallery.
+It composes the game’s 12 modular cores and 48 reusable skills, derives the current
+core and skill visual requirements, saves private named recipes under the existing
+OMOBA profile, and exports a safe native Combat Test preset. The catalogue still
+browses all 17 classes and 68 abilities, including legacy nonmodular kits.
+
+Shared Rust validation drives persistence and local import; gameplay dependencies
+are exported from the same resolver. The Account API stores private versioned
+builds in PostgreSQL and supports owner-bound Ekza library consent without
+exposing credentials to the browser. This is a prototype for local gameplay and
+community contribution, with no public/ranked custom-class admission or automatic
+skin installation. See [community workshop](community-workshop.md) and
+[native build import](class-workshop-game.md).

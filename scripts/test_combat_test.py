@@ -1,6 +1,7 @@
 import unittest
 from pathlib import Path
 import combat_test
+from unittest.mock import patch
 
 
 class CombatTestLauncherTests(unittest.TestCase):
@@ -17,6 +18,18 @@ class CombatTestLauncherTests(unittest.TestCase):
         self.assertEqual(combat_test.arguments(['--hero', 'warden']).hero, 'warden')
         with self.assertRaises(SystemExit):
             combat_test.arguments(['--hero', 'necromancer'])
+
+    def test_class_document_import_is_explicit_and_exclusive(self):
+        args = combat_test.arguments(['--class-build', '/tmp/mixed.json'])
+        self.assertEqual(args.class_build, Path('/tmp/mixed.json'))
+        self.assertIsNone(args.preset)
+        for conflicting in (['--preset', 'dps'], ['--server-only'], ['--avatar', 'anna']):
+            with self.assertRaises(SystemExit):
+                combat_test.arguments(['--class-build', '/tmp/mixed.json', *conflicting])
+
+    def test_shared_cache_path_is_retained_for_launch_helpers(self):
+        with patch.dict('os.environ', {'CARGO_TARGET_DIR': '/tmp/shared-cache-a'}):
+            self.assertEqual(combat_test.target_directory(), Path('/tmp/shared-cache-a').resolve())
 
     def test_live_service_and_qa_settings_cannot_leak_into_sandbox(self):
         parent = {'PATH': '/bin', 'HOME': '/test', 'OMOBA_DATABASE_URL': 'private',
