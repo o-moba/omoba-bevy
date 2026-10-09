@@ -48,5 +48,7 @@
   "pause.hud.combat_y": "Скиллы · по вертикали",
   "pause.hud.reset": "Сбросить положение кнопок",
   "pause.render.show_fps": "Показывать FPS",
+  "pause.tips.enabled": "Подсказки для новичка",
+  "pause.tips.hint": "Советы при загрузке и справка в первом матче. Справку всегда можно открыть вручную.",
   "pause.button.practice": "Отладка"
 }

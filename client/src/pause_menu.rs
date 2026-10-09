@@ -11,6 +11,7 @@ use bevy::{
 
 use crate::audio_settings::AudioSettings;
 use crate::camera::{CAMERA_ZOOM_STEP, CameraSettings};
+use crate::help_overlay::BeginnerTips;
 use crate::i18n::{Locale, Localized, tr, trf};
 use crate::mobile_controls::HudPositionSettings;
 use crate::model_scale::{
@@ -67,6 +68,7 @@ impl Plugin for PauseMenuPlugin {
         app.init_resource::<PauseMenuState>()
             .init_resource::<SelectedSettingsTab>()
             .init_resource::<AudioSettings>()
+            .init_resource::<BeginnerTips>()
             .init_resource::<RenderSettings>()
             .init_resource::<HudPositionSettings>()
             .init_resource::<crate::help_overlay::HelpOverlayVisible>()
@@ -106,6 +108,7 @@ impl Plugin for PauseMenuPlugin {
                     apply_pause_settings,
                     apply_render_and_hud_settings,
                     apply_pause_audio,
+                    apply_beginner_tips,
                     apply_pause_session,
                     apply_pause_language,
                     update_setting_labels
@@ -322,6 +325,7 @@ pub(crate) enum PauseAction {
     /// Switch to the next shipped language.
     CycleLanguage,
     ToggleReduceMotion,
+    ToggleBeginnerTips,
     ToggleFpsReadout,
     TogglePhoneLayoutPreview,
     SettingsTab(SettingsTab),
@@ -566,6 +570,7 @@ fn sync_settings_sliders(
     audio: Res<AudioSettings>,
     lighting: Res<LightingSettings>,
     motion: Res<MotionSettings>,
+    tips: Option<Res<BeginnerTips>>,
     render: Res<RenderSettings>,
     mut sliders: Query<(&SettingsSlider, &mut Slider, &widgets::KitParts)>,
     mut values: Query<&mut Text>,
@@ -602,6 +607,7 @@ fn sync_settings_sliders(
     for (action, mut style) in &mut toggles {
         let selected = match action.0 {
             PauseAction::ToggleReduceMotion => motion.reduce,
+            PauseAction::ToggleBeginnerTips => tips.as_ref().is_none_or(|tips| tips.enabled),
             PauseAction::ToggleFpsReadout => render.show_fps,
             PauseAction::Audio(AudioButton::Mute) => audio.muted,
             _ => continue,
@@ -1308,6 +1314,18 @@ fn setup_pause_menu_ui(mut commands: Commands, platform: Option<Res<crate::ui::U
                                 ));
                             });
                             settings_group(settings, SettingsTab::Hud, |settings| {
+                                widgets::controls::toggle(
+                                    settings,
+                                    Localized::new("pause.tips.enabled"),
+                                    true,
+                                    PauseAction::ToggleBeginnerTips,
+                                    "PauseMenuBeginnerTipsToggle",
+                                );
+                                settings.spawn((
+                                    Localized::new("pause.tips.hint").into_text(),
+                                    theme::role_text(TextRole::Caption),
+                                    TextColor(theme::MUTED),
+                                ));
                                 section_title(settings, "pause.settings.hud", "PauseMenuHudTitle");
                                 settings.spawn((
                                     Localized::new("pause.hud.hint").into_text(),
@@ -1826,6 +1844,25 @@ fn apply_render_and_hud_settings(
     }
 }
 
+/// Automatic advice; only while the settings page is the front-most modal.
+fn apply_beginner_tips(
+    mut activated: MessageReader<Activated<PauseAction>>,
+    menu: Res<PauseMenuState>,
+    career: Option<Res<crate::career::CareerClient>>,
+    social: Option<Res<crate::social::SocialClient>>,
+    mut tips: ResMut<BeginnerTips>,
+) {
+    let allowed = menu.open
+        && menu.in_settings
+        && !career.as_ref().is_some_and(|c| c.modal_open())
+        && !social.as_ref().is_some_and(|s| s.blocks_gameplay());
+    for pressed in activated.read() {
+        if allowed && pressed.action == PauseAction::ToggleBeginnerTips {
+            tips.enabled = !tips.enabled;
+        }
+    }
+}
+
 /// Sound levels and mute; only while the settings page is the front-most modal.
 fn apply_pause_audio(
     mut activated: MessageReader<Activated<PauseAction>>,
@@ -2241,6 +2278,39 @@ mod tests {
             app.world().get::<bevy::ui::CalculatedClip>(entity),
             dpi,
         )
+    }
+
+    #[test]
+    fn beginner_tips_toggle_only_changes_once_while_settings_are_open() {
+        let mut app = App::new();
+        app.init_resource::<BeginnerTips>()
+            .insert_resource(PauseMenuState {
+                open: false,
+                in_settings: false,
+            })
+            .add_message::<Activated<PauseAction>>()
+            .add_systems(Update, apply_beginner_tips);
+        let press = |app: &mut App| {
+            app.world_mut().write_message(Activated {
+                source: Entity::PLACEHOLDER,
+                action: PauseAction::ToggleBeginnerTips,
+            });
+        };
+        press(&mut app);
+        app.update();
+        assert!(app.world().resource::<BeginnerTips>().enabled);
+        *app.world_mut().resource_mut::<PauseMenuState>() = PauseMenuState {
+            open: true,
+            in_settings: true,
+        };
+        press(&mut app);
+        app.update();
+        assert!(!app.world().resource::<BeginnerTips>().enabled);
+        app.update();
+        assert!(!app.world().resource::<BeginnerTips>().enabled);
+        press(&mut app);
+        app.update();
+        assert!(app.world().resource::<BeginnerTips>().enabled);
     }
 
     #[test]

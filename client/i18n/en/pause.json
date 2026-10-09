@@ -48,5 +48,7 @@
   "pause.hud.combat_y": "Skills · vertical",
   "pause.hud.reset": "Reset button positions",
   "pause.render.show_fps": "Show FPS counter",
+  "pause.tips.enabled": "Beginner tips",
+  "pause.tips.hint": "Show loading advice and the first-match guide. You can always open Help manually.",
   "pause.button.practice": "Debug tools"
 }

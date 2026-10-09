@@ -1,6 +1,6 @@
 {
   "help.eyebrow": "FIELD GUIDE  /  VERDANT ARENA",
-  "help.title": "Make your first move.",
+  "help.title": "Destroy the enemy base.",
   "help.card.move.title": "Move",
   "help.card.move.body": "Right-click ground to travel. Your route appears on the minimap.",
   "help.card.attack.title": "Attack",
@@ -12,7 +12,7 @@
   "help.card.shop.title": "Shop",
   "help.card.shop.body": "Press P at your base. Spend earned gold on items that suit your class.",
   "help.card.objective.title": "Objective",
-  "help.card.objective.body": "Follow your minions. Clear every tower in one lane, then destroy the enemy base. Let minions take tower fire. If defeated, wait for your respawn.",
+  "help.card.objective.body": "Follow your minions. Wait for them to take tower fire. Destroy the towers in one lane, then the enemy main tower. Retreat when your minions are gone.",
   "help.card.field.title": "Read the field",
   "help.card.field.body": "Your hero has a double ring; allies have squares; enemies have triangles.",
   "help.card.camera.title": "Camera",
@@ -37,11 +37,11 @@
   "help.phone.card.grow.title": "Grow",
   "help.phone.card.grow.body": "Abilities unlock as you level. Tap RANK, then a glowing skill to spend a point.",
   "help.phone.card.win.title": "Win",
-  "help.phone.card.win.body": "Follow your minions, clear all towers in one lane, then destroy the enemy base.",
+  "help.phone.card.win.body": "Clear one lane’s towers, then the enemy main tower. Approach towers with your minions.",
   "help.phone.card.recover.title": "Recover",
   "help.phone.card.recover.body": "Return to your base to heal and shop. If defeated, wait to respawn.",
   "help.phone.card.look.title": "Look",
-  "help.phone.card.look.body": "Tap the minimap to scout. Move the stick to follow your hero again.",
+  "help.phone.card.look.body": "Tap the minimap to scout. Move to follow again. Adjust zoom in Settings → Camera.",
   "help.phone.footer": "The match continues while menus are open. Stay connected for the next round.",
   "help.phone.dismiss": "Got it — play"
 }

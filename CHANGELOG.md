@@ -5,6 +5,8 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Improve the first match with an objective-first guide, loading tips navigable by buttons or a single-finger swipe, and a remembered beginner-tips switch in Settings → HUD. Keep advice arrows inside narrow desktop windows. Compact creature health bars, reduce melee/hit/tower sound gains, and use a closer default phone camera while preserving saved zoom choices.
+
 ### 0.44.0 candidate — mobile playtest quality
 
 - **Class visual identity (presentation v2).** Each of the 68 skills and 17 basic attacks has its own staged presentation, read from data: a cast accent, a motion from the shared library, a body drawn from replicated geometry, a hit recipe and a voice. `client/assets/config/skills.skillfx` is schema 2 with 68 skill rows, 17 class themes and 17 basic-attack rows; the file refuses the legacy `effect` field, a row without `cast` or `sound.cast` and a registry without a basic row for every class. The shared effect styles, the common cast puff and the built-in basic-motion table are removed. An identity test keeps any two skills from sharing motion family, body and impact, and the 68 cast voices distinct. Authoring vocabulary: [docs/skill-vocabulary.md](docs/skill-vocabulary.md); contract, per-skill table and capture commands: [docs/combat-cosmetics.md](docs/combat-cosmetics.md).

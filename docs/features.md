@@ -1,5 +1,11 @@
 # Feature Inventory
 
+## First-match guidance and mobile comfort (0.44.0 candidate)
+
+The guide starts with the objective: clear one lane with allied minions, then destroy the enemy main tower. Loading shows five advice cards, navigable with arrows or a single-finger horizontal swipe in the text area. Settings → HUD → Beginner tips remembers whether loading advice and the automatic first-match guide appear; manual Help remains available. Older preferences enable advice by default.
+
+Creature health bars are smaller, especially for minions and neutrals. Melee, hit and tower effects use lower audio gains. The mobile profile starts at 0.8 camera zoom; saved zoom choices remain intact. Phone help cards grow to fit their text inside the scrolling guide. See [the integration review](progress/2026-10-09-first-match-merge-review.md).
+
 ## Class visual identity and skill fixes (0.44.0 candidate)
 
 Every skill of every class has its own staged presentation. The 68 skills and
