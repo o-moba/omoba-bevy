@@ -1,5 +1,13 @@
 # Feature Inventory
 
+## Planned: Studio model requirements by class and skill
+
+The [proposal and TODO](plans/studio-skill-asset-catalog.md) describe a game-owned
+requirements catalogue shared by Studio and the website: baseline 3D previews,
+artist contributions to specific skill/model roles and eventual coordinated
+cosmetic sets such as Wildspark’s two guns. This is planned work, not an available
+API, Studio class browser or runtime set feature.
+
 ## First-match guidance and mobile comfort (0.44.0 candidate)
 
 The guide starts with the objective: clear one lane with allied minions, then destroy the enemy main tower. Loading shows five advice cards, navigable with arrows or a single-finger horizontal swipe in the text area. Settings → HUD → Beginner tips remembers whether loading advice and the automatic first-match guide appear; manual Help remains available. Older preferences enable advice by default.

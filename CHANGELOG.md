@@ -5,6 +5,8 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Planning only: record the [Studio class/skill asset requirements backlog](docs/plans/studio-skill-asset-catalog.md), with shared web catalogue, artist briefs and a two-gun Wildspark cosmetic-set example. No API or gameplay implementation.
+
 - Improve the first match with an objective-first guide, loading tips navigable by buttons or a single-finger swipe, and a remembered beginner-tips switch in Settings → HUD. Keep advice arrows inside narrow desktop windows. Compact creature health bars, reduce melee/hit/tower sound gains, and use a closer default phone camera while preserving saved zoom choices.
 
 ### 0.44.0 candidate — mobile playtest quality
