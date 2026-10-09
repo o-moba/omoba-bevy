@@ -369,17 +369,23 @@ or noise. Stated plainly:
 
 - **Wandering Ember** was weaker on its release still (0.87): a pale yellow orb
   on pale stone. Its accent, satellites and accent colour were tuned and it
-  now measures 0.98, level with the old look.
-- **Edge Lunge and Rift Step** are smaller on screen than before: a hit is held
-  inside 1.5 units of its receipt where the old ring was about 3 units across.
+  now measures 0.98 in three trial runs, level with the old look.
+- **Edge Lunge and Rift Step** are smaller on screen than before. The old ring
+  was about 3 units across, which is the bound of 1.5 units around the
+  receipt. The new hit is held inside that bound whatever scale its row asks
+  for, and its flash takes 0.75 of the reach under a cut and 0.86 behind a
+  star: denser and darker, with a mark, but smaller.
 - **The dash line of Flame Dance** is weaker than the shared cyan streak it
   replaces; the move patterns have fixed sizes in the engine.
 - **Horizon Wave, Echo Strike, Rampage** are smaller because the old shapes
   were wider than the replicated geometry or drawn around one victim.
 - **Pyroblast and Longshot** are smaller on their first frames, because the
   body grows from the hand.
-- **Basic-attack hits** of the Warrior, Mage, Ranger, Orbitwright, Cinderforge,
-  Veilstalker and of the launcher round are pale on the pale floor.
+- **Basic-attack hits** of the Warrior, Mage, Ranger, Orbitwright and of the
+  launcher round are pale on the pale floor. The hits of the Veilstalker and
+  the Cinderforge were pale too and were darkened by the same tuning (a dark
+  violet crescent leads the first; the second is soot in both slots). That
+  was seen in one trial capture only, not on the final build.
 - **Longshot and Piercing Arrow** read alike on the release still (two green
   darts); their hits and motions differ.
 - **The broken Northwall keystone** is partly hidden by the hero who holds the

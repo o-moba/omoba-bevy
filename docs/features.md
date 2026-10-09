@@ -22,17 +22,20 @@ reason; the list
 is in [combat cosmetics](combat-cosmetics.md#where-the-new-look-is-weaker).
 
 The same candidate fixes skill mechanics that contradicted their own
-descriptions, without changing a balance number: hero-only picks for Patient
+descriptions, without changing a catalog number: hero-only picks for Patient
 Curse, Fourfold Duel and Orbital Guard, no Thunder Kick on a tower, a root that
 blocks the recast dash of Echo Strike and Iron Hook, a Thunder Pulse recast
 only after a hit, Rift Seal on unprotected enemy structures, no doubled self
 shield on Sheltering Leap and Anchor Step, orb and field effects that no
 longer cut longer ones short, a Fault Line pillar and a Furnace Breath
 telegraph replicated as the server uses them, and receipts from unseen heroes
-that reach their victim without naming the attacker. Practice bots heal and
-restore mana by need. The client refuses, with a line of feedback, casts the
-server would drop: a Rift Step onto a blocked point and an ally skill without
-an ally; a tap on Sheltering Leap or Orbital Guard aims at an ally.
+that reach their victim without naming the attacker. Two of these fixes are
+rule changes that await the owner's decision: Anchor Step lost its doubled
+self shield together with Sheltering Leap, and Rift Seal now marks an
+unprotected enemy structure. Practice bots heal and restore mana by need. The
+client refuses, with a line of feedback, casts the server would drop: a Rift
+Step onto a blocked point and an ally skill without an ally; a tap on
+Sheltering Leap or Orbital Guard aims at an ally.
 
 Gameplay revision `combat-2026-10-08-mechanics` with protocol 11 and catalog
 standard-kits-6: client and server ship together. Verified on stills of one

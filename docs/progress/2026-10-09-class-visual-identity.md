@@ -76,24 +76,44 @@ server must ship together.** The Northwall count uses the existing
 
 ## Checks
 
-All on the final tree, English, one viewport (1280x720, `models3d`,
-offscreen).
+English, one viewport (1280x720, `models3d`, offscreen). Each row names the
+commit it ran on. `f255d14` is the last commit that changes code, data or a
+test; every commit after it changes documentation only.
 
-**The full gate passed** on the final tree (`f255d14`), once disk space was
-freed (the owner approved removing the compiler's incremental directories from
-the two shared caches):
+**The full gate passed** on `f255d14`, once disk space was freed: on
+2026-10-09 the owner approved removing the compiler's incremental directories
+from the two shared caches.
 
-| Check | Result |
-| --- | --- |
-| `make check` (fmt, workspace clippy with warnings as errors, clippy without the `qa` feature, workspace tests, script tests) | exit 0, no warning |
-| workspace tests inside it | client 1268, common 168, shared 129, server 333, passport 30, career-store 13, account-api 6 passed; 0 failed |
-| script tests inside it | 208 and 45 passed |
-| `cargo build -p server && cargo test -p harness -- --test-threads=1` | exit 0; 24 unit and 26 integration tests passed |
-| `python3 scripts/export_humanoid_motion.py --check` | exit 0, 55 motions |
-| captures: 17 classes, the mixed recipe and a Sprite2d smoke (taken two commits before the final tree; the three classes whose rows changed afterwards were captured again on the final tree) | every `capture-run.json` passes; no black frame, no panic |
+| Check | Ran on | Result |
+| --- | --- | --- |
+| `make check` (fmt, workspace clippy with warnings as errors, clippy without the `qa` feature, workspace tests, script tests) | `f255d14` | exit 0, no warning |
+| workspace tests inside it | `f255d14` | client 1268, common 168, shared 129, server 333, passport 30, career-store 13, account-api 6 passed; 0 failed |
+| script tests inside it | `f255d14` | 208 and 45 passed |
+| `cargo build -p server && cargo test -p harness -- --test-threads=1` | `f255d14` | exit 0; 24 unit and 26 integration tests passed |
+| `python3 scripts/export_humanoid_motion.py --check` | `9acdfc1` | exit 0, 55 motions |
+| captures: 17 classes, the mixed recipe and a Sprite2d smoke of one class | `3e3f555` | every `capture-run.json` passes; no black frame, no panic |
+| captures: basic attacks and bodies in flight, 17 classes | `7d2c12f` | the same |
+| captures: Emberveil, Veilstalker and Cinderforge again, a default run | `f255d14` | the same |
 
-The outputs are `raw/make-check.txt` and `raw/verify-gameplay.txt` in the task
-folder.
+The gate was run again on the documentation commits after `f255d14` and
+passed; the outputs are in the task folder (`raw/make-check.txt` names its
+commit in the first line, `raw/verify-gameplay.txt` is the harness run).
+
+What the captures show, and what they do not. The run of the 17 classes is of
+`3e3f555`, four commits before `f255d14`. Of those four only `f255d14` changes
+what a capture shows, in five data lines: the Wandering Ember row and the
+basic-attack hits of the Veilstalker and the Cinderforge. The other three
+change two documentation files and one test. The three classes were therefore
+captured again on `f255d14` (`raw/final-tuned`; its manifest marks the tree as
+dirty: by the final review's check the uncommitted files were the
+documentation of the next commit, and the client it ran is the build of the
+committed sources). That is a default run, and a default run takes no still of
+a basic attack: it shows the tuned Wandering Ember and not the two tuned basic
+hits. Those two hits were seen only in the measurer's trial, a flight run of
+the client of `7d2c12f` with the tuned data file laid over the packaged one
+(`raw/I3/tuned-final-flight`). That file is byte-identical to the file that is
+now shipped. The flight run of all 17 classes (`raw/final-flight`) predates
+the tuning.
 
 One test of `main` was unreliable under load and is fixed:
 `frontend::draft::tests::phone_avatar_picker_has_visible_tiles_and_raw_taps_switch_tabs_and_select`.
@@ -103,8 +123,9 @@ message buffers only after a fixed-timestep tick, that is after wall time, so
 on a loaded machine the request had already been dropped (27 failures in 623
 runs under load, every one at the last assertion; none in 8 idle runs). The
 game was never affected: its network system reads the messages every frame.
-The test now records the request in the frame it is written; ten runs in a
-row pass.
+The test now records the request in the frame it is written (`6507687`); ten
+runs in a row pass, and the reviewer of the final stage saw no failure in 649
+runs under a load that gave 35 failures in 662 runs before the fix.
 
 ## Where the new look is weaker
 
@@ -114,18 +135,21 @@ the old look; 17 stills are below it. By the measurer's per-class table 14
 classes read better than their old look and three are level (Edgeweaver,
 Emberveil, Riftshot); no class as a whole is weaker.
 
-- Was genuinely weaker and is tuned: the release of Wandering Ember measured
-  0.87, a pale orb on pale stone. A larger toss accent, wider satellites and a
-  deeper accent colour bring it to 0.98 in three trial runs (level, inside the
-  run-to-run noise). The same change gives the basic-attack hits of
-  Veilstalker and Cinderforge more pieces and a darker slot.
+- Was genuinely weaker and is tuned (`f255d14`): the release of Wandering Ember
+  measured 0.87, a pale orb on pale stone. A larger toss accent, wider
+  satellites and a deeper accent colour bring it to 0.98 in three trial runs
+  (level, inside the run-to-run noise).
+- Were pale and are tuned in the same commit: the basic-attack hits of the
+  Veilstalker (a dark violet crescent leads) and of the Cinderforge (soot in
+  both slots), each with more pieces and a longer life. Seen in one trial run
+  only, not on the final build (see Checks).
 - Smaller on screen: Edge Lunge and Rift Step (a hit stays within 1.5 units of
   its receipt); the dash line of Flame Dance.
 - Smaller for an honesty reason: Horizon Wave, Echo Strike, Rampage (old
   shapes larger than the replicated geometry or drawn around one victim);
   Pyroblast and Longshot on their first frames (the body grows from the hand).
-- Pale basic-attack hits: Warrior, Mage, Ranger, Orbitwright, Cinderforge,
-  Veilstalker and the launcher round.
+- Still pale basic-attack hits, five: Warrior, Mage, Ranger, Orbitwright and
+  the launcher round.
 - Longshot and Piercing Arrow read alike on the release still.
 - The broken Northwall keystone is partly hidden by its holder; a block has no
   sound.
@@ -144,11 +168,14 @@ Emberveil, Riftshot); no class as a whole is weaker.
 - English only, one desktop viewport (1280x720), one avatar rig for the
   captures. No Russian or Chinese screen, no other aspect ratio.
 - The flat view: one Sprite2d smoke of one class; no 2D capture matrix.
-- A hit from an unseen hero, a later Northwall block, two walls of one hero, a
-  renewed Wandering Ember, a real walk during the Furnace Breath windup and a
-  team fight with many casters were tested in code and never seen in a
-  capture. Pool pressure in a team fight was not checked (the largest count in
-  any still is 37 of 256 live particles, with two heroes).
+- A hit from an unseen hero, a later Northwall block, two walls of one hero,
+  the crack of a wall in the flat view, a Fault Line pillar that outlives its
+  owner, a renewed Wandering Ember, a real walk during the Furnace Breath
+  windup and a team fight with many casters were tested in code and never seen
+  in a capture. Pool pressure in a team fight was not checked (the largest
+  count in any still is 37 of 256 live particles, with two heroes).
+- The tuned basic-attack hits of the Veilstalker and the Cinderforge were not
+  captured on the final build (see Checks).
 - The four client input fixes (Field Dressing, Mountain Echo, Rift Step,
   lantern) and the two ally-cast fixes are proven by unit, ECS and authority
   parity tests only.
@@ -181,10 +208,11 @@ Smaller ones from the analysis, unchanged: whether the caster of Horizon Ray is
 anchored during the windup; the Edge Lunge refund, the Mirror Guard riposte
 anchor and who sees a Fourfold Duel challenge; Patient Curse "weaken" without
 mitigation and Shadow Lash on a structure; whether the lantern rescue passes
-terrain; class-default handhelds for Cinderforge and Edgeweaver; the Sprite2d
-team colour of hostile lanes, cones, cages and walls; the HUD line of Dagger
-Mastery and the Ranger tagline, which still lack the corrections their skill
-descriptions got.
+terrain; class-default handhelds for Cinderforge and Edgeweaver; the caster
+state `soul_stack` of the Chainkeeper (two design reviews accepted it, one
+rejected it; the class ships without it); the Sprite2d team colour of hostile
+lanes, cones, cages and walls; the HUD line of Dagger Mastery and the Ranger
+tagline, which still lack the corrections their skill descriptions got.
 
 ## Deferred
 
@@ -200,8 +228,14 @@ Cut for size or rejected:
 - Victim hit reaction on the body; fuse-corrected remaining ring for Orbital
   Collapse; facing satellites on a fog-cut lane.
 - Preview `lane_to_point_rear`, `BasicProfile.color`, `cast.recast_link`,
-  `stack_speed_step`, the `quickened` and `soul_stack` states, `owner_tether`
-  on the lantern, `crumble` on a lane, `body.anchor: owner`.
+  `stack_speed_step`, the `quickened` state, `owner_tether` on the lantern,
+  `crumble` on a lane, `duel_facets` part (b) (the mirrored side rule; part
+  (a), the diamond outlines, is shipped), `body.anchor: owner`, `body.caps`
+  (the geometry table fixes the caps of a lane).
+- Unused IDs dropped: the motion `channel_raise_loop` is not exported; the
+  models `pillar` and `colossus` are not in the new model list (their GLB
+  files stay on disk); `disc` stays an engine mesh and is not an authorable
+  silhouette; `pistol_aim` stays in the motion library, untouched and unused.
 - Smoothing of legacy homing projectiles, root interpolation of replicated
   bodies, catalog-timed caster states, kill moments and camera effects.
 - A true 2D world-effect renderer, new 2D projectile shapes, per-skill 2D hero
@@ -223,10 +257,14 @@ Known and left as they are:
   more than 0.25 s after it fired plays no release.
 - The style defaults of an unseen Warrior and Cleric still draw a burst that
   reaches past 1.5 units.
+- The merge commit `15ee91a` alone does not compile its test target; the next
+  commit, `d5ce43a`, adds the one missing field. It matters only for
+  `git bisect`.
 
 ## Evidence
 
 Raw logs, captures, sheets and the per-package reports are under
 `.agent/tasks/CLASS-VISUAL-IDENTITY-20261006/` in the primary checkout (local,
 deliberately untracked): `evidence.md`, `evidence.json`, `raw/final`,
-`raw/final-flight`, `raw/final-sheets`, `raw/WP24`, `raw/reports`.
+`raw/final-tuned`, `raw/final-flight`, `raw/final-sheets`, `raw/WP24`,
+`raw/closing`, `raw/reports`.
