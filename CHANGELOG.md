@@ -5,7 +5,7 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
-- Improve the first match with an objective-first guide, loading tips navigable by buttons or a single-finger swipe, and a remembered beginner-tips switch in Settings → HUD. Compact creature health bars, reduce melee/hit/tower sound gains, and use a closer default phone camera while preserving saved zoom choices.
+- Improve the first match with an objective-first guide, loading tips navigable by buttons or a single-finger swipe, and a remembered beginner-tips switch in Settings → HUD. Keep advice arrows inside narrow desktop windows. Compact creature health bars, reduce melee/hit/tower sound gains, and use a closer default phone camera while preserving saved zoom choices.
 
 ### 0.44.0 candidate — mobile playtest quality
 

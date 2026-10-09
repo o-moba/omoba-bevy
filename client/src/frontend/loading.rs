@@ -719,7 +719,7 @@ fn render_loading(
                 }
                 None => spawn_connecting_body(root, &shell, show_tips),
             };
-            let footer = spawn_footer(root, &shell, tip_index, show_tips);
+            let footer = spawn_footer(root, &shell, tip_index, show_tips, window.width());
             parts = Some(LoadingParts {
                 ring: ring.or(body.ring),
                 headline: body.headline,
@@ -1286,11 +1286,13 @@ fn spawn_footer(
     shell: &Shell,
     tip_index: usize,
     show_tips: bool,
+    viewport_width: f32,
 ) -> (Entity, Entity, Entity) {
     let position = if shell.desktop() {
+        let width = (viewport_width - shell.left - shell.right).clamp(0.0, 904.0);
         Node {
-            width: Val::Px(904.0),
-            margin: UiRect::left(Val::Px(-452.0)),
+            width: Val::Px(width),
+            margin: UiRect::left(Val::Px(-width * 0.5)),
             ..absolute(
                 Val::Percent(50.0),
                 Val::Auto,
@@ -1708,7 +1710,7 @@ mod tests {
             .add_ui_action::<LoadingAction>()
             .add_systems(Update, loading_actions.after(crate::ui::UiSet::Dispatch));
         harness::spawn_ui(app.world_mut(), |root| {
-            spawn_footer(root, &Shell::of(Form::Phone, None), 0, true);
+            spawn_footer(root, &Shell::of(Form::Phone, None), 0, true, 844.0);
         });
         app.update();
         harness::press(app.world_mut(), "LoadingTipPrevious");
@@ -1721,10 +1723,91 @@ mod tests {
         assert_eq!(app.world().resource::<LoadingLatch>().tip, 0);
         let mut hidden = harness::kit_app();
         harness::spawn_ui(hidden.world_mut(), |root| {
-            spawn_footer(root, &Shell::of(Form::Phone, None), 0, false);
+            spawn_footer(root, &Shell::of(Form::Phone, None), 0, false, 844.0);
         });
         assert!(harness::find(hidden.world_mut(), "LoadingTipNext").is_none());
         assert!(harness::find(hidden.world_mut(), "LoadingTipText").is_none());
+    }
+
+    #[test]
+    fn advice_buttons_stay_inside_a_narrow_desktop_window() {
+        use bevy::camera::{ComputedCameraValues, RenderTargetInfo};
+        let mut app = App::new();
+        app.add_plugins((
+            MinimalPlugins,
+            bevy::asset::AssetPlugin::default(),
+            bevy::image::ImagePlugin::default(),
+            bevy::text::TextPlugin,
+            bevy::transform::TransformPlugin,
+            bevy::input::InputPlugin,
+            bevy::ui::UiPlugin,
+            bevy::camera::visibility::VisibilityPlugin,
+            bevy::picking::PickingPlugin,
+            bevy::picking::InteractionPlugin,
+        ))
+        .init_resource::<Assets<bevy::mesh::Mesh>>()
+        .init_resource::<Assets<bevy::mesh::skinning::SkinnedMeshInverseBindposes>>()
+        .init_resource::<Assets<TextureAtlasLayout>>();
+        let size = UVec2::new(800, 600);
+        let mut window = Window::default();
+        window.resolution.set_scale_factor_override(Some(1.0));
+        window.resolution.set_physical_resolution(size.x, size.y);
+        app.world_mut().spawn((window, PrimaryWindow));
+        app.world_mut().spawn((
+            Camera2d,
+            Camera {
+                computed: ComputedCameraValues {
+                    target_info: Some(RenderTargetInfo {
+                        physical_size: size,
+                        scale_factor: 1.0,
+                    }),
+                    ..default()
+                },
+                ..default()
+            },
+        ));
+        app.world_mut()
+            .commands()
+            .spawn(Node {
+                width: Val::Percent(100.0),
+                height: Val::Percent(100.0),
+                ..default()
+            })
+            .with_children(|root| {
+                spawn_footer(
+                    root,
+                    &Shell::of(Form::Desktop, None),
+                    0,
+                    true,
+                    size.x as f32,
+                );
+            });
+        app.finish();
+        app.cleanup();
+        for _ in 0..4 {
+            app.update();
+        }
+        let mut buttons = 0;
+        for (id, node, transform) in app
+            .world_mut()
+            .query::<(&TestId, &ComputedNode, &UiGlobalTransform)>()
+            .iter(app.world())
+        {
+            if matches!(id.as_str(), "LoadingTipPrevious" | "LoadingTipNext") {
+                let rect = Rect::from_center_size(transform.translation, node.size());
+                assert!(
+                    node.size().x >= 44.0,
+                    "advice controls retain their touch width"
+                );
+                assert!(
+                    rect.min.x >= 40.0 && rect.max.x <= size.x as f32 - 40.0,
+                    "{}: {rect:?}",
+                    id.as_str()
+                );
+                buttons += 1;
+            }
+        }
+        assert_eq!(buttons, 2);
     }
 
     #[test]
