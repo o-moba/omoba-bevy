@@ -1,5 +1,45 @@
 # Feature Inventory
 
+## Class visual identity and skill fixes (0.44.0 candidate)
+
+Every skill of every class has its own staged presentation. The 68 skills and
+17 basic attacks each read a row of data: a cast accent, a motion from the
+shared 55-clip library, a body built around the replicated geometry of the
+effect, a hit recipe drawn on the confirmed receipt and a voice made from the
+existing samples. No two skills share motion family, body and impact, and a
+skill keeps its look on any button and in any recipe. Warrior and Warden basic
+attacks no longer throw a blade, every legacy projectile ability has a flight
+form of its own, and the Wildspark launcher round is a canister rather than the
+rocket model. Aim previews of the 48 modular skills are drawn from the server
+rule. Status effects are mesh shapes read from replicated flags, and Northwall
+shows each projectile it stops.
+
+The presentation follows fixed honesty rules: a hit, a link or a number needs
+an accepted combat receipt; a boundary equals the replicated geometry; an
+effect that vanishes is not drawn as a hit; nothing of a hero in fog is drawn
+or implied. A few looks are smaller than the shapes they replace for that
+reason, and one (the release of Wandering Ember) is plainly weaker; the list
+is in [combat cosmetics](combat-cosmetics.md#where-the-new-look-is-weaker).
+
+The same candidate fixes skill mechanics that contradicted their own
+descriptions, without changing a balance number: hero-only picks for Patient
+Curse, Fourfold Duel and Orbital Guard, no Thunder Kick on a tower, a root that
+blocks the recast dash of Echo Strike and Iron Hook, a Thunder Pulse recast
+only after a hit, Rift Seal on unprotected enemy structures, no doubled self
+shield on Sheltering Leap and Anchor Step, orb and field effects that no
+longer cut longer ones short, a Fault Line pillar and a Furnace Breath
+telegraph replicated as the server uses them, and receipts from unseen heroes
+that reach their victim without naming the attacker. Practice bots heal and
+restore mana by need. The client refuses, with a line of feedback, casts the
+server would drop: a Rift Step onto a blocked point and an ally skill without
+an ally; a tap on Sheltering Leap or Orbital Guard aims at an ally.
+
+Gameplay revision `combat-2026-10-08-mechanics` with protocol 11 and catalog
+standard-kits-6: client and server ship together. Verified on stills of one
+English 1280x720 desktop viewport and by tests; no physical device, no phone
+frame time, no multiplayer session with people, nothing judged in motion. See
+[the iteration note](progress/2026-10-09-class-visual-identity.md).
+
 ## Mobile playtest quality (0.44.0 candidate)
 
 The new candidate removes automatic account-history result popups, gives textured
@@ -17,7 +57,8 @@ The dragon pit hosts Wind, Stone and Flame in that order, with no fourth spawn:
 +20 armor and resistance, and +12% damage respectively. Buffs do not stack with
 themselves, expire normally, affect respawned teammates and reset each round.
 Wendigo is unchanged. Protocol 11 / standard-kits-6 requires matching client and
-server. See [verification status](progress/2026-10-06-mobile-playtest-quality.md).
+server; the gameplay revision of the candidate is now
+`combat-2026-10-08-mechanics` (see the section above). See [verification status](progress/2026-10-06-mobile-playtest-quality.md).
 
 ## Release compatibility (0.41.0)
 

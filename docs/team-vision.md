@@ -18,7 +18,7 @@ use this feature; an older server that omits `vision` uses the legacy presentati
 - Accepted basic attacks, hostile unit-targeted skills and every accepted cast of
   an equipped kit skill reveal the attacker for two seconds through grass,
   provided they are within the opposing team's radial sight. Legacy self skills,
-  a weapon toggle (Wild Switch, on whatever button it is bound) and rejected
+  a weapon toggle (Switchfire, `wild_switch`, on whatever button it is bound) and rejected
   commands do not trigger this reveal.
 - A local `BRUSH · CONCEALED` / `BRUSH · REVEALED` label reports the server's current
   concealment result. An already-launched homing projectile still follows and
@@ -44,6 +44,11 @@ hero that dealt it is hidden (fog, grass, a trap left behind). Its source is
 withheld (`Unknown`, id 0), so the hit is seen and heard without naming or
 locating the attacker; style, action slot and the trap flag stay. A hidden source
 that is not a hero still drops the receipt.
+The client draws such a receipt as the built-in burst of its wire style without
+a direction (a ring where a melee hit has its slash), with its number and its
+sound, no skill recipe and no link to an attacker. It is drawn and heard once,
+also when the attacker becomes visible while the server still retains the
+receipt. A shielded trap of an unseen owner is audible and not drawn.
 Public scoreboard identity and statistics remain available. Public lobby/draft
 rosters are unaffected. Hidden actors and their child visuals are despawned and
 recreated normally on reacquisition; target validation clears stale selections.

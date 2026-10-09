@@ -11,8 +11,9 @@ motions. `config/skills.skillfx` selects them by skill ID in the accepted
 recipe; Q/W/E/R are input slots. Runtime retargeting caches every named motion
 and instances play independently. Dawn Ray preparation/release follows its
 replicated warning/beam, with cancellation and death priority. See
-[combat cosmetics](combat-cosmetics.md#skill-presentation-pilot) for the current
-contract and remaining phase/weapon work.
+[combat cosmetics](combat-cosmetics.md#class-visual-identity-presentation-v2-0440-candidate)
+for the current contract; the pilot itself is described
+[further down that page](combat-cosmetics.md#skill-presentation-pilot).
 
 ## Skill motion vocabulary
 
@@ -41,6 +42,18 @@ must be described as such. Rows marked `approx` join poses that were never
 authored as one movement; a skill may use them only after a look on two rigs.
 The table, its fields and the full clip list are in
 [the animation source README](../assets-src/animations/README.md).
+
+Which clip a skill plays, at what `rate`, from which `start`, with which windup
+pose and with which clip on a recast is data of its row in
+`config/skills.skillfx`; basic attacks read the 17 basic rows, and no motion
+table is left in code. A windup is held while the hero's own telegraph exists
+(four phases: `instant`, `warn_fire`, `fuse`, `parry`). For a clip released on
+the cast edge the shipped data keeps `(contact - start * duration) / rate` at
+or below 0.15 s, so the strike is on screen within that time of the accepted
+cast. Nothing in the game waits for a clip: the server has already resolved
+the action when the clip starts. `interact`, `pistol_reload` and `roll` were
+retired from the library with this pass; the derived clips that sample those
+sources are unaffected. `pistol_aim` is kept and unused.
 
 ```mermaid
 flowchart LR
