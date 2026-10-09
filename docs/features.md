@@ -18,7 +18,7 @@ The presentation follows fixed honesty rules: a hit, a link or a number needs
 an accepted combat receipt; a boundary equals the replicated geometry; an
 effect that vanishes is not drawn as a hit; nothing of a hero in fog is drawn
 or implied. A few looks are smaller than the shapes they replace for that
-reason, and one (the release of Wandering Ember) is plainly weaker; the list
+reason; the list
 is in [combat cosmetics](combat-cosmetics.md#where-the-new-look-is-weaker).
 
 The same candidate fixes skill mechanics that contradicted their own

@@ -367,8 +367,9 @@ the old look and 17 stills are below it. Sixteen of those are an oversized old
 shape that the rules above no longer allow, the same replicated shape, a pose
 or noise. Stated plainly:
 
-- **Wandering Ember** is weaker on its release still (0.87): a pale yellow orb
-  on pale stone. A five-line data proposal exists and is not applied.
+- **Wandering Ember** was weaker on its release still (0.87): a pale yellow orb
+  on pale stone. Its accent, satellites and accent colour were tuned and it
+  now measures 0.98, level with the old look.
 - **Edge Lunge and Rift Step** are smaller on screen than before: a hit is held
   inside 1.5 units of its receipt where the old ring was about 3 units across.
 - **The dash line of Flame Dance** is weaker than the shared cyan streak it

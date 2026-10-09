@@ -79,43 +79,32 @@ server must ship together.** The Northwall count uses the existing
 All on the final tree, English, one viewport (1280x720, `models3d`,
 offscreen).
 
-**The full gate did not run.** Free disk was 15 GB when this step started,
-under the 20 GB line below which the repository rules forbid building, and the
-one pruning that is allowed freed nothing. Nothing was compiled in this step.
-What follows was run without a compiler, on binaries that an earlier step had
-built from these same sources:
+**The full gate passed** on the final tree (`f255d14`), once disk space was
+freed (the owner approved removing the compiler's incremental directories from
+the two shared caches):
 
 | Check | Result |
 | --- | --- |
-| `cargo fmt --all -- --check` | clean |
-| client library tests (test binary built from this tree, run directly) | 1268 passed, 0 failed, 1 ignored |
-| `common`, `shared`, `server` tests (same way) | 168, 129 and 333 passed, 0 failed, 3 ignored in `server` |
-| script tests (`scripts`, `mobile/ios`) | 208 and 45 passed |
+| `make check` (fmt, workspace clippy with warnings as errors, clippy without the `qa` feature, workspace tests, script tests) | exit 0, no warning |
+| workspace tests inside it | client 1268, common 168, shared 129, server 333, passport 30, career-store 13, account-api 6 passed; 0 failed |
+| script tests inside it | 208 and 45 passed |
+| `cargo build -p server && cargo test -p harness -- --test-threads=1` | exit 0; 24 unit and 26 integration tests passed |
 | `python3 scripts/export_humanoid_motion.py --check` | exit 0, 55 motions |
-| headless gameplay harness (test binaries built before the merge from identical harness and server-side sources, run against the server binary of this tree) | 24 unit and 26 integration tests passed |
-| captures: 17 classes, the mixed recipe and a Sprite2d smoke of the final code and assets, taken before the last documentation-only corrections; the flight run of the commit before the documentation (same binaries and assets) | every `capture-run.json` passes; no black frame, no panic |
+| captures: 17 classes, the mixed recipe and a Sprite2d smoke (taken two commits before the final tree; the three classes whose rows changed afterwards were captured again on the final tree) | every `capture-run.json` passes; no black frame, no panic |
 
-**Not run on the final tree:** `cargo clippy --workspace --all-targets --no-deps
--- -D warnings`, the clippy run without the `qa` feature, and the tests of
-`account-api`, `arena-sync`, `career-store` and `passport` (this branch does
-not touch those crates, but `shared`, which three of them use, changed). On
-the commit before the documentation an earlier step ran clippy through cargo
-with warnings as errors for `client` (all targets, and the library without
-`qa`), `common`, `server` and `shared`, and it passed; the other workspace
-crates were not linted on this tree. That is an earlier result, not a check of
-this step. `make check` and `cargo test -p harness` have to be run through
-cargo once space is free.
+The outputs are `raw/make-check.txt` and `raw/verify-gameplay.txt` in the task
+folder.
 
-One test of `main` is unreliable under load and is not fixed in the tree:
+One test of `main` was unreliable under load and is fixed:
 `frontend::draft::tests::phone_avatar_picker_has_visible_tiles_and_raw_taps_switch_tabs_and_select`.
-Cause: the test drains the network-command messages four `app.update()` calls
-after the tap that sent the request. With `TimePlugin` in the app, Bevy swaps
-its message buffers only after a fixed-timestep tick, that is after wall time,
-so on a loaded machine the request has already been dropped (27 failures in
-623 runs under load, every one at the last assertion; none in 8 idle runs).
-The game is not affected: its network system reads the messages every frame.
-A fix of the test (a recorder that reads every frame) is written and waits to
-be compiled.
+The test drained the network-command messages four `app.update()` calls after
+the tap that sent the request. With `TimePlugin` in the app, Bevy swaps its
+message buffers only after a fixed-timestep tick, that is after wall time, so
+on a loaded machine the request had already been dropped (27 failures in 623
+runs under load, every one at the last assertion; none in 8 idle runs). The
+game was never affected: its network system reads the messages every frame.
+The test now records the request in the frame it is written; ten runs in a
+row pass.
 
 ## Where the new look is weaker
 
@@ -125,9 +114,11 @@ the old look; 17 stills are below it. By the measurer's per-class table 14
 classes read better than their old look and three are level (Edgeweaver,
 Emberveil, Riftshot); no class as a whole is weaker.
 
-- Genuinely weaker: the release of Wandering Ember (0.87), a pale orb on pale
-  stone. A five-line data proposal that brings it to 0.98 exists in the task
-  folder and is not applied, because it could not be tested.
+- Was genuinely weaker and is tuned: the release of Wandering Ember measured
+  0.87, a pale orb on pale stone. A larger toss accent, wider satellites and a
+  deeper accent colour bring it to 0.98 in three trial runs (level, inside the
+  run-to-run noise). The same change gives the basic-attack hits of
+  Veilstalker and Cinderforge more pieces and a darker slot.
 - Smaller on screen: Edge Lunge and Rift Step (a hit stays within 1.5 units of
   its receipt); the dash line of Flame Dance.
 - Smaller for an honesty reason: Horizon Wave, Echo Strike, Rampage (old
