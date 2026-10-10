@@ -5,6 +5,12 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Fix the Linux client freezing the desktop after audio trouble: cpal 0.17 spun its
+  realtime ALSA thread when PipeWire reported `POLLERR` (xrun or suspend), flooding the
+  log with "`alsa::poll()` returned POLLERR". A vendored cpal 0.17.3 now recovers the PCM,
+  stops on a disconnected device and backs off repeated failures
+  (`third_party/cpal-0.17.3/OMOBA-PATCH.md`). No gameplay or protocol change.
+
 - Add `make android-diagnose` for app-scoped launch evidence, installed version,
   device ABI and graphics capabilities. Correct Android compatibility guidance:
   Android 12 meets the OS minimum, while ABI slices do not provide a GPU fallback.
