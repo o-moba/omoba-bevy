@@ -1713,7 +1713,7 @@
                   "nickname": {
                     "type": "string",
                     "maxLength": 25,
-                    "description": "Editable nickname#1234. Legacy bare names (1–20 codepoints) preserve the existing tag."
+                    "description": "Editable nickname#1234. Legacy bare names (1\u201320 codepoints) preserve the existing tag."
                   }
                 },
                 "required": [
@@ -3554,6 +3554,958 @@
           }
         }
       }
+    },
+    "/v1/me/class-builds": {
+      "get": {
+        "summary": "List up to 50 private class preferences, newest update first",
+        "description": "Uses the current browser session owner and existing settings consent. Foreign and absent IDs both return 404. Available after portal migration 004; older schema returns 503 class_builds_unavailable.",
+        "operationId": "list_class_builds",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClassBuildList"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Expired or missing session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Fresh confirmation required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Absent or private resource",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "state_changed (stale version), idempotency_conflict (key reused for another method/path/payload), or class_build_limit (50 private builds).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Body over 8192 bytes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Shared rate limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Dependency unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Save a private class preference",
+        "description": "Uses the current browser session owner and existing settings consent. Foreign and absent IDs both return 404. Available after portal migration 004; older schema returns 503 class_builds_unavailable.",
+        "operationId": "create_class_build",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClassBuildResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Expired or missing session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Fresh confirmation required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Absent or private resource",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "state_changed (stale version), idempotency_conflict (key reused for another method/path/payload), or class_build_limit (50 private builds).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Body over 8192 bytes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Shared rate limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Dependency unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "document": {
+                    "$ref": "#/components/schemas/ClassBuildDocument"
+                  }
+                },
+                "required": [
+                  "document"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 16,
+              "maxLength": 80,
+              "pattern": "^[A-Za-z0-9-]+$"
+            }
+          }
+        ]
+      }
+    },
+    "/v1/me/class-builds/{build_id}": {
+      "get": {
+        "summary": "Read an owned private class preference",
+        "description": "Uses the current browser session owner and existing settings consent. Foreign and absent IDs both return 404. Available after portal migration 004; older schema returns 503 class_builds_unavailable.",
+        "operationId": "get_class_build",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClassBuildResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Expired or missing session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Fresh confirmation required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Absent or private resource",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "state_changed (stale version), idempotency_conflict (key reused for another method/path/payload), or class_build_limit (50 private builds).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Body over 8192 bytes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Shared rate limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Dependency unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "build_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          }
+        ]
+      },
+      "patch": {
+        "summary": "Replace a private class preference at an expected version",
+        "description": "Uses the current browser session owner and existing settings consent. Foreign and absent IDs both return 404. Available after portal migration 004; older schema returns 503 class_builds_unavailable.",
+        "operationId": "update_class_build",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClassBuildResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Expired or missing session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Fresh confirmation required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Absent or private resource",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "state_changed (stale version), idempotency_conflict (key reused for another method/path/payload), or class_build_limit (50 private builds).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Body over 8192 bytes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Shared rate limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Dependency unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "expected_version": {
+                    "type": "string",
+                    "pattern": "^[1-9][0-9]*$",
+                    "description": "Canonical decimal positive signed 64-bit version; mutation preconditions must be below 9223372036854775807."
+                  },
+                  "document": {
+                    "$ref": "#/components/schemas/ClassBuildDocument"
+                  }
+                },
+                "required": [
+                  "expected_version",
+                  "document"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "build_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 16,
+              "maxLength": 80,
+              "pattern": "^[A-Za-z0-9-]+$"
+            }
+          }
+        ]
+      },
+      "delete": {
+        "summary": "Delete a private class preference at an expected version",
+        "description": "Uses the current browser session owner and existing settings consent. Foreign and absent IDs both return 404. Available after portal migration 004; older schema returns 503 class_builds_unavailable.",
+        "operationId": "delete_class_build",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClassBuildDeleted"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Expired or missing session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Fresh confirmation required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Absent or private resource",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "state_changed (stale version), idempotency_conflict (key reused for another method/path/payload), or class_build_limit (50 private builds).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Body over 8192 bytes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Shared rate limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Dependency unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "build_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 16,
+              "maxLength": 80,
+              "pattern": "^[A-Za-z0-9-]+$"
+            }
+          },
+          {
+            "name": "version",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[1-9][0-9]*$",
+              "description": "Canonical decimal positive signed 64-bit version; mutation preconditions must be below 9223372036854775807."
+            }
+          }
+        ]
+      }
+    },
+    "/v1/me/ekza-library": {
+      "get": {
+        "summary": "Verify the current Ekza library connection",
+        "operationId": "get_ekza_library",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "description": "Owner-bound library consent, serialized across sessions. Does not publish or admit game assets. An upstream outage preserves encrypted consent and normally returns 200 with state unavailable; migration 005 missing also returns unavailable. A new connect upstream failure returns 503 ekza_unavailable. Explicit upstream 401/410 clears revoked or expired consent. No query parameters accepted.",
+        "responses": {
+          "200": {
+            "description": "Current whitelisted connection state, including unavailable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EkzaLibraryState"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Expired or missing session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Body over 8192 bytes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Shared rate limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Dependency unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Forget the local encrypted Ekza library grant",
+        "operationId": "delete_ekza_library",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "description": "Owner-bound library consent, serialized across sessions. Does not publish or admit game assets. An upstream outage preserves encrypted consent and normally returns 200 with state unavailable; migration 005 missing also returns unavailable. A new connect upstream failure returns 503 ekza_unavailable. Explicit upstream 401/410 clears revoked or expired consent. No query parameters accepted. DELETE has an empty body. Forgetting here does not revoke the upstream Studio grant.",
+        "responses": {
+          "200": {
+            "description": "Current whitelisted connection state, including unavailable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EkzaLibraryState"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Expired or missing session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Body over 8192 bytes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Shared rate limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Dependency unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/me/ekza-library/connect": {
+      "post": {
+        "summary": "Start or reuse Studio library consent",
+        "operationId": "connect_ekza_library",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "description": "Owner-bound library consent, serialized across sessions. Does not publish or admit game assets. An upstream outage preserves encrypted consent and normally returns 200 with state unavailable; migration 005 missing also returns unavailable. A new connect upstream failure returns 503 ekza_unavailable. Explicit upstream 401/410 clears revoked or expired consent. No query parameters accepted.",
+        "responses": {
+          "200": {
+            "description": "Current whitelisted connection state, including unavailable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EkzaLibraryState"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Expired or missing session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Body over 8192 bytes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Shared rate limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Dependency unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/me/ekza-library/poll": {
+      "post": {
+        "summary": "Poll Studio consent with a server-enforced interval",
+        "operationId": "poll_ekza_library",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "description": "Owner-bound library consent, serialized across sessions. Does not publish or admit game assets. An upstream outage preserves encrypted consent and normally returns 200 with state unavailable; migration 005 missing also returns unavailable. A new connect upstream failure returns 503 ekza_unavailable. Explicit upstream 401/410 clears revoked or expired consent. No query parameters accepted.",
+        "responses": {
+          "200": {
+            "description": "Current whitelisted connection state, including unavailable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EkzaLibraryState"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Expired or missing session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Body over 8192 bytes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Shared rate limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Dependency unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -3589,7 +4541,7 @@
           "nickname": {
             "type": "string",
             "maxLength": 25,
-            "description": "Current public nickname#1234 handle, 1–20 Unicode codepoints plus four digits.",
+            "description": "Current public nickname#1234 handle, 1\u201320 Unicode codepoints plus four digits.",
             "pattern": "^[^#]{1,20}#[0-9]{4}$"
           },
           "rating": {
@@ -3638,7 +4590,7 @@
           },
           "nickname": {
             "type": "string",
-            "description": "Current public nickname#1234 handle, 1–20 Unicode codepoints plus four digits.",
+            "description": "Current public nickname#1234 handle, 1\u201320 Unicode codepoints plus four digits.",
             "maxLength": 25,
             "pattern": "^[^#]{1,20}#[0-9]{4}$"
           },
@@ -4715,7 +5667,7 @@
           "nickname": {
             "type": "string",
             "maxLength": 25,
-            "description": "Current public nickname#1234 handle, 1–20 Unicode codepoints plus four digits.",
+            "description": "Current public nickname#1234 handle, 1\u201320 Unicode codepoints plus four digits.",
             "pattern": "^[^#]{1,20}#[0-9]{4}$"
           }
         },
@@ -5026,6 +5978,332 @@
           "request",
           "signature"
         ]
+      },
+      "ClassBuildRecipe": {
+        "type": "object",
+        "properties": {
+          "schema_version": {
+            "type": "integer",
+            "const": 1
+          },
+          "catalog_revision": {
+            "type": "string",
+            "const": "standard-kits-6"
+          },
+          "core": {
+            "type": "string",
+            "enum": [
+              "dawnweaver",
+              "wildspark",
+              "cinderforge",
+              "edgeweaver",
+              "stormfist",
+              "veilstalker",
+              "emberveil",
+              "orbitwright",
+              "riftshot",
+              "chainkeeper",
+              "frostguard",
+              "adventurer"
+            ]
+          },
+          "passive": {
+            "type": "string",
+            "enum": [
+              "radiance",
+              "momentum",
+              "tempered",
+              "vitals",
+              "flow",
+              "shroud",
+              "essence",
+              "clockwork",
+              "resonance",
+              "souls",
+              "concussion",
+              "dagger_mastery"
+            ]
+          },
+          "skills": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "dawn_bind",
+                "dawn_barrier",
+                "dawn_field",
+                "dawn_ray",
+                "wild_switch",
+                "wild_zap",
+                "wild_traps",
+                "wild_rocket",
+                "fault_line",
+                "furnace_breath",
+                "anvil_charge",
+                "mountain_echo",
+                "edge_lunge",
+                "mirror_guard",
+                "twin_tempo",
+                "fourfold_duel",
+                "echo_strike",
+                "anchor_step",
+                "thunder_pulse",
+                "thunder_kick",
+                "thorn_volley",
+                "patient_curse",
+                "shadow_lash",
+                "nightfall",
+                "wandering_ember",
+                "kindled_wisps",
+                "heart_tether",
+                "flame_dance",
+                "orbital_command",
+                "orbital_field",
+                "orbital_guard",
+                "orbital_collapse",
+                "rift_needle",
+                "rift_seal",
+                "rift_step",
+                "horizon_wave",
+                "iron_hook",
+                "guiding_lantern",
+                "chain_sweep",
+                "iron_boundary",
+                "winter_shard",
+                "sheltering_leap",
+                "northwall",
+                "winter_divide",
+                "dagger_deadly_blow",
+                "dagger_bluff",
+                "dagger_backstab",
+                "dagger_lethal_blow"
+              ]
+            },
+            "minItems": 4,
+            "maxItems": 4,
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "schema_version",
+          "catalog_revision",
+          "core",
+          "passive",
+          "skills"
+        ],
+        "additionalProperties": false,
+        "description": "Validated by the shared game resolver, including distinct skill identities and capability dependencies. Original skill unlock levels apply at runtime independently of key binding. Catalogue changes require an explicit valid recipe; no silent migration."
+      },
+      "ClassBuildDocument": {
+        "type": "object",
+        "properties": {
+          "schema": {
+            "type": "string",
+            "const": "omoba.class-build.v1"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 1000
+          },
+          "recipe": {
+            "$ref": "#/components/schemas/ClassBuildRecipe"
+          }
+        },
+        "required": [
+          "schema",
+          "name",
+          "description",
+          "recipe"
+        ],
+        "additionalProperties": false,
+        "description": "Private local prototype preference, not a published class, asset approval, or public matchmaking admission. Name must be nonblank and control-free; serialized request bodies are limited to 8192 bytes."
+      },
+      "ClassBuild": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "version": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]*$",
+            "description": "Canonical decimal positive signed 64-bit version; mutation preconditions must be below 9223372036854775807."
+          },
+          "document": {
+            "$ref": "#/components/schemas/ClassBuildDocument"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "version",
+          "document",
+          "created_at",
+          "updated_at"
+        ],
+        "additionalProperties": false
+      },
+      "ClassBuildResult": {
+        "type": "object",
+        "properties": {
+          "build": {
+            "$ref": "#/components/schemas/ClassBuild"
+          }
+        },
+        "required": [
+          "build"
+        ],
+        "additionalProperties": false
+      },
+      "ClassBuildList": {
+        "type": "object",
+        "properties": {
+          "builds": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ClassBuild"
+            },
+            "maxItems": 50
+          }
+        },
+        "required": [
+          "builds"
+        ],
+        "additionalProperties": false
+      },
+      "ClassBuildDeleted": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "const": "deleted"
+          },
+          "id": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        },
+        "required": [
+          "status",
+          "id"
+        ],
+        "additionalProperties": false
+      },
+      "EkzaLibraryState": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "state": {
+                "const": "not_connected",
+                "type": "string"
+              },
+              "prototype": {
+                "type": "boolean",
+                "const": true,
+                "description": "Present only for the explicitly configured local Registry protocol fixture."
+              }
+            },
+            "required": [
+              "state"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "state": {
+                "const": "unavailable",
+                "type": "string"
+              },
+              "prototype": {
+                "type": "boolean",
+                "const": true,
+                "description": "Present only for the explicitly configured local Registry protocol fixture."
+              }
+            },
+            "required": [
+              "state"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "state": {
+                "const": "pending",
+                "type": "string"
+              },
+              "prototype": {
+                "type": "boolean",
+                "const": true,
+                "description": "Present only for the explicitly configured local Registry protocol fixture."
+              },
+              "userCode": {
+                "type": "string",
+                "pattern": "^[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{8}$"
+              },
+              "verificationUrl": {
+                "type": "string",
+                "format": "uri"
+              },
+              "expiresAt": {
+                "type": "string",
+                "maxLength": 64
+              }
+            },
+            "required": [
+              "state",
+              "userCode",
+              "verificationUrl",
+              "expiresAt"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "state": {
+                "const": "connected",
+                "type": "string"
+              },
+              "prototype": {
+                "type": "boolean",
+                "const": true,
+                "description": "Present only for the explicitly configured local Registry protocol fixture."
+              },
+              "username": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "expiresAt": {
+                "type": "string",
+                "maxLength": 64
+              }
+            },
+            "required": [
+              "state",
+              "username",
+              "expiresAt"
+            ],
+            "additionalProperties": false
+          }
+        ],
+        "description": "Whitelisted connection state only. Device codes, access tokens and library items never reach the browser. Username is a display label, not an immutable identity or unified SSO subject."
       }
     }
   }

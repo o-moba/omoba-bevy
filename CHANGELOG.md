@@ -5,6 +5,10 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Add the community class workshop bridge: export compiled rules for 12 modular cores/48 skills, validate named build documents through the shared resolver, and import them into local Combat Test. Extend the existing Account API with private versioned build storage and encrypted, owner-bound Ekza library consent; public/ranked admission is unchanged. The companion portal provides the editor, previews, account saves and portable downloads.
+
+- Add the first creator-catalogue bridge: a deterministic class/skill/asset requirements export, content-addressed licensed handheld references and offline Blender thumbnails. The companion portal can browse the snapshot and prepare revision-pinned contribution briefs. Exact requirement approval, cosmetic sets and runtime replacement of projectiles/props remain future work; no gameplay or network protocol changes.
+
 ### Wildspark reference iteration
 
 - Original detailed repeater, launcher, finned rockets and hinged trap models; accepted-action barrel rotation, recoil, socket muzzle flashes, aimed W and underhand trap placement. Other class defaults retain their models.
