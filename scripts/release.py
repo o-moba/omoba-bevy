@@ -9,18 +9,21 @@ One entry point for every platform package a playtest release ships:
     python3 scripts/release.py notes                       # release notes from CHANGELOG.md
     python3 scripts/release.py draft                       # draft GitHub release + upload dist/
     python3 scripts/release.py ci --ref v0.24.0            # run the GitHub release workflow
+    python3 scripts/release.py publish                     # pin dist/ packages to IPFS (Pinata)
 
-Platforms: macos (Apple silicon .app), windows (x64 zip, built on Windows /
-GitHub Actions), linux (x64 client + server tarball), android (arm64 APK,
-needs SDK/NDK), ios (Xcode archive / TestFlight, needs the Apple team).
+Platforms: macos (Apple silicon .app), windows (x64 zip; on macOS cross-built
+with cargo-xwin, otherwise Windows / GitHub Actions), linux (x64 client +
+server tarball; Docker on macOS, offline when the registry is unreachable),
+android (universal APK, needs SDK/NDK), ios (Xcode archive / TestFlight, needs
+the Apple team). `make release-all` builds all five on an Apple-silicon Mac.
 
 Artifacts land in dist/v<version>/ with SHA256SUMS.txt. `--server host:port`
 compiles the initial server address into every client; players can change it
 in the party lobby (desktop) or the SERVER keypad (phone).
 
 Nothing here publishes on its own: `draft` creates an unpublished draft
-release, `ios --upload` is the only step that sends a build to App Store
-Connect, and both must be asked for explicitly.
+release, `publish` pins packages to IPFS, `ios --upload` is the only step that
+sends a build to App Store Connect, and each must be asked for explicitly.
 """
 from __future__ import annotations
 
@@ -35,6 +38,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import zipfile
 from pathlib import Path
 
@@ -46,6 +50,11 @@ DESKTOP_BINARIES = ("client", "server")
 MAC_BUNDLE_ID = "space.ekza.omoba.desktop"
 ANDROID_KEYSTORE = Path.home() / ".config/omoba/android-playtest.keystore"
 REPO = "o-moba/omoba-bevy"
+
+
+def android_universal() -> bool:
+    """arm64-v8a + armeabi-v7a + x86_64 in one APK (make release-all); CI keeps arm64."""
+    return os.environ.get("OMOBA_ANDROID_UNIVERSAL") == "1"
 
 
 # ---------------------------------------------------------------- helpers
@@ -89,7 +98,7 @@ def artifact_name(version: str, target: str) -> str:
         "macos": f"Omoba-{version}-macos-arm64.zip",
         "windows": f"Omoba-{version}-windows-x64.zip",
         "linux": f"omoba-{version}-linux-x64.tar.gz",
-        "android": f"Omoba-{version}-android-arm64.apk",
+        "android": f"Omoba-{version}-android-{'universal' if android_universal() else 'arm64'}.apk",
         "ios": f"Omoba-{version}-ios.ipa",
     }[target]
 
@@ -121,6 +130,43 @@ def write_checksums(directory: Path) -> Path:
     target = directory / "SHA256SUMS.txt"
     target.write_text("\n".join(lines) + "\n")
     return target
+
+
+def shared_target() -> Path:
+    """Cache A in the primary checkout, shared by every worktree."""
+    common = subprocess.check_output(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
+                                     cwd=ROOT, text=True).strip()
+    return Path(common).parent / "target"
+
+
+def free_gib(path: Path = ROOT) -> float:
+    return shutil.disk_usage(path).free / (1 << 30)
+
+
+def xwin_env() -> dict | None:
+    """cargo-xwin + LLVM for cross-building the Windows package on macOS, or None."""
+    search = [os.environ.get("OMOBA_XWIN_TOOLS"), str(Path.home() / ".cargo/bin"),
+              "/tmp/omoba-xwin-tools/bin", "/opt/homebrew/opt/llvm/bin", "/usr/local/opt/llvm/bin"]
+    path = os.pathsep.join([d for d in search if d and Path(d).is_dir()] + [os.environ.get("PATH", "")])
+    if not shutil.which("cargo-xwin", path=path) or not shutil.which("clang-cl", path=path):
+        return None
+    env = os.environ.copy()
+    env["PATH"] = path
+    env.setdefault("XWIN_CACHE_DIR", str(shared_target() / "xwin"))
+    env["CARGO_INCREMENTAL"] = "0"
+    env["RUSTFLAGS"] = (env.get("RUSTFLAGS", "") + " -C target-feature=+crt-static").strip()
+    return env
+
+
+def android_ndk() -> Path | None:
+    candidates = [os.environ.get("ANDROID_NDK_HOME"), "/opt/homebrew/share/android-ndk"]
+    sdk = os.environ.get("ANDROID_HOME") or os.environ.get("ANDROID_SDK_ROOT")
+    if sdk and Path(sdk, "ndk").is_dir():
+        candidates += [str(p) for p in sorted(Path(sdk, "ndk").iterdir(), reverse=True)]
+    for candidate in candidates:
+        if candidate and Path(candidate, "toolchains/llvm/prebuilt").is_dir():
+            return Path(candidate)
+    return None
 
 
 def client_env(server: str | None) -> dict:
@@ -205,8 +251,9 @@ def check_report() -> dict:
     sdk = os.environ.get("ANDROID_HOME") or os.environ.get("ANDROID_SDK_ROOT")
     android_ready = bool(sdk and Path(sdk, "build-tools/35.0.0").is_dir()
                          and Path(sdk, "platforms/android-35").is_dir()
-                         and (os.environ.get("ANDROID_NDK_HOME") or Path(sdk, "ndk").is_dir())
-                         and have("java") and "aarch64-linux-android" in rust_targets)
+                         and android_ndk() is not None and have("java")
+                         and ({"aarch64-linux-android", "armv7-linux-androideabi", "x86_64-linux-android"}
+                              if android_universal() else {"aarch64-linux-android"}) <= rust_targets)
     ios_ready = host == "macos" and have("xcodebuild") and "aarch64-apple-ios" in rust_targets
     report = {
         "version": workspace_version(),
@@ -215,16 +262,21 @@ def check_report() -> dict:
                                          capture_output=True, text=True).stdout.strip()),
         "platforms": {
             "macos": host == "macos" and platform.machine() == "arm64",
-            "windows": host == "windows",
+            "windows": host == "windows" or (host == "macos" and xwin_env() is not None
+                                              and "x86_64-pc-windows-msvc" in rust_targets),
             "linux": host == "linux" or (host == "macos" and have("docker")),
             "android": android_ready,
             "ios": ios_ready,
         },
         "gh": have("gh"),
+        "free_gib": round(free_gib(), 1),
         "notes": {
-            "windows": "built by GitHub Actions (release.yml) unless this host is Windows",
-            "linux": "on macOS, built inside Docker (rust:bookworm); CI builds it natively",
-            "android": "needs ANDROID_HOME with build-tools 35.0.0, platforms android-35, an NDK, java; CI has them",
+            "windows": "on macOS: cargo install --locked cargo-xwin, brew install llvm, "
+                       "rustup target add x86_64-pc-windows-msvc; else GitHub Actions (release.yml)",
+            "linux": "on macOS, built inside Docker (rust:bookworm); offline fallback reuses "
+                     "target/linux-docker/toolchain-<rust> when the registry is unreachable",
+            "android": "needs ANDROID_HOME with build-tools 35.0.0, platforms android-35, an NDK "
+                       "(ANDROID_NDK_HOME or brew android-ndk), java and the three Android rust targets",
             "ios": "needs Xcode signed in to the Apple team (mobile/ios/Omoba.local.xcconfig)",
         },
     }
@@ -233,8 +285,8 @@ def check_report() -> dict:
 
 # ---------------------------------------------------------------- desktop
 
-def cargo_release(binaries, env, target=None) -> dict[str, Path]:
-    args = ["cargo", "build", "--locked", "--release", "--message-format=json-render-diagnostics"]
+def cargo_release(binaries, env, target=None, command=("cargo", "build")) -> dict[str, Path]:
+    args = [*command, "--locked", "--release", "--message-format=json-render-diagnostics"]
     for name in binaries:
         args += ["-p", name]
     if target:
@@ -353,27 +405,45 @@ exec "$DIR/Omoba.app/Contents/MacOS/server"
         return archive
 
 
+def stage_windows(stage: Path, version: str, server: str | None, client: Path, server_binary: Path):
+    stage.mkdir(parents=True)
+    for binary, name in ((client, "Omoba.exe"), (server_binary, "omoba-server.exe")):
+        raw = binary.read_bytes()[:4096]
+        offset = int.from_bytes(raw[60:64], "little")
+        if raw[:2] != b"MZ" or raw[offset:offset + 6] != b"PE\x00\x00\x64\x86":
+            raise SystemExit(f"{binary} is not an x64 Windows executable")
+        shutil.copy2(binary, stage / name)
+    stage_common(stage, version, "windows", server, stage / "assets")
+    (stage / "Host Practice Server.bat").write_text(
+        "@echo off\r\n"
+        "rem Practice server with bots for you and your friends (UDP 4000).\r\n"
+        "cd /d \"%~dp0\"\r\n"
+        "if \"%SERVER_ADDR%\"==\"\" set SERVER_ADDR=0.0.0.0:4000\r\n"
+        "set OMOBA_MATCH_MODE=practice\r\n"
+        "set OMOBA_ASSET_DIR=%~dp0assets\r\n"
+        "echo OMOBA practice server on %SERVER_ADDR%. Friends connect to this PC's IP, port 4000.\r\n"
+        "omoba-server.exe\r\n"
+        "pause\r\n")
+
+
 def build_windows(version: str, out: Path, server: str | None) -> Path:
-    if host_platform() != "windows":
-        raise SystemExit("windows packages are built on Windows: run the GitHub release workflow "
-                         "(python3 scripts/release.py ci) or run this command on a Windows machine")
-    binaries = cargo_release(DESKTOP_BINARIES, client_env(server))
+    host = host_platform()
+    if host == "windows":
+        binaries = cargo_release(DESKTOP_BINARIES, client_env(server))
+    elif host == "macos" and (env := xwin_env()):
+        # Cross-build with the Microsoft CRT/SDK that cargo-xwin caches; static CRT.
+        if server:
+            env["OMOBA_DEFAULT_GAME_SERVER_ADDR"] = server
+        else:
+            env.pop("OMOBA_DEFAULT_GAME_SERVER_ADDR", None)
+        binaries = cargo_release(DESKTOP_BINARIES, env, target="x86_64-pc-windows-msvc",
+                                 command=("cargo", "xwin", "build"))
+    else:
+        raise SystemExit("windows packages need Windows, cargo-xwin on macOS (see `check`), "
+                         "or the GitHub release workflow (python3 scripts/release.py ci)")
     with tempfile.TemporaryDirectory() as temporary:
         stage = Path(temporary) / "Omoba"
-        stage.mkdir()
-        shutil.copy2(binaries["client"], stage / "Omoba.exe")
-        shutil.copy2(binaries["server"], stage / "omoba-server.exe")
-        stage_common(stage, version, "windows", server, stage / "assets")
-        (stage / "Host Practice Server.bat").write_text(
-            "@echo off\r\n"
-            "rem Practice server with bots for you and your friends (UDP 4000).\r\n"
-            "cd /d \"%~dp0\"\r\n"
-            "if \"%SERVER_ADDR%\"==\"\" set SERVER_ADDR=0.0.0.0:4000\r\n"
-            "set OMOBA_MATCH_MODE=practice\r\n"
-            "set OMOBA_ASSET_DIR=%~dp0assets\r\n"
-            "echo OMOBA practice server on %SERVER_ADDR%. Friends connect to this PC's IP, port 4000.\r\n"
-            "omoba-server.exe\r\n"
-            "pause\r\n")
+        stage_windows(stage, version, server, binaries["client"], binaries["server"])
         archive = out / artifact_name(version, "windows")
         zip_tree(stage, archive, "Omoba")
         return archive
@@ -415,6 +485,49 @@ WantedBy=multi-user.target
 """)
 
 
+LINUX_DEBS = ("libasound2", "libasound2-data", "libasound2-dev", "libudev1", "libudev-dev")
+
+
+def linux_toolchain(cache: Path, toolchain: str) -> Path | None:
+    """A Linux Rust toolchain unpacked under the cache, named by full or major.minor version."""
+    for name in (toolchain, ".".join(toolchain.split(".")[:2])):
+        if (cache / f"toolchain-{name}/bin/cargo").is_file():
+            return cache / f"toolchain-{name}"
+    return None
+
+
+def linux_offline_prepare(cache: Path, toolchain: str) -> Path:
+    """Fetch crates and the ALSA/udev -dev packages on the host for a --network none build.
+
+    Docker Desktop sends container and registry traffic through the system proxy;
+    when that proxy is down the host can still reach crates.io and deb.debian.org.
+    """
+    installed = linux_toolchain(cache, toolchain)
+    if not installed:
+        raise SystemExit(f"Docker cannot reach the registry and {cache}/toolchain-{toolchain} is missing; "
+                         "fix Docker's proxy or install that Rust toolchain (x86_64-unknown-linux-gnu) there")
+    env = os.environ.copy()
+    env["CARGO_HOME"] = str(cache / "cargo-home")
+    run("cargo", "fetch", "--locked", env=env)
+    debs = cache / "debs"
+    debs.mkdir(parents=True, exist_ok=True)
+    if all(any(debs.glob(f"{name}_*.deb")) for name in LINUX_DEBS):
+        return installed
+    import lzma
+    import urllib.request
+    index = lzma.decompress(urllib.request.urlopen(
+        "http://deb.debian.org/debian/dists/bookworm/main/binary-amd64/Packages.xz", timeout=120).read()).decode()
+    for block in index.split("\n\n"):
+        fields = dict(line.split(": ", 1) for line in block.splitlines() if ": " in line and not line.startswith(" "))
+        if fields.get("Package") in LINUX_DEBS:
+            target = debs / Path(fields["Filename"]).name
+            data = urllib.request.urlopen("http://deb.debian.org/debian/" + fields["Filename"], timeout=120).read()
+            if hashlib.sha256(data).hexdigest() != fields["SHA256"]:
+                raise SystemExit(f"checksum mismatch for {target.name}")
+            target.write_bytes(data)
+    return installed
+
+
 def build_linux(version: str, out: Path, server: str | None) -> Path:
     archive = out / artifact_name(version, "linux")
     if host_platform() == "linux":
@@ -428,14 +541,33 @@ def build_linux(version: str, out: Path, server: str | None) -> Path:
         raise SystemExit("linux packages need a Linux host, Docker, or the GitHub release workflow")
     # Build inside the pinned toolchain image, then package here.
     toolchain = re.search(r'channel\s*=\s*"([^"]+)"', (ROOT / "rust-toolchain.toml").read_text()).group(1)
-    target_dir = ROOT / "target/linux-docker"
-    script = ("apt-get update -qq && apt-get install -y -qq --no-install-recommends "
-              "libasound2-dev libudev-dev pkg-config >/dev/null && "
-              "cargo build --locked --release -p client -p server")
+    common = shared_target().parent
+    target_dir = common / "target/linux-docker"
+    image = f"rust:{toolchain}-bookworm"
     env_args = ["-e", f"OMOBA_DEFAULT_GAME_SERVER_ADDR={server}"] if server else []
-    run("docker", "run", "--rm", "--platform", "linux/amd64", "-v", f"{ROOT}:/src", "-w", "/src",
-        "-e", "CARGO_TARGET_DIR=/src/target/linux-docker", *env_args,
-        f"rust:{toolchain}-bookworm", "sh", "-c", script)
+    mounts = ["-v", f"{ROOT}:/src", "-v", f"{target_dir}:/cache", "-w", "/src"]
+    # A successful pull also proves the container can reach apt.
+    if subprocess.run(["docker", "pull", "--platform", "linux/amd64", image]).returncode == 0:
+        script = ("apt-get update -qq && apt-get install -y -qq --no-install-recommends "
+                  "libasound2-dev libudev-dev pkg-config >/dev/null && "
+                  "cargo build --locked --release -p client -p server")
+        run("docker", "run", "--rm", "--platform", "linux/amd64", *mounts,
+            "-e", "CARGO_TARGET_DIR=/cache", *env_args, image, "sh", "-c", script)
+    else:
+        print("!! Docker registry unreachable; building offline from the local cache", flush=True)
+        installed = linux_offline_prepare(target_dir, toolchain)
+        base = os.environ.get("OMOBA_LINUX_IMAGE") or next(
+            (line.split()[1] for line in subprocess.run(
+                ["docker", "images", "--format", "{{.Tag}} {{.ID}}", "rust"],
+                capture_output=True, text=True).stdout.splitlines() if "alpine" not in line), None)
+        if not base:
+            raise SystemExit("no local glibc rust image for the offline Linux build (set OMOBA_LINUX_IMAGE)")
+        script = ("dpkg -i /cache/debs/*.deb >/dev/null && "
+                  "cargo build --offline --locked --release -p client -p server")
+        run("docker", "run", "--rm", "--network", "none", "--platform", "linux/amd64", *mounts,
+            "-e", "CARGO_TARGET_DIR=/cache", "-e", "CARGO_HOME=/cache/cargo-home",
+            "-e", f"PATH=/cache/{installed.name}/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+            *env_args, base, "sh", "-c", script)
     release = target_dir / "release"
     with tempfile.TemporaryDirectory() as temporary:
         stage = Path(temporary) / f"omoba-{version}"
@@ -463,19 +595,25 @@ def ensure_android_keystore() -> Path:
 
 
 def build_android(version: str, out: Path, server: str | None) -> Path:
-    work = ROOT / "target/release-android"
+    # Reuse the one Android cargo cache; build.py signs with <output>/local-debug.keystore.
+    work = shared_target() / "mobile/android"
     work.mkdir(parents=True, exist_ok=True)
-    # build.py signs with <output>/local-debug.keystore (alias/passwords
-    # androiddebugkey/android) and reuses it when present.
     shutil.copy2(ensure_android_keystore(), work / "local-debug.keystore")
+    abi = "universal" if android_universal() else "arm64"
     args = [sys.executable, ROOT / "mobile/android/build.py", "--output", work,
             "--version-code", str(android_version_code(version))]
+    if android_universal():
+        args.append("--universal")
+    if ndk := android_ndk():
+        args += ["--ndk", ndk]
     if server:
         args += ["--server", server]
     run(*args)
-    apk = work / f"omoba-{version}-android-arm64-debug.apk"
+    apk = work / f"omoba-{version}-android-{abi}-debug.apk"
     if not apk.is_file():
         raise SystemExit(f"Android build produced no {apk.name}")
+    for leftover in ("omoba-unaligned.apk", "omoba-unsigned.apk"):
+        (work / leftover).unlink(missing_ok=True)
     target = out / artifact_name(version, "android")
     shutil.copy2(apk, target)
     return target
@@ -496,6 +634,18 @@ def local_xcconfig() -> dict:
                 key, value = line.split("=", 1)
                 values[key.strip()] = value.strip()
     return values
+
+
+def remember_ios_build(number: str) -> None:
+    """Record the last used build number in the ignored local config (and the primary checkout's)."""
+    path = ROOT / "mobile/ios/Omoba.local.xcconfig"
+    text = re.sub(r"(?m)^CURRENT_PROJECT_VERSION\s*=.*$", f"CURRENT_PROJECT_VERSION = {number}", path.read_text())
+    path.write_text(text)
+    main_copy = Path(subprocess.check_output(
+        ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"], cwd=ROOT, text=True).strip()
+    ).parent / "mobile/ios/Omoba.local.xcconfig"
+    if main_copy != path and main_copy.is_file():
+        main_copy.write_text(text)
 
 
 def build_ios(version: str, out: Path, server: str | None, build_number: str | None, upload: bool) -> Path:
@@ -525,20 +675,29 @@ def build_ios(version: str, out: Path, server: str | None, build_number: str | N
                        "manageAppVersionAndBuildNumber": False,
                        "uploadSymbols": True}, handle)
     export = work / "export"
-    run("xcodebuild", "-exportArchive", "-archivePath", archive, "-exportPath", export,
-        "-exportOptionsPlist", options, "-allowProvisioningUpdates")
+    kept = out / f"Omoba-{version}-ios-{number}.xcarchive"
+    shutil.rmtree(kept, ignore_errors=True)
+    run("ditto", archive, kept)
+    try:
+        run("xcodebuild", "-exportArchive", "-archivePath", archive, "-exportPath", export,
+            "-exportOptionsPlist", options, "-allowProvisioningUpdates")
+    except subprocess.CalledProcessError:
+        # Command-line export needs an Apple ID in Xcode → Settings → Accounts ("Failed to
+        # Use Accounts" otherwise). The signed archive is kept and handed to Organizer.
+        organizer = Path.home() / "Library/Developer/Xcode/Archives" / time.strftime("%Y-%m-%d")
+        organizer.mkdir(parents=True, exist_ok=True)
+        listed = organizer / f"Omoba {version} ({number}).xcarchive"
+        shutil.rmtree(listed, ignore_errors=True)
+        run("ditto", archive, listed)
+        subprocess.run(["open", "-a", "Xcode", str(listed)])
+        # This number is now taken by a signed archive; the next run uses a fresh one.
+        remember_ios_build(number)
+        print(f"!! iOS export/upload was refused; signed archive {kept.name} is in Xcode Organizer: "
+              "Distribute App → App Store Connect → Upload", file=sys.stderr)
+        return kept
     if upload:
         print(f"Uploaded build {version} ({number}) to App Store Connect; assign it to testers in TestFlight.")
-        # Remember the number so the next upload uses a fresh one.
-        path = ROOT / "mobile/ios/Omoba.local.xcconfig"
-        text = path.read_text()
-        text = re.sub(r"(?m)^CURRENT_PROJECT_VERSION\s*=.*$", f"CURRENT_PROJECT_VERSION = {number}", text)
-        path.write_text(text)
-        main_copy = Path(subprocess.check_output(
-            ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"], cwd=ROOT, text=True).strip()
-        ).parent / "mobile/ios/Omoba.local.xcconfig"
-        if main_copy != path and main_copy.is_file():
-            main_copy.write_text(text)
+        remember_ios_build(number)
     ipas = list(export.glob("*.ipa"))
     target = out / artifact_name(version, "ios")
     if ipas:
@@ -575,6 +734,10 @@ def command_build(args) -> int:
     server = validate_server(args.server)
     out = dist_dir(version, args.out)
     report = check_report()
+    minimum = float(os.environ.get("OMOBA_MIN_FREE_GIB", "20"))
+    if args.platform == "all" and report["free_gib"] < minimum:
+        raise SystemExit(f"only {report['free_gib']} GiB free; a full release needs ~{minimum:g} GiB "
+                         "(set OMOBA_MIN_FREE_GIB to override)")
     write_compatibility_manifest(out, version)
     targets = [p for p in PLATFORMS if report["platforms"][p]] if args.platform == "all" else [args.platform]
     if args.platform == "all":
@@ -603,6 +766,56 @@ def command_build(args) -> int:
                "built": [str(p) for p in built], "failed": failed}
     print(json.dumps(summary, indent=2))
     return 1 if failed and not built else 0
+
+
+def pinata_pin(path: Path, token: str) -> str:
+    """Pin one file wrapped in a directory (so the URL keeps its name); return the CID."""
+    if any(c in token for c in '\r\n"\\'):
+        raise SystemExit("PINATA_JWT contains unexpected characters")
+    print(f"$ pin {path.name} to Pinata", flush=True)
+    # The token goes through curl's stdin config so it never appears in argv or logs.
+    result = subprocess.run(
+        ["curl", "--silent", "--show-error", "--fail-with-body", "--retry", "3", "--config", "-",
+         "--request", "POST", "https://api.pinata.cloud/pinning/pinFileToIPFS",
+         "--form", f"file=@{path};filename={path.name}",
+         "--form", 'pinataOptions={"cidVersion":1,"wrapWithDirectory":true}',
+         "--form", "pinataMetadata=" + json.dumps({"name": path.name})],
+        input=f'header = "Authorization: Bearer {token}"\n', capture_output=True, text=True)
+    if result.returncode:
+        raise SystemExit(f"Pinata rejected {path.name}: {result.stderr.strip() or result.stdout[:300]}")
+    return json.loads(result.stdout)["IpfsHash"]
+
+
+def command_publish(args) -> int:
+    """Pin every built package to IPFS, re-download it and record the verified links."""
+    token = os.environ.get("PINATA_JWT")
+    if not token:
+        raise SystemExit("Set PINATA_JWT to pin packages")
+    version = workspace_version()
+    out = dist_dir(version, args.out)
+    receipt_path = out / "ipfs.json"
+    receipt = json.loads(receipt_path.read_text()) if receipt_path.is_file() else {}
+    for target in PLATFORMS:
+        path = out / artifact_name(version, target)
+        if not path.is_file():
+            continue
+        digest = sha256(path)
+        entry = receipt.get(target)
+        if entry and entry.get("sha256") == digest:
+            continue
+        cid = pinata_pin(path, token)
+        url = f"{args.gateway.rstrip('/')}/ipfs/{cid}/{path.name}"
+        downloaded = Path(tempfile.mkdtemp()) / path.name
+        run("curl", "--silent", "--show-error", "--fail", "--location", "--retry", "3",
+            "--output", downloaded, url)
+        if sha256(downloaded) != digest:
+            raise SystemExit(f"gateway bytes for {path.name} do not match the local package")
+        downloaded.unlink()
+        receipt[target] = {"file": path.name, "bytes": path.stat().st_size, "sha256": digest,
+                           "cid": cid, "url": url}
+        receipt_path.write_text(json.dumps(receipt, indent=2) + "\n")
+    print(json.dumps(receipt, indent=2))
+    return 0
 
 
 def command_notes(args) -> int:
@@ -655,6 +868,9 @@ def main(argv=None) -> int:
     build.add_argument("--ios-build", help="iOS build number (default: local xcconfig + 1)")
     build.add_argument("--upload", action="store_true", help="iOS: upload to App Store Connect / TestFlight")
     sub.add_parser("notes", help="print release notes for the current version")
+    publish = sub.add_parser("publish", help="pin dist/ packages to IPFS (Pinata) and verify the gateway copy")
+    publish.add_argument("--out", type=Path)
+    publish.add_argument("--gateway", default="https://ekza.mypinata.cloud")
     draft = sub.add_parser("draft", help="create or update a DRAFT GitHub release with dist/ files")
     draft.add_argument("--tag")
     draft.add_argument("--target", default="main", help="commit/branch the new tag points at")
@@ -667,7 +883,8 @@ def main(argv=None) -> int:
     if args.command == "check":
         print(json.dumps(check_report(), indent=2))
         return 0
-    return {"build": command_build, "notes": command_notes, "draft": command_draft, "ci": command_ci}[args.command](args)
+    return {"build": command_build, "notes": command_notes, "draft": command_draft, "ci": command_ci,
+            "publish": command_publish}[args.command](args)
 
 
 if __name__ == "__main__":

@@ -24,12 +24,47 @@ Nothing is published without an explicit step: GitHub releases are created as
 | Platform | Artifact | Built by | Command |
 | --- | --- | --- | --- |
 | macOS (Apple silicon) | `Omoba-<v>-macos-arm64.zip` (`Omoba.app` + host script) | this Mac or CI | `make release-mac` |
-| Windows x64 | `Omoba-<v>-windows-x64.zip` (`Omoba.exe` + host script) | GitHub Actions (or a Windows PC) | `make release-ci` |
+| Windows x64 | `Omoba-<v>-windows-x64.zip` (`Omoba.exe` + host script) | this Mac (cargo-xwin), GitHub Actions or a Windows PC | `make release-all` / `make release-ci` |
 | Linux x64 | `omoba-<v>-linux-x64.tar.gz` (client, server, systemd example) | GitHub Actions, or Docker locally | `make release-ci` / `make release-linux` |
-| Android arm64 | `Omoba-<v>-android-arm64.apk` | GitHub Actions, or a machine with SDK/NDK | `make release-ci` / `make release-android` |
+| Android | `Omoba-<v>-android-universal.apk` (arm64, armv7, x86_64) via `make release-all`; `Omoba-<v>-android-arm64.apk` otherwise | this Mac with SDK/NDK, or GitHub Actions | `make release-all` / `make release-android` / `make release-ci` |
 | iPhone | TestFlight build (`.ipa` locally) | this Mac (Apple team) | `make release-testflight` |
 
-`make release-check` prints what the current machine can build.
+`make release-check` prints what the current machine can build and the free disk space.
+
+## One command on the Mac
+
+`make release-all` builds all five platforms on an Apple-silicon Mac from the
+current checkout, pointed at `PROD_SERVER` (default: the live test server), into
+`dist/v<version>/` with `SHA256SUMS.txt` and `compatibility.json`. It stops when
+less than ~20 GB is free (`OMOBA_MIN_FREE_GIB`). `make release-publish` then pins
+each package to IPFS with `PINATA_JWT`, downloads it back through the gateway,
+compares the SHA-256 and records the links in `dist/v<version>/ipfs.json`;
+packages already pinned with the same hash are skipped.
+
+One-time setup on the Mac:
+
+```sh
+rustup target add x86_64-pc-windows-msvc aarch64-apple-ios \
+  aarch64-linux-android armv7-linux-androideabi x86_64-linux-android
+cargo install --locked cargo-xwin && brew install llvm android-ndk
+sdkmanager "platforms;android-35" "build-tools;35.0.0"
+```
+
+- **Windows** is cross-built with cargo-xwin (Microsoft CRT/SDK cached in
+  `target/xwin`, static CRT). The packager checks both executables are x64 PE.
+- **Linux** runs in Docker (`rust:<toolchain>-bookworm`). When Docker cannot reach
+  its registry (for example, a dead system proxy), the build fetches crates and the
+  checksum-verified ALSA/udev `.deb` files on the host and compiles with
+  `--network none`, using a Rust toolchain installed in
+  `target/linux-docker/toolchain-<toolchain>`.
+- **Android** is one universal APK signed with
+  `~/.config/omoba/android-playtest.keystore`; keep that file, or updates stop
+  installing over earlier builds.
+- **iPhone:** the build number is the last one in the ignored
+  `mobile/ios/Omoba.local.xcconfig` + 1. If command-line export is refused (Xcode
+  needs an Apple ID under Settings → Accounts), the signed archive is kept in
+  `dist/v<version>/` and opened in Xcode Organizer for Distribute App → App Store
+  Connect → Upload; that number counts as used.
 
 ## Compatibility gate
 
