@@ -934,7 +934,7 @@ fn ranged_basic_attacks_use_aimed_motion_and_dagger_keeps_the_right_hand_thrust(
     // The classes that throw a body aim or throw it; none swings a blade at range.
     for (class, motion) in [
         (HeroClass::Ranger, "aim_loose_r"),
-        (HeroClass::Wildspark, "pistol_shoot"),
+        (HeroClass::Wildspark, "burst_fire"),
         (HeroClass::Riftshot, "cast_thrust_r"),
         (HeroClass::Mage, "toss_underhand"),
         (HeroClass::Cleric, "cast"),

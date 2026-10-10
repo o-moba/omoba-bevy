@@ -105,23 +105,19 @@
           "state": "repeater"
         },
         {
-          "basicAttackId": "riftshot",
-          "phase": "attack"
-        },
-        {
           "skillId": "wild_switch",
           "phase": "equipped",
           "state": "repeater"
         }
       ],
-      "brief": "Default repeater, reused by Riftshot. Submit a static handheld through the existing weapon profile. A coordinated two-gun set is planned; the current explicit item selection stays selected in both modes.",
+      "brief": "Wildspark class-default repeater with engine-controlled rotor animation. Static handheld submissions are supported; custom moving-part animation and coordinated two-gun sets require a future profile. Explicit item selection stays selected in both modes.",
       "profile": {
         "id": "handheld-glb-v1",
         "version": 1
       },
       "baseline": {
         "kind": "model",
-        "sourcePath": "client/assets/weapons/wild-repeater.glb",
+        "sourcePath": "client/assets/weapons/wildspark-repeater.glb",
         "license": "CC-BY-4.0",
         "attribution": "Open Moba contributors"
       }
@@ -167,15 +163,15 @@
           "state": "rockets"
         }
       ],
-      "brief": "The effective body is the engine-owned tumbler form. The configured wild-rocket.glb is a fallback and is not the normal rendered baseline. Damage, trajectory and collision remain authoritative.",
+      "brief": "Rocket-mode basic attacks render the bundled rocket model. Custom projectile upload is not supported. Damage, trajectory and collision remain authoritative.",
       "profile": null,
       "baseline": {
-        "kind": "procedural",
-        "sourcePath": "client/assets/config/combat_visuals.json",
+        "kind": "reference",
+        "sourcePath": "client/assets/weapons/wild-rocket.glb",
+        "license": "CC-BY-4.0",
+        "attribution": "Open Moba contributors",
         "details": {
-          "profile": "wild_rocket",
-          "effectiveForm": "tumbler",
-          "fallbackSourcePath": "client/assets/weapons/wild-rocket.glb"
+          "profile": "wild_rocket"
         }
       }
     },
@@ -190,15 +186,17 @@
           "phase": "flight"
         }
       ],
-      "brief": "Bundled model is used by this presentation. A dedicated validated contribution profile and game binding are future work. Public model download is withheld because its asset-specific redistribution license is unresolved.",
+      "brief": "Bundled CC-BY-4.0 model is used by this presentation. A dedicated validated contribution profile and game binding are future work; v1 publishes downloadable handheld models only.",
       "profile": null,
       "baseline": {
         "kind": "reference",
         "sourcePath": "client/assets/cosmetics/standard/rocket.glb",
         "details": {
           "model": "rocket",
-          "downloadUnavailableReason": "Asset-specific redistribution license has not been resolved."
-        }
+          "downloadUnavailableReason": "No validated projectile or prop contribution profile in v1."
+        },
+        "license": "CC-BY-4.0",
+        "attribution": "Open Moba contributors"
       }
     },
     {
@@ -212,15 +210,17 @@
           "phase": "placed"
         }
       ],
-      "brief": "Bundled model is used by this presentation. A dedicated validated contribution profile and game binding are future work. Public model download is withheld because its asset-specific redistribution license is unresolved.",
+      "brief": "Bundled CC-BY-4.0 model is used by this presentation. A dedicated validated contribution profile and game binding are future work; v1 publishes downloadable handheld models only.",
       "profile": null,
       "baseline": {
         "kind": "reference",
         "sourcePath": "client/assets/cosmetics/standard/trap.glb",
         "details": {
           "model": "trap",
-          "downloadUnavailableReason": "Asset-specific redistribution license has not been resolved."
-        }
+          "downloadUnavailableReason": "No validated projectile or prop contribution profile in v1."
+        },
+        "license": "CC-BY-4.0",
+        "attribution": "Open Moba contributors"
       }
     },
     {
@@ -332,6 +332,29 @@
         "kind": "procedural",
         "sourcePath": "client/assets/config/skills.skillfx"
       }
+    },
+    {
+      "id": "riftshot.handheld.repeater",
+      "name": "Riftshot repeater",
+      "role": "held_weapon",
+      "status": "supported",
+      "uses": [
+        {
+          "basicAttackId": "riftshot",
+          "phase": "attack"
+        }
+      ],
+      "brief": "Riftshot retains the original repeater model. Submit a static handheld through the existing weapon profile.",
+      "profile": {
+        "id": "handheld-glb-v1",
+        "version": 1
+      },
+      "baseline": {
+        "kind": "model",
+        "sourcePath": "client/assets/weapons/wild-repeater.glb",
+        "license": "CC-BY-4.0",
+        "attribution": "Open Moba contributors"
+      }
     }
   ],
   "sourceEvidence": [
@@ -341,7 +364,7 @@
     },
     {
       "sourcePath": "client/src/skill_presentation/effects.rs",
-      "sha256": "150bcaa471335400d1716f36661464a96dcabcbfecabb5987aee817761e8231e"
+      "sha256": "294fe128dc6f10ae112c0fc7d571fb9e12cc608a66d67eec5a22824d2f38217c"
     },
     {
       "sourcePath": "client/src/skill_icons.rs",
@@ -349,7 +372,11 @@
     },
     {
       "sourcePath": "shared/src/loadout.rs",
-      "sha256": "e19593c393388b79953e1ef81a35e408813ae0ad08fcda75ed043759c99e3eb6"
+      "sha256": "aed16194cb03fbe0466ed72b6f34f12921c0345c1c5fd7248e50f92723506a3b"
+    },
+    {
+      "sourcePath": "client/src/held_weapons.rs",
+      "sha256": "0e53506c86688591d7c55450deb6a2595371208d793c6231cb9ec2c2f687d644"
     }
   ],
   "iconAtlases": [

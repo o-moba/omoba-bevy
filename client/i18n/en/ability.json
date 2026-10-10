@@ -54,7 +54,7 @@
   "ability.wild_traps.name": "Snapline",
   "ability.wild_traps.desc": "Place three traps that arm, then root enemy heroes.",
   "ability.wild_rocket.name": "Last Spark",
-  "ability.wild_rocket.desc": "A long-range rocket explodes on a hero, punishing wounded enemies.",
+  "ability.wild_rocket.desc": "An accelerating rocket explodes on the first enemy hero. Damage grows with flight distance and each nearby enemy’s missing health.",
   "ability.fault_line.name": "Fault Line",
   "ability.fault_line.desc": "Fracture the ground; a delayed solid pillar rises at the endpoint.",
   "ability.furnace_breath.name": "Furnace Breath",

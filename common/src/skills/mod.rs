@@ -1005,8 +1005,15 @@ pub fn cast(
         let mut lifetime = 20.0;
         let mut armed = d.windup_secs;
         match d.effect {
-            SkillEffect::LinearProjectile { speed, .. }
-            | SkillEffect::ImpactRocket { speed, .. } => lifetime = range / speed + 0.2,
+            SkillEffect::LinearProjectile { speed, .. } => lifetime = range / speed + 0.2,
+            SkillEffect::ImpactRocket {
+                speed,
+                launch_speed,
+                acceleration,
+                ..
+            } => {
+                lifetime = rocket_time(range, launch_speed, speed, acceleration) + 0.2;
+            }
             SkillEffect::ReturningShield { speed, .. } => lifetime = range / speed * 2.0 + 3.0,
             SkillEffect::RecastZone { duration_secs, .. } => {
                 pos = end;
@@ -1100,6 +1107,27 @@ fn detonate(w: &mut GameWorld, e: &ActiveEffect, now: Instant) -> Vec<CombatEven
         }
     }
     out
+}
+
+/// Time to a distance under constant acceleration followed by a speed cap.
+/// Integrating the ramp analytically makes travel independent of tick subdivision.
+fn rocket_time(distance: f32, launch: f32, speed: f32, acceleration: f32) -> f32 {
+    let ramp_time = (speed - launch) / acceleration;
+    let ramp_distance = (launch + speed) * ramp_time * 0.5;
+    if distance <= ramp_distance {
+        // Rationalized quadratic root avoids cancellation near the muzzle.
+        2.0 * distance / ((launch * launch + 2.0 * acceleration * distance).sqrt() + launch)
+    } else {
+        ramp_time + (distance - ramp_distance) / speed
+    }
+}
+
+fn rocket_step(traveled: f32, dt: f32, launch: f32, speed: f32, acceleration: f32) -> f32 {
+    let current = (launch * launch + 2.0 * acceleration * traveled)
+        .sqrt()
+        .min(speed);
+    let ramp = dt.min((speed - current) / acceleration);
+    current * ramp + 0.5 * acceleration * ramp * ramp + speed * (dt - ramp)
 }
 
 pub fn tick(w: &mut GameWorld, t: TickCtx) -> Vec<CombatEvent> {
@@ -1375,6 +1403,8 @@ pub fn tick(w: &mut GameWorld, t: TickCtx) -> Vec<CombatEvent> {
             }
             SkillEffect::ImpactRocket {
                 speed,
+                launch_speed,
+                acceleration,
                 radius,
                 blast_radius,
                 damage,
@@ -1382,7 +1412,8 @@ pub fn tick(w: &mut GameWorld, t: TickCtx) -> Vec<CombatEvent> {
                 max_distance,
                 missing_health_ratio,
             } => {
-                let travel = (speed * t.dt).min(distance(e.pos, e.end));
+                let travel = rocket_step(e.traveled, t.dt, launch_speed, speed, acceleration)
+                    .min(distance(e.pos, e.end));
                 let to = add(e.pos, e.direction, travel);
                 if let Some((holder, factor)) =
                     advanced::intercept(w, e.team, e.pos, to, radius, now)
@@ -1419,7 +1450,7 @@ pub fn tick(w: &mut GameWorld, t: TickCtx) -> Vec<CombatEvent> {
                     }) {
                         let amount = damage * e.scale * factor
                             + (victim.max_hp - victim.hp).max(0.0) * missing_health_ratio;
-                        out.extend(apply_hit(
+                        let mut receipts = apply_hit(
                             w,
                             victim.target,
                             amount,
@@ -1430,7 +1461,51 @@ pub fn tick(w: &mut GameWorld, t: TickCtx) -> Vec<CombatEvent> {
                             true,
                             false,
                             now,
-                        ));
+                        );
+                        let victim_kind = match victim.target.kind {
+                            TargetKind::Player => CombatEntityKind::Player,
+                            TargetKind::Minion => CombatEntityKind::Minion,
+                            TargetKind::Structure => CombatEntityKind::Structure,
+                            TargetKind::Neutral => CombatEntityKind::Neutral,
+                        };
+                        let primary = |receipt: &CombatEvent| {
+                            receipt.source.kind == CombatEntityKind::Player
+                                && receipt.source.id == e.owner
+                                && receipt.target.kind == victim_kind
+                                && receipt.target.id == victim.target.id
+                        };
+                        // A blocked blast still detonated. A retaliation receipt alone
+                        // does not confirm the blast on this victim.
+                        if !receipts.iter().any(primary) && victim.target.kind == TargetKind::Player
+                        {
+                            if let Some(player) = w
+                                .players
+                                .values()
+                                .find(|p| p.hero.identity.id == victim.target.id)
+                            {
+                                receipts.push(source(e.owner, e.slot).annotate(CombatEvent {
+                                    target: shared::combat::CombatEntity {
+                                        kind: CombatEntityKind::Player,
+                                        id: victim.target.id,
+                                    },
+                                    x: player.hero.x,
+                                    y: player.hero.y + crate::balance::AIM_HEIGHT,
+                                    z: player.hero.z,
+                                    ..Default::default()
+                                }));
+                            }
+                        }
+                        for receipt in &mut receipts {
+                            if primary(receipt) {
+                                receipt.area_impact = Some(shared::combat::AreaImpact {
+                                    id: e.id,
+                                    skill: e.skill,
+                                    center: e.pos,
+                                    radius: blast_radius,
+                                });
+                            }
+                        }
+                        out.extend(receipts);
                     }
                     keep = false;
                 } else {

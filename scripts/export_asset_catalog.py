@@ -187,10 +187,10 @@ class Exporter:
         authored = self.json("shared/assets/catalog/asset-requirements.json", 1)
         icons = self.json("client/assets/ui/skills/manifest.json", 2)
         evidence = authored.get("sourceEvidence")
-        require(isinstance(evidence, list) and len(evidence) == 4, "Missing authored source evidence")
+        require(isinstance(evidence, list) and len(evidence) == 5, "Missing authored source evidence")
         require({row.get("sourcePath") for row in evidence} == {
             "shared/src/handheld.rs", "client/src/skill_presentation/effects.rs",
-            "client/src/skill_icons.rs", "shared/src/loadout.rs"},
+            "client/src/skill_icons.rs", "shared/src/loadout.rs", "client/src/held_weapons.rs"},
             "Authored evidence must pin handheld defaults, prop resolution and semantic icon mapping")
         for row in evidence:
             require(digest(self.read(row["sourcePath"])) == row.get("sha256"),
@@ -283,10 +283,17 @@ class Exporter:
                                 "sourceClip": clip["source_clip"], "contact": motions["contacts"].get(mid)}}}
 
         # Detect a stale authored assertion about the effective rocket body.
-        rocket = requirements.get("wildspark.projectile.basic-rocket", {}).get("baseline", {}).get("details", {})
-        require(rocket.get("effectiveForm") == combat["profiles"]["wild_rocket"].get("form") == "tumbler",
+        rocket = requirements.get("wildspark.projectile.basic-rocket", {}).get("baseline", {})
+        runtime_rocket = combat["profiles"]["wild_rocket"]
+        require(not runtime_rocket.get("form") and rocket.get("sourcePath") ==
+                "client/assets/" + runtime_rocket.get("model", {}).get("path", ""),
                 "Wildspark effective rocket form changed; update its authored brief")
+        # The class-default override is pinned through held_weapons.rs evidence.
+        default_repeater = "client/assets/weapons/wildspark-repeater.glb"
+        require(requirements.get("wildspark.handheld.repeater", {}).get("baseline", {}).get("sourcePath")
+                == default_repeater, "Wildspark default repeater binding changed")
         licensed_models = {"client/assets/" + weapon["model"] for weapon in weapons.values()}
+        licensed_models.add(default_repeater)
         # A symbolic runtime model is a real requirement only when its usage is
         # described explicitly, including secondary bodies such as the orb.
         for sid, row in presentation["skills"].items():

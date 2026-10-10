@@ -1686,3 +1686,40 @@ fn a_voice_is_a_sample_a_speed_and_a_slice_detuned_by_three_percent_at_most() {
         assert_eq!(voice(origin).detune(), 1.0);
     }
 }
+
+#[test]
+fn one_rocket_explosion_is_heard_across_victims_even_when_the_first_hit_is_shielded() {
+    let mut cursor = EventCursor::default();
+    cursor.accept((1, 1), &GameState::Running, Some(local()), &[]);
+    let area = shared::combat::AreaImpact {
+        id: 77,
+        skill: shared::loadout::SkillId::WildRocket,
+        center: [0.0, 0.0],
+        radius: 3.0,
+    };
+    let hits: Vec<_> = (1..=5)
+        .map(|id| CombatEvent {
+            area_impact: Some(area),
+            amount: if id == 1 { 0.0 } else { 20.0 },
+            ..event(id, ProjectileStyle::Rocket)
+        })
+        .collect();
+    let cues = cursor
+        .accept((1, 1), &GameState::Running, Some(local()), &hits[..1])
+        .1;
+    assert_eq!(cues.len(), 1);
+    assert!(has(&cues, AudioCue::for_style(ProjectileStyle::Rocket)));
+    assert!(
+        cursor
+            .accept((1, 1), &GameState::Running, Some(local()), &hits)
+            .1
+            .is_empty()
+    );
+    cursor.accept((1, 2), &GameState::Running, Some(local()), &[]);
+    assert!(has(
+        &cursor
+            .accept((1, 2), &GameState::Running, Some(local()), &hits)
+            .1,
+        AudioCue::for_style(ProjectileStyle::Rocket)
+    ));
+}

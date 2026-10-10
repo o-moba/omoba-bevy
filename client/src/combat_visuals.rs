@@ -1594,7 +1594,7 @@ mod tests {
     }
 
     #[test]
-    fn form_beats_model_when_meshes_exist() {
+    fn launcher_uses_its_authored_rocket_and_other_forms_keep_their_fallback() {
         let registry = CombatVisualRegistry::from_json(PACKAGED).unwrap();
         let rocket = registry.resolve(
             Some(HeroClass::Wildspark),
@@ -1607,9 +1607,9 @@ mod tests {
             rocket.model.as_ref().unwrap().path,
             "weapons/wild-rocket.glb"
         );
-        let canister = FlightBody::Form(ProjectileForm::Tumbler, Silhouette::Block);
+        let rocket_body = FlightBody::Shape;
         for known_basic in [false, true] {
-            assert_eq!(rocket.flight_body(true, known_basic), canister);
+            assert_eq!(rocket.flight_body(true, known_basic), rocket_body);
             // Without the shared meshes the profile is its `shape`, and with it its model.
             assert_eq!(rocket.flight_body(false, known_basic), FlightBody::Shape);
         }

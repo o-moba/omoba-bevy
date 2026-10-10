@@ -54,13 +54,13 @@
       "sound": { "base": "holy", "speed": 1.35, "slice": "body", "gain": 0.5 }
     },
     "wildspark": {
-      "motions": ["pistol_shoot"], "rate": 1.35,
+      "motions": ["burst_fire"], "rate": 1.65,
       "accent": { "pattern": "muzzle_flash", "shape": "star", "count": 2, "scale": 0.6, "lifetime": 0.25, "slots": ["accent", "white"] },
       "impact": { "kind": "splinter", "shape": "star", "count": 5, "scale": 0.9, "lifetime": 0.35, "slots": ["white", "secondary"] },
       "sound": { "base": "caster", "speed": 0.95, "slice": "tick", "gain": 0.55 },
       "rockets": {
-        "motions": ["pistol_shoot"], "rate": 0.8,
-        "accent": { "pattern": "fan_spray", "shape": "star", "count": 4, "scale": 0.8, "lifetime": 0.3, "slots": ["secondary", "accent"] },
+        "motions": ["shot_heavy"], "rate": 1.15,
+        "accent": { "pattern": "muzzle_burst", "shape": "star", "count": 4, "scale": 0.8, "lifetime": 0.3, "slots": ["secondary", "accent"] },
         "impact": { "kind": "ember_puff", "shape": "star", "count": 6, "scale": 1.0, "lifetime": 0.5, "slots": ["secondary", "accent"] },
         "sound": { "base": "caster", "speed": 0.7, "slice": "body", "gain": 0.8 }
       }
@@ -217,8 +217,8 @@
         "cast": { "base": "caster", "speed": 0.8, "slice": "tick", "gain": 0.7, "notes": [{ "delay_ms": 70, "speed": 1.1, "gain": 0.7 }] } }
     },
     "wild_zap": {
-      "home": "wildspark", "release": "thrust_lunge", "color": [0.04, 0.72, 1.0], "hdr_gain": 3.6,
-      "motion": { "rate": 1.4 },
+      "home": "wildspark", "release": "pistol_shoot", "color": [0.04, 0.72, 1.0], "hdr_gain": 3.6,
+      "motion": { "rate": 1.1 },
       "cast": { "pattern": "muzzle_flash", "shape": "claw", "count": 3, "scale": 1.3, "lifetime": 0.4, "slots": ["primary", "white"] },
       "body": { "archetype": "traveller", "altitude": "chest", "trail": "chevrons", "trail_scale": 1.4,
         "core": { "mesh": "chevron", "size": [0.05, 1.2, 2.0], "behave": "flicker" },
@@ -230,8 +230,8 @@
         "impact": { "base": "caster", "speed": 1.1, "slice": "tail", "gain": 0.8 } }
     },
     "wild_traps": {
-      "home": "wildspark", "release": "ground_shot", "color": [1.0, 0.55, 0.05], "hdr_gain": 3.0,
-      "motion": { "rate": 1.2, "start": 0.2 },
+      "home": "wildspark", "release": "toss_underhand", "color": [1.0, 0.55, 0.05], "hdr_gain": 2.2,
+      "motion": { "rate": 1.3 },
       "cast": { "pattern": "muzzle_burst", "shape": "ringlet", "count": 3, "scale": 1.0, "lifetime": 0.4, "slots": ["primary", "secondary"] },
       "body": { "archetype": "prop", "model": "trap", "altitude": "ground", "fill": true, "marker": "arming_pips", "expire": "crumble",
         "shell": { "mesh": "block", "slot": "accent", "size": [0.3, 0.15, 0.3], "behave": "blink_last" },
@@ -242,9 +242,9 @@
         "impact": { "base": "melee", "speed": 0.75, "slice": "tick", "gain": 0.9 } }
     },
     "wild_rocket": {
-      "home": "wildspark", "release": "shot_heavy", "color": [1.0, 0.2, 0.1], "hdr_gain": 4.0, "accent": [1.0, 0.75, 0.2],
-      "motion": { "rate": 0.8, "start": 0.1 },
-      "cast": { "pattern": "ground_slam", "shape": "streak", "count": 6, "scale": 0.85, "lifetime": 0.4, "slots": ["secondary", "primary"] },
+      "home": "wildspark", "release": "shot_heavy", "color": [1.0, 0.2, 0.1], "hdr_gain": 2.6, "accent": [1.0, 0.75, 0.2],
+      "motion": { "rate": 1.0, "start": 0.05 },
+      "cast": { "pattern": "muzzle_burst", "shape": "streak", "count": 6, "scale": 0.85, "lifetime": 0.4, "slots": ["secondary", "primary"] },
       "body": { "archetype": "traveller", "model": "rocket", "altitude": "chest", "trail": "ribbon", "trail_scale": 2.0,
         "shell": { "mesh": "torus", "slot": "accent", "size": [0.8, 0.8, 0.12], "behave": "pulse" },
         "satellites": { "mesh": "drop", "layout": "helix", "count": 4, "size": [0.24, 0.24, 0.55], "slot": "primary", "behave": "flicker" } },
@@ -521,7 +521,7 @@
     },
     "rift_needle": {
       "home": "riftshot", "release": "burst_fire", "color": [0.36, 0.53, 1.0], "hdr_gain": 3.2,
-      "motion": { "rate": 1.0 },
+      "motion": { "rate": 1.0, "start": 0.05 },
       "cast": { "pattern": "muzzle_burst", "shape": "diamond", "count": 3, "scale": 1.0, "lifetime": 0.4, "slots": ["primary", "white"] },
       "body": { "archetype": "traveller", "altitude": "chest", "trail": "ribbon", "trail_scale": 1.3,
         "core": { "mesh": "cone", "slot": "white", "size": [0.3, 0.3, 2.99] },

@@ -54,7 +54,7 @@
   "ability.wild_traps.name": "连环陷阱",
   "ability.wild_traps.desc": "放置三个陷阱，启动后禁锢敌方英雄。",
   "ability.wild_rocket.name": "终焉火花",
-  "ability.wild_rocket.desc": "远程火箭命中英雄后爆炸，对受伤敌人威胁更大。",
+  "ability.wild_rocket.desc": "火箭持续加速，命中第一个敌方英雄后爆炸。飞行距离提高伤害，并按附近每个敌人已损失的生命值造成额外伤害。",
   "ability.fault_line.name": "断层线",
   "ability.fault_line.desc": "震裂地面并减速敌人，延迟在终点升起实体石柱。",
   "ability.furnace_breath.name": "熔炉吐息",

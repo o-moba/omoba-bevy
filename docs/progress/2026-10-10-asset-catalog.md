@@ -79,3 +79,7 @@ Local proof lives at `.agent/tasks/ASSET-CATALOG-20261010/`. UI scope is English
 at one desktop browser viewport. No native Rust build was needed because runtime
 code is unchanged. There is no physical-phone, hosted-publication, deployment
 or native-equipping claim.
+
+## Wildspark release integration
+
+The Wildspark reference branch changes its default repeater and basic rocket body. The exporter now distinguishes the Wildspark override from Riftshot’s original repeater, pins `held_weapons.rs` as source evidence, and checks the active combat rocket model. Updated authored requirements record the original CC-BY-4.0 prop provenance while keeping unsupported projectile/prop contributions unavailable. Static previews include the class-default override. Regression checks cover separate class bindings and procedural-form precedence drift.

@@ -53,6 +53,27 @@ pub struct CombatEntity {
     pub id: u64,
 }
 
+/// One server-confirmed explosion, repeated on its victim receipts so visibility
+/// filtering cannot discard the only copy. The client draws each id once per round.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct AreaImpact {
+    pub id: u64,
+    pub skill: crate::loadout::SkillId,
+    pub center: [f32; 2],
+    pub radius: f32,
+}
+
+impl AreaImpact {
+    pub fn valid(self) -> bool {
+        self.id != 0
+            && self.skill == crate::loadout::SkillId::WildRocket
+            && self.center.into_iter().all(f32::is_finite)
+            && self.radius.is_finite()
+            && self.radius > 0.0
+            && self.radius <= 32.0
+    }
+}
+
 #[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct CombatEvent {
@@ -66,6 +87,8 @@ pub struct CombatEvent {
     pub style: ProjectileStyle,
     pub action_slot: Option<u8>,
     pub killed: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub area_impact: Option<AreaImpact>,
     /// Authoritative trap activation; false for ordinary attacks/spells.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub trap_triggered: bool,
@@ -77,6 +100,38 @@ pub struct CombatEvent {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn explosion_metadata_is_optional_bounded_and_round_trips() {
+        let ordinary = serde_json::to_value(CombatEvent::default()).unwrap();
+        assert!(ordinary.get("area_impact").is_none());
+        let area = AreaImpact {
+            id: 7,
+            skill: crate::loadout::SkillId::WildRocket,
+            center: [1.0, 2.0],
+            radius: 3.0,
+        };
+        let event = CombatEvent {
+            area_impact: Some(area),
+            ..Default::default()
+        };
+        assert_eq!(
+            serde_json::from_str::<CombatEvent>(&serde_json::to_string(&event).unwrap()).unwrap(),
+            event
+        );
+        assert!(area.valid());
+        for radius in [0.0, -1.0, f32::NAN, 33.0] {
+            assert!(!AreaImpact { radius, ..area }.valid());
+        }
+        assert!(
+            !AreaImpact {
+                center: [f32::INFINITY, 0.0],
+                ..area
+            }
+            .valid()
+        );
+        assert!(!AreaImpact { id: 0, ..area }.valid());
+    }
 
     #[test]
     fn near_lethal_receipt_defaults_off_and_round_trips_only_when_present() {

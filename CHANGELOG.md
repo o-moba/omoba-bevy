@@ -11,6 +11,17 @@ All notable changes are recorded here. The canonical version is
 
 - Planning only: record the [Studio class/skill asset requirements backlog](docs/plans/studio-skill-asset-catalog.md), with shared web catalogue, artist briefs and a two-gun Wildspark cosmetic-set example. No API or gameplay implementation.
 
+- Reconcile the creator export with Wildspark reference models: separate its default repeater from Riftshot, describe the active rocket GLB, pin client attachment evidence and retain projectile/prop upload limits.
+
+### Wildspark reference iteration
+
+- Original detailed repeater, launcher, finned rockets and hinged trap models; accepted-action barrel rotation, recoil, socket muzzle flashes, aimed W and underhand trap placement. Other class defaults retain their models.
+- Last Spark accelerates from 18 to 45 m/s, with timestep-stable flight and a corrected lifetime. Distance scaling and per-victim missing-health damage support a five-target finisher; rocket-mode attacks still charge 4 mana only when accepted.
+- Replicate the visible detonation centre/radius and effect identity on blast receipts. Draw one staged explosion across all victims, including a shielded detonation without damage numbers; keep fog filtering and silent projectile disappearance.
+- Gameplay revision `wildspark-2026-10-09-reference`, catalog `standard-kits-7`; matching client/server required. No deployment or physical-device acceptance is implied.
+
+### First-match guidance
+
 - Improve the first match with an objective-first guide, loading tips navigable by buttons or a single-finger swipe, and a remembered beginner-tips switch in Settings → HUD. Keep advice arrows inside narrow desktop windows. Compact creature health bars, reduce melee/hit/tower sound gains, and use a closer default phone camera while preserving saved zoom choices.
 
 ### 0.44.0 candidate — mobile playtest quality

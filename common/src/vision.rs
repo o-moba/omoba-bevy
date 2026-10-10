@@ -271,6 +271,14 @@ pub fn filter_snapshot(
             })
     });
     combat_events.retain_mut(|event| {
+        // Do not reveal an explosion centre outside this team's actual sight.
+        // The visible victim still receives ordinary hit feedback.
+        if event
+            .area_impact
+            .is_some_and(|impact| !point_visible(&sight, impact.center, false))
+        {
+            event.area_impact = None;
+        }
         // Lethal simulation removes dynamic victims before the snapshot is built.
         // Preserve the final visible impact without reintroducing a living hidden
         // target or bypassing hero brush concealment.

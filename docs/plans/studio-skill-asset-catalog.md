@@ -1,6 +1,6 @@
 # Game asset requirements in Studio
 
-> Status update, 2026-10-10: the first game-owned export and public catalogue are implemented; see [asset catalogue](../asset-catalog.md) and [class workshop](../class-workshop.md). The proposal below remains the roadmap for exact-slot Studio submissions, moderation and runtime cosmetic sets.
+> Status update, 2026-10-10: the first game-owned export and public catalogue are implemented; see [asset catalogue](../progress/2026-10-10-asset-catalog.md) and [class workshop](../progress/2026-10-10-class-workshop.md). The proposal below remains the roadmap for exact-slot Studio submissions, moderation and runtime cosmetic sets.
 
 Status: **proposal / TODO**, 2026-10-09. This draft defines a product direction
 and an implementation backlog; it does not add endpoints, a schema migration or

@@ -269,9 +269,9 @@ the hit).
 | Dawnweaver | E | Luminous Field (`dawn_field`) | `kneel_plant` | `ground_ring` / `star` | `zone` | `ring_burst` / `star` |
 | Dawnweaver | R | Horizon Ray (`dawn_ray`) | `spell_prepare` → `cast` (`warn_fire`) | `inward_gather` / `streak` | `lane` | `pierce_through` / `streak` |
 | Wildspark | Q | Switchfire (`wild_switch`) | `reload_snap` | `toss_arc` / `star` | - | - |
-| Wildspark | W | Shockline (`wild_zap`) | `thrust_lunge` | `muzzle_flash` / `claw` | `traveller` | `spark_fork` / `chevron` |
-| Wildspark | E | Snapline (`wild_traps`) | `ground_shot` | `muzzle_burst` / `ringlet` | `prop` | `chain_snap` / `chevron` |
-| Wildspark | R | Last Spark (`wild_rocket`) | `shot_heavy` | `ground_slam` / `streak` | `traveller` | `blast` / `star` |
+| Wildspark | W | Shockline (`wild_zap`) | `pistol_shoot` | `muzzle_flash` / `claw` | `traveller` | `spark_fork` / `chevron` |
+| Wildspark | E | Snapline (`wild_traps`) | `toss_underhand` | `muzzle_burst` / `ringlet` | `prop` | `chain_snap` / `chevron` |
+| Wildspark | R | Last Spark (`wild_rocket`) | `shot_heavy` | `muzzle_burst` / `streak` | `traveller` | `blast` / `star` |
 | Cinderforge | Q | Fault Line (`fault_line`) | `overhead_plant` | `strike_line` / `diamond` | `prop` | `splinter` / `diamond` |
 | Cinderforge | W | Furnace Breath (`furnace_breath`) | `fist_guard_loop` → `two_hand_push` (`fuse`) | `inward_gather` / `diamond` | `sector` | `spark_fork` / `drop` |
 | Cinderforge | E | Anvil Charge (`anvil_charge`) | `dive_lunge` | `ground_slam` / `diamond`, move `charge_dust` | - | `shard_burst` / `diamond` |
@@ -772,3 +772,30 @@ readability at desktop and mobile camera sizes. Registry, resource lifecycle,
 atlas fallback and role-cue regressions live beside the corresponding Rust
 modules. A native touch preview is useful evidence, but does not replace a
 physical Android/iOS performance and readability check.
+
+
+## Wildspark authoritative explosion and mechanical props
+
+The Wildspark reference iteration supersedes the older tumbling-canister pilot.
+Launcher rounds load `weapons/wild-rocket.glb`; Last Spark uses the larger world
+rocket. `scripts/build_wildspark_models.py` and the editable
+`assets-src/skills/wildspark-reference.blend` own the original geometry.
+`WildsparkRotor`, `WildsparkSlide` and the two `WildsparkJaw*` nodes preserve local
+pivots. Accepted action sequences drive the first two; replicated arming state
+and remaining lifetime drive the jaws. W uses `pistol_shoot`, E `toss_underhand`,
+repeater attacks `burst_fire`, launcher attacks and R `shot_heavy`.
+
+A Last Spark `CombatEvent.area_impact` is optional `{id, skill, center, radius}`.
+The server repeats it on victim receipts, strips it when the centre is unseen,
+and may emit a zero-damage receipt when a shield absorbed the blast. The client
+validates the fields and deduplicates effect ids per round. It draws a bounded
+12-particle staged explosion at the supplied centre, with a ground wave reaching
+the supplied radius. Each victim retains its own damage number. A hidden caster
+is not needed for a radial explosion, and no position or direction of that caster
+is inferred. Other impact recipes and the 2D pooled-particle fallback still work.
+The generic `blast` recipe remains the fallback for receipts without this metadata.
+
+`OMOBA_STANDARD_QA_MOTION=1` additionally records unpaused live probe frames and
+`motion.json` (simulation timestamps, replicated effects/receipts, mechanical
+transforms), while the existing phase harness captures the same English viewport.
+This evidence supplements stills; it is not a physical-phone performance test.

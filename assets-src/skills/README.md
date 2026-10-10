@@ -45,3 +45,20 @@ scripts/build_roster_skill_models.py`. Each exported GLB was inspected with
 
 The pillar's small buried skirt prevents a floating base on terrain. Source
 objects are spaced for editing only after export, keeping runtime origins local.
+
+
+## Wildspark reference models (October 9)
+
+For current Wildspark art, run `scripts/build_wildspark_models.py` with Blender
+5.0.1 in background mode. It saves `wildspark-reference.blend` and exports five
+Scene0 GLBs: `weapons/wildspark-repeater.glb`, `weapons/wild-launcher.glb`,
+`weapons/wild-rocket.glb`, `cosmetics/standard/rocket.glb`, and
+`cosmetics/standard/trap.glb`. This generator supersedes the old generators for
+these paths; it leaves the legacy `wild-repeater.glb` used by Riftshot untouched.
+
+Original geometry/materials, no downloads or textures; CC-BY-4.0, attribution
+OpenMoba contributors. Exports embed attribution and handheld grip metadata.
+The three named moving assemblies preserve canonical Y-up/Z-forward pivots;
+model bounds remain within the runtime collision-envelope presentation limits.
+Policy hashes are in `client/assets/config/asset_policy.json`. Regenerating art
+requires rechecking those hashes and inspecting the GLBs with `assimp info`.

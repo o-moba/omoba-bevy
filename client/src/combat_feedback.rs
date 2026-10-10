@@ -19,7 +19,7 @@ use crate::{
     skill_presentation::{
         SkillPresentation, accents,
         cast::CastKey,
-        impacts::{Receipt, receipt_burst},
+        impacts::{Receipt, receipt_burst, rocket_blast},
         vocab::PaletteSlot,
     },
     sprite::PlayerVisualMode,
@@ -91,7 +91,8 @@ impl HitCursor {
                 continue;
             }
             if !event.amount.is_finite()
-                || event.amount <= 0.0
+                || event.amount < 0.0
+                || (event.amount == 0.0 && !event.area_impact.is_some_and(|area| area.valid()))
                 || !Vec3::new(event.x, event.y, event.z).is_finite()
                 || event.target.kind == CombatEntityKind::Unknown
             {
@@ -288,10 +289,23 @@ struct Impact {
 #[derive(Resource, Default)]
 struct CombatFeedback {
     cursor: HitCursor,
+    explosions: std::collections::VecDeque<u64>,
     impacts: Vec<Impact>,
     /// Whether each neutral monster the client has seen this round is a boss. A killed
     /// monster leaves the snapshot with its last receipt, so its kind is kept from before.
     camps: std::collections::HashMap<u64, bool>,
+}
+impl CombatFeedback {
+    fn first_explosion(&mut self, id: u64) -> bool {
+        if self.explosions.contains(&id) {
+            return false;
+        }
+        if self.explosions.len() == 128 {
+            self.explosions.pop_front();
+        }
+        self.explosions.push_back(id);
+        true
+    }
 }
 #[derive(Component)]
 pub(crate) struct DamageNumber {
@@ -352,6 +366,7 @@ fn collect_hits(
     let mut number_count = numbers.iter().count();
     if changed {
         feedback.impacts.clear();
+        feedback.explosions.clear();
         feedback.camps.clear();
         out.resets.write(ClearCombatVfx);
         for entity in &numbers {
@@ -458,18 +473,34 @@ fn collect_hits(
         );
         // The vital break is the engine's own burst; every other receipt is drawn from the
         // recipe of its row when it has one.
-        let themed = (!vital)
-            .then(|| {
-                themed_impact(
-                    skills.as_deref(),
-                    source.as_ref(),
-                    &event,
-                    ground(position).y,
-                    &snapshot.skill_effects,
-                    drops.len(),
+        let area = event.area_impact.filter(|area| area.valid());
+        let themed = if let Some(area) = area {
+            // The server repeats the detonation on visible victim receipts. Draw one
+            // blast even when receipts arrive in different snapshots or the caster is hidden.
+            let fresh = feedback.first_explosion(area.id);
+            Some(if fresh {
+                rocket_blast(
+                    area,
+                    ground(Vec3::new(area.center[0], 0.0, area.center[1])),
+                    event.id,
                 )
+            } else {
+                Vec::new()
             })
-            .flatten();
+        } else {
+            (!vital)
+                .then(|| {
+                    themed_impact(
+                        skills.as_deref(),
+                        source.as_ref(),
+                        &event,
+                        ground(position).y,
+                        &snapshot.skill_effects,
+                        drops.len(),
+                    )
+                })
+                .flatten()
+        };
         #[cfg(feature = "qa")]
         shown.record(ReceiptLook::of(
             skills.as_deref(),
@@ -516,6 +547,9 @@ fn collect_hits(
                 scale: profile.impact.scale.clamp(0.1, 2.0),
                 color: impact_color,
             });
+        }
+        if event.amount == 0.0 {
+            continue; // A shield can confirm detonation without damage or a hit link.
         }
         if let Some((_, slot)) = source.zip(event.action_slot) {
             out.hits.write(ConfirmedHit {
@@ -717,6 +751,43 @@ mod tests {
             ..default()
         }
     }
+    #[test]
+    fn one_blast_for_many_receipts_and_shields_confirm_only_valid_explosions() {
+        let area = shared::combat::AreaImpact {
+            id: 100,
+            skill: shared::loadout::SkillId::WildRocket,
+            center: [4.0, 0.0],
+            radius: 3.0,
+        };
+        let mut feedback = CombatFeedback::default();
+        feedback.cursor.accept((1, 1), &[]);
+        let events: Vec<_> = (1..=5)
+            .map(|id| CombatEvent {
+                area_impact: Some(area),
+                ..hit(id, if id == 1 { 0.0 } else { 50.0 })
+            })
+            .collect();
+        let (_, accepted) = feedback.cursor.accept((1, 1), &events);
+        assert_eq!(accepted.len(), 5);
+        assert_eq!(
+            accepted
+                .iter()
+                .filter(|e| feedback.first_explosion(e.area_impact.unwrap().id))
+                .count(),
+            1
+        );
+        assert!(!feedback.first_explosion(area.id));
+        assert!(feedback.cursor.accept((1, 1), &events).1.is_empty());
+        let invalid = CombatEvent {
+            area_impact: Some(shared::combat::AreaImpact {
+                radius: f32::NAN,
+                ..area
+            }),
+            ..hit(6, 0.0)
+        };
+        assert!(feedback.cursor.accept((1, 1), &[invalid]).1.is_empty());
+    }
+
     fn seen_hero(class: shared::HeroClass) -> Source<'static> {
         Source {
             position: Vec3::new(0.0, 0.5, 0.0),

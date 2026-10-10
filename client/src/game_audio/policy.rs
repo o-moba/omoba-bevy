@@ -448,6 +448,7 @@ pub(super) struct EventCursor {
     high_water: u64,
     alive: bool,
     level: u32,
+    explosions: std::collections::VecDeque<u64>,
 }
 
 impl EventCursor {
@@ -462,12 +463,14 @@ impl EventCursor {
         let previous_phase = self.phase.replace(phase.clone());
         let latest = events.iter().map(|event| event.id).max().unwrap_or(0);
         let Some(local) = local else {
+            self.explosions.clear();
             let changed = self.identity.take().is_some();
             self.high_water = latest;
             return (changed, Vec::new());
         };
         let identity = (round.0, round.1, local.id);
         if self.identity != Some(identity) {
+            self.explosions.clear();
             let previous_identity = self.identity.replace(identity);
             self.high_water = latest;
             self.alive = local.alive;
@@ -535,6 +538,29 @@ impl EventCursor {
             let outgoing =
                 event.source.kind == CombatEntityKind::Player && event.source.id == local.id;
             let gain = distance_gain(local.position, Vec3::new(event.x, event.y, event.z));
+            let area = event.area_impact.filter(|area| area.valid());
+            if let Some(area) = area.filter(|area| !self.explosions.contains(&area.id)) {
+                if self.explosions.len() == 128 {
+                    self.explosions.pop_front();
+                }
+                self.explosions.push_back(area.id);
+                let gain = distance_gain(
+                    local.position,
+                    Vec3::new(area.center[0], event.y, area.center[1]),
+                );
+                if gain > 0.0 {
+                    cues.push(Candidate::plain(
+                        AudioCue::for_style(ProjectileStyle::Rocket),
+                        gain,
+                        Origin::Receipt {
+                            id: event.id,
+                            source: event.source,
+                            slot: event.action_slot,
+                            style: ProjectileStyle::Rocket,
+                        },
+                    ));
+                }
+            }
             if event.trap_triggered && (outgoing || incoming || gain > 0.0) {
                 cues.push(Candidate::plain(
                     AudioCue::TrapTrigger,
@@ -568,7 +594,7 @@ impl EventCursor {
             if outgoing && event.killed && event.target.kind == CombatEntityKind::Player {
                 cues.push(Candidate::local(AudioCue::Kill));
             }
-            if gain > 0.0 {
+            if gain > 0.0 && area.is_none() {
                 cues.push(Candidate::plain(
                     AudioCue::for_style(event.style),
                     gain,

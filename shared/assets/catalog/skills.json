@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "revision": "standard-kits-6",
+  "revision": "standard-kits-7",
   "skills": [
     {
       "id": "dawn_bind",
@@ -152,7 +152,7 @@
       "id": "wild_rocket",
       "slot": "r",
       "name": "Last Spark",
-      "description": "A long-range rocket explodes on a hero, punishing wounded enemies.",
+      "description": "An accelerating rocket explodes on the first enemy hero. Damage grows with flight distance and each nearby enemy’s missing health.",
       "targeting": "direction",
       "mana_cost": 40,
       "cooldown_secs": 45,
@@ -162,6 +162,8 @@
       "effect": {
         "kind": "impact_rocket",
         "speed": 45,
+        "launch_speed": 18,
+        "acceleration": 54,
         "radius": 1.05,
         "blast_radius": 3,
         "damage": 84,

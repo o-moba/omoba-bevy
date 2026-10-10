@@ -1052,6 +1052,7 @@
     }
   ],
   "other_harnesses": {
+    "client/src/qa/wildspark_demo.rs": "Opt-in live Wildspark demo director (OMOBA_WILDSPARK_DEMO=1), nested under standard_kits_qa: six combat chapters with real mana, moving targets and per-frame receipts. English 960x1280 native capture; social edit is not a phone certification.",
     "client/src/qa/frontend_qa/avatar.rs": "avatar collection with a Studio registry (gap avatar-studio)",
     "client/src/sandbox/ui/qa.rs": "Combat Test panel (gap combat-test)",
     "client/src/qa/audio_qa.rs": "audio settings duplicate of settings-sound; needs OMOBA_AUTOJOIN",
