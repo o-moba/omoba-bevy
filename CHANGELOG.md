@@ -5,6 +5,12 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- `make release-all` builds macOS, Windows (cargo-xwin cross-build), Linux (Docker,
+  offline fallback), a universal Android APK and a signed iPhone archive on one Mac;
+  `make release-publish` pins the packages to IPFS and verifies the gateway copies.
+  An iPhone export refused on the command line now hands the kept archive to Xcode
+  Organizer instead of failing. Release tooling only; no game, protocol or CI change.
+
 - Add `make android-diagnose` for app-scoped launch evidence, installed version,
   device ABI and graphics capabilities. Correct Android compatibility guidance:
   Android 12 meets the OS minimum, while ABI slices do not provide a GPU fallback.

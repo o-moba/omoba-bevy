@@ -67,5 +67,52 @@ class ReleaseHelpers(unittest.TestCase):
             self.assertEqual(sorted(line.split()[1] for line in lines), ["a.zip", "b.apk"])
 
 
+    def test_windows_stage_rejects_non_x64_executables(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            fake = Path(temporary, "client.exe")
+            fake.write_bytes(b"MZ" + b"\x00" * 200)
+            with self.assertRaises(SystemExit):
+                release.stage_windows(Path(temporary, "stage"), "0.24.0", None, fake, fake)
+
+    def test_pinata_token_stays_out_of_the_command_line(self):
+        from unittest import mock
+        calls = []
+
+        def fake_run(args, **kwargs):
+            calls.append((args, kwargs))
+            return mock.Mock(returncode=0, stdout='{"IpfsHash": "bafytest"}', stderr="")
+
+        with tempfile.TemporaryDirectory() as temporary, mock.patch.object(release.subprocess, "run", fake_run):
+            package = Path(temporary, "Omoba-0.24.0-windows-x64.zip")
+            package.write_bytes(b"zip")
+            self.assertEqual(release.pinata_pin(package, "secret-token"), "bafytest")
+        args, kwargs = calls[0]
+        self.assertNotIn("secret-token", " ".join(map(str, args)))
+        self.assertIn("secret-token", kwargs["input"])
+
+    def test_publish_skips_packages_already_pinned_with_the_same_hash(self):
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as temporary:
+            out = Path(temporary)
+            version = "0.24.0"
+            package = out / release.artifact_name(version, "linux")
+            package.write_bytes(b"linux")
+            (out / "ipfs.json").write_text(
+                '{"linux": {"sha256": "%s", "url": "https://x/ipfs/c/f"}}' % release.sha256(package))
+            with mock.patch.dict(release.os.environ, {"PINATA_JWT": "t"}), \
+                    mock.patch.object(release, "workspace_version", return_value=version), \
+                    mock.patch.object(release, "dist_dir", return_value=out), \
+                    mock.patch.object(release, "pinata_pin", side_effect=AssertionError("re-pinned")):
+                self.assertEqual(release.command_publish(mock.Mock(out=None, gateway="https://g")), 0)
+
+
+    def test_android_package_name_follows_the_universal_switch(self):
+        from unittest import mock
+        with mock.patch.dict(release.os.environ, {"OMOBA_ANDROID_UNIVERSAL": "1"}):
+            self.assertEqual(release.artifact_name("0.24.0", "android"), "Omoba-0.24.0-android-universal.apk")
+        with mock.patch.dict(release.os.environ, {}, clear=True):
+            self.assertEqual(release.artifact_name("0.24.0", "android"), "Omoba-0.24.0-android-arm64.apk")
+
+
 if __name__ == "__main__":
     unittest.main()
