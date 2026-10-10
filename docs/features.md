@@ -15,6 +15,14 @@ persist exact requirement bindings, and the game does not yet equip coordinated
 sets or remote projectile/prop skins. See the [iteration record](progress/2026-10-10-asset-catalog.md)
 and parent [design PR #78](https://github.com/o-moba/omoba-bevy/pull/78).
 
+## Planned: Studio model requirements by class and skill
+
+The [proposal and TODO](plans/studio-skill-asset-catalog.md) describe a game-owned
+requirements catalogue shared by Studio and the website: baseline 3D previews,
+artist contributions to specific skill/model roles and eventual coordinated
+cosmetic sets such as Wildspark’s two guns. The public discovery catalogue and local class workshop now exist; exact-slot
+Studio submissions, coordinated sets and runtime set equipping remain planned.
+
 ## First-match guidance and mobile comfort (0.44.0 candidate)
 
 The guide starts with the objective: clear one lane with allied minions, then destroy the enemy main tower. Loading shows five advice cards, navigable with arrows or a single-finger horizontal swipe in the text area. Settings → HUD → Beginner tips remembers whether loading advice and the automatic first-match guide appear; manual Help remains available. Older preferences enable advice by default.
