@@ -1,5 +1,20 @@
 # Feature Inventory
 
+## Creator asset catalogue (first iteration)
+
+The [asset catalogue exporter](asset-catalog.md) joins canonical class recipes,
+skills, presentations and authored asset briefs into a versioned static snapshot.
+It distinguishes licensed bundled handheld references, engine-owned effects and
+motions, and planned projectile/prop bindings. The companion `omoba-web` gallery
+uses the same snapshot; offline Blender thumbnails and content-addressed GLB
+downloads show current defaults without requiring a running game or Account API.
+
+An artist can prepare a requirement/revision-pinned brief and use the existing
+Studio upload route. This is discovery and preparation: Studio does not yet
+persist exact requirement bindings, and the game does not yet equip coordinated
+sets or remote projectile/prop skins. See the [iteration record](progress/2026-10-10-asset-catalog.md)
+and parent [design PR #78](https://github.com/o-moba/omoba-bevy/pull/78).
+
 ## First-match guidance and mobile comfort (0.44.0 candidate)
 
 The guide starts with the objective: clear one lane with allied minions, then destroy the enemy main tower. Loading shows five advice cards, navigable with arrows or a single-finger horizontal swipe in the text area. Settings → HUD → Beginner tips remembers whether loading advice and the automatic first-match guide appear; manual Help remains available. Older preferences enable advice by default.
@@ -1089,3 +1104,20 @@ Allied portraits also show remaining respawn seconds. Nexus motion rotates the o
 ### Engine baseline — 0.43.0
 
 The game and Ekza SDK use Bevy 0.19.1 with Rust 1.95.0. Existing avatar/weapon account flows, humanoid animation and 0.42 gameplay remain supported. GLB scene labels are retained while engine scene types move to world serialization. The upgrade does not claim improved phone FPS without physical-device measurement.
+
+
+## Community class workshop prototype
+
+The companion portal adds `/workshop` alongside the public `/creators` gallery.
+It composes the game’s 12 modular cores and 48 reusable skills, derives the current
+core and skill visual requirements, saves private named recipes under the existing
+OMOBA profile, and exports a safe native Combat Test preset. The catalogue still
+browses all 17 classes and 68 abilities, including legacy nonmodular kits.
+
+Shared Rust validation drives persistence and local import; gameplay dependencies
+are exported from the same resolver. The Account API stores private versioned
+builds in PostgreSQL and supports owner-bound Ekza library consent without
+exposing credentials to the browser. This is a prototype for local gameplay and
+community contribution, with no public/ranked custom-class admission or automatic
+skin installation. See [community workshop](community-workshop.md) and
+[native build import](class-workshop-game.md).

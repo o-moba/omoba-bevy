@@ -5,6 +5,10 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Add the community class workshop bridge: export compiled rules for 12 modular cores/48 skills, validate named build documents through the shared resolver, and import them into local Combat Test. Extend the existing Account API with private versioned build storage and encrypted, owner-bound Ekza library consent; public/ranked admission is unchanged. The companion portal provides the editor, previews, account saves and portable downloads.
+
+- Add the first creator-catalogue bridge: a deterministic class/skill/asset requirements export, content-addressed licensed handheld references and offline Blender thumbnails. The companion portal can browse the snapshot and prepare revision-pinned contribution briefs. Exact requirement approval, cosmetic sets and runtime replacement of projectiles/props remain future work; no gameplay or network protocol changes.
+
 - Improve the first match with an objective-first guide, loading tips navigable by buttons or a single-finger swipe, and a remembered beginner-tips switch in Settings → HUD. Keep advice arrows inside narrow desktop windows. Compact creature health bars, reduce melee/hit/tower sound gains, and use a closer default phone camera while preserving saved zoom choices.
 
 ### 0.44.0 candidate — mobile playtest quality

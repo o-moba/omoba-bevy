@@ -1,8 +1,10 @@
 //! Account HTTP boundary. Match settlement is deliberately not an HTTP operation.
 pub mod accounts;
 pub mod auth;
+pub mod class_builds;
 pub mod crypto;
 pub mod devices;
+pub mod ekza_library;
 pub mod read;
 pub mod supporter;
 
@@ -29,6 +31,8 @@ use std::{
 pub const DEVICES_MIGRATION: &str = include_str!("../migrations/002_devices.sql");
 pub const SUPPORTER_MIGRATION: &str = include_str!("../migrations/003_supporter.sql");
 pub const PORTAL_MIGRATION: &str = include_str!("../migrations/001_portal.sql");
+pub const EKZA_LIBRARY_MIGRATION: &str = include_str!("../migrations/005_ekza_library.sql");
+pub const CLASS_BUILDS_MIGRATION: &str = include_str!("../migrations/004_class_builds.sql");
 #[derive(Clone)]
 pub struct Config {
     pub origin: String,
@@ -39,6 +43,7 @@ pub struct Config {
 #[derive(Clone)]
 pub struct App {
     pub billing: Arc<supporter::BillingConfig>,
+    pub ekza: Arc<ekza_library::EkzaConfig>,
     pub pool: PgPool,
     pub career: CareerStore,
     pub config: Arc<Config>,
@@ -134,13 +139,14 @@ impl App {
             sqlx::query_scalar("SELECT version FROM portal.schema_version ORDER BY version")
                 .fetch_all(&pool)
                 .await?;
-        if versions != [1, 2, 3] {
+        if versions != [1, 2, 3] && versions != [1, 2, 3, 4] && versions != [1, 2, 3, 4, 5] {
             return Err(Error(
                 StatusCode::SERVICE_UNAVAILABLE,
                 "unsupported_portal_schema",
             ));
         }
         Ok(Self {
+            ekza: Arc::new(ekza_library::EkzaConfig::from_env(&config.origin)?),
             billing: Arc::new(supporter::BillingConfig::from_env().map_err(|_| {
                 Error(
                     StatusCode::SERVICE_UNAVAILABLE,
@@ -205,7 +211,12 @@ pub async fn migrate(url: &str) -> std::result::Result<(), String> {
             .await
             .map_err(|_| "Cannot apply portal migration")?;
     }
-    for (version, migration) in [(2, DEVICES_MIGRATION), (3, SUPPORTER_MIGRATION)] {
+    for (version, migration) in [
+        (2, DEVICES_MIGRATION),
+        (3, SUPPORTER_MIGRATION),
+        (4, CLASS_BUILDS_MIGRATION),
+        (5, EKZA_LIBRARY_MIGRATION),
+    ] {
         let applied: bool = sqlx::query_scalar(
             "SELECT EXISTS(SELECT 1 FROM portal.schema_version WHERE version=$1)",
         )
@@ -225,7 +236,7 @@ pub async fn migrate(url: &str) -> std::result::Result<(), String> {
             .fetch_all(&mut *tx)
             .await
             .map_err(|_| "Cannot read portal version")?;
-    if versions != [1, 2, 3] {
+    if versions != [1, 2, 3, 4, 5] {
         return Err("Unsupported portal schema version".into());
     }
     tx.commit().await.map_err(|_| "Cannot commit migration")?;
@@ -394,6 +405,35 @@ async fn dispatch(
     )
     .await?;
     match (method.as_str(), path) {
+        ("GET", "me/ekza-library") => ekza_library::handle(app, &session, "get", query, body).await,
+        ("POST", "me/ekza-library/connect") => {
+            ekza_library::handle(app, &session, "connect", query, body).await
+        }
+        ("POST", "me/ekza-library/poll") => {
+            ekza_library::handle(app, &session, "poll", query, body).await
+        }
+        ("DELETE", "me/ekza-library") => {
+            ekza_library::handle(app, &session, "disconnect", query, body).await
+        }
+        ("GET", "me/class-builds") => class_builds::list(app, &session, query).await,
+        ("POST", "me/class-builds") => {
+            class_builds::mutate(app, &session, "POST", None, query, headers, body).await
+        }
+        ("GET", p) if p.starts_with("me/class-builds/") => {
+            class_builds::get(app, &session, &p[16..], query).await
+        }
+        ("PATCH" | "DELETE", p) if p.starts_with("me/class-builds/") => {
+            class_builds::mutate(
+                app,
+                &session,
+                method.as_str(),
+                Some(&p[16..]),
+                query,
+                headers,
+                body,
+            )
+            .await
+        }
         ("GET", "me/devices") => devices::list(app, &session).await,
         ("POST", "me/devices/lookup") => devices::lookup(app, &session, body).await,
         ("POST", "me/devices/approve") => devices::approve(app, &session, body).await,

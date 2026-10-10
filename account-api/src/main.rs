@@ -12,7 +12,7 @@ async fn run() -> Result<(), String> {
     let url = std::env::var("OMOBA_DATABASE_URL").map_err(|_| "Set OMOBA_DATABASE_URL")?;
     if std::env::args().nth(1).as_deref() == Some("migrate") {
         migrate(&url).await?;
-        println!("Career v3 and portal v3 ready.");
+        println!("Career and Account API migrations ready.");
         return Ok(());
     }
     let origin =
