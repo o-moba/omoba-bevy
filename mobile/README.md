@@ -112,10 +112,10 @@ these are build prerequisites, not a claim that every such device performs well.
 
 ### Universal build (multiple ABIs)
 
-`make android` / `build.py` default to `arm64-v8a` only, which already covers
-effectively every real phone and tablet from the last decade. If a tester's
-device architecture is unknown, or `adb shell getprop ro.product.cpu.abi`
-confirms it is not `arm64-v8a`, add `--universal` (or `make android-universal`)
+`make android` / `build.py` default to `arm64-v8a` only. Some devices use a
+32-bit Android userspace even with a 64-bit processor. Check the operating
+system's supported ABIs with `adb shell getprop ro.product.cpu.abilist`.
+If it does not include `arm64-v8a`, add `--universal` (or `make android-universal`)
 to also cross-compile `armeabi-v7a` and `x86_64` into the same APK:
 
 ```sh
@@ -125,13 +125,46 @@ make android-universal   # or: python3 mobile/android/build.py --universal
 This needs the extra Rust targets installed once (`rustup target add
 armv7-linux-androideabi x86_64-linux-android`), compiles three times, and
 produces a noticeably larger APK at
-`target/mobile/android/omoba-<version>-android-universal-debug.apk`. A crash
-right after launch on an already-`arm64-v8a` device is an architecture
-mismatch only if `adb logcat` actually says so (e.g. `UnsatisfiedLinkError`);
-a generic "app keeps stopping" is far more often the mandatory Vulkan level 1
-feature (line above) failing on that device's GPU driver, which `--universal`
-does not change. Get an `adb logcat` capture (`adb logcat -d | grep -A 30
-"FATAL EXCEPTION\|libclient\|panic"`) before assuming it is an ABI problem.
+`target/mobile/android/omoba-<version>-android-universal-debug.apk`.
+Multiple ABIs do not add GPU support. `UnsatisfiedLinkError` also covers missing
+native symbols, not just an architecture mismatch; see the
+[previous C++ runtime fix](../docs/progress/2026-09-27-android-launch-crash.md).
+
+### Silent launch failure and Android 12
+
+Android 12/API 31 is above the current minimum API 26. A date such as
+`2022-10-05` may be the security patch date; it does not identify the GPU or ABI.
+The current renderer and manifest require Vulkan. Sideloading an APK does not
+prove the device satisfies its declared graphics features (Android's
+[`uses-feature` documentation](https://developer.android.com/guide/topics/manifest/uses-feature-element)
+distinguishes feature declarations from installation checks). A return to the home
+screen can also be a native loader failure, panic, or memory termination.
+
+Connect the affected phone with USB debugging authorized, reproduce the failure,
+and run:
+
+```sh
+make android-diagnose
+# Optional explicit launch and comparison with the candidate APK:
+python3 scripts/android_diagnose.py --launch --apk /path/to/Omoba.apk \
+  --output builds/android-diagnosis-attempt-2.json
+```
+
+The report includes OS/security patch, supported ABIs, advertised Vulkan/OpenGL
+features, GPU description when available, installed version, app exit history,
+and crash-buffer groups naming OMOBA. It omits the device serial and unrelated
+crash groups. Review the report before sharing. Historical records may predate
+the attempt; empty logs do not prove a successful launch. The default is
+read-only and never clears logs, stops, installs or uninstalls the game. Existing
+reports are preserved; use a new output name for each attempt. Multiple devices
+require `--serial`. No developer build toolchain is needed, only Python and adb.
+
+For broader GPU coverage, a separate OpenGL ES fallback needs renderer feature
+selection, reduced graphics limits and actual device tests. Merely removing the
+Vulkan manifest requirement or adding ABI slices cannot implement it. This
+iteration adds diagnostics; it does not claim a working GLES fallback or a fix
+for a phone whose logs have not been collected. Keep the existing signing key
+and increase `versionCode` when distributing any corrected Android build.
 
 After an actual successful build, use the installed SDK's adb to install the debug
 APK on a consenting test device, then launch **Omoba Beta** from its icon. The game
