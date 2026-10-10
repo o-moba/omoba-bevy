@@ -14,6 +14,7 @@ import uuid
 
 from beta_launcher import address, stop
 import catalog
+from export_workshop import rust_command, rust_environment, target_directory
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -26,10 +27,14 @@ def arguments(argv=None):
     p.add_argument('--bind', type=address, default='127.0.0.1:4040')
     p.add_argument('--hero', choices=catalog.hero_ids(), help='skip the hero picker')
     p.add_argument('--avatar', help='shipped avatar slug; choose from the picker if omitted')
-    p.add_argument('--preset', help='duel, late-game, dps, animation, or a saved JSON file')
+    preset = p.add_mutually_exclusive_group()
+    preset.add_argument('--preset', help='duel, late-game, dps, animation, or a saved JSON file')
+    preset.add_argument('--class-build', type=Path, help='website omoba.class-build.v1 JSON; validate using the shared Rust resolver')
     p.add_argument('--client-binary', type=Path, help='explicit prebuilt client; otherwise build locked sources')
     p.add_argument('--server-binary', type=Path, help='explicit prebuilt server; otherwise build locked sources')
     args = p.parse_args(argv)
+    if args.class_build and (args.server_only or args.avatar):
+        p.error('--class-build needs a client and uses the safe default appearance; omit --server-only/--avatar')
     endpoint = args.connect or args.bind
     if not ipaddress.ip_address(endpoint.rsplit(":", 1)[0]).is_loopback:
         p.error("Combat Test is a local development host; use a loopback address")
@@ -55,7 +60,7 @@ def build(names):
     for name in sorted(names):
         command.extend(['-p', name, '--bin', name])
     result = {}
-    with subprocess.Popen(command, cwd=ROOT, stdout=subprocess.PIPE, text=True) as process:
+    with subprocess.Popen(command, cwd=ROOT, env=rust_environment(), stdout=subprocess.PIPE, text=True) as process:
         try:
             for line in process.stdout:
                 event = json.loads(line)
@@ -69,6 +74,18 @@ def build(names):
 
 
 def run(args):
+    run_dir = target_directory() / 'combat-test' / (time.strftime('%Y%m%d-%H%M%S-') + uuid.uuid4().hex[:8])
+    run_dir.mkdir(parents=True)
+    if args.class_build:
+        preset_path = run_dir / 'class-build-preset.json'
+        subprocess.run(rust_command('--class-build', str(args.class_build.resolve()), '--output', str(preset_path)),
+                       cwd=ROOT, env=rust_environment(), check=True)
+        native = json.loads(preset_path.read_text())
+        core = native['player']['hero']
+        if args.hero and args.hero != core:
+            raise RuntimeError('--hero must match the class build core')
+        args.hero = core
+        args.preset = str(preset_path)
     needed = {'server'} if args.server_only else {'client'} if args.connect else {'server', 'client'}
     binaries = {name: getattr(args, name + '_binary') for name in needed}
     binaries.update(build({name for name, path in binaries.items() if path is None}))
@@ -81,8 +98,6 @@ def run(args):
     endpoint = args.connect or (f'127.0.0.1:{port}' if host == '0.0.0.0' else args.bind)
     if endpoint.startswith('0.0.0.0:'):
         raise RuntimeError('--connect needs the host address, not 0.0.0.0')
-    run_dir = ROOT / 'target/combat-test' / (time.strftime('%Y%m%d-%H%M%S-') + uuid.uuid4().hex[:8])
-    run_dir.mkdir(parents=True)
     env = session_environment(os.environ, run_dir, endpoint, args.bind)
     children, logs = [], []
 
@@ -135,7 +150,7 @@ def main(argv=None):
         return run(args)
     except KeyboardInterrupt:
         return 130
-    except (OSError, RuntimeError) as error:
+    except (OSError, RuntimeError, subprocess.CalledProcessError) as error:
         print(f'Combat Test: {error}', file=sys.stderr)
         return 1
 

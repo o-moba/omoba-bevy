@@ -1,0 +1,1228 @@
+{
+  "cores": [
+    {
+      "attackProfile": "light_bolt",
+      "baseHp": 180,
+      "defaultPassive": "radiance",
+      "description": "Light mage: bind, shield, field and beam",
+      "id": "dawnweaver",
+      "name": "Dawnweaver",
+      "preset": {
+        "catalog_revision": "standard-kits-6",
+        "core": "dawnweaver",
+        "passive": "radiance",
+        "schema_version": 1,
+        "skills": [
+          "dawn_bind",
+          "dawn_barrier",
+          "dawn_field",
+          "dawn_ray"
+        ]
+      }
+    },
+    {
+      "attackProfile": "repeater",
+      "baseHp": 190,
+      "defaultPassive": "momentum",
+      "description": "Explosive marksman: weapon modes, traps and takedown momentum",
+      "id": "wildspark",
+      "name": "Wildspark",
+      "preset": {
+        "catalog_revision": "standard-kits-6",
+        "core": "wildspark",
+        "passive": "momentum",
+        "schema_version": 1,
+        "skills": [
+          "wild_switch",
+          "wild_zap",
+          "wild_traps",
+          "wild_rocket"
+        ]
+      }
+    },
+    {
+      "attackProfile": "melee",
+      "baseHp": 260,
+      "defaultPassive": "tempered",
+      "description": "Forge defenses, raise terrain and lead the charge",
+      "id": "cinderforge",
+      "name": "Cinderforge",
+      "preset": {
+        "catalog_revision": "standard-kits-6",
+        "core": "cinderforge",
+        "passive": "tempered",
+        "schema_version": 1,
+        "skills": [
+          "fault_line",
+          "furnace_breath",
+          "anvil_charge",
+          "mountain_echo"
+        ]
+      }
+    },
+    {
+      "attackProfile": "melee",
+      "baseHp": 205,
+      "defaultPassive": "vitals",
+      "description": "Strike directional vitals and parry decisive blows",
+      "id": "edgeweaver",
+      "name": "Edgeweaver",
+      "preset": {
+        "catalog_revision": "standard-kits-6",
+        "core": "edgeweaver",
+        "passive": "vitals",
+        "schema_version": 1,
+        "skills": [
+          "edge_lunge",
+          "mirror_guard",
+          "twin_tempo",
+          "fourfold_duel"
+        ]
+      }
+    },
+    {
+      "attackProfile": "melee",
+      "baseHp": 215,
+      "defaultPassive": "flow",
+      "description": "Energy fighter with linked dashes and a chain kick",
+      "id": "stormfist",
+      "name": "Stormfist",
+      "preset": {
+        "catalog_revision": "standard-kits-6",
+        "core": "stormfist",
+        "passive": "flow",
+        "schema_version": 1,
+        "skills": [
+          "echo_strike",
+          "anchor_step",
+          "thunder_pulse",
+          "thunder_kick"
+        ]
+      }
+    },
+    {
+      "attackProfile": "melee",
+      "baseHp": 185,
+      "defaultPassive": "shroud",
+      "description": "Hidden hunter with prepared curses and a retreating finisher",
+      "id": "veilstalker",
+      "name": "Veilstalker",
+      "preset": {
+        "catalog_revision": "standard-kits-6",
+        "core": "veilstalker",
+        "passive": "shroud",
+        "schema_version": 1,
+        "skills": [
+          "thorn_volley",
+          "patient_curse",
+          "shadow_lash",
+          "nightfall"
+        ]
+      }
+    },
+    {
+      "attackProfile": "light_bolt",
+      "baseHp": 185,
+      "defaultPassive": "essence",
+      "description": "Returning orb, charm and a sequence of fiery dashes",
+      "id": "emberveil",
+      "name": "Emberveil",
+      "preset": {
+        "catalog_revision": "standard-kits-6",
+        "core": "emberveil",
+        "passive": "essence",
+        "schema_version": 1,
+        "skills": [
+          "wandering_ember",
+          "kindled_wisps",
+          "heart_tether",
+          "flame_dance"
+        ]
+      }
+    },
+    {
+      "attackProfile": "light_bolt",
+      "baseHp": 180,
+      "defaultPassive": "clockwork",
+      "description": "Control the battlefield through one persistent orb",
+      "id": "orbitwright",
+      "name": "Orbitwright",
+      "preset": {
+        "catalog_revision": "standard-kits-6",
+        "core": "orbitwright",
+        "passive": "clockwork",
+        "schema_version": 1,
+        "skills": [
+          "orbital_command",
+          "orbital_field",
+          "orbital_guard",
+          "orbital_collapse"
+        ]
+      }
+    },
+    {
+      "attackProfile": "light_bolt",
+      "baseHp": 185,
+      "defaultPassive": "resonance",
+      "description": "Accurate shots, detonation marks and a blink",
+      "id": "riftshot",
+      "name": "Riftshot",
+      "preset": {
+        "catalog_revision": "standard-kits-6",
+        "core": "riftshot",
+        "passive": "resonance",
+        "schema_version": 1,
+        "skills": [
+          "rift_needle",
+          "rift_seal",
+          "rift_step",
+          "horizon_wave"
+        ]
+      }
+    },
+    {
+      "attackProfile": "light_bolt",
+      "baseHp": 220,
+      "defaultPassive": "souls",
+      "description": "Hook enemies, rescue allies and collect souls",
+      "id": "chainkeeper",
+      "name": "Chainkeeper",
+      "preset": {
+        "catalog_revision": "standard-kits-6",
+        "core": "chainkeeper",
+        "passive": "souls",
+        "schema_version": 1,
+        "skills": [
+          "iron_hook",
+          "guiding_lantern",
+          "chain_sweep",
+          "iron_boundary"
+        ]
+      }
+    },
+    {
+      "attackProfile": "melee",
+      "baseHp": 250,
+      "defaultPassive": "concussion",
+      "description": "Protect allies and intercept incoming projectiles",
+      "id": "frostguard",
+      "name": "Frostguard",
+      "preset": {
+        "catalog_revision": "standard-kits-6",
+        "core": "frostguard",
+        "passive": "concussion",
+        "schema_version": 1,
+        "skills": [
+          "winter_shard",
+          "sheltering_leap",
+          "northwall",
+          "winter_divide"
+        ]
+      }
+    },
+    {
+      "attackProfile": "melee",
+      "baseHp": 190,
+      "defaultPassive": "dagger_mastery",
+      "description": "Dagger assassin: Bluff exposes the back; rear attacks hit harder",
+      "id": "adventurer",
+      "name": "Adventurer",
+      "preset": {
+        "catalog_revision": "standard-kits-6",
+        "core": "adventurer",
+        "passive": "dagger_mastery",
+        "schema_version": 1,
+        "skills": [
+          "dagger_deadly_blow",
+          "dagger_bluff",
+          "dagger_backstab",
+          "dagger_lethal_blow"
+        ]
+      }
+    }
+  ],
+  "gameplayRevision": "standard-kits-6",
+  "limits": {
+    "descriptionChars": 1000,
+    "documentBytes": 8192,
+    "nameChars": 80,
+    "skillCount": 4
+  },
+  "passives": [
+    {
+      "id": "radiance",
+      "name": "Radiance"
+    },
+    {
+      "id": "momentum",
+      "name": "Momentum"
+    },
+    {
+      "id": "tempered",
+      "name": "Tempered"
+    },
+    {
+      "id": "vitals",
+      "name": "Vitals"
+    },
+    {
+      "id": "flow",
+      "name": "Flow"
+    },
+    {
+      "id": "shroud",
+      "name": "Shroud"
+    },
+    {
+      "id": "essence",
+      "name": "Essence"
+    },
+    {
+      "id": "clockwork",
+      "name": "Clockwork"
+    },
+    {
+      "id": "resonance",
+      "name": "Resonance"
+    },
+    {
+      "id": "souls",
+      "name": "Souls"
+    },
+    {
+      "id": "concussion",
+      "name": "Concussion"
+    },
+    {
+      "id": "dagger_mastery",
+      "name": "Dagger Mastery"
+    }
+  ],
+  "protocolVersion": 11,
+  "recipeSchemaVersion": 1,
+  "sandboxTemplate": {
+    "dummy": {
+      "armor": 0,
+      "enabled": true,
+      "infinite_hp": true,
+      "max_hp": 10000,
+      "moving": false,
+      "position": [
+        0,
+        3
+      ],
+      "resistance": 0
+    },
+    "enemy": {
+      "actor": {
+        "armor": 0,
+        "attack_speed": 1,
+        "avatar": null,
+        "damage_multiplier": 1,
+        "god_mode": false,
+        "hero": "mage",
+        "infinite_resource": false,
+        "inventory": [],
+        "level": 1,
+        "max_hp": 100,
+        "move_speed": 1,
+        "no_cooldowns": false,
+        "position": [
+          3,
+          0
+        ],
+        "ranks": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "resistance": 0,
+        "unlock_all": false,
+        "xp": 0
+      },
+      "aggression_range": 20,
+      "attack_distance": 2,
+      "auto_respawn": true,
+      "behavior": "stationary",
+      "enabled": false
+    },
+    "environment": {
+      "minions": false,
+      "minions_paused": false,
+      "paused": false,
+      "time_scale": 1
+    },
+    "player": {
+      "armor": 0,
+      "attack_speed": 1,
+      "avatar": null,
+      "damage_multiplier": 1,
+      "god_mode": false,
+      "hero": "dawnweaver",
+      "infinite_resource": false,
+      "inventory": [],
+      "level": 6,
+      "max_hp": 180,
+      "move_speed": 1,
+      "no_cooldowns": false,
+      "position": [
+        -3,
+        0
+      ],
+      "ranks": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "recipe": {
+        "catalog_revision": "standard-kits-6",
+        "core": "dawnweaver",
+        "passive": "radiance",
+        "schema_version": 1,
+        "skills": [
+          "dawn_bind",
+          "dawn_barrier",
+          "dawn_field",
+          "dawn_ray"
+        ]
+      },
+      "resistance": 0,
+      "unlock_all": false,
+      "xp": 0
+    },
+    "version": 1
+  },
+  "schema": "omoba.workshop.v1",
+  "schemaVersion": 1,
+  "skills": [
+    {
+      "castRange": 18,
+      "cooldownSecs": 8,
+      "defaultSlot": "q",
+      "description": "Aimed light binds the first two enemies it hits.",
+      "id": "dawn_bind",
+      "manaCost": 15,
+      "maxRank": 3,
+      "name": "Gleaming Snare",
+      "recastManaCost": 0,
+      "requirements": {
+        "anyOfSkills": [],
+        "attackProfile": null
+      },
+      "targeting": "direction",
+      "unlockLevel": 1
+    },
+    {
+      "castRange": 15,
+      "cooldownSecs": 12,
+      "defaultSlot": "w",
+      "description": "A returning light shields allies on both journeys.",
+      "id": "dawn_barrier",
+      "manaCost": 18,
+      "maxRank": 3,
+      "name": "Returning Aegis",
+      "recastManaCost": 0,
+      "requirements": {
+        "anyOfSkills": [],
+        "attackProfile": null
+      },
+      "targeting": "direction",
+      "unlockLevel": 2
+    },
+    {
+      "castRange": 16,
+      "cooldownSecs": 10,
+      "defaultSlot": "e",
+      "description": "Place a slowing field; cast again to detonate it.",
+      "id": "dawn_field",
+      "manaCost": 24,
+      "maxRank": 3,
+      "name": "Luminous Field",
+      "recastManaCost": 0,
+      "requirements": {
+        "anyOfSkills": [],
+        "attackProfile": null
+      },
+      "targeting": "point",
+      "unlockLevel": 4
+    },
+    {
+      "castRange": 45,
+      "cooldownSecs": 40,
+      "defaultSlot": "r",
+      "description": "A warned beam detonates Radiance marks and applies them again.",
+      "id": "dawn_ray",
+      "manaCost": 40,
+      "maxRank": 3,
+      "name": "Horizon Ray",
+      "recastManaCost": 0,
+      "requirements": {
+        "anyOfSkills": [],
+        "attackProfile": null
+      },
+      "targeting": "direction",
+      "unlockLevel": 6
+    },
+    {
+      "castRange": 0,
+      "cooldownSecs": 0.25,
+      "defaultSlot": "q",
+      "description": "Toggle rapid repeater fire and longer-range rockets that spend Mana.",
+      "id": "wild_switch",
+      "manaCost": 0,
+      "maxRank": 3,
+      "name": "Switchfire",
+      "recastManaCost": 0,
+      "requirements": {
+        "anyOfSkills": [],
+        "attackProfile": "repeater"
+      },
+      "targeting": "self_target",
+      "unlockLevel": 1
+    },
+    {
+      "castRange": 24,
+      "cooldownSecs": 8,
+      "defaultSlot": "w",
+      "description": "Aimed shot slows and reveals the first enemy hit.",
+      "id": "wild_zap",
+      "manaCost": 20,
+      "maxRank": 3,
+      "name": "Shockline",
+      "recastManaCost": 0,
+      "requirements": {
+        "anyOfSkills": [],
+        "attackProfile": null
+      },
+      "targeting": "direction",
+      "unlockLevel": 2
+    },
+    {
+      "castRange": 13,
+      "cooldownSecs": 14,
+      "defaultSlot": "e",
+      "description": "Place three traps that arm, then root enemy heroes.",
+      "id": "wild_traps",
+      "manaCost": 24,
+      "maxRank": 3,
+      "name": "Snapline",
+      "recastManaCost": 0,
+      "requirements": {
+        "anyOfSkills": [],
+        "attackProfile": null
+      },
+      "targeting": "point",
+      "unlockLevel": 4
+    },
+    {
+      "castRange": 256,
+      "cooldownSecs": 45,
+      "defaultSlot": "r",
+      "description": "A long-range rocket explodes on a hero, punishing wounded enemies.",
+      "id": "wild_rocket",
+      "manaCost": 40,
+      "maxRank": 3,
+      "name": "Last Spark",
+      "recastManaCost": 0,
+      "requirements": {
+        "anyOfSkills": [],
+        "attackProfile": null
+      },
+      "targeting": "direction",
+      "unlockLevel": 6
+    },
+    {
+      "castRange": 15,
+      "cooldownSecs": 9,
+      "defaultSlot": "q",
+      "description": "Fracture the ground; a delayed solid pillar rises at the endpoint.",
+      "id": "fault_line",
+      "manaCost": 18,
+      "maxRank": 3,
+      "name": "Fault Line",
+      "recastManaCost": 0,
+      "requirements": {
+        "anyOfSkills": [],
+        "attackProfile": null
+      },
+      "targeting": "direction",
+      "unlockLevel": 1
+    },
+    {
+      "castRange": 7,
+      "cooldownSecs": 12,
+      "defaultSlot": "w",
+      "description": "Breathe fire while resisting displacement; the final blast applies Brittle.",
+      "id": "furnace_breath",
+      "manaCost": 24,
+      "maxRank": 3,
+      "name": "Furnace Breath",
+      "recastManaCost": 0,
+      "requirements": {
+        "anyOfSkills": [],
+        "attackProfile": null
+      },
+      "targeting": "direction",
+      "unlockLevel": 2
+    },
+    {
+      "castRange": 10,
+      "cooldownSecs": 14,
+      "defaultSlot": "e",
+      "description": "Charge forward; terrain impact knocks up nearby enemies.",
+      "id": "anvil_charge",
+      "manaCost": 24,
+      "maxRank": 3,
+      "name": "Anvil Charge",
+      "recastManaCost": 0,
+      "requirements": {
+        "anyOfSkills": [],
+        "attackProfile": null
+      },
+      "targeting": "direction",
+      "unlockLevel": 4
+    },
+    {
+      "castRange": 28,
+      "cooldownSecs": 48,
+      "defaultSlot": "r",
+      "description": "Call an incoming colossus; recast nearby to redirect it and knock enemies up.",
+      "id": "mountain_echo",
+      "manaCost": 45,
+      "maxRank": 3,
+      "name": "Mountain Echo",
+      "recastManaCost": 0,
+      "requirements": {
+        "anyOfSkills": [],
+        "attackProfile": null
+      },
+      "targeting": "direction",
+      "unlockLevel": 6
+    },
+    {
+      "castRange": 5,
+      "cooldownSecs": 7,
+      "defaultSlot": "q",
+      "description": "Lunge and strike the nearest enemy; a hit refunds part of the cooldown.",
+      "id": "edge_lunge",
+      "manaCost": 16,
+      "maxRank": 3,
+      "name": "Edge Lunge",
+      "recastManaCost": 0,
+      "requirements": {
+        "anyOfSkills": [],
+        "attackProfile": null
+      },
+      "targeting": "point",
+      "unlockLevel": 1
+    },
+    {
+      "castRange": 10,
+      "cooldownSecs": 15,
+      "defaultSlot": "w",
+      "description": "Parry damage and control, then counterattack; blocked immobilization empowers the counter.",
+      "id": "mirror_guard",
+      "manaCost": 20,
+      "maxRank": 3,
+      "name": "Mirror Guard",
+      "recastManaCost": 0,
+      "requirements": {
+        "anyOfSkills": [],
+        "attackProfile": null
+      },
+      "targeting": "direction",
+      "unlockLevel": 2
+    },
+    {
+      "castRange": 0,
+      "cooldownSecs": 11,
+      "defaultSlot": "e",
+      "description": "Empower two attacks: the first slows, the second deals critical damage.",
+      "id": "twin_tempo",
+      "manaCost": 18,
+      "maxRank": 3,
+      "name": "Twin Tempo",
+      "recastManaCost": 0,
+      "requirements": {
+        "anyOfSkills": [],
+        "attackProfile": null
+      },
+      "targeting": "self_target",
+      "unlockLevel": 4
+    },
+    {
+      "castRange": 10,
+      "cooldownSecs": 45,
+      "defaultSlot": "r",
+      "description": "Expose four directional vitals; complete the challenge to create an allied healing field.",
+      "id": "fourfold_duel",
+      "manaCost": 40,
+      "maxRank": 3,
+      "name": "Fourfold Duel",
+      "recastManaCost": 0,
+      "requirements": {
+        "anyOfSkills": [],
+        "attackProfile": null
+      },
+      "targeting": "point",
+      "unlockLevel": 6
+    },
+    {
+      "castRange": 18,
+      "cooldownSecs": 9,
+      "defaultSlot": "q",
+      "description": "Mark the first enemy hit; recast to dash to that exact target.",
+      "id": "echo_strike",
+      "manaCost": 50,
+      "maxRank": 3,
+      "name": "Echo Strike",
+      "recastManaCost": 25,
+      "requirements": {
+        "anyOfSkills": [],
+        "attackProfile": null
+      },
+      "targeting": "direction",
+      "unlockLevel": 1
+    },
+    {
+      "castRange": 9,
+      "cooldownSecs": 12,
+      "defaultSlot": "w",
+      "description": "Leap to an ally or place a short-lived anchor; recast for lifesteal.",
+      "id": "anchor_step",
+      "manaCost": 50,
+      "maxRank": 3,
+      "name": "Anchor Step",
+      "recastManaCost": 25,
+      "requirements": {
+        "anyOfSkills": [],
+        "attackProfile": null
+      },
+      "targeting": "point",
+      "unlockLevel": 2
+    },
+    {
+      "castRange": 0,
+      "cooldownSecs": 10,
+      "defaultSlot": "e",
+      "description": "Damage and reveal nearby enemies; recast to slow those victims.",
+      "id": "thunder_pulse",
+      "manaCost": 50,
+      "maxRank": 3,
+      "name": "Thunder Pulse",
+      "recastManaCost": 25,
+      "requirements": {
+        "anyOfSkills": [],
+        "attackProfile": null
+      },
+      "targeting": "self_target",
+      "unlockLevel": 4
+    },
+    {
+      "castRange": 5,
+      "cooldownSecs": 40,
+      "defaultSlot": "r",
+      "description": "Kick an enemy away, damaging and lifting other enemies along its path.",
+      "id": "thunder_kick",
+      "manaCost": 0,
+      "maxRank": 3,
+      "name": "Thunder Kick",
+      "recastManaCost": 0,
+      "requirements": {
+        "anyOfSkills": [],
+        "attackProfile": null
+      },
+      "targeting": "point",
+      "unlockLevel": 6
+    },
+    {
+      "castRange": 13,
+      "cooldownSecs": 7,
+      "defaultSlot": "q",
+      "description": "Launch a marking spike followed by up to three priority-target recasts.",
+      "id": "thorn_volley",
+      "manaCost": 18,
+      "maxRank": 3,
+      "name": "Thorn Volley",
+      "recastManaCost": 0,
+      "requirements": {
+        "anyOfSkills": [],
+        "attackProfile": null
+      },
+      "targeting": "direction",
+      "unlockLevel": 1
+    },
+    {
+      "castRange": 15,
+      "cooldownSecs": 13,
+      "defaultSlot": "w",
+      "description": "Curse a visible target; let the mark mature before hitting to charm and weaken it.",
+      "id": "patient_curse",
+      "manaCost": 18,
+      "maxRank": 3,
+      "name": "Patient Curse",
+      "recastManaCost": 0,
+      "requirements": {
+        "anyOfSkills": [],
+        "attackProfile": null
+      },
+      "targeting": "point",
+      "unlockLevel": 2
+    },
+    {
+      "castRange": 5,
+      "cooldownSecs": 9,
+      "defaultSlot": "e",
+      "description": "Whip a nearby target and gain speed; shroud empowers the approach.",
+      "id": "shadow_lash",
+      "manaCost": 20,
+      "maxRank": 3,
+      "name": "Shadow Lash",
+      "recastManaCost": 0,
+      "requirements": {
+        "anyOfSkills": [],
+        "attackProfile": null
+      },
+      "targeting": "point",
+      "unlockLevel": 4
+    },
+    {
+      "castRange": 8,
+      "cooldownSecs": 48,
+      "defaultSlot": "r",
+      "description": "Strike a frontal area, execute wounded enemies and retreat while briefly untargetable.",
+      "id": "nightfall",
+      "manaCost": 45,
+      "maxRank": 3,
+      "name": "Nightfall",
+      "recastManaCost": 0,
+      "requirements": {
+        "anyOfSkills": [],
+        "attackProfile": null
+      },
+      "targeting": "direction",
+      "unlockLevel": 6
+    },
+    {
+      "castRange": 17,
+      "cooldownSecs": 8,
+      "defaultSlot": "q",
+      "description": "Send an orb out and back to your moving position; the return deals true damage.",
+      "id": "wandering_ember",
+      "manaCost": 20,
+      "maxRank": 3,
+      "name": "Wandering Ember",
+      "recastManaCost": 0,
+      "requirements": {
+        "anyOfSkills": [],
+        "attackProfile": null
+      },
+      "targeting": "direction",
+      "unlockLevel": 1
+    },
+    {
+      "castRange": 9,
+      "cooldownSecs": 10,
+      "defaultSlot": "w",
+      "description": "Gain speed and launch three guided flames at nearby enemies.",
+      "id": "kindled_wisps",
+      "manaCost": 18,
+      "maxRank": 3,
+      "name": "Kindled Wisps",
+      "recastManaCost": 0,
+      "requirements": {
+        "anyOfSkills": [],
+        "attackProfile": null
+      },
+      "targeting": "self_target",
+      "unlockLevel": 2
+    },
+    {
+      "castRange": 18,
+      "cooldownSecs": 12,
+      "defaultSlot": "e",
+      "description": "The first enemy hit walks helplessly toward you.",
+      "id": "heart_tether",
+      "manaCost": 24,
+      "maxRank": 3,
+      "name": "Heart Tether",
+      "recastManaCost": 0,
+      "requirements": {
+        "anyOfSkills": [],
+        "attackProfile": null
+      },
+      "targeting": "direction",
+      "unlockLevel": 4
+    },
+    {
+      "castRange": 7,
+      "cooldownSecs": 42,
+      "defaultSlot": "r",
+      "description": "Dash and fire guided bolts; up to three casts, with a bounded takedown refund.",
+      "id": "flame_dance",
+      "manaCost": 40,
+      "maxRank": 3,
+      "name": "Flame Dance",
+      "recastManaCost": 0,
+      "requirements": {
+        "anyOfSkills": [],
+        "attackProfile": null
+      },
+      "targeting": "point",
+      "unlockLevel": 6
+    },
+    {
+      "castRange": 15,
+      "cooldownSecs": 5,
+      "defaultSlot": "q",
+      "description": "Move your persistent orb, damaging enemies along its path.",
+      "id": "orbital_command",
+      "manaCost": 16,
+      "maxRank": 3,
+      "name": "Orbital Command",
+      "recastManaCost": 0,
+      "requirements": {
+        "anyOfSkills": [],
+        "attackProfile": null
+      },
+      "targeting": "point",
+      "unlockLevel": 1
+    },
+    {
+      "castRange": 0,
+      "cooldownSecs": 10,
+      "defaultSlot": "w",
+      "description": "At the orb, burst damage and create a field that hastens allies and slows enemies.",
+      "id": "orbital_field",
+      "manaCost": 24,
+      "maxRank": 3,
+      "name": "Orbital Field",
+      "recastManaCost": 0,
+      "requirements": {
+        "anyOfSkills": [
+          "orbital_command",
+          "orbital_guard"
+        ],
+        "attackProfile": null
+      },
+      "targeting": "self_target",
+      "unlockLevel": 2
+    },
+    {
+      "castRange": 15,
+      "cooldownSecs": 10,
+      "defaultSlot": "e",
+      "description": "Send the orb to an ally, damaging the path and granting a shield and defensive aura.",
+      "id": "orbital_guard",
+      "manaCost": 20,
+      "maxRank": 3,
+      "name": "Orbital Guard",
+      "recastManaCost": 0,
+      "requirements": {
+        "anyOfSkills": [],
+        "attackProfile": null
+      },
+      "targeting": "point",
+      "unlockLevel": 4
+    },
+    {
+      "castRange": 0,
+      "cooldownSecs": 45,
+      "defaultSlot": "r",
+      "description": "After a visible delay, the orb damages and pulls nearby enemies inward.",
+      "id": "orbital_collapse",
+      "manaCost": 45,
+      "maxRank": 3,
+      "name": "Orbital Collapse",
+      "recastManaCost": 0,
+      "requirements": {
+        "anyOfSkills": [
+          "orbital_command",
+          "orbital_guard"
+        ],
+        "attackProfile": null
+      },
+      "targeting": "self_target",
+      "unlockLevel": 6
+    },
+    {
+      "castRange": 22,
+      "cooldownSecs": 6,
+      "defaultSlot": "q",
+      "description": "First-hit shot applies attack effects and reduces your active cooldowns on hit.",
+      "id": "rift_needle",
+      "manaCost": 14,
+      "maxRank": 3,
+      "name": "Rift Needle",
+      "recastManaCost": 0,
+      "requirements": {
+        "anyOfSkills": [],
+        "attackProfile": null
+      },
+      "targeting": "direction",
+      "unlockLevel": 1
+    },
+    {
+      "castRange": 20,
+      "cooldownSecs": 11,
+      "defaultSlot": "w",
+      "description": "Mark the first hero or structure; only your own attack or spell can detonate it.",
+      "id": "rift_seal",
+      "manaCost": 18,
+      "maxRank": 3,
+      "name": "Rift Seal",
+      "recastManaCost": 0,
+      "requirements": {
+        "anyOfSkills": [],
+        "attackProfile": null
+      },
+      "targeting": "direction",
+      "unlockLevel": 2
+    },
+    {
+      "castRange": 7,
+      "cooldownSecs": 15,
+      "defaultSlot": "e",
+      "description": "Blink to a legal location and fire at a nearby enemy, prioritizing your seal.",
+      "id": "rift_step",
+      "manaCost": 25,
+      "maxRank": 3,
+      "name": "Rift Step",
+      "recastManaCost": 0,
+      "requirements": {
+        "anyOfSkills": [],
+        "attackProfile": null
+      },
+      "targeting": "point",
+      "unlockLevel": 4
+    },
+    {
+      "castRange": 256,
+      "cooldownSecs": 45,
+      "defaultSlot": "r",
+      "description": "Wind up a piercing arena-range wave; non-heroes take reduced damage.",
+      "id": "horizon_wave",
+      "manaCost": 45,
+      "maxRank": 3,
+      "name": "Horizon Wave",
+      "recastManaCost": 0,
+      "requirements": {
+        "anyOfSkills": [],
+        "attackProfile": null
+      },
+      "targeting": "direction",
+      "unlockLevel": 6
+    },
+    {
+      "castRange": 18,
+      "cooldownSecs": 13,
+      "defaultSlot": "q",
+      "description": "Catch and hold the first enemy, then recast to approach the hooked target.",
+      "id": "iron_hook",
+      "manaCost": 22,
+      "maxRank": 3,
+      "name": "Iron Hook",
+      "recastManaCost": 0,
+      "requirements": {
+        "anyOfSkills": [],
+        "attackProfile": null
+      },
+      "targeting": "direction",
+      "unlockLevel": 1
+    },
+    {
+      "castRange": 13,
+      "cooldownSecs": 16,
+      "defaultSlot": "w",
+      "description": "Place a shielding lantern; a nearby ally can explicitly interact to travel to you.",
+      "id": "guiding_lantern",
+      "manaCost": 24,
+      "maxRank": 3,
+      "name": "Guiding Lantern",
+      "recastManaCost": 0,
+      "requirements": {
+        "anyOfSkills": [],
+        "attackProfile": null
+      },
+      "targeting": "point",
+      "unlockLevel": 2
+    },
+    {
+      "castRange": 6,
+      "cooldownSecs": 10,
+      "defaultSlot": "e",
+      "description": "Sweep enemies in your aimed direction; attacks charge while you wait.",
+      "id": "chain_sweep",
+      "manaCost": 20,
+      "maxRank": 3,
+      "name": "Chain Sweep",
+      "recastManaCost": 0,
+      "requirements": {
+        "anyOfSkills": [],
+        "attackProfile": null
+      },
+      "targeting": "direction",
+      "unlockLevel": 4
+    },
+    {
+      "castRange": 0,
+      "cooldownSecs": 45,
+      "defaultSlot": "r",
+      "description": "Raise five boundary segments; each breaks on enemy contact and slows its victim.",
+      "id": "iron_boundary",
+      "manaCost": 45,
+      "maxRank": 3,
+      "name": "Iron Boundary",
+      "recastManaCost": 0,
+      "requirements": {
+        "anyOfSkills": [],
+        "attackProfile": null
+      },
+      "targeting": "self_target",
+      "unlockLevel": 6
+    },
+    {
+      "castRange": 18,
+      "cooldownSecs": 8,
+      "defaultSlot": "q",
+      "description": "Slow the first enemy and apply Concussion; allied attacks complete the stun.",
+      "id": "winter_shard",
+      "manaCost": 18,
+      "maxRank": 3,
+      "name": "Winter Shard",
+      "recastManaCost": 0,
+      "requirements": {
+        "anyOfSkills": [],
+        "attackProfile": null
+      },
+      "targeting": "direction",
+      "unlockLevel": 1
+    },
+    {
+      "castRange": 10,
+      "cooldownSecs": 12,
+      "defaultSlot": "w",
+      "description": "Leap to an allied hero or minion; protect yourself and the ally.",
+      "id": "sheltering_leap",
+      "manaCost": 20,
+      "maxRank": 3,
+      "name": "Sheltering Leap",
+      "recastManaCost": 0,
+      "requirements": {
+        "anyOfSkills": [],
+        "attackProfile": null
+      },
+      "targeting": "point",
+      "unlockLevel": 2
+    },
+    {
+      "castRange": 8,
+      "cooldownSecs": 14,
+      "defaultSlot": "e",
+      "description": "Intercept incoming frontal projectiles: negate the first and reduce later hits.",
+      "id": "northwall",
+      "manaCost": 24,
+      "maxRank": 3,
+      "name": "Northwall",
+      "recastManaCost": 0,
+      "requirements": {
+        "anyOfSkills": [],
+        "attackProfile": null
+      },
+      "targeting": "direction",
+      "unlockLevel": 4
+    },
+    {
+      "castRange": 20,
+      "cooldownSecs": 45,
+      "defaultSlot": "r",
+      "description": "Raise a fissure that knocks up enemies and leaves a slowing trail.",
+      "id": "winter_divide",
+      "manaCost": 45,
+      "maxRank": 3,
+      "name": "Winter Divide",
+      "recastManaCost": 0,
+      "requirements": {
+        "anyOfSkills": [],
+        "attackProfile": null
+      },
+      "targeting": "direction",
+      "unlockLevel": 6
+    },
+    {
+      "castRange": 2.5999999046325684,
+      "cooldownSecs": 5,
+      "defaultSlot": "q",
+      "description": "A quick close-range dagger strike.",
+      "id": "dagger_deadly_blow",
+      "manaCost": 12,
+      "maxRank": 3,
+      "name": "Deadly Blow",
+      "recastManaCost": 0,
+      "requirements": {
+        "anyOfSkills": [],
+        "attackProfile": null
+      },
+      "targeting": "point",
+      "unlockLevel": 1
+    },
+    {
+      "castRange": 2.799999952316284,
+      "cooldownSecs": 14,
+      "defaultSlot": "w",
+      "description": "Stun a nearby enemy hero for 1 second and turn their back to you.",
+      "id": "dagger_bluff",
+      "manaCost": 20,
+      "maxRank": 3,
+      "name": "Bluff",
+      "recastManaCost": 0,
+      "requirements": {
+        "anyOfSkills": [],
+        "attackProfile": null
+      },
+      "targeting": "point",
+      "unlockLevel": 2
+    },
+    {
+      "castRange": 2.5999999046325684,
+      "cooldownSecs": 9,
+      "defaultSlot": "e",
+      "description": "Strike for 2.5x damage from behind an enemy hero. A rear hit that wounds a surviving hero has a 2% chance to leave 1 HP.",
+      "id": "dagger_backstab",
+      "manaCost": 18,
+      "maxRank": 3,
+      "name": "Backstab",
+      "recastManaCost": 0,
+      "requirements": {
+        "anyOfSkills": [],
+        "attackProfile": null
+      },
+      "targeting": "point",
+      "unlockLevel": 4
+    },
+    {
+      "castRange": 2.5999999046325684,
+      "cooldownSecs": 22,
+      "defaultSlot": "r",
+      "description": "A heavy close-range dagger strike; 1.5x damage from behind an enemy hero.",
+      "id": "dagger_lethal_blow",
+      "manaCost": 28,
+      "maxRank": 3,
+      "name": "Lethal Blow",
+      "recastManaCost": 0,
+      "requirements": {
+        "anyOfSkills": [],
+        "attackProfile": null
+      },
+      "targeting": "point",
+      "unlockLevel": 6
+    }
+  ],
+  "source": {
+    "commit": "f5fb8c10d589636da6fc2bbdb66fefbf7077e4d1",
+    "inputsSha256": "60896ff12ece22346317cac8925d01006a5ebef8ce82a7f4cefdf1b78ffd7fa2"
+  },
+  "revision": "sha256-34e41fefa3d9795e4278635ac6a2a4f7f8f3a4ce6ed7247477e639cfc2c517ed"
+}
