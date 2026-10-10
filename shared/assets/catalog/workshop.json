@@ -8,7 +8,7 @@
       "id": "dawnweaver",
       "name": "Dawnweaver",
       "preset": {
-        "catalog_revision": "standard-kits-6",
+        "catalog_revision": "standard-kits-7",
         "core": "dawnweaver",
         "passive": "radiance",
         "schema_version": 1,
@@ -28,7 +28,7 @@
       "id": "wildspark",
       "name": "Wildspark",
       "preset": {
-        "catalog_revision": "standard-kits-6",
+        "catalog_revision": "standard-kits-7",
         "core": "wildspark",
         "passive": "momentum",
         "schema_version": 1,
@@ -48,7 +48,7 @@
       "id": "cinderforge",
       "name": "Cinderforge",
       "preset": {
-        "catalog_revision": "standard-kits-6",
+        "catalog_revision": "standard-kits-7",
         "core": "cinderforge",
         "passive": "tempered",
         "schema_version": 1,
@@ -68,7 +68,7 @@
       "id": "edgeweaver",
       "name": "Edgeweaver",
       "preset": {
-        "catalog_revision": "standard-kits-6",
+        "catalog_revision": "standard-kits-7",
         "core": "edgeweaver",
         "passive": "vitals",
         "schema_version": 1,
@@ -88,7 +88,7 @@
       "id": "stormfist",
       "name": "Stormfist",
       "preset": {
-        "catalog_revision": "standard-kits-6",
+        "catalog_revision": "standard-kits-7",
         "core": "stormfist",
         "passive": "flow",
         "schema_version": 1,
@@ -108,7 +108,7 @@
       "id": "veilstalker",
       "name": "Veilstalker",
       "preset": {
-        "catalog_revision": "standard-kits-6",
+        "catalog_revision": "standard-kits-7",
         "core": "veilstalker",
         "passive": "shroud",
         "schema_version": 1,
@@ -128,7 +128,7 @@
       "id": "emberveil",
       "name": "Emberveil",
       "preset": {
-        "catalog_revision": "standard-kits-6",
+        "catalog_revision": "standard-kits-7",
         "core": "emberveil",
         "passive": "essence",
         "schema_version": 1,
@@ -148,7 +148,7 @@
       "id": "orbitwright",
       "name": "Orbitwright",
       "preset": {
-        "catalog_revision": "standard-kits-6",
+        "catalog_revision": "standard-kits-7",
         "core": "orbitwright",
         "passive": "clockwork",
         "schema_version": 1,
@@ -168,7 +168,7 @@
       "id": "riftshot",
       "name": "Riftshot",
       "preset": {
-        "catalog_revision": "standard-kits-6",
+        "catalog_revision": "standard-kits-7",
         "core": "riftshot",
         "passive": "resonance",
         "schema_version": 1,
@@ -188,7 +188,7 @@
       "id": "chainkeeper",
       "name": "Chainkeeper",
       "preset": {
-        "catalog_revision": "standard-kits-6",
+        "catalog_revision": "standard-kits-7",
         "core": "chainkeeper",
         "passive": "souls",
         "schema_version": 1,
@@ -208,7 +208,7 @@
       "id": "frostguard",
       "name": "Frostguard",
       "preset": {
-        "catalog_revision": "standard-kits-6",
+        "catalog_revision": "standard-kits-7",
         "core": "frostguard",
         "passive": "concussion",
         "schema_version": 1,
@@ -228,7 +228,7 @@
       "id": "adventurer",
       "name": "Adventurer",
       "preset": {
-        "catalog_revision": "standard-kits-6",
+        "catalog_revision": "standard-kits-7",
         "core": "adventurer",
         "passive": "dagger_mastery",
         "schema_version": 1,
@@ -241,7 +241,7 @@
       }
     }
   ],
-  "gameplayRevision": "standard-kits-6",
+  "gameplayRevision": "standard-kits-7",
   "limits": {
     "descriptionChars": 1000,
     "documentBytes": 8192,
@@ -377,7 +377,7 @@
         1
       ],
       "recipe": {
-        "catalog_revision": "standard-kits-6",
+        "catalog_revision": "standard-kits-7",
         "core": "dawnweaver",
         "passive": "radiance",
         "schema_version": 1,
@@ -520,7 +520,7 @@
       "castRange": 256,
       "cooldownSecs": 45,
       "defaultSlot": "r",
-      "description": "A long-range rocket explodes on a hero, punishing wounded enemies.",
+      "description": "An accelerating rocket explodes on the first enemy hero. Damage grows with flight distance and each nearby enemy’s missing health.",
       "id": "wild_rocket",
       "manaCost": 40,
       "maxRank": 3,
@@ -1221,8 +1221,8 @@
     }
   ],
   "source": {
-    "commit": "f5fb8c10d589636da6fc2bbdb66fefbf7077e4d1",
-    "inputsSha256": "60896ff12ece22346317cac8925d01006a5ebef8ce82a7f4cefdf1b78ffd7fa2"
+    "commit": "b6a8b3b0d3d3f4ab1a4409210ebff9c870150536",
+    "inputsSha256": "77065391aba63d0df9fc582c817d978479e3a82c9db8ad6190102c142c42ca11"
   },
-  "revision": "sha256-34e41fefa3d9795e4278635ac6a2a4f7f8f3a4ce6ed7247477e639cfc2c517ed"
+  "revision": "sha256-d0060f4e5635bdfa623a21bd51b56edd5fd968d9de178014f0dec98c6630740e"
 }
