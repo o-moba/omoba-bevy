@@ -1,6 +1,6 @@
 # Releasing OMOBA
 
-Follow the canonical [release policy](release-policy.md) before using the commands below. See the [0.44.0 delivery record](progress/2026-10-10-release-044.md) for the verified local Windows/Linux rollout.
+Prepare a reviewed release PR, freeze its source, and verify the matching server/client contract before deployment and distribution. See the [0.44.0 delivery record](progress/2026-10-10-release-044.md) for the verified local Windows/Linux rollout.
 
 One script, `scripts/release.py`, builds every package; `make release-*`
 targets wrap it. Packages land in `dist/v<version>/` with `SHA256SUMS.txt`.
