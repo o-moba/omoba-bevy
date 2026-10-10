@@ -106,6 +106,18 @@ separate milestones. Current published-file storage is Supabase Storage. Moving
 storage or buying more infrastructure is not required to verify the free-asset
 route and is not authorized by this plan.
 
+## Artist discovery by class and skill — proposed extension
+
+The [game asset requirements plan](studio-skill-asset-catalog.md) adds a separate
+S0–S8 backlog for Studio → Game → Class → Skill → required models. It covers a
+versioned game-owned export, baseline previews, targeted artist contributions,
+shared website data and an eventual two-gun Wildspark cosmetic set. This is a
+documentation proposal; current runtime/API behavior is unchanged. Read-only
+discovery can proceed alongside A1–A7; contribution and runtime rollout reuse
+the existing publication/approval gates. It does not require the class workshop.
+The plan records a newer source audit, including Studio's existing grip preview;
+older unchecked items above need revalidation before implementation.
+
 ## P1 — class workshop MVP after A1–A7 acceptance
 
 The first editor belongs in OMOBA's existing training/workshop surface, close to

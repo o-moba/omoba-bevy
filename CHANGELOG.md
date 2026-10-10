@@ -9,6 +9,8 @@ All notable changes are recorded here. The canonical version is
 
 - Add the first creator-catalogue bridge: a deterministic class/skill/asset requirements export, content-addressed licensed handheld references and offline Blender thumbnails. The companion portal can browse the snapshot and prepare revision-pinned contribution briefs. Exact requirement approval, cosmetic sets and runtime replacement of projectiles/props remain future work; no gameplay or network protocol changes.
 
+- Planning only: record the [Studio class/skill asset requirements backlog](docs/plans/studio-skill-asset-catalog.md), with shared web catalogue, artist briefs and a two-gun Wildspark cosmetic-set example. No API or gameplay implementation.
+
 ### Wildspark reference iteration
 
 - Original detailed repeater, launcher, finned rockets and hinged trap models; accepted-action barrel rotation, recoil, socket muzzle flashes, aimed W and underhand trap placement. Other class defaults retain their models.

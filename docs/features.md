@@ -26,7 +26,7 @@ client and server. See [implementation and verification](progress/2026-10-09-wil
 
 ## Creator asset catalogue (first iteration)
 
-The [asset catalogue exporter](asset-catalog.md) joins canonical class recipes,
+The [asset catalogue exporter](progress/2026-10-10-asset-catalog.md) joins canonical class recipes,
 skills, presentations and authored asset briefs into a versioned static snapshot.
 It distinguishes licensed bundled handheld references, engine-owned effects and
 motions, and planned projectile/prop bindings. The companion `omoba-web` gallery
@@ -38,6 +38,14 @@ Studio upload route. This is discovery and preparation: Studio does not yet
 persist exact requirement bindings, and the game does not yet equip coordinated
 sets or remote projectile/prop skins. See the [iteration record](progress/2026-10-10-asset-catalog.md)
 and parent [design PR #78](https://github.com/o-moba/omoba-bevy/pull/78).
+
+## Planned: Studio model requirements by class and skill
+
+The [proposal and TODO](plans/studio-skill-asset-catalog.md) describe a game-owned
+requirements catalogue shared by Studio and the website: baseline 3D previews,
+artist contributions to specific skill/model roles and eventual coordinated
+cosmetic sets such as Wildspark’s two guns. The public discovery catalogue and local class workshop now exist; exact-slot
+Studio submissions, coordinated sets and runtime set equipping remain planned.
 
 ## First-match guidance and mobile comfort (0.44.0 candidate)
 
