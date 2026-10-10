@@ -1,5 +1,7 @@
 # Releasing OMOBA
 
+Follow the canonical [release policy](release-policy.md) before using the commands below. See the [0.44.0 delivery record](progress/2026-10-10-release-044.md) for the verified local Windows/Linux rollout.
+
 One script, `scripts/release.py`, builds every package; `make release-*`
 targets wrap it. Packages land in `dist/v<version>/` with `SHA256SUMS.txt`.
 Nothing is published without an explicit step: GitHub releases are created as
@@ -55,7 +57,7 @@ server. Direct Xcode/server builds must retain a manifest from the same frozen s
 4. **Desktop + Android:** push the tag (or run the workflow by hand):
 
    ```sh
-   git tag v0.24.0 && git push origin v0.24.0     # triggers .github/workflows/release.yml
+   git tag -a v0.24.0 -m "OMOBA 0.24.0" && git push origin v0.24.0     # triggers .github/workflows/release.yml
    # or: make release-ci RELEASE_SERVER=host:port
    ```
 
@@ -79,7 +81,7 @@ server. Direct Xcode/server builds must retain a manifest from the same frozen s
   other. Locally it lives in `~/.config/omoba/android-playtest.keystore`; for CI
   store it as the secret `OMOBA_ANDROID_KEYSTORE_BASE64`
   (`base64 -i ~/.config/omoba/android-playtest.keystore | gh secret set OMOBA_ANDROID_KEYSTORE_BASE64`).
-  Without the secret CI generates a fresh key per run (uninstall before updating).
+  Without a stable signing key, omit Android from the release; do not run a workflow that generates a replacement key.
   Store publication needs a real release key.
 - **iPhone:** App Store distribution signing, managed by Xcode.
 

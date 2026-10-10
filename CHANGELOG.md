@@ -5,6 +5,8 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+## [0.44.0] - 2026-10-10
+
 - Add the community class workshop bridge: export compiled rules for 12 modular cores/48 skills, validate named build documents through the shared resolver, and import them into local Combat Test. Extend the existing Account API with private versioned build storage and encrypted, owner-bound Ekza library consent; public/ranked admission is unchanged. The companion portal provides the editor, previews, account saves and portable downloads.
 
 - Add the first creator-catalogue bridge: a deterministic class/skill/asset requirements export, content-addressed licensed handheld references and offline Blender thumbnails. The companion portal can browse the snapshot and prepare revision-pinned contribution briefs. Exact requirement approval, cosmetic sets and runtime replacement of projectiles/props remain future work; no gameplay or network protocol changes.
@@ -18,7 +20,7 @@ All notable changes are recorded here. The canonical version is
 - Original detailed repeater, launcher, finned rockets and hinged trap models; accepted-action barrel rotation, recoil, socket muzzle flashes, aimed W and underhand trap placement. Other class defaults retain their models.
 - Last Spark accelerates from 18 to 45 m/s, with timestep-stable flight and a corrected lifetime. Distance scaling and per-victim missing-health damage support a five-target finisher; rocket-mode attacks still charge 4 mana only when accepted.
 - Replicate the visible detonation centre/radius and effect identity on blast receipts. Draw one staged explosion across all victims, including a shielded detonation without damage numbers; keep fog filtering and silent projectile disappearance.
-- Gameplay revision `wildspark-2026-10-09-reference`, catalog `standard-kits-7`; matching client/server required. No deployment or physical-device acceptance is implied.
+- Gameplay revision `wildspark-2026-10-09-reference`, catalog `standard-kits-7`; matching client/server required. Linux production and the locally built Windows candidate are recorded in [the delivery report](docs/progress/2026-10-10-release-044.md). Physical Windows testing remains outstanding.
 
 ### First-match guidance
 
