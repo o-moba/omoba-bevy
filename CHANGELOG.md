@@ -5,6 +5,11 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Add `make android-diagnose` for app-scoped launch evidence, installed version,
+  device ABI and graphics capabilities. Correct Android compatibility guidance:
+  Android 12 meets the OS minimum, while ABI slices do not provide a GPU fallback.
+  This tooling change does not modify the shipped client or diagnose an unseen device.
+
 ## [0.44.0] - 2026-10-10
 
 - Add the community class workshop bridge: export compiled rules for 12 modular cores/48 skills, validate named build documents through the shared resolver, and import them into local Combat Test. Extend the existing Account API with private versioned build storage and encrypted, owner-bound Ekza library consent; public/ranked admission is unchanged. The companion portal provides the editor, previews, account saves and portable downloads.

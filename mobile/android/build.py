@@ -27,8 +27,8 @@ TARGET = "aarch64-linux-android"
 API = 26
 
 # ABI name -> (Rust target triple, NDK clang triple). armeabi-v7a and x86_64
-# are optional extra slices for --universal; arm64-v8a alone already covers
-# effectively all real phones/tablets from the last decade.
+# are optional extra slices for --universal. Check ro.product.cpu.abilist:
+# a 64-bit processor can still run a 32-bit Android userspace.
 ABIS = {
     "arm64-v8a": ("aarch64-linux-android", "aarch64-linux-android"),
     "armeabi-v7a": ("armv7-linux-androideabi", "armv7a-linux-androideabi"),

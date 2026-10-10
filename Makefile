@@ -84,6 +84,10 @@ iphone-box: ## Build an unsigned physical iPhone package into a timestamped buil
 android-check: ## Check Android SDK/NDK/Rust target build prerequisites
 	python3 mobile/android/build.py --check
 
+.PHONY: android-diagnose
+android-diagnose: ## Read Android device/ABI/GPU and OMOBA crash evidence (requires authorized adb)
+	python3 scripts/android_diagnose.py
+
 android: ## Build a locally-signed debug Android APK (arm64 only); optional ANDROID_SERVER=host:port bakes in an initial server address
 	python3 mobile/android/build.py --output "$(ANDROID_OUTPUT)" $(if $(ANDROID_SERVER),--server "$(ANDROID_SERVER)")
 	@echo "APK: $(ANDROID_OUTPUT)/omoba-$$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)-android-arm64-debug.apk"

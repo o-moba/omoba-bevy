@@ -1,5 +1,11 @@
 # Feature Inventory
 
+Android launch diagnostics: `make android-diagnose` records the connected phone's
+OS, ABI, graphics capabilities, installed OMOBA version and app crash/exit evidence.
+Read-only by default; explicit `--launch` is available. See
+[mobile diagnostics](../mobile/README.md#silent-launch-failure-and-android-12).
+Universal APKs cover multiple CPU ABIs; a GLES fallback is not implemented.
+
 ## 0.44.0 delivery
 
 Wildspark and the creator/workshop integration are merged, the Linux production server is updated, and a matching Windows x64 candidate is built locally. See the [delivery record](progress/2026-10-10-release-044.md) for source, checksums, compatibility, rollback and testing limits.
