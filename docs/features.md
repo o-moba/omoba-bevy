@@ -1,5 +1,9 @@
 # Feature Inventory
 
+## 0.44.0 delivery
+
+Wildspark and the creator/workshop integration are merged, the Linux production server is updated, and a matching Windows x64 candidate is built locally. See the [delivery record](progress/2026-10-10-release-044.md) for source, checksums, compatibility, rollback and testing limits.
+
 ## Wildspark reference iteration (0.44.0 candidate)
 
 Switchfire keeps a fast, stacking single-target repeater and a slower launcher:
