@@ -129,7 +129,14 @@ async fn owner_bound_library_consent_keeps_credentials_private_and_survives_outa
         .expect("explicit disposable database required");
     let parsed: sqlx::postgres::PgConnectOptions = url.parse().unwrap();
     assert_eq!(parsed.get_host(), "127.0.0.1");
-    assert_eq!(parsed.get_port(), 55581);
+    // Accept only the known local workshop fixture or existing CI service.
+    assert!(
+        matches!(
+            (parsed.get_port(), parsed.get_database()),
+            (55581, Some("workshop_test")) | (5432, Some("omoba_test"))
+        ),
+        "Only the dedicated workshop or CI test database"
+    );
     migrate(&url).await.unwrap();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let origin = format!("http://{}", listener.local_addr().unwrap());

@@ -18,11 +18,13 @@ fn database(variable: &str) -> String {
         "127.0.0.1",
         "Only isolated loopback fixtures"
     );
-    assert_eq!(options.get_port(), 55581, "Only dedicated fixture port");
-    assert_eq!(
-        options.get_database(),
-        Some("workshop_test"),
-        "Only dedicated test database"
+    // The local workshop fixture and the existing CI service use distinct pairs.
+    assert!(
+        matches!(
+            (options.get_port(), options.get_database()),
+            (55581, Some("workshop_test")) | (5432, Some("omoba_test"))
+        ),
+        "Only the dedicated workshop or CI test database"
     );
     url
 }
@@ -135,7 +137,7 @@ async fn http(
 }
 
 #[tokio::test]
-#[ignore = "requires explicit loopback:55581/workshop_test disposable database"]
+#[ignore = "requires explicit disposable OMOBA_PORTAL_TEST_DATABASE_URL"]
 async fn private_build_crud_signed_sessions_isolation_and_http_revocation() {
     let app = app().await;
     let (owner, token) = login(&app).await;
@@ -241,7 +243,7 @@ async fn private_build_crud_signed_sessions_isolation_and_http_revocation() {
 }
 
 #[tokio::test]
-#[ignore = "requires explicit loopback:55581/workshop_test disposable database"]
+#[ignore = "requires explicit disposable OMOBA_PORTAL_TEST_DATABASE_URL"]
 async fn idempotent_mutations_version_conflicts_and_delete_preconditions() {
     let app = app().await;
     let (owner, _) = login(&app).await;
@@ -358,7 +360,7 @@ async fn idempotent_mutations_version_conflicts_and_delete_preconditions() {
 }
 
 #[tokio::test]
-#[ignore = "requires explicit loopback:55581/workshop_test disposable database"]
+#[ignore = "requires explicit disposable OMOBA_PORTAL_TEST_DATABASE_URL"]
 async fn invalid_documents_and_concurrent_quota_fail_without_partial_saves() {
     let app = app().await;
     let (owner, _) = login(&app).await;
