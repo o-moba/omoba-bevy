@@ -6,6 +6,20 @@ The live lobby at `77.246.105.57:4000` was rechecked against the Windows/iOS
 The service runs `/opt/omoba/releases/0.44.0-beta-1952af2`; see the
 [coordinated rollout](2026-10-10-release-044.md) for worker/gameplay/reconnect evidence.
 
+## Windows public download
+
+[Download OMOBA 0.44.0 for Windows x64](https://ekza.mypinata.cloud/ipfs/bafybeif7pb4xxtvh5rk7kmyemxwk3swzaptyj6mbc2re2kytzhrtdx7i4e/Omoba-0.44.0-windows-x64.zip).
+The exact locally built archive is retained on Pinata/IPFS for download, with no
+automatic unpinning. Public bytes were downloaded and verified against the local
+artifact: 200774638 bytes, SHA-256
+`16b0fcb96463fc4a7e3557650e187607b876040c7d0453c27a0c65739228217b`. Source is
+`1952af24125dce8dc5be7926a56fced1a48f6b84`; the ZIP contains matching source and
+compatibility manifests, assets, legal notices, client and practice server.
+Unpack and start `Omoba.exe`; the public server is compiled as the initial address.
+Saved settings can override it. The binary is unsigned and physical Windows
+rendering/input testing remains outstanding. The GitHub prerelease remains a draft;
+this IPFS link is the verified public distribution endpoint.
+
 ## iOS
 
 Local release compilation and unsigned archive validation passed for 0.44.0 (22),
