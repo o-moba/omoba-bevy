@@ -11,6 +11,8 @@ All notable changes are recorded here. The canonical version is
 
 - Planning only: record the [Studio class/skill asset requirements backlog](docs/plans/studio-skill-asset-catalog.md), with shared web catalogue, artist briefs and a two-gun Wildspark cosmetic-set example. No API or gameplay implementation.
 
+- Reconcile the creator export with Wildspark reference models: separate its default repeater from Riftshot, describe the active rocket GLB, pin client attachment evidence and retain projectile/prop upload limits.
+
 ### Wildspark reference iteration
 
 - Original detailed repeater, launcher, finned rockets and hinged trap models; accepted-action barrel rotation, recoil, socket muzzle flashes, aimed W and underhand trap placement. Other class defaults retain their models.

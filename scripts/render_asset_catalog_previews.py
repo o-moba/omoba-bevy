@@ -27,8 +27,10 @@ def main():
     manifest = json.loads((asset_root / "weapons/manifest.json").read_text())
     args.output.mkdir(parents=True, exist_ok=True)
     records = []
-    for item in manifest["items"]:
-        model = (asset_root / item["model"]).resolve()
+    models = sorted({item["model"] for item in manifest["items"]}
+                    | {"weapons/wildspark-repeater.glb"})
+    for model_path in models:
+        model = (asset_root / model_path).resolve()
         if not model.is_relative_to(asset_root) or model.suffix != ".glb":
             raise ValueError("Only bundled GLB weapons may be rendered")
         model_hash = hashlib.sha256(model.read_bytes()).hexdigest()
@@ -78,7 +80,7 @@ def main():
         path = args.output / f"{model_hash}.png"
         scene.render.filepath = str(path)
         bpy.ops.render.render(write_still=True)
-        records.append({"source": item["model"], "modelSha256": model_hash,
+        records.append({"source": model_path, "modelSha256": model_hash,
                         "preview": path.name, "previewSha256": hashlib.sha256(path.read_bytes()).hexdigest(),
                         "width": 640, "height": 480, "license": "CC-BY-4.0",
                         "attribution": "Open Moba contributors", "renderer": bpy.app.version_string})

@@ -158,18 +158,20 @@ class AssetCatalogTests(unittest.TestCase):
         self.assertEqual(original["icon"], new["icon"])
         self.assertNotEqual(self.catalog["source"]["inputsSha256"], moved["source"]["inputsSha256"])
 
-    def test_wildspark_boundaries_and_unresolved_prop_license(self):
+    def test_wildspark_runtime_models_and_prop_capability_boundaries(self):
         rows = {row["id"]: row for row in self.catalog["requirements"]}
         repeater = rows["wildspark.handheld.repeater"]
-        self.assertEqual(repeater["classIds"], ["riftshot", "wildspark"])
+        self.assertEqual(repeater["classIds"], ["wildspark"])
+        self.assertEqual(rows["riftshot.handheld.repeater"]["classIds"], ["riftshot"])
+        self.assertNotEqual(repeater["baseline"]["sha256"], rows["riftshot.handheld.repeater"]["baseline"]["sha256"])
         self.assertEqual(repeater["status"], "supported")
         rocket = rows["wildspark.projectile.basic-rocket"]
-        self.assertEqual(rocket["baseline"]["kind"], "procedural")
-        self.assertEqual(rocket["baseline"]["details"]["effectiveForm"], "tumbler")
+        self.assertEqual(rocket["baseline"]["kind"], "reference")
+        self.assertEqual(rocket["baseline"]["sourcePath"], "client/assets/weapons/wild-rocket.glb")
         self.assertNotIn("url", rocket["baseline"])
         trap = rows["wildspark.prop.trap"]
         self.assertEqual(trap["status"], "planned")
-        self.assertNotIn("license", trap["baseline"])
+        self.assertEqual(trap["baseline"]["license"], "CC-BY-4.0")
         self.assertNotIn("url", trap["baseline"])
         self.assertFalse(any("avatar" in str(row["baseline"]) for row in rows.values()))
         self.assertTrue(any(row["role"] == "animation_reference" for row in rows.values()))
