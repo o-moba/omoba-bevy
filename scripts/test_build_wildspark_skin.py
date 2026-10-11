@@ -47,6 +47,9 @@ class CommittedSetTests(unittest.TestCase):
                 self.assertEqual(manifest["requirement"], "wildspark.handheld.set")
                 for gate in ("budgets", "c4", "studio", "registry", "game"):
                     self.assertTrue(manifest["gates"][gate]["ok"], f"{gate} recorded as failing")
+                prepared = manifest["gates"]["studio"]["prepared"]
+                self.assertRegex(prepared["sha256"], r"^[0-9a-f]{64}$")
+                self.assertLess(abs(prepared["sizeBytes"] - len(data)), 64)
                 budgets, c4 = skin.budget_gate(data), skin.c4_gate(data)
                 self.assertTrue(budgets["ok"], budgets["issues"])
                 self.assertTrue(c4["ok"], c4["issues"])

@@ -366,14 +366,20 @@ def c4_gate(data):
 
 
 STUDIO_RUNNER = """
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import { pathToFileURL } from 'node:url';
 const [lib, file] = process.argv.slice(2);
 try {
-  const { parseHandheld } = await import(pathToFileURL(lib).href);
+  const { parseHandheld, prepareHandheld } = await import(pathToFileURL(lib).href);
   const bytes = fs.readFileSync(file);
-  const parsed = parseHandheld(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength), true);
-  console.log(JSON.stringify({ ok: true, grip: parsed.grip }));
+  const raw = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+  const parsed = parseHandheld(raw, true);
+  // Studio always uploads prepareHandheld() output, which re-serialises the JSON.
+  const prepared = Buffer.from(prepareHandheld(raw, parsed.grip));
+  parseHandheld(prepared.buffer.slice(prepared.byteOffset, prepared.byteOffset + prepared.byteLength), true);
+  console.log(JSON.stringify({ ok: true, grip: parsed.grip,
+    prepared: { sha256: crypto.createHash('sha256').update(prepared).digest('hex'), sizeBytes: prepared.length } }));
 } catch (error) {
   console.log(JSON.stringify({ ok: false, issues: [String(error && error.message || error)] }));
 }
@@ -422,7 +428,8 @@ def studio_gate(path, registry_root, node="node"):
         result = _json_line(run.stdout)
     except ValueError as error:
         return {"ok": False, "issues": [f"node failed: {error} {run.stderr.strip()[-300:]}"]}
-    result.update({"validator": "ekza-registry web/app/lib/handheld-glb.ts parseHandheld(final=true)",
+    result.update({"validator": "ekza-registry web/app/lib/handheld-glb.ts parseHandheld(final=true), "
+                                "prepareHandheld(embedded grip)",
                    "revision": _git_revision(registry_root, "web/app/lib/handheld-glb.ts")})
     return result
 

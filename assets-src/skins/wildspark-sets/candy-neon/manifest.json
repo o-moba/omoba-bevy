@@ -209,7 +209,11 @@
         ],
         "scale": 1
       },
-      "validator": "ekza-registry web/app/lib/handheld-glb.ts parseHandheld(final=true)",
+      "prepared": {
+        "sha256": "316a13ff1e885330d347525f34d198cb542a593b71c78aa2d59f199f743344f7",
+        "sizeBytes": 365636
+      },
+      "validator": "ekza-registry web/app/lib/handheld-glb.ts parseHandheld(final=true), prepareHandheld(embedded grip)",
       "revision": "90e7850"
     },
     "registry": {
