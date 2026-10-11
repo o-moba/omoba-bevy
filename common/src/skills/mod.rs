@@ -123,6 +123,8 @@ pub struct HeroSkills {
     pub stacks_until: Option<Instant>,
     pub momentum_until: Option<Instant>,
     pub recovery_until: Option<Instant>,
+    /// A beam caster stands still until the warned ray fires from where it was cast.
+    pub cast_lock_until: Option<Instant>,
     pub marked_until: Option<Instant>,
     // The effect ID identifies the exact zone; a stale recast cannot hit a replacement.
     zones: [Option<(u64, Instant, SkillId)>; 4],
@@ -147,11 +149,18 @@ impl HeroSkills {
         self.stacks_until = None;
         self.momentum_until = None;
         self.recovery_until = None;
+        self.cast_lock_until = None;
         self.marked_until = None;
         self.zones = [None; 4];
         self.mode = WeaponMode::Repeater;
     }
+    pub fn cast_locked(&self, now: Instant) -> bool {
+        remaining(self.cast_lock_until, now) > 0.0
+    }
     pub fn movement(&self, now: Instant) -> f32 {
+        if self.cast_locked(now) {
+            return 0.0;
+        }
         self.control.movement(now)
             * if remaining(self.advanced.speed_until, now) > 0.0 {
                 1.3
@@ -538,6 +547,72 @@ fn hits(cs: &[Candidate], a: [f32; 2], b: [f32; 2], r: f32) -> Vec<Candidate> {
     });
     v.into_iter().map(|(_, c)| c).collect()
 }
+/// Distance from `p` to the segment `a`-`b`: the metric of the capsule test above.
+fn segment_distance(a: [f32; 2], b: [f32; 2], p: [f32; 2]) -> f32 {
+    let d = [b[0] - a[0], b[1] - a[1]];
+    let length = d[0] * d[0] + d[1] * d[1];
+    let t = if length > 0.000001 {
+        (((p[0] - a[0]) * d[0] + (p[1] - a[1]) * d[1]) / length).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    distance(p, add(a, d, t))
+}
+fn owner_alive(w: &GameWorld, owner: u64) -> bool {
+    w.players
+        .values()
+        .any(|p| p.joined && p.hero.identity.id == owner && p.hero.hp > 0.0)
+}
+/// Resolves a warned beam once. Each hostile's damage eases from the full core to
+/// the catalog edge multiplier by its centre's distance from the axis; Radiance
+/// detonation and the re-applied mark keep their stored value.
+fn fire_beam(
+    w: &mut GameWorld,
+    e: &mut ActiveEffect,
+    cs: &[Candidate],
+    now: Instant,
+) -> Vec<CombatEvent> {
+    let def = skill(e.skill);
+    let SkillEffect::Beam {
+        width,
+        damage,
+        core_width,
+        edge_damage_multiplier,
+    } = def.effect
+    else {
+        return Vec::new();
+    };
+    e.fired = true;
+    let mut out = Vec::new();
+    for c in hits(cs, e.origin, e.end, width)
+        .into_iter()
+        .filter(|c| hostile(c, e.team))
+    {
+        let lateral = segment_distance(e.origin, e.end, c.pos);
+        let multiplier = shared::loadout::beam_damage_multiplier(
+            lateral,
+            width,
+            c.radius,
+            core_width,
+            edge_damage_multiplier,
+        );
+        let mut src = source(e.owner, e.slot);
+        src.core_hit = lateral <= core_width;
+        out.extend(apply_hit(
+            w,
+            c.target,
+            damage * e.scale * multiplier,
+            def.damage_type,
+            src,
+            e.team,
+            false,
+            true,
+            true,
+            now,
+        ));
+    }
+    out
+}
 fn source(owner: u64, slot: u8) -> HitSource {
     let mut s = HitSource::new(CombatEntityKind::Player, owner, ProjectileStyle::Arcane);
     s.action_slot = Some(slot);
@@ -654,7 +729,11 @@ pub fn apply_hit(
                 target,
                 m.amount,
                 DamageType::Magic,
-                src,
+                HitSource {
+                    core_hit: false,
+                    radiance_burst: true,
+                    ..src
+                },
                 team,
                 now,
             ));
@@ -707,7 +786,11 @@ pub fn apply_hit(
     }
     events.extend(primary);
     if src.entity.kind == CombatEntityKind::Player && amount > 0.0 {
-        events.extend(advanced::on_hit(w, c, amount, src, team, basic, now));
+        let plain = HitSource {
+            core_hit: false,
+            ..src
+        };
+        events.extend(advanced::on_hit(w, c, amount, plain, team, basic, now));
     }
     if mark
         && radiance
@@ -732,7 +815,10 @@ pub fn apply_hit(
                         p.hero.progress.level,
                     )
                     * hero_stats::combat_bonuses(p).damage_multiplier
-            });
+            })
+            // The stored burst is skill damage too: the team buff applies like it
+            // does to the hit that placed the mark.
+            * w.team_buffs.damage_multiplier(team, now);
         w.skill_runtime.marks.insert(
             (key(target), src.entity.id),
             Mark {
@@ -972,6 +1058,9 @@ pub fn cast(
     p.timers.last_cast_at[slot as usize] = Some(now);
     p.hero.skills.recovery_until =
         Some(now + duration(d.windup_secs.max(if is_toggle { 0.0 } else { 0.15 })));
+    if matches!(d.effect, SkillEffect::Beam { .. }) {
+        p.hero.skills.cast_lock_until = Some(now + duration(d.windup_secs));
+    }
     crate::sim::cast::record_player_action(p, SkillSlot::from_index(slot).unwrap());
     if !is_toggle {
         crate::sim::cast::face_player_action(p, dir[0], dir[1]);
@@ -1019,7 +1108,9 @@ pub fn cast(
                 pos = end;
                 lifetime = duration_secs;
             }
-            SkillEffect::Beam { .. } => lifetime = d.windup_secs + 0.15,
+            SkillEffect::Beam { .. } => {
+                lifetime = d.windup_secs + shared::loadout::BEAM_LINGER_SECS;
+            }
             SkillEffect::TrapLine {
                 spacing,
                 arm_secs,
@@ -1148,6 +1239,17 @@ pub fn tick(w: &mut GameWorld, t: TickCtx) -> Vec<CombatEvent> {
         let def = skill(e.skill);
         let cs = candidates(w);
         let mut keep = now < e.expires;
+        if !keep
+            && matches!(def.effect, SkillEffect::Beam { .. })
+            && !e.fired
+            && owner_alive(w, e.owner)
+        {
+            // One late tick can step over the whole linger window. A due beam still
+            // fires once, and lingers a full tail so a snapshot can show the release.
+            out.extend(fire_beam(w, &mut e, &cs, now));
+            e.expires = now + duration(shared::loadout::BEAM_LINGER_SECS);
+            keep = true;
+        }
         if !keep {
             if matches!(def.effect, SkillEffect::RecastZone { .. }) {
                 out.extend(detonate(w, &e, now));
@@ -1182,7 +1284,7 @@ pub fn tick(w: &mut GameWorld, t: TickCtx) -> Vec<CombatEvent> {
                         source(e.owner, e.slot),
                         e.team,
                         false,
-                        true,
+                        factor > 0.0,
                         false,
                         now,
                     ));
@@ -1292,34 +1394,14 @@ pub fn tick(w: &mut GameWorld, t: TickCtx) -> Vec<CombatEvent> {
                     control(w, c, e.id, e.team, 0.0, slow_multiplier, 0.12, 0.0, now);
                 }
             }
-            SkillEffect::Beam { width, damage } => {
-                if !e.fired
-                    && !w
-                        .players
-                        .values()
-                        .any(|p| p.joined && p.hero.identity.id == e.owner && p.hero.hp > 0.0)
-                {
+            SkillEffect::Beam { .. } => {
+                // Death before the ray fires cancels it (the effect is not
+                // re-inserted); a fired beam lingers for its replicated tail.
+                if !e.fired && !owner_alive(w, e.owner) {
                     continue;
                 }
                 if now >= e.armed_at && !e.fired {
-                    for c in hits(&cs, e.origin, e.end, width)
-                        .into_iter()
-                        .filter(|c| hostile(c, e.team))
-                    {
-                        out.extend(apply_hit(
-                            w,
-                            c.target,
-                            damage * e.scale,
-                            def.damage_type,
-                            source(e.owner, e.slot),
-                            e.team,
-                            false,
-                            true,
-                            true,
-                            now,
-                        ));
-                    }
-                    e.fired = true;
+                    out.extend(fire_beam(w, &mut e, &cs, now));
                 }
             }
             SkillEffect::TrapLine {
@@ -1429,7 +1511,7 @@ pub fn tick(w: &mut GameWorld, t: TickCtx) -> Vec<CombatEvent> {
                         source(e.owner, e.slot),
                         e.team,
                         false,
-                        true,
+                        factor > 0.0,
                         false,
                         now,
                     ));
