@@ -10,6 +10,33 @@ Universal APKs cover multiple CPU ABIs; a GLES fallback is not implemented.
 
 Wildspark and the creator/workshop integration are merged, the Linux production server is updated, and a matching Windows x64 candidate is built locally. See the [delivery record](progress/2026-10-10-release-044.md) for source, checksums, compatibility, rollback and testing limits.
 
+## Dawnweaver reference iteration (next candidate)
+
+Horizon Ray is now centre-weighted: a target whose centre is within 0.35 of the beam
+axis takes the full 80, and damage eases (smoothstep) to 60% at its graze point, the
+beam half-width 0.8 plus its own radius. The Radiance detonation and the re-applied
+mark keep their full value. The caster stands still during the 0.8 s windup so the
+warned ray leaves from her (basic attacks and the field recast stay allowed); the
+client predicts the stop. A due ray survives a late server tick, a blocked spell no
+longer marks, and marks include the team damage buff.
+
+The fired ray draws its white core exactly at the damage core, with thin core lines
+in the warning; core hits draw a brighter burst than edge hits, Radiance detonations
+a gold pop, and the release an afterglow along the strip. A dedicated charge motion
+fills the windup and a two-hand push with recoil fires the ray; the lane facing lasts
+through the release. Every listener hears a rising charge when the warning appears,
+gained at the nearest point of the lane, then a new synthesized beam voice; core hits
+and Radiance bursts have their own cues. Direction skills whose effect ignores aim
+distance (beam, linear projectile, returning shield, impact rocket) send the far point
+of the aimed ray, so the server line meets the preview. Bots keep a Luminous Field
+until an enemy hero is about to leave it, do not spend damage skills on towers and
+lead the ray.
+
+Receipts gain additive `core_hit` and `radiance_burst` flags (protocol 11 decodes
+them as absent). Catalog `standard-kits-8` and gameplay revision
+`dawnweaver-2026-10-11-reference` require matching client and server. See
+[implementation and verification](progress/2026-10-11-dawnweaver-reference.md).
+
 ## Wildspark reference iteration (0.44.0 candidate)
 
 Switchfire keeps a fast, stacking single-target repeater and a slower launcher:

@@ -59,7 +59,7 @@ listed in the changelog and in
 | `body` | what stands for a replicated effect: `archetype`, `altitude`, `core` / `shell` / `satellites` parts, `trail`, `marker`, `fill`, `expire`, optional `model` |
 | `aux` | bodies for the secondary objects of a skill (the orb, a soul, a healing mark) |
 | `impact` | the recipe drawn on a confirmed hit: `kind`, lead `shape`, `count`, `scale`, `lifetime`, `slots` |
-| `sound` | `cast` (required), `recast`, `release`, `impact`: a base sample, a speed, a slice and a gain; up to two later notes |
+| `sound` | `cast` (required), `telegraph` (a skill with a timed telegraph only), `recast`, `release`, `impact`: a base sample, a speed, a slice and a gain; up to two later notes |
 
 The parser treats every rule as a hard error. A file with another
 `schema_version`, an unknown field (the legacy `effect` among them), an unknown
@@ -126,7 +126,7 @@ loses.
 ### Motion
 
 Rows name clips of the shared library
-([humanoid motion](humanoid-motion.md), 55 clips). `motion.phase` is derived
+([humanoid motion](humanoid-motion.md), 57 clips). `motion.phase` is derived
 from the skill and may only be restated:
 
 - `instant`: the release clip starts on the accepted cast.
@@ -317,7 +317,7 @@ the hit).
 | Dawnweaver | Q | Gleaming Snare (`dawn_bind`) | `cast_thrust_r` | `muzzle_burst` / `streak` | `traveller` | `facet_pop` / `star` |
 | Dawnweaver | W | Returning Aegis (`dawn_barrier`) | `toss_underhand` | `muzzle_flash` / `kite` | `orbiter` | - |
 | Dawnweaver | E | Luminous Field (`dawn_field`) | `kneel_plant` | `ground_ring` / `star` | `zone` | `ring_burst` / `star` |
-| Dawnweaver | R | Horizon Ray (`dawn_ray`) | `spell_prepare` → `cast` (`warn_fire`) | `inward_gather` / `streak` | `lane` | `pierce_through` / `streak` |
+| Dawnweaver | R | Horizon Ray (`dawn_ray`) | `spell_charge` → `ray_release` (`warn_fire`) | `inward_gather` / `streak` | `lane` | `pierce_through` / `streak` |
 | Wildspark | Q | Switchfire (`wild_switch`) | `reload_snap` | `toss_arc` / `star` | - | - |
 | Wildspark | W | Shockline (`wild_zap`) | `pistol_shoot` | `muzzle_flash` / `claw` | `traveller` | `spark_fork` / `chevron` |
 | Wildspark | E | Snapline (`wild_traps`) | `toss_underhand` | `muzzle_burst` / `ringlet` | `prop` | `chain_snap` / `chevron` |
@@ -597,8 +597,9 @@ direction. Older packets without this optional field remain readable.
 In 3D, both local and remote heroes face that direction after movement and
 network interpolation, before transform propagation: 450 ms for basic attacks,
 700 ms for skills. An authoritative Dawn Ray/Horizon Wave warning keeps the
-preparation facing active until release, also when a basic attack or a recast
-is accepted during the warning. This changes rotation only, respects
+preparation facing active until release and the lane facing through the
+release clip, also when a basic attack or a recast is accepted during the
+warning. This changes rotation only, respects
 sandbox visual time, and does not steer movement or change damage. Initial and
 duplicate snapshots do not replay it; death and round changes clear it. Sprite2d
 keeps its existing behavior. Both client and server must be rebuilt/restarted

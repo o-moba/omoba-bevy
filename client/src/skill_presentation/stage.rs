@@ -286,7 +286,7 @@ pub(crate) fn transitions(
         );
     }
     // A wall publishes how many projectiles its holder has stopped with it
-    // (`common/src/skills/mod.rs:1509-1520`). A rise is one block, however many it counts.
+    // (`effects` in `common/src/skills/mod.rs`). A rise is one block, however many it counts.
     // A fall is the count of a newer wall of the same hero and says nothing.
     if before.kind == K::ShieldWall
         && now.kind == K::ShieldWall

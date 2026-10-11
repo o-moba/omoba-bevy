@@ -1286,8 +1286,12 @@ fn standard_cast_predicts_recovery_and_preserves_the_next_aimed_input_until_read
         .resource_mut::<Messages<NetworkCommand>>()
         .drain()
         .collect::<Vec<_>>();
+    // Returning Aegis keeps only its aimed direction on the server, so the cast path sends
+    // the far point of the aimed ray from the hero at the origin.
+    let barrier = shared::loadout::skill(shared::loadout::SkillId::DawnBarrier);
+    let far = Vec2::new(4.0, 5.0).normalize() * barrier.ability.cast_range;
     assert!(
-        matches!(sent.as_slice(), [NetworkCommand::CastSkill {slot:1,aim}] if *aim==Vec2::new(4.0,5.0))
+        matches!(sent.as_slice(), [NetworkCommand::CastSkill {slot:1,aim}] if aim.distance(far) < 1e-4)
     );
     assert!(!app.world().resource::<PendingCast>().is_pending());
 }
