@@ -4,8 +4,10 @@ A Wildspark set replaces both Wildspark guns, the repeater and the launcher,
 with one weapon asset. It is a single static `handheld-glb-v1` GLB that carries
 both variants. Studio, the registry and the game treat it as one weapon: one
 upload, one curator and owner review, one free claim. The game shows the variant
-for the hero's current weapon mode and animates its rotor or slide. The runtime
-rules are in [handheld weapons](handheld-weapons.md#wildspark-set-repeater-and-launcher-in-one-glb);
+for the hero's current weapon mode and animates only that variant's mechanism:
+the repeater's rotor, or the launcher's slide in rockets mode and during W/R
+draws. The runtime rules are in
+[handheld weapons](handheld-weapons.md#wildspark-set-repeater-and-launcher-in-one-glb);
 this page is the artist's contract and recipe. Submissions target the OMOBA
 requirement `wildspark.handheld.set` ("Wildspark — repeater + launcher set").
 

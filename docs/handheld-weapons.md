@@ -188,8 +188,11 @@ actors, from replicated class, weapon mode and accepted actions:
   default. Owners of any other class always see the repeater variant.
 - `WildsparkRotor` and `WildsparkSlide` move on any held model that has them,
   packaged or SDK, relative to the rest transform read when the scene spawned.
-  Root recoil and the Q lowering apply to the same models. An SDK model
-  without these nodes stays static.
+  Inside a set, a part belongs to the variant above it and moves only while
+  that variant is shown: the rotor in repeater mode, the slide in rockets mode
+  and during a W/R draw. The hidden variant keeps its last pose. Parts outside
+  a set move in every mode. Root recoil and the Q lowering apply to the same
+  models. An SDK model without these nodes stays static.
 - SDK models without a hint flash at the baseline tip of the shown mode;
   packaged props other than the class-default Wildspark pair emit no muzzle
   flash.

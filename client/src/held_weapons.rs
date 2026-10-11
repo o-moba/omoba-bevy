@@ -207,9 +207,22 @@ struct WeaponPose(Transform);
 struct WeaponParts {
     /// `WildsparkSetRepeater` and `WildsparkSetLauncher`, only when both exist.
     set: Option<[Entity; 2]>,
-    rotors: Vec<(Entity, Transform)>,
-    slides: Vec<(Entity, Transform)>,
+    rotors: Vec<Part>,
+    slides: Vec<Part>,
     shown: Option<WeaponMode>,
+}
+
+/// A rotor or slide node. Inside a set it belongs to the variant above it and
+/// moves only while that variant is shown; elsewhere it moves in every mode.
+struct Part {
+    node: Entity,
+    rest: Transform,
+    variant: Option<WeaponMode>,
+}
+impl Part {
+    fn moves(&self, shown: WeaponMode) -> bool {
+        self.variant.is_none_or(|variant| variant == shown)
+    }
 }
 
 /// A scene instance spawns atomically, so the first frame with children has
@@ -219,6 +232,7 @@ fn bind_parts(
     mut commands: Commands,
     weapons: Query<Entity, (With<HeldWeapon>, With<Children>, Without<WeaponParts>)>,
     children: Query<&Children>,
+    parents: Query<&ChildOf>,
     nodes: Query<(&Name, &Transform), Without<Mesh3d>>,
 ) {
     for entity in &weapons {
@@ -228,15 +242,29 @@ fn bind_parts(
             let Ok((name, rest)) = nodes.get(node) else {
                 continue;
             };
+            let part = Part {
+                node,
+                rest: *rest,
+                variant: None,
+            };
             match name.as_str() {
                 "WildsparkSetRepeater" => repeater = repeater.or(Some(node)),
                 "WildsparkSetLauncher" => launcher = launcher.or(Some(node)),
-                "WildsparkRotor" => parts.rotors.push((node, *rest)),
-                "WildsparkSlide" => parts.slides.push((node, *rest)),
+                "WildsparkRotor" => parts.rotors.push(part),
+                "WildsparkSlide" => parts.slides.push(part),
                 _ => {}
             }
         }
         parts.set = repeater.zip(launcher).map(|(r, l)| [r, l]);
+        if let Some([repeater, launcher]) = parts.set {
+            for part in parts.rotors.iter_mut().chain(&mut parts.slides) {
+                part.variant = parents.iter_ancestors(part.node).find_map(|ancestor| {
+                    (ancestor == repeater)
+                        .then_some(WeaponMode::Repeater)
+                        .or((ancestor == launcher).then_some(WeaponMode::Rockets))
+                });
+            }
+        }
         commands.entity(entity).insert(parts);
     }
 }
@@ -420,7 +448,10 @@ fn kick(age: f32) -> f32 {
 }
 
 /// Packaged Wildspark guns and any model with a named rotor or slide move. The
-/// parts are posed relative to their authored rest transforms every frame.
+/// parts are posed relative to their authored rest transforms every frame. In a
+/// set only the shown variant's mechanism moves: the repeater's rotor, or the
+/// launcher's slide in rockets mode and while W or R draws it. The hidden
+/// variant keeps its last pose.
 fn animate_parts(
     actions: Res<WeaponActions>,
     attachments: Query<(Entity, &HeldWeapon, &WeaponPose, Option<&WeaponParts>)>,
@@ -448,14 +479,14 @@ fn animate_parts(
         let Some(parts) = parts else {
             continue;
         };
-        for (node, rest) in &parts.rotors {
-            if let Ok(mut pose) = poses.get_mut(*node) {
-                pose.rotation = rest.rotation * Quat::from_rotation_z(action.rotor);
+        for part in parts.rotors.iter().filter(|part| part.moves(weapon.mode)) {
+            if let Ok(mut pose) = poses.get_mut(part.node) {
+                pose.rotation = part.rest.rotation * Quat::from_rotation_z(action.rotor);
             }
         }
-        for (node, rest) in &parts.slides {
-            if let Ok(mut pose) = poses.get_mut(*node) {
-                pose.translation = rest.translation - Vec3::Z * (recoil * 0.095);
+        for part in parts.slides.iter().filter(|part| part.moves(weapon.mode)) {
+            if let Ok(mut pose) = poses.get_mut(part.node) {
+                pose.translation = part.rest.translation - Vec3::Z * (recoil * 0.095);
             }
         }
     }
@@ -763,7 +794,7 @@ mod tests {
         app.init_resource::<WeaponActions>()
             .add_systems(Update, (bind_parts, animate_parts).chain());
         let owner = app.world_mut().spawn_empty().id();
-        spawn_set(app.world_mut(), owner, WeaponMode::Repeater, true);
+        let weapon = spawn_set(app.world_mut(), owner, WeaponMode::Repeater, true);
         let firing = action(None, 0.05);
         let (rotor, recoil) = (firing.rotor, kick(firing.age));
         app.world_mut()
@@ -776,14 +807,31 @@ mod tests {
         let world = app.world_mut();
         let spun = node(world, "WildsparkRotor").0;
         assert_eq!(spun.translation, Vec3::new(0.0, 0.12, 0.25));
-        assert!(
-            spun.rotation
-                .angle_between(Quat::from_rotation_y(0.5) * Quat::from_rotation_z(rotor))
-                < 1e-5
+        let spun_by = |angle: f32| Quat::from_rotation_y(0.5) * Quat::from_rotation_z(angle);
+        assert!(spun.rotation.angle_between(spun_by(rotor)) < 1e-5);
+        let rest_slide = Vec3::new(0.0, 0.13, 0.20);
+        assert_eq!(
+            node(world, "WildsparkSlide").0.translation,
+            rest_slide,
+            "the hidden launcher's slide does not recoil in repeater mode"
         );
+
+        // Rockets mode, or a W/R draw: the launcher's slide recoils and the
+        // hidden repeater's rotor keeps its last pose while the owner fires.
+        world.get_mut::<HeldWeapon>(weapon).unwrap().mode = WeaponMode::Rockets;
+        let mut launcher_shot = action(Some(SkillId::WildRocket), 0.05);
+        launcher_shot.rotor = rotor + 1.0;
+        world
+            .resource_mut::<WeaponActions>()
+            .0
+            .insert(owner, launcher_shot);
+        app.update();
+        let world = app.world_mut();
         let slide = node(world, "WildsparkSlide").0;
         assert!(recoil > 0.0);
-        assert!((slide.translation - Vec3::new(0.0, 0.13, 0.20 - recoil * 0.095)).length() < 1e-6);
+        assert!((slide.translation - (rest_slide - Vec3::Z * recoil * 0.095)).length() < 1e-6);
+        let frozen = node(world, "WildsparkRotor").0;
+        assert!(frozen.rotation.angle_between(spun_by(rotor)) < 1e-5);
 
         // An SDK prop without named parts stays static, even while its owner fires.
         let mut weapons = world.query_filtered::<Entity, With<HeldWeapon>>();
@@ -810,6 +858,72 @@ mod tests {
             app.world().get::<Transform>(prop).unwrap().translation.z,
             0.1
         );
+    }
+
+    #[test]
+    fn parts_outside_a_set_move_in_every_mode() {
+        let mut app = App::new();
+        app.init_resource::<WeaponActions>()
+            .add_systems(Update, (bind_parts, animate_parts).chain());
+        let owner = app.world_mut().spawn_empty().id();
+        // A single gun with both a rotor and a slide, no set variants.
+        let weapon = spawn_set(app.world_mut(), owner, WeaponMode::Rockets, false);
+        let world = app.world_mut();
+        let rotor = node(world, "WildsparkRotor").0;
+        let mut nodes = world.query_filtered::<(Entity, &Name), Without<Mesh3d>>();
+        let receiver = nodes
+            .iter(world)
+            .find(|(_, name)| name.as_str() == "WildsparkSetRepeater")
+            .map(|(entity, _)| entity)
+            .unwrap();
+        world.spawn((
+            Name::new("WildsparkSlide"),
+            Transform::from_xyz(0.0, 0.13, 0.20),
+            Visibility::Inherited,
+            ChildOf(receiver),
+        ));
+        let firing = action(None, 0.05);
+        let (angle, recoil) = (firing.rotor, kick(firing.age));
+        world
+            .resource_mut::<WeaponActions>()
+            .0
+            .insert(owner, firing);
+        app.update();
+        let world = app.world_mut();
+        let parts = world.get::<WeaponParts>(weapon).unwrap();
+        assert!(parts.set.is_none());
+        assert!(
+            parts
+                .rotors
+                .iter()
+                .chain(&parts.slides)
+                .all(|part| part.variant.is_none())
+        );
+        let spun = node(world, "WildsparkRotor").0;
+        assert!(
+            spun.rotation
+                .angle_between(rotor.rotation * Quat::from_rotation_z(angle))
+                < 1e-5
+        );
+        let slide = node(world, "WildsparkSlide").0;
+        assert!((slide.translation - Vec3::new(0.0, 0.13, 0.20 - recoil * 0.095)).length() < 1e-6);
+    }
+
+    #[test]
+    fn set_parts_belong_to_the_variant_above_them() {
+        let mut app = App::new();
+        app.add_systems(Update, bind_parts);
+        let owner = app.world_mut().spawn_empty().id();
+        let weapon = spawn_set(app.world_mut(), owner, WeaponMode::Repeater, true);
+        app.update();
+        let parts = app.world().get::<WeaponParts>(weapon).unwrap();
+        let variants = |parts: &[Part]| parts.iter().map(|p| p.variant).collect::<Vec<_>>();
+        assert_eq!(variants(&parts.rotors), [Some(WeaponMode::Repeater)]);
+        assert_eq!(variants(&parts.slides), [Some(WeaponMode::Rockets)]);
+        assert!(parts.rotors[0].moves(WeaponMode::Repeater));
+        assert!(!parts.rotors[0].moves(WeaponMode::Rockets));
+        assert!(parts.slides[0].moves(WeaponMode::Rockets));
+        assert!(!parts.slides[0].moves(WeaponMode::Repeater));
     }
 
     #[test]
