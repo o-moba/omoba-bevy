@@ -15,9 +15,11 @@ All notable changes are recorded here. The canonical version is
   on `app.omoba.io/market` appear without a restart), and avatars in the library carry
   the same name. Studio items show the registry's attribution line next to creator and
   licence. The picked avatar is remembered across restarts. The server logs one line per
-  Ekza handheld/avatar admission decision. Needs an ekza-bevy-sdk pin with
-  `AccountSession::assets`; free items stay server-admitted by approval;
-  `PROTOCOL_VERSION` stays 11.
+  Ekza handheld/avatar admission decision. Signing out of Ekza in the game also ends
+  that link on the registry, in the background and best effort, and a new pairing ends
+  the saved link it replaces, so reconnects no longer pile up active links. Needs
+  ekza-bevy-sdk `d18ec72` (`AccountSession::assets`, `disconnect`, store attribution);
+  free items stay server-admitted by approval; `PROTOCOL_VERSION` stays 11.
 
 - `make release-all` builds macOS, Windows (cargo-xwin cross-build), Linux (Docker,
   offline fallback), a universal Android APK and a signed iPhone archive on one Mac;

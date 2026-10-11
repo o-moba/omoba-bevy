@@ -37,11 +37,28 @@ impl State {
         }
     }
 
-    fn accept_session(&mut self, session: AccountSession) {
-        self.error = match &self.path {
-            Some(path) if session.credential().save(path).is_ok() => None,
-            _ => Some(Notice::Key("account.error.not_saved")),
-        };
+    /// Save and publish a new pairing. `client` reaches the registry that
+    /// ends the saved link this pairing replaces, if any.
+    fn accept_session(
+        &mut self,
+        session: AccountSession,
+        client: impl FnOnce() -> Result<account::AccountClient, String>,
+    ) {
+        let replaced = self.path.as_deref().and_then(saved_credential);
+        let saved = self
+            .path
+            .as_ref()
+            .is_some_and(|path| session.credential().save(path).is_ok());
+        self.error = (!saved).then_some(Notice::Key("account.error.not_saved"));
+        // A link saved earlier (e.g. one a startup outage left unrestored) is
+        // replaced now: end it on the registry instead of leaving it active.
+        // Only once the new link is saved, so a failed save keeps the old one.
+        // The SDK refuses, without sending it, a token for another server or game.
+        if let Some(old) = replaced.filter(|old| saved && !same_link(old, &session.credential())) {
+            if let Ok(api) = client() {
+                api.disconnect(old);
+            }
+        }
         self.session = Some(session);
         self.last = Some(Instant::now());
         self.publish_library();
@@ -76,7 +93,11 @@ impl State {
             }
         }
         self.generation = self.generation.wrapping_add(1);
-        self.session = None;
+        // Also end this link on the registry. In the background and best
+        // effort: signing out never waits for, or depends on, the network.
+        if let Some(session) = self.session.take() {
+            session.disconnect();
+        }
         self.flow = None;
         self.worker = false;
         self.opened = None;
@@ -125,6 +146,17 @@ impl State {
             }
         }
     }
+}
+
+/// The connection saved at `path`; none when missing or unreadable.
+fn saved_credential(path: &Path) -> Option<AccountCredential> {
+    AccountCredential::load(path).ok().flatten()
+}
+
+/// Whether two credentials hold the same link (server, game and token). The
+/// SDK keeps the fields private; the comparison stays in memory.
+fn same_link(a: &AccountCredential, b: &AccountCredential) -> bool {
+    serde_json::to_value(a).ok() == serde_json::to_value(b).ok()
 }
 
 static STATE: Mutex<State> = Mutex::new(State::new());
@@ -202,7 +234,7 @@ pub fn poll_account() -> bool {
             let session = state.flow.as_ref().and_then(AccountFlow::take_session);
             state.flow = None;
             if let Some(session) = session {
-                state.accept_session(session);
+                state.accept_session(session, account::client);
                 store::request_refresh();
                 return true;
             }
@@ -308,6 +340,10 @@ mod tests {
         api: account::AccountClient,
         status: Arc<Mutex<u16>>,
         body: Arc<Mutex<String>>,
+        /// Held before each answer, after the request is recorded.
+        delay: Arc<Mutex<Duration>>,
+        /// "<method> <path> <authorization>" of every request, in order.
+        requests: Arc<Mutex<Vec<String>>>,
         stop: Arc<AtomicBool>,
         worker: Option<thread::JoinHandle<()>>,
         root: PathBuf,
@@ -320,8 +356,11 @@ mod tests {
             let api = account::AccountClient::new(&format!("http://{address}"), "omoba").unwrap();
             let status = Arc::new(Mutex::new(200));
             let body = Arc::new(Mutex::new(library(&[])));
+            let delay = Arc::new(Mutex::new(Duration::ZERO));
+            let requests = Arc::new(Mutex::new(Vec::new()));
             let stop = Arc::new(AtomicBool::new(false));
             let (responses, bodies, stopping) = (status.clone(), body.clone(), stop.clone());
+            let (delays, seen) = (delay.clone(), requests.clone());
             let worker = thread::spawn(move || {
                 while !stopping.load(Ordering::Relaxed) {
                     let (mut stream, _) = match listener.accept() {
@@ -338,7 +377,12 @@ mod tests {
                         .set_read_timeout(Some(Duration::from_secs(2)))
                         .unwrap();
                     let mut request = [0; 4096];
-                    assert!(stream.read(&mut request).unwrap() > 0);
+                    let read = stream.read(&mut request).unwrap();
+                    assert!(read > 0);
+                    seen.lock()
+                        .unwrap()
+                        .push(request_line(&String::from_utf8_lossy(&request[..read])));
+                    thread::sleep(*delays.lock().unwrap());
                     let body = bodies.lock().unwrap().clone();
                     write!(
                         stream,
@@ -353,6 +397,8 @@ mod tests {
                 api,
                 status,
                 body,
+                delay,
+                requests,
                 stop,
                 worker: Some(worker),
                 root: std::env::temp_dir().join(format!(
@@ -368,10 +414,35 @@ mod tests {
                 ..State::new()
             }
         }
-        fn session(&self) -> AccountSession {
+        fn session_with(&self, token: &str) -> AccountSession {
             self.api
-                .session("local-fixture-token".into(), &omoba_passport::selector())
+                .session(token.into(), &omoba_passport::selector())
                 .unwrap()
+        }
+        /// A new pairing, as `poll_account` accepts it.
+        fn accept(&self, state: &mut State, token: &str) {
+            state.accept_session(self.session_with(token), || Ok(self.api.clone()));
+        }
+        /// Whether `line` arrives within a few seconds (revokes run in the background).
+        fn received(&self, line: &str) -> bool {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while Instant::now() < deadline {
+                if self
+                    .requests
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .any(|seen| seen == line)
+                {
+                    return true;
+                }
+                thread::sleep(Duration::from_millis(5));
+            }
+            false
+        }
+        fn count(&self, line: &str) -> usize {
+            let requests = self.requests.lock().unwrap();
+            requests.iter().filter(|seen| *seen == line).count()
         }
         fn refresh(&self, state: &mut State) -> bool {
             let result =
@@ -381,6 +452,20 @@ mod tests {
             state.finish_refresh(state.generation, result)
         }
     }
+    /// "<method> <path> <authorization or ->" of one HTTP request head.
+    fn request_line(head: &str) -> String {
+        let mut lines = head.lines();
+        let mut start = lines.next().unwrap_or_default().split(' ');
+        let (method, path) = (start.next().unwrap_or("-"), start.next().unwrap_or("-"));
+        let authorization = lines
+            .filter_map(|line| line.split_once(':'))
+            .find(|(name, _)| name.trim().eq_ignore_ascii_case("authorization"))
+            .map_or("-", |(_, value)| value.trim());
+        format!("{method} {path} {authorization}")
+    }
+    const REVOKE_OLD: &str = "DELETE /v1/account/session Bearer old-fixture-token";
+    const REVOKE_NEW: &str = "DELETE /v1/account/session Bearer new-fixture-token";
+
     /// A library document; `assets` is omitted when empty, as before C1.
     fn library(assets: &[String]) -> String {
         let assets = if assets.is_empty() {
@@ -413,7 +498,7 @@ mod tests {
     fn connection_restores_after_restart_and_logout_rejects_late_refresh() {
         let fixture = Fixture::new();
         let mut original = fixture.state();
-        original.accept_session(fixture.session());
+        fixture.accept(&mut original, "local-fixture-token");
         let path = original.path.clone().unwrap();
         assert!(path.is_file());
         assert!(original.error.is_none());
@@ -445,7 +530,7 @@ mod tests {
     fn outage_preserves_session_and_credential_but_revocation_clears_both() {
         let fixture = Fixture::new();
         let mut state = fixture.state();
-        state.accept_session(fixture.session());
+        fixture.accept(&mut state, "local-fixture-token");
         *fixture.status.lock().unwrap() = 503;
         assert!(!fixture.refresh(&mut state));
         assert_eq!(state.session.as_ref().unwrap().username, "Saved player");
@@ -465,7 +550,7 @@ mod tests {
     fn wrong_backend_scope_retains_the_saved_credential() {
         let fixture = Fixture::new();
         let mut state = fixture.state();
-        state.accept_session(fixture.session());
+        fixture.accept(&mut state, "local-fixture-token");
         state.session = None;
         let result = refresh_session(state.path.as_ref().unwrap(), None, || {
             account::AccountClient::new("http://127.0.0.1:1", "other-game")
@@ -481,7 +566,7 @@ mod tests {
         const SET: &str = "11111111-2222-4333-8444-555555555555";
         let fixture = Fixture::new();
         let mut state = fixture.state();
-        state.accept_session(fixture.session());
+        fixture.accept(&mut state, "local-fixture-token");
         assert!(state.library_weapons().is_empty());
         // Claimed on app.omoba.io: only the desktop handheld revision is listed
         // in the game; another platform's revision and bad entries are skipped.
@@ -524,6 +609,106 @@ mod tests {
         assert_eq!(state.library_weapons(), owned);
         state.sign_out();
         assert!(state.library_weapons().is_empty());
+    }
+
+    #[test]
+    fn signing_out_ends_this_link_on_the_registry_without_waiting_for_it() {
+        let fixture = Fixture::new();
+        let mut state = fixture.state();
+        fixture.accept(&mut state, "new-fixture-token");
+        // A slow, failing registry must neither hold the menu nor keep the
+        // player signed in.
+        *fixture.status.lock().unwrap() = 503;
+        *fixture.delay.lock().unwrap() = Duration::from_millis(1500);
+        let started = Instant::now();
+        state.sign_out();
+        let elapsed = started.elapsed();
+        assert!(elapsed < Duration::from_millis(500), "{elapsed:?}");
+        assert!(state.session.is_none());
+        assert!(state.error.is_none());
+        assert!(!state.path.as_ref().unwrap().exists());
+        // This link's own revoke route; the token travels in the header only.
+        assert!(fixture.received(REVOKE_NEW));
+        assert_eq!(fixture.count(REVOKE_NEW), 1);
+        let requests = fixture.requests.lock().unwrap();
+        assert!(
+            requests
+                .iter()
+                .all(|seen| !seen.split(' ').nth(1).unwrap().contains("fixture-token")),
+            "{requests:?}"
+        );
+    }
+
+    #[test]
+    fn a_new_pairing_ends_the_saved_link_it_replaces_and_no_other() {
+        let fixture = Fixture::new();
+        let mut first = fixture.state();
+        // Nothing saved yet, so nothing to end: no registry client is built.
+        first.accept_session(fixture.session_with("old-fixture-token"), || {
+            panic!("no saved link to end")
+        });
+        drop(first);
+        // A startup outage leaves the saved link unrestored; the player pairs again.
+        let mut restarted = fixture.state();
+        let path = restarted.path.clone().unwrap();
+        fixture.accept(&mut restarted, "new-fixture-token");
+        assert!(restarted.error.is_none());
+        assert!(fixture.received(REVOKE_OLD));
+        let saved = std::fs::read_to_string(&path).unwrap();
+        assert!(saved.contains("new-fixture-token") && !saved.contains("old-fixture-token"));
+        // Accepting the saved link itself again never ends it.
+        restarted.accept_session(fixture.session_with("new-fixture-token"), || {
+            panic!("the saved link is the accepted one")
+        });
+        // A saved link of another game on the same server is refused by the
+        // SDK: its token is never sent.
+        let mut other =
+            serde_json::to_value(fixture.session_with("other-game-token").credential()).unwrap();
+        other["project_id"] = "other-game".into();
+        serde_json::from_value::<AccountCredential>(other)
+            .unwrap()
+            .save(&path)
+            .unwrap();
+        fixture.accept(&mut restarted, "new-fixture-token");
+        restarted.sign_out();
+        assert!(fixture.received(REVOKE_NEW));
+        // Revokes run in the background: give a stray one time to arrive.
+        thread::sleep(Duration::from_millis(200));
+        assert_eq!(fixture.count(REVOKE_OLD), 1);
+        assert_eq!(fixture.count(REVOKE_NEW), 1);
+        let requests = fixture.requests.lock().unwrap();
+        assert!(
+            requests
+                .iter()
+                .all(|seen| !seen.contains("other-game-token")
+                    || seen.starts_with("GET /v1/account/library ")),
+            "{requests:?}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_pairing_that_cannot_be_saved_keeps_the_saved_link() {
+        use std::os::unix::fs::PermissionsExt;
+        let fixture = Fixture::new();
+        let mut state = fixture.state();
+        fixture.accept(&mut state, "old-fixture-token");
+        let path = state.path.clone().unwrap();
+        let directory = path.parent().unwrap();
+        std::fs::set_permissions(directory, std::fs::Permissions::from_mode(0o500)).unwrap();
+        state.accept_session(fixture.session_with("new-fixture-token"), || {
+            panic!("the saved link is still the only one on disk")
+        });
+        std::fs::set_permissions(directory, std::fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(matches!(
+            state.error,
+            Some(Notice::Key("account.error.not_saved"))
+        ));
+        assert!(
+            std::fs::read_to_string(&path)
+                .unwrap()
+                .contains("old-fixture-token")
+        );
     }
 
     #[test]

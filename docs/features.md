@@ -1052,8 +1052,14 @@ local sign out. The client stores its scoped opaque credential in
 `ekza-store/account/session.json` under its private settings directory (0600 on
 Unix), restores it with a fresh SDK library check, and refreshes every 15 seconds.
 Registry outages retain credentials; authorization rejection clears them. Sign
-out removes the local credential and invalidates pending background work;
-Studio Account revokes access server-side. Public approved community models
+out removes the local credential and invalidates pending background work, then
+asks the registry to end that link (`DELETE /v1/account/session` through the
+SDK's `AccountSession::disconnect`). The request runs in the background and is
+best effort: signing out never waits for it, and offline the link stays valid
+until it expires or Studio Account revokes it. A new pairing that replaces a
+saved link (for example one a startup outage left unrestored) ends the old link
+the same way once the new one is saved; the SDK refuses, without sending it, a
+saved token for another server or game. Public approved community models
 remain free after logout. Catalogue identity, metadata, live entitlement changes
 and scrolling stay intact when an account is restored or signed out.
 
