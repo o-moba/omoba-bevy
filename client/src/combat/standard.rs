@@ -271,7 +271,7 @@ pub(crate) fn draw_aim(
     validity: crate::targeting::TargetValidity,
     target: Res<super::selection::TargetState>,
     basic: Res<crate::targeting::BasicAttackState>,
-    world: aim_preview::AimWorld,
+    (world, desktop): (aim_preview::AimWorld, Option<Res<super::cast::DesktopAim>>),
     #[cfg(feature = "qa")] mut shown: ResMut<aim_preview::AimPreviewShown>,
 ) {
     vector.0 = None;
@@ -295,7 +295,11 @@ pub(crate) fn draw_aim(
         .as_ref()
         .filter(|m| m.enabled)
         .and_then(|m| m.aimed_skill());
-    let controller = pad.as_ref().filter(|p| p.active);
+    // The hold's source picks the aim: a skill held on the keyboard aims with the mouse
+    // even while a controller owns input, the way its release is cast.
+    let controller = pad
+        .as_ref()
+        .filter(|p| p.active && touch.is_none() && p.aiming_slot.is_some());
     let slot = touch
         .map(|t| t.slot)
         .or_else(|| controller.and_then(|p| p.aiming_slot))
@@ -358,18 +362,14 @@ pub(crate) fn draw_aim(
             assisted,
         )
     } else {
-        let (Ok(window), Ok((camera, camera_pose))) = (windows.single(), camera.single()) else {
+        // The live cursor, else where it last aimed in this hold: the point a release sends.
+        let cursor = windows.single().ok().and_then(|window| {
+            super::cast::cursor_ground_point(window, camera.single().ok(), *mode)
+        });
+        let Some(aim) = cursor.or_else(|| desktop.as_ref().and_then(|d| d.held)) else {
             return;
         };
-        let Some(cursor) = window.cursor_position() else {
-            return;
-        };
-        let Some(p) =
-            crate::player::viewport_to_simulation_world(camera, camera_pose, cursor, *mode, 0.0)
-        else {
-            return;
-        };
-        p.xz()
+        aim
     };
     let aim = bounded_aim(origin, aim, def.ability.targeting, range);
     let caster = aim_preview::Caster {

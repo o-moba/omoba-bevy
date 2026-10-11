@@ -5,6 +5,16 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Fix desktop aiming of held direction skills (reported on Wildspark's Last Spark on
+  Linux): the aim lane and the cast now read one mouse aim. Moving the cursor outside
+  a windowed game mid-hold keeps the last aim instead of firing along the hero's facing;
+  losing focus mid-hold (Alt+Tab, the desktop overview) cancels the hold instead of
+  casting; a controller (or a Linux joystick-class device) can no longer take the aim
+  off the mouse while a skill key is held; a same-frame key-repeat pair no longer
+  releases the cast early. A desktop cast with no cursor aim is dropped rather than sent
+  along the hero's facing. Touch and controller casting are unchanged; no protocol or
+  gameplay change. See [the investigation](docs/progress/2026-10-11-desktop-aim.md).
+
 - `make release-all` builds macOS, Windows (cargo-xwin cross-build), Linux (Docker,
   offline fallback), a universal Android APK and a signed iPhone archive on one Mac;
   `make release-publish` pins the packages to IPFS and verifies the gateway copies.

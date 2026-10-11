@@ -9,8 +9,9 @@
 //! pixel `(400 + 40 x, 400 + 40 z)` is the ground point `(x, z)`, the hero stands at the
 //! origin facing -Z.
 //!
-//! A test marked `#[ignore = "reproduces ..."]` fails on the code it was written
-//! against; it is the regression test of the fix and loses the mark with it.
+//! Five of these reproduced the report before the fix (a lane taken over by a waking
+//! controller, focus loss and a cursor outside the window firing along the hero's facing,
+//! the readers disagreeing without focus, a same-frame repeat pair); all are regressions.
 use super::cast::{cast_spell_system, resolve_pending_cast_system};
 use super::cooldown::tick_local_cast_cooldown;
 use super::standard::{SkillAimGizmos, SkillAimVector, draw_aim};
@@ -76,6 +77,7 @@ impl Desk {
         .init_resource::<BasicAttackState>()
         .init_resource::<TargetAimPreview>()
         .init_resource::<PendingCast>()
+        .init_resource::<super::cast::DesktopAim>()
         .init_resource::<LocalCastCooldown>()
         .init_resource::<ActionFeedback>()
         .init_resource::<SkillAimVector>()
@@ -101,6 +103,7 @@ impl Desk {
                 tick_local_cast_cooldown,
                 crate::targeting::tick_basic_attack,
                 crate::targeting::clear_invalid_selection,
+                super::cast::sample_desktop_aim,
                 cast_spell_system,
                 crate::targeting::mobile_basic_attack,
                 crate::targeting::resolve_basic_attack,
@@ -325,7 +328,6 @@ fn key_repeat_as_winit_delivers_it_on_linux_neither_casts_nor_freezes_the_aim() 
 /// release then casts nothing. winit 0.30.12 does not deliver such pairs (the test above),
 /// so this is not the Linux report; it pins the cheap guard against any source that does.
 #[test]
-#[ignore = "reproduces H1: a same-frame Released+Pressed auto-repeat pair fires R early"]
 fn auto_repeat_release_press_pair_in_one_frame_does_not_cast_before_the_real_release() {
     let (mut desk, _) = Desk::new(None);
     desk.point_at(EAST);
@@ -458,7 +460,6 @@ fn a_controller_waking_up_during_a_mouse_hold_still_sends_r_at_the_cursor() {
 /// hold the lane points along the hero's facing (or the stick), not at the cursor that
 /// the release will be sent at.
 #[test]
-#[ignore = "reproduces H2: a drifting or blipping controller takes the held R lane off the mouse"]
 fn a_controller_waking_up_during_a_mouse_hold_does_not_take_the_lane_off_the_cursor() {
     for wakes in PAD_WAKES {
         let (held, _) = hold_while_a_pad_wakes(wakes);
@@ -470,11 +471,9 @@ fn a_controller_waking_up_during_a_mouse_hold_does_not_take_the_lane_off_the_cur
 
 /// T4 (H3), `window.focused` false while the cursor is over the window. Real winit
 /// delivers no key to an unfocused window (X11 and Wayland alike), so this is reachable
-/// only with a stale focus flag; it shows the two readers disagree: `draw_aim` ignores
-/// focus and follows the cursor, `resolve_pending_cast_system` drops the cursor and sends
-/// the hero's facing.
+/// only with a stale focus flag. The lane and the cast read one aim source, so whatever
+/// is sent is what was drawn, and never the hero's facing.
 #[test]
-#[ignore = "reproduces H3: unfocused, the lane follows the cursor but R is sent along the hero's facing"]
 fn without_window_focus_the_sent_aim_matches_the_drawn_lane() {
     let (mut desk, _) = Desk::new(None);
     desk.set_focused(false);
@@ -506,7 +505,6 @@ fn without_window_focus_the_sent_aim_matches_the_drawn_lane() {
 /// sees R `just_released` and queues the cast; the resolver, with the cursor filtered out
 /// by focus, sends it along the hero's facing.
 #[test]
-#[ignore = "reproduces H4: losing focus mid-hold fires R along the hero's facing"]
 fn losing_focus_while_r_is_held_cancels_the_hold_instead_of_casting_along_the_facing() {
     let (mut desk, _) = Desk::new(None);
     desk.point_at(EAST);
@@ -539,7 +537,6 @@ fn losing_focus_while_r_is_held_cancels_the_hold_instead_of_casting_along_the_fa
 /// `cursor_position()` is `None`, the lane disappears, and a release out there sends R
 /// along the hero's facing instead of where it was last aimed.
 #[test]
-#[ignore = "reproduces H4: releasing R with the cursor outside the window fires along the facing"]
 fn releasing_with_the_cursor_outside_the_window_never_fires_along_the_facing() {
     let (mut desk, _) = Desk::new(None);
     desk.point_at(EAST);
@@ -579,4 +576,46 @@ fn turning_the_hero_during_the_hold_does_not_move_the_aim() {
     }
     desk.release_r();
     assert_sent_at(&desk.step(), SOUTH, "released");
+}
+
+/// A tap: R goes down and up within one frame. The repeat-pair guard must not swallow it.
+#[test]
+fn press_and_release_in_one_frame_casts_once_at_the_cursor() {
+    let (mut desk, _) = Desk::new(None);
+    desk.point_at(SOUTH);
+    desk.press_r();
+    desk.release_r();
+    assert_sent_at(&desk.step(), SOUTH, "tap");
+    assert!(desk.step().casts.is_empty());
+}
+
+/// While a skill key is held the controller cannot take input: its wake-up counts as
+/// keyboard use, so the lane and the hotbar stay on the mouse and keyboard.
+#[test]
+fn a_pad_cannot_take_ownership_while_a_skill_key_is_held() {
+    for wakes in PAD_WAKES {
+        let (held, released) = hold_while_a_pad_wakes(wakes);
+        for (cursor, pad_owns, _) in &held {
+            assert!(!pad_owns, "{wakes}: the pad took input at {cursor}");
+        }
+        assert_sent_at(&released, WEST, wakes);
+    }
+}
+
+/// A tap with the cursor outside the window for the whole hold has no aim: nothing is
+/// cast, and in particular not along the hero's facing.
+#[test]
+fn cursor_outside_for_the_whole_tap_casts_nothing() {
+    let (mut desk, _) = Desk::new(None);
+    desk.cursor_leaves();
+    desk.press_r();
+    let pressed = desk.step();
+    assert!(pressed.casts.is_empty() && pressed.preview.is_none());
+    desk.release_r();
+    assert!(desk.step().casts.is_empty());
+    desk.point_at(EAST);
+    desk.press_r();
+    assert_previews(&desk.step(), EAST, "back inside");
+    desk.release_r();
+    assert_sent_at(&desk.step(), EAST, "back inside");
 }
