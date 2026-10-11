@@ -97,6 +97,120 @@ fn bot_mobility_safe(
     })
 }
 
+/// A displacement between two thinks faster than any walk (level growth, items
+/// and haste stay well below it) is a dash, blink or respawn, not a course to lead.
+const MAX_LEAD_SPEED: f32 = shared::hero_balance::PLAYER_SPEED * 2.5;
+
+/// A visible enemy hero as a bot sees it on one think.
+#[derive(Clone, Copy, Debug)]
+struct Sighting {
+    id: u64,
+    position: [f32; 2],
+    /// From the previous think's sighting; `None` when unseen, stale or a jump.
+    velocity: Option<[f32; 2]>,
+    /// Time it cannot walk anyway: root, stun or its own cast lock.
+    held_secs: f32,
+    /// Held or slowed: the window a slow cast waits for.
+    hampered: bool,
+}
+
+/// Effects dispatched by `skills::cast` hit through `skills::hostile`, which
+/// never includes structures: aimed at a tower, such a damage skill is wasted.
+/// Techniques have their own executors (a seal does land on structures).
+fn damages_units_only(effect: shared::loadout::SkillEffect) -> bool {
+    effect.damage().is_some() && !matches!(effect, shared::loadout::SkillEffect::Technique { .. })
+}
+
+/// Whether to recast a live field now. Any recast detonates it, so only an
+/// enemy hero inside it that would walk out before the next think is worth it;
+/// otherwise the field keeps slowing and detonates by itself when it expires.
+fn field_detonation_due(centre: [f32; 2], radius: f32, heroes: &[Sighting]) -> bool {
+    let reach = radius + crate::balance::PLAYER_HIT_RADIUS;
+    // Thinks run on the movement tick after `THINK_INTERVAL`, so allow slack.
+    let horizon = THINK_INTERVAL.as_secs_f32() * 1.5;
+    let inside = |p: [f32; 2]| (p[0] - centre[0]).hypot(p[1] - centre[1]) <= reach;
+    heroes.iter().any(|hero| {
+        let v = hero.velocity.unwrap_or([0.0; 2]);
+        inside(hero.position)
+            && !inside([
+                hero.position[0] + v[0] * horizon,
+                hero.position[1] + v[1] * horizon,
+            ])
+    })
+}
+
+/// A warned beam's aim, and whether its victim is hampered.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct BeamShot {
+    aim: [f32; 2],
+    hampered: bool,
+}
+
+/// Where to aim a warned beam from `origin`, or `None` to keep it. Each hero is
+/// led along its observed velocity for the part of the windup it can walk, and
+/// counts only while that point stays inside the fired capsule; a hero without
+/// a velocity estimate counts only when held for the whole windup. A hampered
+/// hero comes first, then the bot's own target, then the nearest. Minions alone
+/// never justify the beam.
+fn beam_shot(
+    origin: [f32; 2],
+    length: f32,
+    width: f32,
+    windup_secs: f32,
+    preferred: Option<u64>,
+    heroes: &[Sighting],
+) -> Option<BeamShot> {
+    let reach = length + width + crate::balance::PLAYER_HIT_RADIUS;
+    heroes
+        .iter()
+        .filter_map(|hero| {
+            let lead = (windup_secs - hero.held_secs).max(0.0);
+            let v = match hero.velocity {
+                Some(v) => v,
+                None if lead == 0.0 => [0.0; 2],
+                None => return None,
+            };
+            let aim = [
+                hero.position[0] + v[0] * lead,
+                hero.position[1] + v[1] * lead,
+            ];
+            let distance = (aim[0] - origin[0]).hypot(aim[1] - origin[1]);
+            (distance <= reach).then_some((hero, aim, distance))
+        })
+        .min_by(|a, b| {
+            (!a.0.hampered, preferred != Some(a.0.id))
+                .cmp(&(!b.0.hampered, preferred != Some(b.0.id)))
+                .then_with(|| a.2.total_cmp(&b.2))
+                .then_with(|| a.0.id.cmp(&b.0.id))
+        })
+        .map(|(hero, aim, _)| BeamShot {
+            aim,
+            hampered: hero.hampered,
+        })
+}
+
+/// The shot of the beam bound to `slot`, if that slot holds a beam with a victim.
+fn slot_beam_shot(
+    p: &ConnectedPlayer,
+    slot: u8,
+    preferred: Option<u64>,
+    heroes: &[Sighting],
+) -> Option<BeamShot> {
+    let definition = p.hero.skills.loadout?.skill(SkillSlot::from_index(slot)?);
+    let shared::loadout::SkillEffect::Beam { width, .. } = definition.effect else {
+        return None;
+    };
+    let rank = p.hero.progress.ranks[usize::from(slot)].clamp(1, definition.ability.max_rank);
+    beam_shot(
+        [p.hero.x, p.hero.z],
+        shared::scaled_cast_range(&definition.ability, rank),
+        width,
+        definition.windup_secs,
+        preferred,
+        heroes,
+    )
+}
+
 /// Stop on the approach side of the first unsupported lane objective. Routing
 /// around a danger disc must not let an idle pusher bypass its defended tower.
 fn lane_staging_destination(
@@ -355,6 +469,8 @@ impl BotControllers {
             retreat_until: None,
             target: None,
             holding_range: false,
+            seen: Vec::new(),
+            seen_at: None,
         });
     }
 
@@ -405,6 +521,9 @@ struct Controller {
     retreat_until: Option<Instant>,
     target: Option<TargetId>,
     holding_range: bool,
+    /// Enemy hero positions at `seen_at`, the last think that looked.
+    seen: Vec<(u64, [f32; 2])>,
+    seen_at: Option<Instant>,
 }
 
 // The unspecified IPv6 source cannot identify a remote UDP peer. Still reject
@@ -634,6 +753,8 @@ impl CombatHost<'_> {
                 retreat_until: None,
                 target: None,
                 holding_range: false,
+                seen: Vec::new(),
+                seen_at: None,
             },
         );
         Some(addr)
@@ -865,6 +986,12 @@ impl CombatHost<'_> {
                         match_id,
                     );
                 }
+                // Every think looks, so a slow cast can lead the hero it picks.
+                let sightings = if self.world.players[&addr].hero.skills.loadout.is_some() {
+                    self.sight_enemy_heroes(team, &mut controller, now)
+                } else {
+                    Vec::new()
+                };
                 let previous_target = controller.target;
                 controller.target = if retreating {
                     None
@@ -926,10 +1053,22 @@ impl CombatHost<'_> {
                             &self.world.structures,
                             &self.world.neutrals,
                         ) {
+                            use shared::loadout::SkillEffect;
+                            let preferred =
+                                (target.kind == TargetKind::Player).then_some(target.id);
                             let mut skill_order = [0, 1, 2, 3];
                             skill_order.sort_by_key(|slot| {
-                                use shared::loadout::{SkillEffect, Technique};
-                                match self.world.players[&addr]
+                                use shared::loadout::Technique;
+                                let p = &self.world.players[&addr];
+                                // A hampered victim, e.g. right after this bot's own
+                                // root landed, is the beam's window: take it before the
+                                // shared recovery goes to another slot.
+                                if slot_beam_shot(p, *slot, preferred, &sightings)
+                                    .is_some_and(|shot| shot.hampered)
+                                {
+                                    return 0;
+                                }
+                                match p
                                     .hero
                                     .skills
                                     .loadout
@@ -940,12 +1079,12 @@ impl CombatHost<'_> {
                                     SkillEffect::Technique {
                                         action: Technique::DaggerBluff,
                                         ..
-                                    } => 0,
+                                    } => 1,
                                     SkillEffect::Technique {
                                         action: Technique::DaggerBackstab,
                                         ..
-                                    } => 1,
-                                    _ => 2,
+                                    } => 2,
+                                    _ => 3,
                                 }
                             });
                             for slot in skill_order {
@@ -958,17 +1097,41 @@ impl CombatHost<'_> {
                                     .unwrap()
                                     .skill(SkillSlot::from_index(slot).unwrap());
                                 // Select a weapon once for this encounter; avoid repeatedly toggling.
-                                if matches!(
-                                    definition.effect,
-                                    shared::loadout::SkillEffect::WeaponToggle { .. }
-                                ) && p.hero.skills.mode == shared::loadout::WeaponMode::Rockets
+                                if matches!(definition.effect, SkillEffect::WeaponToggle { .. })
+                                    && p.hero.skills.mode == shared::loadout::WeaponMode::Rockets
                                 {
                                     continue;
                                 }
+                                // Any recast detonates the live field instead of paying
+                                // for a new one.
+                                if let SkillEffect::RecastZone { radius, .. } = definition.effect
+                                    && let Some(centre) =
+                                        crate::skills::live_zone(self.world, p, slot, now)
+                                {
+                                    if field_detonation_due(centre, radius, &sightings) {
+                                        let request = p.hero.skills.request_id.saturating_add(1);
+                                        crate::skills::cast(
+                                            self.world, addr, slot, centre, request, now,
+                                        );
+                                    }
+                                    continue;
+                                }
                                 let mut aim = [position.x, position.z];
-                                if matches!(
+                                if matches!(definition.effect, SkillEffect::Beam { .. }) {
+                                    // The beam picks its own victim, from where the
+                                    // bot stands now; without one it waits.
+                                    let Some(shot) = slot_beam_shot(p, slot, preferred, &sightings)
+                                    else {
+                                        continue;
+                                    };
+                                    aim = shot.aim;
+                                } else if target.kind == TargetKind::Structure
+                                    && damages_units_only(definition.effect)
+                                {
+                                    continue;
+                                } else if matches!(
                                     definition.effect,
-                                    shared::loadout::SkillEffect::Technique {
+                                    SkillEffect::Technique {
                                         action: shared::loadout::Technique::AllyLeap
                                             | shared::loadout::Technique::BallGuard
                                             | shared::loadout::Technique::GuardLeap,
@@ -1191,6 +1354,63 @@ impl CombatHost<'_> {
             }
             self.bots.controllers.insert(addr, controller);
         }
+    }
+
+    /// Visible living enemy heroes. Velocities come from the controller's previous
+    /// sightings (only if that think was recent), which this one then replaces.
+    fn sight_enemy_heroes(
+        &self,
+        team: Team,
+        controller: &mut Controller,
+        now: Instant,
+    ) -> Vec<Sighting> {
+        let elapsed = controller
+            .seen_at
+            .map(|at| now.saturating_duration_since(at).as_secs_f32())
+            .filter(|secs| *secs > 0.0 && *secs <= THINK_INTERVAL.as_secs_f32() * 2.0);
+        let remaining = |until: Option<Instant>| {
+            until.map_or(0.0, |until| {
+                until.saturating_duration_since(now).as_secs_f32()
+            })
+        };
+        let mut heroes: Vec<_> = self
+            .world
+            .players
+            .values()
+            .filter(|p| p.joined && p.hero.hp > 0.0 && p.hero.identity.team != team)
+            .filter(|p| {
+                let target = TargetId {
+                    kind: TargetKind::Player,
+                    id: p.hero.identity.id,
+                };
+                vision::target_visible(team, target, self.world, now)
+            })
+            .map(|p| {
+                let id = p.hero.identity.id;
+                let position = [p.hero.x, p.hero.z];
+                let velocity = elapsed
+                    .zip(controller.seen.iter().find(|(seen, _)| *seen == id))
+                    .map(|(secs, (_, at))| {
+                        [(position[0] - at[0]) / secs, (position[1] - at[1]) / secs]
+                    })
+                    .filter(|v| v[0].hypot(v[1]) <= MAX_LEAD_SPEED);
+                let skills = &p.hero.skills;
+                let held_secs = remaining(skills.control.root_until)
+                    .max(remaining(skills.control.stun_until))
+                    .max(remaining(skills.cast_lock_until));
+                Sighting {
+                    id,
+                    position,
+                    velocity,
+                    held_secs,
+                    hampered: held_secs > 0.0 || skills.control.movement(now) < 1.0,
+                }
+            })
+            .collect();
+        heroes.sort_unstable_by_key(|hero| hero.id);
+        controller.seen = heroes.iter().map(|hero| (hero.id, hero.position)).collect();
+        controller.seen_at = Some(now);
+        heroes
     }
 
     /// Nearest living ordinary camp, preferring the bot's own half of the map.
@@ -1639,7 +1859,10 @@ mod sustain_tests {
 
     /// One level-10 legacy bot alone on an empty map: with nothing to fight,
     /// every accepted cast is a self-sustain decision.
-    fn lone_bot(class: HeroClass, now: Instant) -> (GameWorld, BotControllers, SocketAddr) {
+    pub(super) fn lone_bot(
+        class: HeroClass,
+        now: Instant,
+    ) -> (GameWorld, BotControllers, SocketAddr) {
         let mut world = GameWorld::empty();
         let address: SocketAddr = "[::]:32001".parse().unwrap();
         world.ensure_connected(address, now);
@@ -1668,7 +1891,7 @@ mod sustain_tests {
         (world, bots, address)
     }
 
-    fn think(world: &mut GameWorld, bots: &mut BotControllers, now: Instant) {
+    pub(super) fn think(world: &mut GameWorld, bots: &mut BotControllers, now: Instant) {
         let mut log = CombatLog::default();
         CombatHost {
             world,
@@ -1778,5 +2001,386 @@ mod sustain_tests {
         let p = &world.players[&address];
         assert_eq!(p.timers.last_cast_at, [None, Some(now), None, Some(first)]);
         assert!(p.hero.hp > after_ultimate);
+    }
+}
+
+#[cfg(test)]
+mod kit_tests {
+    use super::sustain_tests::{lone_bot, think};
+    use super::*;
+    use crate::game_world::{GameWorld, TickCtx};
+    use crate::skills::live_zone;
+    use shared::combat::CombatEvent;
+    use shared::loadout::SkillEffect;
+    use shared::wire::StructureKind;
+
+    const FIELD: u8 = 2;
+    const RAY: u8 = 3;
+    const FRAME: Duration = Duration::from_millis(50);
+
+    fn add_enemy(world: &mut GameWorld, port: u16, at: [f32; 2], now: Instant) -> SocketAddr {
+        let address: SocketAddr = format!("127.0.0.1:{port}").parse().unwrap();
+        world.ensure_connected(address, now);
+        crate::session::handle_join_request(
+            world.players.get_mut(&address).unwrap(),
+            Team::Blue,
+            shared::wire::CharacterChoice::Ipfs,
+            HeroClass::Warrior,
+            None,
+            &world.map_layout,
+            now,
+        );
+        let p = world.players.get_mut(&address).unwrap();
+        p.hero.x = at[0];
+        p.hero.z = at[1];
+        p.hero.hp = 1000.0;
+        p.hero.max_hp = 1000.0;
+        address
+    }
+
+    fn add_minion(world: &mut GameWorld, team: Team, at: [f32; 2]) -> u64 {
+        crate::world::spawn_minion_wave_for_team_lane(
+            &world.map_layout,
+            &mut world.minions,
+            &mut world.next_minion_id,
+            team,
+            Lane::Mid,
+        );
+        let id = *world.minions.keys().max().unwrap();
+        world
+            .minions
+            .retain(|key, minion| *key == id || minion.state.team != team);
+        let minion = world.minions.get_mut(&id).unwrap();
+        minion.state.x = at[0];
+        minion.state.z = at[1];
+        id
+    }
+
+    /// Spend `slots` now, so only the remaining ones can be cast.
+    fn rest(world: &mut GameWorld, address: SocketAddr, slots: &[u8], now: Instant) {
+        for slot in slots {
+            world.players.get_mut(&address).unwrap().timers.last_cast_at[usize::from(*slot)] =
+                Some(now);
+        }
+    }
+
+    /// One 50 ms frame: the bot (thinking on its own cadence), then the skill runtime.
+    fn frame(world: &mut GameWorld, bots: &mut BotControllers, now: Instant) -> Vec<CombatEvent> {
+        think(world, bots, now);
+        let events = crate::skills::tick(world, TickCtx { now, dt: 0.05 });
+        crate::skills::observe(world, &events, now);
+        crate::skills::normalize(world, now);
+        events
+    }
+
+    /// Walk `address` along `direction` for one frame at its own hero speed.
+    fn walk(world: &mut GameWorld, address: SocketAddr, direction: [f32; 2], now: Instant) {
+        let p = world.players.get_mut(&address).unwrap();
+        let step = hero_stats::move_speed(p) * p.hero.skills.movement(now) * FRAME.as_secs_f32();
+        p.hero.x += direction[0] * step;
+        p.hero.z += direction[1] * step;
+    }
+
+    fn position(world: &GameWorld, address: SocketAddr) -> [f32; 2] {
+        [
+            world.players[&address].hero.x,
+            world.players[&address].hero.z,
+        ]
+    }
+
+    fn ray_hit(events: &[CombatEvent], caster: u64, victim: u64) -> Option<&CombatEvent> {
+        events.iter().find(|e| {
+            e.source.id == caster
+                && e.target.id == victim
+                && e.action_slot == Some(RAY)
+                && !e.radiance_burst
+        })
+    }
+
+    fn field_reach() -> f32 {
+        let SkillEffect::RecastZone { radius, .. } =
+            shared::loadout::skill(shared::loadout::SkillId::DawnField).effect
+        else {
+            unreachable!()
+        };
+        radius + crate::balance::PLAYER_HIT_RADIUS
+    }
+
+    #[test]
+    fn beam_shot_leads_by_the_walkable_windup_and_ranks_hampered_heroes_first() {
+        let walker = Sighting {
+            id: 7,
+            position: [10.0, 0.0],
+            velocity: Some([0.0, 5.0]),
+            held_secs: 0.0,
+            hampered: false,
+        };
+        let shot = beam_shot([0.0; 2], 45.0, 0.8, 0.8, None, &[walker]).unwrap();
+        assert_eq!(shot.aim, [10.0, 4.0], "led by the whole windup");
+        let rooted = Sighting {
+            held_secs: 0.5,
+            hampered: true,
+            ..walker
+        };
+        let shot = beam_shot([0.0; 2], 45.0, 0.8, 0.8, None, &[rooted]).unwrap();
+        assert!(
+            (shot.aim[1] - 1.5).abs() < 1e-4,
+            "led only once the root ends"
+        );
+        assert!(shot.hampered);
+
+        let unknown = Sighting {
+            velocity: None,
+            ..walker
+        };
+        assert_eq!(beam_shot([0.0; 2], 45.0, 0.8, 0.8, None, &[unknown]), None);
+        let held = Sighting {
+            held_secs: 1.0,
+            ..unknown
+        };
+        assert_eq!(
+            beam_shot([0.0; 2], 45.0, 0.8, 0.8, None, &[held]).map(|s| s.aim),
+            Some([10.0, 0.0]),
+            "held for the whole windup, no estimate is needed"
+        );
+        let far = Sighting {
+            position: [46.5, 0.0],
+            velocity: Some([0.0; 2]),
+            ..walker
+        };
+        assert_eq!(beam_shot([0.0; 2], 45.0, 0.8, 0.8, None, &[far]), None);
+
+        let target = Sighting {
+            id: 3,
+            position: [5.0, 0.0],
+            velocity: Some([0.0; 2]),
+            ..walker
+        };
+        let slowed = Sighting {
+            id: 9,
+            position: [12.0, 0.0],
+            velocity: Some([0.0; 2]),
+            held_secs: 0.0,
+            hampered: true,
+        };
+        let pick = |heroes: &[Sighting], preferred| {
+            beam_shot([0.0; 2], 45.0, 0.8, 0.8, preferred, heroes).map(|s| s.aim)
+        };
+        assert_eq!(pick(&[target, slowed], Some(3)), Some([12.0, 0.0]));
+        assert_eq!(pick(&[target, far, walker], Some(7)), Some([10.0, 4.0]));
+        assert_eq!(pick(&[walker, target], None), Some([5.0, 0.0]));
+    }
+
+    #[test]
+    fn field_is_held_until_an_enemy_hero_inside_would_walk_out() {
+        let mut now = Instant::now();
+        let (mut world, mut bots, bot) = lone_bot(HeroClass::Dawnweaver, now);
+        let enemy = add_enemy(&mut world, 32101, [8.0, 0.0], now);
+        rest(&mut world, bot, &[0, 1, RAY], now);
+        now += Duration::from_millis(10);
+        frame(&mut world, &mut bots, now);
+        let placed = now;
+        let centre = live_zone(&world, &world.players[&bot], FIELD, now)
+            .expect("the field is placed on the target");
+        assert!((centre[0] - 8.0).abs() < 1e-3 && centre[1].abs() < 1e-3);
+        assert_eq!(live_zone(&world, &world.players[&bot], 0, now), None);
+        assert_eq!(
+            live_zone(
+                &world,
+                &world.players[&bot],
+                FIELD,
+                now + Duration::from_secs(5)
+            ),
+            None,
+            "an expired field cannot be recast"
+        );
+
+        // Nobody inside: every think keeps the field.
+        world.players.get_mut(&enemy).unwrap().hero.z = field_reach() + 2.0;
+        for _ in 0..20 {
+            now += FRAME;
+            frame(&mut world, &mut bots, now);
+        }
+        assert_eq!(
+            live_zone(&world, &world.players[&bot], FIELD, now),
+            Some(centre)
+        );
+        // Standing inside: still kept, it slows the hero.
+        world.players.get_mut(&enemy).unwrap().hero.z = 0.5;
+        for _ in 0..20 {
+            now += FRAME;
+            frame(&mut world, &mut bots, now);
+        }
+        assert_eq!(
+            live_zone(&world, &world.players[&bot], FIELD, now),
+            Some(centre)
+        );
+        assert!(world.players[&enemy].hero.skills.control.movement(now) < 1.0);
+        assert_eq!(world.players[&enemy].hero.hp, 1000.0);
+
+        // Walking out: detonated while still inside, before it would expire.
+        while live_zone(&world, &world.players[&bot], FIELD, now).is_some() {
+            walk(&mut world, enemy, [0.0, 1.0], now);
+            now += FRAME;
+            assert!(now < placed + Duration::from_secs(5), "never recast");
+            frame(&mut world, &mut bots, now);
+        }
+        let at = position(&world, enemy);
+        assert!((at[0] - centre[0]).hypot(at[1] - centre[1]) <= field_reach());
+        assert!(
+            world.players[&enemy].hero.hp < 1000.0,
+            "the recast caught it"
+        );
+    }
+
+    #[test]
+    fn damage_skills_are_not_spent_on_a_structure() {
+        for class in [HeroClass::Dawnweaver, HeroClass::Wildspark] {
+            let mut now = Instant::now();
+            let (mut world, mut bots, bot) = lone_bot(class, now);
+            let mut next = 1;
+            crate::world::add_structure(
+                &mut world.structures,
+                &mut next,
+                StructureKind::Tower,
+                StructureRole::LaneTower { lane: Lane::Mid },
+                Team::Blue,
+                crate::entities::Vec3f::new(12.0, 3.0, 0.0),
+            );
+            // Allied cover lets the bot push the tower.
+            add_minion(&mut world, Team::Green, [8.0, 0.0]);
+            for _ in 0..60 {
+                now += FRAME;
+                frame(&mut world, &mut bots, now);
+            }
+            assert_eq!(
+                bots.controllers[&bot].target.map(|t| t.kind),
+                Some(TargetKind::Structure),
+                "{class:?}"
+            );
+            let p = &world.players[&bot];
+            let loadout = p.hero.skills.loadout.unwrap();
+            let mut withheld = 0;
+            for slot in SkillSlot::ALL {
+                if damages_units_only(loadout.skill(slot).effect) {
+                    withheld += 1;
+                    assert_eq!(
+                        p.timers.last_cast_at[slot.index()],
+                        None,
+                        "{class:?} {slot:?}"
+                    );
+                }
+            }
+            assert_eq!(withheld, 3, "{class:?}: Q/E/R or W/E/R deal damage");
+        }
+    }
+
+    #[test]
+    fn ray_leads_a_hero_walking_at_hero_speed_onto_its_core() {
+        let mut now = Instant::now();
+        let (mut world, mut bots, bot) = lone_bot(HeroClass::Dawnweaver, now);
+        let enemy = add_enemy(&mut world, 32102, [8.0, -2.0], now);
+        rest(&mut world, bot, &[0, 1, FIELD], now);
+        let caster = world.players[&bot].hero.identity.id;
+        let victim = world.players[&enemy].hero.identity.id;
+        let mut cast = None;
+        let mut hit = None;
+        for _ in 0..40 {
+            walk(&mut world, enemy, [0.0, 1.0], now);
+            now += FRAME;
+            let events = frame(&mut world, &mut bots, now);
+            if cast.is_none() && world.players[&bot].timers.last_cast_at[3].is_some() {
+                cast = Some((position(&world, bot), position(&world, enemy)));
+            }
+            if let Some(event) = ray_hit(&events, caster, victim) {
+                hit = Some(event.clone());
+                break;
+            }
+        }
+        let (origin, seen) = cast.expect("the ray is cast at a walking hero");
+        let hit = hit.expect("the led ray hits");
+        assert!(hit.core_hit, "on the axis, not the edge: {hit:?}");
+        // Aimed where the hero stood at the cast, the ray would have missed.
+        let at = position(&world, enemy);
+        let axis = [seen[0] - origin[0], seen[1] - origin[1]];
+        let length = axis[0].hypot(axis[1]);
+        let lateral =
+            ((at[0] - origin[0]) * axis[1] - (at[1] - origin[1]) * axis[0]).abs() / length;
+        assert!(
+            lateral > 0.8 + crate::balance::PLAYER_HIT_RADIUS,
+            "{lateral}"
+        );
+    }
+
+    #[test]
+    fn ray_takes_the_window_right_after_the_bots_own_root_lands() {
+        let mut now = Instant::now();
+        let (mut world, mut bots, bot) = lone_bot(HeroClass::Dawnweaver, now);
+        let enemy = add_enemy(&mut world, 32104, [8.0, 0.0], now);
+        let caster = world.players[&bot].hero.identity.id;
+        let victim = world.players[&enemy].hero.identity.id;
+        let mut cast = false;
+        let mut hit = None;
+        for _ in 0..40 {
+            now += FRAME;
+            let events = frame(&mut world, &mut bots, now);
+            let timers = &world.players[&bot].timers;
+            if timers.last_cast_at[3] == Some(now) {
+                cast = true;
+                assert!(timers.last_cast_at[0].is_some(), "Q first");
+                assert_eq!(timers.last_cast_at[2], None, "R jumps ahead of E");
+                let root = world.players[&enemy].hero.skills.control.root_until;
+                assert!(root.is_some_and(|until| until > now), "cast into the root");
+            }
+            if let Some(event) = ray_hit(&events, caster, victim) {
+                hit = Some(event.clone());
+                break;
+            }
+        }
+        assert!(cast);
+        assert!(hit.expect("the ray follows the root").core_hit);
+    }
+
+    #[test]
+    fn ray_ignores_a_lone_minion_and_prefers_a_hero_behind_it() {
+        let mut now = Instant::now();
+        let (mut world, mut bots, bot) = lone_bot(HeroClass::Dawnweaver, now);
+        let minion = add_minion(&mut world, Team::Blue, [5.0, 0.0]);
+        // Sturdy enough to stay the target through every skill the bot spends.
+        let creep = world.minions.get_mut(&minion).unwrap();
+        creep.state.hp = 5000.0;
+        creep.state.max_hp = 5000.0;
+        for _ in 0..40 {
+            now += FRAME;
+            frame(&mut world, &mut bots, now);
+        }
+        let p = &world.players[&bot];
+        assert_eq!(
+            bots.controllers[&bot].target,
+            Some(TargetId {
+                kind: TargetKind::Minion,
+                id: minion,
+            })
+        );
+        assert!(p.timers.last_cast_at[0].is_some(), "Q is still used on it");
+        assert_eq!(p.timers.last_cast_at[3], None, "no ultimate on a minion");
+
+        let enemy = add_enemy(&mut world, 32103, [6.0, 5.0], now);
+        let caster = world.players[&bot].hero.identity.id;
+        let victim = world.players[&enemy].hero.identity.id;
+        let mut hit = None;
+        for _ in 0..30 {
+            now += FRAME;
+            if let Some(event) = ray_hit(&frame(&mut world, &mut bots, now), caster, victim) {
+                hit = Some(event.clone());
+                break;
+            }
+        }
+        assert_eq!(
+            bots.controllers[&bot].target.map(|t| t.kind),
+            Some(TargetKind::Minion),
+            "the nearer minion stays the attack target"
+        );
+        assert!(hit.expect("the ray picks the hero").core_hit);
     }
 }

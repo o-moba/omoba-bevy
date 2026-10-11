@@ -1166,6 +1166,28 @@ pub fn cast(
         w.skill_runtime.effects.insert(e.id, e);
     }
 }
+/// Centre of the live field `slot` placed, exactly while [`cast`] would detonate
+/// it instead of placing a new one. Bots read it to hold the field for a victim.
+pub(crate) fn live_zone(
+    w: &GameWorld,
+    p: &ConnectedPlayer,
+    slot: u8,
+    now: Instant,
+) -> Option<[f32; 2]> {
+    let id = *p
+        .hero
+        .skills
+        .loadout
+        .as_ref()?
+        .skills()
+        .get(usize::from(slot))?;
+    let (zone, expires, _) = (*p.hero.skills.zones.get(usize::from(slot))?)?;
+    w.skill_runtime
+        .effects
+        .get(&zone)
+        .filter(|e| now < expires && e.owner == p.hero.identity.id && e.skill == id)
+        .map(|e| e.pos)
+}
 fn detonate(w: &mut GameWorld, e: &ActiveEffect, now: Instant) -> Vec<CombatEvent> {
     let SkillEffect::RecastZone { radius, damage, .. } = skill(e.skill).effect else {
         return Vec::new();
