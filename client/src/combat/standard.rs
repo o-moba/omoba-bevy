@@ -53,6 +53,12 @@ pub(crate) fn movement_factor(loadout: Option<&PlayerLoadout>) -> f32 {
     })
 }
 
+/// Authority refuses every step of this hero: a root, a stun, or the windup of a beam it
+/// cast, which replicates as `movement_multiplier` 0 while `root_remaining_secs` stays 0.
+pub(crate) fn movement_locked(loadout: Option<&PlayerLoadout>) -> bool {
+    movement_factor(loadout) <= 0.0
+}
+
 #[derive(Component)]
 pub(super) struct StandardStatus;
 
