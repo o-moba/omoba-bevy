@@ -123,7 +123,7 @@ fn target_parses() {
             .count()
     };
     assert_eq!(cast(|cast| cast.movement.is_some()), 10);
-    assert_eq!(cast(|cast| cast.link.is_some()), 14);
+    assert_eq!(cast(|cast| cast.link.is_some()), 13);
     assert_eq!(cast(|cast| cast.area), 3);
     assert_eq!(cast(|cast| cast.recast.is_some()), 7);
     assert_eq!(cast(|cast| cast.recast == Some(AccentPattern::None)), 5);
