@@ -261,14 +261,14 @@ fn colossus_recast_is_offered_and_sent_only_inside_the_gate() {
             .resource_mut::<ActionFeedback>()
             .text
             .clear();
-        let mut pending = app.world_mut().resource_mut::<PendingCast>();
-        pending.request = Some(PendingCastRequest {
+        // No cursor: a recast keeps the facing fallback, and the gate's refusal comes
+        // before any aim check.
+        app.world_mut().resource_mut::<PendingCast>().request = Some(PendingCastRequest {
             slot: R,
             target_entity: None,
             target: None,
             approach_announced: false,
         });
-        pending.aim = Some(Vec2::new(0.0, 6.0));
         app.update();
         let sent = sent_commands(app);
         let cooldowns = app.world().resource::<LocalCastCooldown>();
@@ -545,11 +545,11 @@ struct Press {
 }
 
 impl Press {
-    /// A desktop press with no cursor aim: dropped silently, never sent along the hero's
-    /// facing, nothing predicted, and the hero walks on.
+    /// A desktop press with no cursor aim: never sent along the hero's facing; one line
+    /// asks for an aim, nothing is predicted, and the hero walks on.
     fn dropped_without_an_aim(&self) {
         assert!(self.sent.is_empty(), "{:?}", self.sent);
-        assert!(self.feedback.is_empty(), "{}", self.feedback);
+        assert_eq!(self.feedback, crate::i18n::tr("combat.cast.no_aim"));
         assert_eq!(self.cooldown, 0.0, "no phantom cooldown");
         assert!(!self.predicted && self.walking && !self.queued);
     }

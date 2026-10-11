@@ -53,10 +53,14 @@ A tap-to-arm cast mode would avoid it in-game; that is a UX decision for later.
   point while a skill key is held. The lane (`draw_aim`) and the cast both read it;
   the release snapshots it, so a cast buffered through recovery goes where it was
   drawn.
-- A desktop cast with no aim is dropped; a self cast takes the hero's position and
-  the facing fallback stays only for touch and controller casts, which always carry
-  their own aim. Two ally-pick tests and one recast test that encoded the old "no
-  cursor aims ten units ahead" fallback now pass an explicit aim or expect the drop.
+- A desktop first cast with no aim is dropped with one line ("Point at the
+  battlefield inside the game window to aim", en/ru/zh-Hans). A self cast takes
+  the hero's position; recasts (zone detonation, riding a hook, follow-ups that
+  ignore the aim) and touch/controller casts keep the old facing fallback, and a
+  gated recast's "not ready" line still comes first. Two ally-pick tests that
+  encoded "no cursor aims ten units ahead" now expect the line.
+- Desktop QA demos point the cursor at their target for the frame a scripted skill
+  key goes down.
 - Focus loss (or an unfocused window) cancels a keyboard hold like a modal does:
   the window is marked unfocused a frame before Bevy's synthesized release.
 - A release counts only if the key is not down again in the same frame.
@@ -71,6 +75,8 @@ A tap-to-arm cast mode would avoid it in-game; that is a UX decision for later.
 - `cargo test -p client --lib desktop_aim`: 14 passed (the five reproductions and
   three new regressions included).
 - `cargo test -p client --lib`: 1303 passed, 1 ignored (environment-dependent).
+- An independent review confirmed two issues in the first revision (aim-free
+  recasts dropped without a cursor; demo QA key casts without a cursor), both fixed.
 - `cargo clippy -p client --all-targets --no-deps -- -D warnings`, the same with
   `--features qa`, `cargo test -p client --lib --features qa aim_preview` (12) and
   `cargo fmt --all -- --check` pass.

@@ -11,8 +11,9 @@ All notable changes are recorded here. The canonical version is
   losing focus mid-hold (Alt+Tab, the desktop overview) cancels the hold instead of
   casting; a controller (or a Linux joystick-class device) can no longer take the aim
   off the mouse while a skill key is held; a same-frame key-repeat pair no longer
-  releases the cast early. A desktop cast with no cursor aim is dropped rather than sent
-  along the hero's facing. Touch and controller casting are unchanged; no protocol or
+  releases the cast early. A desktop first cast with no cursor aim is refused with a
+  one-line hint instead of flying along the hero's facing (recasts that ignore the aim
+  still go out). Touch and controller casting are unchanged; no protocol or
   gameplay change. See [the investigation](docs/progress/2026-10-11-desktop-aim.md).
 
 - `make release-all` builds macOS, Windows (cargo-xwin cross-build), Linux (Docker,

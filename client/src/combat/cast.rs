@@ -468,16 +468,6 @@ pub(super) fn resolve_pending_cast_system(
                     .unwrap_or(crate::sprite::PlayerVisualMode::Models3d),
             )
         });
-        let origin = player_transform.translation.xz();
-        let Some(aim) = pending_cast
-            .aim
-            .or(cursor)
-            .or_else(|| (definition.targeting == TargetingMode::SelfTarget).then_some(origin))
-            .or_else(|| touch_mode.then(|| origin + player_transform.forward().xz() * 10.0))
-        else {
-            pending_cast.cancel();
-            return;
-        };
         // The replicated flag only opens the recast window. A recast with a gate is also
         // refused away from the skill's own effect (Mountain Echo).
         let offered = state.is_some_and(|s| s.slots[slot.index()].can_recast);
@@ -493,10 +483,7 @@ pub(super) fn resolve_pending_cast_system(
                 game.as_ref().map_or(&[], |game| &game.skill_effects),
             )
         });
-        if !stats.is_alive()
-            || !equipped_skills::unlocked(&skills, &prog)[slot.index()]
-            || !aim.is_finite()
-        {
+        if !stats.is_alive() || !equipped_skills::unlocked(&skills, &prog)[slot.index()] {
             pending_cast.cancel();
             return;
         }
@@ -507,6 +494,22 @@ pub(super) fn resolve_pending_cast_system(
             pending_cast.cancel();
             return;
         }
+        // A recast (a zone detonation, a ride along a hook) keeps the old fallback: most
+        // ignore the aim, and the server reads the press either way.
+        let origin = player_transform.translation.xz();
+        let Some(aim) = pending_cast
+            .aim
+            .or(cursor)
+            .or_else(|| (definition.targeting == TargetingMode::SelfTarget).then_some(origin))
+            .or_else(|| {
+                (touch_mode || recast).then(|| origin + player_transform.forward().xz() * 10.0)
+            })
+            .filter(|aim| aim.is_finite())
+        else {
+            report_plain(&mut feedback, "combat.cast.no_aim");
+            pending_cast.cancel();
+            return;
+        };
         if !recast && cast_cd.recovery_secs > 0.0 {
             return;
         }
