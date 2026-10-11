@@ -8,7 +8,7 @@
       "id": "dawnweaver",
       "name": "Dawnweaver",
       "preset": {
-        "catalog_revision": "standard-kits-7",
+        "catalog_revision": "standard-kits-8",
         "core": "dawnweaver",
         "passive": "radiance",
         "schema_version": 1,
@@ -28,7 +28,7 @@
       "id": "wildspark",
       "name": "Wildspark",
       "preset": {
-        "catalog_revision": "standard-kits-7",
+        "catalog_revision": "standard-kits-8",
         "core": "wildspark",
         "passive": "momentum",
         "schema_version": 1,
@@ -48,7 +48,7 @@
       "id": "cinderforge",
       "name": "Cinderforge",
       "preset": {
-        "catalog_revision": "standard-kits-7",
+        "catalog_revision": "standard-kits-8",
         "core": "cinderforge",
         "passive": "tempered",
         "schema_version": 1,
@@ -68,7 +68,7 @@
       "id": "edgeweaver",
       "name": "Edgeweaver",
       "preset": {
-        "catalog_revision": "standard-kits-7",
+        "catalog_revision": "standard-kits-8",
         "core": "edgeweaver",
         "passive": "vitals",
         "schema_version": 1,
@@ -88,7 +88,7 @@
       "id": "stormfist",
       "name": "Stormfist",
       "preset": {
-        "catalog_revision": "standard-kits-7",
+        "catalog_revision": "standard-kits-8",
         "core": "stormfist",
         "passive": "flow",
         "schema_version": 1,
@@ -108,7 +108,7 @@
       "id": "veilstalker",
       "name": "Veilstalker",
       "preset": {
-        "catalog_revision": "standard-kits-7",
+        "catalog_revision": "standard-kits-8",
         "core": "veilstalker",
         "passive": "shroud",
         "schema_version": 1,
@@ -128,7 +128,7 @@
       "id": "emberveil",
       "name": "Emberveil",
       "preset": {
-        "catalog_revision": "standard-kits-7",
+        "catalog_revision": "standard-kits-8",
         "core": "emberveil",
         "passive": "essence",
         "schema_version": 1,
@@ -148,7 +148,7 @@
       "id": "orbitwright",
       "name": "Orbitwright",
       "preset": {
-        "catalog_revision": "standard-kits-7",
+        "catalog_revision": "standard-kits-8",
         "core": "orbitwright",
         "passive": "clockwork",
         "schema_version": 1,
@@ -168,7 +168,7 @@
       "id": "riftshot",
       "name": "Riftshot",
       "preset": {
-        "catalog_revision": "standard-kits-7",
+        "catalog_revision": "standard-kits-8",
         "core": "riftshot",
         "passive": "resonance",
         "schema_version": 1,
@@ -188,7 +188,7 @@
       "id": "chainkeeper",
       "name": "Chainkeeper",
       "preset": {
-        "catalog_revision": "standard-kits-7",
+        "catalog_revision": "standard-kits-8",
         "core": "chainkeeper",
         "passive": "souls",
         "schema_version": 1,
@@ -208,7 +208,7 @@
       "id": "frostguard",
       "name": "Frostguard",
       "preset": {
-        "catalog_revision": "standard-kits-7",
+        "catalog_revision": "standard-kits-8",
         "core": "frostguard",
         "passive": "concussion",
         "schema_version": 1,
@@ -228,7 +228,7 @@
       "id": "adventurer",
       "name": "Adventurer",
       "preset": {
-        "catalog_revision": "standard-kits-7",
+        "catalog_revision": "standard-kits-8",
         "core": "adventurer",
         "passive": "dagger_mastery",
         "schema_version": 1,
@@ -241,7 +241,7 @@
       }
     }
   ],
-  "gameplayRevision": "standard-kits-7",
+  "gameplayRevision": "standard-kits-8",
   "limits": {
     "descriptionChars": 1000,
     "documentBytes": 8192,
@@ -377,7 +377,7 @@
         1
       ],
       "recipe": {
-        "catalog_revision": "standard-kits-7",
+        "catalog_revision": "standard-kits-8",
         "core": "dawnweaver",
         "passive": "radiance",
         "schema_version": 1,
@@ -418,7 +418,7 @@
       "castRange": 15,
       "cooldownSecs": 12,
       "defaultSlot": "w",
-      "description": "A returning light shields allies on both journeys.",
+      "description": "A returning light shields you and the allies it passes, out and back.",
       "id": "dawn_barrier",
       "manaCost": 18,
       "maxRank": 3,
@@ -435,7 +435,7 @@
       "castRange": 16,
       "cooldownSecs": 10,
       "defaultSlot": "e",
-      "description": "Place a slowing field; cast again to detonate it.",
+      "description": "Place a slowing field; cast again, or wait, to detonate it.",
       "id": "dawn_field",
       "manaCost": 24,
       "maxRank": 3,
@@ -452,7 +452,7 @@
       "castRange": 45,
       "cooldownSecs": 40,
       "defaultSlot": "r",
-      "description": "A warned beam detonates Radiance marks and applies them again.",
+      "description": "A warned beam that burns hardest along its centre; detonates Radiance marks and applies them again.",
       "id": "dawn_ray",
       "manaCost": 40,
       "maxRank": 3,
@@ -1221,8 +1221,8 @@
     }
   ],
   "source": {
-    "commit": "82637bdf7c77e8da1cffa89d6bb664abf57d1785",
-    "inputsSha256": "161603c6d657eaf25e1849599930b363be3db99b044dddbe3663f2150aee4f34"
+    "commit": "b2597bd4e0c6c85f62923dcca0e20e4723e48ab7",
+    "inputsSha256": "db2da40ce39196954f46ce190326db5e6e872a96c7573049f7c063d449822cd0"
   },
-  "revision": "sha256-834d07ab50efefe270beb018c744123a9fbc99e918c82c4496bdd53a4238e251"
+  "revision": "sha256-a0ecfc53d0a1be4e9bff90baa0bdc466cc1ae3e693f28488355626d4c860690c"
 }
