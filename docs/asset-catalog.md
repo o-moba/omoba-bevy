@@ -129,7 +129,10 @@ configured GLB fallback; Last Spark uses a different flying rocket; Snapline's
 three traps reuse one model. Shockline and explosion effects remain engine-owned.
 The exporter asserts the current tumbler precedence so a presentation change
 cannot silently preserve an obsolete brief. Explicitly selected handhelds still
-remain selected in both weapon modes; coordinated two-gun skins are future work.
+remain selected in both weapon modes. A one-GLB
+[Wildspark set](handheld-weapons.md#wildspark-set-repeater-and-launcher-in-one-glb)
+switches between its own repeater and launcher variants; two independently
+approved guns are future work.
 
 Only the six current class-default handheld GLBs are publicly copied, with the
 CC-BY-4.0 grant from `client/assets/weapons/LICENSE.md`. The seven-item weapon

@@ -26,10 +26,14 @@ acceptance, not a fresh production availability check in this document. Mobile
 runtime integration exists; physical iPhone/Android visual and performance
 acceptance is still separate. Paid ownership/checkout remains future work.
 
-Artists must currently export valid embedded grip metadata: Studio has a generic
-model preview, but no grip editor or avatar-hand placement preview. The export
-contract below is current. Priorities for making this authorable without an
-engineer are in the [creator roadmap](plans/creator-loop-and-class-builder.md).
+Studio's weapon preparation (ekza-registry `90e7850`) accepts a static GLB
+without grip metadata: the artist sets hand, position, XYZ rotation and uniform
+scale on an exact-file avatar-hand preview, and Studio writes only
+`asset.extras.ekza_handheld_v1` while preserving the binary chunk. A GLB that
+already embeds the grip can still be uploaded unchanged. Which Studio revision
+is hosted is a deployment fact; check it before relying on the editor there.
+The export contract below is current. Priorities for making this authorable
+without an engineer are in the [creator roadmap](plans/creator-loop-and-class-builder.md).
 See [typed lifecycle and runtime ownership](progress/2026-10-01-asset-lifecycle.md).
 
 ## Attachment
@@ -45,7 +49,7 @@ The prop follows the skeletal hierarchy during idle, run, attack and death.
 Unequip, avatar replacement, actor removal and switching to Sprite2d remove the
 attachment. Model normalization scales the prop together with the character.
 No IK, new collider, root motion or per-frame transform copying is required.
-Adventurer uses a right-hand thrust for contact attacks. Wildspark uses a burst-fire motion for the repeater and a heavy shot for launcher rounds; its named rotor and recoil slide are animated only after accepted actions. W/R temporarily select the launcher for class-default equipment. The default repeater uses `weapons/wildspark-repeater.glb`; Riftshot and explicit legacy repeater skins retain `wild-repeater.glb`. Pausing the sandbox freezes these parts and muzzle flashes use the real hand socket. The new bow currently uses the existing ranged avatar
+Adventurer uses a right-hand thrust for contact attacks. Wildspark uses a burst-fire motion for the repeater and a heavy shot for launcher rounds; its named rotor and recoil slide are animated only after accepted actions. W/R temporarily select the launcher for class-default equipment and for the launcher variant of a [Wildspark set](#wildspark-set-repeater-and-launcher-in-one-glb). The default repeater uses `weapons/wildspark-repeater.glb`; Riftshot and explicit legacy repeater skins retain `wild-repeater.glb`. Pausing the sandbox freezes these parts and muzzle flashes use the real hand socket. An explicitly selected SDK item that is still downloading, has failed or is not yet in this peer's catalogue shows the class-default handheld for the current mode (for Wildspark the repeater/launcher pair), never empty hands; the item replaces it once installed. The new bow currently uses the existing ranged avatar
 motion path: dedicated bow-draw animation, string deformation and two-handed IK
 remain separate work. No visual prop changes the accepted attack profile.
 
@@ -81,6 +85,59 @@ The [profile document](profiles/handheld-glb-v1.json) describes
 `omoba / desktop / handheld-glb-v1`. The existing **Ekza SDK** handles the
 catalog query and bounded cached download; no new SDK dependency or fork is
 needed. Omoba adds the static attachment validator.
+
+## Wildspark set: repeater and launcher in one GLB
+
+A single approved weapon asset can carry both Wildspark guns. It is one
+submission, approval and claim, travels as the same `HandheldSelection::Item`
+and needs no protocol or server change. The art pipeline and recipe live in
+[Wildspark skin sets](wildspark-skin-sets.md); the runtime contract is:
+
+```text
+scene root "wildspark-set"
+ ├─ WildsparkSetRepeater   identity TRS
+ │   ├─ ...receiver meshes
+ │   └─ WildsparkRotor      pivot (0, 0.12, 0.25), rest rotation identity, spins about local Z
+ └─ WildsparkSetLauncher   scale 0 in the file
+     ├─ ...launcher meshes
+     └─ WildsparkSlide      pivot (0, 0.13, 0.20), recoils along -Z
+```
+
+Coordinates use the canonical grip frame above (origin at the palm, +Y up the
+frame, +Z towards the muzzle); both variants share one `ekza_handheld_v1` grip.
+The usual handheld-glb-v1 limits apply to the whole file. The authored scale 0
+keeps the launcher hidden in viewers that do not know this convention, which
+also covers older game clients: they show the repeater in both modes. An
+optional hint moves the muzzle flash:
+
+```json
+"omoba_wildspark_set_v1": {
+  "repeater": "WildsparkSetRepeater",
+  "launcher": "WildsparkSetLauncher",
+  "muzzle": { "repeater": [0, 0.12, 0.735], "launcher": [0, 0.13, 0.81] }
+}
+```
+
+It sits next to `ekza_handheld_v1` in `asset.extras`. The game identifies the
+set by the two node names alone. Without the hint, or for a malformed tip (not
+three finite numbers within ±2 m), the baseline tip of the shown gun is used;
+the hint never rejects a model.
+
+`client/src/held_weapons.rs` applies the set the same way for local and remote
+actors, from replicated class, weapon mode and accepted actions:
+
+- When a held model has both `WildsparkSetRepeater` and `WildsparkSetLauncher`
+  glTF nodes, the variant for the owner's current mode is shown at scale 1 and
+  the other is `Visibility::Hidden`. Q switches it in place without reloading
+  the model; an accepted W/R draws the launcher for 1.1 s, like the class
+  default. Owners of any other class always see the repeater variant.
+- `WildsparkRotor` and `WildsparkSlide` move on any held model that has them,
+  packaged or SDK, relative to the rest transform read when the scene spawned.
+  Root recoil and the Q lowering apply to the same models. An SDK model
+  without these nodes stays static.
+- SDK models without a hint flash at the baseline tip of the shown mode;
+  packaged props other than the class-default Wildspark pair emit no muzzle
+  flash.
 
 ## Historical operator-import pilot
 
