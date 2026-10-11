@@ -13,10 +13,12 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 import build_audio_palette as palette
 
-AUDIO = Path(__file__).resolve().parents[1] / 'client/assets/audio'
+ROOT = Path(__file__).resolve().parents[1]
+AUDIO = ROOT / 'client/assets/audio'
 DAWN = ['radiant_charge', 'radiant_beam', 'radiant_core', 'radiance_burst']
 CUES = palette.original_cues()
 
@@ -75,6 +77,20 @@ class DawnCueTests(unittest.TestCase):
         rising = [rms(charge, at, at + .1) for at in [.3, .45, .6, .75, .88]]
         self.assertEqual(rising, sorted(rising))
         self.assertAlmostEqual(loudest(charge), fire, delta=.06)
+        self.assertLess(rms(charge, fire + .05, fire + .12), .2 * rms(charge, fire - .06, fire))
+
+    def test_the_charge_is_timed_by_the_windup_of_the_catalog(self):
+        catalog = json.loads((ROOT / 'shared/assets/catalog/skills.json').read_text())['skills']
+        self.assertEqual(palette.RAY_WINDUP, next(row['windup_secs'] for row in catalog if row['id'] == 'dawn_ray'))
+        # Another windup moves the whole warning: it rises until that ray fires, is loudest
+        # then, and nothing of it starts later.
+        with mock.patch.object(palette, 'RAY_WINDUP', .6):
+            charge = palette.dawn_cues()['radiant_charge']
+        fire = palette.TAIL_START + .6
+        self.assertAlmostEqual(len(charge) / palette.RATE, fire + .12, delta=.001)
+        self.assertAlmostEqual(loudest(charge), fire, delta=.06)
+        rising = [rms(charge, at, at + .1) for at in [.25, .35, .45, .55, .65]]
+        self.assertEqual(rising, sorted(rising))
         self.assertLess(rms(charge, fire + .05, fire + .12), .2 * rms(charge, fire - .06, fire))
 
     def test_the_beam_core_and_burst_are_short_and_strike_at_once(self):

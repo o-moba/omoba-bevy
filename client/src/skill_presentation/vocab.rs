@@ -339,7 +339,7 @@ vocabulary! {
         Caster = "caster": "the caster bolt sample",
         Tower = "tower": "the tower shot sample",
         Bluff = "bluff": "the bluff sample; `dagger_bluff` only",
-        RadiantCharge = "radiant_charge": "the Horizon Ray charge: a short ignition in `tick`, and in `tail` a swell that is loudest 0.80 s after it starts",
+        RadiantCharge = "radiant_charge": "the Horizon Ray charge: a short ignition in `tick`, and in `tail` a swell that is loudest when the ray fires, one `dawn_ray` windup after it starts",
         RadiantBeam = "radiant_beam": "a ray firing: a warm low thump, a bright bell cluster and a burst of air",
     }
 }

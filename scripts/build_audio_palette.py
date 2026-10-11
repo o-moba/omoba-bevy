@@ -147,10 +147,17 @@ def original_cues():
     return out
 
 
-# The Horizon Ray fires this long after its warning appears (`dawn_ray` windup_secs in
-# shared/assets/catalog/skills.json); the charge is built to peak then.
-RAY_WINDUP = .8
-# Where the `tail` slice of a row voice starts (client AudioSlice::Tail).
+def windup_secs(skill):
+    """A skill's windup in the shared catalog, which the server times its release by."""
+    catalog = Path(__file__).resolve().parents[1] / 'shared/assets/catalog/skills.json'
+    rows = json.loads(catalog.read_text())['skills']
+    return next(row['windup_secs'] for row in rows if row['id'] == skill)
+
+
+# The Horizon Ray fires this long after its warning appears; the charge is built to peak then.
+RAY_WINDUP = windup_secs('dawn_ray')
+# Where the `tail` slice of a row voice starts (client AudioSlice::Tail). If the two
+# disagree, the client test of the decoded charge no longer finds its peak one windup in.
 TAIL_START = .2
 C_MAJOR = [523.25, 659.25, 783.99, 1046.5, 1318.51, 1567.98, 2093.0, 2637.02]
 
@@ -170,10 +177,11 @@ def dawn_cues():
     rise = RAY_WINDUP + .04
     note(b, TAIL_START, rise, 261.63, .22, 'magic', 1046.5, swell=True)
     note(b, TAIL_START, rise, 523.25, .07, 'bell', 2093.0, swell=True)
-    for i, (at, f) in enumerate(zip([.22, .38, .52, .64, .74, .82, .89, .95], C_MAJOR)):
-        note(b, at, .14, f, .05 + .015 * i)
-    for i, at in enumerate([.4, .6, .76]):
-        air(b, at, .26, .08 + .07 * i, seed=223 + i, lowpass=.35, swell=True)
+    # The arpeggio and the air enter at shares of the windup, so they follow its length.
+    for i, (share, f) in enumerate(zip([.025, .225, .4, .55, .675, .775, .8625, .9375], C_MAJOR)):
+        note(b, TAIL_START + share * RAY_WINDUP, .14, f, .05 + .015 * i)
+    for i, share in enumerate([.25, .5, .7]):
+        air(b, TAIL_START + share * RAY_WINDUP, .26, .08 + .07 * i, seed=223 + i, lowpass=.35, swell=True)
     note(b, fire - .02, .12, 3135.96, .1)
     out['radiant_charge'] = b
     # The ray fires: a warm low thump, a bright bell cluster and a burst of air.

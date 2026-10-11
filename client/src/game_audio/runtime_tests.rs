@@ -655,9 +655,9 @@ fn a_full_frame_keeps_the_release_and_drops_what_only_adds_to_a_hit() {
     assert!(!report.cue_plays.contains_key("radiant_core"));
 }
 
-/// The length in seconds of what the decoder yields for one slice of the packaged sample
-/// of `cue`, cut as the mixer cuts it.
-fn decoded_secs(cue: AudioCue, slice: crate::skill_presentation::vocab::AudioSlice) -> f64 {
+/// The samples the decoder yields for one slice of the packaged sample of `cue`, cut as
+/// the mixer cuts it, and how many of them make a second.
+fn decoded(cue: AudioCue, slice: crate::skill_presentation::vocab::AudioSlice) -> (Vec<f32>, f64) {
     use bevy::audio::{Decodable, Source};
     let catalog = CueCatalog::parse(include_str!("../../assets/audio/manifest.json")).unwrap();
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -674,14 +674,21 @@ fn decoded_secs(cue: AudioCue, slice: crate::skill_presentation::vocab::AudioSli
     }
     .span();
     let samples = match (start, duration) {
-        (Some(start), Some(duration)) => {
-            decoder.skip_duration(start).take_duration(duration).count()
-        }
-        (Some(start), None) => decoder.skip_duration(start).count(),
-        (None, Some(duration)) => decoder.take_duration(duration).count(),
-        (None, None) => decoder.count(),
+        (Some(start), Some(duration)) => decoder
+            .skip_duration(start)
+            .take_duration(duration)
+            .collect(),
+        (Some(start), None) => decoder.skip_duration(start).collect(),
+        (None, Some(duration)) => decoder.take_duration(duration).collect(),
+        (None, None) => decoder.collect(),
     };
-    samples as f64 / per_second
+    (samples, per_second)
+}
+
+/// The length in seconds of one slice of the packaged sample of `cue`.
+fn decoded_secs(cue: AudioCue, slice: crate::skill_presentation::vocab::AudioSlice) -> f64 {
+    let (samples, per_second) = decoded(cue, slice);
+    samples.len() as f64 / per_second
 }
 
 #[test]
@@ -712,12 +719,29 @@ fn every_slice_of_every_base_sample_sounds() {
 }
 
 #[test]
-fn the_charge_lasts_the_windup_past_the_tail_and_the_cues_of_receipts_sound() {
+fn the_charge_peaks_when_the_ray_fires_and_the_cues_of_receipts_sound() {
     use crate::skill_presentation::vocab::AudioSlice;
-    // The warning starts at the tail of the charge and peaks when the ray fires, 0.80 s on,
-    // with a short ring after it.
-    let tail = decoded_secs(AudioCue::RadiantCharge, AudioSlice::Tail);
-    assert!((0.85..=1.0).contains(&tail), "{tail:.3}");
+    // The warning is the tail of the charge. It lasts the catalog windup of the ray, with a
+    // short ring after it, and is loudest as the ray fires.
+    let windup = f64::from(shared::loadout::skill(SkillId::DawnRay).windup_secs);
+    let (tail, per_second) = decoded(AudioCue::RadiantCharge, AudioSlice::Tail);
+    let secs = tail.len() as f64 / per_second;
+    assert!(
+        (windup..=windup + 0.2).contains(&secs),
+        "tail {secs:.3} s, windup {windup:.2} s"
+    );
+    let step = 0.02;
+    let energy = |window: &[f32]| window.iter().map(|value| value * value).sum::<f32>();
+    let (loudest, _) = tail
+        .chunks((step * per_second) as usize)
+        .enumerate()
+        .max_by(|(_, a), (_, b)| energy(a).total_cmp(&energy(b)))
+        .unwrap();
+    let loudest = loudest as f64 * step;
+    assert!(
+        (loudest - windup).abs() <= 0.06,
+        "loudest at {loudest:.2} s, windup {windup:.2} s"
+    );
     for cue in [AudioCue::RadiantCore, AudioCue::RadianceBurst] {
         let full = decoded_secs(cue, AudioSlice::Full);
         assert!(

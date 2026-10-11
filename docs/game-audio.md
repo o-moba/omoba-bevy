@@ -86,7 +86,9 @@ rounds. The 68 cast voices are pairwise different (`base`, `speed`, `slice` and
 notes), which the identity test checks. Every voice of every row at every
 moment, basic attacks included, is a variant of its own as well, apart from
 twelve shares between rows of other heroes that predate that check; the test
-lists them, and the list may only shrink.
+lists them, and the list may only shrink. They are recorded debt: a variant of
+its own changes how each of those heroes sounds, which belongs to their own
+pass.
 
 Rules of the mixer for these voices:
 
@@ -120,7 +122,7 @@ row and the receipts give it these voices:
 | Moment | Voice | Who hears it, from where |
 | --- | --- | --- |
 | cast | `radiant_charge` `tick`: a short ignition | a hero the client sees cast it, where the hero stands |
-| telegraph | `radiant_charge` `tail`: a swell that is loudest 0.8 s after it starts, when the ray fires | everyone who sees the warning, from the point of the lane nearest them |
+| telegraph | `radiant_charge` `tail`: a swell that is loudest when the ray fires, one windup after it starts | everyone who sees the warning, from the point of the lane nearest them |
 | release | `radiant_beam`: a warm low thump, a bright bell cluster and a burst of air | everyone in earshot of the lane, from its nearest point |
 | impact | `holy` 1.40 `tail`, per hit | as every hit |
 | core hit | `radiant_core`, once a frame | as every hit; in full for the caster and the victim |
@@ -206,8 +208,10 @@ encoder build writes the same bytes on every run (`+bitexact` on the output also
 fixes the Ogg stream serial), but bytes may differ between encoder versions;
 packaged hashes identify the release. `scripts/test_build_audio_palette.py`
 checks that every packaged synthesized cue still follows what the script makes.
-The charge is built for the 0.8 s windup of `dawn_ray`; rebuild it if that
-windup changes.
+The charge reads the windup of `dawn_ray` from
+`shared/assets/catalog/skills.json`, and its arpeggio and air enter at shares
+of it. If that windup changes, the script test and the client test of the
+decoded charge fail until the charge is rebuilt with `--only radiant_charge`.
 
 ## Verification and remaining scope
 
