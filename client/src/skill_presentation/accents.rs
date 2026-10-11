@@ -1088,8 +1088,8 @@ pub(crate) enum OneShot {
     Crumble,
     Discharge,
     Detonate,
-    /// A warning became the beam it warned of: the strip glows white-hot and cools to the
-    /// skill colour where the beam lay.
+    /// A warning became the beam it warned of: the strip glows in the skill colour where
+    /// the beam lay and cools to its matter colour. White stays the beam's own core.
     Afterglow,
 }
 
@@ -1478,8 +1478,9 @@ pub(crate) fn stage_oneshot(
             };
             // Equal bars centred in equal slots, all lit at once: the same set from either
             // end, so the glow does not say which end the beam left from. A streak is as
-            // wide as its length allows, so a bar is no longer than keeps it inside.
-            let white = palette.slot(PaletteSlot::White);
+            // wide as its length allows, so a bar is no longer than keeps it inside. The
+            // glow is wider than the core of a beam, so it is never white: white is the
+            // core alone (`bodies::extent`).
             let slot = from.distance(to) / AFTERGLOW_BARS as f32;
             let widest = AFTERGLOW_WIDTH * 2.0 * half_width * unit_radius(ParticleShape::Streak)
                 / STREAK_HALF_WIDTH;
@@ -1488,8 +1489,8 @@ pub(crate) fn stage_oneshot(
                 .map(|i| {
                     let middle = from.lerp(to, (i as f32 + 0.5) / AFTERGLOW_BARS as f32);
                     let along = (to - from).normalize_or_zero() * half;
-                    let mut glow = bar(middle - along, middle + along, AFTERGLOW_SECS, white);
-                    glow.end_color = Some(lead);
+                    let mut glow = bar(middle - along, middle + along, AFTERGLOW_SECS, lead);
+                    glow.end_color = Some(matter);
                     glow
                 })
                 .collect()
@@ -3285,9 +3286,10 @@ mod tests {
         }
     }
 
-    /// The beam a warning became leaves an afterglow along its strip: white-hot bars that
-    /// cool to the skill colour, inside the strip across and along, all lit at once, and
-    /// the same set from either end, so a strip whose owner is not seen keeps its secret.
+    /// The beam a warning became leaves an afterglow along its strip: bars in the skill
+    /// colour that cool to its matter colour, never white (white is the beam's core),
+    /// inside the strip across and along, all lit at once, and the same set from either
+    /// end, so a strip whose owner is not seen keeps its secret.
     #[test]
     fn the_afterglow_of_a_beam_lies_inside_its_strip_and_tells_no_direction() {
         let near = Vec2::new(ORIGIN.x, ORIGIN.z);
@@ -3319,8 +3321,9 @@ mod tests {
                 assert_eq!(bar.shape, ParticleShape::Streak);
                 assert_eq!(
                     (bar.color, bar.end_color),
-                    (palette.white, Some(palette.primary))
+                    (palette.primary, Some(palette.secondary))
                 );
+                assert_ne!(bar.color, palette.white);
                 assert_eq!((bar.delay, bar.lifetime), (0.0, AFTERGLOW_SECS));
                 // Across, the bar stays well inside the strip.
                 let half_width = STREAK_HALF_WIDTH * bar.size;

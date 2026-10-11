@@ -200,8 +200,8 @@
       "motion": { "phase": "warn_fire", "fit_windup": true, "rate": 0.8 },
       "cast": { "pattern": "inward_gather", "shape": "streak", "count": 8, "scale": 1.0, "lifetime": 0.5, "slots": ["primary", "white"] },
       "body": { "archetype": "lane", "altitude": "ground", "fill": true, "marker": "fill_to_edge", "expire": "fade",
-        "core": { "mesh": "block", "slot": "white", "size": [0.875, 0.4, 1.0], "behave": "hide_in_telegraph" },
-        "shell": { "mesh": "block", "slot": "primary", "size": [1.0, 0.22, 1.0], "behave": "hide_in_telegraph" },
+        "core": { "mesh": "block", "slot": "white", "size": [0.875, 0.15, 1.0], "behave": "hide_in_telegraph" },
+        "shell": { "mesh": "block", "slot": "primary", "size": [1.0, 0.08, 1.0], "behave": "hide_in_telegraph" },
         "satellites": { "mesh": "block", "layout": "stagger", "count": 8, "size": [0.4, 0.08, 0.3], "slot": "primary", "behave": "only_in_telegraph" } },
       "impact": { "kind": "pierce_through", "shape": "streak", "count": 12, "scale": 1.0, "lifetime": 0.9, "slots": ["primary", "accent"] },
       "sound": {

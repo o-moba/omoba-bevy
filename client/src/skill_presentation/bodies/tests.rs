@@ -1803,6 +1803,17 @@ fn the_ray_draws_its_full_damage_core_from_the_catalog() {
         );
         let (_, shell) = across(Role::Shell);
         assert!(shell >= right - 1e-4 && shell <= radius * (1.0 - ARC_BAND) + 1e-4);
+        // A low band, not a wall: seen from the gameplay camera, the raised faces of a
+        // taller block would widen the white past the core. The shell stays under it.
+        let top = |role: Role| {
+            let slot = slots(&fired, &seen, |found| found == role)[0];
+            span(drawn(&slot, &seen).unwrap().iter().map(|point| point.y)).1
+        };
+        assert!(
+            top(Role::Core) - GROUND_LIFT <= 0.5 * half + 1e-4,
+            "{radius}"
+        );
+        assert!(top(Role::Shell) < top(Role::Core));
         // The warning is gone, and so are the edges of its core.
         assert!(shown(&fired, &seen, |role| matches!(role, Role::Marker(_))).is_empty());
     }

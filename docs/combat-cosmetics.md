@@ -180,15 +180,18 @@ pillar outlives its owner on the server and crumbles when its time ends.
 
 ### Horizon Ray and Radiance
 
-The ray's look follows its centre-weighted damage. Every number below is read
-from the catalog or the receipt, never authored twice.
+The ray's look follows its centre-weighted damage. The width of its core is
+read from the catalog and how a hit struck from its receipt; neither is
+authored a second time in the presentation data.
 
 - **Core.** The white core of the fired beam is exactly the catalog
   `core_width` to each side of the axis (0.35 of the 0.8 half-width): rule E-7
   gives the `core` of a lane over a beam with a full-damage core that width,
-  whatever its row authors (`geometry::damage_core`). Its gold shell frames it,
-  the soft fill covers the whole capsule, and the outline stays the replicated
-  capsule; as everywhere, the drawn edge does not add the target radius.
+  whatever its row authors (`geometry::damage_core`). It is a low band, so its
+  raised faces do not widen the white as the gameplay camera sees it; a lower
+  gold shell frames it, the soft fill covers the whole capsule, and the outline
+  stays the replicated capsule. As everywhere, the drawn edge does not add the
+  target radius.
 - **Warning.** The telegraph of such a lane draws the two edges of that core as
   fine lines in the skill colour, half the width of the outline, on the inner
   side of each edge and mirror images of each other, so the sweet spot is
@@ -196,9 +199,10 @@ from the catalog or the receipt, never authored twice.
   between those lines and the outline. A strip without a damage core, such as
   the Horizon Wave warning, has neither.
 - **Release.** When the warning becomes the beam, an afterglow lies along the
-  strip: six white bars in equal slots that cool to the skill colour over
-  0.4 s, all lit at once and the same set from either end, so a fogged owner's
-  strip does not show where it came from. The beam itself is replicated for
+  strip: six bars in the skill colour, in equal slots, that cool to its matter
+  colour over 0.4 s, all lit at once and the same set from either end, so a
+  fogged owner's strip does not show where it came from. They are never white:
+  white is the core alone. The beam itself is replicated for
   `shared::loadout::BEAM_LINGER_SECS` (0.15 s), which the client reads for its
   telegraph progress instead of a literal; the grey fade still marks its end.
 - **Hits.** A receipt flagged `core_hit` draws the row's recipe led by white
