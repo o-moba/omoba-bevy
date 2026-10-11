@@ -237,47 +237,7 @@ fn spawn_catalogue_grid(
     ))
     .with_children(|grid| {
         if filter == CollectionFilter::Weapons {
-            grid.spawn(widgets::heading(tr("collection.weapons"), 17.0));
-            grid.spawn(widgets::label(
-                tr("collection.weapons_hint"),
-                12.0,
-                theme::MUTED,
-            ));
-            screen_button(
-                grid,
-                tr("collection.button.refresh"),
-                ButtonKind::Secondary,
-                CollectionAction::Refresh,
-                "CollectionRefreshWeapons",
-            );
-            let (_, status, _) = omoba_passport::weapon_store::snapshot();
-            let key = match status {
-                omoba_passport::store::CatalogueStatus::Loading { .. } => {
-                    "collection.weapons_loading"
-                }
-                omoba_passport::store::CatalogueStatus::Empty => "collection.weapons_empty",
-                omoba_passport::store::CatalogueStatus::Unavailable { .. } => {
-                    "collection.weapons_unavailable"
-                }
-                omoba_passport::store::CatalogueStatus::Ready { .. } => "collection.weapons_ready",
-            };
-            grid.spawn(widgets::label(tr(key), 12.0, theme::MUTED));
-            if let Some(status) = handheld_status(handheld) {
-                grid.spawn((
-                    widgets::label(status, 12.0, theme::GOLD),
-                    Name::new("SelectedWeaponStatus"),
-                ));
-            }
-            for (choice, name, id) in handheld_choices() {
-                compact_screen_tile(
-                    grid,
-                    name,
-                    *handheld == choice,
-                    CollectionAction::Handheld(choice),
-                    id,
-                    phone,
-                );
-            }
+            spawn_weapon_choices(grid, handheld, phone);
             return;
         }
         if filter != CollectionFilter::Studio {
@@ -380,6 +340,131 @@ fn spawn_catalogue_grid(
     });
 }
 
+/// Collection → Weapons: "My Ekza library" first, with the account controls
+/// and the market hint while it is empty, then the shipped choices, then the
+/// rest of the public Ekza catalogue. Ekza items show their author and licence.
+fn spawn_weapon_choices(
+    grid: &mut ChildSpawnerCommands,
+    handheld: &shared::handheld::HandheldSelection,
+    phone: bool,
+) {
+    use omoba_passport::store::CatalogueStatus;
+    grid.spawn(widgets::heading(tr("collection.weapons"), 17.0));
+    grid.spawn(widgets::label(
+        tr("collection.weapons_hint"),
+        12.0,
+        theme::MUTED,
+    ));
+    screen_button(
+        grid,
+        tr("collection.button.refresh"),
+        ButtonKind::Secondary,
+        CollectionAction::Refresh,
+        "CollectionRefreshWeapons",
+    );
+    if let Some(status) = handheld_status(handheld) {
+        grid.spawn((
+            widgets::label(status, 12.0, theme::GOLD),
+            Name::new("SelectedWeaponStatus"),
+        ));
+    }
+    let choices = handheld_choices();
+    let connected = crate::passport::account_connected();
+    for group in HandheldGroup::ALL {
+        match group {
+            HandheldGroup::Library => {
+                grid.spawn((
+                    widgets::heading(tr("collection.weapons_library"), 15.0),
+                    Name::new("CollectionWeaponLibraryHeading"),
+                ));
+                screen_button(
+                    grid,
+                    if connected {
+                        tr("collection.button.sign_out")
+                    } else {
+                        tr("collection.button.connect")
+                    },
+                    ButtonKind::Secondary,
+                    CollectionAction::ConnectAccount,
+                    "CollectionWeaponsConnectAccount",
+                );
+                // Same live line as the avatar library: approval code, errors.
+                grid.spawn((
+                    widgets::label(
+                        &crate::passport::avatar_account_status_line(),
+                        11.0,
+                        theme::MUTED,
+                    ),
+                    Name::new("CollectionAccountStatus"),
+                ));
+                if !choices.iter().any(|c| c.group == group) {
+                    grid.spawn((
+                        widgets::label(tr(library_hint(connected)), 12.0, theme::MUTED),
+                        Name::new("CollectionWeaponMarketHint"),
+                    ));
+                }
+            }
+            HandheldGroup::Included => {
+                grid.spawn(widgets::heading(tr("collection.weapons_included"), 15.0));
+            }
+            HandheldGroup::Catalogue => {
+                grid.spawn((
+                    widgets::heading(tr("collection.weapons_catalogue"), 15.0),
+                    Name::new("CollectionWeaponCatalogueHeading"),
+                ));
+                let key = match omoba_passport::weapon_store::snapshot().1 {
+                    CatalogueStatus::Loading { .. } => "collection.weapons_loading",
+                    CatalogueStatus::Empty => "collection.weapons_empty",
+                    CatalogueStatus::Unavailable { .. } => "collection.weapons_unavailable",
+                    CatalogueStatus::Ready { .. } => "collection.weapons_ready",
+                };
+                grid.spawn(widgets::label(tr(key), 12.0, theme::MUTED));
+            }
+        }
+        for choice in choices.iter().filter(|c| c.group == group) {
+            let Some(credit) = &choice.credit else {
+                weapon_tile(grid, choice, handheld, phone);
+                continue;
+            };
+            grid.spawn(Node {
+                flex_direction: FlexDirection::Column,
+                row_gap: Val::Px(2.0),
+                flex_shrink: 0.0,
+                ..default()
+            })
+            .with_children(|item| {
+                weapon_tile(item, choice, handheld, phone);
+                item.spawn(widgets::label(credit, 11.0, theme::MUTED));
+            });
+        }
+    }
+}
+
+fn weapon_tile(
+    parent: &mut ChildSpawnerCommands,
+    choice: &HandheldChoice,
+    handheld: &shared::handheld::HandheldSelection,
+    phone: bool,
+) {
+    compact_screen_tile(
+        parent,
+        choice.name.clone(),
+        *handheld == choice.value,
+        CollectionAction::Handheld(choice.value.clone()),
+        choice.id.clone(),
+        phone,
+    );
+}
+
+/// Shown while "My Ekza library" has no weapons.
+pub(super) fn library_hint(connected: bool) -> &'static str {
+    if connected {
+        "collection.weapons_library_empty"
+    } else {
+        "collection.weapons_market_hint"
+    }
+}
+
 fn refresh_connection_labels(mut labels: Query<(&Name, &mut Text)>) {
     let account = crate::passport::avatar_account_status_line();
     let wallet = crate::passport::wallet_status_line();
@@ -413,6 +498,7 @@ fn refresh_collection_catalogue(
     filter: Res<CollectionFilter>,
     selection: Res<TeamSelection>,
     mut weapon_revision: Local<u64>,
+    mut listed_account: Local<Option<bool>>,
 ) {
     crate::passport::poll_account();
     crate::passport::poll_wallet();
@@ -421,14 +507,21 @@ fn refresh_collection_catalogue(
     let generation = locale.as_ref().map(|locale| locale.generation());
     let relocalize = language.is_some() && *language != generation;
     *language = generation;
+    // The library weapons (and the account library) refresh about every 15 s;
+    // only a changed list bumps this revision.
     let next_weapons = omoba_passport::weapon_store::snapshot().0;
     let weapons_changed = next_weapons != *weapon_revision;
     *weapon_revision = next_weapons;
+    // Connecting or signing out swaps the account button and library hint.
+    let connected = crate::passport::account_connected();
+    let account_changed = listed_account.is_some_and(|listed| listed != connected);
+    *listed_account = Some(connected);
     for (grid, mut revision) in &mut grids {
         if revision.0 == catalogue.revision
             && !relocalize
             && !filter.is_changed()
             && !weapons_changed
+            && !account_changed
             && !selection.is_changed()
         {
             continue;
@@ -1149,35 +1242,95 @@ fn clip_display(name: &str) -> String {
         .map_or_else(|| AvatarPreview::clip_label(name), str::to_owned)
 }
 
+/// Where a handheld choice is listed, in display order.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum HandheldGroup {
+    /// "My Ekza library": weapons the connected account created, saved or claimed.
+    Library,
+    /// Class default, empty hands and the packaged props.
+    Included,
+    /// The rest of the public Ekza catalogue (approved free weapons).
+    Catalogue,
+}
+impl HandheldGroup {
+    pub(super) const ALL: [Self; 3] = [Self::Library, Self::Included, Self::Catalogue];
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct HandheldChoice {
+    pub value: shared::handheld::HandheldSelection,
+    pub name: String,
+    /// Stable test id, never displayed.
+    pub id: String,
+    pub group: HandheldGroup,
+    /// "author · licence" of an Ekza item; shipped choices have none.
+    pub credit: Option<String>,
+}
+
 /// Identical cosmetic choices in the collection and the authoritative draft.
-pub(super) fn handheld_choices() -> Vec<(shared::handheld::HandheldSelection, String, String)> {
+pub(super) fn handheld_choices() -> Vec<HandheldChoice> {
+    handheld_choices_from(
+        &omoba_passport::weapons::catalog().items,
+        omoba_passport::weapon_store::snapshot().2,
+    )
+}
+
+/// Library entries first, then the shipped choices, then the catalogue; the
+/// store already lists an owned asset only once.
+fn handheld_choices_from(
+    packaged: &[omoba_passport::weapons::Weapon],
+    store: Vec<omoba_passport::weapon_store::Entry>,
+) -> Vec<HandheldChoice> {
     use shared::handheld::HandheldSelection as H;
-    let mut result = vec![
-        (
-            H::ClassDefault,
-            tr("collection.weapon_default").into(),
-            "Handheld-default".into(), // i18n-allow: stable test id, never displayed
-        ),
-        (
-            H::Unequipped,
-            tr("collection.weapon_empty").into(),
-            "Handheld-empty".into(), // i18n-allow: stable test id, never displayed
-        ),
-    ];
-    result.extend(omoba_passport::weapons::catalog().items.iter().map(|w| {
-        (
-            H::Item(w.id.clone()),
-            w.name.clone(),
-            format!("Handheld-{}", w.id), // i18n-allow: stable test id, never displayed
-        )
-    }));
+    let included = |value, name: String, id: &str| HandheldChoice {
+        value,
+        name,
+        id: format!("Handheld-{id}"), // i18n-allow: stable test id, never displayed
+        group: HandheldGroup::Included,
+        credit: None,
+    };
+    let (owned, public): (Vec<_>, Vec<_>) = store.into_iter().partition(|entry| entry.owned);
+    let item = |entry: omoba_passport::weapon_store::Entry| HandheldChoice {
+        credit: Some(weapon_credit(&entry)),
+        value: H::Item(entry.id.clone()),
+        id: format!("Handheld-{}", entry.id), // i18n-allow: stable test id, never displayed
+        name: entry.name,
+        group: if entry.owned {
+            HandheldGroup::Library
+        } else {
+            HandheldGroup::Catalogue
+        },
+    };
+    let mut result: Vec<_> = owned.into_iter().map(item).collect();
+    result.push(included(
+        H::ClassDefault,
+        tr("collection.weapon_default").into(),
+        "default",
+    ));
+    result.push(included(
+        H::Unequipped,
+        tr("collection.weapon_empty").into(),
+        "empty",
+    ));
     result.extend(
-        omoba_passport::weapon_store::snapshot()
-            .2
-            .into_iter()
-            .map(|w| (H::Item(w.id.clone()), w.name, format!("Handheld-{}", w.id))), // i18n-allow: stable test id, never displayed
+        packaged
+            .iter()
+            .map(|w| included(H::Item(w.id.clone()), w.name.clone(), &w.id)),
     );
+    result.extend(public.into_iter().map(item));
     result
+}
+
+/// Author and licence as the creator published them.
+fn weapon_credit(entry: &omoba_passport::weapon_store::Entry) -> String {
+    let author = entry
+        .author
+        .as_deref()
+        .unwrap_or(tr("collection.unknown_author"));
+    match entry.license.as_deref() {
+        Some(license) => [author, license].join(" · "),
+        None => author.to_owned(),
+    }
 }
 
 /// Selection feedback shares the same installer state used by the renderer.
@@ -1623,6 +1776,103 @@ mod tests {
             398.0,
             "the grid follows the finger from the first pixel"
         );
+    }
+
+    #[test]
+    fn library_weapons_list_first_and_carry_author_and_licence() {
+        use omoba_passport::weapon_store::Entry;
+        use shared::handheld::HandheldSelection as H;
+        let entry = |id: &str, owned| Entry {
+            id: id.into(),
+            name: id.into(),
+            author: Some("jinx-artist".into()),
+            license: Some("CC-BY-4.0".into()),
+            owned,
+        };
+        let packaged = &omoba_passport::weapons::catalog().items[..1];
+        let shipped = format!("Handheld-{}", packaged[0].id);
+        let choices = handheld_choices_from(
+            packaged,
+            vec![entry("ekza-owned", true), entry("ekza-public", false)],
+        );
+        let order: Vec<_> = choices.iter().map(|c| (c.id.as_str(), c.group)).collect();
+        assert_eq!(
+            order,
+            [
+                ("Handheld-ekza-owned", HandheldGroup::Library),
+                ("Handheld-default", HandheldGroup::Included),
+                ("Handheld-empty", HandheldGroup::Included),
+                (shipped.as_str(), HandheldGroup::Included),
+                ("Handheld-ekza-public", HandheldGroup::Catalogue),
+            ]
+        );
+        assert_eq!(choices[0].value, H::Item("ekza-owned".into()));
+        assert_eq!(
+            choices[0].credit.as_deref(),
+            Some("jinx-artist · CC-BY-4.0")
+        );
+        assert_eq!(
+            choices[4].credit.as_deref(),
+            Some("jinx-artist · CC-BY-4.0")
+        );
+        assert!(choices[1..4].iter().all(|c| c.credit.is_none()));
+        // Signed out: no library group, the shipped choices lead as before.
+        let signed_out = handheld_choices_from(packaged, vec![entry("ekza-public", false)]);
+        assert_eq!(signed_out[0].value, H::ClassDefault);
+        assert!(signed_out.iter().all(|c| c.group != HandheldGroup::Library));
+        let anonymous = Entry {
+            author: None,
+            license: None,
+            ..entry("ekza-anonymous", true)
+        };
+        assert_eq!(weapon_credit(&anonymous), tr("collection.unknown_author"));
+    }
+
+    #[test]
+    fn the_weapons_tab_puts_the_library_and_its_market_hint_first() {
+        let mut app = App::new();
+        app.insert_resource(CollectionFilter::Weapons);
+        app.add_plugins((MinimalPlugins, AssetPlugin::default()))
+            .init_asset::<Image>()
+            .init_resource::<AvatarPreview>()
+            .init_resource::<AvatarThumbnails>()
+            .init_resource::<TeamSelection>()
+            .insert_resource(crate::ui::UiPlatform(crate::platform::UiProfile::Desktop))
+            .add_systems(Update, refresh_collection_catalogue);
+        app.world_mut()
+            .spawn((CollectionGrid, CatalogueRevision(u64::MAX), Node::default()));
+        app.update();
+        let find = |app: &mut App, key: &str| {
+            app.world_mut()
+                .query::<(Entity, crate::ui::test_id::NodeKey)>()
+                .iter(app.world())
+                .find(|(_, name)| name.as_str() == key)
+                .map(|(entity, _)| entity)
+        };
+        let scroll = find(&mut app, "CollectionCatalogueScroll").unwrap();
+        let order: Vec<_> = app
+            .world()
+            .get::<Children>(scroll)
+            .unwrap()
+            .iter()
+            .collect();
+        let at = |app: &mut App, key: &str| {
+            let entity = find(app, key).unwrap_or_else(|| panic!("{key} is missing"));
+            order.iter().position(|child| *child == entity).unwrap()
+        };
+        let library = at(&mut app, "CollectionWeaponLibraryHeading");
+        let connect = at(&mut app, "CollectionWeaponsConnectAccount");
+        let hint = at(&mut app, "CollectionWeaponMarketHint");
+        let shipped = at(&mut app, "Handheld-default");
+        let catalogue = at(&mut app, "CollectionWeaponCatalogueHeading");
+        assert!(library < connect && connect < hint && hint < shipped && shipped < catalogue);
+        // No account in tests: the disconnected hint points at the market.
+        let hint = find(&mut app, "CollectionWeaponMarketHint").unwrap();
+        assert_eq!(
+            app.world().get::<Text>(hint).unwrap().0,
+            tr(library_hint(false))
+        );
+        assert!(tr(library_hint(false)).contains("app.omoba.io/market"));
     }
 
     #[test]

@@ -621,6 +621,9 @@ fn render_draft(
     let Some(draft) = &game.prematch else {
         return;
     };
+    // Completes "Connect Ekza" from this screen and keeps the library current
+    // (about every 15 s), so a weapon claimed on the web appears in the picker.
+    crate::passport::poll_account();
     if let Some(stage) = party_stage.as_mut() {
         let mut preview_roster = draft.clone();
         if let (Some(choice), Some(local)) = (
@@ -651,9 +654,10 @@ fn render_draft(
         window.width()
     );
     let key = format!(
-        "{key}:{:?}:{}:{}:{}",
+        "{key}:{:?}:{}:{}:{}:{}",
         state.picker_tab,
         omoba_passport::weapon_store::snapshot().0,
+        crate::passport::account_connected(),
         window.height(),
         locale.as_ref().map_or(0, |locale| locale.generation())
     );
@@ -823,6 +827,8 @@ fn render_draft(
                             });
                     }
                     if !compact || state.picker_tab == PickerTab::Weapons {
+                        use super::collection::HandheldGroup;
+                        let choices = super::collection::handheld_choices();
                         picker.spawn(widgets::label(tr("collection.weapons"), 12.0, theme::MUTED));
                         if let Some(status) = choice
                             .and_then(|choice| super::collection::handheld_status(&choice.handheld))
@@ -832,29 +838,92 @@ fn render_draft(
                                 Name::new("DraftWeaponStatus"),
                             ));
                         }
+                        // Author and licence of the chosen Ekza item.
+                        if let Some(credit) = choice
+                            .and_then(|c| choices.iter().find(|item| item.value == c.handheld))
+                            .and_then(|item| item.credit.as_deref())
+                        {
+                            picker.spawn((
+                                widgets::label(credit, 11.0, theme::MUTED),
+                                Name::new("DraftWeaponCredit"),
+                            ));
+                        }
+                        let connected = crate::passport::account_connected();
+                        let owned = choices.iter().any(|c| c.group == HandheldGroup::Library);
                         picker
                             .spawn(Node {
                                 flex_wrap: FlexWrap::Wrap,
-                                column_gap: Val::Px(4.0),
-                                row_gap: Val::Px(4.0),
-                                max_height: Val::Px(84.0),
-                                overflow: Overflow::scroll_y(),
+                                column_gap: Val::Px(6.0),
+                                row_gap: Val::Px(2.0),
+                                align_items: AlignItems::Center,
+                                flex_shrink: 0.0,
                                 ..default()
                             })
                             .with_children(|row| {
-                                for (value, name, id) in super::collection::handheld_choices() {
-                                    let selected = choice.is_some_and(|c| c.handheld == value);
+                                row.spawn((
+                                    widgets::label(
+                                        tr("collection.weapons_library"),
+                                        12.0,
+                                        theme::GOLD,
+                                    ),
+                                    Name::new("DraftWeaponLibraryHeading"),
+                                ));
+                                if !owned {
+                                    row.spawn((
+                                        widgets::label(
+                                            tr(super::collection::library_hint(connected)),
+                                            11.0,
+                                            theme::MUTED,
+                                        ),
+                                        Name::new("DraftWeaponMarketHint"),
+                                    ));
+                                }
+                                // The full layout already shows Connect in the avatar library.
+                                if compact && !connected {
                                     action_button(
                                         row,
-                                        &name,
-                                        DraftAction::Handheld(value),
-                                        &format!("Draft-{id}"), // i18n-allow: stable ECS/test identity, never displayed
-                                        (picker_width - 8.0) / 3.0,
+                                        tr("draft.button.connect_ekza"),
+                                        DraftAction::Connect,
+                                        "DraftWeaponsConnect",
+                                        116.0,
                                         false,
-                                        selected,
+                                        false,
                                     );
                                 }
                             });
+                        // "My Ekza library" on its own row, then everything else.
+                        for library in [true, false] {
+                            if library && !owned {
+                                continue;
+                            }
+                            picker
+                                .spawn(Node {
+                                    flex_wrap: FlexWrap::Wrap,
+                                    column_gap: Val::Px(4.0),
+                                    row_gap: Val::Px(4.0),
+                                    max_height: Val::Px(84.0),
+                                    overflow: Overflow::scroll_y(),
+                                    ..default()
+                                })
+                                .with_children(|row| {
+                                    for item in choices
+                                        .iter()
+                                        .filter(|c| (c.group == HandheldGroup::Library) == library)
+                                    {
+                                        let selected =
+                                            choice.is_some_and(|c| c.handheld == item.value);
+                                        action_button(
+                                            row,
+                                            &item.name,
+                                            DraftAction::Handheld(item.value.clone()),
+                                            &format!("Draft-{}", item.id), // i18n-allow: stable ECS/test identity, never displayed
+                                            (picker_width - 8.0) / 3.0,
+                                            false,
+                                            selected,
+                                        );
+                                    }
+                                });
+                        }
                     }
                     if !compact || state.picker_tab == PickerTab::Classes {
                         picker

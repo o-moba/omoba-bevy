@@ -5,7 +5,7 @@ use crate::i18n::{tr, trf};
 use omoba_passport::{
     PairingState,
     account::{self, AccountCredential, AccountError, AccountFlow, AccountSession},
-    store,
+    store, weapon_store,
 };
 use std::{
     path::{Path, PathBuf},
@@ -44,6 +44,20 @@ impl State {
         };
         self.session = Some(session);
         self.last = Some(Instant::now());
+        self.publish_library();
+    }
+
+    /// The weapons "My Ekza library" lists, none without a session. Lock order
+    /// is always this state, then the weapon store's.
+    fn library_weapons(&self) -> Vec<ekza_bevy_sdk::assets::StoreAsset> {
+        self.session
+            .as_ref()
+            .map(weapon_store::owned)
+            .unwrap_or_default()
+    }
+
+    fn publish_library(&self) {
+        weapon_store::set_library(self.library_weapons());
     }
 
     fn sign_out(&mut self) {
@@ -62,6 +76,7 @@ impl State {
         self.opened = None;
         self.error = None;
         self.last = Some(Instant::now());
+        self.publish_library();
     }
 
     /// A response from before logout or a new pairing must never restore identity.
@@ -79,6 +94,8 @@ impl State {
             Ok(session) => {
                 self.session = session;
                 self.error = None;
+                // A claim made on the web appears on this read, without a restart.
+                self.publish_library();
                 true
             }
             Err(AccountError::Unauthorized) => {
@@ -87,6 +104,7 @@ impl State {
                     let _ = std::fs::remove_file(path);
                 }
                 self.error = Some(Notice::Key("account.error.expired"));
+                self.publish_library();
                 true
             }
             Err(AccountError::InvalidCredential) => {
@@ -283,6 +301,7 @@ mod tests {
     struct Fixture {
         api: account::AccountClient,
         status: Arc<Mutex<u16>>,
+        body: Arc<Mutex<String>>,
         stop: Arc<AtomicBool>,
         worker: Option<thread::JoinHandle<()>>,
         root: PathBuf,
@@ -294,8 +313,9 @@ mod tests {
             let address = listener.local_addr().unwrap();
             let api = account::AccountClient::new(&format!("http://{address}"), "omoba").unwrap();
             let status = Arc::new(Mutex::new(200));
+            let body = Arc::new(Mutex::new(library(&[])));
             let stop = Arc::new(AtomicBool::new(false));
-            let (responses, stopping) = (status.clone(), stop.clone());
+            let (responses, bodies, stopping) = (status.clone(), body.clone(), stop.clone());
             let worker = thread::spawn(move || {
                 while !stopping.load(Ordering::Relaxed) {
                     let (mut stream, _) = match listener.accept() {
@@ -313,7 +333,7 @@ mod tests {
                         .unwrap();
                     let mut request = [0; 4096];
                     assert!(stream.read(&mut request).unwrap() > 0);
-                    let body = r#"{"schema":"ekza.account.library.v1","projectId":"omoba","account":{"username":"Saved player"},"items":[]}"#;
+                    let body = bodies.lock().unwrap().clone();
                     write!(
                         stream,
                         "HTTP/1.1 {} OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
@@ -326,6 +346,7 @@ mod tests {
             Self {
                 api,
                 status,
+                body,
                 stop,
                 worker: Some(worker),
                 root: std::env::temp_dir().join(format!(
@@ -354,6 +375,26 @@ mod tests {
             state.finish_refresh(state.generation, result)
         }
     }
+    /// A library document; `assets` is omitted when empty, as before C1.
+    fn library(assets: &[String]) -> String {
+        let assets = if assets.is_empty() {
+            String::new()
+        } else {
+            format!(r#","assets":[{}]"#, assets.join(","))
+        };
+        format!(
+            r#"{{"schema":"ekza.account.library.v1","projectId":"omoba","account":{{"username":"Saved player"}},"items":[]{assets}}}"#
+        )
+    }
+
+    /// One `/v2/assets` weapon item approved for `platform`, as the library lists it.
+    fn weapon(uuid: &str, name: &str, platform: &str, sha: char) -> String {
+        let sha = sha.to_string().repeat(64);
+        format!(
+            r#"{{"id":"ekza:weapon:{uuid}","assetKind":"weapon","name":"{name}","license":{{"text":"CC-BY-4.0","attribution":"wildspark-maker"}},"creator":{{"name":"wildspark-maker"}},"access":"free","renditions":[{{"platform":"{platform}","profile":"handheld-glb-v1","format":"glb","sha256":"{sha}","sizeBytes":4096,"downloadUrl":"https://registry.ekza.io/v1/studio/assets/{sha}/rendition"}}],"projectSupport":[{{"projectId":"omoba","platform":"{platform}","profile":"handheld-glb-v1","status":"approved","requirementId":"wildspark.handheld.set"}}],"library":{{"reason":"claimed"}}}}"#
+        )
+    }
+
     impl Drop for Fixture {
         fn drop(&mut self) {
             self.stop.store(true, Ordering::Relaxed);
@@ -427,6 +468,50 @@ mod tests {
         assert!(!state.finish_refresh(state.generation, result));
         assert!(state.path.as_ref().unwrap().is_file());
         assert!(state.session.is_none());
+    }
+
+    #[test]
+    fn a_web_claim_reaches_the_weapon_library_on_the_next_refresh() {
+        const SET: &str = "11111111-2222-4333-8444-555555555555";
+        let fixture = Fixture::new();
+        let mut state = fixture.state();
+        state.accept_session(fixture.session());
+        assert!(state.library_weapons().is_empty());
+        // Claimed on app.omoba.io: only the desktop handheld revision is listed
+        // in the game; another platform's revision and bad entries are skipped.
+        *fixture.body.lock().unwrap() = library(&[
+            weapon(SET, "Candy Neon set", "desktop", 'c'),
+            weapon(
+                "22222222-3333-4444-8555-666666666666",
+                "Phone only",
+                "android",
+                'd',
+            ),
+            r#"{"id":"ekza:avatar:aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa","assetKind":"weapon"}"#
+                .into(),
+            "null".into(),
+        ]);
+        assert!(fixture.refresh(&mut state));
+        let owned = state.library_weapons();
+        assert_eq!(owned.len(), 1);
+        assert_eq!(owned[0].asset_id, format!("ekza:weapon:{SET}"));
+        assert_eq!(owned[0].name, "Candy Neon set");
+        assert_eq!(owned[0].author.as_deref(), Some("wildspark-maker"));
+        assert_eq!(owned[0].license.as_deref(), Some("CC-BY-4.0"));
+        assert!(owned[0].slug.starts_with("ekza-"));
+        // An outage keeps the listed weapons; a healthy empty library clears them.
+        *fixture.status.lock().unwrap() = 503;
+        assert!(!fixture.refresh(&mut state));
+        assert_eq!(state.library_weapons(), owned);
+        *fixture.status.lock().unwrap() = 200;
+        *fixture.body.lock().unwrap() = library(&[]);
+        assert!(fixture.refresh(&mut state));
+        assert!(state.library_weapons().is_empty());
+        *fixture.body.lock().unwrap() = library(&[weapon(SET, "Candy Neon set", "desktop", 'c')]);
+        assert!(fixture.refresh(&mut state));
+        assert_eq!(state.library_weapons(), owned);
+        state.sign_out();
+        assert!(state.library_weapons().is_empty());
     }
 
     #[test]
