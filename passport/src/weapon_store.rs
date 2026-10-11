@@ -393,6 +393,7 @@ mod tests {
             name: name.into(),
             author: Some(format!("{name} maker")),
             license: Some("CC-BY-4.0".into()),
+            attribution: None,
             thumbnail_url: None,
             support: ProjectSupport {
                 project_id: "omoba".into(),

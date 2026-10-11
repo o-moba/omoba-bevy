@@ -97,7 +97,7 @@ The code is in `passport/src/weapon_store.rs` (`set_library`, the merge in
 read) and the shared `handheld_choices` in `client/src/frontend/collection.rs`,
 which Collection and `draft.rs` both use. It needs an `ekza-bevy-sdk` revision
 with `AccountSession::assets` (the library-assets entry in the SDK changelog);
-the root `Cargo.toml` pins `789688f`.
+the root `Cargo.toml` pins `d18ec72`.
 
 ## Attachment
 

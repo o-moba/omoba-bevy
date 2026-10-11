@@ -589,6 +589,7 @@ mod tests {
             name: "Community Robert".into(),
             author: Some("alice".into()),
             license: Some("CC0".into()),
+            attribution: None,
             thumbnail_url: None,
             protected,
             free,
@@ -1063,6 +1064,7 @@ mod weapon_tests {
             name: "Approved hammer".into(),
             author: None,
             license: None,
+            attribution: None,
             thumbnail_url: None,
             free: true,
             support: ProjectSupport {
