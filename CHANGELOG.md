@@ -21,6 +21,12 @@ All notable changes are recorded here. The canonical version is
   ekza-bevy-sdk `d18ec72` (`AccountSession::assets`, `disconnect`, store attribution);
   free items stay server-admitted by approval; `PROTOCOL_VERSION` stays 11.
 
+- `make sdk-pin-check` checks that the `ekza-bevy-sdk` commit pinned in `Cargo.toml`
+  and `Cargo.lock` is on a branch of the SDK's GitHub repository (`SDK_BRANCH=dev`
+  requires it merged there). A commit known only to a local `~/.cargo/git` cache builds
+  on that machine and fails CI and fresh clones. Tooling only; not part of `make check`
+  because it needs the network.
+
 - `make release-all` builds macOS, Windows (cargo-xwin cross-build), Linux (Docker,
   offline fallback), a universal Android APK and a signed iPhone archive on one Mac;
   `make release-publish` pins the packages to IPFS and verifies the gateway copies.
