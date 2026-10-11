@@ -3,7 +3,7 @@
 //! writable Ekza source on every platform, never in the application bundle.
 use crate::{
     store::{CatalogueStatus, ModelState},
-    weapons::{Grip, Weapon},
+    weapons::{Grip, Weapon, WildsparkSetHint},
 };
 use ekza_bevy_sdk::{
     assets::{AssetKind, AssetStore, StoreAsset, templates},
@@ -44,7 +44,7 @@ pub struct Entry {
 }
 enum Install {
     Pending,
-    Ready(Grip),
+    Ready(Grip, Option<WildsparkSetHint>),
     Failed(Instant),
 }
 #[derive(Default)]
@@ -170,7 +170,7 @@ pub fn model_state(id: &str) -> ModelState {
         return ModelState::Unavailable;
     };
     match state.installs.get(id) {
-        Some(Install::Ready(_)) => return ModelState::Ready,
+        Some(Install::Ready(..)) => return ModelState::Ready,
         Some(Install::Pending) => return ModelState::Pending,
         Some(Install::Failed(at)) if at.elapsed() < Duration::from_secs(60) => {
             return ModelState::Unavailable;
@@ -186,12 +186,15 @@ pub fn model_state(id: &str) -> ModelState {
                 crate::weapons::validate_model(bytes).map(drop)
             })
             .and_then(|path| std::fs::read(path).map_err(|e| e.to_string()))
-            .and_then(|bytes| crate::weapons::validate_model(&bytes));
+            .and_then(|bytes| {
+                crate::weapons::validate_model(&bytes)
+                    .map(|grip| (grip, crate::weapons::wildspark_set_hint(&bytes)))
+            });
         let mut state = runtime.state.lock().unwrap();
         state.installs.insert(
             item.slug,
             match result {
-                Ok(grip) => Install::Ready(grip),
+                Ok((grip, hint)) => Install::Ready(grip, hint),
                 Err(_) => Install::Failed(Instant::now()),
             },
         );
@@ -208,7 +211,7 @@ pub fn definition(id: &str) -> Option<Weapon> {
     }
     let state = runtime()?.state.lock().unwrap();
     let item = state.items.get(id)?;
-    let Install::Ready(grip) = state.installs.get(id)? else {
+    let Install::Ready(grip, _) = state.installs.get(id)? else {
         return None;
     };
     Some(Weapon {
@@ -219,4 +222,12 @@ pub fn definition(id: &str) -> Option<Weapon> {
         source_id: Some(item.asset_id.clone()),
         sha256: Some(item.support.rendition.sha256.clone()),
     })
+}
+/// The optional set hint embedded in an installed SDK model. Packaged props have
+/// none; the client then uses the baseline muzzle of the shown variant.
+pub fn wildspark_set_hint(id: &str) -> Option<WildsparkSetHint> {
+    match runtime()?.state.lock().unwrap().installs.get(id)? {
+        Install::Ready(_, hint) => *hint,
+        _ => None,
+    }
 }
