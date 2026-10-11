@@ -34,3 +34,9 @@ opt-level = 1
 
 [profile.dev.package."*"]
 opt-level = 3
+
+# Linux audio: cpal 0.17.3 spins its realtime ALSA worker on POLLERR (PipeWire
+# xrun/suspend), freezing the desktop. Local backport of the cpal 0.18 recovery;
+# drop when bevy_audio moves to rodio/cpal 0.18. See third_party/cpal-0.17.3/OMOBA-PATCH.md.
+[patch.crates-io]
+cpal = { path = "third_party/cpal-0.17.3" }

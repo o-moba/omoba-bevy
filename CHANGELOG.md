@@ -11,12 +11,26 @@ All notable changes are recorded here. The canonical version is
   An iPhone export refused on the command line now hands the kept archive to Xcode
   Organizer instead of failing. Release tooling only; no game, protocol or CI change.
 
+## [0.44.0] - 2026-10-10
+
+### Community Beta 1 — first GitHub release
+
+- First tagged GitHub release, `v0.44.0` (pre-release): Windows x64, macOS Apple
+  silicon, Linux x64 and a universal Android APK, all starting on the public test
+  server, with SHA-256 checksums, the compatibility manifest and per-package source
+  commits. iPhone and iPad testers join through TestFlight. The same packages are
+  mirrored on IPFS and linked from omoba.io.
+
+- Fix the Linux client freezing the desktop after audio trouble: cpal 0.17 spun its
+  realtime ALSA thread when PipeWire reported `POLLERR` (xrun or suspend), flooding the
+  log with "`alsa::poll()` returned POLLERR". A vendored cpal 0.17.3 now recovers the PCM,
+  stops on a disconnected device and backs off repeated failures
+  (`third_party/cpal-0.17.3/OMOBA-PATCH.md`). No gameplay or protocol change.
+
 - Add `make android-diagnose` for app-scoped launch evidence, installed version,
   device ABI and graphics capabilities. Correct Android compatibility guidance:
   Android 12 meets the OS minimum, while ABI slices do not provide a GPU fallback.
   This tooling change does not modify the shipped client or diagnose an unseen device.
-
-## [0.44.0] - 2026-10-10
 
 - Add the community class workshop bridge: export compiled rules for 12 modular cores/48 skills, validate named build documents through the shared resolver, and import them into local Combat Test. Extend the existing Account API with private versioned build storage and encrypted, owner-bound Ekza library consent; public/ranked admission is unchanged. The companion portal provides the editor, previews, account saves and portable downloads.
 
