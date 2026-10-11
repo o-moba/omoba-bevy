@@ -19,7 +19,8 @@ The SDK reads `/v2/assets?kind=weapon&project=omoba&platform=desktop&profile=han
 Collection → Weapons and draft equipment selection download verified approved
 files into the writable runtime cache. Peers install the same immutable IDs;
 the server independently checks eligibility. A per-model packaged manifest edit
-or game rebuild is not required for this route.
+or game rebuild is not required for this route. Weapons in the player's own
+Ekza library are listed first, see [Owned items](#owned-items).
 
 The hosted free-weapon route and two desktop clients have recorded pilot
 acceptance, not a fresh production availability check in this document. Mobile
@@ -35,6 +36,59 @@ is hosted is a deployment fact; check it before relying on the editor there.
 The export contract below is current. Priorities for making this authorable
 without an engineer are in the [creator roadmap](plans/creator-loop-and-class-builder.md).
 See [typed lifecycle and runtime ownership](progress/2026-10-01-asset-lifecycle.md).
+
+## Owned items
+
+Collection → Weapons and the draft equipment picker list **My Ekza library**
+first: the weapons the connected Ekza account created, saved in Studio or
+claimed for free on `app.omoba.io/market`. They come from the `assets` array of
+`GET /v1/account/library`, through the SDK's
+`AccountSession::assets(AssetKind::Weapon, weapon_store::selector())`. Only
+free, approved, unambiguous `omoba / desktop / handheld-glb-v1` renditions
+qualify, and each one is the same `StoreAsset` the public catalogue would give.
+
+The order is:
+
+1. My Ekza library, by name.
+2. Included: class default, empty hands and the packaged props.
+3. Ekza catalogue: the public `/v2/assets` list, minus every asset already in
+   the library.
+
+An asset is listed once, by asset id. A library revision newer than the cached
+catalogue replaces the catalogue's entry instead of adding a second one.
+Signed out, the library group is empty and the catalogue group looks the same
+as before this change. Each Ekza entry shows its author and licence as
+published: Collection prints them under every tile, the draft under the chosen
+item.
+
+- **Refresh.** While Collection or the draft is open, the account library is
+  re-read about every 15 s (`poll_account`), so a claim made on the web appears
+  without a restart. The screen is rebuilt only when the list changes.
+  - An outage keeps the last list.
+  - Revocation or sign-out empties it.
+  - A library weapon that the cached catalogue does not list yet is still shown
+    and installable. It also triggers a catalogue refresh (at most every 30 s).
+- **Download.** Choosing an owned weapon that is not installed starts the usual
+  verified download (approved sha256, size cap, handheld validator). The class
+  default is shown until the download is done.
+- **Empty or disconnected.** The group shows the Ekza account button and status
+  line (with the approval code while pairing). It also shows a hint: "Get free
+  items at app.omoba.io/market" when disconnected, "No weapons in your Ekza
+  library yet" when connected with an empty library. The full draft layout
+  relies on the avatar library's Connect Ekza button; the compact Weapons tab
+  has its own.
+- **Not an entitlement.** The library only decides what is listed. The server
+  still admits a free weapon from its own registry read, whoever owns it. Paid
+  items will need a server-verified entitlement from the same Ekza ledger (the
+  Ekza umbrella `adr/0001-web2-first-asset-lifecycle.md`).
+  The game links with the read-only `library` scope. Claiming happens on the
+  web under `library-claim`, and both places show `account.username`.
+
+The code is in `passport/src/weapon_store.rs` (`set_library`, the merge in
+`State::entries`), `client/src/ekza_account.rs` (published on every library
+read) and the shared `handheld_choices` in `client/src/frontend/collection.rs`,
+which Collection and `draft.rs` both use. It needs an `ekza-bevy-sdk` revision
+with `AccountSession::assets` (the library-assets entry in the SDK changelog).
 
 ## Attachment
 
