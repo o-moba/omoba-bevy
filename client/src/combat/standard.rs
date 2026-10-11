@@ -38,8 +38,10 @@ pub(crate) fn bounded_aim(origin: Vec2, aim: Vec2, targeting: TargetingMode, ran
 /// `origin + direction * range` (`common::skills::cast`), so the distance of the aim is
 /// dropped there. Sent as the far point of the aimed ray, the server's line from its slightly
 /// older origin meets the preview at the far end instead of crossing it at the cursor and
-/// diverging past it. Every other effect, a technique's dash or blink included, reads the
-/// distance of its aim and keeps it; an aim on the caster has no direction and is unchanged.
+/// diverging past it. Every other effect keeps its aim. Point effects and a technique's dash
+/// or blink read the distance; a direction-targeted technique lane or bolt also ends at
+/// `origin + direction * range` (`common::skills::advanced`) but is outside this change. An
+/// aim on the caster has no direction and is unchanged.
 pub(crate) fn sent_aim(origin: Vec2, aim: Vec2, effect: &SkillEffect, range: f32) -> Vec2 {
     let direction_only = matches!(
         effect,
@@ -1884,9 +1886,9 @@ mod tests {
         );
     }
 
-    /// A skill whose server effect keeps only the direction is sent the far point of its
-    /// aimed ray; a point, a toggle and a technique (a dash or a blink reads its distance)
-    /// keep the aim, and an aim on the caster has no direction to extend.
+    /// A beam, projectile, returning shield or rocket is sent the far point of its aimed
+    /// ray; every other skill keeps the aim (techniques, direction-targeted lanes included,
+    /// are outside this change), and an aim on the caster has no direction to extend.
     #[test]
     fn direction_skills_send_the_far_point_and_the_rest_keep_their_aim() {
         let origin = Vec2::new(2.0, -1.0);
