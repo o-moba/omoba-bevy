@@ -11,7 +11,7 @@ pub(super) struct SkillEffectGizmos;
 #[derive(Resource, Default)]
 pub(crate) struct SkillAimVector(pub Option<(Vec2, Vec2, f32)>);
 
-use shared::loadout::{EffectVisualKind, LoadoutState, SkillEffectState, WeaponMode};
+use shared::loadout::{EffectVisualKind, LoadoutState, SkillEffect, SkillEffectState, WeaponMode};
 use shared::{HeroClass, TargetingMode};
 
 use super::aim_preview;
@@ -29,6 +29,27 @@ pub(crate) fn bounded_aim(origin: Vec2, aim: Vec2, targeting: TargetingMode, ran
     match targeting {
         TargetingMode::Point => origin + (aim - origin).clamp_length_max(range),
         TargetingMode::SelfTarget => origin,
+        _ => aim,
+    }
+}
+
+/// The aim sent for a skill whose server effect keeps only the aimed direction. A beam, a
+/// projectile, a returning shield and a rocket all run from the caster's server position to
+/// `origin + direction * range` (`common::skills::cast`), so the distance of the aim is
+/// dropped there. Sent as the far point of the aimed ray, the server's line from its slightly
+/// older origin meets the preview at the far end instead of crossing it at the cursor and
+/// diverging past it. Every other effect, a technique's dash or blink included, reads the
+/// distance of its aim and keeps it; an aim on the caster has no direction and is unchanged.
+pub(crate) fn sent_aim(origin: Vec2, aim: Vec2, effect: &SkillEffect, range: f32) -> Vec2 {
+    let direction_only = matches!(
+        effect,
+        SkillEffect::Beam { .. }
+            | SkillEffect::LinearProjectile { .. }
+            | SkillEffect::ReturningShield { .. }
+            | SkillEffect::ImpactRocket { .. }
+    );
+    match (aim - origin).try_normalize() {
+        Some(direction) if direction_only && range > 0.0 => origin + direction * range,
         _ => aim,
     }
 }
@@ -1861,6 +1882,142 @@ mod tests {
             bounded_aim(Vec2::ONE, Vec2::ZERO, TargetingMode::SelfTarget, 0.0),
             Vec2::ONE
         );
+    }
+
+    /// A skill whose server effect keeps only the direction is sent the far point of its
+    /// aimed ray; a point, a toggle and a technique (a dash or a blink reads its distance)
+    /// keep the aim, and an aim on the caster has no direction to extend.
+    #[test]
+    fn direction_skills_send_the_far_point_and_the_rest_keep_their_aim() {
+        let origin = Vec2::new(2.0, -1.0);
+        let aim = origin + Vec2::new(3.0, 4.0);
+        let far = [
+            SkillId::DawnRay,
+            SkillId::DawnBind,
+            SkillId::DawnBarrier,
+            SkillId::WildZap,
+            SkillId::WildRocket,
+        ];
+        for id in SkillId::ALL {
+            let def = shared::loadout::skill(id);
+            let range = def.ability.cast_range;
+            let sent = sent_aim(origin, aim, &def.effect, range);
+            if far.contains(&id) {
+                assert_eq!(def.ability.targeting, TargetingMode::Direction, "{id:?}");
+                let expected = origin + Vec2::new(0.6, 0.8) * range;
+                assert!(sent.distance(expected) < 1e-3, "{id:?}: {sent}");
+            } else {
+                assert_eq!(sent, aim, "{id:?}");
+            }
+        }
+        let ray = shared::loadout::skill(SkillId::DawnRay);
+        assert_eq!(sent_aim(origin, origin, &ray.effect, 45.0), origin);
+    }
+
+    /// AC11 on the practice authority. The client has stepped 0.3 units since its last
+    /// position reached the server and aims Horizon Ray 3 units ahead. The ray the
+    /// authority warns, drawn from its older origin through what the cast path sends, ends
+    /// where the client's preview ends; through the raw cursor it would miss that end by
+    /// more than a hero's whole hit corridor.
+    #[test]
+    fn the_authoritys_ray_meets_the_preview_at_its_far_end() {
+        use super::super::cast::{PendingCastRequest, resolve_pending_cast_system};
+        use crate::combat::{CombatStats, LocalCastCooldown, PendingCast};
+        use crate::net::{NetworkCommand, NetworkPlayerId, PlayerProgression};
+        use common::offline::{EPOCH, LOCAL_ADDR, PracticeSession};
+        use shared::wire::{CharacterChoice, ClientPacket, ServerPacket};
+        const R: usize = 3;
+        let class = HeroClass::Dawnweaver;
+        let server_origin = Vec2::ZERO;
+        let client_origin = Vec2::new(0.3, 0.0);
+        let cursor = client_origin + Vec2::new(3.0, 3.0);
+
+        let mut app = App::new();
+        app.init_resource::<crate::team::TeamSelection>()
+            .init_resource::<PendingCast>()
+            .init_resource::<LocalCastCooldown>()
+            .init_resource::<super::super::ActionFeedback>()
+            .init_resource::<crate::input_context::GameplayInputContext>()
+            .add_message::<NetworkCommand>()
+            .add_systems(Update, resolve_pending_cast_system);
+        app.world_mut().spawn((
+            Player,
+            Transform::from_xyz(client_origin.x, 0.0, client_origin.y),
+            CombatStats::default(),
+            PlayerProgression {
+                level: 10,
+                ..default()
+            },
+            NetworkPlayerId(1),
+            crate::team::Team::Green,
+            NetworkHeroClass(class),
+            PlayerLoadout(Some(LoadoutState {
+                recipe: shared::loadout::preset_for_class(class).map(|p| p.recipe()),
+                ..default()
+            })),
+        ));
+        {
+            let mut pending = app.world_mut().resource_mut::<PendingCast>();
+            pending.request = Some(PendingCastRequest {
+                slot: R,
+                target_entity: None,
+                target: None,
+                approach_announced: false,
+            });
+            pending.aim = Some(cursor);
+        }
+        app.update();
+        let sent: Vec<_> = app
+            .world_mut()
+            .resource_mut::<Messages<NetworkCommand>>()
+            .drain()
+            .collect();
+        let [NetworkCommand::CastSkill { slot: 3, aim: sent }] = sent.as_slice() else {
+            panic!("one cast of Horizon Ray: {sent:?}");
+        };
+
+        let range = shared::loadout::skill(SkillId::DawnRay).ability.cast_range;
+        let preview_end = client_origin + (cursor - client_origin).normalize() * range;
+        let warned_end = |aim: Vec2| {
+            let mut session = PracticeSession::new(std::time::Instant::now());
+            session.command(ClientPacket::Join {
+                handheld: Default::default(),
+                prematch: false,
+                team: shared::map::Team::Green,
+                character: CharacterChoice::Ipfs,
+                hero_class: class,
+                avatar: None,
+                sprite_character: None,
+                session_id: None,
+                passport_ticket: None,
+            });
+            {
+                let hero = &mut session.world.players.get_mut(&LOCAL_ADDR).unwrap().hero;
+                (hero.x, hero.z) = (server_origin.x, server_origin.y);
+                hero.mana = hero.max_mana;
+            }
+            session.command(ClientPacket::CastSkill {
+                slot: R as u8,
+                aim: aim.to_array(),
+                server_epoch: EPOCH,
+                match_id: session.match_id,
+                request_id: 1,
+            });
+            let ServerPacket::Snapshot { skill_effects, .. } = session.snapshot() else {
+                panic!("practice publishes a snapshot");
+            };
+            let warning = skill_effects
+                .iter()
+                .find(|effect| effect.kind == EffectVisualKind::BeamWarning)
+                .expect("the authority warns the ray");
+            assert_eq!(Vec2::from_array(warning.position), server_origin);
+            Vec2::from_array(warning.end)
+        };
+        let corridor = 0.8 + shared::PLAYER_TARGET_RADIUS;
+        let agreed = warned_end(*sent).distance(preview_end);
+        assert!(agreed <= client_origin.distance(server_origin), "{agreed}");
+        let raw = warned_end(cursor).distance(preview_end);
+        assert!(raw > corridor, "{raw}");
     }
 
     /// The lantern `id` of the allied hero `owner`, planted at `at`.
