@@ -110,7 +110,7 @@
           "state": "repeater"
         }
       ],
-      "brief": "Wildspark class-default repeater with engine-controlled rotor animation. Contribute it with the launcher as one Wildspark set GLB (Studio requirement wildspark.handheld.set): WildsparkSetRepeater and WildsparkSetLauncher nodes, launcher at scale 0 in the file. The game shows the variant for the current weapon mode and drives WildsparkRotor and WildsparkSlide nodes from their rest pose. Custom moving-part animation requires a future profile. Any other explicit item stays selected in both modes; an item that is not installed yet shows the class-default pair.",
+      "brief": "Wildspark class-default repeater with engine-controlled rotor animation. The repeater and the launcher are contributed together as one Wildspark set GLB under the Studio requirement wildspark.handheld.set: WildsparkSetRepeater and WildsparkSetLauncher nodes, launcher at scale 0 in the file. The game shows the variant for the current weapon mode and moves only its mechanism from the rest pose: WildsparkRotor in repeater mode. Authoring guide: docs/wildspark-skin-sets.md in github.com/o-moba/omoba-bevy. Custom moving-part animation requires a future profile. Any other explicit item stays selected in both modes; an item that is not installed yet shows the class-default pair.",
       "profile": {
         "id": "handheld-glb-v1",
         "version": 1
@@ -139,7 +139,7 @@
           "state": "rockets"
         }
       ],
-      "brief": "The second gun in the class-default Q switch. Contribute it as the WildsparkSetLauncher variant of a one-GLB Wildspark set (Studio requirement wildspark.handheld.set); the game shows it in rockets mode. A standalone static handheld is still accepted but stays selected in both modes. Two independently approved guns are future work; this is not a third Q weapon.",
+      "brief": "The second gun in the class-default Q switch, shown in rockets mode and while W or R draws it. The launcher and the repeater are contributed together as one Wildspark set GLB under the Studio requirement wildspark.handheld.set; this gun is its WildsparkSetLauncher variant, and its WildsparkSlide recoils from the rest pose. Authoring guide: docs/wildspark-skin-sets.md in github.com/o-moba/omoba-bevy. A standalone static handheld is still accepted but stays selected in both modes. This is not a third Q weapon.",
       "profile": {
         "id": "handheld-glb-v1",
         "version": 1

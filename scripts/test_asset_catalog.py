@@ -175,11 +175,18 @@ class AssetCatalogTests(unittest.TestCase):
         self.assertNotIn("url", trap["baseline"])
         self.assertFalse(any("avatar" in str(row["baseline"]) for row in rows.values()))
         self.assertTrue(any(row["role"] == "animation_reference" for row in rows.values()))
-        # Both Q guns are contributed as one set GLB; each brief names that contract.
+        # Both Q guns are contributed together as one set GLB; each brief names
+        # that contract and its authoring guide, and none calls sets future work.
         for rid in ("wildspark.handheld.repeater", "wildspark.handheld.launcher"):
             with self.subTest(rid=rid):
-                for term in ("wildspark.handheld.set", "WildsparkSetLauncher"):
-                    self.assertIn(term, rows[rid]["brief"])
+                brief = rows[rid]["brief"]
+                for term in ("contributed together as one Wildspark set GLB",
+                             "wildspark.handheld.set", "WildsparkSetLauncher",
+                             "docs/wildspark-skin-sets.md"):
+                    self.assertIn(term, brief)
+                for stale in ("two-gun", "Two independently", "Mode-specific"):
+                    self.assertNotIn(stale, brief)
+        self.assertTrue((ROOT / "docs/wildspark-skin-sets.md").is_file())
 
     def test_rocket_precedence_cannot_silently_drift(self):
         root = self.fixture()
