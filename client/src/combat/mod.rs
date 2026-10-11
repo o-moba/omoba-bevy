@@ -210,6 +210,9 @@ fn configure_target_presentation(app: &mut App) {
 }
 
 #[cfg(test)]
+mod desktop_aim_tests;
+
+#[cfg(test)]
 mod target_presentation_tests;
 
 #[cfg(test)]
