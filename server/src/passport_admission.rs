@@ -192,10 +192,7 @@ impl PassportAdmissions {
             ))
             .expect("shipped props");
             if !shipped.items.iter().any(|item| item.id == *id) {
-                if id.len() != 37
-                    || !id.starts_with("ekza-")
-                    || !id[5..].bytes().all(|b| b.is_ascii_hexdigit())
-                {
+                if !is_ekza_weapon_slug(id) {
                     return Admission::Denied;
                 }
                 let cache = self.weapons.lock().unwrap();
@@ -399,6 +396,64 @@ impl PassportAdmissions {
             completed.push(response);
         }
         completed
+    }
+}
+
+/// The store slug shape of a hosted handheld (`ekza-` and 32 hex digits).
+fn is_ekza_weapon_slug(id: &str) -> bool {
+    id.len() == 37 && id.starts_with("ekza-") && id[5..].bytes().all(|b| b.is_ascii_hexdigit())
+}
+
+/// The operator line for a loadout decision that names Ekza items: a hosted
+/// handheld and/or a store avatar (Studio or passport). Shipped props, roster
+/// avatars and malformed ids are not echoed, and tickets and session ids are
+/// never part of it. `None` when the loadout names no Ekza item.
+pub(crate) fn ekza_decision_line(
+    player: Option<u64>,
+    packet: &ClientPacket,
+    allowed: bool,
+) -> Option<String> {
+    use shared::prematch::{PrematchAction, PrematchRequest};
+    let (handheld, avatar) = match packet {
+        ClientPacket::Join {
+            handheld, avatar, ..
+        }
+        | ClientPacket::Prematch {
+            request:
+                PrematchRequest {
+                    action:
+                        PrematchAction::Select {
+                            handheld, avatar, ..
+                        },
+                    ..
+                },
+        } => (handheld, avatar),
+        _ => return None,
+    };
+    let handheld = match handheld {
+        shared::handheld::HandheldSelection::Item(id) if is_ekza_weapon_slug(id) => Some(id),
+        _ => None,
+    };
+    let avatar = avatar
+        .as_deref()
+        .map(str::trim)
+        .filter(|slug| ekza_bevy_sdk::passport::is_protected_slug(slug));
+    if handheld.is_none() && avatar.is_none() {
+        return None;
+    }
+    Some(format!(
+        "Ekza loadout {} for player {}: handheld {}, avatar {}",
+        if allowed { "admitted" } else { "denied" },
+        player.map_or_else(|| "?".to_owned(), |id| id.to_string()),
+        handheld.map_or("-", String::as_str),
+        avatar.unwrap_or("-"),
+    ))
+}
+
+/// Print [`ekza_decision_line`], if any.
+pub(crate) fn log_ekza_decision(player: Option<u64>, packet: &ClientPacket, allowed: bool) {
+    if let Some(line) = ekza_decision_line(player, packet, allowed) {
+        println!("{line}");
     }
 }
 
@@ -1083,6 +1138,70 @@ mod weapon_tests {
             gate.begin(addr, &join(&format!("ekza-{}", "c".repeat(32)), None)),
             Admission::Denied
         ));
+    }
+    #[test]
+    fn ekza_decisions_log_slugs_and_player_but_never_secrets_or_junk() {
+        let avatar = format!("ekza-{}", "a".repeat(64));
+        let mut packet = join(&item().slug, Some(&format!(" {avatar} ")));
+        if let ClientPacket::Join {
+            passport_ticket, ..
+        } = &mut packet
+        {
+            *passport_ticket = Some("ticket-secret-0123456789".into());
+        }
+        let line = ekza_decision_line(Some(7), &packet, true).unwrap();
+        assert_eq!(
+            line,
+            format!(
+                "Ekza loadout admitted for player 7: handheld {}, avatar {avatar}",
+                item().slug
+            )
+        );
+        assert!(!line.contains("ticket-secret") && !line.contains("weapon-test"));
+        assert_eq!(
+            ekza_decision_line(None, &join(&item().slug, None), false).unwrap(),
+            format!(
+                "Ekza loadout denied for player ?: handheld {}, avatar -",
+                item().slug
+            )
+        );
+        // A draft selection is reported the same way.
+        let select = ClientPacket::Prematch {
+            request: shared::prematch::PrematchRequest {
+                server_epoch: 1,
+                match_id: 1,
+                generation: 1,
+                request_id: 1,
+                action: shared::prematch::PrematchAction::Select {
+                    handheld: HandheldSelection::ClassDefault,
+                    character: CharacterChoice::default(),
+                    hero_class: HeroClass::Mage,
+                    avatar: Some(avatar.clone()),
+                    sprite_character: None,
+                    role: shared::prematch::Role::Support,
+                    passport_ticket: None,
+                },
+            },
+        };
+        assert_eq!(
+            ekza_decision_line(Some(3), &select, false).unwrap(),
+            format!("Ekza loadout denied for player 3: handheld -, avatar {avatar}")
+        );
+        // Shipped props, roster avatars and malformed ids are not Ekza items.
+        for (weapon, avatar) in [
+            ("dagger", Some("agnes")),
+            ("ekza-not-hex\nforged line", Some("ekza-NOT-A-SLUG\nforged")),
+            ("ekza-0123", None),
+        ] {
+            assert_eq!(
+                ekza_decision_line(Some(7), &join(weapon, avatar), true),
+                None
+            );
+        }
+        assert_eq!(
+            ekza_decision_line(Some(7), &ClientPacket::Leave, true),
+            None
+        );
     }
     #[test]
     fn healthy_empty_revokes_future_weapon_use_and_outage_preserves_previous_catalogue() {

@@ -24,6 +24,14 @@ const _: () = assert!(CLIENT_DATAGRAM_RECEIVE_CAPACITY > IPV4_UDP_MAX_PAYLOAD_BY
 impl ServerRuntime {
     pub(crate) fn receive_packets(&mut self) {
         for completion in self.passport_admissions.completed() {
+            passport_admission::log_ekza_decision(
+                self.world
+                    .players
+                    .get(&completion.addr)
+                    .map(|player| player.hero.identity.id),
+                &completion.packet,
+                completion.allowed,
+            );
             if let ClientPacket::Prematch { request } = completion.packet {
                 let now = self.clock.now();
                 self.complete_prematch_admission(completion.addr, request, completion.allowed, now);
@@ -196,7 +204,18 @@ impl ServerRuntime {
                     return;
                 }
             }
-            match self.passport_admissions.begin(addr, &packet) {
+            let admission = self.passport_admissions.begin(addr, &packet);
+            if !matches!(admission, passport_admission::Admission::Pending) {
+                passport_admission::log_ekza_decision(
+                    self.world
+                        .players
+                        .get(&addr)
+                        .map(|player| player.hero.identity.id),
+                    &packet,
+                    matches!(admission, passport_admission::Admission::Free),
+                );
+            }
+            match admission {
                 passport_admission::Admission::Free => {}
                 passport_admission::Admission::Pending => return,
                 passport_admission::Admission::Denied => {
