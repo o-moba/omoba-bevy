@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 
-.PHONY: compatibility-manifest compatibility-check help server server-dev practice practice-server game game2d start start-release play play-bots bots stop restart verify-task-12 verify-gameplay iphone-check iphone iphone-box android-check android android-universal check fmt fmt-check lint check-no-qa test test-scripts test-postgres release-check release-local release-mac release-linux release-android release-ios release-testflight release-ci release-draft release-notes showcase demo-video trailer-clips
+.PHONY: compatibility-manifest compatibility-check help server server-dev practice practice-server game game2d start start-release play play-bots bots stop restart verify-task-12 verify-gameplay iphone-check iphone iphone-box android-check android android-universal check fmt fmt-check lint check-no-qa test test-scripts test-postgres release-check release-all release-publish release-local release-mac release-linux release-android release-ios release-testflight release-ci release-draft release-notes showcase demo-video trailer-clips
 
 # ---------------------------------------------------------------------------
 # Match modes (TASK-22)
@@ -195,6 +195,18 @@ RELEASE_FLAGS = $(if $(RELEASE_SERVER),--server $(RELEASE_SERVER),)
 
 release-check: ## Which release platforms this computer can build
 	python3 scripts/release.py check
+
+# Full playtest release on an Apple-silicon Mac: macOS, Windows (cargo-xwin),
+# Linux (Docker, offline fallback), universal Android APK and a signed iPhone
+# archive, all pointed at the live server, into dist/v<version>/ with checksums.
+# The iPhone archive opens in Xcode Organizer when command-line upload is refused.
+PROD_SERVER ?= 77.246.105.57:4000
+release-all: ## All five platforms on this Mac for PROD_SERVER into dist/v<version>/ (needs ~20 GB free)
+	OMOBA_ANDROID_UNIVERSAL=1 python3 scripts/release.py check
+	OMOBA_ANDROID_UNIVERSAL=1 python3 scripts/release.py build all --server $(PROD_SERVER)
+
+release-publish: ## Pin dist/v<version>/ packages to IPFS (needs PINATA_JWT) and verify the downloads
+	OMOBA_ANDROID_UNIVERSAL=1 python3 scripts/release.py publish
 
 release-local: ## Build every package this computer can (macOS, iPhone archive, Linux via Docker, Android if SDK)
 	python3 scripts/release.py build all $(RELEASE_FLAGS)

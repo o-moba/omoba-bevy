@@ -5,6 +5,12 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- `make release-all` builds macOS, Windows (cargo-xwin cross-build), Linux (Docker,
+  offline fallback), a universal Android APK and a signed iPhone archive on one Mac;
+  `make release-publish` pins the packages to IPFS and verifies the gateway copies.
+  An iPhone export refused on the command line now hands the kept archive to Xcode
+  Organizer instead of failing. Release tooling only; no game, protocol or CI change.
+
 ## [0.44.0] - 2026-10-10
 
 ### Community Beta 1 — first GitHub release
