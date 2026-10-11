@@ -948,7 +948,7 @@ const CRACK_LEAN: f32 = 0.24;
 
 /// Whether the wall has stopped a projectile: the block that costs its holder nothing is
 /// spent (`common/src/skills/advanced.rs:1877-1878`). The count is replicated in
-/// `consumed_segments` (`common/src/skills/mod.rs:1509-1520`), so a wall first seen with it
+/// `consumed_segments` (`effects` in `common/src/skills/mod.rs`), so a wall first seen with it
 /// is drawn cracked at once.
 pub(crate) fn cracked(effect: &SkillEffectState) -> bool {
     effect.kind == EffectVisualKind::ShieldWall && effect.consumed_segments > 0

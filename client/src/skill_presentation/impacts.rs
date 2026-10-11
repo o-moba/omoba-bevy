@@ -124,17 +124,20 @@ impl HitTier {
 }
 
 /// Receipts of one strike in one snapshot above which each of them draws fewer particles,
-/// and the fewest particles of its recipe a crowded receipt still draws.
+/// and the fewest particles of its recipe a crowded receipt still draws, an edge hit too.
 const CROWD: usize = 3;
 const CROWD_LEAST: usize = 4;
 
-/// Particles of its budget one receipt leaves to the others when `receipts` receipts of the
-/// same strike arrive in one snapshot: above `CROWD` of them each keeps its share of
-/// `CROWD` whole bursts, and never fewer than `CROWD_LEAST` particles. A beam through a
-/// wave then does not take the pool from the heroes it struck as well. The recipe is laid
-/// out with that many fewer, as for any reserve.
-pub(crate) fn crowd_reserve(receipts: usize) -> usize {
-    if receipts <= CROWD {
+/// Particles of its budget one receipt of `key` leaves to the others when `receipts`
+/// receipts of the same strike arrive in one snapshot. Only a strike that runs through its
+/// targets shares (`category::pierces`: a beam or a body that flies on); any other strike
+/// is drawn whole. Above `CROWD` receipts each keeps its share of `CROWD` whole bursts,
+/// and never fewer than `CROWD_LEAST` particles. A beam through a wave then does not take
+/// the pool from the heroes it struck as well. The recipe is laid out with that many
+/// fewer, as for any reserve.
+pub(crate) fn crowd_reserve(key: Option<CastKey>, receipts: usize) -> usize {
+    let runs_through = key.and_then(CastKey::skill).is_some_and(category::pierces);
+    if !runs_through || receipts <= CROWD {
         return 0;
     }
     let room = IMPACT_MAX - 1;
@@ -632,7 +635,8 @@ pub(crate) fn impact_particles(
 
 /// The burst of one accepted receipt, as its tier draws the recipe: a core hit leads with
 /// white and flashes wider, an edge hit is the same recipe with fewer particles and less
-/// reach. Both stay inside the budget and the bounds of a plain hit.
+/// reach, but never fewer than a crowded receipt keeps (`CROWD_LEAST`). Both stay inside
+/// the budget and the bounds of a plain hit.
 pub(crate) fn tiered_particles(
     recipe: &ImpactRecipe,
     palette: &Palette,
@@ -658,7 +662,7 @@ pub(crate) fn tiered_particles(
             (flash_share(kind) * CORE_FLASH).min(FLASH_BLOOM),
         ),
         HitTier::Edge => (
-            ((count as f32 * EDGE_COUNT).ceil() as usize).max(1),
+            ((count as f32 * EDGE_COUNT).ceil() as usize).max(CROWD_LEAST.min(count)),
             lead,
             companion,
             EDGE_REACH,
@@ -1947,6 +1951,55 @@ mod tests {
             }
         }
         assert_eq!(beams, 1);
+    }
+
+    /// Only a strike that runs through its targets leaves room to the others of a crowd,
+    /// whichever hero deals it; an area, a single-target strike or a basic attack is drawn
+    /// whole however many receipts it lands. A crowded edge hit of the ray still draws
+    /// `CROWD_LEAST` particles of its recipe and its flash.
+    #[test]
+    fn only_a_strike_that_runs_through_its_targets_shares_a_crowd() {
+        let registry = target();
+        let mut runs_through = Vec::new();
+        for (id, _) in registry.rows() {
+            let Some(skill) = SkillId::from_id(id) else {
+                continue;
+            };
+            let key = CastKey::Skill(SkillKey::Modular(skill));
+            let pierces = category::pierces(SkillKey::Modular(skill));
+            for receipts in 0..=CROWD {
+                assert_eq!(crowd_reserve(Some(key), receipts), 0, "{id}");
+            }
+            for receipts in CROWD + 1..64 {
+                let reserve = crowd_reserve(Some(key), receipts);
+                assert_eq!(reserve > 0, pierces, "{id} {receipts}");
+                assert!(reserve <= IMPACT_MAX - 1 - CROWD_LEAST, "{id}");
+            }
+            if pierces {
+                runs_through.push(skill);
+            }
+        }
+        assert!(runs_through.contains(&SkillId::DawnRay));
+        assert!(runs_through.len() > 1, "{runs_through:?}");
+        assert!(!runs_through.contains(&SkillId::DawnField));
+        for class in [HeroClass::Dawnweaver, HeroClass::Stormfist] {
+            assert_eq!(crowd_reserve(Some(CastKey::Basic(class)), 10), 0);
+        }
+        assert_eq!(crowd_reserve(None, 10), 0);
+
+        let ray = CastKey::Skill(SkillKey::Modular(SkillId::DawnRay));
+        let look = registry.look(ray).unwrap();
+        let recipe = look.impact.unwrap();
+        for receipts in CROWD + 1..64 {
+            let ctx = ImpactContext {
+                reserved: crowd_reserve(Some(ray), receipts),
+                ..receipt(false)
+            };
+            let core = tiered_particles(recipe, &look.palette, &ctx, HitTier::Core);
+            let edge = tiered_particles(recipe, &look.palette, &ctx, HitTier::Edge);
+            assert!(edge.len() > CROWD_LEAST, "{receipts}: {}", edge.len());
+            assert!(edge.len() <= core.len(), "{receipts}");
+        }
     }
 
     /// The ray's own hit leads with a colour that glows, and its row asks for no more reach

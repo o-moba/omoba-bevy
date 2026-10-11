@@ -262,7 +262,7 @@ fn strike(event: &CombatEvent) -> Option<(u64, u8, bool)> {
 /// Puts the receipts on heroes first, so that they are drawn first when the pool is
 /// short, and counts the receipts of each strike: a beam that runs through a wave lands
 /// many receipts at once, and each of them then leaves room for the others
-/// (`impacts::crowd_reserve`).
+/// (`impacts::crowd_reserve`, which shares only a strike that runs through its targets).
 fn strike_crowds(events: &mut [CombatEvent]) -> std::collections::HashMap<(u64, u8, bool), usize> {
     events.sort_by_key(|event| event.target.kind != CombatEntityKind::Player);
     let mut crowds = std::collections::HashMap::new();
@@ -530,6 +530,7 @@ fn collect_hits(
         // recipe of its row when it has one.
         let area = event.area_impact.filter(|area| area.valid());
         let crowd = crowd_reserve(
+            source.and_then(|source| source.key(&event)),
             strike(&event)
                 .and_then(|key| crowds.get(&key).copied())
                 .unwrap_or(1),
@@ -1036,7 +1037,8 @@ mod tests {
 
     /// A ray through a wave lands many receipts in one snapshot. The receipts on heroes are
     /// drawn first, and every receipt of so large a strike leaves room for the others: the
-    /// strike draws less than half of what its bursts would whole. A small strike is drawn
+    /// strike draws less than half of what its bursts would whole, and an edge hit in it
+    /// still keeps four particles of its recipe and its flash. A small strike is drawn
     /// whole.
     #[test]
     fn a_crowded_strike_shares_the_pool_and_draws_heroes_first() {
@@ -1087,7 +1089,7 @@ mod tests {
                         event,
                         FLOOR,
                         &[],
-                        crowd_reserve(k),
+                        crowd_reserve(source.key(event), k),
                     )
                     .unwrap()
                     .len()
@@ -1098,11 +1100,28 @@ mod tests {
         assert!(2 * drawn(true) < drawn(false), "{}", drawn(true));
         // Up to three receipts of a strike are drawn whole; a crowded one keeps a mark and
         // its flash.
-        assert_eq!((crowd_reserve(1), crowd_reserve(3)), (0, 0));
-        assert!(crowd_reserve(4) > 0);
-        assert!((4..64).all(|k| crowd_reserve(k) <= IMPACT_MAX - 1 - 4));
+        let key = source.key(&events[0]);
+        assert_eq!((crowd_reserve(key, 1), crowd_reserve(key, 3)), (0, 0));
+        assert!(crowd_reserve(key, 4) > 0);
+        assert!((4..64).all(|k| crowd_reserve(key, k) <= IMPACT_MAX - 1 - 4));
         let lone = hit_burst(Some(&registry), Some(&source), &events[0], FLOOR, &[], 0).unwrap();
         assert_eq!(lone.len(), IMPACT_MAX);
+        // Most of a wave is struck at the edge of the ray: such a receipt in a crowd still
+        // draws four particles of its recipe and its flash, and no more than a core hit.
+        let edge = CombatEvent {
+            core_hit: false,
+            ..events[3].clone()
+        };
+        for k in 4..64 {
+            let burst = |event: &CombatEvent| {
+                let reserved = crowd_reserve(source.key(event), k);
+                hit_burst(Some(&registry), Some(&source), event, FLOOR, &[], reserved)
+                    .unwrap()
+                    .len()
+            };
+            assert!(burst(&edge) > 4, "{k}: {}", burst(&edge));
+            assert!(burst(&edge) <= burst(&events[3]), "{k}");
+        }
         // Receipts of no hero's action belong to no strike.
         let tower = CombatEvent {
             source: shared::combat::CombatEntity {
@@ -1112,6 +1131,45 @@ mod tests {
             ..hit(12, 30.0)
         };
         assert_eq!(strike(&tower), None);
+    }
+
+    /// Only a strike that runs through its targets shares the pool. An area strike of
+    /// another hero landing on a whole wave in one snapshot still draws every receipt
+    /// whole, as does a basic attack.
+    #[test]
+    fn a_crowded_area_strike_is_drawn_whole() {
+        use shared::loadout::SkillId;
+        let registry = SkillPresentation::target();
+        for (class, skill) in [
+            (shared::HeroClass::Chainkeeper, SkillId::ChainSweep),
+            (shared::HeroClass::Stormfist, SkillId::ThunderPulse),
+        ] {
+            let source = seen_hero(class);
+            let slot = slot_of(class, skill);
+            let mut events: Vec<_> = (1..=8)
+                .map(|id| CombatEvent {
+                    target: shared::combat::CombatEntity {
+                        kind: CombatEntityKind::Minion,
+                        id: 100 + id,
+                    },
+                    ..dealt(id, 30.0, 7, slot)
+                })
+                .collect();
+            let crowds = strike_crowds(&mut events);
+            assert_eq!(crowds[&(7, slot, false)], 8);
+            for event in &events {
+                let crowd = crowd_reserve(source.key(event), crowds[&strike(event).unwrap()]);
+                assert_eq!(crowd, 0, "{skill:?}");
+                let whole = hit_burst(Some(&registry), Some(&source), event, FLOOR, &[], 0);
+                assert!(whole.is_some(), "{skill:?}");
+                assert_eq!(
+                    hit_burst(Some(&registry), Some(&source), event, FLOOR, &[], crowd),
+                    whole
+                );
+            }
+            let basic = dealt(9, 30.0, 7, shared::BASIC_ATTACK_ACTION_SLOT);
+            assert_eq!(crowd_reserve(source.key(&basic), 8), 0);
+        }
     }
 
     /// A receipt on the neutral monster 50 from the hero 7.

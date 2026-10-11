@@ -207,12 +207,16 @@ authored a second time in the presentation data.
   telegraph progress instead of a literal; the grey fade still marks its end.
 - **Hits.** A receipt flagged `core_hit` draws the row's recipe led by white
   with a 25% wider flash; one without it (an edge hit) draws the same recipe
-  with half the particles at three quarters of the reach. The ray's recipe
-  leads with its HDR primary at scale 1.0, the full single-target reach, so
-  nothing of it is cut back without a word. When one strike lands more than
-  three receipts in a snapshot (a ray through a wave), receipts on heroes are
-  drawn first and each receipt keeps only its share of three whole bursts, at
-  least four particles of its recipe and its flash.
+  with half the particles (never fewer than four, or all of a smaller recipe)
+  at three quarters of the reach. The ray's recipe leads with its HDR primary
+  at scale 1.0, the full single-target reach, so nothing of it is cut back
+  without a word. Receipts on heroes are drawn before the rest of a snapshot.
+  When a strike that runs through its targets (`category::pierces`: a beam or
+  a body that flies on, of any hero) lands more than three receipts in a
+  snapshot, as a ray through a wave does, each receipt keeps only its share of
+  three whole bursts, at least four particles of its recipe and its flash,
+  core or edge. Area, single-target and basic strikes are drawn whole however
+  many they land.
 - **Radiance.** A receipt flagged `radiance_burst` is the detonated mark, not a
   second hit: it draws a gold pop in the colour of the overhead mark (a star,
   a ring, four rising motes and a flash) instead of the recipe of the hit that
