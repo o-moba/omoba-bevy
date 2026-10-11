@@ -838,14 +838,29 @@ fn render_draft(
                                 Name::new("DraftWeaponStatus"),
                             ));
                         }
-                        // Author and licence of the chosen Ekza item.
-                        if let Some(credit) = choice
-                            .and_then(|c| choices.iter().find(|item| item.value == c.handheld))
-                            .and_then(|item| item.credit.as_deref())
-                        {
+                        // Author, licence and attribution of the chosen Ekza
+                        // item. The attribution keeps at most two lines so the
+                        // weapon rows stay in view; Collection shows it whole.
+                        let chosen = choice
+                            .and_then(|c| choices.iter().find(|item| item.value == c.handheld));
+                        if let Some(credit) = chosen.and_then(|item| item.credit.as_deref()) {
                             picker.spawn((
                                 widgets::label(credit, 11.0, theme::MUTED),
                                 Name::new("DraftWeaponCredit"),
+                            ));
+                        }
+                        if let Some(attribution) =
+                            chosen.and_then(|item| item.attribution.as_deref())
+                        {
+                            picker.spawn((
+                                widgets::label(attribution, 10.5, theme::MUTED),
+                                Node {
+                                    max_height: Val::Px(28.0),
+                                    overflow: Overflow::clip(),
+                                    flex_shrink: 0.0,
+                                    ..default()
+                                },
+                                Name::new("DraftWeaponAttribution"),
                             ));
                         }
                         let connected = crate::passport::account_connected();

@@ -7,8 +7,13 @@
 //! [`set_library`]). The library only decides what is listed first as
 //! "My Ekza library"; both install through the same verified store, and the
 //! server still admits a free weapon from its own registry read.
+//!
+//! Entries also carry the registry's attribution line, read from the same two
+//! documents (see [`crate::attribution`]); the catalogue's copy is saved next
+//! to the store's own offline catalogue.
 use crate::{
     account::AccountSession,
+    attribution::{self, Attributions},
     store::{CatalogueStatus, ModelState},
     weapons::{Grip, Weapon, WildsparkSetHint},
 };
@@ -50,16 +55,19 @@ pub struct Entry {
     pub name: String,
     pub author: Option<String>,
     pub license: Option<String>,
+    /// The registry's `license.attribution` line, when the creator gave one.
+    pub attribution: Option<String>,
     /// Listed in the connected player's Ekza library.
     pub owned: bool,
 }
 impl Entry {
-    fn of(item: &StoreAsset, owned: bool) -> Self {
+    fn of(item: &StoreAsset, owned: bool, attribution: Option<String>) -> Self {
         Self {
             id: item.slug.clone(),
             name: item.name.clone(),
             author: item.author.clone(),
             license: item.license.clone(),
+            attribution,
             owned,
         }
     }
@@ -79,12 +87,34 @@ struct State {
     /// The account library's weapons, in library order; empty when signed out.
     library: Vec<StoreAsset>,
     installs: HashMap<String, Install>,
+    /// Attribution lines by asset id: the public catalogue's (saved for
+    /// offline use) and the account library's, which wins when both list one.
+    attributions: Attributions,
+    library_attributions: Attributions,
     refreshing: bool,
     attempted: Option<Instant>,
     failed: bool,
     revision: u64,
 }
 impl State {
+    fn attribution(&self, item: &StoreAsset) -> Option<String> {
+        self.library_attributions
+            .get(&item.asset_id)
+            .or_else(|| self.attributions.get(&item.asset_id))
+            .cloned()
+    }
+    /// Replace one attribution table; only a change bumps the revision.
+    fn set_attributions(&mut self, library: bool, attributions: Attributions) {
+        let table = if library {
+            &mut self.library_attributions
+        } else {
+            &mut self.attributions
+        };
+        if *table != attributions {
+            *table = attributions;
+            self.revision = self.revision.wrapping_add(1);
+        }
+    }
     /// A catalogue item, else a library item the catalogue has not listed yet.
     fn item(&self, id: &str) -> Option<&StoreAsset> {
         self.items
@@ -103,14 +133,14 @@ impl State {
             .library
             .iter()
             .filter(|item| assets.insert(item.asset_id.as_str()))
-            .map(|item| Entry::of(item, true))
+            .map(|item| Entry::of(item, true, self.attribution(item)))
             .collect();
         sort(&mut owned);
         let mut public: Vec<_> = self
             .items
             .values()
             .filter(|item| !assets.contains(item.asset_id.as_str()))
-            .map(|item| Entry::of(item, false))
+            .map(|item| Entry::of(item, false, self.attribution(item)))
             .collect();
         sort(&mut public);
         owned.append(&mut public);
@@ -136,7 +166,13 @@ impl State {
 }
 struct Runtime {
     store: AssetStore,
+    registry: String,
     state: Mutex<State>,
+}
+impl Runtime {
+    fn attributions_path(&self) -> PathBuf {
+        self.store.root().join("weapon-attributions.json")
+    }
 }
 static RUNTIME: OnceLock<Option<Runtime>> = OnceLock::new();
 fn runtime() -> Option<&'static Runtime> {
@@ -145,24 +181,37 @@ fn runtime() -> Option<&'static Runtime> {
 pub fn initialize(root: PathBuf) {
     let Some(runtime) = RUNTIME
         .get_or_init(|| {
-            AssetStore::new(
-                root,
-                &crate::community::registry_url(),
-                AssetKind::Weapon,
-                selector(),
-            )
-            .ok()
-            .map(|store| Runtime {
-                store,
-                state: Mutex::default(),
-            })
+            let registry = crate::community::registry_url();
+            AssetStore::new(root, &registry, AssetKind::Weapon, selector())
+                .ok()
+                .map(|store| Runtime {
+                    store,
+                    registry,
+                    state: Mutex::default(),
+                })
         })
         .as_ref()
     else {
         return;
     };
+    let saved = attribution::load(&runtime.attributions_path());
+    runtime.state.lock().unwrap().set_attributions(false, saved);
     adopt(runtime, runtime.store.cached());
     refresh(false);
+}
+/// Attribution lines of the approved weapons. The SDK's `StoreAsset` omits
+/// them, so this reads the same `/v2/assets` document once more after the
+/// store's own verified refresh succeeds.
+fn fetch_attributions(registry: &str) -> Result<Attributions, String> {
+    let assets = RegistryClient::new(registry)
+        .map_err(|e| e.to_string())?
+        .assets_v2(
+            AssetKind::Weapon,
+            Some("omoba"),
+            Some(("desktop", crate::weapons::PROFILE)),
+        )
+        .map_err(|e| e.to_string())?;
+    Ok(attribution::of_assets(&assets))
 }
 fn adopt(runtime: &Runtime, entries: Vec<StoreAsset>) {
     let mut state = runtime.state.lock().unwrap();
@@ -195,6 +244,15 @@ pub fn refresh(user: bool) {
         let result = runtime.store.refresh();
         let failed = result.is_err();
         if let Ok(items) = result {
+            // Best effort: a failed read keeps the lines already known.
+            if let Ok(attributions) = fetch_attributions(&runtime.registry) {
+                let _ = attribution::save(&runtime.attributions_path(), &attributions);
+                runtime
+                    .state
+                    .lock()
+                    .unwrap()
+                    .set_attributions(false, attributions);
+            }
             adopt(runtime, items);
         }
         let mut state = runtime.state.lock().unwrap();
@@ -204,12 +262,17 @@ pub fn refresh(user: bool) {
         state.revision = state.revision.wrapping_add(1);
     });
 }
-/// The connected account's library weapons, or none after sign-out. Called on
+/// The connected account's library weapons and the attribution lines of its
+/// assets ([`attribution::of_library`]), or none after sign-out. Called on
 /// every library read (about every 15 s); only a change bumps the revision.
 /// A newly listed weapon also asks the public catalogue to catch up.
-pub fn set_library(items: Vec<StoreAsset>) {
+pub fn set_library(items: Vec<StoreAsset>, attributions: Attributions) {
     let Some(runtime) = runtime() else { return };
-    let changed = runtime.state.lock().unwrap().set_library(items);
+    let changed = {
+        let mut state = runtime.state.lock().unwrap();
+        state.set_attributions(true, attributions);
+        state.set_library(items)
+    };
     if changed == Some(true) {
         refresh(false);
     }
@@ -430,6 +493,108 @@ mod tests {
         let other = weapon(SET, "Wildspark set (android)", 'f');
         state.set_library(vec![claimed.clone(), other]);
         assert_eq!(state.entries().iter().filter(|e| e.owned).count(), 1);
+    }
+
+    #[test]
+    fn entries_carry_the_registry_attribution_and_the_library_line_wins() {
+        let (hammer, set) = (
+            weapon(HAMMER, "Forge Hammer", 'b'),
+            weapon(SET, "Wildspark set", 'c'),
+        );
+        let mut state = catalogue(&[hammer.clone(), set.clone()]);
+        assert!(state.entries().iter().all(|e| e.attribution.is_none()));
+        let line = |id: &StoreAsset, text: &str| (id.asset_id.clone(), text.to_owned());
+        state.set_attributions(
+            false,
+            Attributions::from([
+                line(&hammer, "Hammer by Bob, CC-BY-4.0"),
+                line(&set, "Set (catalogue copy)"),
+            ]),
+        );
+        let revision = state.revision;
+        state.set_attributions(
+            false,
+            Attributions::from([
+                line(&hammer, "Hammer by Bob, CC-BY-4.0"),
+                line(&set, "Set (catalogue copy)"),
+            ]),
+        );
+        assert_eq!(
+            state.revision, revision,
+            "an unchanged read keeps the revision"
+        );
+        state.set_library(vec![set.clone()]);
+        state.set_attributions(true, Attributions::from([line(&set, "Set by Alice")]));
+        let entries = state.entries();
+        let attribution = |name: &str| {
+            entries
+                .iter()
+                .find(|e| e.name == name)
+                .and_then(|e| e.attribution.as_deref())
+        };
+        assert_eq!(attribution("Wildspark set"), Some("Set by Alice"));
+        assert_eq!(
+            attribution("Forge Hammer"),
+            Some("Hammer by Bob, CC-BY-4.0")
+        );
+        // Sign-out drops the library's lines, the catalogue copy remains.
+        state.set_library(Vec::new());
+        state.set_attributions(true, Attributions::new());
+        assert_eq!(
+            state
+                .entries()
+                .iter()
+                .find(|e| e.name == "Wildspark set")
+                .and_then(|e| e.attribution.clone())
+                .as_deref(),
+            Some("Set (catalogue copy)")
+        );
+    }
+
+    #[test]
+    fn the_catalogue_attribution_read_uses_the_weapon_selector() {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let origin = format!("http://{}", listener.local_addr().unwrap());
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(2)))
+                .unwrap();
+            let mut request = [0u8; 4096];
+            let count = stream.read(&mut request).unwrap();
+            let body = format!(
+                r#"{{"schema":"ekza.asset.catalog.v2","count":1,"items":[{{"assetKind":"weapon","id":"ekza:weapon:{SET}","name":"Set","license":{{"text":"CC-BY-4.0","attribution":"Set by Alice, CC-BY-4.0"}}}}]}}"#
+            );
+            write!(
+                stream,
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            )
+            .unwrap();
+            String::from_utf8_lossy(&request[..count]).into_owned()
+        });
+        let attributions = fetch_attributions(&origin).unwrap();
+        let request = server.join().unwrap();
+        let line = request.lines().next().unwrap();
+        assert!(line.starts_with("GET /v2/assets?"), "{line}");
+        for pair in [
+            "kind=weapon",
+            "project=omoba",
+            "platform=desktop",
+            "profile=handheld-glb-v1",
+        ] {
+            assert!(line.contains(pair), "{line}");
+        }
+        assert_eq!(
+            attributions,
+            Attributions::from([(
+                format!("ekza:weapon:{SET}"),
+                "Set by Alice, CC-BY-4.0".to_owned()
+            )])
+        );
+        // An outage is an error; the refresh then keeps the lines it had.
+        assert!(fetch_attributions("http://127.0.0.1:1").is_err());
     }
 
     #[test]

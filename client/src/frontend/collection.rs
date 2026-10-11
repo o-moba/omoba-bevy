@@ -342,7 +342,8 @@ fn spawn_catalogue_grid(
 
 /// Collection → Weapons: "My Ekza library" first, with the account controls
 /// and the market hint while it is empty, then the shipped choices, then the
-/// rest of the public Ekza catalogue. Ekza items show their author and licence.
+/// rest of the public Ekza catalogue. Ekza items show their author and licence,
+/// and the selected one its attribution line.
 fn spawn_weapon_choices(
     grid: &mut ChildSpawnerCommands,
     handheld: &shared::handheld::HandheldSelection,
@@ -369,6 +370,18 @@ fn spawn_weapon_choices(
         ));
     }
     let choices = handheld_choices();
+    // The tiles show author and licence; the chosen item's attribution line
+    // (CC-BY credit) is shown in full here.
+    if let Some(attribution) = choices
+        .iter()
+        .find(|choice| choice.value == *handheld)
+        .and_then(|choice| choice.attribution.as_deref())
+    {
+        grid.spawn((
+            widgets::label(attribution, 11.0, theme::MUTED),
+            Name::new("SelectedWeaponAttribution"),
+        ));
+    }
     let connected = crate::passport::account_connected();
     for group in HandheldGroup::ALL {
         match group {
@@ -1186,6 +1199,18 @@ fn refresh_collection_details(
                     theme::MUTED,
                 ));
                 panel.spawn(widgets::label(&definition.license, 11.5, theme::MUTED));
+                // CC-BY credit as the creator wrote it in Ekza Studio.
+                if let Some(attribution) = &definition.attribution {
+                    panel.spawn((
+                        widgets::label(attribution, 11.0, theme::MUTED),
+                        TextLayout::justify(Justify::Center),
+                        Node {
+                            max_width: Val::Percent(100.0),
+                            ..default()
+                        },
+                        Name::new("AvatarAttribution"),
+                    ));
+                }
             }
             panel
                 .spawn(Node {
@@ -1265,6 +1290,8 @@ pub(super) struct HandheldChoice {
     pub group: HandheldGroup,
     /// "author · licence" of an Ekza item; shipped choices have none.
     pub credit: Option<String>,
+    /// The registry's attribution line of an Ekza item, when it has one.
+    pub attribution: Option<String>,
 }
 
 /// Identical cosmetic choices in the collection and the authoritative draft.
@@ -1288,6 +1315,7 @@ fn handheld_choices_from(
         id: format!("Handheld-{id}"), // i18n-allow: stable test id, never displayed
         group: HandheldGroup::Included,
         credit: None,
+        attribution: None,
     };
     let (owned, public): (Vec<_>, Vec<_>) = store.into_iter().partition(|entry| entry.owned);
     let item = |entry: omoba_passport::weapon_store::Entry| HandheldChoice {
@@ -1300,6 +1328,7 @@ fn handheld_choices_from(
         } else {
             HandheldGroup::Catalogue
         },
+        attribution: entry.attribution,
     };
     let mut result: Vec<_> = owned.into_iter().map(item).collect();
     result.push(included(
@@ -1779,7 +1808,7 @@ mod tests {
     }
 
     #[test]
-    fn library_weapons_list_first_and_carry_author_and_licence() {
+    fn library_weapons_list_first_and_carry_author_licence_and_attribution() {
         use omoba_passport::weapon_store::Entry;
         use shared::handheld::HandheldSelection as H;
         let entry = |id: &str, owned| Entry {
@@ -1787,6 +1816,7 @@ mod tests {
             name: id.into(),
             author: Some("jinx-artist".into()),
             license: Some("CC-BY-4.0".into()),
+            attribution: Some(format!("{id} by jinx-artist, CC-BY-4.0")),
             owned,
         };
         let packaged = &omoba_passport::weapons::catalog().items[..1];
@@ -1816,6 +1846,11 @@ mod tests {
             Some("jinx-artist · CC-BY-4.0")
         );
         assert!(choices[1..4].iter().all(|c| c.credit.is_none()));
+        assert_eq!(
+            choices[4].attribution.as_deref(),
+            Some("ekza-public by jinx-artist, CC-BY-4.0")
+        );
+        assert!(choices[1..4].iter().all(|c| c.attribution.is_none()));
         // Signed out: no library group, the shipped choices lead as before.
         let signed_out = handheld_choices_from(packaged, vec![entry("ekza-public", false)]);
         assert_eq!(signed_out[0].value, H::ClassDefault);
@@ -1826,6 +1861,70 @@ mod tests {
             ..entry("ekza-anonymous", true)
         };
         assert_eq!(weapon_credit(&anonymous), tr("collection.unknown_author"));
+    }
+
+    #[test]
+    fn a_studio_avatar_detail_credits_its_attribution_line() {
+        use ekza_bevy_sdk::passport::{ProjectSupport, ProtectedAvatar, Rendition};
+        // A unique Studio avatar in the process-wide registry.
+        let protected = ProtectedAvatar {
+            avatar_id: "ekza:avatar:7e57a77b-1d2c-4a3b-8c4d-00000000a771".into(),
+            support: ProjectSupport {
+                project_id: "omoba".into(),
+                platform: "desktop".into(),
+                profile: "humanoid-glb-v1".into(),
+                status: "approved".into(),
+                rendition: Rendition {
+                    id: "sha256:".to_owned() + &"7".repeat(64),
+                    url: "https://registry.example/v1/studio/assets/7/rendition".into(),
+                    sha256: "7".repeat(64),
+                    size_bytes: 4096,
+                    format: "glb".into(),
+                },
+            },
+        };
+        let credit = "Pyre Sorcerer by Polygonal Mind (100Avatars R2), CC0 1.0";
+        let studio = omoba_passport::avatars::register_store_avatar(AvatarDefinition {
+            slug: omoba_passport::protected_slug(&protected),
+            display_name: "Pyre Sorcerer".into(),
+            collection: "Ekza store".into(),
+            license: "CC0-1.0".into(),
+            source_url: protected.support.rendition.url.clone(),
+            author: Some("jinx-artist".into()),
+            attribution: Some(credit.into()),
+            thumbnail: None,
+            passport: Some(protected),
+            free: true,
+        })
+        .unwrap()
+        .slug
+        .clone();
+        let shipped = omoba_passport::avatars::avatar_roster()[0].slug.clone();
+        for (slug, expected) in [(studio, Some(credit)), (shipped, None)] {
+            let mut app = App::new();
+            app.add_plugins((MinimalPlugins, AssetPlugin::default()))
+                .init_asset::<Image>()
+                .init_resource::<AvatarPreview>()
+                .init_resource::<ProfileCard>()
+                .init_resource::<TeamSelection>()
+                .insert_resource(crate::ui::UiPlatform(crate::platform::UiProfile::Desktop))
+                .add_systems(Update, refresh_collection_details);
+            app.world_mut()
+                .resource_mut::<AvatarPreview>()
+                .show_portrait(&slug);
+            app.world_mut().spawn((Node::default(), DetailPanel));
+            app.update();
+            let mut labels = app.world_mut().query::<(&Name, &Text)>();
+            let shown: Vec<_> = labels
+                .iter(app.world())
+                .filter(|(name, _)| name.as_str() == "AvatarAttribution")
+                .map(|(_, text)| text.0.clone())
+                .collect();
+            assert_eq!(
+                shown,
+                expected.into_iter().map(str::to_owned).collect::<Vec<_>>()
+            );
+        }
     }
 
     #[test]

@@ -59,7 +59,15 @@ catalogue replaces the catalogue's entry instead of adding a second one.
 Signed out, the library group is empty and the catalogue group looks the same
 as before this change. Each Ekza entry shows its author and licence as
 published: Collection prints them under every tile, the draft under the chosen
-item.
+item. The registry's `license.attribution` line (the CC-BY credit) is shown for
+the chosen item: in full in Collection, at most two lines in the draft. The
+pinned SDK's `StoreAsset` has no attribution field, so
+`passport/src/attribution.rs` reads it from the same documents: the library's
+`assets` entries, and one more `/v2/assets` read after each successful
+catalogue refresh. The catalogue's lines are saved as
+`weapon-attributions.json` next to the offline catalogue. Studio avatars get
+theirs from the `/v2/avatars` read (`avatar-attributions.json`) and show it in
+the Collection detail under the licence.
 
 - **Refresh.** While Collection or the draft is open, the account library is
   re-read about every 15 s (`poll_account`), so a claim made on the web appears
