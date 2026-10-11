@@ -175,6 +175,11 @@ class AssetCatalogTests(unittest.TestCase):
         self.assertNotIn("url", trap["baseline"])
         self.assertFalse(any("avatar" in str(row["baseline"]) for row in rows.values()))
         self.assertTrue(any(row["role"] == "animation_reference" for row in rows.values()))
+        # Both Q guns are contributed as one set GLB; each brief names that contract.
+        for rid in ("wildspark.handheld.repeater", "wildspark.handheld.launcher"):
+            with self.subTest(rid=rid):
+                for term in ("wildspark.handheld.set", "WildsparkSetLauncher"):
+                    self.assertIn(term, rows[rid]["brief"])
 
     def test_rocket_precedence_cannot_silently_drift(self):
         root = self.fixture()
@@ -223,6 +228,16 @@ class AssetCatalogTests(unittest.TestCase):
         source = root / "shared/src/handheld.rs"
         source.write_text(source.read_text().replace('Some("wild-repeater")', 'Some("wild-launcher")'))
         with self.assertRaisesRegex(CatalogError, "Authored source evidence changed"):
+            Exporter(root).build(COMMIT)
+
+    def test_held_weapon_override_drift_requires_authored_review(self):
+        root = self.fixture()
+        source = root / "client/src/held_weapons.rs"
+        text = source.read_text()
+        self.assertIn('"weapons/wildspark-repeater.glb".to_owned()', text)
+        source.write_text(text.replace('"weapons/wildspark-repeater.glb".to_owned()',
+                                       '"weapons/wild-repeater.glb".to_owned()'))
+        with self.assertRaisesRegex(CatalogError, "Authored source evidence changed: client/src/held_weapons.rs"):
             Exporter(root).build(COMMIT)
 
     def test_semantic_icon_binding_rejects_dangling_and_duplicate_ids(self):

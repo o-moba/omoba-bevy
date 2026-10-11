@@ -110,7 +110,7 @@
           "state": "repeater"
         }
       ],
-      "brief": "Wildspark class-default repeater with engine-controlled rotor animation. Static handheld submissions are supported; custom moving-part animation and coordinated two-gun sets require a future profile. Explicit item selection stays selected in both modes.",
+      "brief": "Wildspark class-default repeater with engine-controlled rotor animation. Contribute it with the launcher as one Wildspark set GLB (Studio requirement wildspark.handheld.set): WildsparkSetRepeater and WildsparkSetLauncher nodes, launcher at scale 0 in the file. The game shows the variant for the current weapon mode and drives WildsparkRotor and WildsparkSlide nodes from their rest pose. Custom moving-part animation requires a future profile. Any other explicit item stays selected in both modes; an item that is not installed yet shows the class-default pair.",
       "profile": {
         "id": "handheld-glb-v1",
         "version": 1
@@ -139,7 +139,7 @@
           "state": "rockets"
         }
       ],
-      "brief": "The second gun in the class-default Q switch. Individual static handheld submission is supported. Mode-specific cosmetic set approval and equipment are future work; this is not a third Q weapon.",
+      "brief": "The second gun in the class-default Q switch. Contribute it as the WildsparkSetLauncher variant of a one-GLB Wildspark set (Studio requirement wildspark.handheld.set); the game shows it in rockets mode. A standalone static handheld is still accepted but stays selected in both modes. Two independently approved guns are future work; this is not a third Q weapon.",
       "profile": {
         "id": "handheld-glb-v1",
         "version": 1
@@ -376,7 +376,7 @@
     },
     {
       "sourcePath": "client/src/held_weapons.rs",
-      "sha256": "0e53506c86688591d7c55450deb6a2595371208d793c6231cb9ec2c2f687d644"
+      "sha256": "d19264393afd6520e828a0f919b2ae7c9b6a43920d776e53bae1b4dff840775c"
     }
   ],
   "iconAtlases": [

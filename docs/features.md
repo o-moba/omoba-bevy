@@ -45,8 +45,10 @@ downloads show current defaults without requiring a running game or Account API.
 
 An artist can prepare a requirement/revision-pinned brief and use the existing
 Studio upload route. This is discovery and preparation: Studio does not yet
-persist exact requirement bindings, and the game does not yet equip coordinated
-sets or remote projectile/prop skins. See the [iteration record](progress/2026-10-10-asset-catalog.md)
+persist exact requirement bindings. The game equips a one-GLB
+[Wildspark set](handheld-weapons.md#wildspark-set-repeater-and-launcher-in-one-glb)
+with both Q guns, but no other coordinated sets or remote projectile/prop skins.
+See the [iteration record](progress/2026-10-10-asset-catalog.md)
 and parent [design PR #78](https://github.com/o-moba/omoba-bevy/pull/78).
 
 ## Planned: Studio model requirements by class and skill
@@ -54,8 +56,9 @@ and parent [design PR #78](https://github.com/o-moba/omoba-bevy/pull/78).
 The [proposal and TODO](plans/studio-skill-asset-catalog.md) describe a game-owned
 requirements catalogue shared by Studio and the website: baseline 3D previews,
 artist contributions to specific skill/model roles and eventual coordinated
-cosmetic sets such as Wildspark’s two guns. The public discovery catalogue and local class workshop now exist; exact-slot
-Studio submissions, coordinated sets and runtime set equipping remain planned.
+cosmetic sets such as Wildspark’s two guns. The public discovery catalogue and local class workshop now exist,
+and the game equips a one-GLB Wildspark set. Exact-slot Studio submissions and
+other coordinated sets remain planned.
 
 ## First-match guidance and mobile comfort (0.44.0 candidate)
 
