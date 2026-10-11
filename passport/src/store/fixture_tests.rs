@@ -184,7 +184,7 @@ fn sdk_http_catalogue_refresh_validation_and_failed_cache_are_real() {
         registry: fixture.origin.clone(),
         state: Mutex::default(),
     }));
-    restore_offline(restarted);
+    adopt(restarted, restarted.store.cached());
     assert_eq!(
         restarted.state.lock().unwrap().definitions[&approved.slug]
             .attribution

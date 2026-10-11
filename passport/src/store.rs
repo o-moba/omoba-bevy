@@ -11,8 +11,9 @@
 //! Nothing here grants an entitlement. Wearing a store avatar still requires a
 //! passport ticket that the game server consumes.
 //!
-//! Definitions also carry the registry's attribution line (see
-//! [`crate::attribution`]), saved next to the offline catalogue.
+//! Definitions also carry the registry's attribution line, which the SDK keeps
+//! on each `StoreAvatar` and in the offline catalogue (see
+//! [`crate::attribution`]).
 
 use ekza_bevy_sdk::{
     cache::AssetCache,
@@ -142,8 +143,6 @@ struct State {
     definitions: HashMap<String, crate::avatars::AvatarDefinition>,
     installs: HashMap<String, Install>,
     changed: Vec<String>,
-    /// Attribution lines by avatar id, from the last complete v2 catalogue.
-    attributions: crate::attribution::Attributions,
     refreshing: bool,
     last_refresh: Option<Instant>,
     refresh_failed: bool,
@@ -153,11 +152,6 @@ struct Runtime {
     store: AvatarStore,
     registry: String,
     state: Mutex<State>,
-}
-impl Runtime {
-    fn attributions_path(&self) -> PathBuf {
-        self.store.root().join("avatar-attributions.json")
-    }
 }
 
 static RUNTIME: OnceLock<Option<Runtime>> = OnceLock::new();
@@ -203,19 +197,12 @@ pub fn initialize(root: PathBuf, wait_for_catalogue: bool) {
     let Some(runtime) = created.as_ref() else {
         return;
     };
-    restore_offline(runtime);
+    adopt(runtime, runtime.store.cached());
     if wait_for_catalogue {
         refresh_now(runtime);
     } else {
         request_refresh();
     }
-}
-
-/// The saved catalogue and its attribution lines, before any network read.
-fn restore_offline(runtime: &Runtime) {
-    runtime.state.lock().unwrap().attributions =
-        crate::attribution::load(&runtime.attributions_path());
-    adopt(runtime, runtime.store.cached());
 }
 
 /// Ask for a catalogue refresh (rate limited, never blocks). Called when a
@@ -253,13 +240,7 @@ fn refresh_now(runtime: &'static Runtime) {
     let result = refresh_catalogue(runtime);
     let failed = result.is_err();
     match result {
-        Ok((items, attributions)) => {
-            if let Some(attributions) = attributions {
-                let _ = crate::attribution::save(&runtime.attributions_path(), &attributions);
-                runtime.state.lock().unwrap().attributions = attributions;
-            }
-            adopt(runtime, items)
-        }
+        Ok(items) => adopt(runtime, items),
         Err(error) => eprintln!("Ekza avatar catalogue refresh failed: {error}"),
     }
     let mut state = runtime.state.lock().unwrap();
@@ -271,10 +252,7 @@ fn refresh_now(runtime: &'static Runtime) {
 /// The locked SDK predates v2 outage semantics. Keep its parser, approved
 /// template filter, cache format and verified installer, but do not downgrade
 /// a failed/partial Studio catalogue into a successful empty v1 catalogue.
-/// The v2 read also yields the attribution lines; the v1 feed has none.
-fn refresh_catalogue(
-    runtime: &Runtime,
-) -> Result<(Vec<StoreAvatar>, Option<crate::attribution::Attributions>), String> {
+fn refresh_catalogue(runtime: &Runtime) -> Result<Vec<StoreAvatar>, String> {
     use ekza_bevy_sdk::{
         catalog::CatalogV2Response,
         registry::feed_url,
@@ -302,7 +280,7 @@ fn refresh_catalogue(
         .map_err(|_| "Studio connection unavailable")?;
     if response.status() == reqwest::StatusCode::NOT_FOUND {
         // Compatibility is permitted only for a registry without the v2 API.
-        return runtime.store.refresh().map(|items| (items, None));
+        return runtime.store.refresh();
     }
     if !response.status().is_success()
         || response
@@ -338,10 +316,7 @@ fn refresh_catalogue(
     .map_err(|_| "Studio catalogue could not be saved")?;
     ekza_bevy_sdk::cache::atomic_write(&runtime.store.root().join("store.json"), &persisted)
         .map_err(|_| "Studio catalogue could not be saved")?;
-    Ok((
-        items,
-        Some(crate::attribution::of_avatars(&catalogue.items)),
-    ))
+    Ok(items)
 }
 
 /// Register catalogue items with the process avatar registry; new slugs are reported
@@ -350,7 +325,6 @@ fn adopt(runtime: &Runtime, items: Vec<StoreAvatar>) {
     let mut accepted = HashMap::new();
     let mut definitions = HashMap::new();
     let mut newly_known = Vec::new();
-    let attributions = runtime.state.lock().unwrap().attributions.clone();
     for item in items {
         let was_known = runtime.state.lock().unwrap().items.contains_key(&item.slug);
         let thumbnail = thumbnail(&runtime.store, &item);
@@ -364,7 +338,10 @@ fn adopt(runtime: &Runtime, items: Vec<StoreAvatar>) {
                 .unwrap_or_else(|| "See creator terms".into()),
             source_url: item.protected.support.rendition.url.clone(),
             author: item.author.clone(),
-            attribution: attributions.get(&item.protected.avatar_id).cloned(),
+            attribution: item
+                .attribution
+                .as_deref()
+                .and_then(crate::attribution::clean),
             thumbnail,
             passport: Some(item.protected.clone()),
             free: item.free,

@@ -74,13 +74,7 @@ impl State {
     }
 
     fn publish_library(&self) {
-        weapon_store::set_library(
-            self.library_weapons(),
-            self.session
-                .as_ref()
-                .map(omoba_passport::attribution::of_library)
-                .unwrap_or_default(),
-        );
+        weapon_store::set_library(self.library_weapons());
     }
 
     fn sign_out(&mut self) {
@@ -590,12 +584,8 @@ mod tests {
         assert_eq!(owned[0].author.as_deref(), Some("wildspark-maker"));
         assert_eq!(owned[0].license.as_deref(), Some("CC-BY-4.0"));
         assert!(owned[0].slug.starts_with("ekza-"));
-        // The library's attribution lines travel with it to the weapon store.
-        let credits = omoba_passport::attribution::of_library(state.session.as_ref().unwrap());
-        assert_eq!(
-            credits.get(&owned[0].asset_id).map(String::as_str),
-            Some("wildspark-maker")
-        );
+        // The library item carries its own attribution line to the weapon store.
+        assert_eq!(owned[0].attribution.as_deref(), Some("wildspark-maker"));
         // An outage keeps the listed weapons; a healthy empty library clears them.
         *fixture.status.lock().unwrap() = 503;
         assert!(!fixture.refresh(&mut state));
