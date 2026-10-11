@@ -106,8 +106,11 @@ const MAX_LEAD_SPEED: f32 = shared::hero_balance::PLAYER_SPEED * 2.5;
 struct Sighting {
     id: u64,
     position: [f32; 2],
-    /// From the previous think's sighting; `None` when unseen, stale or a jump.
+    /// From the previous think's sighting; `None` when unseen, stale, a jump or
+    /// held at either sighting (a hold says nothing of the walk after it).
     velocity: Option<[f32; 2]>,
+    /// Steady walking speed, the bound on a course that is not known.
+    speed: f32,
     /// Time it cannot walk anyway: root, stun or its own cast lock.
     held_secs: f32,
     /// Held or slowed: the window a slow cast waits for.
@@ -149,7 +152,8 @@ struct BeamShot {
 /// Where to aim a warned beam from `origin`, or `None` to keep it. Each hero is
 /// led along its observed velocity for the part of the windup it can walk, and
 /// counts only while that point stays inside the fired capsule; a hero without
-/// a velocity estimate counts only when held for the whole windup. A hampered
+/// a velocity estimate is aimed where it stands and counts only if that part of
+/// the windup is too short to walk out of the ray in any direction. A hampered
 /// hero comes first, then the bot's own target, then the nearest. Minions alone
 /// never justify the beam.
 fn beam_shot(
@@ -160,22 +164,24 @@ fn beam_shot(
     preferred: Option<u64>,
     heroes: &[Sighting],
 ) -> Option<BeamShot> {
-    let reach = length + width + crate::balance::PLAYER_HIT_RADIUS;
+    let side = width + crate::balance::PLAYER_HIT_RADIUS;
+    let reach = length + side;
     heroes
         .iter()
         .filter_map(|hero| {
             let lead = (windup_secs - hero.held_secs).max(0.0);
-            let v = match hero.velocity {
-                Some(v) => v,
-                None if lead == 0.0 => [0.0; 2],
-                None => return None,
+            let (aim, walk) = match hero.velocity {
+                Some(v) => (
+                    [
+                        hero.position[0] + v[0] * lead,
+                        hero.position[1] + v[1] * lead,
+                    ],
+                    0.0,
+                ),
+                None => (hero.position, hero.speed * lead),
             };
-            let aim = [
-                hero.position[0] + v[0] * lead,
-                hero.position[1] + v[1] * lead,
-            ];
             let distance = (aim[0] - origin[0]).hypot(aim[1] - origin[1]);
-            (distance <= reach).then_some((hero, aim, distance))
+            (walk <= side && distance + walk <= reach).then_some((hero, aim, distance))
         })
         .min_by(|a, b| {
             (!a.0.hampered, preferred != Some(a.0.id))
@@ -521,8 +527,9 @@ struct Controller {
     retreat_until: Option<Instant>,
     target: Option<TargetId>,
     holding_range: bool,
-    /// Enemy hero positions at `seen_at`, the last think that looked.
-    seen: Vec<(u64, [f32; 2])>,
+    /// Enemy hero positions at `seen_at`, the last think that looked, and
+    /// whether each was held then.
+    seen: Vec<(u64, [f32; 2], bool)>,
     seen_at: Option<Instant>,
 }
 
@@ -1357,7 +1364,8 @@ impl CombatHost<'_> {
     }
 
     /// Visible living enemy heroes. Velocities come from the controller's previous
-    /// sightings (only if that think was recent), which this one then replaces.
+    /// sightings (only if that think was recent and neither think saw the hero
+    /// held), which this one then replaces.
     fn sight_enemy_heroes(
         &self,
         team: Team,
@@ -1388,27 +1396,33 @@ impl CombatHost<'_> {
             .map(|p| {
                 let id = p.hero.identity.id;
                 let position = [p.hero.x, p.hero.z];
-                let velocity = elapsed
-                    .zip(controller.seen.iter().find(|(seen, _)| *seen == id))
-                    .map(|(secs, (_, at))| {
-                        [(position[0] - at[0]) / secs, (position[1] - at[1]) / secs]
-                    })
-                    .filter(|v| v[0].hypot(v[1]) <= MAX_LEAD_SPEED);
                 let skills = &p.hero.skills;
                 let held_secs = remaining(skills.control.root_until)
                     .max(remaining(skills.control.stun_until))
                     .max(remaining(skills.cast_lock_until));
+                // A displacement measured across a hold is not the walk after it.
+                let velocity = elapsed
+                    .zip(controller.seen.iter().find(|(seen, ..)| *seen == id))
+                    .filter(|(_, (.., was_held))| !was_held && held_secs == 0.0)
+                    .map(|(secs, (_, at, _))| {
+                        [(position[0] - at[0]) / secs, (position[1] - at[1]) / secs]
+                    })
+                    .filter(|v| v[0].hypot(v[1]) <= MAX_LEAD_SPEED);
                 Sighting {
                     id,
                     position,
                     velocity,
+                    speed: hero_stats::move_speed(p),
                     held_secs,
                     hampered: held_secs > 0.0 || skills.control.movement(now) < 1.0,
                 }
             })
             .collect();
         heroes.sort_unstable_by_key(|hero| hero.id);
-        controller.seen = heroes.iter().map(|hero| (hero.id, hero.position)).collect();
+        controller.seen = heroes
+            .iter()
+            .map(|hero| (hero.id, hero.position, hero.held_secs > 0.0))
+            .collect();
         controller.seen_at = Some(now);
         heroes
     }
@@ -2008,7 +2022,9 @@ mod sustain_tests {
 mod kit_tests {
     use super::sustain_tests::{lone_bot, think};
     use super::*;
+    use crate::combat_feedback::CombatLog;
     use crate::game_world::{GameWorld, TickCtx};
+    use crate::match_rules::{MatchMode, MatchRules};
     use crate::skills::live_zone;
     use shared::combat::CombatEvent;
     use shared::loadout::SkillEffect;
@@ -2106,43 +2122,96 @@ mod kit_tests {
         radius + crate::balance::PLAYER_HIT_RADIUS
     }
 
+    /// Off-axis distance at which the ray still hits a hero.
+    fn ray_side_reach() -> f32 {
+        let SkillEffect::Beam { width, .. } =
+            shared::loadout::skill(shared::loadout::SkillId::DawnRay).effect
+        else {
+            unreachable!()
+        };
+        width + crate::balance::PLAYER_HIT_RADIUS
+    }
+
     #[test]
     fn beam_shot_leads_by_the_walkable_windup_and_ranks_hampered_heroes_first() {
         let walker = Sighting {
             id: 7,
             position: [10.0, 0.0],
             velocity: Some([0.0, 5.0]),
+            speed: 5.0,
             held_secs: 0.0,
             hampered: false,
         };
         let shot = beam_shot([0.0; 2], 45.0, 0.8, 0.8, None, &[walker]).unwrap();
         assert_eq!(shot.aim, [10.0, 4.0], "led by the whole windup");
-        let rooted = Sighting {
-            held_secs: 0.5,
-            hampered: true,
-            ..walker
-        };
-        let shot = beam_shot([0.0; 2], 45.0, 0.8, 0.8, None, &[rooted]).unwrap();
-        assert!(
-            (shot.aim[1] - 1.5).abs() < 1e-4,
-            "led only once the root ends"
-        );
-        assert!(shot.hampered);
 
+        // No estimate (unseen, or held): aimed where it stands, and only if the
+        // walkable part of the windup cannot carry it out of the ray.
         let unknown = Sighting {
             velocity: None,
             ..walker
         };
         assert_eq!(beam_shot([0.0; 2], 45.0, 0.8, 0.8, None, &[unknown]), None);
-        let held = Sighting {
-            held_secs: 1.0,
+        let freed_soon = Sighting {
+            held_secs: 0.4,
+            hampered: true,
             ..unknown
         };
         assert_eq!(
-            beam_shot([0.0; 2], 45.0, 0.8, 0.8, None, &[held]).map(|s| s.aim),
+            beam_shot([0.0; 2], 45.0, 0.8, 0.8, None, &[freed_soon]),
+            None,
+            "0.4 s free is 2 units off the axis"
+        );
+        let held = Sighting {
+            held_secs: 0.7,
+            ..freed_soon
+        };
+        let shot = beam_shot([0.0; 2], 45.0, 0.8, 0.8, None, &[held]).unwrap();
+        assert_eq!(shot.aim, [10.0, 0.0], "0.1 s free stays inside the ray");
+        assert!(shot.hampered);
+        let held_through = Sighting {
+            held_secs: 1.0,
+            ..freed_soon
+        };
+        assert_eq!(
+            beam_shot([0.0; 2], 45.0, 0.8, 0.8, None, &[held_through]).map(|s| s.aim),
             Some([10.0, 0.0]),
             "held for the whole windup, no estimate is needed"
         );
+        // Nor may the free part carry it past the end of the ray.
+        let at_the_end = Sighting {
+            position: [45.0 + 0.8 + crate::balance::PLAYER_HIT_RADIUS - 0.2, 0.0],
+            ..held
+        };
+        assert_eq!(
+            beam_shot([0.0; 2], 45.0, 0.8, 0.8, None, &[at_the_end]),
+            None
+        );
+        assert!(
+            beam_shot(
+                [0.0; 2],
+                45.0,
+                0.8,
+                0.8,
+                None,
+                &[Sighting {
+                    held_secs: 1.0,
+                    ..at_the_end
+                }]
+            )
+            .is_some()
+        );
+        // A hold that ends inside the windup does not outrank a led walker.
+        let nearer = Sighting {
+            id: 11,
+            position: [6.0, 0.0],
+            ..freed_soon
+        };
+        assert_eq!(
+            beam_shot([0.0; 2], 45.0, 0.8, 0.8, None, &[nearer, walker]).map(|s| s.aim),
+            Some([10.0, 4.0])
+        );
+
         let far = Sighting {
             position: [46.5, 0.0],
             velocity: Some([0.0; 2]),
@@ -2160,6 +2229,7 @@ mod kit_tests {
             id: 9,
             position: [12.0, 0.0],
             velocity: Some([0.0; 2]),
+            speed: 5.0,
             held_secs: 0.0,
             hampered: true,
         };
@@ -2169,6 +2239,51 @@ mod kit_tests {
         assert_eq!(pick(&[target, slowed], Some(3)), Some([12.0, 0.0]));
         assert_eq!(pick(&[target, far, walker], Some(7)), Some([10.0, 4.0]));
         assert_eq!(pick(&[walker, target], None), Some([5.0, 0.0]));
+    }
+
+    #[test]
+    fn sightings_measure_no_velocity_across_a_hold() {
+        let start = Instant::now();
+        let (mut world, mut bots, bot) = lone_bot(HeroClass::Dawnweaver, start);
+        let enemy = add_enemy(&mut world, 32106, [8.0, 0.0], start);
+        let mut controller = bots.controllers.remove(&bot).unwrap();
+        let mut log = CombatLog::default();
+        let mut look = |world: &mut GameWorld, think: u32| {
+            CombatHost {
+                world,
+                bots: &mut bots,
+                combat_log: &mut log,
+                rules: MatchRules::for_mode(MatchMode::Release, 1),
+                match_id: 1,
+            }
+            .sight_enemy_heroes(
+                Team::Green,
+                &mut controller,
+                start + THINK_INTERVAL * think,
+            )[0]
+            .velocity
+        };
+        let step = |world: &mut GameWorld| world.players.get_mut(&enemy).unwrap().hero.z += 1.0;
+        assert_eq!(look(&mut world, 0), None, "nothing seen before");
+        step(&mut world);
+        assert_eq!(look(&mut world, 1), Some([0.0, 4.0]));
+        // Rooted since the last look: what it walked before is no course.
+        step(&mut world);
+        world
+            .players
+            .get_mut(&enemy)
+            .unwrap()
+            .hero
+            .skills
+            .control
+            .root_until = Some(start + THINK_INTERVAL * 2 + Duration::from_millis(400));
+        assert_eq!(look(&mut world, 2), None);
+        assert_eq!(look(&mut world, 3), None, "still rooted");
+        // Free again, but the last look saw it held.
+        step(&mut world);
+        assert_eq!(look(&mut world, 4), None);
+        step(&mut world);
+        assert_eq!(look(&mut world, 5), Some([0.0, 4.0]));
     }
 
     #[test]
@@ -2306,10 +2421,7 @@ mod kit_tests {
         let length = axis[0].hypot(axis[1]);
         let lateral =
             ((at[0] - origin[0]) * axis[1] - (at[1] - origin[1]) * axis[0]).abs() / length;
-        assert!(
-            lateral > 0.8 + crate::balance::PLAYER_HIT_RADIUS,
-            "{lateral}"
-        );
+        assert!(lateral > ray_side_reach(), "{lateral}");
     }
 
     #[test]
@@ -2339,6 +2451,51 @@ mod kit_tests {
         }
         assert!(cast);
         assert!(hit.expect("the ray follows the root").core_hit);
+    }
+
+    #[test]
+    fn ray_is_not_aimed_at_a_root_that_ends_inside_its_windup() {
+        let mut now = Instant::now();
+        let (mut world, mut bots, bot) = lone_bot(HeroClass::Dawnweaver, now);
+        let enemy = add_enemy(&mut world, 32105, [8.0, -2.0], now);
+        rest(&mut world, bot, &[0, 1, FIELD, RAY], now);
+        let caster = world.players[&bot].hero.identity.id;
+        let victim = world.players[&enemy].hero.identity.id;
+        // Rooted through several thinks; the ray comes off cooldown with 0.3 s left.
+        let freed = now + Duration::from_millis(1300);
+        world
+            .players
+            .get_mut(&enemy)
+            .unwrap()
+            .hero
+            .skills
+            .control
+            .root_until = Some(freed);
+        let ready = freed - Duration::from_millis(300);
+        let mut readied = false;
+        let mut cast = None;
+        let mut hit = None;
+        for _ in 0..60 {
+            if !readied && now >= ready {
+                world.players.get_mut(&bot).unwrap().timers.last_cast_at[usize::from(RAY)] = None;
+                readied = true;
+            }
+            walk(&mut world, enemy, [0.0, 1.0], now);
+            now += FRAME;
+            let events = frame(&mut world, &mut bots, now);
+            if cast.is_none()
+                && world.players[&bot].timers.last_cast_at[usize::from(RAY)] == Some(now)
+            {
+                cast = Some(now);
+            }
+            if let Some(event) = ray_hit(&events, caster, victim) {
+                hit = Some(event.clone());
+                break;
+            }
+        }
+        let cast = cast.expect("the ray is cast once the hero walks again");
+        assert!(cast > freed, "not aimed at the rooted spot it walks out of");
+        assert!(hit.is_some(), "led onto the walking hero instead");
     }
 
     #[test]
