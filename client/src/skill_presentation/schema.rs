@@ -291,6 +291,10 @@ impl ImpactRecipe {
 pub(crate) struct Sound {
     #[serde(default)]
     pub cast: Option<SoundCue>,
+    /// Played when the timed telegraph of the skill first appears, to everyone who sees it
+    /// and whether or not they see the hero who cast it.
+    #[serde(default)]
+    pub telegraph: Option<SoundCue>,
     /// Played when a telegraphed skill releases.
     #[serde(default)]
     pub release: Option<SoundCue>,
@@ -1094,6 +1098,7 @@ fn sound_block(
 ) -> Result<(), String> {
     for (slot, cue) in [
         ("cast", &sound.cast),
+        ("telegraph", &sound.telegraph),
         ("release", &sound.release),
         ("impact", &sound.impact),
         ("recast", &sound.recast),
@@ -1103,6 +1108,9 @@ fn sound_block(
         if cue.base == AudioBase::Bluff && key != SkillKey::Modular(SkillId::DaggerBluff) {
             return Err(format!("sound.{slot}: bluff belongs to dagger_bluff"));
         }
+    }
+    if sound.telegraph.is_some() && key.modular().and_then(category::telegraph_secs).is_none() {
+        return Err("sound.telegraph needs a skill with a timed telegraph".into());
     }
     if sound.release.is_some() && phase == MotionPhase::Instant {
         return Err("sound.release needs a non-instant phase".into());

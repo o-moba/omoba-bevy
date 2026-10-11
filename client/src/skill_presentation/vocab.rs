@@ -339,6 +339,8 @@ vocabulary! {
         Caster = "caster": "the caster bolt sample",
         Tower = "tower": "the tower shot sample",
         Bluff = "bluff": "the bluff sample; `dagger_bluff` only",
+        RadiantCharge = "radiant_charge": "the Horizon Ray charge: a short ignition in `tick`, and in `tail` a swell that is loudest 0.80 s after it starts",
+        RadiantBeam = "radiant_beam": "a ray firing: a warm low thump, a bright bell cluster and a burst of air",
     }
 }
 
@@ -698,7 +700,7 @@ mod tests {
             ImpactKind: 17,
             ParticleShape: 13,
             PaletteSlot: 4,
-            AudioBase: 7,
+            AudioBase: 9,
             AudioSlice: 4,
             ProjectileForm: 7,
             ProjectilePresentation: 3,
