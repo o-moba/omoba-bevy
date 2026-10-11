@@ -196,8 +196,8 @@
         "impact": { "base": "holy", "speed": 1.2, "slice": "tick", "gain": 0.8 } }
     },
     "dawn_ray": {
-      "home": "dawnweaver", "windup": "spell_prepare", "release": "cast", "color": [1.0, 0.82, 0.32], "hdr_gain": 4.2,
-      "motion": { "phase": "warn_fire", "fit_windup": true, "rate": 0.8 },
+      "home": "dawnweaver", "windup": "spell_charge", "release": "ray_release", "color": [1.0, 0.82, 0.32], "hdr_gain": 4.2,
+      "motion": { "phase": "warn_fire", "fit_windup": true },
       "cast": { "pattern": "inward_gather", "shape": "streak", "count": 8, "scale": 1.0, "lifetime": 0.5, "slots": ["primary", "white"] },
       "body": { "archetype": "lane", "altitude": "ground", "fill": true, "marker": "fill_to_edge", "expire": "fade",
         "core": { "mesh": "block", "slot": "white", "size": [0.3, 0.4, 1.0], "behave": "hide_in_telegraph" },
