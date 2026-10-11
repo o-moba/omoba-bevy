@@ -29,7 +29,7 @@ fn skill_motion_waits_for_phase_deduplicates_and_respects_cancel_death_respawn()
     let mut app = App::new();
     let mut set = animation_set();
     set.motion_nodes
-        .push(("spell_prepare".into(), set.attack_node.unwrap()));
+        .push(("spell_charge".into(), set.attack_node.unwrap()));
     let mut library = PlayerAnimationLibrary::default();
     library
         .sets
@@ -1710,8 +1710,8 @@ fn action_clips_enter_at_their_start_and_play_at_their_rate() {
         EffectVisualKind::BeamWarning,
     ));
     rig.act(1, ray, PlayerActionKind::Cast);
-    assert_eq!(rig.state(), rig.set.motion("spell_prepare"));
-    assert_eq!(rig.clip().speed(), 0.625);
+    assert_eq!(rig.state(), rig.set.motion("spell_charge"));
+    assert_eq!(rig.clip().speed(), 1.0);
     assert_eq!(rig.clip().repeat_mode(), RepeatAnimation::Never);
     let (class, wave_kit, wave) = kit_with(CoreId::Riftshot, SkillId::HorizonWave);
     let mut rig = Rig::new(SkillPresentation::target(), class, wave_kit);
