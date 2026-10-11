@@ -98,7 +98,9 @@ loses.
   from an accepted combat receipt. A zero-amount trap receipt draws the trap
   cue and nothing else.
 - **No fabricated status.** State visuals read replicated flags. No row, impact
-  kind or accent depicts a stun, root, slow, shield or mark.
+  kind or accent depicts a stun, root, slow, shield or mark. The one burst that
+  shows a mark is the Radiance pop, and only on a receipt the server flags
+  `radiance_burst`.
 - **No fabricated pierce or area.** `pierce_through` needs a skill that pierces,
   `blast` one with area damage. `cast.area` is drawn only for Thunder Pulse,
   Chain Sweep and Anvil Charge, on a first-cast edge, at the catalog radius. A
@@ -175,6 +177,46 @@ lights the wall, pops a star on its keystone and throws chips along it, and
 once the first, free block is spent the keystone stands broken. Where the shot
 struck is not replicated, so nothing in the picture names a side. A Fault Line
 pillar outlives its owner on the server and crumbles when its time ends.
+
+### Horizon Ray and Radiance
+
+The ray's look follows its centre-weighted damage. Every number below is read
+from the catalog or the receipt, never authored twice.
+
+- **Core.** The white core of the fired beam is exactly the catalog
+  `core_width` to each side of the axis (0.35 of the 0.8 half-width): rule E-7
+  gives the `core` of a lane over a beam with a full-damage core that width,
+  whatever its row authors (`geometry::damage_core`). Its gold shell frames it,
+  the soft fill covers the whole capsule, and the outline stays the replicated
+  capsule; as everywhere, the drawn edge does not add the target radius.
+- **Warning.** The telegraph of such a lane draws the two edges of that core as
+  fine lines in the skill colour, half the width of the outline, on the inner
+  side of each edge and mirror images of each other, so the sweet spot is
+  warned before the beam fires. The staggered marks stand in the falloff band
+  between those lines and the outline. A strip without a damage core, such as
+  the Horizon Wave warning, has neither.
+- **Release.** When the warning becomes the beam, an afterglow lies along the
+  strip: six white bars in equal slots that cool to the skill colour over
+  0.4 s, all lit at once and the same set from either end, so a fogged owner's
+  strip does not show where it came from. The beam itself is replicated for
+  `shared::loadout::BEAM_LINGER_SECS` (0.15 s), which the client reads for its
+  telegraph progress instead of a literal; the grey fade still marks its end.
+- **Hits.** A receipt flagged `core_hit` draws the row's recipe led by white
+  with a 25% wider flash; one without it (an edge hit) draws the same recipe
+  with half the particles at three quarters of the reach. The ray's recipe
+  leads with its HDR primary at scale 1.0, the full single-target reach, so
+  nothing of it is cut back without a word. When one strike lands more than
+  three receipts in a snapshot (a ray through a wave), receipts on heroes are
+  drawn first and each receipt keeps only its share of three whole bursts, at
+  least four particles of its recipe and its flash.
+- **Radiance.** A receipt flagged `radiance_burst` is the detonated mark, not a
+  second hit: it draws a gold pop in the colour of the overhead mark (a star,
+  a ring, four rising motes and a flash) instead of the recipe of the hit that
+  set it off, opens no link, and is drawn even when the hero who set the mark
+  is not seen, because it points nowhere.
+- **Luminous Field.** The field bursts where it stands, so its row names no
+  `link` and a recast-zone skill never links its receipts to the caster's
+  hand.
 
 ### Legacy projectile forms
 

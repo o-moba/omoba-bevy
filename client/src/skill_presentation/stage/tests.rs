@@ -1241,14 +1241,30 @@ fn kind_flip_pops_only_after_an_observed_warning() {
     // A wave first seen as a wave, and a warning that disappears without one, pop nothing.
     assert_eq!(shots(&[&[], std::slice::from_ref(&wave)]).len(), 0);
     assert_eq!(shots(&[std::slice::from_ref(&warning), &[]]).len(), 0);
-    // The ray becomes a beam: that flip is carried by the body and pops nothing.
+    // The ray becomes a beam: no pop, but an afterglow along the strip that outlives the
+    // few snapshots the beam is replicated for, lying inside its capsule.
     let ray = effect(61, SkillId::DawnRay, K::BeamWarning);
-    let flip = event(
-        &with(&ray, |e| e.kind = K::Beam),
-        step(Transition::KindFlipped),
+    let fired = with(&ray, |e| e.kind = K::Beam);
+    let flip = event(&fired, step(Transition::KindFlipped));
+    assert_eq!(
+        accents::stage_shot(&registry, &flip),
+        Some(OneShot::Afterglow)
     );
-    assert_eq!(accents::stage_shot(&registry, &flip), None);
-    assert!(accents::stage_burst(&registry, &flip, 0.0).is_empty());
+    let glow = accents::stage_burst(&registry, &flip, 0.0);
+    assert!(!glow.is_empty());
+    let (from, to) = (
+        Vec2::from_array(fired.position),
+        Vec2::from_array(fired.end),
+    );
+    for spec in &glow {
+        assert_eq!((spec.event_id, spec.source), (61, ParticleSource::Stage));
+        let at = spec.origin.xz();
+        let along = (at - from).dot((to - from).normalize());
+        assert!((0.0..=from.distance(to)).contains(&along));
+        let foot = from + (to - from).normalize() * along;
+        assert!(at.distance(foot) <= fired.radius + 1e-4);
+        assert!(spec.end_secs() > category::tail_secs(SkillId::DawnRay).unwrap());
+    }
 }
 
 /// The Northwall publishes how many projectiles it has stopped in `consumed_segments`. A

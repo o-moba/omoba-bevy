@@ -1426,7 +1426,7 @@ fn budget_from_data() {
             recasts: 7,
             areas: 3,
             moves: 10,
-            links: 14,
+            links: 13,
             impacts: 51 + 18,
             expires: 12,
         }
@@ -1752,8 +1752,8 @@ fn target_bodies_fit_the_part_and_material_budgets() {
     assert_eq!(
         long_cooldown,
         [
-            ("dawn_ray", 16),
-            ("dawn_ray", 16),
+            ("dawn_ray", 18),
+            ("dawn_ray", 18),
             ("iron_boundary", 16),
             ("orbital_collapse", 13),
             ("winter_divide", 15)

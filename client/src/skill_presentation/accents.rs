@@ -14,7 +14,8 @@ use super::stage::{EndKind, OwnerSeen, StageChange, StageEvent, Transition};
 use super::vocab::{AccentPattern, Archetype, ExpireKind, MovePattern, PaletteSlot, ParticleShape};
 use crate::combat_feedback::ConfirmedHit;
 use crate::game_vfx::{
-    Curve, Orient, ParticleSource, ParticleSpec, SkillBurst, Tint, jitter, unit_radius,
+    Curve, Orient, ParticleSource, ParticleSpec, STREAK_HALF_WIDTH, SkillBurst, Tint, jitter,
+    unit_radius,
 };
 use crate::net::GameStateSnapshot;
 use crate::player::Player;
@@ -35,6 +36,12 @@ pub(crate) const STAGE_SECS: f32 = 0.6;
 /// How long the flash of a released telegraph is seen: the payoff of a wait, so it stays
 /// for most of what a stage one-shot may last.
 const DISCHARGE_SECS: f32 = 0.5;
+/// The afterglow of a fired beam: bars in equal slots along the strip, each this share of
+/// its slot and never wider than this share of the strip, and how long they glow.
+const AFTERGLOW_BARS: usize = 6;
+const AFTERGLOW_FILL: f32 = 0.85;
+const AFTERGLOW_WIDTH: f32 = 0.8;
+const AFTERGLOW_SECS: f32 = 0.4;
 /// Wisps of a fade, and the pause between one pair of them and the next.
 const FADE_WISPS: usize = 6;
 const FADE_STEP_SECS: f32 = 0.03;
@@ -1081,6 +1088,9 @@ pub(crate) enum OneShot {
     Crumble,
     Discharge,
     Detonate,
+    /// A warning became the beam it warned of: the strip glows white-hot and cools to the
+    /// skill colour where the beam lay.
+    Afterglow,
 }
 
 impl OneShot {
@@ -1456,6 +1466,34 @@ pub(crate) fn stage_oneshot(
             }
             GeoShape::None => Vec::new(),
         },
+        OneShot::Afterglow => {
+            let (from, to, half_width) = match *geo {
+                GeoShape::Capsule { from, to, radius } => (from, to, radius),
+                GeoShape::Lane {
+                    from,
+                    to,
+                    half_width,
+                } => (from, to, half_width),
+                _ => return Vec::new(),
+            };
+            // Equal bars centred in equal slots, all lit at once: the same set from either
+            // end, so the glow does not say which end the beam left from. A streak is as
+            // wide as its length allows, so a bar is no longer than keeps it inside.
+            let white = palette.slot(PaletteSlot::White);
+            let slot = from.distance(to) / AFTERGLOW_BARS as f32;
+            let widest = AFTERGLOW_WIDTH * 2.0 * half_width * unit_radius(ParticleShape::Streak)
+                / STREAK_HALF_WIDTH;
+            let half = 0.5 * (slot * AFTERGLOW_FILL).min(widest);
+            (0..AFTERGLOW_BARS)
+                .map(|i| {
+                    let middle = from.lerp(to, (i as f32 + 0.5) / AFTERGLOW_BARS as f32);
+                    let along = (to - from).normalize_or_zero() * half;
+                    let mut glow = bar(middle - along, middle + along, AFTERGLOW_SECS, white);
+                    glow.end_color = Some(lead);
+                    glow
+                })
+                .collect()
+        }
         OneShot::Detonate => {
             let GeoShape::Ring { center, radius } = *geo else {
                 return Vec::new();
@@ -1681,8 +1719,8 @@ pub(crate) fn trap_snap(
 }
 
 /// The one-shot of one stage event. Only a row that gives the effect a body draws one. The
-/// flip of a warning pops when it sets a travelling body off; the beam a warning becomes is
-/// its own read.
+/// flip of a warning pops when it sets a travelling body off, and leaves an afterglow on
+/// the strip of the beam it became: that beam is replicated for a few snapshots only.
 pub(crate) fn stage_shot(registry: &SkillPresentation, event: &StageEvent) -> Option<OneShot> {
     let effect = &event.effect;
     let body = registry.body_for(effect)?;
@@ -1696,9 +1734,11 @@ pub(crate) fn stage_shot(registry: &SkillPresentation, event: &StageEvent) -> Op
     match event.change {
         StageChange::Ended(_) if cut => None,
         StageChange::Transition(Transition::Armed) => Some(OneShot::ArmPop),
-        StageChange::Transition(Transition::KindFlipped) => {
-            (event.effect.kind == EffectVisualKind::Bolt).then_some(OneShot::ArmPop)
-        }
+        StageChange::Transition(Transition::KindFlipped) => match event.effect.kind {
+            EffectVisualKind::Bolt => Some(OneShot::ArmPop),
+            EffectVisualKind::Beam => Some(OneShot::Afterglow),
+            _ => None,
+        },
         StageChange::Transition(Transition::SegmentBroken(side)) => {
             Some(OneShot::SegmentSnap(side))
         }
@@ -3032,6 +3072,7 @@ mod tests {
             OneShot::Crumble,
             OneShot::Discharge,
             OneShot::Detonate,
+            OneShot::Afterglow,
         ]
         .into_iter()
         .chain((0..5).map(OneShot::SegmentSnap));
@@ -3063,8 +3104,8 @@ mod tests {
             // A one-shot is drawn only for a boundary it can follow.
             let expected = match kind {
                 OneShot::Detonate => 4,
-                // The cage and the wall.
-                OneShot::SegmentSnap(_) => 2,
+                // The cage and the wall; the capsule and the lane.
+                OneShot::SegmentSnap(_) | OneShot::Afterglow => 2,
                 OneShot::ArmPop | OneShot::TurnSpark => 8,
                 OneShot::Fade | OneShot::Crumble | OneShot::Discharge => 9,
             };
@@ -3242,6 +3283,74 @@ mod tests {
             assert_eq!(first.len(), 2, "{there:?}");
             assert!(drawn.iter().any(|wisp| wisp.1 > 0), "{there:?}");
         }
+    }
+
+    /// The beam a warning became leaves an afterglow along its strip: white-hot bars that
+    /// cool to the skill colour, inside the strip across and along, all lit at once, and
+    /// the same set from either end, so a strip whose owner is not seen keeps its secret.
+    #[test]
+    fn the_afterglow_of_a_beam_lies_inside_its_strip_and_tells_no_direction() {
+        let near = Vec2::new(ORIGIN.x, ORIGIN.z);
+        let palette = palette();
+        let bars = |geo: GeoShape| {
+            let mut bars: Vec<_> = stage_oneshot(OneShot::Afterglow, &palette, &geo, ORIGIN.y, 5)
+                .into_iter()
+                .map(|bar| {
+                    (
+                        (bar.origin * 1e3).round().to_array().map(|v| v as i64),
+                        (bar.size * 1e3).round() as i64,
+                    )
+                })
+                .collect();
+            bars.sort();
+            bars
+        };
+        for (length, radius) in [(45.0, 0.8), (12.0, 0.8), (2.0, 0.8), (45.0, 1.2)] {
+            let far = near + Vec2::new(0.6, 0.8) * length;
+            let capsule = GeoShape::Capsule {
+                from: near,
+                to: far,
+                radius,
+            };
+            let glow = stage_oneshot(OneShot::Afterglow, &palette, &capsule, ORIGIN.y, 5);
+            assert_eq!(glow.len(), AFTERGLOW_BARS);
+            let mut covered = 0.0;
+            for bar in &glow {
+                assert_eq!(bar.shape, ParticleShape::Streak);
+                assert_eq!(
+                    (bar.color, bar.end_color),
+                    (palette.white, Some(palette.primary))
+                );
+                assert_eq!((bar.delay, bar.lifetime), (0.0, AFTERGLOW_SECS));
+                // Across, the bar stays well inside the strip.
+                let half_width = STREAK_HALF_WIDTH * bar.size;
+                assert!(
+                    half_width <= AFTERGLOW_WIDTH * radius + 1e-4,
+                    "{length} {radius}"
+                );
+                covered += 2.0 * unit_radius(ParticleShape::Streak) * bar.size;
+            }
+            assert!(covered <= length + 1e-3);
+            // A long strip glows along most of its length.
+            if length / radius < 20.0 {
+                assert!(
+                    covered >= AFTERGLOW_FILL * length - 1e-3,
+                    "{length} {radius}"
+                );
+            }
+            let back = GeoShape::Capsule {
+                from: far,
+                to: near,
+                radius,
+            };
+            assert_eq!(bars(capsule), bars(back), "{length} {radius}");
+        }
+        // Nothing but a strip has one.
+        let ring = GeoShape::Ring {
+            center: near,
+            radius: 3.0,
+        };
+        assert!(stage_oneshot(OneShot::Afterglow, &palette, &ring, ORIGIN.y, 5).is_empty());
     }
 
     #[test]

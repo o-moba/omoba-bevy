@@ -503,6 +503,12 @@ fn every_target_body_lists_the_parts_its_row_counts() {
     assert_eq!(total(SkillId::GuidingLantern, K::Lantern), 7);
     assert_eq!(total(SkillId::IronBoundary, K::Cage), 16);
     assert_eq!(total(SkillId::WinterDivide, K::BeamWarning), 15);
+    // The ray's read-out carries the two edges of its core: at its cooldown's budget.
+    assert_eq!(total(SkillId::DawnRay, K::BeamWarning), 18);
+    assert_eq!(
+        total(SkillId::DawnRay, K::BeamWarning),
+        total(SkillId::DawnRay, K::Beam)
+    );
 }
 
 /// The boundary parts of a body in the world, one entry for each: the vertices of a part
@@ -1754,6 +1760,103 @@ fn fill_completes_when_the_server_fires() {
     let (_, widest) = span(kite.iter().map(|point| point.x.atan2(point.z).abs()));
     assert!((far - 7.0).abs() < 1e-3, "{far}");
     assert!((widest - half_angle).abs() < 1e-3, "{widest}");
+}
+
+/// The bright middle of the fired ray is the core where it deals its whole damage: the
+/// catalog's `core_width` to each side of the axis, at the replicated width, framed by its
+/// shell and inside the outline. The telegraph warns of the same core with two fine lines
+/// in the skill colour, each the other's mirror image, that leave with the warning. A strip
+/// whose damage does not depend on its axis has neither.
+#[test]
+fn the_ray_draws_its_full_damage_core_from_the_catalog() {
+    let shared::loadout::SkillEffect::Beam {
+        width, core_width, ..
+    } = shared::loadout::skill(SkillId::DawnRay).effect
+    else {
+        panic!("Horizon Ray is a beam");
+    };
+    let share = geometry::damage_core(SkillId::DawnRay).unwrap();
+    assert!((share * width - core_width).abs() < 1e-6);
+    let fired = target_body(SkillId::DawnRay, K::Beam);
+    // The row says what is drawn: its core is authored as wide as the catalog's.
+    let authored = fired.core.as_ref().unwrap().size[0];
+    assert!(
+        (authored * width * 0.5 - core_width).abs() < 1e-4,
+        "{authored}"
+    );
+    for radius in [width, 1.2, 0.5] {
+        let e = with(&effect(SkillId::DawnRay, K::Beam), |e| {
+            e.radius = radius;
+            e.remaining_secs = 0.1;
+        });
+        let seen = first(&e, 0.0);
+        assert_eq!(seen.view.stage, Stage::Active);
+        let across = |role: Role| {
+            let slot = slots(&fired, &seen, |found| found == role)[0];
+            span(drawn(&slot, &seen).unwrap().iter().map(|point| point.x))
+        };
+        let (left, right) = across(Role::Core);
+        let half = share * radius;
+        assert!(
+            (right - half).abs() < 1e-4 && (left + half).abs() < 1e-4,
+            "{radius}"
+        );
+        let (_, shell) = across(Role::Shell);
+        assert!(shell >= right - 1e-4 && shell <= radius * (1.0 - ARC_BAND) + 1e-4);
+        // The warning is gone, and so are the edges of its core.
+        assert!(shown(&fired, &seen, |role| matches!(role, Role::Marker(_))).is_empty());
+    }
+
+    let warning = target_body(SkillId::DawnRay, K::BeamWarning);
+    let e = effect(SkillId::DawnRay, K::BeamWarning);
+    let seen = first(&e, 0.0);
+    assert_eq!(seen.view.stage, Stage::Telegraph);
+    let edges = slots(&warning, &seen, |role| matches!(role, Role::Marker(1 | 2)));
+    assert_eq!(edges.len(), 2);
+    let half = share * e.radius;
+    let line = e.radius * ARC_BAND * CORE_EDGE_SHARE;
+    let mut sides = Vec::new();
+    for edge in &edges {
+        assert_eq!(
+            part_paint(edge, &seen),
+            Some(Paint::Slot(PaletteSlot::Primary))
+        );
+        let points = drawn(edge, &seen).unwrap();
+        let (inner, outer) = span(points.iter().map(|point| point.x.abs()));
+        // A fine line on the inner side of the edge of the core, the whole length long.
+        assert!((outer - half).abs() < 1e-4 && (outer - inner - line).abs() < 1e-4);
+        let (near, far) = span(points.iter().map(|point| point.z));
+        assert!(near.abs() < 1e-3 && (far - 45.0).abs() < 1e-3);
+        sides.push(points[0].x.signum());
+    }
+    sides.sort_by(f32::total_cmp);
+    assert_eq!(sides, [-1.0, 1.0]);
+    // The outline is still the replicated capsule, the heavier line of the two.
+    assert!(e.radius * ARC_BAND > line);
+    // The staggered marks stand outside the core, between its edges and the outline.
+    for mark in shown(&warning, &seen, |role| matches!(role, Role::Satellite(_))) {
+        let reach = mark.scale.x * 0.5;
+        assert!(mark.translation.x.abs() - reach >= half - 1e-4, "{mark:?}");
+    }
+
+    // The wave's warning is a strip as well, but it has no core and its damage does not
+    // fall off: it has its read-out alone.
+    let wave = target_body(SkillId::HorizonWave, K::BeamWarning);
+    assert_eq!(
+        (wave.archetype, wave.marker),
+        (Archetype::Lane, Marker::FillToEdge)
+    );
+    let e = effect(SkillId::HorizonWave, K::BeamWarning);
+    let seen = first(&e, 0.0);
+    assert_eq!(
+        slots(&wave, &seen, |role| matches!(role, Role::Marker(_))).len(),
+        1
+    );
+    let mut cored = wave.clone();
+    cored.core = warning.core.clone();
+    let edges = slots(&cored, &seen, |role| matches!(role, Role::Marker(1 | 2)));
+    assert_eq!(edges.len(), 2);
+    assert!(edges.iter().all(|edge| drawn(edge, &seen).is_none()));
 }
 
 /// `rise_on_spawn` reads the age of an instance from its remaining time alone, so an

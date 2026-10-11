@@ -3,7 +3,8 @@
 //! effect fields and of what the client observed of the instance. Boundary parts are posed
 //! from replicated geometry alone, so no authored value can move or scale them. Authored
 //! parts never grow beyond their authored size and stay inside the boundary of an area
-//! body. Trails are laid on observed positions only.
+//! body; the one width the catalog decides is that of the core of a beam, which is the
+//! core where the beam deals its whole damage. Trails are laid on observed positions only.
 use super::category;
 use super::geometry::{self, GeoShape};
 use super::schema::{Body, Part};
@@ -87,6 +88,11 @@ const SHEET_HEIGHT: f32 = 0.01;
 /// (`cap_mesh`). The edge bars of the strip are as wide, so its outline is one line, about
 /// as heavy as the ring of a zone of the same size.
 const ARC_BAND: f32 = 0.12;
+/// The telegraph of a beam with a full-damage core draws the two edges of that core
+/// (`geometry::damage_core`) as bars this share of the strip's outline wide: a finer line
+/// inside the boundary, which stays the heavier read.
+const CORE_EDGES: u8 = 2;
+const CORE_EDGE_SHARE: f32 = 0.5;
 /// Band of the ring under a small body in flight, as a share of its radius, and the
 /// largest radius that is small. The ring of a zone (`MARKER_REACH`) would be a hairline
 /// there, and it is the one mark of whose skillshot it is. The band lies inside the
@@ -468,10 +474,14 @@ const fn trail_parts(trail: Trail) -> u8 {
     }
 }
 
-const fn marker_parts(marker: Marker) -> u8 {
+/// Marker parts of a body. The read-out of a strip with a `core` carries the two edges of
+/// that core as well, where the core is the full-damage core of a beam (`core_edge`): the
+/// telegraph warns of the band the fired beam lights.
+const fn marker_parts(archetype: Archetype, marker: Marker, has_core: bool) -> u8 {
     match marker {
         Marker::None => 0,
         Marker::ArmingPips => 3,
+        Marker::FillToEdge if matches!(archetype, Archetype::Lane) && has_core => 1 + CORE_EDGES,
         Marker::RemainingRing | Marker::FillToEdge | Marker::OwnerTether => 1,
     }
 }
@@ -487,7 +497,11 @@ pub(crate) fn part_total(body: &Body, shape: &GeoShape) -> usize {
             .as_ref()
             .map_or(0, |part| usize::from(part.count))
         + usize::from(trail_parts(body.trail))
-        + usize::from(marker_parts(body.marker))
+        + usize::from(marker_parts(
+            body.archetype,
+            body.marker,
+            body.core.is_some(),
+        ))
         + usize::from(body.model.is_some())
 }
 
@@ -657,7 +671,10 @@ pub(crate) fn part_list(body: &Body, shape: &GeoShape) -> Vec<PartSlot> {
         Marker::ArmingPips => PartMesh::Silhouette(Silhouette::Ball),
         Marker::OwnerTether => block,
     };
-    parts.extend((0..marker_parts(body.marker)).map(|index| engine(Role::Marker(index), marker)));
+    parts.extend(
+        (0..marker_parts(body.archetype, body.marker, plan.has_core))
+            .map(|index| engine(Role::Marker(index), marker)),
+    );
     if body.model.is_some() {
         parts.push(PartSlot {
             mesh: None,
@@ -992,14 +1009,29 @@ fn spans_strip(slot: &PartSlot) -> bool {
     slot.plan.archetype == Archetype::Lane && matches!(slot.role, Role::Core | Role::Shell)
 }
 
-/// The authored extents of a part in metres.
+/// Half-width of the full-damage core of the beam a strip draws, in metres: the catalog
+/// share of the replicated half-width, never past the inner side of the outline. `None`
+/// for a strip whose damage does not depend on the distance from its axis.
+fn core_half_width(strip: Strip, seen: &Seen) -> Option<f32> {
+    let share = geometry::damage_core(seen.effect.skill)?;
+    Some((share * strip.radius).min(strip.radius - strip.line))
+}
+
+/// The authored extents of a part in metres. Rule E-7 also gives the `core` of a lane
+/// whose beam has a full-damage core the width of that core, whatever its row authors:
+/// the bright middle of the beam is where it deals its whole damage, and nowhere else.
 fn extent(slot: &PartSlot, seen: &Seen) -> Vec3 {
     if moving(slot.plan.archetype) {
         return slot.size;
     }
     let size = slot.size * seen.effect.radius;
     match seen.strip().filter(|_| spans_strip(slot)) {
-        Some(strip) => Vec3::new(size.x, size.y, slot.size.z * strip.length),
+        Some(strip) => {
+            let lateral = core_half_width(strip, seen)
+                .filter(|_| slot.role == Role::Core)
+                .map_or(size.x, |half| 2.0 * half);
+            Vec3::new(lateral, size.y, slot.size.z * strip.length)
+        }
         None => size,
     }
 }
@@ -1606,6 +1638,7 @@ fn marker(slot: &PartSlot, index: u8, seen: &Seen) -> Option<Transform> {
             ))
             .filter(|_| left > 0.0)
         }
+        Marker::FillToEdge if index > 0 => core_edge(index, seen),
         Marker::FillToEdge => {
             // It ends at the inner side of the boundary line, where there is one.
             let progress = seen.view.progress;
@@ -1639,6 +1672,23 @@ fn marker(slot: &PartSlot, index: u8, seen: &Seen) -> Option<Transform> {
             )
         }
     }
+}
+
+/// Marker `index` (1 or 2) of a strip in its telegraph: the edge of the full-damage core
+/// of its beam on one side, a fine bar along the whole segment that lies on the inner side
+/// of that edge, as the outline lies on the inner side of the boundary. The two are each
+/// other's mirror image, so they say nothing about which end is the origin. A strip
+/// without such a core, and a beam that has fired, has none.
+fn core_edge(index: u8, seen: &Seen) -> Option<Transform> {
+    let strip = seen.strip()?;
+    let half = core_half_width(strip, seen)?;
+    if seen.view.stage != Stage::Telegraph {
+        return None;
+    }
+    let line = strip.line * CORE_EDGE_SHARE;
+    let side = if index == 1 { 1.0 } else { -1.0 };
+    let from = Vec3::new(side * (half - line * 0.5).max(0.0), MARKER_LIFT, 0.0);
+    bar(from, from + Vec3::Z * strip.length, line, LINE_HEIGHT)
 }
 
 /// The pose of one part relative to the root of its body, in the frame the client holds
@@ -1700,6 +1750,10 @@ pub(crate) fn part_paint(slot: &PartSlot, seen: &Seen) -> Option<Paint> {
         Role::Core | Role::Shell | Role::Satellite(_) => Paint::Slot(slot.slot),
         Role::Trail(_) if slot.plan.trail == Trail::Links => Paint::Slot(PaletteSlot::Secondary),
         Role::Trail(_) => Paint::Slot(PaletteSlot::Primary),
+        // The edges of the core of a beam are lines in the colour of the skill.
+        Role::Marker(index) if index > 0 && slot.plan.marker == Marker::FillToEdge => {
+            Paint::Slot(PaletteSlot::Primary)
+        }
         // Over a strip and in a cone the read-out is a second dim layer that spreads over
         // the first: a telegraph grows wider, never brighter.
         Role::Marker(_)
