@@ -903,6 +903,10 @@ fn render_draft(
                                     row_gap: Val::Px(4.0),
                                     max_height: Val::Px(84.0),
                                     overflow: Overflow::scroll_y(),
+                                    // A scroll container has no content
+                                    // minimum: in the overflowing desktop
+                                    // picker it would shrink to nothing.
+                                    flex_shrink: 0.0,
                                     ..default()
                                 })
                                 .with_children(|row| {
@@ -1405,10 +1409,9 @@ mod tests {
         }
     }
 
-    #[test]
-    fn phone_avatar_picker_has_visible_tiles_and_raw_taps_switch_tabs_and_select() {
+    /// The draft screen laid out by Bevy's UI in a `width`x`height` window.
+    fn draft_ui_app(profile: crate::platform::UiProfile, width: f32, height: f32) -> (App, Entity) {
         use bevy::camera::{ComputedCameraValues, RenderTargetInfo};
-        use bevy::input::touch::{TouchInput, TouchPhase};
         let mut app = request_app();
         app.add_plugins((
             MinimalPlugins,
@@ -1427,7 +1430,7 @@ mod tests {
         .init_resource::<Assets<TextureAtlasLayout>>()
         .init_resource::<DraftScrollMemory>()
         .init_resource::<AvatarThumbnails>()
-        .insert_resource(crate::ui::UiPlatform(crate::platform::UiProfile::Mobile))
+        .insert_resource(crate::ui::UiPlatform(profile))
         .init_resource::<crate::ui::GestureEpoch>()
         .init_resource::<SentRequests>()
         .add_message::<SessionUiCommand>()
@@ -1455,14 +1458,14 @@ mod tests {
             ..default()
         };
         window.resolution.set_scale_factor_override(Some(1.0));
-        window.resolution.set(852.0, 393.0);
+        window.resolution.set(width, height);
         let window = app.world_mut().spawn((window, PrimaryWindow)).id();
         app.world_mut().spawn((
             Camera2d,
             Camera {
                 computed: ComputedCameraValues {
                     target_info: Some(RenderTargetInfo {
-                        physical_size: UVec2::new(852, 393),
+                        physical_size: UVec2::new(width as u32, height as u32),
                         scale_factor: 1.0,
                     }),
                     ..default()
@@ -1475,6 +1478,13 @@ mod tests {
         for _ in 0..5 {
             app.update();
         }
+        (app, window)
+    }
+
+    #[test]
+    fn phone_avatar_picker_has_visible_tiles_and_raw_taps_switch_tabs_and_select() {
+        use bevy::input::touch::{TouchInput, TouchPhase};
+        let (mut app, window) = draft_ui_app(crate::platform::UiProfile::Mobile, 852.0, 393.0);
         let tap = |app: &mut App, id: &str| {
             let button = crate::ui::test_id::harness::find(app.world_mut(), id).unwrap();
             let node = app.world().get::<ComputedNode>(button).unwrap();
@@ -1548,6 +1558,31 @@ mod tests {
             "no Select request for {slug} among the {} requests sent",
             sent.len()
         );
+    }
+
+    /// At 1280x720 the picker overflows and scrolls. The weapon rows are
+    /// scroll containers themselves, so without `flex_shrink: 0` they were
+    /// squeezed to no height and no weapon could be picked in the draft.
+    #[test]
+    fn desktop_weapon_rows_keep_their_height_at_1280x720() {
+        let (mut app, _) = draft_ui_app(crate::platform::UiProfile::Desktop, 1280.0, 720.0);
+        for id in ["Draft-Handheld-default", "Draft-Handheld-empty"] {
+            let button = crate::ui::test_id::harness::find(app.world_mut(), id)
+                .unwrap_or_else(|| panic!("{id} missing"));
+            let node = app.world().get::<ComputedNode>(button).unwrap();
+            let transform = app.world().get::<UiGlobalTransform>(button).unwrap();
+            let rect = crate::ui::gesture::logical_ui_rect(
+                node,
+                transform,
+                app.world().get::<bevy::ui::CalculatedClip>(button),
+                1.0,
+            );
+            assert!(
+                rect.width() >= 40.0 && rect.height() >= 24.0,
+                "{id} squeezed to {rect:?}"
+            );
+            assert!(rect.min.y >= 0.0 && rect.max.y <= 720.0, "{id} at {rect:?}");
+        }
     }
 
     #[test]
