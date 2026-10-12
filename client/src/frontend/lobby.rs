@@ -905,21 +905,19 @@ fn spawn_social(parent: &mut ChildSpawnerCommands, sig: &LobbySignature, phone: 
                                             ..default()
                                         })
                                         .with_children(|row| {
-                                            for (preset, key, id) in [
+                                            for (preset, id) in [
                                                 (
                                                     crate::session_config::ServerPreset::Beta,
-                                                    "phone.server.beta",
                                                     "LobbyServerBeta",
                                                 ),
                                                 (
                                                     crate::session_config::ServerPreset::Local,
-                                                    "phone.server.local",
                                                     "LobbyServerLocal",
                                                 ),
                                             ] {
                                                 button(
                                                     row,
-                                                    tr(key),
+                                                    tr(preset.label_key()),
                                                     112.0,
                                                     ButtonKind::Secondary,
                                                     super::server_field::ServerFieldAction::Preset(

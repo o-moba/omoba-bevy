@@ -170,14 +170,19 @@ pub(crate) fn preferences_path() -> Option<PathBuf> {
     )
 }
 
-/// Validates `host:port` or a parseable [`SocketAddr`] string for client config.
+/// Validates `host:port` or a parseable [`SocketAddr`] string for client config. A
+/// contour (dev) build also refuses the production lobby here, so neither a typed
+/// address, a saved one, `GAME_SERVER_ADDR` nor a match allocation can reach it
+/// ([`crate::session_config::endpoint_allowed`]).
 pub fn validate_game_server_addr(raw: &str) -> Option<String> {
     let t = raw.trim();
     if t.is_empty() {
         return None;
     }
     if let Ok(address) = t.parse::<SocketAddr>() {
-        return (address.port() != 0).then(|| address.to_string());
+        return (address.port() != 0
+            && crate::session_config::endpoint_allowed(&address.ip().to_string()))
+        .then(|| address.to_string());
     }
     let (host, port_str) = t.rsplit_once(':')?;
     let host = host.trim();
@@ -198,7 +203,8 @@ pub fn validate_game_server_addr(raw: &str) -> Option<String> {
         return None;
     }
     let port: u16 = port_str.trim().parse().ok()?;
-    (port != 0).then(|| format!("{host}:{port}"))
+    (port != 0 && crate::session_config::endpoint_allowed(dns_name))
+        .then(|| format!("{host}:{port}"))
 }
 
 pub fn clamp_model_target_height(value: f32) -> f32 {
