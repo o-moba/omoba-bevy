@@ -1,6 +1,6 @@
 # OMOBA DEV lobby and dev tester builds
 
-The DEV contour runs on a **dedicated dev VPS** (Ubuntu 24.04 amd64, about 2 vCPU / 4 GB),
+The DEV contour runs on a **dedicated dev VPS** (Ubuntu 24.04 or 26.04 amd64, about 2 vCPU / 4 GB; `vds-dev` runs 26.04),
 never on the production VPS. Its ssh alias is `vds-dev` (root, key auth). Its address is
 known only from `DEV_IP`, and every tool reads it from the environment.
 
@@ -105,12 +105,30 @@ make compatibility-check GAME_SERVER_ADDR=lobby.dev.omoba.io:4100 \
   COMPATIBILITY_MANIFEST=dist/v$V-dev/compatibility.json
 ```
 
+`release.py build linux` also builds the Bevy client. When only the lobby changes, or
+`target/linux-docker` has been pruned and disk is short, build just the two binaries in the
+same image, mounts and compiled defaults, then ship them with `--binary`:
+
+```sh
+T=$(cd "$(git rev-parse --path-format=absolute --git-common-dir)/.." && pwd)/target/linux-docker
+docker run --rm --platform linux/amd64 -v "$PWD:/src" -v "$T:/cache" -w /src \
+  -e CARGO_TARGET_DIR=/cache -e OMOBA_DEFAULT_GAME_SERVER_ADDR=lobby.dev.omoba.io:4100 \
+  -e OMOBA_DEFAULT_REGISTRY_URL=https://registry.dev.ekza.io \
+  -e OMOBA_DEFAULT_PASSPORT_URL=http://127.0.0.1:9/api/passport -e OMOBA_DEFAULT_CONFIG_DIR_SUFFIX=dev \
+  rust:1.95.0-bookworm cargo build --locked --release -p server -p omoba-account-api
+python3 ops/vps/dev/lobby_dev.py ship --binary "$T/release/server" --account-api "$T/release/omoba-account-api" \
+  --version "$V" --check      # then --apply
+```
+
+The `-e` values are `release.py build linux --contour dev --dry-run`'s `compiled_defaults`, and
+the toolchain is `rust-toolchain.toml`'s. Such a release records `"package": null` in `BUILD.json`.
+
 The dev Linux package carries `omoba-server` (the lobby) and `omoba-account-api` (only its
 `migrate` command runs, never the service).
 
 What `--apply` does:
 
-1. Preflight. It refuses on any production marker: unit `omoba-lobby`, user `omoba`, `/opt/omoba`, `/var/lib/omoba`, `/opt/ekza-*`, the NPM edge, or address 77.246.105.57. It also refuses when dev match workers are running, when UDP 4100/41100 is held by something else, when less than 600 MiB is available, when `lobby.dev.omoba.io` is missing, wrong, or has AAAA records, when `supabase_db_ekza-dev` is not running or is published beyond `127.0.0.1:54322`, when an existing `database.env` is not root-owned 0600 or names anything but the dev URL, and when a database `omoba_dev` exists with another owner.
+1. Preflight. It refuses on any production marker: unit `omoba-lobby`, user `omoba`, `/opt/omoba`, `/var/lib/omoba`, `/opt/ekza-studio`, `/opt/ekza-mirror`, the NPM edge, or address 77.246.105.57. The dev host's own `/opt/ekza-dev` (ekza-registry `deploy/dev`) is not a marker. It also refuses when dev match workers are running, when UDP 4100/41100 is held by something else, when less than 600 MiB is available, when `lobby.dev.omoba.io` is missing, wrong, or has AAAA records, when `supabase_db_ekza-dev` is not running or is published beyond `127.0.0.1:54322`, when an existing `database.env` is not root-owned 0600 or names anything but the dev URL, and when a database `omoba_dev` exists with another owner.
 2. Stage. It creates user `omoba-dev`, `/opt/omoba-dev/releases/<version>-dev-<sha7>/` and `/var/lib/omoba-dev/{matches,lobby-outbox}`. Release directories are immutable.
 3. Upload. It sends `server.part` and `omoba-account-api.part` (only the missing ones), then checks each sha256 on the host.
 4. Database, before the running lobby is touched. Over the container's local socket it creates the three roles (NOLOGIN) and `omoba_dev` when missing. When `database.env` is missing, it generates the game role's password on the host and writes the file (root, 0600). It sets that password on `omoba_dev_game`, gives `omoba_dev_owner` a temporary login that expires in 15 minutes, runs the release's `omoba-account-api migrate`, applies `grants.sql` as the owner, and disables the owner login again. SQL goes over stdin and the URL over the child's environment, never argv. Error output is redacted. If any of this fails, the running lobby keeps running.

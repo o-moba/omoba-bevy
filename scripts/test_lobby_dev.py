@@ -443,6 +443,7 @@ class ProductionHostRefusals(HostCase):
         "/var/lib/omoba": lambda fake: os.makedirs(fake.p("/var/lib/omoba/matches")),
         "NPM edge": lambda fake: os.makedirs(fake.p("/root/docker/nginx-proxy-manager")),
         "/opt/ekza-studio": lambda fake: os.makedirs(fake.p("/opt/ekza-studio/config")),
+        "/opt/ekza-mirror": lambda fake: os.makedirs(fake.p("/opt/ekza-mirror")),
         "loaded prod unit": lambda fake: fake.units.update({"omoba-lobby": {"LoadState": "loaded"}}),
         "prod user": lambda fake: fake.users.update(
             {"omoba": {"uid": 999, "home": "/var/lib/omoba", "shell": "/usr/sbin/nologin"}}),
@@ -470,6 +471,13 @@ class ProductionHostRefusals(HostCase):
         self.setUp()
         self.ship()
         self.assertEqual(self.ship("0.44.0-dev-def5678", b"dev-2")[0]["release"], "0.44.0-dev-def5678")
+
+    def test_the_dev_host_registry_tooling_is_not_a_production_marker(self):
+        # vds-dev also runs ekza-registry deploy/dev (/opt/ekza-dev, /etc/ekza-dev).
+        os.makedirs(self.fake.p("/opt/ekza-dev/secrets"))
+        os.makedirs(self.fake.p("/etc/ekza-dev"))
+        self.assertEqual(self.fresh().production_markers(), [])
+        self.assertEqual(self.ship()[0]["status"], "DEPLOYED")
 
     def test_a_production_marker_appearing_during_the_switch_is_reported(self):
         self.fake.prod_marker_on_start = True
