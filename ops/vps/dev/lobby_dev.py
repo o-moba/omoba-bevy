@@ -28,6 +28,20 @@ production marker exists (unit omoba-lobby, user omoba, /opt/omoba,
 under /opt/omoba-dev, /var/lib/omoba-dev and its own unit file, never
 interrupts a running dev match, and rolls back to the previous release on any
 failed start. Re-shipping the active release with the same unit is a no-op.
+
+Career database. A public lobby refuses to start without OMOBA_DATABASE_URL
+(server/src/runtime/mod.rs), and without storage it cannot queue anybody:
+matchmaking needs a signed account profile. The dev lobby therefore gets its own
+database `omoba_dev` and roles omoba_dev_{owner,game,portal} in the dev Supabase
+stack's Postgres on this host (container supabase_db_ekza-dev, published on
+127.0.0.1:54322 only). Activation creates them when missing, generates the game
+role's password on the host into /opt/omoba-dev/database.env (root, 0600; the
+unit's only EnvironmentFile), runs the release's `omoba-account-api migrate`
+under a temporary, expiring owner login, applies account-api/ops/grants.sql as
+the owner and disables the owner login again. The file must name a loopback
+database URL for omoba_dev_game@omoba_dev and nothing else; a production
+Supabase name, the production VPS or production role names are refused. No
+secret is printed, passed in argv or written outside that file.
 """
 from __future__ import annotations
 
@@ -39,6 +53,7 @@ import json
 import os
 import posixpath
 import re
+import secrets
 import socket
 import subprocess
 import sys
@@ -46,6 +61,7 @@ import tarfile
 import tempfile
 import time
 from pathlib import Path
+from urllib.parse import unquote, urlsplit
 
 # ---------------------------------------------------------------- the dev contour
 
@@ -66,25 +82,52 @@ UNIT_PATH = "/etc/systemd/system/omoba-lobby-dev.service"
 LOBBY_PORT = 4100
 MATCH_PORTS = frozenset({41100})
 REGISTRY = "https://registry.dev.ekza.io"
+# No dev Ekza passport exists yet; the SDK default (avatar.ekza.io) is production. A closed
+# loopback port makes protected-avatar tickets fail closed. Mirrors scripts/release.py DEV_PASSPORT.
+PASSPORT = "http://127.0.0.1:9/api/passport"
 DEFAULT_PUBLIC_HOST = "lobby.dev.omoba.io"
 PUBLIC_HOST_KEY = "OMOBA_MATCH_PUBLIC_HOST"
 MIN_AVAILABLE_MIB = 600  # MemoryMax=512M plus headroom for the rest of the dev host
 DEV_HOSTNAME = re.compile(r"(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+dev\.(?:omoba|ekza)\.io")
 
+# Release directory contents: the lobby binary and its schema migration tool (never a service).
+ACCOUNT_API = "omoba-account-api"
+RELEASE_BINARIES = ("server", ACCOUNT_API)
+GRANTS = "account-api/ops/grants.sql"
+
+# Career database in the dev Supabase stack's Postgres (Supabase CLI project ekza-dev).
+DATABASE_ENV = OPT + "/database.env"
+DATABASE_URL_KEY = "OMOBA_DATABASE_URL"
+DB_CONTAINER = "supabase_db_ekza-dev"
+DB_PORT = 54322
+DB_ADMIN = "supabase_admin"  # superuser over the container's local socket (trust)
+DB_NAME = "omoba_dev"
+DB_OWNER, DB_GAME, DB_PORTAL = "omoba_dev_owner", "omoba_dev_game", "omoba_dev_portal"
+DB_ROLES = (DB_OWNER, DB_GAME, DB_PORTAL)
+DB_LOOPBACK = frozenset({"127.0.0.1", "localhost", "::1"})
+DB_PASSWORD = re.compile(r"[A-Za-z0-9_-]{24,128}")
+MIGRATION_LOGIN_SECONDS = 900
+
 # ---------------------------------------------------------------- production (never a target)
 
 PROD_SSH_ALIASES = frozenset({"vds-eternal"})
 PROD_IPS = frozenset({"77.246.105.57"})
-PROD_HOSTNAMES = frozenset({"registry.ekza.io", "studio.ekza.io", "app.omoba.io", "omoba.io",
-                            "ekza.io", "wss.ekza.io", "www.omoba.io", "www.ekza.io"})
+# Every omoba.io / ekza.io name outside the dev zones is production (as in scripts/release.py),
+# including names not listed anywhere yet, such as avatar.ekza.io (the production passport).
+PUBLIC_ZONES = ("omoba.io", "ekza.io")
+DEV_ZONES = ("dev.omoba.io", "dev.ekza.io")
+PROD_DB_NAMES = frozenset({"omoba"})
+PROD_DB_ROLES = frozenset({"omoba_owner", "omoba_game", "omoba_portal"})
+PROD_DB_PORTS = frozenset({2003})
 PROD_UNIT = "omoba-lobby"
 PROD_USER = "omoba"
 PROD_UNIT_PATH = "/etc/systemd/system/omoba-lobby.service"
 PROD_PATHS = ("/opt/omoba", "/var/lib/omoba", "/opt/ekza-studio", "/opt/ekza-mirror",
               "/root/docker/nginx-proxy-manager", PROD_UNIT_PATH)
 PROD_PORTS = frozenset({4000, 41000, 41001})
-# Forbidden-value guard only: the production Supabase project must never appear here.
-FORBIDDEN_TOKENS = ("snrjxwutqxokeujuiepn",)
+# Forbidden-value guard only: the production Supabase project and hosted Supabase must never
+# appear in the unit or the database URL.
+FORBIDDEN_TOKENS = ("snrjxwutqxokeujuiepn", "supabase.co", "supabase.com")
 
 RELEASE_NAME = re.compile(r"\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?-dev-[0-9a-f]{7,40}")
 DEV_PACKAGE = re.compile(r"omoba-(\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?)-dev-linux-x64\.tar\.gz")
@@ -93,7 +136,7 @@ SSH_ALIAS = re.compile(r"(?:[a-z_][a-z0-9_-]*@)?[A-Za-z0-9][A-Za-z0-9._-]*")
 
 # Exact values the dev unit must carry; OMOBA_MATCH_PUBLIC_HOST is checked separately.
 UNIT_SERVICE = {
-    "User": USER, "Group": USER, "WorkingDirectory": STATE,
+    "User": USER, "Group": USER, "WorkingDirectory": STATE, "EnvironmentFile": DATABASE_ENV,
     "ExecStart": CURRENT + "/server", "ReadWritePaths": STATE,
     "MemoryHigh": "448M", "MemoryMax": "512M", "CPUQuota": "100%", "OOMScoreAdjust": "300",
     "TasksMax": "96", "UMask": "0077",
@@ -104,9 +147,11 @@ UNIT_ENV = {
     "OMOBA_MATCH_ROOT": STATE + "/matches", "OMOBA_CAREER_OUTBOX": STATE + "/lobby-outbox",
     "OMOBA_MATCH_FIRST_PORT": str(min(MATCH_PORTS)), "OMOBA_MATCH_CAPACITY": str(len(MATCH_PORTS)),
     "OMOBA_MATCH_EXECUTABLE": CURRENT + "/server", "OMOBA_REGISTRY_URL": REGISTRY,
+    "OMOBA_PASSPORT_URL": PASSPORT,
 }
-UNIT_FORBIDDEN_KEYS = ("EnvironmentFile",)
-UNIT_FORBIDDEN_ENV = ("OMOBA_DATABASE_URL",)
+# The database URL is a secret and lives only in DATABASE_ENV; EKZA_PASSPORT_URL is the
+# SDK-wide passport fallback and has no place in the dev unit.
+UNIT_FORBIDDEN_ENV = (DATABASE_URL_KEY, "EKZA_PASSPORT_URL")
 
 
 class Refused(SystemExit):
@@ -127,12 +172,18 @@ def touches_production(path: str) -> bool:
     return any(within(path, prod) for prod in PROD_PATHS)
 
 
+def in_zone(name: str, zones) -> bool:
+    return any(name == zone or name.endswith("." + zone) for zone in zones)
+
+
 def is_production_name(value: str) -> bool:
-    """A production ssh alias, address or public hostname (case and trailing dot ignored)."""
+    """A production ssh alias, address, or any omoba.io / ekza.io name outside the dev zones
+    (case and trailing dot ignored)."""
     name = (value or "").strip().lower().rstrip(".")
     if "@" in name:
         name = name.rsplit("@", 1)[1]
-    return name in PROD_SSH_ALIASES or name in PROD_IPS or name in PROD_HOSTNAMES
+    return name in PROD_SSH_ALIASES or name in PROD_IPS or \
+        (in_zone(name, PUBLIC_ZONES) and not in_zone(name, DEV_ZONES))
 
 
 def assert_dev_constants() -> None:
@@ -146,6 +197,12 @@ def assert_dev_constants() -> None:
         raise Refused("dev ports overlap production ports")
     if is_production_name(DEFAULT_HOST) or is_production_name(DEFAULT_PUBLIC_HOST):
         raise Refused("dev host defaults name production")
+    if touches_production(DATABASE_ENV) or not within(DATABASE_ENV, OPT):
+        raise Refused(f"dev database file {DATABASE_ENV} is outside {OPT}")
+    if DB_NAME in PROD_DB_NAMES or set(DB_ROLES) & PROD_DB_ROLES or DB_PORT in PROD_DB_PORTS:
+        raise Refused("dev database name, roles or port equal production ones")
+    if urlsplit(PASSPORT).hostname not in DB_LOOPBACK:
+        raise Refused(f"dev passport {PASSPORT} is not the closed loopback placeholder")
 
 
 def ipv4_literal(value: str) -> str | None:
@@ -245,12 +302,10 @@ def check_unit(text: str) -> list[str]:
             validate_public_host(public[0])
         except Refused as refusal:
             errors.append(refusal.message)
-    for key in UNIT_FORBIDDEN_KEYS:
-        if f"Service.{key}" in directives:
-            errors.append(f"[Service] {key} is not allowed in the guest-only dev lobby")
     for key in UNIT_FORBIDDEN_ENV:
         if key in environment:
-            errors.append(f"Environment {key} is not allowed in the guest-only dev lobby")
+            errors.append(f"Environment {key} is not allowed in the dev unit "
+                          f"(the dev database URL lives only in {DATABASE_ENV})")
     for key, values in directives.items():
         if len(values) > 1 and not key.endswith(".Environment"):
             errors.append(f"{key} appears {len(values)} times")
@@ -271,7 +326,7 @@ def check_unit(text: str) -> list[str]:
     if ports & PROD_PORTS:
         errors.append(f"ports {sorted(ports & PROD_PORTS)} belong to the production lobby")
     if any(token in text.lower() for token in FORBIDDEN_TOKENS):
-        errors.append("the unit mentions the production Supabase project")
+        errors.append("the unit mentions the production Supabase project or hosted Supabase")
     if UNIT_PATH.rsplit("/", 1)[1] != UNIT + ".service":
         errors.append("unexpected unit file name")
     return errors
@@ -295,6 +350,161 @@ def validate_release_name(name: str) -> str:
     return name
 
 
+def release_files(payload: dict, require_tool: bool = True) -> dict[str, str]:
+    """{file in the release directory: expected sha256}. Old rollback records lack the tool."""
+    files = {"server": payload.get("sha256")}
+    if payload.get("account_api_sha256") or require_tool:
+        files[ACCOUNT_API] = payload.get("account_api_sha256")
+    for name, digest in files.items():
+        if not (isinstance(digest, str) and re.fullmatch(r"[0-9a-f]{64}", digest)):
+            raise Refused(f"payload lacks the sha256 of {name}")
+    return files
+
+
+# ---------------------------------------------------------------- career database
+
+def _printable(value: str) -> str:
+    """Only short, plain identifiers are echoed; anything else could be a pasted secret."""
+    return value if re.fullmatch(r"[A-Za-z0-9._:\[\]-]{1,64}", value or "") else "(not shown)"
+
+
+def database_url(user: str, password: str, database: str = DB_NAME) -> str:
+    return f"postgres://{user}:{password}@127.0.0.1:{DB_PORT}/{database}"
+
+
+def database_env_text(url: str) -> str:
+    return (f"# OMOBA DEV lobby career database: written on the dev VPS by ops/vps/dev/lobby_dev.py.\n"
+            f"# root:root 0600, read by systemd for {UNIT}. Never copy it off this host.\n"
+            f"{DATABASE_URL_KEY}={url}\n")
+
+
+def database_url_problems(url: str) -> list[str]:
+    """Why `url` is not the dev lobby's loopback omoba_dev_game@omoba_dev URL; never echoes it."""
+    lowered = (url or "").lower()
+    problems = []
+    if any(token in lowered for token in FORBIDDEN_TOKENS) or any(ip in lowered for ip in PROD_IPS):
+        problems.append("names production (hosted Supabase, the production project or the production VPS)")
+    try:
+        parts = urlsplit(url or "")
+        port = parts.port
+    except ValueError:
+        return problems + ["is not a postgres://user:password@127.0.0.1:port/database URL"]
+    if parts.scheme not in ("postgres", "postgresql"):
+        problems.append("is not a postgres:// URL")
+    host = (parts.hostname or "").lower()
+    if host not in DB_LOOPBACK:
+        problems.append(f"host {_printable(host)} is not loopback; the dev career database runs on this host")
+    if port != DB_PORT:
+        problems.append(f"port {port} is not the dev Supabase database port {DB_PORT}")
+    user = unquote(parts.username or "")
+    if user in PROD_DB_ROLES or user != DB_GAME:
+        problems.append(f"user {_printable(user)} is not {DB_GAME}")
+    if not DB_PASSWORD.fullmatch(unquote(parts.password or "")):
+        problems.append("password must be 24-128 characters of [A-Za-z0-9_-]")
+    database = unquote(parts.path.lstrip("/"))
+    if database in PROD_DB_NAMES or database != DB_NAME:
+        problems.append(f"database {_printable(database)} is not {DB_NAME}")
+    if parts.query or parts.fragment or any(ch.isspace() for ch in url or ""):
+        problems.append("must not carry query parameters, a fragment or spaces")
+    return problems
+
+
+def parse_database_env(text: str) -> tuple[str | None, list[str]]:
+    """(URL, problems) of a database.env; only one OMOBA_DATABASE_URL line is allowed, because
+    EnvironmentFile settings override the unit's Environment= (passport, registry, ports)."""
+    url, problems = None, []
+    for number, raw in enumerate(text.splitlines(), 1):
+        line = raw.strip()
+        if not line or line.startswith(("#", ";")):
+            continue
+        key, separator, value = line.partition("=")
+        if not separator or key.strip() != DATABASE_URL_KEY:
+            problems.append(f"line {number}: only {DATABASE_URL_KEY}=... is allowed")
+            continue
+        if url is not None:
+            problems.append(f"{DATABASE_URL_KEY} appears more than once")
+            continue
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"":
+            value = value[1:-1]
+        url = value
+    if url is None:
+        problems.append(f"{DATABASE_URL_KEY} is missing")
+    else:
+        problems += [f"{DATABASE_URL_KEY} {problem}" for problem in database_url_problems(url)]
+    return url, problems
+
+
+def password_of(url: str) -> str:
+    return unquote(urlsplit(url).password or "")
+
+
+def redact(text: str, hidden=()) -> str:
+    for value in hidden:
+        if value:
+            text = text.replace(value, "<redacted>")
+    text = re.sub(r"(?i)(password\s+)'[^']*'", r"\1'<redacted>'", text)
+    return re.sub(r"://([^:/@\s]+):[^@\s]*@", r"://\1:<redacted>@", text)
+
+
+def sql_secret(value: str) -> str:
+    if not DB_PASSWORD.fullmatch(value):
+        raise Refused("internal: a database password with unexpected characters")
+    return f"'{value}'"
+
+
+STATE_SQL = f"""-- lobby_dev:state
+SELECT json_build_object(
+  'roles', (SELECT coalesce(json_object_agg(rolname, rolcanlogin), '{{}}'::json) FROM pg_roles
+            WHERE rolname IN ('{DB_OWNER}', '{DB_GAME}', '{DB_PORTAL}')),
+  'database_owner', (SELECT pg_get_userbyid(datdba) FROM pg_database WHERE datname = '{DB_NAME}'),
+  'superuser', (SELECT rolsuper FROM pg_roles WHERE rolname = current_user));
+"""
+SCHEMA_SQL = """-- lobby_dev:schema
+SELECT to_regclass('public.career_schema_version') IS NOT NULL
+   AND to_regclass('portal.schema_version') IS NOT NULL;
+"""
+OWNER_NOLOGIN_SQL = f"""-- lobby_dev:owner-nologin
+ALTER ROLE {DB_OWNER} NOLOGIN PASSWORD NULL VALID UNTIL 'infinity';
+"""
+
+
+def bootstrap_sql(game_password: str) -> str:
+    """Roles and database when missing (idempotent); the game role's password from database.env."""
+    roles = ", ".join(f"'{role}'" for role in DB_ROLES)
+    return f"""-- lobby_dev:bootstrap
+SELECT format('CREATE ROLE %I NOLOGIN', r) FROM unnest(ARRAY[{roles}]) AS r
+ WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = r) \\gexec
+SELECT 'CREATE DATABASE {DB_NAME} OWNER {DB_OWNER}'
+ WHERE NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = '{DB_NAME}') \\gexec
+REVOKE ALL ON DATABASE {DB_NAME} FROM PUBLIC;
+GRANT CONNECT ON DATABASE {DB_NAME} TO {DB_GAME}, {DB_PORTAL};
+ALTER ROLE {DB_OWNER} NOLOGIN;
+ALTER ROLE {DB_PORTAL} NOLOGIN;
+ALTER ROLE {DB_GAME} LOGIN PASSWORD {sql_secret(game_password)};
+"""
+
+
+def owner_login_sql(password: str, until: str) -> str:
+    if not re.fullmatch(r"\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\+00", until):
+        raise Refused("internal: unexpected VALID UNTIL timestamp")
+    return f"""-- lobby_dev:owner-login
+ALTER ROLE {DB_OWNER} LOGIN PASSWORD {sql_secret(password)} VALID UNTIL '{until}';
+"""
+
+
+def grants_sql(grants: str) -> str:
+    """account-api/ops/grants.sql run as the schema owner, as in production."""
+    return (f"-- lobby_dev:grants\nSET ROLE {DB_OWNER};\n\\set portal_role {DB_PORTAL}\n"
+            f"\\set game_role {DB_GAME}\n{grants}\nRESET ROLE;\n")
+
+
+def validate_grants(grants) -> str:
+    if not isinstance(grants, str) or not 0 < len(grants) < 65536 or ':"game_role"' not in grants:
+        raise Refused(f"payload lacks {GRANTS}")
+    return grants
+
+
 # ---------------------------------------------------------------- host half
 
 def _resolve(host: str, family: int) -> set[str]:
@@ -309,18 +519,19 @@ class Host:
     filesystem, fake commands and fake DNS; the remote entry point always uses
     root "/", real commands and the host's resolver."""
 
-    def __init__(self, root: str = "/", run=None, sleep=time.sleep, resolve=_resolve):
+    def __init__(self, root: str = "/", run=None, sleep=time.sleep, resolve=_resolve, root_uid: int = 0):
         self.root = root
         self.run = run or self._run
         self.sleep = sleep
         self.resolve = resolve
+        self.root_uid = root_uid  # owner database.env must have; tests use their own uid
         self.mutating = False
         assert_dev_constants()
 
     @staticmethod
-    def _run(args, check=True):
+    def _run(args, check=True, input=None, env=None, timeout=120):
         try:
-            result = subprocess.run(args, capture_output=True, text=True, timeout=120)
+            result = subprocess.run(args, capture_output=True, text=True, timeout=timeout, input=input, env=env)
         except FileNotFoundError:
             result = subprocess.CompletedProcess(args, 127, "", f"{args[0]}: not found")
         if check and result.returncode:
@@ -447,6 +658,175 @@ class Host:
                             "and clients would try IPv6 first: remove them")
         return problems
 
+    # ---- career database (dev Supabase Postgres on this host)
+
+    def psql(self, database: str, sql: str, hidden=(), check: bool = True):
+        """SQL on stdin (never argv) as the container's local superuser."""
+        if database not in ("postgres", DB_NAME):
+            raise Refused(f"internal: psql on database {database}")
+        result = self.run(["docker", "exec", "-i", DB_CONTAINER, "psql", "-X", "-q", "-At",
+                           "-v", "ON_ERROR_STOP=1", "-U", DB_ADMIN, "-d", database], check=False, input=sql)
+        if check and result.returncode:
+            detail = redact(result.stderr.strip() or result.stdout.strip(), hidden)
+            raise SystemExit(f"psql on {DB_CONTAINER}/{database} failed: {detail}")
+        return result
+
+    def db_container_problems(self) -> list[str]:
+        running = self.run(["docker", "inspect", "-f", "{{.State.Running}}", DB_CONTAINER], check=False)
+        if running.returncode or running.stdout.strip() != "true":
+            return [f"the dev Supabase database container {DB_CONTAINER} is not running; start the "
+                    "dev Supabase stack (project ekza-dev) on this host first"]
+        published = set(self.run(["docker", "port", DB_CONTAINER, "5432/tcp"], check=False).stdout.split())
+        expected = f"127.0.0.1:{DB_PORT}"
+        problems = []
+        if expected not in published:
+            problems.append(f"{DB_CONTAINER} does not publish 5432/tcp on {expected}")
+        if published - {expected}:
+            problems.append(f"{DB_CONTAINER} also publishes 5432/tcp on {sorted(published - {expected})}; "
+                            "the dev database must be reachable on loopback only")
+        return problems
+
+    def db_state(self) -> dict | None:
+        """Roles, database owner and schema presence; None when the database cannot be queried."""
+        result = self.psql("postgres", STATE_SQL, check=False)
+        try:
+            state = json.loads(result.stdout.strip().splitlines()[-1]) if result.returncode == 0 else None
+        except (IndexError, ValueError):
+            state = None
+        if not isinstance(state, dict) or not isinstance(state.get("roles"), dict):
+            return None
+        state["schema"] = False
+        if state.get("database_owner"):
+            schema = self.psql(DB_NAME, SCHEMA_SQL, check=False)
+            state["schema"] = schema.returncode == 0 and schema.stdout.strip().endswith("t")
+        return state
+
+    def database_ready(self) -> bool:
+        """Roles, database and schema all exist (e.g. not lost with a reset Supabase volume)."""
+        state = None if self.db_container_problems() else self.db_state()
+        return bool(state and state.get("schema") and state.get("database_owner") == DB_OWNER
+                    and state["roles"].get(DB_GAME))
+
+    def database_env(self) -> dict:
+        """{exists, url (only when valid), problems} for database.env; never returns a bad URL."""
+        path = self.p(DATABASE_ENV)
+        if os.path.islink(path):
+            return {"exists": True, "url": None, "problems": ["is a symlink"]}
+        if not os.path.lexists(path):
+            return {"exists": False, "url": None, "problems": []}
+        if not os.path.isfile(path):
+            return {"exists": True, "url": None, "problems": ["is not a regular file"]}
+        info = os.stat(path)
+        problems = []
+        if info.st_uid != self.root_uid:
+            problems.append("is not owned by root")
+        if info.st_mode & 0o077:
+            problems.append(f"has mode {oct(info.st_mode & 0o777)}; it must be 0600")
+        try:
+            text = Path(path).read_text()
+        except OSError:
+            return {"exists": True, "url": None, "problems": problems + ["is not readable here"]}
+        url, more = parse_database_env(text)
+        problems += more
+        return {"exists": True, "url": None if problems else url, "problems": problems}
+
+    def database_report(self) -> dict:
+        """Read-only: what activation would do to the dev career database, and what blocks it."""
+        container = self.db_container_problems()
+        env = self.database_env()
+        problems = container + [f"{DATABASE_ENV} {problem}" for problem in env["problems"]]
+        state = None if container else self.db_state()
+        would = []
+        if not container:
+            if state is None:
+                problems.append(f"cannot query {DB_CONTAINER} as {DB_ADMIN} over its local socket")
+            else:
+                owner = state.get("database_owner")
+                if owner not in (None, DB_OWNER):
+                    problems.append(f"database {DB_NAME} exists and is owned by {_printable(owner)}, "
+                                    f"not {DB_OWNER}")
+                missing = [role for role in DB_ROLES if role not in state["roles"]]
+                if missing:
+                    would.append(f"create roles {', '.join(missing)} (NOLOGIN) in {DB_CONTAINER}")
+                if owner is None:
+                    would.append(f"create database {DB_NAME} owned by {DB_OWNER}")
+        if not env["exists"]:
+            would.append(f"generate the {DB_GAME} password on this host into {DATABASE_ENV} (root, 0600)")
+        would.append(f"{DB_GAME} LOGIN with that password; migrate {DB_NAME} with the release's "
+                     f"{ACCOUNT_API} under a temporary owner login; apply {GRANTS}; owner NOLOGIN")
+        return {"problems": problems, "would": would,
+                "env_file": "missing" if not env["exists"] else ("invalid" if env["problems"] else "ok"),
+                "roles": (state or {}).get("roles"), "database_owner": (state or {}).get("database_owner"),
+                "schema": (state or {}).get("schema")}
+
+    def write_database_env(self, password: str) -> None:
+        self.write_guard(DATABASE_ENV)
+        url = database_url(DB_GAME, password)
+        if database_url_problems(url):
+            raise Refused("internal: the generated database URL fails its own check")
+        temporary = self.p(DATABASE_ENV + ".next")
+        if os.path.lexists(temporary):
+            os.unlink(temporary)
+        descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        try:
+            os.write(descriptor, database_env_text(url).encode())
+            if os.geteuid() == 0:
+                os.fchown(descriptor, 0, 0)
+            os.fchmod(descriptor, 0o600)
+        finally:
+            os.close(descriptor)
+        os.replace(temporary, self.p(DATABASE_ENV))
+
+    def migrate_database(self, directory: str, grants: str) -> None:
+        """`omoba-account-api migrate` as the owner through a temporary, expiring login."""
+        temporary = secrets.token_hex(24)
+        until = time.strftime("%Y-%m-%d %H:%M:%S+00", time.gmtime(time.time() + MIGRATION_LOGIN_SECONDS))
+        try:
+            self.psql("postgres", owner_login_sql(temporary, until), hidden=(temporary,))
+            result = self.run([self.p(f"{directory}/{ACCOUNT_API}"), "migrate"], check=False, timeout=600,
+                              env={"PATH": "/usr/sbin:/usr/bin:/sbin:/bin",
+                                   DATABASE_URL_KEY: database_url(DB_OWNER, temporary)})
+            if result.returncode:
+                detail = redact(result.stderr.strip() or result.stdout.strip(), (temporary,))
+                raise SystemExit(f"{ACCOUNT_API} migrate failed: {detail}")
+            self.psql(DB_NAME, grants_sql(grants), hidden=(temporary,))
+        finally:
+            self.psql("postgres", OWNER_NOLOGIN_SQL, check=False)
+
+    def prepare_database(self, directory: str, grants: str) -> dict:
+        """Roles, database, database.env and schema for the release about to start."""
+        problems = self.db_container_problems()
+        if problems:
+            raise Refused("dev career database: " + "; ".join(problems))
+        env = self.database_env()
+        if env["problems"]:
+            raise Refused(f"{DATABASE_ENV} " + "; ".join(env["problems"])
+                          + "; fix it, or remove it so a new password is generated")
+        state = self.db_state()
+        if state is None:
+            raise Refused(f"cannot query {DB_CONTAINER} as {DB_ADMIN} over its local socket")
+        if state.get("database_owner") not in (None, DB_OWNER):
+            raise Refused(f"database {DB_NAME} exists and is owned by {_printable(state['database_owner'])}")
+        self.write_guard(DATABASE_ENV)
+        password = password_of(env["url"]) if env["exists"] else secrets.token_hex(32)
+        if not env["exists"]:
+            self.write_database_env(password)
+        self.psql("postgres", bootstrap_sql(password), hidden=(password,))
+        self.migrate_database(directory, grants)
+        written = self.database_env()
+        if written["problems"] or not written["exists"]:
+            raise SystemExit(f"{DATABASE_ENV} is not valid after preparation: {written['problems']}")
+        return {"database": DB_NAME, "env_written": not env["exists"],
+                "created_roles": [role for role in DB_ROLES if role not in state["roles"]],
+                "created_database": state.get("database_owner") is None}
+
+    def require_database_env(self) -> dict:
+        env = self.database_env()
+        if env["problems"] or not env["exists"]:
+            raise Refused(f"{DATABASE_ENV} " + ("; ".join(env["problems"]) or "is missing")
+                          + "; ship a release (not a rollback) to prepare the dev career database")
+        return {"database": DB_NAME, "env_written": False}
+
     # ---- guards (no writes)
 
     def guard_not_production(self) -> None:
@@ -511,17 +891,18 @@ class Host:
             raise Refused(f"release path {path} escapes {RELEASES}")
         return path
 
-    def verify_release(self, release: str, sha256: str) -> str:
+    def verify_release(self, release: str, files: dict[str, str]) -> str:
         directory = self.release_dir(release)
-        server = self.p(directory + "/server")
-        if os.path.islink(server) or not os.path.isfile(server):
-            raise Refused(f"{directory}/server is missing or a symlink")
-        with open(server, "rb") as handle:
-            if not is_linux_x86_64_elf(handle.read(64)):
-                raise Refused(f"{directory}/server is not a Linux x86-64 executable")
-        actual = sha256_file(server)
-        if actual != sha256:
-            raise Refused(f"{directory}/server sha256 {actual} != expected {sha256}")
+        for name, expected in files.items():
+            path = self.p(f"{directory}/{name}")
+            if os.path.islink(path) or not os.path.isfile(path):
+                raise Refused(f"{directory}/{name} is missing or a symlink")
+            with open(path, "rb") as handle:
+                if not is_linux_x86_64_elf(handle.read(64)):
+                    raise Refused(f"{directory}/{name} is not a Linux x86-64 executable")
+            actual = sha256_file(path)
+            if actual != expected:
+                raise Refused(f"{directory}/{name} sha256 {actual} != expected {expected}")
         return directory
 
     def running_release_ok(self, directory: str) -> bool:
@@ -545,6 +926,7 @@ class Host:
             "production_markers": self.production_markers(),
             "firewall": self.firewall_notes(),
             "available_mib": self.available_mib(),
+            "database": self.database_report(),
         }
 
     def preflight(self, payload: dict) -> dict:
@@ -566,6 +948,8 @@ class Host:
                             "fine behind provider NAT, otherwise check DEV_IP")
         public_host = unit_public_host(unit or self.installed_unit() or "")
         problems = self.public_host_problems(public_host, expected_ip) if public_host else []
+        database = self.database_report()
+        problems += database["problems"]
         warnings += self.firewall_notes()
         would = []
         if not user:
@@ -579,8 +963,12 @@ class Host:
         if directory:
             if self.current_release() == release and unit in (None, self.installed_unit()) \
                     and self.running_release_ok(directory):
-                would.append(f"nothing: {UNIT} already runs {release}")
+                if self.database_ready() and not database["problems"]:
+                    would.append(f"nothing: {UNIT} already runs {release}")
+                else:
+                    would += database["would"] + [f"keep {UNIT} running {release} (no restart)"]
             else:
+                would += database["would"]
                 would += [f"{CURRENT} -> releases/{release}", f"systemctl enable + restart {UNIT}",
                           f"verify /proc/<MainPID>/exe == {directory}/server and UDP {LOBBY_PORT}"]
         return {"mode": "preflight", "ok": not problems, "current": self.current_release(),
@@ -596,6 +984,7 @@ class Host:
         self.guard_layout()
         user = self.guard_user()
         directory = self.release_dir(payload["release"])
+        files = release_files(payload)
         self.mutating = True
         if not user:
             self.write_guard(STATE)
@@ -606,13 +995,19 @@ class Host:
         self._install_dir(RELEASES)
         for path in STATE_DIRS:
             self._install_dir(path, USER, "0750")
-        server = self.p(directory + "/server")
-        if os.path.isfile(server):
-            if sha256_file(server) != payload["sha256"]:
-                raise Refused(f"{directory} already holds a different server; releases are immutable")
-            return {"mode": "stage", "release": payload["release"], "staged": "already"}
+        missing = []
+        for name, digest in files.items():
+            path = self.p(f"{directory}/{name}")
+            if os.path.lexists(path):
+                if not os.path.isfile(path) or os.path.islink(path) or sha256_file(path) != digest:
+                    raise Refused(f"{directory} already holds a different {name}; releases are immutable")
+            else:
+                missing.append(name)
+        if not missing:
+            return {"mode": "stage", "release": payload["release"], "staged": "already", "upload_to": []}
         self._install_dir(directory)
-        return {"mode": "stage", "release": payload["release"], "upload_to": directory + "/server.part"}
+        return {"mode": "stage", "release": payload["release"],
+                "upload_to": [f"{directory}/{name}.part" for name in missing]}
 
     def _point_current(self, release: str) -> None:
         self.write_guard(CURRENT)
@@ -637,15 +1032,16 @@ class Host:
                 handle.write(text)
             self.run(["systemd-analyze", "verify", candidate])
 
-    def _finalize_upload(self, directory: str, payload: dict) -> None:
-        part, server = self.p(directory + "/server.part"), self.p(directory + "/server")
-        if os.path.isfile(part) and not os.path.lexists(server):
-            self.write_guard(directory + "/server.part")
-            if sha256_file(part) != payload["sha256"]:
-                os.unlink(part)
-                raise Refused("uploaded server.part does not match the local sha256; removed it")
-            os.chmod(part, 0o755)
-            os.replace(part, server)
+    def _finalize_upload(self, directory: str, payload: dict, files: dict[str, str]) -> None:
+        for name, digest in files.items():
+            part, final = self.p(f"{directory}/{name}.part"), self.p(f"{directory}/{name}")
+            if os.path.isfile(part) and not os.path.lexists(final):
+                self.write_guard(f"{directory}/{name}.part")
+                if sha256_file(part) != digest:
+                    os.unlink(part)
+                    raise Refused(f"uploaded {name}.part does not match the local sha256; removed it")
+                os.chmod(part, 0o755)
+                os.replace(part, final)
         build = self.p(directory + "/BUILD.json")
         if payload.get("build") and not os.path.isfile(build):
             self.write_guard(directory + "/BUILD.json")
@@ -683,6 +1079,8 @@ class Host:
             raise Refused(f"user {USER} is missing; run stage first")
         release = payload["release"]
         directory = self.release_dir(release)
+        files = release_files(payload, require_tool=mode != "rollback")
+        grants = validate_grants(payload.get("grants")) if mode != "rollback" else None
         unit = self.guard_unit_payload(payload)
         old_unit = self.installed_unit()
         public_host = unit_public_host(unit or old_unit or "")
@@ -694,13 +1092,24 @@ class Host:
             raise Refused(f"{UNIT_PATH} is not installed and no unit was supplied")
         previous = self.current_release()
         self.mutating = True
-        self._finalize_upload(directory, payload)
-        self.verify_release(release, payload["sha256"])
+        self._finalize_upload(directory, payload, files)
+        self.verify_release(release, files)
         if previous == release and not unit_changed and self.running_release_ok(directory):
-            return {"status": "UNCHANGED", "mode": mode, "release": release, "pid": self.dev_main_pid()}
+            if grants is None or self.database_ready():
+                return {"status": "UNCHANGED", "mode": mode, "release": release, "pid": self.dev_main_pid()}
+            # The release runs but its database is gone (a reset dev Supabase volume): rebuild it;
+            # the lobby's career worker reconnects by itself.
+            database = self.prepare_database(directory, grants)
+            record = {"mode": mode, "release": release, "previous": previous, "pid": self.dev_main_pid(),
+                      "database": database, "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
+            self._record(record)
+            return {"status": "DATABASE_PREPARED", **record}
         self.guard_no_matches()
         self.guard_ports()
         self.guard_memory()
+        # Before the running lobby is touched: a failure here leaves it as it was. A rollback
+        # never runs an older release's migrations against a newer schema.
+        database = self.require_database_env() if grants is None else self.prepare_database(directory, grants)
         was_active = self.active(UNIT)
         if was_active:
             self.run(["systemctl", "stop", UNIT])
@@ -718,7 +1127,8 @@ class Host:
         if markers:
             raise SystemExit(f"PRODUCTION MARKERS APPEARED during the dev switch: {markers}")
         record = {"mode": mode, "release": release, "previous": previous, "pid": pid,
-                  "sha256": payload["sha256"], "unit_changed": unit_changed, "public_host": public_host,
+                  "sha256": payload["sha256"], "account_api_sha256": files.get(ACCOUNT_API),
+                  "unit_changed": unit_changed, "public_host": public_host, "database": database,
                   "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
         self._record(record)
         return {"status": "DEPLOYED", **record}
@@ -750,7 +1160,8 @@ class Host:
             info = json.load(handle)
         if info.get("contour") != "dev" or info.get("release") != release:
             raise Refused(f"{directory}/BUILD.json is not a dev release record for {release}")
-        return self.activate({"release": release, "sha256": info["sha256"], "unit": None,
+        return self.activate({"release": release, "sha256": info["sha256"],
+                              "account_api_sha256": info.get("account_api_sha256"), "unit": None,
                               "expected_ip": payload.get("expected_ip")}, mode="rollback")
 
 
@@ -839,22 +1250,30 @@ def resolve_target(args, need_ip: bool, config_reader=None) -> dict:
             "expected_ip": expected_ip}
 
 
-def read_package(package: Path) -> tuple[str, bytes, str]:
-    """(version, omoba-server bytes, package sha256) from a dev Linux package only."""
+# Package member -> release directory file.
+PACKAGE_MEMBERS = {"omoba-server": "server", ACCOUNT_API: ACCOUNT_API}
+
+
+def read_package(package: Path) -> tuple[str, dict[str, bytes], str]:
+    """(version, {release file: bytes}, package sha256) from a dev Linux package only."""
     match = DEV_PACKAGE.fullmatch(package.name)
     if not match:
         raise Refused(f"{package.name} is not a dev Linux package (omoba-<version>-dev-linux-x64.tar.gz); "
                       "build it with: python3 scripts/release.py build linux --contour dev")
     version = match.group(1)
-    member_name = f"omoba-{version}-dev/omoba-server"
+    binaries = {}
     with tarfile.open(package, "r:gz") as archive:
-        members = [m for m in archive.getmembers() if m.name == member_name]
-        if len(members) != 1 or not members[0].isfile():
-            raise Refused(f"{package.name} has no regular file {member_name}")
-        data = archive.extractfile(members[0]).read()
-    if not is_linux_x86_64_elf(data[:64]):
-        raise Refused(f"{member_name} is not a Linux x86-64 executable")
-    return version, data, sha256_file(str(package))
+        for member, name in PACKAGE_MEMBERS.items():
+            member_name = f"omoba-{version}-dev/{member}"
+            members = [m for m in archive.getmembers() if m.name == member_name]
+            if len(members) != 1 or not members[0].isfile():
+                raise Refused(f"{package.name} has no regular file {member_name} "
+                              "(rebuild it with this checkout's scripts/release.py)")
+            data = archive.extractfile(members[0]).read()
+            if not is_linux_x86_64_elf(data[:64]):
+                raise Refused(f"{member_name} is not a Linux x86-64 executable")
+            binaries[name] = data
+    return version, binaries, sha256_file(str(package))
 
 
 def source_revision(explicit: str | None, version: str) -> str:
@@ -880,22 +1299,28 @@ def prepare(args) -> dict:
     unit = render_unit(unit_path.read_text(), public_host)
     assert_dev_unit(unit)
     if args.package:
-        version, data, package_sha = read_package(Path(args.package))
+        version, binaries, package_sha = read_package(Path(args.package))
         package_name = Path(args.package).name
     else:
-        data = Path(args.binary).read_bytes()
-        if not is_linux_x86_64_elf(data[:64]):
-            raise Refused(f"{args.binary} is not a Linux x86-64 executable")
-        if not args.version:
-            raise Refused("--binary needs --version")
+        if not args.version or not args.account_api:
+            raise Refused("--binary needs --version and --account-api")
+        binaries = {"server": Path(args.binary).read_bytes(), ACCOUNT_API: Path(args.account_api).read_bytes()}
+        for name, data in binaries.items():
+            if not is_linux_x86_64_elf(data[:64]):
+                raise Refused(f"{name} ({args.binary if name == 'server' else args.account_api}) "
+                              "is not a Linux x86-64 executable")
         version, package_sha, package_name = args.version, None, None
     revision = source_revision(args.revision, version)
     release = validate_release_name(args.release or f"{version}-dev-{revision[:7]}")
-    sha = hashlib.sha256(data).hexdigest()
+    grants = validate_grants((repo_root() / GRANTS).read_text())
+    digests = {name: hashlib.sha256(data).hexdigest() for name, data in binaries.items()}
     build = {"contour": "dev", "release": release, "version": version, "revision": revision,
-             "sha256": sha, "package": package_name, "package_sha256": package_sha,
+             "sha256": digests["server"], "account_api_sha256": digests[ACCOUNT_API],
+             "grants_sha256": hashlib.sha256(grants.encode()).hexdigest(),
+             "package": package_name, "package_sha256": package_sha,
              "unit_sha256": hashlib.sha256(unit.encode()).hexdigest(), "tool": "ops/vps/dev/lobby_dev.py"}
-    return {"release": release, "sha256": sha, "data": data, "unit": unit, "build": build,
+    return {"release": release, "sha256": digests["server"], "account_api_sha256": digests[ACCOUNT_API],
+            "binaries": binaries, "unit": unit, "grants": grants, "build": build,
             "public_host": unit_public_host(unit)}
 
 
@@ -915,20 +1340,24 @@ def command_ship(args) -> int:
     staged = prepare(args)
     target = resolve_target(args, need_ip=args.check or args.apply)
     alias = target["alias"]
-    payload = {key: staged[key] for key in ("release", "sha256", "unit", "build")}
+    payload = {key: staged[key] for key in ("release", "sha256", "account_api_sha256", "unit", "grants", "build")}
     payload["expected_ip"] = target["expected_ip"]
     directory = f"{RELEASES}/{staged['release']}"
     plan = {
         "target": target, "release": staged["release"], "sha256": staged["sha256"],
+        "account_api_sha256": staged["account_api_sha256"],
         "public_host": staged["public_host"], "build": staged["build"],
         "steps": [
             f"remote preflight (read-only): no production markers, {USER} layout, no dev matches, "
             f"UDP {LOBBY_PORT}/{sorted(MATCH_PORTS)} free, >= {MIN_AVAILABLE_MIB} MiB available, "
-            f"{staged['public_host']} resolves to the dev VPS (A only)",
+            f"{staged['public_host']} resolves to the dev VPS (A only), {DB_CONTAINER} runs on "
+            f"127.0.0.1:{DB_PORT} only, {DATABASE_ENV} (if present) names {DB_GAME}@{DB_NAME} on loopback",
             f"remote stage: user {USER}, {OPT}, {STATE}, {directory}/",
-            f"scp omoba-server -> {alias}:{directory}/server.part",
-            f"remote activate: sha256 check, {CURRENT} -> releases/{staged['release']}, unit if changed, "
-            f"restart {UNIT}, verify, roll back on failure (no-op when already running this release)",
+            f"scp omoba-server and {ACCOUNT_API} -> {alias}:{directory}/<name>.part (only missing ones)",
+            f"remote activate: sha256 checks; career database: roles/database {DB_NAME} when missing, "
+            f"{DATABASE_ENV} generated on the host when missing, {ACCOUNT_API} migrate + {GRANTS}; then "
+            f"{CURRENT} -> releases/{staged['release']}, unit if changed, restart {UNIT}, verify, roll back "
+            "on failure (no-op when already running this release)",
         ],
     }
     if not (args.check or args.apply):
@@ -942,14 +1371,19 @@ def command_ship(args) -> int:
         return 0
     if not json.loads(preflight).get("ok"):
         raise Refused("host preflight reported problems; fix them first")
-    print(ssh_remote(alias, "stage", {"release": staged["release"], "sha256": staged["sha256"]}))
-    with tempfile.NamedTemporaryFile(prefix="omoba-server-dev-", delete=False) as handle:
-        handle.write(staged["data"])
-    try:
-        subprocess.run(["scp", "-q", "-o", "BatchMode=yes", handle.name,
-                        f"{alias}:{directory}/server.part"], check=True)
-    finally:
-        os.unlink(handle.name)
+    stage = ssh_remote(alias, "stage", {key: staged[key] for key in ("release", "sha256", "account_api_sha256")})
+    print(stage)
+    for target_path in json.loads(stage).get("upload_to") or []:
+        name = posixpath.basename(target_path)[:-len(".part")]
+        if target_path != f"{directory}/{name}.part" or name not in RELEASE_BINARIES:
+            raise Refused(f"the host asked for an unexpected upload {target_path!r}")
+        with tempfile.NamedTemporaryFile(prefix=f"omoba-dev-{name}-", delete=False) as handle:
+            handle.write(staged["binaries"][name])
+        try:
+            subprocess.run(["scp", "-q", "-o", "BatchMode=yes", handle.name, f"{alias}:{target_path}"],
+                           check=True)
+        finally:
+            os.unlink(handle.name)
     print(ssh_remote(alias, "activate", payload))
     return 0
 
@@ -961,8 +1395,8 @@ def command_rollback(args) -> int:
     if not (args.check or args.apply):
         print(json.dumps({"dry_run": True, "target": target, "steps": [
             f"remote preflight (read-only) for {RELEASES}/{release}",
-            f"remote rollback: {CURRENT} -> releases/{release} (BUILD.json contour dev, sha256 checked), "
-            f"restart {UNIT}, verify"]}, indent=2))
+            f"remote rollback: {CURRENT} -> releases/{release} (BUILD.json contour dev, sha256 checked; "
+            f"no migration, {DATABASE_ENV} must already be valid), restart {UNIT}, verify"]}, indent=2))
         return 0
     print(ssh_remote(target["alias"], "preflight", payload))
     if args.apply:
@@ -985,7 +1419,8 @@ def main(argv=None) -> int:
     ship = sub.add_parser("ship", help="install or update the dev lobby (dry-run unless --check/--apply)")
     source = ship.add_mutually_exclusive_group(required=True)
     source.add_argument("--package", help="dev Linux package from `release.py build linux --contour dev`")
-    source.add_argument("--binary", help="a Linux x86-64 server binary (needs --version)")
+    source.add_argument("--binary", help="a Linux x86-64 server binary (needs --version and --account-api)")
+    ship.add_argument("--account-api", help=f"the matching Linux x86-64 {ACCOUNT_API} for --binary")
     ship.add_argument("--version", help="version for --binary")
     ship.add_argument("--revision", help="source commit (default: HEAD of this clean checkout)")
     ship.add_argument("--release", help="release directory name (default: <version>-dev-<sha7>)")

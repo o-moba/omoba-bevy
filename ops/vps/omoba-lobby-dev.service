@@ -3,8 +3,14 @@
 # runbook: ops/vps/dev/README.md.
 # Every name differs from production (ops/vps/omoba-lobby.service): user omoba-dev,
 # /opt/omoba-dev and /var/lib/omoba-dev, UDP 4100 + match port 41100 (production
-# 4000 + 41000-41001), the dev registry, and no database (guest-only). Hardening
-# matches production so the dev lobby rehearses the production unit.
+# 4000 + 41000-41001), the dev registry, the dev career database and a closed passport.
+# Hardening matches production so the dev lobby rehearses the production unit.
+# A public lobby does not start without OMOBA_DATABASE_URL, and matchmaking needs signed
+# accounts in that database. database.env holds only that URL: database omoba_dev, role
+# omoba_dev_game, in the dev Supabase Postgres on this host (127.0.0.1:54322). lobby_dev.py
+# creates it on the host (root, 0600) and refuses any other database.
+# There is no dev Ekza passport yet and the SDK default is production, so protected-avatar
+# tickets go to a closed loopback port and fail closed. Match workers inherit this environment.
 # OMOBA_MATCH_PUBLIC_HOST is the address clients reach the match worker on. The
 # default needs a DNS A record (no AAAA) lobby.dev.omoba.io -> dev VPS IPv4;
 # `lobby_dev.py ship --public-host <dev IP>` replaces only that value.
@@ -20,7 +26,7 @@ Type=simple
 User=omoba-dev
 Group=omoba-dev
 WorkingDirectory=/var/lib/omoba-dev
-# Guest-only: no EnvironmentFile and no OMOBA_DATABASE_URL until a dev database is approved.
+EnvironmentFile=/opt/omoba-dev/database.env
 Environment=SERVER_ADDR=0.0.0.0:4100
 Environment=OMOBA_SERVER_ROLE=lobby
 Environment=OMOBA_MATCH_MODE=release
@@ -33,6 +39,7 @@ Environment=OMOBA_MATCH_FIRST_PORT=41100
 Environment=OMOBA_MATCH_CAPACITY=1
 Environment=OMOBA_MATCH_EXECUTABLE=/opt/omoba-dev/current/server
 Environment=OMOBA_REGISTRY_URL=https://registry.dev.ekza.io
+Environment=OMOBA_PASSPORT_URL=http://127.0.0.1:9/api/passport
 ExecStart=/opt/omoba-dev/current/server
 Restart=on-failure
 RestartSec=5

@@ -1,22 +1,46 @@
 """ops/vps/dev/lobby_dev.py: the DEV lobby tool only ever targets the dedicated dev VPS.
 
 The host half runs against a temporary filesystem root, fake systemctl / pgrep /
-ss / ip / id / useradd / install / ufw and a fake resolver, so nothing here
-needs ssh, root, DNS or systemd. The Mac half is exercised with ssh/scp mocked.
+ss / ip / id / useradd / install / ufw / docker (the dev Supabase Postgres) /
+omoba-account-api and a fake resolver, so nothing here needs ssh, root, DNS,
+Docker or systemd. The Mac half is exercised with ssh/scp mocked.
+
+Two opt-in smoke tests use real binaries and are skipped otherwise:
+
+- RealServerSmoke runs a built server with the dev unit's environment
+  (OMOBA_LOBBY_SMOKE_SERVER).
+- RealDatabaseSmoke runs the host half's database preparation, with a built
+  omoba-account-api, against a disposable container of the Postgres image the dev
+  Supabase stack runs, then signs the real lobby in with the file it wrote:
+
+    cargo build -p server -p omoba-account-api
+    docker run -d --rm --name omoba-lobby-smoke-db -e POSTGRES_PASSWORD=smoke-only \\
+        -p 127.0.0.1:59871:5432 public.ecr.aws/supabase/postgres:17.6.1.165
+    OMOBA_LOBBY_SMOKE_SERVER=$CARGO_TARGET_DIR/debug/server \\
+    OMOBA_LOBBY_SMOKE_ACCOUNT_API=$CARGO_TARGET_DIR/debug/omoba-account-api \\
+    OMOBA_LOBBY_SMOKE_DB_CONTAINER=omoba-lobby-smoke-db OMOBA_LOBBY_SMOKE_DB_PORT=59871 \\
+        python3 -m unittest discover -s scripts -p test_lobby_dev.py
+    docker rm -f omoba-lobby-smoke-db
 """
+from __future__ import annotations
+
 import contextlib
 import hashlib
 import io
 import json
 import os
+import re
 import socket
+import stat
 import subprocess
 import sys
 import tarfile
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
+from urllib.parse import urlsplit
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "ops/vps/dev"))
@@ -25,12 +49,19 @@ import lobby_dev  # noqa: E402
 
 DEV_UNIT = (ROOT / "ops/vps/omoba-lobby-dev.service").read_text()
 PROD_UNIT = (ROOT / "ops/vps/omoba-lobby.service").read_text()
+GRANTS = (ROOT / lobby_dev.GRANTS).read_text()
 DEV_IP = "203.0.113.10"
 PROD_IP = "77.246.105.57"
+GOOD_PASSWORD = "a" * 64
+GOOD_URL = f"postgres://omoba_dev_game:{GOOD_PASSWORD}@127.0.0.1:54322/omoba_dev"
 
 
 def elf(machine: bytes = b"\x3e\x00", body: bytes = b"server") -> bytes:
     return b"\x7fELF" + bytes([2, 1, 1, 0]) + bytes(8) + b"\x02\x00" + machine + bytes(44) + body
+
+
+TOOL = elf(body=b"omoba-account-api")
+PASSWORD_IN_SQL = re.compile(r"PASSWORD '([^']+)'")
 
 
 class FakeSystem:
@@ -56,6 +87,18 @@ class FakeSystem:
         self.prod_marker_on_start = False
         self.reloads = 0
         self.restarts = 0
+        # The dev Supabase Postgres container and what the tool did to it.
+        self.db_running = True
+        self.db_ports = ["127.0.0.1:54322"]
+        self.roles = {}       # role -> can login
+        self.passwords = {}   # role -> password
+        self.database_owner = None
+        self.schema = False
+        self.sql = []         # (database, tag) of every psql batch
+        self.migrations = []  # the URL each migration ran with
+        self.grants = 0
+        self.fail_migrate = False
+        self.fail_grants = False
 
     def p(self, path):
         return os.path.join(self.root, path.lstrip("/"))
@@ -64,15 +107,80 @@ class FakeSystem:
         self.calls.append(["resolve", host, str(family)])
         return set(self.dns.get(host, {}).get(family, set()))
 
-    def __call__(self, args, check=True):
+    def __call__(self, args, check=True, input=None, env=None, timeout=None):
         self.calls.append(list(args))
-        code, out = self.dispatch(list(args))
+        code, out, *err = self.dispatch(list(args), input, env)
         if check and code:
             raise SystemExit(f"{' '.join(args)} failed")
-        return subprocess.CompletedProcess(args, code, out, "")
+        return subprocess.CompletedProcess(args, code, out, err[0] if err else "")
 
-    def dispatch(self, args):
+    def docker(self, args, sql):
+        container = "supabase_db_ekza-dev"
+        if args[0] == "inspect":
+            assert args[-1] == container, args
+            return (0, "true\n") if self.db_running else (1, "", "Error: No such object")
+        if args[0] == "port":
+            assert args[1:] == [container, "5432/tcp"], args
+            return 0, "".join(f"{line}\n" for line in self.db_ports)
+        if args[0] != "exec" or args[1:3] != ["-i", container]:
+            raise AssertionError(f"the dev tool ran docker {args}")
+        if not self.db_running:
+            return 1, "", "container is not running"
+        assert args[args.index("-U") + 1] == "supabase_admin" and "ON_ERROR_STOP=1" in args, args
+        database = args[args.index("-d") + 1]
+        assert database in ("postgres", "omoba_dev"), args
+        tag = sql.splitlines()[0]
+        self.sql.append((database, tag))
+        if tag == "-- lobby_dev:state":
+            return 0, json.dumps({"roles": self.roles, "database_owner": self.database_owner,
+                                  "superuser": True}) + "\n"
+        if tag == "-- lobby_dev:schema":
+            return 0, "t\n" if self.schema else "f\n"
+        if tag == "-- lobby_dev:bootstrap":
+            for role in ("omoba_dev_owner", "omoba_dev_game", "omoba_dev_portal"):
+                self.roles.setdefault(role, False)
+            self.database_owner = self.database_owner or "omoba_dev_owner"
+            self.roles["omoba_dev_owner"] = self.roles["omoba_dev_portal"] = False
+            self.roles["omoba_dev_game"] = True
+            self.passwords["omoba_dev_game"] = PASSWORD_IN_SQL.search(sql).group(1)
+            return 0, ""
+        if tag == "-- lobby_dev:owner-login":
+            assert "VALID UNTIL" in sql
+            self.roles["omoba_dev_owner"] = True
+            self.passwords["omoba_dev_owner"] = PASSWORD_IN_SQL.search(sql).group(1)
+            return 0, ""
+        if tag == "-- lobby_dev:grants":
+            assert database == "omoba_dev" and "SET ROLE omoba_dev_owner;" in sql and ':"game_role"' in sql
+            assert "\\set game_role omoba_dev_game" in sql and "\\set portal_role omoba_dev_portal" in sql
+            if self.fail_grants:
+                return 3, "", "ERROR: permission denied"
+            self.grants += 1
+            return 0, ""
+        if tag == "-- lobby_dev:owner-nologin":
+            self.roles["omoba_dev_owner"] = False
+            self.passwords.pop("omoba_dev_owner", None)
+            return 0, ""
+        raise AssertionError(f"unexpected SQL batch {tag}")
+
+    def migrate(self, args, env):
+        assert args[1:] == ["migrate"], args
+        url = env["OMOBA_DATABASE_URL"]
+        parts = urlsplit(url)
+        assert (parts.username, parts.hostname, parts.port, parts.path) == \
+            ("omoba_dev_owner", "127.0.0.1", 54322, "/omoba_dev"), url
+        assert self.roles.get("omoba_dev_owner") and parts.password == self.passwords["omoba_dev_owner"]
+        self.migrations.append(url)
+        if self.fail_migrate:
+            return 1, "", f"Career migration failed: cannot connect to {url}"
+        self.schema = True
+        return 0, "Career and Account API migrations ready.\n"
+
+    def dispatch(self, args, sql=None, env=None):
         name = args[0]
+        if name == "docker":
+            return self.docker(args[1:], sql)
+        if name.endswith("/omoba-account-api"):
+            return self.migrate(args, env)
         if name == "systemctl":
             return self.systemctl(args[1:])
         if name == "pgrep":
@@ -188,22 +296,32 @@ class HostCase(unittest.TestCase):
         self.temporary.cleanup()
 
     def fresh(self):
-        return lobby_dev.Host(self.root, run=self.fake, sleep=lambda _: None, resolve=self.fake.resolve)
+        return lobby_dev.Host(self.root, run=self.fake, sleep=lambda _: None, resolve=self.fake.resolve,
+                              root_uid=os.getuid())
 
     def payload(self, release="0.44.0-dev-abc1234", body=b"dev-1", unit=DEV_UNIT):
         data = elf(body=body)
         digest = hashlib.sha256(data).hexdigest()
-        return {"release": release, "sha256": digest, "unit": unit, "expected_ip": DEV_IP,
-                "build": {"contour": "dev", "release": release, "sha256": digest}}, data
+        tool = hashlib.sha256(TOOL).hexdigest()
+        return {"release": release, "sha256": digest, "account_api_sha256": tool, "unit": unit,
+                "grants": GRANTS, "expected_ip": DEV_IP,
+                "build": {"contour": "dev", "release": release, "sha256": digest,
+                          "account_api_sha256": tool}}, data
 
-    def upload(self, payload, data):
-        Path(self.fake.p(f"/opt/omoba-dev/releases/{payload['release']}/server.part")).write_bytes(data)
+    def upload(self, payload, data, tool=TOOL):
+        directory = f"/opt/omoba-dev/releases/{payload['release']}"
+        Path(self.fake.p(f"{directory}/server.part")).write_bytes(data)
+        if not os.path.exists(self.fake.p(f"{directory}/omoba-account-api")):
+            Path(self.fake.p(f"{directory}/omoba-account-api.part")).write_bytes(tool)
 
     def ship(self, release="0.44.0-dev-abc1234", body=b"dev-1", unit=DEV_UNIT):
         payload, data = self.payload(release, body, unit)
-        self.fresh().stage({"release": payload["release"], "sha256": payload["sha256"]})
+        self.fresh().stage(payload)
         self.upload(payload, data)
         return self.fresh().activate(payload), payload
+
+    def env_file(self):
+        return Path(self.fake.p(lobby_dev.DATABASE_ENV))
 
     def current(self):
         return os.readlink(self.fake.p(lobby_dev.CURRENT))
@@ -290,7 +408,20 @@ class FirstInstallAndUpdate(HostCase):
         self.ship()
         payload, _ = self.payload(body=b"different")
         with self.assertRaises(lobby_dev.Refused):
-            self.fresh().stage({"release": payload["release"], "sha256": payload["sha256"]})
+            self.fresh().stage(payload)
+        payload, _ = self.payload()
+        payload["account_api_sha256"] = "0" * 64
+        with self.assertRaises(lobby_dev.Refused):
+            self.fresh().stage(payload)
+
+    def test_stage_asks_only_for_missing_files(self):
+        payload, data = self.payload()
+        self.assertEqual(self.fresh().stage(payload)["upload_to"], [
+            "/opt/omoba-dev/releases/0.44.0-dev-abc1234/server.part",
+            "/opt/omoba-dev/releases/0.44.0-dev-abc1234/omoba-account-api.part"])
+        self.upload(payload, data)
+        self.fresh().activate(payload)
+        self.assertEqual(self.fresh().stage(payload)["upload_to"], [])
 
     def test_status_is_read_only(self):
         self.ship()
@@ -410,6 +541,18 @@ class Refusals(HostCase):
         self.assertFalse(os.path.exists(release + "/server"), "a tampered upload became the release binary")
         self.assertEqual(self.current(), "releases/0.44.0-dev-abc1234")
 
+    def test_a_tampered_migration_tool_never_runs(self):
+        self.ship()
+        payload, data = self.payload("0.44.0-dev-def5678", b"dev-2")
+        self.fresh().stage(payload)
+        self.upload(payload, data, tool=elf(body=b"tampered tool"))
+        migrations = len(self.fake.migrations)
+        with self.assertRaises(lobby_dev.Refused):
+            self.fresh().activate(payload)
+        self.assertEqual(len(self.fake.migrations), migrations)
+        self.assertFalse(os.path.exists(self.fake.p(
+            "/opt/omoba-dev/releases/0.44.0-dev-def5678/omoba-account-api")))
+
     def test_rollback_needs_a_dev_build_record(self):
         self.ship()
         os.makedirs(self.fake.p("/opt/omoba-dev/releases/0.44.0-dev-0000000"))
@@ -513,6 +656,367 @@ class FailuresRollBack(HostCase):
         self.assertFalse(self.fake.units["omoba-lobby-dev"]["active"])
 
 
+class CareerDatabase(HostCase):
+    """The dev lobby's database: dev Supabase Postgres on this host, generated password, no secret out."""
+
+    def assert_no_secret(self, *texts):
+        hidden = [value for value in self.fake.passwords.values()] + \
+                 [urlsplit(url).password for url in self.fake.migrations]
+        for text in texts:
+            for value in hidden:
+                self.assertNotIn(value, text)
+
+    def test_first_install_creates_the_database_and_a_root_only_env_file(self):
+        result, _ = self.ship()
+        self.assertEqual(result["database"], {"database": "omoba_dev", "env_written": True,
+                                              "created_roles": ["omoba_dev_owner", "omoba_dev_game",
+                                                                "omoba_dev_portal"],
+                                              "created_database": True})
+        mode = stat.S_IMODE(os.stat(self.env_file()).st_mode)
+        self.assertEqual(mode, 0o600)
+        url, problems = lobby_dev.parse_database_env(self.env_file().read_text())
+        self.assertEqual(problems, [])
+        self.assertEqual(urlsplit(url).password, self.fake.passwords["omoba_dev_game"])
+        self.assertEqual(self.fake.database_owner, "omoba_dev_owner")
+        self.assertTrue(self.fake.schema)
+        self.assertEqual((len(self.fake.migrations), self.fake.grants), (1, 1))
+        # The owner logged in only for the migration, with a different, expiring password.
+        self.assertFalse(self.fake.roles["omoba_dev_owner"])
+        self.assertNotIn("omoba_dev_owner", self.fake.passwords)
+        self.assertNotEqual(urlsplit(self.fake.migrations[0]).password, self.fake.passwords["omoba_dev_game"])
+        tags = [tag for _, tag in self.fake.sql]
+        self.assertLess(tags.index("-- lobby_dev:bootstrap"), tags.index("-- lobby_dev:owner-login"))
+        self.assertLess(tags.index("-- lobby_dev:grants"), tags.index("-- lobby_dev:owner-nologin"))
+        # The database is ready before the lobby (and its match workers) start.
+        first_start = next(i for i, call in enumerate(self.fake.calls) if call[:2] == ["systemctl", "restart"])
+        migrate = next(i for i, call in enumerate(self.fake.calls) if call[0].endswith("/omoba-account-api"))
+        self.assertLess(migrate, first_start)
+        # No secret in argv, the result, the history or BUILD.json.
+        self.assert_no_secret(json.dumps(self.fake.calls), json.dumps(result),
+                              Path(self.fake.p(lobby_dev.HISTORY)).read_text(),
+                              json.dumps(self.fresh().status()))
+
+    def test_preflight_lists_the_database_steps_and_only_reads(self):
+        payload, _ = self.payload()
+        result = self.fresh().preflight(payload)
+        self.assertTrue(result["ok"], result)
+        self.assertTrue(any("create database omoba_dev" in step for step in result["would"]))
+        self.assertTrue(any("into /opt/omoba-dev/database.env (root, 0600)" in step for step in result["would"]))
+        self.assertEqual({tag for _, tag in self.fake.sql}, {"-- lobby_dev:state"})
+        self.assertFalse(self.env_file().exists())
+
+    def test_updates_keep_the_password_and_migrate_each_new_release(self):
+        self.ship()
+        password, text = self.fake.passwords["omoba_dev_game"], self.env_file().read_text()
+        result, _ = self.ship("0.44.0-dev-def5678", b"dev-2")
+        self.assertEqual(result["database"]["created_roles"], [])
+        self.assertFalse(result["database"]["env_written"])
+        self.assertEqual((self.fake.passwords["omoba_dev_game"], self.env_file().read_text()), (password, text))
+        self.assertEqual((len(self.fake.migrations), self.fake.grants), (2, 2))
+        payload, _ = self.payload("0.44.0-dev-def5678", b"dev-2")
+        self.assertEqual(self.fresh().activate(payload)["status"], "UNCHANGED")
+        self.assertEqual(len(self.fake.migrations), 2)
+
+    def test_reshipping_after_a_supabase_reset_rebuilds_the_database_without_a_restart(self):
+        self.ship()
+        password, restarts = self.fake.passwords["omoba_dev_game"], self.fake.restarts
+        self.fake.roles, self.fake.passwords, self.fake.database_owner, self.fake.schema = {}, {}, None, False
+        payload, _ = self.payload()
+        would = self.fresh().preflight(payload)["would"]
+        self.assertIn("keep omoba-lobby-dev running 0.44.0-dev-abc1234 (no restart)", would)
+        result = self.fresh().activate(payload)
+        self.assertEqual(result["status"], "DATABASE_PREPARED")
+        self.assertEqual((self.fake.restarts, self.fake.passwords["omoba_dev_game"]), (restarts, password))
+        self.assertTrue(self.fake.schema)
+        self.assertEqual(self.fresh().activate(payload)["status"], "UNCHANGED")
+
+    def test_a_recreated_supabase_volume_gets_its_roles_back_with_the_same_password(self):
+        self.ship()
+        password = self.fake.passwords["omoba_dev_game"]
+        self.fake.roles, self.fake.passwords, self.fake.database_owner, self.fake.schema = {}, {}, None, False
+        result, _ = self.ship("0.44.0-dev-def5678", b"dev-2")
+        self.assertTrue(result["database"]["created_database"])
+        self.assertEqual(self.fake.passwords["omoba_dev_game"], password)
+
+    BAD_ENV = {
+        "hosted Supabase": "OMOBA_DATABASE_URL=postgres://omoba_dev_game:{p}@db.snrjxwutqxokeujuiepn.supabase.co:54322/omoba_dev\n",
+        "Supabase pooler": "OMOBA_DATABASE_URL=postgres://omoba_dev_game:{p}@aws-0-eu.pooler.supabase.com:54322/omoba_dev\n",
+        "production VPS": "OMOBA_DATABASE_URL=postgres://omoba_dev_game:{p}@77.246.105.57:54322/omoba_dev\n",
+        "other host": "OMOBA_DATABASE_URL=postgres://omoba_dev_game:{p}@db.example.com:54322/omoba_dev\n",
+        "production port": "OMOBA_DATABASE_URL=postgres://omoba_dev_game:{p}@127.0.0.1:2003/omoba_dev\n",
+        "production role": "OMOBA_DATABASE_URL=postgres://omoba_game:{p}@127.0.0.1:54322/omoba_dev\n",
+        "production database": "OMOBA_DATABASE_URL=postgres://omoba_dev_game:{p}@127.0.0.1:54322/omoba\n",
+        "host override": "OMOBA_DATABASE_URL=postgres://omoba_dev_game:{p}@127.0.0.1:54322/omoba_dev?host=db.example.com\n",
+        "short password": "OMOBA_DATABASE_URL=postgres://omoba_dev_game:short@127.0.0.1:54322/omoba_dev\n",
+        "extra key": "OMOBA_DATABASE_URL=postgres://omoba_dev_game:{p}@127.0.0.1:54322/omoba_dev\n"
+                     "OMOBA_PASSPORT_URL=https://avatar.ekza.io/api/passport\n",
+        "twice": "OMOBA_DATABASE_URL=postgres://omoba_dev_game:{p}@127.0.0.1:54322/omoba_dev\n" * 2,
+        "empty": "# nothing\n",
+    }
+
+    def test_a_production_or_foreign_env_file_is_refused_before_anything_switches(self):
+        self.ship()
+        payload, data = self.payload("0.44.0-dev-def5678", b"dev-2")
+        self.fresh().stage(payload)
+        self.upload(payload, data)
+        good = self.env_file().read_text()
+        for name, content in self.BAD_ENV.items():
+            with self.subTest(env=name):
+                self.env_file().write_text(content.format(p=GOOD_PASSWORD))
+                os.chmod(self.env_file(), 0o600)
+                self.assertFalse(self.fresh().preflight(payload)["ok"])
+                calls = len(self.fake.calls)
+                with self.assertRaises(lobby_dev.Refused) as raised:
+                    self.fresh().activate(payload)
+                self.assertNotIn(GOOD_PASSWORD, raised.exception.message)
+                self.assertNotIn(["systemctl", "stop", "omoba-lobby-dev"], self.fake.calls[calls:])
+                self.assertFalse(any(call[0] == "docker" and call[1] == "exec" for call in self.fake.calls[calls:]))
+                self.assertEqual(self.current(), "releases/0.44.0-dev-abc1234")
+                self.assertTrue(self.fake.units["omoba-lobby-dev"]["active"])
+        self.env_file().write_text(good)
+        os.chmod(self.env_file(), 0o644)
+        with self.assertRaises(lobby_dev.Refused) as raised:
+            self.fresh().activate(payload)
+        self.assertIn("must be 0600", raised.exception.message)
+        os.chmod(self.env_file(), 0o600)
+        self.assertEqual(self.fresh().activate(payload)["status"], "DEPLOYED")
+
+    def test_the_database_container_must_run_and_listen_on_loopback_only(self):
+        payload, data = self.payload()
+        for running, ports, expected in ((False, [], "is not running"),
+                                         (True, ["0.0.0.0:54322"], "loopback only"),
+                                         (True, ["127.0.0.1:54322", "[::]:54322"], "loopback only"),
+                                         (True, ["127.0.0.1:5432"], "does not publish")):
+            with self.subTest(running=running, ports=ports):
+                self.fake.db_running, self.fake.db_ports = running, ports
+                preflight = self.fresh().preflight(payload)
+                self.assertFalse(preflight["ok"])
+                self.assertTrue(any(expected in problem for problem in preflight["problems"]), preflight)
+                self.fresh().stage(payload)
+                self.upload(payload, data)
+                with self.assertRaises(lobby_dev.Refused):
+                    self.fresh().activate(payload)
+                self.assertFalse(self.env_file().exists())
+                self.assertFalse(self.fake.units["omoba-lobby-dev"]["active"])
+
+    def test_a_database_owned_by_another_role_is_refused(self):
+        self.fake.database_owner = "postgres"
+        payload, data = self.payload()
+        self.assertFalse(self.fresh().preflight(payload)["ok"])
+        self.fresh().stage(payload)
+        self.upload(payload, data)
+        with self.assertRaises(lobby_dev.Refused):
+            self.fresh().activate(payload)
+        self.assertEqual(self.fake.migrations, [])
+
+    def test_a_failed_migration_keeps_the_running_lobby_and_hides_the_password(self):
+        self.ship()
+        self.fake.fail_migrate = True
+        payload, data = self.payload("0.44.0-dev-def5678", b"dev-2")
+        self.fresh().stage(payload)
+        self.upload(payload, data)
+        calls = len(self.fake.calls)
+        with self.assertRaises(SystemExit) as raised:
+            self.fresh().activate(payload)
+        self.assertIn("migrate failed", str(raised.exception))
+        self.assertIn("<redacted>", str(raised.exception))
+        self.assert_no_secret(str(raised.exception))
+        self.assertNotIn(["systemctl", "stop", "omoba-lobby-dev"], self.fake.calls[calls:])
+        self.assertEqual(self.current(), "releases/0.44.0-dev-abc1234")
+        self.assertFalse(self.fake.roles["omoba_dev_owner"], "the temporary owner login stayed on")
+        self.fake.fail_migrate, self.fake.fail_grants = False, True
+        with self.assertRaises(SystemExit):
+            self.fresh().activate(payload)
+        self.assertFalse(self.fake.roles["omoba_dev_owner"])
+        self.assertEqual(self.current(), "releases/0.44.0-dev-abc1234")
+
+    def test_rollback_never_migrates_and_needs_the_env_file(self):
+        self.ship()
+        self.ship("0.44.0-dev-def5678", b"dev-2")
+        migrations = len(self.fake.migrations)
+        result = self.fresh().rollback({"release": "0.44.0-dev-abc1234", "expected_ip": DEV_IP})
+        self.assertEqual((result["status"], len(self.fake.migrations)), ("DEPLOYED", migrations))
+        self.env_file().unlink()
+        with self.assertRaises(lobby_dev.Refused):
+            self.fresh().rollback({"release": "0.44.0-dev-def5678", "expected_ip": DEV_IP})
+        self.assertEqual(self.current(), "releases/0.44.0-dev-abc1234")
+
+    def test_activation_needs_the_grants_and_the_tool(self):
+        payload, data = self.payload()
+        self.fresh().stage(payload)
+        self.upload(payload, data)
+        for change in ({"grants": None}, {"grants": "GRANT ALL ON ALL TABLES TO PUBLIC;"},
+                       {"account_api_sha256": None}):
+            with self.assertRaises(lobby_dev.Refused, msg=change):
+                self.fresh().activate({**payload, **change})
+
+    def test_status_reports_the_database_without_secrets(self):
+        self.ship()
+        database = self.fresh().status()["database"]
+        self.assertEqual((database["env_file"], database["database_owner"], database["schema"], database["problems"]),
+                         ("ok", "omoba_dev_owner", True, []))
+        self.assert_no_secret(json.dumps(database))
+
+
+class DatabaseUrl(unittest.TestCase):
+    def test_only_the_loopback_dev_game_url_passes(self):
+        self.assertEqual(lobby_dev.database_url_problems(GOOD_URL), [])
+        self.assertEqual(lobby_dev.database_url_problems(GOOD_URL.replace("127.0.0.1", "localhost")), [])
+        self.assertEqual(lobby_dev.database_url(lobby_dev.DB_GAME, GOOD_PASSWORD), GOOD_URL)
+        for content in CareerDatabase.BAD_ENV.values():
+            url = content.splitlines()[0].partition("=")[2] if "=" in content else ""
+            problems = lobby_dev.parse_database_env(content.format(p=GOOD_PASSWORD))[1]
+            self.assertTrue(problems, url)
+            self.assertNotIn(GOOD_PASSWORD, json.dumps(problems))
+        for bad in ("", "not a url", "mysql://omoba_dev_game:" + GOOD_PASSWORD + "@127.0.0.1:54322/omoba_dev",
+                    GOOD_URL + "#x", GOOD_URL.replace(":54322", ":99999"),
+                    GOOD_URL.replace(GOOD_PASSWORD, "a'b" * 10)):
+            self.assertTrue(lobby_dev.database_url_problems(bad), bad)
+
+    def test_the_written_file_parses_back(self):
+        text = lobby_dev.database_env_text(GOOD_URL)
+        self.assertEqual(lobby_dev.parse_database_env(text), (GOOD_URL, []))
+        self.assertEqual(lobby_dev.parse_database_env(f'OMOBA_DATABASE_URL="{GOOD_URL}"\n'), (GOOD_URL, []))
+
+    def test_redaction(self):
+        text = f"ERROR at LINE 1: ALTER ROLE x LOGIN PASSWORD '{GOOD_PASSWORD}' via {GOOD_URL}"
+        redacted = lobby_dev.redact(text)
+        self.assertNotIn(GOOD_PASSWORD, redacted)
+        self.assertIn("omoba_dev_game:<redacted>@127.0.0.1", redacted)
+        self.assertEqual(lobby_dev.redact("token xyz", ("xyz",)), "token <redacted>")
+        with self.assertRaises(lobby_dev.Refused):
+            lobby_dev.sql_secret("x'; DROP ROLE omoba_dev_game; --" + "a" * 24)
+
+
+def free_udp_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
+        probe.bind(("127.0.0.1", 0))
+        return probe.getsockname()[1]
+
+
+@unittest.skipUnless(os.environ.get("OMOBA_LOBBY_SMOKE_SERVER"),
+                     "set OMOBA_LOBBY_SMOKE_SERVER to a built server binary (cargo build -p server)")
+class RealServerSmoke(unittest.TestCase):
+    """The real server with the dev unit's environment and the env file this tool writes.
+
+    Only what would leave this machine is redirected to loopback: bind and match
+    addresses, state directories and the registry. The unit's role, match mode, team
+    size, capacity and passport are used as they are.
+    """
+
+    def environment(self, directory: str, database_url: str | None) -> dict:
+        unit_env = {key: values[-1] for key, values in lobby_dev.parse_unit(DEV_UNIT)[1].items()}
+        first = free_udp_port()
+        unit_env.update({
+            "SERVER_ADDR": f"127.0.0.1:{free_udp_port()}", "OMOBA_MATCH_BIND_IP": "127.0.0.1",
+            "OMOBA_MATCH_PUBLIC_HOST": "127.0.0.1", "OMOBA_MATCH_FIRST_PORT": str(first),
+            "OMOBA_MATCH_ROOT": os.path.join(directory, "matches"),
+            "OMOBA_CAREER_OUTBOX": os.path.join(directory, "lobby-outbox"),
+            "OMOBA_MATCH_EXECUTABLE": os.environ["OMOBA_LOBBY_SMOKE_SERVER"],
+            "OMOBA_REGISTRY_URL": "http://127.0.0.1:9",
+        })
+        for key in ("OMOBA_MATCH_ROOT", "OMOBA_CAREER_OUTBOX"):
+            os.makedirs(unit_env[key])
+        env = {"PATH": "/usr/bin:/bin", "HOME": directory, **unit_env}
+        if database_url is not None:
+            url, problems = lobby_dev.parse_database_env(lobby_dev.database_env_text(database_url))
+            self.assertEqual(problems, [])
+            env[lobby_dev.DATABASE_URL_KEY] = url
+        return env
+
+    def run_server(self, env, seconds, during=None):
+        """(exit code or None if still running after `seconds`, output); `during` runs meanwhile."""
+        with subprocess.Popen([os.environ["OMOBA_LOBBY_SMOKE_SERVER"]], env=env, stdout=subprocess.PIPE,
+                              stderr=subprocess.STDOUT, text=True) as process:
+            seen = None
+            try:
+                if during:
+                    time.sleep(seconds / 2)
+                    seen = during()
+                output, _ = process.communicate(timeout=seconds / 2 if during else seconds)
+                code = process.returncode
+            except subprocess.TimeoutExpired:
+                process.terminate()
+                output, _ = process.communicate(timeout=10)
+                code = None
+        return (code, output, seen) if during else (code, output)
+
+    def test_the_dev_unit_environment_starts_the_lobby(self):
+        url = os.environ.get("OMOBA_LOBBY_SMOKE_DATABASE_URL") or lobby_dev.database_url(
+            lobby_dev.DB_GAME, "s" * 32)  # no database behind it: the lobby must still come up
+        with tempfile.TemporaryDirectory() as directory:
+            code, output = self.run_server(self.environment(directory, url), 8)
+        self.assertIsNone(code, f"the dev lobby exited ({code}):\n{output}")
+        self.assertIn("UDP game server is listening on 127.0.0.1:", output)
+        self.assertIn("Match mode: release", output)
+
+    def test_without_the_env_file_a_public_lobby_refuses_to_start(self):
+        # Why the unit carries EnvironmentFile=/opt/omoba-dev/database.env.
+        with tempfile.TemporaryDirectory() as directory:
+            code, output = self.run_server(self.environment(directory, None), 20)
+        self.assertNotIn(code, (None, 0), output)
+        self.assertIn("Public roles require OMOBA_DATABASE_URL", output)
+
+
+@unittest.skipUnless(os.environ.get("OMOBA_LOBBY_SMOKE_DB_CONTAINER") and os.environ.get("OMOBA_LOBBY_SMOKE_ACCOUNT_API"),
+                     "set OMOBA_LOBBY_SMOKE_DB_CONTAINER / _DB_PORT / _ACCOUNT_API (see the module docstring)")
+class RealDatabaseSmoke(unittest.TestCase):
+    """prepare_database for real: Supabase Postgres image, account-api migrations, grants, env file."""
+
+    RELEASE = "/opt/omoba-dev/releases/0.0.0-dev-0000000"
+
+    def setUp(self):
+        container = os.environ["OMOBA_LOBBY_SMOKE_DB_CONTAINER"]
+        if not container.startswith("omoba-lobby-smoke-"):
+            self.skipTest("the disposable container must be named omoba-lobby-smoke-* (this test writes to it)")
+        for name, value in (("DB_CONTAINER", container),
+                            ("DB_PORT", int(os.environ.get("OMOBA_LOBBY_SMOKE_DB_PORT", "59871")))):
+            patcher = mock.patch.object(lobby_dev, name, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.root = temporary.name
+        tool = Path(self.root, self.RELEASE.lstrip("/"), "omoba-account-api")
+        tool.parent.mkdir(parents=True)
+        tool.write_bytes(Path(os.environ["OMOBA_LOBBY_SMOKE_ACCOUNT_API"]).read_bytes())
+        tool.chmod(0o755)
+
+    def host(self):
+        host = lobby_dev.Host(self.root, root_uid=os.getuid())
+        host.mutating = True
+        return host
+
+    def test_prepare_twice_then_the_real_lobby_signs_in_as_the_game_role(self):
+        self.assertEqual(self.host().db_container_problems(), [])
+        first = self.host().prepare_database(self.RELEASE, GRANTS)
+        self.assertTrue(first["env_written"])
+        again = self.host().prepare_database(self.RELEASE, GRANTS)
+        self.assertEqual((again["created_roles"], again["created_database"], again["env_written"]),
+                         ([], False, False))
+        state = self.host().db_state()
+        self.assertEqual((state["roles"], state["database_owner"], state["schema"]),
+                         ({"omoba_dev_owner": False, "omoba_dev_game": True, "omoba_dev_portal": False},
+                          "omoba_dev_owner", True))
+        env = self.host().database_env()
+        self.assertEqual((env["exists"], env["problems"]), (True, []))
+        self.assertEqual(stat.S_IMODE(os.stat(Path(self.root, "opt/omoba-dev/database.env")).st_mode), 0o600)
+        if not os.environ.get("OMOBA_LOBBY_SMOKE_SERVER"):
+            return
+        smoke = RealServerSmoke()
+        with tempfile.TemporaryDirectory() as directory:
+            environment = smoke.environment(directory, None)
+            environment[lobby_dev.DATABASE_URL_KEY] = env["url"]
+
+            def signed_in():
+                return self.host().psql("postgres", "-- lobby_dev:smoke\nSELECT count(*) FROM pg_stat_activity "
+                                        "WHERE usename = 'omoba_dev_game' AND datname = 'omoba_dev';\n").stdout
+
+            code, output, sessions = smoke.run_server(environment, 10, during=signed_in)
+        self.assertIsNone(code, output)
+        self.assertGreater(int(sessions.strip() or 0), 0, output)
+
+
 class UnitChecks(unittest.TestCase):
     def test_the_repository_dev_unit_is_the_dev_lobby(self):
         self.assertEqual(lobby_dev.check_unit(DEV_UNIT), [])
@@ -545,9 +1049,19 @@ class UnitChecks(unittest.TestCase):
             ("ProtectSystem=strict", "ProtectSystem=full"),
             ("NoNewPrivileges=true", "NoNewPrivileges=false"),
             ("[Service]\n", "[Service]\nEnvironmentFile=/opt/omoba/database.env\n"),
+            ("EnvironmentFile=/opt/omoba-dev/database.env\n", "EnvironmentFile=/opt/omoba/database.env\n"),
+            ("EnvironmentFile=/opt/omoba-dev/database.env\n", "EnvironmentFile=-/opt/omoba-dev/database.env\n"),
+            ("EnvironmentFile=/opt/omoba-dev/database.env\n", "EnvironmentFile=/var/lib/omoba-dev/db.env\n"),
+            ("EnvironmentFile=/opt/omoba-dev/database.env\n", ""),
             ("[Service]\n", "[Service]\nEnvironment=OMOBA_DATABASE_URL=postgres://x@127.0.0.1:2003/omoba\n"),
+            ("[Service]\n", f"[Service]\nEnvironment=OMOBA_DATABASE_URL={GOOD_URL}\n"),
+            ("OMOBA_PASSPORT_URL=http://127.0.0.1:9/api/passport",
+             "OMOBA_PASSPORT_URL=https://avatar.ekza.io/api/passport"),
+            ("Environment=OMOBA_PASSPORT_URL=http://127.0.0.1:9/api/passport\n", ""),
+            ("[Service]\n", "[Service]\nEnvironment=EKZA_PASSPORT_URL=https://avatar.ekza.io/api/passport\n"),
             ("[Service]\n", "[Service]\nUser=omoba\n"),
             ("[Service]\n", f"[Service]\nEnvironment=EKZA_REF={lobby_dev.FORBIDDEN_TOKENS[0]}\n"),
+            ("[Service]\n", "[Service]\nEnvironment=EKZA_SUPABASE_URL=https://x.supabase.co\n"),
         ]
         for old, new in replacements:
             self.assertIn(old, DEV_UNIT)
@@ -566,6 +1080,14 @@ class UnitChecks(unittest.TestCase):
             with self.assertRaises(lobby_dev.Refused, msg=bad):
                 lobby_dev.render_unit(DEV_UNIT, bad)
 
+    def test_production_names_are_every_public_name_outside_the_dev_zones(self):
+        for name in ("avatar.ekza.io", "Avatar.Ekza.IO.", "registry.ekza.io", "omoba.io", "x.y.omoba.io",
+                     "root@app.omoba.io", "vds-eternal", PROD_IP):
+            self.assertTrue(lobby_dev.is_production_name(name), name)
+        for name in ("vds-dev", "lobby.dev.omoba.io", "registry.dev.ekza.io", "dev.ekza.io", DEV_IP,
+                     "notomoba.io", "127.0.0.1", "omoba.io.example"):
+            self.assertFalse(lobby_dev.is_production_name(name), name)
+
     def test_paths_compare_by_component(self):
         self.assertFalse(lobby_dev.within("/opt/omoba-dev", "/opt/omoba"))
         self.assertTrue(lobby_dev.within("/opt/omoba/current", "/opt/omoba"))
@@ -579,7 +1101,10 @@ class UnitChecks(unittest.TestCase):
     def test_editing_a_dev_constant_into_production_is_caught(self):
         for name, value in (("OPT", "/opt/omoba"), ("STATE_DIRS", ("/var/lib/omoba",)), ("USER", "omoba"),
                             ("UNIT", "omoba-lobby"), ("LOBBY_PORT", 4000), ("MATCH_PORTS", frozenset({41001})),
-                            ("DEFAULT_HOST", "vds-eternal"), ("DEFAULT_PUBLIC_HOST", PROD_IP)):
+                            ("DEFAULT_HOST", "vds-eternal"), ("DEFAULT_PUBLIC_HOST", PROD_IP),
+                            ("DATABASE_ENV", "/opt/omoba/database.env"), ("DB_NAME", "omoba"),
+                            ("DB_ROLES", ("omoba_game",)), ("DB_PORT", 2003),
+                            ("PASSPORT", "https://avatar.ekza.io/api/passport")):
             with mock.patch.object(lobby_dev, name, value), self.assertRaises(lobby_dev.Refused, msg=name):
                 lobby_dev.assert_dev_constants()
 
@@ -592,16 +1117,22 @@ class UnitChecks(unittest.TestCase):
             lobby_dev.decode_payload("e30=; rm -rf /")
 
 
-def write_package(directory, name, member, data, symlink=False):
+def write_package(directory, name, member, data, symlink=False, extra=None):
+    """A tarball with `member` plus, by default, the dev migration tool next to it."""
     package = Path(directory, name)
+    root = member.split("/", 1)[0]
+    members = {member: (data, symlink)}
+    for path, content in ({f"{root}/omoba-account-api": TOOL} if extra is None else extra).items():
+        members[path] = (content, False)
     with tarfile.open(package, "w:gz") as archive:
-        info = tarfile.TarInfo(member)
-        if symlink:
-            info.type, info.linkname = tarfile.SYMTYPE, "/opt/omoba/current/server"
-            archive.addfile(info)
-        else:
-            info.size = len(data)
-            archive.addfile(info, io.BytesIO(data))
+        for path, (content, link) in members.items():
+            info = tarfile.TarInfo(path)
+            if link:
+                info.type, info.linkname = tarfile.SYMTYPE, "/opt/omoba/current/server"
+                archive.addfile(info)
+            else:
+                info.size = len(content)
+                archive.addfile(info, io.BytesIO(content))
     return package
 
 
@@ -677,8 +1208,15 @@ class MacHalf(unittest.TestCase):
             os.environ.pop(key, None)
 
     def test_only_a_dev_linux_package_with_an_x86_64_server_is_accepted(self):
-        version, data, _ = lobby_dev.read_package(self.package)
-        self.assertEqual((version, data), ("0.44.0", elf()))
+        version, binaries, _ = lobby_dev.read_package(self.package)
+        self.assertEqual((version, binaries), ("0.44.0", {"server": elf(), "omoba-account-api": TOOL}))
+        for extra in ({}, {"omoba-0.44.0-dev/omoba-account-api": b"#!/bin/sh\n"}):
+            sub = Path(self.directory.name, f"tool-{len(extra)}")
+            sub.mkdir()
+            package = write_package(sub, "omoba-0.44.0-dev-linux-x64.tar.gz", "omoba-0.44.0-dev/omoba-server",
+                                    elf(), extra=extra)
+            with self.assertRaises(lobby_dev.Refused, msg=extra):
+                lobby_dev.read_package(package)
         cases = [
             ("omoba-0.44.0-linux-x64.tar.gz", "omoba-0.44.0/omoba-server", elf(), False),
             ("omoba-0.44.0-dev-linux-x64.tar.gz", "omoba-0.44.0-dev/omoba-server", elf(b"\xb7\x00"), False),
@@ -740,27 +1278,48 @@ class MacHalf(unittest.TestCase):
                 with self.assertRaises(lobby_dev.Refused):
                     lobby_dev.main(["ship", "--package", str(self.package), "--revision", "abc1234", *extra])
 
-    def test_apply_runs_preflight_stage_upload_activate_in_order(self):
+    def apply_with(self, uploads):
         calls = []
+        directory = "/opt/omoba-dev/releases/0.44.0-dev-abc1234"
 
         def remote(alias, mode, payload=None):
             calls.append((alias, mode, payload))
+            if mode == "stage":
+                return json.dumps({"mode": mode, "upload_to": [f"{directory}/{name}" for name in uploads]})
             return json.dumps({"ok": True, "mode": mode})
 
         def run(args, *rest, **kwargs):
             if args[:2] == ["ssh", "-G"]:
                 return subprocess.CompletedProcess(args, 0, f"hostname {DEV_IP}\n", "")
-            calls.append(("scp", args[-1]))
+            calls.append(("scp", args[-1], Path(args[-2]).read_bytes()))
             return subprocess.CompletedProcess(args, 0, "", "")
 
         with mock.patch.object(lobby_dev, "ssh_remote", remote), mock.patch.object(lobby_dev.subprocess, "run", run), \
                 contextlib.redirect_stdout(io.StringIO()):
             lobby_dev.main(["ship", "--package", str(self.package), "--revision", "abc1234", "--ip", DEV_IP, "--apply"])
-        self.assertEqual([call[1] for call in calls], ["preflight", "stage", "vds-dev:/opt/omoba-dev/releases/"
-                                                       "0.44.0-dev-abc1234/server.part", "activate"])
+        return calls
+
+    def test_apply_runs_preflight_stage_upload_activate_in_order(self):
+        calls = self.apply_with(["server.part", "omoba-account-api.part"])
+        directory = "vds-dev:/opt/omoba-dev/releases/0.44.0-dev-abc1234"
+        self.assertEqual([call[1] for call in calls], ["preflight", "stage", f"{directory}/server.part",
+                                                       f"{directory}/omoba-account-api.part", "activate"])
+        self.assertEqual((calls[2][2], calls[3][2]), (elf(), TOOL))
         self.assertTrue(all(call[0] in ("vds-dev", "scp") for call in calls))
-        self.assertEqual(calls[3][2]["expected_ip"], DEV_IP)
-        self.assertEqual(lobby_dev.check_unit(calls[3][2]["unit"]), [])
+        activate = calls[4][2]
+        self.assertEqual(activate["expected_ip"], DEV_IP)
+        self.assertEqual(lobby_dev.check_unit(activate["unit"]), [])
+        self.assertEqual(activate["grants"], GRANTS)
+        self.assertEqual(activate["account_api_sha256"], hashlib.sha256(TOOL).hexdigest())
+        self.assertEqual(activate["build"]["account_api_sha256"], hashlib.sha256(TOOL).hexdigest())
+        # Already staged files are not uploaded again.
+        self.assertEqual([call[1] for call in self.apply_with([])], ["preflight", "stage", "activate"])
+
+    def test_apply_refuses_an_upload_outside_the_release(self):
+        with self.assertRaises(lobby_dev.Refused):
+            self.apply_with(["../../omoba/current/server.part"])
+        with self.assertRaises(lobby_dev.Refused):
+            self.apply_with(["client.part"])
 
     def test_apply_stops_when_the_host_preflight_reports_problems(self):
         modes = []
