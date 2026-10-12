@@ -24,7 +24,8 @@ literal in ~/.ssh/config, so a proxy's fake-IP DNS cannot redirect it); the
 unit must be exactly the dev lobby. On the host (the same file, piped to
 `ssh <alias> python3 - remote <mode> <payload>`): it refuses to run where any
 production marker exists (unit omoba-lobby, user omoba, /opt/omoba,
-/var/lib/omoba, /opt/ekza-*, the NPM edge, address 77.246.105.57), only writes
+/var/lib/omoba, /opt/ekza-studio, /opt/ekza-mirror, the NPM edge, address
+77.246.105.57; the dev host's own /opt/ekza-dev is not a marker), only writes
 under /opt/omoba-dev, /var/lib/omoba-dev and its own unit file, never
 interrupts a running dev match, and rolls back to the previous release on any
 failed start. Re-shipping the active release with the same unit is a no-op.
