@@ -112,6 +112,10 @@ pub fn main() {
     // Purchased Ekza avatars live outside the (possibly read-only) bundle.
     // Asset sources must exist before AssetPlugin is added.
     if let Some(store_root) = passport::initialize_store() {
+        // Restore a saved Ekza connection now, in the background, instead of
+        // when a screen that polls the account (Collection, hero select,
+        // draft) first opens: Home starts with the account and its library.
+        passport::poll_account();
         app.register_asset_source(
             omoba_passport::store::ASSET_SOURCE,
             bevy::asset::io::AssetSourceBuilder::platform_default(
