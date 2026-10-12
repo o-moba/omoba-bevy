@@ -27,6 +27,23 @@ All notable changes are recorded here. The canonical version is
   on that machine and fails CI and fresh clones. Tooling only; not part of `make check`
   because it needs the network.
 
+- DEV contour: `scripts/release.py build … --contour dev` makes desktop tester packages that
+  point at the dev lobby (`lobby.dev.omoba.io:4100` on the dedicated dev VPS) and
+  `registry.dev.ekza.io`. They are named `…-dev-…`, keep settings, session and caches in
+  `omoba-bevy-dev` instead of `omoba-bevy`, and are titled `OMOBA DEV` / `Omoba Dev.app`.
+  Dev builds use a closed loopback passport instead of the production `avatar.ekza.io`,
+  and at run time they offer an **OMOBA Dev** preset and refuse the production lobby in
+  every address they validate (typed, saved, `GAME_SERVER_ADDR`, match allocations).
+  `--registry` and `--passport` bake those origins for a build. No build, including the
+  iOS archive, inherits a compile-time setting from the shell (`OMOBA_DEFAULT_*`,
+  `OMOBA_ACCOUNT_API_URL`, `OMOBA_PORTAL_ORIGIN`, `EKZA_DEV_HTTP_HOST`). `release.yml`
+  gains `registry` and `contour` dispatch inputs. `ops/vps/omoba-lobby-dev.service` and
+  `ops/vps/dev/lobby_dev.py` install the dev lobby (UDP 4100/41100) on `vds-dev` with
+  dry-run, production refusals and rollback. The lobby gets its own career database
+  `omoba_dev` in the dev Supabase Postgres on that host, because a public lobby needs one
+  to start and to match players: roles, database and schema are created on the host, and
+  the password is generated there into a root-only file. Production builds, the production
+  unit and protocol are unchanged.
 - `make release-all` builds macOS, Windows (cargo-xwin cross-build), Linux (Docker,
   offline fallback), a universal Android APK and a signed iPhone archive on one Mac;
   `make release-publish` pins the packages to IPFS and verifies the gateway copies.

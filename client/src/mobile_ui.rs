@@ -230,13 +230,17 @@ fn setup_phone_ui(mut commands: Commands, mobile: Res<MobileControls>) {
                         .with_children(|row| {
                             phone_button(
                                 row,
-                                Localized::new("phone.server.beta"),
+                                Localized::new(
+                                    crate::session_config::ServerPreset::Beta.label_key(),
+                                ),
                                 "ServerPresetBeta",
                                 PhoneAction::Preset(crate::session_config::ServerPreset::Beta),
                             );
                             phone_button(
                                 row,
-                                Localized::new("phone.server.local"),
+                                Localized::new(
+                                    crate::session_config::ServerPreset::Local.label_key(),
+                                ),
                                 "ServerPresetLocal",
                                 PhoneAction::Preset(crate::session_config::ServerPreset::Local),
                             );

@@ -107,6 +107,24 @@ server. Direct Xcode/server builds must retain a manifest from the same frozen s
 7. Review the draft on GitHub, download one package per platform, smoke it,
    then publish: `gh release edit v0.24.0 --draft=false`.
 
+## DEV-contour tester builds
+
+Dev builds are for testers on the dev contour (dev lobby on the dedicated dev VPS,
+`registry.dev.ekza.io`). They are desktop only and never replace or share state with a
+production install:
+
+```sh
+python3 scripts/release.py build all --contour dev --dry-run   # what gets baked in
+python3 scripts/release.py build all --contour dev             # macOS, Windows, Linux into dist/v<version>-dev/
+python3 scripts/release.py ci --contour dev --ref v<version>-dev.1 --dry-run
+```
+
+- Defaults: `lobby.dev.omoba.io:4100` (`--server <DEV_IP>:4100` when DNS is not set), `https://registry.dev.ekza.io`, passport `http://127.0.0.1:9/api/passport` (closed: there is no dev passport yet, and `avatar.ekza.io` is production; `--passport` takes a dev or loopback URL), settings folder `omoba-bevy-dev`, window title `OMOBA DEV`, `Omoba Dev.app` (bundle id `…desktop.dev`). The dev Linux package also carries `omoba-account-api`, the dev lobby's migration tool.
+- `-dev` appears in every package and dist directory name. Dev releases use `v<version>-dev.N` tags only, are drafts and prereleases, and target `dev`. The workflow's `contour=dev` input skips Android.
+- A dev build refuses production endpoints, and a production build refuses dev ones (and `$DEV_IP`). A dev client also refuses the production lobby at run time: its online preset is OMOBA Dev, and typed, saved or allocated production addresses are rejected.
+- No build inherits a compile-time setting from the shell (`OMOBA_DEFAULT_*`, `OMOBA_ACCOUNT_API_URL`, `OMOBA_PORTAL_ORIGIN`, `EKZA_DEV_HTTP_HOST`), including the iOS archive.
+- The dev lobby itself is shipped with `ops/vps/dev/lobby_dev.py`; see [ops/vps/dev/README.md](../ops/vps/dev/README.md).
+
 ## Signing and trust
 
 - **macOS:** ad-hoc signed, not notarized. Players right-click → Open once
