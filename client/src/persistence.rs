@@ -1,4 +1,5 @@
-//! On-disk client preferences: graphics, character selection, optional server address.
+//! On-disk client preferences: graphics, character and avatar selection,
+//! optional server address.
 //!
 //! **Load path**: `OMOBA_CLIENT_CONFIG_DIR` if set, else platform default
 //! (`~/.config/omoba-bevy/client_preferences.json` on Unix,
@@ -105,6 +106,11 @@ struct ClientPreferencesFile {
     client_session_id: Option<String>,
     #[serde(default)]
     character: Option<CharacterChoice>,
+    /// The picked 3D avatar: a shipped roster slug or an Ekza store slug.
+    /// Absent before 0.45 (no schema bump: older builds ignore it). Restored
+    /// only while the player may still pick it.
+    #[serde(default)]
+    avatar: Option<String>,
     #[serde(default)]
     model_target_height: Option<f32>,
     #[serde(default)]
@@ -370,6 +376,12 @@ pub(crate) fn load_persistent_client_settings(
     if let Some(ch) = disk.character {
         team.character = ch;
     }
+    if let Some(slug) = disk.avatar.as_deref() {
+        match restorable_avatar(slug) {
+            Some(slug) => team.avatar = Some(slug),
+            None => info!("Saved avatar {slug:?} is not available; keeping the default avatar."),
+        }
+    }
 
     if let Some(h) = disk.model_target_height {
         let resolved = migrate_model_target_height(h, disk.schema_version);
@@ -400,6 +412,14 @@ pub(crate) fn load_persistent_client_settings(
     }
 }
 
+/// A saved avatar slug this player may still pick: shipped, or an Ekza store
+/// avatar the offline catalogue already lists and [`crate::passport::can_select`]
+/// allows. A withdrawn or unknown slug is dropped so a join never asks for it.
+fn restorable_avatar(slug: &str) -> Option<String> {
+    let avatar = omoba_passport::avatars::avatar_definition(slug.trim())?;
+    crate::passport::can_select(avatar).then(|| avatar.slug.clone())
+}
+
 fn build_file_from_state(
     lighting: &LightingSettings,
     model: &ModelScaleSettings,
@@ -415,6 +435,7 @@ fn build_file_from_state(
         game_server_addr: Some(game_server_addr.to_string()),
         client_session_id: Some(client_session_id.to_string()),
         character: Some(character),
+        avatar: None,
         model_target_height: Some(model.target_height),
         illuminance: Some(lighting.illuminance),
         ambient_brightness: Some(lighting.ambient_brightness),
@@ -443,6 +464,8 @@ pub(crate) fn language_to_save(
 }
 
 /// Writes current resources to disk (graphics + character + active server display string).
+/// `None` for `handheld`, `avatar`, `render`, `hud_position` or `tips` keeps
+/// the stored value; `Some(None)` for `avatar` clears it.
 pub(crate) fn save_client_preferences_to_disk(
     lighting: &LightingSettings,
     model: &ModelScaleSettings,
@@ -454,6 +477,7 @@ pub(crate) fn save_client_preferences_to_disk(
     motion: &MotionSettings,
     language: Option<crate::i18n::LocaleId>,
     handheld: Option<&shared::handheld::HandheldSelection>,
+    avatar: Option<Option<&str>>,
     render: Option<&RenderSettings>,
     hud_position: Option<&HudPositionSettings>,
     tips: Option<&BeginnerTips>,
@@ -494,6 +518,10 @@ pub(crate) fn save_client_preferences_to_disk(
         .copied()
         .or_else(|| previous.as_ref().map(|p| p.beginner_tips))
         .unwrap_or_default();
+    prefs.avatar = match avatar {
+        Some(avatar) => avatar.map(str::to_owned),
+        None => previous.as_ref().and_then(|p| p.avatar.clone()),
+    };
     prefs.handheld = handheld
         .cloned()
         .or_else(|| previous.map(|p| p.handheld))
@@ -557,6 +585,7 @@ fn save_client_preferences_on_change(
         motion.as_ref(),
         language_to_save(locale.as_deref(), &saved_language),
         Some(&team.handheld),
+        Some(team.avatar.as_deref()),
         Some(&render),
         Some(&hud_position),
         Some(&tips),
@@ -594,6 +623,7 @@ pub(crate) fn reset_graphics_to_defaults(
         camera,
         motion,
         language,
+        None,
         None,
         None,
         None,
@@ -660,6 +690,132 @@ mod tests {
         next.update();
         assert!(!next.world().resource::<BeginnerTips>().enabled);
         assert_eq!(next.world().resource::<CameraSettings>().zoom, 0.9);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// A picked avatar, shipped or from Ekza Studio, is the selection on the
+    /// next launch; one the player can no longer pick keeps the default.
+    #[test]
+    fn a_picked_avatar_is_restored_on_the_next_launch_while_still_selectable() {
+        if crate::i18n::testing::isolated(
+            "persistence::tests::a_picked_avatar_is_restored_on_the_next_launch_while_still_selectable",
+        ) {
+            return;
+        }
+        use ekza_bevy_sdk::passport::{ProjectSupport, ProtectedAvatar, Rendition};
+        let legacy: ClientPreferencesFile =
+            serde_json::from_str(r#"{"schema_version":8,"character":"paco"}"#).unwrap();
+        assert_eq!(legacy.avatar, None);
+        let dir = scratch_dir("avatar");
+        // SAFETY: this test is isolated in its own process before changing env.
+        unsafe {
+            std::env::set_var("OMOBA_CLIENT_CONFIG_DIR", &dir);
+        }
+        let launch = || {
+            let mut app = App::new();
+            app.init_resource::<LightingSettings>()
+                .init_resource::<ModelScaleSettings>()
+                .init_resource::<crate::team::TeamSelection>()
+                .add_plugins(ClientPersistencePlugin);
+            app.update();
+            app
+        };
+        let avatar = |app: &App| {
+            app.world()
+                .resource::<crate::team::TeamSelection>()
+                .avatar
+                .clone()
+        };
+        let default = crate::team::TeamSelection::default().avatar;
+        // A free Studio avatar from the offline catalogue (process-global
+        // registry; this body runs in its own process).
+        let protected = ProtectedAvatar {
+            avatar_id: "ekza:avatar:5ab84bd7-b19a-41c5-9b76-14b737cc356b".into(),
+            support: ProjectSupport {
+                project_id: "omoba".into(),
+                platform: "desktop".into(),
+                profile: "humanoid-glb-v1".into(),
+                status: "approved".into(),
+                rendition: Rendition {
+                    id: "sha256:".to_owned() + &"d".repeat(64),
+                    url: "https://registry.example/v1/studio/assets/d/rendition".into(),
+                    sha256: "d".repeat(64),
+                    size_bytes: 4096,
+                    format: "glb".into(),
+                },
+            },
+        };
+        let studio = omoba_passport::avatars::register_store_avatar(
+            omoba_passport::avatars::AvatarDefinition {
+                slug: omoba_passport::protected_slug(&protected),
+                display_name: "Pyre Sorcerer".into(),
+                collection: "Ekza store".into(),
+                license: "CC0-1.0".into(),
+                source_url: protected.support.rendition.url.clone(),
+                author: Some("jinx-artist".into()),
+                attribution: None,
+                thumbnail: None,
+                passport: Some(protected),
+                free: true,
+            },
+        )
+        .unwrap()
+        .slug
+        .clone();
+        let shipped = omoba_passport::avatars::avatar_roster()
+            .last()
+            .unwrap()
+            .slug
+            .clone();
+        assert_ne!(Some(&shipped), default.as_ref());
+        for picked in [shipped, studio] {
+            let mut app = launch();
+            for _ in 0..5 {
+                app.update();
+            }
+            app.world_mut()
+                .resource_mut::<crate::team::TeamSelection>()
+                .avatar = Some(picked.clone());
+            app.update();
+            assert_eq!(
+                read_preferences_file(&dir.join(PREFS_FILENAME))
+                    .unwrap()
+                    .avatar
+                    .as_deref(),
+                Some(picked.as_str())
+            );
+            assert_eq!(avatar(&launch()), Some(picked));
+        }
+        // Withdrawn from the catalogue (unknown here) or never valid: default.
+        for stale in [format!("ekza-{}", "e".repeat(64)), "../agnes".into()] {
+            let mut file = read_preferences_file(&dir.join(PREFS_FILENAME)).unwrap();
+            file.avatar = Some(stale);
+            write_preferences_file(&dir.join(PREFS_FILENAME), &file).unwrap();
+            assert_eq!(avatar(&launch()), default);
+        }
+        // A graphics reset keeps the stored avatar.
+        let mut file = read_preferences_file(&dir.join(PREFS_FILENAME)).unwrap();
+        file.avatar = Some("agnes".into());
+        write_preferences_file(&dir.join(PREFS_FILENAME), &file).unwrap();
+        reset_graphics_to_defaults(
+            &mut LightingSettings::default(),
+            &mut ModelScaleSettings::default(),
+            &mut CameraSettings::default(),
+            &mut ClientPrefsSaveGate::default(),
+            CharacterChoice::Paco,
+            "game.local:4000",
+            "avatar-relaunch",
+            &AudioSettings::default(),
+            &MotionSettings::default(),
+            None,
+        );
+        assert_eq!(
+            read_preferences_file(&dir.join(PREFS_FILENAME))
+                .unwrap()
+                .avatar
+                .as_deref(),
+            Some("agnes")
+        );
         fs::remove_dir_all(dir).unwrap();
     }
 
@@ -867,6 +1023,7 @@ mod tests {
             Some(&shared::handheld::HandheldSelection::Item(
                 "forge-hammer".into(),
             )),
+            None,
             None,
             None,
             None,

@@ -82,7 +82,8 @@ server. Direct Xcode/server builds must retain a manifest from the same frozen s
 
 ## Turnkey release
 
-1. Merge the release PR to `main` with CI green (`make check` locally first).
+1. Merge the release PR to `main` with CI green (`make check` locally first, and
+   `make sdk-pin-check SDK_BRANCH=main` so the pinned SDK commit is on SDK `main`).
 2. Bump `Cargo.toml` version, move `CHANGELOG.md` `[Unreleased]` entries into
    `## [x.y.z] - date`, update `docs/features.md`, commit to `main`.
 3. Optional: choose the server clients start on. Either pass

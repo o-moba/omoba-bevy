@@ -453,6 +453,7 @@ fn catalogue_revision(entries: &[AvatarCatalogueEntry], _status: &store::Catalog
         entry.avatar.free.hash(&mut hash);
         entry.avatar.license.hash(&mut hash);
         entry.avatar.author.hash(&mut hash);
+        entry.avatar.attribution.hash(&mut hash);
         can_select(&entry.avatar).hash(&mut hash);
     }
     hash.finish()

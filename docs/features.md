@@ -45,8 +45,10 @@ downloads show current defaults without requiring a running game or Account API.
 
 An artist can prepare a requirement/revision-pinned brief and use the existing
 Studio upload route. This is discovery and preparation: Studio does not yet
-persist exact requirement bindings, and the game does not yet equip coordinated
-sets or remote projectile/prop skins. See the [iteration record](progress/2026-10-10-asset-catalog.md)
+persist exact requirement bindings. The game equips a one-GLB
+[Wildspark set](handheld-weapons.md#wildspark-set-repeater-and-launcher-in-one-glb)
+with both Q guns, but no other coordinated sets or remote projectile/prop skins.
+See the [iteration record](progress/2026-10-10-asset-catalog.md)
 and parent [design PR #78](https://github.com/o-moba/omoba-bevy/pull/78).
 
 ## Planned: Studio model requirements by class and skill
@@ -54,8 +56,9 @@ and parent [design PR #78](https://github.com/o-moba/omoba-bevy/pull/78).
 The [proposal and TODO](plans/studio-skill-asset-catalog.md) describe a game-owned
 requirements catalogue shared by Studio and the website: baseline 3D previews,
 artist contributions to specific skill/model roles and eventual coordinated
-cosmetic sets such as Wildspark’s two guns. The public discovery catalogue and local class workshop now exist; exact-slot
-Studio submissions, coordinated sets and runtime set equipping remain planned.
+cosmetic sets such as Wildspark’s two guns. The public discovery catalogue and local class workshop now exist,
+and the game equips a one-GLB Wildspark set. Exact-slot Studio submissions and
+other coordinated sets remain planned.
 
 ## First-match guidance and mobile comfort (0.44.0 candidate)
 
@@ -1049,8 +1052,14 @@ local sign out. The client stores its scoped opaque credential in
 `ekza-store/account/session.json` under its private settings directory (0600 on
 Unix), restores it with a fresh SDK library check, and refreshes every 15 seconds.
 Registry outages retain credentials; authorization rejection clears them. Sign
-out removes the local credential and invalidates pending background work;
-Studio Account revokes access server-side. Public approved community models
+out removes the local credential and invalidates pending background work, then
+asks the registry to end that link (`DELETE /v1/account/session` through the
+SDK's `AccountSession::disconnect`). The request runs in the background and is
+best effort: signing out never waits for it, and offline the link stays valid
+until it expires or Studio Account revokes it. A new pairing that replaces a
+saved link (for example one a startup outage left unrestored) ends the old link
+the same way once the new one is saved; the SDK refuses, without sending it, a
+saved token for another server or game. Public approved community models
 remain free after logout. Catalogue identity, metadata, live entitlement changes
 and scrolling stay intact when an account is restored or signed out.
 

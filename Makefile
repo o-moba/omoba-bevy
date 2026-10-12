@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 
-.PHONY: compatibility-manifest compatibility-check help server server-dev practice practice-server game game2d start start-release play play-bots bots stop restart verify-task-12 verify-gameplay iphone-check iphone iphone-box android-check android android-universal check fmt fmt-check lint check-no-qa test test-scripts test-postgres release-check release-all release-publish release-local release-mac release-linux release-android release-ios release-testflight release-ci release-draft release-notes showcase demo-video trailer-clips
+.PHONY: compatibility-manifest compatibility-check help server server-dev practice practice-server game game2d start start-release play play-bots bots stop restart verify-task-12 verify-gameplay iphone-check iphone iphone-box android-check android android-universal check fmt fmt-check lint check-no-qa test test-scripts test-postgres release-check release-all release-publish release-local release-mac release-linux release-android release-ios release-testflight release-ci release-draft release-notes showcase demo-video trailer-clips sdk-pin-check
 
 # ---------------------------------------------------------------------------
 # Match modes (TASK-22)
@@ -25,6 +25,7 @@ LOCAL_SERVER_ADDR ?= 127.0.0.1:4000
 IPHONE_OUTPUT ?= builds/iphone
 ANDROID_OUTPUT ?= target/mobile/android
 ANDROID_SERVER ?=
+SDK_BRANCH ?=
 SHOWCASE_OUTPUT ?= builds/showcase
 DEMO_OUTPUT ?= builds/demo
 UI_AUDIT_OUTPUT ?= ../omoba-ui/captures/$(shell date +%F)
@@ -65,6 +66,13 @@ test-scripts: ## Python launcher, packaging, asset-gate and iOS tooling tests
 # CI runs the same script in the `postgres` job.
 test-postgres: ## PostgreSQL-backed tests (set OMOBA_TEST_DATABASE_URL to a disposable database)
 	python3 scripts/postgres_tests.py
+
+# Not part of `check`: reads the SDK's GitHub repository. Cargo fetches the pinned
+# ekza-bevy-sdk commit from there, so a commit only in a local checkout or in
+# ~/.cargo/git builds here and fails CI and fresh clones. Run before opening a PR
+# that moves the pin; SDK_BRANCH=dev (or main) before merging into that branch.
+sdk-pin-check: ## Check the pinned ekza-bevy-sdk commit is on an SDK branch (SDK_BRANCH=dev: merged there)
+	python3 scripts/check_sdk_pin.py $(if $(SDK_BRANCH),--branch "$(SDK_BRANCH)")
 
 # Physical iOS package; install the Rust iOS target and select Xcode first.
 # Optional signing with existing credentials is documented in mobile/ios/README.md.

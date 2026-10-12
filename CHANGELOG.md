@@ -5,6 +5,28 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Wildspark skin sets and "My Ekza library" weapons. One static `handheld-glb-v1`
+  GLB can carry both Wildspark guns (`WildsparkSetRepeater` / `WildsparkSetLauncher`,
+  [authoring guide](docs/wildspark-skin-sets.md)); the game shows the variant for the
+  replicated weapon mode and moves only that variant's rotor or slide. Two sample sets
+  (Candy Neon, Scrap Punk) are in `assets-src/skins/wildspark-sets/`, built by
+  `scripts/build_wildspark_skin.py`; they reach players only through Studio. Collection and
+  the draft list the connected account's weapons first as "My Ekza library" (claims made
+  on `app.omoba.io/market` appear without a restart), and avatars in the library carry
+  the same name. Studio items show the registry's attribution line next to creator and
+  licence. The picked avatar is remembered across restarts. The server logs one line per
+  Ekza handheld/avatar admission decision. Signing out of Ekza in the game also ends
+  that link on the registry, in the background and best effort, and a new pairing ends
+  the saved link it replaces, so reconnects no longer pile up active links. Needs
+  ekza-bevy-sdk `d18ec72` (`AccountSession::assets`, `disconnect`, store attribution);
+  free items stay server-admitted by approval; `PROTOCOL_VERSION` stays 11.
+
+- `make sdk-pin-check` checks that the `ekza-bevy-sdk` commit pinned in `Cargo.toml`
+  and `Cargo.lock` is on a branch of the SDK's GitHub repository (`SDK_BRANCH=dev`
+  requires it merged there). A commit known only to a local `~/.cargo/git` cache builds
+  on that machine and fails CI and fresh clones. Tooling only; not part of `make check`
+  because it needs the network.
+
 - `make release-all` builds macOS, Windows (cargo-xwin cross-build), Linux (Docker,
   offline fallback), a universal Android APK and a signed iPhone archive on one Mac;
   `make release-publish` pins the packages to IPFS and verifies the gateway copies.
