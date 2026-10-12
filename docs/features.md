@@ -49,6 +49,13 @@ persist exact requirement bindings, and the game does not yet equip coordinated
 sets or remote projectile/prop skins. See the [iteration record](progress/2026-10-10-asset-catalog.md)
 and parent [design PR #78](https://github.com/o-moba/omoba-bevy/pull/78).
 
+## Idea: rating-unlocked skill slots
+
+Recorded 2026-10-12, not scheduled: as a character's rating grows it could unlock
+more than four skills, possibly up to about ten. The [idea and open questions](plans/rating-skill-slots.md)
+cover which rating counts, active versus known skills, ranked fairness, controls
+and the protocol impact.
+
 ## Planned: Studio model requirements by class and skill
 
 The [proposal and TODO](plans/studio-skill-asset-catalog.md) describe a game-owned
