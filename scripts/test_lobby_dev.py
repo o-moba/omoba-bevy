@@ -14,7 +14,7 @@ Two opt-in smoke tests use real binaries and are skipped otherwise:
   Supabase stack runs, then signs the real lobby in with the file it wrote:
 
     cargo build -p server -p omoba-account-api
-    docker run -d --rm --name omoba-lobby-smoke-db -e POSTGRES_PASSWORD=smoke-only \\
+    docker run -d --rm --name omoba-lobby-smoke-db -e POSTGRES_PASSWORD="$(openssl rand -hex 16)" \\
         -p 127.0.0.1:59871:5432 public.ecr.aws/supabase/postgres:17.6.1.165
     OMOBA_LOBBY_SMOKE_SERVER=$CARGO_TARGET_DIR/debug/server \\
     OMOBA_LOBBY_SMOKE_ACCOUNT_API=$CARGO_TARGET_DIR/debug/omoba-account-api \\
@@ -53,6 +53,7 @@ GRANTS = (ROOT / lobby_dev.GRANTS).read_text()
 DEV_IP = "203.0.113.10"
 PROD_IP = "77.246.105.57"
 GOOD_PASSWORD = "a" * 64
+SHORT_PASSWORD = "s" * 5
 GOOD_URL = f"postgres://omoba_dev_game:{GOOD_PASSWORD}@127.0.0.1:54322/omoba_dev"
 
 
@@ -747,7 +748,7 @@ class CareerDatabase(HostCase):
         "production role": "OMOBA_DATABASE_URL=postgres://omoba_game:{p}@127.0.0.1:54322/omoba_dev\n",
         "production database": "OMOBA_DATABASE_URL=postgres://omoba_dev_game:{p}@127.0.0.1:54322/omoba\n",
         "host override": "OMOBA_DATABASE_URL=postgres://omoba_dev_game:{p}@127.0.0.1:54322/omoba_dev?host=db.example.com\n",
-        "short password": "OMOBA_DATABASE_URL=postgres://omoba_dev_game:short@127.0.0.1:54322/omoba_dev\n",
+        "short password": "OMOBA_DATABASE_URL=postgres://omoba_dev_game:{s}@127.0.0.1:54322/omoba_dev\n",
         "extra key": "OMOBA_DATABASE_URL=postgres://omoba_dev_game:{p}@127.0.0.1:54322/omoba_dev\n"
                      "OMOBA_PASSPORT_URL=https://avatar.ekza.io/api/passport\n",
         "twice": "OMOBA_DATABASE_URL=postgres://omoba_dev_game:{p}@127.0.0.1:54322/omoba_dev\n" * 2,
@@ -762,7 +763,7 @@ class CareerDatabase(HostCase):
         good = self.env_file().read_text()
         for name, content in self.BAD_ENV.items():
             with self.subTest(env=name):
-                self.env_file().write_text(content.format(p=GOOD_PASSWORD))
+                self.env_file().write_text(content.format(p=GOOD_PASSWORD, s=SHORT_PASSWORD))
                 os.chmod(self.env_file(), 0o600)
                 self.assertFalse(self.fresh().preflight(payload)["ok"])
                 calls = len(self.fake.calls)
@@ -865,7 +866,7 @@ class DatabaseUrl(unittest.TestCase):
         self.assertEqual(lobby_dev.database_url(lobby_dev.DB_GAME, GOOD_PASSWORD), GOOD_URL)
         for content in CareerDatabase.BAD_ENV.values():
             url = content.splitlines()[0].partition("=")[2] if "=" in content else ""
-            problems = lobby_dev.parse_database_env(content.format(p=GOOD_PASSWORD))[1]
+            problems = lobby_dev.parse_database_env(content.format(p=GOOD_PASSWORD, s=SHORT_PASSWORD))[1]
             self.assertTrue(problems, url)
             self.assertNotIn(GOOD_PASSWORD, json.dumps(problems))
         for bad in ("", "not a url", "mysql://omoba_dev_game:" + GOOD_PASSWORD + "@127.0.0.1:54322/omoba_dev",
