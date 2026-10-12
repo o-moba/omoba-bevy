@@ -35,18 +35,78 @@ pub fn window_plugin() -> WindowPlugin {
         }
     }
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
-    WindowPlugin::default()
+    match desktop_window_title(CONFIG_DIR_SUFFIX) {
+        // A contour build says so in its title bar; production keeps Bevy's default window.
+        Some(title) => WindowPlugin {
+            primary_window: Some(Window { title, ..default() }),
+            ..default()
+        },
+        None => WindowPlugin::default(),
+    }
+}
+
+/// `OMOBA DEV` for a dev-contour desktop build, `None` (unchanged default) for production.
+#[cfg_attr(any(target_os = "android", target_os = "ios"), allow(dead_code))]
+fn desktop_window_title(suffix: Option<&str>) -> Option<String> {
+    suffix
+        .filter(|suffix| !suffix.is_empty())
+        .map(|suffix| format!("OMOBA {}", suffix.to_ascii_uppercase()))
+}
+
+/// Build-time suffix for the default settings directory. A dev-contour tester
+/// build (`scripts/release.py build <platform> --contour dev`) sets `dev`, so it
+/// keeps its session, saved server, identity and caches in `omoba-bevy-dev` and
+/// never reads or overwrites a production install's `omoba-bevy`. Unset or empty
+/// keeps the production name. A runtime `OMOBA_CLIENT_CONFIG_DIR` still wins.
+const CONFIG_DIR_SUFFIX: Option<&str> = option_env!("OMOBA_DEFAULT_CONFIG_DIR_SUFFIX");
+
+// An invalid suffix fails the build instead of silently sharing production state.
+const _: () = assert!(
+    valid_config_dir_suffix(CONFIG_DIR_SUFFIX),
+    "OMOBA_DEFAULT_CONFIG_DIR_SUFFIX must be 1-16 lowercase ASCII letters, digits or inner '-'"
+);
+
+/// One path component: lowercase ASCII letters, digits and inner hyphens, at most 16 bytes.
+const fn valid_config_dir_suffix(suffix: Option<&str>) -> bool {
+    let Some(suffix) = suffix else {
+        return true;
+    };
+    let bytes = suffix.as_bytes();
+    if bytes.is_empty() {
+        return true;
+    }
+    if bytes.len() > 16 || bytes[0] == b'-' || bytes[bytes.len() - 1] == b'-' {
+        return false;
+    }
+    let mut index = 0;
+    while index < bytes.len() {
+        let byte = bytes[index];
+        if !(byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-') {
+            return false;
+        }
+        index += 1;
+    }
+    true
+}
+
+/// `omoba-bevy` for production builds, `omoba-bevy-<suffix>` for a contour build.
+fn config_directory_name(suffix: Option<&str>) -> String {
+    match suffix.filter(|suffix| !suffix.is_empty()) {
+        Some(suffix) => format!("omoba-bevy-{suffix}"),
+        None => "omoba-bevy".to_owned(),
+    }
 }
 
 /// The OS-owned writable directory for settings, excluding the filename.
 /// The explicit OMOBA_CLIENT_CONFIG_DIR override remains in persistence.rs.
 pub fn preferences_directory() -> Option<PathBuf> {
+    let name = config_directory_name(CONFIG_DIR_SUFFIX);
     #[cfg(target_os = "android")]
     {
         bevy::android::ANDROID_APP
             .get()
             .and_then(|app| app.internal_data_path())
-            .map(|base| base.join("omoba-bevy"))
+            .map(|base| base.join(name))
     }
     #[cfg(target_os = "ios")]
     {
@@ -56,16 +116,16 @@ pub fn preferences_directory() -> Option<PathBuf> {
             PathBuf::from(base)
                 .join("Library")
                 .join("Application Support")
-                .join("omoba-bevy")
+                .join(name)
         })
     }
     #[cfg(target_os = "windows")]
     {
-        std::env::var_os("APPDATA").map(|base| PathBuf::from(base).join("omoba-bevy"))
+        std::env::var_os("APPDATA").map(|base| PathBuf::from(base).join(name))
     }
     #[cfg(not(any(target_os = "android", target_os = "ios", target_os = "windows")))]
     {
-        std::env::var_os("HOME").map(|base| PathBuf::from(base).join(".config").join("omoba-bevy"))
+        std::env::var_os("HOME").map(|base| PathBuf::from(base).join(".config").join(name))
     }
 }
 
@@ -141,5 +201,69 @@ mod tests {
         // Never fall back into the installed bundle when an OS directory is missing.
         assert_eq!(preferences_file_path(Some(""), None, "prefs.json"), None);
         assert_eq!(preferences_file_path(None, None, "prefs.json"), None);
+    }
+
+    #[test]
+    fn production_builds_keep_the_original_settings_directory() {
+        assert_eq!(config_directory_name(None), "omoba-bevy");
+        assert_eq!(config_directory_name(Some("")), "omoba-bevy");
+    }
+
+    #[test]
+    fn a_contour_build_gets_its_own_settings_directory() {
+        assert_eq!(config_directory_name(Some("dev")), "omoba-bevy-dev");
+        assert_ne!(
+            config_directory_name(Some("dev")),
+            config_directory_name(None)
+        );
+    }
+
+    #[test]
+    fn only_a_contour_build_marks_its_window_title() {
+        assert_eq!(desktop_window_title(None), None);
+        assert_eq!(desktop_window_title(Some("")), None);
+        assert_eq!(
+            desktop_window_title(Some("dev")).as_deref(),
+            Some("OMOBA DEV")
+        );
+    }
+
+    #[test]
+    fn config_dir_suffix_is_one_safe_path_component() {
+        for good in [
+            None,
+            Some(""),
+            Some("dev"),
+            Some("dev-2"),
+            Some("abcdefghij012345"),
+        ] {
+            assert!(valid_config_dir_suffix(good), "{good:?}");
+        }
+        for bad in [
+            "../prod",
+            "a/b",
+            "a\\b",
+            "Dev",
+            "-dev",
+            "dev-",
+            "dev ",
+            ".",
+            "abcdefghij0123456",
+        ] {
+            assert!(!valid_config_dir_suffix(Some(bad)), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn preferences_directory_uses_the_compiled_suffix() {
+        // Matches whatever this test binary was compiled with: `omoba-bevy` normally,
+        // `omoba-bevy-dev` when OMOBA_DEFAULT_CONFIG_DIR_SUFFIX=dev.
+        let expected = config_directory_name(option_env!("OMOBA_DEFAULT_CONFIG_DIR_SUFFIX"));
+        if let Some(directory) = preferences_directory() {
+            assert_eq!(
+                directory.file_name().and_then(|name| name.to_str()),
+                Some(expected.as_str())
+            );
+        }
     }
 }
