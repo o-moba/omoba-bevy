@@ -5,6 +5,15 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- DEV contour: `scripts/release.py build … --contour dev` makes desktop tester packages that
+  point at the dev lobby (`lobby.dev.omoba.io:4100` on the dedicated dev VPS) and
+  `registry.dev.ekza.io`. They are named `…-dev-…`, keep settings, session and caches in
+  `omoba-bevy-dev` instead of `omoba-bevy`, and are titled `OMOBA DEV` / `Omoba Dev.app`.
+  `--registry` bakes a registry origin for any build. Builds no longer inherit
+  `OMOBA_DEFAULT_*` from the shell. `release.yml` gains `registry` and `contour` dispatch
+  inputs. `ops/vps/omoba-lobby-dev.service` and `ops/vps/dev/lobby_dev.py` install the
+  guest-only dev lobby (UDP 4100/41100) on `vds-dev` with dry-run, production refusals and
+  rollback. Production builds, the production unit and protocol are unchanged.
 - `make release-all` builds macOS, Windows (cargo-xwin cross-build), Linux (Docker,
   offline fallback), a universal Android APK and a signed iPhone archive on one Mac;
   `make release-publish` pins the packages to IPFS and verifies the gateway copies.
