@@ -15,13 +15,20 @@
 //!   frames later), e.g. `KeyQ` for Wildspark's Switchfire;
 //! - `attack` / `cast {slot}`: the `NetworkCommand` the combat input sends for
 //!   a basic attack or an aimed cast at the nearest practice dummy;
+//! - `attack_nearest {kinds?, max_distance?}`: the attack order a right-click
+//!   on a unit gives (`BasicAttackState::start` with repeat), on the nearest
+//!   hostile the local hero may attack (`kinds` from `player`, `minion`,
+//!   `neutral`, `structure`; default all but `structure`). A public match has
+//!   no practice dummies, so this is how a round there fires at something.
+//!   The state file lists those candidates under `targets`;
 //! - `camera {lock, focus_player, zoom}`, `menu {open}`, `move {dx, dz}`,
 //!   `scroll {node, y}` (the scroll offset a wheel or drag would leave);
 //! - `shot {file}`: a screenshot of the window now;
 //! - `shot_when {file, player?, mode?, muzzle?, motion?, action?, item?}`: arms
 //!   a gate on one held weapon (the local hero's unless `player` names
-//!   another), optionally sends `action` (`attack`, `cast:<slot>` or
-//!   `key:<code>`), and takes the screenshot in the frame after the gate holds:
+//!   another), optionally sends `action` (`attack`, `attack_nearest`,
+//!   `cast:<slot>` or `key:<code>`), and takes the screenshot in the frame
+//!   after the gate holds:
 //!   the Wildspark set variant for `mode` is shown and the other hidden, a
 //!   muzzle flash was emitted at the shown variant's tip, and the rotor or
 //!   slide moved from its pose at arm time. The result carries that readback.
@@ -55,7 +62,7 @@ use crate::{
     held_weapons::HeldWeapon,
     net::{
         ClientSession, GameStateSnapshot, NetworkCommand, NetworkHeroClass, NetworkPlayerId,
-        PlayerHandheld, PlayerLoadout,
+        PlayerHandheld, PlayerLoadout, PlayerProgression, TargetId, TargetKind,
     },
     player::Player,
 };
@@ -94,6 +101,12 @@ enum Command {
         open: bool,
     },
     Attack,
+    AttackNearest {
+        #[serde(default)]
+        kinds: Option<Vec<String>>,
+        #[serde(default)]
+        max_distance: Option<f32>,
+    },
     Cast {
         slot: u8,
     },
@@ -289,6 +302,10 @@ struct Loop {
     input: serde_json::Value,
     focus_request: Option<usize>,
     focused: bool,
+    /// Nearest hostile units the local hero may attack (`attack_nearest`).
+    targets: serde_json::Value,
+    /// The local hero's replicated level (W unlocks at 2, R at 6).
+    level: Option<u32>,
 }
 
 impl Loop {
@@ -341,6 +358,8 @@ impl Plugin for CreatorLoopQaPlugin {
             input: serde_json::Value::Null,
             focus_request: None,
             focused: false,
+            targets: serde_json::Value::Null,
+            level: None,
         })
         .insert_resource(bevy::winit::WinitSettings::continuous())
         .add_systems(
@@ -436,6 +455,56 @@ fn nearest_dummy(
         .min_by(|a, b| a.1.distance(from).total_cmp(&b.1.distance(from)))
 }
 
+fn kind_name(kind: TargetKind) -> &'static str {
+    match kind {
+        TargetKind::Player => "player",
+        TargetKind::Minion => "minion",
+        TargetKind::Neutral => "neutral",
+        TargetKind::Structure => "structure",
+    }
+}
+
+/// Every unit the local hero may attack, nearest first, by the combat input's
+/// own rule (`TargetValidity::valid`: alive, visible, hostile, and not a
+/// protected structure).
+fn hostile_targets(
+    candidates: &crate::combat::TargetCandidates,
+    validity: &crate::targeting::TargetValidity,
+    team: crate::team::Team,
+    from: Vec3,
+) -> Vec<(Entity, TargetId, Vec3, f32)> {
+    let mut out = Vec::new();
+    let mut consider = |entity: Entity, kind: TargetKind, id: u64, at: Vec3| {
+        let target = TargetId { kind, id };
+        if validity.valid(entity, target, team) {
+            out.push((entity, target, at, at.xz().distance(from.xz())));
+        }
+    };
+    for (entity, pose, id, ..) in &candidates.players {
+        consider(entity, TargetKind::Player, id.0, pose.translation);
+    }
+    for (entity, pose, id, ..) in &candidates.minions {
+        consider(entity, TargetKind::Minion, id.0, pose.translation);
+    }
+    for (entity, pose, id, ..) in &candidates.neutrals {
+        consider(entity, TargetKind::Neutral, id.0, pose.translation);
+    }
+    for (entity, pose, id, ..) in &candidates.structures {
+        consider(entity, TargetKind::Structure, id.0, pose.translation);
+    }
+    out.sort_by(|a, b| a.3.total_cmp(&b.3));
+    out
+}
+
+/// The kinds `attack_nearest` considers: the named ones, else every kind but
+/// structures (a tower answers a stray order with the hero's life).
+fn wanted_kind(kinds: Option<&[String]>, kind: TargetKind) -> bool {
+    match kinds {
+        Some(kinds) => kinds.iter().any(|name| name == kind_name(kind)),
+        None => kind != TargetKind::Structure,
+    }
+}
+
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn run_commands(
     mut commands: Commands,
@@ -460,6 +529,12 @@ fn run_commands(
         Option<ResMut<crate::targeting::BasicAttackState>>,
     ),
     mut exit: MessageWriter<AppExit>,
+    mut live: (
+        crate::combat::TargetCandidates,
+        crate::targeting::TargetValidity,
+        Query<(&crate::team::Team, Option<&PlayerProgression>), With<Player>>,
+        Option<ResMut<crate::combat::TargetState>>,
+    ),
 ) {
     lp.frame += 1;
     let frame = lp.frame;
@@ -488,6 +563,22 @@ fn run_commands(
         .iter()
         .find(|(_, _, _, _, local)| *local)
         .map(|(entity, _, pose, _, _)| (entity, pose.translation));
+    let hero = live
+        .2
+        .single()
+        .ok()
+        .map(|(team, progression)| (*team, progression.map(|p| p.level)));
+    lp.level = hero.and_then(|(_, level)| level);
+    let hostile = match (hero, local) {
+        (Some((team, _)), Some((_, at))) => hostile_targets(&live.0, &live.1, team, at),
+        _ => Vec::new(),
+    };
+    lp.targets = hostile
+        .iter()
+        .take(8)
+        .map(|(_, id, at, distance)| target_json(*id, *at, *distance))
+        .collect::<Vec<_>>()
+        .into();
     // One command a frame keeps presses and their screens in order.
     if !frame.is_multiple_of(3) || lp.armed.is_some() {
         return;
@@ -559,6 +650,24 @@ fn run_commands(
                 n,
                 if target.is_some() { "ok" } else { "no_target" },
                 serde_json::json!({"target": target.map(|t| t.0)}),
+            );
+        }
+        Command::AttackNearest {
+            kinds,
+            max_distance,
+        } => {
+            let target = order_attack(
+                &hostile,
+                kinds.as_deref(),
+                max_distance,
+                orders.0.as_deref_mut(),
+                orders.1.as_deref_mut(),
+                live.3.as_deref_mut(),
+            );
+            lp.result(
+                n,
+                if target.is_some() { "ok" } else { "no_target" },
+                serde_json::json!({"target": target, "level": lp.level}),
             );
         }
         Command::Cast { slot } => {
@@ -645,6 +754,16 @@ fn run_commands(
                     None if action == "attack" => {
                         serde_json::json!({"attack": aim_at_dummy(None, &mut outgoing).map(|t| t.0)})
                     }
+                    None if action == "attack_nearest" => {
+                        serde_json::json!({"attack_nearest": order_attack(
+                            &hostile,
+                            None,
+                            None,
+                            orders.0.as_deref_mut(),
+                            orders.1.as_deref_mut(),
+                            live.3.as_deref_mut(),
+                        )})
+                    }
                     Some(("cast", slot)) => {
                         let slot = slot.parse().unwrap_or(0);
                         serde_json::json!({"cast": slot, "target": aim_at_dummy(Some(slot), &mut outgoing).map(|t| t.0)})
@@ -680,6 +799,37 @@ fn run_commands(
             lp.exit_at = Some(frame + 2);
         }
     }
+}
+
+fn target_json(id: TargetId, at: Vec3, distance: f32) -> serde_json::Value {
+    serde_json::json!({"kind": kind_name(id.kind), "id": id.id, "position": at.to_array(),
+        "distance": distance})
+}
+
+/// What a right-click on that unit does (`combat::selection`): select it, drop
+/// a pending cast and start a repeating attack order, which walks the hero
+/// into range and strikes through the normal combat input.
+fn order_attack(
+    hostile: &[(Entity, TargetId, Vec3, f32)],
+    kinds: Option<&[String]>,
+    max_distance: Option<f32>,
+    pending: Option<&mut crate::combat::PendingCast>,
+    basic: Option<&mut crate::targeting::BasicAttackState>,
+    selected: Option<&mut crate::combat::TargetState>,
+) -> Option<serde_json::Value> {
+    let (entity, id, at, distance) = hostile.iter().copied().find(|(_, id, _, distance)| {
+        wanted_kind(kinds, id.kind) && max_distance.is_none_or(|max| *distance <= max)
+    })?;
+    let basic = basic?;
+    if let Some(selected) = selected {
+        selected.selected_entity = Some(entity);
+        selected.selected_target = Some(id);
+    }
+    if let Some(pending) = pending {
+        pending.cancel();
+    }
+    basic.start(entity, id, true);
+    Some(target_json(id, at, distance))
 }
 
 fn spawn_shot(commands: &mut Commands, lp: &Loop, n: usize, file: &str, data: serde_json::Value) {
@@ -996,6 +1146,8 @@ fn return_state(
         "labels": texts,
         "buttons": buttons,
         "players": players,
+        "local_level": lp.level,
+        "targets": lp.targets,
         "held": lp.reads.iter().map(WeaponRead::json).collect::<Vec<_>>(),
         "recent_flashes": lp.flashes.iter().rev().take(8).map(|f| serde_json::json!({"frame": f.frame,
             "owner": f.owner, "tip": f.tip, "distance": f.distance})).collect::<Vec<_>>(),
@@ -1053,6 +1205,35 @@ mod tests {
             Command::Focus
         );
         assert!(serde_json::from_str::<Command>(r#"{"op":"format_disk"}"#).is_err());
+        assert_eq!(
+            serde_json::from_str::<Command>(r#"{"op":"attack_nearest"}"#).unwrap(),
+            Command::AttackNearest {
+                kinds: None,
+                max_distance: None
+            }
+        );
+        assert_eq!(
+            serde_json::from_str::<Command>(
+                r#"{"op":"attack_nearest","kinds":["neutral"],"max_distance":20}"#
+            )
+            .unwrap(),
+            Command::AttackNearest {
+                kinds: Some(vec!["neutral".into()]),
+                max_distance: Some(20.0)
+            }
+        );
+    }
+
+    #[test]
+    fn attack_nearest_skips_structures_unless_asked() {
+        for kind in [TargetKind::Player, TargetKind::Minion, TargetKind::Neutral] {
+            assert!(wanted_kind(None, kind), "{kind:?}");
+        }
+        assert!(!wanted_kind(None, TargetKind::Structure));
+        let towers = ["structure".to_owned()];
+        assert!(wanted_kind(Some(&towers[..]), TargetKind::Structure));
+        assert!(!wanted_kind(Some(&towers[..]), TargetKind::Minion));
+        assert_eq!(kind_name(TargetKind::Neutral), "neutral");
     }
 
     #[test]
