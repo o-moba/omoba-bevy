@@ -392,7 +392,18 @@ impl HudLayout {
             HudRegion::PlayerStatus => self.player_status,
             HudRegion::Equipment => self.equipment,
             HudRegion::QuickBuy => self.quick_buy,
+            HudRegion::ContourBadge => self.contour_badge(),
         }
+    }
+
+    /// The contour badge: `space.8` under the score strip, left-aligned with
+    /// it, one `size.badge.height` high (the free strip above the kill feed).
+    fn contour_badge(&self) -> Rect {
+        let top = self.score_strip.max.y + space::S8;
+        Rect::from_corners(
+            Vec2::new(self.score_strip.min.x, top),
+            Vec2::new(self.score_strip.max.x, top + size::BADGE_HEIGHT),
+        )
     }
 }
 
@@ -416,6 +427,9 @@ pub(crate) enum HudRegion {
     PlayerStatus,
     Equipment,
     QuickBuy,
+    /// A contour build's `DEV` badge (`crate::contour_badge`) under the
+    /// score strip (hugs its text).
+    ContourBadge,
 }
 
 /// How a region's node takes its rectangle.
@@ -434,7 +448,9 @@ enum Anchor {
 impl HudRegion {
     fn anchor(self, form: Form) -> Anchor {
         match self {
-            HudRegion::QuickBuy | HudRegion::PracticeBadge => Anchor::TopLeft,
+            HudRegion::QuickBuy | HudRegion::PracticeBadge | HudRegion::ContourBadge => {
+                Anchor::TopLeft
+            }
             HudRegion::BrushChip => Anchor::TopCentre,
             HudRegion::ActionFeedback if form == Form::Phone => Anchor::TopCentre,
             HudRegion::ActionFeedback => Anchor::BottomCentre,
@@ -721,6 +737,60 @@ mod tests {
         assert!(l.quick_buy.max.y < 242.0);
         mobile.safe.top = 12.0;
         assert!(HudLayout::phone(&mobile).quick_buy.max.y < 242.0);
+    }
+
+    /// A dev build's contour badge sits `space.8` under the score strip and
+    /// clear of every resting plate around it, on desktop and phone.
+    #[test]
+    fn the_contour_badge_sits_under_the_score_strip_clear_of_other_plates() {
+        let reference = HudLayout::desktop(Vec2::new(1280.0, 720.0), false);
+        assert_eq!(
+            at(reference.region(HudRegion::ContourBadge)),
+            (940.0, 64.0, 176.0, size::BADGE_HEIGHT)
+        );
+        assert_eq!(
+            HudRegion::ContourBadge.anchor(Form::Desktop),
+            Anchor::TopLeft
+        );
+        let mut mobile = MobileControls::default();
+        mobile.enabled = true;
+        mobile.viewport = Vec2::new(844.0, 390.0);
+        mobile.safe.left = 47.0;
+        mobile.safe.right = 47.0;
+        mobile.safe.top = 0.0;
+        mobile.safe.bottom = 21.0;
+        let mut layouts: Vec<HudLayout> = [
+            Vec2::new(1280.0, 720.0),
+            Vec2::new(1024.0, 640.0),
+            Vec2::new(1440.0, 720.0),
+        ]
+        .into_iter()
+        .map(|viewport| HudLayout::desktop(viewport, false))
+        .collect();
+        layouts.push(HudLayout::phone(&mobile));
+        for l in layouts {
+            let badge = l.region(HudRegion::ContourBadge);
+            assert_eq!(badge.min.x, l.score_strip.min.x);
+            assert_eq!(badge.min.y, l.score_strip.max.y + space::S8);
+            let plates = [
+                l.minimap,
+                l.allies,
+                l.target_frame,
+                l.brush_chip,
+                l.score_strip,
+                l.icon_buttons,
+                l.kill_feed,
+                l.action_feedback,
+            ];
+            for plate in plates.into_iter().chain(l.enemy_portrait_slots()) {
+                let overlap = badge.intersect(plate);
+                assert!(
+                    overlap.width() <= 0.0 || overlap.height() <= 0.0,
+                    "{badge:?} overlaps {plate:?} at {:?}",
+                    l.viewport
+                );
+            }
+        }
     }
 
     #[test]

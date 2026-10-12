@@ -5,6 +5,12 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- DEV contour polish. A dev-contour build shows a `DEV` badge (kit badge,
+  `common.contour_badge`) beside the Home title and under the match score strip, and its
+  Collection and draft hints name `app.dev.omoba.io/market` instead of the production
+  market: the dictionaries now hold `{market}`, filled from the build's contour.
+  Production builds look the same as before.
+
 - Wildspark skin sets and "My Ekza library" weapons. One static `handheld-glb-v1`
   GLB can carry both Wildspark guns (`WildsparkSetRepeater` / `WildsparkSetLauncher`,
   [authoring guide](docs/wildspark-skin-sets.md)); the game shows the variant for the

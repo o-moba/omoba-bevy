@@ -11,6 +11,7 @@ mod career_identity;
 mod combat;
 mod combat_feedback;
 mod combat_visuals;
+mod contour_badge;
 mod creatures3d;
 mod dash_preview;
 mod debug;

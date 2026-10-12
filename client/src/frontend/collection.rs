@@ -16,7 +16,7 @@ use super::AppScreen;
 use super::card::ProfileCard;
 use super::preview::{AvatarPreview, PreviewStatus};
 use super::widgets;
-use crate::i18n::{Locale, Localized, tr};
+use crate::i18n::{Locale, Localized, tr, trf};
 use crate::team::{AvatarThumbnails, TeamSelection};
 use crate::ui::kit_assets::{Frame, Icon, KitImage};
 use crate::ui::living_background::{self, LivingBands, LivingScene};
@@ -412,7 +412,7 @@ fn spawn_weapon_choices(
                 ));
                 if !choices.iter().any(|c| c.group == group) {
                     grid.spawn((
-                        widgets::label(tr(library_hint(connected)), 12.0, theme::MUTED),
+                        widgets::label(library_hint(connected), 12.0, theme::MUTED),
                         Name::new("CollectionWeaponMarketHint"),
                     ));
                 }
@@ -469,13 +469,16 @@ fn weapon_tile(
     );
 }
 
-/// Shown while "My Ekza library" has no weapons.
-pub(super) fn library_hint(connected: bool) -> &'static str {
-    if connected {
+/// Shown while "My Ekza library" has no weapons; names this build's market
+/// (`session_config::market_address`), so a dev build never sends testers to
+/// the production one.
+pub(super) fn library_hint(connected: bool) -> String {
+    let key = if connected {
         "collection.weapons_library_empty"
     } else {
         "collection.weapons_market_hint"
-    }
+    };
+    trf(key, &[("market", &crate::session_config::market_address())])
 }
 
 fn refresh_connection_labels(mut labels: Query<(&Name, &mut Text)>) {
@@ -1965,13 +1968,39 @@ mod tests {
         let shipped = at(&mut app, "Handheld-default");
         let catalogue = at(&mut app, "CollectionWeaponCatalogueHeading");
         assert!(library < connect && connect < hint && hint < shipped && shipped < catalogue);
-        // No account in tests: the disconnected hint points at the market.
+        // No account in tests: the disconnected hint points at this build's market.
         let hint = find(&mut app, "CollectionWeaponMarketHint").unwrap();
         assert_eq!(
             app.world().get::<Text>(hint).unwrap().0,
-            tr(library_hint(false))
+            library_hint(false)
         );
-        assert!(tr(library_hint(false)).contains("app.omoba.io/market"));
+        let market = crate::session_config::market_address();
+        assert!(library_hint(false).contains(&market));
+        assert!(library_hint(true).contains(&market));
+        assert_eq!(
+            library_hint(false).contains("app.omoba.io/market"),
+            crate::session_config::BUILD_CONTOUR.is_none()
+        );
+    }
+
+    /// The market host is never written into a dictionary: every locale names
+    /// it through `{market}`, which this build fills with its own contour's.
+    #[test]
+    fn every_locale_names_the_market_through_its_placeholder() {
+        use crate::i18n::{available_locales, tr_in, trf_in};
+        for locale in available_locales() {
+            for key in [
+                "collection.weapons_market_hint",
+                "collection.weapons_library_empty",
+            ] {
+                let template = tr_in(key, locale);
+                assert!(template.contains("{market}"), "{}: {key}", locale.code());
+                assert!(!template.contains("omoba.io"), "{}: {key}", locale.code());
+                let dev = trf_in(key, locale, &[("market", &"app.dev.omoba.io/market")]);
+                assert!(dev.contains("app.dev.omoba.io/market"), "{dev}");
+                assert!(!dev.contains("{market}"), "{dev}");
+            }
+        }
     }
 
     #[test]

@@ -175,6 +175,7 @@ impl PluginGroup for UiPlugins {
             .add(TeamSelectPlugin)
             .add(GameStateUiPlugin)
             .add(crate::hud_layout::HudLayoutPlugin)
+            .add(crate::contour_badge::ContourBadgePlugin)
             .add(MatchHudPlugin)
             .add(EdgeHudPlugin)
             .add(MinimapPlugin)

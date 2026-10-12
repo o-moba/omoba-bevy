@@ -81,7 +81,10 @@ licence.
 - **Empty or disconnected.** The group shows the Ekza account button and status
   line (with the approval code while pairing). It also shows a hint: "Get free
   items at app.omoba.io/market" when disconnected, "No weapons in your Ekza
-  library yet" when connected with an empty library. The full draft layout
+  library yet" when connected with an empty library. The dictionaries hold
+  `{market}`, which the client fills with `session_config::market_address`:
+  `app.omoba.io/market` in production, `app.dev.omoba.io/market` in a
+  dev-contour build. The full draft layout
   relies on the avatar library's Connect Ekza button; the compact Weapons tab
   has its own.
 - **Not an entitlement.** The library only decides what is listed. The server

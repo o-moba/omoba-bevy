@@ -639,7 +639,9 @@ The match HUD is built from `omoba-ui/handoff/screens/hud.md` (+ the
   row `GoldShopButton` and `EquipmentHud`; phone `QuickBuyHud`), `social`
   (`SocialEntry`, `SocialStatus`), `minimap`, `team_vision`
   (`BrushStatus`), `net::offline` (practice badge / toast),
-  `mobile_controls` (phone combat group).
+  `contour_badge` (a dev-contour build's `DEV` badge `HudContourBadge` under
+  the score strip; also beside the Home title), `mobile_controls` (phone
+  combat group).
 - **Kit additions**: `KitSkin::Plate` + `plate_button` (a HUD plate that is
   a button: glass kept, border `gold.500` on hover), `live_portrait` /
   `PortraitView` / `paint_portraits` (art or icon, XP ring, level disc,

@@ -49,6 +49,21 @@ pub(crate) const BUILD_CONTOUR: Option<&str> = match option_env!("OMOBA_DEFAULT_
     _ => None,
 };
 
+/// The Omoba market a player is pointed to for free items, without the scheme:
+/// `app.omoba.io/market` in production, `app.<contour>.omoba.io/market` (the
+/// contour's own web app) in a contour build, so a tester is never sent to the
+/// production market. The i18n hints show it as `{market}`.
+pub(crate) fn market_address() -> String {
+    market_address_for(BUILD_CONTOUR)
+}
+
+fn market_address_for(contour: Option<&str>) -> String {
+    match contour {
+        Some(contour) => format!("app.{contour}.omoba.io/market"),
+        None => "app.omoba.io/market".to_owned(),
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ServerPreset {
     /// The online lobby: the public beta, or a contour build's own lobby.
@@ -283,6 +298,32 @@ mod tests {
             );
         }
         assert!(crate::persistence::validate_game_server_addr("127.0.0.1:4000").is_some());
+    }
+
+    #[test]
+    fn production_points_at_the_production_market() {
+        assert_eq!(market_address_for(None), "app.omoba.io/market");
+    }
+
+    #[test]
+    fn a_dev_build_points_at_its_own_market() {
+        let dev = Some("dev");
+        assert_eq!(market_address_for(dev), "app.dev.omoba.io/market");
+        // The market host is inside the contour, never a production name.
+        let address = market_address_for(dev);
+        let host = address.split('/').next().unwrap();
+        assert!(endpoint_allowed_for(dev, host), "{host}");
+        assert!(!endpoint_allowed_for(dev, "app.omoba.io"));
+    }
+
+    #[test]
+    fn this_builds_market_matches_its_contour() {
+        assert_eq!(
+            market_address() == "app.omoba.io/market",
+            BUILD_CONTOUR.is_none()
+        );
+        let address = market_address();
+        assert!(endpoint_allowed(address.split('/').next().unwrap()));
     }
 
     #[test]
