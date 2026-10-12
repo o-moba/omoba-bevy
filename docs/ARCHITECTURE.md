@@ -78,6 +78,8 @@ just the debug toggles; `OMOBA_OFFLINE_OVERLAY_QA_ONLY=1` captures Home and
 the actual offline match with cosmetic mist Auto/Stretch/hidden), `OMOBA_FOG_COVERAGE_QA_DIR` (production fog node
 with a uniform mask: Auto negative control, then actual production Stretch;
 private harness in `team_vision/coverage_qa.rs`), `OMOBA_CAREER_QA_OUTPUT`,
+`OMOBA_CREATOR_LOOP_QA` (a file-driven creator-loop capture whose name keeps
+the shell up; see `creator_loop_qa.rs`),
 `OMOBA_SUPPORTER_QA_DIR`, `OMOBA_HELP_QA_SHOTS` (the controls guide's
 controller focus and Settings → Controls return), `OMOBA_BOOT_SPLASH_SHOTS`
 (the boot splash and the Home it reveals; every other harness starts without

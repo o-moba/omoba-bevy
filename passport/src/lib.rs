@@ -3,6 +3,7 @@
 
 pub mod account;
 pub mod assets;
+pub mod attribution;
 pub mod avatars;
 pub mod community;
 pub mod device_account;
