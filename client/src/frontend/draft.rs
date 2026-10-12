@@ -886,7 +886,7 @@ fn render_draft(
                                 if !owned {
                                     row.spawn((
                                         widgets::label(
-                                            tr(super::collection::library_hint(connected)),
+                                            super::collection::library_hint(connected),
                                             11.0,
                                             theme::MUTED,
                                         ),

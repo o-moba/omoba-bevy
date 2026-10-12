@@ -18,7 +18,9 @@ known only from `DEV_IP`, and every tool reads it from the environment.
 | Client settings folder | `omoba-bevy-dev` | `omoba-bevy` |
 
 The dev lobby has no web UI, so there is nothing to mark noindex. Dev clients say
-`OMOBA DEV` in the window title and are named `Omoba Dev.app`. Only synthetic accounts and
+`OMOBA DEV` in the window title, show a `DEV` badge beside the Home title and under the
+match score strip, point their market hints at `app.dev.omoba.io/market`, and are named
+`Omoba Dev.app`. Only synthetic accounts and
 guests use it. Nobody copies production data to it.
 
 ## Why the dev lobby needs a database

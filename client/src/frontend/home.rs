@@ -500,7 +500,24 @@ fn spawn_home(
                             Name::new("HomeBrand"),
                         ))
                         .with_children(|brand| {
-                            brand.spawn((Text::new("OMOBA"), theme::role_text(TextRole::Title))); // i18n-allow
+                            brand
+                                .spawn((
+                                    Node {
+                                        align_items: AlignItems::Center,
+                                        column_gap: Val::Px(space::S8),
+                                        ..default()
+                                    },
+                                    Name::new("HomeBrandTitle"),
+                                ))
+                                .with_children(|title| {
+                                    let wordmark = "OMOBA"; // i18n-allow
+                                    title.spawn((
+                                        Text::new(wordmark),
+                                        theme::role_text(TextRole::Title),
+                                    ));
+                                    // A dev-contour build says so beside the title.
+                                    crate::contour_badge::spawn(title);
+                                });
                             brand.spawn((
                                 Text::new(tr("home.tagline")),
                                 theme::role_text(TextRole::Eyebrow),
@@ -551,11 +568,14 @@ fn spawn_home(
                         right: Val::Px(63.0),
                         top: Val::Px(12.0),
                         column_gap: Val::Px(space::S8),
+                        align_items: AlignItems::Center,
                         ..default()
                     },
                     Name::new("HomeUtilityButtons"),
                 ))
                 .with_children(|buttons| {
+                    // Phones have no title row: a contour build's badge leads the utilities.
+                    crate::contour_badge::spawn(buttons);
                     spawn_home_utilities(buttons, true, theme::Form::Phone, fit);
                 });
                 root.spawn((
@@ -1545,6 +1565,36 @@ mod tests {
             let (line, _) = connection_line(&session);
             assert!(!line.is_empty(), "{state:?} must have a status line");
         }
+    }
+
+    /// The title row holds the brand and, only in a contour build, its badge.
+    #[test]
+    fn only_a_contour_build_marks_the_home_title() {
+        use crate::ui::test_id::harness;
+        let mut app = harness::kit_app();
+        app.add_plugins(bevy::state::app::StatesPlugin)
+            .init_state::<AppScreen>()
+            .init_resource::<Assets<Image>>()
+            .init_resource::<super::super::preview::AvatarPreview>()
+            .init_resource::<CareerClient>()
+            .init_resource::<ClientSession>()
+            .init_resource::<ProfileCard>()
+            .init_resource::<AvatarThumbnails>()
+            .init_resource::<crate::party::PartyClient>()
+            .insert_resource(crate::ui::UiPlatform(crate::platform::UiProfile::Desktop))
+            .add_systems(Startup, spawn_home);
+        app.update();
+        let names: Vec<String> = app
+            .world_mut()
+            .query::<&Name>()
+            .iter(app.world())
+            .map(|name| name.as_str().to_owned())
+            .collect();
+        assert!(names.iter().any(|name| name == "HomeBrandTitle"));
+        assert_eq!(
+            names.iter().any(|name| name == "ContourBadge"),
+            crate::session_config::BUILD_CONTOUR.is_some()
+        );
     }
 
     /// The home screen is a render-key screen: a language change rebuilds it
