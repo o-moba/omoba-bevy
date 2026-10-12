@@ -23,7 +23,9 @@ in the party lobby (desktop) or the SERVER keypad (phone). `--registry URL`
 compiles the initial Ekza registry origin the same way.
 
 DEV-contour tester builds (desktop only) point at the dev lobby on the dedicated
-dev VPS and the dev registry, and never share state with a production install:
+dev VPS and the dev registry, use a closed loopback passport (there is no dev Ekza
+passport yet, and avatar.ekza.io is production), and never share state with a
+production install:
 
     python3 scripts/release.py build macos --contour dev   # lobby.dev.omoba.io:4100 + registry.dev.ekza.io
     python3 scripts/release.py build macos --contour dev --server <dev VPS IPv4>:4100   # without DNS
@@ -33,8 +35,11 @@ needs only the DNS A record lobby.dev.omoba.io -> dev VPS. Dev packages land in
 dist/v<version>-dev/ as Omoba-<version>-dev-*.zip / omoba-<version>-dev-*.tar.gz,
 keep settings, session and caches in an `omoba-bevy-dev` folder instead of
 `omoba-bevy`, title their desktop window "OMOBA DEV", and the macOS app is
-"Omoba Dev.app" with its own bundle id. A production build refuses dev
-endpoints (and $DEV_IP when set); a dev build refuses production ones.
+"Omoba Dev.app" with its own bundle id. The dev Linux package also carries
+omoba-account-api, the dev lobby's schema migration tool. A production build
+refuses dev endpoints (and $DEV_IP when set); a dev build refuses production ones.
+No build inherits a compile-time default (OMOBA_DEFAULT_*, OMOBA_ACCOUNT_API_URL,
+OMOBA_PORTAL_ORIGIN, EKZA_DEV_HTTP_HOST) from the shell.
 
 Nothing here publishes on its own: `draft` creates an unpublished draft
 release, `publish` pins packages to IPFS, `ios --upload` is the only step that
@@ -68,13 +73,20 @@ MAC_BUNDLE_ID = "space.ekza.omoba.desktop"
 ANDROID_KEYSTORE = Path.home() / ".config/omoba/android-playtest.keystore"
 REPO = "o-moba/omoba-bevy"
 
-# Build-time client defaults. A build sets exactly the ones it asks for and never
-# inherits them from the invoking shell (client/src/session_config.rs,
-# passport/src/community.rs, client/src/platform.rs).
+# Build-time client defaults a Flavor sets (client/src/session_config.rs,
+# passport/src/community.rs, passport/src/lib.rs, client/src/platform.rs).
 SERVER_DEFAULT_ENV = "OMOBA_DEFAULT_GAME_SERVER_ADDR"
 REGISTRY_DEFAULT_ENV = "OMOBA_DEFAULT_REGISTRY_URL"
+PASSPORT_DEFAULT_ENV = "OMOBA_DEFAULT_PASSPORT_URL"
 CONFIG_SUFFIX_ENV = "OMOBA_DEFAULT_CONFIG_DIR_SUFFIX"
-CLIENT_DEFAULT_ENVS = (SERVER_DEFAULT_ENV, REGISTRY_DEFAULT_ENV, CONFIG_SUFFIX_ENV)
+CLIENT_DEFAULT_ENVS = (SERVER_DEFAULT_ENV, REGISTRY_DEFAULT_ENV, PASSPORT_DEFAULT_ENV, CONFIG_SUFFIX_ENV)
+# Every compile-time setting the workspace (`option_env!`) or the pinned Ekza SDK
+# (EKZA_DEV_HTTP_HOST, ekza-bevy-sdk src/registry.rs) reads. A build drops all of
+# them, and anything else named OMOBA_DEFAULT_*, from the environment it inherits,
+# then sets only its Flavor's values; scripts/test_release.py keeps this list in
+# step with the sources.
+BUILD_TIME_ENV_PREFIX = "OMOBA_DEFAULT_"
+BUILD_TIME_ENVS = CLIENT_DEFAULT_ENVS + ("OMOBA_ACCOUNT_API_URL", "OMOBA_PORTAL_ORIGIN", "EKZA_DEV_HTTP_HOST")
 
 # Contours. Production: the public beta lobby on the production VPS and the Ekza
 # registry/Studio. DEV: ops/vps/omoba-lobby-dev.service on the dedicated dev VPS
@@ -83,6 +95,15 @@ CONTOURS = ("prod", "dev")
 DEV_PLATFORMS = ("macos", "windows", "linux")
 DEV_LOBBY = "lobby.dev.omoba.io:4100"
 DEV_REGISTRY = "https://registry.dev.ekza.io"
+# The dev contour has no Ekza passport yet; https://avatar.ekza.io/api/passport (the SDK
+# default) is production. Dev builds and the dev lobby therefore use a closed loopback
+# port, so wallet pairing and protected-avatar tickets fail closed instead of reaching
+# production. Free and shipped avatars still work. Once a dev passport exists, pass
+# --passport https://<name>.dev.ekza.io/api/passport and update ops/vps/dev/lobby_dev.py.
+DEV_PASSPORT = "http://127.0.0.1:9/api/passport"
+# The dev Linux package also carries the dev lobby's schema migration tool
+# (ops/vps/dev/lobby_dev.py runs `omoba-account-api migrate` on the dev VPS).
+DEV_LINUX_TOOLS = ("omoba-account-api",)
 DEV_CONFIG_SUFFIX = "dev"
 DEV_IP_ENV = "DEV_IP"
 PROD_VPS_IPS = frozenset({"77.246.105.57"})
@@ -94,11 +115,12 @@ LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 
 @dataclass(frozen=True)
 class Flavor:
-    """What one build bakes in: contour, initial server and registry, settings folder."""
+    """What one build bakes in: contour, initial server, registry and passport, settings folder."""
     contour: str = "prod"
     server: str | None = None
     registry: str | None = None
     config_suffix: str | None = None
+    passport: str | None = None
 
     @property
     def dev(self) -> bool:
@@ -124,7 +146,7 @@ class Flavor:
 
     def client_defaults(self) -> dict[str, str]:
         values = {SERVER_DEFAULT_ENV: self.server, REGISTRY_DEFAULT_ENV: self.registry,
-                  CONFIG_SUFFIX_ENV: self.config_suffix}
+                  PASSPORT_DEFAULT_ENV: self.passport, CONFIG_SUFFIX_ENV: self.config_suffix}
         return {key: value for key, value in values.items() if value}
 
 
@@ -252,10 +274,20 @@ def android_ndk() -> Path | None:
     return None
 
 
+def is_build_time_env(key: str) -> bool:
+    return key in BUILD_TIME_ENVS or key.startswith(BUILD_TIME_ENV_PREFIX)
+
+
+def scrub_build_env(env: dict) -> dict:
+    """Drop every compile-time setting the invoking shell may have exported."""
+    for key in [key for key in env if is_build_time_env(key)]:
+        del env[key]
+    return env
+
+
 def apply_client_defaults(env: dict, flavor: Flavor) -> dict:
     """Set exactly this build's compiled-in defaults; drop any the shell exported."""
-    for key in CLIENT_DEFAULT_ENVS:
-        env.pop(key, None)
+    scrub_build_env(env)
     env.update(flavor.client_defaults())
     return env
 
@@ -290,6 +322,26 @@ def validate_registry(registry: str | None) -> str | None:
     return registry.rstrip("/")
 
 
+def validate_passport(passport: str | None) -> str | None:
+    """The SDK passport rule: an https:// (or loopback http://) URL ending in /api/passport."""
+    if passport is None:
+        return None
+    parts = urlsplit(passport)
+    try:
+        parts.port
+    except ValueError:
+        raise SystemExit(f"--passport has an invalid port: {passport!r}") from None
+    if (parts.scheme not in ("https", "http") or not parts.hostname or parts.username is not None
+            or parts.password is not None or parts.query or parts.fragment
+            or not parts.path.rstrip("/").endswith("/api/passport")
+            or any(ch.isspace() or ch in "\"'\\" for ch in passport)):
+        raise SystemExit(f"--passport must be an https:// URL ending in /api/passport without "
+                         f"credentials, got {passport!r}")
+    if parts.scheme == "http" and parts.hostname not in LOOPBACK_HOSTS:
+        raise SystemExit(f"--passport may use http:// only on loopback, got {passport!r}")
+    return passport.rstrip("/")
+
+
 def endpoint_host(server: str | None) -> str | None:
     """The host of host:port, with case and a trailing dot normalised away."""
     if not server:
@@ -317,26 +369,36 @@ def is_prod_host(host: str | None) -> bool:
     return bool(host) and (host in PROD_VPS_IPS or (in_zone(host, PUBLIC_ZONES) and not in_zone(host, DEV_ZONES)))
 
 
-def resolve_flavor(contour: str = "prod", server: str | None = None, registry: str | None = None) -> Flavor:
+def resolve_flavor(contour: str = "prod", server: str | None = None, registry: str | None = None,
+                   passport: str | None = None) -> Flavor:
     """Validate a build's endpoints and refuse to cross contours in either direction."""
     if contour not in CONTOURS:
         raise SystemExit(f"--contour must be one of {', '.join(CONTOURS)}, got {contour!r}")
     server = validate_server(server)
     registry = validate_registry(registry)
+    passport = validate_passport(passport)
     if contour == "dev":
         server = server or DEV_LOBBY
         registry = registry or DEV_REGISTRY
+        passport = passport or DEV_PASSPORT
         if is_prod_host(endpoint_host(server)):
             raise SystemExit(f"a dev build must not point at production: {server} "
                              "(the dev lobby runs on the dedicated dev VPS)")
         if is_prod_host(registry_host(registry)):
             raise SystemExit(f"a dev build must not use a production registry: {registry}")
-        return Flavor("dev", server, registry, DEV_CONFIG_SUFFIX)
+        # Pairing and ticket consumption change passport state: only a dev or loopback passport.
+        host = registry_host(passport)
+        if not (is_dev_host(host) or host in LOOPBACK_HOSTS):
+            raise SystemExit(f"a dev build must not use a non-dev Ekza passport: {passport} "
+                             f"(default {DEV_PASSPORT} fails closed)")
+        return Flavor("dev", server, registry, DEV_CONFIG_SUFFIX, passport)
     if is_dev_host(endpoint_host(server)):
         raise SystemExit(f"{server} is the dev lobby; build with --contour dev")
     if is_dev_host(registry_host(registry)):
         raise SystemExit(f"{registry} is the dev registry; build with --contour dev")
-    return Flavor("prod", server, registry, None)
+    if is_dev_host(registry_host(passport)):
+        raise SystemExit(f"{passport} is a dev passport; build with --contour dev")
+    return Flavor("prod", server, registry, None, passport)
 
 
 def player_readme(version: str, target: str, flavor: Flavor = PROD) -> str:
@@ -344,6 +406,11 @@ def player_readme(version: str, target: str, flavor: Flavor = PROD) -> str:
     server_line = (f"This build connects to {server} by default." if server else
                    "This build starts on 127.0.0.1:4000 (a server on the same computer).")
     title = f"OMOBA {version} — DEV test build" if flavor.dev else f"OMOBA {version} — playtest build"
+    passport_notice = ("Ekza wallet pairing and purchased avatars are off in dev builds (there is\n"
+                       "no dev passport yet); free and built-in avatars work.\n"
+                       if flavor.passport == DEV_PASSPORT else "")
+    tools_notice = ("omoba-account-api is the dev lobby's database migration tool; players do\n"
+                    "not need it.\n" if target == "linux" else "")
     dev_notice = f"""
 DEV TEST BUILD
 This is a development test build, not the public beta. It uses the OMOBA dev
@@ -351,7 +418,7 @@ lobby ({flavor.server}) and the Ekza dev registry ({flavor.registry}).
 Its window says OMOBA DEV. It keeps its settings, session and downloads in its
 own "{flavor.config_dir}" folder, so a normal OMOBA install on this computer is
 left untouched. Dev servers and dev accounts may be reset at any time.
-""" if flavor.dev else ""
+{passport_notice}{tools_notice}""" if flavor.dev else ""
     app = f"{flavor.app_name}.app"
     app_path = f'"/path/to/{app}"' if " " in app else f"/path/to/{app}"
     common = f"""{title}
@@ -621,10 +688,22 @@ def build_windows(version: str, out: Path, flavor: Flavor) -> Path:
         return archive
 
 
-def stage_linux(stage: Path, version: str, flavor: Flavor, client: Path, server_binary: Path):
+def linux_binaries(flavor: Flavor) -> tuple[str, ...]:
+    """Cargo packages a Linux package is built from; dev adds the lobby's migration tool."""
+    return DESKTOP_BINARIES + (DEV_LINUX_TOOLS if flavor.dev else ())
+
+
+def stage_linux(stage: Path, version: str, flavor: Flavor, client: Path, server_binary: Path,
+                tools: dict[str, Path] | None = None):
     stage.mkdir(parents=True)
     shutil.copy2(client, stage / "omoba")
     shutil.copy2(server_binary, stage / "omoba-server")
+    expected = DEV_LINUX_TOOLS if flavor.dev else ()
+    if set(tools or {}) != set(expected):
+        raise SystemExit(f"a {flavor.contour} Linux package carries exactly {list(expected)}, "
+                         f"got {sorted(tools or {})}")
+    for name, binary in (tools or {}).items():
+        shutil.copy2(binary, stage / name)
     stage_common(stage, version, "linux", flavor, stage / "assets")
     host = stage / "host-practice.sh"
     host.write_text("""#!/bin/sh
@@ -707,11 +786,13 @@ def linux_docker_env_args(flavor: Flavor) -> list[str]:
 
 def build_linux(version: str, out: Path, flavor: Flavor) -> Path:
     archive = out / artifact_name(version, "linux", flavor.contour)
+    packages = linux_binaries(flavor)
     if host_platform() == "linux":
-        binaries = cargo_release(DESKTOP_BINARIES, client_env(flavor))
+        binaries = cargo_release(packages, client_env(flavor))
         with tempfile.TemporaryDirectory() as temporary:
             stage = Path(temporary) / f"omoba-{version}{flavor.label}"
-            stage_linux(stage, version, flavor, binaries["client"], binaries["server"])
+            stage_linux(stage, version, flavor, binaries["client"], binaries["server"],
+                        {name: binaries[name] for name in packages if name not in DESKTOP_BINARIES})
             run("tar", "-czf", archive, "-C", stage.parent, stage.name)
         return archive
     if not shutil.which("docker"):
@@ -722,12 +803,13 @@ def build_linux(version: str, out: Path, flavor: Flavor) -> Path:
     target_dir = common / "target/linux-docker"
     image = f"rust:{toolchain}-bookworm"
     env_args = linux_docker_env_args(flavor)
+    cargo_packages = " ".join(f"-p {name}" for name in packages)
     mounts = ["-v", f"{ROOT}:/src", "-v", f"{target_dir}:/cache", "-w", "/src"]
     # A successful pull also proves the container can reach apt.
     if subprocess.run(["docker", "pull", "--platform", "linux/amd64", image]).returncode == 0:
         script = ("apt-get update -qq && apt-get install -y -qq --no-install-recommends "
                   "libasound2-dev libudev-dev pkg-config >/dev/null && "
-                  "cargo build --locked --release -p client -p server")
+                  f"cargo build --locked --release {cargo_packages}")
         run("docker", "run", "--rm", "--platform", "linux/amd64", *mounts,
             "-e", "CARGO_TARGET_DIR=/cache", *env_args, image, "sh", "-c", script)
     else:
@@ -740,7 +822,7 @@ def build_linux(version: str, out: Path, flavor: Flavor) -> Path:
         if not base:
             raise SystemExit("no local glibc rust image for the offline Linux build (set OMOBA_LINUX_IMAGE)")
         script = ("dpkg -i /cache/debs/*.deb >/dev/null && "
-                  "cargo build --offline --locked --release -p client -p server")
+                  f"cargo build --offline --locked --release {cargo_packages}")
         run("docker", "run", "--rm", "--network", "none", "--platform", "linux/amd64", *mounts,
             "-e", "CARGO_TARGET_DIR=/cache", "-e", "CARGO_HOME=/cache/cargo-home",
             "-e", f"PATH=/cache/{installed.name}/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
@@ -750,7 +832,8 @@ def build_linux(version: str, out: Path, flavor: Flavor) -> Path:
     release = target_dir / "release"
     with tempfile.TemporaryDirectory() as temporary:
         stage = Path(temporary) / f"omoba-{version}{flavor.label}"
-        stage_linux(stage, version, flavor, release / "client", release / "server")
+        stage_linux(stage, version, flavor, release / "client", release / "server",
+                    {name: release / name for name in packages if name not in DESKTOP_BINARIES})
         run("tar", "-czf", archive, "-C", stage.parent, stage.name)
     return archive
 
@@ -834,9 +917,9 @@ def build_ios(version: str, out: Path, flavor: Flavor, build_number: str | None,
     if flavor.dev:
         raise SystemExit("dev-contour builds are desktop-only: an iPhone build would share the "
                          "production bundle id")
-    if flavor.registry:
-        raise SystemExit("--registry is not supported for ios: archives never take a registry "
-                         "from the shell (mobile/ios/xcode_build.py)")
+    if flavor.registry or flavor.passport:
+        raise SystemExit("--registry/--passport are not supported for ios: archives never take "
+                         "them from the shell (mobile/ios/xcode_build.py)")
     if host_platform() != "macos":
         raise SystemExit("iOS builds need macOS with Xcode")
     server = flavor.server
@@ -854,9 +937,9 @@ def build_ios(version: str, out: Path, flavor: Flavor, build_number: str | None,
                 "OMOBA_CARGO_PROFILE=release", "CODE_SIGN_STYLE=Automatic"]
     if server:
         settings.append(f"OMOBA_GAME_SERVER={server}")
-    # The archive's Cargo step inherits this environment: never a contour settings suffix.
-    env = os.environ.copy()
-    env.pop(CONFIG_SUFFIX_ENV, None)
+    # The archive's Cargo step (mobile/ios/xcode_build.py) inherits this environment: no
+    # compile-time default from the shell, so the server comes only from OMOBA_GAME_SERVER.
+    env = scrub_build_env(os.environ.copy())
     run("xcodebuild", "-project", ROOT / "mobile/ios/Omoba.xcodeproj", "-scheme", "Omoba",
         "-configuration", "Release", "-destination", "generic/platform=iOS",
         "-archivePath", archive, "-allowProvisioningUpdates", "archive", *settings, env=env)
@@ -940,14 +1023,15 @@ def build_targets(platform_arg: str, flavor: Flavor, buildable: dict) -> list[st
 
 def build_plan(version: str, flavor: Flavor, targets: list[str], out: Path) -> dict:
     return {"version": version, "contour": flavor.contour, "server": flavor.server,
-            "registry": flavor.registry, "config_dir": flavor.config_dir,
-            "compiled_defaults": flavor.client_defaults(), "dist": str(out),
+            "registry": flavor.registry, "passport": flavor.passport, "config_dir": flavor.config_dir,
+            "compiled_defaults": flavor.client_defaults(),
+            "linux_binaries": list(linux_binaries(flavor)) if "linux" in targets else [], "dist": str(out),
             "packages": [str(out / artifact_name(version, target, flavor.contour)) for target in targets]}
 
 
 def command_build(args) -> int:
     version = workspace_version()
-    flavor = resolve_flavor(args.contour, args.server, args.registry)
+    flavor = resolve_flavor(args.contour, args.server, args.registry, args.passport)
     report = check_report()
     targets = build_targets(args.platform, flavor, report["platforms"])
     if args.dry_run:
@@ -983,7 +1067,8 @@ def command_build(args) -> int:
                 raise
     write_checksums(out)
     summary = {"version": version, "contour": flavor.contour, "server": flavor.server,
-               "registry": flavor.registry, "config_dir": flavor.config_dir, "dist": str(out),
+               "registry": flavor.registry, "passport": flavor.passport, "config_dir": flavor.config_dir,
+               "dist": str(out),
                "built": [str(p) for p in built], "failed": failed}
     print(json.dumps(summary, indent=2))
     return 1 if failed and not built else 0
@@ -1132,6 +1217,8 @@ def main(argv=None) -> int:
     build.add_argument("platform", choices=PLATFORMS + ("all",))
     build.add_argument("--server", help="initial game server host:port compiled into clients")
     build.add_argument("--registry", help="initial Ekza registry origin compiled into clients")
+    build.add_argument("--passport", help="Ekza passport URL (…/api/passport) compiled into clients "
+                                          f"(dev default: {DEV_PASSPORT}, closed)")
     build.add_argument("--contour", choices=CONTOURS, default="prod", help=contour_help)
     build.add_argument("--out", type=Path, help="dist base directory (default: dist/)")
     build.add_argument("--ios-build", help="iOS build number (default: local xcconfig + 1)")

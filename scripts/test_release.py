@@ -141,6 +141,7 @@ class DevContour(unittest.TestCase):
         self.assertEqual(flavor.client_defaults(), {
             "OMOBA_DEFAULT_GAME_SERVER_ADDR": "lobby.dev.omoba.io:4100",
             "OMOBA_DEFAULT_REGISTRY_URL": "https://registry.dev.ekza.io",
+            "OMOBA_DEFAULT_PASSPORT_URL": "http://127.0.0.1:9/api/passport",
             "OMOBA_DEFAULT_CONFIG_DIR_SUFFIX": "dev",
         })
         self.assertEqual(flavor.config_dir, "omoba-bevy-dev")
@@ -221,23 +222,111 @@ class DevContour(unittest.TestCase):
             with self.assertRaises(SystemExit, msg=bad):
                 release.validate_registry(bad)
 
+    # Values a developer may have left exported from dev or LAN work.
+    EXPORTED = {"OMOBA_DEFAULT_GAME_SERVER_ADDR": "lobby.dev.omoba.io:4100",
+                "OMOBA_DEFAULT_REGISTRY_URL": "https://registry.dev.ekza.io",
+                "OMOBA_DEFAULT_PASSPORT_URL": "https://passport.dev.ekza.io/api/passport",
+                "OMOBA_DEFAULT_CONFIG_DIR_SUFFIX": "dev",
+                "OMOBA_ACCOUNT_API_URL": "https://account.dev.omoba.io",
+                "OMOBA_PORTAL_ORIGIN": "https://app.dev.omoba.io",
+                "EKZA_DEV_HTTP_HOST": "192.168.1.71",
+                "OMOBA_DEFAULT_SOMETHING_NEW": "x",
+                "PATH": "/bin", "OMOBA_PASSPORT_URL": "runtime-only"}
+
     def test_builds_never_inherit_compiled_defaults_from_the_shell(self):
         from unittest import mock
-        exported = {"OMOBA_DEFAULT_GAME_SERVER_ADDR": "lobby.dev.omoba.io:4100",
-                    "OMOBA_DEFAULT_REGISTRY_URL": "https://registry.dev.ekza.io",
-                    "OMOBA_DEFAULT_CONFIG_DIR_SUFFIX": "dev", "PATH": "/bin"}
-        with mock.patch.dict(release.os.environ, exported, clear=True):
+        with mock.patch.dict(release.os.environ, self.EXPORTED, clear=True):
             prod = release.client_env(release.PROD)
             dev = release.client_env(release.resolve_flavor("dev", registry="http://127.0.0.1:8018"))
-        for key in release.CLIENT_DEFAULT_ENVS:
-            self.assertNotIn(key, prod)
-        self.assertEqual(prod["PATH"], "/bin")
+            xwin = release.apply_client_defaults(dict(release.os.environ), release.PROD)
+        for env in (prod, xwin):
+            self.assertEqual(env, {"PATH": "/bin", "OMOBA_PASSPORT_URL": "runtime-only"})
+        self.assertEqual({k: v for k, v in dev.items() if release.is_build_time_env(k)},
+                         release.resolve_flavor("dev", registry="http://127.0.0.1:8018").client_defaults())
         self.assertEqual(dev["OMOBA_DEFAULT_REGISTRY_URL"], "http://127.0.0.1:8018")
+        self.assertEqual(dev["OMOBA_DEFAULT_PASSPORT_URL"], release.DEV_PASSPORT)
         self.assertEqual(release.linux_docker_env_args(release.PROD), [])
         self.assertEqual(release.linux_docker_env_args(release.resolve_flavor("dev")), [
             "-e", "OMOBA_DEFAULT_GAME_SERVER_ADDR=lobby.dev.omoba.io:4100",
             "-e", "OMOBA_DEFAULT_REGISTRY_URL=https://registry.dev.ekza.io",
+            "-e", "OMOBA_DEFAULT_PASSPORT_URL=http://127.0.0.1:9/api/passport",
             "-e", "OMOBA_DEFAULT_CONFIG_DIR_SUFFIX=dev"])
+
+    def test_the_ios_archive_never_inherits_compiled_defaults_from_the_shell(self):
+        from unittest import mock
+        seen = []
+
+        def run(*args, env=None, **kwargs):
+            seen.append(env)
+            raise SystemExit("stop after the archive command")
+
+        with tempfile.TemporaryDirectory() as temporary, \
+                mock.patch.dict(release.os.environ, self.EXPORTED, clear=True), \
+                mock.patch.object(release, "ROOT", Path(temporary)), \
+                mock.patch.object(release, "host_platform", return_value="macos"), \
+                mock.patch.object(release, "local_xcconfig",
+                                  return_value={"DEVELOPMENT_TEAM": "TEAM", "CURRENT_PROJECT_VERSION": "1"}), \
+                mock.patch.object(release, "run", run):
+            with self.assertRaises(SystemExit):
+                release.build_ios("0.24.0", Path(temporary), release.resolve_flavor(), None, False)
+        self.assertEqual(seen[0], {"PATH": "/bin", "OMOBA_PASSPORT_URL": "runtime-only"})
+        for flavor in (release.resolve_flavor(registry="https://registry.ekza.io"),
+                       release.resolve_flavor(passport="https://avatar.ekza.io/api/passport")):
+            with self.assertRaises(SystemExit):
+                release.build_ios("0.24.0", Path("/nonexistent"), flavor, None, False)
+
+    def test_a_dev_build_never_uses_the_production_passport(self):
+        dev = release.resolve_flavor("dev")
+        self.assertEqual(dev.passport, release.DEV_PASSPORT)
+        self.assertEqual(release.registry_host(dev.passport), "127.0.0.1")
+        for passport in ("https://avatar.ekza.io/api/passport", "https://AVATAR.ekza.io./api/passport",
+                         "https://ekza.io/api/passport", "https://passport.example.com/api/passport",
+                         "https://77.246.105.57/api/passport"):
+            with self.assertRaises(SystemExit, msg=passport):
+                release.resolve_flavor("dev", passport=passport)
+        self.assertEqual(release.resolve_flavor("dev", passport="https://passport.dev.ekza.io/api/passport/").passport,
+                         "https://passport.dev.ekza.io/api/passport")
+        self.assertEqual(release.resolve_flavor("dev", passport="http://localhost:3000/api/passport").passport,
+                         "http://localhost:3000/api/passport")
+        # Production keeps the SDK default unless asked, and never takes a dev passport.
+        self.assertIsNone(release.resolve_flavor().passport)
+        self.assertNotIn("OMOBA_DEFAULT_PASSPORT_URL", release.PROD.client_defaults())
+        with self.assertRaises(SystemExit):
+            release.resolve_flavor(passport="https://passport.dev.ekza.io/api/passport")
+
+    def test_passport_follows_the_sdk_url_rule(self):
+        self.assertIsNone(release.validate_passport(None))
+        for bad in ("https://avatar.ekza.io", "https://avatar.ekza.io/api", "http://avatar.ekza.io/api/passport",
+                    "https://u:p@x.dev.ekza.io/api/passport", "https://x.dev.ekza.io/api/passport?a=1",
+                    "https://x.dev.ekza.io/api/passport#f", "ftp://x/api/passport", "x.dev.ekza.io/api/passport",
+                    "https://x.dev.ekza.io/api/pass port", "https://x.io:99999/api/passport"):
+            with self.assertRaises(SystemExit, msg=bad):
+                release.validate_passport(bad)
+
+    def test_the_dev_linux_package_carries_the_lobby_migration_tool(self):
+        from unittest import mock
+        self.assertEqual(release.linux_binaries(release.PROD), ("client", "server"))
+        self.assertEqual(release.linux_binaries(release.resolve_flavor("dev")),
+                         ("client", "server", "omoba-account-api"))
+        with tempfile.TemporaryDirectory() as temporary, mock.patch.object(release, "stage_common"):
+            root = Path(temporary)
+            for name in ("client", "server", "account"):
+                (root / name).write_bytes(name.encode())
+            dev = release.resolve_flavor("dev")
+            release.stage_linux(root / "dev", "0.24.0", dev, root / "client", root / "server",
+                                {"omoba-account-api": root / "account"})
+            self.assertEqual((root / "dev/omoba-account-api").read_bytes(), b"account")
+            release.stage_linux(root / "prod", "0.24.0", release.PROD, root / "client", root / "server")
+            self.assertFalse((root / "prod/omoba-account-api").exists())
+            with self.assertRaises(SystemExit):
+                release.stage_linux(root / "dev2", "0.24.0", dev, root / "client", root / "server")
+            with self.assertRaises(SystemExit):
+                release.stage_linux(root / "prod2", "0.24.0", release.PROD, root / "client", root / "server",
+                                    {"omoba-account-api": root / "account"})
+        readme = release.player_readme("0.24.0", "linux", release.resolve_flavor("dev"))
+        self.assertIn("omoba-account-api is the dev lobby's database migration tool", readme)
+        self.assertIn("wallet pairing and purchased avatars are off", readme)
+        self.assertNotIn("omoba-account-api", release.player_readme("0.24.0", "macos", release.resolve_flavor("dev")))
 
     def test_dev_builds_are_desktop_only(self):
         dev = release.resolve_flavor("dev")
@@ -341,12 +430,26 @@ exec "$DIR/Omoba.app/Contents/MacOS/server"
         sources = {
             "OMOBA_DEFAULT_GAME_SERVER_ADDR": "client/src/session_config.rs",
             "OMOBA_DEFAULT_REGISTRY_URL": "passport/src/community.rs",
+            "OMOBA_DEFAULT_PASSPORT_URL": "passport/src/lib.rs",
             "OMOBA_DEFAULT_CONFIG_DIR_SUFFIX": "client/src/platform.rs",
         }
         self.assertEqual(set(sources), set(release.CLIENT_DEFAULT_ENVS))
         for key, path in sources.items():
             self.assertIn(f'option_env!("{key}")', (release.ROOT / path).read_text(), path)
         self.assertIn('format!("omoba-bevy-{suffix}")', (release.ROOT / "client/src/platform.rs").read_text())
+
+    def test_every_compile_time_setting_in_the_sources_is_scrubbed(self):
+        import re
+        import subprocess
+        listing = subprocess.run(["git", "grep", "-h", "-o", "-E", r'option_env!\("[A-Z0-9_]+"\)', "--", "*.rs"],
+                                 cwd=release.ROOT, capture_output=True, text=True, check=True).stdout
+        keys = set(re.findall(r'option_env!\("([A-Z0-9_]+)"\)', listing))
+        self.assertIn("OMOBA_DEFAULT_PASSPORT_URL", keys)
+        self.assertTrue(keys, "git grep found no option_env! reads")
+        self.assertEqual({key for key in keys if not release.is_build_time_env(key)}, set())
+        # The pinned Ekza SDK reads EKZA_DEV_HTTP_HOST at compile time (src/registry.rs).
+        self.assertTrue(release.is_build_time_env("EKZA_DEV_HTTP_HOST"))
+        self.assertIn("ekza-bevy-sdk", (release.ROOT / "Cargo.toml").read_text())
 
 
 if __name__ == "__main__":
