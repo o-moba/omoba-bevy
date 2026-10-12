@@ -388,7 +388,7 @@ def database_url_problems(url: str) -> list[str]:
         parts = urlsplit(url or "")
         port = parts.port
     except ValueError:
-        return problems + ["is not a postgres://user:password@127.0.0.1:port/database URL"]
+        return problems + ["is not a loopback postgres URL with a role, a password, a port and a database"]
     if parts.scheme not in ("postgres", "postgresql"):
         problems.append("is not a postgres:// URL")
     host = (parts.hostname or "").lower()
