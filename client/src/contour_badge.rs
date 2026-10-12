@@ -1,7 +1,7 @@
 //! The contour marker. A contour build (`scripts/release.py build … --contour
 //! dev`) names its contour in a kit badge (`DEV`) beside the Home title and in
-//! the match HUD under the score strip, so a tester's screen or screenshot never
-//! passes for production. Production builds spawn nothing.
+//! the desktop match HUD under the score strip, so a tester's screen or
+//! screenshot never passes for production. Production builds spawn nothing.
 //!
 //! The contour is the compile-time [`BUILD_CONTOUR`] that also names the
 //! settings folder and the window title (`crate::platform`).
@@ -49,7 +49,14 @@ fn spawn_for(parent: &mut ChildSpawnerCommands, contour: Option<&str>) -> Option
     Some(badge)
 }
 
-fn spawn_hud_badge(mut commands: Commands) {
+fn spawn_hud_badge(
+    mut commands: Commands,
+    mobile: Option<Res<crate::mobile_controls::MobileControls>>,
+) {
+    // The phone HUD has no free slot for it (`HudLayout::contour_badge`).
+    if mobile.is_some_and(|mobile| mobile.enabled) {
+        return;
+    }
     spawn_hud_badge_for(&mut commands, BUILD_CONTOUR);
 }
 

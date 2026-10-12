@@ -398,7 +398,13 @@ impl HudLayout {
 
     /// The contour badge: `space.8` under the score strip, left-aligned with
     /// it, one `size.badge.height` high (the free strip above the kill feed).
+    /// The phone HUD has no free slot there (the enemy portraits wrap under
+    /// the icon row), so it has none and `crate::contour_badge` spawns the
+    /// badge only for the desktop HUD; dev-contour builds are desktop-only.
     fn contour_badge(&self) -> Rect {
+        if self.form == Form::Phone {
+            return Rect::default();
+        }
         let top = self.score_strip.max.y + space::S8;
         Rect::from_corners(
             Vec2::new(self.score_strip.min.x, top),
@@ -740,7 +746,7 @@ mod tests {
     }
 
     /// A dev build's contour badge sits `space.8` under the score strip and
-    /// clear of every resting plate around it, on desktop and phone.
+    /// clear of every resting plate around it; the phone HUD has none.
     #[test]
     fn the_contour_badge_sits_under_the_score_strip_clear_of_other_plates() {
         let reference = HudLayout::desktop(Vec2::new(1280.0, 720.0), false);
@@ -755,20 +761,16 @@ mod tests {
         let mut mobile = MobileControls::default();
         mobile.enabled = true;
         mobile.viewport = Vec2::new(844.0, 390.0);
-        mobile.safe.left = 47.0;
-        mobile.safe.right = 47.0;
-        mobile.safe.top = 0.0;
-        mobile.safe.bottom = 21.0;
-        let mut layouts: Vec<HudLayout> = [
+        assert_eq!(
+            HudLayout::phone(&mobile).region(HudRegion::ContourBadge),
+            Rect::default()
+        );
+        for viewport in [
             Vec2::new(1280.0, 720.0),
             Vec2::new(1024.0, 640.0),
             Vec2::new(1440.0, 720.0),
-        ]
-        .into_iter()
-        .map(|viewport| HudLayout::desktop(viewport, false))
-        .collect();
-        layouts.push(HudLayout::phone(&mobile));
-        for l in layouts {
+        ] {
+            let l = HudLayout::desktop(viewport, false);
             let badge = l.region(HudRegion::ContourBadge);
             assert_eq!(badge.min.x, l.score_strip.min.x);
             assert_eq!(badge.min.y, l.score_strip.max.y + space::S8);
