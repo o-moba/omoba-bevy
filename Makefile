@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 
-.PHONY: compatibility-manifest compatibility-check help server server-dev practice practice-server game game2d start start-release play play-bots bots stop restart verify-task-12 verify-gameplay iphone-check iphone iphone-box android-check android android-universal check fmt fmt-check lint check-no-qa test test-scripts test-postgres release-check release-all release-publish release-local release-mac release-linux release-android release-ios release-testflight release-ci release-draft release-notes showcase demo-video trailer-clips
+.PHONY: compatibility-manifest compatibility-check help server server-dev practice practice-server game game2d start start-release play play-bots bots stop restart verify-task-12 verify-gameplay iphone-check iphone iphone-box android-check android android-universal check fmt fmt-check lint check-no-qa test test-scripts test-postgres release-check release-all release-publish release-local release-mac release-linux release-android release-ios release-testflight release-ci release-draft release-notes release-dev showcase demo-video trailer-clips
 
 # ---------------------------------------------------------------------------
 # Match modes (TASK-22)
@@ -234,6 +234,13 @@ release-draft: ## Upload local dist/ packages to a DRAFT GitHub release
 
 release-notes: ## Print release notes for the current version
 	python3 scripts/release.py notes
+
+# DEV-contour tester packages (desktop only) into dist/v<version>-dev/: dev lobby
+# lobby.dev.omoba.io:4100 (DEV_SERVER=<dev VPS IPv4>:4100 without DNS), dev registry,
+# own settings folder. See ops/vps/dev/README.md.
+DEV_SERVER ?=
+release-dev: ## DEV tester packages (macOS/Windows/Linux this Mac can build) for the dev contour
+	python3 scripts/release.py build all --contour dev $(if $(DEV_SERVER),--server $(DEV_SERVER),)
 
 # Staged native screenshots for the website, stores and README: desktop and
 # phone-preview scenes (hero select, lane fight, shop) from a local dev build.
