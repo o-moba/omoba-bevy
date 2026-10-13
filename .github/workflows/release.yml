@@ -8,9 +8,10 @@ name: Release
 # Trigger: push a tag `v*`, or run it by hand (Actions -> Release -> Run
 # workflow / `python3 scripts/release.py ci`).
 #
-# DEV-contour tester packages (desktop only; dev lobby lobby.dev.omoba.io:4100 on
-# the dedicated dev VPS + registry.dev.ekza.io; separate settings folder; -dev file
-# names; built from the dev branch) only go to a v<version>-dev.N tag:
+# DEV-contour tester packages (the OMOBA Dev app: desktop -dev packages and the
+# space.ekza.omoba.dev APK; dev lobby lobby.dev.omoba.io:4100 on the dedicated dev
+# VPS + registry.dev.ekza.io; separate settings folder; -dev file names; built from
+# the dev branch) only go to a v<version>-dev.N tag:
 #   python3 scripts/release.py ci --contour dev --ref v0.45.0-dev.1
 # A pushed v*-dev* tag builds production packages and then fails the draft step.
 on:
@@ -107,8 +108,8 @@ jobs:
 
   android:
     name: android
-    # Dev-contour packages are desktop-only: an APK would install over the production app.
-    if: ${{ github.event.inputs.contour != 'dev' }}
+    # A dev-contour APK is the separate OMOBA Dev app (space.ekza.omoba.dev), so it
+    # installs beside the production app instead of over it.
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
@@ -135,7 +136,7 @@ jobs:
           # Optional: a stable signing key so updates install over each other.
           OMOBA_ANDROID_KEYSTORE_BASE64: ${{ secrets.OMOBA_ANDROID_KEYSTORE_BASE64 }}
         run: |
-          args=(build android --out dist)
+          args=(build android --out dist --contour "$RELEASE_CONTOUR")
           if [ -n "$RELEASE_SERVER" ]; then args+=(--server "$RELEASE_SERVER"); fi
           if [ -n "$RELEASE_REGISTRY" ]; then args+=(--registry "$RELEASE_REGISTRY"); fi
           python3 scripts/release.py "${args[@]}"

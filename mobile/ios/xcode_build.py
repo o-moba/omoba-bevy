@@ -17,8 +17,35 @@ import sys
 
 from build_device import (ROOT, app_info, inspect_macho, ios_build_environment,
                           sha256, tracked_assets, validate_dsym)
+from contours import MOBILE, compile_defaults, contour_of_xcode_setting
 from package_licenses import collect_legal_notices, copy_legal_notices
 from prepare_testflight import validate_build_number
+
+# Compile-time settings an Xcode build never takes from the invoking shell; the
+# contour (and, for production Debug runs only, the local LAN rehearsal) sets them.
+SCRUBBED_ENV = ('EKZA_DEV_HTTP_HOST', 'OMOBA_DEFAULT_REGISTRY_URL', 'OMOBA_DEFAULT_PASSPORT_URL',
+                'OMOBA_DEFAULT_CONFIG_DIR_SUFFIX')
+
+
+def contour(env: dict[str, str]) -> str:
+    """The app this build makes (`OMOBA_CONTOUR`), checked against its bundle id:
+    the dev app never ships under the production id, nor production under the dev id."""
+    name = contour_of_xcode_setting(env.get('OMOBA_CONTOUR'))
+    bundle_id = env.get('PRODUCT_BUNDLE_IDENTIFIER', '')
+    other = MOBILE['prod' if name == 'dev' else 'dev'].bundle_id
+    if bundle_id == other:
+        raise ValueError(f'The {name} contour cannot build bundle id {bundle_id}; '
+                         f'its app is {MOBILE[name].bundle_id}.')
+    return name
+
+
+def contour_build_settings(env: dict[str, str], root: Path = ROOT) -> dict[str, str]:
+    """Compile-time client settings: the dev app's lobby, registry, closed passport and
+    settings folder; for the production app, only the local Debug LAN rehearsal."""
+    name = contour(env)
+    if name == 'dev':
+        return compile_defaults('dev', env.get('OMOBA_GAME_SERVER') or None)
+    return ekza_build_settings(env, root)
 
 
 def settings(env: dict[str, str]) -> dict:
@@ -77,10 +104,10 @@ def build(env: dict[str, str]) -> None:
     cfg = settings(env)
     before = source_identity()
     build_env = ios_build_environment(cfg['cache'], env['SDKROOT'], env.get('OMOBA_GAME_SERVER') or None)
-    # Never inherit a LAN exception into Archive from the invoking shell.
-    for key in ('EKZA_DEV_HTTP_HOST', 'OMOBA_DEFAULT_REGISTRY_URL', 'OMOBA_DEFAULT_PASSPORT_URL'):
+    # Never inherit a LAN exception or another contour into Archive from the invoking shell.
+    for key in SCRUBBED_ENV:
         build_env.pop(key, None)
-    build_env.update(ekza_build_settings(env))
+    build_env.update(contour_build_settings(env))
     # Xcode may set architecture/linker flags for its own toolchain. Cargo owns
     # the executable and the device builder's retained-symbol configuration.
     subprocess.run(['cargo', 'build', '--locked', '-p', 'client', '--bin', 'client',
@@ -118,17 +145,20 @@ def build(env: dict[str, str]) -> None:
     retained.parent.mkdir(parents=True, exist_ok=True)
     shutil.copytree(dsym, retained)
     validate_dsym(bundle / 'client', retained)
-    info = app_info(ROOT, macho, env['PRODUCT_BUNDLE_IDENTIFIER'])
+    app = contour(env)
+    info = app_info(ROOT, macho, env['PRODUCT_BUNDLE_IDENTIFIER'],
+                    MOBILE[app].display_name if app == 'dev' else None)
     info.pop('UIDeviceFamily', None)  # Xcode derives this from TARGETED_DEVICE_FAMILY.
     info['CFBundleVersion'] = cfg['build']
     cfg['derived'].mkdir(parents=True, exist_ok=True)
     (cfg['derived'] / 'Omoba-Info.plist').write_bytes(plistlib.dumps(info))
-    report = {'source_revision': before['revision'], 'source_dirty': bool(before['tracked_diff']),
+    report = {'contour': app, 'source_revision': before['revision'], 'source_dirty': bool(before['tracked_diff']),
               'version': info['CFBundleShortVersionString'], 'build': cfg['build'],
               'cargo_profile': cfg['profile'], 'binary_sha256': sha256(bundle / 'client'),
               'debug_symbols': symbols, 'signing_owner': 'Xcode', 'uploaded': False}
     (assets / 'legal/XCODE-BUILD.json').write_text(json.dumps(report, indent=2) + '\n')
-    print(f"OMOBA {info['CFBundleShortVersionString']} ({cfg['build']}): Rust executable, assets and matching dSYM staged.")
+    print(f"{info['CFBundleDisplayName']} {info['CFBundleShortVersionString']} ({cfg['build']}): "
+          "Rust executable, assets and matching dSYM staged.")
 
 
 if __name__ == '__main__':

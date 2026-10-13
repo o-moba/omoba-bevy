@@ -44,6 +44,12 @@ class ReleaseHelpers(unittest.TestCase):
         self.assertIn("10.0.0.2:4000", text)
         self.assertIn("Host Practice Server.bat", text)
         self.assertIn("PLAY VS BOTS", text)
+        # Production has no in-game server picker; the dev app's is its Connection panel.
+        self.assertNotIn('"Change" under SERVER', text)
+        self.assertIn("GAME_SERVER_ADDR=192.168.1.20:4000", text)
+        dev = release.player_readme("0.24.0", "windows", release.resolve_flavor("dev"))
+        self.assertIn("Home -> Connection -> Custom", dev)
+        self.assertNotIn("GAME_SERVER_ADDR", dev)
 
     def test_zip_keeps_executable_bits_and_a_root_folder(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -328,19 +334,84 @@ class DevContour(unittest.TestCase):
         self.assertIn("wallet pairing and purchased avatars are off", readme)
         self.assertNotIn("omoba-account-api", release.player_readme("0.24.0", "macos", release.resolve_flavor("dev")))
 
-    def test_dev_builds_are_desktop_only(self):
+    def test_dev_builds_cover_every_platform_with_their_own_app(self):
         dev = release.resolve_flavor("dev")
         every = dict.fromkeys(release.PLATFORMS, True)
-        self.assertEqual(release.build_targets("all", dev, every), ["macos", "windows", "linux"])
+        self.assertEqual(release.build_targets("all", dev, every), list(release.PLATFORMS))
         self.assertEqual(release.build_targets("all", release.PROD, every), list(release.PLATFORMS))
-        self.assertEqual(release.build_targets("linux", dev, every), ["linux"])
-        for mobile in ("android", "ios"):
+        for target in release.PLATFORMS:
+            self.assertEqual(release.build_targets(target, dev, every), [target])
+        # Phones compile the dev app's own registry and passport; only the lobby changes.
+        for flavor in (release.resolve_flavor("dev", registry="https://registry.lan.example"),
+                       release.resolve_flavor("dev", passport="https://passport.dev.ekza.io/api/passport")):
             with self.assertRaises(SystemExit):
-                release.build_targets(mobile, dev, every)
-        with self.assertRaises(SystemExit):
-            release.build_android("0.24.0", Path("/nonexistent"), dev)
-        with self.assertRaises(SystemExit):
-            release.build_ios("0.24.0", Path("/nonexistent"), dev, None, False)
+                release.build_android("0.24.0", Path("/nonexistent"), flavor)
+            with self.assertRaises(SystemExit):
+                release.build_ios("0.24.0", Path("/nonexistent"), flavor, None, False)
+
+    def test_dev_phone_builds_hand_the_contour_to_the_packagers(self):
+        from unittest import mock
+        seen = []
+
+        def run(*args, env=None, **kwargs):
+            seen.append(([str(a) for a in args], env))
+            raise SystemExit("stop after the packager command")
+
+        with tempfile.TemporaryDirectory() as temporary, \
+                mock.patch.dict(release.os.environ, {"PATH": "/bin"}, clear=True), \
+                mock.patch.object(release, "shared_target", return_value=Path(temporary)), \
+                mock.patch.object(release, "ensure_android_keystore",
+                                  return_value=Path(temporary, "key")), \
+                mock.patch.object(release, "android_ndk", return_value=None), \
+                mock.patch.object(release, "run", run):
+            Path(temporary, "key").write_bytes(b"k")
+            for flavor in (release.PROD, release.resolve_flavor("dev", server="203.0.113.10:4100")):
+                with self.assertRaises(SystemExit):
+                    release.build_android("0.24.0", Path(temporary), flavor)
+        (prod_args, _), (dev_args, dev_env) = seen
+        self.assertEqual(prod_args[prod_args.index("--contour") + 1], "prod")
+        self.assertEqual(dev_args[dev_args.index("--contour") + 1], "dev")
+        self.assertEqual(dev_args[dev_args.index("--server") + 1], "203.0.113.10:4100")
+        self.assertEqual(dev_env["OMOBA_DEFAULT_CONFIG_DIR_SUFFIX"], "dev")
+        self.assertEqual(release.ios_settings(release.PROD, "TEAM", "7"),
+                         ["DEVELOPMENT_TEAM=TEAM", "CURRENT_PROJECT_VERSION=7",
+                          "OMOBA_CARGO_PROFILE=release", "CODE_SIGN_STYLE=Automatic"])
+        dev_ios = release.ios_settings(release.resolve_flavor("dev"), "TEAM", "7")
+        self.assertIn("OMOBA_CONTOUR=dev", dev_ios)
+        self.assertIn("OMOBA_GAME_SERVER=lobby.dev.omoba.io:4100", dev_ios)
+        self.assertNotIn("OMOBA_CONTOUR=dev", release.ios_settings(
+            release.resolve_flavor(server="192.0.2.1:4000"), "TEAM", "7"))
+
+    def test_the_phone_apps_never_share_an_identity(self):
+        import plistlib
+        prod, dev = release.MOBILE["prod"], release.MOBILE["dev"]
+        self.assertEqual((prod.bundle_id, dev.bundle_id), ("space.ekza.omoba.beta", "space.ekza.omoba.dev"))
+        self.assertEqual(dev.display_name, "OMOBA Dev")
+        self.assertNotEqual(prod.ios_app_icon, dev.ios_app_icon)
+        self.assertNotEqual(prod.android_res, dev.android_res)
+        # The production identity is still what the checked-in app files say.
+        info = plistlib.loads((release.ROOT / "mobile/ios/Info.plist").read_bytes())
+        self.assertEqual((info["CFBundleIdentifier"], info["CFBundleDisplayName"]),
+                         (prod.bundle_id, prod.display_name))
+        manifest = (release.ROOT / "mobile/android/AndroidManifest.xml").read_text()
+        self.assertIn(f'package="{prod.bundle_id}"', manifest)
+        self.assertIn(f'android:label="{prod.display_name}"', manifest)
+        for identity in (prod, dev):
+            self.assertTrue((release.ROOT / "mobile/ios/Assets.xcassets"
+                             / f"{identity.ios_app_icon}.appiconset/AppIcon.png").is_file())
+            self.assertTrue((release.ROOT / "mobile/android" / identity.android_res
+                             / "mipmap-xxxhdpi/ic_launcher.png").is_file())
+        self.assertTrue(release.mac_icon_source(release.resolve_flavor("dev")).parent.name
+                        .startswith("AppIconDev"))
+        self.assertEqual(release.mac_icon_source(release.PROD).parent.name, "AppIcon.appiconset")
+
+    def test_the_dev_endpoints_match_the_clients_dev_profile(self):
+        source = (release.ROOT / "client/src/connection_profile.rs").read_text()
+        self.assertIn(f'CLOSED_PASSPORT: &str = "{release.DEV_PASSPORT}"', source)
+        self.assertIn('"https://registry.{contour}.ekza.io"', source)
+        self.assertEqual(release.DEV_REGISTRY, "https://registry.dev.ekza.io")
+        self.assertIn('"lobby.{contour}.omoba.io:4100"', source)
+        self.assertEqual(release.DEV_LOBBY, "lobby.dev.omoba.io:4100")
 
     def test_dev_readme_says_what_it_points_at_and_where_it_keeps_state(self):
         dev = release.player_readme("0.24.0", "macos", release.resolve_flavor("dev"))
@@ -400,7 +471,8 @@ exec "$DIR/Omoba.app/Contents/MacOS/server"
             release.ci_command(args(contour="dev"), "0.45.0")
         workflow = (release.ROOT / ".github/workflows/release.yml").read_text()
         for needle in ("      registry:\n", "      contour:\n", '--contour "$RELEASE_CONTOUR"',
-                       '--registry "$RELEASE_REGISTRY"', "if: ${{ github.event.inputs.contour != 'dev' }}",
+                       '--registry "$RELEASE_REGISTRY"',
+                       'args=(build android --out dist --contour "$RELEASE_CONTOUR")',
                        "github.event.inputs.contour != 'dev' && vars.OMOBA_RELEASE_SERVER",
                        'title="OMOBA ${RELEASE_TAG#v} DEV (test contour)"'):
             self.assertIn(needle, workflow)
@@ -424,7 +496,8 @@ exec "$DIR/Omoba.app/Contents/MacOS/server"
         self.assertEqual(plan["config_dir"], "omoba-bevy-dev")
         self.assertEqual([Path(p).name for p in plan["packages"]], [
             "Omoba-0.24.0-dev-macos-arm64.zip", "Omoba-0.24.0-dev-windows-x64.zip",
-            "omoba-0.24.0-dev-linux-x64.tar.gz"])
+            "omoba-0.24.0-dev-linux-x64.tar.gz", release.artifact_name("0.24.0", "android", "dev"),
+            "Omoba-0.24.0-dev-ios.ipa"])
 
     def test_compiled_default_names_match_the_rust_sources(self):
         sources = {
