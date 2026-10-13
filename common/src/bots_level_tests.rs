@@ -872,6 +872,129 @@ fn a_recruit_defends_its_own_tower_through_every_gate() {
     assert!(!defends(&arena.world, Team::Blue, hero));
 }
 
+/// A Recruit at its spawn, past the timed part of a health retreat and held
+/// home by `resume_hp` at 60%, with an enemy Ranger out of sight and the
+/// round ledger running. `at(along, across)` is a point relative to the
+/// spawn: `along` points away from the fountain, `across` sideways.
+fn held_at_home() -> (Arena, SocketAddr, SocketAddr, impl Fn(f32, f32) -> [f32; 2]) {
+    let mut arena = Arena::new();
+    let spawn = spawn_position_for_team(&arena.world.map_layout, Team::Green);
+    let home = arena.world.map_layout.home;
+    let length = (spawn.x - home.x).hypot(spawn.z - home.z);
+    let along = [(spawn.x - home.x) / length, (spawn.z - home.z) / length];
+    let at = move |a: f32, c: f32| {
+        [
+            spawn.x + along[0] * a - along[1] * c,
+            spawn.z + along[1] * a + along[0] * c,
+        ]
+    };
+    let bot = arena.bot(
+        "[::]:34551",
+        Team::Green,
+        HeroClass::Warrior,
+        [spawn.x, spawn.z],
+        BotProfile::RECRUIT,
+    );
+    let away = arena.world.map_layout.away;
+    let enemy = arena.hero(
+        "127.0.0.1:34552",
+        Team::Blue,
+        HeroClass::Ranger,
+        [away.x, away.z],
+    );
+    arena.start_ledger();
+    arena.set_hp(bot, 0.45);
+    arena.step();
+    let started = arena.now;
+    arena.set_hp(bot, 0.6);
+    arena.run_until(started + Duration::from_secs(7));
+    let controller = arena.controller(bot);
+    assert!(controller.retreat_started.is_some(), "the hold runs");
+    assert!(
+        controller
+            .retreat_until
+            .is_some_and(|until| arena.now >= until),
+        "past retreat_secs"
+    );
+    assert_eq!(controller.target, None);
+    (arena, bot, enemy, at)
+}
+
+fn put(arena: &mut Arena, addr: SocketAddr, at: [f32; 2]) {
+    let hero = &mut arena.world.players.get_mut(&addr).unwrap().hero;
+    hero.x = at[0];
+    hero.z = at[1];
+}
+
+#[test]
+fn a_recruit_held_home_by_resume_hp_still_defends_its_base() {
+    // The diver hits it from 13 m, inside the fountain and shop zone: an
+    // answer within one think tick, though the hold goes on.
+    let (mut arena, bot, enemy, at) = held_at_home();
+    let inside = at(5.0, 12.0);
+    let home = arena.world.map_layout.home;
+    assert!((inside[0] - home.x).hypot(inside[1] - home.z) <= crate::balance::BASE_HEAL_RADIUS);
+    let start = at(0.0, 0.0);
+    assert!(
+        shared::navigation::world_navigation().segment_clear(start, inside),
+        "a clear approach"
+    );
+    put(&mut arena, enemy, inside);
+    arena.hit(enemy, bot);
+    arena.run(THINK_INTERVAL);
+    assert_eq!(arena.target(bot), arena.hero_target(enemy));
+    let distance = |arena: &Arena| {
+        let (a, b) = (
+            &arena.world.players[&bot].hero,
+            &arena.world.players[&enemy].hero,
+        );
+        (a.x - b.x).hypot(a.z - b.z)
+    };
+    let before = distance(&arena);
+    arena.run(Duration::from_secs(1));
+    assert_eq!(arena.target(bot), arena.hero_target(enemy), "kept");
+    assert!(
+        distance(&arena) < before - 1.0,
+        "it closes in, not walks home"
+    );
+    assert!(arena.controller(bot).retreat_started.is_some());
+
+    // Once the diver leaves, the hold takes over again.
+    let away = arena.world.map_layout.away;
+    put(&mut arena, enemy, [away.x, away.z]);
+    arena.run(THINK_INTERVAL);
+    assert_eq!(arena.target(bot), None);
+    assert!(
+        arena.controller(bot).retreat_started.is_some(),
+        "still held"
+    );
+
+    // Unprovoked, a diver inside the engage range is taken on too, and one
+    // beyond it is left alone.
+    for ((along, across), defended) in [((3.0, 4.0), true), ((5.0, 12.0), false)] {
+        let (mut arena, bot, enemy, at) = held_at_home();
+        put(&mut arena, enemy, at(along, across));
+        arena.run(THINK_INTERVAL);
+        let expected = if defended {
+            arena.hero_target(enemy)
+        } else {
+            None
+        };
+        assert_eq!(arena.target(bot), expected, "at ({along}, {across})");
+    }
+
+    // An attacker outside the base and away from its towers does not end
+    // the hold: walking home is the answer.
+    let (mut arena, bot, enemy, at) = held_at_home();
+    let outside = at(14.0, 0.0);
+    assert!((outside[0] - home.x).hypot(outside[1] - home.z) > crate::balance::BASE_HEAL_RADIUS);
+    put(&mut arena, enemy, outside);
+    arena.hit(enemy, bot);
+    arena.run(THINK_INTERVAL);
+    assert_eq!(arena.target(bot), None);
+    assert!(arena.controller(bot).retreat_started.is_some());
+}
+
 #[test]
 fn every_level_heals_below_28_percent_and_only_there() {
     for (level, profile) in levels() {

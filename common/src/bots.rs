@@ -1509,7 +1509,7 @@ impl CombatHost<'_> {
             }
             // `resume_hp`: a health retreat goes on until health is back, but
             // never past `retreat_cap_secs` from its start.
-            let recovering = controller.retreat_started.is_some_and(|started| {
+            let hold = controller.retreat_started.is_some_and(|started| {
                 profile
                     .resume_hp
                     .is_some_and(|resume| player.hero.hp < player.hero.max_hp * resume)
@@ -1518,9 +1518,16 @@ impl CombatHost<'_> {
                         .is_none_or(|cap| now < started + Duration::from_secs_f32(cap))
             });
             let timed = controller.retreat_until.is_some_and(|until| now < until);
-            if !timed && !recovering {
+            if !timed && !hold {
                 controller.retreat_started = None;
             }
+            // The hold yields to the defend exception: a hero the think tick
+            // took on during the hold (below) is fought, not walked away
+            // from. During the hold the target is that hero or nothing.
+            let recovering = hold
+                && !controller
+                    .target
+                    .is_some_and(|target| target.kind == TargetKind::Player);
             let mut retreating = turret_retreat.is_some() || timed || recovering;
             if now >= controller.next_think {
                 controller.next_think = now + THINK_INTERVAL;
@@ -1560,7 +1567,15 @@ impl CombatHost<'_> {
                     controller.gate_retreat(&profile, now);
                     retreating = true;
                 }
-                controller.target = if retreating {
+                // Only the `resume_hp` hold keeps the bot home: no timed or
+                // turret retreat runs, including one the outnumbered gate just
+                // started.
+                let held = hold
+                    && turret_retreat.is_none()
+                    && controller.retreat_until.is_none_or(|until| now >= until);
+                controller.target = if let Some(gates) = gates.filter(|_| held) {
+                    self.defend_target(&profile, &gates, team, origin, controller.target, now)
+                } else if retreating {
                     None
                 } else {
                     // Retain a living unit instead of swapping between nearly
@@ -1614,6 +1629,9 @@ impl CombatHost<'_> {
                 controller.target = controller
                     .target
                     .filter(|target| self.reachable(team, origin, *target, &danger));
+                if held {
+                    retreating = controller.target.is_none();
+                }
                 // Threat response: a hero that hit this bot gets an answer in
                 // this think tick. Retaliate if the gates allow it, otherwise
                 // back off; never carry on as if nothing happened.
@@ -2062,6 +2080,51 @@ impl CombatHost<'_> {
             minion_in_sight,
             threat,
         }
+    }
+
+    /// The target of a bot that only the `resume_hp` hold keeps home: an
+    /// enemy hero the defend exception covers. The current one is kept while
+    /// it stays covered, visible and within `VISION` plus the leash;
+    /// otherwise the nearest covered hero in range and in sight is taken.
+    /// Anything else waits for the hold to end. It reads the sight the gate
+    /// scan just filled, so it allocates nothing.
+    fn defend_target(
+        &self,
+        profile: &BotProfile,
+        gates: &ThinkGates,
+        team: Team,
+        origin: [f32; 2],
+        current: Option<TargetId>,
+        now: Instant,
+    ) -> Option<TargetId> {
+        let sight = &self.bots.sight;
+        let distance = |p: &ConnectedPlayer| (p.hero.x - origin[0]).hypot(p.hero.z - origin[1]);
+        let covered = |p: &ConnectedPlayer| {
+            p.joined
+                && p.hero.hp > 0.0
+                && p.hero.identity.team != team
+                && vision::player_visible(sight, p, now)
+                && defends(self.world, team, p)
+        };
+        current
+            .filter(|target| target.kind == TargetKind::Player)
+            .and_then(|target| hero_by_id(&self.world.players, target.id))
+            .filter(|p| covered(p) && distance(p) <= VISION + profile.target_leash)
+            .or_else(|| {
+                self.world
+                    .players
+                    .values()
+                    .filter(|p| covered(p) && distance(p) <= gates.hero_range(p.hero.identity.id))
+                    .min_by(|a, b| {
+                        distance(a)
+                            .total_cmp(&distance(b))
+                            .then_with(|| a.hero.identity.id.cmp(&b.hero.identity.id))
+                    })
+            })
+            .map(|p| TargetId {
+                kind: TargetKind::Player,
+                id: p.hero.identity.id,
+            })
     }
 
     /// Nearest living ordinary camp, preferring the bot's own half of the map.
