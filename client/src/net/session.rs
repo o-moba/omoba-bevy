@@ -516,6 +516,12 @@ pub(in crate::net) fn start_networking(
     }
 }
 
+/// The lobby this process connects to: [`start_networking`]'s validated
+/// startup address. A saved match-resume hint must name it.
+pub(in crate::net) fn startup_lobby_addr() -> String {
+    validated_server_addr_or_default(&crate::session_config::startup_server_addr())
+}
+
 fn validated_server_addr_or_default(raw: &str) -> String {
     crate::persistence::validate_game_server_addr(raw)
         .or_else(|| {

@@ -27,7 +27,10 @@ or connection panel on desktop or phone, in Home, the party lobby or the legacy
 phone bar (tests: `production_builds_spawn_no_server_or_connection_ui_on_desktop_or_phone`,
 `only_a_contour_build_offers_the_connection_button_and_profile_badge`). The
 `game_server_addr` an older build saved is no longer read, so it cannot pin a
-build that has no way to change it.
+build that has no way to change it. Likewise a match-resume hint
+(`match-resume.json`) is only offered when it names the lobby this process connects
+to; a hint an older build saved for a custom, LAN or local lobby is deleted at start
+instead of sending the player back there (`a_hint_for_another_lobby_is_dropped_and_deleted`).
 
 Developers and self-hosters of this open-source game override the endpoints on a
 **desktop** with environment variables (phones read none):

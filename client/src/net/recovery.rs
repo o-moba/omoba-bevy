@@ -55,17 +55,32 @@ fn resume_path() -> Option<std::path::PathBuf> {
 }
 pub(crate) fn load_resume(mut resume: ResMut<ResumeMatchState>, session: Res<ClientSessionId>) {
     resume.saved = resume_path()
-        .and_then(|path| std::fs::read(path).ok())
-        .filter(|bytes| bytes.len() <= 16_384)
-        .and_then(|bytes| serde_json::from_slice::<SavedResume>(&bytes).ok())
-        .filter(|saved| valid_resume(saved, &session.0));
+        .and_then(|path| load_resume_at(&path, &session.0, &super::session::startup_lobby_addr()));
 }
-fn valid_resume(saved: &SavedResume, session: &str) -> bool {
+/// The hint at `path` when it belongs to `session` on `lobby` (this process's
+/// lobby). A hint for another lobby is deleted: a build that no longer offers
+/// that server (an older build's custom or LAN lobby, the production app since
+/// it lost server selection) must not send the player back to it.
+fn load_resume_at(path: &std::path::Path, session: &str, lobby: &str) -> Option<SavedResume> {
+    let saved = std::fs::read(path)
+        .ok()
+        .filter(|bytes| bytes.len() <= 16_384)
+        .and_then(|bytes| serde_json::from_slice::<SavedResume>(&bytes).ok())?;
+    if !same_lobby(&saved.lobby, lobby) {
+        let _ = std::fs::remove_file(path);
+        return None;
+    }
+    valid_resume(&saved, session, lobby).then_some(saved)
+}
+fn same_lobby(saved: &str, lobby: &str) -> bool {
+    crate::persistence::validate_game_server_addr(saved).is_some_and(|saved| saved == lobby)
+}
+fn valid_resume(saved: &SavedResume, session: &str, lobby: &str) -> bool {
     saved.session_id == session
         && saved.server_epoch != 0
         && saved.match_id != 0
         && crate::persistence::validate_game_server_addr(&saved.allocation.endpoint).is_some()
-        && crate::persistence::validate_game_server_addr(&saved.lobby).is_some()
+        && same_lobby(&saved.lobby, lobby)
 }
 pub(crate) fn remember_resume(
     mut resume: ResMut<ResumeMatchState>,
@@ -126,7 +141,9 @@ pub(crate) fn remember_resume(
         match_id: snapshot.meta.match_id,
         join: join.clone(),
     };
-    if valid_resume(&saved, &identity.0) && resume.saved.as_ref() != Some(&saved) {
+    if resume.saved.as_ref() != Some(&saved)
+        && valid_resume(&saved, &identity.0, &super::session::startup_lobby_addr())
+    {
         resume.saved = Some(saved);
         resume.persist();
     }
@@ -183,7 +200,71 @@ mod tests {
         assert!(!json.contains("passport_ticket"));
         let decoded: SavedResume = serde_json::from_str(&json).unwrap();
         assert_eq!(decoded, saved);
-        assert!(valid_resume(&decoded, "stable-session"));
-        assert!(!valid_resume(&decoded, "another-session"));
+        assert!(valid_resume(&decoded, "stable-session", "127.0.0.1:4000"));
+        assert!(!valid_resume(&decoded, "another-session", "127.0.0.1:4000"));
+        assert!(!valid_resume(&decoded, "stable-session", "127.0.0.1:4001"));
+    }
+
+    fn saved_on(lobby: &str) -> SavedResume {
+        SavedResume {
+            allocation: shared::match_service::MatchAllocation {
+                allocation_id: "b".repeat(32),
+                endpoint: "192.168.1.20:41000".into(),
+                preference: Default::default(),
+                team: shared::map::Team::Blue,
+                human_count: 1,
+                bot_count: 9,
+                rated: false,
+                join_deadline_ms: 1,
+            },
+            lobby: lobby.into(),
+            session_id: "stable-session".into(),
+            server_epoch: 3,
+            match_id: 5,
+            join: CommittedJoin::for_test(),
+        }
+    }
+
+    fn scratch_file(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "omoba-resume-{name}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir.join("match-resume.json")
+    }
+
+    #[test]
+    fn a_hint_for_another_lobby_is_dropped_and_deleted() {
+        // An older build saved this while the player was on a LAN lobby; this
+        // build connects to its own lobby (the public one in production).
+        let lobby = super::super::session::startup_lobby_addr();
+        assert_ne!(lobby, "192.168.1.20:4000");
+        let path = scratch_file("other-lobby");
+        std::fs::write(
+            &path,
+            serde_json::to_vec(&saved_on("192.168.1.20:4000")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(load_resume_at(&path, "stable-session", &lobby), None);
+        assert!(!path.exists(), "a stale hint must not offer Resume again");
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn a_hint_for_this_lobby_is_kept() {
+        let lobby = super::super::session::startup_lobby_addr();
+        let path = scratch_file("this-lobby");
+        let saved = saved_on(&lobby);
+        std::fs::write(&path, serde_json::to_vec(&saved).unwrap()).unwrap();
+        assert_eq!(load_resume_at(&path, "stable-session", &lobby), Some(saved));
+        // Another identity on the same lobby gets no Resume, but the file stays.
+        assert_eq!(load_resume_at(&path, "another-session", &lobby), None);
+        assert!(path.exists());
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 }
