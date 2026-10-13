@@ -148,18 +148,7 @@ impl PracticeSession {
                 crate::bots::auto_rank_skills(p);
                 p.hero.hp = p.hero.max_hp;
                 p.hero.mana = p.hero.max_mana;
-                self.world.game_state = GameState::Running;
-                self.world.last_wave_spawn_at = self.now
-                    - (crate::balance::MINION_WAVE_INTERVAL
-                        - crate::balance::FIRST_MINION_WAVE_DELAY);
-                crate::neutrals::schedule_boss_spawns(&mut self.world.neutrals, self.now);
-                self.combat_log
-                    .ledger
-                    .begin(Vec::new())
-                    .expect("fresh practice ledger");
-                let now = self.now;
-                self.host().fill_practice_bots(now);
-                self.register_scoreboard();
+                self.start_round();
             }
             ClientPacket::Leave => self.reset_for_round(self.match_id + 1),
             ClientPacket::RequestRematch => {
@@ -197,6 +186,41 @@ impl PracticeSession {
                 );
             }
         }
+    }
+    /// The round start a `Join` triggers: Running, the first wave timer, the
+    /// boss schedule and the started ledger, then the practice bots, each on
+    /// the scoreboard.
+    fn start_round(&mut self) {
+        self.world.game_state = GameState::Running;
+        self.world.last_wave_spawn_at = self.now
+            - (crate::balance::MINION_WAVE_INTERVAL - crate::balance::FIRST_MINION_WAVE_DELAY);
+        crate::neutrals::schedule_boss_spawns(&mut self.world.neutrals, self.now);
+        self.combat_log
+            .ledger
+            .begin(Vec::new())
+            .expect("fresh practice ledger");
+        let now = self.now;
+        self.host().fill_practice_bots(now);
+        self.register_scoreboard();
+    }
+    /// A human-less round for the difficulty simulator
+    /// (docs/plans/bot-personas.md, S3): the round start a `Join` performs,
+    /// with each team's bots at its own level, Green then Blue. The levels
+    /// are the teams' own, not the practice setting, so they do not survive
+    /// Leave or Rematch.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn bots_only(now: Instant, levels: [BotDifficulty; 2]) -> Self {
+        let mut practice = Self::new(now);
+        for (team, level) in [shared::map::Team::Green, shared::map::Team::Blue]
+            .into_iter()
+            .zip(levels)
+        {
+            practice
+                .bots
+                .set_difficulty(team, level, &practice.world.players);
+        }
+        practice.start_round();
+        practice
     }
     pub fn advance(&mut self, dt: f32) {
         let dt = if dt.is_finite() {

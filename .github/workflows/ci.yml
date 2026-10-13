@@ -34,7 +34,26 @@ jobs:
       - name: Clippy, client without the qa feature
         run: cargo clippy -p client --lib --no-deps --no-default-features -- -D warnings
       - name: Unit and integration tests
+        # The runner (ubuntu 24.04, glibc 2.39) has an Elite trace baseline,
+        # so the trace comparison must run, not skip (docs/plans/bot-personas.md).
+        env:
+          OMOBA_REQUIRE_BOT_TRACE: "1"
         run: cargo test --workspace --locked --exclude harness
+
+  bot-sim:
+    name: bot difficulty smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.95.0
+      - uses: Swatinem/rust-cache@v2
+      # A small fixed-seed sample of full bot rounds, interval assertions only.
+      # The full matrix is bot-sim.yml (workflow_dispatch) or the dev VPS builder.
+      - name: Difficulty simulator smoke
+        run: cargo test --release --locked -p common --features test-support --test bot_difficulty_sim -- --ignored smoke_
 
   harness:
     name: headless gameplay harness

@@ -80,6 +80,98 @@ mod command_trace {
     }
 }
 
+/// The decisions a level changes, as the difficulty simulator
+/// (`common/tests/bot_difficulty_sim.rs`, docs/plans/bot-personas.md S3)
+/// observes them. Recording is per thread and off until `start`; a record
+/// only reads values the brain already chose. Without `test-support` (and
+/// outside unit tests) `record` compiles to nothing.
+pub mod sim_probe {
+    use std::net::SocketAddr;
+
+    /// Why a gate retreat began.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub enum GateCause {
+        /// `outnumbered_retreat`.
+        Outnumbered,
+        /// Threat response refused the attacker.
+        Threat,
+    }
+
+    /// How threat response answered an attacker.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub enum ThreatAnswer {
+        /// The attacker became the target.
+        Retaliated,
+        /// Retreat: the attacker is beyond `VISION`.
+        OutOfRange,
+        /// Retreat: the trade gate, the outnumbered hold, or both refused
+        /// it.
+        Refused { trade: bool, outnumbered: bool },
+        /// Retreat: it cannot be reached without entering a danger disc.
+        Unreachable,
+    }
+
+    #[derive(Clone, Copy, Debug, PartialEq)]
+    pub enum Event {
+        /// The health retreat triggered (`retreat_hp`, re-armed by
+        /// `rearm_secs`) at this health fraction. `continued` when the bot
+        /// was already backing off on a retreat timer or `resume_hp`, so the
+        /// trigger only extended that retreat.
+        HealthRetreat {
+            bot: SocketAddr,
+            hp: f32,
+            continued: bool,
+        },
+        /// A gate retreat began in this think tick.
+        GateRetreat { bot: SocketAddr, cause: GateCause },
+        /// Threat response answered an attacker. A retreat is also
+        /// reported as a `GateRetreat`.
+        ThreatAnswer {
+            bot: SocketAddr,
+            answer: ThreatAnswer,
+        },
+        /// A route was planned (the simulator's cost and thrash indicator).
+        Route { bot: SocketAddr },
+    }
+
+    #[cfg(any(test, feature = "test-support"))]
+    thread_local! {
+        static LOG: std::cell::RefCell<Option<Vec<Event>>> =
+            const { std::cell::RefCell::new(None) };
+    }
+
+    #[cfg(any(test, feature = "test-support"))]
+    pub(super) fn record(event: impl FnOnce() -> Event) {
+        LOG.with(|log| {
+            if let Some(log) = log.borrow_mut().as_mut() {
+                log.push(event());
+            }
+        });
+    }
+
+    #[cfg(not(any(test, feature = "test-support")))]
+    #[inline(always)]
+    pub(super) fn record(_: impl FnOnce() -> Event) {}
+
+    /// Start recording on this thread, discarding anything unread.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn start() {
+        LOG.with(|log| *log.borrow_mut() = Some(Vec::new()));
+    }
+
+    /// The events recorded since `start` or the previous `drain`.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn drain() -> Vec<Event> {
+        LOG.with(|log| log.borrow_mut().as_mut().map(std::mem::take))
+            .unwrap_or_default()
+    }
+
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn stop() {
+        LOG.with(|log| *log.borrow_mut() = None);
+    }
+}
+
 #[cfg(test)]
 #[path = "bots_trace_tests.rs"]
 mod trace_tests;
@@ -820,6 +912,13 @@ impl BotControllers {
         self.controllers.get(&addr).map(|c| c.profile)
     }
 
+    /// The current target of the controller at `addr`, for the difficulty
+    /// simulator.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn target(&self, addr: SocketAddr) -> Option<TargetId> {
+        self.controllers.get(&addr).and_then(|c| c.target)
+    }
+
     /// The behaviour level of `team`'s bots.
     pub fn difficulty(&self, team: Team) -> BotDifficulty {
         self.difficulty[team_index(team)]
@@ -836,6 +935,26 @@ impl BotControllers {
     ) {
         self.difficulty[team_index(team)] = level;
         let profile = BotProfile::for_level(level);
+        for (addr, controller) in &mut self.controllers {
+            if players
+                .get(addr)
+                .is_some_and(|p| p.hero.identity.is_bot && p.hero.identity.team == team)
+            {
+                controller.profile = profile;
+            }
+        }
+    }
+
+    /// Give `team`'s live bots `profile` instead of their level's, for the
+    /// difficulty simulator's calibration sweeps. The team's level is
+    /// unchanged, so a later spawn plays the level again.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn set_team_profile(
+        &mut self,
+        team: Team,
+        profile: BotProfile,
+        players: &HashMap<SocketAddr, ConnectedPlayer>,
+    ) {
         for (addr, controller) in &mut self.controllers {
             if players
                 .get(addr)
@@ -1368,6 +1487,12 @@ impl CombatHost<'_> {
             let retreat_low = player.hero.hp < player.hero.max_hp * profile.retreat_hp;
             let heal_low = player.hero.hp < player.hero.max_hp * HEAL_HP;
             if retreat_low && now >= controller.next_retreat {
+                sim_probe::record(|| sim_probe::Event::HealthRetreat {
+                    bot: addr,
+                    hp: hp_fraction(player),
+                    continued: controller.retreat_until.is_some_and(|until| now < until)
+                        || controller.retreat_started.is_some(),
+                });
                 controller.retreat_until =
                     Some(now + Duration::from_secs_f32(profile.retreat_secs));
                 controller.next_retreat = now + Duration::from_secs_f32(profile.rearm_secs);
@@ -1423,6 +1548,10 @@ impl CombatHost<'_> {
                     && gates.outnumbered_at(profile.outnumbered_retreat)
                     && !gates.defend_in_sight
                 {
+                    sim_probe::record(|| sim_probe::Event::GateRetreat {
+                        bot: addr,
+                        cause: sim_probe::GateCause::Outnumbered,
+                    });
                     controller.gate_retreat(&profile, now);
                     retreating = true;
                 }
@@ -1494,16 +1623,37 @@ impl CombatHost<'_> {
                         kind: TargetKind::Player,
                         id: threat,
                     };
-                    let retaliate = distance <= VISION
+                    let in_range = distance <= VISION;
+                    let admitted = in_range
                         && hero_by_id(&self.world.players, threat).is_some_and(|hero| {
                             defends(self.world, team, hero)
                                 || (gates.trades_with(hero)
                                     && !gates.outnumbered_at(profile.outnumbered_hold))
-                        })
-                        && self.reachable(team, origin, target, &danger);
+                        });
+                    let retaliate = admitted && self.reachable(team, origin, target, &danger);
+                    sim_probe::record(|| sim_probe::Event::ThreatAnswer {
+                        bot: addr,
+                        answer: if retaliate {
+                            sim_probe::ThreatAnswer::Retaliated
+                        } else if !in_range {
+                            sim_probe::ThreatAnswer::OutOfRange
+                        } else if !admitted {
+                            let hero = hero_by_id(&self.world.players, threat);
+                            sim_probe::ThreatAnswer::Refused {
+                                trade: hero.is_some_and(|hero| !gates.trades_with(hero)),
+                                outnumbered: gates.outnumbered_at(profile.outnumbered_hold),
+                            }
+                        } else {
+                            sim_probe::ThreatAnswer::Unreachable
+                        },
+                    });
                     if retaliate {
                         controller.target = Some(target);
                     } else {
+                        sim_probe::record(|| sim_probe::Event::GateRetreat {
+                            bot: addr,
+                            cause: sim_probe::GateCause::Threat,
+                        });
                         controller.gate_retreat(&profile, now);
                         retreating = true;
                     }
@@ -1757,6 +1907,7 @@ impl CombatHost<'_> {
                     .goal
                     .is_none_or(|p| (p[0] - destination[0]).hypot(p[1] - destination[1]) > 2.0);
                 if controller.route.is_empty() || (now >= controller.next_route && goal_changed) {
+                    sim_probe::record(|| sim_probe::Event::Route { bot: addr });
                     controller.next_route = now + ROUTE_INTERVAL;
                     controller.goal = Some(destination);
                     controller.route = shared::navigation::world_navigation()

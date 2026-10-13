@@ -7,6 +7,12 @@ license = "AGPL-3.0-only"
 [features]
 test-support = []
 
+# Headless bot-difficulty simulator (docs/plans/bot-personas.md, S3). It
+# drives the brain through test-support hooks, so it builds only with them.
+[[test]]
+name = "bot_difficulty_sim"
+required-features = ["test-support"]
+
 [dependencies]
 shared = { path = "../shared" }
 
