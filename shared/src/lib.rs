@@ -7,6 +7,7 @@
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
+pub mod bot_profile;
 pub mod career;
 pub mod catalog;
 pub mod combat;

@@ -8,6 +8,7 @@ use crate::{
     match_rules::{MatchMode, MatchRules},
 };
 use shared::{
+    bot_profile::BotDifficulty,
     debug::{DebugAccess, DebugCommand, OFFLINE_PRACTICE_MODE},
     protocol::{JoinRejection, SnapshotMeta},
     wire::{ClientPacket, GameState, ServerPacket},
@@ -28,6 +29,9 @@ pub struct PracticeSession {
     pub match_id: u64,
     tick: u64,
     error: Option<JoinRejection>,
+    /// Behaviour level of both teams' bots. A local practice setting, so it
+    /// survives Leave and Rematch; Elite until the host sets it.
+    bot_difficulty: BotDifficulty,
 }
 impl PracticeSession {
     pub fn new(now: Instant) -> Self {
@@ -39,7 +43,25 @@ impl PracticeSession {
             match_id: 1,
             tick: 0,
             error: None,
+            bot_difficulty: BotDifficulty::Elite,
         }
+    }
+    pub fn bot_difficulty(&self) -> BotDifficulty {
+        self.bot_difficulty
+    }
+    /// Set the level of both teams' bots, retuning live bots in place.
+    pub fn set_bot_difficulty(&mut self, level: BotDifficulty) {
+        self.bot_difficulty = level;
+        for team in [shared::map::Team::Green, shared::map::Team::Blue] {
+            self.bots.set_difficulty(team, level, &self.world.players);
+        }
+    }
+    /// A fresh round keeping the local settings.
+    fn reset_for_round(&mut self, round: u64) {
+        let level = self.bot_difficulty;
+        *self = Self::new(self.now);
+        self.match_id = round;
+        self.set_bot_difficulty(level);
     }
     pub fn host(&mut self) -> CombatHost<'_> {
         CombatHost {
@@ -139,11 +161,7 @@ impl PracticeSession {
                 self.host().fill_practice_bots(now);
                 self.register_scoreboard();
             }
-            ClientPacket::Leave => {
-                let round = self.match_id + 1;
-                *self = Self::new(self.now);
-                self.match_id = round;
-            }
+            ClientPacket::Leave => self.reset_for_round(self.match_id + 1),
             ClientPacket::RequestRematch => {
                 // A late/repeated Play Again must never reset a running round.
                 // Match the authoritative server's terminal-only transition.
@@ -165,9 +183,7 @@ impl PracticeSession {
                     session_id: None,
                     passport_ticket: None,
                 };
-                let round = self.match_id + 1;
-                *self = Self::new(self.now);
-                self.match_id = round;
+                self.reset_for_round(self.match_id + 1);
                 self.command(join);
             }
             packet => {
@@ -387,6 +403,39 @@ mod tests {
             }));
             assert!(matches!(p.world.game_state, GameState::Running));
         }
+    }
+
+    #[test]
+    fn bot_level_applies_to_both_teams_and_survives_leave_and_rematch() {
+        use crate::bots::BotProfile;
+        let profiles = |p: &PracticeSession| -> Vec<_> {
+            p.world
+                .players
+                .iter()
+                .filter(|(_, player)| player.hero.identity.is_bot)
+                .map(|(addr, _)| p.bots.profile(*addr))
+                .collect()
+        };
+        let mut p = PracticeSession::new(Instant::now());
+        assert_eq!(p.bot_difficulty(), BotDifficulty::Elite);
+        p.command(join(HeroClass::Warrior));
+        assert_eq!(profiles(&p).len(), 9);
+        assert!(profiles(&p).iter().all(|b| *b == Some(BotProfile::ELITE)));
+
+        p.set_bot_difficulty(BotDifficulty::Regular);
+        assert!(profiles(&p).iter().all(|b| *b == Some(BotProfile::REGULAR)));
+        p.world.game_state = GameState::Victory {
+            winner: Team::Green,
+        };
+        p.command(ClientPacket::RequestRematch);
+        assert_eq!(p.match_id, 2);
+        assert_eq!(profiles(&p).len(), 9);
+        assert!(profiles(&p).iter().all(|b| *b == Some(BotProfile::REGULAR)));
+        p.command(ClientPacket::Leave);
+        p.command(join(HeroClass::Mage));
+        assert_eq!(p.bot_difficulty(), BotDifficulty::Regular);
+        assert_eq!(profiles(&p).len(), 9);
+        assert!(profiles(&p).iter().all(|b| *b == Some(BotProfile::REGULAR)));
     }
 
     #[test]

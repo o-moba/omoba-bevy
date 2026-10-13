@@ -256,6 +256,16 @@ pub(crate) fn run() -> io::Result<()> {
 
     let mut runtime = ServerRuntime::new_with_map(socket, match_config, map_config);
     runtime.match_service = match_service;
+    let bot_difficulty = bots::boot_bot_difficulty(
+        runtime.match_service.is_public(),
+        runtime.rules.fills_with_bots,
+        || std::env::var(shared::bot_profile::BotDifficulty::ENV).ok(),
+    )
+    .map_err(io::Error::other)?;
+    if let Some(level) = bot_difficulty {
+        runtime.set_bot_difficulty(level);
+        println!("Practice bot level: {} for both teams", level.name());
+    }
     if std::env::var("OMOBA_COMBAT_SANDBOX").as_deref() == Ok("1") {
         if !runtime.rules.combat_sandbox_allowed
             || runtime.match_service.is_public()

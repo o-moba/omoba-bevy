@@ -4,6 +4,7 @@ use std::collections::{HashMap, VecDeque};
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 
+use shared::bot_profile::BotDifficulty;
 use shared::map::{Lane, Team};
 use shared::progression::equipped_skill_upgrade_order;
 use shared::shop::plan_purchases;
@@ -83,23 +84,226 @@ mod command_trace {
 #[path = "bots_trace_tests.rs"]
 mod trace_tests;
 
-/// Exactly the living minions the tower authority can prefer over a hero.
-/// A nearby wave outside its actual three-dimensional range is not cover.
+/// Health fraction below which a bot presses its heal. The same at every
+/// level (docs/bot-practice-and-social.md), unlike the retreat threshold.
+const HEAL_HP: f32 = 0.28;
+
+/// Which unit a bot picks as a *new* target.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TargetPriority {
+    /// The nearest hero or minion; heroes and minions count the same.
+    Nearest,
+    /// A hero only when no enemy minion is in sight, when it is already in
+    /// basic-attack reach, or under threat response.
+    MinionFirst,
+}
+
+/// When the jungler puts a visible hero ahead of its camp.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum JungleGank {
+    Always,
+    IfNotOutnumbered,
+    /// Own health at least 0.6 and not outnumbered.
+    IfAhead,
+    Never,
+}
+
+/// What a difficulty level changes in the shared brain
+/// (docs/plans/bot-personas.md, "Knobs and default values"). Every field is
+/// a same-tick gate or a retreat timer: a level may remove an action or add
+/// a retreat, never delay one. Reaction, aim, steering, cast order and the
+/// think and route cadence read nothing from here. No level contests
+/// objectives, since there is no such behaviour to scale.
+///
+/// `None` means the gate is off, which is the original behaviour.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BotProfile {
+    /// Start a retreat below this health fraction.
+    pub retreat_hp: f32,
+    /// Stay home until health reaches this fraction (capped by
+    /// `retreat_cap_secs`).
+    pub resume_hp: Option<f32>,
+    /// Minimum length of a health retreat.
+    pub retreat_secs: f32,
+    /// Hard stop for `resume_hp`.
+    pub retreat_cap_secs: Option<f32>,
+    /// Earliest next health-triggered retreat after one starts.
+    pub rearm_secs: f32,
+    /// Allied minions inside an enemy tower's range before it counts as
+    /// covered, for danger discs, lane staging and sieges.
+    pub cover_minions: usize,
+    /// Added to an uncovered tower's danger-disc radius (m).
+    pub tower_margin: f32,
+    /// Stop this far short of an uncovered lane tower (m).
+    pub staging_margin: f32,
+    /// Hit a covered structure only at or above this health fraction.
+    pub siege_min_hp: Option<f32>,
+    /// Pick a new hero target within this distance (m). Minions keep the
+    /// full engage range.
+    pub hero_engage_range: f32,
+    /// Keep the current target within the engage range plus this (m).
+    pub target_leash: f32,
+    pub target_priority: TargetPriority,
+    /// A new hero target needs own health fraction at least
+    /// `min(target's + margin, 0.95)`.
+    pub trade_margin: Option<f32>,
+    /// Refuse or drop hero targets at this outnumbered count.
+    pub outnumbered_hold: Option<u8>,
+    /// Start a retreat at this outnumbered count.
+    pub outnumbered_retreat: Option<u8>,
+    /// A visible hero that hit this bot this recently is exempt from the
+    /// engage range and `MinionFirst`.
+    pub threat_window_secs: Option<f32>,
+    /// Use a mobility technique toward a hero only at or below this health
+    /// fraction of the target.
+    pub dash_hero_hp: Option<f32>,
+    /// Extra travel room a mobility technique keeps from danger discs (m).
+    pub mobility_margin: f32,
+    pub jungle_gank: JungleGank,
+}
+
+impl BotProfile {
+    /// The original bots, literal for literal.
+    pub const ELITE: Self = Self {
+        retreat_hp: 0.28,
+        resume_hp: None,
+        retreat_secs: 6.0,
+        retreat_cap_secs: None,
+        rearm_secs: 18.0,
+        cover_minions: 1,
+        tower_margin: 0.75,
+        staging_margin: 1.5,
+        siege_min_hp: None,
+        hero_engage_range: VISION,
+        target_leash: 2.0,
+        target_priority: TargetPriority::Nearest,
+        trade_margin: None,
+        outnumbered_hold: None,
+        outnumbered_retreat: None,
+        threat_window_secs: None,
+        dash_hero_hp: None,
+        mobility_margin: 3.0,
+        jungle_gank: JungleGank::Always,
+    };
+
+    pub const VETERAN: Self = Self {
+        retreat_hp: 0.33,
+        resume_hp: Some(0.50),
+        retreat_secs: 6.0,
+        retreat_cap_secs: Some(20.0),
+        rearm_secs: 15.0,
+        cover_minions: 1,
+        tower_margin: 1.25,
+        staging_margin: 2.0,
+        siege_min_hp: None,
+        hero_engage_range: VISION,
+        target_leash: 2.0,
+        target_priority: TargetPriority::Nearest,
+        trade_margin: None,
+        outnumbered_hold: Some(2),
+        outnumbered_retreat: None,
+        threat_window_secs: Some(2.0),
+        dash_hero_hp: None,
+        mobility_margin: 4.0,
+        jungle_gank: JungleGank::IfNotOutnumbered,
+    };
+
+    pub const REGULAR: Self = Self {
+        retreat_hp: 0.40,
+        resume_hp: Some(0.70),
+        retreat_secs: 6.0,
+        retreat_cap_secs: Some(25.0),
+        rearm_secs: 12.0,
+        cover_minions: 2,
+        tower_margin: 2.0,
+        staging_margin: 3.0,
+        siege_min_hp: Some(0.45),
+        hero_engage_range: 13.0,
+        target_leash: 1.0,
+        target_priority: TargetPriority::Nearest,
+        trade_margin: Some(0.0),
+        outnumbered_hold: Some(1),
+        outnumbered_retreat: Some(2),
+        threat_window_secs: Some(2.0),
+        dash_hero_hp: Some(0.50),
+        mobility_margin: 5.0,
+        jungle_gank: JungleGank::IfAhead,
+    };
+
+    pub const RECRUIT: Self = Self {
+        retreat_hp: 0.50,
+        resume_hp: Some(0.85),
+        retreat_secs: 6.0,
+        retreat_cap_secs: Some(30.0),
+        rearm_secs: 8.0,
+        cover_minions: 3,
+        tower_margin: 3.0,
+        staging_margin: 4.0,
+        siege_min_hp: Some(0.60),
+        hero_engage_range: 11.0,
+        target_leash: 0.0,
+        target_priority: TargetPriority::MinionFirst,
+        trade_margin: Some(0.15),
+        outnumbered_hold: Some(1),
+        outnumbered_retreat: Some(1),
+        threat_window_secs: Some(2.0),
+        dash_hero_hp: Some(0.35),
+        mobility_margin: 6.0,
+        jungle_gank: JungleGank::Never,
+    };
+
+    /// The profile a level plays; an unknown level plays as Elite.
+    pub const fn for_level(level: BotDifficulty) -> Self {
+        match level {
+            BotDifficulty::Recruit => Self::RECRUIT,
+            BotDifficulty::Regular => Self::REGULAR,
+            BotDifficulty::Veteran => Self::VETERAN,
+            BotDifficulty::Elite | BotDifficulty::Unknown => Self::ELITE,
+        }
+    }
+}
+
+fn team_index(team: Team) -> usize {
+    match team {
+        Team::Green => 0,
+        Team::Blue => 1,
+    }
+}
+
+/// At least `cover` of exactly the living minions the tower authority can
+/// prefer over a hero. A nearby wave outside its actual three-dimensional
+/// range is not cover.
+fn tower_has_minion_cover_of(
+    tower: &crate::entities::Structure,
+    team: Team,
+    minions: &HashMap<u64, crate::entities::Minion>,
+    cover: usize,
+) -> bool {
+    let position = crate::entities::Vec3f::new(tower.state.x, tower.state.y, tower.state.z);
+    minions
+        .values()
+        .filter(|minion| {
+            minion.state.team == team
+                && minion.state.hp > 0.0
+                && position.distance_squared(crate::entities::Vec3f::new(
+                    minion.state.x,
+                    minion.state.y,
+                    minion.state.z,
+                )) <= tower.attack_range.powi(2)
+        })
+        .take(cover)
+        .count()
+        >= cover
+}
+
+/// The single-minion cover of the original bots.
+#[cfg(test)]
 fn tower_has_minion_cover(
     tower: &crate::entities::Structure,
     team: Team,
     minions: &HashMap<u64, crate::entities::Minion>,
 ) -> bool {
-    let position = crate::entities::Vec3f::new(tower.state.x, tower.state.y, tower.state.z);
-    minions.values().any(|minion| {
-        minion.state.team == team
-            && minion.state.hp > 0.0
-            && position.distance_squared(crate::entities::Vec3f::new(
-                minion.state.x,
-                minion.state.y,
-                minion.state.z,
-            )) <= tower.attack_range.powi(2)
-    })
+    tower_has_minion_cover_of(tower, team, minions, BotProfile::ELITE.cover_minions)
 }
 
 /// Autonomous mobility needs room for its actual displacement, which can run
@@ -110,6 +314,7 @@ fn bot_mobility_safe(
     origin: [f32; 2],
     recast: bool,
     danger: &[shared::navigation::Disc],
+    margin: f32,
 ) -> bool {
     use shared::loadout::{SkillEffect, Technique};
     let SkillEffect::Technique { action, .. } = definition.effect else {
@@ -135,9 +340,9 @@ fn bot_mobility_safe(
     if recast && matches!(action, Technique::EchoStrike | Technique::Hook) {
         return danger.is_empty();
     }
-    // Seven covers the backwards execute; extra room covers target hitboxes
+    // Seven covers the backwards execute; the margin covers target hitboxes
     // and the one-unit landing offset used by targeted leaps.
-    let travel = definition.ability.cast_range.max(7.0) + 3.0;
+    let travel = definition.ability.cast_range.max(7.0) + margin;
     danger.iter().all(|disc| {
         (origin[0] - disc.center[0]).hypot(origin[1] - disc.center[1]) > disc.radius + travel
     })
@@ -150,6 +355,7 @@ fn lane_staging_destination(
     team: Team,
     lane: Lane,
     destination: [f32; 2],
+    profile: &BotProfile,
 ) -> [f32; 2] {
     let path = build_minion_path(&world.map_layout, lane, team);
     let progress = |point: [f32; 2]| {
@@ -185,13 +391,13 @@ fn lane_staging_destination(
                     StructureRole::LaneTower { lane: tower_lane } => tower_lane == lane,
                     StructureRole::BaseTower => true,
                 }
-                && !tower_has_minion_cover(tower, team, &world.minions)
+                && !tower_has_minion_cover_of(tower, team, &world.minions, profile.cover_minions)
         })
         .map(|tower| {
             (progress([tower.state.x, tower.state.z])
                 - tower.attack_range
                 - shared::PLAYER_TARGET_RADIUS
-                - 1.5)
+                - profile.staging_margin)
                 .max(0.0)
         })
         .min_by(f32::total_cmp);
@@ -372,6 +578,9 @@ pub fn bot_avatar(class: HeroClass, slot: u16) -> Option<&'static str> {
 #[derive(Default)]
 pub struct BotControllers {
     controllers: HashMap<SocketAddr, Controller>,
+    /// Behaviour level of each team's bots, Green then Blue; Elite unless a
+    /// practice host sets it. It survives `clear`, so a round reset keeps it.
+    difficulty: [BotDifficulty; 2],
     pub defer_fill: bool,
     /// A practice sandbox command replaced the standard roster: no automatic
     /// refill or trimming until `PracticeCommand::Roster` or a round reset
@@ -382,26 +591,63 @@ pub struct BotControllers {
 impl BotControllers {
     /// Attach AI to an existing retained human without changing its identity,
     /// build, progression or the controller's current plan on repeated votes.
+    /// Takeover always plays Elite, whatever the team's level.
     pub fn attach_existing(&mut self, addr: SocketAddr, class: HeroClass, now: Instant) {
+        self.attach(addr, class, BotProfile::ELITE, now);
+    }
+
+    /// `attach_existing` with an explicit profile, for per-level tests.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn attach_with_profile(
+        &mut self,
+        addr: SocketAddr,
+        class: HeroClass,
+        profile: BotProfile,
+        now: Instant,
+    ) {
+        self.attach(addr, class, profile, now);
+    }
+
+    fn attach(&mut self, addr: SocketAddr, class: HeroClass, profile: BotProfile, now: Instant) {
         let (_, lane, jungle) = BOT_COMPOSITION
             .iter()
             .copied()
             .find(|(candidate, ..)| *candidate == class)
             .unwrap_or((class, Lane::Mid, false));
-        self.controllers.entry(addr).or_insert_with(|| Controller {
-            kind: BotKind::Duelist,
-            lane,
-            jungle,
-            waypoint: 1,
-            route: VecDeque::new(),
-            goal: None,
-            next_route: now,
-            next_think: now,
-            next_retreat: now,
-            retreat_until: None,
-            target: None,
-            holding_range: false,
-        });
+        self.controllers
+            .entry(addr)
+            .or_insert_with(|| Controller::new(BotKind::Duelist, lane, jungle, profile, now));
+    }
+
+    /// The profile the controller at `addr` plays, if any.
+    pub fn profile(&self, addr: SocketAddr) -> Option<BotProfile> {
+        self.controllers.get(&addr).map(|c| c.profile)
+    }
+
+    /// The behaviour level of `team`'s bots.
+    pub fn difficulty(&self, team: Team) -> BotDifficulty {
+        self.difficulty[team_index(team)]
+    }
+
+    /// Set `team`'s level and retune its live bots in place; no bot
+    /// respawns. Takeover controllers on retained humans stay Elite.
+    /// Online hosts never call this: workers always play Elite.
+    pub fn set_difficulty(
+        &mut self,
+        team: Team,
+        level: BotDifficulty,
+        players: &HashMap<SocketAddr, ConnectedPlayer>,
+    ) {
+        self.difficulty[team_index(team)] = level;
+        let profile = BotProfile::for_level(level);
+        for (addr, controller) in &mut self.controllers {
+            if players
+                .get(addr)
+                .is_some_and(|p| p.hero.identity.is_bot && p.hero.identity.team == team)
+            {
+                controller.profile = profile;
+            }
+        }
     }
 
     pub fn detach(&mut self, addr: SocketAddr) {
@@ -442,6 +688,8 @@ struct Controller {
     lane: Lane,
     /// Clears jungle camps before following `lane`.
     jungle: bool,
+    /// The behaviour level this bot plays (Elite for takeover).
+    profile: BotProfile,
     waypoint: usize,
     route: VecDeque<[f32; 2]>,
     goal: Option<[f32; 2]>,
@@ -451,6 +699,26 @@ struct Controller {
     retreat_until: Option<Instant>,
     target: Option<TargetId>,
     holding_range: bool,
+}
+
+impl Controller {
+    fn new(kind: BotKind, lane: Lane, jungle: bool, profile: BotProfile, now: Instant) -> Self {
+        Self {
+            kind,
+            lane,
+            jungle,
+            profile,
+            waypoint: 1,
+            route: VecDeque::new(),
+            goal: None,
+            next_route: now,
+            next_think: now,
+            next_retreat: now,
+            retreat_until: None,
+            target: None,
+            holding_range: false,
+        }
+    }
 }
 
 // The unspecified IPv6 source cannot identify a remote UDP peer. Still reject
@@ -665,23 +933,10 @@ impl CombatHost<'_> {
             now,
         );
         self.world.separate_spawn(addr);
-        self.bots.controllers.insert(
-            addr,
-            Controller {
-                kind,
-                lane,
-                jungle,
-                waypoint: 1,
-                route: VecDeque::new(),
-                goal: None,
-                next_route: now,
-                next_think: now,
-                next_retreat: now,
-                retreat_until: None,
-                target: None,
-                holding_range: false,
-            },
-        );
+        let profile = BotProfile::for_level(self.bots.difficulty(team));
+        self.bots
+            .controllers
+            .insert(addr, Controller::new(kind, lane, jungle, profile, now));
         Some(addr)
     }
 
@@ -851,11 +1106,19 @@ impl CombatHost<'_> {
             }
             let team = player.hero.identity.team;
             let origin = [player.hero.x, player.hero.z];
+            let profile = controller.profile;
             let danger: Vec<_> = self
                 .world
                 .structures
                 .values()
-                .filter(|tower| !tower_has_minion_cover(tower, team, &self.world.minions))
+                .filter(|tower| {
+                    !tower_has_minion_cover_of(
+                        tower,
+                        team,
+                        &self.world.minions,
+                        profile.cover_minions,
+                    )
+                })
                 .filter(|tower| {
                     tower.state.team != team
                         && tower.state.hp > 0.0
@@ -864,7 +1127,9 @@ impl CombatHost<'_> {
                 })
                 .map(|tower| shared::navigation::Disc {
                     center: [tower.state.x, tower.state.z],
-                    radius: tower.attack_range + shared::PLAYER_TARGET_RADIUS + 0.75,
+                    radius: tower.attack_range
+                        + shared::PLAYER_TARGET_RADIUS
+                        + profile.tower_margin,
                 })
                 .collect();
             let turret_retreat = danger
@@ -887,10 +1152,14 @@ impl CombatHost<'_> {
             }
             let mut safe_discs = discs.clone();
             safe_discs.extend(danger.iter().copied());
-            let low_health = player.hero.hp < player.hero.max_hp * 0.28;
-            if low_health && now >= controller.next_retreat {
-                controller.retreat_until = Some(now + Duration::from_secs(6));
-                controller.next_retreat = now + Duration::from_secs(18);
+            // One health reading, two thresholds: the retreat depends on the
+            // level, the heal never does.
+            let retreat_low = player.hero.hp < player.hero.max_hp * profile.retreat_hp;
+            let heal_low = player.hero.hp < player.hero.max_hp * HEAL_HP;
+            if retreat_low && now >= controller.next_retreat {
+                controller.retreat_until =
+                    Some(now + Duration::from_secs_f32(profile.retreat_secs));
+                controller.next_retreat = now + Duration::from_secs_f32(profile.rearm_secs);
                 controller.route.clear();
                 controller.next_route = now;
             }
@@ -932,14 +1201,15 @@ impl CombatHost<'_> {
                                     &self.world.neutrals,
                                 )
                                 .is_some_and(|(p, _)| {
-                                    (p.x - origin[0]).hypot(p.z - origin[1]) <= VISION + 2.0
+                                    (p.x - origin[0]).hypot(p.z - origin[1])
+                                        <= VISION + profile.target_leash
                                 })
                         })
                         .or_else(|| {
                             if controller.jungle {
-                                self.jungle_target(team, origin, controller.lane, now)
+                                self.jungle_target(&profile, team, origin, controller.lane, now)
                             } else {
-                                self.bot_target(team, origin, controller.lane, now)
+                                self.profiled_target(&profile, team, origin, controller.lane, now)
                             }
                         })
                 };
@@ -1039,6 +1309,7 @@ impl CombatHost<'_> {
                                     [p.hero.x, p.hero.z],
                                     recast,
                                     &danger,
+                                    profile.mobility_margin,
                                 ) {
                                     continue;
                                 }
@@ -1076,7 +1347,7 @@ impl CombatHost<'_> {
                     kind: TargetKind::Player,
                     id: bot.hero.identity.id,
                 };
-                for slot in self_sustain_order(bot, low_health) {
+                for slot in self_sustain_order(bot, heal_low) {
                     command_trace::record(|| format!("{} sustain {slot}", addr.port()));
                     handle_cast_request(self.world, addr, target, slot, now);
                 }
@@ -1179,7 +1450,13 @@ impl CombatHost<'_> {
                     controller.next_route = now;
                 }
                 let point = path[controller.waypoint.min(path.len() - 1)];
-                lane_staging_destination(self.world, team, controller.lane, [point.x, point.z])
+                lane_staging_destination(
+                    self.world,
+                    team,
+                    controller.lane,
+                    [point.x, point.z],
+                    &profile,
+                )
             };
             let mut desired = origin;
             if turret_retreat.is_some() {
@@ -1277,6 +1554,7 @@ impl CombatHost<'_> {
     /// sight. With every camp down it farms and pushes its fallback lane.
     fn jungle_target(
         &self,
+        profile: &BotProfile,
         team: Team,
         origin: [f32; 2],
         lane: Lane,
@@ -1303,7 +1581,7 @@ impl CombatHost<'_> {
             return Some(target);
         }
         let Some((id, at)) = self.jungle_camp(team, origin) else {
-            return self.bot_target(team, origin, lane, now);
+            return self.profiled_target(profile, team, origin, lane, now);
         };
         let camp = TargetId {
             kind: TargetKind::Neutral,
@@ -1312,8 +1590,20 @@ impl CombatHost<'_> {
         ((at[0] - origin[0]).hypot(at[1] - origin[1]) <= VISION && visible(camp)).then_some(camp)
     }
 
+    /// The new target an Elite lane bot at `origin` picks.
     pub fn bot_target(
         &self,
+        team: Team,
+        origin: [f32; 2],
+        lane: Lane,
+        now: Instant,
+    ) -> Option<TargetId> {
+        self.profiled_target(&BotProfile::ELITE, team, origin, lane, now)
+    }
+
+    fn profiled_target(
+        &self,
+        profile: &BotProfile,
         team: Team,
         origin: [f32; 2],
         lane: Lane,
@@ -1355,7 +1645,12 @@ impl CombatHost<'_> {
         if let Some((_, target)) = units
             .into_iter()
             .filter(|(d, target)| {
-                *d <= VISION && vision::target_visible(team, *target, self.world, now)
+                let range = if target.kind == TargetKind::Player {
+                    profile.hero_engage_range
+                } else {
+                    VISION
+                };
+                *d <= range && vision::target_visible(team, *target, self.world, now)
             })
             .min_by(|a, b| a.0.total_cmp(&b.0).then_with(|| a.1.id.cmp(&b.1.id)))
         {
@@ -1367,7 +1662,12 @@ impl CombatHost<'_> {
             .filter(|s| {
                 s.state.hp > 0.0
                     && s.state.team != team
-                    && tower_has_minion_cover(s, team, &self.world.minions)
+                    && tower_has_minion_cover_of(
+                        s,
+                        team,
+                        &self.world.minions,
+                        profile.cover_minions,
+                    )
                     && !structure_is_protected(&self.world.structures, s.state.id)
                     && match s.role {
                         StructureRole::BaseTower => true,
@@ -1832,5 +2132,231 @@ mod sustain_tests {
         let p = &world.players[&address];
         assert_eq!(p.timers.last_cast_at, [None, Some(now), None, Some(first)]);
         assert!(p.hero.hp > after_ultimate);
+    }
+}
+
+#[cfg(test)]
+mod profile_tests {
+    use super::*;
+    use crate::{
+        combat_feedback::CombatLog,
+        game_world::GameWorld,
+        match_rules::{MatchMode, MatchRules},
+    };
+
+    fn host<'a>(
+        world: &'a mut GameWorld,
+        bots: &'a mut BotControllers,
+        log: &'a mut CombatLog,
+    ) -> CombatHost<'a> {
+        CombatHost {
+            world,
+            bots,
+            combat_log: log,
+            rules: MatchRules::for_mode(MatchMode::Practice, 5),
+            match_id: 1,
+        }
+    }
+
+    fn profile_of(bots: &BotControllers, addr: SocketAddr) -> BotProfile {
+        bots.controllers[&addr].profile
+    }
+
+    fn join(world: &mut GameWorld, addr: SocketAddr, team: Team, class: HeroClass, x: f32) {
+        let now = Instant::now();
+        world.ensure_connected(addr, now);
+        crate::session::handle_join_request(
+            world.players.get_mut(&addr).unwrap(),
+            team,
+            shared::wire::CharacterChoice::Ipfs,
+            class,
+            None,
+            &world.map_layout,
+            now,
+        );
+        let p = world.players.get_mut(&addr).unwrap();
+        p.hero.x = x;
+        p.hero.z = 0.0;
+        p.hero.hp = 1000.0;
+        p.hero.max_hp = 1000.0;
+        p.hero.mana = 500.0;
+        p.hero.max_mana = 500.0;
+        p.hero.progress.level = 10;
+        p.hero.progress.ranks = [3; 4];
+        p.hero.progress.skill_points = 0;
+    }
+
+    #[test]
+    fn elite_profile_pins_the_original_literals_with_every_new_gate_off() {
+        let p = BotProfile::ELITE;
+        assert_eq!(
+            (
+                p.retreat_hp,
+                p.retreat_secs,
+                p.rearm_secs,
+                p.tower_margin,
+                p.staging_margin,
+                p.cover_minions,
+                p.hero_engage_range,
+                p.target_leash,
+                p.mobility_margin,
+            ),
+            (0.28, 6.0, 18.0, 0.75, 1.5, 1, 15.0, 2.0, 3.0)
+        );
+        assert_eq!(VISION, 15.0);
+        assert_eq!(
+            (
+                p.resume_hp,
+                p.retreat_cap_secs,
+                p.siege_min_hp,
+                p.trade_margin,
+                p.outnumbered_hold,
+                p.outnumbered_retreat,
+                p.threat_window_secs,
+                p.dash_hero_hp,
+            ),
+            (None, None, None, None, None, None, None, None)
+        );
+        assert_eq!(p.target_priority, TargetPriority::Nearest);
+        assert_eq!(p.jungle_gank, JungleGank::Always);
+        assert_eq!(HEAL_HP, 0.28, "the heal threshold is not a level knob");
+        assert_eq!(BotProfile::for_level(BotDifficulty::Elite), p);
+        assert_eq!(BotProfile::for_level(BotDifficulty::Unknown), p);
+    }
+
+    #[test]
+    fn weaker_levels_are_never_bolder_on_any_knob() {
+        let levels = BotDifficulty::ALL.map(BotProfile::for_level);
+        for pair in levels.windows(2) {
+            let (weaker, stronger) = (&pair[0], &pair[1]);
+            assert!(weaker.retreat_hp >= stronger.retreat_hp);
+            assert!(weaker.resume_hp.unwrap_or(0.0) >= stronger.resume_hp.unwrap_or(0.0));
+            assert_eq!(weaker.retreat_secs, stronger.retreat_secs);
+            assert!(weaker.rearm_secs <= stronger.rearm_secs);
+            assert!(weaker.cover_minions >= stronger.cover_minions);
+            assert!(weaker.tower_margin >= stronger.tower_margin);
+            assert!(weaker.staging_margin >= stronger.staging_margin);
+            assert!(weaker.siege_min_hp.unwrap_or(0.0) >= stronger.siege_min_hp.unwrap_or(0.0));
+            assert!(weaker.hero_engage_range <= stronger.hero_engage_range);
+            assert!(weaker.hero_engage_range <= VISION);
+            assert!(weaker.target_leash <= stronger.target_leash);
+            assert!(weaker.mobility_margin >= stronger.mobility_margin);
+            assert!(weaker.dash_hero_hp.unwrap_or(1.0) <= stronger.dash_hero_hp.unwrap_or(1.0));
+        }
+    }
+
+    #[test]
+    fn levels_are_per_team_survive_a_round_reset_and_never_retune_takeover() {
+        let now = Instant::now();
+        let mut world = GameWorld::empty();
+        let mut bots = BotControllers::default();
+        let mut log = CombatLog::default();
+        assert_eq!(bots.difficulty(Team::Green), BotDifficulty::Elite);
+        assert_eq!(bots.difficulty(Team::Blue), BotDifficulty::Elite);
+        bots.set_difficulty(Team::Blue, BotDifficulty::Recruit, &world.players);
+        let human: SocketAddr = "127.0.0.1:33001".parse().unwrap();
+        join(&mut world, human, Team::Blue, HeroClass::Warrior, 0.0);
+        let mut host = host(&mut world, &mut bots, &mut log);
+        let blue = host
+            .spawn_bot(Team::Blue, None, BotKind::Lane, now)
+            .unwrap();
+        let green = host
+            .spawn_bot(Team::Green, None, BotKind::Lane, now)
+            .unwrap();
+        host.bots.attach_existing(human, HeroClass::Warrior, now);
+        assert_eq!(profile_of(host.bots, blue), BotProfile::RECRUIT);
+        assert_eq!(profile_of(host.bots, green), BotProfile::ELITE);
+        assert_eq!(
+            profile_of(host.bots, human),
+            BotProfile::ELITE,
+            "takeover is Elite"
+        );
+
+        // A level change retunes the live bots of that team only, in place.
+        let position = [
+            host.world.players[&blue].hero.x,
+            host.world.players[&blue].hero.z,
+        ];
+        host.bots
+            .set_difficulty(Team::Blue, BotDifficulty::Regular, &host.world.players);
+        assert_eq!(profile_of(host.bots, blue), BotProfile::REGULAR);
+        assert_eq!(profile_of(host.bots, green), BotProfile::ELITE);
+        assert_eq!(profile_of(host.bots, human), BotProfile::ELITE);
+        assert_eq!(
+            [
+                host.world.players[&blue].hero.x,
+                host.world.players[&blue].hero.z
+            ],
+            position,
+            "no respawn"
+        );
+
+        host.bots.clear();
+        assert!(host.bots.controllers.is_empty());
+        assert_eq!(host.bots.difficulty(Team::Blue), BotDifficulty::Regular);
+        assert_eq!(host.bots.difficulty(Team::Green), BotDifficulty::Elite);
+    }
+
+    #[test]
+    fn the_retreat_threshold_comes_from_the_profile_and_the_heal_stays_at_28_percent() {
+        // Warrior: W is a heal. Alone on an empty map, every decision is a
+        // retreat or a self-sustain cast.
+        for (hp, profile, retreats, heals) in [
+            (0.45, BotProfile::ELITE, false, false),
+            (0.45, BotProfile::RECRUIT, true, false),
+            (0.20, BotProfile::ELITE, true, true),
+            (0.20, BotProfile::RECRUIT, true, true),
+        ] {
+            let now = Instant::now();
+            let mut world = GameWorld::empty();
+            let addr: SocketAddr = "[::]:33101".parse().unwrap();
+            join(&mut world, addr, Team::Green, HeroClass::Warrior, 0.0);
+            world.players.get_mut(&addr).unwrap().hero.hp = 1000.0 * hp;
+            let mut bots = BotControllers::default();
+            bots.attach_with_profile(addr, HeroClass::Warrior, profile, now);
+            let mut log = CombatLog::default();
+            host(&mut world, &mut bots, &mut log)
+                .simulate_bots(now + Duration::from_millis(10), 0.01);
+            let case = format!("hp {hp} retreat_hp {}", profile.retreat_hp);
+            assert_eq!(
+                bots.controllers[&addr].retreat_until.is_some(),
+                retreats,
+                "{case}"
+            );
+            assert_eq!(
+                world.players[&addr].timers.last_cast_at[1].is_some(),
+                heals,
+                "{case}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_new_hero_target_respects_the_engage_range_and_minions_keep_vision() {
+        let now = Instant::now();
+        let mut world = GameWorld::empty();
+        // The bot's own hero is the only Green sight source.
+        let me: SocketAddr = "[::]:33201".parse().unwrap();
+        let enemy: SocketAddr = "127.0.0.1:33202".parse().unwrap();
+        join(&mut world, me, Team::Green, HeroClass::Warrior, 0.0);
+        join(&mut world, enemy, Team::Blue, HeroClass::Warrior, 13.0);
+        let id = world.players[&enemy].hero.identity.id;
+        let mut bots = BotControllers::default();
+        let mut log = CombatLog::default();
+        let host = host(&mut world, &mut bots, &mut log);
+        let pick = |profile: &BotProfile| {
+            host.profiled_target(profile, Team::Green, [0.0, 0.0], Lane::Mid, now)
+        };
+        let hero = Some(TargetId {
+            kind: TargetKind::Player,
+            id,
+        });
+        assert_eq!(pick(&BotProfile::ELITE), hero);
+        assert_eq!(
+            host.bot_target(Team::Green, [0.0, 0.0], Lane::Mid, now),
+            hero
+        );
+        assert_eq!(pick(&BotProfile::REGULAR), hero, "13 m is inside 13 m");
+        assert_eq!(pick(&BotProfile::RECRUIT), None, "13 m is beyond 11 m");
     }
 }
