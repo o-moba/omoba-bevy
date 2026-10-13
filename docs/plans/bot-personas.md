@@ -879,6 +879,7 @@ Heavy Rust builds and test runs go to CI or the dev VPS builder. Nothing heavy r
   - **`OMOBA_BOT_DIFFICULTY`.**
     - A standalone server that fills with bots applies it to both teams at boot, and refuses to start on an invalid value. Lobbies and workers never read it.
     - `match_pool::spawn` removes it from every worker's environment; `worker_command` is unit-tested for that.
+    - A public role (lobby or worker) ignores a level request, so an allocated worker's bots are Elite even after one (`allocated_worker_bots_play_elite_whatever_level_is_requested`).
     - The desktop client reads it once for offline practice, as a tester override until the S4 picker; an invalid value logs a warning and keeps Elite.
     - The offline level survives Leave and Rematch.
   - **Finding for S3.** These bot-only rounds are deterministic across `HashMap` seeds when no dagger class plays. So repeated runs of one pairing would be identical samples, not N ≥ 200 independent ones. The simulator must vary something real between runs, for example the side, the roster or the start offset.

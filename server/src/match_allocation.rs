@@ -396,6 +396,33 @@ mod runtime_tests {
     }
 
     #[test]
+    fn allocated_worker_bots_play_elite_whatever_level_is_requested() {
+        use shared::bot_profile::BotDifficulty;
+        let (mut rt, addr, join) = fixture();
+        let now = Instant::now();
+        // Online bots are always Elite: a worker never takes a practice level.
+        rt.set_bot_difficulty(BotDifficulty::Recruit);
+        rt.handle_packet(addr, join, now);
+        for team in [Team::Green, Team::Blue] {
+            assert_eq!(rt.bots.difficulty(team), BotDifficulty::Elite);
+        }
+        let profiles: Vec<_> = rt
+            .world
+            .players
+            .iter()
+            .filter(|(_, p)| p.hero.identity.is_bot)
+            .map(|(bot, _)| rt.bots.profile(*bot))
+            .collect();
+        assert_eq!(profiles.len(), 9);
+        assert!(
+            profiles
+                .iter()
+                .all(|p| *p == Some(crate::bots::BotProfile::ELITE)),
+            "{profiles:?}"
+        );
+    }
+
+    #[test]
     fn allocated_practice_refuses_debug_toggles_after_the_durable_start() {
         let (mut rt, addr, join) = fixture();
         let now = Instant::now();
