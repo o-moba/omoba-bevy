@@ -1215,7 +1215,7 @@ impl ServerRuntime {
         self.career.last_sent = Some(now);
         self.career.sequence = self.career.sequence.saturating_add(1);
         for (addr, player) in &self.world.players {
-            if !player.career_capable || crate::bots::is_bot_address(*addr) {
+            if !player.career_capable || !crate::runtime::network_endpoint(*addr, player) {
                 continue;
             }
             let result = encode_career_datagrams(

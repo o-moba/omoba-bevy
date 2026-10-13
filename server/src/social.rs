@@ -11,7 +11,7 @@ use shared::social::{
 };
 use shared::wire::{GameState, ServerPacket};
 
-use crate::runtime::ServerRuntime;
+use crate::runtime::{RateLimitedDiagnostic, ServerRuntime};
 
 const MAX_EVENTS: usize = 32;
 const MAX_SENDERS: usize = 512;
@@ -58,6 +58,7 @@ pub(super) struct SocialRuntime {
     receipts: HashMap<u64, Receipt>,
     // Account/session identity survives endpoint replacement and round changes.
     limits: HashMap<String, RateBudget>,
+    send_diagnostic: RateLimitedDiagnostic,
 }
 
 struct Sender {
@@ -72,6 +73,12 @@ struct Sender {
 }
 
 impl SocialRuntime {
+    /// Whether this identity opted into the Social stream this round.
+    #[cfg(test)]
+    pub(crate) fn subscribed(&self, player_id: u64) -> bool {
+        self.receipts.contains_key(&player_id)
+    }
+
     fn sync_round(&mut self, epoch: u64, round: u64, now: Instant) {
         if self.epoch != epoch || self.round != round {
             // Framing keys contain epoch + sequence, not match_id. Preserve
@@ -293,17 +300,23 @@ impl ServerRuntime {
         }
         self.social.last_sent = Some(now);
         self.social.sequence = self.social.sequence.saturating_add(1);
-        for (addr, player) in &self.world.players {
-            // Legacy framed clients have no Social packet decoder. Only a
-            // scoped request opts a joined actor into this separate stream.
-            if !player.framed_snapshots
-                || !self.social.receipts.contains_key(&player.hero.identity.id)
-            {
-                continue;
-            }
-            let Some(sender) = self.social_sender(*addr) else {
-                continue;
-            };
+        let recipients: Vec<_> = self
+            .world
+            .players
+            .iter()
+            .filter(|(addr, player)| {
+                // Legacy framed clients have no Social packet decoder. Only a
+                // scoped request opts a joined actor into this separate stream.
+                // The receipt is identity-keyed, so it follows a seat handover:
+                // while a bot drives a detached seat its internal address is
+                // skipped, and the stream resumes at the reclaiming endpoint.
+                player.framed_snapshots
+                    && self.social.receipts.contains_key(&player.hero.identity.id)
+                    && self.live_match_endpoint(**addr, now)
+            })
+            .filter_map(|(addr, _)| Some((*addr, self.social_sender(*addr)?)))
+            .collect();
+        for (addr, sender) in recipients {
             let packet = ServerPacket::Social {
                 server_epoch: self.server_epoch,
                 match_id: self.match_id,
@@ -320,20 +333,27 @@ impl ServerRuntime {
                     )
                     .map_err(|e| e.to_string())
                 });
+            // Failures share one stream-local limiter: at most one line per
+            // interval with a count, never one per datagram, and never
+            // spending the world-snapshot diagnostic budget.
             match result {
                 Ok(datagrams) => {
                     for datagram in datagrams {
-                        if let Err(error) = self.transport.send_to(&datagram, *addr) {
-                            if self.snapshot_send_diagnostic.record(now).is_some() {
-                                eprintln!("Social send failed: {error}");
+                        if let Err(error) = self.transport.send_to(&datagram, addr) {
+                            if let Some(suppressed) = self.social.send_diagnostic.record(now) {
+                                eprintln!(
+                                    "Social send failed for {addr}: {error}; suppressed {suppressed} similar errors"
+                                );
                             }
                             break;
                         }
                     }
                 }
                 Err(error) => {
-                    if self.snapshot_send_diagnostic.record(now).is_some() {
-                        eprintln!("Social framing failed: {error}");
+                    if let Some(suppressed) = self.social.send_diagnostic.record(now) {
+                        eprintln!(
+                            "Social framing failed for {addr}: {error}; suppressed {suppressed} similar errors"
+                        );
                     }
                 }
             }

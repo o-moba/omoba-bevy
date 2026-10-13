@@ -571,6 +571,125 @@ mod runtime_tests {
         );
     }
 
+    /// The production return-path admission (probe, challenge, proof) for
+    /// `addr`, then the Hello it yields, as the receive loop dispatches it.
+    fn admit_public_endpoint(rt: &mut ServerRuntime, addr: SocketAddr, now: Instant) {
+        use shared::public_transport::{
+            PROBE_PADDING_BYTES, PublicClientDatagram, PublicServerDatagram,
+        };
+        let probe = serde_json::to_vec(&PublicClientDatagram::TransportProbe {
+            protocol_version: shared::protocol::PROTOCOL_VERSION,
+            client_nonce: "a".repeat(32),
+            padding: "0".repeat(PROBE_PADDING_BYTES),
+        })
+        .unwrap();
+        let (epoch, match_id) = (rt.server_epoch, rt.match_id);
+        let crate::public_transport::Decision::Reply(challenge) = rt
+            .public_transport
+            .receive(addr, &probe, epoch, match_id, false, None, now)
+        else {
+            panic!("missing path challenge");
+        };
+        let PublicServerDatagram::TransportChallenge { path_nonce, .. } =
+            serde_json::from_slice(&challenge).unwrap();
+        let proof = serde_json::to_vec(&PublicClientDatagram::TransportProof {
+            server_epoch: epoch,
+            path_nonce,
+        })
+        .unwrap();
+        let crate::public_transport::Decision::Dispatch(hello) = rt
+            .public_transport
+            .receive(addr, &proof, epoch, match_id, false, None, now)
+        else {
+            panic!("path proof rejected");
+        };
+        rt.handle_packet(addr, hello, now);
+        assert!(rt.public_transport.validated(addr, now));
+    }
+
+    #[test]
+    fn detached_seat_gets_no_social_datagrams_and_reclaim_resumes_the_stream() {
+        use crate::runtime::ports::MemoryTransport;
+        use shared::social::{SocialCommand, SocialRequest};
+        let (mut rt, addr, join) = fixture();
+        let transport = MemoryTransport::new("127.0.0.1:41000".parse().unwrap());
+        rt.transport = Box::new(transport.clone());
+        let destinations = |transport: &MemoryTransport| -> Vec<SocketAddr> {
+            transport
+                .take_outbound()
+                .into_iter()
+                .map(|(to, _)| to)
+                .collect()
+        };
+        let now = Instant::now();
+        admit_public_endpoint(&mut rt, addr, now);
+        rt.handle_packet(addr, join.clone(), now);
+        let id = rt.world.players[&addr].hero.identity.id;
+        rt.begin_career_round(now);
+        let result = rt.career_allocation_for_test().unwrap();
+        rt.career.backend.test_ack_start(&result.result_id);
+        assert!(rt.begin_career_round(now));
+        rt.world.game_state = GameState::Running;
+        rt.match_started_at = Some(now);
+        let subscribe = SocialRequest {
+            request_id: 1,
+            server_epoch: rt.server_epoch,
+            match_id: rt.match_id,
+            session_id: "seat-a".into(),
+            command: SocialCommand::Subscribe,
+        };
+        rt.handle_social_request(addr, subscribe, true, now);
+        assert!(rt.social.subscribed(id));
+        transport.take_outbound();
+        rt.send_social_views(now);
+        let sent = destinations(&transport);
+        assert!(!sent.is_empty() && sent.iter().all(|to| *to == addr));
+
+        // Human -> bot handover: the live hero moves to an internal actor
+        // address (`[::]:N`) that a bot drives for the rest of the match.
+        rt.handle_packet(addr, ClientPacket::Leave, now);
+        let (&detached, seat) = rt
+            .world
+            .players
+            .iter()
+            .find(|(_, p)| p.hero.identity.id == id)
+            .unwrap();
+        assert!(crate::bots::is_bot_address(detached));
+        assert!(seat.joined && seat.framed_snapshots && !seat.hero.identity.is_bot);
+        assert!(rt.bots.kind(detached).is_some());
+        assert!(
+            rt.social.subscribed(id),
+            "the subscription follows the identity, not the endpoint"
+        );
+        let mut at = now;
+        for _ in 0..8 {
+            at += Duration::from_millis(250);
+            rt.send_social_views(at);
+        }
+        let sent = destinations(&transport);
+        assert!(
+            sent.is_empty(),
+            "neither the internal actor nor the departed endpoint gets Social datagrams: {sent:?}"
+        );
+
+        // Reclaim from a new endpoint: the identity's stream resumes there.
+        let reconnect: SocketAddr = "127.0.0.1:60411".parse().unwrap();
+        rt.career.backend.test_authenticated(
+            reconnect,
+            shared::career::ProfileSummary::new("a".repeat(64), "Alice".into()),
+            "seat-a",
+        );
+        admit_public_endpoint(&mut rt, reconnect, at);
+        rt.handle_packet(reconnect, join, at);
+        assert_eq!(rt.world.players[&reconnect].hero.identity.id, id);
+        assert!(!rt.world.players.contains_key(&detached));
+        transport.take_outbound();
+        at += Duration::from_millis(250);
+        rt.send_social_views(at);
+        let sent = destinations(&transport);
+        assert!(!sent.is_empty() && sent.iter().all(|to| *to == reconnect));
+    }
+
     #[test]
     fn retained_human_survives_account_polling_and_reclaims_after_empty_grace() {
         for deliberate_leave in [false, true] {
