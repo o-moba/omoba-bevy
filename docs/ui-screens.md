@@ -21,7 +21,7 @@ Harness: `client/src/qa/frontend_qa.rs`; server: dev; env: `OMOBA_FRONTEND_QA_OU
 | Game menu | `08-menu.png` | desktop, phone | Escape / MENU | `client/src/pause_menu.rs` |  |
 | Settings · sound | `09-settings-sound.png` | desktop, phone | Game menu → Settings | `client/src/pause_menu.rs` |  |
 | Settings · graphics (bottom) | `10-settings-graphics.png` | desktop, phone | Game menu → Settings, scrolled down | `client/src/pause_menu.rs` |  |
-| Server entry | `11-server.png` | phone | Home → SERVER (phone) | `client/src/frontend/server_field.rs` |  |
+| Connection panel (dev builds) | `11-server.png` | phone | Home → Connection (dev-contour builds only) | `client/src/mobile_ui.rs` | Production builds have no server UI and skip this frame; capture with a `--contour dev` build |
 | Home help | `12-home-help.png` | phone | Home → ? (phone) | `client/src/help_overlay.rs` |  |
 | Home after help | `13-home-help-closed.png` | phone | Home → ? → close (phone) | `client/src/frontend/home.rs` |  |
 | Party lobby (solo) | `14-party-lobby.png` | desktop, phone | Home → Party & friends | `client/src/frontend/lobby.rs` |  |

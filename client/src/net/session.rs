@@ -9,11 +9,9 @@ use shared::wire::ClientPacket;
 
 use crate::camera::CameraState;
 use crate::domain::RoundId;
-use crate::persistence::{ClientSessionId, FileGameServerAddr};
+use crate::persistence::ClientSessionId;
 use crate::player::Player;
-use crate::session_config::{
-    DEFAULT_GAME_SERVER_ADDR, T_RETRY, T_STALE_SNAPSHOT, T_WAIT_MAX, is_stale,
-};
+use crate::session_config::{T_RETRY, T_STALE_SNAPSHOT, T_WAIT_MAX, is_stale};
 use crate::team::{CharacterChoice, Team, TeamSelection};
 
 use super::components::{
@@ -46,8 +44,6 @@ pub enum SessionUiCommand {
     ResumeMatch,
     /// Replace remote I/O with an in-process, unrated character practice.
     StartOffline,
-    /// Validated address chosen in the pre-join UI. Never transfers an active match.
-    ConnectTo(String),
     /// Switch to a trusted lobby allocation without overwriting the saved lobby.
     ConnectAllocated(String),
     /// Leave the current match or queue and return to the front end. The
@@ -502,17 +498,13 @@ impl ClientSession {
 pub(in crate::net) fn start_networking(
     mut commands: Commands,
     mut client_session: ResMut<ClientSession>,
-    file_addr: Res<FileGameServerAddr>,
 ) {
-    let preferred_addr = std::env::var("GAME_SERVER_ADDR")
-        .ok()
-        .filter(|s| !s.trim().is_empty())
-        .or_else(|| file_addr.0.clone())
-        .unwrap_or_else(|| DEFAULT_GAME_SERVER_ADDR.to_owned());
+    // A desktop `GAME_SERVER_ADDR`, else the connection profile's lobby.
+    let preferred_addr = crate::session_config::startup_server_addr();
     let server_addr = validated_server_addr_or_default(&preferred_addr);
     if server_addr != preferred_addr {
         warn!(
-            "Ignoring invalid GAME_SERVER_ADDR/file value {preferred_addr:?}; falling back to {server_addr}"
+            "Ignoring invalid GAME_SERVER_ADDR value {preferred_addr:?}; falling back to {server_addr}"
         );
     }
     if std::env::var("OMOBA_OFFLINE_PRACTICE").is_ok_and(|v| v == "1") {
@@ -526,8 +518,12 @@ pub(in crate::net) fn start_networking(
 
 fn validated_server_addr_or_default(raw: &str) -> String {
     crate::persistence::validate_game_server_addr(raw)
-        .or_else(|| crate::persistence::validate_game_server_addr(DEFAULT_GAME_SERVER_ADDR))
-        .unwrap_or_else(|| "127.0.0.1:4000".to_owned())
+        .or_else(|| {
+            crate::persistence::validate_game_server_addr(
+                crate::session_config::default_server_addr(),
+            )
+        })
+        .unwrap_or_else(|| crate::session_config::FALLBACK_GAME_SERVER_ADDR.to_owned())
 }
 
 pub(in crate::net) fn retry_pending_join(
@@ -842,24 +838,6 @@ pub(in crate::net) fn update_session_lifecycle(
                     &mut client_session,
                     offline::ADDRESS.into(),
                 );
-                incoming_dead.0 = false;
-                retried_this_frame = true;
-            }
-            SessionUiCommand::ConnectTo(raw) => {
-                if client_session.join_flow_committed || client_session.last_join.is_some() {
-                    continue;
-                }
-                let Some(address) = crate::persistence::validate_game_server_addr(raw) else {
-                    continue;
-                };
-                // Checked before `spawn_network_transport` overwrites the address.
-                if address != client_session.server_addr_display {
-                    client_session.outbox.push(SessionEvent::ServerScopeReset);
-                }
-                client_session.offline_return_addr = None;
-                client_session.ephemeral_endpoint = false;
-                commands.remove_resource::<NetworkChannels>();
-                spawn_network_transport(&mut commands, &mut client_session, address);
                 incoming_dead.0 = false;
                 retried_this_frame = true;
             }
@@ -1397,7 +1375,7 @@ mod tests {
     }
 
     #[test]
-    fn connect_and_leave_announce_scope_reset_transport_and_left() {
+    fn an_allocation_and_leave_announce_scope_reset_transport_and_left() {
         let server = UdpSocket::bind("127.0.0.1:0").unwrap();
         let address = server.local_addr().unwrap().to_string();
         let mut app = App::new();
@@ -1419,7 +1397,7 @@ mod tests {
             (update_session_lifecycle, flush_session_events).chain(),
         );
         app.world_mut()
-            .write_message(SessionUiCommand::ConnectTo(address.clone()));
+            .write_message(SessionUiCommand::ConnectAllocated(address.clone()));
         app.update();
         assert_eq!(
             drain_session_events(&mut app),
@@ -1484,7 +1462,7 @@ mod tests {
         configure_network_pipeline(&mut app);
 
         app.world_mut()
-            .write_message(SessionUiCommand::ConnectTo(address));
+            .write_message(SessionUiCommand::ConnectAllocated(address));
         app.update();
         assert!(
             app.world()

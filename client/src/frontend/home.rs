@@ -230,13 +230,16 @@ fn home_control_size(authored: f32, mobile: bool, fit: f32) -> f32 {
     }
 }
 
+/// Help, Settings and, only in a contour build (`connection`), the
+/// connection panel. A production build has no server button.
 fn spawn_home_utilities(
     parent: &mut ChildSpawnerCommands,
     mobile: bool,
     form: theme::Form,
     fit: f32,
+    connection: bool,
 ) {
-    for (icon, action, desktop_id, phone_id) in [
+    let utilities = [
         (
             Icon::NavHelpCircle,
             HomeAction::Help,
@@ -255,7 +258,9 @@ fn spawn_home_utilities(
             "HomeServer",
             "PhoneServerButton",
         ),
-    ] {
+    ];
+    let shown = if connection { 3 } else { 2 };
+    for (icon, action, desktop_id, phone_id) in utilities.into_iter().take(shown) {
         let button = kit::controls::sized_icon_button(
             parent,
             icon,
@@ -414,8 +419,11 @@ fn spawn_home(
     locale: Option<Res<Locale>>,
     windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
     resume: Option<Res<crate::net::recovery::ResumeMatchState>>,
+    connection: Option<Res<crate::connection_profile::ActiveConnection>>,
 ) {
     let can_resume = resume.as_ref().is_some_and(|resume| resume.saved.is_some());
+    let connection = connection.as_deref();
+    let offers_connection = crate::mobile_ui::offers_connection(connection);
     if automation_bypass() {
         return;
     }
@@ -515,8 +523,9 @@ fn spawn_home(
                                         Text::new(wordmark),
                                         theme::role_text(TextRole::Title),
                                     ));
-                                    // A dev-contour build says so beside the title.
-                                    crate::contour_badge::spawn(title);
+                                    // A dev-contour build says so beside the
+                                    // title, with its running connection profile.
+                                    crate::contour_badge::spawn(title, connection);
                                 });
                             brand.spawn((
                                 Text::new(tr("home.tagline")),
@@ -558,6 +567,7 @@ fn spawn_home(
                                 platform.is_mobile(),
                                 theme::Form::of(platform.is_mobile()),
                                 fit,
+                                offers_connection,
                             );
                         });
                 });
@@ -574,9 +584,9 @@ fn spawn_home(
                     Name::new("HomeUtilityButtons"),
                 ))
                 .with_children(|buttons| {
-                    // Phones have no title row: a contour build's badge leads the utilities.
-                    crate::contour_badge::spawn(buttons);
-                    spawn_home_utilities(buttons, true, theme::Form::Phone, fit);
+                    // Phones have no title row: a contour build's badges lead the utilities.
+                    crate::contour_badge::spawn(buttons, connection);
+                    spawn_home_utilities(buttons, true, theme::Form::Phone, fit, offers_connection);
                 });
                 root.spawn((
                     Node {
@@ -1157,6 +1167,7 @@ fn home_actions(
     mut pause: Option<ResMut<crate::pause_menu::PauseMenuState>>,
     mut help: Option<ResMut<crate::help_overlay::HelpOverlayVisible>>,
     mut server_entry: Option<ResMut<crate::mobile_ui::ServerEntry>>,
+    connection: Option<Res<crate::connection_profile::ActiveConnection>>,
 ) {
     let in_party = party.as_ref().is_some_and(|p| p.in_party());
     let leads = party.as_ref().is_some_and(|p| p.view.is_leader());
@@ -1230,7 +1241,7 @@ fn home_actions(
             }
             HomeAction::Server => {
                 if let Some(entry) = server_entry.as_deref_mut() {
-                    entry.open_for(&session);
+                    crate::mobile_ui::open_connection_panel(entry, &session, connection.as_deref());
                 }
             }
         }
@@ -1254,6 +1265,7 @@ fn refresh_home(
     mut last: Local<Option<HomeSignature>>,
     windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
     resume: Option<Res<crate::net::recovery::ResumeMatchState>>,
+    connection: Option<Res<crate::connection_profile::ActiveConnection>>,
 ) {
     let mut current = signature(
         &career,
@@ -1280,7 +1292,7 @@ fn refresh_home(
         .despawn();
     spawn_home(
         commands, career, session, card, thumbnails, preview, platform, ui_scale, party, locale,
-        windows, resume,
+        windows, resume, connection,
     );
 }
 
@@ -1389,7 +1401,7 @@ mod tests {
             let fit = (viewport.x / 1280.0).min(viewport.y / 720.0);
             let mut app = harness::kit_app();
             harness::spawn_ui(app.world_mut(), |root| {
-                spawn_home_utilities(root, true, theme::Form::Phone, fit);
+                spawn_home_utilities(root, true, theme::Form::Phone, fit, true);
                 spawn_home_identity(
                     root,
                     false,
@@ -1595,6 +1607,85 @@ mod tests {
             names.iter().any(|name| name == "ContourBadge"),
             crate::session_config::BUILD_CONTOUR.is_some()
         );
+    }
+
+    /// Production Home has no server button anywhere; a contour build's Home
+    /// opens the connection panel and names its running profile beside DEV.
+    #[test]
+    fn only_a_contour_build_offers_the_connection_button_and_profile_badge() {
+        use crate::connection_profile::ActiveConnection;
+        use crate::ui::test_id::harness;
+        for (contour, profile) in [
+            (None, crate::platform::UiProfile::Desktop),
+            (None, crate::platform::UiProfile::Mobile),
+            (Some("dev"), crate::platform::UiProfile::Desktop),
+            (Some("dev"), crate::platform::UiProfile::Mobile),
+        ] {
+            let mut app = harness::kit_app();
+            app.add_plugins(bevy::state::app::StatesPlugin)
+                .init_state::<AppScreen>()
+                .init_resource::<Assets<Image>>()
+                .init_resource::<super::super::preview::AvatarPreview>()
+                .init_resource::<CareerClient>()
+                .init_resource::<ClientSession>()
+                .init_resource::<ProfileCard>()
+                .init_resource::<AvatarThumbnails>()
+                .init_resource::<crate::party::PartyClient>()
+                .insert_resource(ActiveConnection::for_contour(contour, None))
+                .insert_resource(crate::ui::UiPlatform(profile))
+                .add_systems(Startup, spawn_home);
+            app.update();
+            let names: Vec<String> = app
+                .world_mut()
+                .query::<crate::ui::test_id::NodeKey>()
+                .iter(app.world())
+                .map(|key| key.as_str().to_owned())
+                .collect();
+            let has = |id: &str| names.iter().any(|name| name == id);
+            let dev = contour.is_some();
+            assert_eq!(
+                has("HomeServer") || has("PhoneServerButton"),
+                dev,
+                "{contour:?}"
+            );
+            assert_eq!(has("ContourBadge"), dev);
+            assert_eq!(has("ConnectionProfileBadge"), dev);
+            assert!(has("HomeHelp") || has("PhoneHelpButton"));
+        }
+    }
+
+    #[test]
+    fn the_connection_button_opens_the_panel_only_in_a_contour_build() {
+        use crate::connection_profile::ActiveConnection;
+        use crate::ui::test_id::harness;
+        for contour in [None, Some("dev")] {
+            let mut app = harness::kit_app();
+            app.add_plugins(bevy::state::app::StatesPlugin)
+                .init_state::<AppScreen>()
+                .init_resource::<CareerClient>()
+                .init_resource::<ClientSession>()
+                .init_resource::<crate::match_service::MatchServiceClient>()
+                .init_resource::<crate::mobile_ui::ServerEntry>()
+                .insert_resource(ActiveConnection::for_contour(contour, None))
+                .add_message::<NetworkCommand>()
+                .add_message::<crate::net::SessionUiCommand>()
+                .add_ui_action::<HomeAction>()
+                .add_systems(Update, home_actions.after(UiSet::Dispatch));
+            app.world_mut().write_message(Activated {
+                action: HomeAction::Server,
+                source: Entity::PLACEHOLDER,
+            });
+            app.update();
+            assert_eq!(
+                app.world().resource::<crate::mobile_ui::ServerEntry>().open,
+                contour.is_some()
+            );
+            assert!(
+                app.world()
+                    .resource::<Messages<crate::net::SessionUiCommand>>()
+                    .is_empty()
+            );
+        }
     }
 
     /// The home screen is a render-key screen: a language change rebuilds it

@@ -8,16 +8,16 @@
 //! snapshot channel disconnect ([`crate::net::NetIncomingDisconnected`]), and bounded wait in
 //! **WaitingForServer** ([`T_WAIT_MAX`]).
 //!
-//! **Precedence for default server address** (see `persistence` + `net`):
-//! 1. Non-empty `GAME_SERVER_ADDR` environment variable
-//! 2. `game_server_addr` in the on-disk preferences file (if valid)
-//! 3. [`DEFAULT_GAME_SERVER_ADDR`]
+//! **Server address at startup** ([`startup_server_addr`], used by `net`):
+//! 1. Desktop only: a non-empty `GAME_SERVER_ADDR` environment variable
+//! 2. The running connection profile's lobby (`crate::connection_profile`):
+//!    production's public lobby, or a contour build's chosen profile
 //!
 //! **Contour builds.** A build with `OMOBA_DEFAULT_CONFIG_DIR_SUFFIX` (a dev-contour
 //! tester build from `scripts/release.py build … --contour dev`) never offers or
-//! accepts the production lobby: its online preset is its own compiled-in lobby, and
-//! [`endpoint_allowed`] refuses the production VPS and every production `omoba.io` /
-//! `ekza.io` name in every address it validates (typed, saved, `GAME_SERVER_ADDR`,
+//! accepts the production lobby: its profiles are Dev, Local and Custom, and
+//! [`endpoint_allowed_for`] refuses the production VPS and every production `omoba.io` /
+//! `ekza.io` name in every address it validates (custom, `GAME_SERVER_ADDR`,
 //! match allocations).
 //!
 //! **Failure detection** (TASK-14): `net::update_session_lifecycle` tears down on stale snapshot
@@ -50,66 +50,34 @@ pub(crate) const BUILD_CONTOUR: Option<&str> = match option_env!("OMOBA_DEFAULT_
 };
 
 /// The Omoba market a player is pointed to for free items, without the scheme:
-/// `app.omoba.io/market` in production, `app.<contour>.omoba.io/market` (the
-/// contour's own web app) in a contour build, so a tester is never sent to the
-/// production market. The i18n hints show it as `{market}`.
+/// the running connection profile's (`app.omoba.io/market` in production,
+/// `app.<contour>.omoba.io/market` for a contour build's own servers), so a
+/// tester is never sent to the production market. The i18n hints show it as
+/// `{market}`.
 pub(crate) fn market_address() -> String {
-    market_address_for(BUILD_CONTOUR)
+    crate::connection_profile::active().market.clone()
 }
 
-fn market_address_for(contour: Option<&str>) -> String {
-    match contour {
-        Some(contour) => format!("app.{contour}.omoba.io/market"),
-        None => "app.omoba.io/market".to_owned(),
-    }
+/// The lobby this process connects to unless a desktop `GAME_SERVER_ADDR`
+/// overrides it: the running connection profile's.
+pub(crate) fn default_server_addr() -> &'static str {
+    crate::connection_profile::active().lobby.as_str()
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum ServerPreset {
-    /// The online lobby: the public beta, or a contour build's own lobby.
-    Beta,
-    Local,
+/// The lobby at startup: a desktop `GAME_SERVER_ADDR` (developers and
+/// self-hosters; phones read none), else the connection profile's lobby. A
+/// saved address is no longer an input: production builds have no server
+/// selection, and a contour build's profile owns its lobby.
+pub(crate) fn startup_server_addr() -> String {
+    crate::connection_profile::desktop_override("GAME_SERVER_ADDR")
+        .unwrap_or_else(|| default_server_addr().to_owned())
 }
 
-impl ServerPreset {
-    pub(crate) fn address(self) -> &'static str {
-        preset_address(self, BUILD_CONTOUR, DEFAULT_GAME_SERVER_ADDR)
-    }
-
-    /// Localization key of the preset button.
-    pub(crate) fn label_key(self) -> &'static str {
-        preset_label_key(self, BUILD_CONTOUR)
-    }
-}
-
-fn preset_address(
-    preset: ServerPreset,
-    contour: Option<&str>,
-    default: &'static str,
-) -> &'static str {
-    match preset {
-        ServerPreset::Local => FALLBACK_GAME_SERVER_ADDR,
-        ServerPreset::Beta if contour.is_some() => default,
-        ServerPreset::Beta => BETA_GAME_SERVER_ADDR,
-    }
-}
-
-fn preset_label_key(preset: ServerPreset, contour: Option<&str>) -> &'static str {
-    match preset {
-        ServerPreset::Local => "phone.server.local",
-        ServerPreset::Beta if contour.is_some() => "phone.server.dev",
-        ServerPreset::Beta => "phone.server.beta",
-    }
-}
-
-/// Whether this build may connect to `host` (an IP literal or a DNS name, without
-/// the port). Production builds accept every host; a contour build refuses the
-/// production lobby.
-pub(crate) fn endpoint_allowed(host: &str) -> bool {
-    endpoint_allowed_for(BUILD_CONTOUR, host)
-}
-
-fn endpoint_allowed_for(contour: Option<&str>, host: &str) -> bool {
+/// Whether a build of `contour` may connect to `host` (an IP literal or a DNS
+/// name, without the port). Production builds accept every host; a contour build
+/// refuses the production lobby and every production `omoba.io` / `ekza.io` name.
+/// This build's rule is `endpoint_allowed_for(BUILD_CONTOUR, host)`.
+pub(crate) fn endpoint_allowed_for(contour: Option<&str>, host: &str) -> bool {
     let Some(contour) = contour else {
         return true;
     };
@@ -132,10 +100,15 @@ fn endpoint_allowed_for(contour: Option<&str>, host: &str) -> bool {
         .any(|zone| in_zone(zone) && !in_zone(&format!("{contour}.{zone}")))
 }
 
-/// Default UDP server address when env and saved preferences do not supply one. A
-/// contour build without a compiled-in lobby falls back to the local server, never to
-/// the production beta.
-pub const DEFAULT_GAME_SERVER_ADDR: &str = match option_env!("OMOBA_DEFAULT_GAME_SERVER_ADDR") {
+/// The lobby compiled into this build (`OMOBA_DEFAULT_GAME_SERVER_ADDR`, set by
+/// `scripts/release.py --server` or a contour's default), if any.
+pub(crate) const COMPILED_GAME_SERVER_ADDR: Option<&str> =
+    option_env!("OMOBA_DEFAULT_GAME_SERVER_ADDR");
+
+/// The compiled lobby, else the public beta; a contour build without a compiled
+/// lobby falls back to the local server, never to the production beta. The
+/// running lobby is the connection profile's ([`default_server_addr`]).
+pub const DEFAULT_GAME_SERVER_ADDR: &str = match COMPILED_GAME_SERVER_ADDR {
     Some(address) => address,
     None if BUILD_CONTOUR.is_some() => FALLBACK_GAME_SERVER_ADDR,
     None => BETA_GAME_SERVER_ADDR,
@@ -206,49 +179,6 @@ mod tests {
         );
     }
 
-    fn host_of(address: &str) -> &str {
-        address.rsplit_once(':').map_or(address, |(host, _)| host)
-    }
-
-    #[test]
-    fn production_presets_are_the_public_beta_and_localhost() {
-        assert_eq!(
-            preset_address(ServerPreset::Beta, None, "ignored:1"),
-            BETA_GAME_SERVER_ADDR
-        );
-        assert_eq!(
-            preset_address(ServerPreset::Local, None, "ignored:1"),
-            FALLBACK_GAME_SERVER_ADDR
-        );
-        assert_eq!(
-            preset_label_key(ServerPreset::Beta, None),
-            "phone.server.beta"
-        );
-        assert!(endpoint_allowed_for(None, "77.246.105.57"));
-        assert!(endpoint_allowed_for(None, "play.dev.omoba.io"));
-    }
-
-    #[test]
-    fn a_dev_build_exposes_no_production_preset() {
-        let dev = Some("dev");
-        for default in ["lobby.dev.omoba.io:4100", "203.0.113.10:4100"] {
-            assert_eq!(preset_address(ServerPreset::Beta, dev, default), default);
-            for preset in [ServerPreset::Beta, ServerPreset::Local] {
-                let address = preset_address(preset, dev, default);
-                assert_ne!(address, BETA_GAME_SERVER_ADDR);
-                assert!(endpoint_allowed_for(dev, host_of(address)), "{address}");
-            }
-        }
-        assert_eq!(
-            preset_label_key(ServerPreset::Beta, dev),
-            "phone.server.dev"
-        );
-        assert_eq!(
-            preset_label_key(ServerPreset::Local, dev),
-            "phone.server.local"
-        );
-    }
-
     #[test]
     fn a_dev_build_refuses_every_production_lobby_address() {
         let dev = Some("dev");
@@ -301,43 +231,33 @@ mod tests {
     }
 
     #[test]
-    fn production_points_at_the_production_market() {
-        assert_eq!(market_address_for(None), "app.omoba.io/market");
-    }
-
-    #[test]
-    fn a_dev_build_points_at_its_own_market() {
-        let dev = Some("dev");
-        assert_eq!(market_address_for(dev), "app.dev.omoba.io/market");
-        // The market host is inside the contour, never a production name.
-        let address = market_address_for(dev);
-        let host = address.split('/').next().unwrap();
-        assert!(endpoint_allowed_for(dev, host), "{host}");
-        assert!(!endpoint_allowed_for(dev, "app.omoba.io"));
-    }
-
-    #[test]
-    fn this_builds_market_matches_its_contour() {
+    fn this_builds_market_and_lobby_match_its_contour() {
         assert_eq!(
             market_address() == "app.omoba.io/market",
             BUILD_CONTOUR.is_none()
         );
         let address = market_address();
-        assert!(endpoint_allowed(address.split('/').next().unwrap()));
+        assert!(endpoint_allowed_for(
+            BUILD_CONTOUR,
+            address.split('/').next().unwrap()
+        ));
+        let lobby = default_server_addr();
+        assert!(crate::persistence::validate_game_server_addr(lobby).is_some());
+        if BUILD_CONTOUR.is_none() {
+            assert_eq!(lobby, DEFAULT_GAME_SERVER_ADDR);
+        } else {
+            assert_ne!(lobby, BETA_GAME_SERVER_ADDR);
+        }
     }
 
     #[test]
-    fn this_builds_presets_are_connectable() {
-        for preset in [ServerPreset::Beta, ServerPreset::Local] {
-            assert!(endpoint_allowed(host_of(preset.address())), "{preset:?}");
-            assert!(
-                crate::persistence::validate_game_server_addr(preset.address()).is_some(),
-                "{preset:?}"
-            );
-        }
-        assert_eq!(
-            BUILD_CONTOUR.is_some(),
-            ServerPreset::Beta.address() != BETA_GAME_SERVER_ADDR
-        );
+    fn the_startup_lobby_is_the_profiles_unless_a_desktop_override_is_set() {
+        let expected = std::env::var("GAME_SERVER_ADDR")
+            .ok()
+            .filter(|value| !value.trim().is_empty())
+            .filter(|_| !cfg!(any(target_os = "android", target_os = "ios")))
+            .map(|value| value.trim().to_owned())
+            .unwrap_or_else(|| default_server_addr().to_owned());
+        assert_eq!(startup_server_addr(), expected);
     }
 }

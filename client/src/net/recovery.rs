@@ -48,8 +48,10 @@ impl ResumeMatchState {
         }
     }
 }
+/// The running connection profile's resume hint: another profile's lobby
+/// never sees it (production keeps it beside the preferences file).
 fn resume_path() -> Option<std::path::PathBuf> {
-    crate::persistence::preferences_path().map(|path| path.with_file_name("match-resume.json"))
+    crate::connection_profile::profile_file("match-resume.json")
 }
 pub(crate) fn load_resume(mut resume: ResMut<ResumeMatchState>, session: Res<ClientSessionId>) {
     resume.saved = resume_path()

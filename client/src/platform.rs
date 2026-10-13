@@ -136,12 +136,46 @@ pub fn preferences_file_path(
     platform_directory: Option<PathBuf>,
     filename: &str,
 ) -> Option<PathBuf> {
+    settings_directory_from(override_directory, platform_directory)
+        .map(|directory| directory.join(filename))
+}
+
+/// The settings folder: a non-empty override, else the OS-private one.
+pub fn settings_directory_from(
+    override_directory: Option<&str>,
+    platform_directory: Option<PathBuf>,
+) -> Option<PathBuf> {
     override_directory
         .map(str::trim)
         .filter(|directory| !directory.is_empty())
         .map(PathBuf::from)
         .or(platform_directory)
-        .map(|directory| directory.join(filename))
+}
+
+/// This process's settings folder (`OMOBA_CLIENT_CONFIG_DIR`, else the OS one).
+pub fn settings_directory() -> Option<PathBuf> {
+    settings_directory_from(
+        std::env::var("OMOBA_CLIENT_CONFIG_DIR").ok().as_deref(),
+        preferences_directory(),
+    )
+}
+
+/// Whether this platform can start a fresh copy of the game itself (desktop);
+/// a phone app is closed and reopened by the player.
+pub const CAN_RELAUNCH: bool = !cfg!(any(target_os = "android", target_os = "ios"));
+
+/// Starts a fresh copy of this game with the same arguments, so a choice that
+/// applies at startup (the connection profile) takes effect; the caller exits.
+pub fn relaunch() -> std::io::Result<()> {
+    if !CAN_RELAUNCH {
+        return Err(std::io::Error::from(std::io::ErrorKind::Unsupported));
+    }
+    let executable = std::env::current_exe()?;
+    // The new process outlives this one; nothing waits for it.
+    let _child = std::process::Command::new(executable)
+        .args(std::env::args_os().skip(1))
+        .spawn()?;
+    Ok(())
 }
 
 /// The game owns native browser presentation; the SDK still validates the URL.
@@ -201,6 +235,28 @@ mod tests {
         // Never fall back into the installed bundle when an OS directory is missing.
         assert_eq!(preferences_file_path(Some(""), None, "prefs.json"), None);
         assert_eq!(preferences_file_path(None, None, "prefs.json"), None);
+    }
+
+    #[test]
+    fn the_settings_directory_follows_the_same_override_rule() {
+        let private = PathBuf::from("/app/Library/Application Support/omoba-bevy-dev");
+        assert_eq!(
+            settings_directory_from(None, Some(private.clone())),
+            Some(private.clone())
+        );
+        assert_eq!(
+            settings_directory_from(Some(" /tmp/qa "), Some(private.clone())),
+            Some(PathBuf::from("/tmp/qa"))
+        );
+        assert_eq!(
+            settings_directory_from(Some(""), Some(private.clone())),
+            Some(private)
+        );
+        assert_eq!(settings_directory_from(None, None), None);
+        assert_eq!(
+            CAN_RELAUNCH,
+            !cfg!(any(target_os = "android", target_os = "ios"))
+        );
     }
 
     #[test]

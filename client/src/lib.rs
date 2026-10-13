@@ -11,6 +11,7 @@ mod career_identity;
 mod combat;
 mod combat_feedback;
 mod combat_visuals;
+mod connection_profile;
 mod contour_badge;
 mod creatures3d;
 mod dash_preview;
@@ -85,6 +86,9 @@ use sprite::PlayerVisualMode;
 #[bevy_main]
 pub fn main() {
     shared::catalog::ensure_loaded();
+    // The connection profile decides the registry, passport and the profile's
+    // own folder before any store, account call or socket opens.
+    connection_profile::install();
     // The one environment read of the avatar roster source, before any screen,
     // QA harness or the passport store looks an avatar up.
     let roster_source = omoba_passport::avatars::RosterSource::from_env();

@@ -23,7 +23,6 @@ use crate::persistence::{
     ClientPrefsSaveGate, ClientSessionId, ResolvedServerAddressForPrefs, reset_graphics_to_defaults,
 };
 use crate::render_settings::RenderSettings;
-use crate::session_config::DEFAULT_GAME_SERVER_ADDR;
 use crate::team::TeamSelection;
 use crate::ui::living_background::{
     self, LivingBackground, LivingBands, LivingScene, MotionSettings,
@@ -2051,7 +2050,7 @@ fn update_setting_labels(
 fn server_addr_for_prefs(resolved: &ResolvedServerAddressForPrefs) -> &str {
     let s = resolved.0.as_str().trim();
     if s.is_empty() {
-        DEFAULT_GAME_SERVER_ADDR
+        crate::session_config::default_server_addr()
     } else {
         s
     }
