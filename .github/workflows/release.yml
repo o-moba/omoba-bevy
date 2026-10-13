@@ -101,6 +101,9 @@ jobs:
             dist/*/*.zip
             dist/*/*.tar.gz
           if-no-files-found: error
+          # Packages also reach the draft release; the artifacts only hand them
+          # between jobs, so keep them briefly instead of the 90-day default.
+          retention-days: 3
 
   android:
     name: android
@@ -141,6 +144,7 @@ jobs:
           name: omoba-android
           path: dist/*/*.apk
           if-no-files-found: error
+          retention-days: 3
 
   draft:
     name: draft release
