@@ -831,6 +831,9 @@ fn tally_json(pairing: Pairing, tally: &Tally) -> String {
 struct Check {
     name: String,
     passed: bool,
+    /// Whether `full_matrix` fails on it. Only an infeasible comparison is
+    /// reported without gating.
+    gating: bool,
     detail: String,
 }
 
@@ -866,6 +869,7 @@ fn checks(pairings: &[Pairing], tallies: &[Tally], profiles: &Profiles) -> Vec<C
     if let Some(tally) = find(pairings, tallies, Elite, Elite) {
         let (low, high) = wilson(tally.subject_wins, tally.decisive());
         checks.push(Check {
+            gating: true,
             name: "elite_vs_elite_contains_half".into(),
             passed: low <= 0.5 && 0.5 <= high,
             detail: format!("Wilson95 [{low:.3}, {high:.3}]"),
@@ -888,14 +892,28 @@ fn checks(pairings: &[Pairing], tallies: &[Tally], profiles: &Profiles) -> Vec<C
             high.decisive(),
         );
         let rate = |t: &Tally| f64::from(t.subject_wins) / f64::from(t.decisive().max(1));
+        // Two levels that both lose nearly every round to Elite cannot be
+        // ordered by that win rate; the lead and the direct pairing do it.
+        let hopeless = |t: &Tally| wilson(t.subject_wins, t.decisive()).1 < 0.10;
+        let feasible = !(hopeless(low) && hopeless(high));
         checks.push(Check {
+            gating: feasible,
             name: format!(
                 "vs_elite_{}_below_{}",
                 ladder[pair].name(),
                 ladder[pair + 1].name()
             ),
             passed: rate(low) < rate(high) && p < 0.05,
-            detail: format!("{:.3} < {:.3}, one-sided p = {p:.4}", rate(low), rate(high)),
+            detail: format!(
+                "{:.3} < {:.3}, one-sided p = {p:.4}{}",
+                rate(low),
+                rate(high),
+                if feasible {
+                    ""
+                } else {
+                    "; both lose nearly every round to Elite (Wilson upper < 0.10), so this is not gating"
+                }
+            ),
         });
     }
     // The margin against Elite, which still orders levels that both lose
@@ -907,6 +925,7 @@ fn checks(pairings: &[Pairing], tallies: &[Tally], profiles: &Profiles) -> Vec<C
         let (a, a_half) = mean_interval(&low.leads);
         let (b, b_half) = mean_interval(&high.leads);
         checks.push(Check {
+            gating: true,
             name: format!(
                 "vs_elite_lead_{}_below_{}",
                 ladder[pair].name(),
@@ -921,6 +940,7 @@ fn checks(pairings: &[Pairing], tallies: &[Tally], profiles: &Profiles) -> Vec<C
         if let Some(tally) = find(pairings, tallies, ladder[pair], ladder[pair + 1]) {
             let (low, high) = wilson(tally.subject_wins, tally.decisive());
             checks.push(Check {
+                gating: true,
                 name: format!(
                     "{}_loses_to_{}",
                     ladder[pair].name(),
@@ -934,6 +954,7 @@ fn checks(pairings: &[Pairing], tallies: &[Tally], profiles: &Profiles) -> Vec<C
     for (pairing, tally) in pairings.iter().zip(tallies) {
         let rate = f64::from(tally.draws) / f64::from(tally.rounds.max(1));
         checks.push(Check {
+            gating: true,
             name: format!("draws_at_most_10pct_{}", pairing.name()),
             passed: rate <= 0.10,
             detail: format!("{} of {} rounds", tally.draws, tally.rounds),
@@ -949,10 +970,11 @@ fn checks(pairings: &[Pairing], tallies: &[Tally], profiles: &Profiles) -> Vec<C
         let hp = sorted(&side.health_retreats);
         let median = quantile(&hp, 0.5);
         checks.push(Check {
+            gating: true,
             name: format!("health_retreats_{}", level.name()),
             passed: hp.iter().all(|h| *h < line) && median >= f64::from(line) - 0.10,
             detail: format!(
-                "{} starts, max {:.3} < {line}, median {median:.3} >= {:.2}",
+                "{} starts, max {:.4} < {line}, median {median:.3} >= {:.2}",
                 hp.len(),
                 hp[hp.len() - 1],
                 line - 0.10
@@ -1041,7 +1063,7 @@ fn full_matrix() {
     let tallies = run_matrix(&pairings, &counts, base_seed, profiles, config, threads);
     let checks = checks(&pairings, &tallies, &profiles);
     let report = format!(
-        "{{\n\"version\":\"{}\",\n\"setup\":{{\"default_rounds_per_pairing\":{rounds},\"base_seed\":{base_seed},\"dt\":{},\"jitter\":{},\"cap_minutes\":{},\"capped_rounds\":\"adjudicated by enemy structure health removed; a lead under {DRAW_MARGIN} structures is a draw\",\"roster\":\"standard practice fill\",\"sides\":\"subject Green in even rounds, Blue in odd\",\"tune\":\"{}\",\"wall_secs\":{:.0}}},\n\"profiles\":{{{}}},\n\"pairings\":[\n{}\n],\n\"checks\":[\n{}\n]\n}}\n",
+        "{{\n\"version\":\"{}\",\n\"setup\":{{\"default_rounds_per_pairing\":{rounds},\"base_seed\":{base_seed},\"dt\":{},\"jitter\":{},\"cap_minutes\":{},\"capped_rounds\":\"adjudicated by enemy structure health removed; a lead under {DRAW_MARGIN} structures is a draw\",\"roster\":\"standard practice fill\",\"sides\":\"subject Green in even rounds, Blue in odd\",\"tune\":\"{}\",\"wall_secs\":{:.0}}},\n\"profiles\":{{{}}},\n\"levels\":{{{}}},\n\"pairings\":[\n{}\n],\n\"checks\":[\n{}\n]\n}}\n",
         env!("CARGO_PKG_VERSION"),
         json_f(f64::from(config.dt)),
         json_f(f64::from(config.jitter)),
@@ -1057,6 +1079,16 @@ fn full_matrix() {
             ))
             .collect::<Vec<_>>()
             .join(","),
+        // Each level pooled over every pairing it played, on either side.
+        BotDifficulty::ALL
+            .iter()
+            .map(|level| format!(
+                "\n\"{}\":{}",
+                level.name(),
+                side_json(&level_side(&pairings, &tallies, *level))
+            ))
+            .collect::<Vec<_>>()
+            .join(","),
         pairings
             .iter()
             .zip(&tallies)
@@ -1066,8 +1098,8 @@ fn full_matrix() {
         checks
             .iter()
             .map(|c| format!(
-                "{{\"check\":\"{}\",\"passed\":{},\"detail\":\"{}\"}}",
-                c.name, c.passed, c.detail
+                "{{\"check\":\"{}\",\"passed\":{},\"gating\":{},\"detail\":\"{}\"}}",
+                c.name, c.passed, c.gating, c.detail
             ))
             .collect::<Vec<_>>()
             .join(",\n"),
@@ -1077,7 +1109,7 @@ fn full_matrix() {
     if let Ok(path) = std::env::var("OMOBA_BOT_SIM_REPORT") {
         std::fs::write(&path, &report).expect("write the simulator report");
     }
-    let failed: Vec<_> = checks.iter().filter(|c| !c.passed).collect();
+    let failed: Vec<_> = checks.iter().filter(|c| c.gating && !c.passed).collect();
     if env("OMOBA_BOT_SIM_ASSERT", 1_u8) == 1 {
         assert!(failed.is_empty(), "acceptance checks failed: {failed:#?}");
     }

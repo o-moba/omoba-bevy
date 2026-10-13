@@ -282,6 +282,11 @@ impl BotProfile {
         jungle_gank: JungleGank::Always,
     };
 
+    /// Calibrated by the S3 simulator: no outnumbered hold and no threat
+    /// response. Its engage range and target priority are Elite's, so it
+    /// notices an attacker exactly as Elite does, and with threat response
+    /// nearly every answer was a retreat from an attacker it could not reach
+    /// (docs/plans/bot-personas.md, S3 notes).
     pub const VETERAN: Self = Self {
         retreat_hp: 0.33,
         resume_hp: Some(0.50),
@@ -296,9 +301,9 @@ impl BotProfile {
         target_leash: 2.0,
         target_priority: TargetPriority::Nearest,
         trade_margin: None,
-        outnumbered_hold: Some(2),
+        outnumbered_hold: None,
         outnumbered_retreat: None,
-        threat_window_secs: Some(2.0),
+        threat_window_secs: None,
         dash_hero_hp: None,
         mobility_margin: 4.0,
         jungle_gank: JungleGank::IfNotOutnumbered,
