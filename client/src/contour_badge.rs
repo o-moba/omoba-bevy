@@ -1,7 +1,9 @@
 //! The contour marker. A contour build (`scripts/release.py build … --contour
 //! dev`) names its contour in a kit badge (`DEV`) beside the Home title and in
 //! the desktop match HUD under the score strip, so a tester's screen or
-//! screenshot never passes for production. Production builds spawn nothing.
+//! screenshot never passes for production. On Home a second badge names the
+//! running connection profile (`Dev`, `Local`, `Custom`). Production builds
+//! spawn nothing.
 //!
 //! The contour is the compile-time [`BUILD_CONTOUR`] that also names the
 //! settings folder and the window title (`crate::platform`).
@@ -35,9 +37,32 @@ fn label(contour: Option<&str>) -> Option<Localized> {
     ))
 }
 
-/// Adds this build's contour badge to `parent` (a row); nothing in production.
-pub(crate) fn spawn(parent: &mut ChildSpawnerCommands) -> Option<Entity> {
-    spawn_for(parent, BUILD_CONTOUR)
+/// Adds this build's contour badge and its running connection profile's badge
+/// to `parent` (a row); nothing in production. `connection` is the
+/// `ActiveConnection` resource (this process's when absent).
+pub(crate) fn spawn(
+    parent: &mut ChildSpawnerCommands,
+    connection: Option<&crate::connection_profile::ActiveConnection>,
+) -> Option<Entity> {
+    let contour = connection.map_or(BUILD_CONTOUR, |connection| connection.contour.as_deref());
+    let badge = spawn_for(parent, contour)?;
+    let running = connection.map_or_else(
+        || crate::connection_profile::active().id,
+        |connection| connection.profile.id,
+    );
+    if crate::mobile_ui::offers_connection(connection) {
+        let profile = surfaces::badge(
+            parent,
+            Localized::new(running.label_key()),
+            BadgeKind::Muted,
+            false,
+        );
+        parent
+            .commands()
+            .entity(profile)
+            .insert(Name::new("ConnectionProfileBadge"));
+    }
+    Some(badge)
 }
 
 fn spawn_for(parent: &mut ChildSpawnerCommands, contour: Option<&str>) -> Option<Entity> {
@@ -142,6 +167,33 @@ mod tests {
             .map(|(_, children)| children[0])
             .unwrap();
         assert!(app.world().get::<Localized>(text).is_some());
+    }
+
+    #[test]
+    fn home_names_the_running_profile_beside_the_dev_badge() {
+        use crate::connection_profile::ActiveConnection;
+        let mut app = App::new();
+        app.add_systems(Startup, |mut commands: Commands| {
+            commands.spawn(Node::default()).with_children(|row| {
+                let production = ActiveConnection::for_contour(None, None);
+                assert!(spawn(row, Some(&production)).is_none());
+                let dev = ActiveConnection::for_contour(Some("dev"), None);
+                assert!(spawn(row, Some(&dev)).is_some());
+            });
+        });
+        app.update();
+        assert_eq!(badge_texts(&mut app), ["DEV"]);
+        let profiles: Vec<String> = app
+            .world_mut()
+            .query::<(&Name, &Children)>()
+            .iter(app.world())
+            .filter(|(name, _)| name.as_str() == "ConnectionProfileBadge")
+            .map(|(_, children)| children[0])
+            .collect::<Vec<_>>()
+            .into_iter()
+            .map(|text| app.world().get::<Localized>(text).unwrap().key.to_owned())
+            .collect();
+        assert_eq!(profiles, ["connection.profile.dev"]);
     }
 
     #[test]

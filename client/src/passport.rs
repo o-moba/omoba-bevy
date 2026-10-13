@@ -215,15 +215,13 @@ pub fn initialize() {
     }
 }
 
-/// Start the Ekza avatar store under the private settings directory. With a
-/// paired wallet the first catalogue read is awaited so purchases are on the
-/// first menu; otherwise it happens in the background.
+/// Start the Ekza avatar store in the running connection profile's own folder
+/// of the private settings directory (`ekza-store`; per profile in a contour
+/// build, so a registry's link and caches never reach another). With a paired
+/// wallet the first catalogue read is awaited so purchases are on the first
+/// menu; otherwise it happens in the background.
 pub fn initialize_store() -> Option<std::path::PathBuf> {
-    let root = crate::platform::preferences_file_path(
-        std::env::var("OMOBA_CLIENT_CONFIG_DIR").ok().as_deref(),
-        crate::platform::preferences_directory(),
-        "ekza-store",
-    )?;
+    let root = crate::connection_profile::profile_file(crate::connection_profile::STORE_DIR)?;
     std::fs::create_dir_all(root.join("avatars")).ok()?;
     ekza_account::initialize(root.join("account/session.json"));
     store::initialize(root.clone(), SESSION.get().is_some());

@@ -40,9 +40,16 @@ Use the ignored `mobile/ios/Omoba.local.xcconfig` for local settings, for exampl
 ```xcconfig
 DEVELOPMENT_TEAM = YOUR_EXISTING_TEAM_ID
 CURRENT_PROJECT_VERSION = 12
-// Optional reachable game server; omit to choose through SERVER in the game.
+// Optional reachable game server compiled in (production has no in-game server choice).
 OMOBA_GAME_SERVER = 192.168.1.10:4000
+// Optional: build the separate OMOBA Dev app (space.ekza.omoba.dev) instead.
+// OMOBA_CONTOUR = dev
 ```
+
+`OMOBA_GAME_SERVER` and `OMOBA_CONTOUR` here apply to Xcode runs only:
+`scripts/release.py build ios` always sets both on the command line (from
+`--contour` and `--server`) and checks the archived bundle id, so a release never
+picks them up from this file.
 
 Selecting a team in Xcode can write it into `project.pbxproj`; move that personal
 setting into the ignored local configuration before committing source. Do not
@@ -176,12 +183,22 @@ blanket tracking/encryption declaration is inserted. Re-audit the manifest when
 the app or SDKs change, and investigate Apple validation feedback rather than
 adding unrelated API reasons to silence warnings.
 
+## OMOBA Dev (internal TestFlight)
+
+The dev contour is a separate app, `space.ekza.omoba.dev` ("OMOBA Dev", DEV-ribbon
+icon, dev connection profiles), with its own App Store Connect record for internal
+testers only. It installs beside Omoba Beta. Build and upload with
+`python3 scripts/release.py build ios --contour dev --upload` (or `OMOBA_CONTOUR = dev`
+in `Omoba.local.xcconfig` for an Xcode Run). One-time setup: the owner checklist in
+[docs/connection-profiles.md](../../docs/connection-profiles.md#owner-checklist-once).
+
 ## Playing after installation
 
 TestFlight distributes the **client**, not a game server. For the existing home
 kit, start `builds/iphone-home-2026-09-16/1-Start-server.command` on the Mac, put
 Mac and iPhone on a network that allows them to communicate, and enter the printed
-LAN `IP:4000` using **SERVER → CONNECT**. Xcode Wi-Fi pairing is not required for
+LAN `IP:4000` with the OMOBA Dev app (**Connection → Custom → Use**, then reopen
+the app; the production app only plays on its compiled lobby). Xcode Wi-Fi pairing is not required for
 this game connection. If LAN communication also fails, a reachable hosted game
 server is required. No public 24/7 server deployment is claimed by this workflow.
 

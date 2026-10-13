@@ -167,6 +167,7 @@ impl PluginGroup for UiPlugins {
     fn build(self) -> PluginGroupBuilder {
         PluginGroupBuilder::start::<Self>()
             .add(UiKitPlugin)
+            .add(crate::connection_profile::ConnectionProfilePlugin)
             .add(crate::render_settings::RenderSettingsPlugin)
             .add(MobileControlsPlugin)
             .add(MobileUiPlugin)

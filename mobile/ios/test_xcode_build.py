@@ -32,6 +32,120 @@ class XcodeBridgeTests(unittest.TestCase):
             path.write_text(json.dumps({'development_host':'8.8.8.8','registry':'http://8.8.8.8'}))
             with self.assertRaises(ValueError): xb.ekza_build_settings({'CONFIGURATION':'Debug'}, root)
 
+    def test_the_contour_picks_the_app_and_never_crosses_identities(self):
+        self.assertEqual(xb.contour({'PRODUCT_BUNDLE_IDENTIFIER': 'space.ekza.omoba.beta'}), 'prod')
+        self.assertEqual(xb.contour({'OMOBA_CONTOUR': ' ', 'PRODUCT_BUNDLE_IDENTIFIER': 'x.team.omoba'}), 'prod')
+        self.assertEqual(xb.contour({'OMOBA_CONTOUR': 'dev', 'PRODUCT_BUNDLE_IDENTIFIER': 'space.ekza.omoba.dev'}), 'dev')
+        for env in ({'OMOBA_CONTOUR': 'dev', 'PRODUCT_BUNDLE_IDENTIFIER': 'space.ekza.omoba.beta'},
+                    {'OMOBA_CONTOUR': '', 'PRODUCT_BUNDLE_IDENTIFIER': 'space.ekza.omoba.dev'},
+                    {'OMOBA_CONTOUR': 'staging', 'PRODUCT_BUNDLE_IDENTIFIER': 'space.ekza.omoba.dev'}):
+            with self.subTest(env=env), self.assertRaises(ValueError):
+                xb.contour(env)
+
+    def test_the_dev_app_compiles_its_dev_profile_and_never_the_lan_rehearsal(self):
+        import json
+        dev = {'OMOBA_CONTOUR': 'dev', 'PRODUCT_BUNDLE_IDENTIFIER': 'space.ekza.omoba.dev', 'CONFIGURATION': 'Debug'}
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            (root/'.ekza-lan').mkdir()
+            (root/'.ekza-lan/client.json').write_text(json.dumps({
+                'development_host': '192.168.1.71', 'registry': 'http://192.168.1.71:8018'}))
+            self.assertEqual(xb.contour_build_settings(dev, root), {
+                'OMOBA_DEFAULT_GAME_SERVER_ADDR': 'lobby.dev.omoba.io:4100',
+                'OMOBA_DEFAULT_REGISTRY_URL': 'https://registry.dev.ekza.io',
+                'OMOBA_DEFAULT_PASSPORT_URL': 'http://127.0.0.1:9/api/passport',
+                'OMOBA_DEFAULT_CONFIG_DIR_SUFFIX': 'dev'})
+            by_ip = xb.contour_build_settings({**dev, 'OMOBA_GAME_SERVER': '203.0.113.10:4100'}, root)
+            self.assertEqual(by_ip['OMOBA_DEFAULT_GAME_SERVER_ADDR'], '203.0.113.10:4100')
+            # The production app's Debug run still takes the LAN rehearsal.
+            prod = {'PRODUCT_BUNDLE_IDENTIFIER': 'space.ekza.omoba.beta', 'CONFIGURATION': 'Debug'}
+            self.assertEqual(xb.contour_build_settings(prod, root)['EKZA_DEV_HTTP_HOST'], '192.168.1.71')
+            self.assertNotIn('OMOBA_DEFAULT_CONFIG_DIR_SUFFIX', xb.contour_build_settings(prod, root))
+
+    def test_the_dev_app_is_named_omoba_dev_and_production_is_unchanged(self):
+        prod = xb.app_info(xb.ROOT, {'minimum_os': '15.0.0'}, 'space.ekza.omoba.beta')
+        dev = xb.app_info(xb.ROOT, {'minimum_os': '15.0.0'}, 'space.ekza.omoba.dev', 'OMOBA Dev')
+        self.assertEqual((prod['CFBundleIdentifier'], prod['CFBundleDisplayName'], prod['CFBundleName']),
+                         ('space.ekza.omoba.beta', 'Omoba Beta', 'Omoba Beta'))
+        self.assertEqual((dev['CFBundleIdentifier'], dev['CFBundleDisplayName'], dev['CFBundleName']),
+                         ('space.ekza.omoba.dev', 'OMOBA Dev', 'OMOBA Dev'))
+        self.assertEqual({k: v for k, v in dev.items() if not k.startswith('CFBundle')},
+                         {k: v for k, v in prod.items() if not k.startswith('CFBundle')})
+
+    def test_the_xcconfig_maps_each_contour_to_its_bundle_id_and_icon(self):
+        here = Path(xb.__file__).parent
+        config = {}
+        for line in (here/'Omoba.xcconfig').read_text().splitlines():
+            if '=' in line and not line.strip().startswith(('//', '#')):
+                key, value = line.split('=', 1)
+                config[key.strip()] = value.strip()
+
+        def expand(value, contour):
+            values = {**config, 'OMOBA_CONTOUR': contour}
+            while '$(' in value:
+                start = value.rindex('$(')
+                end = value.index(')', start)
+                value = value[:start] + values.get(value[start + 2:end], '') + value[end + 1:]
+            return value
+
+        self.assertEqual(config['OMOBA_CONTOUR'], '')
+        for contour, bundle, icon in (('', 'space.ekza.omoba.beta', 'AppIcon'),
+                                      ('prod', 'space.ekza.omoba.beta', 'AppIcon'),
+                                      ('dev', 'space.ekza.omoba.dev', 'AppIconDev')):
+            self.assertEqual(expand(config['PRODUCT_BUNDLE_IDENTIFIER'], contour), bundle)
+            self.assertEqual(expand(config['ASSETCATALOG_COMPILER_APPICON_NAME'], contour), icon)
+            icon_set = here/'Assets.xcassets'/f'{icon}.appiconset'
+            contents = __import__('json').loads((icon_set/'Contents.json').read_text())
+            self.assertTrue((icon_set/contents['images'][0]['filename']).is_file())
+
+    def test_a_dev_build_stages_the_dev_app_from_a_clean_environment(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            env = {**self.env(root), 'OMOBA_CONTOUR': 'dev', 'PRODUCT_BUNDLE_IDENTIFIER': 'space.ekza.omoba.dev',
+                   'CONFIGURATION': 'Release'}
+            binary = root/'cache/aarch64-apple-ios/debug/client'
+            binary.parent.mkdir(parents=True)
+            binary.write_bytes(b'rust')
+            dsym = Path(str(binary)+'.dSYM')
+            (dsym/'Contents/Resources/DWARF').mkdir(parents=True)
+            (dsym/'Contents/Resources/DWARF/client').write_bytes(b'symbols')
+            shell = {'OMOBA_DEFAULT_CONFIG_DIR_SUFFIX': 'stale', 'OMOBA_DEFAULT_REGISTRY_URL': 'https://registry.ekza.io',
+                     'EKZA_DEV_HTTP_HOST': '192.168.1.71'}
+            with patch.dict(os.environ, shell), \
+                 patch.object(xb, 'source_identity', return_value={'revision': 'r', 'tracked_diff': ''}), \
+                 patch.object(xb.subprocess, 'run') as cargo, \
+                 patch.object(xb, 'inspect_macho', return_value={'minimum_os': '15.0.0', 'sdk': '26.0'}), \
+                 patch.object(xb, 'validate_dsym', return_value={'uuid_match_verified': True}), \
+                 patch.object(xb, 'tracked_assets', return_value=[]), \
+                 patch.object(xb, 'collect_legal_notices', return_value=[]), \
+                 patch.object(xb, 'copy_legal_notices', side_effect=lambda _, dest: dest.mkdir(parents=True)):
+                xb.build(env)
+            cargo_env = cargo.call_args.kwargs['env']
+            self.assertEqual(cargo_env['OMOBA_DEFAULT_CONFIG_DIR_SUFFIX'], 'dev')
+            self.assertEqual(cargo_env['OMOBA_DEFAULT_REGISTRY_URL'], 'https://registry.dev.ekza.io')
+            self.assertEqual(cargo_env['OMOBA_DEFAULT_GAME_SERVER_ADDR'], 'lobby.dev.omoba.io:4100')
+            self.assertNotIn('EKZA_DEV_HTTP_HOST', cargo_env)
+            info = plistlib.loads((root/'derived/Omoba-Info.plist').read_bytes())
+            self.assertEqual((info['CFBundleIdentifier'], info['CFBundleDisplayName']),
+                             ('space.ekza.omoba.dev', 'OMOBA Dev'))
+            report = __import__('json').loads((root/'products/OmobaBeta.app/assets/legal/XCODE-BUILD.json').read_text())
+            self.assertEqual(report['contour'], 'dev')
+            # The same shell never leaks into a production archive.
+            with patch.dict(os.environ, shell), \
+                 patch.object(xb, 'source_identity', return_value={'revision': 'r', 'tracked_diff': ''}), \
+                 patch.object(xb.subprocess, 'run') as cargo, \
+                 patch.object(xb, 'inspect_macho', return_value={'minimum_os': '15.0.0', 'sdk': '26.0'}), \
+                 patch.object(xb, 'validate_dsym', return_value={'uuid_match_verified': True}), \
+                 patch.object(xb, 'tracked_assets', return_value=[]), \
+                 patch.object(xb, 'collect_legal_notices', return_value=[]), \
+                 patch.object(xb, 'copy_legal_notices', side_effect=lambda _, dest: dest.mkdir(parents=True)):
+                xb.build({**self.env(root), 'CONFIGURATION': 'Release'})
+            prod_env = cargo.call_args.kwargs['env']
+            for key in shell:
+                self.assertNotIn(key, prod_env)
+            info = plistlib.loads((root/'derived/Omoba-Info.plist').read_bytes())
+            self.assertEqual(info['CFBundleDisplayName'], 'Omoba Beta')
+
     def test_rejects_simulator_and_non_arm64(self):
         for field, value in [('PLATFORM_NAME','iphonesimulator'), ('ARCHS','arm64 x86_64')]:
             with self.subTest(field=field):
