@@ -37,6 +37,52 @@ const BOT_COMPOSITION: [(HeroClass, Lane, bool); 5] = [
 ];
 const HERO_SPACING: f32 = shared::PLAYER_TARGET_RADIUS * 2.0 + 0.08;
 
+/// Every command the brain issues, in issue order, for the trace-equivalence
+/// test (`bots_trace_tests.rs`). Outside `cfg(test)` it is a no-op: the line
+/// is never formatted, and it only ever reads values the brain already chose.
+mod command_trace {
+    #[cfg(test)]
+    thread_local! {
+        static LOG: std::cell::RefCell<Option<Vec<String>>> =
+            const { std::cell::RefCell::new(None) };
+    }
+
+    #[cfg(test)]
+    pub(super) fn record(line: impl FnOnce() -> String) {
+        LOG.with(|log| {
+            if let Some(log) = log.borrow_mut().as_mut() {
+                log.push(line());
+            }
+        });
+    }
+
+    #[cfg(not(test))]
+    #[inline(always)]
+    pub(super) fn record(_: impl FnOnce() -> String) {}
+
+    /// Start recording on this thread, discarding anything unread.
+    #[cfg(test)]
+    pub(super) fn start() {
+        LOG.with(|log| *log.borrow_mut() = Some(Vec::new()));
+    }
+
+    /// The commands recorded since `start` or the previous `drain`.
+    #[cfg(test)]
+    pub(super) fn drain() -> Vec<String> {
+        LOG.with(|log| log.borrow_mut().as_mut().map(std::mem::take))
+            .unwrap_or_default()
+    }
+
+    #[cfg(test)]
+    pub(super) fn stop() {
+        LOG.with(|log| *log.borrow_mut() = None);
+    }
+}
+
+#[cfg(test)]
+#[path = "bots_trace_tests.rs"]
+mod trace_tests;
+
 /// Exactly the living minions the tower authority can prefer over a hero.
 /// A nearby wave outside its actual three-dimensional range is not cover.
 fn tower_has_minion_cover(
@@ -997,6 +1043,9 @@ impl CombatHost<'_> {
                                     continue;
                                 }
                                 let request = p.hero.skills.request_id.saturating_add(1);
+                                command_trace::record(|| {
+                                    format!("{} cast {slot} {aim:?}", addr.port())
+                                });
                                 crate::skills::cast(self.world, addr, slot, aim, request, now);
                             }
                         }
@@ -1015,6 +1064,7 @@ impl CombatHost<'_> {
                         {
                             continue;
                         }
+                        command_trace::record(|| format!("{} unit {slot} {target:?}", addr.port()));
                         handle_cast_request(self.world, addr, target, slot, now);
                     }
                 }
@@ -1027,6 +1077,7 @@ impl CombatHost<'_> {
                     id: bot.hero.identity.id,
                 };
                 for slot in self_sustain_order(bot, low_health) {
+                    command_trace::record(|| format!("{} sustain {slot}", addr.port()));
                     handle_cast_request(self.world, addr, target, slot, now);
                 }
             }
@@ -1088,6 +1139,9 @@ impl CombatHost<'_> {
                         .economy
                         .basic_attack_request_id
                         .saturating_add(1);
+                    command_trace::record(|| {
+                        format!("{} attack {target:?} {request}", addr.port())
+                    });
                     basic_attack::handle_basic_attack_request(
                         self.world, addr, target, request, now,
                     );
