@@ -84,6 +84,12 @@ identity stay shared. A dev build from before profiles kept its store in
 `<settings>/ekza-store`; the Dev profile adopts it once. Production keeps everything
 in the settings folder itself, as before.
 
+**Tests.** CI's `client in the dev contour` job compiles the client with the OMOBA
+Dev app's defaults (`scripts/contours.py`), runs both client clippy variants and
+`cargo test -p client` in a scratch `OMOBA_CLIENT_CONFIG_DIR`; the other jobs cover
+production. Unit tests never read a saved `connection_profile.json`, so a local
+dev-contour run is the Dev profile whatever the developer chose in their own app.
+
 ## Building and releasing the dev app
 
 ```sh

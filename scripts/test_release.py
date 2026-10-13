@@ -523,6 +523,23 @@ exec "$DIR/Omoba.app/Contents/MacOS/server"
                        'title="OMOBA ${RELEASE_TAG#v} DEV (test contour)"'):
             self.assertIn(needle, workflow)
 
+    def test_ci_runs_the_client_in_the_dev_contour_and_pull_requests_build_the_dev_apk(self):
+        # BUILD_CONTOUR = Some("dev") code only compiles with the dev defaults, so CI
+        # runs the client's clippy and tests with exactly the OMOBA Dev app's values,
+        # in a scratch settings folder.
+        ci = (release.ROOT / ".github/workflows/ci.yml").read_text()
+        job = ci[ci.index("  dev-contour:\n"):ci.index("  harness:\n")]
+        for key, value in release.resolve_flavor("dev").client_defaults().items():
+            self.assertIn(f"      {key}: {value}\n", job)
+        for needle in ("OMOBA_CLIENT_CONFIG_DIR=$RUNNER_TEMP/",
+                       "cargo clippy -p client --all-targets --no-deps --locked -- -D warnings",
+                       "cargo clippy -p client --lib --no-deps --no-default-features --locked -- -D warnings",
+                       "cargo test -p client --locked"):
+            self.assertIn(needle, job)
+        workflow = (release.ROOT / ".github/workflows/release.yml").read_text()
+        self.assertIn("if: github.event_name == 'pull_request'\n", workflow)
+        self.assertIn("run: python3 scripts/release.py build android --out dist --contour dev\n", workflow)
+
     def test_build_dry_run_plans_without_building_or_creating_dist(self):
         import contextlib
         import io

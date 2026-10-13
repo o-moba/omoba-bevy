@@ -487,13 +487,20 @@ pub(crate) fn adopt_legacy_store(base: &Path, profile: &ConnectionProfile) -> bo
 
 static ACTIVE: OnceLock<ConnectionProfile> = OnceLock::new();
 
-/// The profile this process runs with, resolved once. A production build never
-/// reads the selection file.
+/// The choice saved at `path` that this build runs with. A production build
+/// never reads it; unit tests never do either, so a dev-contour test run is the
+/// build's default profile, not the developer's own saved choice.
+fn saved_choice(path: Option<&Path>) -> Option<Selection> {
+    if cfg!(test) {
+        return None;
+    }
+    BUILD_CONTOUR.and(path).and_then(load_selection)
+}
+
+/// The profile this process runs with, resolved once.
 pub(crate) fn active() -> &'static ConnectionProfile {
     ACTIVE.get_or_init(|| {
-        let saved = BUILD_CONTOUR
-            .and_then(|_| selection_path())
-            .and_then(|path| load_selection(&path));
+        let saved = saved_choice(selection_path().as_deref());
         resolve(BUILD_CONTOUR, saved.as_ref(), &COMPILED)
     })
 }
@@ -598,9 +605,7 @@ impl ActiveConnection {
     /// This process: its build contour, running profile and saved choice.
     pub(crate) fn current() -> Self {
         let selection_file = selection_path();
-        let saved = BUILD_CONTOUR
-            .and(selection_file.as_deref())
-            .and_then(load_selection);
+        let saved = saved_choice(selection_file.as_deref());
         Self {
             contour: BUILD_CONTOUR.map(str::to_owned),
             profile: active().clone(),
@@ -1090,9 +1095,18 @@ mod tests {
 
     #[test]
     fn this_build_runs_its_contours_default_profile() {
-        // Tests never write a selection file, so this process runs the default.
+        // Tests never read a selection file, so this process runs the default
+        // whatever the developer chose in their own dev app.
         let profile = active();
-        assert_eq!(profile.id == ProfileId::Production, BUILD_CONTOUR.is_none());
+        let default = if BUILD_CONTOUR.is_some() {
+            ProfileId::Dev
+        } else {
+            ProfileId::Production
+        };
+        assert_eq!(profile.id, default);
+        assert_eq!(profile, &resolve(BUILD_CONTOUR, None, &COMPILED));
+        assert!(saved_choice(selection_path().as_deref()).is_none());
+        assert_eq!(ActiveConnection::current().profile, *profile);
         assert!(crate::persistence::validate_game_server_addr(&profile.lobby).is_some());
         assert_eq!(
             crate::session_config::default_server_addr(),

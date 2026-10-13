@@ -36,6 +36,37 @@ jobs:
       - name: Unit and integration tests
         run: cargo test --workspace --locked --exclude harness
 
+  dev-contour:
+    # The OMOBA Dev app's code paths (BUILD_CONTOUR = Some("dev"): the Dev, Local
+    # and Custom connection profiles, per-profile folders, the connection panel)
+    # only exist in a client compiled with the dev defaults of scripts/contours.py.
+    name: client in the dev contour
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      OMOBA_DEFAULT_CONFIG_DIR_SUFFIX: dev
+      OMOBA_DEFAULT_GAME_SERVER_ADDR: lobby.dev.omoba.io:4100
+      OMOBA_DEFAULT_REGISTRY_URL: https://registry.dev.ekza.io
+      OMOBA_DEFAULT_PASSPORT_URL: http://127.0.0.1:9/api/passport
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install native dependencies (audio, udev)
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libasound2-dev libudev-dev pkg-config
+      - name: Install the pinned toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.95.0
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Keep the settings folder in a scratch directory
+        run: echo "OMOBA_CLIENT_CONFIG_DIR=$RUNNER_TEMP/omoba-dev-settings" >> "$GITHUB_ENV"
+      - name: Clippy (warnings are errors)
+        run: cargo clippy -p client --all-targets --no-deps --locked -- -D warnings
+      - name: Clippy, client without the qa feature
+        run: cargo clippy -p client --lib --no-deps --no-default-features --locked -- -D warnings
+      - name: Client tests
+        run: cargo test -p client --locked
+
   harness:
     name: headless gameplay harness
     runs-on: ubuntu-latest
