@@ -46,6 +46,11 @@ OMOBA_GAME_SERVER = 192.168.1.10:4000
 // OMOBA_CONTOUR = dev
 ```
 
+`OMOBA_GAME_SERVER` and `OMOBA_CONTOUR` here apply to Xcode runs only:
+`scripts/release.py build ios` always sets both on the command line (from
+`--contour` and `--server`) and checks the archived bundle id, so a release never
+picks them up from this file.
+
 Selecting a team in Xcode can write it into `project.pbxproj`; move that personal
 setting into the ignored local configuration before committing source. Do not
 check in provisioning files, certificates, account credentials or archive output.

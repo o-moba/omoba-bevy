@@ -937,14 +937,38 @@ def remember_ios_build(number: str) -> None:
 def ios_settings(flavor: Flavor, team: str, number: str) -> list[str]:
     """xcodebuild settings of one archive. The contour picks the app (Omoba.xcconfig:
     bundle id, icon; xcode_build.py: name, compiled dev profile); only --server reaches
-    the archive's Cargo step, through OMOBA_GAME_SERVER."""
-    settings = [f"DEVELOPMENT_TEAM={team}", f"CURRENT_PROJECT_VERSION={number}",
-                "OMOBA_CARGO_PROFILE=release", "CODE_SIGN_STYLE=Automatic"]
-    if flavor.dev:
-        settings.append("OMOBA_CONTOUR=dev")
-    if flavor.server:
-        settings.append(f"OMOBA_GAME_SERVER={flavor.server}")
-    return settings
+    the archive's Cargo step, through OMOBA_GAME_SERVER.
+
+    Both are always on the command line, which beats mobile/ios/Omoba.local.xcconfig:
+    an `OMOBA_CONTOUR = dev` or a LAN `OMOBA_GAME_SERVER` left there for Xcode runs
+    never reaches a release archive (a production upload stays the production app and
+    keeps the public lobby; it has no server selection to recover from a LAN one)."""
+    return [f"DEVELOPMENT_TEAM={team}", f"CURRENT_PROJECT_VERSION={number}",
+            "OMOBA_CARGO_PROFILE=release", "CODE_SIGN_STYLE=Automatic",
+            f"OMOBA_CONTOUR={flavor.contour}", f"OMOBA_GAME_SERVER={flavor.server or ''}"]
+
+
+def archive_bundle_id(archive: Path) -> str | None:
+    """CFBundleIdentifier of the app in an .xcarchive: the archive's own Info.plist
+    (ApplicationProperties), else the archived app's Info.plist."""
+    summary = archive / "Info.plist"
+    if summary.is_file():
+        properties = plistlib.loads(summary.read_bytes()).get("ApplicationProperties") or {}
+        if properties.get("CFBundleIdentifier"):
+            return properties["CFBundleIdentifier"]
+    for info in sorted((archive / "Products/Applications").glob("*.app/Info.plist")):
+        return plistlib.loads(info.read_bytes()).get("CFBundleIdentifier")
+    return None
+
+
+def check_archive_identity(archive: Path, flavor: Flavor) -> None:
+    """Refuses an archive that is not the app the flavor names (the production app for
+    prod, OMOBA Dev for --contour dev) before it is kept, exported or uploaded."""
+    expected = MOBILE[flavor.contour].bundle_id
+    found = archive_bundle_id(archive)
+    if found != expected:
+        raise SystemExit(f"The {flavor.contour} iOS archive is {found or 'missing its bundle id'}, "
+                         f"expected {expected}; check mobile/ios/Omoba.local.xcconfig")
 
 
 def build_ios(version: str, out: Path, flavor: Flavor, build_number: str | None, upload: bool) -> Path:
@@ -970,6 +994,7 @@ def build_ios(version: str, out: Path, flavor: Flavor, build_number: str | None,
     run("xcodebuild", "-project", ROOT / "mobile/ios/Omoba.xcodeproj", "-scheme", "Omoba",
         "-configuration", "Release", "-destination", "generic/platform=iOS",
         "-archivePath", archive, "-allowProvisioningUpdates", "archive", *settings, env=env)
+    check_archive_identity(archive, flavor)
     options = work / "ExportOptions.plist"
     with options.open("wb") as handle:
         plistlib.dump({"method": "app-store-connect", "teamID": team, "signingStyle": "automatic",

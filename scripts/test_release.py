@@ -373,14 +373,60 @@ class DevContour(unittest.TestCase):
         self.assertEqual(dev_args[dev_args.index("--contour") + 1], "dev")
         self.assertEqual(dev_args[dev_args.index("--server") + 1], "203.0.113.10:4100")
         self.assertEqual(dev_env["OMOBA_DEFAULT_CONFIG_DIR_SUFFIX"], "dev")
-        self.assertEqual(release.ios_settings(release.PROD, "TEAM", "7"),
-                         ["DEVELOPMENT_TEAM=TEAM", "CURRENT_PROJECT_VERSION=7",
-                          "OMOBA_CARGO_PROFILE=release", "CODE_SIGN_STYLE=Automatic"])
         dev_ios = release.ios_settings(release.resolve_flavor("dev"), "TEAM", "7")
         self.assertIn("OMOBA_CONTOUR=dev", dev_ios)
         self.assertIn("OMOBA_GAME_SERVER=lobby.dev.omoba.io:4100", dev_ios)
         self.assertNotIn("OMOBA_CONTOUR=dev", release.ios_settings(
             release.resolve_flavor(server="192.0.2.1:4000"), "TEAM", "7"))
+
+    def test_a_production_ios_archive_pins_its_contour_and_server_over_the_local_xcconfig(self):
+        # Omoba.local.xcconfig may hold `OMOBA_CONTOUR = dev` or a LAN OMOBA_GAME_SERVER
+        # for Xcode runs; command-line settings win, so a release always names both.
+        self.assertEqual(release.ios_settings(release.PROD, "TEAM", "7"),
+                         ["DEVELOPMENT_TEAM=TEAM", "CURRENT_PROJECT_VERSION=7",
+                          "OMOBA_CARGO_PROFILE=release", "CODE_SIGN_STYLE=Automatic",
+                          "OMOBA_CONTOUR=prod", "OMOBA_GAME_SERVER="])
+        self.assertEqual(release.ios_settings(release.resolve_flavor(server="192.0.2.1:4000"), "TEAM", "7")[-2:],
+                         ["OMOBA_CONTOUR=prod", "OMOBA_GAME_SERVER=192.0.2.1:4000"])
+        # Each contour's setting is one Omoba.xcconfig and xcode_build.py both understand.
+        from contours import contour_of_xcode_setting
+        xcconfig = (release.ROOT / "mobile/ios/Omoba.xcconfig").read_text()
+        for contour in release.CONTOURS:
+            flavor = release.resolve_flavor(contour)
+            setting = next(item for item in release.ios_settings(flavor, "TEAM", "7")
+                           if item.startswith("OMOBA_CONTOUR="))
+            value = setting.split("=", 1)[1]
+            self.assertEqual(contour_of_xcode_setting(value), contour)
+            self.assertIn(f"OMOBA_BUNDLE_ID_{value} = {release.MOBILE[contour].bundle_id}", xcconfig)
+
+    def test_an_ios_archive_of_the_wrong_app_is_refused(self):
+        import plistlib
+
+        def archive_of(directory: Path, bundle_id: str | None, summary: bool) -> Path:
+            archive = directory / "Omoba.xcarchive"
+            app = archive / "Products/Applications/OmobaBeta.app"
+            app.mkdir(parents=True)
+            if bundle_id:
+                (app / "Info.plist").write_bytes(plistlib.dumps({"CFBundleIdentifier": bundle_id}))
+            if summary:
+                (archive / "Info.plist").write_bytes(plistlib.dumps(
+                    {"ApplicationProperties": {"CFBundleIdentifier": bundle_id}}))
+            return archive
+
+        prod, dev = release.PROD, release.resolve_flavor("dev")
+        cases = [(prod, "space.ekza.omoba.beta", True), (dev, "space.ekza.omoba.dev", False)]
+        for flavor, bundle_id, summary in cases:
+            with self.subTest(flavor.contour), tempfile.TemporaryDirectory() as temporary:
+                archive = archive_of(Path(temporary), bundle_id, summary)
+                self.assertEqual(release.archive_bundle_id(archive), bundle_id)
+                release.check_archive_identity(archive, flavor)
+        refused = [(prod, "space.ekza.omoba.dev"), (dev, "space.ekza.omoba.beta"), (prod, None)]
+        for flavor, bundle_id in refused:
+            with self.subTest(f"{flavor.contour} as {bundle_id}"), \
+                    tempfile.TemporaryDirectory() as temporary:
+                archive = archive_of(Path(temporary), bundle_id, False)
+                with self.assertRaises(SystemExit):
+                    release.check_archive_identity(archive, flavor)
 
     def test_the_phone_apps_never_share_an_identity(self):
         import plistlib
