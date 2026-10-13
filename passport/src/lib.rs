@@ -29,6 +29,25 @@ use std::{fs, io::Read, path::Path, time::Duration};
 
 /// Operator override of the trusted storefront passport API.
 pub const PASSPORT_URL_ENV: &str = "OMOBA_PASSPORT_URL";
+/// The passport a client's connection profile chose, set once at startup.
+static CHOSEN_PASSPORT: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
+/// The passport API compiled into this build (`OMOBA_DEFAULT_PASSPORT_URL`, set
+/// by `scripts/release.py`), if any.
+pub const COMPILED_PASSPORT_URL: Option<&str> = option_env!("OMOBA_DEFAULT_PASSPORT_URL");
+
+/// The passport this build was compiled for, else the public Ekza storefront.
+pub fn compiled_passport_url() -> &'static str {
+    COMPILED_PASSPORT_URL.unwrap_or(ekza_bevy_sdk::registry::DEFAULT_PASSPORT_URL)
+}
+
+/// Pins the passport for this process (the game client's connection profile,
+/// which already folds in the desktop `OMOBA_PASSPORT_URL` override). Returns
+/// false when one was already chosen; the first choice stays.
+pub fn set_passport_url(url: String) -> bool {
+    CHOSEN_PASSPORT.set(url).is_ok()
+}
+
 /// Omoba only accepts devnet libraries until a mainnet storefront exists.
 const LIBRARY_NETWORK: &str = "solana-devnet";
 
@@ -47,17 +66,16 @@ impl PassportApi {
         PassportClient::new(base, OMOBA_PROJECT).map(Self)
     }
 
+    /// The client's chosen passport ([`set_passport_url`]), else
     /// `OMOBA_PASSPORT_URL`, then the SDK-wide `EKZA_PASSPORT_URL`, then the
-    /// public Ekza storefront. The origin is always operator- or build-defined,
-    /// never taken from a game packet.
+    /// compiled one ([`compiled_passport_url`]). The origin is always
+    /// operator- or build-defined, never taken from a game packet.
     pub fn from_env() -> Result<Self, String> {
-        let base = std::env::var(PASSPORT_URL_ENV)
-            .or_else(|_| std::env::var(ekza_bevy_sdk::passport::client::PASSPORT_URL_ENV))
-            .unwrap_or_else(|_| {
-                option_env!("OMOBA_DEFAULT_PASSPORT_URL")
-                    .unwrap_or(ekza_bevy_sdk::registry::DEFAULT_PASSPORT_URL)
-                    .to_owned()
-            });
+        let base = CHOSEN_PASSPORT.get().cloned().unwrap_or_else(|| {
+            std::env::var(PASSPORT_URL_ENV)
+                .or_else(|_| std::env::var(ekza_bevy_sdk::passport::client::PASSPORT_URL_ENV))
+                .unwrap_or_else(|_| compiled_passport_url().to_owned())
+        });
         Self::new(&base)
     }
 

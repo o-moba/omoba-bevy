@@ -186,15 +186,15 @@ disposable `public.ecr.aws/supabase/postgres` container.
 
 ```sh
 python3 scripts/release.py build all --contour dev --dry-run   # what would be baked in
-python3 scripts/release.py build all --contour dev             # macOS, Windows (cargo-xwin), Linux on this Mac
+python3 scripts/release.py build all --contour dev             # macOS, Windows (cargo-xwin), Linux, Android, iOS on this Mac
 ```
 
 - Baked in: `OMOBA_DEFAULT_GAME_SERVER_ADDR=lobby.dev.omoba.io:4100` (`--server` overrides; prefer the IP when DNS is not set), `OMOBA_DEFAULT_REGISTRY_URL=https://registry.dev.ekza.io` (`--registry` overrides), `OMOBA_DEFAULT_PASSPORT_URL=http://127.0.0.1:9/api/passport` (`--passport` overrides, dev or loopback only) and `OMOBA_DEFAULT_CONFIG_DIR_SUFFIX=dev`.
 - No build, dev or production, inherits a compile-time setting from the shell: every `OMOBA_DEFAULT_*`, `OMOBA_ACCOUNT_API_URL`, `OMOBA_PORTAL_ORIGIN` and `EKZA_DEV_HTTP_HOST` is dropped before the build sets its own. That covers macOS, Windows, Linux (native and Docker), Android and the iOS archive. `scripts/test_release.py` checks the list against every `option_env!` in the sources.
-- Settings, saved server, identity key, Ekza session and avatar/weapon caches live in `~/.config/omoba-bevy-dev` (macOS/Linux) or `%APPDATA%\omoba-bevy-dev` (Windows). A tester's production install in `omoba-bevy` is never read or written. `OMOBA_CLIENT_CONFIG_DIR` still overrides both.
-- No production lobby at run time either. In a dev build, the server editor's online preset is **OMOBA Dev** (this build's lobby), not OMOBA Beta. Every address the client validates (typed, saved, `GAME_SERVER_ADDR`, match allocations) is refused when it is the production VPS (77.246.105.57, any port) or an `omoba.io`/`ekza.io` name outside `dev.*`. A refused saved address falls back to the dev lobby.
+- Settings, identity key and the connection choice live in `~/.config/omoba-bevy-dev` (macOS/Linux) or `%APPDATA%\omoba-bevy-dev` (Windows); each connection profile keeps its Ekza session, avatar/weapon caches and match-resume hint in `profiles/<profile>/` there. A tester's production install in `omoba-bevy` is never read or written. `OMOBA_CLIENT_CONFIG_DIR` still overrides both.
+- No production lobby at run time either. A dev build's profiles are Dev (this build's lobby and registry), Local and Custom (Home → Connection, applied at the next start; [connection profiles](../../../docs/connection-profiles.md)). Every address the client validates (custom, `GAME_SERVER_ADDR`, match allocations) is refused when it is the production VPS (77.246.105.57, any port) or an `omoba.io`/`ekza.io` name outside `dev.*`; a refused custom profile falls back to Dev.
 - Packages: `dist/v<version>-dev/Omoba-<version>-dev-macos-arm64.zip`, `…-dev-windows-x64.zip` and `omoba-<version>-dev-linux-x64.tar.gz` (which also carries `omoba-account-api` for the dev lobby). The macOS app is `Omoba Dev.app` with bundle id `space.ekza.omoba.desktop.dev`.
-- Desktop only. An APK or iPhone build would share the production app id, so `release.py` refuses `android`/`ios` for `--contour dev`.
+- Phones: the OMOBA Dev app, `space.ekza.omoba.dev` ("OMOBA Dev", DEV-ribbon icon), installs beside the production `space.ekza.omoba.beta`. `release.py build android|ios --contour dev`; phone builds take only `--server`.
 - Cross-contour refusals:
   - A dev build refuses the production VPS on any port, any non-dev `omoba.io`/`ekza.io` name, the production registry, and any passport that is not a dev name or loopback.
   - A production build refuses `*.dev.omoba.io`/`*.dev.ekza.io` (server, registry, passport), and also `$DEV_IP` when it is set.

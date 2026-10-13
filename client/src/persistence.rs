@@ -1,11 +1,15 @@
-//! On-disk client preferences: graphics, character and avatar selection,
-//! optional server address.
+//! On-disk client preferences: graphics, character and avatar selection, the
+//! last server address (informational).
 //!
 //! **Load path**: `OMOBA_CLIENT_CONFIG_DIR` if set, else platform default
 //! (`~/.config/omoba-bevy/client_preferences.json` on Unix,
 //! `%APPDATA%/omoba-bevy/client_preferences.json` on Windows).
 //!
-//! **Server address precedence** matches [`crate::session_config`] docs.
+//! **Server address.** `game_server_addr` is still written (older builds read
+//! it) but no longer read: the connection profile decides the lobby
+//! ([`crate::session_config::startup_server_addr`]), so an address saved by an
+//! older build's server field can never pin a production build that has no
+//! server selection.
 
 use std::fs;
 use std::io;
@@ -25,7 +29,7 @@ use crate::model_scale::{
     DEFAULT_MODEL_TARGET_HEIGHT, MAX_MODEL_TARGET_HEIGHT, MIN_MODEL_TARGET_HEIGHT,
     ModelScaleSettings,
 };
-use crate::session_config::{DEFAULT_GAME_SERVER_ADDR, FALLBACK_GAME_SERVER_ADDR};
+use crate::session_config::FALLBACK_GAME_SERVER_ADDR;
 use crate::team::CharacterChoice;
 use crate::ui::living_background::MotionSettings;
 use crate::world::{
@@ -39,10 +43,6 @@ const LEGACY_DEFAULT_MODEL_TARGET_HEIGHT: f32 = 1.15;
 const SCHEMA_3_DEFAULT_MODEL_TARGET_HEIGHT: f32 = 1.45;
 const PREFS_FILENAME: &str = "client_preferences.json";
 const CLIENT_SESSION_ID_MAX_LEN: usize = 64;
-
-/// Address loaded from disk for use when `GAME_SERVER_ADDR` is unset (validated).
-#[derive(Resource, Default, Clone)]
-pub struct FileGameServerAddr(pub Option<String>);
 
 /// Last address used for UDP (env, file, or default), for persisting alongside graphics prefs.
 #[derive(Resource, Default, Clone)]
@@ -62,8 +62,7 @@ pub struct ClientPersistencePlugin;
 
 impl Plugin for ClientPersistencePlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<FileGameServerAddr>()
-            .init_resource::<AudioSettings>()
+        app.init_resource::<AudioSettings>()
             .init_resource::<BeginnerTips>()
             .init_resource::<RenderSettings>()
             .init_resource::<HudPositionSettings>()
@@ -100,6 +99,7 @@ struct ClientPreferencesFile {
     handheld: shared::handheld::HandheldSelection,
     #[serde(default = "default_schema_version")]
     schema_version: u32,
+    /// The last lobby, written for older builds; never read back.
     #[serde(default)]
     game_server_addr: Option<String>,
     #[serde(default)]
@@ -177,17 +177,22 @@ pub(crate) fn preferences_path() -> Option<PathBuf> {
 }
 
 /// Validates `host:port` or a parseable [`SocketAddr`] string for client config. A
-/// contour (dev) build also refuses the production lobby here, so neither a typed
-/// address, a saved one, `GAME_SERVER_ADDR` nor a match allocation can reach it
-/// ([`crate::session_config::endpoint_allowed`]).
+/// contour (dev) build also refuses the production lobby here, so neither a custom
+/// profile, `GAME_SERVER_ADDR` nor a match allocation can reach it
+/// ([`crate::session_config::endpoint_allowed_for`]).
 pub fn validate_game_server_addr(raw: &str) -> Option<String> {
+    validate_game_server_addr_in(crate::session_config::BUILD_CONTOUR, raw)
+}
+
+/// [`validate_game_server_addr`] for a build of `contour`.
+pub(crate) fn validate_game_server_addr_in(contour: Option<&str>, raw: &str) -> Option<String> {
     let t = raw.trim();
     if t.is_empty() {
         return None;
     }
     if let Ok(address) = t.parse::<SocketAddr>() {
         return (address.port() != 0
-            && crate::session_config::endpoint_allowed(&address.ip().to_string()))
+            && crate::session_config::endpoint_allowed_for(contour, &address.ip().to_string()))
         .then(|| address.to_string());
     }
     let (host, port_str) = t.rsplit_once(':')?;
@@ -209,7 +214,7 @@ pub fn validate_game_server_addr(raw: &str) -> Option<String> {
         return None;
     }
     let port: u16 = port_str.trim().parse().ok()?;
-    (port != 0 && crate::session_config::endpoint_allowed(dns_name))
+    (port != 0 && crate::session_config::endpoint_allowed_for(contour, dns_name))
         .then(|| format!("{host}:{port}"))
 }
 
@@ -300,9 +305,8 @@ fn write_atomically(path: &Path, data: &[u8]) -> io::Result<()> {
     result
 }
 
-/// Startup: load JSON if present and apply to resources; always sets [`FileGameServerAddr`].
+/// Startup: load JSON if present and apply to resources.
 pub(crate) fn load_persistent_client_settings(
-    mut file_addr: ResMut<FileGameServerAddr>,
     mut lighting: ResMut<LightingSettings>,
     mut model: ResMut<ModelScaleSettings>,
     mut team: ResMut<crate::team::TeamSelection>,
@@ -318,7 +322,6 @@ pub(crate) fn load_persistent_client_settings(
     mut saved_language: ResMut<SavedLanguage>,
 ) {
     gate.suppress_saves = 3;
-    file_addr.0 = None;
     initial_save_pending.0 = false;
 
     let Some(path) = preferences_path() else {
@@ -357,14 +360,6 @@ pub(crate) fn load_persistent_client_settings(
     saved_language.0 = stored_language(disk.language.as_deref());
     if let Some(zoom) = disk.camera_zoom {
         *camera = CameraSettings { zoom }.sanitized();
-    }
-
-    if let Some(addr_raw) = disk.game_server_addr.as_deref() {
-        if let Some(addr) = validate_game_server_addr(addr_raw) {
-            file_addr.0 = Some(addr);
-        } else {
-            warn!("Ignoring invalid game_server_addr in preferences file.");
-        }
     }
 
     if let Some(raw_session_id) = disk.client_session_id.as_deref() {
@@ -495,7 +490,7 @@ pub(crate) fn save_client_preferences_to_disk(
         ));
     };
     let addr = validate_game_server_addr(game_server_addr).unwrap_or_else(|| {
-        validate_game_server_addr(DEFAULT_GAME_SERVER_ADDR)
+        validate_game_server_addr(crate::session_config::default_server_addr())
             .unwrap_or_else(|| FALLBACK_GAME_SERVER_ADDR.to_string())
     });
     let session_id =
@@ -581,7 +576,7 @@ fn save_client_preferences_on_change(
         model.as_ref(),
         team.character,
         if addr.is_empty() {
-            DEFAULT_GAME_SERVER_ADDR
+            crate::session_config::default_server_addr()
         } else {
             addr
         },
@@ -1279,7 +1274,7 @@ mod tests {
                 &LightingSettings::default(),
                 &ModelScaleSettings { target_height },
                 CharacterChoice::Paco,
-                DEFAULT_GAME_SERVER_ADDR,
+                FALLBACK_GAME_SERVER_ADDR,
                 "scale-migration-test",
                 &AudioSettings::default(),
                 &CameraSettings::default(),

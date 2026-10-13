@@ -5,6 +5,26 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Connection profiles and the OMOBA Dev app ([docs/connection-profiles.md](docs/connection-profiles.md)).
+  **Production builds have no server selection at all**: the party lobby's server
+  field, the Home/phone SERVER button and the Beta/Local presets are gone, and a
+  `game_server_addr` saved by an older build is no longer read; desktop developers and
+  self-hosters override the lobby, registry and passport with `GAME_SERVER_ADDR`,
+  `OMOBA_REGISTRY_URL`, `OMOBA_PASSPORT_URL` (phones read none; the dev app ignores a
+  production one). **Dev-contour builds**
+  get a Connection panel (kit modal; Home and Party → Connection) with three profiles,
+  each one button for lobby, Ekza registry, market, Studio and passport: Dev (default:
+  `lobby.dev.omoba.io:4100`, `registry.dev.ekza.io`, `app.dev.omoba.io`,
+  `studio.dev.ekza.io`, closed passport), Local (loopback `:4000`/`:8018`/`:3010`/`:5188`)
+  and Custom (typed lobby, optional registry; production refused). A switch is confirmed,
+  saved, and applies at the next start (desktop: Restart now); Home shows the running
+  profile beside DEV. Each profile keeps its Ekza link, store caches and match-resume
+  hint in `profiles/<profile>/`. The dev app now also exists on phones:
+  `scripts/release.py build ios|android --contour dev` makes `space.ekza.omoba.dev`
+  ("OMOBA Dev", DEV-ribbon icon from `scripts/make_dev_icons.py`), which installs beside
+  `space.ekza.omoba.beta`; the release workflow builds the dev APK. `PROTOCOL_VERSION`
+  is unchanged.
+
 - DEV contour polish. A dev-contour build shows a `DEV` badge (kit badge,
   `common.contour_badge`) beside the Home title and under the match score strip, and its
   Collection and draft hints name `app.dev.omoba.io/market` instead of the production

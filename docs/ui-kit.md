@@ -261,7 +261,7 @@ the same schedule constraints, so the same overlay takes a press as before
 | `supporter::keyboard_close` | `Modal`, before `toggle_pause_menu` | supporter panel |
 | `career::dismiss_with_escape` | `Modal`, before `toggle_pause_menu` | career modal |
 | `sandbox::ui::keys` | `Modal`, before `toggle_pause_menu` | Combat Test panel, teleport, field edit |
-| `frontend::server_field::type_address` | before `PauseMenuSet::Close` | lobby server field edit |
+| `mobile_ui::close_server_entry_on_back` | `Modal`, before `PauseMenuSet::Close` | connection panel (confirm step first; dev builds only) |
 | `pause_menu::toggle_pause_menu` | `PauseMenuSet::Close`, after help and the shop | toggles the pause menu |
 
 The pause menu is the last reader: `Esc` opens or closes it; a back press

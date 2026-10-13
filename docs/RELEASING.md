@@ -86,10 +86,11 @@ server. Direct Xcode/server builds must retain a manifest from the same frozen s
    `make sdk-pin-check SDK_BRANCH=main` so the pinned SDK commit is on SDK `main`).
 2. Bump `Cargo.toml` version, move `CHANGELOG.md` `[Unreleased]` entries into
    `## [x.y.z] - date`, update `docs/features.md`, commit to `main`.
-3. Optional: choose the server clients start on. Either pass
+3. Optional: choose the lobby clients use. Either pass
    `RELEASE_SERVER=host:port` to the make targets, set the repository
-   variable `OMOBA_RELEASE_SERVER` for CI, or leave it empty (players type the
-   address in the party lobby → SERVER → Change).
+   variable `OMOBA_RELEASE_SERVER` for CI, or leave it empty (the public lobby).
+   Production clients have no in-game server selection
+   ([connection profiles](connection-profiles.md)).
 4. **Desktop + Android:** push the tag (or run the workflow by hand):
 
    ```sh
@@ -109,19 +110,23 @@ server. Direct Xcode/server builds must retain a manifest from the same frozen s
 
 ## DEV-contour tester builds
 
-Dev builds are for testers on the dev contour (dev lobby on the dedicated dev VPS,
-`registry.dev.ekza.io`). They are desktop only and never replace or share state with a
-production install:
+Dev builds are the separate OMOBA Dev app for testers on the dev contour (dev lobby on
+the dedicated dev VPS, `registry.dev.ekza.io`) on every platform. They never replace or
+share state with a production install, and on phones they install beside it
+(`space.ekza.omoba.dev`, "OMOBA Dev", DEV-ribbon icon). In-game, Home → Connection
+switches between the Dev, Local and Custom profiles
+([connection profiles, owner checklist](connection-profiles.md)):
 
 ```sh
 python3 scripts/release.py build all --contour dev --dry-run   # what gets baked in
-python3 scripts/release.py build all --contour dev             # macOS, Windows, Linux into dist/v<version>-dev/
+python3 scripts/release.py build all --contour dev             # every platform this host can build, into dist/v<version>-dev/
+python3 scripts/release.py build ios --contour dev --upload    # OMOBA Dev to App Store Connect (internal TestFlight)
 python3 scripts/release.py ci --contour dev --ref v<version>-dev.1 --dry-run
 ```
 
 - Defaults: `lobby.dev.omoba.io:4100` (`--server <DEV_IP>:4100` when DNS is not set), `https://registry.dev.ekza.io`, passport `http://127.0.0.1:9/api/passport` (closed: there is no dev passport yet, and `avatar.ekza.io` is production; `--passport` takes a dev or loopback URL), settings folder `omoba-bevy-dev`, window title `OMOBA DEV`, `Omoba Dev.app` (bundle id `…desktop.dev`). The dev Linux package also carries `omoba-account-api`, the dev lobby's migration tool.
-- `-dev` appears in every package and dist directory name. Dev releases use `v<version>-dev.N` tags only, are drafts and prereleases, and target `dev`. The workflow's `contour=dev` input skips Android.
-- A dev build refuses production endpoints, and a production build refuses dev ones (and `$DEV_IP`). A dev client also refuses the production lobby at run time: its online preset is OMOBA Dev, and typed, saved or allocated production addresses are rejected.
+- `-dev` appears in every package and dist directory name. Dev releases use `v<version>-dev.N` tags only, are drafts and prereleases, and target `dev`. The workflow's `contour=dev` input also builds the dev APK.
+- A dev build refuses production endpoints, and a production build refuses dev ones (and `$DEV_IP`). A dev client also refuses the production lobby at run time: it has no Production profile, and custom, `GAME_SERVER_ADDR` or allocated production addresses are rejected.
 - No build inherits a compile-time setting from the shell (`OMOBA_DEFAULT_*`, `OMOBA_ACCOUNT_API_URL`, `OMOBA_PORTAL_ORIGIN`, `EKZA_DEV_HTTP_HOST`), including the iOS archive.
 - The dev lobby itself is shipped with `ops/vps/dev/lobby_dev.py`; see [ops/vps/dev/README.md](../ops/vps/dev/README.md).
 

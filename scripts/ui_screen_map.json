@@ -278,14 +278,15 @@
     },
     {
       "id": "server-entry",
-      "title": "Server entry",
+      "title": "Connection panel (dev builds)",
       "run": "shell",
       "frame": "11-server.png",
       "profiles": [
         "phone"
       ],
-      "route": "Home \u2192 SERVER (phone)",
-      "source": "client/src/frontend/server_field.rs"
+      "route": "Home \u2192 Connection (dev-contour builds only)",
+      "source": "client/src/mobile_ui.rs",
+      "fixture": "Production builds have no server UI and skip this frame; capture with a `--contour dev` build"
     },
     {
       "id": "home-help",

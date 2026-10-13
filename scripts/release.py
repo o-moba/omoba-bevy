@@ -18,26 +18,31 @@ android (universal APK, needs SDK/NDK), ios (Xcode archive / TestFlight, needs
 the Apple team). `make release-all` builds all five on an Apple-silicon Mac.
 
 Artifacts land in dist/v<version>/ with SHA256SUMS.txt. `--server host:port`
-compiles the initial server address into every client; players can change it
-in the party lobby (desktop) or the SERVER keypad (phone). `--registry URL`
-compiles the initial Ekza registry origin the same way.
+compiles the lobby into every client and `--registry URL` the Ekza registry
+origin (self-hosted builds). Production clients have no server selection: on a
+desktop GAME_SERVER_ADDR / OMOBA_REGISTRY_URL override them, phones take none.
 
-DEV-contour tester builds (desktop only) point at the dev lobby on the dedicated
-dev VPS and the dev registry, use a closed loopback passport (there is no dev Ekza
-passport yet, and avatar.ekza.io is production), and never share state with a
-production install:
+DEV-contour tester builds are the separate OMOBA Dev app on every platform. They
+point at the dev lobby on the dedicated dev VPS and the dev registry (their Dev
+connection profile; the in-game Connection panel also offers Local and Custom), use a
+closed loopback passport (there is no dev Ekza passport yet, and avatar.ekza.io is
+production), and never share state or an app identity with a production install:
 
     python3 scripts/release.py build macos --contour dev   # lobby.dev.omoba.io:4100 + registry.dev.ekza.io
     python3 scripts/release.py build macos --contour dev --server <dev VPS IPv4>:4100   # without DNS
+    python3 scripts/release.py build android --contour dev # space.ekza.omoba.dev, "OMOBA Dev"
+    python3 scripts/release.py build ios --contour dev     # space.ekza.omoba.dev archive (TestFlight: --upload)
 
 The client resolves a host name itself (lobby and match worker), so the default
 needs only the DNS A record lobby.dev.omoba.io -> dev VPS. Dev packages land in
 dist/v<version>-dev/ as Omoba-<version>-dev-*.zip / omoba-<version>-dev-*.tar.gz,
 keep settings, session and caches in an `omoba-bevy-dev` folder instead of
 `omoba-bevy`, title their desktop window "OMOBA DEV", and the macOS app is
-"Omoba Dev.app" with its own bundle id. The dev Linux package also carries
-omoba-account-api, the dev lobby's schema migration tool. A production build
-refuses dev endpoints (and $DEV_IP when set); a dev build refuses production ones.
+"Omoba Dev.app" with its own bundle id and the DEV-ribbon icon. The phone apps are
+space.ekza.omoba.dev ("OMOBA Dev", scripts/contours.py), beside space.ekza.omoba.beta.
+The dev Linux package also carries omoba-account-api, the dev lobby's schema
+migration tool. A production build refuses dev endpoints (and $DEV_IP when set); a
+dev build refuses production ones. Production clients have no server selection.
 No build inherits a compile-time default (OMOBA_DEFAULT_*, OMOBA_ACCOUNT_API_URL,
 OMOBA_PORTAL_ORIGIN, EKZA_DEV_HTTP_HOST) from the shell.
 
@@ -74,11 +79,11 @@ ANDROID_KEYSTORE = Path.home() / ".config/omoba/android-playtest.keystore"
 REPO = "o-moba/omoba-bevy"
 
 # Build-time client defaults a Flavor sets (client/src/session_config.rs,
-# passport/src/community.rs, passport/src/lib.rs, client/src/platform.rs).
-SERVER_DEFAULT_ENV = "OMOBA_DEFAULT_GAME_SERVER_ADDR"
-REGISTRY_DEFAULT_ENV = "OMOBA_DEFAULT_REGISTRY_URL"
-PASSPORT_DEFAULT_ENV = "OMOBA_DEFAULT_PASSPORT_URL"
-CONFIG_SUFFIX_ENV = "OMOBA_DEFAULT_CONFIG_DIR_SUFFIX"
+# passport/src/community.rs, passport/src/lib.rs, client/src/platform.rs) and the
+# contours' identities: scripts/contours.py, shared with the mobile packagers.
+from contours import (CONFIG_SUFFIX_ENV, CONTOURS, DEV_CONFIG_SUFFIX, DEV_LOBBY,  # noqa: E402
+                      DEV_PASSPORT, DEV_REGISTRY, MOBILE, PASSPORT_DEFAULT_ENV, REGISTRY_DEFAULT_ENV,
+                      SERVER_DEFAULT_ENV)
 CLIENT_DEFAULT_ENVS = (SERVER_DEFAULT_ENV, REGISTRY_DEFAULT_ENV, PASSPORT_DEFAULT_ENV, CONFIG_SUFFIX_ENV)
 # Every compile-time setting the workspace (`option_env!`) or the pinned Ekza SDK
 # (EKZA_DEV_HTTP_HOST, ekza-bevy-sdk src/registry.rs) reads. A build drops all of
@@ -90,21 +95,15 @@ BUILD_TIME_ENVS = CLIENT_DEFAULT_ENVS + ("OMOBA_ACCOUNT_API_URL", "OMOBA_PORTAL_
 
 # Contours. Production: the public beta lobby on the production VPS and the Ekza
 # registry/Studio. DEV: ops/vps/omoba-lobby-dev.service on the dedicated dev VPS
-# (lobby.dev.omoba.io, address only known from $DEV_IP) and registry.dev.ekza.io.
-CONTOURS = ("prod", "dev")
-DEV_PLATFORMS = ("macos", "windows", "linux")
-DEV_LOBBY = "lobby.dev.omoba.io:4100"
-DEV_REGISTRY = "https://registry.dev.ekza.io"
-# The dev contour has no Ekza passport yet; https://avatar.ekza.io/api/passport (the SDK
-# default) is production. Dev builds and the dev lobby therefore use a closed loopback
-# port, so wallet pairing and protected-avatar tickets fail closed instead of reaching
-# production. Free and shipped avatars still work. Once a dev passport exists, pass
-# --passport https://<name>.dev.ekza.io/api/passport and update ops/vps/dev/lobby_dev.py.
-DEV_PASSPORT = "http://127.0.0.1:9/api/passport"
+# (lobby.dev.omoba.io, address only known from $DEV_IP) and registry.dev.ekza.io,
+# built as the separate OMOBA Dev app on every platform (phones: space.ekza.omoba.dev).
+# The dev contour has no Ekza passport yet (DEV_PASSPORT is a closed loopback port);
+# once one exists, pass --passport https://<name>.dev.ekza.io/api/passport and update
+# ops/vps/dev/lobby_dev.py.
+DEV_PLATFORMS = PLATFORMS
 # The dev Linux package also carries the dev lobby's schema migration tool
 # (ops/vps/dev/lobby_dev.py runs `omoba-account-api migrate` on the dev VPS).
 DEV_LINUX_TOOLS = ("omoba-account-api",)
-DEV_CONFIG_SUFFIX = "dev"
 DEV_IP_ENV = "DEV_IP"
 PROD_VPS_IPS = frozenset({"77.246.105.57"})
 PUBLIC_ZONES = ("omoba.io", "ekza.io")
@@ -404,7 +403,7 @@ def resolve_flavor(contour: str = "prod", server: str | None = None, registry: s
 def player_readme(version: str, target: str, flavor: Flavor = PROD) -> str:
     server = flavor.server
     server_line = (f"This build connects to {server} by default." if server else
-                   "This build starts on 127.0.0.1:4000 (a server on the same computer).")
+                   "This build plays on the public OMOBA lobby.")
     title = f"OMOBA {version} — DEV test build" if flavor.dev else f"OMOBA {version} — playtest build"
     passport_notice = ("Ekza wallet pairing and purchased avatars are off in dev builds (there is\n"
                        "no dev passport yet); free and built-in avatars work.\n"
@@ -419,6 +418,15 @@ Its window says OMOBA DEV. It keeps its settings, session and downloads in its
 own "{flavor.config_dir}" folder, so a normal OMOBA install on this computer is
 left untouched. Dev servers and dev accounts may be reset at any time.
 {passport_notice}{tools_notice}""" if flavor.dev else ""
+    join_own_server = ("""
+To play on your own practice server instead: Home -> Connection -> Custom,
+type the host's address (host:port, for example 192.168.1.20:4000), press Use
+and restart the game. Connection -> Dev switches back.
+""" if flavor.dev else """
+To play on your own practice server instead (computers only): start the game
+with GAME_SERVER_ADDR set to the host's address, for example
+GAME_SERVER_ADDR=192.168.1.20:4000. The game has no in-game server picker.
+""")
     app = f"{flavor.app_name}.app"
     app_path = f'"/path/to/{app}"' if " " in app else f"/path/to/{app}"
     common = f"""{title}
@@ -427,15 +435,11 @@ left untouched. Dev servers and dev accounts may be reset at any time.
 {server_line}
 {dev_notice}
 PLAY WITH A FRIEND
-1. One of you hosts a practice server (see HOSTING below) or you both use
-   a shared server address.
-2. Both start the game. Home -> "Party & friends". On a computer, press
-   "Change" under SERVER and type the host's address (host:port, for example
-   192.168.1.20:4000). It is remembered for the next start.
-3. Invite your friend from "Online on this server"; they press Accept.
-4. The leader presses PLAY VS BOTS. Pick heroes. You play on one team and
+1. Both start the game. Home -> "Party & friends".
+2. Invite your friend from "Online on this server"; they press Accept.
+3. The leader presses PLAY VS BOTS. Pick heroes. You play on one team and
    bots take the other seats.
-
+{join_own_server}
 HOSTING A PRACTICE SERVER
 The host's UDP port 4000 must be reachable: same Wi-Fi/LAN, a VPN such as
 Tailscale/ZeroTier, or a router port forward for UDP 4000.
@@ -462,10 +466,10 @@ LINUX
 - Host: ./host-practice.sh (practice server with bots on 0.0.0.0:4000)
 - A long-running server: see omoba-practice.service (systemd example).
 """,
-        "android": """
+        "android": f"""
 ANDROID
 - Allow installs from your browser/file manager, open the APK, install.
-- Tap SERVER on the home screen to enter the host's address.
+- {"OMOBA Dev installs beside OMOBA; its Connection button picks Dev, Local or Custom." if flavor.dev else "It plays on the public OMOBA lobby."}
 """,
     }.get(target, "")
     return common + specific + "\nLicenses and attributions: see the legal/ folder and ATTRIBUTION.md.\n"
@@ -575,8 +579,14 @@ def zip_tree(source: Path, archive: Path, root_name: str):
                 bundle.writestr(info, handle.read())
 
 
-def mac_icon(resources: Path):
-    source = ROOT / "mobile/ios/Assets.xcassets/AppIcon.appiconset/AppIcon.png"
+def mac_icon_source(flavor: Flavor = PROD) -> Path:
+    """The phone app icon of the build's contour: the dev app has the DEV ribbon."""
+    icon_set = MOBILE[flavor.contour].ios_app_icon
+    return ROOT / f"mobile/ios/Assets.xcassets/{icon_set}.appiconset/AppIcon.png"
+
+
+def mac_icon(resources: Path, flavor: Flavor = PROD):
+    source = mac_icon_source(flavor)
     if not source.is_file() or not shutil.which("iconutil"):
         return None
     with tempfile.TemporaryDirectory() as temporary:
@@ -633,7 +643,7 @@ def build_macos(version: str, out: Path, flavor: Flavor) -> Path:
         shutil.copy2(binaries["client"], macos_dir / "client")
         shutil.copy2(binaries["server"], macos_dir / "server")
         stage_common(stage, version, "macos", flavor, resources / "assets")
-        icon = mac_icon(resources)
+        icon = mac_icon(resources, flavor)
         with (app / "Contents/Info.plist").open("wb") as handle:
             plistlib.dump(mac_info_plist(version, flavor, icon), handle)
         host = stage / "Host Practice Server.command"
@@ -856,10 +866,20 @@ def ensure_android_keystore() -> Path:
     return ANDROID_KEYSTORE
 
 
+def mobile_endpoints_check(flavor: Flavor, platform_name: str) -> None:
+    """Dev phone builds (and every iOS archive) compile their contour's registry and
+    passport (scripts/contours.py; production: the SDK defaults); only --server changes."""
+    defaults = (DEV_REGISTRY, DEV_PASSPORT) if flavor.dev else (None, None)
+    if (flavor.registry, flavor.passport) != defaults:
+        raise SystemExit(f"--registry/--passport are not supported for {platform_name}: the "
+                         f"{flavor.contour} app compiles its contour's own (scripts/contours.py)")
+
+
 def build_android(version: str, out: Path, flavor: Flavor) -> Path:
+    """The production app (space.ekza.omoba.beta) or, for --contour dev, the OMOBA Dev
+    app (space.ekza.omoba.dev, DEV icon), which installs beside it."""
     if flavor.dev:
-        raise SystemExit("dev-contour builds are desktop-only: an APK would install over the "
-                         "production app (same application id)")
+        mobile_endpoints_check(flavor, "android")
     # Reuse the one Android cargo cache; build.py signs with <output>/local-debug.keystore.
     work = shared_target() / "mobile/android"
     work.mkdir(parents=True, exist_ok=True)
@@ -873,8 +893,9 @@ def build_android(version: str, out: Path, flavor: Flavor) -> Path:
         args += ["--ndk", ndk]
     if flavor.server:
         args += ["--server", flavor.server]
+    args += ["--contour", flavor.contour]
     run(*args, env=client_env(flavor))
-    apk = work / f"omoba-{version}-android-{abi}-debug.apk"
+    apk = work / f"omoba-{version}{flavor.label}-android-{abi}-debug.apk"
     if not apk.is_file():
         raise SystemExit(f"Android build produced no {apk.name}")
     for leftover in ("omoba-unaligned.apk", "omoba-unsigned.apk"):
@@ -913,16 +934,49 @@ def remember_ios_build(number: str) -> None:
         main_copy.write_text(text)
 
 
+def ios_settings(flavor: Flavor, team: str, number: str) -> list[str]:
+    """xcodebuild settings of one archive. The contour picks the app (Omoba.xcconfig:
+    bundle id, icon; xcode_build.py: name, compiled dev profile); only --server reaches
+    the archive's Cargo step, through OMOBA_GAME_SERVER.
+
+    Both are always on the command line, which beats mobile/ios/Omoba.local.xcconfig:
+    an `OMOBA_CONTOUR = dev` or a LAN `OMOBA_GAME_SERVER` left there for Xcode runs
+    never reaches a release archive (a production upload stays the production app and
+    keeps the public lobby; it has no server selection to recover from a LAN one)."""
+    return [f"DEVELOPMENT_TEAM={team}", f"CURRENT_PROJECT_VERSION={number}",
+            "OMOBA_CARGO_PROFILE=release", "CODE_SIGN_STYLE=Automatic",
+            f"OMOBA_CONTOUR={flavor.contour}", f"OMOBA_GAME_SERVER={flavor.server or ''}"]
+
+
+def archive_bundle_id(archive: Path) -> str | None:
+    """CFBundleIdentifier of the app in an .xcarchive: the archive's own Info.plist
+    (ApplicationProperties), else the archived app's Info.plist."""
+    summary = archive / "Info.plist"
+    if summary.is_file():
+        properties = plistlib.loads(summary.read_bytes()).get("ApplicationProperties") or {}
+        if properties.get("CFBundleIdentifier"):
+            return properties["CFBundleIdentifier"]
+    for info in sorted((archive / "Products/Applications").glob("*.app/Info.plist")):
+        return plistlib.loads(info.read_bytes()).get("CFBundleIdentifier")
+    return None
+
+
+def check_archive_identity(archive: Path, flavor: Flavor) -> None:
+    """Refuses an archive that is not the app the flavor names (the production app for
+    prod, OMOBA Dev for --contour dev) before it is kept, exported or uploaded."""
+    expected = MOBILE[flavor.contour].bundle_id
+    found = archive_bundle_id(archive)
+    if found != expected:
+        raise SystemExit(f"The {flavor.contour} iOS archive is {found or 'missing its bundle id'}, "
+                         f"expected {expected}; check mobile/ios/Omoba.local.xcconfig")
+
+
 def build_ios(version: str, out: Path, flavor: Flavor, build_number: str | None, upload: bool) -> Path:
-    if flavor.dev:
-        raise SystemExit("dev-contour builds are desktop-only: an iPhone build would share the "
-                         "production bundle id")
-    if flavor.registry or flavor.passport:
-        raise SystemExit("--registry/--passport are not supported for ios: archives never take "
-                         "them from the shell (mobile/ios/xcode_build.py)")
+    """The production app or, for --contour dev, the OMOBA Dev app (space.ekza.omoba.dev,
+    its own App Store Connect record for internal TestFlight)."""
+    mobile_endpoints_check(flavor, "ios")
     if host_platform() != "macos":
         raise SystemExit("iOS builds need macOS with Xcode")
-    server = flavor.server
     config = local_xcconfig()
     team = config.get("DEVELOPMENT_TEAM")
     if not team:
@@ -933,16 +987,14 @@ def build_ios(version: str, out: Path, flavor: Flavor, build_number: str | None,
         shutil.rmtree(work)
     work.mkdir(parents=True)
     archive = work / "Omoba.xcarchive"
-    settings = [f"DEVELOPMENT_TEAM={team}", f"CURRENT_PROJECT_VERSION={number}",
-                "OMOBA_CARGO_PROFILE=release", "CODE_SIGN_STYLE=Automatic"]
-    if server:
-        settings.append(f"OMOBA_GAME_SERVER={server}")
+    settings = ios_settings(flavor, team, number)
     # The archive's Cargo step (mobile/ios/xcode_build.py) inherits this environment: no
     # compile-time default from the shell, so the server comes only from OMOBA_GAME_SERVER.
     env = scrub_build_env(os.environ.copy())
     run("xcodebuild", "-project", ROOT / "mobile/ios/Omoba.xcodeproj", "-scheme", "Omoba",
         "-configuration", "Release", "-destination", "generic/platform=iOS",
         "-archivePath", archive, "-allowProvisioningUpdates", "archive", *settings, env=env)
+    check_archive_identity(archive, flavor)
     options = work / "ExportOptions.plist"
     with options.open("wb") as handle:
         plistlib.dump({"method": "app-store-connect", "teamID": team, "signingStyle": "automatic",
@@ -950,7 +1002,7 @@ def build_ios(version: str, out: Path, flavor: Flavor, build_number: str | None,
                        "manageAppVersionAndBuildNumber": False,
                        "uploadSymbols": True}, handle)
     export = work / "export"
-    kept = out / f"Omoba-{version}-ios-{number}.xcarchive"
+    kept = out / f"Omoba-{version}{flavor.label}-ios-{number}.xcarchive"
     shutil.rmtree(kept, ignore_errors=True)
     run("ditto", archive, kept)
     try:
@@ -961,7 +1013,7 @@ def build_ios(version: str, out: Path, flavor: Flavor, build_number: str | None,
         # Use Accounts" otherwise). The signed archive is kept and handed to Organizer.
         organizer = Path.home() / "Library/Developer/Xcode/Archives" / time.strftime("%Y-%m-%d")
         organizer.mkdir(parents=True, exist_ok=True)
-        listed = organizer / f"Omoba {version} ({number}).xcarchive"
+        listed = organizer / f"{flavor.app_name} {version} ({number}).xcarchive"
         shutil.rmtree(listed, ignore_errors=True)
         run("ditto", archive, listed)
         subprocess.run(["open", "-a", "Xcode", str(listed)])
@@ -971,7 +1023,8 @@ def build_ios(version: str, out: Path, flavor: Flavor, build_number: str | None,
               "Distribute App → App Store Connect → Upload", file=sys.stderr)
         return kept
     if upload:
-        print(f"Uploaded build {version} ({number}) to App Store Connect; assign it to testers in TestFlight.")
+        print(f"Uploaded {flavor.app_name} {version} ({number}) to App Store Connect "
+              f"({MOBILE[flavor.contour].bundle_id}); assign it to testers in TestFlight.")
         remember_ios_build(number)
     ipas = list(export.glob("*.ipa"))
     target = out / artifact_name(version, "ios", flavor.contour)
@@ -1012,11 +1065,11 @@ def write_compatibility_manifest(out: Path, version: str) -> Path:
 
 
 def build_targets(platform_arg: str, flavor: Flavor, buildable: dict) -> list[str]:
-    """Platforms one `build` invocation makes; a dev build never makes a mobile package."""
+    """Platforms one `build` invocation makes. Every platform has a dev app with its own
+    identity (desktop -dev packages, phones space.ekza.omoba.dev)."""
     if platform_arg != "all":
         if flavor.dev and platform_arg not in DEV_PLATFORMS:
-            raise SystemExit(f"dev-contour builds are desktop-only ({', '.join(DEV_PLATFORMS)}); "
-                             f"{platform_arg} would share the production app id")
+            raise SystemExit(f"no dev-contour app for {platform_arg}")
         return [platform_arg]
     return [p for p in PLATFORMS if buildable[p] and (not flavor.dev or p in DEV_PLATFORMS)]
 
