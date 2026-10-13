@@ -84,6 +84,10 @@ mod command_trace {
 #[path = "bots_trace_tests.rs"]
 mod trace_tests;
 
+#[cfg(test)]
+#[path = "bots_level_tests.rs"]
+mod level_tests;
+
 /// Health fraction below which a bot presses its heal. The same at every
 /// level (docs/bot-practice-and-social.md), unlike the retreat threshold.
 const HEAL_HP: f32 = 0.28;
@@ -261,6 +265,185 @@ impl BotProfile {
             BotDifficulty::Elite | BotDifficulty::Unknown => Self::ELITE,
         }
     }
+
+    /// Whether a think tick needs `ThinkGates`: some gate reads the
+    /// outnumbered count, the threat record, own health or the minions in
+    /// sight. Never at Elite, which keeps the original think tick exactly.
+    fn has_gates(&self) -> bool {
+        self.siege_min_hp.is_some()
+            || self.trade_margin.is_some()
+            || self.outnumbered_hold.is_some()
+            || self.outnumbered_retreat.is_some()
+            || self.threat_window_secs.is_some()
+            || self.target_priority != TargetPriority::Nearest
+            || self.jungle_gank != JungleGank::Always
+    }
+}
+
+/// Health as a fraction of the maximum; a hero without a maximum counts as
+/// empty.
+fn hp_fraction(player: &ConnectedPlayer) -> f32 {
+    if player.hero.max_hp > 0.0 {
+        player.hero.hp / player.hero.max_hp
+    } else {
+        0.0
+    }
+}
+
+/// The defend exception: an enemy hero inside the range of one of `team`'s
+/// living towers (the distance the tower itself shoots at) or inside
+/// `team`'s own base, the fountain and shop zone. Such a hero may always be
+/// targeted; the trade, outnumbered, minion-first and jungle-gank gates do
+/// not apply to it.
+fn defends(world: &crate::game_world::GameWorld, team: Team, hero: &ConnectedPlayer) -> bool {
+    let base = match team {
+        Team::Green => world.map_layout.home,
+        Team::Blue => world.map_layout.away,
+    };
+    if (hero.hero.x - base.x).hypot(hero.hero.z - base.z) <= crate::balance::BASE_HEAL_RADIUS {
+        return true;
+    }
+    let aim = crate::entities::Vec3f::new(
+        hero.hero.x,
+        hero.hero.y + crate::balance::AIM_HEIGHT,
+        hero.hero.z,
+    );
+    world.structures.values().any(|tower| {
+        tower.state.team == team
+            && tower.state.hp > 0.0
+            && tower.attack_range > 0.0
+            && tower.attack_damage > 0.0
+            && crate::entities::Vec3f::new(tower.state.x, tower.state.y, tower.state.z)
+                .distance_squared(aim)
+                <= tower.attack_range.powi(2)
+    })
+}
+
+/// Counts `CombatHost::think_gates` scans on this thread, for the
+/// once-per-think-tick test. A no-op outside `cfg(test)`.
+mod gate_probe {
+    #[cfg(test)]
+    thread_local! {
+        static SCANS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    }
+
+    #[cfg(test)]
+    pub(super) fn count() {
+        SCANS.with(|scans| scans.set(scans.get() + 1));
+    }
+
+    #[cfg(not(test))]
+    #[inline(always)]
+    pub(super) fn count() {}
+
+    #[cfg(test)]
+    pub(super) fn scans() -> usize {
+        SCANS.with(std::cell::Cell::get)
+    }
+}
+
+/// What one think tick of a lower level knows for its gates
+/// (docs/plans/bot-personas.md, "Definitions"). It is built once per think
+/// tick, before any target choice, from what a human could see: enemy heroes
+/// in the team's sight, its own towers, base and health, and the hits it
+/// took. Building it allocates nothing. Elite never builds one.
+#[derive(Clone, Copy, Debug)]
+struct ThinkGates {
+    profile: BotProfile,
+    team: Team,
+    /// Own health fraction.
+    own_hp: f32,
+    /// Own basic-attack reach (m), for `MinionFirst`.
+    reach: f32,
+    /// Visible living enemy heroes within `VISION`, minus living allied
+    /// heroes within `VISION`, self included.
+    outnumbered: i32,
+    /// A visible enemy hero within `VISION` stands where the defend
+    /// exception applies.
+    defend_in_sight: bool,
+    /// A visible living enemy minion is within `VISION`. Only read, and
+    /// only computed, for `MinionFirst`.
+    minion_in_sight: bool,
+    /// The nearest visible living enemy hero that damaged this bot within
+    /// `threat_window_secs`, with its distance.
+    threat: Option<(u64, f32)>,
+}
+
+impl ThinkGates {
+    fn outnumbered_at(&self, count: Option<u8>) -> bool {
+        count.is_some_and(|count| self.outnumbered >= i32::from(count))
+    }
+
+    /// How far away a new hero target may be: the threat is exempt from the
+    /// engage range, though not from `VISION`.
+    fn hero_range(&self, hero: u64) -> f32 {
+        if self.threat.is_some_and(|(id, _)| id == hero) {
+            VISION
+        } else {
+            self.profile.hero_engage_range
+        }
+    }
+
+    /// The trade gate, capped at 0.95 so a healthy bot can always open a
+    /// trade with a healthy hero.
+    fn trades_with(&self, hero: &ConnectedPlayer) -> bool {
+        self.profile
+            .trade_margin
+            .is_none_or(|margin| self.own_hp >= (hp_fraction(hero) + margin).min(0.95))
+    }
+
+    /// The gates on a new hero target already in range and in sight.
+    fn admits_new_hero(
+        &self,
+        world: &crate::game_world::GameWorld,
+        hero: &ConnectedPlayer,
+        distance: f32,
+    ) -> bool {
+        if defends(world, self.team, hero) {
+            return true;
+        }
+        let threat = self
+            .threat
+            .is_some_and(|(id, _)| id == hero.hero.identity.id);
+        let minion_first = self.profile.target_priority == TargetPriority::MinionFirst
+            && !threat
+            && self.minion_in_sight
+            && distance > self.reach + shared::PLAYER_TARGET_RADIUS;
+        !minion_first
+            && self.trades_with(hero)
+            && !self.outnumbered_at(self.profile.outnumbered_hold)
+    }
+
+    /// Whether to keep the current hero target: only the outnumbered hold
+    /// drops one. The other gates apply to new targets only.
+    fn keeps_hero(&self, world: &crate::game_world::GameWorld, hero: &ConnectedPlayer) -> bool {
+        defends(world, self.team, hero) || !self.outnumbered_at(self.profile.outnumbered_hold)
+    }
+
+    /// The jungler's hero priority (`jungle_gank`).
+    fn ganks(&self, world: &crate::game_world::GameWorld, hero: &ConnectedPlayer) -> bool {
+        defends(world, self.team, hero)
+            || match self.profile.jungle_gank {
+                JungleGank::Always => true,
+                JungleGank::IfNotOutnumbered => self.outnumbered <= 0,
+                JungleGank::IfAhead => self.own_hp >= 0.6 && self.outnumbered <= 0,
+                JungleGank::Never => false,
+            }
+    }
+
+    /// Whether a covered structure may be hit at this health.
+    fn sieges(&self) -> bool {
+        self.profile
+            .siege_min_hp
+            .is_none_or(|min| self.own_hp >= min)
+    }
+}
+
+/// The hero `id` among the joined players.
+fn hero_by_id(players: &HashMap<SocketAddr, ConnectedPlayer>, id: u64) -> Option<&ConnectedPlayer> {
+    players
+        .values()
+        .find(|p| p.joined && p.hero.identity.id == id)
 }
 
 fn team_index(team: Team) -> usize {
@@ -306,21 +489,16 @@ fn tower_has_minion_cover(
     tower_has_minion_cover_of(tower, team, minions, BotProfile::ELITE.cover_minions)
 }
 
-/// Autonomous mobility needs room for its actual displacement, which can run
-/// opposite the aim or follow a moving recast target. Withhold it before the
-/// authority spends resources; ordinary ranged damage remains available.
-fn bot_mobility_safe(
+/// The techniques that displace their caster: `bot_mobility_safe` keeps them
+/// out of danger, and the dash gate withholds them toward a healthy hero.
+fn mobility_technique(
     definition: &shared::loadout::SkillDefinition,
-    origin: [f32; 2],
-    recast: bool,
-    danger: &[shared::navigation::Disc],
-    margin: f32,
-) -> bool {
+) -> Option<shared::loadout::Technique> {
     use shared::loadout::{SkillEffect, Technique};
     let SkillEffect::Technique { action, .. } = definition.effect else {
-        return true;
+        return None;
     };
-    if !matches!(
+    matches!(
         action,
         Technique::CollisionCharge
             | Technique::Lunge
@@ -332,9 +510,24 @@ fn bot_mobility_safe(
             | Technique::ExecuteRetreat
             | Technique::SpiritDash
             | Technique::BlinkShot
-    ) {
+    )
+    .then_some(action)
+}
+
+/// Autonomous mobility needs room for its actual displacement, which can run
+/// opposite the aim or follow a moving recast target. Withhold it before the
+/// authority spends resources; ordinary ranged damage remains available.
+fn bot_mobility_safe(
+    definition: &shared::loadout::SkillDefinition,
+    origin: [f32; 2],
+    recast: bool,
+    danger: &[shared::navigation::Disc],
+    margin: f32,
+) -> bool {
+    use shared::loadout::Technique;
+    let Some(action) = mobility_technique(definition) else {
         return true;
-    }
+    };
     // These recasts follow the earlier victim, which can have moved beyond the
     // initial cast range; the AI has no safe fixed travel bound for that jump.
     if recast && matches!(action, Technique::EchoStrike | Technique::Hook) {
@@ -581,6 +774,9 @@ pub struct BotControllers {
     /// Behaviour level of each team's bots, Green then Blue; Elite unless a
     /// practice host sets it. It survives `clear`, so a round reset keeps it.
     difficulty: [BotDifficulty; 2],
+    /// Scratch for the sight of the team a lower-level bot thinks for. It is
+    /// reused, so the level gates allocate nothing per think tick.
+    sight: Vec<shared::vision::VisionSource>,
     pub defer_fill: bool,
     /// A practice sandbox command replaced the standard roster: no automatic
     /// refill or trimming until `PracticeCommand::Roster` or a round reset
@@ -697,6 +893,10 @@ struct Controller {
     next_think: Instant,
     next_retreat: Instant,
     retreat_until: Option<Instant>,
+    /// When the current health retreat began, while `resume_hp` keeps it
+    /// going after `retreat_until`. Unused at Elite, which has no
+    /// `resume_hp`.
+    retreat_started: Option<Instant>,
     target: Option<TargetId>,
     holding_range: bool,
 }
@@ -715,9 +915,20 @@ impl Controller {
             next_think: now,
             next_retreat: now,
             retreat_until: None,
+            retreat_started: None,
             target: None,
             holding_range: false,
         }
+    }
+
+    /// A gate retreat (outnumbered, or an attacker the gates refuse), from
+    /// this think tick: `retreat_secs` long, and the health re-arm is
+    /// neither checked nor reset.
+    fn gate_retreat(&mut self, profile: &BotProfile, now: Instant) {
+        self.retreat_until = Some(now + Duration::from_secs_f32(profile.retreat_secs));
+        self.target = None;
+        self.route.clear();
+        self.next_route = now;
     }
 }
 
@@ -1160,11 +1371,27 @@ impl CombatHost<'_> {
                 controller.retreat_until =
                     Some(now + Duration::from_secs_f32(profile.retreat_secs));
                 controller.next_retreat = now + Duration::from_secs_f32(profile.rearm_secs);
+                if profile.resume_hp.is_some() {
+                    controller.retreat_started.get_or_insert(now);
+                }
                 controller.route.clear();
                 controller.next_route = now;
             }
-            let retreating = turret_retreat.is_some()
-                || controller.retreat_until.is_some_and(|until| now < until);
+            // `resume_hp`: a health retreat goes on until health is back, but
+            // never past `retreat_cap_secs` from its start.
+            let recovering = controller.retreat_started.is_some_and(|started| {
+                profile
+                    .resume_hp
+                    .is_some_and(|resume| player.hero.hp < player.hero.max_hp * resume)
+                    && profile
+                        .retreat_cap_secs
+                        .is_none_or(|cap| now < started + Duration::from_secs_f32(cap))
+            });
+            let timed = controller.retreat_until.is_some_and(|until| now < until);
+            if !timed && !recovering {
+                controller.retreat_started = None;
+            }
+            let mut retreating = turret_retreat.is_some() || timed || recovering;
             if now >= controller.next_think {
                 controller.next_think = now + THINK_INTERVAL;
                 {
@@ -1181,6 +1408,24 @@ impl CombatHost<'_> {
                     );
                 }
                 let previous_target = controller.target;
+                // The level gates read one scan per think tick, made before any
+                // target choice. Elite has no gates and makes none.
+                let mut sight = std::mem::take(&mut self.bots.sight);
+                let gates = profile.has_gates().then(|| {
+                    vision::sources_into(team, self.world, &mut sight);
+                    self.think_gates(&profile, addr, &sight, now)
+                });
+                self.bots.sight = sight;
+                // Outnumbered: back off in this think tick, unless there is a
+                // hero to defend against.
+                if let Some(gates) = gates
+                    && !retreating
+                    && gates.outnumbered_at(profile.outnumbered_retreat)
+                    && !gates.defend_in_sight
+                {
+                    controller.gate_retreat(&profile, now);
+                    retreating = true;
+                }
                 controller.target = if retreating {
                     None
                 } else {
@@ -1204,29 +1449,65 @@ impl CombatHost<'_> {
                                     (p.x - origin[0]).hypot(p.z - origin[1])
                                         <= VISION + profile.target_leash
                                 })
+                                && (target.kind != TargetKind::Player
+                                    || gates.is_none_or(|gates| {
+                                        hero_by_id(&self.world.players, target.id)
+                                            .is_none_or(|hero| gates.keeps_hero(self.world, hero))
+                                    }))
                         })
                         .or_else(|| {
                             if controller.jungle {
-                                self.jungle_target(&profile, team, origin, controller.lane, now)
+                                self.jungle_target(
+                                    &profile,
+                                    gates.as_ref(),
+                                    team,
+                                    origin,
+                                    controller.lane,
+                                    now,
+                                )
                             } else {
-                                self.profiled_target(&profile, team, origin, controller.lane, now)
+                                self.profiled_target(
+                                    &profile,
+                                    gates.as_ref(),
+                                    team,
+                                    origin,
+                                    controller.lane,
+                                    now,
+                                )
                             }
                         })
                 };
-                controller.target = controller.target.filter(|target| {
-                    basic_attack::resolve_hostile_target(
-                        team,
-                        *target,
-                        &self.world.players,
-                        &self.world.minions,
-                        &self.world.structures,
-                        &self.world.neutrals,
-                    )
-                    .is_some_and(|(point, _)| {
-                        let goal = [point.x, point.z];
-                        shared::navigation::clip_discs(origin, goal, &danger) == goal
-                    })
-                });
+                controller.target = controller
+                    .target
+                    .filter(|target| self.reachable(team, origin, *target, &danger));
+                // Threat response: a hero that hit this bot gets an answer in
+                // this think tick. Retaliate if the gates allow it, otherwise
+                // back off; never carry on as if nothing happened.
+                if let Some(gates) = gates
+                    && !retreating
+                    && let Some((threat, distance)) = gates.threat
+                    && controller
+                        .target
+                        .is_none_or(|target| target.kind != TargetKind::Player)
+                {
+                    let target = TargetId {
+                        kind: TargetKind::Player,
+                        id: threat,
+                    };
+                    let retaliate = distance <= VISION
+                        && hero_by_id(&self.world.players, threat).is_some_and(|hero| {
+                            defends(self.world, team, hero)
+                                || (gates.trades_with(hero)
+                                    && !gates.outnumbered_at(profile.outnumbered_hold))
+                        })
+                        && self.reachable(team, origin, target, &danger);
+                    if retaliate {
+                        controller.target = Some(target);
+                    } else {
+                        controller.gate_retreat(&profile, now);
+                        retreating = true;
+                    }
+                }
                 if controller.target != previous_target {
                     controller.holding_range = false;
                     controller.route.clear();
@@ -1242,6 +1523,13 @@ impl CombatHost<'_> {
                             &self.world.structures,
                             &self.world.neutrals,
                         ) {
+                            // The dash gate: no mobility technique toward a
+                            // hero above the level's health line.
+                            let dash_withheld = profile.dash_hero_hp.is_some_and(|limit| {
+                                target.kind == TargetKind::Player
+                                    && hero_by_id(&self.world.players, target.id)
+                                        .is_some_and(|hero| hp_fraction(hero) > limit)
+                            });
                             let mut skill_order = [0, 1, 2, 3];
                             skill_order.sort_by_key(|slot| {
                                 use shared::loadout::{SkillEffect, Technique};
@@ -1304,6 +1592,9 @@ impl CombatHost<'_> {
                                 let recast = p.hero.skills.advanced.recasts[slot as usize]
                                     .as_ref()
                                     .is_some_and(|r| r.until > now && r.uses > 0);
+                                if dash_withheld && mobility_technique(definition).is_some() {
+                                    continue;
+                                }
                                 if !bot_mobility_safe(
                                     definition,
                                     [p.hero.x, p.hero.z],
@@ -1524,6 +1815,99 @@ impl CombatHost<'_> {
         }
     }
 
+    /// Whether `target` can be reached without entering a danger disc.
+    fn reachable(
+        &self,
+        team: Team,
+        origin: [f32; 2],
+        target: TargetId,
+        danger: &[shared::navigation::Disc],
+    ) -> bool {
+        basic_attack::resolve_hostile_target(
+            team,
+            target,
+            &self.world.players,
+            &self.world.minions,
+            &self.world.structures,
+            &self.world.neutrals,
+        )
+        .is_some_and(|(point, _)| {
+            let goal = [point.x, point.z];
+            shared::navigation::clip_discs(origin, goal, danger) == goal
+        })
+    }
+
+    /// The one scan a lower-level think tick makes for its gates. `sight`
+    /// is the current sight of the bot's team. It visits each player at most
+    /// twice and allocates nothing.
+    fn think_gates(
+        &self,
+        profile: &BotProfile,
+        addr: SocketAddr,
+        sight: &[shared::vision::VisionSource],
+        now: Instant,
+    ) -> ThinkGates {
+        gate_probe::count();
+        let me = &self.world.players[&addr];
+        let team = me.hero.identity.team;
+        let origin = [me.hero.x, me.hero.z];
+        let distance = |x: f32, z: f32| (x - origin[0]).hypot(z - origin[1]);
+        let mut outnumbered = 0_i32;
+        let mut defend_in_sight = false;
+        for p in self
+            .world
+            .players
+            .values()
+            .filter(|p| p.joined && p.hero.hp > 0.0 && distance(p.hero.x, p.hero.z) <= VISION)
+        {
+            if p.hero.identity.team == team {
+                outnumbered -= 1;
+            } else if vision::player_visible(sight, p, now) {
+                outnumbered += 1;
+                defend_in_sight = defend_in_sight || defends(self.world, team, p);
+            }
+        }
+        let minion_in_sight = profile.target_priority == TargetPriority::MinionFirst
+            && self.world.minions.values().any(|m| {
+                m.state.hp > 0.0
+                    && m.state.team != team
+                    && distance(m.state.x, m.state.z) <= VISION
+                    && vision::target_visible_with(
+                        sight,
+                        team,
+                        TargetId {
+                            kind: TargetKind::Minion,
+                            id: m.state.id,
+                        },
+                        self.world,
+                        now,
+                    )
+            });
+        let threat = profile.threat_window_secs.and_then(|window| {
+            self.combat_log
+                .ledger
+                .recent_attackers(me.hero.identity.id, now, Duration::from_secs_f32(window))
+                .filter_map(|(attacker, _)| hero_by_id(&self.world.players, attacker))
+                .filter(|p| {
+                    p.hero.hp > 0.0
+                        && p.hero.identity.team != team
+                        && vision::player_visible(sight, p, now)
+                })
+                .map(|p| (p.hero.identity.id, distance(p.hero.x, p.hero.z)))
+                .min_by(|a, b| a.1.total_cmp(&b.1).then_with(|| a.0.cmp(&b.0)))
+        });
+        ThinkGates {
+            profile: *profile,
+            team,
+            own_hp: hp_fraction(me),
+            reach: crate::skills::attack_modifiers(me).0,
+            outnumbered,
+            defend_in_sight,
+            minion_in_sight,
+            threat,
+        }
+    }
+
     /// Nearest living ordinary camp, preferring the bot's own half of the map.
     /// Camp spots are public map knowledge, like a human jungler's timers.
     fn jungle_camp(&self, team: Team, origin: [f32; 2]) -> Option<(u64, [f32; 2])> {
@@ -1555,6 +1939,7 @@ impl CombatHost<'_> {
     fn jungle_target(
         &self,
         profile: &BotProfile,
+        gates: Option<&ThinkGates>,
         team: Team,
         origin: [f32; 2],
         lane: Lane,
@@ -1573,15 +1958,23 @@ impl CombatHost<'_> {
                         kind: TargetKind::Player,
                         id: p.hero.identity.id,
                     },
+                    p,
                 )
             })
-            .filter(|(d, target)| *d <= VISION && visible(*target))
+            .filter(|(d, target, p)| {
+                let range = gates.map_or(profile.hero_engage_range, |g| g.hero_range(target.id));
+                *d <= range
+                    && visible(*target)
+                    && gates.is_none_or(|g| {
+                        g.ganks(self.world, p) && g.admits_new_hero(self.world, p, *d)
+                    })
+            })
             .min_by(|a, b| a.0.total_cmp(&b.0).then_with(|| a.1.id.cmp(&b.1.id)));
-        if let Some((_, target)) = hero {
+        if let Some((_, target, _)) = hero {
             return Some(target);
         }
         let Some((id, at)) = self.jungle_camp(team, origin) else {
-            return self.profiled_target(profile, team, origin, lane, now);
+            return self.profiled_target(profile, gates, team, origin, lane, now);
         };
         let camp = TargetId {
             kind: TargetKind::Neutral,
@@ -1598,12 +1991,13 @@ impl CombatHost<'_> {
         lane: Lane,
         now: Instant,
     ) -> Option<TargetId> {
-        self.profiled_target(&BotProfile::ELITE, team, origin, lane, now)
+        self.profiled_target(&BotProfile::ELITE, None, team, origin, lane, now)
     }
 
     fn profiled_target(
         &self,
         profile: &BotProfile,
+        gates: Option<&ThinkGates>,
         team: Team,
         origin: [f32; 2],
         lane: Lane,
@@ -1646,11 +2040,17 @@ impl CombatHost<'_> {
             .into_iter()
             .filter(|(d, target)| {
                 let range = if target.kind == TargetKind::Player {
-                    profile.hero_engage_range
+                    gates.map_or(profile.hero_engage_range, |g| g.hero_range(target.id))
                 } else {
                     VISION
                 };
-                *d <= range && vision::target_visible(team, *target, self.world, now)
+                *d <= range
+                    && vision::target_visible(team, *target, self.world, now)
+                    && (target.kind != TargetKind::Player
+                        || gates.is_none_or(|g| {
+                            hero_by_id(&self.world.players, target.id)
+                                .is_some_and(|hero| g.admits_new_hero(self.world, hero, *d))
+                        }))
             })
             .min_by(|a, b| a.0.total_cmp(&b.0).then_with(|| a.1.id.cmp(&b.1.id)))
         {
@@ -1673,6 +2073,7 @@ impl CombatHost<'_> {
                         StructureRole::BaseTower => true,
                         StructureRole::LaneTower { lane: tower_lane } => tower_lane == lane,
                     }
+                    && gates.is_none_or(ThinkGates::sieges)
             })
             .filter(|s| {
                 distance(s.state.x, s.state.z) <= VISION + s.attack_range
@@ -2345,7 +2746,7 @@ mod profile_tests {
         let mut log = CombatLog::default();
         let host = host(&mut world, &mut bots, &mut log);
         let pick = |profile: &BotProfile| {
-            host.profiled_target(profile, Team::Green, [0.0, 0.0], Lane::Mid, now)
+            host.profiled_target(profile, None, Team::Green, [0.0, 0.0], Lane::Mid, now)
         };
         let hero = Some(TargetId {
             kind: TargetKind::Player,

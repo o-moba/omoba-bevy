@@ -1,6 +1,6 @@
 # Bot personas and behavioural bot levels
 
-Status: **design / in progress**, 2026-10-13. Reviewed against the code the same day. The owner decisions below are binding. S1 (the behaviour profile refactor) is implemented on `feat/bot-levels`; everything else on this page is not built yet.
+Status: **design / in progress**, 2026-10-13. Reviewed against the code the same day. The owner decisions below are binding. S1 (the behaviour profile refactor) and S2 (the lower-level behaviours) are implemented on `feat/bot-levels`; everything else on this page is not built yet.
 
 Code references point at OMOBA `origin/dev` `6d4962f`. Its game code is identical to `1f4ad10`, because the newer commits only touch `.github/workflows/release.yml`. The workspace version is `0.44.0` ([Cargo.toml:6](../../Cargo.toml)). The player portal is `omoba-web` `origin/dev` `6f4e90e`, and the omoba-ui handoff is `7145d2b`. Line numbers come from those revisions, so re-check them when a package starts.
 
@@ -191,7 +191,7 @@ Definitions:
   - It is classified in [shared/src/protocol/wire_enums.rs](../../shared/src/protocol/wire_enums.rs) (test `every_serde_enum_in_shared_is_classified`, [:228](../../shared/src/protocol/wire_enums.rs#L228)).
   - The fallback is an explicit `#[serde(other)] Unknown` unit variant. It plays as `Elite` and is displayed as a plain "AI" with no level name, so a newer host's extra level is never mislabelled "Elite".
 - **`BotProfile`** is a `Copy` struct in `common/src/bots.rs`, with `const` profiles and `BotProfile::for_level`.
-- **`Controller`** gains `profile` and `retreat_started: Option<Instant>` ([common/src/bots.rs:394-408](../../common/src/bots.rs#L394-L408)). The second is used for the `resume_hp` hysteresis, so it arrives with S2; S1 adds only `profile`.
+- **`Controller`** gains `profile` and `retreat_started: Option<Instant>` ([common/src/bots.rs:394-408](../../common/src/bots.rs#L394-L408)). The second is used for the `resume_hp` hysteresis, so it arrived with S2; S1 added only `profile`.
 - **`BotControllers.difficulty: [BotDifficulty; 2]`** holds one entry per team and defaults to `Elite` ([:326-334](../../common/src/bots.rs#L326-L334), `#[derive(Default)]`). It survives `clear()` ([:365-368](../../common/src/bots.rs#L365-L368)), which the round reset calls ([server/src/session.rs:119](../../server/src/session.rs#L119)).
 - **`spawn_bot`** reads the team's level ([:622-638](../../common/src/bots.rs#L622-L638)). This also covers Duelists and dummies spawned through it ([common/src/practice.rs:121-163](../../common/src/practice.rs#L121-L163)). Dummies do not use the main brain.
 - **`attach_existing` (takeover)** always sets `ELITE` ([:345-358](../../common/src/bots.rs#L345-L358)). The existing tests keep using it unchanged. Per-level tests use a new constructor `attach_with_profile`, compiled for `cfg(test)` and the `test-support` feature, so server tests can use it too.
@@ -748,6 +748,7 @@ Heavy Rust builds and test runs go to CI or the dev VPS builder. Nothing heavy r
   - Recruit at full HP engages a fresh, lone hero within 11 m (the trade-margin cap).
   - A Recruit hit by a hero at 13 m reacts in the same think tick, by retaliating or retreating, never by ignoring it.
   - Heal stays at 28% at every level.
+  - **Built (S2):** see the S2 notes under TODO.
 - **No-delay invariant.** For every profile, use a fixture where all gates admit the target: a lone hero within 11 m, both at HP ≤ 0.95, no minions, the mobility target at or below the dash gate. The first think tick, the order of slots attempted, every aim point and the first basic-attack tick must equal Elite's. A second fixture proves that `next_think` and `next_route` scheduling never depend on the profile.
 - **Existing tests stay green under Elite with no expectation edits:**
   - [common/src/bots.rs:1357-1781](../../common/src/bots.rs#L1357);
@@ -875,7 +876,7 @@ Heavy Rust builds and test runs go to CI or the dev VPS builder. Nothing heavy r
   - **New libm.** A new baseline can only come from the pre-refactor commit. The test's module docs give the steps.
   - **Profile fields.** The field names follow the knob table. Times are `f32` seconds (`Duration::from_secs_f32(6.0)` is exactly 6 s). There is no `contest_objectives` field: no level contests objectives, so there is nothing to switch.
   - **Kept names.** The public `CombatHost::bot_target` stays as the Elite entry point, because a server vision test calls it. The brain uses a profile-aware variant. `tower_has_minion_cover` stays as a test-only Elite wrapper.
-  - **Lower levels after S1.** The knobs that replaced literals already apply at the lower levels: `retreat_hp`, `rearm_secs`, `cover_minions`, the tower, staging and mobility margins, `hero_engage_range` and `target_leash`. The S2 gates are data only for now. Until S2 adds threat response, a lower level can ignore an attacker beyond its engage range. Only practice hosts can select a lower level, and only through `OMOBA_BOT_DIFFICULTY`.
+  - **Lower levels after S1.** The knobs that replaced literals already apply at the lower levels: `retreat_hp`, `rearm_secs`, `cover_minions`, the tower, staging and mobility margins, `hero_engage_range` and `target_leash`. S2 then added the remaining gates and threat response (see the S2 notes). Only practice hosts can select a lower level, and only through `OMOBA_BOT_DIFFICULTY`.
   - **`OMOBA_BOT_DIFFICULTY`.**
     - A standalone server that fills with bots applies it to both teams at boot, and refuses to start on an invalid value. Lobbies and workers never read it.
     - `match_pool::spawn` removes it from every worker's environment; `worker_command` is unit-tested for that.
@@ -883,7 +884,7 @@ Heavy Rust builds and test runs go to CI or the dev VPS builder. Nothing heavy r
     - The desktop client reads it once for offline practice, as a tester override until the S4 picker; an invalid value logs a warning and keeps Elite.
     - The offline level survives Leave and Rematch.
   - **Finding for S3.** These bot-only rounds are deterministic across `HashMap` seeds when no dagger class plays. So repeated runs of one pairing would be identical samples, not N ≥ 200 independent ones. The simulator must vary something real between runs, for example the side, the roster or the start offset.
-- [ ] **S2. Lower-level behaviours.** *Gameplay AI.* Size **M**.
+- [x] **S2. Lower-level behaviours.** *Gameplay AI.* Size **M**. Done on `feat/bot-levels`; see the S2 notes below.
   - File: `common/src/bots.rs`, plus a read-only accessor on the ledger's attacker record (`common/src/match_stats.rs`).
   - Add:
     - `resume_hp` hysteresis with its cap;
@@ -900,6 +901,24 @@ Heavy Rust builds and test runs go to CI or the dev VPS builder. Nothing heavy r
     - every per-level test listed in the testing strategy passes;
     - the no-delay invariant tests pass;
     - the outnumbered and trade checks run once per think tick with no new allocation.
+- **S2 notes (as built).**
+  - **One scan per think tick.** A profile with any gate on builds a `ThinkGates` once per 250 ms think tick, before any target choice. It holds own health and basic-attack reach, the outnumbered count, whether a hero to defend against is in sight, whether a visible enemy minion is within `VISION` (computed only for `minion_first`) and the nearest visible attacker. The scan reuses one sight buffer (`vision::sources_into`), so it allocates nothing. Elite builds none, so its think tick is the original one; the S1 trace test still matches.
+  - **Ledger accessor.** `RoundLedger::recent_attackers(victim, now, window)` lists the hostile players that hit `victim` within the window, capped at the assist window, with each one's latest hit. It is read-only, and a death clears the victim's record.
+  - **Health retreat.** The trigger is unchanged (`retreat_hp`, then `rearm_secs`). With `resume_hp`, the retreat continues after `retreat_secs` until health reaches `resume_hp`, but never past `retreat_cap_secs` from the first trigger. A re-trigger during it only extends `retreat_until`. Only health-triggered retreats use `resume_hp`.
+  - **Gate retreats.** The outnumbered retreat and a refused threat start a retreat in the same think tick for `retreat_secs`. They neither check nor reset `rearm_secs`.
+  - **Threat response.** In the normal pick the attacker is exempt from the engage range and `minion_first`. After the pick, if the bot is not on a hero (no target, a minion, a structure or a camp), it retaliates when the attacker is within `VISION`, the trade and hold gates (or the defend exception) admit it, and it can be reached without entering an uncovered tower's danger disc. Otherwise it retreats. A bot already fighting a hero keeps that target.
+  - **Choices the definitions left open:**
+    - `hero_engage_range` also bounds the jungler's hero pick, because that is a new hero target too. Elite's range is `VISION`, so Elite is unchanged.
+    - **Defend exception.** "Inside the range of the bot's own tower" uses the distance the tower itself shoots at. "Own base" is the fountain and shop zone (`SHOP_RADIUS`, 18 m). The exception bypasses the trade gate, the outnumbered hold, `minion_first` and the jungle-gank policy, but not the engage range.
+    - The defend exception also suppresses the outnumbered retreat while a hero to defend against is in sight. Without that, a lower-level team would walk away from a push into its own base.
+    - The dash gate covers exactly the techniques `bot_mobility_safe` guards, and only casts whose target is a hero.
+    - `siege_min_hp` gates picking a covered structure. Structures are re-picked on every think tick, so the gate acts at once.
+    - "Within basic-attack reach" for `minion_first` is the attack range plus the hero hit radius, the reach the attack itself uses.
+  - **Tests.**
+    - `common/src/bots_level_tests.rs` has one test per gate and level, the no-delay trace equality (commands with slots and aim points, positions, targets and schedules, tick by tick, against Elite) and the cadence check.
+    - The same file checks that the scan runs once per think tick and that a lower-level tick allocates exactly what an Elite tick does. It counts allocations with a test-only global allocator in the common unit-test binary.
+    - `match_stats` tests the accessor.
+    - `server/src/offline_parity_tests.rs` adds `every_bot_level_plays_the_same_online_and_offline`.
 - [ ] **S3. Difficulty simulator and calibration.** *Gameplay AI, CI.* Size **M–L**.
   - Files: `common/tests/bot_difficulty_sim.rs` (or `harness/src/bin/botsim.rs`), a `common/src/offline.rs` test-support helper that starts a human-less Running world, and `.github/workflows/ci.yml`.
   - **Accept:**
