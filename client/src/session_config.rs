@@ -101,18 +101,12 @@ pub(crate) fn endpoint_allowed_for(contour: Option<&str>, host: &str) -> bool {
 }
 
 /// The lobby compiled into this build (`OMOBA_DEFAULT_GAME_SERVER_ADDR`, set by
-/// `scripts/release.py --server` or a contour's default), if any.
+/// `scripts/release.py --server` or a contour's default), if any. The running
+/// lobby is the connection profile's ([`default_server_addr`]): this one, else
+/// the public beta in production or the contour's own lobby, never the
+/// production beta in a contour build.
 pub(crate) const COMPILED_GAME_SERVER_ADDR: Option<&str> =
     option_env!("OMOBA_DEFAULT_GAME_SERVER_ADDR");
-
-/// The compiled lobby, else the public beta; a contour build without a compiled
-/// lobby falls back to the local server, never to the production beta. The
-/// running lobby is the connection profile's ([`default_server_addr`]).
-pub const DEFAULT_GAME_SERVER_ADDR: &str = match COMPILED_GAME_SERVER_ADDR {
-    Some(address) => address,
-    None if BUILD_CONTOUR.is_some() => FALLBACK_GAME_SERVER_ADDR,
-    None => BETA_GAME_SERVER_ADDR,
-};
 
 /// Outbound keepalive / retry interval while waiting for the first qualifying snapshot (P1).
 pub const T_RETRY: Duration = Duration::from_secs(2);
@@ -169,14 +163,6 @@ mod tests {
         assert_eq!(T_STALE_SNAPSHOT, Duration::from_secs(3));
         assert_eq!(TRANSPORT_CONSECUTIVE_RECV_ERRORS, 8);
         assert_eq!(TRANSPORT_CONSECUTIVE_SEND_ERRORS, 6);
-        assert_eq!(
-            DEFAULT_GAME_SERVER_ADDR,
-            option_env!("OMOBA_DEFAULT_GAME_SERVER_ADDR").unwrap_or(if BUILD_CONTOUR.is_some() {
-                FALLBACK_GAME_SERVER_ADDR
-            } else {
-                BETA_GAME_SERVER_ADDR
-            })
-        );
     }
 
     #[test]
@@ -244,7 +230,10 @@ mod tests {
         let lobby = default_server_addr();
         assert!(crate::persistence::validate_game_server_addr(lobby).is_some());
         if BUILD_CONTOUR.is_none() {
-            assert_eq!(lobby, DEFAULT_GAME_SERVER_ADDR);
+            assert_eq!(
+                lobby,
+                COMPILED_GAME_SERVER_ADDR.unwrap_or(BETA_GAME_SERVER_ADDR)
+            );
         } else {
             assert_ne!(lobby, BETA_GAME_SERVER_ADDR);
         }

@@ -1274,7 +1274,7 @@ mod tests {
                 &LightingSettings::default(),
                 &ModelScaleSettings { target_height },
                 CharacterChoice::Paco,
-                crate::session_config::DEFAULT_GAME_SERVER_ADDR,
+                FALLBACK_GAME_SERVER_ADDR,
                 "scale-migration-test",
                 &AudioSettings::default(),
                 &CameraSettings::default(),
