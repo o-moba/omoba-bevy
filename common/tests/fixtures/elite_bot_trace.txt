@@ -3,6 +3,8 @@
 # test only). One block per libm fingerprint: "baseline <libm> <label>",
 # then per scenario a "scenario <name>" line, its summary line and one
 # digest per simulated second.
+# A commit that changes gameplay on purpose re-records these blocks; see
+# "Re-baselining" in the module docs of common/src/bots_trace_tests.rs.
 
 baseline eca5596453a227bc ubuntu 24.04, glibc 2.39 (CI runner)
 scenario roster

@@ -14,22 +14,40 @@
 //! - Each round runs twice in one process. Each `GameWorld` gets its own
 //!   `HashMap` keys, so equal traces show the scenario does not depend on
 //!   iteration order.
-//! - The digests must equal the baseline recorded from the pre-refactor brain
-//!   (`origin/dev` `ce04e5f` plus this test only), so the Elite profile is
-//!   today's behaviour exactly. Neither round has a dagger class, the only
-//!   gameplay code that draws randomness.
+//! - The digests must equal the committed baseline. The first baseline was
+//!   recorded from the pre-refactor brain (`origin/dev` `ce04e5f` plus this
+//!   test only), which proved the Elite profile is the old behaviour exactly.
+//!   Neither round has a dagger class, the only gameplay code that draws
+//!   randomness.
 //!
 //! Positions come from `sin`, `cos`, `atan2` and `hypot`, which the platform
 //! `libm` computes, and those last bits differ between C libraries and some
 //! glibc releases. A baseline is therefore keyed by a fingerprint of those
 //! functions. Without a matching baseline the comparison is skipped with a
-//! notice, unless `OMOBA_REQUIRE_BOT_TRACE=1`. The determinism check runs
-//! everywhere.
+//! notice, unless `OMOBA_REQUIRE_BOT_TRACE=1` (set in CI). The determinism
+//! check runs everywhere.
 //!
-//! Recording a baseline for a new `libm` is only valid on the pre-refactor
-//! brain: check out the baseline commit, then run
-//! `OMOBA_BOT_TRACE_OUT=<file> OMOBA_BOT_TRACE_LABEL=<label> cargo test -p common elite_command_trace`
-//! and append the file to the fixture.
+//! # Re-baselining
+//!
+//! Since S1 the baseline guards Elite against *unintended* change. The digest
+//! covers the whole round (hero, minion and tower balance, kits, gold, the map
+//! and the brain), so a commit that changes gameplay on purpose fails here.
+//! That commit re-records the baseline itself:
+//!
+//! 1. Check the difference is the intended change. A change to the lower
+//!    levels alone must never move this trace; that is what it guards.
+//! 2. CI's `fmt, clippy, tests` job records this test's trace for its runner
+//!    (ubuntu 24.04, glibc 2.39) and uploads it as the `elite-bot-trace`
+//!    artifact, also when the test fails. Replace the block with the same
+//!    fingerprint in `common/tests/fixtures/elite_bot_trace.txt` with it.
+//! 3. Re-record each other block from the same commit on its `libm` with
+//!    `OMOBA_BOT_TRACE_OUT=<file> OMOBA_BOT_TRACE_LABEL=<label> cargo test -p common elite_command_trace`
+//!    (the glibc 2.43 block on the dev VPS builder). If that is not possible,
+//!    delete the block: a stale block fails on its `libm`, a missing one only
+//!    skips the comparison there.
+//! 4. Say in the commit message that it re-baselines the Elite trace, and why.
+//!
+//! A new `libm` gets its block the same way, from the current commit.
 use super::*;
 use crate::{balance, offline::PracticeSession};
 
@@ -39,6 +57,9 @@ const TICKS: usize = 6_000;
 const DT: f32 = 0.05;
 const TICKS_PER_DIGEST: usize = 20;
 const FIXTURE: &str = include_str!("../tests/fixtures/elite_bot_trace.txt");
+/// The hint a baseline mismatch prints.
+const REBASELINE: &str = "If the gameplay change is intended, re-baseline in the same commit \
+    (\"Re-baselining\" in the module docs of common/src/bots_trace_tests.rs).";
 
 const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
 fn fnv(hash: &mut u64, bytes: &[u8]) {
@@ -415,13 +436,13 @@ fn elite_command_trace_is_deterministic_and_matches_the_pre_refactor_baseline() 
         assert_eq!(
             summary,
             &trace.summary.line(),
-            "Elite {name} summary differs from the {} baseline",
+            "Elite {name} summary differs from the {} baseline. {REBASELINE}",
             baseline.label
         );
         assert_eq!(digests.len(), trace.digests.len(), "{name}");
         if let Some(at) = (0..digests.len()).find(|i| digests[*i] != trace.digests[*i]) {
             panic!(
-                "Elite {name} behaviour differs from the {} baseline from second {at}:\n{}",
+                "Elite {name} behaviour differs from the {} baseline from second {at}. {REBASELINE}\n{}",
                 baseline.label,
                 window(trace, at)
             );
