@@ -1,6 +1,6 @@
 # Bot personas and behavioural bot levels
 
-Status: **design / TODO**, 2026-10-13. Reviewed against the code the same day. The owner decisions below are binding. Nothing on this page is implemented yet.
+Status: **design / in progress**, 2026-10-13. Reviewed against the code the same day. The owner decisions below are binding. S1 (the behaviour profile refactor) is implemented on `feat/bot-levels`; everything else on this page is not built yet.
 
 Code references point at OMOBA `origin/dev` `6d4962f`. Its game code is identical to `1f4ad10`, because the newer commits only touch `.github/workflows/release.yml`. The workspace version is `0.44.0` ([Cargo.toml:6](../../Cargo.toml)). The player portal is `omoba-web` `origin/dev` `6f4e90e`, and the omoba-ui handoff is `7145d2b`. Line numbers come from those revisions, so re-check them when a package starts.
 
@@ -23,6 +23,14 @@ Code references point at OMOBA `origin/dev` `6d4962f`. Its game code is identica
 5. **The player picks the bot level in practice.** Online stays at the top level: the public lobby and Quick-match fill keep today's bots.
 6. **Competitive rating stays PvP-only and bot-free.** Persona games may get separate vs-AI stats.
 
+Owner defaults for the level questions (2026-10-13), which close D1–D4:
+
+- **D1.** The lobby's Server bot match is online, so it stays Elite. S-opt is not planned.
+- **D2.** The practice level applies to both teams.
+- **D3.** The picker's first-run default is Regular. It arrives with the picker in S4; until then every host defaults to Elite.
+- **D4.** Four levels named Recruit / Regular / Veteran / Elite, one name in code, on the wire and in the UI. Elite is the earlier draft's `Top`.
+- Online workers ignore `OMOBA_BOT_DIFFICULTY`, and the lobby removes it from their environment.
+
 What this design concludes from those decisions (S0 can override any of them):
 
 - **"Online" includes the lobby's Server bot match and the party "Play vs bots".**
@@ -41,7 +49,7 @@ What this design concludes from those decisions (S0 can override any of them):
 
 | Area | Today (exists) | Why it matters |
 | --- | --- | --- |
-| One bot brain | [common/src/bots.rs](../../common/src/bots.rs) is shared by the server ([server/src/bots.rs:2](../../server/src/bots.rs#L2), ticked from [server/src/runtime/tick.rs:73](../../server/src/runtime/tick.rs#L73)) and by offline practice ([common/src/offline.rs:23-205](../../common/src/offline.rs#L23-L205), [common/src/host.rs:19-36](../../common/src/host.rs#L19-L36)). Every existing bot unit test builds its controller through the takeover constructor `attach_existing` ([common/src/bots.rs:1388](../../common/src/bots.rs#L1388), [:1477](../../common/src/bots.rs#L1477), [:1546](../../common/src/bots.rs#L1546), [:1667](../../common/src/bots.rs#L1667)) | A level change applies to the server and offline practice at once. The parity tests ([server/src/offline_parity_tests.rs](../../server/src/offline_parity_tests.rs)) must stay green. Per-level tests need a new constructor, because takeover is pinned to Top |
+| One bot brain | [common/src/bots.rs](../../common/src/bots.rs) is shared by the server ([server/src/bots.rs:2](../../server/src/bots.rs#L2), ticked from [server/src/runtime/tick.rs:73](../../server/src/runtime/tick.rs#L73)) and by offline practice ([common/src/offline.rs:23-205](../../common/src/offline.rs#L23-L205), [common/src/host.rs:19-36](../../common/src/host.rs#L19-L36)). Every existing bot unit test builds its controller through the takeover constructor `attach_existing` ([common/src/bots.rs:1388](../../common/src/bots.rs#L1388), [:1477](../../common/src/bots.rs#L1477), [:1546](../../common/src/bots.rs#L1546), [:1667](../../common/src/bots.rs#L1667)) | A level change applies to the server and offline practice at once. The parity tests ([server/src/offline_parity_tests.rs](../../server/src/offline_parity_tests.rs)) must stay green. Per-level tests need a new constructor, because takeover is pinned to Elite |
 | Who gets bots | A worker runs `practice` mode whenever it has fewer than 10 humans ([server/src/match_pool.rs:316-324](../../server/src/match_pool.rs#L316-L324)). Practice fills with bots ([common/src/match_rules.rs:198-205](../../common/src/match_rules.rs#L198-L205)). Quick allocates with bots after 30 s ([server/src/match_service.rs:14](../../server/src/match_service.rs#L14), [:510-517](../../server/src/match_service.rs#L510-L517)). BotPractice allocates at once (`:490-492`) | Quick fill and Server bot match run the same rules. Both count as "online" |
 | Worker environment | Workers inherit the lobby's environment. Only `OMOBA_MAP_CONFIG` and `OMOBA_TARGETING_QA` are removed ([server/src/match_pool.rs:300-327](../../server/src/match_pool.rs#L300-L327)) | Any new bot-tuning environment variable would leak into online workers unless it is removed there |
 | Takeover | A disconnected human's seat gets AI through `attach_existing` as `BotKind::Duelist` ([common/src/bots.rs:339-359](../../common/src/bots.rs#L339-L359), called from [server/src/session_recovery.rs:70](../../server/src/session_recovery.rs#L70) and [:213](../../server/src/session_recovery.rs#L213)). It is reported as "off", not as a bot ([server/src/snapshot.rs:107-112](../../server/src/snapshot.rs#L107-L112)) | Always the top level. Never a persona and never an AI badge |
@@ -74,7 +82,7 @@ flowchart LR
   Lobby --> Man[Manifest.bot_seats]
   Man --> Worker[worker spawns bot seats]
   Caps[Join.caps.ai_labels of every human] --> Worker
-  Lvl[BotDifficulty per team, Top in workers] --> Worker
+  Lvl[BotDifficulty per team, Elite in workers] --> Worker
   Worker --> Res[MatchResult: bot seats carry persona profile_id]
   Res --> Store[career store: persona stats, human vs-AI counters, never Elo]
   Store --> Portal[account API + portal: AI badge, persona page, no rating]
@@ -84,9 +92,9 @@ flowchart LR
 
 | Mode | Behaviour level | Seat identity | Results |
 | --- | --- | --- | --- |
-| Quick-match fill (worker, `practice` mode) | Top (today) | Persona. Anonymous AI when no persona is free, when any human lacks AI labels, or on a store conflict | `public-casual-v1`, saved |
-| Server bot match / party Play vs bots (`BotPractice`) | Top in v1 (S-opt may add a picker) | Persona, with the same fallbacks | `public-casual-v1`, saved |
-| Takeover of a disconnected human | Top | The human's own identity, shown as "off" | As the match |
+| Quick-match fill (worker, `practice` mode) | Elite (today) | Persona. Anonymous AI when no persona is free, when any human lacks AI labels, or on a store conflict | `public-casual-v1`, saved |
+| Server bot match / party Play vs bots (`BotPractice`) | Elite in v1 (S-opt may add a picker) | Persona, with the same fallbacks | `public-casual-v1`, saved |
+| Takeover of a disconnected human | Elite | The human's own identity, shown as "off" | As the match |
 | Standalone practice server (`make practice`) | Player's choice, per team, set from the pause-menu practice page | Anonymous AI | Local, never saved |
 | Offline practice | Player's choice, per team, set from hero select | Anonymous AI | Local, never saved |
 | Combat Test sandbox (its own `BotBehavior`, [shared/src/sandbox.rs:16](../../shared/src/sandbox.rs#L16)), harness UDP bots | Out of scope | — | — |
@@ -95,11 +103,11 @@ flowchart LR
 
 ### Principles
 
-- **The levels**, in code and on the wire: `Recruit`, `Regular`, `Veteran`, `Top`.
-  - The UI calls them Recruit / Regular / Veteran / **Elite**, where Elite is the UI name for `Top`.
+- **The levels**, in code, on the wire and in the UI: `Recruit`, `Regular`, `Veteran`, `Elite`.
+  - An earlier draft called the highest level `Top` in code and Elite in the UI. The owner chose one name (2026-10-13), so code, wire and UI all say Elite.
   - The type is `BotDifficulty`, not "level", because "level" already means the duel hero level ([shared/src/practice.rs:32-34](../../shared/src/practice.rs#L32-L34)) and the hero start level in the offline banner ([client/src/net/offline.rs:120-124](../../client/src/net/offline.rs#L120-L124)).
   - It is also not "behavior", which the Combat Test sandbox already uses.
-- **`Top` is today's bots.** `BotProfile::TOP` holds exactly today's literals, and a unit test pins them. Every gate this plan adds is off (`—`) at Top.
+- **`Elite` is today's bots.** `BotProfile::ELITE` holds exactly today's literals, and a unit test pins them. Every gate this plan adds is off (`—`) at Elite.
 - **What changes between levels is limited to:**
   - when a bot commits;
   - when it backs off;
@@ -117,7 +125,7 @@ flowchart LR
   - skill ranking ([:525-536](../../common/src/bots.rs#L525-L536));
   - shopping ([shared/src/shop.rs:149-177](../../shared/src/shop.rs#L149-L177));
   - hero stats, levels and gold. There are no economic or stat handicaps.
-- **Threat response, for all levels below Top.** Being hit by a visible enemy hero always produces a decision in the same think tick: retaliate if the gates allow it, otherwise retreat. A lower level must never look like it failed to notice its attacker. Top stays as today.
+- **Threat response, for all levels below Elite.** Being hit by a visible enemy hero always produces a decision in the same think tick: retaliate if the gates allow it, otherwise retreat. A lower level must never look like it failed to notice its attacker. Elite stays as today.
 - **The heal threshold stays at 28% for every level.**
   - The docs pin it ([docs/bot-practice-and-social.md:65](../bot-practice-and-social.md)), and so do `sustain_tests` (`low_health_bot_does_not_burn_a_mana_restore_at_full_mana`, `low_health_cleric_bot_casts_the_largest_heal_first`, [common/src/bots.rs:1629-1781](../../common/src/bots.rs#L1629)).
   - Today the retreat gate and the heal share one `low_health` binding ([:844](../../common/src/bots.rs#L844), used at [:1029](../../common/src/bots.rs#L1029)). S1 splits them into `retreat_low` (profile) and `heal_low` (fixed 0.28).
@@ -132,7 +140,7 @@ flowchart LR
 
 These are starting values. S3 calibrates them with the simulator. "—" means the gate is off, which is today's behaviour.
 
-| Knob (`BotProfile` field) | Today in code | Recruit | Regular | Veteran | Top (= today) |
+| Knob (`BotProfile` field) | Today in code | Recruit | Regular | Veteran | Elite (= today) |
 | --- | --- | --- | --- | --- | --- |
 | `retreat_hp`: start a retreat below this HP fraction | 0.28 ([:844](../../common/src/bots.rs#L844)) | 0.50 | 0.40 | 0.33 | 0.28 |
 | `resume_hp`: stay home or in the fountain until HP reaches this. The fountain heals bots ([server/src/practice_tests.rs:1527](../../server/src/practice_tests.rs#L1527)) | none; re-engages after the timer ([:845-852](../../common/src/bots.rs#L845-L852)) | 0.85 | 0.70 | 0.50 | — |
@@ -165,31 +173,31 @@ Definitions:
 
   Like today, a retained target is kept until it becomes invalid; the gate applies only to picking a new target.
 - **`trade_margin`:** the 0.95 cap keeps the gate satisfiable at full HP. Without it, `1.0 ≥ 1.15` would mean a Recruit never engages a healthy hero at all.
-- **Threat response (levels below Top):** a visible enemy hero that damaged this bot within `threat_window_secs` is exempt from `hero_engage_range` and `minion_first`.
+- **Threat response (levels below Elite):** a visible enemy hero that damaged this bot within `threat_window_secs` is exempt from `hero_engage_range` and `minion_first`.
   - If the trade gate or the outnumbered gate then refuses it, the bot starts a retreat in the same think tick. `retreat_secs` applies and `rearm_secs` is ignored.
   - The source is the round ledger's attacker record ([common/src/match_stats.rs:26](../../common/src/match_stats.rs#L26), [:239-242](../../common/src/match_stats.rs#L239-L242)), bounded by the assist window. It needs a read-only accessor.
   - Being hit is information a human has.
-- **Defend exception, all levels:** a hero inside the range of the bot's own tower, or inside the bot's own base, may always be targeted. The trade, outnumbered and minion-first gates do not apply to it. This only relaxes gates, so `Top` is unaffected.
+- **Defend exception, all levels:** a hero inside the range of the bot's own tower, or inside the bot's own base, may always be targeted. The trade, outnumbered and minion-first gates do not apply to it. This only relaxes gates, so `Elite` is unaffected.
 - **Outnumbered count:** living enemy heroes visible to the bot's team within `VISION`, minus living allied heroes within `VISION` (self included).
   - It is computed once per 250 ms think tick.
   - The scan covers at most 32 players and allocates nothing new.
 - **`dash_hero_hp`:** it applies only when the cast's target is a hero. Tower-related withholding stays as today.
-- **Objectives:** there is no current behaviour to scale. If objective play is ever added, it ships first below `Top`, or as a new top behaviour behind a `bot_ai` version bump (see Stats).
+- **Objectives:** there is no current behaviour to scale. If objective play is ever added, it ships first below `Elite`, or as a new top behaviour behind a `bot_ai` version bump (see Stats).
 - **Calibration risk:** a higher `cover_minions` with wider tower margins can stall pushes. The simulator reports time-capped draws per pairing (see S3).
 
 ### Where the profile lives (build)
 
 - **`BotDifficulty`** is a Tolerant serde enum in a new `shared/src/bot_profile.rs`.
   - It is classified in [shared/src/protocol/wire_enums.rs](../../shared/src/protocol/wire_enums.rs) (test `every_serde_enum_in_shared_is_classified`, [:228](../../shared/src/protocol/wire_enums.rs#L228)).
-  - The fallback is an explicit `#[serde(other)] Unknown` unit variant. It plays as `Top` and is displayed as a plain "AI" with no level name, so a newer host's extra level is never mislabelled "Elite".
+  - The fallback is an explicit `#[serde(other)] Unknown` unit variant. It plays as `Elite` and is displayed as a plain "AI" with no level name, so a newer host's extra level is never mislabelled "Elite".
 - **`BotProfile`** is a `Copy` struct in `common/src/bots.rs`, with `const` profiles and `BotProfile::for_level`.
-- **`Controller`** gains `profile` and `retreat_started: Option<Instant>` ([common/src/bots.rs:394-408](../../common/src/bots.rs#L394-L408)). The second is used for the `resume_hp` hysteresis.
-- **`BotControllers.difficulty: [BotDifficulty; 2]`** holds one entry per team and defaults to `Top` ([:326-334](../../common/src/bots.rs#L326-L334), `#[derive(Default)]`). It survives `clear()` ([:365-368](../../common/src/bots.rs#L365-L368)), which the round reset calls ([server/src/session.rs:119](../../server/src/session.rs#L119)).
+- **`Controller`** gains `profile` and `retreat_started: Option<Instant>` ([common/src/bots.rs:394-408](../../common/src/bots.rs#L394-L408)). The second is used for the `resume_hp` hysteresis, so it arrives with S2; S1 adds only `profile`.
+- **`BotControllers.difficulty: [BotDifficulty; 2]`** holds one entry per team and defaults to `Elite` ([:326-334](../../common/src/bots.rs#L326-L334), `#[derive(Default)]`). It survives `clear()` ([:365-368](../../common/src/bots.rs#L365-L368)), which the round reset calls ([server/src/session.rs:119](../../server/src/session.rs#L119)).
 - **`spawn_bot`** reads the team's level ([:622-638](../../common/src/bots.rs#L622-L638)). This also covers Duelists and dummies spawned through it ([common/src/practice.rs:121-163](../../common/src/practice.rs#L121-L163)). Dummies do not use the main brain.
-- **`attach_existing` (takeover)** always sets `TOP` ([:345-358](../../common/src/bots.rs#L345-L358)). The existing tests keep using it unchanged. Per-level tests use a new `#[cfg(test)]` constructor `attach_with_profile`.
+- **`attach_existing` (takeover)** always sets `ELITE` ([:345-358](../../common/src/bots.rs#L345-L358)). The existing tests keep using it unchanged. Per-level tests use a new constructor `attach_with_profile`, compiled for `cfg(test)` and the `test-support` feature, so server tests can use it too.
 - **A level change** retunes the live controllers of that team. Bots do not respawn.
 - **Practice default:** the chosen level applies to both teams, so the human's play decides the match. The per-team model lets S0 switch to "enemies only" without wire changes.
-- **Workers are always Top.**
+- **Workers are always Elite.**
   - A worker ignores `SetBotDifficulty` (it already refuses practice commands).
   - It ignores `OMOBA_BOT_DIFFICULTY`.
   - `match_pool::spawn` adds `.env_remove("OMOBA_BOT_DIFFICULTY")` ([server/src/match_pool.rs:325-326](../../server/src/match_pool.rs#L325-L326)), so an operator setting on the lobby host can never weaken online bots.
@@ -328,8 +336,8 @@ Personality in v1 is tone, game opinions ("Warden is my favourite") and rhythm. 
 
 | Type | Fields | Where |
 | --- | --- | --- |
-| `BotDifficulty` | `Recruit`, `Regular`, `Veteran`, `Top`, and `#[serde(other)] Unknown` (plays as `Top`, displayed as "AI") | `shared/src/bot_profile.rs` |
-| `BotProfile` | the knobs above; `const RECRUIT, REGULAR, VETERAN, TOP` | `common/src/bots.rs` |
+| `BotDifficulty` | `Recruit`, `Regular`, `Veteran`, `Elite`, and `#[serde(other)] Unknown` (plays as `Elite`, displayed as "AI") | `shared/src/bot_profile.rs` |
+| `BotProfile` | the knobs above; `const RECRUIT, REGULAR, VETERAN, ELITE` | `common/src/bots.rs` |
 | `ClientCaps` | `ai_labels: bool`, `locale: Option<String>` (validated `en`, `ru`, `zh-Hans`). Default, and skipped when empty | new field `Join.caps` in `shared/src/protocol/wire.rs`. Not on `Hello`, which public servers synthesize ([server/src/public_transport.rs:202](../../server/src/public_transport.rs#L202)) |
 | `CareerView.ai_personas` | `bool`, default false: the lobby understands the request flag below | `shared/src/career.rs` |
 | Career request flag | `ai_labels: bool`, skipped when false, on `Friends`, `Profile` and `LookupPlayer` (both `CareerAction` and `CareerRequest`). Sent only to a lobby with `ai_personas` | `shared/src/career.rs:255-304` |
@@ -404,7 +412,7 @@ Why a career profile and not a separate `persona_id`? Friendships, participants,
 
 ## Seat fill rules
 
-### Online (Quick fill and Server bot match): Top level, persona seats
+### Online (Quick fill and Server bot match): Elite level, persona seats
 
 1. **The lobby reserves personas** when it builds the manifest ([server/src/match_service.rs:335-343](../../server/src/match_service.rs#L335-L343)). Per team it needs `5 − humans on that team` personas. A new `PersonaLedger` holds:
    - **busy:** personas listed in any slot manifest still in the pool. After a lobby restart this set is rebuilt from the retained manifests ([server/src/match_pool.rs:75-107](../../server/src/match_pool.rs#L75-L107)).
@@ -431,9 +439,9 @@ Why a career profile and not a separate `persona_id`? Friendships, participants,
    - If it fails with `persona_busy`, the worker handles that *before* `handle_rejected_career_start` ([server/src/career_runtime.rs:1074-1108](../../server/src/career_runtime.rs#L1074-L1108)). That function unjoins and blocks every participant today.
    - The worker swaps the conflicting seats to anonymous identities, rebuilds the drafted round with a fresh `result_id`, and retries once.
    - A second failure takes today's path. This happens during loading, before combat starts.
-6. **Behaviour:** every online seat uses `BotProfile::TOP`. A takeover never gets a persona.
+6. **Behaviour:** every online seat uses `BotProfile::ELITE`. A takeover never gets a persona.
 7. **Team balance.**
-   - Personas are identical Top controllers, and classes still come from `BOT_COMPOSITION`, so persona assignment cannot change the balance.
+   - Personas are identical Elite controllers, and classes still come from `BOT_COMPOSITION`, so persona assignment cannot change the balance.
    - Seat counts per team follow `split_teams` ([server/src/match_service.rs:425-479](../../server/src/match_service.rs#L425-L479)).
    - The lobby spreads archetypes so that a team never has more than two `sunny` or `joker` chatterers.
    - Balancing displayed career levels across teams is a later nicety.
@@ -442,7 +450,7 @@ Why a career profile and not a separate `persona_id`? Friendships, participants,
 
 - **Offline.**
   - Hero select shows the picker only when `session.is_offline()` ([client/src/team.rs:1777-1792](../../client/src/team.rs#L1777-L1792)).
-  - The client sends `PracticeCommand::SetBotDifficulty { green, blue }` in the same frame, right after `Join`. The shared handler ignores senders that have not joined ([common/src/practice.rs:63-70](../../common/src/practice.rs#L63-L70)), and offline `Join` already fills the bots at Top ([common/src/offline.rs:121-136](../../common/src/offline.rs#L121-L136)). Sending in the same frame means no simulated tick runs at Top first.
+  - The client sends `PracticeCommand::SetBotDifficulty { green, blue }` in the same frame, right after `Join`. The shared handler ignores senders that have not joined ([common/src/practice.rs:63-70](../../common/src/practice.rs#L63-L70)), and offline `Join` already fills the bots at Elite ([common/src/offline.rs:121-136](../../common/src/offline.rs#L121-L136)). Sending in the same frame means no simulated tick runs at Elite first.
   - The command is sent again whenever the picker changes.
   - `PracticeSession` keeps the value across Leave and Rematch, which today rebuild the session with `Self::new` ([common/src/offline.rs:142-172](../../common/src/offline.rs#L142-L172)).
 - **Standalone practice server.**
@@ -455,8 +463,8 @@ Why a career profile and not a separate `persona_id`? Friendships, participants,
   - The offline banner `net.practice.banner` is offline-only ([client/src/net/offline.rs:120-124](../../client/src/net/offline.rs#L120-L124)) and reads the `PracticeSession` echo.
   - The standalone practice page shows the echo, never the client's own request.
   - An old standalone host ignores the command (`Unsupported`, [common/src/practice.rs:186](../../common/src/practice.rs#L186)) and sends no echo. The page then shows "Elite (server default)".
-- **Duel.** `StartDuel` gains an optional `difficulty`. If it is absent, the duelist takes the opposing team's level, because it spawns through `spawn_bot` ([common/src/practice.rs:155-163](../../common/src/practice.rs#L155-L163)). An old host ignores the field, so the duelist plays at Top.
-- **Defaults.** Without a command the level is `Top`, which is today's behaviour for `make practice` and old clients. The picker's first-run default is `Regular` (decision D3).
+- **Duel.** `StartDuel` gains an optional `difficulty`. If it is absent, the duelist takes the opposing team's level, because it spawns through `spawn_bot` ([common/src/practice.rs:155-163](../../common/src/practice.rs#L155-L163)). An old host ignores the field, so the duelist plays at Elite.
+- **Defaults.** Without a command the level is `Elite`, which is today's behaviour for `make practice` and old clients. The picker's first-run default is `Regular` (decision D3).
 - **Out of scope.** The human's level-6 start offline ([common/src/offline.rs:19](../../common/src/offline.rs#L19), [:122-125](../../common/src/offline.rs#L122-L125)) is not part of difficulty and stays unchanged (decision D5).
 
 ## Social v1
@@ -658,7 +666,7 @@ The UI design pass comes first, in the omoba-ui handoff (`components/badge.md`, 
 
 | Change | Where | Old peer | Note |
 | --- | --- | --- | --- |
-| `BotDifficulty` (new Tolerant enum with `Unknown`) | `shared/src/bot_profile.rs`, listed in [wire_enums.rs:67-121](../../shared/src/protocol/wire_enums.rs#L67-L121) | n/a | A decode test proves unknown values become `Unknown`, which plays as Top |
+| `BotDifficulty` (new Tolerant enum with `Unknown`) | `shared/src/bot_profile.rs`, listed in [wire_enums.rs:67-121](../../shared/src/protocol/wire_enums.rs#L67-L121) | n/a | A decode test proves unknown values become `Unknown`, which plays as Elite |
 | `PracticeCommand::SetBotDifficulty { green, blue }` | [shared/src/practice.rs:17-40](../../shared/src/practice.rs#L17-L40) | decodes as `Unsupported` and is ignored ([:35-39](../../shared/src/practice.rs#L35-L39)) | Workers keep refusing it ([server/src/debug/mod.rs:52-58](../../server/src/debug/mod.rs#L52-L58)) |
 | `StartDuel.difficulty` | same | field ignored | `#[serde(default)]`, absent → team level |
 | `Snapshot.bot_difficulty: Option<[BotDifficulty; 2]>` | [shared/src/protocol/wire.rs:592-603](../../shared/src/protocol/wire.rs#L592-L603) (pattern: `debug_access`) | ignored | skipped when `None`; also set by `PracticeSession::snapshot` |
@@ -726,30 +734,31 @@ The UI design pass comes first, in the omoba-ui handoff (`components/badge.md`, 
 
 Heavy Rust builds and test runs go to CI or the dev VPS builder. Nothing heavy runs on the Mac, whose disk is tight.
 
-- **Top equivalence (S1).**
+- **Elite equivalence (S1).**
   - On the pre-refactor commit, record a JSON trace of a fixed scenario of N ticks: per tick and per bot, the target, cast slots, aim points and position. The scenario is one lane with no dagger classes.
   - First prove the scenario is deterministic by running it twice. Then assert the refactor reproduces the trace exactly.
-  - `BotProfile::TOP` is pinned to 0.28 / 6 s / 18 s / 0.75 / 1.5 / 1 minion / 15 / +2 / +3, with every new gate off.
-- **Behaviour unit tests** ([common/src/bots.rs](../../common/src/bots.rs) test modules, in the style of `turret_tests` and `sustain_tests` at [:1348](../../common/src/bots.rs#L1348) and [:1629](../../common/src/bots.rs#L1629)). These use `attach_with_profile`; takeover stays Top.
-  - Recruit retreats at 45% HP where Top does not, and stays until 85% or the cap.
+  - `BotProfile::ELITE` is pinned to 0.28 / 6 s / 18 s / 0.75 / 1.5 / 1 minion / 15 / +2 / +3, with every new gate off.
+  - **Built (S1):** see the S1 notes under TODO.
+- **Behaviour unit tests** ([common/src/bots.rs](../../common/src/bots.rs) test modules, in the style of `turret_tests` and `sustain_tests` at [:1348](../../common/src/bots.rs#L1348) and [:1629](../../common/src/bots.rs#L1629)). These use `attach_with_profile`; takeover stays Elite.
+  - Recruit retreats at 45% HP where Elite does not, and stays until 85% or the cap.
   - Recruit waits for 3-minion cover.
-  - In a 2v1, Recruit retreats, Regular drops hero targets but holds, Veteran fights, and Top fights.
+  - In a 2v1, Recruit retreats, Regular drops hero targets but holds, Veteran fights, and Elite fights.
   - A Recruit jungler does not gank.
   - Recruit dashes onto a hero only at or below 35% HP.
   - Recruit at full HP engages a fresh, lone hero within 11 m (the trade-margin cap).
   - A Recruit hit by a hero at 13 m reacts in the same think tick, by retaliating or retreating, never by ignoring it.
   - Heal stays at 28% at every level.
-- **No-delay invariant.** For every profile, use a fixture where all gates admit the target: a lone hero within 11 m, both at HP ≤ 0.95, no minions, the mobility target at or below the dash gate. The first think tick, the order of slots attempted, every aim point and the first basic-attack tick must equal Top's. A second fixture proves that `next_think` and `next_route` scheduling never depend on the profile.
-- **Existing tests stay green under Top with no expectation edits:**
+- **No-delay invariant.** For every profile, use a fixture where all gates admit the target: a lone hero within 11 m, both at HP ≤ 0.95, no minions, the mobility target at or below the dash gate. The first think tick, the order of slots attempted, every aim point and the first basic-attack tick must equal Elite's. A second fixture proves that `next_think` and `next_route` scheduling never depend on the profile.
+- **Existing tests stay green under Elite with no expectation edits:**
   - [common/src/bots.rs:1357-1781](../../common/src/bots.rs#L1357);
   - [server/src/practice_tests.rs](../../server/src/practice_tests.rs);
   - [server/src/offline_parity_tests.rs](../../server/src/offline_parity_tests.rs), which gains one per-level online-versus-offline case;
   - the offline session tests ([common/src/offline.rs:343+](../../common/src/offline.rs#L343)).
 - **Server tests:**
   - an old manifest decodes, and `bot_seats` is validated;
-  - workers are Top, ignore `SetBotDifficulty` and ignore `OMOBA_BOT_DIFFICULTY`, and the pool strips that variable;
-  - takeover is Top and never gets a persona;
-  - offline keeps the level across Leave and Rematch, and `SetBotDifficulty` in the Join frame means no tick runs at Top;
+  - workers are Elite, ignore `SetBotDifficulty` and ignore `OMOBA_BOT_DIFFICULTY`, and the pool strips that variable;
+  - takeover is Elite and never gets a persona;
+  - offline keeps the level across Leave and Rematch, and `SetBotDifficulty` in the Join frame means no tick runs at Elite;
   - the capability gate falls back to anonymous seats, and the unused reservation is released;
   - no persona appears in two slots;
   - the recent-persona rotation holds;
@@ -783,7 +792,7 @@ Heavy Rust builds and test runs go to CI or the dev VPS builder. Nothing heavy r
   - **Runner.** An in-process bot-vs-bot runner on `PracticeSession`, driven only by commands and explicit `dt` ([common/src/offline.rs:185-205](../../common/src/offline.rs#L185-L205)).
     - `fill_practice_bots` needs no human ([common/src/host.rs:19-36](../../common/src/host.rs#L19-L36)).
     - `simulate_bots` runs only in `GameState::Running` ([common/src/bots.rs:661](../../common/src/bots.rs#L661)). A test-support helper must do the world setup that `Join` does today: Running, the first wave timer, boss scheduling and starting the ledger ([common/src/offline.rs:121-136](../../common/src/offline.rs#L121-L136)).
-  - **Matches.** Full 5v5 per pairing: Top vs Top, and each lower level vs Top, with alternating sides. A match ends at `GameState::Victory` ([common/src/sim/towers.rs:75-79](../../common/src/sim/towers.rs#L75-L79)) or at a time cap, which counts as a draw.
+  - **Matches.** Full 5v5 per pairing: Elite vs Elite, and each lower level vs Elite, with alternating sides. A match ends at `GameState::Victory` ([common/src/sim/towers.rs:75-79](../../common/src/sim/towers.rs#L75-L79)) or at a time cap, which counts as a draw.
   - **Report.** JSON in the `OMOBA_BALANCE_REPORT` style ([server/src/balance_probe.rs:257](../../server/src/balance_probe.rs#L257)), with:
     - win rates with Wilson intervals, and draw rates;
     - `MatchStats` ([shared/src/career.rs:59-74](../../shared/src/career.rs#L59-L74));
@@ -794,8 +803,8 @@ Heavy Rust builds and test runs go to CI or the dev VPS builder. Nothing heavy r
   - **Sample size.** Runs are not seeded: the world `HashMap`s use the default `RandomState` ([common/src/game_world.rs:28-33](../../common/src/game_world.rs#L28-L33)), and so do dagger procs ([common/src/skills/dagger.rs:5-30](../../common/src/skills/dagger.rs#L5-L30)). Use N ≥ 200 per pairing.
   - **Where it runs.** A cheap CI smoke check covers the behavioural metrics only. The full matrix runs via `workflow_dispatch` or the dev VPS builder.
   - **Acceptance:**
-    - Top vs Top: the 95% Wilson interval contains 0.50, with sides alternated;
-    - point estimates are ordered Recruit < Regular < Veteran < Top;
+    - Elite vs Elite: the 95% Wilson interval contains 0.50, with sides alternated;
+    - point estimates are ordered Recruit < Regular < Veteran < Elite;
     - each adjacent pair is separated by a one-sided two-proportion test at p < 0.05. Raise N, or merge levels, until that holds;
     - draws are at most 10% per pairing;
     - HP-gate retreat starts (not turret, outnumbered or threat retreats) all begin below `retreat_hp`, with the median ≥ `retreat_hp − 0.10`, since burst damage moves it down.
@@ -848,13 +857,31 @@ Heavy Rust builds and test runs go to CI or the dev VPS builder. Nothing heavy r
   - Answer D1–D11 below.
   - omoba-ui pass: `badge.md` gets an AI row, text budgets and the overhead badge-plus-bubble layout; `offline-hero-picker.md` gets the level region.
   - **Accept:** the decisions are recorded on this page; the handoff is merged; the token and asset sync is green.
-- [ ] **S1. Behaviour profile refactor, no behaviour change.** *Gameplay AI.* Size **S–M**.
+- [x] **S1. Behaviour profile refactor, no behaviour change.** *Gameplay AI.* Size **S–M**. Done on `feat/bot-levels`; see the S1 notes below.
   - Files: `shared/src/bot_profile.rs`, `shared/src/protocol/wire_enums.rs`, `common/src/bots.rs`, `server/src/match_pool.rs` (`env_remove`).
-  - Thread `Controller.profile` and the per-team `BotControllers.difficulty` through. Replace every literal in the knob table. Split `low_health` into retreat and heal. Takeover forces Top. Add `attach_with_profile` for tests.
+  - Thread `Controller.profile` and the per-team `BotControllers.difficulty` through. Replace every literal in the knob table. Split `low_health` into retreat and heal. Takeover forces Elite. Add `attach_with_profile` for tests.
   - **Accept:**
-    - the Top trace-equivalence and Top pin tests pass;
+    - the Elite trace-equivalence and Elite pin tests pass;
     - every existing bot, practice, parity and offline test passes with no expectation edits;
     - the classification test passes.
+- **S1 notes (as built).**
+  - **Trace test.** `common/src/bots_trace_tests.rs` records every command the brain issues through a recorder that is a no-op outside `cfg(test)`: point casts with their aim, unit casts, self-sustain casts and basic attacks. Each tick it also records each bot's position, facing, HP, level, gold, target and retreat state. It runs two human-less 5v5 rounds of 6,000 ticks at 50 ms:
+    - `roster`: the standard practice fill. Legacy kits have no point casts, so this round covers retreats, tower cover, sieges, the jungle and sustain.
+    - `mid`: ten advanced, non-dagger kits on one lane, for aim points, clamped point casts, self-aimed leaps and mobility withholding near towers.
+  - **Determinism.** Each round runs twice in one process, so each `GameWorld` has different `HashMap` keys, and both runs must match. They do.
+  - **Baseline.** Per-second FNV digests from the pre-refactor commit (`origin/dev` `ce04e5f` plus only the test) are committed in `common/tests/fixtures/elite_bot_trace.txt`.
+  - **Why the baseline is keyed by libm.** Positions go through `sin`, `cos`, `atan2` and `hypot` from the platform C library, and the results differ between glibc releases. For example, glibc 2.43 ships a new `atan2f` (symbol version `GLIBC_2.43`), and the same round plays out differently on it than on glibc 2.39. So each baseline is keyed by a fingerprint of those functions. The fixture holds one baseline for ubuntu 24.04 / glibc 2.39 (the CI runner image, recorded in a container on the dev VPS) and one for ubuntu 26.04 / glibc 2.43 (the dev VPS).
+  - **Other platforms.** On any other libm, such as macOS, the comparison is skipped with a notice and only the determinism check runs. `OMOBA_REQUIRE_BOT_TRACE=1` turns the skip into a failure.
+  - **New libm.** A new baseline can only come from the pre-refactor commit. The test's module docs give the steps.
+  - **Profile fields.** The field names follow the knob table. Times are `f32` seconds (`Duration::from_secs_f32(6.0)` is exactly 6 s). There is no `contest_objectives` field: no level contests objectives, so there is nothing to switch.
+  - **Kept names.** The public `CombatHost::bot_target` stays as the Elite entry point, because a server vision test calls it. The brain uses a profile-aware variant. `tower_has_minion_cover` stays as a test-only Elite wrapper.
+  - **Lower levels after S1.** The knobs that replaced literals already apply at the lower levels: `retreat_hp`, `rearm_secs`, `cover_minions`, the tower, staging and mobility margins, `hero_engage_range` and `target_leash`. The S2 gates are data only for now. Until S2 adds threat response, a lower level can ignore an attacker beyond its engage range. Only practice hosts can select a lower level, and only through `OMOBA_BOT_DIFFICULTY`.
+  - **`OMOBA_BOT_DIFFICULTY`.**
+    - A standalone server that fills with bots applies it to both teams at boot, and refuses to start on an invalid value. Lobbies and workers never read it.
+    - `match_pool::spawn` removes it from every worker's environment; `worker_command` is unit-tested for that.
+    - The desktop client reads it once for offline practice, as a tester override until the S4 picker; an invalid value logs a warning and keeps Elite.
+    - The offline level survives Leave and Rematch.
+  - **Finding for S3.** These bot-only rounds are deterministic across `HashMap` seeds when no dagger class plays. So repeated runs of one pairing would be identical samples, not N ≥ 200 independent ones. The simulator must vary something real between runs, for example the side, the roster or the start offset.
 - [ ] **S2. Lower-level behaviours.** *Gameplay AI.* Size **M**.
   - File: `common/src/bots.rs`, plus a read-only accessor on the ledger's attacker record (`common/src/match_stats.rs`).
   - Add:
@@ -883,7 +910,7 @@ Heavy Rust builds and test runs go to CI or the dev VPS builder. Nothing heavy r
   - Files: `shared/src/practice.rs`, `common/src/practice.rs`, `common/src/offline.rs`, `shared/src/protocol/wire.rs` (snapshot echo), `client/src/team.rs`, `client/src/net/offline.rs`, `client/src/persistence.rs`, `client/src/debug/tools_page.rs`, `client/i18n/{en,ru,zh-Hans}`.
   - **Accept:**
     - the offline and standalone level applies to both teams and survives Leave and Rematch;
-    - no tick runs at Top after Join;
+    - no tick runs at Elite after Join;
     - the offline banner and the standalone page show the echoed level;
     - an old standalone host shows "Elite (server default)";
     - Quick and Server bot match have no picker;
@@ -927,7 +954,7 @@ Heavy Rust builds and test runs go to CI or the dev VPS builder. Nothing heavy r
     - `server/src/career_runtime.rs` (`participant()`, the `persona_busy` path ahead of `handle_rejected_career_start`);
     - `server/src/career_backend.rs` (persona presence entries).
   - **Accept:**
-    - all seats are Top;
+    - all seats are Elite;
     - personas never appear in two live slots;
     - no human gets the same persona in consecutive matches while another is free;
     - any human without `ai_labels` makes the match anonymous;
@@ -972,14 +999,14 @@ Heavy Rust builds and test runs go to CI or the dev VPS builder. Nothing heavy r
 - [ ] **S13. Production enablement.** *Ops.* Size **S**.
   - Work: lockstep deploy, then personas on once AI-label clients dominate.
   - **Accept:** the rollback flags are verified in production; the public "AI players" note is live; player counts exclude AI.
-- [ ] **S-opt. Level picker for Server bot match** (only if D1 says so). *Shared, server, client.* Size **M**.
+- [ ] **S-opt. Level picker for Server bot match** (only if D1 says so; D1 keeps Server bot match at Elite, so this is not planned). *Shared, server, client.* Size **M**.
   - Files:
     - `shared/src/career.rs` (`FindMatch.bot_difficulty`, `skip_serializing_if`) and the `CareerView` capability;
     - `shared/src/party.rs` (`Launch` and `PartyLaunch`; the leader decides);
     - `server/src/match_service.rs` (the duplicate check includes the level, [:161](../../server/src/match_service.rs#L161));
     - `Manifest.bot_difficulty` (BotPractice only) and the worker.
   - **Accept:**
-    - Quick and HumansOnly are forced to Top;
+    - Quick and HumansOnly are forced to Elite;
     - an old lobby never receives the field;
     - the XP policy per level is decided and enforced.
 - [ ] **Later (separate plans).**
@@ -987,14 +1014,16 @@ Heavy Rust builds and test runs go to CI or the dev VPS builder. Nothing heavy r
   - Friend DMs for everyone (protocol 12).
   - Persona party invites and the online list.
   - Objective contesting behind `bot_ai` v2.
-  - Per-persona playstyle variation below Top only.
+  - Per-persona playstyle variation below Elite only.
   - A dedicated `persona_role`.
 
 ## Open decisions (S0)
 
-- **D1.** Is the lobby's Server bot match "online" (Top, the v1 default, matching "public lobby" in the owner decisions) or "practice" (a picker via S-opt, with an XP policy per level)?
+Decided on 2026-10-13: D1–D4 (see "Owner defaults for the level questions").
+
+- **D1.** Is the lobby's Server bot match "online" (Elite, the v1 default, matching "public lobby" in the owner decisions) or "practice" (a picker via S-opt, with an XP policy per level)?
 - **D2.** Practice level for both teams (default) or enemies only? The data model supports both.
-- **D3.** First-run picker default: Regular (recommended), or Elite to keep today's offline feel? Without a command the level stays Top.
+- **D3.** First-run picker default: Regular (recommended), or Elite to keep today's offline feel? Without a command the level stays Elite.
 - **D4.** Four levels named Recruit / Regular / Veteran / Elite (recommended), or three?
 - **D5.** Keep the human's level-6 head start in offline practice ([common/src/offline.rs:19](../../common/src/offline.rs#L19)) as a separate convenience, or level both sides?
 - **D6.** Should personas earn real XP and career level (recommended), or show a fixed level?
@@ -1041,7 +1070,7 @@ Heavy Rust builds and test runs go to CI or the dev VPS builder. Nothing heavy r
   - the parity test now uses a fixture where every gate admits the action (the old version contradicted the gates);
   - capped `trade_margin`, because `1.0 ≥ 1.15` made a Recruit never engage a healthy hero;
   - scoped the dash gate to hero targets.
-- **Online stays Top:** workers inherit the lobby environment, so `OMOBA_BOT_DIFFICULTY` must be stripped in `match_pool::spawn` and ignored by workers.
+- **Online stays Elite:** workers inherit the lobby environment, so `OMOBA_BOT_DIFFICULTY` must be stripped in `match_pool::spawn` and ignored by workers.
 - **Rating and honesty leaks closed:**
   - the AI rating is removed at the API;
   - the public-casual check is now two-way (AI on a non-bot seat, human on a bot seat);
@@ -1055,8 +1084,8 @@ Heavy Rust builds and test runs go to CI or the dev VPS builder. Nothing heavy r
   - S3, S5, S7 and S8 raised to M–L, and S10 to M;
   - `persona_role` replaced in v1 by the existing account-API role plus one `SECURITY DEFINER` presence function.
 - **Acceptance tests:**
-  - added Top trace equivalence, the no-delay invariant, old-client filtering, two-way roster checks, `persona_busy` without ejection, the stripped env var, and packaged-artifact checks;
-  - replaced the flaky "Top vs Top 45–55% at N = 200" and strict point monotonicity with interval and pairwise tests, and limited the retreat-HP metric to HP-triggered retreats.
+  - added Elite trace equivalence, the no-delay invariant, old-client filtering, two-way roster checks, `persona_busy` without ejection, the stripped env var, and packaged-artifact checks;
+  - replaced the flaky "Elite vs Elite 45–55% at N = 200" and strict point monotonicity with interval and pairwise tests, and limited the retreat-HP metric to HP-triggered retreats.
 - **New open decisions:**
   - D10: Add friend on human result rows was quietly a new human-to-human affordance;
   - D11: the persona daily cap and how strict schedules are.
