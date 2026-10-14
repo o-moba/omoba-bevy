@@ -379,6 +379,23 @@ class DevContour(unittest.TestCase):
         self.assertNotIn("OMOBA_CONTOUR=dev", release.ios_settings(
             release.resolve_flavor(server="192.0.2.1:4000"), "TEAM", "7"))
 
+    def test_ios_archive_command_selects_the_matching_shared_scheme(self):
+        from unittest import mock
+        for contour, scheme, configuration in [('prod', 'Omoba', 'Release'),
+                                                ('dev', 'Omoba Dev', 'Release Dev')]:
+            with self.subTest(contour=contour), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                with mock.patch.object(release, 'ROOT', root), \
+                     mock.patch.object(release, 'host_platform', return_value='macos'), \
+                     mock.patch.object(release, 'local_xcconfig', return_value={'DEVELOPMENT_TEAM': 'TEAM'}), \
+                     mock.patch.object(release, 'run', side_effect=RuntimeError('stop before signing')) as run:
+                    with self.assertRaisesRegex(RuntimeError, 'stop before signing'):
+                        release.build_ios('0.44.0', root/'dist', release.resolve_flavor(contour), '42', False)
+                args = run.call_args.args
+                self.assertEqual(args[args.index('-scheme') + 1], scheme)
+                self.assertEqual(args[args.index('-configuration') + 1], configuration)
+                self.assertIn(f'OMOBA_CONTOUR={contour}', args)
+
     def test_a_production_ios_archive_pins_its_contour_and_server_over_the_local_xcconfig(self):
         # Omoba.local.xcconfig may hold `OMOBA_CONTOUR = dev` or a LAN OMOBA_GAME_SERVER
         # for Xcode runs; command-line settings win, so a release always names both.

@@ -971,6 +971,12 @@ def check_archive_identity(archive: Path, flavor: Flavor) -> None:
                          f"expected {expected}; check mobile/ios/Omoba.local.xcconfig")
 
 
+def ios_scheme(contour: str) -> tuple[str, str]:
+    if contour not in CONTOURS:
+        raise ValueError(f"unknown contour {contour!r}")
+    return ("Omoba Dev", "Release Dev") if contour == "dev" else ("Omoba", "Release")
+
+
 def build_ios(version: str, out: Path, flavor: Flavor, build_number: str | None, upload: bool) -> Path:
     """The production app or, for --contour dev, the OMOBA Dev app (space.ekza.omoba.dev,
     its own App Store Connect record for internal TestFlight)."""
@@ -991,8 +997,9 @@ def build_ios(version: str, out: Path, flavor: Flavor, build_number: str | None,
     # The archive's Cargo step (mobile/ios/xcode_build.py) inherits this environment: no
     # compile-time default from the shell, so the server comes only from OMOBA_GAME_SERVER.
     env = scrub_build_env(os.environ.copy())
-    run("xcodebuild", "-project", ROOT / "mobile/ios/Omoba.xcodeproj", "-scheme", "Omoba",
-        "-configuration", "Release", "-destination", "generic/platform=iOS",
+    scheme, configuration = ios_scheme(flavor.contour)
+    run("xcodebuild", "-project", ROOT / "mobile/ios/Omoba.xcodeproj", "-scheme", scheme,
+        "-configuration", configuration, "-destination", "generic/platform=iOS",
         "-archivePath", archive, "-allowProvisioningUpdates", "archive", *settings, env=env)
     check_archive_identity(archive, flavor)
     options = work / "ExportOptions.plist"

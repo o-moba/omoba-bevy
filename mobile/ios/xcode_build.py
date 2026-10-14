@@ -48,6 +48,17 @@ def contour_build_settings(env: dict[str, str], root: Path = ROOT) -> dict[str, 
     return ekza_build_settings(env, root)
 
 
+def cargo_cache(env: dict[str, str]) -> Path:
+    """Reuse the primary checkout's cache when opened from a linked worktree."""
+    override = env.get('OMOBA_CARGO_TARGET_DIR') or env.get('CARGO_TARGET_DIR')
+    if override:
+        return Path(override).expanduser().resolve()
+    common = subprocess.check_output(
+        ['git', 'rev-parse', '--path-format=absolute', '--git-common-dir'],
+        cwd=ROOT, text=True).strip()
+    return Path(common).parent / 'target'
+
+
 def settings(env: dict[str, str]) -> dict:
     if env.get('PLATFORM_NAME') != 'iphoneos':
         raise ValueError('Choose Any iOS Device (arm64) or a physical iPhone. Use build_simulator.py for Simulator.')
@@ -63,7 +74,7 @@ def settings(env: dict[str, str]) -> dict:
     if bundle.suffix != '.app' or executable.parts != (bundle.name, 'client'):
         raise ValueError('Expected a single Omoba application with executable client.')
     return dict(profile=profile, build=build, bundle=bundle,
-                cache=Path(env.get('OMOBA_CARGO_TARGET_DIR') or ROOT / 'target/iphone-cargo').expanduser().resolve(),
+                cache=cargo_cache(env),
                 derived=Path(env['DERIVED_FILE_DIR']),
                 symbols=Path(env['DWARF_DSYM_FOLDER_PATH']) / env['DWARF_DSYM_FILE_NAME'])
 

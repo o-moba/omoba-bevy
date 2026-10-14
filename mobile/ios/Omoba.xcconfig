@@ -1,10 +1,10 @@
-// Open Omoba.xcodeproj, choose the Omoba scheme and Any iOS Device (arm64).
+// Open Omoba.xcodeproj, choose Omoba or Omoba Dev and Any iOS Device (arm64).
 PRODUCT_NAME = OmobaBeta
 // The contour picks the app (scripts/contours.py): empty is the production app
 // space.ekza.omoba.beta; `dev` is the separate OMOBA Dev tester app with its own
 // bundle id, name, DEV-ribbon icon and dev connection profiles, installable beside
 // it. `scripts/release.py build ios --contour dev` passes OMOBA_CONTOUR=dev; for a
-// Run from Xcode put `OMOBA_CONTOUR = dev` in Omoba.local.xcconfig.
+// Run from Xcode choose the Omoba Dev scheme (Debug Dev / Release Dev).
 OMOBA_CONTOUR =
 OMOBA_BUNDLE_ID_ = space.ekza.omoba.beta
 OMOBA_BUNDLE_ID_prod = space.ekza.omoba.beta

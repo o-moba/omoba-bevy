@@ -1,6 +1,9 @@
 import os
 from pathlib import Path
 import plistlib
+import shutil
+import sys
+import json
 import subprocess
 import tempfile
 import unittest
@@ -17,6 +20,51 @@ class XcodeBridgeTests(unittest.TestCase):
                     DWARF_DSYM_FOLDER_PATH=str(root/'products'), DWARF_DSYM_FILE_NAME='OmobaBeta.app.dSYM',
                     OMOBA_CARGO_TARGET_DIR=str(root/'cache'), PRODUCT_BUNDLE_IDENTIFIER='space.ekza.omoba.beta',
                     SDKROOT='/selected/iphoneos.sdk')
+
+    def test_worktrees_share_primary_cargo_cache_and_allow_explicit_cache(self):
+        with patch.object(xb.subprocess, 'check_output', return_value='/repo/omoba/.git\n') as git:
+            self.assertEqual(xb.cargo_cache({}), Path('/repo/omoba/target'))
+            self.assertIn('--git-common-dir', git.call_args.args[0])
+        with patch.object(xb.subprocess, 'check_output') as git:
+            self.assertEqual(xb.cargo_cache({'CARGO_TARGET_DIR': '/cache/b'}), Path('/cache/b'))
+            self.assertEqual(xb.cargo_cache({'CARGO_TARGET_DIR': '/cache/b',
+                                           'OMOBA_CARGO_TARGET_DIR': '/cache/a'}), Path('/cache/a'))
+            git.assert_not_called()
+
+    @unittest.skipUnless(sys.platform == 'darwin' and shutil.which('xcodebuild'), 'requires Xcode')
+    def test_xcode_resolves_both_schemes_despite_stale_local_settings(self):
+        here = Path(xb.__file__).parent
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            shutil.copytree(here/'Omoba.xcodeproj', root/'Omoba.xcodeproj')
+            shutil.copy2(here/'Omoba.xcconfig', root/'Omoba.xcconfig')
+            for scheme, config, contour, bundle, product, icon in (
+                ('Omoba', 'Debug', 'prod', 'space.ekza.omoba.beta', 'OmobaBeta.app', 'AppIcon'),
+                ('Omoba', 'Release', 'prod', 'space.ekza.omoba.beta', 'OmobaBeta.app', 'AppIcon'),
+                ('Omoba Dev', 'Debug Dev', 'dev', 'space.ekza.omoba.dev', 'OmobaDev.app', 'AppIconDev'),
+                ('Omoba Dev', 'Release Dev', 'dev', 'space.ekza.omoba.dev', 'OmobaDev.app', 'AppIconDev'),
+            ):
+                with self.subTest(scheme=scheme, config=config):
+                    stale = 'prod' if contour == 'dev' else 'dev'
+                    (root/'Omoba.local.xcconfig').write_text(
+                        f'OMOBA_CONTOUR = {stale}\nOMOBA_GAME_SERVER = 77.246.105.57:4000\n')
+                    result = subprocess.run([
+                        'xcodebuild', '-project', str(root/'Omoba.xcodeproj'),
+                        '-scheme', scheme, '-configuration', config,
+                        '-destination', 'generic/platform=iOS', '-showBuildSettings', '-json',
+                    ], capture_output=True, text=True, timeout=60, check=True)
+                    values = json.loads(result.stdout)[0]['buildSettings']
+                    self.assertEqual(values['OMOBA_CONTOUR'], contour)
+                    self.assertEqual(values['PRODUCT_BUNDLE_IDENTIFIER'], bundle)
+                    self.assertEqual(values['FULL_PRODUCT_NAME'], product)
+                    self.assertEqual(values['ASSETCATALOG_COMPILER_APPICON_NAME'], icon)
+                    if contour == 'dev':
+                        self.assertFalse(values.get('OMOBA_GAME_SERVER'))
+                        self.assertEqual(xb.contour_build_settings(values)['OMOBA_DEFAULT_GAME_SERVER_ADDR'],
+                                         'lobby.dev.omoba.io:4100')
+            dev_scheme = ET.parse(root/'Omoba.xcodeproj/xcshareddata/xcschemes/Omoba Dev.xcscheme')
+            self.assertEqual(dev_scheme.find('LaunchAction').get('buildConfiguration'), 'Debug Dev')
+            self.assertEqual(dev_scheme.find('ArchiveAction').get('buildConfiguration'), 'Release Dev')
 
     def test_local_ekza_settings_apply_only_to_debug_and_private_host(self):
         import json

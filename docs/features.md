@@ -1,5 +1,13 @@
 # Feature Inventory
 
+## Dev iOS workflow
+
+The shared **Omoba Dev** Xcode scheme builds the separate `space.ekza.omoba.dev`
+app for the dev contour. Run and Archive select dev settings without editing
+local contour values. The release script selects the same scheme. Apple signing,
+TestFlight upload, tester assignment and physical-device checks remain separate
+steps: [dev quickstart](dev-quickstart.md).
+
 Android launch diagnostics: `make android-diagnose` records the connected phone's
 OS, ABI, graphics capabilities, installed OMOBA version and app crash/exit evidence.
 Read-only by default; explicit `--launch` is available. See
