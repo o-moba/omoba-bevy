@@ -84,6 +84,7 @@ REPO = "o-moba/omoba-bevy"
 from contours import (CONFIG_SUFFIX_ENV, CONTOURS, DEV_CONFIG_SUFFIX, DEV_LOBBY,  # noqa: E402
                       DEV_PASSPORT, DEV_REGISTRY, MOBILE, PASSPORT_DEFAULT_ENV, REGISTRY_DEFAULT_ENV,
                       SERVER_DEFAULT_ENV)
+from ios_release_guard import require_production_source
 CLIENT_DEFAULT_ENVS = (SERVER_DEFAULT_ENV, REGISTRY_DEFAULT_ENV, PASSPORT_DEFAULT_ENV, CONFIG_SUFFIX_ENV)
 # Every compile-time setting the workspace (`option_env!`) or the pinned Ekza SDK
 # (EKZA_DEV_HTTP_HOST, ekza-bevy-sdk src/registry.rs) reads. A build drops all of
@@ -923,15 +924,13 @@ def local_xcconfig() -> dict:
 
 
 def remember_ios_build(number: str) -> None:
-    """Record the last used build number in the ignored local config (and the primary checkout's)."""
+    """Record the last used number in this checkout only; other contours own theirs."""
     path = ROOT / "mobile/ios/Omoba.local.xcconfig"
-    text = re.sub(r"(?m)^CURRENT_PROJECT_VERSION\s*=.*$", f"CURRENT_PROJECT_VERSION = {number}", path.read_text())
+    text, count = re.subn(r"(?m)^CURRENT_PROJECT_VERSION\s*=.*$",
+                         f"CURRENT_PROJECT_VERSION = {number}", path.read_text())
+    if not count:
+        text = text.rstrip() + f"\nCURRENT_PROJECT_VERSION = {number}\n"
     path.write_text(text)
-    main_copy = Path(subprocess.check_output(
-        ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"], cwd=ROOT, text=True).strip()
-    ).parent / "mobile/ios/Omoba.local.xcconfig"
-    if main_copy != path and main_copy.is_file():
-        main_copy.write_text(text)
 
 
 def ios_settings(flavor: Flavor, team: str, number: str) -> list[str]:
@@ -971,10 +970,20 @@ def check_archive_identity(archive: Path, flavor: Flavor) -> None:
                          f"expected {expected}; check mobile/ios/Omoba.local.xcconfig")
 
 
+def ios_scheme(contour: str) -> tuple[str, str]:
+    if contour not in CONTOURS:
+        raise ValueError(f"unknown contour {contour!r}")
+    return ("Omoba Dev", "Release Dev") if contour == "dev" else ("Omoba", "Release")
+
+
 def build_ios(version: str, out: Path, flavor: Flavor, build_number: str | None, upload: bool) -> Path:
     """The production app or, for --contour dev, the OMOBA Dev app (space.ekza.omoba.dev,
     its own App Store Connect record for internal TestFlight)."""
     mobile_endpoints_check(flavor, "ios")
+    try:
+        source = require_production_source(ROOT) if not flavor.dev else None
+    except ValueError as error:
+        raise SystemExit(str(error)) from error
     if host_platform() != "macos":
         raise SystemExit("iOS builds need macOS with Xcode")
     config = local_xcconfig()
@@ -991,10 +1000,17 @@ def build_ios(version: str, out: Path, flavor: Flavor, build_number: str | None,
     # The archive's Cargo step (mobile/ios/xcode_build.py) inherits this environment: no
     # compile-time default from the shell, so the server comes only from OMOBA_GAME_SERVER.
     env = scrub_build_env(os.environ.copy())
-    run("xcodebuild", "-project", ROOT / "mobile/ios/Omoba.xcodeproj", "-scheme", "Omoba",
-        "-configuration", "Release", "-destination", "generic/platform=iOS",
+    scheme, configuration = ios_scheme(flavor.contour)
+    run("xcodebuild", "-project", ROOT / "mobile/ios/Omoba.xcodeproj", "-scheme", scheme,
+        "-configuration", configuration, "-destination", "generic/platform=iOS",
         "-archivePath", archive, "-allowProvisioningUpdates", "archive", *settings, env=env)
     check_archive_identity(archive, flavor)
+    if source is not None:
+        try:
+            if source != require_production_source(ROOT):
+                raise ValueError('Production source changed during archive; build again.')
+        except ValueError as error:
+            raise SystemExit(str(error)) from error
     options = work / "ExportOptions.plist"
     with options.open("wb") as handle:
         plistlib.dump({"method": "app-store-connect", "teamID": team, "signingStyle": "automatic",

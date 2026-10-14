@@ -5,6 +5,11 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Shared **Omoba Dev** Xcode scheme for Run and Archive: separate app identity,
+  DEV icon and dev lobby, protected against stale local contour/server settings.
+  iOS release tooling selects the matching scheme; linked worktrees share the
+  primary Cargo cache. See [dev quickstart](docs/dev-quickstart.md).
+
 - Connection profiles and the OMOBA Dev app ([docs/connection-profiles.md](docs/connection-profiles.md)).
   **Production builds have no server selection at all**: the party lobby's server
   field, the Home/phone SERVER button and the Beta/Local presets are gone, and a

@@ -111,8 +111,8 @@ python3 scripts/release.py ci --contour dev --ref v<version>-dev.1   # desktop +
   `PRODUCT_BUNDLE_IDENTIFIER = space.ekza.omoba.dev` and the `AppIconDev` icon set in
   `mobile/ios/Omoba.xcconfig`; `xcode_build.py` then names the app `OMOBA Dev`,
   compiles the Dev profile and refuses a dev build under the production bundle id (and
-  the reverse). For a Run from Xcode, put `OMOBA_CONTOUR = dev` in
-  `mobile/ios/Omoba.local.xcconfig`. `release.py` always passes `OMOBA_CONTOUR` and
+  the reverse). For Run or Archive from Xcode, select the shared **Omoba Dev** scheme.
+  Its `Debug Dev` / `Release Dev` configurations pin the dev contour over local settings. `release.py` selects that scheme for dev and always passes `OMOBA_CONTOUR` and
   `OMOBA_GAME_SERVER` on the `xcodebuild` command line (empty server for production
   without `--server`), so these Xcode-run lines never reach a release archive, and it
   refuses an archive whose bundle id is not the requested app's. The LAN rehearsal
