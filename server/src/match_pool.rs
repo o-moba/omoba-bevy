@@ -307,7 +307,24 @@ fn spawn(
         .create(true)
         .append(true)
         .open(directory.join("worker.log"))?;
-    Command::new(executable)
+    worker_command(executable, directory, m, recovery)
+        .stdin(Stdio::null())
+        .stdout(Stdio::from(output.try_clone()?))
+        .stderr(Stdio::from(output))
+        .spawn()
+}
+
+/// A worker inherits the lobby's environment except its own settings and the
+/// local-only overrides: a map file, targeting QA, and the practice bot level,
+/// so an operator setting on the lobby host can never weaken online bots.
+fn worker_command(
+    executable: &std::path::Path,
+    directory: &std::path::Path,
+    m: &Manifest,
+    recovery: bool,
+) -> Command {
+    let mut command = Command::new(executable);
+    command
         .env("OMOBA_SERVER_ROLE", "match")
         .env("OMOBA_MATCH_ALLOCATION", directory.join("manifest.json"))
         .env("OMOBA_MATCH_RECOVERY", if recovery { "1" } else { "0" })
@@ -324,10 +341,8 @@ fn spawn(
         )
         .env_remove("OMOBA_MAP_CONFIG")
         .env_remove("OMOBA_TARGETING_QA")
-        .stdin(Stdio::null())
-        .stdout(Stdio::from(output.try_clone()?))
-        .stderr(Stdio::from(output))
-        .spawn()
+        .env_remove(shared::bot_profile::BotDifficulty::ENV);
+    command
 }
 
 fn lock_root(root: &std::path::Path) -> Result<fs::File, String> {
@@ -410,6 +425,36 @@ mod tests {
             join_deadline_ms: match_allocation::unix_ms() + 180_000,
         }
     }
+    #[test]
+    fn workers_never_inherit_local_overrides_such_as_the_bot_level() {
+        let command = worker_command(
+            std::path::Path::new("omoba-server"),
+            std::path::Path::new("/tmp/allocation"),
+            &manifest('a'),
+            false,
+        );
+        let envs: HashMap<_, _> = command.get_envs().collect();
+        for removed in [
+            "OMOBA_MAP_CONFIG",
+            "OMOBA_TARGETING_QA",
+            shared::bot_profile::BotDifficulty::ENV,
+        ] {
+            assert_eq!(
+                envs.get(std::ffi::OsStr::new(removed)),
+                Some(&None),
+                "{removed} must be removed"
+            );
+        }
+        assert_eq!(
+            envs.get(std::ffi::OsStr::new("OMOBA_SERVER_ROLE")),
+            Some(&Some(std::ffi::OsStr::new("match")))
+        );
+        assert_eq!(
+            envs.get(std::ffi::OsStr::new("OMOBA_MATCH_MODE")),
+            Some(&Some(std::ffi::OsStr::new("practice")))
+        );
+    }
+
     #[test]
     fn only_one_coordinator_can_own_a_root_and_drop_releases_it() {
         let p = Pool::for_test();
