@@ -24,13 +24,18 @@
 //!   z-test.
 //!
 //! The quick tests below run in CI on a small sample and assert only
-//! intervals. The full matrix is `#[ignore]`d; run it on the dev VPS builder:
+//! intervals. The full matrix is `#[ignore]`d; run it on a many-core machine
+//! (not the dev VPS) or with the `Bot difficulty matrix` workflow. The
+//! acceptance matrix (docs/plans/bot-personas.md, S3 notes) is:
 //!
 //! ```sh
-//! OMOBA_BOT_SIM_MATCHES=200 OMOBA_BOT_SIM_THREADS=2 OMOBA_BOT_SIM_REPORT=report.json \
+//! OMOBA_BOT_SIM_MATCHES=200 OMOBA_BOT_SIM_SEED=1 OMOBA_BOT_SIM_REPORT=report.json \
 //!   cargo test --release --locked -p common --features test-support \
-//!   --test bot_difficulty_sim -- --ignored --nocapture full_matrix
+//!   --test bot_difficulty_sim -- --ignored --exact --nocapture full_matrix > /dev/null
 //! ```
+//!
+//! The thread count defaults to the available parallelism and does not
+//! change the result.
 //!
 //! Optional settings: `OMOBA_BOT_SIM_SEED` (base seed), `OMOBA_BOT_SIM_DT`
 //! (nominal step, s), `OMOBA_BOT_SIM_JITTER` (relative step jitter),
@@ -1031,7 +1036,7 @@ fn parse_pairings(spec: &str) -> Vec<(Pairing, Option<u32>)> {
 }
 
 #[test]
-#[ignore = "full matrix: minutes to hours; run on the dev VPS builder (module docs)"]
+#[ignore = "full matrix: minutes to hours; see the module docs"]
 fn full_matrix() {
     let rounds: u32 = env("OMOBA_BOT_SIM_MATCHES", 200);
     let threads: usize = env(

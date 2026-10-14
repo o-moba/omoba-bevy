@@ -734,7 +734,7 @@ The UI design pass comes first, in the omoba-ui handoff (`components/badge.md`, 
 
 ## Testing strategy
 
-Heavy Rust builds and test runs go to CI or the dev VPS builder. Nothing heavy runs on the Mac, whose disk is tight.
+Heavy Rust builds and test runs go to CI or the owner's Mac (14 cores), never to the dev VPS, which is small and shared with the dev services. S1–S3 were first gated on the dev VPS builder; the final S3 gate and matrix ran on the Mac.
 
 - **Elite equivalence (S1).**
   - On the pre-refactor commit, record a JSON trace of a fixed scenario of N ticks: per tick and per bot, the target, cast slots, aim points and position. The scenario is one lane with no dagger classes.
@@ -808,10 +808,11 @@ Heavy Rust builds and test runs go to CI or the dev VPS builder. Nothing heavy r
     - routes planned, the simulator's cost driver.
     - The brain reports health retreats, gate retreats, threat answers and routes through `bots::sim_probe`. It is per thread, off unless started, only reads values the brain already chose, and compiles to nothing without test-support.
   - **Seeds.** S1 found that bot-only rounds without a dagger class are deterministic. So a round's only variation is a seeded step jitter: each step is `dt` 50 ms ± 20%, the way a server tick or a client frame varies. A seed replays its round exactly on one platform (`a_round_replays_exactly_from_its_seed`); another `libm` plays a different but equally valid sample.
-  - **Where it runs.** CI's `bot difficulty smoke` job runs two `smoke_` tests in release on a small fixed-seed sample, with interval assertions only. The full matrix is the `#[ignore]`d `full_matrix` test, run on the dev VPS builder or with the `Bot difficulty matrix` workflow (`workflow_dispatch`, once it is on the default branch, `main`).
+  - **Where it runs.** CI's `bot difficulty smoke` job runs two `smoke_` tests in release on a small fixed-seed sample, with interval assertions only. The full matrix is the `#[ignore]`d `full_matrix` test, run on a many-core machine (the acceptance matrix ran on the owner's Mac) or with the `Bot difficulty matrix` workflow (`workflow_dispatch`, once it is on the default branch, `main`). Not on the dev VPS: it is small and shared with the dev services.
   - **Acceptance:**
     - Elite vs Elite: the 95% Wilson interval contains 0.50, with sides alternated;
     - win rates against Elite are ordered Recruit < Regular < Veteran < Elite, each adjacent pair separated by a one-sided two-proportion test at p < 0.05, where that is feasible. Levels that both lose nearly every round to Elite (both Wilson upper bounds under 0.10) are ordered by their mean structure lead against Elite instead, with disjoint 95% intervals, and by their direct pairing;
+      - **This fallback was added after the data was seen, and awaits owner sign-off.** The criterion as planned read: "each adjacent pair separated by a one-sided two-proportion test at p < 0.05. Raise N, or merge levels, until that holds." The S3 calibration commit added the fallback after its matrix had shown Recruit and Regular inseparable against Elite (0.005 against 0.010, p = 0.28). The acceptance matrix (base seed 1, see the S3 notes) gives 0.000 against 0.015 with a z-test p = 0.041, but that rests on 3 wins in 400 rounds, where the normal approximation is weak: Fisher's exact one-sided p is 0.12. So the two levels are still not reliably separated by this win rate. Raising N is the plan's first remedy and is now affordable: separating 0.005 from 0.010 at p < 0.05 with 80% power needs about 3,700 decisive rounds in each of the two pairings, about 3 hours (Recruit against Elite, 3.0 s per round) plus 1.6 hours (Regular against Elite, 1.6 s per round) on the Mac's 14 threads. It was not run in this step. Merging levels, or retuning Regular until it wins measurably against Elite, changes owner decision D4 or the level design, so it is the owner's call. Until the owner decides, the fallback stands in for that one comparison, and the report marks it as not gating;
     - in each direct adjacent pairing (Recruit against Regular, Regular against Veteran), the weaker level's Wilson interval lies below 0.50;
     - draws (ties after adjudication) are at most 10% per pairing; the share of rounds reaching Victory is reported;
     - HP-gate retreat starts (not turret, outnumbered or threat retreats) all begin below `retreat_hp`, with the median ≥ `retreat_hp − 0.10`, since burst damage moves it down.
@@ -876,6 +877,7 @@ Heavy Rust builds and test runs go to CI or the dev VPS builder. Nothing heavy r
     - `roster`: the standard practice fill. Legacy kits have no point casts, so this round covers retreats, tower cover, sieges, the jungle and sustain.
     - `mid`: ten advanced, non-dagger kits on one lane, for aim points, clamped point casts, self-aimed leaps and mobility withholding near towers.
   - **Determinism.** Each round runs twice in one process, so each `GameWorld` has different `HashMap` keys, and both runs must match. They do.
+    - On macOS's `libm` the roster round reached an exact tie at second 192: an enemy tower picked between two equally near minions in `HashMap` order, so the check failed in about half the runs (the pre-refactor commit `d228ca9` too, 4 of 8). The tower now breaks the tie by the lowest minion id ([common/src/sim/towers.rs](../../common/src/sim/towers.rs), test `a_tower_shoots_the_lowest_id_of_equally_near_minions_whatever_the_hash_seed`), and the check passed 16 of 16 runs on the Mac. The glibc rounds never reached such a tie, so their baselines still hold: CI's required comparison on glibc 2.39 passed unchanged after the fix ([run 38499004706](https://github.com/o-moba/omoba-bevy/actions/runs/38499004706)).
   - **Baseline.** Per-second FNV digests from the pre-refactor commit (`origin/dev` `ce04e5f` plus only the test) are committed in `common/tests/fixtures/elite_bot_trace.txt`.
   - **Why the baseline is keyed by libm.** Positions go through `sin`, `cos`, `atan2` and `hypot` from the platform C library, and the results differ between glibc releases. For example, glibc 2.43 ships a new `atan2f` (symbol version `GLIBC_2.43`), and the same round plays out differently on it than on glibc 2.39. So each baseline is keyed by a fingerprint of those functions. The fixture holds one baseline for ubuntu 24.04 / glibc 2.39 (the CI runner image, recorded in a container on the dev VPS) and one for ubuntu 26.04 / glibc 2.43 (the dev VPS).
   - **Other platforms.** On any other libm, such as macOS, the comparison is skipped with a notice and only the determinism check runs. `OMOBA_REQUIRE_BOT_TRACE=1` turns the skip into a failure.
@@ -935,48 +937,49 @@ Heavy Rust builds and test runs go to CI or the dev VPS builder. Nothing heavy r
     - the knob values are updated from the report.
 - **S3 notes (as built).**
   - **Simulator.** `common/tests/bot_difficulty_sim.rs` builds only with `common`'s `test-support` feature (`required-features`). In a workspace test run the server's dev-dependency turns that feature on, so its two quick tests (the statistics helpers and `a_round_replays_exactly_from_its_seed`) run in the main CI job. The rest of the design is under "Difficulty simulator (S3)" in the testing strategy. Test-support additions: `PracticeSession::bots_only`, `BotControllers::target` and `set_team_profile`, and the `bots::sim_probe` recorder.
-  - **Running it.** On the dev VPS builder, build with cargo, then run the binary outside the build lock at the lowest priority, so a long run never blocks another task's build:
+  - **Running it.** The acceptance matrix, 200 rounds in each of the six default pairings, base seed 1. On the owner's Mac (M4 Pro, 14 cores) it took 2,078 s on 14 threads, sharing the cores with a gate build for its first minutes. The run itself used the prebuilt test binary with the six pairings spelled out (`OMOBA_BOT_SIM_PAIRINGS='elite:elite@200,…,recruit:regular@200'`); this shorter form plays the same pairings and seeds:
 
     ```sh
-    cargo test --release --locked -p common --features test-support --test bot_difficulty_sim --no-run
-    OMOBA_BOT_SIM_PAIRINGS='elite:elite@200,veteran:elite@200,regular:elite@200,recruit:elite@200,regular:veteran@100,recruit:regular@100' \
-      OMOBA_BOT_SIM_THREADS=2 OMOBA_BOT_SIM_REPORT=report.json \
-      nice -n 19 target/release/deps/bot_difficulty_sim-<hash> --ignored full_matrix > /dev/null
+    OMOBA_BOT_SIM_MATCHES=200 OMOBA_BOT_SIM_SEED=1 OMOBA_BOT_SIM_REPORT=report.json \
+      cargo test --release --locked -p common --features test-support \
+      --test bot_difficulty_sim -- --ignored --exact --nocapture full_matrix > /dev/null
     ```
 
-    The game logs to stdout; progress and the report go to stderr. `OMOBA_BOT_SIM_TUNE` overrides profile fields for a sweep, for example `regular.trade_margin=off;veteran.threat_window_secs=off`. The module docs list every setting.
-  - **Cost.** Route planning dominates. Bots plan a route 166–299 times per bot-minute at every level, Elite included, because a bot with an empty route plans again on the next step, and each plan rebuilds the walkable grid. A 20-minute round costs 12–20 s of one VPS core for Elite against Elite and up to about 85 s for Recruit against Elite. The final matrix took 6.5 hours on two cores at nice 19.
+    The game logs to stdout; progress and the report go to stderr. `OMOBA_BOT_SIM_THREADS` sets the thread count (default: every core) and never changes the result. `OMOBA_BOT_SIM_PAIRINGS` picks pairings (`@N` sets one pairing's rounds), and `OMOBA_BOT_SIM_TUNE` overrides profile fields for a sweep, for example `regular.trade_margin=off;veteran.threat_window_secs=off`. The module docs list every setting.
+  - **Seeds.** The calibration sweeps ran at base seed 0, and so did the S3 calibration commit's own matrix. The acceptance matrix uses base seed 1, so none of its rounds was used to pick a knob value.
+  - **Cost.** Route planning dominates. Bots plan a route 166–299 times per bot-minute at every level, Elite included, because a bot with an empty route plans again on the next step, and each plan rebuilds the walkable grid. A 20-minute round costs 12–20 s of one dev VPS core for Elite against Elite and up to about 85 s for Recruit against Elite; the S3 calibration commit's matrix took 6.5 hours there on two cores. On the Mac's 14 threads the acceptance matrix took 35 minutes: about 0.8 s of wall time per round for Elite against Elite and 3.0 s for Recruit against Elite.
   - **Calibration.** Probe and screening runs (10–20 rounds per variant, 20-minute cap) came before the final matrix:
     - **Veteran.** With the plan's values, Veteran answered 622 threats in 10 rounds against Elite. 613 answers were retreats from an attacker it could not reach without entering a danger disc, 9 were retreats from an attacker beyond `VISION`, and none was a gate refusal: Veteran has no trade gate, and an outnumbered count of 2 is rare. So its threat response was a blanket retreat from any poke near an enemy tower, not the gate decision the definitions describe. Without threat response, Veteran's mean structure lead against Elite moved from about −3.6 (30 rounds) to about −2.3 (28 rounds in two sweeps, one of them also without the hold), and Regular's direct result against it fell from 0.40 (10 rounds) to 0.25 (16 rounds). The hold went too, because without threat response a Veteran that drops a hero target while outnumbered would keep farming while that hero hits it.
     - **Regular and Recruit.** Both lose nearly every round to Elite. Five single-factor sweeps on Regular (no trade gate; hold 2 and no outnumbered retreat; Veteran's retreat line, resume and re-arm; Veteran's cover and siege; Veteran's engage range, leash and dash) left it at 0–1 wins in 10–12 rounds, with no clear change in the structure lead. Their main cost is threat retreats (0.7–0.9 per bot-minute for Regular in the sweeps), mostly refused by the trade gate: being hit leaves a bot less healthy than its attacker. They keep the plan's values.
     - **Shipped.** Veteran's `outnumbered_hold` and `threat_window_secs` become "—". Every other value is the plan's starting value.
-  - **Measured** (final matrix on the tree of the S3 calibration commit, base seed 0; report [docs/progress/2026-10-14-bot-difficulty-report.json](../progress/2026-10-14-bot-difficulty-report.json), summary in [docs/progress/2026-10-14-bot-personas.md](../progress/2026-10-14-bot-personas.md)):
+  - **Measured** (acceptance matrix on the Mac, the tree of `f1c3a6f`: the S3 calibration plus the two review fixes, the `resume_hp` hold yielding to the defend exception and the tower tie-break; base seed 1; report [docs/progress/2026-10-14-bot-difficulty-report.json](../progress/2026-10-14-bot-difficulty-report.json), summary in [docs/progress/2026-10-14-bot-personas.md](../progress/2026-10-14-bot-personas.md)):
 
     | Pairing (subject : opponent) | Rounds | W–L–D | Subject win rate, decisive rounds [95% Wilson] | Structure lead [95% CI] | Reached Victory |
     | --- | --- | --- | --- | --- | --- |
-    | Elite : Elite | 200 | 99–89–12 | 0.527 [0.455, 0.597] | +0.05 ± 0.29 | 0 |
-    | Veteran : Elite | 200 | 33–164–3 | 0.168 [0.122, 0.226] | −2.61 ± 0.36 | 5 |
-    | Regular : Elite | 200 | 2–196–2 | 0.010 [0.003, 0.036] | −4.58 ± 0.26 | 13 |
-    | Recruit : Elite | 200 | 1–199–0 | 0.005 [0.001, 0.028] | −6.00 ± 0.23 | 35 |
-    | Regular : Veteran | 100 | 24–76–0 | 0.240 [0.167, 0.332] | −1.70 ± 0.47 | 0 |
-    | Recruit : Regular | 100 | 17–81–2 | 0.173 [0.111, 0.260] | −1.86 ± 0.42 | 0 |
+    | Elite : Elite | 200 | 101–87–12 | 0.537 [0.466, 0.607] | +0.17 ± 0.31 | 1 |
+    | Veteran : Elite | 200 | 43–154–3 | 0.218 [0.166, 0.281] | −2.44 ± 0.38 | 4 |
+    | Regular : Elite | 200 | 3–197–0 | 0.015 [0.005, 0.043] | −4.73 ± 0.29 | 20 |
+    | Recruit : Elite | 200 | 0–200–0 | 0.000 [0.000, 0.019] | −5.87 ± 0.23 | 32 |
+    | Regular : Veteran | 200 | 53–146–1 | 0.266 [0.210, 0.332] | −1.77 ± 0.34 | 0 |
+    | Recruit : Regular | 200 | 39–160–1 | 0.196 [0.147, 0.257] | −1.71 ± 0.28 | 0 |
 
     | Level, pooled over its pairings | Health retreats | Median health at the start [95% CI] | 10th percentile | Tower shots / bot-min | Tower dives / bot-min | Outnumbered share of hero fights | Threat retreats / bot-min |
     | --- | --- | --- | --- | --- | --- | --- | --- |
-    | Recruit | 11,921 | 0.485 [0.484, 0.485] | 0.405 | 0.000 | 0.000 | 0.009 | 0.57 |
-    | Regular | 16,132 | 0.381 [0.381, 0.382] | 0.291 | 0.023 | 0.002 | 0.007 | 0.77 |
-    | Veteran | 26,673 | 0.288 [0.287, 0.289] | 0.145 | 0.058 | 0.027 | 0.075 | — |
-    | Elite | 83,558 | 0.233 [0.232, 0.234] | 0.100 | 0.070 | 0.026 | 0.058 | — |
+    | Recruit | 16,151 | 0.485 [0.485, 0.485] | 0.409 | 0.003 | 0.000 | 0.008 | 0.51 |
+    | Regular | 25,011 | 0.383 [0.383, 0.383] | 0.295 | 0.035 | 0.004 | 0.007 | 0.71 |
+    | Veteran | 34,567 | 0.291 [0.290, 0.291] | 0.152 | 0.081 | 0.034 | 0.070 | — |
+    | Elite | 83,428 | 0.233 [0.232, 0.234] | 0.100 | 0.070 | 0.025 | 0.056 | — |
 
-    - Every gating check passes: Elite against Elite contains 0.50; Regular < Veteran < Elite against Elite at p < 0.0001; the structure leads against Elite are ordered with disjoint intervals at every step; each direct pairing goes to the stronger level; draws are at most 6% per pairing; every health retreat starts below its line, and each median is within 0.05 of it.
-    - Not gating: Recruit (0.005) and Regular (0.010) against Elite do not separate by win rate (one-sided p = 0.28), because both lose nearly every round. Their structure leads against Elite (−6.00 and −4.58) and their direct pairing order them.
+    - Every gating check passes: Elite against Elite contains 0.50; Regular < Veteran < Elite against Elite at p < 0.0001, with disjoint Wilson intervals; the structure leads against Elite are ordered with disjoint intervals at every step; each direct pairing goes to the stronger level, with the weaker level's interval below 0.50; draws are at most 6% per pairing; every health retreat starts below its line, and each median is within 0.05 of it (Recruit 0.485 against its 0.50 line).
+    - Not gating: Recruit (0.000) and Regular (0.015) against Elite. The z-test gives p = 0.041, but on 3 wins in 400 rounds (Fisher's exact one-sided p = 0.12), so this win rate does not reliably order them. Their structure leads against Elite (−5.87 and −4.73) and their direct pairing (Recruit 0.196 against Regular) do.
+    - Against the S3 calibration commit's matrix (base seed 0, 100 rounds per direct pairing), Veteran rose from 0.168 to 0.218 against Elite and Recruit went from 1 win to none; no win rate moved by more than 0.05.
     - Kills, deaths, gate retreats and threat answers per pairing side are in the progress note and the report.
-    - Side bias: Green won 58.5% of decisive Elite-against-Elite rounds, Wilson [0.514, 0.653]. Sides alternate, so the level comparisons are balanced; the cause is open.
+    - Side bias: Green won 64.9% of decisive Elite-against-Elite rounds, Wilson [0.578, 0.714], and 70.1% of Veteran-against-Elite rounds. Sides alternate, so the level comparisons are balanced, but `elite_vs_elite_contains_half` cannot see it; the cause is open.
 
   - **Deviations from the plan, and why:**
     - Capped rounds are adjudicated by structure health instead of counting as draws, because bot-only rounds rarely reach Victory (see the testing strategy). The share of rounds that reached Victory is reported per pairing.
     - Tower shots taken and tower dives replace "time inside danger discs", because a disc's size depends on the level's own margin.
-    - The direct pairings Regular against Veteran and Recruit against Regular were added (100 rounds each), and the vs-Elite structure lead is a second ordering, because two levels that both lose nearly every round to Elite cannot be ordered by that win rate. The report marks that comparison as not gating; `full_matrix` fails on every other check.
+    - The direct pairings Regular against Veteran and Recruit against Regular were added (200 rounds each in the acceptance matrix), and the vs-Elite structure lead is a second ordering, because two levels that both lose nearly every round to Elite cannot be ordered by that win rate. The report marks that comparison as not gating; `full_matrix` fails on every other check.
   - **CI.** `OMOBA_REQUIRE_BOT_TRACE=1` is now set for the workspace tests. The GitHub runner's `libm` matched the committed ubuntu 24.04 baseline: the Elite trace test passed with the comparison required ([run 38423640395](https://github.com/o-moba/omoba-bevy/actions/runs/38423640395)). The new `bot difficulty smoke` job took 3.5 minutes there, 143 s of it the two smoke tests.
 - [ ] **S4. Practice wiring and picker.** *Client, shared.* Size **M**.
   - Files: `shared/src/practice.rs`, `common/src/practice.rs`, `common/src/offline.rs`, `shared/src/protocol/wire.rs` (snapshot echo), `client/src/team.rs`, `client/src/net/offline.rs`, `client/src/persistence.rs`, `client/src/debug/tools_page.rs`, `client/i18n/{en,ru,zh-Hans}`.
