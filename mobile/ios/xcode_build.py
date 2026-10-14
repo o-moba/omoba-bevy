@@ -20,12 +20,8 @@ from build_device import (ROOT, app_info, inspect_macho, ios_build_environment,
 from contours import MOBILE, compile_defaults, contour_of_xcode_setting
 from package_licenses import collect_legal_notices, copy_legal_notices
 from prepare_testflight import validate_build_number
-
-# Compile-time settings an Xcode build never takes from the invoking shell; the
-# contour (and, for production Debug runs only, the local LAN rehearsal) sets them.
-SCRUBBED_ENV = ('EKZA_DEV_HTTP_HOST', 'OMOBA_DEFAULT_REGISTRY_URL', 'OMOBA_DEFAULT_PASSPORT_URL',
-                'OMOBA_DEFAULT_CONFIG_DIR_SUFFIX')
-
+from ios_release_guard import require_production_source
+from release import resolve_flavor, scrub_build_env
 
 def contour(env: dict[str, str]) -> str:
     """The app this build makes (`OMOBA_CONTOUR`), checked against its bundle id:
@@ -43,9 +39,14 @@ def contour_build_settings(env: dict[str, str], root: Path = ROOT) -> dict[str, 
     """Compile-time client settings: the dev app's lobby, registry, closed passport and
     settings folder; for the production app, only the local Debug LAN rehearsal."""
     name = contour(env)
+    try:
+        # Use the CLI's same cross-contour endpoint validation for direct Xcode.
+        flavor = resolve_flavor(name, server=env.get('OMOBA_GAME_SERVER') or None)
+    except SystemExit as error:
+        raise ValueError(str(error)) from error
     if name == 'dev':
-        return compile_defaults('dev', env.get('OMOBA_GAME_SERVER') or None)
-    return ekza_build_settings(env, root)
+        return compile_defaults('dev', flavor.server)
+    return {**ekza_build_settings(env, root), **compile_defaults('prod', flavor.server)}
 
 
 def cargo_cache(env: dict[str, str]) -> Path:
@@ -82,12 +83,14 @@ def settings(env: dict[str, str]) -> dict:
 def source_identity() -> dict:
     def git(*args):
         return subprocess.check_output(['git', *args], cwd=ROOT, text=True).strip()
-    return {'revision': git('rev-parse', 'HEAD'), 'tracked_diff': git('diff', 'HEAD', '--', 'Cargo.toml', 'Cargo.lock', 'client', 'common', 'shared', 'passport', 'skills', 'mobile/ios', 'scripts')}
+    return {'revision': git('rev-parse', 'HEAD'),
+            'tracked_diff': git('diff', 'HEAD', '--'),
+            'source_status': git('status', '--porcelain', '--untracked-files=all')}
 
 
 def ekza_build_settings(env: dict[str, str], root: Path = ROOT) -> dict[str, str]:
     """Only Debug Run loads the local rehearsal configuration; Archives ignore it."""
-    if env.get('CONFIGURATION', 'Debug') != 'Debug':
+    if env.get('CONFIGURATION', 'Debug') != 'Debug' or env.get('ACTION') == 'install':
         return {}
     path = root / '.ekza-lan/client.json'
     if not path.is_file():
@@ -112,12 +115,14 @@ def ekza_build_settings(env: dict[str, str], root: Path = ROOT) -> dict[str, str
 
 
 def build(env: dict[str, str]) -> None:
+    app = contour(env)
+    production_archive = app == 'prod' and env.get('ACTION') == 'install'
+    if production_archive:
+        require_production_source(ROOT)
     cfg = settings(env)
     before = source_identity()
-    build_env = ios_build_environment(cfg['cache'], env['SDKROOT'], env.get('OMOBA_GAME_SERVER') or None)
     # Never inherit a LAN exception or another contour into Archive from the invoking shell.
-    for key in SCRUBBED_ENV:
-        build_env.pop(key, None)
+    build_env = scrub_build_env(ios_build_environment(cfg['cache'], env['SDKROOT']))
     build_env.update(contour_build_settings(env))
     # Xcode may set architecture/linker flags for its own toolchain. Cargo owns
     # the executable and the device builder's retained-symbol configuration.
@@ -130,6 +135,8 @@ def build(env: dict[str, str]) -> None:
     symbols = validate_dsym(binary, dsym)
     if before != source_identity():
         raise ValueError('Source changed while Cargo was building. Build again from a stable checkout.')
+    if production_archive:
+        require_production_source(ROOT)
     bundle = cfg['bundle']
     bundle.mkdir(parents=True, exist_ok=True)
     # Cargo may reuse an older unsigned binary. Preserve fresh output mtime so
@@ -156,14 +163,21 @@ def build(env: dict[str, str]) -> None:
     retained.parent.mkdir(parents=True, exist_ok=True)
     shutil.copytree(dsym, retained)
     validate_dsym(bundle / 'client', retained)
-    app = contour(env)
     info = app_info(ROOT, macho, env['PRODUCT_BUNDLE_IDENTIFIER'],
                     MOBILE[app].display_name if app == 'dev' else None)
     info.pop('UIDeviceFamily', None)  # Xcode derives this from TARGETED_DEVICE_FAMILY.
     info['CFBundleVersion'] = cfg['build']
     cfg['derived'].mkdir(parents=True, exist_ok=True)
     (cfg['derived'] / 'Omoba-Info.plist').write_bytes(plistlib.dumps(info))
-    report = {'contour': app, 'source_revision': before['revision'], 'source_dirty': bool(before['tracked_diff']),
+    report = {'contour': app, 'source_revision': before['revision'],
+              'source_dirty': bool(before['tracked_diff'] or before.get('source_status')),
+              'bundle_id': env['PRODUCT_BUNDLE_IDENTIFIER'],
+              'xcode_action': env.get('ACTION', 'build'), 'configuration': env.get('CONFIGURATION'),
+              'archive_path': env.get('ARCHIVE_PATH'),
+              'compiled_endpoint_overrides': {
+                  key: build_env[key] for key in ('OMOBA_DEFAULT_GAME_SERVER_ADDR',
+                      'OMOBA_DEFAULT_REGISTRY_URL', 'OMOBA_DEFAULT_PASSPORT_URL') if key in build_env},
+              'endpoint_fallback': 'compiled source defaults for keys not overridden',
               'version': info['CFBundleShortVersionString'], 'build': cfg['build'],
               'cargo_profile': cfg['profile'], 'binary_sha256': sha256(bundle / 'client'),
               'debug_symbols': symbols, 'signing_owner': 'Xcode', 'uploaded': False}

@@ -269,6 +269,7 @@ class DevContour(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary, \
                 mock.patch.dict(release.os.environ, self.EXPORTED, clear=True), \
                 mock.patch.object(release, "ROOT", Path(temporary)), \
+                mock.patch.object(release, "require_production_source", return_value={'revision': 'test'}), \
                 mock.patch.object(release, "host_platform", return_value="macos"), \
                 mock.patch.object(release, "local_xcconfig",
                                   return_value={"DEVELOPMENT_TEAM": "TEAM", "CURRENT_PROJECT_VERSION": "1"}), \
@@ -386,6 +387,7 @@ class DevContour(unittest.TestCase):
             with self.subTest(contour=contour), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
                 with mock.patch.object(release, 'ROOT', root), \
+                     mock.patch.object(release, 'require_production_source', return_value={'revision': 'test'}) as guard, \
                      mock.patch.object(release, 'host_platform', return_value='macos'), \
                      mock.patch.object(release, 'local_xcconfig', return_value={'DEVELOPMENT_TEAM': 'TEAM'}), \
                      mock.patch.object(release, 'run', side_effect=RuntimeError('stop before signing')) as run:
@@ -395,6 +397,7 @@ class DevContour(unittest.TestCase):
                 self.assertEqual(args[args.index('-scheme') + 1], scheme)
                 self.assertEqual(args[args.index('-configuration') + 1], configuration)
                 self.assertIn(f'OMOBA_CONTOUR={contour}', args)
+                self.assertEqual(guard.call_count, 0 if contour == 'dev' else 1)
 
     def test_a_production_ios_archive_pins_its_contour_and_server_over_the_local_xcconfig(self):
         # Omoba.local.xcconfig may hold `OMOBA_CONTOUR = dev` or a LAN OMOBA_GAME_SERVER

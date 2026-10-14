@@ -1,5 +1,17 @@
 # TestFlight from the primary checkout
 
+**Daily development:** use **Omoba Dev** and the [Russian operating guide](../../docs/dev-quickstart.md#как-не-перепутать-dev-и-prod).
+Production Archive (including unsigned verification) now requires clean source,
+an exact stable `vMAJOR.MINOR.PATCH` tag, a commit reachable from the local
+`origin/main`, and either `main` or detached HEAD. Fetch refs before a deliberate
+release. This local accident guard is not independent release approval and is
+absent from older checkouts until the change is integrated there. Normal dev
+archives and production Run builds are not gated by this source convention.
+The legacy `prepare_testflight.py` path described historically below now refuses
+the production Bundle ID, including `--check`: an existing binary cannot inherit
+the current checkout's source eligibility. Rebuild production through the guarded
+Xcode scheme. Prebuilt dev app packaging remains supported with its DEV icon.
+
 TestFlight installs the app over the internet. It does not require a USB cable,
 wireless Xcode pairing, a registered device UDID, or Developer Mode on the tester's
 phone. The distributor needs an active Apple Developer Program membership and
