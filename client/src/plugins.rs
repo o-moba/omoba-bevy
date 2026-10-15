@@ -150,6 +150,7 @@ impl PluginGroup for PresentationPlugins {
             // 3D model backend.
             .add(Presentation3dPlugin)
             .add(Verdant3dPlugin)
+            .add(crate::sponsorship::SponsorshipPlugin)
             .add(DecorPlugin)
             .add(JungleVisualsPlugin)
             .add(MinionVisualsPlugin)

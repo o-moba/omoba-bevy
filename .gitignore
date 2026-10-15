@@ -14,6 +14,8 @@ client/assets/*
 !client/assets/config/
 !client/assets/cosmetics/
 !client/assets/weapons/
+!client/assets/community/
+!client/assets/community/**
 client/assets/weapons/imported/
 client/assets/weapons/ekza-manifest.json
 !client/assets/sprites/
@@ -51,6 +53,7 @@ docs/*
 !docs/party.md
 !docs/RELEASING.md
 !docs/connection-profiles.md
+!docs/community-sculptures.md
 !docs/release-compatibility.md
 !docs/bot-practice-and-social.md
 !docs/game-audio.md

@@ -5,6 +5,12 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Community sculpture pilot: a Registry-approved, temporary 3D placement beside
+  the Wendigo pit, with bounded hash-verified downloads, expiry/revocation, and
+  an original waving lucky cat. No objective or collision changes. The linked
+  Web/Studio workflow is free; cryptocurrency payments remain disabled.
+  See [runtime and local verification](docs/community-sculptures.md).
+
 - Shared **Omoba Dev** Xcode scheme for Run and Archive: separate app identity,
   DEV icon and dev lobby, protected against stale local contour/server settings.
   iOS release tooling selects the matching scheme; linked worktrees share the
