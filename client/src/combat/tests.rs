@@ -261,6 +261,8 @@ fn colossus_recast_is_offered_and_sent_only_inside_the_gate() {
             .resource_mut::<ActionFeedback>()
             .text
             .clear();
+        // No cursor: a recast keeps the facing fallback, and the gate's refusal comes
+        // before any aim check.
         app.world_mut().resource_mut::<PendingCast>().request = Some(PendingCastRequest {
             slot: R,
             target_entity: None,
@@ -543,6 +545,15 @@ struct Press {
 }
 
 impl Press {
+    /// A desktop press with no cursor aim: never sent along the hero's facing; one line
+    /// asks for an aim, nothing is predicted, and the hero walks on.
+    fn dropped_without_an_aim(&self) {
+        assert!(self.sent.is_empty(), "{:?}", self.sent);
+        assert_eq!(self.feedback, crate::i18n::tr("combat.cast.no_aim"));
+        assert_eq!(self.cooldown, 0.0, "no phantom cooldown");
+        assert!(!self.predicted && self.walking && !self.queued);
+    }
+
     /// Nothing went out and nothing was predicted: one line, and the hero walks on.
     fn refused_for_want_of_an_ally(&self, case: &str) {
         assert!(self.sent.is_empty(), "{case}: {:?}", self.sent);
@@ -631,11 +642,11 @@ fn orbital_guard_is_sent_to_the_allied_hero_at_its_aim_or_refused_with_a_line() 
     let ally = Vec2::new(6.0, 2.0);
     let beside = ally + Vec2::X;
 
-    // Nobody to guard: nothing is sent, nothing is predicted, one line says why. So it is
-    // for a press without a cursor, which aims ten units ahead.
-    for aim in [Some(Vec2::new(30.0, 0.0)), Some(beside), None] {
+    // Nobody to guard: nothing is sent, nothing is predicted, one line says why.
+    for aim in [Some(Vec2::new(30.0, 0.0)), Some(beside)] {
         press_among(class, e, aim, |_| {}).refused_for_want_of_an_ally("no ally");
     }
+    press_among(class, e, None, |_| {}).dropped_without_an_aim();
     // An allied hero at the aim: the cast goes out, aimed at that hero.
     press_among(class, e, Some(beside), |app| {
         remote_hero(app, 9, Team::Green, ally);
@@ -721,9 +732,10 @@ fn sheltering_leap_is_sent_to_the_ally_at_its_aim_or_refused_with_a_line() {
     let aim = Vec2::new(5.0, -3.0);
 
     // The leap needs an ally to leap to.
-    for aim in [Some(Vec2::new(30.0, 0.0)), Some(aim), None] {
+    for aim in [Some(Vec2::new(30.0, 0.0)), Some(aim)] {
         press_among(class, w, aim, |_| {}).refused_for_want_of_an_ally("no ally");
     }
+    press_among(class, w, None, |_| {}).dropped_without_an_aim();
     press_among(class, w, Some(aim), |app| {
         remote_hero(app, 9, Team::Blue, aim);
         lane_minion(app, 4, Team::Blue, aim);
@@ -1183,6 +1195,11 @@ fn standard_keyboard_holds_before_cast_and_cancels_when_context_is_lost() {
     for canceled in [false, true] {
         let mut app = standard_cast_app(HeroClass::Dawnweaver, 0, false);
         app.world_mut().resource_mut::<PendingCast>().cancel();
+        // The cursor's ground point, as `sample_desktop_aim` would leave it.
+        app.insert_resource(super::cast::DesktopAim {
+            cursor: Some(Vec2::new(5.0, 0.0)),
+            held: None,
+        });
         app.init_resource::<ButtonInput<KeyCode>>()
             .init_resource::<TargetState>()
             .add_systems(

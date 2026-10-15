@@ -20,6 +20,34 @@ All notable changes are recorded here. The canonical version is
   far point of the aimed ray. Bots hold the Luminous Field, spare towers and lead the
   ray. Catalog `standard-kits-8`, gameplay `dawnweaver-2026-10-11-reference`; matching
   client and server required. See [the iteration record](docs/progress/2026-10-11-dawnweaver-reference.md).
+- Fix desktop aiming of held direction skills (reported on Wildspark's Last Spark on
+  Linux): the aim lane and the cast now read one mouse aim. Moving the cursor outside
+  a windowed game mid-hold keeps the last aim instead of firing along the hero's facing;
+  losing focus mid-hold (Alt+Tab, the desktop overview) cancels the hold instead of
+  casting; a controller (or a Linux joystick-class device) can no longer take the aim
+  off the mouse while a skill key is held; a same-frame key-repeat pair no longer
+  releases the cast early. A desktop first cast with no cursor aim is refused with a
+  one-line hint instead of flying along the hero's facing (recasts that ignore the aim
+  still go out). Touch and controller casting are unchanged; no protocol or
+  gameplay change. See [the investigation](docs/progress/2026-10-11-desktop-aim.md).
+
+- Hero aura orbits now use continuous, feathered ribbons with bright heads,
+  a gentler body glow and one counter-rotating orbit. The 3D effect uses 23
+  elements instead of 35; counted geometry drops from 13,056 to 1,632 triangles
+  per aura. Shared static meshes need no per-frame geometry uploads, new lights
+  or dependencies. The separately depth-sorted 2D fallback stays at 35 elements.
+  Server-owned eligibility and cleanup are unchanged. Local 5v5 practice captures
+  verify the 23-element effect on a moving Agnes and its removal after revocation.
+  A short desktop frame-time comparison at VSync 60 is recorded separately; it
+  does not measure isolated GPU cost or mobile performance.
+
+- Monthly Hero Supporter recognition: a refined cosmetic aura, lifetime credit
+  for unique verified monthly support periods, optional public acknowledgement,
+  and a paginated supporter directory linked to privacy-aware game profiles.
+  Expired support remains credited; refunds and payment replays cannot inflate
+  it. Existing server authority and Apple/Solana provider gates remain in place.
+  Includes a new Account API migration; deployment and real payment-provider
+  activation are separate operations. See [Supporter operations](docs/supporter.md).
 
 - Community sculpture pilot: a Registry-approved, temporary 3D placement beside
   the Wendigo pit, with bounded hash-verified downloads, expiry/revocation, and

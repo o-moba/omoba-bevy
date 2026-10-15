@@ -697,18 +697,18 @@ struct BeamShot {
 /// the windup is too short to walk out of the ray in any direction. A hampered
 /// hero comes first, then the bot's own target, then the nearest. Minions alone
 /// never justify the beam.
-fn beam_shot(
+fn beam_shot<'a>(
     origin: [f32; 2],
     length: f32,
     width: f32,
     windup_secs: f32,
     preferred: Option<u64>,
-    heroes: &[Sighting],
+    heroes: impl IntoIterator<Item = &'a Sighting>,
 ) -> Option<BeamShot> {
     let side = width + crate::balance::PLAYER_HIT_RADIUS;
     let reach = length + side;
     heroes
-        .iter()
+        .into_iter()
         .filter_map(|hero| {
             let lead = (windup_secs - hero.held_secs).max(0.0);
             let (aim, walk) = match hero.velocity {
@@ -736,12 +736,42 @@ fn beam_shot(
         })
 }
 
+/// A beam may select a different hero than the attack target, but must not
+/// bypass a lower level's target gates. Reuse the existing once-per-think scan;
+/// this filter neither allocates nor changes the shared aiming/cast cadence.
+fn admits_beam_target(
+    world: &crate::game_world::GameWorld,
+    controller: &Controller,
+    gates: Option<&ThinkGates>,
+    origin: [f32; 2],
+    held: bool,
+    sighting: &Sighting,
+) -> bool {
+    let Some(gates) = gates else {
+        return true;
+    };
+    if controller
+        .target
+        .is_some_and(|target| target.kind == TargetKind::Player && target.id == sighting.id)
+    {
+        return true; // The normal target path has already admitted this hero.
+    }
+    let Some(hero) = hero_by_id(&world.players, sighting.id) else {
+        return false;
+    };
+    let distance = (sighting.position[0] - origin[0]).hypot(sighting.position[1] - origin[1]);
+    distance <= gates.hero_range(sighting.id)
+        && (!held || defends(world, gates.team, hero))
+        && gates.admits_new_hero(world, hero, distance)
+        && (!controller.jungle || gates.ganks(world, hero))
+}
+
 /// The shot of the beam bound to `slot`, if that slot holds a beam with a victim.
-fn slot_beam_shot(
+fn slot_beam_shot<'a>(
     p: &ConnectedPlayer,
     slot: u8,
     preferred: Option<u64>,
-    heroes: &[Sighting],
+    heroes: impl IntoIterator<Item = &'a Sighting>,
 ) -> Option<BeamShot> {
     let definition = p.hero.skills.loadout?.skill(SkillSlot::from_index(slot)?);
     let shared::loadout::SkillEffect::Beam { width, .. } = definition.effect else {
@@ -1845,8 +1875,22 @@ impl CombatHost<'_> {
                                 // A hampered victim, e.g. right after this bot's own
                                 // root landed, is the beam's window: take it before the
                                 // shared recovery goes to another slot.
-                                if slot_beam_shot(p, *slot, preferred, &sightings)
-                                    .is_some_and(|shot| shot.hampered)
+                                if slot_beam_shot(
+                                    p,
+                                    *slot,
+                                    preferred,
+                                    sightings.iter().filter(|hero| {
+                                        admits_beam_target(
+                                            self.world,
+                                            &controller,
+                                            gates.as_ref(),
+                                            origin,
+                                            held,
+                                            hero,
+                                        )
+                                    }),
+                                )
+                                .is_some_and(|shot| shot.hampered)
                                 {
                                     return 0;
                                 }
@@ -1902,8 +1946,21 @@ impl CombatHost<'_> {
                                 if matches!(definition.effect, SkillEffect::Beam { .. }) {
                                     // The beam picks its own victim, from where the
                                     // bot stands now; without one it waits.
-                                    let Some(shot) = slot_beam_shot(p, slot, preferred, &sightings)
-                                    else {
+                                    let Some(shot) = slot_beam_shot(
+                                        p,
+                                        slot,
+                                        preferred,
+                                        sightings.iter().filter(|hero| {
+                                            admits_beam_target(
+                                                self.world,
+                                                &controller,
+                                                gates.as_ref(),
+                                                origin,
+                                                held,
+                                                hero,
+                                            )
+                                        }),
+                                    ) else {
                                         continue;
                                     };
                                     aim = shot.aim;
@@ -3359,6 +3416,46 @@ mod kit_tests {
                 }
             }
             assert_eq!(withheld, 3, "{class:?}: Q/E/R or W/E/R deal damage");
+        }
+    }
+
+    #[test]
+    fn independent_ray_targets_respect_lower_level_minion_and_trade_gates() {
+        for (profile, own_hp, should_cast) in [
+            (BotProfile::ELITE, 1.0, true),
+            (BotProfile::RECRUIT, 1.0, false),
+            (BotProfile::REGULAR, 0.8, false),
+            (BotProfile::REGULAR, 1.0, true),
+        ] {
+            let now = Instant::now();
+            let (mut world, mut bots, bot) = lone_bot(HeroClass::Dawnweaver, now);
+            bots.controllers.get_mut(&bot).unwrap().profile = profile;
+            world.players.get_mut(&bot).unwrap().hero.hp = own_hp * 1000.0;
+            let minion = add_minion(&mut world, Team::Blue, [5.0, 0.0]);
+            let enemy = add_enemy(&mut world, 32107, [8.0, 0.0], now);
+            world
+                .players
+                .get_mut(&enemy)
+                .unwrap()
+                .hero
+                .skills
+                .control
+                .root_until = Some(now + Duration::from_secs(2));
+            rest(&mut world, bot, &[0, 1, FIELD], now);
+            frame(&mut world, &mut bots, now + FRAME);
+            assert_eq!(
+                bots.controllers[&bot].target,
+                Some(TargetId {
+                    kind: TargetKind::Minion,
+                    id: minion
+                }),
+                "fixture keeps the nearer minion as its normal target"
+            );
+            assert_eq!(
+                world.players[&bot].timers.last_cast_at[usize::from(RAY)].is_some(),
+                should_cast,
+                "independent beam target must obey {profile:?}, hp={own_hp}"
+            );
         }
     }
 

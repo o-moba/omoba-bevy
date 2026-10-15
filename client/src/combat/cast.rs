@@ -29,6 +29,63 @@ pub(super) struct PendingCastRequest {
     pub(super) approach_announced: bool,
 }
 
+/// The ground point the mouse aims at for a skill held on the keyboard. The aim lane
+/// (`standard::draw_aim`) and the cast read this one source, so what is sent is what
+/// was drawn.
+#[derive(Resource, Default, Debug, Clone, Copy, PartialEq)]
+pub(crate) struct DesktopAim {
+    /// The cursor's ground point this frame: `None` when the window is unfocused or the
+    /// cursor is outside it.
+    pub(crate) cursor: Option<Vec2>,
+    /// The last cursor point while a skill key is held. When the cursor leaves the window
+    /// mid-hold, the lane stays there and a release casts there.
+    pub(crate) held: Option<Vec2>,
+}
+
+impl DesktopAim {
+    pub(crate) fn aim(&self) -> Option<Vec2> {
+        self.cursor.or(self.held)
+    }
+}
+
+/// The ground point under the cursor of a focused window.
+pub(crate) fn cursor_ground_point(
+    window: &Window,
+    camera: Option<(&Camera, &GlobalTransform)>,
+    mode: crate::sprite::PlayerVisualMode,
+) -> Option<Vec2> {
+    let cursor = window.cursor_position().filter(|_| window.focused)?;
+    let (camera, pose) = camera?;
+    crate::player::viewport_to_simulation_world(camera, pose, cursor, mode, 0.0).map(|p| p.xz())
+}
+
+/// Samples [`DesktopAim`] before the keyboard cast reads it.
+pub(super) fn sample_desktop_aim(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
+    camera: Query<(&Camera, &GlobalTransform), With<crate::camera::MainCamera>>,
+    mode: Option<Res<crate::sprite::PlayerVisualMode>>,
+    mut aim: ResMut<DesktopAim>,
+) {
+    aim.cursor = windows.single().ok().and_then(|window| {
+        cursor_ground_point(
+            window,
+            camera.single().ok(),
+            mode.as_deref()
+                .copied()
+                .unwrap_or(crate::sprite::PlayerVisualMode::Models3d),
+        )
+    });
+    let holding = SKILL_CAST_KEYS
+        .iter()
+        .any(|key| keyboard.pressed(*key) || keyboard.just_released(*key));
+    aim.held = if holding {
+        aim.cursor.or(aim.held)
+    } else {
+        None
+    };
+}
+
 #[derive(Resource, Default)]
 pub(crate) struct PendingCast {
     pub(super) request: Option<PendingCastRequest>,
@@ -251,9 +308,16 @@ pub(super) fn cast_spell_system(
     mut pending_cast: ResMut<PendingCast>,
     mut feedback: ResMut<ActionFeedback>,
     context: Res<GameplayInputContext>,
+    (windows, desktop_aim): (
+        Query<&Window, With<bevy::window::PrimaryWindow>>,
+        Option<Res<DesktopAim>>,
+    ),
     mut aimed: Local<[bool; 4]>,
 ) {
-    if !context.gameplay_allowed() {
+    // Losing focus mid-hold (alt-tab, the desktop overview) cancels the hold like a
+    // modal does. The window is marked unfocused a frame before the window system's
+    // synthesized release arrives, so that release casts nothing.
+    if !context.gameplay_allowed() || windows.single().is_ok_and(|window| !window.focused) {
         *aimed = [false; 4];
         return;
     }
@@ -278,7 +342,9 @@ pub(super) fn cast_spell_system(
             if keyboard_input.just_pressed(*key) {
                 aimed[slot] = true;
             }
-            if keyboard_input.just_released(*key) {
+            // A release with the key down again in the same frame is a key-repeat
+            // pair, not the end of the hold.
+            if keyboard_input.just_released(*key) && !keyboard_input.pressed(*key) {
                 if aimed[slot] {
                     released = Some(slot);
                 }
@@ -302,6 +368,10 @@ pub(super) fn cast_spell_system(
         &mut pending_cast,
         &mut feedback,
     );
+    if skills.resolved().is_some() && pending_cast.is_pending() {
+        // The aim at release, so a cast buffered through recovery goes where it was drawn.
+        pending_cast.aim = desktop_aim.and_then(|aim| aim.aim());
+    }
 }
 
 pub(super) fn resolve_pending_cast_system(
@@ -384,29 +454,19 @@ pub(super) fn resolve_pending_cast_system(
     let rank = prog.ranks[slot.index()].clamp(1, definition.max_rank);
     if let Some(skill) = skills.skill(slot) {
         let state = loadouts.single().ok().and_then(|s| s.0.as_ref());
-        let cursor = aim_view
-            .0
-            .single()
-            .ok()
-            .filter(|w| w.focused)
-            .and_then(|w| w.cursor_position())
-            .and_then(|p| {
-                let (camera, pose) = aim_view.1.single().ok()?;
-                crate::player::viewport_to_simulation_world(
-                    camera,
-                    pose,
-                    p,
-                    aim_view
-                        .2
-                        .as_deref()
-                        .copied()
-                        .unwrap_or(crate::sprite::PlayerVisualMode::Models3d),
-                    0.0,
-                )
-            })
-            .map(|p| p.xz());
-        let aim = pending_cast.aim.or(cursor).unwrap_or_else(|| {
-            player_transform.translation.xz() + player_transform.forward().xz() * 10.0
+        // Touch and controller casts always carry their aim and a self cast needs none.
+        // A desktop cast without a cursor aim (the cursor never was over the focused
+        // window) is dropped rather than sent along the hero's facing.
+        let cursor = aim_view.0.single().ok().and_then(|window| {
+            cursor_ground_point(
+                window,
+                aim_view.1.single().ok(),
+                aim_view
+                    .2
+                    .as_deref()
+                    .copied()
+                    .unwrap_or(crate::sprite::PlayerVisualMode::Models3d),
+            )
         });
         // The replicated flag only opens the recast window. A recast with a gate is also
         // refused away from the skill's own effect (Mountain Echo).
@@ -423,10 +483,7 @@ pub(super) fn resolve_pending_cast_system(
                 game.as_ref().map_or(&[], |game| &game.skill_effects),
             )
         });
-        if !stats.is_alive()
-            || !equipped_skills::unlocked(&skills, &prog)[slot.index()]
-            || !aim.is_finite()
-        {
+        if !stats.is_alive() || !equipped_skills::unlocked(&skills, &prog)[slot.index()] {
             pending_cast.cancel();
             return;
         }
@@ -437,6 +494,22 @@ pub(super) fn resolve_pending_cast_system(
             pending_cast.cancel();
             return;
         }
+        // A recast (a zone detonation, a ride along a hook) keeps the old fallback: most
+        // ignore the aim, and the server reads the press either way.
+        let origin = player_transform.translation.xz();
+        let Some(aim) = pending_cast
+            .aim
+            .or(cursor)
+            .or_else(|| (definition.targeting == TargetingMode::SelfTarget).then_some(origin))
+            .or_else(|| {
+                (touch_mode || recast).then(|| origin + player_transform.forward().xz() * 10.0)
+            })
+            .filter(|aim| aim.is_finite())
+        else {
+            report_plain(&mut feedback, "combat.cast.no_aim");
+            pending_cast.cancel();
+            return;
+        };
         if !recast && cast_cd.recovery_secs > 0.0 {
             return;
         }
