@@ -94,3 +94,44 @@ tests and data checks only; no listening pass was done for the new samples.
   status shows; the 0.5 s schema cap on the charge accent; direction-targeted
   technique lanes still use the raw cursor.
 - Not verified on physical devices or with a listening pass.
+
+## Combined dev integration (2026-10-15)
+
+The owner requested combined testing in `dev`, so PR #85 now targets `dev` and
+incorporates desktop aiming (#84), the skill-slot idea (#87), Astral Ivory (#100),
+community sculptures (#102), and monthly Hero recognition/orbits (#103).
+
+The bot merge retains all difficulty profiles, target/retreat gates, controller
+construction, and both profile and Dawnweaver test modules. A beam may choose a
+different hero than the normal attack target, so its candidate filter now reuses
+the existing lower-level admission gates without allocating or changing cadence.
+Elite behavior is unchanged by this filter. Four runtime cases cover Recruit's
+minion-first gate and Regular's trade gate, plus positive controls. The rejected
+hero is 10.8 m away: beyond Dawnweaver's 10 m basic reach plus the target radius,
+but within Recruit's 11 m engagement range.
+
+Cursor ownership/focus/release handling stays intact. Direction tests now require
+the exact Last Spark endpoint 256 m along the cursor ray, matching the existing
+Dawnweaver change instead of the old raw cursor-point expectation. The regenerated
+workshop is paired with OMOBA Web PR #13. Matching client/server catalog and
+gameplay revisions are required before hosted testing; this integration deploys
+nothing.
+
+Validation on the corrected combined source: formatting, both strict Clippy modes,
+2,170 Rust tests (50 existing ignored) and 55 iOS packaging fixture tests pass.
+A fresh reviewer independently reran 62 desktop/bot/Hero/sculpture tests. Clean
+GitHub CI run 38745687316 passed PostgreSQL tests, bot difficulty smoke, the UDP
+harness, Android compilation and Python tooling on identical production source.
+Its Rust job passed the Linux Elite trace comparison: both scenarios' 600 digests
+and summaries exactly match the existing glibc 2.39 baseline, so no baseline was
+changed. That run's sole Rust failure was the earlier 8 m regression fixture,
+which legitimately fell inside the minion-first basic-reach exception; the
+corrected 10.8 m case passes locally. The final push reruns normal CI.
+
+The aggregate local `make check` is **not fully green**: one of 392 Python tests
+compares with an unrelated dirty sibling `omoba-ui` handoff, whose CJK font
+manifest predates the sculpture glyph fix. The committed installed font, licence
+files, inventory and package budget validate; the same Python tooling passes in
+clean CI. Neither the user's handoff checkout nor the strict comparison test was
+changed. Raw failed and passing logs, trace artifact provenance and independent
+verification are retained under the existing task's `raw/integration` directory.
