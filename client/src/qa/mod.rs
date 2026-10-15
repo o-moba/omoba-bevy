@@ -35,6 +35,7 @@ mod result_qa;
 mod roster_qa;
 mod sdk_pack_qa;
 mod social_qa;
+pub(crate) mod sponsorship_qa;
 mod standard_kits_qa;
 mod supporter;
 mod targeting_qa;

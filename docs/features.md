@@ -1,5 +1,18 @@
 # Feature Inventory
 
+## Temporary community sculptures
+
+One decorative slot beside the Wendigo pit displays the Registry-approved
+24-hour placement. Exact-byte model validation, profile-isolated caching,
+monotonic expiry and bounded revocation keep community art outside gameplay
+simulation. Clicking or tapping the rendered sculpture opens its approved title,
+credit and optional 1,000-character plain-text description in a scrollable card.
+Opening and closing gestures cannot trigger movement or combat; revocation or
+replacement closes stale cards. An original lucky waving cat exercises the
+optional rotation clip, which continues while the card is open.
+The coordinated Web/Studio pilot is free; paid crypto providers and hosted
+deployment remain separate work. See [runtime details](community-sculptures.md).
+
 ## Dev iOS workflow
 
 The shared **Omoba Dev** Xcode scheme builds the separate `space.ekza.omoba.dev`

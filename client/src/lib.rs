@@ -66,6 +66,7 @@ mod session_config;
 mod shop;
 mod skill_icons;
 mod social;
+mod sponsorship;
 mod sprite;
 mod sprite_roster;
 mod supporter;
@@ -97,6 +98,11 @@ pub fn main() {
     #[cfg(feature = "qa")]
     if let Some(directory) = std::env::var_os("OMOBA_ANIMATION_QA") {
         qa::animation_qa::run(directory.into());
+        return;
+    }
+    #[cfg(feature = "qa")]
+    if std::env::var_os("OMOBA_SPONSOR_QA_DIR").is_some_and(|v| !v.is_empty()) {
+        qa::sponsorship_qa::run(passport::initialize_store());
         return;
     }
     if let Err(error) = sandbox::validate_launch() {
