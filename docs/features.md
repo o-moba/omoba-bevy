@@ -413,7 +413,7 @@ This is a lightweight Bevy mesh/material particle foundation, without an extra
 GPU particle plugin or dynamic lights. Phone performance still needs device QA.
 These source changes are newer than TestFlight 0.20.0 (4).
 
-## Shared accounts and Supporter cosmetics
+## Shared accounts and Hero Supporter cosmetics
 
 A native installation can enroll a separate device key into an existing account
 through explicit portal approval, without exporting its private seed or merging
@@ -426,14 +426,32 @@ Supporter provides three cosmetic aura styles (Solar, Lunar, Verdant) and a free
 isolated preview. The game server reads account grants from PostgreSQL, enforces
 expiry and revocation, and replicates the permitted style. Auras follow actor
 visibility/death and never change combat, XP, rating, or matchmaking. The portal
-shows billing source, paid period, renewal state and aura preferences.
+shows billing source, paid period, renewal state, aura preferences and lifetime
+credited months. The player-facing Hero status is cosmetic and follows the same
+verified active period. A public supporter directory links opted-in public
+profiles to their existing statistics-aware pages; expired support remains
+acknowledged, refunds remove its credit, and private profiles/statistics remain
+private. The lifetime count is independent of truncated payment history.
 
-Live aura VFX use three intersecting inclined orbits with bright cores, camera-facing glow sprites,
-eight tapered trail segments per orbit, four rising glints and a subtle ground ring.
-Each hero has a fixed 35 rendered elements; meshes/materials are shared and no dynamic
-lights or per-frame particle spawning are needed. Sprite mode projects the same paths
-with front/back layering. Native preview uses the same effect implementation.
-This source update is newer than TestFlight 0.20.0 (4).
+Hero aura VFX combine three intersecting, feathered ribbon orbits, bright moving
+heads, a gentler body glow, eight rising sparks and a subtle ground ring. One
+orbit runs in the opposite direction. Each 3D orbit has a shared static ribbon
+with core and glow layers, built from crossed sheets with 32 segments per sheet.
+The 23 rendered elements replace the previous 35; counted geometry is 1,632
+triangles per aura versus 13,056 previously, an eightfold reduction in triangles.
+This is a geometry count, not a measured eightfold GPU or frame-time improvement.
+Meshes and materials are preallocated and shared: animation changes transforms,
+without per-frame geometry uploads, new dynamic lights or dependencies. The
+body glow never replaces character materials. Sprite mode retains 35 elements
+with separate front/back depth sorting. Native preview and live actors share the
+effect implementation and the existing authorization/visibility cleanup.
+
+The owner's Lineage II reference inspired the luminous orbital treatment; this
+is an original OMOBA effect, not an exact recreation or reused game asset. New
+local 5v5 practice captures show the 23-element ribbon effect at normal zoom,
+during movement and close up, followed by server-driven removal. The desktop
+frame-time sample includes VSync and other scene work; it establishes no isolated
+GPU, power or mobile result. Earlier 35-element captures remain historical.
 
 Apple and Solana are separate provider adapters granting the same account right.
 Payment functionality is unavailable until the operator explicitly configures a
@@ -443,7 +461,7 @@ purchase/restore and retains unfinished transactions until server confirmation.
 The Apple adapter requires an authenticated verifier and App Store setup; local
 fixtures are not proof of a real sandbox purchase or App Review approval.
 
-Core career and portal schemas are both version 3. Run owner migrations and the
+Core career schema is version 3 and portal schema is version 6. Run owner migrations and the
 updated runtime grants before deploying matching game/API releases. See
 [Supporter operations](supporter.md) for rollout boundaries and test procedures.
 
@@ -1192,3 +1210,16 @@ exposing credentials to the browser. This is a prototype for local gameplay and
 community contribution, with no public/ranked custom-class admission or automatic
 skin installation. See [community workshop](community-workshop.md) and
 [native build import](class-workshop-game.md).
+
+### Hero aura world verification (2026-10-15)
+
+The current ribbon revision is captured on the actual Agnes roster character
+in a server-backed local 5v5 practice match, in English at 1280×720. Normal,
+moving and close views plus 24 sampled motion frames show 23 effect elements;
+revocation clears the replicated aura and removes them all. The short 3.24-second
+MP4 contains those 24 sampled frames, not a 60-fps recording. A separate warmed
+180-frame sample per state at VSync 60 records similar whole-frame pacing with
+the aura on and off; ongoing bots, jungle and HUD work prevent isolating its GPU
+cost. The earlier 35-element body-glow captures remain historical. See
+[Supporter operations](supporter.md#live-hero-world-verification) for results,
+limits and the reproducible QA scope. No real payment or deployment is implied.

@@ -5,6 +5,24 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Hero aura orbits now use continuous, feathered ribbons with bright heads,
+  a gentler body glow and one counter-rotating orbit. The 3D effect uses 23
+  elements instead of 35; counted geometry drops from 13,056 to 1,632 triangles
+  per aura. Shared static meshes need no per-frame geometry uploads, new lights
+  or dependencies. The separately depth-sorted 2D fallback stays at 35 elements.
+  Server-owned eligibility and cleanup are unchanged. Local 5v5 practice captures
+  verify the 23-element effect on a moving Agnes and its removal after revocation.
+  A short desktop frame-time comparison at VSync 60 is recorded separately; it
+  does not measure isolated GPU cost or mobile performance.
+
+- Monthly Hero Supporter recognition: a refined cosmetic aura, lifetime credit
+  for unique verified monthly support periods, optional public acknowledgement,
+  and a paginated supporter directory linked to privacy-aware game profiles.
+  Expired support remains credited; refunds and payment replays cannot inflate
+  it. Existing server authority and Apple/Solana provider gates remain in place.
+  Includes a new Account API migration; deployment and real payment-provider
+  activation are separate operations. See [Supporter operations](docs/supporter.md).
+
 - Community sculpture pilot: a Registry-approved, temporary 3D placement beside
   the Wendigo pit, with bounded hash-verified downloads, expiry/revocation, and
   an original waving lucky cat. Click/tap the sculpture to read its moderated
