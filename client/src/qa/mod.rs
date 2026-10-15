@@ -37,6 +37,7 @@ mod sdk_pack_qa;
 mod social_qa;
 mod standard_kits_qa;
 mod supporter;
+mod supporter_world;
 mod targeting_qa;
 mod team_vision_qa;
 mod ui_gallery;
@@ -56,6 +57,7 @@ impl PluginGroup for QaPlugins {
             .add(sdk_pack_qa::SdkPackQaPlugin)
             .add(creator_loop_qa::CreatorLoopQaPlugin)
             .add(supporter::SupporterQaPlugin)
+            .add(supporter_world::SupporterWorldQaPlugin)
             .add(team_vision_qa::TeamVisionQaPlugin)
             .add(audio_qa::AudioQaPlugin)
             .add(offline_qa::OfflineQaPlugin)

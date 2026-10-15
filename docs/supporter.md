@@ -206,3 +206,29 @@ documented disposable localhost fixture. Never run fixtures on production.
 Native screenshots are enabled only by `OMOBA_QA_SUPPORTER=1` with
 `OMOBA_SUPPORTER_QA_DIR` pointing to a disposable output directory. This opens a
 local preview; it never creates an account entitlement or a paid world aura.
+
+### Live Hero world verification
+
+The follow-up native check connects a real game client to a loopback practice
+server with PostgreSQL-backed identity and an explicitly seeded monthly period.
+It uses the roster avatar Agnes on Verdant, normal movement and authoritative
+replicated `supporter_aura`. No client aura/grant is injected. Daylit-map testing
+revealed the original backdrop was too faint, so the shared 3D body halo now uses
+a broader alpha falloff and stronger HDR white/gold radiance. The 35-element
+budget, character materials, lighting and server eligibility remain unchanged.
+
+The dormant `OMOBA_HERO_WORLD_QA_DIR=<output>` harness requires an explicit
+loopback `GAME_SERVER_ADDR`, `OMOBA_AUTOJOIN=ranger:agnes:green` and an isolated
+`OMOBA_CLIENT_CONFIG_DIR` holding the synthetic seed7 identity from
+`account-api/examples/hero-supporter-fixture.rs`. Start the server with
+`OMOBA_MATCH_MODE=practice` against that fixture database. It captures normal
+1280×720 English gameplay, moving player and a closer inspection, then waits
+for the operator to revoke the fixture's active paid period. It succeeds only
+when the replicated aura is cleared and every owned effect entity is removed.
+The operator may move the hero with normal input to keep the final image clear.
+
+Evidence is under `.agent/tasks/hero-supporter/raw/world/`: four native PNGs,
+server/client logs, per-stage profile/player identity, world positions, replicated
+aura and effect counts, plus `world-summary.json`. This proves live local
+server-backed practice rendering and revocation; real payment verification,
+hosted dev rollout, remote PvP and physical mobile performance are separate.

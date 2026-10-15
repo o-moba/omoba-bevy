@@ -37,3 +37,22 @@ configured RPC/network/mint/treasury/price and a real wallet check, while Apple
 requires its actual verification service, monthly product and sandbox testing.
 No hosted migration, provider setup, credentials, payments, release or deployment
 is performed by this feature task.
+
+## Follow-up: actual in-game Hero appearance
+
+The owner requested direct live-world proof. The first connected practice match
+showed the aura followed the character and disappeared after server revocation,
+but its body glow was faint at normal camera distance on the daylight map.
+The shared 3D renderer now uses a broader HDR body halo without adding elements,
+lights or changes to the character materials.
+
+The final English 1280×720 run captured Agnes in a local 5v5 practice match with
+server bots, at normal zoom, moving, and at closer zoom. A synthetic paid period
+in the isolated PostgreSQL fixture admitted Solar through the ordinary signed
+identity and snapshot pipeline. All 35 elements followed the actual player.
+After revoking that period in the fixture database, the next server update
+cleared the aura and removed every effect element. The regular selection marker
+remained. A normal right-click moved the player clear of architecture before
+the final capture. See the separate world verification artifacts for source
+identity, native pixels and independent review; earlier preview-only evidence
+remains historical and is not relabelled as a world test.

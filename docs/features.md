@@ -1187,3 +1187,11 @@ exposing credentials to the browser. This is a prototype for local gameplay and
 community contribution, with no public/ranked custom-class admission or automatic
 skin installation. See [community workshop](community-workshop.md) and
 [native build import](class-workshop-game.md).
+
+### Hero aura world verification (2026-10-15)
+
+The Hero appearance includes a broad white/gold HDR body glow readable on the
+daylight map at normal gameplay zoom, plus orbiting light trails and rising
+sparks. The original 35-element budget is unchanged. Native local practice-match
+evidence verifies an actual roster character, movement and server-authoritative
+removal after revocation; see `docs/supporter.md` for the reproducible QA scope.

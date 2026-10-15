@@ -96,7 +96,7 @@ impl PlatformMessage {
 #[derive(Resource, Default)]
 struct AuraRegistry(HashMap<Entity, (Entity, AuraStyle, PlayerVisualMode)>);
 #[derive(Component)]
-struct AuraOwner(Entity);
+pub(crate) struct AuraOwner(pub(crate) Entity);
 #[derive(Component)]
 struct AuraAnchor;
 #[derive(Component)]
@@ -184,6 +184,19 @@ fn particle_material(style: AuraStyle, alpha: f32, white: f32) -> StandardMateri
 }
 
 fn glow_texture(star: bool) -> Image {
+    glow_texture_with_falloff(star, 3.)
+}
+
+fn body_glow_material(style: AuraStyle, alpha: f32, white: f32) -> StandardMaterial {
+    StandardMaterial {
+        // Daylit maps need a broad HDR halo, not only tiny orbit highlights.
+        base_color: crate::game_vfx::hdr_tint(color(style).mix(&Color::WHITE, white), 6.)
+            .with_alpha(alpha),
+        ..particle_material(style, alpha, white)
+    }
+}
+
+fn glow_texture_with_falloff(star: bool, falloff: f32) -> Image {
     const SIZE: u32 = 64;
     let mut data = Vec::with_capacity((SIZE * SIZE * 4) as usize);
     for y in 0..SIZE {
@@ -192,7 +205,7 @@ fn glow_texture(star: bool) -> Image {
             let v = (y as f32 + 0.5) / SIZE as f32 * 2. - 1.;
             let radius = (u * u + v * v).sqrt();
             let edge = (1. - radius).max(0.);
-            let mut alpha = edge.powi(3);
+            let mut alpha = edge.powf(falloff);
             if star {
                 let rays = (-u.abs() * 45.).exp() * (1. - v.abs()).powi(2)
                     + (-v.abs() * 45.).exp() * (1. - u.abs()).powi(2);
@@ -242,7 +255,7 @@ fn particle_pose(orbit: &Orbit, seconds: f64) -> Transform {
             } else {
                 Vec3::new(10., 17., 1.)
             };
-            (Vec3::Y * 0.88, size * breath, Quat::IDENTITY)
+            (Vec3::Y * 1.05, size * breath, Quat::IDENTITY)
         }
         AuraParticle::Core | AuraParticle::Halo => {
             let pulse = 1. + 0.12 * (seconds as f32 * 3. + orbit.index).sin();
@@ -352,6 +365,7 @@ fn setup(
         Some(TextureFormat::Rgba8UnormSrgb),
     ));
     let glow = images.add(glow_texture(false));
+    let body_glow = images.add(glow_texture_with_falloff(false, 1.5));
     let star = images.add(glow_texture(true));
     let aura = AuraAssets {
         ring: meshes.add(Annulus::new(AURA_RADIUS - 0.025, AURA_RADIUS)),
@@ -400,14 +414,14 @@ fn setup(
         flat_trails: AuraStyle::ALL.map(|s| flat.add(color(s).with_alpha(0.65))),
         mantles: AuraStyle::ALL.map(|s| {
             materials.add(StandardMaterial {
-                base_color_texture: Some(glow.clone()),
-                ..particle_material(s, 0.48, 0.12)
+                base_color_texture: Some(body_glow.clone()),
+                ..body_glow_material(s, 0.48, 0.40)
             })
         }),
         radiance: AuraStyle::ALL.map(|s| {
             materials.add(StandardMaterial {
-                base_color_texture: Some(glow.clone()),
-                ..particle_material(s, 0.25, 0.72)
+                base_color_texture: Some(body_glow.clone()),
+                ..body_glow_material(s, 0.30, 0.85)
             })
         }),
         flat_mantles: AuraStyle::ALL.map(|s| {
@@ -1315,7 +1329,7 @@ mod tests {
     #[test]
     fn hero_glows_preserve_transparency_and_rising_sparks_fade_at_wrap() {
         for style in AuraStyle::ALL {
-            let material = particle_material(style, 0.48, 0.12);
+            let material = body_glow_material(style, 0.48, 0.40);
             assert!(material.unlit);
             assert_eq!(material.alpha_mode, AlphaMode::Add);
             let tint = material.base_color.to_linear();

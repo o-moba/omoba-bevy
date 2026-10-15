@@ -5,6 +5,10 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Hero body radiance is now clearly visible against the daylight map at normal
+  gameplay zoom. Verified on a moving roster character in a local server-backed
+  practice match, including server-driven removal after entitlement revocation.
+
 - Monthly Hero Supporter recognition: a refined cosmetic aura, lifetime credit
   for unique verified monthly support periods, optional public acknowledgement,
   and a paginated supporter directory linked to privacy-aware game profiles.
