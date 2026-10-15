@@ -111,7 +111,7 @@ OMOBA_REGISTRY_URL=http://127.0.0.1:8769 \
 OMOBA_CLIENT_CONFIG_DIR=/tmp/omoba-sculpture-qa \
 OMOBA_ASSET_DIR="$PWD/client/assets" \
 OMOBA_LANGUAGE=en OMOBA_PLAYER_VISUAL_MODE=models3d \
-OMOBA_SPONSOR_QA_DIR="$PWD/.agent/tasks/community-sculptures/raw/native" \
+OMOBA_SPONSOR_QA_DIR="$PWD/.agent/tasks/sculpture-info/raw/native" \
 "$CARGO_TARGET_DIR/debug/client"
 ```
 
@@ -129,9 +129,11 @@ fabricate an active placement or bypass the downloader. The QA label identifies
 local evidence. Other viewports and physical iOS/Android devices are not covered.
 
 On this Mac, direct terminal launch initially produced black GPU readbacks; those
-runs were rejected. The accepted local capture used a temporary `.app` wrapper
-launched through the native app UI, with the same binary, endpoint overrides and
-isolated art entry. The task evidence retains its launcher, logs, two rendered
-frames and measured result. No machine settings were changed. If a capture stays
-black, open the native application window before accepting evidence; `pass: true`
-requires five nonblack readbacks and animation motion, plus visual inspection.
+runs were rejected. The earlier `community-sculptures` task captured the cat and
+its animation using a temporary `.app` wrapper launched through the native app UI.
+Its two rendered frames verify the original cat-only scene, not the new information
+card. Preserve that historical evidence separately. The updated five-frame
+`sculpture-info` run is still pending because the Mac is locked. No machine settings
+were changed. If a capture stays black, open the native application window before
+accepting evidence; `pass: true` requires five nonblack readbacks, animation motion
+and the card interaction assertions, plus visual inspection.
