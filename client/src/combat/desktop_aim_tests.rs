@@ -36,6 +36,8 @@ use shared::HeroClass;
 
 /// Wildspark's R: Last Spark, a `Direction` skill.
 const ULT: u8 = 3;
+/// Last Spark sends the far end of its cursor ray so the preview and server agree.
+const ULT_RANGE: f32 = 256.0;
 /// The hero's facing at rest (`Transform::default()`): where a cast without an aim goes.
 const FACING: Vec2 = Vec2::new(0.0, -1.0);
 /// Cursor points on four sides of the hero; none of them along `FACING`.
@@ -270,8 +272,8 @@ fn assert_previews(frame: &Frame, cursor: Vec2, case: &str) {
 fn assert_sent_at(frame: &Frame, cursor: Vec2, case: &str) {
     match frame.casts.as_slice() {
         [(ULT, aim)] => assert!(
-            aim.distance(cursor) < 1e-3,
-            "{case}: R must fly at the cursor {cursor} at release, was sent at {aim} \
+            aim.distance(cursor.normalize() * ULT_RANGE) < 1e-3,
+            "{case}: R must use the cursor {cursor} ray at range {ULT_RANGE}, was sent at {aim} \
              (the hero's facing is {FACING})"
         ),
         other => panic!("{case}: exactly one R cast at release, got {other:?}"),
