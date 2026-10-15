@@ -19,6 +19,7 @@ mod boot_qa;
 mod career_visual_qa;
 mod combat_polish_qa;
 mod combat_qa;
+mod creator_loop_qa;
 mod dagger_qa;
 mod demo_qa;
 mod equipped_skills_qa;
@@ -34,6 +35,7 @@ mod result_qa;
 mod roster_qa;
 mod sdk_pack_qa;
 mod social_qa;
+pub(crate) mod sponsorship_qa;
 mod standard_kits_qa;
 mod supporter;
 mod targeting_qa;
@@ -53,6 +55,7 @@ impl PluginGroup for QaPlugins {
             .add(visual_qa::VisualQaPlugin)
             .add(social_qa::SocialQaPlugin)
             .add(sdk_pack_qa::SdkPackQaPlugin)
+            .add(creator_loop_qa::CreatorLoopQaPlugin)
             .add(supporter::SupporterQaPlugin)
             .add(team_vision_qa::TeamVisionQaPlugin)
             .add(audio_qa::AudioQaPlugin)

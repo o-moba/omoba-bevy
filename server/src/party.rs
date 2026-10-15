@@ -86,6 +86,7 @@ pub(crate) struct PartyState {
     launch_sequence: u64,
     sequence: u64,
     last_sent: Option<Instant>,
+    send_diagnostic: crate::runtime::RateLimitedDiagnostic,
 }
 
 /// Only shipped roster avatars travel to other players; anything else (an
@@ -632,7 +633,10 @@ impl ServerRuntime {
             let Some(player) = self.world.players.get(&addr) else {
                 continue;
             };
-            if player.hero.identity.id != player_id || !player.framed_snapshots {
+            if player.hero.identity.id != player_id
+                || !player.framed_snapshots
+                || !crate::runtime::network_endpoint(addr, player)
+            {
                 continue;
             }
             let friends: HashSet<String> = self
@@ -668,16 +672,20 @@ impl ServerRuntime {
                 Ok(datagrams) => {
                     for datagram in datagrams {
                         if let Err(error) = self.transport.send_to(&datagram, addr) {
-                            if self.snapshot_send_diagnostic.record(now).is_some() {
-                                eprintln!("Party send failed: {error}");
+                            if let Some(suppressed) = self.party.send_diagnostic.record(now) {
+                                eprintln!(
+                                    "Party send failed for {addr}: {error}; suppressed {suppressed} similar errors"
+                                );
                             }
                             break;
                         }
                     }
                 }
                 Err(error) => {
-                    if self.snapshot_send_diagnostic.record(now).is_some() {
-                        eprintln!("Party framing failed: {error}");
+                    if let Some(suppressed) = self.party.send_diagnostic.record(now) {
+                        eprintln!(
+                            "Party framing failed for {addr}: {error}; suppressed {suppressed} similar errors"
+                        );
                     }
                 }
             }

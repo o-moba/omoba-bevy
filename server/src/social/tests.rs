@@ -7,6 +7,7 @@ use shared::wire::ServerPacket;
 use super::*;
 use crate::match_rules::MatchConfig;
 use crate::runtime::ServerRuntime;
+use crate::runtime::ports::{ManualClock, MemoryTransport};
 
 fn sender(id: u64, team: SocialTeam) -> Sender {
     Sender {
@@ -383,4 +384,135 @@ fn real_udp_filters_team_messages_and_preserves_fragmented_social_payloads() {
         }));
     }
     assert!(now.elapsed() < Duration::from_secs(10));
+}
+
+/// A standalone runtime whose `seats` are joined, framed and subscribed to
+/// Social, as a client's scoped Subscribe request leaves them.
+fn subscribed_runtime(
+    seats: &[(SocketAddr, Team)],
+    now: Instant,
+) -> (ServerRuntime, MemoryTransport) {
+    let transport = MemoryTransport::new("127.0.0.1:4000".parse().unwrap());
+    let mut rt = ServerRuntime::for_test(
+        transport.clone(),
+        ManualClock::new(now),
+        crate::career_backend::MemoryCareer::disabled(7),
+        MatchConfig::dev(),
+    );
+    for (index, &(addr, team)) in seats.iter().enumerate() {
+        rt.world.ensure_connected(addr, now);
+        let player = rt.world.players.get_mut(&addr).unwrap();
+        crate::session::handle_join_request(
+            player,
+            team,
+            shared::wire::CharacterChoice::Ipfs,
+            shared::HeroClass::default(),
+            None,
+            &rt.world.map_layout,
+            now,
+        );
+        player.framed_snapshots = true;
+        player.career_capable = true;
+        player.session_id = Some(format!("seat-{index}"));
+    }
+    rt.world.game_state = GameState::Running;
+    for (index, &(addr, _)) in seats.iter().enumerate() {
+        let request = SocialRequest {
+            request_id: 1,
+            server_epoch: rt.server_epoch,
+            match_id: rt.match_id,
+            session_id: format!("seat-{index}"),
+            command: SocialCommand::Subscribe,
+        };
+        rt.handle_social_request(addr, request, false, now);
+    }
+    assert_eq!(rt.social.receipts.len(), seats.len());
+    (rt, transport)
+}
+
+#[test]
+fn match_streams_never_target_internal_actor_addresses() {
+    let now = Instant::now();
+    let human: SocketAddr = "127.0.0.1:60500".parse().unwrap();
+    // Where a worker parks a human seat once a bot takes it over
+    // (`session_recovery`). No role may address it: the IPv4 socket fails
+    // every such datagram with EAFNOSUPPORT.
+    let parked: SocketAddr = "[::]:1024".parse().unwrap();
+    assert!(crate::bots::is_bot_address(parked));
+    let (mut rt, transport) =
+        subscribed_runtime(&[(human, Team::Green), (parked, Team::Blue)], now);
+    let later = now + crate::snapshot::SNAPSHOT_INTERVAL;
+    rt.broadcast_snapshots(later, false);
+    rt.send_career_views(later);
+    rt.send_social_views(later);
+    let sent = transport.take_outbound();
+    let stray: Vec<_> = sent
+        .iter()
+        .map(|(to, _)| *to)
+        .filter(|to| *to != human)
+        .collect();
+    assert!(
+        stray.is_empty(),
+        "internal actor addresses were targeted: {stray:?}"
+    );
+    let mut assembler = shared::transport::SnapshotAssembler::default();
+    let mut streams = Vec::new();
+    for (_, datagram) in &sent {
+        if let Some(body) = assembler.push(datagram, later).unwrap() {
+            streams.push(
+                match serde_json::from_slice::<ServerPacket>(&body).unwrap() {
+                    ServerPacket::Snapshot { .. } => "snapshot",
+                    ServerPacket::Social { .. } => "social",
+                    ServerPacket::Career { .. } => "career",
+                    ServerPacket::Party { .. } => "party",
+                },
+            );
+        }
+    }
+    for stream in ["snapshot", "career", "social"] {
+        assert!(
+            streams.contains(&stream),
+            "{stream} must still reach the connected human: {streams:?}"
+        );
+    }
+}
+
+/// Refuses every destination, as an IPv4 socket refuses `[::]:N`.
+struct RefusingTransport;
+impl crate::runtime::ports::Transport for RefusingTransport {
+    fn recv(&mut self, _: &mut [u8]) -> io::Result<(usize, SocketAddr)> {
+        Err(io::ErrorKind::WouldBlock.into())
+    }
+    fn send_to(&self, _: &[u8], _: SocketAddr) -> io::Result<usize> {
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "address family not supported by protocol",
+        ))
+    }
+    fn local_addr(&self) -> io::Result<SocketAddr> {
+        Ok("127.0.0.1:4000".parse().unwrap())
+    }
+    fn peek(&self, _: &mut [u8]) -> io::Result<(usize, SocketAddr)> {
+        Err(io::ErrorKind::WouldBlock.into())
+    }
+}
+
+#[test]
+fn social_send_failures_are_counted_on_their_own_limiter() {
+    let now = Instant::now();
+    let human: SocketAddr = "127.0.0.1:60501".parse().unwrap();
+    let (mut rt, _) = subscribed_runtime(&[(human, Team::Green)], now);
+    rt.transport = Box::new(RefusingTransport);
+    // Four Social intervals inside one diagnostic interval: one line, then a
+    // count, never one line per failed datagram.
+    for step in 0..4 {
+        rt.send_social_views(now + SEND_INTERVAL * step);
+    }
+    assert!(rt.social.send_diagnostic.last_emitted_at.is_some());
+    assert_eq!(rt.social.send_diagnostic.suppressed, 3);
+    assert!(
+        rt.snapshot_send_diagnostic.last_emitted_at.is_none()
+            && rt.snapshot_send_diagnostic.suppressed == 0,
+        "Social failures must not spend the world-snapshot diagnostic budget"
+    );
 }
