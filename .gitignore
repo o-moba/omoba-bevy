@@ -14,8 +14,6 @@ client/assets/*
 !client/assets/config/
 !client/assets/cosmetics/
 !client/assets/weapons/
-!client/assets/community/
-!client/assets/community/**
 client/assets/weapons/imported/
 client/assets/weapons/ekza-manifest.json
 !client/assets/sprites/

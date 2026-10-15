@@ -25,11 +25,11 @@ Run from the repository root with Blender 5:
 assimp info assets-src/community/lucky-cat/lucky-cat.glb
 ```
 
-The generator also writes the exact same GLB to
-`client/assets/community/lucky-cat.glb` for an explicitly requested local demo.
-The bundled file is not an approved or paid public placement. Public placement
-still requires Studio upload, technical validation, curator publication, OMOBA
-project approval and approval of the placement request.
+The canonical GLB remains here as source and a test fixture; the generator does
+not copy it into the packaged client assets. The normal client and opt-in local
+art scene load it through the Registry's authorized download path. Public
+placement requires Studio upload, technical validation, curator publication,
+OMOBA project approval and approval of the placement request.
 
 Upload the GLB as a `map_prop` and the cover as its thumbnail. Select the OMOBA
 `desktop/map-prop-glb-v1` profile. No humanoid rig or weapon grip is required.

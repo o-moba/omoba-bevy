@@ -56,11 +56,11 @@ radius encloses every permitted rotation pose; the root is fitted inside a fixed
 four-metre envelope and grounded from actual static vertices. Model size does not
 follow the player's hero-size preference.
 
-The original lucky cat is `client/assets/community/lucky-cat.glb`; editable source
-and provenance are under `assets-src/community/lucky-cat`. Its `LuckyPawWave` node
-is driven by the embedded `Wave` rotation clip. Bundling this test model does not
-activate it: the normal client needs an active Registry placement and downloads
-its approved bytes just like any other sculpture.
+The original lucky cat is `assets-src/community/lucky-cat/lucky-cat.glb`, beside
+its editable source and provenance. Its `LuckyPawWave` node is driven by the
+embedded `Wave` rotation clip. This source/test fixture is not packaged with the
+client. The normal client and opt-in local art scene require an active Registry
+placement and download its approved bytes just like any other sculpture.
 
 ## Focused local verification
 

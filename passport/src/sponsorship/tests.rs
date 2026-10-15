@@ -3,7 +3,7 @@ use std::{
     io::{Read, Write},
     net::TcpListener,
 };
-const CAT: &[u8] = include_bytes!("../../../client/assets/community/lucky-cat.glb");
+const CAT: &[u8] = include_bytes!("../../../assets-src/community/lucky-cat/lucky-cat.glb");
 fn placement(base: &str) -> Placement {
     Placement {
         id: "11111111-1111-4111-8111-111111111111".into(),
@@ -31,7 +31,7 @@ fn manifest(p: Placement) -> Manifest {
     }
 }
 #[test]
-fn bundled_cat_meets_profile_and_has_grounded_fixed_fit() {
+fn source_cat_meets_profile_and_has_grounded_fixed_fit() {
     let fit = model::validate(CAT).unwrap();
     assert!(fit.scale > 0.1 && fit.scale <= 2.);
     assert!(fit.offset.iter().all(|v| v.is_finite()));

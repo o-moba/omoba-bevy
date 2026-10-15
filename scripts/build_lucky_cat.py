@@ -5,8 +5,8 @@
   --python scripts/build_lucky_cat.py
 
 Writes an editable .blend, an embedded GLB with a two-second paw animation,
-a cover and a manifest under assets-src/community/lucky-cat, and copies the
-same GLB to client/assets/community for the explicit local demonstration.
+a cover and a manifest under assets-src/community/lucky-cat for Studio upload
+and local tests. The client loads only Registry-authorized downloads.
 No downloaded geometry, textures, fonts or additional Python packages.
 """
 from __future__ import annotations
@@ -15,7 +15,6 @@ import hashlib
 import json
 import math
 from pathlib import Path
-import shutil
 
 import bpy
 from mathutils import Vector
@@ -198,9 +197,6 @@ bpy.ops.export_scene.gltf(filepath=str(glb), export_format="GLB", use_selection=
                           export_frame_range=True, export_force_sampling=False,
                           export_skins=False, export_morph=False, export_extras=False,
                           export_cameras=False, export_lights=False)
-packaged = ROOT / "client/assets/community/lucky-cat.glb"
-packaged.parent.mkdir(parents=True, exist_ok=True)
-shutil.copyfile(glb, packaged)
 
 # Neutral studio preview. Camera/lights are intentionally excluded from the GLB.
 scene = bpy.context.scene
