@@ -51,6 +51,7 @@ docs/*
 !docs/party.md
 !docs/RELEASING.md
 !docs/connection-profiles.md
+!docs/community-sculptures.md
 !docs/release-compatibility.md
 !docs/bot-practice-and-social.md
 !docs/game-audio.md

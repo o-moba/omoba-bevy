@@ -261,7 +261,7 @@ pub fn wildspark_set_hint(bytes: &[u8]) -> Option<WildsparkSetHint> {
 }
 /// The profile caps the graph at 64 nodes before this check. Validate the
 /// entire forest, including unused nodes, before Bevy traverses any scene.
-fn validate_scene_graph(document: &serde_json::Value) -> Result<(), String> {
+pub(crate) fn validate_scene_graph(document: &serde_json::Value) -> Result<(), String> {
     let nodes = document["nodes"].as_array().unwrap();
     let meshes = document["meshes"].as_array().unwrap();
     let index = |value: &serde_json::Value, bound: usize| -> Result<usize, String> {

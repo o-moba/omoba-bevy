@@ -33,6 +33,7 @@ pub mod public_transport;
 pub mod sandbox;
 pub mod shop;
 pub mod social;
+pub mod sponsorship;
 pub mod supporter;
 pub mod transport;
 pub mod utility;
