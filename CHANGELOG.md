@@ -5,6 +5,17 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Fix desktop aiming of held direction skills (reported on Wildspark's Last Spark on
+  Linux): the aim lane and the cast now read one mouse aim. Moving the cursor outside
+  a windowed game mid-hold keeps the last aim instead of firing along the hero's facing;
+  losing focus mid-hold (Alt+Tab, the desktop overview) cancels the hold instead of
+  casting; a controller (or a Linux joystick-class device) can no longer take the aim
+  off the mouse while a skill key is held; a same-frame key-repeat pair no longer
+  releases the cast early. A desktop first cast with no cursor aim is refused with a
+  one-line hint instead of flying along the hero's facing (recasts that ignore the aim
+  still go out). Touch and controller casting are unchanged; no protocol or
+  gameplay change. See [the investigation](docs/progress/2026-10-11-desktop-aim.md).
+
 - Hero aura orbits now use continuous, feathered ribbons with bright heads,
   a gentler body glow and one counter-rotating orbit. The 3D effect uses 23
   elements instead of 35; counted geometry drops from 13,056 to 1,632 triangles
