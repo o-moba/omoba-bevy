@@ -108,7 +108,7 @@ The whole file, both guns together, must stay within `handheld-glb-v1`:
 
 ## Generated sets
 
-`scripts/build_wildspark_skin.py` generates two original sets. Blender 5.0.1
+`scripts/build_wildspark_skin.py` generates three original sets. Blender 5.0.1
 runs headless with `--factory-startup` and an empty scene; all geometry is
 built procedurally by the script. It never opens or saves
 `assets-src/skills/wildspark-reference.blend` and refuses to write under
@@ -135,8 +135,9 @@ committed PNGs and only rewrites the GLB and manifest.
 | --- | --- | --- | --- |
 | **Candy Neon** | pink toy frame, gumball hopper, heart sight, donut drum, candy-cane stock with a lollipop butt; three spiral-striped barrels and a star brace on the rotor | mint frame, glowing heart core, spare candy rocket; striped rocket pod with four swept fins, rolled lemon lip, glowing warhead and star sight | 365,640 B, 7 nodes, 4 meshes, 7 materials, no textures |
 | **Scrap Punk** | taped pipe grip, bolted plates, hazard-lidded paint-can drum, welded half shroud; four mismatched pipes with hose clamps and a toxic core | fuel tank; square sheet-metal tube with hazard band, warning signs, bolted patch, carry handle and ladder sight; toxic warhead | 627,168 B, 7 nodes, 4 meshes, 9 materials, two 256² tiling textures (rust, grime) |
+| **Astral Ivory** | porcelain blade receiver, gold harp stock, three open ivory rotor vanes around an exposed cyan spindle and two gold orbital rings | swept ceramic prongs cradle a large faceted crystal spear; the complete crystal assembly recoils with the slide | 178,416 B, 7 nodes, 4 meshes, 6 materials, no textures |
 
-Both sets keep the baseline pivots, muzzle tips and shared identity grip and fit
+All sets keep the baseline pivots, muzzle tips and shared identity grip and fit
 the allowed bounds. They are original OMOBA geometry and contain no
 franchise-specific designs or character names. Licence: CC-BY-4.0, credited as
 in each manifest's `attribution`.

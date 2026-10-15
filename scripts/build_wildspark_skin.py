@@ -76,6 +76,20 @@ IMAGES = {"cover": (640, 480), "repeater": (512, 512), "launcher": (512, 512)}
 # Emission above 1 makes Blender emit KHR_materials_emissive_strength, which Studio
 # and the registry reject.
 THEMES = {
+    "astral-ivory": {
+        "title": "Astral Ivory",
+        "backdrop": ((0.045, 0.12, 0.18), (0.009, 0.02, 0.045)),
+        "rim": (0.15, 0.85, 1.0),
+        "preview_exposure": -1.8,
+        "materials": {
+            "ivory": ("porcelain armour", (0.91, 0.88, 0.74), 0.15, 0.3, 0.0),
+            "gold": ("antique gold", (0.83, 0.47, 0.09), 0.8, 0.3, 0.0),
+            "night": ("midnight inlay", (0.014, 0.036, 0.085), 0.45, 0.38, 0.0),
+            "crystal": ("cyan crystal", (0.035, 0.5, 0.65), 0.25, 0.22, 0.25),
+            "facet": ("deep crystal facets", (0.025, 0.15, 0.31), 0.45, 0.25, 0.0),
+            "glow": ("starlight", (0.08, 0.93, 1.0), 0.0, 0.3, 1.0),
+        },
+    },
     "candy-neon": {
         "title": "Candy Neon",
         "backdrop": ((0.16, 0.07, 0.19), (0.035, 0.02, 0.05)),
@@ -1132,7 +1146,82 @@ def scrap_punk():
     return [repeater, rotor, launcher, slide]
 
 
-BUILDERS = {"candy-neon": candy_neon, "scrap-punk": scrap_punk}
+def _astral_chassis(part):
+    """Open harp stock and ceramic blade receiver, rather than a conventional gun box."""
+    part.box((0, -0.045, -0.012), (0.061, 0.20, 0.075), "night", bevel=0.016,
+             segments=2, rot=_rot("X", 10))
+    for y in (-0.11, -0.075, -0.04):
+        part.box((0, y, -0.016), (0.067, 0.009, 0.08), "gold", bevel=0.003)
+    part.torus((0, -0.018, 0.06), (1, 0, 0), 0.038, 0.006, "gold", n=24, m=6)
+    # Side-view outline rises at the rear and leaves a broad open centre.
+    shape = [(-0.29, 0.18), (-0.23, 0.255), (-0.12, 0.205), (0.18, 0.17),
+             (0.24, 0.12), (0.12, 0.055), (-0.12, 0.075), (-0.23, 0.105)]
+    for side in (-1, 1):
+        frame = _frame((side * 0.05, 0, 0), (side, 0, 0))
+        # In this frame horizontal is +/- canonical Z; mirror to keep the outline aligned.
+        part.prism([(-side * z, y) for z, y in shape], 0.018, frame, "ivory")
+        part.prism(star(0.031, 0.009, 4), 0.006,
+                   _frame((side * 0.063, 0.132, 0.02), (side, 0, 0)), "gold")
+        part.prism(star(0.016, 0.005, 4), 0.008,
+                   _frame((side * 0.068, 0.132, 0.02), (side, 0, 0)), "glow")
+    # The hollow rear stock is a gold harp with three luminous strings.
+    part.torus((0, 0.13, -0.25), (1, 0, 0), 0.082, 0.012, "gold", n=28, m=6)
+    for z in (-0.286, -0.25, -0.214):
+        part.cylinder((0, 0.068, z), (0, 0.195, z), 0.0035, "glow", n=6)
+    part.box((0, 0.117, 0.05), (0.07, 0.055, 0.29), "night", bevel=0.015)
+    part.cylinder((0, 0.12, 0.18), (0, 0.12, 0.25), 0.042, "gold", n=12)
+
+
+def astral_ivory():
+    """Orbital repeater and split-prong crystal lance, sharing the canonical grip."""
+    repeater = Part("WildsparkRepeaterReceiver", REPEATER)
+    rotor = Part(ROTOR, REPEATER, ROTOR_PIVOT)
+    launcher = Part("WildsparkLauncherReceiver", LAUNCHER)
+    slide = Part(SLIDE, LAUNCHER, SLIDE_PIVOT)
+    _astral_chassis(repeater)
+    _astral_chassis(launcher)
+
+    # Repeater rotor: three pointed ivory vanes around an exposed energy spindle.
+    # The complete orbit assembly rotates about the existing runtime rotor pivot.
+    axis = Matrix.Translation((0, 0.12, 0))
+    rotor.lathe([(0, 0.255), (0.044, 0.28), (0.025, 0.53), (0.015, 0.70), (0, 0.735)],
+                lambda i, j: "glow" if j % 2 else "crystal", 8, axis)
+    for z, radius in ((0.34, 0.132), (0.56, 0.117)):
+        rotor.torus((0, 0.12, z), (0, 0, 1), radius, 0.009, "gold", n=36, m=6)
+        rotor.torus((0, 0.12, z), (0, 0, 1), radius - 0.014, 0.0035, "glow", n=36, m=6)
+    for k in range(3):
+        angle = 90 + 120 * k
+        frame = axis @ _rot("Z", angle) @ _rot("X", 90)
+        rotor.prism([(0.073, 0.265), (0.125, 0.32), (0.11, 0.60),
+                     (0.052, 0.73), (0.062, 0.53), (0.043, 0.34)], 0.029, frame, "ivory")
+        rotor.prism([(0.092, 0.34), (0.1, 0.38), (0.086, 0.57), (0.067, 0.64)],
+                    0.031, frame, "gold")
+        # Asymmetric dark inlay makes the rotation visually readable.
+        rotor.prism([(0.067, 0.285), (0.085, 0.32), (0.065, 0.39)],
+                    0.033, frame, "night")
+
+    # Launcher: an enormous faceted spear held in an open, swept ceramic cradle.
+    axis = Matrix.Translation((0, 0.13, 0))
+    slide.lathe([(0, 0.25), (0.067, 0.32), (0.089, 0.51), (0.064, 0.66), (0, 0.81)],
+                lambda i, j: "crystal" if j % 3 else "facet", 6, axis, phase=math.pi / 6)
+    slide.torus((0, 0.13, 0.335), (0, 0, 1), 0.108, 0.012, "gold", n=24, m=6)
+    slide.torus((0, 0.13, 0.57), (0, 0, 1), 0.106, 0.007, "gold", n=24, m=6)
+    slide.torus((0, 0.13, 0.565), (0, 0, 1), 0.096, 0.003, "glow", n=24, m=6)
+    for side in (-1, 1):
+        # Wide planar wings create a very different silhouette from a tubular launcher.
+        frame = _frame((side * 0.11, 0.13, 0), (side, 0, 0))
+        outline = [(0.23, -0.06), (0.31, -0.13), (0.47, -0.115), (0.72, 0.025),
+                   (0.48, -0.035), (0.34, 0.07), (0.32, 0.23), (0.23, 0.12)]
+        slide.prism([(-side * z, y) for z, y in outline], 0.035, frame, "ivory")
+        trim = [(0.255, 0.11), (0.315, 0.20), (0.305, 0.055), (0.46, -0.047),
+                (0.60, -0.01), (0.45, -0.07), (0.28, 0.035)]
+        slide.prism([(-side * z, y) for z, y in trim], 0.038, frame, "gold")
+        slide.prism(star(0.04, 0.012, 4), 0.042,
+                    _frame((side * 0.11, 0.23, 0.29), (side, 0, 0)), "glow")
+    return [repeater, rotor, launcher, slide]
+
+
+BUILDERS = {"candy-neon": candy_neon, "scrap-punk": scrap_punk, "astral-ivory": astral_ivory}
 
 
 def _material(name, color, metallic, roughness, emission, image=None):
@@ -1292,6 +1381,7 @@ def blender_render(theme, glb, output_dir):
     scene.render.image_settings.color_mode = "RGBA"
     scene.view_settings.view_transform = "Standard"
     scene.view_settings.look = "None"
+    scene.view_settings.exposure = spec.get("preview_exposure", 0.0)
     world = bpy.data.worlds.new("studio")
     world.use_nodes = True
     world.node_tree.nodes["Background"].inputs["Color"].default_value = (0.34, 0.36, 0.4, 1)
