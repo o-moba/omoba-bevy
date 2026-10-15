@@ -5,6 +5,21 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Dawnweaver reference pass. **Horizon Ray now burns hardest along its centre**: full
+  damage within 0.35 of the axis, easing to 60% at each target's graze point (damage
+  80 at the centre, 48 at the edge; previously a flat 72). Radiance detonations and the
+  re-applied mark keep their full value. The caster stands still through the 0.8 s
+  windup so the ray leaves from the hero who warned it (proposed for owner review), a
+  late server tick can no longer swallow a due ray, a fully intercepted spell no
+  longer arms Radiance, and marks include the team damage buff. Receipts carry
+  additive `core_hit` / `radiance_burst` flags. Presentation: a drawn core band that
+  matches the damage core, stronger core hits, a Radiance pop, a release afterglow,
+  charge and two-hand release motions, the lane facing kept through the release, an
+  audible charge telegraph for every listener, new synthesized beam/core/burst voices
+  and lane-gained release audio. Direction skills that ignore aim distance send the
+  far point of the aimed ray. Bots hold the Luminous Field, spare towers and lead the
+  ray. Catalog `standard-kits-8`, gameplay `dawnweaver-2026-10-11-reference`; matching
+  client and server required. See [the iteration record](docs/progress/2026-10-11-dawnweaver-reference.md).
 - Fix desktop aiming of held direction skills (reported on Wildspark's Last Spark on
   Linux): the aim lane and the cast now read one mouse aim. Moving the cursor outside
   a windowed game mid-hold keeps the last aim instead of firing along the hero's facing;

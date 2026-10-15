@@ -43,7 +43,7 @@
   "combat.skill.hint_touch": "Отпустите, чтобы закрыть · нажмите или потяните, чтобы применить",
   "combat.standard.not_ready": "Умение перезаряжается.",
   "combat.standard.blocked_landing": "Скачок в эту точку невозможен: она занята.",
-  "combat.standard.radiance": "Сияние · метки усиливают атаки",
+  "combat.standard.radiance": "Сияние · метки взрываются от атак и луча",
   "combat.standard.momentum": "Разгон · добивания дают ускорение",
   "combat.standard.repeater": "Скорострельный режим",
   "combat.standard.rockets": "Ракеты",

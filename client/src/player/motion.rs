@@ -77,12 +77,10 @@ pub(super) fn move_player(
                 .remove::<(MovementTarget, MovementRoute, Jumping)>();
             continue;
         }
-        // A rooted/stunned player cannot finish a short old waypoint or rotate
-        // toward it while speed is zero. Authority resumes the same route later.
-        if loadout
-            .and_then(|loadout| loadout.0.as_ref())
-            .is_some_and(|state| state.root_remaining_secs > 0.0)
-        {
+        // A rooted/stunned player, or one standing in the windup of its own beam, cannot
+        // finish a short old waypoint or rotate toward it while speed is zero. The order
+        // is kept: the same route resumes once authority lets the hero move again.
+        if crate::combat::standard::movement_locked(loadout) {
             continue;
         }
         let Some(waypoint) = route.waypoints.first().copied() else {

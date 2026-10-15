@@ -526,11 +526,13 @@ pub(super) fn resolve_pending_cast_system(
             pending_cast.cancel();
             return;
         }
-        let aim = super::standard::bounded_aim(
-            player_transform.translation.xz(),
-            aim,
-            definition.targeting,
-            scaled_cast_range(definition, rank),
+        let origin = player_transform.translation.xz();
+        let range = scaled_cast_range(definition, rank);
+        let aim = super::standard::sent_aim(
+            origin,
+            super::standard::bounded_aim(origin, aim, definition.targeting, range),
+            &skill.effect,
+            range,
         );
         if matches!(
             skill.effect,
@@ -554,13 +556,12 @@ pub(super) fn resolve_pending_cast_system(
             .filter(|rule| !recast && rule.ally && !rule.pick_optional);
         let aim = if let Some(rule) = needs_ally {
             let caster = super::aim_preview::Caster {
-                position: player_transform.translation.xz(),
+                position: origin,
                 id: net_id.map(|id| id.0),
                 team: *team,
                 flags: state,
                 slot: slot.index(),
             };
-            let range = scaled_cast_range(definition, rank);
             let Some(ally) = aim_view.3.ally_aim(rule, &caster, range, aim, &aim_view.4) else {
                 report_plain(&mut feedback, "combat.cast.no_ally");
                 pending_cast.cancel();

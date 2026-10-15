@@ -114,6 +114,10 @@ pub struct HitSource {
     pub entity: CombatEntity,
     pub style: ProjectileStyle,
     pub action_slot: Option<u8>,
+    /// A beam's primary hit landed inside the full-damage core.
+    pub core_hit: bool,
+    /// This receipt is a Radiance mark detonation, not the triggering hit.
+    pub radiance_burst: bool,
 }
 
 impl HitSource {
@@ -122,6 +126,8 @@ impl HitSource {
             entity: CombatEntity { kind, id },
             style,
             action_slot: None,
+            core_hit: false,
+            radiance_burst: false,
         }
     }
 
@@ -133,6 +139,8 @@ impl HitSource {
             },
             style: state.style,
             action_slot: state.action_slot,
+            core_hit: false,
+            radiance_burst: false,
         }
     }
 
@@ -140,6 +148,8 @@ impl HitSource {
         event.source = self.entity;
         event.style = self.style;
         event.action_slot = self.action_slot;
+        event.core_hit = self.core_hit;
+        event.radiance_burst = self.radiance_burst;
         event
     }
 }

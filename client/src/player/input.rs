@@ -245,6 +245,8 @@ pub(super) fn move_player_analog(
                 * hero_movement_multiplier(class, progression),
         ) * utility.map_or(1.0, |u| u.state.movement_multiplier())
             * crate::combat::standard::movement_factor(loadout);
+        // A root, a stun or the windup of the hero's own beam: no step and no turn. A stick
+        // still held when it ends moves the hero on.
         if speed <= 0.0 {
             continue;
         }

@@ -372,7 +372,7 @@
     },
     {
       "sourcePath": "shared/src/loadout.rs",
-      "sha256": "aed16194cb03fbe0466ed72b6f34f12921c0345c1c5fd7248e50f92723506a3b"
+      "sha256": "9e76e7ad1b8b9fffa35705f52b312686ddf2b35c035e0b3d91e6ce8227bce2ea"
     },
     {
       "sourcePath": "client/src/held_weapons.rs",

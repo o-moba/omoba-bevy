@@ -270,6 +270,37 @@ impl MotionCue {
             looping: clip.is_some_and(|clip| clip.looping),
         })
     }
+
+    /// Seconds the library clip of this cue plays from where it enters to its last key, at
+    /// its rate. A loop, or a motion the library does not have, has no end.
+    pub(crate) fn play_secs(&self) -> Option<f32> {
+        if self.looping || self.rate <= 0.0 {
+            return None;
+        }
+        let library = crate::humanoid::SharedHumanoidMotion::embedded().ok()?;
+        let clip = library.clips.get(&self.motion)?;
+        Some(clip.duration * (1.0 - self.start.clamp(0.0, 1.0)) / self.rate)
+    }
+
+    /// Seconds into its clip at which this held windup enters when its telegraph `effect` is
+    /// first seen: as far as the telegraph has run, at the windup's rate, so a warning seen
+    /// late (a lost snapshot, a caster leaving fog, a reconnect) still reaches its contact
+    /// when the server fires. A warning seen within [`stage::FRESH_SECS`] of its cast enters
+    /// at the first key, as a cast accent counts it fresh (rule E-16); a loop always does.
+    pub(crate) fn windup_entry_secs(&self, effect: &SkillEffectState) -> f32 {
+        if !self.hold || self.looping {
+            return 0.0;
+        }
+        let Some(telegraph) = category::telegraph_secs(effect.skill) else {
+            return 0.0;
+        };
+        let elapsed = stage::view(effect).progress * telegraph;
+        if elapsed > stage::FRESH_SECS {
+            elapsed * self.rate
+        } else {
+            0.0
+        }
+    }
 }
 
 /// What the action in one slot asks of the body, with the effects the hero has replicated.
