@@ -30,6 +30,8 @@ pub struct Placement {
     pub rendition_url: String,
     pub title: String,
     pub credit: String,
+    #[serde(default)]
+    pub description: String,
     pub starts_at: String,
     pub expires_at: String,
 }
@@ -224,6 +226,8 @@ fn authorize(base: &Url, m: Manifest, started: Instant) -> Result<Option<Authori
         || p.title.is_empty()
         || p.title.chars().count() > 80
         || p.credit.chars().count() > 120
+        || p.description.chars().count() > 1_000
+        || p.description.chars().any(|c| c != '\n' && c.is_control())
         || p.title
             .chars()
             .chain(p.credit.chars())

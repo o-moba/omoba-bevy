@@ -113,3 +113,14 @@ external asset origin.
 This feature is delivered as separate Registry, Web, game and preview SDK PRs into `dev`.
 Creating those PRs does not deploy the pilot, publish a mobile build or enable
 payments. See `docs/community-sculptures.md` for runtime and verification details.
+
+## Readable in-game advertising card
+
+An approved placement includes an optional immutable `description` (1,000 Unicode
+scalars, plain text, preserved LF/spacing, other control characters rejected).
+Studio reviews the exact full text; the owner, slot and active-manifest reads
+return the same snapshot. The game opens it only from an actual visible sculpture
+click/tap. It reuses modal input capture and scrolling, closes with the common
+close/back controls, and disappears with the placement authorization. No external
+links, embedded markup, tracking or gameplay targeting are introduced. The GLB
+animation remains active while its information card is open.

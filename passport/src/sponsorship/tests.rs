@@ -18,6 +18,7 @@ fn placement(base: &str) -> Placement {
         ),
         title: "Lucky cat".into(),
         credit: "OMOBA community".into(),
+        description: String::new(),
         starts_at: "2026-10-15T00:00:00Z".into(),
         expires_at: "2026-10-16T00:00:00+00:00".into(),
     }
@@ -310,4 +311,63 @@ fn empty_revocation_advances_watermark_and_rejects_an_unseen_older_snapshot() {
     fresh.placements[0].id = "44444444-4444-4444-8444-444444444444".into();
     state.apply_read(evaluate_manifest(&base, fresh, later), later);
     assert!(state.authorization.is_some());
+}
+
+#[test]
+fn description_is_optional_exact_plain_text_with_scalar_and_control_limits() {
+    let base = origin("https://registry.example").unwrap();
+    let p = placement("https://registry.example");
+    let now = Instant::now();
+    let mut value = serde_json::to_value(manifest(p.clone())).unwrap();
+    value["placements"][0]
+        .as_object_mut()
+        .unwrap()
+        .remove("description");
+    let old: Manifest = serde_json::from_value(value.clone()).unwrap();
+    assert_eq!(old.placements[0].description, "");
+    assert!(authorize(&base, old, now).unwrap().is_some());
+    for text in [
+        "".into(),
+        "  <b>招财猫</b>\nhttps://example.test\ne\u{301}  ".into(),
+        "🐈".repeat(1_000),
+    ] {
+        value["placements"][0]["description"] = serde_json::Value::String(text.clone());
+        let parsed: Manifest = serde_json::from_value(value.clone()).unwrap();
+        assert_eq!(
+            authorize(&base, parsed, now)
+                .unwrap()
+                .unwrap()
+                .placement
+                .description,
+            text
+        );
+    }
+    for text in [
+        "🐈".repeat(1_001),
+        "a\r\nb".into(),
+        "a\t".into(),
+        "a\0".into(),
+        "a\u{7f}".into(),
+        "a\u{80}".into(),
+        "a\u{85}".into(),
+        "a\u{9f}".into(),
+    ] {
+        value["placements"][0]["description"] = serde_json::Value::String(text);
+        let parsed: Manifest = serde_json::from_value(value.clone()).unwrap();
+        assert!(authorize(&base, parsed, now).is_err());
+    }
+    for bad in [
+        serde_json::Value::Null,
+        serde_json::json!(12),
+        serde_json::json!([]),
+        serde_json::json!({}),
+    ] {
+        value["placements"][0]["description"] = bad;
+        assert!(serde_json::from_value::<Manifest>(value.clone()).is_err());
+    }
+    // serde's UTF-8 String cannot represent unpaired UTF-16 surrogates.
+    let json = serde_json::to_string(&manifest(p))
+        .unwrap()
+        .replace("\"description\":\"\"", r#""description":"\ud800""#);
+    assert!(serde_json::from_str::<Manifest>(&json).is_err());
 }

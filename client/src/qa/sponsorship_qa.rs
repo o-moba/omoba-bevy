@@ -3,6 +3,11 @@
 //! integration server. The ordinary production downloader remains in charge.
 use crate::{camera::MainCamera, sponsorship::Sculpture};
 use bevy::{
+    input::{
+        ButtonState,
+        keyboard::{Key, KeyboardInput},
+        mouse::{MouseButtonInput, MouseScrollUnit, MouseWheel},
+    },
     prelude::*,
     render::view::screenshot::{Screenshot, ScreenshotCaptured, save_to_disk},
     window::PrimaryWindow,
@@ -39,6 +44,15 @@ pub(crate) fn run(store_root: Option<PathBuf>) {
                 ..default()
             }),
     )
+    .add_plugins((
+        crate::i18n::I18nPlugin::from_environment(),
+        crate::input_context::InputContextPlugin,
+        crate::ui::UiKitPlugin,
+    ))
+    .insert_resource(crate::net::GameStateSnapshot {
+        state: crate::net::GameState::Running,
+        ..default()
+    })
     .insert_resource(crate::sprite::PlayerVisualMode::Models3d)
     .insert_resource(ClearColor(Color::srgb(0.12, 0.19, 0.20)))
     .insert_resource(GlobalAmbientLight {
@@ -69,6 +83,16 @@ struct Audit {
     identity: Option<String>,
     retry_at: Option<Instant>,
     colored_readbacks: usize,
+    step_at: Instant,
+    card_rotation: Option<Quat>,
+    card_motion: f32,
+    scrolled_to_end: bool,
+    input_frames: usize,
+    leaked_input_frames: usize,
+    pointer_opened: bool,
+    pointer_closed: bool,
+    escape_closed: bool,
+    description_scalars: usize,
 }
 impl Plugin for SponsorshipQaPlugin {
     fn build(&self, app: &mut App) {
@@ -90,10 +114,24 @@ impl Plugin for SponsorshipQaPlugin {
                 identity: None,
                 retry_at: None,
                 colored_readbacks: 0,
+                step_at: Instant::now(),
+                card_rotation: None,
+                card_motion: 0.,
+                scrolled_to_end: false,
+                input_frames: 0,
+                leaked_input_frames: 0,
+                pointer_opened: false,
+                pointer_closed: false,
+                escape_closed: false,
+                description_scalars: 0,
             })
             .add_systems(Startup, setup)
             .add_systems(PreUpdate, focus)
             .add_systems(PostUpdate, diagnostics)
+            .add_systems(
+                Update,
+                audit_input.in_set(crate::input_context::InputContextSet::Actions),
+            )
             .add_systems(
                 PostUpdate,
                 capture.after(bevy::transform::TransformSystems::Propagate),
@@ -109,7 +147,8 @@ fn setup(mut commands: Commands) {
             fov: 45_f32.to_radians(),
             ..default()
         }),
-        Transform::from_translation(target + Vec3::new(5.5, 4.0, 7.5)).looking_at(target, Vec3::Y),
+        Transform::from_translation(target + Vec3::new(5.5, 4.0, 7.5))
+            .looking_at(target + Vec3::new(7.5, 0., -5.5).normalize() * 3.4, Vec3::Y),
     ));
     commands.spawn((
         DirectionalLight {
@@ -137,20 +176,74 @@ fn setup(mut commands: Commands) {
         ZIndex(999),
     ));
 }
+/// Low-level mouse/keyboard events flow through the same input and UI systems
+/// as the native window. This audit is an input-policy proof, not a UDP match.
+fn audit_input(
+    mut qa: ResMut<Audit>,
+    mouse: Res<ButtonInput<MouseButton>>,
+    keyboard: Res<ButtonInput<KeyCode>>,
+    context: Res<crate::input_context::GameplayInputContext>,
+) {
+    if mouse.just_pressed(MouseButton::Left)
+        || mouse.just_released(MouseButton::Left)
+        || keyboard.just_pressed(KeyCode::Escape)
+    {
+        qa.input_frames += 1;
+        if context.gameplay_allowed() || context.camera_allowed() {
+            qa.leaked_input_frames += 1;
+        }
+    }
+}
+#[derive(bevy::ecs::system::SystemParam)]
+struct QaInput<'w, 's> {
+    windows: Query<'w, 's, (Entity, &'static mut Window), With<PrimaryWindow>>,
+    mouse: MessageWriter<'w, MouseButtonInput>,
+    wheel: MessageWriter<'w, MouseWheel>,
+    keys: MessageWriter<'w, KeyboardInput>,
+    cameras: Query<'w, 's, (&'static Camera, &'static GlobalTransform), With<MainCamera>>,
+    controls: Query<'w, 's, (&'static crate::ui::TestId, &'static UiGlobalTransform)>,
+}
+impl QaInput<'_, '_> {
+    fn pointer(&mut self, point: Option<Vec2>, state: ButtonState) {
+        let Ok((entity, mut window)) = self.windows.single_mut() else {
+            return;
+        };
+        if let Some(point) = point {
+            window.set_cursor_position(Some(point));
+        }
+        self.mouse.write(MouseButtonInput {
+            button: MouseButton::Left,
+            state,
+            window: entity,
+        });
+    }
+    fn cat_point(&self) -> Option<Vec2> {
+        let (camera, transform) = self.cameras.single().ok()?;
+        camera
+            .world_to_viewport(
+                transform,
+                Vec3::from_array(shared::sponsorship::slot_position()) + Vec3::Y,
+            )
+            .ok()
+    }
+}
 fn capture(
     mut commands: Commands,
     mut qa: ResMut<Audit>,
     roots: Query<&Sculpture>,
     nodes: Query<(&Name, &Transform)>,
+    info: Res<crate::sponsorship::info::SculptureInfo>,
+    scrolls: Query<(&ComputedNode, &ScrollPosition), With<crate::sponsorship::info::InfoScroll>>,
+    mut input: QaInput,
     mut exit: MessageWriter<AppExit>,
 ) {
-    if qa.stage >= 3 {
+    if qa.stage >= 14 {
         return;
     }
     if qa.start.elapsed() > Duration::from_secs(90) {
         let _ = std::fs::create_dir_all(&qa.dir);
-        let _=std::fs::write(qa.dir.join("result.json"),serde_json::json!({"pass":false,"error":"No authorized rendered waving cat before timeout","identity":qa.identity,"motion":qa.max_motion}).to_string());
-        qa.stage = 3;
+        let _ = std::fs::write(qa.dir.join("result.json"), serde_json::json!({"pass":false,"error":"Native sculpture info proof timed out","stage":qa.stage,"identity":qa.identity,"motion":qa.max_motion,"inputFrames":qa.input_frames,"leakedInputFrames":qa.leaked_input_frames}).to_string());
+        qa.stage = 14;
         exit.write(AppExit::error());
         return;
     }
@@ -164,21 +257,127 @@ fn capture(
     };
     let first = *qa.rotation.get_or_insert(paw.rotation);
     qa.max_motion = qa.max_motion.max(first.angle_between(paw.rotation).abs());
-    let ready = *qa.ready.get_or_insert_with(Instant::now);
-    if qa.retry_at.is_some_and(|at| Instant::now() < at) {
-        return;
+    if info.open.is_some() {
+        let first = *qa.card_rotation.get_or_insert(paw.rotation);
+        qa.card_motion = qa.card_motion.max(first.angle_between(paw.rotation).abs());
     }
-    if qa.pending || ready.elapsed() < Duration::from_secs(8) {
+    let ready = *qa.ready.get_or_insert_with(Instant::now);
+    if qa.retry_at.is_some_and(|at| Instant::now() < at)
+        || qa.pending
+        || ready.elapsed() < Duration::from_secs(8)
+    {
         return;
     }
     if qa.stage == 2 {
-        let pass = qa.max_motion > 0.05 && qa.colored_readbacks == 2;
-        let result = serde_json::json!({"pass":pass,"source":"normal Registry active manifest and verified HTTP GLB download","viewport":[1280,720],"language":"en","identity":qa.identity,"slot":shared::sponsorship::SLOT_ID,"position":shared::sponsorship::slot_position(),"pawRotationRadians":qa.max_motion,"gameplay":"Isolated art capture with real Verdant assets and production placement plugin; no UDP gameplay session","physicalMobileTested":false,"nonblackReadbacks":qa.colored_readbacks});
+        let point = input.cat_point();
+        input.pointer(point, ButtonState::Pressed);
+        qa.stage = 3;
+        qa.step_at = Instant::now();
+        return;
+    }
+    if qa.stage == 3 {
+        if let Some(open) = &info.open {
+            qa.pointer_opened = true;
+            qa.description_scalars = open.description.chars().count();
+            input.pointer(None, ButtonState::Released);
+            qa.stage = 4;
+            qa.step_at = Instant::now();
+        }
+        return;
+    }
+    if matches!(qa.stage, 1 | 4 | 5 | 7 | 10 | 12 | 13)
+        && qa.step_at.elapsed() < Duration::from_millis(800)
+    {
+        return;
+    }
+    if qa.stage == 6 {
+        if let Ok((entity, _)) = input.windows.single() {
+            input.wheel.write(MouseWheel {
+                unit: MouseScrollUnit::Line,
+                phase: bevy::input::touch::TouchPhase::Moved,
+                x: 0.,
+                y: -10_000.,
+                window: entity,
+            });
+        }
+        qa.stage = 7;
+        qa.step_at = Instant::now();
+        return;
+    }
+    if qa.stage == 7 {
+        if let Ok((node, scroll)) = scrolls.single() {
+            let maximum =
+                (node.content_size().y - node.size().y).max(0.) * node.inverse_scale_factor;
+            qa.scrolled_to_end = scroll.y > 0. && (scroll.y - maximum).abs() < 1.;
+        }
+    }
+    if qa.stage == 8 {
+        let point = input
+            .controls
+            .iter()
+            .find(|(id, _)| id.as_str() == "SculptureInfoClose")
+            .map(|(_, transform)| transform.translation);
+        input.pointer(point, ButtonState::Pressed);
+        qa.stage = 9;
+        qa.step_at = Instant::now();
+        return;
+    }
+    if qa.stage == 9 {
+        if info.open.is_none() {
+            qa.pointer_closed = true;
+            input.pointer(None, ButtonState::Released);
+            qa.stage = 10;
+            qa.step_at = Instant::now();
+        }
+        return;
+    }
+    if qa.stage == 10 {
+        let point = input.cat_point();
+        input.pointer(point, ButtonState::Pressed);
+        qa.stage = 11;
+        return;
+    }
+    if qa.stage == 11 {
+        if info.open.is_some() {
+            input.pointer(None, ButtonState::Released);
+            qa.stage = 12;
+            qa.step_at = Instant::now();
+        }
+        return;
+    }
+    if qa.stage == 12 {
+        if let Ok((window, _)) = input.windows.single() {
+            input.keys.write(KeyboardInput {
+                window,
+                key_code: KeyCode::Escape,
+                logical_key: Key::Escape,
+                text: None,
+                state: ButtonState::Pressed,
+                repeat: false,
+            });
+        }
+        qa.stage = 13;
+        qa.step_at = Instant::now();
+        return;
+    }
+    if qa.stage == 13 {
+        qa.escape_closed = info.open.is_none();
+        let pass = qa.max_motion > 0.05
+            && qa.card_motion > 0.05
+            && qa.colored_readbacks == 5
+            && qa.pointer_opened
+            && qa.pointer_closed
+            && qa.escape_closed
+            && qa.scrolled_to_end
+            && qa.description_scalars == 1000
+            && qa.input_frames >= 6
+            && qa.leaked_input_frames == 0;
+        let result = serde_json::json!({"pass":pass,"source":"normal Registry active manifest and verified HTTP GLB download","viewport":[1280,720],"language":"en","identity":qa.identity,"slot":shared::sponsorship::SLOT_ID,"position":shared::sponsorship::slot_position(),"pawRotationRadians":qa.max_motion,"cardPawRotationRadians":qa.card_motion,"pointerOpened":qa.pointer_opened,"pointerClosed":qa.pointer_closed,"escapeClosed":qa.escape_closed,"scrolledToEnd":qa.scrolled_to_end,"descriptionScalars":qa.description_scalars,"inputFrames":qa.input_frames,"leakedInputFrames":qa.leaked_input_frames,"gameplay":"Isolated art capture with real Verdant assets and production input/modal/placement plugins; low-level pointer and keyboard messages; no UDP gameplay session","physicalMobileTested":false,"nonblackReadbacks":qa.colored_readbacks});
         let written = std::fs::write(
             qa.dir.join("result.json"),
             serde_json::to_vec_pretty(&result).unwrap(),
         );
-        qa.stage = 3;
+        qa.stage = 14;
         exit.write(if pass && written.is_ok() {
             AppExit::Success
         } else {
@@ -186,18 +385,18 @@ fn capture(
         });
         return;
     }
-    if qa.stage == 1 && ready.elapsed() < Duration::from_millis(8750) {
-        return;
-    }
     if std::fs::create_dir_all(&qa.dir).is_err() {
-        qa.stage = 3;
+        qa.stage = 14;
         exit.write(AppExit::error());
         return;
     }
-    let file = if qa.stage == 0 {
-        "01-sculpture.png"
-    } else {
-        "02-sculpture-wave.png"
+    let file = match qa.stage {
+        0 => "01-sculpture.png",
+        1 => "02-sculpture-wave.png",
+        4 => "03-info.png",
+        5 => "04-info-wave.png",
+        7 => "05-info-scrolled.png",
+        _ => return,
     };
     qa.pending = true;
     commands
@@ -214,6 +413,7 @@ fn capture(
             if colored > 10000 {
                 qa.colored_readbacks += 1;
                 qa.stage += 1;
+                qa.step_at = Instant::now();
             } else {
                 qa.retry_at = Some(Instant::now() + Duration::from_secs(1));
             }

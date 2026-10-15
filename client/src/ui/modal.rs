@@ -19,6 +19,7 @@ pub(crate) enum ModalId {
     Career,
     Shop,
     Supporter,
+    Sculpture,
     Scoreboard,
     /// The phone server-address overlay (`mobile_ui::ServerEntry`).
     ServerEntry,
@@ -38,6 +39,7 @@ impl ModalId {
         match self {
             ModalId::Shop => 45,
             ModalId::Scoreboard => 90,
+            ModalId::Sculpture => 95,
             ModalId::Pause => 100,
             // `SCREEN_Z + 50`: over the pause menu and the HUD modals.
             ModalId::Help => 110,

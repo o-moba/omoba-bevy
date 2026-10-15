@@ -40,6 +40,28 @@ the existing profile-isolated `ekza-store/map-props` cache. A changed placement
 replaces the previous scene root; expiry/revocation despawns its descendants and
 drops scene/animation handles. No downloaded file enters the application bundle.
 
+## Clickable creator information
+
+Click or tap the actual rendered sculpture to read the approved title, credit and
+optional description. The ray tests the nearest visible geometry, so empty ground
+or an occluding tree cannot activate a hidden sculpture. The card uses the common
+modal stack, close control, Escape/back signal and wheel/PageUp/PageDown/touch
+scrolling. The creator text is literal: no HTML, Markdown, clickable URLs or
+tracking. Every opening, closing and touch-drag gesture remains blocked from
+movement, combat and camera input, including the release/closing frame.
+
+`description` is immutable with the placement approval. Omission means an empty
+string; explicit null and non-strings are invalid. The limit is 1,000 Unicode
+scalar values, with LF line breaks allowed and other C0/C1/DEL controls rejected.
+Accepted text is not trimmed or normalized. Rust strings reject unpaired
+surrogates during JSON parsing. A card is bound to the exact authorized placement;
+expiry, stale/invalid authorization, revocation, visual-mode removal or replacement
+closes it. A late download or replay cannot recreate its authorization.
+
+The GLB's permitted rotation animation continues behind the card. GLB is the
+only model format for this profile; it does not imply arbitrary GLB compatibility.
+The budgets below remain identical for animated and static sculptures.
+
 ## Conservative model profile
 
 V1 accepts one GLB 2.0 scene with embedded BIN data, at most 64 nodes, 16 meshes,
@@ -95,9 +117,14 @@ OMOBA_SPONSOR_QA_DIR="$PWD/.agent/tasks/community-sculptures/raw/native" \
 
 The opt-in entry starts an isolated art app with the actual Verdant map and
 production placement plugin. It opens no UDP gameplay session, positions the
-camera on the fixed slot and waits for the ordinary runtime to load an authorized cat. It records two screenshots,
-nonblack readbacks, the placement/hash identity, slot position and measured paw rotation in
-`result.json`, and exits nonzero on timeout or absent movement. It does not
+camera near the fixed slot and waits for the ordinary runtime to load an authorized
+cat with the fixture’s 1,000-scalar multiline description. It records five
+screenshots (cat, wave, card, wave behind the card, and final scrolled text),
+nonblack readbacks, the placement/hash identity, slot position and paw motion.
+Low-level pointer and keyboard events exercise actual triangle selection, the
+visible close control and Escape through production input/modal systems.
+`result.json` requires full-text scroll reachability, animation while reading and
+zero input-policy leaks; it exits nonzero on timeout or a failed assertion. It does not
 fabricate an active placement or bypass the downloader. The QA label identifies
 local evidence. Other viewports and physical iOS/Android devices are not covered.
 
@@ -107,4 +134,4 @@ launched through the native app UI, with the same binary, endpoint overrides and
 isolated art entry. The task evidence retains its launcher, logs, two rendered
 frames and measured result. No machine settings were changed. If a capture stays
 black, open the native application window before accepting evidence; `pass: true`
-requires two nonblack readbacks and animation motion, plus visual inspection.
+requires five nonblack readbacks and animation motion, plus visual inspection.

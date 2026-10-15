@@ -2,6 +2,8 @@
 use bevy::{gltf::Gltf, prelude::*};
 use omoba_passport::sponsorship::{self, Ready};
 
+pub(crate) mod info;
+
 pub struct SponsorshipPlugin;
 #[derive(Resource, Default)]
 struct Desired(Option<Ready>);
@@ -18,10 +20,14 @@ pub(crate) struct Sculpture {
 struct SculptureAnimation;
 impl Plugin for SponsorshipPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<Desired>().add_systems(
-            Update,
-            (poll, reconcile, animation_library, bind_animation).chain(),
-        );
+        app.add_plugins(info::SculptureInfoPlugin)
+            .init_resource::<Desired>()
+            .add_systems(
+                Update,
+                (poll, reconcile, animation_library, bind_animation)
+                    .chain()
+                    .before(crate::input_context::InputContextSet::Modal),
+            );
     }
 }
 fn poll(mut desired: ResMut<Desired>, mode: Res<crate::sprite::PlayerVisualMode>) {
@@ -168,6 +174,7 @@ mod tests {
             rendition_url: "https://registry.test".into(),
             title: "Cat".into(),
             credit: "Artist".into(),
+            description: String::new(),
             starts_at: String::new(),
             expires_at: String::new(),
         };

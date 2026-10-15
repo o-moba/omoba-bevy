@@ -1059,7 +1059,7 @@
     "client/src/qa/audio_qa.rs": "audio settings duplicate of settings-sound; needs OMOBA_AUTOJOIN",
     "client/src/qa/visual_qa.rs": "world render checks (Verdant, jungle, forest VFX), not UI",
     "client/src/qa/map_qa.rs": "map prop swaps, not UI",
-    "client/src/qa/sponsorship_qa.rs": "Opt-in local sculpture art scene (OMOBA_SPONSOR_QA_DIR): normal Registry authorization/download at the fixed opposite-dragon slot, two animated-cat captures and measured paw rotation. English 1280x720 native viewport; no played match or mobile certification.",
+    "client/src/qa/sponsorship_qa.rs": "Opt-in local sculpture art scene (OMOBA_SPONSOR_QA_DIR): normal Registry authorization/download at the fixed opposite-dragon slot; five cat/card/scroll captures, low-level pointer open/close and Escape, full 1,000-scalar description scroll, measured paw rotation while reading and input-policy leak checks. English 1280x720 native viewport; no played match or mobile certification.",
     "client/src/qa/team_vision_qa.rs": "brush visibility, not UI",
     "client/src/qa/targeting_qa.rs": "targeting proof (in-world markers), not UI screens",
     "client/src/qa/combat_qa.rs": "projectile/impact proof, not UI",

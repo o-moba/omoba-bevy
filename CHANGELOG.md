@@ -7,7 +7,11 @@ All notable changes are recorded here. The canonical version is
 
 - Community sculpture pilot: a Registry-approved, temporary 3D placement beside
   the Wendigo pit, with bounded hash-verified downloads, expiry/revocation, and
-  an original waving lucky cat. No objective or collision changes. The linked
+  an original waving lucky cat. Click/tap the sculpture to read its moderated
+  title, credit and optional multiline description in a scrollable modal; input
+  stays blocked through opening/closing gestures and authorization loss removes
+  stale information. The GLB animation continues while reading. No objective or
+  collision changes. The linked
   Web/Studio workflow is free; cryptocurrency payments remain disabled.
   See [runtime and local verification](docs/community-sculptures.md).
 
