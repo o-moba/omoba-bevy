@@ -248,12 +248,20 @@ impl ServerRuntime {
             let packet = ClientPacket::Prematch {
                 request: request.clone(),
             };
-            match self.passport_admissions.begin_loadout(
+            let admission = self.passport_admissions.begin_loadout(
                 addr,
                 &packet,
                 session.as_deref(),
                 same_avatar,
-            ) {
+            );
+            if !matches!(admission, passport_admission::Admission::Pending) {
+                passport_admission::log_ekza_decision(
+                    Some(identity),
+                    &packet,
+                    matches!(admission, passport_admission::Admission::Free),
+                );
+            }
+            match admission {
                 passport_admission::Admission::Denied => {
                     player.draft.error = Some(
                         "This avatar or weapon is unavailable. Refresh Studio and choose approved equipment.".into(),

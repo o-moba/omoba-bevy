@@ -15,7 +15,9 @@ env:
 jobs:
   rust:
     name: fmt, clippy, tests
-    runs-on: ubuntu-latest
+    # Pinned, not ubuntu-latest: the Elite trace baseline is keyed by this
+    # image's libm (glibc 2.39), so an image change must be a deliberate edit.
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
@@ -34,7 +36,69 @@ jobs:
       - name: Clippy, client without the qa feature
         run: cargo clippy -p client --lib --no-deps --no-default-features -- -D warnings
       - name: Unit and integration tests
+        # The runner (ubuntu 24.04, glibc 2.39) has an Elite trace baseline,
+        # so the trace comparison must run, not skip (docs/plans/bot-personas.md).
+        # The trace this run recorded is uploaded, also on failure, so an
+        # intended gameplay change can re-baseline without a 2.39 machine
+        # (module docs of common/src/bots_trace_tests.rs).
+        env:
+          OMOBA_REQUIRE_BOT_TRACE: "1"
+          OMOBA_BOT_TRACE_OUT: ${{ runner.temp }}/elite_bot_trace.txt
+          OMOBA_BOT_TRACE_LABEL: ubuntu 24.04, glibc 2.39 (CI runner)
         run: cargo test --workspace --locked --exclude harness
+      - name: Upload the Elite trace this run recorded
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: elite-bot-trace
+          path: ${{ runner.temp }}/elite_bot_trace.txt
+          if-no-files-found: ignore
+
+  bot-sim:
+    name: bot difficulty smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.95.0
+      - uses: Swatinem/rust-cache@v2
+      # A small fixed-seed sample of full bot rounds, interval assertions only.
+      # The full matrix is bot-sim.yml (workflow_dispatch) or the dev VPS builder.
+      - name: Difficulty simulator smoke
+        run: cargo test --release --locked -p common --features test-support --test bot_difficulty_sim -- --ignored smoke_
+
+  dev-contour:
+    # The OMOBA Dev app's code paths (BUILD_CONTOUR = Some("dev"): the Dev, Local
+    # and Custom connection profiles, per-profile folders, the connection panel)
+    # only exist in a client compiled with the dev defaults of scripts/contours.py.
+    name: client in the dev contour
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      OMOBA_DEFAULT_CONFIG_DIR_SUFFIX: dev
+      OMOBA_DEFAULT_GAME_SERVER_ADDR: lobby.dev.omoba.io:4100
+      OMOBA_DEFAULT_REGISTRY_URL: https://registry.dev.ekza.io
+      OMOBA_DEFAULT_PASSPORT_URL: http://127.0.0.1:9/api/passport
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install native dependencies (audio, udev)
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libasound2-dev libudev-dev pkg-config
+      - name: Install the pinned toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.95.0
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Keep the settings folder in a scratch directory
+        run: echo "OMOBA_CLIENT_CONFIG_DIR=$RUNNER_TEMP/omoba-dev-settings" >> "$GITHUB_ENV"
+      - name: Clippy (warnings are errors)
+        run: cargo clippy -p client --all-targets --no-deps --locked -- -D warnings
+      - name: Clippy, client without the qa feature
+        run: cargo clippy -p client --lib --no-deps --no-default-features --locked -- -D warnings
+      - name: Client tests
+        run: cargo test -p client --locked
 
   harness:
     name: headless gameplay harness
@@ -130,3 +194,5 @@ jobs:
         run: python3 -m unittest discover -s scripts -p 'test_*.py'
       - name: iOS packaging tool tests
         run: python3 -m unittest discover -s mobile/ios -p 'test_*.py'
+      - name: Android packaging tool tests
+        run: python3 -m unittest discover -s mobile/android -p 'test_*.py'

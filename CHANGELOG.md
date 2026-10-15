@@ -16,6 +16,106 @@ All notable changes are recorded here. The canonical version is
   still go out). Touch and controller casting are unchanged; no protocol or
   gameplay change. See [the investigation](docs/progress/2026-10-11-desktop-aim.md).
 
+- Hero aura orbits now use continuous, feathered ribbons with bright heads,
+  a gentler body glow and one counter-rotating orbit. The 3D effect uses 23
+  elements instead of 35; counted geometry drops from 13,056 to 1,632 triangles
+  per aura. Shared static meshes need no per-frame geometry uploads, new lights
+  or dependencies. The separately depth-sorted 2D fallback stays at 35 elements.
+  Server-owned eligibility and cleanup are unchanged. Local 5v5 practice captures
+  verify the 23-element effect on a moving Agnes and its removal after revocation.
+  A short desktop frame-time comparison at VSync 60 is recorded separately; it
+  does not measure isolated GPU cost or mobile performance.
+
+- Monthly Hero Supporter recognition: a refined cosmetic aura, lifetime credit
+  for unique verified monthly support periods, optional public acknowledgement,
+  and a paginated supporter directory linked to privacy-aware game profiles.
+  Expired support remains credited; refunds and payment replays cannot inflate
+  it. Existing server authority and Apple/Solana provider gates remain in place.
+  Includes a new Account API migration; deployment and real payment-provider
+  activation are separate operations. See [Supporter operations](docs/supporter.md).
+
+- Community sculpture pilot: a Registry-approved, temporary 3D placement beside
+  the Wendigo pit, with bounded hash-verified downloads, expiry/revocation, and
+  an original waving lucky cat. Click/tap the sculpture to read its moderated
+  title, credit and optional multiline description in a scrollable modal; input
+  stays blocked through opening/closing gestures and authorization loss removes
+  stale information. The GLB animation continues while reading. No objective or
+  collision changes. The linked
+  Web/Studio workflow is free; cryptocurrency payments remain disabled.
+  See [runtime and local verification](docs/community-sculptures.md).
+
+- Shared **Omoba Dev** Xcode scheme for Run and Archive: separate app identity,
+  DEV icon and dev lobby, protected against stale local contour/server settings.
+  iOS release tooling selects the matching scheme; linked worktrees share the
+  primary Cargo cache. See [dev quickstart](docs/dev-quickstart.md).
+
+- Connection profiles and the OMOBA Dev app ([docs/connection-profiles.md](docs/connection-profiles.md)).
+  **Production builds have no server selection at all**: the party lobby's server
+  field, the Home/phone SERVER button and the Beta/Local presets are gone, and a
+  `game_server_addr` saved by an older build is no longer read; desktop developers and
+  self-hosters override the lobby, registry and passport with `GAME_SERVER_ADDR`,
+  `OMOBA_REGISTRY_URL`, `OMOBA_PASSPORT_URL` (phones read none; the dev app ignores a
+  production one). **Dev-contour builds**
+  get a Connection panel (kit modal; Home and Party → Connection) with three profiles,
+  each one button for lobby, Ekza registry, market, Studio and passport: Dev (default:
+  `lobby.dev.omoba.io:4100`, `registry.dev.ekza.io`, `app.dev.omoba.io`,
+  `studio.dev.ekza.io`, closed passport), Local (loopback `:4000`/`:8018`/`:3010`/`:5188`)
+  and Custom (typed lobby, optional registry; production refused). A switch is confirmed,
+  saved, and applies at the next start (desktop: Restart now); Home shows the running
+  profile beside DEV. Each profile keeps its Ekza link, store caches and match-resume
+  hint in `profiles/<profile>/`. The dev app now also exists on phones:
+  `scripts/release.py build ios|android --contour dev` makes `space.ekza.omoba.dev`
+  ("OMOBA Dev", DEV-ribbon icon from `scripts/make_dev_icons.py`), which installs beside
+  `space.ekza.omoba.beta`; the release workflow builds the dev APK. `PROTOCOL_VERSION`
+  is unchanged.
+
+- DEV contour polish. A dev-contour build shows a `DEV` badge (kit badge,
+  `common.contour_badge`) beside the Home title and under the match score strip, and its
+  Collection and draft hints name `app.dev.omoba.io/market` instead of the production
+  market: the dictionaries now hold `{market}`, filled from the build's contour.
+  Production builds look the same as before. A saved Ekza connection is now restored at
+  startup, in the background, rather than when Collection, hero select or the draft
+  first opens.
+
+- Wildspark skin sets and "My Ekza library" weapons. One static `handheld-glb-v1`
+  GLB can carry both Wildspark guns (`WildsparkSetRepeater` / `WildsparkSetLauncher`,
+  [authoring guide](docs/wildspark-skin-sets.md)); the game shows the variant for the
+  replicated weapon mode and moves only that variant's rotor or slide. Two sample sets
+  (Candy Neon, Scrap Punk) are in `assets-src/skins/wildspark-sets/`, built by
+  `scripts/build_wildspark_skin.py`; they reach players only through Studio. Collection and
+  the draft list the connected account's weapons first as "My Ekza library" (claims made
+  on `app.omoba.io/market` appear without a restart), and avatars in the library carry
+  the same name. Studio items show the registry's attribution line next to creator and
+  licence. The picked avatar is remembered across restarts. The server logs one line per
+  Ekza handheld/avatar admission decision. Signing out of Ekza in the game also ends
+  that link on the registry, in the background and best effort, and a new pairing ends
+  the saved link it replaces, so reconnects no longer pile up active links. Needs
+  ekza-bevy-sdk `d18ec72` (`AccountSession::assets`, `disconnect`, store attribution);
+  free items stay server-admitted by approval; `PROTOCOL_VERSION` stays 11.
+
+- `make sdk-pin-check` checks that the `ekza-bevy-sdk` commit pinned in `Cargo.toml`
+  and `Cargo.lock` is on a branch of the SDK's GitHub repository (`SDK_BRANCH=dev`
+  requires it merged there). A commit known only to a local `~/.cargo/git` cache builds
+  on that machine and fails CI and fresh clones. Tooling only; not part of `make check`
+  because it needs the network.
+
+- DEV contour: `scripts/release.py build … --contour dev` makes desktop tester packages that
+  point at the dev lobby (`lobby.dev.omoba.io:4100` on the dedicated dev VPS) and
+  `registry.dev.ekza.io`. They are named `…-dev-…`, keep settings, session and caches in
+  `omoba-bevy-dev` instead of `omoba-bevy`, and are titled `OMOBA DEV` / `Omoba Dev.app`.
+  Dev builds use a closed loopback passport instead of the production `avatar.ekza.io`,
+  and at run time they offer an **OMOBA Dev** preset and refuse the production lobby in
+  every address they validate (typed, saved, `GAME_SERVER_ADDR`, match allocations).
+  `--registry` and `--passport` bake those origins for a build. No build, including the
+  iOS archive, inherits a compile-time setting from the shell (`OMOBA_DEFAULT_*`,
+  `OMOBA_ACCOUNT_API_URL`, `OMOBA_PORTAL_ORIGIN`, `EKZA_DEV_HTTP_HOST`). `release.yml`
+  gains `registry` and `contour` dispatch inputs. `ops/vps/omoba-lobby-dev.service` and
+  `ops/vps/dev/lobby_dev.py` install the dev lobby (UDP 4100/41100) on `vds-dev` with
+  dry-run, production refusals and rollback. The lobby gets its own career database
+  `omoba_dev` in the dev Supabase Postgres on that host, because a public lobby needs one
+  to start and to match players: roles, database and schema are created on the host, and
+  the password is generated there into a root-only file. Production builds, the production
+  unit and protocol are unchanged.
 - `make release-all` builds macOS, Windows (cargo-xwin cross-build), Linux (Docker,
   offline fallback), a universal Android APK and a signed iPhone archive on one Mac;
   `make release-publish` pins the packages to IPFS and verifies the gateway copies.

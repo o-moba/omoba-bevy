@@ -1,0 +1,46 @@
+name: Bot difficulty matrix
+
+# The full difficulty simulator matrix (docs/plans/bot-personas.md, S3):
+# N fixed-seed rounds per pairing, report attached as an artifact.
+on:
+  workflow_dispatch:
+    inputs:
+      rounds:
+        description: Rounds per pairing
+        default: "200"
+      pairings:
+        description: "Pairings, subject first (empty: the default matrix), e.g. recruit:elite,regular:veteran"
+        default: ""
+      tune:
+        description: "Profile overrides for a sweep, e.g. recruit.retreat_hp=0.45;regular.trade_margin=off"
+        default: ""
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  matrix:
+    name: difficulty matrix
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.95.0
+      - uses: Swatinem/rust-cache@v2
+      - name: Run the matrix
+        env:
+          OMOBA_BOT_SIM_MATCHES: ${{ inputs.rounds }}
+          OMOBA_BOT_SIM_PAIRINGS: ${{ inputs.pairings }}
+          OMOBA_BOT_SIM_TUNE: ${{ inputs.tune }}
+          OMOBA_BOT_SIM_REPORT: ${{ github.workspace }}/bot-difficulty-report.json
+        # The game logs to stdout; progress and the report go to stderr.
+        run: cargo test --release --locked -p common --features test-support --test bot_difficulty_sim -- --ignored --nocapture full_matrix > /dev/null
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: bot-difficulty-report
+          path: bot-difficulty-report.json
+          if-no-files-found: ignore

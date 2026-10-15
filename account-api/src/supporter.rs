@@ -1,4 +1,5 @@
 //! Provider receipts are verified outside the client trust boundary, then recorded atomically.
+pub mod recognition;
 pub mod solana;
 use crate::*;
 use ed25519_dalek::{Signature, VerifyingKey};
@@ -241,7 +242,7 @@ pub async fn dashboard(app: &App, profile: &str) -> Result<Value> {
         None => json!({"available":false,"duration_days":30}),
     };
     Ok(
-        json!({"supporter":status(app,profile).await?,"apple":apple,"solana":solana,"catalog":AuraStyle::ALL.map(|a|json!({"id":a,"name":a.label()}))}),
+        json!({"supporter":status(app,profile).await?,"recognition":recognition::get(app,profile).await?,"apple":apple,"solana":solana,"catalog":AuraStyle::ALL.map(|a|json!({"id":a,"name":a.label()}))}),
     )
 }
 #[derive(Deserialize)]
