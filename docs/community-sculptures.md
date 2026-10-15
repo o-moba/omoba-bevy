@@ -107,13 +107,19 @@ client with its ordinary environment override and isolated settings directory:
 
 ```sh
 GAME_SERVER_ADDR=127.0.0.1:41009 \
-OMOBA_REGISTRY_URL=http://127.0.0.1:8769 \
+OMOBA_REGISTRY_URL=http://127.0.0.1:8773 \
 OMOBA_CLIENT_CONFIG_DIR=/tmp/omoba-sculpture-qa \
 OMOBA_ASSET_DIR="$PWD/client/assets" \
 OMOBA_LANGUAGE=en OMOBA_PLAYER_VISUAL_MODE=models3d \
-OMOBA_SPONSOR_QA_DIR="$PWD/.agent/tasks/sculpture-info/raw/native" \
+OMOBA_SPONSOR_QA_DIR="$PWD/.agent/tasks/sculpture-info/raw/native-connected" \
 "$CARGO_TARGET_DIR/debug/client"
 ```
+
+For the connected run, first use OMOBA Web's `sponsor-connected.e2e.mjs` with the
+Registry fixture on port 8773. It creates a request through the real Web BFF and
+approves that same request in Studio; leave its fixture running for the game.
+This uses a preseeded approved model and synthetic login/storage. It does not
+prove a new-file upload, worker processing or a hosted dev deployment.
 
 The opt-in entry starts an isolated art app with the actual Verdant map and
 production placement plugin. It opens no UDP gameplay session, positions the
@@ -121,6 +127,8 @@ camera near the fixed slot and waits for the ordinary runtime to load an authori
 cat with the fixture’s 1,000-scalar multiline description. It records five
 screenshots (cat, wave, card, wave behind the card, and final scrolled text),
 nonblack readbacks, the placement/hash identity, slot position and paw motion.
+The harness targets a ray-confirmed visible sculpture mesh after visibility
+calculation and delivers bounded press/release events before input processing.
 Low-level pointer and keyboard events exercise actual triangle selection, the
 visible close control and Escape through production input/modal systems.
 `result.json` requires full-text scroll reachability, animation while reading and
@@ -133,7 +141,14 @@ runs were rejected. The earlier `community-sculptures` task captured the cat and
 its animation using a temporary `.app` wrapper launched through the native app UI.
 Its two rendered frames verify the original cat-only scene, not the new information
 card. Preserve that historical evidence separately. The updated five-frame
-`sculpture-info` run is still pending because the Mac is locked. No machine settings
+`sculpture-info` evidence includes the connected request identity, full-text scroll,
+close/back behavior, animation and input-policy assertions. No machine settings
 were changed. If a capture stays black, open the native application window before
 accepting evidence; `pass: true` requires five nonblack readbacks, animation motion
 and the card interaction assertions, plus visual inspection.
+
+Text is preserved as Unicode, but the existing bundled fonts do not cover every
+code point. Unsupported emoji such as the fixture's cat emoji render a missing
+glyph; see `client/assets/ui/NotoSansCJK-SOURCE.md`. The Chinese sculpture heading
+is included in the generated display-font subset and covered by the existing
+dictionary/font regression test.
