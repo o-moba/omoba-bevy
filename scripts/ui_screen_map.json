@@ -100,7 +100,7 @@
       "env": {
         "OMOBA_SUPPORTER_QA_DIR": "{out}"
       },
-      "note": "Supporter aura panel; the harness uses its own fixed viewport sizes.",
+      "note": "Hero cosmetic preview only; all palettes use the requested viewport (default 1280x720). No account entitlement or paid world session.",
       "sources": [
         "client/src/qa/supporter.rs"
       ]
@@ -697,9 +697,9 @@
     },
     {
       "id": "supporter-solar",
-      "title": "Supporter \u00b7 Solar aura",
+      "title": "Hero \u00b7 Solar aura preview",
       "run": "supporter",
-      "frame": "solar-desktop.png",
+      "frame": "hero-solar-preview.png",
       "profiles": [
         "desktop",
         "phone"
@@ -709,9 +709,9 @@
     },
     {
       "id": "supporter-lunar",
-      "title": "Supporter \u00b7 Lunar aura",
+      "title": "Hero \u00b7 Lunar aura preview",
       "run": "supporter",
-      "frame": "lunar-phone.png",
+      "frame": "hero-lunar-preview.png",
       "profiles": [
         "desktop",
         "phone"
@@ -721,9 +721,9 @@
     },
     {
       "id": "supporter-verdant",
-      "title": "Supporter \u00b7 Verdant aura",
+      "title": "Hero \u00b7 Verdant aura preview",
       "run": "supporter",
-      "frame": "verdant-phone.png",
+      "frame": "hero-verdant-preview.png",
       "profiles": [
         "desktop",
         "phone"

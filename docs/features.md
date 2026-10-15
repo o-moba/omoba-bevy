@@ -400,7 +400,7 @@ This is a lightweight Bevy mesh/material particle foundation, without an extra
 GPU particle plugin or dynamic lights. Phone performance still needs device QA.
 These source changes are newer than TestFlight 0.20.0 (4).
 
-## Shared accounts and Supporter cosmetics
+## Shared accounts and Hero Supporter cosmetics
 
 A native installation can enroll a separate device key into an existing account
 through explicit portal approval, without exporting its private seed or merging
@@ -413,14 +413,22 @@ Supporter provides three cosmetic aura styles (Solar, Lunar, Verdant) and a free
 isolated preview. The game server reads account grants from PostgreSQL, enforces
 expiry and revocation, and replicates the permitted style. Auras follow actor
 visibility/death and never change combat, XP, rating, or matchmaking. The portal
-shows billing source, paid period, renewal state and aura preferences.
+shows billing source, paid period, renewal state, aura preferences and lifetime
+credited months. The player-facing Hero status is cosmetic and follows the same
+verified active period. A public supporter directory links opted-in public
+profiles to their existing statistics-aware pages; expired support remains
+acknowledged, refunds remove its credit, and private profiles/statistics remain
+private. The lifetime count is independent of truncated payment history.
 
-Live aura VFX use three intersecting inclined orbits with bright cores, camera-facing glow sprites,
-eight tapered trail segments per orbit, four rising glints and a subtle ground ring.
-Each hero has a fixed 35 rendered elements; meshes/materials are shared and no dynamic
-lights or per-frame particle spawning are needed. Sprite mode projects the same paths
-with front/back layering. Native preview uses the same effect implementation.
-This source update is newer than TestFlight 0.20.0 (4).
+Hero aura VFX combine a restrained body glow, three intersecting orbits with bright
+cores and tapered trails, eight rising sparks and a subtle ground ring. Unlit core
+brightness uses HDR base color rather than ineffective emissive energy. The slow
+body glow stays behind the character and never replaces its materials. Each hero
+keeps the existing fixed 35 rendered elements; meshes/materials are shared, with
+no dynamic lights or per-frame particle spawning. Sprite mode projects the same
+paths with front/back layering. Native preview and live actors share the effect
+implementation. Source verification is separate from a mobile release or a real
+paid multiplayer session.
 
 Apple and Solana are separate provider adapters granting the same account right.
 Payment functionality is unavailable until the operator explicitly configures a
@@ -430,7 +438,7 @@ purchase/restore and retains unfinished transactions until server confirmation.
 The Apple adapter requires an authenticated verifier and App Store setup; local
 fixtures are not proof of a real sandbox purchase or App Review approval.
 
-Core career and portal schemas are both version 3. Run owner migrations and the
+Core career schema is version 3 and portal schema is version 6. Run owner migrations and the
 updated runtime grants before deploying matching game/API releases. See
 [Supporter operations](supporter.md) for rollout boundaries and test procedures.
 

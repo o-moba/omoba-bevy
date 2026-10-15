@@ -1,6 +1,6 @@
-# Shared accounts and Open Moba Supporter
+# Shared accounts and Hero Supporter
 
-Supporter is cosmetic account access. No purchase modifies damage, health, XP,
+Hero Supporter is voluntary cosmetic account access. No purchase modifies damage, health, XP,
 rating, matchmaking, visibility rules or hitboxes. Solar, Lunar and Verdant use
 the same lightweight mesh-based effect with separate color presentation.
 
@@ -18,6 +18,45 @@ usability or App Review acceptance. The Apple verification policy is under
 `billing/apple-verifier/`; binding it to Apple's official server library requires
 the separately approved production dependency. Do not enable Apple checkout with
 a mock verifier or a service that only decodes JWT payloads.
+
+## Monthly Hero status and public thanks
+
+Hero is the player-facing name for the existing Supporter cosmetic entitlement.
+It is not a combat rank or a separate client-granted right. A verified active
+period unlocks the Solar, Lunar and Verdant aura styles; hiding an aura does not
+end the paid period. The server continues to own authorization and expiry.
+
+On the website, Solana USDC buys **30 days of prepaid support**, without automatic
+wallet debits. The existing Apple product must be configured as a **monthly**
+subscription; its renewal and cancellation rules come from StoreKit. Do not call
+the website payment an automatically renewing subscription. Both are voluntary
+ways to support the project and neither grants gameplay advantages.
+
+The portal shows `months_supported`, the count of unique verified, nonrevoked
+monthly payment periods across providers. Expired periods and already-paid future
+periods retain their credit; a refund removes that period's credit. Retries,
+restores and repeated provider events never add a second month. This count is
+queried from the entire grant ledger, independently of the bounded recent-history
+list. It is not computed by dividing elapsed days by 30: calendar months and
+Apple sandbox renewal intervals differ. A future annual product would need an
+explicit period-credit policy before it could be sold through this mechanism.
+
+Public thanks are optional. The account owner enables acknowledgement on the
+Supporter page and separately publishes their game profile in Settings. The
+public `/supporters` directory includes all profiles meeting both conditions
+with at least one credited month, using bounded cursor pagination. It shows the
+nickname, credited months, whether Hero is currently active, and a link to the
+existing player profile. Former supporters remain acknowledged after expiry.
+Opting out or making the profile private removes public acknowledgement. Public
+statistics remain independently controlled by the existing statistics setting;
+no payment publishes hidden statistics. Public responses never contain receipts,
+wallets, billing sources or renewal settings.
+
+The Account API adds `recognition` to the existing private supporter dashboard,
+`PATCH /v1/me/supporter/recognition` for its explicit visibility preference, and
+public `GET /v1/supporters`. Public player responses include a small supporter
+summary only when that same acknowledgement is public. Existing game/native
+SupporterStatus and network messages are unchanged.
 
 ## One account on phone and PC
 
@@ -53,7 +92,9 @@ thirty seconds without a successful check; no silent fallback to a guest account
 
 ## Database upgrade and runtime permissions
 
-Core career schema is version 3; portal schema is independently version 3.
+Core career schema is version 3; portal schema is independently version 6.
+The new `006_supporter_recognition.sql` migration adds public acknowledgement
+with an opt-out default; it does not grant paid access or publish any account.
 Run the existing owner-only Account API `migrate` command, then
 `account-api/ops/grants.sql` with your existing runtime role names. Apply first
 to an isolated database and verify backups before an operator-approved rollout.

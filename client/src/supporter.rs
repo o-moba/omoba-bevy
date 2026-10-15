@@ -30,12 +30,18 @@ use std::collections::HashMap;
 const PREVIEW_LAYER: usize = 29;
 const AURA_RADIUS: f32 = 0.76;
 const ORBIT_COUNT: usize = 3;
-const TRAIL_SAMPLES: usize = 8;
-const GLINT_COUNT: usize = 4;
-const TRAIL_STEP: f64 = 0.075;
+const TRAIL_SAMPLES: usize = 6;
+const GLINT_COUNT: usize = 8;
+const TRAIL_STEP: f64 = 0.10;
+// Two body glows and more rising sparks replace six trail elements: the total
+// stays at 35 mesh elements, independently of elapsed time and frame rate.
+pub(crate) const HERO_AURA_ELEMENT_BUDGET: usize =
+    1 + 2 + ORBIT_COUNT * (2 + TRAIL_SAMPLES) + GLINT_COUNT;
 
 #[derive(Clone, Copy)]
 enum AuraParticle {
+    Mantle,
+    Radiance,
     Core,
     Halo,
     Trail(usize),
@@ -126,7 +132,7 @@ enum Action {
     Purchase,
     Restore,
 }
-#[derive(Resource)]
+#[derive(Resource, Default)]
 struct AuraAssets {
     ring: Handle<Mesh>,
     orb: Handle<Mesh>,
@@ -140,6 +146,10 @@ struct AuraAssets {
     flat_cores: [Handle<ColorMaterial>; 3],
     flat_halos: [Handle<ColorMaterial>; 3],
     flat_trails: [Handle<ColorMaterial>; 3],
+    mantles: [Handle<StandardMaterial>; 3],
+    radiance: [Handle<StandardMaterial>; 3],
+    flat_mantles: [Handle<ColorMaterial>; 3],
+    flat_radiance: [Handle<ColorMaterial>; 3],
     preview: Handle<Image>,
 }
 fn style_index(style: AuraStyle) -> usize {
@@ -162,8 +172,9 @@ fn color(style: AuraStyle) -> Color {
 fn particle_material(style: AuraStyle, alpha: f32, white: f32) -> StandardMaterial {
     let tint = color(style).mix(&Color::WHITE, white);
     StandardMaterial {
-        base_color: tint.with_alpha(alpha),
-        emissive: LinearRgba::from(tint) * 2.2,
+        // Unlit materials draw base_color directly; emissive alone does not
+        // brighten them. Use the same HDR convention as the game's other VFX.
+        base_color: crate::game_vfx::hdr_tint(tint, 2.2).with_alpha(alpha),
         unlit: true,
         alpha_mode: AlphaMode::Add,
         double_sided: true,
@@ -224,6 +235,15 @@ fn project_particle(point: Vec3, flat: bool) -> Vec3 {
 fn particle_pose(orbit: &Orbit, seconds: f64) -> Transform {
     let head = orbital_point(orbit.index, seconds);
     let (position, scale, rotation) = match orbit.particle {
+        AuraParticle::Mantle | AuraParticle::Radiance => {
+            let breath = 1. + 0.04 * (seconds as f32 * 1.7).sin();
+            let size = if matches!(orbit.particle, AuraParticle::Mantle) {
+                Vec3::new(16., 22., 1.)
+            } else {
+                Vec3::new(10., 17., 1.)
+            };
+            (Vec3::Y * 0.88, size * breath, Quat::IDENTITY)
+        }
         AuraParticle::Core | AuraParticle::Halo => {
             let pulse = 1. + 0.12 * (seconds as f32 * 3. + orbit.index).sin();
             let size = if matches!(orbit.particle, AuraParticle::Halo) {
@@ -246,22 +266,29 @@ fn particle_pose(orbit: &Orbit, seconds: f64) -> Transform {
             )
         }
         AuraParticle::Glint => {
-            let age = (seconds * 0.45 + orbit.index as f64 / GLINT_COUNT as f64).fract() as f32;
-            let phase = orbit.index * 2.399 + age * 1.2;
-            let radius = AURA_RADIUS * (0.5 + 0.3 * age);
+            let age =
+                (seconds * 0.38 + orbit.index as f64 / GLINT_COUNT as f64).rem_euclid(1.) as f32;
+            let phase = orbit.index * 2.399 + age * 1.8;
+            let radius = AURA_RADIUS * (0.58 + 0.30 * age);
             let point = Vec3::new(
                 phase.cos() * radius,
-                0.15 + age * 1.55,
+                0.06 + age * 1.90,
                 phase.sin() * radius,
             );
-            let sparkle = (std::f32::consts::PI * age).sin().powi(3) * 1.5;
-            (point, Vec3::splat(sparkle), Quat::IDENTITY)
+            // Fade to zero at each wrap: rising sparks never pop at the feet.
+            let sparkle = (std::f32::consts::PI * age).sin().powi(2) * 1.35;
+            (point, Vec3::new(0.8, 1.65, 1.) * sparkle, Quat::IDENTITY)
         }
     };
     let mut projected = project_particle(position, orbit.flat);
     if orbit.flat {
         // Orbit behind the sprite on the far half and in front on the near half.
-        projected.z = if position.z >= 0. {
+        projected.z = if matches!(
+            orbit.particle,
+            AuraParticle::Mantle | AuraParticle::Radiance
+        ) {
+            0.02
+        } else if position.z >= 0. {
             crate::world2d::layer::VFX - crate::world2d::layer::MARKER
         } else {
             0.02
@@ -371,6 +398,32 @@ fn setup(
             })
         }),
         flat_trails: AuraStyle::ALL.map(|s| flat.add(color(s).with_alpha(0.65))),
+        mantles: AuraStyle::ALL.map(|s| {
+            materials.add(StandardMaterial {
+                base_color_texture: Some(glow.clone()),
+                ..particle_material(s, 0.48, 0.12)
+            })
+        }),
+        radiance: AuraStyle::ALL.map(|s| {
+            materials.add(StandardMaterial {
+                base_color_texture: Some(glow.clone()),
+                ..particle_material(s, 0.25, 0.72)
+            })
+        }),
+        flat_mantles: AuraStyle::ALL.map(|s| {
+            flat.add(ColorMaterial {
+                color: color(s).with_alpha(0.48),
+                texture: Some(glow.clone()),
+                ..default()
+            })
+        }),
+        flat_radiance: AuraStyle::ALL.map(|s| {
+            flat.add(ColorMaterial {
+                color: color(s).mix(&Color::WHITE, 0.72).with_alpha(0.25),
+                texture: Some(glow.clone()),
+                ..default()
+            })
+        }),
         preview: image.clone(),
     };
     commands.spawn((
@@ -457,15 +510,18 @@ fn spawn_aura(
         ));
     }
     commands.entity(root).add_child(ring);
-    let particles = (0..ORBIT_COUNT)
-        .flat_map(|i| {
+    let particles = [(0, AuraParticle::Mantle), (0, AuraParticle::Radiance)]
+        .into_iter()
+        .chain((0..ORBIT_COUNT).flat_map(|i| {
             [AuraParticle::Core, AuraParticle::Halo]
                 .into_iter()
                 .chain((0..TRAIL_SAMPLES).map(AuraParticle::Trail))
                 .map(move |kind| (i, kind))
-        })
+        }))
         .chain((0..GLINT_COUNT).map(|i| (i, AuraParticle::Glint)));
+    let mut elements = 1; // Ground ring.
     for (index_orbit, particle) in particles {
+        elements += 1;
         let orbit = Orbit {
             index: index_orbit as f32,
             flat,
@@ -473,6 +529,8 @@ fn spawn_aura(
             preview: layer == PREVIEW_LAYER,
         };
         let (material, flat_material) = match particle {
+            AuraParticle::Mantle => (&assets.mantles[index], &assets.flat_mantles[index]),
+            AuraParticle::Radiance => (&assets.radiance[index], &assets.flat_radiance[index]),
             AuraParticle::Core | AuraParticle::Glint => {
                 (&assets.cores[index], &assets.flat_cores[index])
             }
@@ -511,6 +569,7 @@ fn spawn_aura(
         }
         commands.entity(root).add_child(orb);
     }
+    debug_assert_eq!(elements, HERO_AURA_ELEMENT_BUDGET);
     root
 }
 
@@ -656,6 +715,15 @@ fn animate_orbits(
                 .find(|(camera, _, preview)| camera.is_active && preview.is_some() == orbit.preview)
             {
                 transform.rotation = pose.to_scale_rotation_translation().1;
+                if matches!(
+                    orbit.particle,
+                    AuraParticle::Mantle | AuraParticle::Radiance
+                ) {
+                    // Put the broad glow behind the model in camera space, so
+                    // its own shading, costume and team colours stay readable.
+                    let behind = transform.rotation * Vec3::NEG_Z * 0.42;
+                    transform.translation += behind;
+                }
             }
         }
         if let Ok((parent, visible)) = roots.get(parent.parent()) {
@@ -911,7 +979,7 @@ fn render_panel(
                 SupporterScroll,
                 panel_scroll(),
                 Node {
-                    width: Val::Px(660.),
+                    width: Val::Px(if compact { 660. } else { 760. }),
                     max_width: Val::Percent(100.),
                     max_height: Val::Percent(96.),
                     flex_direction: FlexDirection::Column,
@@ -946,8 +1014,8 @@ fn render_panel(
                             ImageNode::new(assets.preview.clone()),
                             PreviewImage,
                             Node {
-                                width: Val::Px(if compact { 170. } else { 240. }),
-                                height: Val::Px(if compact { 119. } else { 168. }),
+                                width: Val::Px(if compact { 170. } else { 320. }),
+                                height: Val::Px(if compact { 119. } else { 224. }),
                                 ..default()
                             },
                         ));
@@ -1165,6 +1233,8 @@ mod tests {
             for tick in 0..120 {
                 let t = tick as f64 / 30.;
                 for particle in [
+                    AuraParticle::Mantle,
+                    AuraParticle::Radiance,
                     AuraParticle::Core,
                     AuraParticle::Halo,
                     AuraParticle::Trail(0),
@@ -1243,6 +1313,52 @@ mod tests {
         ));
     }
     #[test]
+    fn hero_glows_preserve_transparency_and_rising_sparks_fade_at_wrap() {
+        for style in AuraStyle::ALL {
+            let material = particle_material(style, 0.48, 0.12);
+            assert!(material.unlit);
+            assert_eq!(material.alpha_mode, AlphaMode::Add);
+            let tint = material.base_color.to_linear();
+            assert!(tint.red.max(tint.green).max(tint.blue) > 1.);
+            assert!(material.base_color.alpha() < 0.5);
+        }
+        for flat in [false, true] {
+            for particle in [AuraParticle::Mantle, AuraParticle::Radiance] {
+                for tick in 0..600 {
+                    let pose = particle_pose(
+                        &Orbit {
+                            index: 0.,
+                            flat,
+                            particle,
+                            preview: false,
+                        },
+                        tick as f64 / 60.,
+                    );
+                    // A soft backdrop, under three world units tall; never a
+                    // changing model scale or an opaque layer over a 2D actor.
+                    assert!(pose.scale.y * 0.13 < 3.);
+                    if flat {
+                        assert!(pose.translation.z < 1.);
+                    }
+                }
+            }
+            let spark = Orbit {
+                index: 0.,
+                flat,
+                particle: AuraParticle::Glint,
+                preview: false,
+            };
+            let lifetime = 1. / 0.38;
+            assert_eq!(particle_pose(&spark, 0.).scale, Vec3::ZERO);
+            assert!(particle_pose(&spark, lifetime - 0.0001).scale.max_element() < 0.0001);
+            assert!(particle_pose(&spark, lifetime + 0.0001).scale.max_element() < 0.0001);
+            assert!(
+                particle_pose(&spark, lifetime * 0.75).translation.y
+                    > particle_pose(&spark, lifetime * 0.25).translation.y
+            );
+        }
+    }
+    #[test]
     fn aura_lifecycle_tracks_server_style_and_despawns_with_owner_in_both_modes() {
         for (mode, remote) in [PlayerVisualMode::Models3d, PlayerVisualMode::Sprite2d]
             .into_iter()
@@ -1251,21 +1367,7 @@ mod tests {
             let mut app = App::new();
             app.insert_resource(mode)
                 .init_resource::<AuraRegistry>()
-                .insert_resource(AuraAssets {
-                    ring: default(),
-                    orb: default(),
-                    flat_orb: default(),
-                    glow_quad: default(),
-                    material: default(),
-                    flat: default(),
-                    cores: default(),
-                    halos: default(),
-                    trails: default(),
-                    flat_cores: default(),
-                    flat_halos: default(),
-                    flat_trails: default(),
-                    preview: default(),
-                })
+                .init_resource::<AuraAssets>()
                 .add_systems(Update, sync_auras);
             let actor = app
                 .world_mut()
@@ -1291,10 +1393,17 @@ mod tests {
                 .unwrap()
                 .iter()
                 .collect::<Vec<_>>();
+            assert_eq!(children.len(), HERO_AURA_ELEMENT_BUDGET);
             assert_eq!(
                 children.len(),
-                1 + ORBIT_COUNT * (2 + TRAIL_SAMPLES) + GLINT_COUNT
+                35,
+                "Hero stays within the previous aura budget"
             );
+            for _ in 0..120 {
+                app.update();
+                assert_eq!(app.world().resource::<AuraRegistry>().0[&actor].0, first);
+                assert_eq!(app.world().get::<Children>(first).unwrap().len(), 35);
+            }
             app.world_mut()
                 .get_mut::<NetworkSupporterAura>(actor)
                 .unwrap()
@@ -1302,9 +1411,28 @@ mod tests {
             app.update();
             assert!(app.world().get_entity(first).is_err());
             let second = app.world().resource::<AuraRegistry>().0[&actor].0;
-            app.world_mut().despawn(actor);
+            // Expiry, revocation and unequip all replicate None. Every mesh must
+            // disappear while the actor itself remains alive.
+            app.world_mut()
+                .get_mut::<NetworkSupporterAura>(actor)
+                .unwrap()
+                .0 = None;
             app.update();
             assert!(app.world().get_entity(second).is_err());
+            assert!(app.world().resource::<AuraRegistry>().0.is_empty());
+            assert_eq!(
+                app.world_mut().query::<&Orbit>().iter(app.world()).count(),
+                0
+            );
+            app.world_mut()
+                .get_mut::<NetworkSupporterAura>(actor)
+                .unwrap()
+                .0 = Some(AuraStyle::Verdant);
+            app.update();
+            let third = app.world().resource::<AuraRegistry>().0[&actor].0;
+            app.world_mut().despawn(actor);
+            app.update();
+            assert!(app.world().get_entity(third).is_err());
             assert!(app.world().resource::<AuraRegistry>().0.is_empty());
             for child in children {
                 assert!(app.world().get_entity(child).is_err());
@@ -1322,21 +1450,7 @@ mod tests {
                 .insert_resource(mode)
                 .init_resource::<AuraRegistry>()
                 .init_resource::<crate::maps::MapLayout>()
-                .insert_resource(AuraAssets {
-                    ring: default(),
-                    orb: default(),
-                    flat_orb: default(),
-                    glow_quad: default(),
-                    material: default(),
-                    flat: default(),
-                    cores: default(),
-                    halos: default(),
-                    trails: default(),
-                    flat_cores: default(),
-                    flat_halos: default(),
-                    flat_trails: default(),
-                    preview: default(),
-                })
+                .init_resource::<AuraAssets>()
                 .add_systems(Update, sync_auras)
                 .add_systems(
                     PostUpdate,
@@ -1451,14 +1565,14 @@ mod tests {
         assert_eq!(loading.text(), "Loading App Store pricing…");
         assert_eq!(
             status_label(None),
-            "Connect your saved account to view membership."
+            "Connect your saved account to view Hero access."
         );
         app.world_mut()
             .resource_mut::<Locale>()
             .set(LocaleId::parse("zh-Hans").unwrap());
         assert_eq!(loading.text(), "正在加载 App Store 价格…");
         assert_eq!(native.text(), "Purchase pending.");
-        assert_eq!(status_label(None), "连接已保存的账号即可查看会员状态。");
+        assert_eq!(status_label(None), "连接已保存的账号即可查看 Hero 状态。");
         let active = SupporterStatus {
             active: true,
             active_until: Some(0),
@@ -1466,7 +1580,7 @@ mod tests {
         };
         assert_eq!(
             status_label(Some(&active)),
-            "支持者已激活 · \n有效期至 1970-01-01 00:00 UTC"
+            "Hero 已激活 · \n外观有效期至 1970-01-01 00:00 UTC"
         );
         assert_ne!(data::aura(AuraStyle::Solar), AuraStyle::Solar.label());
     }
@@ -1474,13 +1588,34 @@ mod tests {
     #[test]
     fn preview_cannot_grant_aura_or_change_combat_stats() {
         let mut app = App::new();
-        app.init_resource::<SupporterUiState>();
+        app.init_resource::<SupporterUiState>()
+            .init_resource::<AuraAssets>()
+            .add_systems(Update, sync_preview);
         let actor = app
             .world_mut()
             .spawn((CombatStats::default(), NetworkSupporterAura(None)))
             .id();
         app.world_mut().resource_mut::<SupporterUiState>().open = true;
         app.world_mut().resource_mut::<SupporterUiState>().selected = AuraStyle::Verdant;
+        app.update();
+        assert_eq!(
+            app.world_mut()
+                .query::<&PreviewAura>()
+                .iter(app.world())
+                .count(),
+            1
+        );
+        assert_eq!(
+            app.world_mut()
+                .query::<&AuraOwner>()
+                .iter(app.world())
+                .count(),
+            0
+        );
+        assert_eq!(
+            app.world_mut().query::<&Orbit>().iter(app.world()).count(),
+            HERO_AURA_ELEMENT_BUDGET - 1
+        );
         assert_eq!(
             app.world().get::<NetworkSupporterAura>(actor).unwrap().0,
             None
@@ -1488,6 +1623,12 @@ mod tests {
         assert_eq!(
             app.world().get::<CombatStats>(actor).unwrap().hp,
             CombatStats::default().hp
+        );
+        app.world_mut().resource_mut::<SupporterUiState>().open = false;
+        app.update();
+        assert_eq!(
+            app.world_mut().query::<&Orbit>().iter(app.world()).count(),
+            0
         );
     }
 

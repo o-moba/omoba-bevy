@@ -5,6 +5,14 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Monthly Hero Supporter recognition: a refined cosmetic aura, lifetime credit
+  for unique verified monthly support periods, optional public acknowledgement,
+  and a paginated supporter directory linked to privacy-aware game profiles.
+  Expired support remains credited; refunds and payment replays cannot inflate
+  it. Existing server authority and Apple/Solana provider gates remain in place.
+  Includes a new Account API migration; deployment and real payment-provider
+  activation are separate operations. See [Supporter operations](docs/supporter.md).
+
 - Shared **Omoba Dev** Xcode scheme for Run and Archive: separate app identity,
   DEV icon and dev lobby, protected against stale local contour/server settings.
   iOS release tooling selects the matching scheme; linked worktrees share the

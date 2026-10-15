@@ -94,15 +94,15 @@ Harness: `client/src/qa/career_visual_qa.rs`; server: none; env: `OMOBA_CAREER_Q
 
 ## 06-supporter · `supporter`
 
-Supporter aura panel; the harness uses its own fixed viewport sizes.
+Hero cosmetic preview only; all palettes use the requested viewport (default 1280x720). No account entitlement or paid world session.
 
 Harness: `client/src/qa/supporter.rs`; server: none; env: `OMOBA_SUPPORTER_QA_DIR={out}`
 
 | Screen | Frame | Profiles | How a player gets there | Code | Note |
 | --- | --- | --- | --- | --- | --- |
-| Supporter · Solar aura | `solar-desktop.png` | desktop, phone | Profile → Support OMOBA | `client/src/supporter.rs` |  |
-| Supporter · Lunar aura | `lunar-phone.png` | desktop, phone | Supporter → Lunar | `client/src/supporter.rs` |  |
-| Supporter · Verdant aura | `verdant-phone.png` | desktop, phone | Supporter → Verdant | `client/src/supporter.rs` |  |
+| Hero · Solar aura preview | `hero-solar-preview.png` | desktop, phone | Profile → Support OMOBA | `client/src/supporter.rs` |  |
+| Hero · Lunar aura preview | `hero-lunar-preview.png` | desktop, phone | Supporter → Lunar | `client/src/supporter.rs` |  |
+| Hero · Verdant aura preview | `hero-verdant-preview.png` | desktop, phone | Supporter → Verdant | `client/src/supporter.rs` |  |
 
 ## 07-offline-practice · `offline`
 
