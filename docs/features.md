@@ -420,15 +420,25 @@ profiles to their existing statistics-aware pages; expired support remains
 acknowledged, refunds remove its credit, and private profiles/statistics remain
 private. The lifetime count is independent of truncated payment history.
 
-Hero aura VFX combine a restrained body glow, three intersecting orbits with bright
-cores and tapered trails, eight rising sparks and a subtle ground ring. Unlit core
-brightness uses HDR base color rather than ineffective emissive energy. The slow
-body glow stays behind the character and never replaces its materials. Each hero
-keeps the existing fixed 35 rendered elements; meshes/materials are shared, with
-no dynamic lights or per-frame particle spawning. Sprite mode projects the same
-paths with front/back layering. Native preview and live actors share the effect
-implementation. Source verification is separate from a mobile release or a real
-paid multiplayer session.
+Hero aura VFX combine three intersecting, feathered ribbon orbits, bright moving
+heads, a gentler body glow, eight rising sparks and a subtle ground ring. One
+orbit runs in the opposite direction. Each 3D orbit has a shared static ribbon
+with core and glow layers, built from crossed sheets with 32 segments per sheet.
+The 23 rendered elements replace the previous 35; counted geometry is 1,632
+triangles per aura versus 13,056 previously, an eightfold reduction in triangles.
+This is a geometry count, not a measured eightfold GPU or frame-time improvement.
+Meshes and materials are preallocated and shared: animation changes transforms,
+without per-frame geometry uploads, new dynamic lights or dependencies. The
+body glow never replaces character materials. Sprite mode retains 35 elements
+with separate front/back depth sorting. Native preview and live actors share the
+effect implementation and the existing authorization/visibility cleanup.
+
+The owner's Lineage II reference inspired the luminous orbital treatment; this
+is an original OMOBA effect, not an exact recreation or reused game asset. New
+local 5v5 practice captures show the 23-element ribbon effect at normal zoom,
+during movement and close up, followed by server-driven removal. The desktop
+frame-time sample includes VSync and other scene work; it establishes no isolated
+GPU, power or mobile result. Earlier 35-element captures remain historical.
 
 Apple and Solana are separate provider adapters granting the same account right.
 Payment functionality is unavailable until the operator explicitly configures a
@@ -1190,8 +1200,13 @@ skin installation. See [community workshop](community-workshop.md) and
 
 ### Hero aura world verification (2026-10-15)
 
-The Hero appearance includes a broad white/gold HDR body glow readable on the
-daylight map at normal gameplay zoom, plus orbiting light trails and rising
-sparks. The original 35-element budget is unchanged. Native local practice-match
-evidence verifies an actual roster character, movement and server-authoritative
-removal after revocation; see `docs/supporter.md` for the reproducible QA scope.
+The current ribbon revision is captured on the actual Agnes roster character
+in a server-backed local 5v5 practice match, in English at 1280×720. Normal,
+moving and close views plus 24 sampled motion frames show 23 effect elements;
+revocation clears the replicated aura and removes them all. The short 3.24-second
+MP4 contains those 24 sampled frames, not a 60-fps recording. A separate warmed
+180-frame sample per state at VSync 60 records similar whole-frame pacing with
+the aura on and off; ongoing bots, jungle and HUD work prevent isolating its GPU
+cost. The earlier 35-element body-glow captures remain historical. See
+[Supporter operations](supporter.md#live-hero-world-verification) for results,
+limits and the reproducible QA scope. No real payment or deployment is implied.

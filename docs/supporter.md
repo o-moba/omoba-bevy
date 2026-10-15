@@ -58,6 +58,34 @@ public `GET /v1/supporters`. Public player responses include a small supporter
 summary only when that same acknowledgement is public. Existing game/native
 SupporterStatus and network messages are unchanged.
 
+## Hero aura rendering
+
+The current 3D effect uses three intersecting ribbon orbits with bright heads,
+a gentler body glow, eight rising sparks and a ground ring. One orbit rotates
+against the other two. Each static ribbon has a narrow core and a wider glow
+layer; crossed, feathered sheets with 32 segments keep it visible from different
+viewing angles. Meshes and materials are preallocated and shared by the free
+preview and live actors. Animation updates transforms, with no per-frame geometry
+uploads, new dynamic lights or new production dependencies.
+
+The 3D budget is 23 rendered elements per aura, down from 35. The geometry check
+counts 1,632 triangles for the complete new aura versus 13,056 for the previous
+one: eight times fewer triangles. This does not establish the same reduction in
+GPU cost or frame time; transparent overlap and screen coverage still need runtime
+measurement. The 2D fallback retains 35 elements with separate front/back depth
+sorting rather than treating a whole intersecting ribbon as one sprite layer.
+
+The owner's Lineage II image is visual inspiration for luminous orbits, not an
+exact implementation target or a source of reused assets. This original OMOBA
+rendering keeps the Solar/Lunar/Verdant palettes and the existing server-owned
+entitlement, expiry, revocation, visibility, death and unequip cleanup. It adds
+no gameplay capability or change to character materials, lighting or hitboxes.
+
+Native local world captures now verify the 23-element ribbon revision and
+server-driven removal. A short desktop timing comparison is recorded below with
+its limits. The earlier 35-element captures remain historical evidence and must
+not be presented as validation of the current appearance or performance.
+
 ## One account on phone and PC
 
 1. On an existing device, connect the player portal through Profile. The game
@@ -209,26 +237,52 @@ local preview; it never creates an account entitlement or a paid world aura.
 
 ### Live Hero world verification
 
-The follow-up native check connects a real game client to a loopback practice
+The earlier native check connected a real game client to a loopback practice
 server with PostgreSQL-backed identity and an explicitly seeded monthly period.
-It uses the roster avatar Agnes on Verdant, normal movement and authoritative
-replicated `supporter_aura`. No client aura/grant is injected. Daylit-map testing
-revealed the original backdrop was too faint, so the shared 3D body halo now uses
-a broader alpha falloff and stronger HDR white/gold radiance. The 35-element
-budget, character materials, lighting and server eligibility remain unchanged.
+It used the roster avatar Agnes on Verdant, normal movement and authoritative
+replicated `supporter_aura`, with no client aura/grant injection. Daylit-map testing
+led to a broader HDR body halo in that 35-element revision. Those captures predate
+the current 23-element ribbon effect and its gentler body glow.
 
 The dormant `OMOBA_HERO_WORLD_QA_DIR=<output>` harness requires an explicit
 loopback `GAME_SERVER_ADDR`, `OMOBA_AUTOJOIN=ranger:agnes:green` and an isolated
 `OMOBA_CLIENT_CONFIG_DIR` holding the synthetic seed7 identity from
 `account-api/examples/hero-supporter-fixture.rs`. Start the server with
 `OMOBA_MATCH_MODE=practice` against that fixture database. It captures normal
-1280×720 English gameplay, moving player and a closer inspection, then waits
-for the operator to revoke the fixture's active paid period. It succeeds only
-when the replicated aura is cleared and every owned effect entity is removed.
-The operator may move the hero with normal input to keep the final image clear.
+1280×720 English gameplay, moving player, a closer inspection and 24 sampled
+motion frames. It then records a warmed active frame-time sample and waits for
+the operator to revoke the fixture's active paid period after
+`ready-to-revoke.json` appears. Success requires the
+replicated aura to clear and every owned effect entity to be removed, followed
+by the inactive timing sample at the same position and camera zoom.
 
-Evidence is under `.agent/tasks/hero-supporter/raw/world/`: four native PNGs,
-server/client logs, per-stage profile/player identity, world positions, replicated
-aura and effect counts, plus `world-summary.json`. This proves live local
-server-backed practice rendering and revocation; real payment verification,
-hosted dev rollout, remote PvP and physical mobile performance are separate.
+Historical evidence is under `.agent/tasks/hero-supporter/raw/world/`: four
+native PNGs, server/client logs, per-stage profile/player identity, world
+positions, replicated aura and effect counts, plus `world-summary.json`. It
+proves local server-backed rendering and revocation for the earlier body-glow
+revision.
+
+Current ribbon evidence is under `.agent/tasks/hero-orbit-art/raw/world/`.
+The successful local 5v5 practice run shows the actual Agnes roster player with
+23 elements at normal zoom, moving and close up, and 24 sampled motion frames.
+After revocation, the replicated aura is null and owned roots/elements are zero.
+Another unit approaches in the inactive image, so it is not a pixel-identical
+scene comparison. The 3.24-second MP4 presents the 24 sampled frames; it is not
+a 60-fps capture. The coordinator inspected the captured pixels.
+
+On Apple M4 with VSync 60, each timing state warmed for 60 frames before recording
+180 `Time<Real>` frame deltas over approximately three seconds. Both used camera
+zoom 0.55 and the same player position, with zero measured position drift; no
+screenshots were taken during sampling.
+
+| Aura state | p50 frame time | p95 frame time |
+|---|---:|---:|
+| Active | 16.642792 ms | 18.045000 ms |
+| Revoked / off | 16.618417 ms | 18.048333 ms |
+
+These are short whole-frame pacing samples. Bots, jungle and HUD work continued
+and differed between windows. They do not isolate GPU cost, establish a power
+saving or certify mobile performance. Raw samples are in `active-timing.json`
+and `inactive-timing.json`; the lifecycle and identity record is in
+`world-summary.json`. Real payment verification, hosted dev rollout, remote PvP
+and physical mobile performance remain separate.

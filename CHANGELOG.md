@@ -5,9 +5,15 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
-- Hero body radiance is now clearly visible against the daylight map at normal
-  gameplay zoom. Verified on a moving roster character in a local server-backed
-  practice match, including server-driven removal after entitlement revocation.
+- Hero aura orbits now use continuous, feathered ribbons with bright heads,
+  a gentler body glow and one counter-rotating orbit. The 3D effect uses 23
+  elements instead of 35; counted geometry drops from 13,056 to 1,632 triangles
+  per aura. Shared static meshes need no per-frame geometry uploads, new lights
+  or dependencies. The separately depth-sorted 2D fallback stays at 35 elements.
+  Server-owned eligibility and cleanup are unchanged. Local 5v5 practice captures
+  verify the 23-element effect on a moving Agnes and its removal after revocation.
+  A short desktop frame-time comparison at VSync 60 is recorded separately; it
+  does not measure isolated GPU cost or mobile performance.
 
 - Monthly Hero Supporter recognition: a refined cosmetic aura, lifetime credit
   for unique verified monthly support periods, optional public acknowledgement,

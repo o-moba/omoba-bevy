@@ -18,6 +18,7 @@ use crate::{
 use bevy::{
     asset::RenderAssetUsages,
     camera::{RenderTarget, visibility::RenderLayers},
+    mesh::{Indices, PrimitiveTopology},
     prelude::*,
     render::render_resource::{Extent3d, TextureDimension, TextureFormat},
 };
@@ -28,15 +29,25 @@ use shared::{
 use std::collections::HashMap;
 
 const PREVIEW_LAYER: usize = 29;
-const AURA_RADIUS: f32 = 0.76;
+const AURA_RADIUS: f32 = 0.94;
+const ORBIT_HEIGHT: f32 = 1.02;
+const RIBBON_SEGMENTS: usize = 32;
+const RIBBON_SWEEP: f32 = 2.85;
 const ORBIT_COUNT: usize = 3;
 const TRAIL_SAMPLES: usize = 6;
 const GLINT_COUNT: usize = 8;
-const TRAIL_STEP: f64 = 0.10;
-// Two body glows and more rising sparks replace six trail elements: the total
-// stays at 35 mesh elements, independently of elapsed time and frame rate.
-pub(crate) const HERO_AURA_ELEMENT_BUDGET: usize =
-    1 + 2 + ORBIT_COUNT * (2 + TRAIL_SAMPLES) + GLINT_COUNT;
+const TRAIL_STEP: f64 = 0.24;
+// Each 3D orbit is two shared ribbons plus two head billboards. Unlike the old
+// 18 stretched spheres, ribbons cost 1,536 triangles total and no vertex uploads.
+pub(crate) const HERO_AURA_ELEMENT_BUDGET: usize = 1 + 2 + ORBIT_COUNT * 4 + GLINT_COUNT;
+const FLAT_AURA_ELEMENT_BUDGET: usize = 1 + 2 + ORBIT_COUNT * (2 + TRAIL_SAMPLES) + GLINT_COUNT;
+fn aura_element_budget(flat: bool) -> usize {
+    if flat {
+        FLAT_AURA_ELEMENT_BUDGET
+    } else {
+        HERO_AURA_ELEMENT_BUDGET
+    }
+}
 
 #[derive(Clone, Copy)]
 enum AuraParticle {
@@ -45,6 +56,8 @@ enum AuraParticle {
     Core,
     Halo,
     Trail(usize),
+    RibbonCore,
+    RibbonGlow,
     Glint,
 }
 
@@ -135,7 +148,8 @@ enum Action {
 #[derive(Resource, Default)]
 struct AuraAssets {
     ring: Handle<Mesh>,
-    orb: Handle<Mesh>,
+    ribbon_core: Handle<Mesh>,
+    ribbon_glow: Handle<Mesh>,
     flat_orb: Handle<Mesh>,
     glow_quad: Handle<Mesh>,
     material: [Handle<StandardMaterial>; 3],
@@ -143,6 +157,7 @@ struct AuraAssets {
     cores: [Handle<StandardMaterial>; 3],
     halos: [Handle<StandardMaterial>; 3],
     trails: [Handle<StandardMaterial>; 3],
+    ribbon_cores: [Handle<StandardMaterial>; 3],
     flat_cores: [Handle<ColorMaterial>; 3],
     flat_halos: [Handle<ColorMaterial>; 3],
     flat_trails: [Handle<ColorMaterial>; 3],
@@ -227,14 +242,74 @@ fn glow_texture_with_falloff(star: bool, falloff: f32) -> Image {
     )
 }
 
-fn orbital_point(index: f32, seconds: f64) -> Vec3 {
-    let phase = (seconds * (1.30 + index as f64 * 0.13)
+/// A circular ribbon rotated in its own plane: head and tail always use the
+/// same frame. Reversing one orbit uses a proper 3D rotation (not negative scale),
+/// so its trail still follows behind its head. Time reduction prevents long-session
+/// precision loss; neither path nor brightness depends on frame rate.
+fn orbit_rotation(index: f32, seconds: f64) -> Quat {
+    let phase = (seconds * (1.15 + index as f64 * 0.17)
         + index as f64 * std::f64::consts::TAU / ORBIT_COUNT as f64)
         .rem_euclid(std::f64::consts::TAU) as f32;
-    let (s, c) = phase.sin_cos();
-    let tilt =
-        Quat::from_rotation_y(index * std::f32::consts::TAU / 3.) * Quat::from_rotation_z(0.34);
-    Vec3::Y * 0.82 + tilt * Vec3::new(c * AURA_RADIUS, s * 0.68, s * 0.18)
+    let precession = (seconds * 0.08).rem_euclid(std::f64::consts::TAU) as f32;
+    let plane = Quat::from_rotation_y(index * std::f32::consts::TAU / 3. + precession)
+        * Quat::from_rotation_z(0.32)
+        * Quat::from_rotation_x(0.22);
+    let reverse = if index == 1. {
+        Quat::from_rotation_x(std::f32::consts::PI)
+    } else {
+        Quat::IDENTITY
+    };
+    plane * reverse * Quat::from_rotation_z(phase)
+}
+fn orbital_point(index: f32, seconds: f64) -> Vec3 {
+    Vec3::Y * ORBIT_HEIGHT + orbit_rotation(index, seconds) * Vec3::X * AURA_RADIUS
+}
+
+/// Two crossed, feathered sheets prevent an orbit disappearing edge-on. Width
+/// and vertex alpha both taper smoothly to zero. Built once and shared by every
+/// Hero; the animation only transforms the mesh, never rebuilds it.
+fn ribbon_mesh(half_width: f32) -> Mesh {
+    let mut positions = Vec::new();
+    let mut normals = Vec::new();
+    let mut colors = Vec::new();
+    let mut indices = Vec::new();
+    for sheet in 0..2 {
+        let offset = positions.len() as u32;
+        for step in 0..=RIBBON_SEGMENTS {
+            let u = step as f32 / RIBBON_SEGMENTS as f32;
+            let angle = -u * RIBBON_SWEEP;
+            let radial = Vec3::new(angle.cos(), angle.sin(), 0.);
+            let across = if sheet == 0 { radial } else { Vec3::Z };
+            let taper = (1. - u).powf(0.75);
+            let fade = (1. - u).powf(1.3);
+            for side in [-1., 0., 1.] {
+                positions
+                    .push((radial * AURA_RADIUS + across * (side * half_width * taper)).to_array());
+                normals.push(if sheet == 0 {
+                    Vec3::Z.to_array()
+                } else {
+                    radial.to_array()
+                });
+                colors.push([1., 1., 1., if side == 0. { fade } else { 0. }]);
+            }
+        }
+        for step in 0..RIBBON_SEGMENTS as u32 {
+            for column in 0..2 {
+                let a = offset + step * 3 + column;
+                indices.extend_from_slice(&[a, a + 3, a + 1, a + 1, a + 3, a + 4]);
+            }
+        }
+    }
+    let vertices = positions.len();
+    Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::default(),
+    )
+    .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, positions)
+    .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, normals)
+    .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, vec![[0.5, 0.5]; vertices])
+    .with_inserted_attribute(Mesh::ATTRIBUTE_COLOR, colors)
+    .with_inserted_indices(Indices::U32(indices))
 }
 
 fn project_particle(point: Vec3, flat: bool) -> Vec3 {
@@ -246,26 +321,31 @@ fn project_particle(point: Vec3, flat: bool) -> Vec3 {
 }
 
 fn particle_pose(orbit: &Orbit, seconds: f64) -> Transform {
-    let head = orbital_point(orbit.index, seconds);
     let (position, scale, rotation) = match orbit.particle {
         AuraParticle::Mantle | AuraParticle::Radiance => {
             let breath = 1. + 0.04 * (seconds as f32 * 1.7).sin();
             let size = if matches!(orbit.particle, AuraParticle::Mantle) {
-                Vec3::new(16., 22., 1.)
+                Vec3::new(12., 19., 1.)
             } else {
-                Vec3::new(10., 17., 1.)
+                Vec3::new(7., 12., 1.)
             };
             (Vec3::Y * 1.05, size * breath, Quat::IDENTITY)
         }
         AuraParticle::Core | AuraParticle::Halo => {
-            let pulse = 1. + 0.12 * (seconds as f32 * 3. + orbit.index).sin();
+            let head = orbital_point(orbit.index, seconds);
+            let pulse = 1. + 0.10 * (seconds as f32 * 2.1 + orbit.index).sin();
             let size = if matches!(orbit.particle, AuraParticle::Halo) {
-                5.0
+                4.6
             } else {
-                2.0
+                3.2
             };
             (head, Vec3::splat(size * pulse), Quat::IDENTITY)
         }
+        AuraParticle::RibbonCore | AuraParticle::RibbonGlow => (
+            Vec3::Y * ORBIT_HEIGHT,
+            Vec3::ONE,
+            orbit_rotation(orbit.index, seconds),
+        ),
         AuraParticle::Trail(sample) => {
             let start = orbital_point(orbit.index, seconds - sample as f64 * TRAIL_STEP);
             let end = orbital_point(orbit.index, seconds - (sample + 1) as f64 * TRAIL_STEP);
@@ -369,7 +449,8 @@ fn setup(
     let star = images.add(glow_texture(true));
     let aura = AuraAssets {
         ring: meshes.add(Annulus::new(AURA_RADIUS - 0.025, AURA_RADIUS)),
-        orb: meshes.add(Sphere::new(0.065)),
+        ribbon_core: meshes.add(ribbon_mesh(0.018)),
+        ribbon_glow: meshes.add(ribbon_mesh(0.075)),
         flat_orb: meshes.add(Circle::new(0.065)),
         glow_quad: meshes.add(Rectangle::new(0.13, 0.13)),
         material: AuraStyle::ALL.map(|s| {
@@ -396,7 +477,13 @@ fn setup(
                 ..particle_material(s, 0.85, 0.1)
             })
         }),
-        trails: AuraStyle::ALL.map(|s| materials.add(particle_material(s, 0.65, 0.30))),
+        trails: AuraStyle::ALL.map(|s| materials.add(particle_material(s, 0.65, 0.10))),
+        ribbon_cores: AuraStyle::ALL.map(|s| {
+            materials.add(StandardMaterial {
+                base_color: crate::game_vfx::hdr_tint(color(s).mix(&Color::WHITE, 0.92), 4.0),
+                ..particle_material(s, 1., 0.92)
+            })
+        }),
         flat_cores: AuraStyle::ALL.map(|s| {
             flat.add(ColorMaterial {
                 color: color(s).mix(&Color::WHITE, 0.85),
@@ -415,13 +502,13 @@ fn setup(
         mantles: AuraStyle::ALL.map(|s| {
             materials.add(StandardMaterial {
                 base_color_texture: Some(body_glow.clone()),
-                ..body_glow_material(s, 0.48, 0.40)
+                ..body_glow_material(s, 0.23, 0.25)
             })
         }),
         radiance: AuraStyle::ALL.map(|s| {
             materials.add(StandardMaterial {
                 base_color_texture: Some(body_glow.clone()),
-                ..body_glow_material(s, 0.30, 0.85)
+                ..body_glow_material(s, 0.12, 0.75)
             })
         }),
         flat_mantles: AuraStyle::ALL.map(|s| {
@@ -449,7 +536,8 @@ fn setup(
             ..default()
         },
         RenderTarget::Image(image.into()),
-        Transform::from_xyz(1.7, 1.6, 2.5).looking_at(Vec3::Y * 0.65, Vec3::Y),
+        // Frame the full orbit crown and foot ring in the 320×224 preview.
+        Transform::from_xyz(1.9, 1.8, 2.8).looking_at(Vec3::Y * 0.95, Vec3::Y),
         RenderLayers::layer(PREVIEW_LAYER),
         PreviewCamera,
     ));
@@ -524,15 +612,18 @@ fn spawn_aura(
         ));
     }
     commands.entity(root).add_child(ring);
-    let particles = [(0, AuraParticle::Mantle), (0, AuraParticle::Radiance)]
-        .into_iter()
-        .chain((0..ORBIT_COUNT).flat_map(|i| {
-            [AuraParticle::Core, AuraParticle::Halo]
-                .into_iter()
-                .chain((0..TRAIL_SAMPLES).map(AuraParticle::Trail))
-                .map(move |kind| (i, kind))
-        }))
-        .chain((0..GLINT_COUNT).map(|i| (i, AuraParticle::Glint)));
+    let mut particles = vec![(0, AuraParticle::Mantle), (0, AuraParticle::Radiance)];
+    for i in 0..ORBIT_COUNT {
+        particles.extend([(i, AuraParticle::Core), (i, AuraParticle::Halo)]);
+        if flat {
+            // Small, independently sorted segments preserve sprite front/back
+            // crossings; a single ribbon cannot have both 2D sorting depths.
+            particles.extend((0..TRAIL_SAMPLES).map(|sample| (i, AuraParticle::Trail(sample))));
+        } else {
+            particles.extend([(i, AuraParticle::RibbonCore), (i, AuraParticle::RibbonGlow)]);
+        }
+    }
+    particles.extend((0..GLINT_COUNT).map(|i| (i, AuraParticle::Glint)));
     let mut elements = 1; // Ground ring.
     for (index_orbit, particle) in particles {
         elements += 1;
@@ -549,7 +640,10 @@ fn spawn_aura(
                 (&assets.cores[index], &assets.flat_cores[index])
             }
             AuraParticle::Halo => (&assets.halos[index], &assets.flat_halos[index]),
-            AuraParticle::Trail(_) => (&assets.trails[index], &assets.flat_trails[index]),
+            AuraParticle::Trail(_) | AuraParticle::RibbonGlow => {
+                (&assets.trails[index], &assets.flat_trails[index])
+            }
+            AuraParticle::RibbonCore => (&assets.ribbon_cores[index], &assets.flat_trails[index]),
         };
         let orb = commands
             .spawn((
@@ -561,7 +655,10 @@ fn spawn_aura(
                 bevy::light::NotShadowReceiver,
             ))
             .id();
-        let billboard = !matches!(particle, AuraParticle::Trail(_));
+        let billboard = !matches!(
+            particle,
+            AuraParticle::Trail(_) | AuraParticle::RibbonCore | AuraParticle::RibbonGlow
+        );
         if flat {
             commands.entity(orb).insert((
                 Mesh2d(if billboard {
@@ -573,17 +670,17 @@ fn spawn_aura(
             ));
         } else {
             commands.entity(orb).insert((
-                Mesh3d(if billboard {
-                    assets.glow_quad.clone()
-                } else {
-                    assets.orb.clone()
+                Mesh3d(match particle {
+                    AuraParticle::RibbonCore => assets.ribbon_core.clone(),
+                    AuraParticle::RibbonGlow => assets.ribbon_glow.clone(),
+                    _ => assets.glow_quad.clone(),
                 }),
                 MeshMaterial3d(material.clone()),
             ));
         }
         commands.entity(root).add_child(orb);
     }
-    debug_assert_eq!(elements, HERO_AURA_ELEMENT_BUDGET);
+    debug_assert_eq!(elements, aura_element_budget(flat));
     root
 }
 
@@ -723,7 +820,12 @@ fn animate_orbits(
 ) {
     for (orbit, parent, mut transform, mut global, mut inherited) in &mut orbits {
         *transform = particle_pose(orbit, time.elapsed_secs_f64());
-        if !orbit.flat && !matches!(orbit.particle, AuraParticle::Trail(_)) {
+        if !orbit.flat
+            && !matches!(
+                orbit.particle,
+                AuraParticle::Trail(_) | AuraParticle::RibbonCore | AuraParticle::RibbonGlow
+            )
+        {
             if let Some((_, pose, _)) = cameras
                 .iter()
                 .find(|(camera, _, preview)| camera.is_active && preview.is_some() == orbit.preview)
@@ -1223,19 +1325,14 @@ mod tests {
                 let t = tick as f64 / 60.;
                 let p = orbital_point(i as f32, t);
                 assert!(p.is_finite());
-                assert!(p.y > 0.08 && p.y < 1.6);
+                assert!(p.y > 0.08 && p.y < 1.97);
                 assert!(p.x.abs() <= 1. && p.z.abs() <= 1.);
                 assert!(p.distance(orbital_point(i as f32, t + 1. / 60.)) < 0.025);
             }
         }
         // Three distinct planes, not three lights on the same horizontal ring.
         assert!(orbital_point(0., 0.).distance(orbital_point(1., 0.)) > 0.4);
-        let n = |i: f32| {
-            let speed = 1.30 + i as f64 * 0.13;
-            let a = orbital_point(i, 0.) - Vec3::Y * 0.82;
-            let b = orbital_point(i, std::f64::consts::FRAC_PI_2 / speed) - Vec3::Y * 0.82;
-            a.cross(b).normalize()
-        };
+        let n = |i: f32| orbit_rotation(i, 0.) * Vec3::Z;
         assert!(n(0.).dot(n(1.)).abs() < 0.9);
     }
 
@@ -1299,6 +1396,110 @@ mod tests {
             );
             assert!(last.scale.y < first.scale.y * 0.2);
         }
+    }
+
+    #[test]
+    fn ribbons_join_their_heads_and_have_finite_tapered_geometry() {
+        use bevy::mesh::VertexAttributeValues;
+        for width in [0.018, 0.075] {
+            let mesh = ribbon_mesh(width);
+            let Some(VertexAttributeValues::Float32x3(points)) =
+                mesh.attribute(Mesh::ATTRIBUTE_POSITION)
+            else {
+                panic!("positions")
+            };
+            let Some(VertexAttributeValues::Float32x4(colors)) =
+                mesh.attribute(Mesh::ATTRIBUTE_COLOR)
+            else {
+                panic!("colors")
+            };
+            assert_eq!(mesh.indices().unwrap().len() / 3, 256);
+            assert_eq!(points.len(), 198);
+            for (p, c) in points.iter().zip(colors) {
+                assert!(Vec3::from(*p).is_finite());
+                assert!(Vec3::from(*p).length() <= AURA_RADIUS + width + 0.001);
+                assert!((0. ..=1.).contains(&c[3]));
+            }
+            for sheet in 0..2 {
+                let base = sheet * (RIBBON_SEGMENTS + 1) * 3;
+                for step in 0..RIBBON_SEGMENTS {
+                    assert!(colors[base + step * 3 + 1][3] > colors[base + (step + 1) * 3 + 1][3]);
+                    assert_eq!(colors[base + step * 3][3], 0.);
+                    assert_eq!(colors[base + step * 3 + 2][3], 0.);
+                }
+                assert_eq!(colors[base + RIBBON_SEGMENTS * 3 + 1][3], 0.);
+            }
+            for i in 0..ORBIT_COUNT {
+                for seconds in [0., 0.1, 2., 23., 1_000_000.] {
+                    let orbit = Orbit {
+                        index: i as f32,
+                        flat: false,
+                        particle: AuraParticle::RibbonCore,
+                        preview: false,
+                    };
+                    let pose = particle_pose(&orbit, seconds);
+                    let tip = pose.transform_point(Vec3::from(points[1]));
+                    assert!(tip.distance(orbital_point(i as f32, seconds)) < 0.0001);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn sustained_orbits_share_assets_and_reduce_actual_mesh_work() {
+        let mut app = App::new();
+        app.init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<StandardMaterial>>()
+            .init_resource::<Assets<ColorMaterial>>()
+            .init_resource::<Assets<Image>>()
+            .init_resource::<Time>()
+            .init_resource::<AuraRegistry>()
+            .insert_resource(PlayerVisualMode::Models3d)
+            .add_systems(Startup, setup)
+            .add_systems(Update, (sync_auras, animate_orbits).chain());
+        for _ in 0..10 {
+            app.world_mut()
+                .spawn((RemotePlayer, NetworkSupporterAura(Some(AuraStyle::Solar))));
+        }
+        app.update();
+        let counts = |world: &World| {
+            (
+                world.entities().len(),
+                world.resource::<Assets<Mesh>>().len(),
+                world.resource::<Assets<StandardMaterial>>().len(),
+                world.resource::<Assets<ColorMaterial>>().len(),
+                world.resource::<Assets<Image>>().len(),
+            )
+        };
+        let before = counts(app.world());
+        let meshes = app.world().resource::<Assets<Mesh>>();
+        let assets = app.world().resource::<AuraAssets>();
+        let triangles =
+            |handle: &Handle<Mesh>| meshes.get(handle).unwrap().indices().unwrap().len() / 3;
+        let old_sphere = Mesh::from(Sphere::new(0.065));
+        let old_trails = old_sphere.indices().unwrap().len() / 3 * 18;
+        let new_trails =
+            (triangles(&assets.ribbon_core) + triangles(&assets.ribbon_glow)) * ORBIT_COUNT;
+        let old_total = old_trails + triangles(&assets.ring) + 16 * 2;
+        let new_total = new_trails + triangles(&assets.ring) + 16 * 2;
+        assert_eq!(new_trails, 1536);
+        assert!(new_total * 4 < old_total);
+        assert_eq!(HERO_AURA_ELEMENT_BUDGET, 23);
+        assert_eq!(FLAT_AURA_ELEMENT_BUDGET, 35);
+        println!(
+            "HERO_MESH_COST {{\"old_triangles_per_hero\":{old_total},\"new_triangles_per_hero\":{new_total},\"old_elements\":35,\"new_elements\":23,\"actors\":10,\"frames\":600,\"assets\":{before:?}}}"
+        );
+        for _ in 0..600 {
+            app.world_mut()
+                .resource_mut::<Time>()
+                .advance_by(std::time::Duration::from_secs_f64(1. / 60.));
+            app.update();
+        }
+        assert_eq!(
+            counts(app.world()),
+            before,
+            "no steady-state assets or entities allocated"
+        );
     }
 
     #[test]
@@ -1407,16 +1608,13 @@ mod tests {
                 .unwrap()
                 .iter()
                 .collect::<Vec<_>>();
-            assert_eq!(children.len(), HERO_AURA_ELEMENT_BUDGET);
-            assert_eq!(
-                children.len(),
-                35,
-                "Hero stays within the previous aura budget"
-            );
+            let budget = aura_element_budget(mode == PlayerVisualMode::Sprite2d);
+            assert_eq!(children.len(), budget);
+            assert!(budget <= 35, "Hero stays within the previous aura budget");
             for _ in 0..120 {
                 app.update();
                 assert_eq!(app.world().resource::<AuraRegistry>().0[&actor].0, first);
-                assert_eq!(app.world().get::<Children>(first).unwrap().len(), 35);
+                assert_eq!(app.world().get::<Children>(first).unwrap().len(), budget);
             }
             app.world_mut()
                 .get_mut::<NetworkSupporterAura>(actor)
