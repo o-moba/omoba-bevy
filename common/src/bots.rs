@@ -3432,7 +3432,16 @@ mod kit_tests {
             bots.controllers.get_mut(&bot).unwrap().profile = profile;
             world.players.get_mut(&bot).unwrap().hero.hp = own_hp * 1000.0;
             let minion = add_minion(&mut world, Team::Blue, [5.0, 0.0]);
-            let enemy = add_enemy(&mut world, 32107, [8.0, 0.0], now);
+            // Outside Dawnweaver's 10 m basic reach, but inside Recruit's 11 m
+            // engage range: MinionFirst must actually reject this candidate.
+            let enemy_distance = 10.8;
+            assert!(
+                enemy_distance
+                    > crate::skills::attack_modifiers(&world.players[&bot]).0
+                        + shared::PLAYER_TARGET_RADIUS
+            );
+            assert!(enemy_distance < BotProfile::RECRUIT.hero_engage_range);
+            let enemy = add_enemy(&mut world, 32107, [enemy_distance, 0.0], now);
             world
                 .players
                 .get_mut(&enemy)
