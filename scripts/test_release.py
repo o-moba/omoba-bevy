@@ -149,6 +149,8 @@ class DevContour(unittest.TestCase):
             "OMOBA_DEFAULT_REGISTRY_URL": "https://registry.dev.ekza.io",
             "OMOBA_DEFAULT_PASSPORT_URL": "http://127.0.0.1:9/api/passport",
             "OMOBA_DEFAULT_CONFIG_DIR_SUFFIX": "dev",
+            "OMOBA_ACCOUNT_API_URL": "https://account.dev.omoba.io",
+            "OMOBA_PORTAL_ORIGIN": "https://app.dev.omoba.io",
         })
         self.assertEqual(flavor.config_dir, "omoba-bevy-dev")
         self.assertEqual(flavor.app_name, "Omoba Dev")
@@ -233,8 +235,8 @@ class DevContour(unittest.TestCase):
                 "OMOBA_DEFAULT_REGISTRY_URL": "https://registry.dev.ekza.io",
                 "OMOBA_DEFAULT_PASSPORT_URL": "https://passport.dev.ekza.io/api/passport",
                 "OMOBA_DEFAULT_CONFIG_DIR_SUFFIX": "dev",
-                "OMOBA_ACCOUNT_API_URL": "https://account.dev.omoba.io",
-                "OMOBA_PORTAL_ORIGIN": "https://app.dev.omoba.io",
+                "OMOBA_ACCOUNT_API_URL": "https://account.omoba.io",
+                "OMOBA_PORTAL_ORIGIN": "https://app.omoba.io",
                 "EKZA_DEV_HTTP_HOST": "192.168.1.71",
                 "OMOBA_DEFAULT_SOMETHING_NEW": "x",
                 "PATH": "/bin", "OMOBA_PASSPORT_URL": "runtime-only"}
@@ -256,7 +258,9 @@ class DevContour(unittest.TestCase):
             "-e", "OMOBA_DEFAULT_GAME_SERVER_ADDR=lobby.dev.omoba.io:4100",
             "-e", "OMOBA_DEFAULT_REGISTRY_URL=https://registry.dev.ekza.io",
             "-e", "OMOBA_DEFAULT_PASSPORT_URL=http://127.0.0.1:9/api/passport",
-            "-e", "OMOBA_DEFAULT_CONFIG_DIR_SUFFIX=dev"])
+            "-e", "OMOBA_DEFAULT_CONFIG_DIR_SUFFIX=dev",
+            "-e", "OMOBA_ACCOUNT_API_URL=https://account.dev.omoba.io",
+            "-e", "OMOBA_PORTAL_ORIGIN=https://app.dev.omoba.io"])
 
     def test_the_ios_archive_never_inherits_compiled_defaults_from_the_shell(self):
         from unittest import mock

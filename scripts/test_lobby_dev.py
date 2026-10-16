@@ -141,7 +141,9 @@ class FakeSystem:
             for role in ("omoba_dev_owner", "omoba_dev_game", "omoba_dev_portal"):
                 self.roles.setdefault(role, False)
             self.database_owner = self.database_owner or "omoba_dev_owner"
-            self.roles["omoba_dev_owner"] = self.roles["omoba_dev_portal"] = False
+            self.roles["omoba_dev_owner"] = False
+            if "ALTER ROLE omoba_dev_portal NOLOGIN;" in sql:
+                self.roles["omoba_dev_portal"] = False
             self.roles["omoba_dev_game"] = True
             self.passwords["omoba_dev_game"] = PASSWORD_IN_SQL.search(sql).group(1)
             return 0, ""
@@ -675,6 +677,19 @@ class CareerDatabase(HostCase):
             for value in hidden:
                 self.assertNotIn(value, text)
 
+    def test_game_update_preserves_an_enabled_account_api_login(self):
+        self.ship()
+        self.fake.roles["omoba_dev_portal"] = True
+        self.fake.passwords["omoba_dev_portal"] = "existing-account-api-secret"
+        payload, data = self.payload("0.44.0-dev-def5678", b"dev-2")
+        self.fresh().stage(payload)
+        self.upload(payload, data)
+        self.fresh().activate(payload)
+        self.assertTrue(self.fake.roles["omoba_dev_portal"])
+        self.assertEqual(self.fake.passwords["omoba_dev_portal"], "existing-account-api-secret")
+        self.assertFalse(self.fake.roles["omoba_dev_owner"])
+        self.assertNotIn("ALTER ROLE omoba_dev_portal", lobby_dev.bootstrap_sql("a" * 48))
+
     def test_first_install_creates_the_database_and_a_root_only_env_file(self):
         result, _ = self.ship()
         self.assertEqual(result["database"], {"database": "omoba_dev", "env_written": True,
@@ -691,6 +706,7 @@ class CareerDatabase(HostCase):
         self.assertEqual((len(self.fake.migrations), self.fake.grants), (1, 1))
         # The owner logged in only for the migration, with a different, expiring password.
         self.assertFalse(self.fake.roles["omoba_dev_owner"])
+        self.assertFalse(self.fake.roles["omoba_dev_portal"])
         self.assertNotIn("omoba_dev_owner", self.fake.passwords)
         self.assertNotEqual(urlsplit(self.fake.migrations[0]).password, self.fake.passwords["omoba_dev_game"])
         tags = [tag for _, tag in self.fake.sql]

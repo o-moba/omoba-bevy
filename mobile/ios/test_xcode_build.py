@@ -125,7 +125,9 @@ class XcodeBridgeTests(unittest.TestCase):
                 'OMOBA_DEFAULT_GAME_SERVER_ADDR': 'lobby.dev.omoba.io:4100',
                 'OMOBA_DEFAULT_REGISTRY_URL': 'https://registry.dev.ekza.io',
                 'OMOBA_DEFAULT_PASSPORT_URL': 'http://127.0.0.1:9/api/passport',
-                'OMOBA_DEFAULT_CONFIG_DIR_SUFFIX': 'dev'})
+                'OMOBA_DEFAULT_CONFIG_DIR_SUFFIX': 'dev',
+                'OMOBA_ACCOUNT_API_URL': 'https://account.dev.omoba.io',
+                'OMOBA_PORTAL_ORIGIN': 'https://app.dev.omoba.io'})
             by_ip = xb.contour_build_settings({**dev, 'OMOBA_GAME_SERVER': '203.0.113.10:4100'}, root)
             self.assertEqual(by_ip['OMOBA_DEFAULT_GAME_SERVER_ADDR'], '203.0.113.10:4100')
             # The production app's Debug run still takes the LAN rehearsal.
@@ -198,6 +200,8 @@ class XcodeBridgeTests(unittest.TestCase):
             self.assertEqual(cargo_env['OMOBA_DEFAULT_CONFIG_DIR_SUFFIX'], 'dev')
             self.assertEqual(cargo_env['OMOBA_DEFAULT_REGISTRY_URL'], 'https://registry.dev.ekza.io')
             self.assertEqual(cargo_env['OMOBA_DEFAULT_GAME_SERVER_ADDR'], 'lobby.dev.omoba.io:4100')
+            self.assertEqual(cargo_env['OMOBA_ACCOUNT_API_URL'], 'https://account.dev.omoba.io')
+            self.assertEqual(cargo_env['OMOBA_PORTAL_ORIGIN'], 'https://app.dev.omoba.io')
             self.assertNotIn('EKZA_DEV_HTTP_HOST', cargo_env)
             info = plistlib.loads((root/'derived/Omoba-Info.plist').read_bytes())
             self.assertEqual((info['CFBundleIdentifier'], info['CFBundleDisplayName']),

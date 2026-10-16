@@ -81,7 +81,8 @@ REPO = "o-moba/omoba-bevy"
 # Build-time client defaults a Flavor sets (client/src/session_config.rs,
 # passport/src/community.rs, passport/src/lib.rs, client/src/platform.rs) and the
 # contours' identities: scripts/contours.py, shared with the mobile packagers.
-from contours import (CONFIG_SUFFIX_ENV, CONTOURS, DEV_CONFIG_SUFFIX, DEV_LOBBY,  # noqa: E402
+from contours import (ACCOUNT_API_ENV, PORTAL_ORIGIN_ENV, DEV_ACCOUNT_API, DEV_PORTAL_ORIGIN,
+                      CONFIG_SUFFIX_ENV, CONTOURS, DEV_CONFIG_SUFFIX, DEV_LOBBY,  # noqa: E402
                       DEV_PASSPORT, DEV_REGISTRY, MOBILE, PASSPORT_DEFAULT_ENV, REGISTRY_DEFAULT_ENV,
                       SERVER_DEFAULT_ENV)
 from ios_release_guard import require_production_source
@@ -147,6 +148,8 @@ class Flavor:
     def client_defaults(self) -> dict[str, str]:
         values = {SERVER_DEFAULT_ENV: self.server, REGISTRY_DEFAULT_ENV: self.registry,
                   PASSPORT_DEFAULT_ENV: self.passport, CONFIG_SUFFIX_ENV: self.config_suffix}
+        if self.dev:
+            values.update({ACCOUNT_API_ENV: DEV_ACCOUNT_API, PORTAL_ORIGIN_ENV: DEV_PORTAL_ORIGIN})
         return {key: value for key, value in values.items() if value}
 
 
