@@ -199,3 +199,56 @@ python3 scripts/release.py build all --contour dev             # macOS, Windows 
   - A dev build refuses the production VPS on any port, any non-dev `omoba.io`/`ekza.io` name, the production registry, and any passport that is not a dev name or loopback.
   - A production build refuses `*.dev.omoba.io`/`*.dev.ekza.io` (server, registry, passport), and also `$DEV_IP` when it is set.
 - Distribution happens only with the owner's OK. Use `python3 scripts/release.py draft --contour dev --tag v<version>-dev.N`, which creates a draft prerelease targeting `dev`. Or use CI: `python3 scripts/release.py ci --contour dev --ref v<version>-dev.N`, which dispatches `release.yml` on `dev` with `contour=dev`. Add `--dry-run` to either command to print it without running it.
+
+## DEV Account API
+
+`account_api_dev.py` runs on `vds-dev` as root and defaults to a read-only preflight.
+It is limited to `146.103.102.18`, the loopback dev Supabase database and the
+unprivileged `omoba_dev_portal` role. It refuses known production paths and
+exposed database ports. No credentials are accepted in arguments or printed.
+
+Prerequisites: a completed Registry backup including `omoba_dev.dump`, exact DNS
+`account.dev.omoba.io` → `146.103.102.18`, and Registry's Caddy fragment support
+(PR21). The native DEV package must contain that exact API origin and
+`https://app.dev.omoba.io` as its portal origin.
+
+```sh
+ssh vds-dev 'python3 -' < ops/vps/dev/account_api_dev.py
+ssh vds-dev 'python3 - --apply --backup /opt/ekza-dev/backups/YYYYMMDDTHHMMSSZ' \
+  < ops/vps/dev/account_api_dev.py
+# Ship the frozen DEV server+Account API first with lobby_dev.py (above).
+# Then replace FULL_SHA with its exact 40-character BUILD.json revision:
+ssh vds-dev 'python3 - --apply --backup /opt/ekza-dev/backups/YYYYMMDDTHHMMSSZ --activate-revision FULL_SHA' \
+  < ops/vps/dev/account_api_dev.py
+```
+
+Preparation creates/reuses root-owned `0600` files:
+`/opt/omoba-dev/account-api.env`, `/opt/omoba-dev/account-api-ingress.key` and
+`/opt/ekza-dev/secrets/caddy/account-api.caddy`. It enables only the portal runtime
+login, preserves its password on retries and installs the bounded
+`omoba-account-api-dev.service`. Activation checks DEV contour, revision, binary
+SHA-256 and portal migrations 1–6 before any writes. Existing credential drift
+is rejected without rotation. The operator owns these files; preserve a private
+copy before any later intentional change. Never attach them to reports or PRs.
+
+The service binds `127.0.0.1:40550`. The Caddy fragment exposes health checks and
+an explicit POST allowlist of signed native account endpoints. Other `/v1/*`
+routes require `X-Omoba-Portal-Key`, supplied by the website server as the private
+`OMOBA_ACCOUNT_INGRESS_KEY`. This is an ingress gate; normal session/CSRF/signature
+checks still apply. Caddy removes the key before forwarding and replaces the
+client-IP header. Browser requests must never receive the key. Caddy's admin API
+stays disabled. Validate and recreate only the dev Caddy container after editing
+or removing the fragment, following the Registry dev runbook; ordinary app
+rollbacks do not restore operator-managed fragments.
+
+After activation check `/health/live` and `/health/ready` over HTTPS, anonymous
+private-route 403 responses, invalid-signed native requests rejected by the API,
+and a real website pairing flow. Check unit restarts, loopback binding, role
+privileges and database schema. No payment provider is enabled by this helper.
+
+Rollback: disable website account mode before stopping `omoba-account-api-dev`.
+Keep credentials private and stable. Restore the previous reviewed Caddy fragment
+(or remove only this new fragment), validate and recreate dev Caddy. Disable the
+portal login only after the API is stopped. A binary rollback must be compatible
+with the current schema; do not automatically downgrade or restore databases over
+new user data. Use the pre-deploy backup only as a separately reviewed recovery.

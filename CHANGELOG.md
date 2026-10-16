@@ -5,6 +5,9 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Add a guarded DEV Account API host setup with persistent private credentials,
+  a restricted HTTPS ingress and exact-revision activation after database migration.
+
 - OMOBA Dev now includes its own Account API and player portal defaults on desktop,
   iOS and Android. DEV account traffic rejects production runtime overrides; the
   DEV Account API uses DEV Registry/Studio for library consent. Game-server
