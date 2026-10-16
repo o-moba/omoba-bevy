@@ -1,5 +1,35 @@
 # Feature Inventory
 
+## Temporary community sculptures
+
+One decorative slot beside the Wendigo pit displays the Registry-approved
+24-hour placement. Exact-byte model validation, profile-isolated caching,
+monotonic expiry and bounded revocation keep community art outside gameplay
+simulation. Clicking or tapping the rendered sculpture opens its approved title,
+credit and optional 1,000-character plain-text description in a scrollable card.
+Opening and closing gestures cannot trigger movement or combat; revocation or
+replacement closes stale cards. An original lucky waving cat exercises the
+optional rotation clip, which continues while the card is open.
+The coordinated Web/Studio pilot is free; paid crypto providers and hosted
+deployment remain separate work. See [runtime details](community-sculptures.md).
+
+## DEV account integration
+
+Packaged OMOBA Dev uses `account.dev.omoba.io` and `app.dev.omoba.io` for account
+confirmation and device-account features. Runtime overrides cannot redirect a DEV
+app to production. The DEV Account API keeps Ekza library consent on DEV Registry
+and Studio. The [DEV host helper](../ops/vps/dev/README.md#dev-account-api)
+prepares its isolated runtime role and HTTPS ingress; activation verifies the exact
+DEV binary and portal schema. Provider setup and tester availability remain separate.
+
+## Dev iOS workflow
+
+The shared **Omoba Dev** Xcode scheme builds the separate `space.ekza.omoba.dev`
+app for the dev contour. Run and Archive select dev settings without editing
+local contour values. The release script selects the same scheme. Apple signing,
+TestFlight upload, tester assignment and physical-device checks remain separate
+steps: [dev quickstart](dev-quickstart.md).
+
 Android launch diagnostics: `make android-diagnose` records the connected phone's
 OS, ABI, graphics capabilities, installed OMOBA version and app crash/exit evidence.
 Read-only by default; explicit `--launch` is available. See
@@ -9,6 +39,33 @@ Universal APKs cover multiple CPU ABIs; a GLES fallback is not implemented.
 ## 0.44.0 delivery
 
 Wildspark and the creator/workshop integration are merged, the Linux production server is updated, and a matching Windows x64 candidate is built locally. See the [delivery record](progress/2026-10-10-release-044.md) for source, checksums, compatibility, rollback and testing limits.
+
+## Dawnweaver reference iteration (next candidate)
+
+Horizon Ray is now centre-weighted: a target whose centre is within 0.35 of the beam
+axis takes the full 80, and damage eases (smoothstep) to 60% at its graze point, the
+beam half-width 0.8 plus its own radius. The Radiance detonation and the re-applied
+mark keep their full value. The caster stands still during the 0.8 s windup so the
+warned ray leaves from her (basic attacks and the field recast stay allowed); the
+client predicts the stop. A due ray survives a late server tick, a blocked spell no
+longer marks, and marks include the team damage buff.
+
+The fired ray draws its white core exactly at the damage core, with thin core lines
+in the warning; core hits draw a brighter burst than edge hits, Radiance detonations
+a gold pop, and the release an afterglow along the strip. A dedicated charge motion
+fills the windup and a two-hand push with recoil fires the ray; the lane facing lasts
+through the release. Every listener hears a rising charge when the warning appears,
+gained at the nearest point of the lane, then a new synthesized beam voice; core hits
+and Radiance bursts have their own cues. Direction skills whose effect ignores aim
+distance (beam, linear projectile, returning shield, impact rocket) send the far point
+of the aimed ray, so the server line meets the preview. Bots keep a Luminous Field
+until an enemy hero is about to leave it, do not spend damage skills on towers and
+lead the ray.
+
+Receipts gain additive `core_hit` and `radiance_burst` flags (protocol 11 decodes
+them as absent). Catalog `standard-kits-8` and gameplay revision
+`dawnweaver-2026-10-11-reference` require matching client and server. See
+[implementation and verification](progress/2026-10-11-dawnweaver-reference.md).
 
 ## Wildspark reference iteration (0.44.0 candidate)
 
@@ -45,17 +102,27 @@ downloads show current defaults without requiring a running game or Account API.
 
 An artist can prepare a requirement/revision-pinned brief and use the existing
 Studio upload route. This is discovery and preparation: Studio does not yet
-persist exact requirement bindings, and the game does not yet equip coordinated
-sets or remote projectile/prop skins. See the [iteration record](progress/2026-10-10-asset-catalog.md)
+persist exact requirement bindings. The game equips a one-GLB
+[Wildspark set](handheld-weapons.md#wildspark-set-repeater-and-launcher-in-one-glb)
+with both Q guns, but no other coordinated sets or remote projectile/prop skins.
+See the [iteration record](progress/2026-10-10-asset-catalog.md)
 and parent [design PR #78](https://github.com/o-moba/omoba-bevy/pull/78).
+
+## Idea: rating-unlocked skill slots
+
+Recorded 2026-10-12, not scheduled: as a character's rating grows it could unlock
+more than four skills, possibly up to about ten. The [idea and open questions](plans/rating-skill-slots.md)
+cover which rating counts, active versus known skills, ranked fairness, controls
+and the protocol impact.
 
 ## Planned: Studio model requirements by class and skill
 
 The [proposal and TODO](plans/studio-skill-asset-catalog.md) describe a game-owned
 requirements catalogue shared by Studio and the website: baseline 3D previews,
 artist contributions to specific skill/model roles and eventual coordinated
-cosmetic sets such as Wildspark’s two guns. The public discovery catalogue and local class workshop now exist; exact-slot
-Studio submissions, coordinated sets and runtime set equipping remain planned.
+cosmetic sets such as Wildspark’s two guns. The public discovery catalogue and local class workshop now exist,
+and the game equips a one-GLB Wildspark set. Exact-slot Studio submissions and
+other coordinated sets remain planned.
 
 ## First-match guidance and mobile comfort (0.44.0 candidate)
 
@@ -389,7 +456,7 @@ This is a lightweight Bevy mesh/material particle foundation, without an extra
 GPU particle plugin or dynamic lights. Phone performance still needs device QA.
 These source changes are newer than TestFlight 0.20.0 (4).
 
-## Shared accounts and Supporter cosmetics
+## Shared accounts and Hero Supporter cosmetics
 
 A native installation can enroll a separate device key into an existing account
 through explicit portal approval, without exporting its private seed or merging
@@ -402,14 +469,32 @@ Supporter provides three cosmetic aura styles (Solar, Lunar, Verdant) and a free
 isolated preview. The game server reads account grants from PostgreSQL, enforces
 expiry and revocation, and replicates the permitted style. Auras follow actor
 visibility/death and never change combat, XP, rating, or matchmaking. The portal
-shows billing source, paid period, renewal state and aura preferences.
+shows billing source, paid period, renewal state, aura preferences and lifetime
+credited months. The player-facing Hero status is cosmetic and follows the same
+verified active period. A public supporter directory links opted-in public
+profiles to their existing statistics-aware pages; expired support remains
+acknowledged, refunds remove its credit, and private profiles/statistics remain
+private. The lifetime count is independent of truncated payment history.
 
-Live aura VFX use three intersecting inclined orbits with bright cores, camera-facing glow sprites,
-eight tapered trail segments per orbit, four rising glints and a subtle ground ring.
-Each hero has a fixed 35 rendered elements; meshes/materials are shared and no dynamic
-lights or per-frame particle spawning are needed. Sprite mode projects the same paths
-with front/back layering. Native preview uses the same effect implementation.
-This source update is newer than TestFlight 0.20.0 (4).
+Hero aura VFX combine three intersecting, feathered ribbon orbits, bright moving
+heads, a gentler body glow, eight rising sparks and a subtle ground ring. One
+orbit runs in the opposite direction. Each 3D orbit has a shared static ribbon
+with core and glow layers, built from crossed sheets with 32 segments per sheet.
+The 23 rendered elements replace the previous 35; counted geometry is 1,632
+triangles per aura versus 13,056 previously, an eightfold reduction in triangles.
+This is a geometry count, not a measured eightfold GPU or frame-time improvement.
+Meshes and materials are preallocated and shared: animation changes transforms,
+without per-frame geometry uploads, new dynamic lights or dependencies. The
+body glow never replaces character materials. Sprite mode retains 35 elements
+with separate front/back depth sorting. Native preview and live actors share the
+effect implementation and the existing authorization/visibility cleanup.
+
+The owner's Lineage II reference inspired the luminous orbital treatment; this
+is an original OMOBA effect, not an exact recreation or reused game asset. New
+local 5v5 practice captures show the 23-element ribbon effect at normal zoom,
+during movement and close up, followed by server-driven removal. The desktop
+frame-time sample includes VSync and other scene work; it establishes no isolated
+GPU, power or mobile result. Earlier 35-element captures remain historical.
 
 Apple and Solana are separate provider adapters granting the same account right.
 Payment functionality is unavailable until the operator explicitly configures a
@@ -419,7 +504,7 @@ purchase/restore and retains unfinished transactions until server confirmation.
 The Apple adapter requires an authenticated verifier and App Store setup; local
 fixtures are not proof of a real sandbox purchase or App Review approval.
 
-Core career and portal schemas are both version 3. Run owner migrations and the
+Core career schema is version 3 and portal schema is version 6. Run owner migrations and the
 updated runtime grants before deploying matching game/API releases. See
 [Supporter operations](supporter.md) for rollout boundaries and test procedures.
 
@@ -1049,8 +1134,14 @@ local sign out. The client stores its scoped opaque credential in
 `ekza-store/account/session.json` under its private settings directory (0600 on
 Unix), restores it with a fresh SDK library check, and refreshes every 15 seconds.
 Registry outages retain credentials; authorization rejection clears them. Sign
-out removes the local credential and invalidates pending background work;
-Studio Account revokes access server-side. Public approved community models
+out removes the local credential and invalidates pending background work, then
+asks the registry to end that link (`DELETE /v1/account/session` through the
+SDK's `AccountSession::disconnect`). The request runs in the background and is
+best effort: signing out never waits for it, and offline the link stays valid
+until it expires or Studio Account revokes it. A new pairing that replaces a
+saved link (for example one a startup outage left unrestored) ends the old link
+the same way once the new one is saved; the SDK refuses, without sending it, a
+saved token for another server or game. Public approved community models
 remain free after logout. Catalogue identity, metadata, live entitlement changes
 and scrolling stay intact when an account is restored or signed out.
 
@@ -1162,3 +1253,16 @@ exposing credentials to the browser. This is a prototype for local gameplay and
 community contribution, with no public/ranked custom-class admission or automatic
 skin installation. See [community workshop](community-workshop.md) and
 [native build import](class-workshop-game.md).
+
+### Hero aura world verification (2026-10-15)
+
+The current ribbon revision is captured on the actual Agnes roster character
+in a server-backed local 5v5 practice match, in English at 1280×720. Normal,
+moving and close views plus 24 sampled motion frames show 23 effect elements;
+revocation clears the replicated aura and removes them all. The short 3.24-second
+MP4 contains those 24 sampled frames, not a 60-fps recording. A separate warmed
+180-frame sample per state at VSync 60 records similar whole-frame pacing with
+the aura on and off; ongoing bots, jungle and HUD work prevent isolating its GPU
+cost. The earlier 35-element body-glow captures remain historical. See
+[Supporter operations](supporter.md#live-hero-world-verification) for results,
+limits and the reproducible QA scope. No real payment or deployment is implied.

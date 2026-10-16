@@ -28,6 +28,10 @@ pub struct AvatarDefinition {
     pub source_url: String,
     #[serde(default)]
     pub author: Option<String>,
+    /// The registry's attribution line for an Ekza store avatar, shown with
+    /// the licence (see [`crate::attribution`]). Display only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attribution: Option<String>,
     /// Thumbnail file name relative to `client/assets/avatars/`, if shipped.
     #[serde(default)]
     pub thumbnail: Option<String>,
@@ -316,6 +320,7 @@ mod tests {
             license: "See creator terms".into(),
             source_url: "https://example.test/store.glb".into(),
             author: None,
+            attribution: None,
             thumbnail: None,
             passport,
             free: false,

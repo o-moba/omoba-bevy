@@ -100,7 +100,7 @@
       "env": {
         "OMOBA_SUPPORTER_QA_DIR": "{out}"
       },
-      "note": "Supporter aura panel; the harness uses its own fixed viewport sizes.",
+      "note": "Hero cosmetic preview only; all palettes use the requested viewport (default 1280x720). No account entitlement or paid world session.",
       "sources": [
         "client/src/qa/supporter.rs"
       ]
@@ -278,14 +278,15 @@
     },
     {
       "id": "server-entry",
-      "title": "Server entry",
+      "title": "Connection panel (dev builds)",
       "run": "shell",
       "frame": "11-server.png",
       "profiles": [
         "phone"
       ],
-      "route": "Home \u2192 SERVER (phone)",
-      "source": "client/src/frontend/server_field.rs"
+      "route": "Home \u2192 Connection (dev-contour builds only)",
+      "source": "client/src/mobile_ui.rs",
+      "fixture": "Production builds have no server UI and skip this frame; capture with a `--contour dev` build"
     },
     {
       "id": "home-help",
@@ -696,9 +697,9 @@
     },
     {
       "id": "supporter-solar",
-      "title": "Supporter \u00b7 Solar aura",
+      "title": "Hero \u00b7 Solar aura preview",
       "run": "supporter",
-      "frame": "solar-desktop.png",
+      "frame": "hero-solar-preview.png",
       "profiles": [
         "desktop",
         "phone"
@@ -708,9 +709,9 @@
     },
     {
       "id": "supporter-lunar",
-      "title": "Supporter \u00b7 Lunar aura",
+      "title": "Hero \u00b7 Lunar aura preview",
       "run": "supporter",
-      "frame": "lunar-phone.png",
+      "frame": "hero-lunar-preview.png",
       "profiles": [
         "desktop",
         "phone"
@@ -720,9 +721,9 @@
     },
     {
       "id": "supporter-verdant",
-      "title": "Supporter \u00b7 Verdant aura",
+      "title": "Hero \u00b7 Verdant aura preview",
       "run": "supporter",
-      "frame": "verdant-phone.png",
+      "frame": "hero-verdant-preview.png",
       "profiles": [
         "desktop",
         "phone"
@@ -1052,12 +1053,14 @@
     }
   ],
   "other_harnesses": {
+    "client/src/qa/supporter_world.rs": "server-backed Hero aura movement and revocation proof; loopback seeded entitlement required, not UI screens",
     "client/src/qa/wildspark_demo.rs": "Opt-in live Wildspark demo director (OMOBA_WILDSPARK_DEMO=1), nested under standard_kits_qa: six combat chapters with real mana, moving targets and per-frame receipts. English 960x1280 native capture; social edit is not a phone certification.",
     "client/src/qa/frontend_qa/avatar.rs": "avatar collection with a Studio registry (gap avatar-studio)",
     "client/src/sandbox/ui/qa.rs": "Combat Test panel (gap combat-test)",
     "client/src/qa/audio_qa.rs": "audio settings duplicate of settings-sound; needs OMOBA_AUTOJOIN",
     "client/src/qa/visual_qa.rs": "world render checks (Verdant, jungle, forest VFX), not UI",
     "client/src/qa/map_qa.rs": "map prop swaps, not UI",
+    "client/src/qa/sponsorship_qa.rs": "Opt-in local sculpture art scene (OMOBA_SPONSOR_QA_DIR): normal Registry authorization/download at the fixed opposite-dragon slot; five cat/card/scroll captures, low-level pointer open/close and Escape, full 1,000-scalar description scroll, measured paw rotation while reading and input-policy leak checks. English 1280x720 native viewport; no played match or mobile certification.",
     "client/src/qa/team_vision_qa.rs": "brush visibility, not UI",
     "client/src/qa/targeting_qa.rs": "targeting proof (in-world markers), not UI screens",
     "client/src/qa/combat_qa.rs": "projectile/impact proof, not UI",
@@ -1072,6 +1075,7 @@
     "client/src/qa/standard_kits_qa.rs": "Focused standard-kit selection, effects and held-aim proof from a live local sandbox (OMOBA_STANDARD_QA_DIR, OMOBA_STANDARD_QA_CLASS); OMOBA_STANDARD_QA_PHASES=1 takes an idle baseline and three state-gated stills per skill (windup, release, impact or settled) for any of the 17 classes, OMOBA_STANDARD_QA_OFFSCREEN=1 hides the window and renders the main camera to an image; for a look at motion clips a phase run takes OMOBA_STANDARD_QA_AVATAR (the hero's rig) and OMOBA_STANDARD_QA_RELEASE_AT (release still at the clip's contact time or a fixed time); for a look at projectile bodies OMOBA_STANDARD_QA_FLIGHT=1 casts unit-target abilities from lane distance and adds the basic attack: a still of its projectile in flight (not for a melee core) and one of its hit, and for a repeater the same two of its rocket round after its weapon switch. OMOBA_STANDARD_QA_AIM=1 adds a still of the aim preview of every modular skill with its key held before the cast, and one more while the slot offers a recast. OMOBA_STANDARD_QA_RECIPE gives the hero four named skills on the core of its class. A skill whose area or hit the closest view does not hold is captured from farther away with an idle still of that view; every still carries the evidence the launcher judges it by (clip, bodies, budgets, impact recipe, registry fingerprint). One English desktop viewport, scripted input, no device matrix.",
     "client/src/qa/roster_qa.rs": "Focused remaining roster selection and live skill states (OMOBA_ROSTER_QA_DIR); OMOBA_ROSTER_QA_INSPECTION adds short/long/released skill holds. English 1280x720, scripted input; no device matrix.",
     "client/src/qa/sdk_pack_qa.rs": "Focused local SDK collection proof (OMOBA_SDK_PACK_QA_OUTPUT): 20 live avatar previews plus representative server-admitted running avatars and hand mounts. English 1280x720, scripted selection; not public Studio publication or a device matrix.",
+    "client/src/qa/creator_loop_qa.rs": "File-driven creator-loop acceptance (OMOBA_CREATOR_LOOP_QA=<dir>): a coordinator appends JSON commands (press a TestId, key, practice attack/cast, camera, screenshot, state-gated still) and reads qa-state.json/results.jsonl; gated stills check the shown Wildspark set variant, the muzzle flash tip and rotor/slide motion of a held SDK weapon. English 1280x720, one desktop viewport, no device matrix.",
     "client/src/qa/combat_polish_qa.rs": "Focused synthetic iPad combat presentation fixtures (OMOBA_COMBAT_POLISH_QA_DIR): vitals, upgrades, held attack, kill feed, concealment and rocket. English 1180x820 by default; OMOBA_IPHONE_UX_QA=1 selects focused 852x393 iPhone gameplay, empty attack, concealment, dash aim, recall and FPS/HUD settings with checked UI readback. Not physical-device or multiplayer proof.",
     "client/src/qa/dagger_qa.rs": "Focused Adventurer class preview and normal offline Q/W/E/R casts, plus clearly labelled synthetic rare-hit receipt presentation (OMOBA_DAGGER_QA_DIR). English852x393 only; optional synthetic focus, no raw-touch/device/RNG claims.",
     "client/src/qa/equipped_skills_qa.rs": "Focused synthetic accepted hybrid HUD and held-skill card (OMOBA_EQUIPPED_SKILLS_QA_DIR). English 852x393 only; actual input and UI readback, separate real-server harness proof. Not physical-device or multiplayer proof.",

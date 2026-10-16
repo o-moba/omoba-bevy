@@ -1192,6 +1192,182 @@ fn a_fresh_own_warning_stands_in_for_a_cast_edge_the_snapshot_hid() {
     }
 }
 
+/// The first sights of telegraphs the tracker reports for `effect` in a stream that already
+/// runs, with the heroes of both snapshots.
+fn telegraphs_of(
+    before: &[HeroSeen],
+    now: &[HeroSeen],
+    effect: &SkillEffectState,
+) -> Vec<TelegraphSeen> {
+    let mut feed = Feed::new(target());
+    feed.snap_with(&[], before, &[]);
+    let taken = feed.snap_with(std::slice::from_ref(effect), now, &[]);
+    assert!(taken.events.is_empty());
+    // The same effect is never a first sight again.
+    let again = feed.snap_with(std::slice::from_ref(effect), now, &[]);
+    assert!(again.telegraphs.is_empty());
+    taken.telegraphs
+}
+
+#[test]
+fn a_fresh_telegraph_is_reported_once_whoever_cast_it() {
+    for (class, id, kind) in [
+        (HeroClass::Dawnweaver, SkillId::DawnRay, K::BeamWarning),
+        (HeroClass::Riftshot, SkillId::HorizonWave, K::BeamWarning),
+        (
+            HeroClass::Cinderforge,
+            SkillId::FurnaceBreath,
+            K::BeamWarning,
+        ),
+    ] {
+        let seen = [hero(class)];
+        let (telegraph, tail) = category::telegraph_secs(id)
+            .zip(category::tail_secs(id))
+            .unwrap();
+        let fresh = with(&effect(60, id, kind), |e| {
+            e.position = [HOME.x, HOME.z];
+            e.end = [HOME.x + 45.0, HOME.z];
+            e.remaining_secs = tail + telegraph - 0.05;
+        });
+        let reported = |owner: Option<OwnerSeen>, effect: &SkillEffectState| {
+            vec![TelegraphSeen {
+                effect: effect.clone(),
+                owner,
+            }]
+        };
+        let owned = seen[0].owner_of(id);
+        assert_eq!(
+            telegraphs_of(&seen, &seen, &fresh),
+            reported(Some(owned), &fresh),
+            "{}",
+            id.id()
+        );
+        // The telegraph is in the snapshot, so it is reported whether or not the client
+        // sees the hero, holds the hero at all or is told who cast it.
+        let hidden = [HeroSeen {
+            visible: false,
+            ..hero(class)
+        }];
+        let unseen = OwnerSeen {
+            visible: false,
+            ..owned
+        };
+        assert_eq!(
+            telegraphs_of(&hidden, &hidden, &fresh),
+            reported(Some(unseen), &fresh)
+        );
+        assert_eq!(telegraphs_of(&[], &[], &fresh), reported(None, &fresh));
+        let ownerless = with(&fresh, |e| e.owner_id = 0);
+        assert_eq!(
+            telegraphs_of(&seen, &seen, &ownerless),
+            reported(None, &ownerless)
+        );
+        // A telegraph already well into its time was not cast just now.
+        let late = with(&fresh, |e| {
+            e.remaining_secs = tail + telegraph - FRESH_SECS - 0.05;
+        });
+        assert_eq!(telegraphs_of(&seen, &seen, &late), []);
+
+        // The first snapshot of a stream is a baseline, and so is the first one after a
+        // stall; nothing is reported outside a running match.
+        let mut feed = Feed::new(target());
+        assert!(
+            feed.snap_with(std::slice::from_ref(&fresh), &seen, &[])
+                .telegraphs
+                .is_empty()
+        );
+        let mut feed = Feed::new(target());
+        feed.snap_with(&[], &seen, &[]);
+        feed.now += 1.0;
+        assert!(
+            feed.snap_with(std::slice::from_ref(&fresh), &seen, &[])
+                .telegraphs
+                .is_empty()
+        );
+        let mut feed = Feed::new(target());
+        feed.snap_with(&[], &seen, &[]);
+        feed.now += STEP;
+        let paused = feed.memory.take(&Frame {
+            round: ROUND,
+            now: feed.now,
+            running: false,
+            effects: std::slice::from_ref(&fresh),
+            heroes: &seen,
+            casts: &[],
+            registry: Some(&feed.registry),
+        });
+        assert_eq!(paused, Taken::default());
+    }
+    // A live effect is no telegraph: the beam a warning became, the fissure that is live
+    // although replicated as a warning, an armed trap; a trap that waits to arm has no
+    // timed telegraph to be fresh in.
+    let seen = [hero(HeroClass::Dawnweaver)];
+    for (id, kind) in [
+        (SkillId::DawnRay, K::Beam),
+        (SkillId::WinterDivide, K::BeamWarning),
+        (SkillId::WildTraps, K::Trap),
+        (SkillId::DawnField, K::Field),
+    ] {
+        let live = with(&effect(61, id, kind), |e| e.remaining_secs = 0.9);
+        assert_eq!(telegraphs_of(&seen, &seen, &live), [], "{}", id.id());
+    }
+    // The stand-in of a hidden cast edge (rule E-16) is reported beside it, as before.
+    let class = HeroClass::Dawnweaver;
+    let mut feed = Feed::new(target());
+    let seen = [hero(class)];
+    feed.snap_with(&[], &seen, &[]);
+    let warning = with(&effect(62, SkillId::DawnRay, K::BeamWarning), |e| {
+        e.remaining_secs = 0.9;
+    });
+    let taken = feed.snap_with(std::slice::from_ref(&warning), &seen, &[]);
+    assert_eq!((taken.casts.len(), taken.telegraphs.len()), (1, 1));
+}
+
+/// The schema accepts `sound.telegraph` exactly on the rows whose telegraphs the tracker
+/// can report: skills with a timed telegraph.
+#[test]
+fn a_telegraph_voice_needs_a_timed_telegraph() {
+    let packaged: serde_json::Value =
+        serde_json::from_str(include_str!("../../../assets/config/skills.skillfx")).unwrap();
+    // The error, if the registry refuses the row with the voice.
+    let with_voice = |id: &str, voice: serde_json::Value| {
+        let mut config = packaged.clone();
+        config["skills"][id]["sound"]["telegraph"] = voice;
+        SkillPresentation::parse(&config.to_string()).err()
+    };
+    let voice = serde_json::json!({ "base": "radiant_charge", "slice": "tail" });
+    let mut timed = Vec::new();
+    for (id, _) in target().rows() {
+        let skill = SkillKey::from_id(id).and_then(SkillKey::modular);
+        match with_voice(id, voice.clone()) {
+            None => timed.push(id.to_string()),
+            Some(error) => assert!(
+                error.contains("sound.telegraph needs a skill with a timed telegraph"),
+                "{id}: {error}"
+            ),
+        }
+        assert_eq!(
+            timed.last().is_some_and(|last| last == id),
+            skill.and_then(category::telegraph_secs).is_some(),
+            "{id}"
+        );
+    }
+    assert!(timed.contains(&"dawn_ray".to_string()) && timed.len() >= 5);
+    // A telegraph voice is checked as every voice is.
+    let fast = serde_json::json!({ "base": "radiant_charge", "speed": 1.5 });
+    assert!(
+        with_voice("dawn_ray", fast)
+            .unwrap()
+            .contains("sound.telegraph: speed must be")
+    );
+    let bluff = serde_json::json!({ "base": "bluff" });
+    assert!(
+        with_voice("dawn_ray", bluff)
+            .unwrap()
+            .contains("sound.telegraph: bluff belongs to dagger_bluff")
+    );
+}
+
 /// A stage event of `effect` with a living, visible owner.
 fn event(effect: &SkillEffectState, change: StageChange) -> StageEvent {
     StageEvent {
@@ -1241,14 +1417,30 @@ fn kind_flip_pops_only_after_an_observed_warning() {
     // A wave first seen as a wave, and a warning that disappears without one, pop nothing.
     assert_eq!(shots(&[&[], std::slice::from_ref(&wave)]).len(), 0);
     assert_eq!(shots(&[std::slice::from_ref(&warning), &[]]).len(), 0);
-    // The ray becomes a beam: that flip is carried by the body and pops nothing.
+    // The ray becomes a beam: no pop, but an afterglow along the strip that outlives the
+    // few snapshots the beam is replicated for, lying inside its capsule.
     let ray = effect(61, SkillId::DawnRay, K::BeamWarning);
-    let flip = event(
-        &with(&ray, |e| e.kind = K::Beam),
-        step(Transition::KindFlipped),
+    let fired = with(&ray, |e| e.kind = K::Beam);
+    let flip = event(&fired, step(Transition::KindFlipped));
+    assert_eq!(
+        accents::stage_shot(&registry, &flip),
+        Some(OneShot::Afterglow)
     );
-    assert_eq!(accents::stage_shot(&registry, &flip), None);
-    assert!(accents::stage_burst(&registry, &flip, 0.0).is_empty());
+    let glow = accents::stage_burst(&registry, &flip, 0.0);
+    assert!(!glow.is_empty());
+    let (from, to) = (
+        Vec2::from_array(fired.position),
+        Vec2::from_array(fired.end),
+    );
+    for spec in &glow {
+        assert_eq!((spec.event_id, spec.source), (61, ParticleSource::Stage));
+        let at = spec.origin.xz();
+        let along = (at - from).dot((to - from).normalize());
+        assert!((0.0..=from.distance(to)).contains(&along));
+        let foot = from + (to - from).normalize() * along;
+        assert!(at.distance(foot) <= fired.radius + 1e-4);
+        assert!(spec.end_secs() > category::tail_secs(SkillId::DawnRay).unwrap());
+    }
 }
 
 /// The Northwall publishes how many projectiles it has stopped in `consumed_segments`. A
@@ -1980,6 +2172,36 @@ fn the_tracker_reports_a_hidden_cast_edge_to_the_accent() {
     let bursts = apply(&mut app, std::slice::from_ref(&warning));
     assert_eq!(sources(&bursts), [ParticleSource::Accent]);
     assert!(bursts[0].iter().all(|spec| spec.event_id == 31));
+}
+
+#[test]
+fn the_tracker_tells_whoever_listens_that_a_telegraph_appeared() {
+    let warning = with(&effect(86, SkillId::DawnRay, K::BeamWarning), |e| {
+        e.remaining_secs = 0.9;
+    });
+    // An app that registered the message hears of the warning once.
+    let (mut app, _) = stage(target(), HeroClass::Dawnweaver);
+    app.add_message::<TelegraphSeen>();
+    apply(&mut app, &[]);
+    apply(&mut app, std::slice::from_ref(&warning));
+    let told: Vec<_> = app
+        .world_mut()
+        .resource_mut::<Messages<TelegraphSeen>>()
+        .drain()
+        .collect();
+    assert_eq!(told.len(), 1);
+    assert_eq!(told[0].effect, warning);
+    apply(&mut app, std::slice::from_ref(&warning));
+    assert_eq!(app.world().resource::<Messages<TelegraphSeen>>().len(), 0);
+    // An app without a listener tracks the same and tells nobody.
+    let (mut app, _) = stage(target(), HeroClass::Dawnweaver);
+    apply(&mut app, &[]);
+    apply(&mut app, std::slice::from_ref(&warning));
+    assert!(
+        app.world()
+            .get_resource::<Messages<TelegraphSeen>>()
+            .is_none()
+    );
 }
 
 fn join(class: HeroClass) -> ClientPacket {

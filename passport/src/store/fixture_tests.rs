@@ -138,7 +138,8 @@ fn sdk_http_catalogue_refresh_validation_and_failed_cache_are_real() {
     let png = vec![137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 0];
     let fixture = Fixture::start(bytes.clone(), png);
     let sha = format!("{:x}", Sha256::digest(&bytes));
-    let free = avatar(&fixture.origin, 1, "free", &sha, bytes.len());
+    let mut free = avatar(&fixture.origin, 1, "free", &sha, bytes.len());
+    free["license"]["attribution"] = "Studio fixture 1 by Polygonal Mind,\n CC0 1.0".into();
     let paid = avatar(&fixture.origin, 2, "owned", &sha, bytes.len());
     let mut unapproved = avatar(&fixture.origin, 3, "free", &sha, bytes.len());
     unapproved["projectSupport"][0]["status"] = "pending".into();
@@ -164,6 +165,32 @@ fn sdk_http_catalogue_refresh_validation_and_failed_cache_are_real() {
     let definition = crate::avatars::avatar_definition(&approved.slug).unwrap();
     assert!(definition.free);
     assert!(definition.thumbnail.is_some());
+    // The registry's attribution line reaches the picker definition, cleaned,
+    // and is restored with the offline catalogue after a restart.
+    let credited = Some("Studio fixture 1 by Polygonal Mind, CC0 1.0");
+    assert_eq!(definition.attribution.as_deref(), credited);
+    let paid_slug = initial
+        .values()
+        .find(|item| !item.free)
+        .unwrap()
+        .slug
+        .clone();
+    assert_eq!(
+        runtime.state.lock().unwrap().definitions[&paid_slug].attribution,
+        None
+    );
+    let restarted = Box::leak(Box::new(Runtime {
+        store: AvatarStore::new(root.clone(), &fixture.origin, crate::selector()).unwrap(),
+        registry: fixture.origin.clone(),
+        state: Mutex::default(),
+    }));
+    adopt(restarted, restarted.store.cached());
+    assert_eq!(
+        restarted.state.lock().unwrap().definitions[&approved.slug]
+            .attribution
+            .as_deref(),
+        credited
+    );
     install_blocking_inner(runtime, approved)
         .expect("real SDK download, size/hash/envelope/profile validation");
     assert!(matches!(

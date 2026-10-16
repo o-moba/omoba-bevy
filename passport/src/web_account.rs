@@ -11,6 +11,7 @@ pub struct WebAccountApi {
 }
 impl WebAccountApi {
     pub fn new(base: &str, origin: &str, insecure_local: bool) -> Result<Self, String> {
+        validate_contour_endpoints(option_env!("OMOBA_DEFAULT_CONFIG_DIR_SUFFIX"), base, origin)?;
         let base = trusted_url(base, insecure_local)?;
         let portal = trusted_url(origin, insecure_local)?;
         if portal.as_str().trim_end_matches('/') != origin {
@@ -120,6 +121,20 @@ impl WebAccountApi {
         Ok(())
     }
 }
+// Packaged DEV account traffic has one trusted service/origin pair. Runtime
+// environment overrides must not send account proofs or device secrets to prod.
+fn validate_contour_endpoints(
+    contour: Option<&str>,
+    base: &str,
+    origin: &str,
+) -> Result<(), String> {
+    if contour == Some("dev")
+        && (base != "https://account.dev.omoba.io" || origin != "https://app.dev.omoba.io")
+    {
+        return Err("OMOBA Dev requires its DEV account service and player portal.".into());
+    }
+    Ok(())
+}
 fn trusted_url(raw: &str, insecure: bool) -> Result<Url, String> {
     let u = Url::parse(raw).map_err(|_| "Invalid website address.")?;
     let local = matches!(u.host_str(), Some("127.0.0.1" | "localhost" | "[::1]"));
@@ -138,6 +153,24 @@ fn trusted_url(raw: &str, insecure: bool) -> Result<Url, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn dev_account_transport_rejects_runtime_cross_contour_overrides() {
+        let dev_api = "https://account.dev.omoba.io";
+        let dev_portal = "https://app.dev.omoba.io";
+        assert!(validate_contour_endpoints(Some("dev"), dev_api, dev_portal).is_ok());
+        for (base, origin) in [
+            ("https://account.omoba.io", dev_portal),
+            (dev_api, "https://app.omoba.io"),
+            ("https://account.omoba.io", "https://app.omoba.io"),
+            ("http://127.0.0.1:40550", "http://localhost:3010"),
+            ("https://account.dev.omoba.io.evil.test", dev_portal),
+            ("https://account.dev.omoba.io/", dev_portal),
+            (dev_api, "https://app.dev.omoba.io/path"),
+        ] {
+            assert!(validate_contour_endpoints(Some("dev"), base, origin).is_err());
+            assert!(validate_contour_endpoints(None, base, origin).is_ok());
+        }
+    }
     #[test]
     fn rejects_untrusted_urls() {
         for u in [

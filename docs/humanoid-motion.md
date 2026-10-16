@@ -17,10 +17,10 @@ for the current contract; the pilot itself is described
 
 ## Skill motion vocabulary
 
-The library holds 55 motions: the six base states, seven further full-rate
-clips, four dagger edits and 38 pose-key motions for the class skill kits
+The library holds 57 motions: the six base states, seven further full-rate
+clips, four dagger edits and 40 pose-key motions for the class skill kits
 (blade, fist, leap, two-handed, gun and caster families plus five windup
-holds). The 38 come from one exporter table,
+holds). The 40 come from one exporter table,
 `assets-src/animations/derived-motions.json`: each key names a source clip and
 a phase of the checked-in CC0 library, and a row may mirror keys, bake one
 whole-body turn, lift the hips or close a decimated loop. No pose is drawn by

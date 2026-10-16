@@ -167,21 +167,26 @@ for a phone whose logs have not been collected. Keep the existing signing key
 and increase `versionCode` when distributing any corrected Android build.
 
 After an actual successful build, use the installed SDK's adb to install the debug
-APK on a consenting test device, then launch **Omoba Beta** from its icon. The game
-lets a tester enter the same real LAN/server address used by the computer client.
+APK on a consenting test device, then launch **Omoba Beta** from its icon. The
+production app always plays on its compiled lobby (the public one unless `--server`
+was given) and has no in-game server selection. To test against a LAN or local
+server, build the OMOBA Dev app (`--contour dev`: package `space.ekza.omoba.dev`,
+label "OMOBA Dev", DEV-ribbon icon from `res-dev/`), which installs beside it; its
+Home → Connection → Custom takes the same real LAN/server address used by the
+computer client ([connection profiles](../docs/connection-profiles.md)).
 `127.0.0.1` on a phone refers to the phone itself. Do not use it for a server running
 on your computer. The existing server's UDP port must be reachable from both devices.
 
-No live endpoint is compiled by default. For a controlled test build,
 `--server` accepts a real `host:port` and sets `OMOBA_DEFAULT_GAME_SERVER_ADDR` at
-compile time. Environment `GAME_SERVER_ADDR` and saved preferences retain their
-usual precedence; the in-game connection form can choose another endpoint.
+compile time (for `--contour dev` it replaces `lobby.dev.omoba.io:4100`). Phones read
+no `GAME_SERVER_ADDR`; a saved address is not read either.
 Malformed build-time configuration falls back to the local default without a panic.
 No custom URL scheme or website-to-app deep link is registered in this beta package.
 
 Android's current winit implementation exposes logical key characters while its
-`KeyboardInput.text` is empty. NativeActivity soft keyboards vary, so the game also
-provides an on-screen address pad. Test both before relying on OS keyboard entry.
+`KeyboardInput.text` is empty. NativeActivity soft keyboards vary, so the dev app's
+Custom connection fields also have an on-screen address pad. Test both before relying
+on OS keyboard entry.
 
 ## Early iOS Simulator package
 

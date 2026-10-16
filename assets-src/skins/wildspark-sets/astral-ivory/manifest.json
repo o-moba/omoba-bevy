@@ -1,0 +1,234 @@
+{
+  "schema": "omoba.wildspark-set-skin.v1",
+  "theme": "astral-ivory",
+  "title": "Astral Ivory Wildspark set",
+  "requirement": "wildspark.handheld.set",
+  "upload": {
+    "kind": "weapon",
+    "project": "omoba",
+    "platform": "desktop",
+    "profile": "handheld-glb-v1"
+  },
+  "license": "CC-BY-4.0",
+  "attribution": "Astral Ivory Wildspark set — original geometry by OMOBA contributors (generated with scripts/build_wildspark_skin.py); CC-BY-4.0",
+  "grip": {
+    "bone": "rightHand",
+    "offset": [
+      0,
+      0,
+      0
+    ],
+    "rotation_degrees": [
+      0,
+      0,
+      0
+    ],
+    "scale": 1
+  },
+  "set": {
+    "repeater": "WildsparkSetRepeater",
+    "launcher": "WildsparkSetLauncher",
+    "muzzle": {
+      "repeater": [
+        0.0,
+        0.12,
+        0.735
+      ],
+      "launcher": [
+        0.0,
+        0.13,
+        0.81
+      ]
+    }
+  },
+  "files": {
+    "model": {
+      "path": "astral-ivory-wildspark-set.glb",
+      "sha256": "c1931ab31f209100ef7ddea58cd90007b8d1d15c4d89acf50308ec4c749f2912",
+      "sizeBytes": 178416
+    },
+    "cover": {
+      "path": "cover.png",
+      "sha256": "163c2114bdf26dbb19add9060521692f19a3adf379079aa644b692c6989fbfb9",
+      "sizeBytes": 179786,
+      "width": 640,
+      "height": 480
+    },
+    "repeater": {
+      "path": "repeater.png",
+      "sha256": "49cab9adee446bd2b1c9ebe11e3ca1612cfee90c5cd73180a0a23efd9ce3c2f4",
+      "sizeBytes": 121838,
+      "width": 512,
+      "height": 512
+    },
+    "launcher": {
+      "path": "launcher.png",
+      "sha256": "09bbf5ace4d73c514ee90477816096a94ad1f33c8fbc58a099a6beed1d0be1bf",
+      "sizeBytes": 118933,
+      "width": 512,
+      "height": 512
+    }
+  },
+  "glb": {
+    "scenes": 1,
+    "nodes": 7,
+    "meshes": 4,
+    "primitives": 18,
+    "materials": 6,
+    "vertices": 5862,
+    "triangles": 5316,
+    "nodeNames": [
+      "WildsparkLauncherReceiver",
+      "WildsparkSlide",
+      "WildsparkSetLauncher",
+      "WildsparkRepeaterReceiver",
+      "WildsparkRotor",
+      "WildsparkSetRepeater",
+      "wildspark-set"
+    ],
+    "materialNames": [
+      "Astral Ivory | midnight inlay",
+      "Astral Ivory | antique gold",
+      "Astral Ivory | porcelain armour",
+      "Astral Ivory | starlight",
+      "Astral Ivory | deep crystal facets",
+      "Astral Ivory | cyan crystal"
+    ]
+  },
+  "bounds": {
+    "repeater": {
+      "min": [
+        -0.141,
+        -0.14721,
+        -0.344
+      ],
+      "max": [
+        0.141,
+        0.261,
+        0.735
+      ]
+    },
+    "launcher": {
+      "min": [
+        -0.131,
+        -0.14721,
+        -0.344
+      ],
+      "max": [
+        0.131,
+        0.36,
+        0.81
+      ]
+    }
+  },
+  "envelopes": {
+    "repeater": {
+      "baseline": [
+        [
+          -0.17,
+          -0.155,
+          -0.3375
+        ],
+        [
+          0.17,
+          0.2575,
+          0.735
+        ]
+      ],
+      "allowed": [
+        [
+          -0.204,
+          -0.19625,
+          -0.44475
+        ],
+        [
+          0.204,
+          0.29875,
+          0.84225
+        ]
+      ]
+    },
+    "launcher": {
+      "baseline": [
+        [
+          -0.1825,
+          -0.155,
+          -0.3375
+        ],
+        [
+          0.1825,
+          0.3705,
+          0.81
+        ]
+      ],
+      "allowed": [
+        [
+          -0.219,
+          -0.20755,
+          -0.45225
+        ],
+        [
+          0.219,
+          0.42305,
+          0.92475
+        ]
+      ]
+    }
+  },
+  "gates": {
+    "budgets": {
+      "ok": true,
+      "issues": [],
+      "sizeBytes": 178416,
+      "scenes": 1,
+      "nodes": 7,
+      "meshes": 4,
+      "primitives": 18,
+      "materials": 6,
+      "vertices": 5862,
+      "triangles": 5316
+    },
+    "c4": {
+      "ok": true,
+      "issues": []
+    },
+    "studio": {
+      "ok": true,
+      "grip": {
+        "bone": "rightHand",
+        "offset": [
+          0,
+          0,
+          0
+        ],
+        "rotation_degrees": [
+          0,
+          0,
+          0
+        ],
+        "scale": 1
+      },
+      "prepared": {
+        "sha256": "e4f1a40f45e598478774d54677aef3222f7b499a7e829729457bde5b7b097c76",
+        "sizeBytes": 178408
+      },
+      "validator": "ekza-registry web/app/lib/handheld-glb.ts parseHandheld(final=true), prepareHandheld(embedded grip)",
+      "revision": "90e7850"
+    },
+    "registry": {
+      "ok": true,
+      "validator": "ekza-registry backend app.services.studio.validate_model(asset_kind='weapon') -> handheld.py + handheld_checks.py",
+      "revision": "7de3baa"
+    },
+    "game": {
+      "ok": true,
+      "validator": "omoba-bevy passport weapon-build --source --output-dir (validate_model)",
+      "revision": "795bc1a"
+    }
+  },
+  "generator": {
+    "script": "scripts/build_wildspark_skin.py",
+    "blender": "5.0.1",
+    "objects": 7
+  }
+}

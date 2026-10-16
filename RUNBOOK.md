@@ -256,4 +256,4 @@ Use two terminals (or `make start` / `make stop`). Constants live in `client/src
 | 5 | Spam team join (double-click / rapid confirm) | At most one local `Player` after sync; `Join` idempotent while `join_flow_committed`. |
 | 6 | Block UDP (e.g. firewall) while **Connected** | Stale snapshot or transport rule → **Disconnected** same as server kill. |
 
-**Preferences file** (optional server address + graphics + stable client session id): see `client/src/persistence.rs` (`OMOBA_CLIENT_CONFIG_DIR` or default OS path). **Env wins** over saved `game_server_addr` when `GAME_SERVER_ADDR` is set and non-empty.
+**Preferences file** (graphics + stable client session id): see `client/src/persistence.rs` (`OMOBA_CLIENT_CONFIG_DIR` or default OS path). The lobby comes from the build's connection profile; on a desktop a non-empty `GAME_SERVER_ADDR` overrides it (a saved `game_server_addr` is no longer read). Production builds have no in-game server selection; dev builds (`--contour dev`) switch between their Dev, Local and Custom profiles in Home → Connection, applied at the next start. See [docs/connection-profiles.md](docs/connection-profiles.md).

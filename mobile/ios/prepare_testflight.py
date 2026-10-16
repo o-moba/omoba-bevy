@@ -17,6 +17,7 @@ import sys
 import tempfile
 
 from build_device import ROOT, inspect_macho, output, resolve_identity, sha256, validate_dsym, validate_profile
+from contours import MOBILE
 
 
 def validate_build_number(value: str) -> str:
@@ -69,13 +70,21 @@ def main(argv: list[str] | None = None) -> int:
     if dsym.resolve() in archive.resolve().parents:
         raise ValueError("Archive output cannot be inside the source dSYM.")
     info, binary = validate_source(app)
+    if info['CFBundleIdentifier'] == MOBILE['prod'].bundle_id:
+        raise ValueError('Production archives cannot be prepared from a prebuilt app: its '
+                         'source cannot be established by the current checkout. Use the '
+                         'guarded Omoba Xcode Archive workflow from an eligible release '
+                         'commit, or Omoba Dev for development.')
+    is_dev = info['CFBundleIdentifier'] == MOBILE['dev'].bundle_id
+    product = 'OmobaDev' if is_dev else 'OmobaBeta'
+    icon = 'AppIconDev' if is_dev else 'AppIcon'
     symbols = validate_dsym(app / "client", dsym, runner=output)
     output(["codesign", "--verify", "--strict", str(app)])
     identity = resolve_identity(args.identity, output(["security", "find-identity", "-v", "-p", "codesigning"]).decode())
     profile = plistlib.loads(output(["security", "cms", "-D", "-i", str(app / "embedded.mobileprovision")]))
     entitlements = validate_profile(profile, info["CFBundleIdentifier"], identity)
     assets = ROOT / "mobile/ios/Assets.xcassets"
-    if not (assets / "AppIcon.appiconset/AppIcon.png").is_file():
+    if not (assets / f"{icon}.appiconset/AppIcon.png").is_file():
         raise ValueError("Bundled 1024px beta app icon is missing.")
     manifest = ROOT / "mobile/ios/PrivacyInfo.xcprivacy"
     plistlib.loads(manifest.read_bytes())
@@ -100,14 +109,14 @@ def main(argv: list[str] | None = None) -> int:
     archive.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix=".omoba-archive-", dir=archive.parent) as temporary:
         staging = Path(temporary)
-        prepared = staging / "OmobaBeta.xcarchive"
-        bundle = prepared / "Products/Applications/OmobaBeta.app"
+        prepared = staging / f"{product}.xcarchive"
+        bundle = prepared / f"Products/Applications/{product}.app"
         shutil.copytree(app, bundle)
-        retained_dsym = prepared / "dSYMs/OmobaBeta.app.dSYM"
+        retained_dsym = prepared / f"dSYMs/{product}.app.dSYM"
         shutil.copytree(dsym, retained_dsym)
         partial = staging / "icons.plist"
         output(["xcrun", "actool", "--compile", str(bundle), "--platform", "iphoneos",
-                "--minimum-deployment-target", info["MinimumOSVersion"], "--app-icon", "AppIcon",
+                "--minimum-deployment-target", info["MinimumOSVersion"], "--app-icon", icon,
                 "--output-partial-info-plist", str(partial), "--target-device", "iphone",
                 "--target-device", "ipad", str(assets)])
         info.update(plistlib.loads(partial.read_bytes()))
@@ -129,8 +138,8 @@ def main(argv: list[str] | None = None) -> int:
         if retained_symbols != symbols:
             raise ValueError("dSYM changed during archive preparation; source symbols must remain intact.")
         metadata = {"ArchiveVersion": 2, "CreationDate": datetime.now(timezone.utc).replace(tzinfo=None),
-                    "Name": "Omoba Beta", "SchemeName": "OmobaBeta",
-                    "ApplicationProperties": {"ApplicationPath": "Applications/OmobaBeta.app",
+                    "Name": "OMOBA Dev" if is_dev else "Omoba Beta", "SchemeName": product,
+                    "ApplicationProperties": {"ApplicationPath": f"Applications/{product}.app",
                         "CFBundleIdentifier": info["CFBundleIdentifier"],
                         "CFBundleShortVersionString": info["CFBundleShortVersionString"],
                         "CFBundleVersion": build, "SigningIdentity": "Apple Development",

@@ -110,7 +110,7 @@
           "state": "repeater"
         }
       ],
-      "brief": "Wildspark class-default repeater with engine-controlled rotor animation. Static handheld submissions are supported; custom moving-part animation and coordinated two-gun sets require a future profile. Explicit item selection stays selected in both modes.",
+      "brief": "Wildspark class-default repeater with engine-controlled rotor animation. The repeater and the launcher are contributed together as one Wildspark set GLB under the Studio requirement wildspark.handheld.set: WildsparkSetRepeater and WildsparkSetLauncher nodes, launcher at scale 0 in the file. The game shows the variant for the current weapon mode and moves only its mechanism from the rest pose: WildsparkRotor in repeater mode. Authoring guide: docs/wildspark-skin-sets.md in github.com/o-moba/omoba-bevy. Custom moving-part animation requires a future profile. Any other explicit item stays selected in both modes; an item that is not installed yet shows the class-default pair.",
       "profile": {
         "id": "handheld-glb-v1",
         "version": 1
@@ -139,7 +139,7 @@
           "state": "rockets"
         }
       ],
-      "brief": "The second gun in the class-default Q switch. Individual static handheld submission is supported. Mode-specific cosmetic set approval and equipment are future work; this is not a third Q weapon.",
+      "brief": "The second gun in the class-default Q switch, shown in rockets mode and while W or R draws it. The launcher and the repeater are contributed together as one Wildspark set GLB under the Studio requirement wildspark.handheld.set; this gun is its WildsparkSetLauncher variant, and its WildsparkSlide recoils from the rest pose. Authoring guide: docs/wildspark-skin-sets.md in github.com/o-moba/omoba-bevy. A standalone static handheld is still accepted but stays selected in both modes. This is not a third Q weapon.",
       "profile": {
         "id": "handheld-glb-v1",
         "version": 1
@@ -372,11 +372,11 @@
     },
     {
       "sourcePath": "shared/src/loadout.rs",
-      "sha256": "aed16194cb03fbe0466ed72b6f34f12921c0345c1c5fd7248e50f92723506a3b"
+      "sha256": "9e76e7ad1b8b9fffa35705f52b312686ddf2b35c035e0b3d91e6ce8227bce2ea"
     },
     {
       "sourcePath": "client/src/held_weapons.rs",
-      "sha256": "0e53506c86688591d7c55450deb6a2595371208d793c6231cb9ec2c2f687d644"
+      "sha256": "98b850c54ff6b91b6e49187310f6ac0c9929766ce171b55d2d978e5ec69f8300"
     }
   ],
   "iconAtlases": [

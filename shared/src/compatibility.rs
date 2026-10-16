@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 pub const HANDSHAKE_VERSION: u16 = 1;
 /// Bump when simulation semantics change incompatibly without a wire/map/catalog bump.
-pub const GAMEPLAY_REVISION: &str = "wildspark-2026-10-09-reference";
+pub const GAMEPLAY_REVISION: &str = "dawnweaver-2026-10-11-reference";
 pub const MAX_PROBE_BYTES: usize = 2048;
 pub const PROBE_PADDING: usize = 512;
 

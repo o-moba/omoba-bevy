@@ -117,6 +117,7 @@ impl Plugin for CombatPlugin {
         .init_resource::<LocalCastCooldown>()
         .init_resource::<WorldPointerState>()
         .init_resource::<PendingCast>()
+        .init_resource::<cast::DesktopAim>()
         .init_resource::<ActionFeedback>()
         .init_resource::<inspection::SkillInspection>()
         .add_systems(
@@ -152,6 +153,7 @@ impl Plugin for CombatPlugin {
                 sync_authoritative_cooldown_durations,
                 update_action_feedback,
                 crate::targeting::clear_invalid_selection,
+                cast::sample_desktop_aim,
                 cast_spell_system,
                 skill_button_system,
                 mobile_cast_system,
@@ -208,6 +210,9 @@ fn configure_target_presentation(app: &mut App) {
             .before(bevy::transform::TransformSystems::Propagate),
     );
 }
+
+#[cfg(test)]
+mod desktop_aim_tests;
 
 #[cfg(test)]
 mod target_presentation_tests;

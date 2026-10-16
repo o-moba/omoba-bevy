@@ -5988,7 +5988,7 @@
           },
           "catalog_revision": {
             "type": "string",
-            "const": "standard-kits-6"
+            "const": "standard-kits-8"
           },
           "core": {
             "type": "string",

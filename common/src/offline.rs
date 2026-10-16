@@ -8,6 +8,7 @@ use crate::{
     match_rules::{MatchMode, MatchRules},
 };
 use shared::{
+    bot_profile::BotDifficulty,
     debug::{DebugAccess, DebugCommand, OFFLINE_PRACTICE_MODE},
     protocol::{JoinRejection, SnapshotMeta},
     wire::{ClientPacket, GameState, ServerPacket},
@@ -28,6 +29,9 @@ pub struct PracticeSession {
     pub match_id: u64,
     tick: u64,
     error: Option<JoinRejection>,
+    /// Behaviour level of both teams' bots. A local practice setting, so it
+    /// survives Leave and Rematch; Elite until the host sets it.
+    bot_difficulty: BotDifficulty,
 }
 impl PracticeSession {
     pub fn new(now: Instant) -> Self {
@@ -39,7 +43,25 @@ impl PracticeSession {
             match_id: 1,
             tick: 0,
             error: None,
+            bot_difficulty: BotDifficulty::Elite,
         }
+    }
+    pub fn bot_difficulty(&self) -> BotDifficulty {
+        self.bot_difficulty
+    }
+    /// Set the level of both teams' bots, retuning live bots in place.
+    pub fn set_bot_difficulty(&mut self, level: BotDifficulty) {
+        self.bot_difficulty = level;
+        for team in [shared::map::Team::Green, shared::map::Team::Blue] {
+            self.bots.set_difficulty(team, level, &self.world.players);
+        }
+    }
+    /// A fresh round keeping the local settings.
+    fn reset_for_round(&mut self, round: u64) {
+        let level = self.bot_difficulty;
+        *self = Self::new(self.now);
+        self.match_id = round;
+        self.set_bot_difficulty(level);
     }
     pub fn host(&mut self) -> CombatHost<'_> {
         CombatHost {
@@ -126,24 +148,9 @@ impl PracticeSession {
                 crate::bots::auto_rank_skills(p);
                 p.hero.hp = p.hero.max_hp;
                 p.hero.mana = p.hero.max_mana;
-                self.world.game_state = GameState::Running;
-                self.world.last_wave_spawn_at = self.now
-                    - (crate::balance::MINION_WAVE_INTERVAL
-                        - crate::balance::FIRST_MINION_WAVE_DELAY);
-                crate::neutrals::schedule_boss_spawns(&mut self.world.neutrals, self.now);
-                self.combat_log
-                    .ledger
-                    .begin(Vec::new())
-                    .expect("fresh practice ledger");
-                let now = self.now;
-                self.host().fill_practice_bots(now);
-                self.register_scoreboard();
+                self.start_round();
             }
-            ClientPacket::Leave => {
-                let round = self.match_id + 1;
-                *self = Self::new(self.now);
-                self.match_id = round;
-            }
+            ClientPacket::Leave => self.reset_for_round(self.match_id + 1),
             ClientPacket::RequestRematch => {
                 // A late/repeated Play Again must never reset a running round.
                 // Match the authoritative server's terminal-only transition.
@@ -165,9 +172,7 @@ impl PracticeSession {
                     session_id: None,
                     passport_ticket: None,
                 };
-                let round = self.match_id + 1;
-                *self = Self::new(self.now);
-                self.match_id = round;
+                self.reset_for_round(self.match_id + 1);
                 self.command(join);
             }
             packet => {
@@ -181,6 +186,41 @@ impl PracticeSession {
                 );
             }
         }
+    }
+    /// The round start a `Join` triggers: Running, the first wave timer, the
+    /// boss schedule and the started ledger, then the practice bots, each on
+    /// the scoreboard.
+    fn start_round(&mut self) {
+        self.world.game_state = GameState::Running;
+        self.world.last_wave_spawn_at = self.now
+            - (crate::balance::MINION_WAVE_INTERVAL - crate::balance::FIRST_MINION_WAVE_DELAY);
+        crate::neutrals::schedule_boss_spawns(&mut self.world.neutrals, self.now);
+        self.combat_log
+            .ledger
+            .begin(Vec::new())
+            .expect("fresh practice ledger");
+        let now = self.now;
+        self.host().fill_practice_bots(now);
+        self.register_scoreboard();
+    }
+    /// A human-less round for the difficulty simulator
+    /// (docs/plans/bot-personas.md, S3): the round start a `Join` performs,
+    /// with each team's bots at its own level, Green then Blue. The levels
+    /// are the teams' own, not the practice setting, so they do not survive
+    /// Leave or Rematch.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn bots_only(now: Instant, levels: [BotDifficulty; 2]) -> Self {
+        let mut practice = Self::new(now);
+        for (team, level) in [shared::map::Team::Green, shared::map::Team::Blue]
+            .into_iter()
+            .zip(levels)
+        {
+            practice
+                .bots
+                .set_difficulty(team, level, &practice.world.players);
+        }
+        practice.start_round();
+        practice
     }
     pub fn advance(&mut self, dt: f32) {
         let dt = if dt.is_finite() {
@@ -387,6 +427,39 @@ mod tests {
             }));
             assert!(matches!(p.world.game_state, GameState::Running));
         }
+    }
+
+    #[test]
+    fn bot_level_applies_to_both_teams_and_survives_leave_and_rematch() {
+        use crate::bots::BotProfile;
+        let profiles = |p: &PracticeSession| -> Vec<_> {
+            p.world
+                .players
+                .iter()
+                .filter(|(_, player)| player.hero.identity.is_bot)
+                .map(|(addr, _)| p.bots.profile(*addr))
+                .collect()
+        };
+        let mut p = PracticeSession::new(Instant::now());
+        assert_eq!(p.bot_difficulty(), BotDifficulty::Elite);
+        p.command(join(HeroClass::Warrior));
+        assert_eq!(profiles(&p).len(), 9);
+        assert!(profiles(&p).iter().all(|b| *b == Some(BotProfile::ELITE)));
+
+        p.set_bot_difficulty(BotDifficulty::Regular);
+        assert!(profiles(&p).iter().all(|b| *b == Some(BotProfile::REGULAR)));
+        p.world.game_state = GameState::Victory {
+            winner: Team::Green,
+        };
+        p.command(ClientPacket::RequestRematch);
+        assert_eq!(p.match_id, 2);
+        assert_eq!(profiles(&p).len(), 9);
+        assert!(profiles(&p).iter().all(|b| *b == Some(BotProfile::REGULAR)));
+        p.command(ClientPacket::Leave);
+        p.command(join(HeroClass::Mage));
+        assert_eq!(p.bot_difficulty(), BotDifficulty::Regular);
+        assert_eq!(profiles(&p).len(), 9);
+        assert!(profiles(&p).iter().all(|b| *b == Some(BotProfile::REGULAR)));
     }
 
     #[test]

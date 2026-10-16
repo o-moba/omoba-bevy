@@ -246,9 +246,12 @@ def tracked_assets(root: Path) -> list[tuple[Path, Path]]:
     return sorted(paths, key=lambda item: item[1].as_posix())
 
 
-def app_info(root: Path, binary_info: dict, bundle_id: str) -> dict:
+def app_info(root: Path, binary_info: dict, bundle_id: str, display_name: str | None = None) -> dict:
+    """The app's Info.plist; `display_name` renames a contour's app (OMOBA Dev)."""
     with (root / "mobile/ios/Info.plist").open("rb") as source:
         info = plistlib.load(source)
+    if display_name:
+        info.update({"CFBundleName": display_name, "CFBundleDisplayName": display_name})
     cargo = (root / "Cargo.toml").read_text()
     version = re.search(r'(?ms)^\[workspace\.package\]\s*\n(?:(?!^\[).)*?^version\s*=\s*"([^"\n]+)"', cargo)
     if not version:

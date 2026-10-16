@@ -81,6 +81,8 @@ wire_enums! {
     crate::loadout::WeaponMode => Strict [Repeater, Rockets],
     crate::loadout::EffectVisualKind => Strict [Orb, Soul, Anchor, Healing, ShieldWall, Cage, Lantern, Bolt, Barrier, Field, BeamWarning, Beam, Trap, Rocket],
     crate::practice::PracticeCommand => Tolerant [Roster, ClearBots, SpawnDummy, SpawnMovingDummy, SpawnAggressiveDummy, SetNoCooldowns, StartDuel, Unsupported],
+    // Not carried yet; tolerant before the practice picker sends it.
+    crate::bot_profile::BotDifficulty => Tolerant [Recruit, Regular, Veteran, Elite, Unknown],
     crate::protocol::JoinRejection => Strict [MatchFull, SessionActive, ProtocolMismatch, MapGeometryMismatch, AvatarNotAuthorized, OfflineKitUnsupported],
     crate::protocol::wire::GameState => Strict [Lobby, Forming, Starting, Running, Victory],
     crate::sandbox::SandboxCommand => Strict [ApplyConfig, Refill, ResetCooldowns, Teleport, ResetActor, AddXp, GrantItem, ResetDuel, ResetAnalytics, SpawnWave, FrameStep, ForceCast],
@@ -274,6 +276,10 @@ fn tolerant_enums_decode_an_unknown_value() {
             .unwrap(),
         crate::practice::PracticeCommand::Unsupported
     );
+    assert_eq!(
+        serde_json::from_str::<crate::bot_profile::BotDifficulty>(FUTURE).unwrap(),
+        crate::bot_profile::BotDifficulty::Unknown
+    );
     let tolerant: Vec<&str> = WIRE_ENUMS
         .iter()
         .filter(|(_, decoding, _)| *decoding == Decoding::Tolerant)
@@ -284,6 +290,7 @@ fn tolerant_enums_decode_an_unknown_value() {
         [
             "HeroClass",
             "PracticeCommand",
+            "BotDifficulty",
             "PlayerActionKind",
             "CombatEntityKind",
             "ProjectileStyle",

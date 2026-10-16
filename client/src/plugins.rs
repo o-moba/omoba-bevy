@@ -150,6 +150,7 @@ impl PluginGroup for PresentationPlugins {
             // 3D model backend.
             .add(Presentation3dPlugin)
             .add(Verdant3dPlugin)
+            .add(crate::sponsorship::SponsorshipPlugin)
             .add(DecorPlugin)
             .add(JungleVisualsPlugin)
             .add(MinionVisualsPlugin)
@@ -167,6 +168,7 @@ impl PluginGroup for UiPlugins {
     fn build(self) -> PluginGroupBuilder {
         PluginGroupBuilder::start::<Self>()
             .add(UiKitPlugin)
+            .add(crate::connection_profile::ConnectionProfilePlugin)
             .add(crate::render_settings::RenderSettingsPlugin)
             .add(MobileControlsPlugin)
             .add(MobileUiPlugin)
@@ -175,6 +177,7 @@ impl PluginGroup for UiPlugins {
             .add(TeamSelectPlugin)
             .add(GameStateUiPlugin)
             .add(crate::hud_layout::HudLayoutPlugin)
+            .add(crate::contour_badge::ContourBadgePlugin)
             .add(MatchHudPlugin)
             .add(EdgeHudPlugin)
             .add(MinimapPlugin)

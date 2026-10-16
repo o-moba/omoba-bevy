@@ -106,9 +106,10 @@ On another computer, replace the example address with the host's actual LAN IP:
 make game GAME_SERVER_ADDR=192.168.1.10:4000
 ```
 
-On the phone, enter that same reachable `host:4000` in the game's connection
-screen. `127.0.0.1` on a phone means the phone itself. Both devices must be able
-to reach the host's UDP port. This command runs a foreground practice server;
+A phone joins it with the OMOBA Dev app: Home → Connection → Custom, type that
+same reachable `host:4000`, Use, and reopen the app (the production app always
+plays on the public lobby). `127.0.0.1` on a phone means the phone itself. Both
+devices must be able to reach the host's UDP port. This command runs a foreground practice server;
 24/7 public hosting additionally needs supervised operations and network setup.
 
 ## Play with a friend (party vs bots)
@@ -118,8 +119,9 @@ Host a practice server as above, then both of you start the client against it
 `127.0.0.1:4000`). No database or wallet is needed.
 
 Players with a downloaded build ([GitHub Releases](https://github.com/o-moba/omoba-bevy/releases))
-set the host address in the game: **Party & friends → SERVER → Change**, type
-`host:port`, Enter. It is remembered.
+start it with `GAME_SERVER_ADDR=host:port` (production builds have no in-game server
+picker), or use the OMOBA Dev build: **Home → Connection → Custom**, type
+`host:port`, Use, restart ([connection profiles](docs/connection-profiles.md)).
 
 1. On Home, open **Party & friends**. Everyone connected to the same server is
    listed under *Online on this server*; press **Invite**.
@@ -191,7 +193,7 @@ them. Each game keeps its own art direction, performance budget and rules.
 | Project | What to explore |
 | --- | --- |
 | [Ekza Bevy SDK](https://github.com/ekza-space/ekza-bevy-sdk) | Rust character identity, model metadata, GLB validation and Bevy model loading |
-| [The SDK revision used by Open Moba](https://github.com/ekza-space/ekza-bevy-sdk/tree/28fbfde54780ba6af469a1653ef9334df2f5f446) | The exact integration, including Passport data contracts; SDK `main` may differ |
+| [The SDK revision used by Open Moba](Cargo.toml) | The `ekza-bevy-sdk` `rev` in `[workspace.dependencies]`: the exact integration, including Passport data contracts; SDK `main` may differ |
 | [Ekza Stellar TypeScript SDK](https://github.com/ekza-space/ekza-stellar-sdk) | Asset manifests, avatar loading and application bridge source |
 | [Ekza Stellar creator protocol](https://github.com/ekza-space/solana-stellar) | Collaborative assets, lineage, releases and contributor-share infrastructure |
 | [Ekza Space](https://space.ekza.io/) | Explore another application in the ecosystem |
