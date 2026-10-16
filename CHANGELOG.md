@@ -5,6 +5,11 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- OMOBA Dev now includes its own Account API and player portal defaults on desktop,
+  iOS and Android. DEV account traffic rejects production runtime overrides; the
+  DEV Account API uses DEV Registry/Studio for library consent. Game-server
+  updates preserve an explicitly enabled Account API database login.
+
 - Dawnweaver reference pass. **Horizon Ray now burns hardest along its centre**: full
   damage within 0.35 of the axis, easing to 60% at each target's graze point (damage
   80 at the centre, 48 at the edge; previously a flat 72). Radiance detonations and the

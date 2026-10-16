@@ -25,6 +25,8 @@ SERVER_DEFAULT_ENV = "OMOBA_DEFAULT_GAME_SERVER_ADDR"
 REGISTRY_DEFAULT_ENV = "OMOBA_DEFAULT_REGISTRY_URL"
 PASSPORT_DEFAULT_ENV = "OMOBA_DEFAULT_PASSPORT_URL"
 CONFIG_SUFFIX_ENV = "OMOBA_DEFAULT_CONFIG_DIR_SUFFIX"
+ACCOUNT_API_ENV = "OMOBA_ACCOUNT_API_URL"
+PORTAL_ORIGIN_ENV = "OMOBA_PORTAL_ORIGIN"
 
 # The DEV contour: ops/vps/omoba-lobby-dev.service on the dedicated dev VPS
 # (lobby.dev.omoba.io) and registry.dev.ekza.io. There is no dev Ekza passport yet
@@ -35,6 +37,8 @@ DEV_LOBBY = "lobby.dev.omoba.io:4100"
 DEV_REGISTRY = "https://registry.dev.ekza.io"
 DEV_PASSPORT = "http://127.0.0.1:9/api/passport"
 DEV_CONFIG_SUFFIX = "dev"
+DEV_ACCOUNT_API = "https://account.dev.omoba.io"
+DEV_PORTAL_ORIGIN = "https://app.dev.omoba.io"
 
 
 @dataclass(frozen=True)
@@ -82,5 +86,6 @@ def compile_defaults(contour: str, server: str | None = None) -> dict[str, str]:
         return {SERVER_DEFAULT_ENV: server} if server else {}
     if contour == "dev":
         return {SERVER_DEFAULT_ENV: server or DEV_LOBBY, REGISTRY_DEFAULT_ENV: DEV_REGISTRY,
-                PASSPORT_DEFAULT_ENV: DEV_PASSPORT, CONFIG_SUFFIX_ENV: DEV_CONFIG_SUFFIX}
+                PASSPORT_DEFAULT_ENV: DEV_PASSPORT, CONFIG_SUFFIX_ENV: DEV_CONFIG_SUFFIX,
+                ACCOUNT_API_ENV: DEV_ACCOUNT_API, PORTAL_ORIGIN_ENV: DEV_PORTAL_ORIGIN}
     raise ValueError(f"unknown contour {contour!r}")

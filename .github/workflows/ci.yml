@@ -77,6 +77,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
+      OMOBA_ACCOUNT_API_URL: https://account.dev.omoba.io
+      OMOBA_PORTAL_ORIGIN: https://app.dev.omoba.io
       OMOBA_DEFAULT_CONFIG_DIR_SUFFIX: dev
       OMOBA_DEFAULT_GAME_SERVER_ADDR: lobby.dev.omoba.io:4100
       OMOBA_DEFAULT_REGISTRY_URL: https://registry.dev.ekza.io

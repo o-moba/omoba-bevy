@@ -13,6 +13,14 @@ optional rotation clip, which continues while the card is open.
 The coordinated Web/Studio pilot is free; paid crypto providers and hosted
 deployment remain separate work. See [runtime details](community-sculptures.md).
 
+## DEV account integration
+
+Packaged OMOBA Dev uses `account.dev.omoba.io` and `app.dev.omoba.io` for account
+confirmation and device-account features. Runtime overrides cannot redirect a DEV
+app to production. The DEV Account API keeps Ekza library consent on DEV Registry
+and Studio. Deployment, provider setup and tester availability are separate from
+these build defaults.
+
 ## Dev iOS workflow
 
 The shared **Omoba Dev** Xcode scheme builds the separate `space.ekza.omoba.dev`

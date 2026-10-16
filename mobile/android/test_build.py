@@ -56,7 +56,9 @@ class ManifestTests(unittest.TestCase):
 class EnvironmentTests(unittest.TestCase):
     SHELL = {"PATH": "/bin", "OMOBA_DEFAULT_REGISTRY_URL": "https://registry.ekza.io",
              "OMOBA_DEFAULT_CONFIG_DIR_SUFFIX": "stale", "OMOBA_DEFAULT_SOMETHING": "x",
-             "EKZA_DEV_HTTP_HOST": "192.168.1.71"}
+             "EKZA_DEV_HTTP_HOST": "192.168.1.71",
+             "OMOBA_ACCOUNT_API_URL": "https://account.omoba.io",
+             "OMOBA_PORTAL_ORIGIN": "https://app.omoba.io"}
 
     def test_the_dev_app_compiles_only_its_own_defaults(self):
         env = build.contour_env(dict(self.SHELL), "dev", None)
@@ -64,7 +66,9 @@ class EnvironmentTests(unittest.TestCase):
             "OMOBA_DEFAULT_GAME_SERVER_ADDR": "lobby.dev.omoba.io:4100",
             "OMOBA_DEFAULT_REGISTRY_URL": "https://registry.dev.ekza.io",
             "OMOBA_DEFAULT_PASSPORT_URL": "http://127.0.0.1:9/api/passport",
-            "OMOBA_DEFAULT_CONFIG_DIR_SUFFIX": "dev"})
+            "OMOBA_DEFAULT_CONFIG_DIR_SUFFIX": "dev",
+            "OMOBA_ACCOUNT_API_URL": "https://account.dev.omoba.io",
+            "OMOBA_PORTAL_ORIGIN": "https://app.dev.omoba.io"})
         by_ip = build.contour_env(dict(self.SHELL), "dev", "203.0.113.10:4100")
         self.assertEqual(by_ip["OMOBA_DEFAULT_GAME_SERVER_ADDR"], "203.0.113.10:4100")
 
