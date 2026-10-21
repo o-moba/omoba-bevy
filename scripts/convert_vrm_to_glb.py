@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
 """Fetch a VRM avatar and stage it as a Bevy-loadable GLB.
 
-VRM 0.x files are glTF 2.0 *binary* containers (the same `glTF`-magic / version-2
-GLB layout Bevy's `GltfLoader` already understands). The VRM-specific data lives
-in extra glTF extensions (`VRM`, spring bones, blendshapes) that are listed under
-`extensionsUsed` only — never `extensionsRequired` — so Bevy ignores them and
-still loads the mesh + skeleton. That makes the "conversion" a validate-and-copy:
-we confirm the bytes really are a version-2 GLB and write them out with a `.glb`
-extension so the asset server selects the glTF loader by file extension.
+VRM 0.x and 1.0 files are glTF 2.0 *binary* containers (the same `glTF`-magic /
+version-2 GLB layout Bevy's `GltfLoader` already understands). The VRM-specific data
+lives in extra glTF extensions (`VRM` / `VRMC_vrm`, spring bones, blendshapes) that
+are normally listed under `extensionsUsed` only — never `extensionsRequired` — so
+Bevy ignores them and still loads the mesh + skeleton. That makes the "conversion"
+a validate-and-copy: we confirm the bytes really are a version-2 GLB and write them
+out with a `.glb` extension so the asset server selects the glTF loader by file
+extension. Nothing is re-oriented here: a VRM 1.0 model keeps its +Z rest facing
+(VRM 0.x faces -Z, the game's hero forward). The hosted rendition builder
+(`scripts/ekza_build_rendition.py`) is the path that turns VRM 1.0 to face -Z.
 
 Usage:
     python3 scripts/convert_vrm_to_glb.py <source-url-or-path> <output.glb>

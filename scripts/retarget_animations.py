@@ -11,8 +11,15 @@ Method (world-space delta retarget, both rigs T-pose):
   * Source reference pose: the UAL `A_TPose` clip sampled at its first key.
   * Target reference pose: the VRM rest pose (VRM 0.x mandates T-pose rest).
   * Source bones are resolved by Rigify name; target bones through the VRM
-    humanoid bone map (`extensions.VRM.humanoid.humanBones`), which is
-    authoritative even when node names are nonstandard.
+    humanoid bone map (VRM 0.x `extensions.VRM.humanoid.humanBones` list, or
+    VRM 1.0 `extensions.VRMC_vrm.humanoid.humanBones` object), which is
+    authoritative even when node names are nonstandard. VRM 1.0 thumb names
+    (Metacarpal/Proximal/Distal) are read as the VRM 0.x thumb chain
+    (Proximal/Intermediate/Distal), as the client runtime retargeter does.
+  * A VRM 1.0 rig rests facing +Z; the game renders every avatar facing -Z
+    (the VRM 0.x convention). Its scene roots are turned 180 degrees about Y
+    before baking, so the rendition faces like every other avatar. VRM 0.x
+    files are never turned.
   * Per frame, for every mapped bone:
         delta      = R_src_world(t) * inv(R_src_world_ref)
         R_tgt_world = A * delta * inv(A) * R_tgt_world_ref
@@ -190,7 +197,10 @@ class Gltf:
 
     @classmethod
     def from_glb(cls, path: Path):
-        data = path.read_bytes()
+        return cls.from_glb_bytes(path.read_bytes(), str(path))
+
+    @classmethod
+    def from_glb_bytes(cls, data: bytes, path: str = "<bytes>"):
         magic, version, length = struct.unpack("<4sII", data[:12])
         if magic != GLB_MAGIC or version != 2:
             raise ValueError(f"{path}: not a GLB v2 file")
@@ -474,6 +484,8 @@ class BinAppender:
         self.doc = doc
         pad = (4 - len(doc.bin) % 4) % 4
         doc.bin += b"\x00" * pad
+        doc.js.setdefault("accessors", [])
+        doc.js.setdefault("bufferViews", [])
         self.blob = bytearray()
 
     def add_accessor(self, values, gltf_type, with_min_max=False):
@@ -544,21 +556,83 @@ def inject_clips(doc: Gltf, clips):
 # ---------------------------------------------------------------------------
 
 
+# VRM 1.0 renamed the thumb chain; BONE_MAP speaks VRM 0.x names.
+VRM1_THUMB_NAMES = {
+    f"{side}{vrm1}": f"{side}{vrm0}"
+    for side in ("left", "right")
+    for vrm1, vrm0 in (
+        ("ThumbMetacarpal", "ThumbProximal"),
+        ("ThumbProximal", "ThumbIntermediate"),
+        ("ThumbDistal", "ThumbDistal"),
+    )
+}
+YAW_180 = (0.0, 1.0, 0.0, 0.0)
+
+
+def humanoid_bone_map(js: dict):
+    """Return (version, {VRM 0.x bone name: node index}) for a VRM 0.x or 1.0 document."""
+    extensions = js.get("extensions", {})
+    vrm0 = extensions.get("VRM")
+    vrm1 = extensions.get("VRMC_vrm")
+    if vrm0 and vrm1:
+        raise ValueError("model declares conflicting VRM and VRMC_vrm extensions")
+    if vrm0:
+        return "vrm0", {
+            b["bone"]: b["node"]
+            for b in vrm0.get("humanoid", {}).get("humanBones", [])
+            if "bone" in b and "node" in b
+        }
+    if vrm1:
+        bones = vrm1.get("humanoid", {}).get("humanBones", {})
+        if not isinstance(bones, dict):
+            raise ValueError("VRMC_vrm humanBones must be an object")
+        humanoid = {}
+        for name, entry in bones.items():
+            node = entry.get("node") if isinstance(entry, dict) else None
+            if isinstance(node, int):
+                humanoid[VRM1_THUMB_NAMES.get(name, name)] = node
+        return "vrm1", humanoid
+    raise ValueError("no VRM or VRMC_vrm extension (cannot resolve humanoid bone map)")
+
+
+def rest_faces_plus_z(rest_world, humanoid) -> bool:
+    """True when the rest pose looks toward +Z (VRM 1.0), from the hands and head."""
+    up = tuple(a - b for a, b in zip(rest_world[humanoid["head"]][0], rest_world[humanoid["hips"]][0]))
+    across = tuple(
+        a - b for a, b in zip(rest_world[humanoid["leftHand"]][0], rest_world[humanoid["rightHand"]][0])
+    )
+    # forward = across x up (left-to-right hand span crossed with up).
+    forward_z = across[0] * up[1] - across[1] * up[0]
+    return forward_z > 0.0
+
+
+def turn_roots_180(doc: Gltf) -> None:
+    """Yaw every root node 180 degrees about +Y (rotation and translation)."""
+    for index, node in enumerate(doc.nodes):
+        if index in doc.parent:
+            continue
+        translation, rotation = doc.rest_trs(index)
+        node["rotation"] = list(qnorm(qmul(YAW_180, rotation)))
+        if "translation" in node:
+            node["translation"] = list(qrot(YAW_180, translation))
+
+
 def retarget_avatar(src: SourceRig, source_clips, glb_path: Path, verbose=False):
     doc = Gltf.from_glb(glb_path)
     rollback_to_baseline(doc)
 
-    vrm = doc.js.get("extensions", {}).get("VRM")
-    if not vrm:
-        raise ValueError("no VRM extension (cannot resolve humanoid bone map)")
-    humanoid = {
-        b["bone"]: b["node"]
-        for b in vrm.get("humanoid", {}).get("humanBones", [])
-        if "bone" in b and "node" in b
-    }
-    for required in ("hips", "head", "leftHand", "leftUpperLeg"):
+    version, humanoid = humanoid_bone_map(doc.js)
+    required_bones = ("hips", "head", "leftHand", "leftUpperLeg")
+    if version == "vrm1":
+        required_bones += ("rightHand",)
+    for required in required_bones:
         if required not in humanoid:
             raise ValueError(f"humanoid map is missing required bone {required!r}")
+
+    if version == "vrm1" and rest_faces_plus_z(doc.world_pose(doc.rest_local_pose()), humanoid):
+        # Idempotent: a re-run sees a -Z rest and leaves the roots alone.
+        turn_roots_180(doc)
+        doc.js["asset"]["extras"][MARKER_KEY]["restYaw180"] = True
 
     mapping = build_bone_mapping(src, humanoid, len(doc.nodes))
     tgt_rest_world = doc.world_pose(doc.rest_local_pose())
