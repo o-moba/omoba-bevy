@@ -1928,3 +1928,71 @@ fn a_standing_remote_hero_idles_whatever_height_it_has_before_grounding() {
 fn class_of(kit: &shared::loadout::LoadoutState) -> shared::HeroClass {
     kit.recipe.as_ref().unwrap().core.class()
 }
+
+/// A VRM-tagged model whose rig is outside the runtime humanoid subset must keep
+/// its embedded (rendition-baked) clips instead of standing static.
+#[test]
+fn rejected_runtime_rig_falls_back_to_embedded_clips() {
+    use bevy::gltf::Gltf;
+    let mut app = App::new();
+    app.add_plugins((MinimalPlugins, AssetPlugin::default()))
+        .init_asset::<Gltf>()
+        .init_asset::<AnimationClip>()
+        .init_asset::<AnimationGraph>()
+        .init_resource::<PlayerAnimationLibrary>()
+        .init_resource::<crate::world::AvatarAssetCache>()
+        .init_resource::<crate::humanoid::HumanoidRuntimeLibrary>()
+        .add_systems(Update, super::animation::setup_player_animation_library);
+    // VRM 1.0 metadata without the required humanoid bones: the runtime rig rejects it.
+    let source = bevy::gltf::gltf::Gltf::from_slice(
+        br#"{"asset":{"version":"2.0"},"extensionsUsed":["VRMC_vrm"],
+            "extensions":{"VRMC_vrm":{"specVersion":"1.0","humanoid":{"humanBones":{}}}}}"#,
+    )
+    .expect("minimal glTF");
+    assert!(source.extension_value("VRMC_vrm").is_some());
+    let clip = |app: &mut App| {
+        app.world_mut()
+            .resource_mut::<Assets<AnimationClip>>()
+            .add(AnimationClip::default())
+    };
+    let named: Vec<_> = ["idle", "walk", "attack", "cast", "death"]
+        .into_iter()
+        .map(|name| (name, clip(&mut app)))
+        .collect();
+    let gltf = app.world_mut().resource_mut::<Assets<Gltf>>().add(Gltf {
+        scenes: vec![],
+        named_scenes: default(),
+        meshes: vec![],
+        named_meshes: default(),
+        materials: vec![],
+        named_materials: default(),
+        nodes: vec![],
+        named_nodes: default(),
+        skins: vec![],
+        named_skins: default(),
+        default_scene: None,
+        animations: named.iter().map(|(_, handle)| handle.clone()).collect(),
+        named_animations: named
+            .iter()
+            .map(|(name, handle)| ((*name).into(), handle.clone()))
+            .collect(),
+        source: Some(source),
+    });
+    app.world_mut().spawn((
+        Player,
+        NetworkCharacterChoice(CharacterChoice::Ipfs),
+        NetworkAvatar(Some("vrm1-rendition".into())),
+        crate::model_scale::ModelScaleSource {
+            gltf,
+            key: "vrm1-rendition".into(),
+        },
+    ));
+    app.update();
+    let library = app.world().resource::<PlayerAnimationLibrary>();
+    let set = library
+        .sets
+        .get(&AvatarKey::Roster("vrm1-rendition".into()))
+        .expect("embedded clips are used when the runtime rig is rejected");
+    assert!(!set.runtime);
+    assert!(set.attack_node.is_some() && set.cast_node.is_some() && set.death_node.is_some());
+}

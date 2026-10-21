@@ -413,7 +413,7 @@ fn blend_hero_animation(player: &mut AnimationPlayer, current: AnimationNodeInde
     }
 }
 
-fn setup_player_animation_library(
+pub(super) fn setup_player_animation_library(
     mut library: ResMut<PlayerAnimationLibrary>,
     cosmetics: Option<Res<crate::combat_visuals::CombatVisualRegistry>>,
     catalog: Option<Res<PlayerModelCatalog>>,
@@ -578,13 +578,18 @@ fn setup_player_animation_library(
                         "Shared humanoid motion ready for {:?}: Run = Sprint_Loop (runtime retarget)",
                         key
                     );
+                    continue;
                 }
                 Err(error) => {
-                    library.sets.remove(&key);
-                    warn!("Humanoid motion unavailable for {:?}: {}", key, error);
+                    // A VRM-tagged model outside the runtime rig subset keeps the
+                    // legacy path: its embedded (rendition-baked) clips, as the
+                    // avatar preview and party stage already do.
+                    warn!(
+                        "Humanoid motion unavailable for {:?}: {}; using embedded clips",
+                        key, error
+                    );
                 }
             }
-            continue;
         }
 
         let find_clip = |substrings: &[&str]| -> Option<(String, Handle<AnimationClip>)> {

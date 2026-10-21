@@ -5,6 +5,19 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- The Ekza rendition builder (`scripts/ekza_build_rendition.py`, profile
+  `desktop/humanoid-glb-v1`) now bakes idle/walk/attack/cast/death onto VRM 1.0
+  (`VRMC_vrm`) sources instead of failing with `build_failed: no VRM extension`.
+  VRM 1.0 thumbs follow the client runtime naming, and the rendition is turned to
+  rest facing -Z like VRM 0.x avatars. VRM 0.x renditions are byte-identical; a
+  model declaring both VRM versions is refused. The local import
+  (`scripts/convert_vrm_to_glb.py`) applies the same VRM 1.0 turn. The runtime
+  humanoid rig now requires uniform scale only on humanoid bones and their
+  ancestors (accessory nodes with exporter roundoff no longer reject an avatar),
+  and a VRM model whose runtime rig is rejected plays its embedded clips in matches
+  instead of standing static. See
+  [the session note](docs/progress/2026-10-22-vrm1-rendition.md).
+
 - Add a guarded DEV Account API host setup with persistent private credentials,
   a restricted HTTPS ingress and exact-revision activation after database migration.
 
