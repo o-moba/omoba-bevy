@@ -617,22 +617,39 @@ def turn_roots_180(doc: Gltf) -> None:
             node["translation"] = list(qrot(YAW_180, translation))
 
 
+FACING_MARKER_KEY = "omoba_rest_yaw180"
+
+
+def normalize_vrm1_rest_facing(doc: Gltf) -> bool:
+    """Turn a +Z-facing VRM 1.0 rest to face -Z like VRM 0.x; True when turned.
+
+    Shared by the rendition builder and the local VRM import. VRM 0.x documents
+    and rigs that already face -Z are left untouched, so the call is idempotent.
+    The turn is recorded as `asset.extras.omoba_rest_yaw180`.
+    """
+    version, humanoid = humanoid_bone_map(doc.js)
+    if version != "vrm1":
+        return False
+    for required in ("hips", "head", "leftHand", "rightHand"):
+        if required not in humanoid:
+            raise ValueError(f"humanoid map is missing required bone {required!r}")
+    if not rest_faces_plus_z(doc.world_pose(doc.rest_local_pose()), humanoid):
+        return False
+    turn_roots_180(doc)
+    doc.js.setdefault("asset", {}).setdefault("extras", {})[FACING_MARKER_KEY] = True
+    return True
+
+
 def retarget_avatar(src: SourceRig, source_clips, glb_path: Path, verbose=False):
     doc = Gltf.from_glb(glb_path)
     rollback_to_baseline(doc)
 
     version, humanoid = humanoid_bone_map(doc.js)
-    required_bones = ("hips", "head", "leftHand", "leftUpperLeg")
-    if version == "vrm1":
-        required_bones += ("rightHand",)
-    for required in required_bones:
+    for required in ("hips", "head", "leftHand", "leftUpperLeg"):
         if required not in humanoid:
             raise ValueError(f"humanoid map is missing required bone {required!r}")
-
-    if version == "vrm1" and rest_faces_plus_z(doc.world_pose(doc.rest_local_pose()), humanoid):
-        # Idempotent: a re-run sees a -Z rest and leaves the roots alone.
-        turn_roots_180(doc)
-        doc.js["asset"]["extras"][MARKER_KEY]["restYaw180"] = True
+    # VRM 1.0 only; a re-run sees a -Z rest and leaves the roots alone.
+    normalize_vrm1_rest_facing(doc)
 
     mapping = build_bone_mapping(src, humanoid, len(doc.nodes))
     tgt_rest_world = doc.world_pose(doc.rest_local_pose())

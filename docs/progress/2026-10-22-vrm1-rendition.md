@@ -13,8 +13,9 @@ so every VRM 1.0 upload failed with `build_failed: no VRM extension`.
   declaring both `VRM` and `VRMC_vrm` is refused, as in `passport::humanoid`.
 - VRM 1.0 rests facing +Z; the hero model forward and every VRM 0.x avatar is -Z.
   When a VRM 1.0 rest faces +Z (hands/head basis) the scene roots are turned 180°
-  about Y before baking, recorded as `asset.extras.omoba_retarget.restYaw180`. A
-  re-bake sees -Z and does not turn it again. VRM 0.x is never turned.
+  about Y before baking (shared helper `normalize_vrm1_rest_facing`, recorded as
+  `asset.extras.omoba_rest_yaw180`). A re-bake sees -Z and does not turn it again.
+  VRM 0.x is never turned.
 - Small robustness: the BIN appender tolerates documents with no accessor/bufferView
   arrays; `Gltf.from_glb_bytes`.
 - Tests in `scripts/test_ekza_build_rendition.py`: a Studio-shaped synthetic VRM 1.0
@@ -22,8 +23,25 @@ so every VRM 1.0 upload failed with `build_failed: no VRM extension`.
   shipped CC0 VRM 0.x avatar re-declared as VRM 1.0 and turned to +Z must bake the
   same per-node streams as its VRM 0.x original (within 1e-5); VRM 0.x roots are never
   turned; re-bake is byte-stable; conflicting declarations exit 2. A real VRM 1.0
-  export is exercised when `OMOBA_VRM1_SAMPLE` (default: the Ekza Animator
-  `seed-san.vrm` fixture, VRM Public License 1.0) exists; it is never copied here.
+  export is exercised when `OMOBA_VRM1_SAMPLE` (default: the Ekza Studio
+  `fixtures/models/seed-san.vrm`, VRM Public License 1.0) exists; it is never copied
+  here.
+
+## Follow-up in the same branch
+
+- `passport::humanoid`: positive, bounded scale is still required on every node, but
+  uniformity (1e-5) only on humanoid bones and their ancestors — the only nodes whose
+  scale the retargeter composes. Accessory/helper nodes keep their authored
+  transform in Bevy, so exporter roundoff (seed-san `bag_rope_L`
+  `[0.99975, 1, 0.99968]`) no longer rejects the avatar. Chosen over a looser global
+  tolerance because it keeps the check exact where it matters and ignores it where
+  nothing reads it.
+- `client/src/player/animation.rs`: when a VRM-tagged model's runtime rig is
+  rejected, the match path falls through to the embedded-clip (legacy) path instead
+  of leaving the hero static. The avatar preview and party stage already did this.
+- `scripts/convert_vrm_to_glb.py` (local import) applies the same VRM 1.0 turn via
+  the shared helper; VRM 0.x and already -Z files are copied byte for byte; a model
+  declaring both VRM versions fails without writing output.
 
 ## Checks
 
@@ -33,17 +51,14 @@ so every VRM 1.0 upload failed with `build_failed: no VRM extension`.
 - `seed-san.vrm` (VRM 1.0, 51 mapped bones) builds; world trajectories of walk left
   foot / attack right hand correlate 0.999 with a VRM 0.x avatar along Z.
 - `omoba_passport::validate_humanoid_profile` accepts the seed-san, synthetic and
-  re-declared VRM 1.0 renditions; `validate-runtime-vrm` accepts the synthetic and
-  re-declared ones.
+  re-declared VRM 1.0 renditions; after the follow-up `validate-runtime-vrm` accepts
+  all three plus the seed-san source.
+- Follow-up: `scripts/test_convert_vrm_to_glb.py` 5 tests OK;
+  `cargo test -p omoba-passport` OK (new scale-scope test);
+  `cargo test -p client --lib -- player:: humanoid::` 80 OK, including the fallback
+  test (fails when the old `continue` is restored) and a seed-san runtime retarget
+  test (skips without the sample); clippy `-D warnings` and rustfmt clean.
 
 ## Remaining risks
 
-- `validate-runtime-vrm` rejects seed-san (source and rendition) because a
-  non-humanoid node (`bag_rope_L`) has scale `[0.99975, 1, 0.99968]`, outside the
-  1e-5 uniform-scale tolerance. In the client a VRM-tagged model whose runtime rig
-  is rejected gets no animation set at all (`player/animation.rs` removes the set
-  and skips the embedded-clip path), so by code reading such a rendition would not animate in game
-  even though it passes `validate_humanoid_profile`.
-- The local clipless import path (`convert_vrm_to_glb.py`) does not turn VRM 1.0, so a
-  locally staged VRM 1.0 rests facing +Z in game.
-- Not visually checked in the native client.
+- Not visually checked in the native client (facing, fallback playback).

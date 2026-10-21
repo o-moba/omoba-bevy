@@ -27,12 +27,13 @@ ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts/ekza_build_rendition.py"
 # A shipped avatar keeps its VRM humanoid metadata, so it doubles as a real source.
 SOURCE = ROOT / "client/assets/avatars/anna.glb"
-# Optional real VRM 1.0 export (VRM Public License 1.0, credit required). It is
-# read in place and never copied into this repository; the test skips without it.
+# Optional real VRM 1.0 export (Ekza Studio fixture, VRM Public License 1.0, credit
+# required). It is read in place and never copied into this repository; the test
+# skips without it.
 SEED_SAN = Path(
     os.environ.get(
         "OMOBA_VRM1_SAMPLE",
-        Path.home() / "git/ekza/ekza-animator/fixtures/models/seed-san.vrm",
+        Path.home() / "git/ekza/ekza-studio/fixtures/models/seed-san.vrm",
     )
 )
 
@@ -255,7 +256,7 @@ class Vrm1Renditions(unittest.TestCase):
         # The rest now faces -Z: the character's left hand is at -X, like VRM 0.x.
         self.assertLess(world[bones["leftHand"]][0][0], -0.3)
         self.assertGreater(world[bones["rightHand"]][0][0], 0.3)
-        self.assertTrue(doc.js["asset"]["extras"]["omoba_retarget"]["restYaw180"])
+        self.assertTrue(doc.js["asset"]["extras"]["omoba_rest_yaw180"])
         # Only the scene roots were turned; child rest transforms are untouched.
         self.assertEqual(doc.nodes[bones["leftLowerArm"]]["rotation"], document["nodes"][bones["leftLowerArm"]]["rotation"])
         self.assertEqual(doc.nodes[bones["spine"]]["translation"], document["nodes"][bones["spine"]]["translation"])
@@ -306,7 +307,7 @@ class Vrm1Renditions(unittest.TestCase):
         source = retarget.Gltf.from_glb_bytes(SOURCE.read_bytes())
         doc = retarget.Gltf.from_glb_bytes(built)
         self.assertEqual(doc.nodes, source.nodes)
-        self.assertNotIn("restYaw180", doc.js["asset"]["extras"]["omoba_retarget"])
+        self.assertNotIn("omoba_rest_yaw180", doc.js["asset"]["extras"])
 
     @unittest.skipUnless(SEED_SAN.is_file(), "optional VRM 1.0 sample not present")
     def test_real_vrm1_export_builds(self) -> None:

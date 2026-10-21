@@ -392,3 +392,65 @@ fn nonunit_source_quaternions_are_rejected_instead_of_repaired_only_in_metadata(
         assert_eq!(rig.nodes[0].rotation, [0.0, 0.0, 0.0, 1.0]);
     }
 }
+
+#[test]
+fn uniform_scale_is_required_only_where_the_retargeter_reads_it() {
+    for version in [VrmVersion::Vrm0, VrmVersion::Vrm1] {
+        let base = fixture(version);
+        let hips = match version {
+            VrmVersion::Vrm0 => base["extensions"]["VRM"]["humanoid"]["humanBones"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|bone| bone["bone"] == "hips")
+                .unwrap()["node"]
+                .as_u64()
+                .unwrap() as usize,
+            VrmVersion::Vrm1 => {
+                base["extensions"]["VRMC_vrm"]["humanoid"]["humanBones"]["hips"]["node"]
+                    .as_u64()
+                    .unwrap() as usize
+            }
+        };
+        let with_leaf = |scale: Value| {
+            let mut d = base.clone();
+            let leaf = d["nodes"].as_array().unwrap().len();
+            d["nodes"]
+                .as_array_mut()
+                .unwrap()
+                .push(json!({"scale": scale}));
+            d["nodes"][hips]
+                .as_object_mut()
+                .unwrap()
+                .entry("children")
+                .or_insert_with(|| json!([]))
+                .as_array_mut()
+                .unwrap()
+                .push(json!(leaf));
+            d
+        };
+        // Exporter roundoff on an accessory leaf (a real VRM 1.0 bag strap).
+        let rig =
+            HumanoidRig::from_document(&with_leaf(json!([0.9997468, 0.9999999, 0.999677658])))
+                .expect("non-humanoid leaf roundoff is accepted");
+        assert_eq!(rig.nodes.last().unwrap().scale[1], 0.9999999);
+        HumanoidRig::from_document(&with_leaf(json!([1, 2, 1])))
+            .expect("non-humanoid leaves are rendered as authored");
+        error_contains(&with_leaf(json!([-1, 1, 1])), "positive uniform");
+        error_contains(&with_leaf(json!([0, 1, 1])), "positive uniform");
+
+        // A non-humanoid ancestor of the hips is load-bearing and stays strict.
+        let mut d = base.clone();
+        let root = d["nodes"].as_array().unwrap().len();
+        d["nodes"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({"children": [hips], "scale": [1.0, 1.001, 1.0]}));
+        let roots = d["scenes"][0]["nodes"].as_array_mut().unwrap();
+        roots.retain(|node| node.as_u64() != Some(hips as u64));
+        roots.push(json!(root));
+        error_contains(&d, "positive uniform");
+        d["nodes"][root]["scale"] = json!([1.001, 1.001, 1.001]);
+        HumanoidRig::from_document(&d).expect("uniform ancestor scale is accepted");
+    }
+}

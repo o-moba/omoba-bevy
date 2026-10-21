@@ -12,3 +12,13 @@ All criteria PASS (see evidence.json). Raw unittest output: raw-unittest.txt.
   source node scale (`bag_rope_L` [0.99975, 1, 0.99968]) — pre-existing limit.
 - AC6: both-extension model exits 2 `build_failed`.
 - Full `scripts` suite: 410 tests, 2 unrelated pre-existing local failures.
+
+## Follow-up (same branch)
+
+- FU1 passport: uniform scale only on humanoid bones + ancestors; seed-san source and
+  rendition now pass `validate-runtime-vrm`. PASS.
+- FU2 client: rejected runtime rig falls back to embedded clips in matches; ECS test
+  fails when the old `continue` is restored. PASS.
+- FU3 local import: shared VRM 1.0 turn, VRM 0.x byte-identical, idempotent. PASS.
+- Gates: clippy -D warnings, rustfmt, passport tests, client player::/humanoid:: (80),
+  scripts suite (same 2 unrelated local failures).
