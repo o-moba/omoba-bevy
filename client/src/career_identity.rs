@@ -756,6 +756,55 @@ mod tests {
     }
 
     #[test]
+    fn a_social_link_is_signed_by_the_active_key_for_one_enrollment() {
+        use ed25519_dalek::{Signature, VerifyingKey};
+        let identity = CareerIdentity {
+            key: Some(SigningKey::from_bytes(&[3; 32])),
+            ..default()
+        };
+        let pending = SigningKey::from_bytes(&[4; 32]);
+        let origin = "https://app.ru.omoba.io";
+        let enrollment = shared::device_account::DeviceEnrollment {
+            enrollment_id: "a".repeat(64),
+            public_key: hex(pending.verifying_key().as_bytes()),
+            origin: origin.into(),
+            label: "Desktop".into(), // i18n-allow
+            expires_at: "1200".into(),
+        };
+        let proof = identity
+            .sign_social_link(&enrollment, origin, 1000)
+            .unwrap();
+        assert_eq!(proof.link.public_key, identity.public_key().unwrap());
+        assert_eq!(proof.link.enrollment_key, enrollment.public_key);
+        let key = VerifyingKey::from_bytes(&decode_key(&proof.link.public_key).unwrap()).unwrap();
+        let mut signature = [0; 64];
+        for (i, byte) in signature.iter_mut().enumerate() {
+            *byte = u8::from_str_radix(&proof.signature[i * 2..i * 2 + 2], 16).unwrap();
+        }
+        key.verify_strict(
+            &proof.link.signing_bytes(),
+            &Signature::from_bytes(&signature),
+        )
+        .unwrap();
+        // Another portal, an expired request or a key without an identity is refused.
+        assert!(
+            identity
+                .sign_social_link(&enrollment, "https://evil.example", 1000)
+                .is_err()
+        );
+        assert!(
+            identity
+                .sign_social_link(&enrollment, origin, 1200)
+                .is_err()
+        );
+        assert!(
+            CareerIdentity::default()
+                .sign_social_link(&enrollment, origin, 1000)
+                .is_err()
+        );
+    }
+
+    #[test]
     fn key_survives_reopen_and_corruption_is_not_overwritten() {
         let directory = temporary_directory();
         let first = load_or_create_key(&directory).unwrap();
