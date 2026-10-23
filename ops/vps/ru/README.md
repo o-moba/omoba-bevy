@@ -47,6 +47,10 @@ with `OMOBA_MARKET=ru` (no Ekza, no payments, VK ID sign-in).
 - `journalctl -u omoba-lobby-ru -u omoba-account-api-ru`.
 - A real RU client: play a bot match, then Profile → «Войти через VK ID».
 
+Downloads on the portal: `make release-ru-publish` also writes
+`dist/v<version>-ru/releases.json` from the verified IPFS receipts; copy it to
+`/opt/omoba-ru/releases.json` and set `OMOBA_RELEASE_CATALOG` to it.
+
 Rollback: stop the units, point `current` at the previous release, start again.
 Never drop the database or delete match directories; back up with `pg_dump -Fc`
 before schema changes.

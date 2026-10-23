@@ -1371,6 +1371,53 @@ def command_preflight(args) -> int:
     return 0 if report["ready"] else 1
 
 
+CATALOG_PLATFORMS = {"macos": ("macos", "arm64"), "windows": ("windows", "x86_64"),
+                     "linux": ("linux", "x86_64"), "android": ("android", "universal")}
+CATALOG_INSTRUCTIONS = {
+    "ru": {"macos": "Распакуйте архив и перенесите Omoba.app в «Программы». Первый запуск: правый клик → Открыть.",
+           "windows": "Распакуйте архив целиком и запустите Omoba.exe. SmartScreen: «Подробнее» → «Выполнить в любом случае».",
+           "linux": "Распакуйте архив и запустите ./omoba.",
+           "android": "Разрешите установку из браузера или файлового менеджера и откройте APK."},
+}
+DEFAULT_INSTRUCTIONS = {"macos": "Unzip and move Omoba.app to Applications; first start: right-click -> Open.",
+                        "windows": "Unzip the whole folder and run Omoba.exe.",
+                        "linux": "Unpack and run ./omoba.",
+                        "android": "Allow installs from your browser or file manager, then open the APK."}
+
+
+def release_catalog(receipt: dict, version: str, market: str, published_at: str) -> dict:
+    """The Account API download catalog (OMOBA_RELEASE_CATALOG, account-api/README.md#downloads)
+    from `publish` receipts: only packages whose gateway bytes were verified."""
+    instructions = CATALOG_INSTRUCTIONS.get(market, DEFAULT_INSTRUCTIONS)
+    releases = []
+    for target, (platform_name, architecture) in CATALOG_PLATFORMS.items():
+        entry = receipt.get(target)
+        if not entry:
+            continue
+        if not str(entry["url"]).startswith("https://") or not re.fullmatch(r"[0-9a-f]{64}", entry["sha256"]):
+            raise SystemExit(f"{target}: receipt is not a verified https download")
+        releases.append({"platform": platform_name, "architecture": architecture, "version": version,
+                         "url": entry["url"], "sha256": entry["sha256"], "size_bytes": str(entry["bytes"]),
+                         "published_at": published_at, "instructions": instructions[target],
+                         "test_status": "playtest"})
+    return {"releases": releases}
+
+
+def command_catalog(args) -> int:
+    version = workspace_version()
+    out = dist_path(version, args.out, "prod", args.market)
+    receipt_path = out / "ipfs.json"
+    if not receipt_path.is_file():
+        raise SystemExit(f"{receipt_path} is missing: run `publish --market {args.market}` first")
+    published = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(receipt_path.stat().st_mtime))
+    catalog = release_catalog(json.loads(receipt_path.read_text()), version, args.market, published)
+    target = out / "releases.json"
+    target.write_text(json.dumps(catalog, indent=2, ensure_ascii=False) + "\n")
+    print(f"{target}: {len(catalog['releases'])} downloads; install it as the market Account API's "
+          "OMOBA_RELEASE_CATALOG (ops/vps/ru/README.md)")
+    return 0
+
+
 def command_notes(args) -> int:
     version = workspace_version()
     print(release_notes(version, (ROOT / "CHANGELOG.md").read_text()))
@@ -1470,6 +1517,9 @@ def main(argv=None) -> int:
     sub.add_parser("markets", help="print every market's features, servers and platforms")
     preflight = sub.add_parser("preflight", help="check that a market's servers answer (DNS, HTTPS health)")
     preflight.add_argument("--market", choices=tuple(MARKETS), default="ru")
+    catalog = sub.add_parser("catalog", help="write the Account API download catalog from publish receipts")
+    catalog.add_argument("--market", choices=tuple(MARKETS), default="ru")
+    catalog.add_argument("--out", type=Path)
     build = sub.add_parser("build", help="build platform packages into dist/v<version>/")
     build.add_argument("platform", choices=PLATFORMS + ("all",))
     build.add_argument("--server", help="initial game server host:port compiled into clients")
@@ -1514,7 +1564,7 @@ def main(argv=None) -> int:
         return 0
     return {"build": command_build, "notes": command_notes, "draft": command_draft, "ci": command_ci,
             "publish": command_publish, "markets": command_markets,
-            "preflight": command_preflight}[args.command](args)
+            "preflight": command_preflight, "catalog": command_catalog}[args.command](args)
 
 
 if __name__ == "__main__":

@@ -230,6 +230,7 @@ release-ru: ## RU market packages (macOS, Windows, Linux + RU Account API, Andro
 
 release-ru-publish: ## Pin dist/v<version>-ru/ packages to IPFS (needs PINATA_JWT)
 	OMOBA_ANDROID_UNIVERSAL=1 python3 scripts/release.py publish --market ru
+	python3 scripts/release.py catalog --market ru
 
 release-local: ## Build every package this computer can (macOS, iPhone archive, Linux via Docker, Android if SDK)
 	python3 scripts/release.py build all $(RELEASE_FLAGS)

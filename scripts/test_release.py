@@ -713,6 +713,19 @@ class Markets(unittest.TestCase):
         self.assertTrue(up["ready"])
         self.assertFalse(release.preflight_report("cn")["ready"])
 
+    def test_catalog_lists_only_verified_downloads_in_the_api_schema(self):
+        receipt = {"windows": {"file": "Omoba-0.45.0-ru-windows-x64.zip", "bytes": 123, "sha256": "a" * 64,
+                               "cid": "c", "url": "https://ekza.mypinata.cloud/ipfs/c/Omoba-0.45.0-ru-windows-x64.zip"}}
+        catalog = release.release_catalog(receipt, "0.45.0", "ru", "2026-10-23T00:00:00Z")
+        self.assertEqual(len(catalog["releases"]), 1)
+        entry = catalog["releases"][0]
+        self.assertEqual(set(entry), {"platform", "architecture", "version", "url", "sha256", "size_bytes",
+                                      "published_at", "instructions", "test_status"})
+        self.assertEqual((entry["platform"], entry["size_bytes"]), ("windows", "123"))
+        self.assertIn("Omoba.exe", entry["instructions"])
+        with self.assertRaises(SystemExit):
+            release.release_catalog({"linux": {**receipt["windows"], "url": "http://x/y"}}, "0.45.0", "ru", "t")
+
     def test_android_market_app_has_its_own_identity_and_endpoints(self):
         import importlib.util
         spec = importlib.util.spec_from_file_location("android_build", release.ROOT / "mobile/android/build.py")
