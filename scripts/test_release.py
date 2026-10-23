@@ -110,7 +110,8 @@ class ReleaseHelpers(unittest.TestCase):
                     mock.patch.object(release, "dist_dir", return_value=out), \
                     mock.patch.object(release, "pinata_pin", side_effect=AssertionError("re-pinned")):
                 self.assertEqual(release.command_publish(
-                    mock.Mock(out=None, gateway="https://g", contour="prod", dry_run=False)), 0)
+                    mock.Mock(out=None, gateway="https://g", contour="prod", market="global",
+                              dry_run=False)), 0)
 
 
     def test_android_package_name_follows_the_universal_switch(self):
@@ -526,7 +527,7 @@ exec "$DIR/Omoba.app/Contents/MacOS/server"
         from unittest import mock
 
         def args(**values):
-            base = dict(contour="prod", server=None, registry=None, ref=None, branch=None)
+            base = dict(contour="prod", market="global", server=None, registry=None, ref=None, branch=None)
             return mock.Mock(**{**base, **values})
 
         self.assertEqual(release.ci_command(args(), "0.24.0"),
@@ -610,6 +611,127 @@ exec "$DIR/Omoba.app/Contents/MacOS/server"
         # The pinned Ekza SDK reads EKZA_DEV_HTTP_HOST at compile time (src/registry.rs).
         self.assertTrue(release.is_build_time_env("EKZA_DEV_HTTP_HOST"))
         self.assertIn("ekza-bevy-sdk", (release.ROOT / "Cargo.toml").read_text())
+
+
+class Markets(unittest.TestCase):
+    def test_presets_mirror_the_rust_market_module(self):
+        import re
+        import markets
+        source = (release.ROOT / "shared/src/market.rs").read_text()
+        features = source[source.index("pub const fn default_features"):source.index("pub const fn default_locale")]
+        locales = source[source.index("pub const fn default_locale"):source.index("pub const fn storage_suffix")]
+        suffixes = source[source.index("pub const fn storage_suffix"):source.index("impl Features")]
+        names = {"global": "Global", "ru": "Ru", "cn": "Cn"}
+        self.assertEqual(set(names), set(markets.MARKETS))
+        for key, variant in names.items():
+            preset = markets.MARKETS[key]
+            arm = re.search(rf"Self::{variant} => Features \{{(.*?)\}}", features, re.S).group(1)
+            rust = {name: value == "true" for name, value in re.findall(r"(\w+): (true|false)", arm)}
+            self.assertEqual(rust, preset.features, key)
+            self.assertIn(f'Self::{variant} => "{preset.locale}"', locales)
+            expected = f'Some("{preset.storage_suffix}")' if preset.storage_suffix else "None"
+            self.assertIn(f"Self::{variant} => {expected}", suffixes)
+        for name, env in markets.FEATURE_ENVS.items():
+            self.assertIn(f'option_env!("{env}")', source, name)
+        self.assertIn('option_env!("OMOBA_MARKET")', source)
+
+    def test_ru_build_bakes_its_market_servers_folder_and_names(self):
+        ru = release.resolve_flavor(market="ru")
+        self.assertEqual((ru.server, ru.account_api, ru.portal),
+                         ("lobby.ru.omoba.io:4000", "https://account.ru.omoba.io", "https://app.ru.omoba.io"))
+        self.assertEqual((ru.registry, ru.passport), (None, None))
+        self.assertEqual(ru.config_dir, "omoba-bevy-ru")
+        self.assertEqual(ru.label, "-ru")
+        self.assertEqual(ru.bundle_id, "space.ekza.omoba.desktop.ru")
+        defaults = ru.client_defaults()
+        self.assertEqual(defaults["OMOBA_MARKET"], "ru")
+        self.assertEqual(defaults["OMOBA_DEFAULT_GAME_SERVER_ADDR"], "lobby.ru.omoba.io:4000")
+        self.assertNotIn("OMOBA_DEFAULT_REGISTRY_URL", defaults)
+        self.assertFalse(any(key.startswith("OMOBA_FEATURE_") for key in defaults))
+        self.assertEqual(release.artifact_name("0.45.0", "windows", "prod", "ru"), "Omoba-0.45.0-ru-windows-x64.zip")
+        self.assertEqual(release.dist_path("0.45.0", Path("/d"), "prod", "ru"), Path("/d/v0.45.0-ru"))
+        self.assertEqual(release.linux_binaries(ru), ("client", "server", "omoba-account-api"))
+        self.assertEqual(release.build_targets("all", ru, {p: True for p in release.PLATFORMS}),
+                         ["macos", "windows", "linux", "android"])
+        with self.assertRaises(SystemExit):
+            release.build_targets("ios", ru, {p: True for p in release.PLATFORMS})
+        # The global build is unchanged.
+        self.assertEqual(release.PROD.client_defaults(), {})
+        self.assertEqual(release.PROD.config_dir, "omoba-bevy")
+
+    def test_markets_never_cross_servers_and_overrides_are_explicit(self):
+        for bad in (dict(market="ru", registry="https://registry.ekza.io"),
+                    dict(market="ru", server="77.246.105.57:4000"),
+                    dict(server="lobby.ru.omoba.io:4000"),
+                    dict(market="ru", account_api="https://account.ru.omoba.io"),
+                    dict(market="cn"),
+                    dict(market="ru", contour="dev", account_api="https://a.example", portal="https://p.example"),
+                    dict(market="ru", portal="http://evil.example")):
+            with self.subTest(bad), self.assertRaises(SystemExit):
+                release.resolve_flavor(**bad)
+        on = release.resolve_flavor(market="ru", features={"ekza": True}, registry="https://registry.ekza.io")
+        self.assertEqual(on.client_defaults()["OMOBA_FEATURE_EKZA"], "on")
+        self.assertTrue(on.resolved_features["ekza"])
+        free_global = release.resolve_flavor(features={"supporter": False})
+        self.assertEqual(free_global.client_defaults(), {"OMOBA_FEATURE_SUPPORTER": "off"})
+        local = release.resolve_flavor(market="ru", server="127.0.0.1:4000",
+                                       account_api="http://127.0.0.1:40550", portal="http://127.0.0.1:3010")
+        self.assertEqual(local.client_defaults()["OMOBA_PORTAL_ORIGIN"], "http://127.0.0.1:3010")
+        import markets
+        self.assertEqual(markets.parse_feature_overrides(["ekza=on", "vk_sign_in=off"]),
+                         {"ekza": True, "vk_sign_in": False})
+        for bad in (["ekza"], ["ekza=yes"], ["wallet=on"], ["ekza=on", "ekza=off"]):
+            with self.subTest(bad), self.assertRaises(SystemExit):
+                markets.parse_feature_overrides(bad)
+
+    def test_ru_dev_is_the_dev_app_with_ru_features(self):
+        flavor = release.resolve_flavor("dev", market="ru")
+        self.assertEqual(flavor.config_dir, "omoba-bevy-ru-dev")
+        self.assertEqual(flavor.label, "-ru-dev")
+        defaults = flavor.client_defaults()
+        self.assertEqual(defaults["OMOBA_MARKET"], "ru")
+        self.assertEqual(defaults["OMOBA_DEFAULT_GAME_SERVER_ADDR"], release.DEV_LOBBY)
+        self.assertEqual(defaults["OMOBA_ACCOUNT_API_URL"], release.DEV_ACCOUNT_API)
+        self.assertNotIn("OMOBA_DEFAULT_REGISTRY_URL", defaults)
+
+    def test_market_releases_use_their_own_tag_and_stay_off_the_workflow(self):
+        from unittest import mock
+        self.assertEqual(release.release_tag("prod", None, "0.45.0", "ru"), "v0.45.0-ru")
+        for contour, tag in (("prod", "v0.45.0"), ("dev", None)):
+            with self.subTest(contour), self.assertRaises(SystemExit):
+                release.release_tag(contour, tag, "0.45.0", "ru")
+        with self.assertRaises(SystemExit):
+            release.ci_command(mock.Mock(contour="prod", market="ru", server=None, registry=None,
+                                         ref=None, branch=None), "0.45.0")
+
+    def test_preflight_reports_each_server(self):
+        down = release.preflight_report("ru", resolve=lambda host: (_ for _ in ()).throw(OSError()),
+                                        fetch=lambda url: 503)
+        self.assertFalse(down["ready"])
+        self.assertEqual(down["checks"]["account_api"]["url"], "https://account.ru.omoba.io/health/ready")
+        up = release.preflight_report("ru", resolve=lambda host: ["203.0.113.7"], fetch=lambda url: 200)
+        self.assertTrue(up["ready"])
+        self.assertFalse(release.preflight_report("cn")["ready"])
+
+    def test_android_market_app_has_its_own_identity_and_endpoints(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("android_build", release.ROOT / "mobile/android/build.py")
+        build = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(build)
+        self.assertEqual(build.identity_for("prod", "ru"), ("space.ekza.omoba.ru", "OMOBA"))
+        self.assertEqual(build.identity_for("dev", "ru"), ("space.ekza.omoba.dev", "OMOBA Dev"))
+        self.assertEqual(build.identity_for(), ("space.ekza.omoba.beta", "Omoba Beta"))
+        self.assertEqual(build.apk_name("0.45.0", "arm64", "prod", "ru"), "omoba-0.45.0-ru-android-arm64-debug.apk")
+        env = build.contour_env({"OMOBA_DEFAULT_CONFIG_DIR_SUFFIX": "x"}, "prod", None, "ru")
+        self.assertEqual((env["OMOBA_MARKET"], env["OMOBA_DEFAULT_GAME_SERVER_ADDR"], env["OMOBA_PORTAL_ORIGIN"]),
+                         ("ru", "lobby.ru.omoba.io:4000", "https://app.ru.omoba.io"))
+        self.assertNotIn("OMOBA_DEFAULT_CONFIG_DIR_SUFFIX", env)
+        with self.assertRaises(RuntimeError):
+            build.contour_env({"OMOBA_MARKET": "cn"}, "prod", None, "ru")
+        manifest = build.manifest_for(
+            (release.ROOT / "mobile/android/AndroidManifest.xml").read_text(), "0.45.0", 7, "prod", "ru")
+        self.assertIn('package="space.ekza.omoba.ru"', manifest)
+        self.assertIn('android:label="OMOBA"', manifest)
 
 
 if __name__ == "__main__":

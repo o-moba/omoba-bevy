@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 
-.PHONY: compatibility-manifest compatibility-check help server server-dev practice practice-server game game2d start start-release play play-bots bots stop restart verify-task-12 verify-gameplay iphone-check iphone iphone-box android-check android android-universal check fmt fmt-check lint check-no-qa test test-scripts test-postgres release-check release-all release-publish release-local release-mac release-linux release-android release-ios release-testflight release-ci release-draft release-notes release-dev showcase demo-video trailer-clips sdk-pin-check
+.PHONY: compatibility-manifest compatibility-check help server server-dev practice practice-server game game2d start start-release play play-bots bots stop restart verify-task-12 verify-gameplay iphone-check iphone iphone-box android-check android android-universal check fmt fmt-check lint check-no-qa test test-scripts test-postgres release-check release-all release-publish release-local release-mac release-linux release-android release-ios release-testflight release-ci release-draft release-notes release-dev release-markets release-ru release-ru-preflight release-ru-publish showcase demo-video trailer-clips sdk-pin-check
 
 # ---------------------------------------------------------------------------
 # Match modes (TASK-22)
@@ -215,6 +215,21 @@ release-all: ## All five platforms on this Mac for PROD_SERVER into dist/v<versi
 
 release-publish: ## Pin dist/v<version>/ packages to IPFS (needs PINATA_JWT) and verify the downloads
 	OMOBA_ANDROID_UNIVERSAL=1 python3 scripts/release.py publish
+
+# Market builds (docs/markets.md): one market per package set, own servers,
+# settings folder and package names. RU = free game, no Ekza, VK ID sign-in.
+release-markets: ## Print every market's features, servers and platforms
+	python3 scripts/release.py markets
+
+release-ru-preflight: ## Check that the RU lobby, Account API and portal answer
+	python3 scripts/release.py preflight --market ru
+
+release-ru: ## RU market packages (macOS, Windows, Linux + RU Account API, Android) into dist/v<version>-ru/
+	OMOBA_ANDROID_UNIVERSAL=1 python3 scripts/release.py check
+	OMOBA_ANDROID_UNIVERSAL=1 python3 scripts/release.py build all --market ru $(RELEASE_FLAGS)
+
+release-ru-publish: ## Pin dist/v<version>-ru/ packages to IPFS (needs PINATA_JWT)
+	OMOBA_ANDROID_UNIVERSAL=1 python3 scripts/release.py publish --market ru
 
 release-local: ## Build every package this computer can (macOS, iPhone archive, Linux via Docker, Android if SDK)
 	python3 scripts/release.py build all $(RELEASE_FLAGS)
