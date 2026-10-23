@@ -21,6 +21,7 @@ pub mod jungle;
 pub mod live_score;
 pub mod loadout;
 pub mod map;
+pub mod market;
 pub mod match_service;
 pub mod math;
 pub mod navigation;

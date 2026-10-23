@@ -85,7 +85,16 @@ async fn render(app: &App, row: &PgRow) -> Result<Value> {
         }
         None => None,
     };
-    Ok(json!({"state":row_text(row,"state")?,"profile_id":profile,"nickname":nickname,"code":null}))
+    let mut value = json!({"state":row_text(row,"state")?,"profile_id":profile,"nickname":nickname,"code":null});
+    // A pending enrollment a website VK sign-in was offered to waits for the game
+    // to link that sign-in (`POST /v1/auth/social/link`).
+    if row_text(row, "state")? == "pending"
+        && let Some(social) = social::pending(app, &row_text(row, "enrollment_id")?).await?
+    {
+        value["state"] = json!("social_pending");
+        value["social"] = social;
+    }
+    Ok(value)
 }
 pub async fn create(app: &App, body: &[u8]) -> Result<Value> {
     let p = proof(app, body, DeviceAction::Create)?;

@@ -3589,6 +3589,7 @@ mod tests {
                 code: Some("ABCDEFGH".into()),
                 profile_id: None,
                 nickname: None,
+                social: None,
             });
             career.devices.focused = true;
         }

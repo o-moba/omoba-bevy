@@ -26,7 +26,7 @@ pub async fn me(app: &App, s: &Session) -> Result<Value> {
         .await
         .map_err(game_error)?;
     Ok(
-        json!({"profile":profile_dto(&profile),"settings":settings(app,&s.profile_id).await?,"rules":{"newcomer_matches":shared::career::NEWCOMER_MATCHES},"session":{"session_id":s.session_id}}),
+        json!({"profile":profile_dto(&profile),"settings":settings(app,&s.profile_id).await?,"rules":{"newcomer_matches":shared::career::NEWCOMER_MATCHES},"session":{"session_id":s.session_id},"social":social::linked(app,&s.profile_id).await?}),
     )
 }
 pub async fn player(app: &App, s: Option<&Session>, id: &str) -> Result<Value> {
