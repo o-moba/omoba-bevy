@@ -1,6 +1,8 @@
 //! Bounded native account enrollment transport. HTTPS policy matches web pairing.
 use crate::web_account::WebAccountApi;
-use shared::device_account::{DeviceAction, DeviceEnrollmentStatus, SignedDeviceEnrollment};
+use shared::device_account::{
+    DeviceAction, DeviceEnrollmentStatus, SignedDeviceEnrollment, SignedSocialLink,
+};
 
 pub struct DeviceAccountApi {
     inner: WebAccountApi,
@@ -33,5 +35,53 @@ impl DeviceAccountApi {
             path,
             serde_json::to_value(proof).map_err(|_| "Invalid device request.")?,
         )
+    }
+    /// Link the website sign-in waiting on an enrollment to this game's profile.
+    pub fn link_social(&self, proof: &SignedSocialLink) -> Result<DeviceEnrollmentStatus, String> {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(|_| "Invalid system clock.")?
+            .as_secs();
+        proof
+            .link
+            .validate(self.origin(), now)
+            .map_err(str::to_owned)?;
+        self.inner.request(
+            "v1/auth/social/link",
+            serde_json::to_value(proof).map_err(|_| "Invalid sign-in link.")?,
+        )
+    }
+    /// The portal page that signs the player in for an enrollment code (`/connect`).
+    pub fn sign_in_url(&self, code: &str) -> Result<String, String> {
+        sign_in_url(self.origin(), code)
+    }
+}
+
+/// `{portal}/connect?code=CODE` for an eight-character enrollment code.
+pub fn sign_in_url(origin: &str, code: &str) -> Result<String, String> {
+    if code.len() != 8
+        || !code
+            .bytes()
+            .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit())
+    {
+        return Err("Invalid device code.".into());
+    }
+    Ok(format!("{origin}/connect?code={code}"))
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn sign_in_urls_carry_only_a_well_formed_code() {
+        assert_eq!(
+            super::sign_in_url("https://app.ru.omoba.io", "ABCD2345").unwrap(),
+            "https://app.ru.omoba.io/connect?code=ABCD2345"
+        );
+        for bad in ["abcd2345", "ABCD234", "ABCD23456", "ABCD&x=1", "ABCD 234"] {
+            assert!(
+                super::sign_in_url("https://app.ru.omoba.io", bad).is_err(),
+                "{bad}"
+            );
+        }
     }
 }

@@ -488,6 +488,10 @@ enum Action {
     DevicesRecoveryEdit,
     DevicesRecover,
     DevicesConfirm,
+    /// Sign in with VK ID: a device request whose code opens the portal in a browser.
+    SocialStart,
+    /// Link the waiting VK sign-in to this game profile.
+    SocialLink,
     WebOpen,
     WebEdit,
     WebLookup,
@@ -707,7 +711,9 @@ fn actions(
             | Action::DevicesPoll
             | Action::DevicesRecoveryEdit
             | Action::DevicesRecover
-            | Action::DevicesConfirm => {}
+            | Action::DevicesConfirm
+            | Action::SocialStart
+            | Action::SocialLink => {}
             Action::WebOpen
             | Action::WebEdit
             | Action::WebLookup
@@ -1686,6 +1692,14 @@ fn profile_body(parent: &mut ChildSpawnerCommands, career: &CareerClient) {
             ..default()
         })
         .with_children(|row| {
+            if devices::vk_button_visible(shared::market::FEATURES) {
+                button(
+                    row,
+                    tr("devices.button.vk"),
+                    Action::SocialStart,
+                    "CareerVkSignIn",
+                );
+            }
             button(
                 row,
                 tr("career.button.devices"),

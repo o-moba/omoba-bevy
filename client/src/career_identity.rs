@@ -311,6 +311,22 @@ impl CareerIdentity {
         Ok(shared::supporter::SignedNativeSupporterRequest { request, signature })
     }
 
+    /// Only the typed link of a pending enrollment's website sign-in is signed.
+    pub(crate) fn sign_social_link(
+        &self,
+        enrollment: &shared::device_account::DeviceEnrollment,
+        trusted_origin: &str,
+        now_secs: u64,
+    ) -> Result<shared::device_account::SignedSocialLink, String> {
+        let link =
+            shared::device_account::SocialLink::for_enrollment(enrollment, self.public_key()?);
+        link.validate(trusted_origin, now_secs)
+            .map_err(str::to_owned)?;
+        let key = self.key.as_ref().ok_or(tr("identity.not_ready"))?;
+        let signature = hex(&key.sign(&link.signing_bytes()).to_bytes());
+        Ok(shared::device_account::SignedSocialLink { link, signature })
+    }
+
     pub(crate) fn enrollment_directory(&self) -> Result<PathBuf, String> {
         self.directory
             .as_ref()

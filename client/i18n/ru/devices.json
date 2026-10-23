@@ -23,5 +23,15 @@
   "devices.error.preserve_key": "Не удается сохранить ключ ранее связанного устройства.",
   "devices.error.approve_first": "Сначала подтвердите это устройство в портале.",
   "devices.error.stopped": "Запрос устройства остановлен. Повторите попытку безопасно.",
-  "devices.error.enrollment_missing": "Отсутствует регистрация."
+  "devices.error.enrollment_missing": "Отсутствует регистрация.",
+  "devices.button.vk": "Войти через VK ID",
+  "devices.button.vk_link": "Привязать VK к профилю",
+  "devices.vk.waiting": "Войдите через VK, OK или Mail.ru в браузере. Это окно обновится само; запрос действует пять минут.",
+  "devices.vk.opened": "Страница входа открыта в браузере.",
+  "devices.vk.open_manually": "Откройте {url} в браузере, чтобы войти.",
+  "devices.vk.link_prompt": "Привязать вход через VK «{name}» к этому игровому профилю ({profile})? После этого VK входит в аккаунт на сайте и на других устройствах.",
+  "devices.vk.linked": "VK привязан к этому профилю.",
+  "devices.vk.same_account": "Это устройство уже играет за этот аккаунт.",
+  "devices.vk.expired": "Запрос входа истёк. Нажмите «Войти через VK ID» ещё раз.",
+  "devices.vk.this_profile": "этот профиль"
 }
