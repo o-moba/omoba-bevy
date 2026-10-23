@@ -505,3 +505,118 @@ async fn social_sign_in_works_with_the_restricted_portal_role() {
         );
     }
 }
+
+async fn http(
+    app: &App,
+    method: &str,
+    path: &str,
+    token: Option<&str>,
+    body: Value,
+) -> (StatusCode, Value) {
+    use axum::body::{Body, to_bytes};
+    use tower::ServiceExt;
+    let mut request = axum::http::Request::builder().method(method).uri(path);
+    if let Some(token) = token {
+        request = request.header("authorization", format!("Bearer {token}"));
+    }
+    let mut request = request
+        .body(Body::from(serde_json::to_vec(&body).unwrap()))
+        .unwrap();
+    request.extensions_mut().insert(axum::extract::ConnectInfo(
+        "127.0.0.1:42124".parse::<std::net::SocketAddr>().unwrap(),
+    ));
+    let response = router(app.clone()).oneshot(request).await.unwrap();
+    let status = response.status();
+    let bytes = to_bytes(response.into_body(), 65536).await.unwrap();
+    (status, serde_json::from_slice(&bytes).unwrap())
+}
+
+#[tokio::test]
+#[ignore = "requires isolated owner OMOBA_PORTAL_TEST_DATABASE_URL"]
+async fn social_routes_are_served_over_http_and_unlink_needs_a_session() {
+    let app = app().await;
+    let active = random_key();
+    let profile = app
+        .career
+        .authenticate(&public(&active), "Http")
+        .await
+        .unwrap();
+    let user = vk_user();
+    let (status, first) = http(
+        &app,
+        "POST",
+        "/v1/auth/social/vk",
+        None,
+        serde_json::from_slice(&callback(&format!("user-{user}"))).unwrap(),
+    )
+    .await;
+    assert_eq!(
+        (status, &first["state"]),
+        (StatusCode::OK, &json!("unlinked"))
+    );
+    let ticket = first["social_ticket"].clone();
+    let (status, named) = http(
+        &app,
+        "POST",
+        "/v1/auth/social/ticket",
+        None,
+        json!({"social_ticket":ticket}),
+    )
+    .await;
+    assert_eq!(
+        (status, &named["display_name"]),
+        (StatusCode::OK, &json!("Иван П."))
+    );
+    let (_, e, code) = game_request(&app).await;
+    let (status, _) = http(
+        &app,
+        "POST",
+        "/v1/auth/social/attach",
+        None,
+        json!({"code":code,"social_ticket":ticket}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, linked) = http(
+        &app,
+        "POST",
+        "/v1/auth/social/link",
+        None,
+        serde_json::from_slice(&link(&active, &e)).unwrap(),
+    )
+    .await;
+    assert_eq!(
+        (status, &linked["profile_id"]),
+        (StatusCode::OK, &json!(profile.profile_id))
+    );
+    let (_, signed_in) = http(
+        &app,
+        "POST",
+        "/v1/auth/social/vk",
+        None,
+        serde_json::from_slice(&callback(&format!("user-{user}"))).unwrap(),
+    )
+    .await;
+    let token = signed_in["session_token"].as_str().unwrap().to_owned();
+    let (status, me) = http(&app, "GET", "/v1/me", Some(&token), json!(null)).await;
+    assert_eq!(
+        (status, &me["social"][0]["provider"]),
+        (StatusCode::OK, &json!("vk"))
+    );
+    let (status, _) = http(&app, "DELETE", "/v1/me/social/vk", None, json!(null)).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    let (status, unlinked) = http(
+        &app,
+        "DELETE",
+        "/v1/me/social/vk",
+        Some(&token),
+        json!(null),
+    )
+    .await;
+    assert_eq!(
+        (status, &unlinked["status"]),
+        (StatusCode::OK, &json!("unlinked"))
+    );
+    let (status, _) = http(&app, "POST", "/v1/auth/social/unknown", None, json!({})).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}

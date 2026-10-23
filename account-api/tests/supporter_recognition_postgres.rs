@@ -154,7 +154,7 @@ async fn recognition_migration_keeps_existing_and_new_preferences_private() {
             .fetch_all(&mut *tx)
             .await
             .unwrap();
-    assert_eq!(versions, [1, 2, 3, 4, 5, 6]);
+    assert_eq!(versions, omoba_account_api::PORTAL_SCHEMA);
     tx.rollback().await.unwrap();
 }
 
