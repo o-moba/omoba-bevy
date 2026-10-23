@@ -795,23 +795,33 @@ fn spawn_connection_panel(root: &mut ChildSpawnerCommands, view: &PanelView, ani
 
 /// Where a built-in profile points: lobby, registry, market, Studio, passport.
 fn spawn_details(body: &mut ChildSpawnerCommands, profile: &ConnectionProfile) {
-    let passport = if profile.passport_closed() {
-        tr("connection.passport.closed").to_owned()
-    } else {
-        profile.passport.clone()
-    };
-    for (key, value) in [
-        ("connection.detail.lobby", profile.lobby.as_str()),
-        ("connection.detail.registry", profile.registry.as_str()),
-        ("connection.detail.market", profile.market.as_str()),
-        ("connection.detail.studio", profile.studio.as_str()),
-        ("connection.detail.passport", passport.as_str()),
-    ] {
+    for (key, value) in detail_rows(profile, shared::market::FEATURES.ekza) {
         body.spawn(caption(
             Localized::with_args(key, [("value", &value)]),
             color::TEXT_SECONDARY,
         ));
     }
+}
+
+/// The detail lines (dictionary key, value) of `profile`; a build without
+/// Ekza has only its lobby to show.
+fn detail_rows(profile: &ConnectionProfile, ekza: bool) -> Vec<(&'static str, String)> {
+    let mut rows = vec![("connection.detail.lobby", profile.lobby.clone())];
+    if !ekza {
+        return rows;
+    }
+    let passport = if profile.passport_closed() {
+        tr("connection.passport.closed").to_owned()
+    } else {
+        profile.passport.clone()
+    };
+    rows.extend([
+        ("connection.detail.registry", profile.registry.clone()),
+        ("connection.detail.market", profile.market.clone()),
+        ("connection.detail.studio", profile.studio.clone()),
+        ("connection.detail.passport", passport),
+    ]);
+    rows
 }
 
 /// The custom lobby and registry fields (kit text inputs; the selected one is
@@ -1318,6 +1328,32 @@ mod tests {
         ));
         std::fs::create_dir_all(&directory).unwrap();
         directory.join(crate::connection_profile::SELECTION_FILE)
+    }
+
+    #[test]
+    fn connection_details_name_ekza_endpoints_only_in_an_ekza_build() {
+        use shared::market::Market;
+        let profile =
+            crate::connection_profile::ActiveConnection::for_contour(Some("dev"), None).profile;
+        let keys = |market: Market| -> Vec<&str> {
+            detail_rows(&profile, market.default_features().ekza)
+                .into_iter()
+                .map(|(key, _)| key)
+                .collect()
+        };
+        assert_eq!(
+            keys(Market::Global),
+            [
+                "connection.detail.lobby",
+                "connection.detail.registry",
+                "connection.detail.market",
+                "connection.detail.studio",
+                "connection.detail.passport"
+            ]
+        );
+        for market in [Market::Ru, Market::Cn] {
+            assert_eq!(keys(market), ["connection.detail.lobby"]);
+        }
     }
 
     fn press(app: &mut App, action: PhoneAction) {

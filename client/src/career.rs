@@ -693,6 +693,8 @@ fn actions(
         web::act(action, &mut career, &identity, &mut web_worker);
         devices::act(action, &mut career, &identity, &mut device_worker);
         match action {
+            // A build without Supporter has no panel to open.
+            Action::Supporter if !shared::market::FEATURES.supporter => {}
             Action::Supporter => {
                 career.close();
                 if let Some(state) = supporter.as_deref_mut() {
@@ -1686,25 +1688,31 @@ fn profile_body(parent: &mut ChildSpawnerCommands, career: &CareerClient) {
             ..default()
         })
         .with_children(|row| {
-            button(
-                row,
-                tr("career.button.devices"),
-                Action::DevicesOpen,
-                "CareerDevices",
-            );
-            button(
-                row,
-                tr("career.button.website"),
-                Action::WebOpen,
-                "CareerWebsite",
-            );
-            button(
-                row,
-                tr("career.button.supporter"),
-                Action::Supporter,
-                "CareerSupporter",
-            );
+            for (key, action, name) in account_links(shared::market::FEATURES.supporter) {
+                button(row, tr(key), action, name);
+            }
         });
+}
+
+/// The account row under the profile: devices, the website and, in a build
+/// that sells Supporter, "Support OMOBA".
+fn account_links(supporter: bool) -> Vec<(&'static str, Action, &'static str)> {
+    let mut links = vec![
+        (
+            "career.button.devices",
+            Action::DevicesOpen,
+            "CareerDevices",
+        ),
+        ("career.button.website", Action::WebOpen, "CareerWebsite"),
+    ];
+    if supporter {
+        links.push((
+            "career.button.supporter",
+            Action::Supporter,
+            "CareerSupporter",
+        ));
+    }
+    links
 }
 
 fn friend_code_label(parent: &mut ChildSpawnerCommands, handle: &str) {
@@ -2667,6 +2675,24 @@ fn render(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_a_build_that_sells_supporter_offers_support_omoba() {
+        use shared::market::Market;
+        let names = |market: Market| -> Vec<&str> {
+            account_links(market.default_features().supporter)
+                .into_iter()
+                .map(|(_, _, name)| name)
+                .collect()
+        };
+        assert_eq!(
+            names(Market::Global),
+            ["CareerDevices", "CareerWebsite", "CareerSupporter"]
+        );
+        for market in [Market::Ru, Market::Cn] {
+            assert_eq!(names(market), ["CareerDevices", "CareerWebsite"]);
+        }
+    }
 
     /// O11: a store avatar's portrait resolves through the passport path
     /// (`ekza://avatars/...`), not a bundled `avatars/` file.

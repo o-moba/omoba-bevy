@@ -20,6 +20,11 @@
 //! caches and match-resume hint in `profiles/<key>/` of the settings folder
 //! ([`profile_file`]); production keeps them in the settings folder itself.
 //! Graphics, audio, language and the career identity stay shared.
+//!
+//! A build without Ekza (`shared::market::FEATURES.ekza` off, the free RU/CN
+//! markets) runs every profile with the closed loopback registry and passport,
+//! no market and no Studio ([`for_market`]), and takes no desktop registry or
+//! passport override: no Ekza host is ever contacted.
 // i18n-strict
 use std::io;
 use std::path::{Path, PathBuf};
@@ -42,6 +47,9 @@ pub(crate) const STORE_DIR: &str = "ekza-store";
 /// A closed loopback port: wallet pairing and purchased-avatar tickets fail
 /// closed instead of reaching the production passport.
 pub(crate) const CLOSED_PASSPORT: &str = "http://127.0.0.1:9/api/passport";
+/// The same closed port as the registry of a build without Ekza: a store or
+/// account call that slipped past the gates fails at once on this computer.
+pub(crate) const CLOSED_REGISTRY: &str = "http://127.0.0.1:9";
 pub(crate) const LOCAL_REGISTRY: &str = "http://127.0.0.1:8018";
 const LOCAL_MARKET: &str = "127.0.0.1:3010/market";
 const LOCAL_STUDIO: &str = "127.0.0.1:5188/studio";
@@ -291,6 +299,22 @@ pub(crate) fn custom_profile(
     })
 }
 
+/// `profile` as a build with `ekza` runs it: unchanged with Ekza; without it
+/// the closed registry and passport and no market or Studio. The lobby and the
+/// profile's folder stay.
+pub(crate) fn for_market(profile: ConnectionProfile, ekza: bool) -> ConnectionProfile {
+    if ekza {
+        return profile;
+    }
+    ConnectionProfile {
+        registry: CLOSED_REGISTRY.to_owned(),
+        passport: CLOSED_PASSPORT.to_owned(),
+        market: String::new(),
+        studio: String::new(),
+        ..profile
+    }
+}
+
 /// A built-in profile of `contour` (production, dev or local); none for custom
 /// or for a profile the contour does not offer.
 pub(crate) fn builtin_profile(
@@ -501,7 +525,10 @@ fn saved_choice(path: Option<&Path>) -> Option<Selection> {
 pub(crate) fn active() -> &'static ConnectionProfile {
     ACTIVE.get_or_init(|| {
         let saved = saved_choice(selection_path().as_deref());
-        resolve(BUILD_CONTOUR, saved.as_ref(), &COMPILED)
+        for_market(
+            resolve(BUILD_CONTOUR, saved.as_ref(), &COMPILED),
+            shared::market::FEATURES.ekza,
+        )
     })
 }
 
@@ -535,15 +562,20 @@ pub(crate) fn override_allowed(contour: Option<&str>, url: &str) -> bool {
 }
 
 /// The first set desktop override among `keys` that this build accepts
-/// ([`override_allowed`]); a refused one is reported and ignored.
-fn endpoint_override(keys: &[&str]) -> Option<String> {
+/// ([`override_allowed`]); a refused one is reported and ignored. A build
+/// without Ekza takes none: these are all Ekza endpoints.
+fn endpoint_override(keys: &[&str], ekza: bool) -> Option<String> {
     let (key, value) = keys
         .iter()
         .find_map(|key| desktop_override(key).map(|value| (*key, value)))?;
+    // Before the app (and its logger) exists.
+    if !ekza {
+        eprintln!("Ignoring {key}: this build has no Ekza services");
+        return None;
+    }
     if override_allowed(BUILD_CONTOUR, &value) {
         return Some(value);
     }
-    // Before the app (and its logger) exists.
     eprintln!("Ignoring {key}: this test build never uses a production endpoint");
     None
 }
@@ -559,13 +591,17 @@ pub(crate) fn install() -> &'static ConnectionProfile {
     {
         eprintln!("Moved the Ekza store into {}", profile.storage.display());
     }
-    let registry = endpoint_override(&[omoba_passport::store::REGISTRY_URL_ENV])
+    let ekza = shared::market::FEATURES.ekza;
+    let registry = endpoint_override(&[omoba_passport::store::REGISTRY_URL_ENV], ekza)
         .unwrap_or_else(|| profile.registry.clone());
     omoba_passport::community::set_registry_url(registry);
-    let passport = endpoint_override(&[
-        omoba_passport::PASSPORT_URL_ENV,
-        ekza_bevy_sdk::passport::client::PASSPORT_URL_ENV,
-    ])
+    let passport = endpoint_override(
+        &[
+            omoba_passport::PASSPORT_URL_ENV,
+            ekza_bevy_sdk::passport::client::PASSPORT_URL_ENV,
+        ],
+        ekza,
+    )
     .unwrap_or_else(|| profile.passport.clone());
     omoba_passport::set_passport_url(passport);
     // Before the app (and its logger) exists, like the roster summary.
@@ -657,6 +693,7 @@ impl ActiveConnection {
                 builtin_profile(contour, id, &self.compiled).ok_or(ProfileError::Production)
             }
         }
+        .map(|profile| for_market(profile, shared::market::FEATURES.ekza))
     }
 
     /// Saves `profile` as the choice for the next start. Choosing the running
@@ -747,6 +784,37 @@ mod tests {
         let own = resolve(None, None, &compiled);
         assert_eq!(own.lobby, "play.example.org:4000");
         assert_eq!(own.registry, "https://registry.example.org");
+    }
+
+    #[test]
+    fn a_build_without_ekza_closes_every_ekza_endpoint_of_every_profile() {
+        use shared::market::Market;
+        let production = resolve(None, None, &Compiled::default());
+        let ekza = Market::Global.default_features().ekza;
+        assert_eq!(for_market(production.clone(), ekza), production);
+        let profiles = [
+            production,
+            resolve(Some("dev"), None, &DEV_BUILD),
+            local_profile(),
+            custom_profile(
+                "dev",
+                &custom("192.168.1.20:4000", Some("https://registry.lan.example")),
+                &DEV_BUILD,
+            )
+            .unwrap(),
+        ];
+        for market in [Market::Ru, Market::Cn] {
+            for profile in &profiles {
+                let free = for_market(profile.clone(), market.default_features().ekza);
+                assert_eq!(free.registry, CLOSED_REGISTRY, "{:?}", profile.id);
+                assert!(free.passport_closed());
+                assert!(free.market.is_empty() && free.studio.is_empty());
+                // The lobby and the profile's own folder are not Ekza's.
+                assert_eq!((free.id, &free.lobby), (profile.id, &profile.lobby));
+                assert_eq!(free.storage, profile.storage);
+            }
+        }
+        assert!(CLOSED_PASSPORT.starts_with(CLOSED_REGISTRY));
     }
 
     #[test]

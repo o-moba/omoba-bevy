@@ -456,6 +456,18 @@ This is a lightweight Bevy mesh/material particle foundation, without an extra
 GPU particle plugin or dynamic lights. Phone performance still needs device QA.
 These source changes are newer than TestFlight 0.20.0 (4).
 
+## Market builds
+
+One build serves one market (`shared/src/market.rs`). The global build is the
+full product. A free-market build (`OMOBA_MARKET=ru` or `cn`) ships the same
+heroes, packaged avatars, weapons and gameplay without the Ekza ecosystem and
+without purchases: no Ekza store, account link, wallet pairing, Studio tab or
+section, Ekza weapon library or catalogue, market hint, community sculpture or
+"Support OMOBA"; its client pins closed loopback Ekza endpoints and its server
+denies every hosted avatar or weapon. It opens in the market's language and keeps
+its settings in `omoba-bevy-<market>[-<contour>]`. The Home build line names the
+market (`· ru`); the startup log prints the full feature set.
+
 ## Shared accounts and Hero Supporter cosmetics
 
 A native installation can enroll a separate device key into an existing account

@@ -89,18 +89,30 @@ const fn valid_config_dir_suffix(suffix: Option<&str>) -> bool {
     true
 }
 
-/// `omoba-bevy` for production builds, `omoba-bevy-<suffix>` for a contour build.
-fn config_directory_name(suffix: Option<&str>) -> String {
-    match suffix.filter(|suffix| !suffix.is_empty()) {
-        Some(suffix) => format!("omoba-bevy-{suffix}"),
-        None => "omoba-bevy".to_owned(),
+/// `omoba-bevy`, then `-<market>` for a market other than global
+/// (`shared::market::Market::storage_suffix`), then `-<suffix>` for a contour
+/// build: `omoba-bevy`, `omoba-bevy-dev`, `omoba-bevy-ru`, `omoba-bevy-ru-dev`.
+/// Each market has its own account service, so its folder never holds another
+/// market's device keys or caches.
+fn config_directory_name(market: shared::market::Market, suffix: Option<&str>) -> String {
+    let mut name = "omoba-bevy".to_owned();
+    for part in [
+        market.storage_suffix(),
+        suffix.filter(|suffix| !suffix.is_empty()),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        name.push('-');
+        name.push_str(part);
     }
+    name
 }
 
 /// The OS-owned writable directory for settings, excluding the filename.
 /// The explicit OMOBA_CLIENT_CONFIG_DIR override remains in persistence.rs.
 pub fn preferences_directory() -> Option<PathBuf> {
-    let name = config_directory_name(CONFIG_DIR_SUFFIX);
+    let name = config_directory_name(shared::market::MARKET, CONFIG_DIR_SUFFIX);
     #[cfg(target_os = "android")]
     {
         bevy::android::ANDROID_APP
@@ -211,6 +223,7 @@ pub fn browser_approval_hint() -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use shared::market::Market;
 
     #[test]
     fn preferences_override_and_private_storage_are_separate_from_assets() {
@@ -261,17 +274,45 @@ mod tests {
 
     #[test]
     fn production_builds_keep_the_original_settings_directory() {
-        assert_eq!(config_directory_name(None), "omoba-bevy");
-        assert_eq!(config_directory_name(Some("")), "omoba-bevy");
+        assert_eq!(config_directory_name(Market::Global, None), "omoba-bevy");
+        assert_eq!(
+            config_directory_name(Market::Global, Some("")),
+            "omoba-bevy"
+        );
     }
 
     #[test]
     fn a_contour_build_gets_its_own_settings_directory() {
-        assert_eq!(config_directory_name(Some("dev")), "omoba-bevy-dev");
-        assert_ne!(
-            config_directory_name(Some("dev")),
-            config_directory_name(None)
+        assert_eq!(
+            config_directory_name(Market::Global, Some("dev")),
+            "omoba-bevy-dev"
         );
+        assert_ne!(
+            config_directory_name(Market::Global, Some("dev")),
+            config_directory_name(Market::Global, None)
+        );
+    }
+
+    #[test]
+    fn each_market_gets_its_own_settings_directory_before_the_contour() {
+        assert_eq!(config_directory_name(Market::Ru, None), "omoba-bevy-ru");
+        assert_eq!(config_directory_name(Market::Ru, Some("")), "omoba-bevy-ru");
+        assert_eq!(
+            config_directory_name(Market::Ru, Some("dev")),
+            "omoba-bevy-ru-dev"
+        );
+        assert_eq!(config_directory_name(Market::Cn, None), "omoba-bevy-cn");
+        assert_eq!(
+            config_directory_name(Market::Cn, Some("dev")),
+            "omoba-bevy-cn-dev"
+        );
+        let names: std::collections::BTreeSet<_> = Market::ALL
+            .into_iter()
+            .flat_map(|market| {
+                [None, Some("dev")].map(|suffix| config_directory_name(market, suffix))
+            })
+            .collect();
+        assert_eq!(names.len(), Market::ALL.len() * 2);
     }
 
     #[test]
@@ -313,8 +354,12 @@ mod tests {
     #[test]
     fn preferences_directory_uses_the_compiled_suffix() {
         // Matches whatever this test binary was compiled with: `omoba-bevy` normally,
-        // `omoba-bevy-dev` when OMOBA_DEFAULT_CONFIG_DIR_SUFFIX=dev.
-        let expected = config_directory_name(option_env!("OMOBA_DEFAULT_CONFIG_DIR_SUFFIX"));
+        // `omoba-bevy-dev` when OMOBA_DEFAULT_CONFIG_DIR_SUFFIX=dev, `omoba-bevy-ru`
+        // when OMOBA_MARKET=ru.
+        let expected = config_directory_name(
+            shared::market::MARKET,
+            option_env!("OMOBA_DEFAULT_CONFIG_DIR_SUFFIX"),
+        );
         if let Some(directory) = preferences_directory() {
             assert_eq!(
                 directory.file_name().and_then(|name| name.to_str()),

@@ -53,7 +53,7 @@ pub(crate) const BUILD_CONTOUR: Option<&str> = match option_env!("OMOBA_DEFAULT_
 /// the running connection profile's (`app.omoba.io/market` in production,
 /// `app.<contour>.omoba.io/market` for a contour build's own servers), so a
 /// tester is never sent to the production market. The i18n hints show it as
-/// `{market}`.
+/// `{market}`. Empty in a build without Ekza, which names no market.
 pub(crate) fn market_address() -> String {
     crate::connection_profile::active().market.clone()
 }
@@ -218,15 +218,15 @@ mod tests {
 
     #[test]
     fn this_builds_market_and_lobby_match_its_contour() {
-        assert_eq!(
-            market_address() == "app.omoba.io/market",
-            BUILD_CONTOUR.is_none()
-        );
         let address = market_address();
-        assert!(endpoint_allowed_for(
-            BUILD_CONTOUR,
-            address.split('/').next().unwrap()
-        ));
+        assert_eq!(address.is_empty(), !shared::market::FEATURES.ekza);
+        if shared::market::FEATURES.ekza {
+            assert_eq!(address == "app.omoba.io/market", BUILD_CONTOUR.is_none());
+            assert!(endpoint_allowed_for(
+                BUILD_CONTOUR,
+                address.split('/').next().unwrap()
+            ));
+        }
         let lobby = default_server_addr();
         assert!(crate::persistence::validate_game_server_addr(lobby).is_some());
         if BUILD_CONTOUR.is_none() {

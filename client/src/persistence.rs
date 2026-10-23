@@ -255,7 +255,7 @@ pub fn clamp_lighting_settings(mut s: LightingSettings) -> LightingSettings {
 }
 
 /// The shipped locale a stored `language` names; unknown or absent is `None`
-/// (the caller's English default).
+/// (the caller's default: the market's language).
 fn stored_language(language: Option<&str>) -> Option<crate::i18n::LocaleId> {
     language.and_then(crate::i18n::LocaleId::parse)
 }
@@ -373,7 +373,12 @@ pub(crate) fn load_persistent_client_settings(
         initial_save_pending.0 = true;
     }
 
-    team.handheld = disk.handheld;
+    team.handheld = restorable_handheld(disk.handheld, shared::market::FEATURES.ekza, |id| {
+        omoba_passport::weapons::catalog()
+            .items
+            .iter()
+            .any(|weapon| weapon.id == id)
+    });
     if let Some(ch) = disk.character {
         team.character = ch;
     }
@@ -410,6 +415,23 @@ pub(crate) fn load_persistent_client_settings(
             lighting.light_yaw_deg = v;
         }
         *lighting = clamp_lighting_settings(*lighting);
+    }
+}
+
+/// A saved handheld a build with `ekza` can still equip. An Ekza build keeps it
+/// as saved (the store checks an item when it is used); a build without Ekza
+/// keeps only packaged props, so a saved Ekza item becomes the class default.
+fn restorable_handheld(
+    saved: shared::handheld::HandheldSelection,
+    ekza: bool,
+    packaged: impl Fn(&str) -> bool,
+) -> shared::handheld::HandheldSelection {
+    match saved {
+        shared::handheld::HandheldSelection::Item(id) if !ekza && !packaged(&id) => {
+            info!("Saved handheld {id:?} is not packaged; equipping the class default.");
+            shared::handheld::HandheldSelection::ClassDefault
+        }
+        saved => saved,
     }
 }
 
@@ -453,7 +475,8 @@ fn build_file_from_state(
 }
 
 /// The language to write: the one picked in Settings this session, else the
-/// one the file already held (`None` stays absent, which reads as English).
+/// one the file already held (`None` stays absent, which reads as the
+/// market's language).
 pub(crate) fn language_to_save(
     locale: Option<&crate::i18n::Locale>,
     saved: &SavedLanguage,
@@ -637,6 +660,40 @@ pub(crate) fn reset_graphics_to_defaults(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_build_without_ekza_restores_only_packaged_handhelds() {
+        use shared::handheld::HandheldSelection as H;
+        use shared::market::Market;
+        let packaged = |id: &str| id == "forge-sword";
+        let ekza_item = H::Item(format!("ekza-{}", "a".repeat(32)));
+        let global = Market::Global.default_features().ekza;
+        assert_eq!(
+            restorable_handheld(ekza_item.clone(), global, packaged),
+            ekza_item
+        );
+        for market in [Market::Ru, Market::Cn] {
+            let ekza = market.default_features().ekza;
+            assert_eq!(
+                restorable_handheld(ekza_item.clone(), ekza, packaged),
+                H::ClassDefault
+            );
+            for kept in [
+                H::ClassDefault,
+                H::Unequipped,
+                H::Item("forge-sword".into()),
+            ] {
+                assert_eq!(restorable_handheld(kept.clone(), ekza, packaged), kept);
+            }
+        }
+        // The real packaged catalogue lists the class defaults' props.
+        assert!(
+            omoba_passport::weapons::catalog()
+                .items
+                .iter()
+                .any(|weapon| weapon.id == "forge-sword")
+        );
+    }
 
     fn scratch_dir(name: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!(

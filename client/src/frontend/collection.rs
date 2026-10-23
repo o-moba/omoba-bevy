@@ -81,6 +81,27 @@ enum CollectionFilter {
     Weapons,
 }
 
+impl CollectionFilter {
+    /// The tabs (value, label key, test id) a build offers; Studio only with Ekza.
+    fn tabs(ekza: bool) -> Vec<(Self, &'static str, &'static str)> {
+        let mut tabs = vec![
+            (Self::All, "collection.all", "CollectionAll"),
+            (Self::Weapons, "collection.weapons", "CollectionWeapons"),
+            (Self::Included, "collection.included", "CollectionIncluded"),
+        ];
+        if ekza {
+            tabs.push((Self::Studio, "collection.studio", "CollectionStudio"));
+        }
+        tabs
+    }
+}
+
+/// The avatar sections a build lists, in order: the shipped roster (`true`),
+/// then, with Ekza, Ekza Studio (`false`). Shared with the draft picker.
+pub(super) fn avatar_sections(ekza: bool) -> &'static [bool] {
+    if ekza { &[true, false] } else { &[true] }
+}
+
 #[derive(Component)]
 struct PreviewSurface;
 
@@ -185,6 +206,7 @@ fn spawn_catalogue_grid(
     filter: CollectionFilter,
     handheld: &shared::handheld::HandheldSelection,
 ) {
+    let ekza = shared::market::FEATURES.ekza;
     grid.spawn(Node {
         flex_wrap: FlexWrap::Wrap,
         column_gap: Val::Px(8.0),
@@ -193,24 +215,7 @@ fn spawn_catalogue_grid(
         ..default()
     })
     .with_children(|tabs| {
-        for (value, label, id) in [
-            (CollectionFilter::All, "collection.all", "CollectionAll"),
-            (
-                CollectionFilter::Weapons,
-                "collection.weapons",
-                "CollectionWeapons",
-            ),
-            (
-                CollectionFilter::Included,
-                "collection.included",
-                "CollectionIncluded",
-            ),
-            (
-                CollectionFilter::Studio,
-                "collection.studio",
-                "CollectionStudio",
-            ),
-        ] {
+        for (value, label, id) in CollectionFilter::tabs(ekza) {
             compact_screen_tile(
                 tabs,
                 Localized::new(label),
@@ -237,13 +242,13 @@ fn spawn_catalogue_grid(
     ))
     .with_children(|grid| {
         if filter == CollectionFilter::Weapons {
-            spawn_weapon_choices(grid, handheld, phone);
+            spawn_weapon_choices(grid, handheld, phone, ekza);
             return;
         }
         if filter != CollectionFilter::Studio {
             grid.spawn(widgets::heading(tr("collection.included"), 17.0));
         }
-        for (defaults, title) in [(true, ""), (false, tr("collection.studio"))] {
+        for &defaults in avatar_sections(ekza) {
             if (filter == CollectionFilter::Included && !defaults)
                 || (filter == CollectionFilter::Studio && defaults)
             {
@@ -251,7 +256,7 @@ fn spawn_catalogue_grid(
             }
             if !defaults {
                 grid.spawn((
-                    widgets::heading(title, 17.0),
+                    widgets::heading(tr("collection.studio"), 17.0),
                     Name::new("CollectionStudioHeading"),
                 ));
                 grid.spawn((
@@ -324,7 +329,7 @@ fn spawn_catalogue_grid(
         }
         // Preserve existing paid-avatar pairing as an optional action, below the
         // primary account/free library path.
-        {
+        if ekza {
             screen_button(
                 grid,
                 tr("collection.button.connect_wallet"),
@@ -343,11 +348,13 @@ fn spawn_catalogue_grid(
 /// Collection → Weapons: "My Ekza library" first, with the account controls
 /// and the market hint while it is empty, then the shipped choices, then the
 /// rest of the public Ekza catalogue. Ekza items show their author and licence,
-/// and the selected one its attribution line.
+/// and the selected one its attribution line. Without Ekza: the shipped
+/// choices only.
 fn spawn_weapon_choices(
     grid: &mut ChildSpawnerCommands,
     handheld: &shared::handheld::HandheldSelection,
     phone: bool,
+    ekza: bool,
 ) {
     use omoba_passport::store::CatalogueStatus;
     grid.spawn(widgets::heading(tr("collection.weapons"), 17.0));
@@ -356,13 +363,15 @@ fn spawn_weapon_choices(
         12.0,
         theme::MUTED,
     ));
-    screen_button(
-        grid,
-        tr("collection.button.refresh"),
-        ButtonKind::Secondary,
-        CollectionAction::Refresh,
-        "CollectionRefreshWeapons",
-    );
+    if ekza {
+        screen_button(
+            grid,
+            tr("collection.button.refresh"),
+            ButtonKind::Secondary,
+            CollectionAction::Refresh,
+            "CollectionRefreshWeapons",
+        );
+    }
     if let Some(status) = handheld_status(handheld) {
         grid.spawn((
             widgets::label(status, 12.0, theme::GOLD),
@@ -383,7 +392,7 @@ fn spawn_weapon_choices(
         ));
     }
     let connected = crate::passport::account_connected();
-    for group in HandheldGroup::ALL {
+    for &group in HandheldGroup::listed(ekza) {
         match group {
             HandheldGroup::Library => {
                 grid.spawn((
@@ -1282,6 +1291,11 @@ pub(super) enum HandheldGroup {
 }
 impl HandheldGroup {
     pub(super) const ALL: [Self; 3] = [Self::Library, Self::Included, Self::Catalogue];
+
+    /// The groups a build lists: without Ekza only the shipped choices.
+    pub(super) fn listed(ekza: bool) -> &'static [Self] {
+        if ekza { &Self::ALL } else { &[Self::Included] }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1679,6 +1693,11 @@ mod tests {
 
     #[test]
     fn connection_status_changes_do_not_replace_pressed_controls_or_scroll() {
+        // Ekza controls: a build without Ekza has none
+        // (`a_build_without_ekza_lists_only_shipped_avatars_and_weapons`).
+        if !shared::market::FEATURES.ekza {
+            return;
+        }
         let mut app = App::new();
         app.init_resource::<CollectionFilter>();
         app.add_plugins((MinimalPlugins, AssetPlugin::default()))
@@ -1932,6 +1951,11 @@ mod tests {
 
     #[test]
     fn the_weapons_tab_puts_the_library_and_its_market_hint_first() {
+        // Ekza controls: a build without Ekza has none
+        // (`a_build_without_ekza_lists_only_shipped_avatars_and_weapons`).
+        if !shared::market::FEATURES.ekza {
+            return;
+        }
         let mut app = App::new();
         app.insert_resource(CollectionFilter::Weapons);
         app.add_plugins((MinimalPlugins, AssetPlugin::default()))
@@ -2000,6 +2024,34 @@ mod tests {
                 assert!(dev.contains("app.dev.omoba.io/market"), "{dev}");
                 assert!(!dev.contains("{market}"), "{dev}");
             }
+        }
+    }
+
+    #[test]
+    fn a_build_without_ekza_lists_only_shipped_avatars_and_weapons() {
+        use shared::market::Market;
+        let ekza = Market::Global.default_features().ekza;
+        let tabs = |ekza| -> Vec<_> {
+            CollectionFilter::tabs(ekza)
+                .into_iter()
+                .map(|(value, _, _)| value)
+                .collect()
+        };
+        assert!(tabs(ekza).contains(&CollectionFilter::Studio));
+        assert_eq!(avatar_sections(ekza), [true, false]);
+        assert_eq!(HandheldGroup::listed(ekza), HandheldGroup::ALL);
+        for market in [Market::Ru, Market::Cn] {
+            let ekza = market.default_features().ekza;
+            assert_eq!(
+                tabs(ekza),
+                [
+                    CollectionFilter::All,
+                    CollectionFilter::Weapons,
+                    CollectionFilter::Included
+                ]
+            );
+            assert_eq!(avatar_sections(ekza), [true]);
+            assert_eq!(HandheldGroup::listed(ekza), [HandheldGroup::Included]);
         }
     }
 

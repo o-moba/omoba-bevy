@@ -87,6 +87,11 @@ use sprite::PlayerVisualMode;
 #[bevy_main]
 pub fn main() {
     shared::catalog::ensure_loaded();
+    // Before the app (and its logger) exists, like the roster summary.
+    eprintln!(
+        "Market: {}",
+        shared::market::describe(shared::market::MARKET, shared::market::FEATURES)
+    );
     // The connection profile decides the registry, passport and the profile's
     // own folder before any store, account call or socket opens.
     connection_profile::install();
@@ -120,7 +125,8 @@ pub fn main() {
     let mut app = App::new();
     platform::configure_app(&mut app);
     // Purchased Ekza avatars live outside the (possibly read-only) bundle.
-    // Asset sources must exist before AssetPlugin is added.
+    // Asset sources must exist before AssetPlugin is added. A build without
+    // Ekza has no store, so no account poll and no `ekza://` source.
     if let Some(store_root) = passport::initialize_store() {
         // Restore a saved Ekza connection now, in the background, instead of
         // when a screen that polls the account (Collection, hero select,

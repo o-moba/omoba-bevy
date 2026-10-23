@@ -133,14 +133,50 @@ pub(super) struct PassportAdmissions {
 
 impl Default for PassportAdmissions {
     fn default() -> Self {
+        Self::for_market(shared::market::FEATURES.ekza)
+    }
+}
+
+/// Why a build without Ekza admits no hosted item; no request is made.
+const NO_EKZA: &str = "this build has no Ekza services";
+
+fn no_weapons(_: &str) -> Result<Vec<ekza_bevy_sdk::assets::StoreAsset>, String> {
+    Err(NO_EKZA.into())
+}
+
+fn no_free_avatars(_: &str) -> Result<Vec<StoreAvatar>, String> {
+    Err(NO_EKZA.into())
+}
+
+impl PassportAdmissions {
+    /// The admissions of a build with `ekza`. Without Ekza there is no passport
+    /// and every registry read fails at once, without a request: a protected
+    /// avatar or `ekza-` weapon is denied, shipped content stays free.
+    fn for_market(ekza: bool) -> Self {
         let (sender, receiver) = mpsc::channel();
         Self {
             weapons: Arc::default(),
-            fetch_weapons: omoba_passport::weapon_store::fetch_approved,
-            api: PassportApi::from_env().ok(),
+            fetch_weapons: if ekza {
+                omoba_passport::weapon_store::fetch_approved
+            } else {
+                no_weapons
+            },
+            api: if ekza {
+                PassportApi::from_env().ok()
+            } else {
+                None
+            },
             free: Arc::default(),
-            fetch_free: omoba_passport::community::fetch_free,
-            registry: omoba_passport::community::registry_url(),
+            fetch_free: if ekza {
+                omoba_passport::community::fetch_free
+            } else {
+                no_free_avatars
+            },
+            registry: if ekza {
+                omoba_passport::community::registry_url()
+            } else {
+                String::new()
+            },
             pending: HashSet::new(),
             sender,
             receiver: Mutex::new(receiver),
@@ -1107,6 +1143,57 @@ mod weapon_tests {
         }
         panic!("weapon admission did not finish")
     }
+    #[test]
+    fn a_build_without_ekza_denies_every_hosted_item_and_keeps_shipped_content_free() {
+        let mut gate = PassportAdmissions::for_market(false);
+        assert!(gate.api.is_none() && gate.registry.is_empty());
+        // The fetchers fail at once: no registry is asked.
+        assert_eq!(
+            (gate.fetch_weapons)("https://registry.ekza.io")
+                .err()
+                .as_deref(),
+            Some(NO_EKZA)
+        );
+        assert!((gate.fetch_free)("https://registry.ekza.io").is_err());
+        let addr = |port: u16| SocketAddr::from(([127, 0, 0, 1], port));
+        // Shipped props and the default avatar need nothing.
+        assert!(matches!(
+            gate.begin(addr(50201), &join("forge-sword", None)),
+            Admission::Free
+        ));
+        // A hosted weapon: its (failing) read denies it, then the retry window does.
+        assert!(matches!(
+            gate.begin(addr(50202), &join(&item().slug, None)),
+            Admission::Pending
+        ));
+        assert!(!settle(&mut gate).allowed);
+        assert!(matches!(
+            gate.begin(addr(50203), &join(&item().slug, None)),
+            Admission::Denied
+        ));
+        // A protected avatar without a ticket: the free list is unavailable.
+        let protected = format!("ekza-{}", "a".repeat(64));
+        assert!(matches!(
+            gate.begin(addr(50204), &join("forge-sword", Some(&protected))),
+            Admission::Pending
+        ));
+        assert!(!settle(&mut gate).allowed);
+        // With a ticket: there is no passport to consume it at.
+        let mut ticketed = join("forge-sword", Some(&protected));
+        if let ClientPacket::Join {
+            passport_ticket, ..
+        } = &mut ticketed
+        {
+            *passport_ticket = Some("t".repeat(32));
+        }
+        assert!(matches!(
+            gate.begin(addr(50205), &ticketed),
+            Admission::Denied
+        ));
+        // An Ekza build reads its registry.
+        assert!(!PassportAdmissions::for_market(true).registry.is_empty());
+    }
+
     #[test]
     fn approved_weapon_is_independently_admitted_but_cannot_bypass_avatar_gate() {
         let mut gate = PassportAdmissions {
