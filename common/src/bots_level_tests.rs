@@ -996,6 +996,16 @@ fn a_recruit_held_home_by_resume_hp_still_defends_its_base() {
 }
 
 #[test]
+fn a_recorded_retreat_never_reads_as_the_line_it_crossed() {
+    let line = BotProfile::VETERAN.retreat_hp;
+    assert!(198.0 < 600.0 * line, "the trigger fires");
+    assert_eq!(198.0_f32 / 600.0, line, "an f32 division rounds up to it");
+    assert!(sim_probe::fraction_below(198.0, 600.0) < line);
+    assert_eq!(sim_probe::fraction_below(150.0, 600.0), 0.25);
+    assert_eq!(sim_probe::fraction_below(1.0, 0.0), 0.0);
+}
+
+#[test]
 fn every_level_heals_below_28_percent_and_only_there() {
     for (level, profile) in levels() {
         for (hp, heals) in [(0.30, false), (0.27, true)] {
@@ -1216,4 +1226,102 @@ fn the_gate_scan_runs_once_per_think_tick_and_allocates_nothing() {
             }
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Route-planning budget (docs/plans/launch-readiness.md, LR-10)
+
+/// The instants `bot` planned a route at during `ticks` ticks, and whether
+/// each plan found one.
+fn route_plans(arena: &mut Arena, bot: SocketAddr, ticks: usize) -> Vec<(Instant, bool)> {
+    sim_probe::start();
+    let mut plans = Vec::new();
+    for _ in 0..ticks {
+        arena.step();
+        for event in sim_probe::drain() {
+            if let sim_probe::Event::Route { bot: by, found } = event
+                && by == bot
+            {
+                plans.push((arena.now, found));
+            }
+        }
+    }
+    sim_probe::stop();
+    plans
+}
+
+#[test]
+fn a_failed_plan_is_retried_only_after_the_route_interval() {
+    let mut arena = Arena::new();
+    let origin = clear_corridor();
+    let bot = arena.bot(
+        "[::]:34901",
+        Team::Green,
+        HeroClass::Warrior,
+        origin,
+        BotProfile::ELITE,
+    );
+    // More live structures than a plan accepts, so every plan fails.
+    for index in 0..=shared::navigation::MAX_DYNAMIC_DISCS {
+        arena.tower(Team::Green, Lane::Top, [-80.0 + index as f32 * 4.0, -80.0]);
+    }
+    let plans = route_plans(&mut arena, bot, 80);
+    assert!(plans.iter().all(|(_, found)| !found), "{plans:?}");
+    // Before LR-10 an empty route planned again on every tick (80 here).
+    assert_eq!(plans.len(), 5, "{plans:?}");
+    for pair in plans.windows(2) {
+        assert!(pair[1].0 - pair[0].0 >= ROUTE_INTERVAL, "{plans:?}");
+    }
+    let hero = &arena.world.players[&bot].hero;
+    assert_eq!([hero.x, hero.z], origin, "a failed plan holds still");
+}
+
+#[test]
+fn a_new_target_inside_the_route_interval_is_approached_before_the_next_plan() {
+    let mut arena = Arena::new();
+    let origin = clear_corridor();
+    let bot = arena.bot(
+        "[::]:34911",
+        Team::Green,
+        HeroClass::Warrior,
+        origin,
+        BotProfile::ELITE,
+    );
+    // The first tick thinks (no target) and plans the lane.
+    let first = route_plans(&mut arena, bot, 1);
+    assert_eq!(first.len(), 1);
+    let enemy = arena.hero(
+        "127.0.0.1:34912",
+        Team::Blue,
+        HeroClass::Warrior,
+        [origin[0] + 11.0, origin[1]],
+    );
+    arena.world.players.get_mut(&enemy).unwrap().hero.max_hp = 100_000.0;
+    arena.set_hp(enemy, 1.0);
+    let mut distances = Vec::new();
+    sim_probe::start();
+    while arena.now < first[0].0 + ROUTE_INTERVAL - STEP {
+        arena.step();
+        let at = &arena.world.players[&bot].hero;
+        let target = &arena.world.players[&enemy].hero;
+        distances.push((target.x - at.x).hypot(target.z - at.z));
+    }
+    let early: Vec<_> = sim_probe::drain();
+    sim_probe::stop();
+    assert!(early.is_empty(), "no plan inside the interval: {early:?}");
+    assert_eq!(arena.target(bot), arena.hero_target(enemy));
+    // From the think tick that took the hero, every step closes in.
+    let took = distances
+        .windows(2)
+        .position(|pair| pair[1] < pair[0] - 0.05)
+        .expect("the bot turned to the hero");
+    assert!(took <= 6, "{distances:?}");
+    for pair in distances[took..].windows(2) {
+        assert!(pair[1] < pair[0], "{distances:?}");
+    }
+    // The next plan, one interval after the first, routes to the hero.
+    let next = route_plans(&mut arena, bot, 2);
+    assert_eq!(next.len(), 1, "{next:?}");
+    assert!(next[0].1);
+    assert!(next[0].0 - first[0].0 >= ROUTE_INTERVAL);
 }
