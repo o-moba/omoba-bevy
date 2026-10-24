@@ -39,7 +39,7 @@ Snapshot: game dev 6d34f98, portal dev 604bc34, 2026-10-24. See [README](README.
 | Role | Selected by | Bind | Database | Client admission | Used for |
 | --- | --- | --- | --- | --- | --- |
 | `standalone` | Unset or `standalone` | `SERVER_ADDR`, default `0.0.0.0:4000` (`DEFAULT_BIND_ADDR`) | Optional | At most 64 unverified endpoints. Snapshots carry only status until an endpoint is verified (`runtime/prejoin.rs`). | Practice hosts, LAN, local development |
-| `lobby` | `OMOBA_SERVER_ROLE=lobby` | `SERVER_ADDR` | Required. Startup fails with "Public roles require OMOBA_DATABASE_URL" (`server/src/runtime/mod.rs` `run`). | Public transport admission plus Ed25519-signed commands (`server/src/public_transport.rs`) | Public entry point |
+| `lobby` | `OMOBA_SERVER_ROLE=lobby` | `SERVER_ADDR` | Required. Startup fails with "Public roles require OMOBA_DATABASE_URL" (`server/src/runtime/mod.rs` `run`). It also fails when the lobby or its workers bind beyond loopback while `OMOBA_MATCH_PUBLIC_HOST` is unset or loopback (`match_pool.rs` `public_worker_host`). | Public transport admission plus Ed25519-signed commands (`server/src/public_transport.rs`) | Public entry point |
 | `match` | Set by the lobby | Manifest `bind`, which must equal `SERVER_ADDR` | Required | Public admission plus manifest membership | One match: `release` with 10 humans, `practice` otherwise (`worker_command`) |
 
 ### Allocating a match
@@ -57,6 +57,7 @@ Sources: `server/src/match_service.rs`, `server/src/match_pool.rs`, `server/src/
 5. A worker whose match has not started gives up when it is cancelled or its join deadline passes, and settles the round as `Abandoned`.
    - A cancel writes `cancel.json`. The lobby writes it, and the worker writes it itself when an allocated player cancels there before the start (`career_runtime.rs`). The lobby refuses to cancel once the worker is `running` or `settling`.
    - The worker settles every result through its own career outbox and exits 30 s after reaching a terminal phase (`finished` or `failed`).
+   - Every running match ends (`server/src/match_lifecycle.rs`). A worker whose humans all left keeps their heroes under bot control, but once no human has been on a network endpoint for `SESSION_RECLAIM_WINDOW` (180 s) plus 30 s, it settles the round as `Interrupted` and retires (`MATCH_METRIC event=abandoned_reaped`). Any running match also ends at `OMOBA_MATCH_MAX_DURATION_SECS` (default 2700 s, 45 minutes) as `Interrupted` (`event=duration_capped`). A retired worker stops simulating, reports `settling` and then `failed` once the result is stored, and exits; a standalone server starts a fresh round instead.
    - If a child exits without writing any status, the lobby writes a `failed` status for it.
 6. The lobby moves terminal allocations to `archive/`: at startup, and while running (`Pool::poll`) once the heartbeat is old enough and no live child is attached.
 7. An advisory lock (`.coordinator.lock`) allows only one lobby per match root. After a restart, the lobby rediscovers workers from their manifests and adopts them. A crashed match is settled as interrupted and is never resumed mid-frame ([public-mvp.md](../public-mvp.md)). Recovery works like this:

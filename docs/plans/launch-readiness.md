@@ -89,7 +89,7 @@ Area: hosting/deployment · **blocker** · M · ops (owner buys the VPS and sets
     - Caddy
     - firewall open only for UDP 4000, the arena range and TCP 443
     - key-only SSH
-  - [ ] A public lobby with an unset or loopback public host and a non-loopback bind exits with a clear error (unit test).
+  - [x] A public lobby with an unset or loopback public host and a non-loopback bind exits with a clear error (unit test).
   - [ ] A written RU release checklist replaces the April gate. For each platform it covers:
     - clean install and first run in Russian
     - VK sign-in
@@ -326,9 +326,9 @@ Area: worker lifecycle · **major** · S · code
   - A worker with no connected human for `SESSION_RECLAIM_WINDOW` plus a grace period settles as abandoned (unrated) and frees its port.
   - A configurable hard maximum duration ends any match with a defined outcome.
 - **Acceptance:**
-  - [ ] Test: in a BotPractice match the human leaves; after the reclaim window and grace, the status is Finished or Failed and the port is released.
-  - [ ] Test: a match past the max duration reaches a terminal state, with no rating for an abandoned bot game.
-  - [ ] `MATCH_METRIC` emits `abandoned_reaped` and `duration_capped`.
+  - [x] Test: in a BotPractice match the human leaves; after the reclaim window and grace, the status is Finished or Failed and the port is released.
+  - [x] Test: a match past the max duration reaches a terminal state, with no rating for an abandoned bot game.
+  - [x] `MATCH_METRIC` emits `abandoned_reaped` and `duration_capped`.
 - **Depends on:** —
 
 #### LR-12 — Watchdog and self-healing processes
