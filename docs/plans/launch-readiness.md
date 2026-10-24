@@ -1506,3 +1506,32 @@ M1 is about 50 engineer-weeks (six L specs plus about 19 M specs), owner items e
 | O-18 | Ranked cross-play between touch and mouse players | LR-53 |
 | O-19 | Consent model for attaching logs and crash data to feedback and crash reports | LR-20, LR-29 |
 | O-20 | When does the global market launch? This decides when the directory and global hostname work (D0/D1) is needed | LR-57 |
+
+---
+
+## 7. Default decisions for the M0 implementation (2026-10-24)
+
+The owner asked to bring the RU launch to maximum readiness before the RU host
+exists. The M0 code specs are implemented against these defaults. Each is a
+single, documented setting the owner can change later.
+
+| ID | Default | Where it lives |
+| --- | --- | --- |
+| O-1 | **Ranked at launch**: humans-only 5v5, rated, never bot-filled. The searching screen shows how many players search in the queue; after 5 minutes it offers switching to Casual without losing the place in Ranked. | LR-08, `docs/match-progression.md` |
+| O-2 | **Casual PvP**: unrated, awards XP, groups every human in the queue regardless of rating or newcomer cohort, then bot-fills after 30 s. **vs Bots** stays a separate choice. | LR-08 |
+| O-3 | No ranked entry gate beyond the existing newcomer and eligibility rules (LR-37 later). | LR-08 |
+| O-6, O-7 | Online bot difficulty and the hero roster stay as they are (LR-43, LR-45 later). | — |
+| O-8 | Hard match cap **45 minutes**. A capped or abandoned match settles as **Interrupted** (unrated, never counted twice), reusing the existing semantics. | LR-11, LR-12 |
+| O-9 | **RU chat off** at launch: a server-wide chat switch (`OMOBA_CHAT=off` in the RU lobby unit); reactions/emotes stay. Turning it on later needs the owner's legal check (ОРИ, 149-FZ). | LR-15, LR-41 |
+| O-10 | RU distribution: direct downloads from the RU host (IPFS as mirror) for Windows, Linux, macOS and Android. RuStore/VK Play and iOS later. | LR-23, LR-50, LR-66 |
+| O-11 | Android: Vulkan only, with a localized "device not supported" screen and published minimums; no GLES fallback. | LR-25 |
+| O-12 | Update policy: client and server ship together; an incompatible client shows **Update required** with a download button; a newer compatible release shows a dismissible banner. Source: the market's release catalog (`GET /v1/releases`). | LR-14 |
+| O-15 | Account deletion: a manual e-mail procedure at launch, described in the privacy policy (self-service later, LR-42). | LR-04 |
+| O-16 | One RU VPS runs PostgreSQL, the lobby and workers, the Account API, the portal and the download host behind Caddy. | LR-01, LR-23 |
+| O-19 | Feedback and crash reports attach logs only when the player ticks a box (off by default). | LR-20 |
+| — | **RU landing** = the RU portal's guest home at `app.ru.omoba.io` (hosted in Russia, no foreign analytics); the omoba.io landing is not changed for M0. | LR-22 |
+| — | **Legal texts**: Russian drafts of the privacy policy and user agreement ship with a visible "проект" banner and version `0-draft`; the owner replaces them with the counsel-approved texts (LR-04) before publication. | LR-04, LR-06 |
+| — | **Age category**: plumbing with the RU value `12+` as a placeholder the owner confirms with counsel before publication (with chat off). | LR-07 |
+| — | **Release label**: «Открытая бета». | LR-23 |
+| — | **Owner notifications** (feedback, alerts): one Telegram bot configured on the RU host (`OMOBA_TELEGRAM_BOT_TOKEN`, `OMOBA_TELEGRAM_CHAT_ID`); without it, notifications go to the journal only. | LR-17, LR-20 |
+| — | **Schema numbers** reserved for M0: career core migration 004 = admission/new-profile limits (LR-16), 005 = sanctions (LR-15); portal migration 008 = feedback (LR-20). | LR-15, LR-16, LR-20 |
