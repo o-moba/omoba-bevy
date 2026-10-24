@@ -219,8 +219,9 @@ def validate_activation(revision):
     binary = ROOT / 'current/omoba-account-api'
     if hashlib.sha256(binary.read_bytes()).hexdigest() != build.get('account_api_sha256'):
         raise RuntimeError('Account API binary hash mismatch')
-    if sql('SELECT version FROM portal.schema_version ORDER BY version;').splitlines() != ['1','2','3','4','5','6']:
-        raise RuntimeError('portal migration6 must be applied by lobby ship first')
+    # Exactly the portal schema this release serves (account-api PORTAL_SCHEMA).
+    if sql('SELECT version FROM portal.schema_version ORDER BY version;').splitlines() != ['1','2','3','4','5','6','7']:
+        raise RuntimeError('portal migration7 must be applied by lobby ship first')
 
 if __name__ == '__main__':
     try:

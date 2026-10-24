@@ -123,6 +123,8 @@ docs/profiles/*
 !docs/ARCHITECTURE_REPORT.md
 !docs/plans/
 !docs/plans/**
+!docs/architecture/
+!docs/architecture/**
 
 # Local career receipts and device identity are runtime data, never source.
 .omoba/

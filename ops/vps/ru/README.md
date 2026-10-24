@@ -10,6 +10,13 @@ Only binaries from the RU Linux package (`python3 scripts/release.py build linux
 --market ru`, `omoba-<version>-ru-linux-x64.tar.gz`) may run here: they are built
 with `OMOBA_MARKET=ru` (no Ekza, no payments, VK ID sign-in).
 
+> **Not deployable as is.** The launch-readiness audit found blockers in this kit;
+> fix them first: the portal does not send the ingress key outside the dev contour,
+> so behind `Caddyfile.ru` every portal call to the Account API is refused
+> ([LR-02](../../../docs/plans/launch-readiness.md)); there is no portal unit,
+> backup job or monitoring yet (LR-01, LR-03, LR-17); two arenas per host is
+> unmeasured (LR-09). See [the launch-readiness plan](../../../docs/plans/launch-readiness.md).
+
 ## Install
 
 1. User and folders: `useradd --system --home /var/lib/omoba-ru omoba-ru`;

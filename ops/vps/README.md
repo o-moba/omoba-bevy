@@ -17,7 +17,7 @@ Checks: `systemctl status omoba-lobby`, `journalctl -u omoba-lobby`, `systemctl 
 
 Rollback: stop `omoba-lobby`, point `current` at the previous compatible release, start again. Never delete live match directories or drop the database. First deployment has no prior OMOBA service: rollback means stopping/disabling this service and leaving durable state for inspection. Studio/API are unaffected. Back up the dedicated database and match/outbox state before schema changes; current deployment creates a fresh database only.
 
-Client: fresh installations use77.246.105.57:4000. Home's server button opens a shared editor with **OMOBA Beta** and **Localhost** presets; presets fill the editable field, **Connect** applies and saves it. Desktop party lobby also retains its address editor. Priority: non-empty runtime `GAME_SERVER_ADDR`, valid saved preference, build override `OMOBA_DEFAULT_GAME_SERVER_ADDR`, built-in beta address. Existing local/custom preferences are preserved. Choose Beta once to move an older install; the next launch remembers it. Temporary worker endpoints never overwrite the saved lobby.
+Client: production builds connect to the compiled lobby (77.246.105.57:4000 unless a release passes `--server`) and have no server picker; a desktop `GAME_SERVER_ADDR` overrides it for developers. Dev-contour builds (the OMOBA Dev app) choose Dev, Local or Custom in their Connection panel ([docs/connection-profiles.md](../../docs/connection-profiles.md)). Market builds compile their own lobby ([docs/markets.md](../../docs/markets.md)). Temporary worker endpoints never replace the lobby.
 
 ## DEV contour (separate VPS)
 

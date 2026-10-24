@@ -227,7 +227,7 @@ Preparation creates/reuses root-owned `0600` files:
 `/opt/ekza-dev/secrets/caddy/account-api.caddy`. It enables only the portal runtime
 login, preserves its password on retries and installs the bounded
 `omoba-account-api-dev.service`. Activation checks DEV contour, revision, binary
-SHA-256 and portal migrations 1–6 before any writes. Existing credential drift
+SHA-256 and portal migrations 1–7 before any writes. Existing credential drift
 is rejected without rotation. The operator owns these files; preserve a private
 copy before any later intentional change. Never attach them to reports or PRs.
 
