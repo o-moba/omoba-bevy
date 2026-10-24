@@ -171,4 +171,6 @@ pub fn main() {
 }
 
 #[cfg(test)]
+mod game_contract;
+#[cfg(test)]
 mod test_support;

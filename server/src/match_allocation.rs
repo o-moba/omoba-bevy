@@ -236,7 +236,7 @@ mod tests {
 }
 
 #[cfg(test)]
-mod runtime_tests {
+pub(crate) mod runtime_tests {
     use shared::wire::GameState;
     use std::net::{SocketAddr, UdpSocket};
     use std::time::{Duration, Instant};
@@ -250,7 +250,8 @@ mod runtime_tests {
     use crate::match_rules::{MatchConfig, MatchMode};
     use crate::runtime::{PLAYER_TIMEOUT, ServerRuntime};
     use crate::snapshot::{SNAPSHOT_INTERVAL, build_players_snapshot};
-    fn fixture() -> (ServerRuntime, SocketAddr, ClientPacket) {
+    /// An allocated BotPractice worker for one authenticated player.
+    pub(crate) fn fixture() -> (ServerRuntime, SocketAddr, ClientPacket) {
         let socket = UdpSocket::bind("127.0.0.1:0").unwrap();
         socket.set_nonblocking(true).unwrap();
         let mut rt = ServerRuntime::new(

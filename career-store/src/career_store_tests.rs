@@ -1083,6 +1083,58 @@ async fn career_store_interrupted_custom_and_development_never_grant_casual_xp()
     f.close().await;
 }
 
+/// LR-11: a match the server ends (an abandoned worker or the duration cap)
+/// settles as Interrupted with its allocation's own reason: once, unrated,
+/// without a winner or XP, for a public-casual bot game and a rated allocation.
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "requires OMOBA_TEST_DATABASE_URL and real PostgreSQL"]
+async fn career_store_server_ended_matches_settle_interrupted_once_and_unrated() {
+    let f = Fixture::new().await;
+    let a = f.profile(1).await;
+    let b = f.profile(2).await;
+    for game in [public_casual(&a, &b, 1), result(&a, &b, 2)] {
+        f.store.start(starting(&game)).await.unwrap();
+        let mut ended = game.clone();
+        ended.outcome = MatchOutcome::Interrupted;
+        ended.winner = None;
+        ended.rated = false;
+        if game.ruleset == RULESET {
+            // What `finish_career_round` writes for a non-practice round.
+            ended.unrated_reason = Some("The match did not finish normally.".into());
+        }
+        let (first, duplicate) =
+            tokio::join!(f.store.settle(ended.clone()), f.store.settle(ended.clone()));
+        let saved = first.unwrap();
+        assert_eq!(saved, duplicate.unwrap());
+        assert_eq!(saved.outcome, MatchOutcome::Interrupted);
+        assert!(saved.saved && !saved.rated && saved.winner.is_none());
+        assert!(
+            saved
+                .participants
+                .iter()
+                .all(|p| p.progression_xp_gained == 0 && p.rating.is_none())
+        );
+        assert_eq!(f.store.settle(ended).await.unwrap(), saved);
+    }
+    for profile in [&a, &b] {
+        let current = f.store.profile(&profile.profile_id).await.unwrap();
+        assert_eq!(
+            (
+                current.rating,
+                current.rated_matches,
+                current.wins,
+                current.losses,
+                current.progression_xp,
+                current.matches_played
+            ),
+            (profile.rating, 0, 0, 0, 0, 2)
+        );
+        let (history, _) = f.store.history(&profile.profile_id, None).await.unwrap();
+        assert_eq!(history.len(), 2);
+    }
+    f.close().await;
+}
+
 #[tokio::test(flavor = "current_thread")]
 #[ignore = "requires OMOBA_TEST_DATABASE_URL and real PostgreSQL"]
 async fn career_store_public_worker_recovery_does_not_settle_another_epoch() {

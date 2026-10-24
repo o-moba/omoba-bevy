@@ -270,7 +270,7 @@ sequenceDiagram
   | `OMOBA_MATCH_CAPACITY` | 16 | 1–100 workers |
   | `OMOBA_MATCH_FIRST_PORT` | 41000 | consecutive ports; `first_port + capacity` ≤ 65535 |
   | `OMOBA_MATCH_BIND_IP` | `127.0.0.1` | manifest `bind` = `<bind_ip>:<port>`, the worker's `SERVER_ADDR` |
-  | `OMOBA_MATCH_PUBLIC_HOST` | `127.0.0.1` | manifest `endpoint` = `<public_host>:<port>`, what the client dials. ≤ 200 chars, no `/`, space or newline |
+  | `OMOBA_MATCH_PUBLIC_HOST` | `127.0.0.1` | manifest `endpoint` = `<public_host>:<port>`, what the client dials. ≤ 200 chars, no `/`, space or newline. Never `0.0.0.0` or `::`. The lobby refuses to start when it or its workers bind beyond loopback while this is unset or loopback (`127.0.0.0/8`, `::1`, `localhost`) |
   | `OMOBA_MATCH_EXECUTABLE` | the lobby's `current_exe()` | worker binary |
 
 - Startup: the lobby rediscovers manifests from the root (children outlive a lobby restart) and archives terminal slots right away when their last heartbeat is older than 35 s. It refuses to start when the root exceeds its size bounds ([system.md › Lobby scheduling bounds](./system.md#lobby-scheduling-bounds)).
@@ -298,6 +298,8 @@ Timers (`match_pool.rs`, worker side in `match_service.rs`):
 | Heartbeat | every 1 s | the worker rewrites `status.json` |
 | Readiness | heartbeat younger than 10 s | a slot is **ready** only when it is not recovering or cancelled and `status.json` shows `ready\|forming\|running` with a fresh heartbeat (`Slot::ready`). Spawning a process is not enough |
 | Worker exit | 30 s after `finished` or `failed` | the worker process exits |
+| Abandoned match | no human on a network endpoint for 180 s (`SESSION_RECLAIM_WINDOW`) + 30 s while `running` | seats a human left stay bot-controlled until then. The worker settles the round as `Interrupted` (unrated, no winner), logs `MATCH_METRIC event=abandoned_reaped`, stops simulating and admits nobody; `settling`, then `failed` once stored (`match_lifecycle.rs`) |
+| Duration cap | `OMOBA_MATCH_MAX_DURATION_SECS`, default 2700 (45 min), 1–86400 | a running match past the cap settles as `Interrupted` and logs `MATCH_METRIC event=duration_capped`; the worker retires as above. Workers inherit the lobby's value; an invalid value stops the server at startup |
 | Relaunch | heartbeat older than 100 s, or no status 100 s past the join deadline, or the child exited | `Pool::poll` relaunches a non-terminal slot with no live child, with `OMOBA_MATCH_RECOVERY=1`, only when the bind port is free, and at most 4 times per poll |
 | Recovery worker exit | more than 120 s after boot | the recovery worker settles the round as `Abandoned` and reports `recovering`. Once its outbox holds no pending result and the store confirms recovery, it writes `failed` and exits |
 | Port hold | 35 s after the last heartbeat | a terminal slot keeps its port while a child is attached or for 35 s (`Slot::occupies_port`) |

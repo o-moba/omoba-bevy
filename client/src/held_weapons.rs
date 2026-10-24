@@ -106,14 +106,7 @@ fn sync_held_weapons(
                 rotation: Quat::from_euler(EulerRot::XYZ, r[0], r[1], r[2]),
                 scale: Vec3::splat(def.grip.scale),
             };
-            let model = if class.0 == shared::HeroClass::Wildspark
-                && class_default
-                && def.id == "wild-repeater"
-            {
-                "weapons/wildspark-repeater.glb".to_owned()
-            } else {
-                def.model.clone()
-            };
+            let model = shown_model(class.0, class_default, &def);
             wanted.insert(
                 root,
                 (owner, hand, def, frame.mul_transform(offset), model, mode),
@@ -160,6 +153,16 @@ fn sync_held_weapons(
     }
 }
 
+/// The model a held definition is drawn with: Wildspark's own repeater for its
+/// class-default repeater, else the definition's model.
+pub(crate) fn shown_model(class: shared::HeroClass, class_default: bool, def: &Weapon) -> String {
+    if class == shared::HeroClass::Wildspark && class_default && def.id == "wild-repeater" {
+        "weapons/wildspark-repeater.glb".to_owned()
+    } else {
+        def.model.clone()
+    }
+}
+
 /// Only Wildspark switches guns. An accepted ultimate draws the launcher even
 /// when Q is in repeater mode; the actual loadout, cadence and mana accounting
 /// remain authoritative. Every peer derives this from replicated state.
@@ -168,15 +171,40 @@ fn shown_mode(
     loadout: Option<&LoadoutState>,
     action: Option<&ActionTime>,
 ) -> WeaponMode {
+    let casting = action
+        .filter(|action| action.age < 1.1)
+        .and_then(|action| action.skill);
+    slot_mode(
+        class,
+        casting,
+        loadout.map_or(WeaponMode::Repeater, |state| state.weapon_mode),
+    )
+}
+
+/// The gun mode shown while `skill` (none for a basic attack) plays, with the
+/// loadout in `mode`: Shockline and Last Spark draw the launcher.
+pub(crate) fn slot_mode(
+    class: shared::HeroClass,
+    skill: Option<SkillId>,
+    mode: WeaponMode,
+) -> WeaponMode {
     if class != shared::HeroClass::Wildspark {
         return WeaponMode::Repeater;
     }
-    if action.is_some_and(|action| {
-        matches!(action.skill, Some(SkillId::WildRocket | SkillId::WildZap)) && action.age < 1.1
-    }) {
+    if matches!(skill, Some(SkillId::WildRocket | SkillId::WildZap)) {
         return WeaponMode::Rockets;
     }
-    loadout.map_or(WeaponMode::Repeater, |state| state.weapon_mode)
+    mode
+}
+
+/// Seconds after an accepted action within which its barrel flash is emitted.
+pub(crate) const MUZZLE_WINDOW_SECS: [f32; 2] = [0.08, 0.25];
+
+/// Whether an accepted action flashes the barrel of a held gun: every basic
+/// attack, and the shots of Shockline and Last Spark.
+pub(crate) fn flashes_muzzle(slot: u8, skill: Option<SkillId>) -> bool {
+    slot == shared::BASIC_ATTACK_ACTION_SLOT
+        || matches!(skill, Some(SkillId::WildZap | SkillId::WildRocket))
 }
 
 /// An explicit item that is still downloading, has failed or is not yet in this
@@ -371,14 +399,14 @@ fn emit_muzzle(
         let Some(action) = actions.0.get_mut(&weapon.owner) else {
             continue;
         };
-        if !visible.get() || action.muzzle_sequence == action.sequence || action.age < 0.08 {
+        if !visible.get()
+            || action.muzzle_sequence == action.sequence
+            || action.age < MUZZLE_WINDOW_SECS[0]
+        {
             continue;
         }
         action.muzzle_sequence = action.sequence;
-        if action.age > 0.25
-            || !(action.slot == shared::BASIC_ATTACK_ACTION_SLOT
-                || matches!(action.skill, Some(SkillId::WildZap | SkillId::WildRocket)))
-        {
+        if action.age > MUZZLE_WINDOW_SECS[1] || !flashes_muzzle(action.slot, action.skill) {
             continue;
         }
         let Some(muzzle) = muzzle_point(&weapon.model, weapon.mode, weapon.hint) else {
@@ -421,7 +449,11 @@ const LAUNCHER_MUZZLE: [f32; 3] = [0.0, 0.13, 0.81];
 
 /// Packaged guns keep their measured tips and other packaged props emit none.
 /// SDK models use their embedded set hint, else the baseline tip of the mode.
-fn muzzle_point(model: &str, mode: WeaponMode, hint: Option<WildsparkSetHint>) -> Option<Vec3> {
+pub(crate) fn muzzle_point(
+    model: &str,
+    mode: WeaponMode,
+    hint: Option<WildsparkSetHint>,
+) -> Option<Vec3> {
     let tip = match model {
         "weapons/wildspark-repeater.glb" => REPEATER_MUZZLE,
         "weapons/wild-launcher.glb" => LAUNCHER_MUZZLE,

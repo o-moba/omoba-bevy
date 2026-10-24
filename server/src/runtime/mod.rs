@@ -123,6 +123,11 @@ pub(crate) struct ServerRuntime {
     pub(crate) snapshot_tick: u64,
     pub(crate) match_started_at: Option<Instant>,
     pub(crate) empty_since: Option<Instant>,
+    /// Worker only: since when a running match has had no human on a
+    /// network endpoint (`match_lifecycle.rs`).
+    pub(crate) unattended_since: Option<Instant>,
+    /// The hard cap on a running match (`OMOBA_MATCH_MAX_DURATION_SECS`).
+    pub(crate) max_match_duration: Duration,
     pub(crate) metrics_players: HashMap<u64, (u32, bool)>,
     pub(crate) metrics_objectives: HashSet<u64>,
 }
@@ -222,6 +227,8 @@ impl ServerRuntime {
             snapshot_tick: 0,
             match_started_at: None,
             empty_since: None,
+            unattended_since: None,
+            max_match_duration: crate::match_lifecycle::DEFAULT_MATCH_MAX_DURATION,
             metrics_players: HashMap::new(),
             metrics_objectives: HashSet::new(),
         }
@@ -249,7 +256,8 @@ pub(crate) fn run() -> io::Result<()> {
     socket.set_nonblocking(true)?;
     println!("UDP game server is listening on {bind_addr}");
 
-    let match_service = match_service::MatchService::from_env().map_err(io::Error::other)?;
+    let match_service =
+        match_service::MatchService::from_env(socket.local_addr()?).map_err(io::Error::other)?;
     if match_service.is_public()
         && std::env::var("OMOBA_DATABASE_URL")
             .ok()
@@ -285,8 +293,21 @@ pub(crate) fn run() -> io::Result<()> {
         ),
     }
 
+    let max_match_duration = crate::match_lifecycle::max_match_duration(
+        std::env::var(crate::match_lifecycle::MATCH_MAX_DURATION_ENV)
+            .ok()
+            .as_deref(),
+    )
+    .map_err(io::Error::other)?;
+    println!(
+        "Match duration cap: {} s ({})",
+        max_match_duration.as_secs(),
+        crate::match_lifecycle::MATCH_MAX_DURATION_ENV
+    );
+
     let mut runtime = ServerRuntime::new_with_map(socket, match_config, map_config);
     runtime.match_service = match_service;
+    runtime.max_match_duration = max_match_duration;
     let bot_difficulty = bots::boot_bot_difficulty(
         runtime.match_service.is_public(),
         runtime.rules.fills_with_bots,

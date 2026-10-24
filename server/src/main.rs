@@ -20,6 +20,7 @@ mod hero_timers;
 #[cfg(test)]
 mod map_config_tests;
 mod match_allocation;
+mod match_lifecycle;
 mod match_pool;
 mod match_rules;
 mod match_service;

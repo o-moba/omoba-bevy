@@ -8,6 +8,11 @@ use crate::{
 use bevy::prelude::*;
 use std::collections::HashMap;
 
+/// Seconds an accepted basic attack keeps the body turned to its aim.
+pub(crate) const BASIC_FACING_HOLD_SECS: f32 = 0.45;
+/// Seconds an accepted skill keeps the body turned to its aim.
+pub(crate) const SKILL_FACING_HOLD_SECS: f32 = 0.7;
+
 #[derive(Default)]
 pub(super) struct FacingState {
     sequence: Option<u64>,
@@ -36,9 +41,9 @@ impl FacingState {
                 .flatten()
                 .filter(|v| v.is_finite());
             self.remaining = if action.slot == shared::BASIC_ATTACK_ACTION_SLOT {
-                0.45
+                BASIC_FACING_HOLD_SECS
             } else {
-                0.7
+                SKILL_FACING_HOLD_SECS
             };
         }
         self.sequence = Some(self.sequence.unwrap_or(0).max(action.sequence));

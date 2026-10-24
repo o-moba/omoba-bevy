@@ -1,0 +1,876 @@
+{
+  "schema": "omoba.game-contract-fixtures.v1",
+  "profile": "omoba.character.v1",
+  "license": "CC0-1.0",
+  "generator": "scripts/build_game_contract_fixtures.py",
+  "contracts": [
+    {
+      "file": "contract.json",
+      "revision": "sha256-490411f885107bc156482c90ac660e83ed2c968b9899a2526bb56ffd9728e42b",
+      "status": "active"
+    },
+    {
+      "file": "contract-retired.json",
+      "revision": "sha256-cef9e7eb5beb16ce902df9be509af1881ff026bb6f14ef66a5b015c26b53e6e9",
+      "status": "retired"
+    }
+  ],
+  "verdicts": "gate",
+  "packageCases": [
+    {
+      "id": "ok-vrm1-three-slots",
+      "rule": null,
+      "file": "packages/ok-vrm1-three-slots.glb",
+      "expected": "expected/ok-vrm1-three-slots.json",
+      "note": "VRM 1.0 rig; custom run, basic attack and Shockline"
+    },
+    {
+      "id": "ok-vrm0-three-slots",
+      "rule": null,
+      "file": "packages/ok-vrm0-three-slots.glb",
+      "expected": "expected/ok-vrm0-three-slots.json",
+      "note": "the same on a VRM 0.x rig (facing -Z, 17 bones)"
+    },
+    {
+      "id": "ok-shared-animation",
+      "rule": null,
+      "file": "packages/ok-shared-animation.glb",
+      "expected": "expected/ok-shared-animation.json",
+      "note": "one animation serves the rocket basic attack and Last Spark"
+    },
+    {
+      "id": "ok-all-default",
+      "rule": null,
+      "file": "packages/ok-all-default.glb",
+      "expected": "expected/ok-all-default.json",
+      "note": "manifest only: every slot plays OMOBA's default"
+    },
+    {
+      "id": "pack-missing-manifest",
+      "rule": "pack.manifest",
+      "file": "packages/pack-missing-manifest.glb",
+      "expected": "expected/pack-missing-manifest.json",
+      "note": "clips without asset.extras.ekza_package_v1"
+    },
+    {
+      "id": "pack-bad-schema",
+      "rule": "pack.manifest",
+      "file": "packages/pack-bad-schema.glb",
+      "expected": "expected/pack-bad-schema.json",
+      "note": "manifest schema ekza.package.v2"
+    },
+    {
+      "id": "pack-unknown-revision",
+      "rule": "pack.contract",
+      "file": "packages/pack-unknown-revision.glb",
+      "expected": "expected/pack-unknown-revision.json",
+      "note": "a revision no registry lists"
+    },
+    {
+      "id": "pack-retired-revision",
+      "rule": "pack.contract",
+      "file": "packages/pack-retired-revision.glb",
+      "expected": "expected/pack-retired-revision.json",
+      "note": "made against contract-retired.json"
+    },
+    {
+      "id": "pack-unknown-slot",
+      "rule": "pack.slot-known",
+      "file": "packages/pack-unknown-slot.glb",
+      "expected": "expected/pack-unknown-slot.json",
+      "note": "a custom slot the target does not have"
+    },
+    {
+      "id": "pack-slot-not-listed",
+      "rule": "pack.slot-known",
+      "file": "packages/pack-slot-not-listed.glb",
+      "expected": "expected/pack-slot-not-listed.json",
+      "note": "Snapline is missing from the manifest (every-customizable-slot)"
+    },
+    {
+      "id": "pack-windup-custom",
+      "rule": "pack.slot-known",
+      "file": "packages/pack-windup-custom.glb",
+      "expected": "expected/pack-windup-custom.json",
+      "note": "Dawn Ray's wind-up opens in profile 1.1, not 1"
+    },
+    {
+      "id": "pack-unknown-target",
+      "rule": "pack.target",
+      "file": "packages/pack-unknown-target.glb",
+      "expected": "expected/pack-unknown-target.json",
+      "note": "a target the contract does not have"
+    },
+    {
+      "id": "pack-gear-requirement-on-character",
+      "rule": "pack.target",
+      "file": "packages/pack-gear-requirement-on-character.glb",
+      "expected": "expected/pack-gear-requirement-on-character.json",
+      "note": "a character package naming the gear requirement wildspark.handheld.set"
+    },
+    {
+      "id": "pack-bad-index",
+      "rule": "pack.ref",
+      "file": "packages/pack-bad-index.glb",
+      "expected": "expected/pack-bad-index.json",
+      "note": "the basic attack names animation 7 of 3"
+    },
+    {
+      "id": "pack-name-mismatch",
+      "rule": "pack.ref",
+      "file": "packages/pack-name-mismatch.glb",
+      "expected": "expected/pack-name-mismatch.json",
+      "note": "the basic attack's animation is named attack"
+    },
+    {
+      "id": "pack-duplicate-names",
+      "rule": "pack.ref",
+      "file": "packages/pack-duplicate-names.glb",
+      "expected": "expected/pack-duplicate-names.json",
+      "note": "two animations named skill.wild_zap.release"
+    },
+    {
+      "id": "pack-unreferenced-animation",
+      "rule": "pack.unreferenced",
+      "file": "packages/pack-unreferenced-animation.glb",
+      "expected": "expected/pack-unreferenced-animation.json",
+      "note": "an animation no slot names (warning)"
+    },
+    {
+      "id": "pack-49-custom-slots",
+      "rule": "pack.bytes",
+      "file": "packages/pack-49-custom-slots.glb",
+      "expected": "expected/pack-49-custom-slots.json",
+      "note": "49 custom slots (packaging.character.maxFills is 48; checked before the slots)"
+    },
+    {
+      "id": "pack-animation-bytes-over",
+      "rule": "pack.bytes",
+      "file": "packages/pack-animation-bytes-over.glb",
+      "expected": "expected/pack-animation-bytes-over.json",
+      "note": "a custom clip with 4.53 MiB of accessor data (the cap is 4 MiB)"
+    },
+    {
+      "id": "clip-scale-channel",
+      "rule": "clip.channels",
+      "file": "packages/clip-scale-channel.glb",
+      "expected": "expected/clip-scale-channel.json",
+      "note": "a scale channel on the hips"
+    },
+    {
+      "id": "clip-morph-weights",
+      "rule": "clip.channels",
+      "file": "packages/clip-morph-weights.glb",
+      "expected": "expected/clip-morph-weights.json",
+      "note": "a morph weights channel on the mesh"
+    },
+    {
+      "id": "clip-root-node",
+      "rule": "clip.channels",
+      "file": "packages/clip-root-node.glb",
+      "expected": "expected/clip-root-node.json",
+      "note": "a rotation channel on the scene root"
+    },
+    {
+      "id": "clip-accessory-node",
+      "rule": "clip.channels",
+      "file": "packages/clip-accessory-node.glb",
+      "expected": "expected/clip-accessory-node.json",
+      "note": "a rotation channel on a non-humanoid accessory"
+    },
+    {
+      "id": "clip-translation-on-spine",
+      "rule": "clip.channels",
+      "file": "packages/clip-translation-on-spine.glb",
+      "expected": "expected/clip-translation-on-spine.json",
+      "note": "a translation channel on the spine"
+    },
+    {
+      "id": "clip-cubicspline",
+      "rule": "clip.sampler",
+      "file": "packages/clip-cubicspline.glb",
+      "expected": "expected/clip-cubicspline.json",
+      "note": "CUBICSPLINE interpolation"
+    },
+    {
+      "id": "clip-nan-key",
+      "rule": "clip.sampler",
+      "file": "packages/clip-nan-key.glb",
+      "expected": "expected/clip-nan-key.json",
+      "note": "a NaN in a rotation key"
+    },
+    {
+      "id": "clip-unsorted-times",
+      "rule": "clip.sampler",
+      "file": "packages/clip-unsorted-times.glb",
+      "expected": "expected/clip-unsorted-times.json",
+      "note": "key times 4 and 5 swapped"
+    },
+    {
+      "id": "clip-starts-late",
+      "rule": "clip.sampler",
+      "file": "packages/clip-starts-late.glb",
+      "expected": "expected/clip-starts-late.json",
+      "note": "the first key at 0.05 s"
+    },
+    {
+      "id": "clip-non-unit-quat",
+      "rule": "clip.sampler",
+      "file": "packages/clip-non-unit-quat.glb",
+      "expected": "expected/clip-non-unit-quat.json",
+      "note": "a rotation key of length 1.01"
+    },
+    {
+      "id": "clip-4097-keys",
+      "rule": "clip.keys",
+      "file": "packages/clip-4097-keys.glb",
+      "expected": "expected/clip-4097-keys.json",
+      "note": "4097 keys in one second"
+    },
+    {
+      "id": "clip-120hz",
+      "rule": "clip.keys",
+      "file": "packages/clip-120hz.glb",
+      "expected": "expected/clip-120hz.json",
+      "note": "sampled at 120 Hz"
+    },
+    {
+      "id": "clip-too-short",
+      "rule": "clip.duration",
+      "file": "packages/clip-too-short.glb",
+      "expected": "expected/clip-too-short.json",
+      "note": "a 0.1 s basic attack (window 0.15-1.2 s)"
+    },
+    {
+      "id": "clip-too-long",
+      "rule": "clip.duration",
+      "file": "packages/clip-too-long.glb",
+      "expected": "expected/clip-too-long.json",
+      "note": "a 1.5 s Shockline release"
+    },
+    {
+      "id": "clip-run-cycle-1.3s",
+      "rule": "clip.duration",
+      "file": "packages/clip-run-cycle-1.3s.glb",
+      "expected": "expected/clip-run-cycle-1.3s.json",
+      "note": "a 1.3 s run cycle (window 0.4-1.2 s)"
+    },
+    {
+      "id": "clip-hips-drift-at-cap",
+      "rule": "clip.in-place",
+      "file": "packages/clip-hips-drift-at-cap.glb",
+      "expected": "expected/clip-hips-drift-at-cap.json",
+      "note": "hips 0.149 leg lengths off rest (passes)"
+    },
+    {
+      "id": "clip-hips-drift-over",
+      "rule": "clip.in-place",
+      "file": "packages/clip-hips-drift-over.glb",
+      "expected": "expected/clip-hips-drift-over.json",
+      "note": "hips 0.151 leg lengths off rest"
+    },
+    {
+      "id": "clip-loop-open-3deg",
+      "rule": "clip.loop-closure",
+      "file": "packages/clip-loop-open-3deg.glb",
+      "expected": "expected/clip-loop-open-3deg.json",
+      "note": "the run's last pose 3 degrees off its first"
+    },
+    {
+      "id": "clip-loop-closed-1deg",
+      "rule": "clip.loop-closure",
+      "file": "packages/clip-loop-closed-1deg.glb",
+      "expected": "expected/clip-loop-closed-1deg.json",
+      "note": "a 1 degree seam (passes)"
+    },
+    {
+      "id": "clip-contact-0.149",
+      "rule": "clip.markers",
+      "file": "packages/clip-contact-0.149.glb",
+      "expected": "expected/clip-contact-0.149.json",
+      "note": "contact 0.149 s after the cast (passes)"
+    },
+    {
+      "id": "clip-contact-0.151",
+      "rule": "clip.markers",
+      "file": "packages/clip-contact-0.151.glb",
+      "expected": "expected/clip-contact-0.151.json",
+      "note": "contact 0.151 s after the cast"
+    },
+    {
+      "id": "clip-contact-missing",
+      "rule": "clip.markers",
+      "file": "packages/clip-contact-missing.glb",
+      "expected": "expected/clip-contact-missing.json",
+      "note": "no contact time on an edge-released slot"
+    },
+    {
+      "id": "clip-contact-after-end",
+      "rule": "clip.markers",
+      "file": "packages/clip-contact-after-end.glb",
+      "expected": "expected/clip-contact-after-end.json",
+      "note": "contact 0.45 s in a 0.4 s clip"
+    },
+    {
+      "id": "clip-contact-mismatch-meta",
+      "rule": "clip.markers",
+      "file": "packages/clip-contact-mismatch-meta.glb",
+      "expected": "expected/clip-contact-mismatch-meta.json",
+      "note": "the manifest says 0.1 s, ekza_animation_v1 says 0.12 s"
+    },
+    {
+      "id": "clip-basic-longer-than-interval",
+      "rule": "clip.min-interval",
+      "file": "packages/clip-basic-longer-than-interval.glb",
+      "expected": "expected/clip-basic-longer-than-interval.json",
+      "note": "a 0.6 s basic attack; the fastest basic attacks come 0.4375 s apart (warning)"
+    },
+    {
+      "id": "rig-hips-scene-root-vrm1",
+      "rule": null,
+      "file": "packages/rig-hips-scene-root-vrm1.glb",
+      "expected": "expected/rig-hips-scene-root-vrm1.json",
+      "note": "VRM 1.0 whose hips are a scene root (the builder inserts a parent before turning it)"
+    }
+  ],
+  "contractCases": [
+    {
+      "id": "contract-ok-fixture",
+      "file": "contracts/contract-ok-fixture.json",
+      "expected": "expected/contract-ok-fixture.json",
+      "document": "ok"
+    },
+    {
+      "id": "contract-schema-1.9-min-reader-1.0",
+      "file": "contracts/contract-schema-1.9-min-reader-1.0.json",
+      "expected": "expected/contract-schema-1.9-min-reader-1.0.json",
+      "document": "ok"
+    },
+    {
+      "id": "contract-unknown-namespaced-rule",
+      "file": "contracts/contract-unknown-namespaced-rule.json",
+      "expected": "expected/contract-unknown-namespaced-rule.json",
+      "document": "ok"
+    },
+    {
+      "id": "contract-unknown-profile-ext",
+      "file": "contracts/contract-unknown-profile-ext.json",
+      "expected": "expected/contract-unknown-profile-ext.json",
+      "document": "ok"
+    },
+    {
+      "id": "contract-unknown-key",
+      "file": "contracts/contract-unknown-key.json",
+      "expected": "expected/contract-unknown-key.json",
+      "document": "refused: schema"
+    },
+    {
+      "id": "contract-revision-mismatch",
+      "file": "contracts/contract-revision-mismatch.json",
+      "expected": "expected/contract-revision-mismatch.json",
+      "document": "refused: revision"
+    },
+    {
+      "id": "contract-dangling-slot-ref",
+      "file": "contracts/contract-dangling-slot-ref.json",
+      "expected": "expected/contract-dangling-slot-ref.json",
+      "document": "refused: reference"
+    },
+    {
+      "id": "contract-offer-kind-mismatch",
+      "file": "contracts/contract-offer-kind-mismatch.json",
+      "expected": "expected/contract-offer-kind-mismatch.json",
+      "document": "refused: reference"
+    },
+    {
+      "id": "contract-required-unknown-profile",
+      "file": "contracts/contract-required-unknown-profile.json",
+      "expected": "expected/contract-required-unknown-profile.json",
+      "document": "refused: profile"
+    },
+    {
+      "id": "contract-unknown-core-rule",
+      "file": "contracts/contract-unknown-core-rule.json",
+      "expected": "expected/contract-unknown-core-rule.json",
+      "document": "refused: unknown-rule"
+    },
+    {
+      "id": "contract-min-reader-1.9",
+      "file": "contracts/contract-min-reader-1.9.json",
+      "expected": "expected/contract-min-reader-1.9.json",
+      "document": "refused: reader-version"
+    },
+    {
+      "id": "contract-bad-profile-ext",
+      "file": "contracts/contract-bad-profile-ext.json",
+      "expected": "expected/contract-bad-profile-ext.json",
+      "document": "refused: profile"
+    }
+  ],
+  "files": {
+    "contract-retired.json": {
+      "sha256": "e758583063fb54b80a493f6f021a157ae06b89c9e7b4a951030eb99cc901f6cd",
+      "bytes": 60030
+    },
+    "contract.json": {
+      "sha256": "cfbdd05fe70cb0f0060f0a7ad67593f9e38948ebab98260e451debd29b455ba3",
+      "bytes": 60100
+    },
+    "contracts/contract-bad-profile-ext.json": {
+      "sha256": "9b0e76778b8be165a88c0c223322fa274e2887d195c310e02f347eaae1cd87d2",
+      "bytes": 60096
+    },
+    "contracts/contract-dangling-slot-ref.json": {
+      "sha256": "ac885883d201669c918beb71e7a43d8d4f11a469219e0312658107c034c81547",
+      "bytes": 60178
+    },
+    "contracts/contract-min-reader-1.9.json": {
+      "sha256": "9ec3788ea4535fed86a477f0b5104d19d768e2ad4fd283e7e888a15d1a971cbe",
+      "bytes": 60100
+    },
+    "contracts/contract-offer-kind-mismatch.json": {
+      "sha256": "b0664bd019ab5f28e0908bf5c2cba423e0141706b1041a741bf915e819b77066",
+      "bytes": 60366
+    },
+    "contracts/contract-ok-fixture.json": {
+      "sha256": "cfbdd05fe70cb0f0060f0a7ad67593f9e38948ebab98260e451debd29b455ba3",
+      "bytes": 60100
+    },
+    "contracts/contract-required-unknown-profile.json": {
+      "sha256": "234d36f6532e90c8ea7527c6b782c5118ae9adb4fdd32c18e05bf2737784ab24",
+      "bytes": 60209
+    },
+    "contracts/contract-revision-mismatch.json": {
+      "sha256": "a3ccae92c87433abdc29c5290cc79bf6288878419dee162b6ebabb6e45b2d856",
+      "bytes": 60100
+    },
+    "contracts/contract-schema-1.9-min-reader-1.0.json": {
+      "sha256": "6c318955b1a82a605e2521c6e10e2277ac7a5a77ae5fc92b62ea6498add13f2b",
+      "bytes": 60181
+    },
+    "contracts/contract-unknown-core-rule.json": {
+      "sha256": "0a4ff6355c2a8ace67356dbb936a419f6da6e0a9594b5cf918379c00a2bb6c23",
+      "bytes": 60298
+    },
+    "contracts/contract-unknown-key.json": {
+      "sha256": "2febb46128fa6a31699a53ddf335bdda3a6214759934b574eefc7f3ed1cdc4f7",
+      "bytes": 60118
+    },
+    "contracts/contract-unknown-namespaced-rule.json": {
+      "sha256": "63eda073184ed940353ea863ddc6cfe6046bce83aef4433aee89a06b32805c61",
+      "bytes": 60290
+    },
+    "contracts/contract-unknown-profile-ext.json": {
+      "sha256": "82806bf9e5b8341179f1ff3bcca3ad4f3f25872d59b2c0f82d9512a04410d6da",
+      "bytes": 60182
+    },
+    "expected/clip-120hz.json": {
+      "sha256": "469c0c2d8f3548d8148f5e4e85c1f0fa2b657e395713e5de9080f5646b4978a4",
+      "bytes": 379
+    },
+    "expected/clip-4097-keys.json": {
+      "sha256": "e1eec9dcc5c2b68a7cfda21d5bb99faae1018c9ae6177719d533378a243318a9",
+      "bytes": 389
+    },
+    "expected/clip-accessory-node.json": {
+      "sha256": "381f9290df87498ec1a978ca6a2d3925423afdfd5c5551244f3ac7cdf00c76ba",
+      "bytes": 421
+    },
+    "expected/clip-basic-longer-than-interval.json": {
+      "sha256": "43f98727f5304a01c92960ea1ca3751361a52dede12204437ed560844fc1246a",
+      "bytes": 503
+    },
+    "expected/clip-contact-0.149.json": {
+      "sha256": "3f036920e5d36132e5cbe2480fc581f4c4cb772b24325ce081b167303270702e",
+      "bytes": 390
+    },
+    "expected/clip-contact-0.151.json": {
+      "sha256": "90d5ebddce18837951fd1a247cf704b782ec6db107fddde71434deb1fbd16877",
+      "bytes": 403
+    },
+    "expected/clip-contact-after-end.json": {
+      "sha256": "fede8a5f23b5ddf93f3ab8c194be3ea1920f6f8a3f3152223d572189fe3df284",
+      "bytes": 407
+    },
+    "expected/clip-contact-mismatch-meta.json": {
+      "sha256": "5c7917af940957b5366d3ed42cf11b2366014d6015fc288444a97acd3d024662",
+      "bytes": 435
+    },
+    "expected/clip-contact-missing.json": {
+      "sha256": "a39a24f816edc8fba4f31a8501afc81fd424c7e25c35816b83c51177cbc9f888",
+      "bytes": 415
+    },
+    "expected/clip-cubicspline.json": {
+      "sha256": "35fdad85db4cc5cf61cfeb9f504ba38112dae1176c85b0e5999cd69a8d8aa8ac",
+      "bytes": 396
+    },
+    "expected/clip-hips-drift-at-cap.json": {
+      "sha256": "07c1220f0bf8fa5bc1b96f048fe6271e75bfd2f607958465551916a928b690f2",
+      "bytes": 395
+    },
+    "expected/clip-hips-drift-over.json": {
+      "sha256": "3a73ef03699d5153361ef71ffe0cff4838e43b35eb81b058bf4e9d4abe6c1928",
+      "bytes": 407
+    },
+    "expected/clip-loop-closed-1deg.json": {
+      "sha256": "542d3eef05c414fa84865ec584c07d07ecd477c76662bc4f488e7a70e682cb47",
+      "bytes": 378
+    },
+    "expected/clip-loop-open-3deg.json": {
+      "sha256": "985d3e30a4a27f258f5af07a7bd0367f7f1ffd094254808e3a512b57bf5373b8",
+      "bytes": 422
+    },
+    "expected/clip-morph-weights.json": {
+      "sha256": "465ecc2bd5f7e4c83375798960f973e21716538c87577b40e8258bdcaf62b618",
+      "bytes": 409
+    },
+    "expected/clip-nan-key.json": {
+      "sha256": "7f5ce742ebbd963698177b76b231b40fee42a9403d188b8f1a7172b0e5796da5",
+      "bytes": 390
+    },
+    "expected/clip-non-unit-quat.json": {
+      "sha256": "9c82cfa68e08a156bbee091487bad7bd347f4921b05689c43174541daa6e4626",
+      "bytes": 402
+    },
+    "expected/clip-root-node.json": {
+      "sha256": "1c585a1e46fdd86fc932dbb4d66cf838758bd7aaddd36dbd751f46e32aae1284",
+      "bytes": 406
+    },
+    "expected/clip-run-cycle-1.3s.json": {
+      "sha256": "99d8cb608a3362c5f6a05b9a904855e15646e36b75cda8d48a01b1aa805e1084",
+      "bytes": 411
+    },
+    "expected/clip-scale-channel.json": {
+      "sha256": "30cefcdd726eb9ad0f8c197eacfdfd398cfa5a3ec949b072ca273a6e94c6589f",
+      "bytes": 401
+    },
+    "expected/clip-starts-late.json": {
+      "sha256": "e1dcb00127552813bc36ad657a95422172194d57895c834290b4a434a1c5dba8",
+      "bytes": 394
+    },
+    "expected/clip-too-long.json": {
+      "sha256": "afd1f791ed9d2616fa44ed8d0302cc66f73c1afb4dbf06c0eab784dec0f26fcc",
+      "bytes": 394
+    },
+    "expected/clip-too-short.json": {
+      "sha256": "8ccb0287405f647ba8c70aae8116194796e453dca1ff0dbec97c87e1b1177651",
+      "bytes": 410
+    },
+    "expected/clip-translation-on-spine.json": {
+      "sha256": "c34422508bd9e7db0f0c90f49061e83c8849f2d28d68302d02082288e51a598f",
+      "bytes": 415
+    },
+    "expected/clip-unsorted-times.json": {
+      "sha256": "4b9ed403427629287164e265d9d8cbe6d1fe5512b7f6e82f9bc376659bd8c472",
+      "bytes": 399
+    },
+    "expected/contract-bad-profile-ext.json": {
+      "sha256": "da2bdf00eb152059c0c0512e23d455e6285b37b0890390af545f4229f6355b76",
+      "bytes": 75
+    },
+    "expected/contract-dangling-slot-ref.json": {
+      "sha256": "0c102ab306c48bb5d98a06ac84946884b8358b3024dd6fc1dd2e8521ceba47e0",
+      "bytes": 79
+    },
+    "expected/contract-min-reader-1.9.json": {
+      "sha256": "00b909d4830833ff871cc4b896666f842eb7e9bf20f0fd5c4f15b4ab270f9de5",
+      "bytes": 81
+    },
+    "expected/contract-offer-kind-mismatch.json": {
+      "sha256": "db8be410d70c053f8eff1a2825fa165f96429111c20b1996bf0a56c2ca4b7712",
+      "bytes": 81
+    },
+    "expected/contract-ok-fixture.json": {
+      "sha256": "ff51ea0c9030582f53ef22da52e80020df67c372ee8ca1533d1298b78e9fbdcf",
+      "bytes": 56
+    },
+    "expected/contract-required-unknown-profile.json": {
+      "sha256": "f6f5d0c457293a222620a8bd002c5bf9da1e8a02411c772fb998f361b358ee41",
+      "bytes": 84
+    },
+    "expected/contract-revision-mismatch.json": {
+      "sha256": "b1bcc3f91a2fc6dad5800f6a81ee3d80ede6844e5aec77df09128f8fabf7a146",
+      "bytes": 78
+    },
+    "expected/contract-schema-1.9-min-reader-1.0.json": {
+      "sha256": "dd3bf3a2d49c4293732fbe0c19cfd5c66ba719ff9974e966bf42f23f2dd6a57c",
+      "bytes": 71
+    },
+    "expected/contract-unknown-core-rule.json": {
+      "sha256": "d0880d34e952c2ed8fa43c2ef2e9b062867ac0fbf4068d22aee63054b1cb9eb7",
+      "bytes": 82
+    },
+    "expected/contract-unknown-key.json": {
+      "sha256": "7dd658ef852ca87beb081ea226531601f336f9a96abe64d63fcc29f5193616ba",
+      "bytes": 70
+    },
+    "expected/contract-unknown-namespaced-rule.json": {
+      "sha256": "c33818f3e203b3cdb941a29a60cbcb1fd9a1c5c4897b7719712b393a9ba77482",
+      "bytes": 69
+    },
+    "expected/contract-unknown-profile-ext.json": {
+      "sha256": "11de4e1bb87017f411bd5fb51116bfd46540bbd0b55ba2ef6371f6e01b02d22a",
+      "bytes": 65
+    },
+    "expected/ok-all-default.json": {
+      "sha256": "136fff27608f46e89c744954bced1d979ab9386d33a5e84b2822d04d364b4512",
+      "bytes": 297
+    },
+    "expected/ok-shared-animation.json": {
+      "sha256": "9c3dbe1a17a600b208629f89f0d322b92f5e57489599ce989e0e983c8a10b6d5",
+      "bytes": 493
+    },
+    "expected/ok-vrm0-three-slots.json": {
+      "sha256": "382c7fd9658eb19c88767761d4ec5514179341c66a9f9675cb5568f3e35974c1",
+      "bytes": 399
+    },
+    "expected/ok-vrm1-three-slots.json": {
+      "sha256": "20bde61d3c3a34a9a94995d3d921fe3604d2ad8ff831cd03560cc59d7a622d7e",
+      "bytes": 403
+    },
+    "expected/pack-49-custom-slots.json": {
+      "sha256": "10d6ba82b5a86396f11070f25439c23267db192f72db04f032681c93b58b969f",
+      "bytes": 352
+    },
+    "expected/pack-animation-bytes-over.json": {
+      "sha256": "bb5c0d7cae012d6cd414fcc8671a2b4fa5c742ce732cb20fb5c54e94b7355574",
+      "bytes": 342
+    },
+    "expected/pack-bad-index.json": {
+      "sha256": "0058c8499c5902c056e0dfdf1460d8ecf18239b5e15c6646943f6f8d75eb94ae",
+      "bytes": 305
+    },
+    "expected/pack-bad-schema.json": {
+      "sha256": "16275d1ce135c629f0e96ad6f1009f105bd33b38b99d221be4241f027d44122e",
+      "bytes": 303
+    },
+    "expected/pack-duplicate-names.json": {
+      "sha256": "2108935c9ee7b0b5314e03a572d173eae4a725eaa702b1f232b770a4a83bf60a",
+      "bytes": 315
+    },
+    "expected/pack-gear-requirement-on-character.json": {
+      "sha256": "68419fd782f92303a901ddce41c309fed68b73dfe868728546c4904bc129bb2c",
+      "bytes": 359
+    },
+    "expected/pack-missing-manifest.json": {
+      "sha256": "f47ed5224ef6333f1e264804ff483978b5003f14fc5b140ecf79f7edd896680b",
+      "bytes": 320
+    },
+    "expected/pack-name-mismatch.json": {
+      "sha256": "fd540bcbcd1978224d73e4cf99bc539a094b25eb6f27d2bdba096fba110f188a",
+      "bytes": 314
+    },
+    "expected/pack-retired-revision.json": {
+      "sha256": "407976c19e6cadea1f4709a155491e82dcdef7a8e576833fde985b54d94474ff",
+      "bytes": 312
+    },
+    "expected/pack-slot-not-listed.json": {
+      "sha256": "1028d2ccef91b35dfbfd6382ca0f1b36562586a2cc538414ce3c0d64834e43e1",
+      "bytes": 342
+    },
+    "expected/pack-unknown-revision.json": {
+      "sha256": "fc085550354cacf227540e97e9c89f3ef73ea76ca995583c327faf0e0d78be46",
+      "bytes": 306
+    },
+    "expected/pack-unknown-slot.json": {
+      "sha256": "99f28040ebda28ecb5bf3410a7958bc61c0ab7dec430e9a6e5824e72cbea7cf7",
+      "bytes": 314
+    },
+    "expected/pack-unknown-target.json": {
+      "sha256": "662415d86a5918fefe462e19344a95b2d430d31118c5f9325cc593f13d756da5",
+      "bytes": 311
+    },
+    "expected/pack-unreferenced-animation.json": {
+      "sha256": "b4bfcc8fbf6a772599bb584539a542fbf5d3375c313ac4c3a586731b7ee6300a",
+      "bytes": 423
+    },
+    "expected/pack-windup-custom.json": {
+      "sha256": "cd0d27dacbf08a09230a1fe0b6c00bdd732948b771205ea7edc74c389b6ebae2",
+      "bytes": 324
+    },
+    "expected/rig-hips-scene-root-vrm1.json": {
+      "sha256": "d4d78f40a44bf60cbdfc22d2d1b922f59dae99f68ff9caa06077165fb063f47a",
+      "bytes": 441
+    },
+    "packages/clip-120hz.glb": {
+      "sha256": "22b849d8623deba1e520b636101e99780050a5b0b51e7daed97fc39473961e9b",
+      "bytes": 13992
+    },
+    "packages/clip-4097-keys.glb": {
+      "sha256": "b8f975c42ac0cb0a5cba602e9cff0a15a0a442047acb7de88d7125dd6ca9378a",
+      "bytes": 272732
+    },
+    "packages/clip-accessory-node.glb": {
+      "sha256": "94dd079c499114b2d9a1bc21a72eded96809e783b5f57dfa4060f1b17a0ccaa0",
+      "bytes": 12184
+    },
+    "packages/clip-basic-longer-than-interval.glb": {
+      "sha256": "c66138bdf74f93fce617b8d319e97f350ac7659365d4e927c7340529ec81fd59",
+      "bytes": 12092
+    },
+    "packages/clip-contact-0.149.glb": {
+      "sha256": "2b9b1816c888042856a8df7814bbcfe04e41904010d6ddc2dfae06a8e26564a5",
+      "bytes": 11700
+    },
+    "packages/clip-contact-0.151.glb": {
+      "sha256": "cce05a43ab22d79b91c74b870c5f828a7c063446a92c5bc40c98f0aaad53e5d3",
+      "bytes": 11700
+    },
+    "packages/clip-contact-after-end.glb": {
+      "sha256": "d8104ee795ae0d5a4a46fa29c4f1341e2c842da09c61c97a5e3e6ba7cc7688fc",
+      "bytes": 11700
+    },
+    "packages/clip-contact-mismatch-meta.glb": {
+      "sha256": "f4888a62ed3248397432272b6ff45e0398c1c5bc2162ca72bbeddf36f7bcca73",
+      "bytes": 11704
+    },
+    "packages/clip-contact-missing.glb": {
+      "sha256": "15a48583411570e1edfe24307b2690faff74f3773dcee7d755a08be4eb3dc501",
+      "bytes": 11684
+    },
+    "packages/clip-cubicspline.glb": {
+      "sha256": "5bcea987391f71082e0fe235e5c568b3ce1fc0c183de4bed417d68ca74d451a3",
+      "bytes": 12116
+    },
+    "packages/clip-hips-drift-at-cap.glb": {
+      "sha256": "56263c99ea57c4d4c6d6a8278ea1ef88074fe0fde308eaa25bdfec7f5487e692",
+      "bytes": 11700
+    },
+    "packages/clip-hips-drift-over.glb": {
+      "sha256": "823ca9ce9227f18b511679261d70ff27f694565b0d1991fee308689b6070747e",
+      "bytes": 11696
+    },
+    "packages/clip-loop-closed-1deg.glb": {
+      "sha256": "80675d9d46d456c0a8ab7e91c9f19dca9b97008c65acacca0c4c2a3003aeb6e9",
+      "bytes": 11700
+    },
+    "packages/clip-loop-open-3deg.glb": {
+      "sha256": "ecd376baa3b2d9b06cc19b51cf5398d632a30584bb5b4b840bd91b72dfddf9c3",
+      "bytes": 11696
+    },
+    "packages/clip-morph-weights.glb": {
+      "sha256": "ab9764c2b616a245340767bf0152385961edd15b0ca2385b4503d647f1cf333e",
+      "bytes": 12196
+    },
+    "packages/clip-nan-key.glb": {
+      "sha256": "b48c5f1d8d4311807312e7b02859e747bfa3a0233a41f9b1030fc92bb1dcec23",
+      "bytes": 11688
+    },
+    "packages/clip-non-unit-quat.glb": {
+      "sha256": "4ee1755f3a68d1294508d15e772866cf5e3d596f5684e431e77c0c89b85be034",
+      "bytes": 11696
+    },
+    "packages/clip-root-node.glb": {
+      "sha256": "58e55bcc6c789d10cdfa474173c9c1ddce685b0ba672d9587fe7d8032e8813d2",
+      "bytes": 12112
+    },
+    "packages/clip-run-cycle-1.3s.glb": {
+      "sha256": "255170d7d86a5c0101633f589ea2e6e2ce78ea711c16d30a361b43f7555cb4bd",
+      "bytes": 13040
+    },
+    "packages/clip-scale-channel.glb": {
+      "sha256": "1f3b3513e5c9ec48f2fafbe0b57da07985e45dc66621488d6e7fb180dc221bf1",
+      "bytes": 12136
+    },
+    "packages/clip-starts-late.glb": {
+      "sha256": "e80b8fa192c1ea922c16489fac4a014025755ae12637162b09e54c7068d3c35f",
+      "bytes": 11584
+    },
+    "packages/clip-too-long.glb": {
+      "sha256": "d6d3ad6f761a3c21aab75fe51ff1a2dcb37f68ba0ef0f5a4c48bfd71e1b51c0f",
+      "bytes": 13612
+    },
+    "packages/clip-too-short.glb": {
+      "sha256": "a928d4901048b6557925e07c58af0419d23c0dd4ac34a2800ecad09436fffa0e",
+      "bytes": 11108
+    },
+    "packages/clip-translation-on-spine.glb": {
+      "sha256": "9829868d9b6d30fa3f2a19d2d31ba5184f1b826211212c1e34406f01613f3559",
+      "bytes": 12076
+    },
+    "packages/clip-unsorted-times.glb": {
+      "sha256": "9c90e7b8a529e06bd59fd7e032e522e1a2aa1efdcb09dceb8fcbd331f090a7bb",
+      "bytes": 11696
+    },
+    "packages/ok-all-default.glb": {
+      "sha256": "5d3adcc08e856426f0434c81e916647e21b65e25a0acc5f224d1146137d12286",
+      "bytes": 4564
+    },
+    "packages/ok-shared-animation.glb": {
+      "sha256": "38468a678878490661eee5088971528eb9cc0a99afcb7323792d6a9002dc7b27",
+      "bytes": 14084
+    },
+    "packages/ok-vrm0-three-slots.glb": {
+      "sha256": "746538da816eeb949d219caabb160edbf1a2c2aada72e13066a53ee7f23fac8e",
+      "bytes": 12428
+    },
+    "packages/ok-vrm1-three-slots.glb": {
+      "sha256": "9dcaa0367b4917462d22d41ad71cfa529fd44b91533e1475c5ee0936fc103e5f",
+      "bytes": 11696
+    },
+    "packages/pack-49-custom-slots.glb": {
+      "sha256": "7e60d539a2900010bcbcf67d2aecd9e6a3129fa798b7bfacae2b320b55942ac1",
+      "bytes": 10320
+    },
+    "packages/pack-animation-bytes-over.glb": {
+      "sha256": "d08762d9eca5890f4bfab2ff0225612b2852afe2f9c82a032c1b864e7eb251db",
+      "bytes": 4759176
+    },
+    "packages/pack-bad-index.glb": {
+      "sha256": "fa853badebb0c176ed1a5036a2016e002f9df3405c42289100c74841ad81a637",
+      "bytes": 11692
+    },
+    "packages/pack-bad-schema.glb": {
+      "sha256": "4ded6ac7067216e5d8a947fb22816154e737d85111ce0b8501145501e3e1c08d",
+      "bytes": 11692
+    },
+    "packages/pack-duplicate-names.glb": {
+      "sha256": "e884080720b8f5e00f0aef6f07d4a851149b865a491864af06be7a01782e6224",
+      "bytes": 13996
+    },
+    "packages/pack-gear-requirement-on-character.glb": {
+      "sha256": "e7468ecfa18b13bdfac4d326cd5f0cfdcab354fa2a73dfd66cab2e3a38b2f3cc",
+      "bytes": 11716
+    },
+    "packages/pack-missing-manifest.glb": {
+      "sha256": "e68551e883bf7b59f86dc98d77bb2f915e06b8d8e9d108efc90581db893b26cd",
+      "bytes": 10848
+    },
+    "packages/pack-name-mismatch.glb": {
+      "sha256": "8edd968e43e17d443ebf85a7a73b80ceb1c04b7a876a10965567a504a8d57a02",
+      "bytes": 11664
+    },
+    "packages/pack-retired-revision.glb": {
+      "sha256": "877798f5143664d84b1ae6623a49bacd951b291c48675ec4f821a9e9cb4abcba",
+      "bytes": 11700
+    },
+    "packages/pack-slot-not-listed.glb": {
+      "sha256": "5e1ca1923d1469caedba84016734cec95064501c1c24b73200a2ba77df515c4c",
+      "bytes": 11652
+    },
+    "packages/pack-unknown-revision.glb": {
+      "sha256": "f230958f9b996cabe7296bf50aaad74a53d22eb812841ef34744e592e50cc5ec",
+      "bytes": 11700
+    },
+    "packages/pack-unknown-slot.glb": {
+      "sha256": "28808adc2094cc11103a7a6b3c54340b7637bdd5dd06382ba7e44765a1a2c968",
+      "bytes": 11780
+    },
+    "packages/pack-unknown-target.glb": {
+      "sha256": "19f9e04eba9c91deae5e63ae2006394f77afbde2f08fe4f6b73ad6496681a260",
+      "bytes": 11700
+    },
+    "packages/pack-unreferenced-animation.glb": {
+      "sha256": "72c7666d41d7a694298eb2eb5025debb627d62a10b7f46e05c7a6a614178e898",
+      "bytes": 13968
+    },
+    "packages/pack-windup-custom.glb": {
+      "sha256": "0470ee870f3954ad027a49c2a4fcafa172a97e89af7fbadacf1e3cfc275c30de",
+      "bytes": 10592
+    },
+    "packages/rig-hips-scene-root-vrm1.glb": {
+      "sha256": "54ea53779ec05aef9a5f4eecd30376c677314aaa3bb2865dfece87592e219ad6",
+      "bytes": 11664
+    }
+  }
+}

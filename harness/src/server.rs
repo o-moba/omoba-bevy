@@ -48,6 +48,12 @@ impl ServerLog {
         lines.push_back(line);
     }
 
+    /// The oldest buffered line containing `needle`.
+    fn find(&self, needle: &str) -> Option<String> {
+        let lines = self.0.lock().unwrap_or_else(|poison| poison.into_inner());
+        lines.iter().find(|line| line.contains(needle)).cloned()
+    }
+
     /// The buffered lines, oldest first, one per line.
     fn tail(&self) -> String {
         let lines = self.0.lock().unwrap_or_else(|poison| poison.into_inner());
@@ -200,6 +206,22 @@ impl ServerProcess {
     /// The loopback address bots should connect to.
     pub fn addr(&self) -> SocketAddr {
         self.addr
+    }
+
+    /// The first buffered stdout/stderr line containing `needle`, waiting up
+    /// to `timeout` for it (for example a `MATCH_METRIC` event). Only the last
+    /// [`LOG_LINES`] lines are kept, so wait while the line is recent.
+    pub fn wait_for_output(&self, needle: &str, timeout: Duration) -> Option<String> {
+        let deadline = Instant::now() + timeout;
+        loop {
+            if let Some(line) = self.log.find(needle) {
+                return Some(line);
+            }
+            if Instant::now() >= deadline {
+                return None;
+            }
+            thread::sleep(Duration::from_millis(20));
+        }
     }
 }
 

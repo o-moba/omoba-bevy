@@ -1,0 +1,17 @@
+{
+  "case": "clip-translation-on-spine",
+  "contract": "sha256-490411f885107bc156482c90ac660e83ed2c968b9899a2526bb56ffd9728e42b",
+  "target": "wildspark",
+  "document": "ok",
+  "pack": "ok",
+  "warnings": [],
+  "slots": {
+    "base.run": "pass",
+    "basic.wildspark.0": [
+      "clip.channels"
+    ],
+    "skill.wild_zap.release": "pass"
+  },
+  "slotWarnings": {},
+  "note": "a translation channel on the spine"
+}

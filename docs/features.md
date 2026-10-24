@@ -1053,6 +1053,14 @@ follows.
 - In-game match HUD (below minimap): level, XP, skill points, upgrade key label (`U`), local HP/mana, target hints, objective line, per-slot class ability lines (name, effect numbers, cooldown/lock state), and F1 help reminder; bottom-right skill bar shows `Q`–`R` keys with the selected class's ability names and ranks.
 - F1 toggle help overlay with movement, camera, targeting, casting, objective, and pause guidance; does not reset simulation when toggled. The panel is shown only while the match is `Running` (toggle state is preserved when returning to a live match so lobby/victory screens are not covered).
 
+## Every match ends (LR-11, unreleased)
+
+- A match worker whose humans all left (Leave, crash or lost connection) keeps their heroes under bot control for the 180 s reclaim window plus 30 s. If nobody comes back, the round settles as **Interrupted** (unrated, no winner, no XP, stored once) and the worker retires and frees its port.
+- Any running match ends at a hard cap, `OMOBA_MATCH_MAX_DURATION_SECS` (default 2700 s = 45 minutes), also as **Interrupted**. Connected players get the terminal receipt and the result screen shows «Match interrupted». A standalone server starts a fresh round instead.
+- The server logs `MATCH_METRIC event=abandoned_reaped` and `event=duration_capped`.
+- A lobby that binds beyond loopback refuses to start while `OMOBA_MATCH_PUBLIC_HOST` is unset or loopback, because players would be sent to their own machine (LR-01).
+- Code: `server/src/match_lifecycle.rs`, `server/src/match_pool.rs` (`public_worker_host`). See [the session note](progress/2026-10-24-lr-11.md).
+
 ## Multiplayer Session Reliability
 
 - **TASK-14 (client)**: Explicit session states, non-blocking wait when the server is down, bounded `WaitingForServer` timeout, stale snapshot detection while connected, UDP transport error thresholds, snapshot-channel disconnect detection when the UDP thread ends, full teardown (replicated entities + team overlay) on disconnect, manual reconnect via **Retry** (no silent rejoin into a match), pause menu auto-closes on **Disconnected**, minimap hidden unless **Connected**.

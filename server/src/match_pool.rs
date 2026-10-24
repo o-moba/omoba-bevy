@@ -30,8 +30,60 @@ fn setting<T: std::str::FromStr>(name: &str, default: T) -> Result<T, String> {
         v.parse().map_err(|_| format!("Invalid {name}"))
     })
 }
+/// The host part of a worker endpoint, as an IP address when it is one.
+fn host_ip(host: &str) -> Option<std::net::IpAddr> {
+    host.trim_start_matches('[')
+        .trim_end_matches(']')
+        .parse()
+        .ok()
+}
+
+fn loopback_host(host: &str) -> bool {
+    let name = host.trim_end_matches('.').to_ascii_lowercase();
+    host_ip(host).is_some_and(|ip| ip.is_loopback())
+        || name == "localhost"
+        || name.ends_with(".localhost")
+}
+
+/// The host clients dial for a worker (`OMOBA_MATCH_PUBLIC_HOST`, unset =
+/// `127.0.0.1`). A lobby or its workers bound beyond loopback serve remote
+/// players, and a loopback endpoint would send those players to their own
+/// machine: such a lobby refuses to start instead of failing every match.
+pub(crate) fn public_worker_host(
+    configured: Option<&str>,
+    lobby_bind: SocketAddr,
+    worker_bind: std::net::IpAddr,
+) -> Result<String, String> {
+    let public_host = configured.unwrap_or("127.0.0.1");
+    if public_host.is_empty()
+        || public_host.len() > 200
+        || public_host.contains(['/', '\n', '\r', ' '])
+    {
+        return Err("Invalid public worker host".into());
+    }
+    if host_ip(public_host).is_some_and(|ip| ip.is_unspecified()) {
+        return Err(format!(
+            "OMOBA_MATCH_PUBLIC_HOST={public_host} is not an address players can dial; \
+             set it to this host's public IPv4 address or DNS name"
+        ));
+    }
+    let exposed = !lobby_bind.ip().is_loopback() || !worker_bind.is_loopback();
+    if exposed && loopback_host(public_host) {
+        let shown =
+            configured.map_or_else(|| "unset (default 127.0.0.1)".to_owned(), str::to_owned);
+        return Err(format!(
+            "OMOBA_MATCH_PUBLIC_HOST is {shown}, but the lobby binds {lobby_bind} and workers \
+             bind {worker_bind}: remote players would be sent to their own loopback address. \
+             Set OMOBA_MATCH_PUBLIC_HOST to this host's public IPv4 address or DNS name, \
+             or bind SERVER_ADDR and OMOBA_MATCH_BIND_IP to loopback for local play"
+        ));
+    }
+    Ok(public_host.to_owned())
+}
+
 impl Pool {
-    pub fn from_env() -> Result<Self, String> {
+    /// `lobby_bind` is the lobby's own bound UDP address (`SERVER_ADDR`).
+    pub fn from_env(lobby_bind: SocketAddr) -> Result<Self, String> {
         let root = std::env::var_os("OMOBA_MATCH_ROOT")
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from(".omoba/matches"));
@@ -46,18 +98,15 @@ impl Pool {
         {
             return Err("Invalid match pool capacity or ports".into());
         }
-        let public_host =
-            std::env::var("OMOBA_MATCH_PUBLIC_HOST").unwrap_or_else(|_| "127.0.0.1".into());
         let bind_ip = std::env::var("OMOBA_MATCH_BIND_IP").unwrap_or_else(|_| "127.0.0.1".into());
-        format!("{bind_ip}:{first_port}")
+        let worker_bind = format!("{bind_ip}:{first_port}")
             .parse::<SocketAddr>()
             .map_err(|_| "Invalid worker bind IP")?;
-        if public_host.is_empty()
-            || public_host.len() > 200
-            || public_host.contains(['/', '\n', '\r', ' '])
-        {
-            return Err("Invalid public worker host".into());
-        }
+        let public_host = public_worker_host(
+            std::env::var("OMOBA_MATCH_PUBLIC_HOST").ok().as_deref(),
+            lobby_bind,
+            worker_bind.ip(),
+        )?;
         let executable = std::env::var_os("OMOBA_MATCH_EXECUTABLE")
             .map(PathBuf::from)
             .map_or_else(
@@ -515,6 +564,101 @@ mod tests {
             .wait()
             .unwrap();
     }
+    #[test]
+    fn exposed_lobby_refuses_a_loopback_or_unset_public_worker_host() {
+        let public: SocketAddr = "0.0.0.0:4000".parse().unwrap();
+        let local: SocketAddr = "127.0.0.1:4000".parse().unwrap();
+        let any: std::net::IpAddr = "0.0.0.0".parse().unwrap();
+        let loopback: std::net::IpAddr = "127.0.0.1".parse().unwrap();
+        // The RU/production shape: public binds need a reachable host.
+        for host in [
+            None,
+            Some("127.0.0.1"),
+            Some("127.0.1.1"),
+            Some("::1"),
+            Some("[::1]"),
+            Some("localhost"),
+            Some("LOCALHOST."),
+            Some("game.localhost"),
+        ] {
+            for (lobby, workers) in [(public, any), (public, loopback), (local, any)] {
+                let error = public_worker_host(host, lobby, workers).unwrap_err();
+                assert!(
+                    error.contains("OMOBA_MATCH_PUBLIC_HOST") && error.contains("loopback"),
+                    "{host:?} {lobby} {workers}: {error}"
+                );
+            }
+        }
+        assert!(
+            public_worker_host(None, public, any)
+                .unwrap_err()
+                .contains("unset (default 127.0.0.1)")
+        );
+        // Never dialable, whatever the binds.
+        for host in ["0.0.0.0", "::", "[::]"] {
+            assert!(
+                public_worker_host(Some(host), local, loopback)
+                    .unwrap_err()
+                    .contains("not an address players can dial")
+            );
+        }
+        let long = "a".repeat(201);
+        for host in ["", "a b", "a/b", long.as_str()] {
+            assert_eq!(
+                public_worker_host(Some(host), local, loopback).unwrap_err(),
+                "Invalid public worker host"
+            );
+        }
+        // Local play keeps the loopback default; public hosts are accepted.
+        assert_eq!(
+            public_worker_host(None, local, loopback).unwrap(),
+            "127.0.0.1"
+        );
+        for host in ["lobby.ru.omoba.io", "203.0.113.7", "lobby.dev.omoba.io"] {
+            assert_eq!(public_worker_host(Some(host), public, any).unwrap(), host);
+        }
+    }
+
+    #[test]
+    fn retired_worker_frees_its_port_once_its_last_heartbeat_ages() {
+        let mut p = Pool::for_test();
+        let id = p.allocate(manifest('a')).unwrap();
+        let port = p.slots[&id].manifest.bind.clone();
+        p.slots
+            .get_mut(&id)
+            .unwrap()
+            .child
+            .as_mut()
+            .unwrap()
+            .wait()
+            .unwrap();
+        // What an aborted worker (reaped or capped) writes before it exits.
+        let retired = |age_ms: u64| Status {
+            allocation_id: id.clone(),
+            server_epoch: 1,
+            heartbeat_ms: match_allocation::unix_ms() - age_ms,
+            phase: Phase::Failed,
+            result_id: Some("r".repeat(32)),
+        };
+        p.write_status_for_test(&id, &retired(1_000));
+        p.poll();
+        assert!(p.slots[&id].terminal());
+        assert!(p.full(), "the port is held while the exit is recent");
+        p.write_status_for_test(&id, &retired(36_000));
+        p.poll();
+        assert!(!p.full());
+        let next = p.allocate(manifest('b')).unwrap();
+        assert_eq!(p.slots[&next].manifest.bind, port);
+        p.slots
+            .get_mut(&next)
+            .unwrap()
+            .child
+            .as_mut()
+            .unwrap()
+            .wait()
+            .unwrap();
+    }
+
     #[test]
     fn running_assignment_cannot_be_cancelled_from_lobby() {
         let mut p = Pool::for_test();

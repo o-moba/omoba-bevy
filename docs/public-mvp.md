@@ -88,6 +88,12 @@ clients. The first worker port must be nonzero and the range must fit in a UDP
 port number. `GAME_SERVER_ADDR=play.example.com:4000 ./client` connects a native
 client. Keep private state directories inaccessible to other users.
 
+The lobby refuses to start when it or its workers bind beyond loopback while
+`OMOBA_MATCH_PUBLIC_HOST` is unset or loopback. `OMOBA_MATCH_MAX_DURATION_SECS`
+(default 2700, 45 minutes) caps every running match; a capped match, or one that no
+human has attended for the 180 s reclaim window plus 30 s, settles as interrupted
+and unrated, and its worker exits.
+
 The packaged `launch-lobby.sh` validates required deployment values; review them
 before launching. `OMOBA_MATCH_EXECUTABLE` can override the worker binary; by
 default the lobby spawns the same server executable. Workers inherit the database

@@ -89,7 +89,7 @@ Area: hosting/deployment · **blocker** · M · ops (owner buys the VPS and sets
     - Caddy
     - firewall open only for UDP 4000, the arena range and TCP 443
     - key-only SSH
-  - [ ] A public lobby with an unset or loopback public host and a non-loopback bind exits with a clear error (unit test).
+  - [x] A public lobby with an unset or loopback public host and a non-loopback bind exits with a clear error (unit test).
   - [ ] A written RU release checklist replaces the April gate. For each platform it covers:
     - clean install and first run in Russian
     - VK sign-in
@@ -183,7 +183,7 @@ Area: legal (152-FZ) · **blocker** · S · owner
   - No operator entity exists. The landing credits "Wotori Studio", and the only contact is Telegram (`landing-v2/apps/omoba/src/app/privacy/page.tsx:160-176`).
   - The RKN notice is listed as an owner step, with no record that it was filed (`docs/markets.md:121-125`).
 - **Requirement:**
-  - Decide the entity: ИП, ООО or self-employed. The same entity is used for the RuStore, VK ID and VK Play accounts.
+  - Decide the entity: ИП or ООО. Self-employed (НПД) status is not enough once the RU market sells supporter auras: the YooKassa shop with «Чеки от ЮKassa» (LR-67) needs an ИП or ООО. The same entity is used for the YooKassa, RuStore, VK ID and VK Play accounts.
   - File the operator notice (152-FZ art. 22).
   - Either file a cross-border notice or state that no RU personal data leaves Russia. Check off-site backups, Pinata, and Vercel/Supabase analytics on RU-facing pages.
 - **Acceptance:**
@@ -326,9 +326,9 @@ Area: worker lifecycle · **major** · S · code
   - A worker with no connected human for `SESSION_RECLAIM_WINDOW` plus a grace period settles as abandoned (unrated) and frees its port.
   - A configurable hard maximum duration ends any match with a defined outcome.
 - **Acceptance:**
-  - [ ] Test: in a BotPractice match the human leaves; after the reclaim window and grace, the status is Finished or Failed and the port is released.
-  - [ ] Test: a match past the max duration reaches a terminal state, with no rating for an abandoned bot game.
-  - [ ] `MATCH_METRIC` emits `abandoned_reaped` and `duration_capped`.
+  - [x] Test: in a BotPractice match the human leaves; after the reclaim window and grace, the status is Finished or Failed and the port is released.
+  - [x] Test: a match past the max duration reaches a terminal state, with no rating for an abandoned bot game.
+  - [x] `MATCH_METRIC` emits `abandoned_reaped` and `duration_capped`.
 - **Depends on:** —
 
 #### LR-12 — Watchdog and self-healing processes
@@ -1577,3 +1577,4 @@ single, documented setting the owner can change later.
 | — | **RU surfaces**: no donate-with-crypto, wallet, Solana or Ekza content; the RU Supporter page (YooKassa) and `/supporters` are allowed and linked from the portal navigation. | LR-22, LR-67 |
 | — | **Legal drafts** (LR-06) also include a draft **public offer** (оферта) for supporter cosmetics at `/offer`: what is sold (a 30-day cosmetic aura, no gameplay advantage), prices, payment through YooKassa, refunds, and placeholders for the seller's requisites (ФИО, ИНН, ОГРНИП, address, e-mail, phone). Prices and the offer are readable without sign-in. | LR-06, LR-67 |
 | — | **Reserved numbers**: portal migration 009 = YooKassa supporter (LR-67); game protocol 12 = tier aura styles (LR-67). | LR-67 |
+| — | **RU domain (owner, 2026-10-24)**: the RU market lives on **omoba.ru** (registered at REG.RU, DNS there): `https://omoba.ru` = RU portal and landing (VK ID callback `https://omoba.ru/api/auth/vk/callback`, `/privacy`, `/terms`, `/offer`, `/supporter`, `/download`), `https://account.omoba.ru` = Account API (YooKassa webhook `https://account.omoba.ru/v1/supporter/yookassa/notifications`), `lobby.omoba.ru:4000` = lobby and match workers. These replace every `*.ru.omoba.io` name in this plan. New code and docs take names from `scripts/markets.py` / `shared/src/market.rs`, never literals; existing `ru.omoba.io` references are replaced in one sweep after the M0 run. The global ecosystem (`omoba.io`, Ekza) is untouched; Ekza comes to RU later feature by feature (`--feature ekza=on`). | all RU specs |

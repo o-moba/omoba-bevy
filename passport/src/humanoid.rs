@@ -18,6 +18,8 @@ use std::collections::{BTreeMap, HashSet, VecDeque};
 pub const MAX_HUMANOID_NODES: usize = 4096;
 pub const MAX_HUMANOID_JSON_BYTES: usize = 4 * 1024 * 1024;
 pub const MAX_HUMANOID_GLB_BYTES: usize = 50 * 1024 * 1024;
+/// Most semantic bones a VRM humanoid map may assign.
+pub const MAX_HUMANOID_BONES: usize = 64;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum VrmVersion {
@@ -407,7 +409,8 @@ fn node_index(value: &Value, count: usize, context: &str) -> Result<usize, Strin
         .ok_or_else(|| format!("VRM {context} index is missing or out of range"))
 }
 
-fn required_bones(version: VrmVersion) -> Vec<&'static str> {
+/// The semantic bones a rig of this VRM version must map.
+pub fn required_bones(version: VrmVersion) -> Vec<&'static str> {
     let mut bones = vec![
         "hips",
         "spine",
@@ -448,7 +451,7 @@ fn parse_bones(
             let bones = extension["humanoid"]["humanBones"]
                 .as_array()
                 .ok_or("VRM0 humanBones must be an array")?;
-            if bones.len() > 64 {
+            if bones.len() > MAX_HUMANOID_BONES {
                 return Err("VRM humanoid map exceeds 64 bones".into());
             }
             let entries = bones
@@ -471,7 +474,7 @@ fn parse_bones(
             let bones = extension["humanoid"]["humanBones"]
                 .as_object()
                 .ok_or("VRM1 humanBones must be an object")?;
-            if bones.len() > 64 {
+            if bones.len() > MAX_HUMANOID_BONES {
                 return Err("VRM humanoid map exceeds 64 bones".into());
             }
             (
