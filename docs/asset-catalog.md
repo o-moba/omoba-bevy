@@ -5,6 +5,12 @@ It describes all 17 classes, their 68 skills, current basic attacks, semantic
 motion references and authored cosmetic requirements. The executable game and
 combat protocol do not consume this document in this iteration.
 
+What creators may submit to the game - every animation slot of every hero, its
+default and the rules a custom clip must pass - is the separate
+[game contract](game-contract.md) (`ekza.game-contract.v1`), which uses the same
+canonical JSON and revision rule. Its asset slots will be cut from this
+catalogue's requirements (GP5).
+
 The original [Studio proposal (PR #78)](https://github.com/o-moba/omoba-bevy/pull/78) remains the
 roadmap for Registry publication, requirement-targeted review and playable sets.
 This export implements discovery and preparation of a contribution brief. It does
