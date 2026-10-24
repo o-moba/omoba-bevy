@@ -4,19 +4,23 @@ This page is the map of the repository for people changing it: which crate
 owns what, how a frame flows through the client, how a tick flows through the
 server, the rules that keep the two in step, and the refactoring roadmap the
 maintainers are working through. Feature-level documentation lives in
-[features.md](features.md); operations in [RUNBOOK.md](../RUNBOOK.md).
+[features.md](features.md); operations in [RUNBOOK.md](../RUNBOOK.md). The
+system-level architecture (services and hosts, identity and accounts, protocols,
+data, build and release, methodology, decision log) is in
+[architecture/](architecture/README.md).
 
 ## Crate map
 
 | Crate | Role | Depends on |
 | --- | --- | --- |
-| `shared` (MPL) | The gameplay model both sides agree on: hero classes and ability kits, hero growth, items, map geometry and navigation, the wire protocol, prematch/draft, social/career/account contracts, the debug command family (`shared::debug`) and the Combat Test sandbox protocol, and the pure bot planners (`shared::progression`, `shop::plan_purchases`). Per-class and per-item data is JSON in `shared/assets/catalog/`, embedded and validated at startup (`shared::catalog`), and the frozen sprite character ids with their normalization. No Bevy, no I/O: no environment, filesystem or network reads, and no Ekza SDK types. | serde, serde_json; no I/O |
+| `shared` (MPL) | The gameplay model both sides agree on: hero classes and ability kits, hero growth, items, map geometry and navigation, the wire protocol, prematch/draft, social/career/account contracts, the debug command family (`shared::debug`) and the Combat Test sandbox protocol, and the pure bot planners (`shared::progression`, `shop::plan_purchases`). Per-class and per-item data is JSON in `shared/assets/catalog/`, embedded and validated at startup (`shared::catalog`), and the frozen sprite character ids with their normalization, and the build's market (`shared::market`, baked at compile time from `OMOBA_MARKET`/`OMOBA_FEATURE_*`, see [markets.md](markets.md)). No Bevy, no I/O: no runtime environment, filesystem or network reads, and no Ekza SDK types. | serde, serde_json; no I/O |
+| `common` (AGPL) | The authoritative combat simulation (game world, heroes, bots, combat, formation) without transport, authentication or persistence, shared by the server and the client's socket-free offline practice. | shared |
 | `server` (AGPL) | The authoritative simulation and UDP endpoint: match lifecycle, bots, combat, shop, career settlement, public transport signing, allocation workers. Binary only. No Bevy since step 6a; `sqlx` is a dev-dependency (the PostgreSQL fixtures), production reaches the database through career-store. | shared, passport, career-store, ekza-bevy-sdk (no default features), tokio, ed25519-dalek |
 | `career-store` (AGPL) | Trusted career persistence (Postgres, migrations) and the bounded queue policy, linked by the server and the account API without the engine. | shared, sqlx |
 | `client` (MPL) | The Bevy game: networking, prediction, presentation (2D sprites and 3D models, the sprite roster in `sprite_roster.rs`), UI, mobile input, offline practice, QA harnesses (`qa` feature, on by default). | shared, passport, bevy, ekza-bevy-sdk |
 | `harness` | Black-box UDP players and gameplay/matchmaking checks that launch the server binary. | shared |
 | `passport` | Ekza passport contract: tickets, device and web accounts, store admission; the asset root (`passport::assets`), the avatar roster and the store-avatar registry (`passport::avatars`), and the companion reaction grant (`passport::entitlements`). | shared, ekza-bevy-sdk (`http`), reqwest |
-| `account-api` | Axum/Postgres HTTP service over the career store (portal, devices, supporter billing). | shared, career-store, axum, sqlx |
+| `account-api` | Axum/Postgres HTTP service over the career store: portal pairing and sessions, devices and recovery, Supporter billing, class builds, the Ekza library link and sign in with VK ID (portal schema 7). Free-market builds serve no Supporter or Ekza routes. | shared, career-store, axum, sqlx, reqwest |
 | `arena-sync` | CLI that pulls Ekza Arena avatars and merges the avatar manifest. | reqwest |
 
 Rules that follow from the map:

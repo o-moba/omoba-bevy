@@ -69,10 +69,11 @@ class Activation(unittest.TestCase):
 
     def test_schema_guard(self):
         self.save()
-        with patch.object(api, 'sql', return_value='1\n2\n3\n4\n5'):
-            with self.assertRaisesRegex(RuntimeError, 'migration6'):
-                api.validate_activation(REV)
-        with patch.object(api, 'sql', return_value='1\n2\n3\n4\n5\n6'):
+        for old in ('1\n2\n3\n4\n5', '1\n2\n3\n4\n5\n6'):
+            with patch.object(api, 'sql', return_value=old):
+                with self.assertRaisesRegex(RuntimeError, 'migration7'):
+                    api.validate_activation(REV)
+        with patch.object(api, 'sql', return_value='1\n2\n3\n4\n5\n6\n7'):
             api.validate_activation(REV)
 
     def test_bad_activation_cannot_write_or_enable_login(self):

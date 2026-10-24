@@ -18,6 +18,19 @@ All notable changes are recorded here. The canonical version is
   notes on each hero's asset needs for GP5. No engine behaviour changes. See
   [the reference](docs/game-contract.md).
 
+- Documentation: a current architecture set in `docs/architecture/` (system and
+  deployment, identity and accounts, protocols, data, build and release,
+  methodology, an ADR log) written from the code and fact-checked against it, and
+  the launch-readiness plan `docs/plans/launch-readiness.md` (66 specs in three
+  milestones from an audit of matchmaking, ranked, bots, operations, client,
+  community, security and the RU launch). The RU server kit is marked not
+  deployable until its blockers are fixed (LR-02: the portal sends no ingress key
+  outside the dev contour). The DEV Account API activation now expects portal
+  schema 1–7. The 2026-09-25 architecture snapshots are marked historical, and
+  stale passages in supporter.md, the Account API README, CONTRIBUTING.md and the
+  VPS README are corrected. See
+  [the session note](docs/progress/2026-10-24-architecture-and-launch-readiness.md).
+
 - Markets: one build per region (`docs/markets.md`). `shared::market` bakes
   `OMOBA_MARKET` (`global` default, `ru`, `cn`) and `OMOBA_FEATURE_EKZA|SUPPORTER|
   VK_SIGN_IN` overrides into every crate; an unknown value fails the build.
