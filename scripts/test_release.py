@@ -174,7 +174,7 @@ class DevContour(unittest.TestCase):
                        "LOBBY.OMOBA.IO.:4100", "play.ekza.io:4000"):
             with self.assertRaises(SystemExit, msg=server):
                 release.resolve_flavor("dev", server=server)
-        for registry in ("https://registry.ekza.io", "https://REGISTRY.ekza.io/", "https://studio.ekza.io",
+        for registry in ("https://registry.ekza.io", "https://REGISTRY.ekza.io/", "https://studio.ekza.io", "https://hub.ekza.io",
                          "https://registry.ekza.io./v1", "https://wss.ekza.io/mirror", "https://ekza.io"):
             with self.assertRaises(SystemExit, msg=registry):
                 release.resolve_flavor("dev", registry=registry)
@@ -184,7 +184,8 @@ class DevContour(unittest.TestCase):
                        "x.dev.ekza.io:4000"):
             with self.assertRaises(SystemExit, msg=server):
                 release.resolve_flavor(server=server)
-        for registry in ("https://registry.dev.ekza.io", "https://Registry.Dev.Ekza.io/", "https://studio.dev.ekza.io"):
+        for registry in ("https://registry.dev.ekza.io", "https://Registry.Dev.Ekza.io/", "https://studio.dev.ekza.io",
+                         "https://hub.dev.ekza.io"):
             with self.assertRaises(SystemExit, msg=registry):
                 release.resolve_flavor(registry=registry)
         with self.assertRaises(SystemExit):

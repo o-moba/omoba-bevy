@@ -130,7 +130,7 @@ These addresses cannot receive recovery mail, even after SMTP is configured.
 
 1. Check DEV and the running Dev connection profile on each client.
 2. Sign in at `app.dev.omoba.io/market`, claim a free item and connect the game
-   through `studio.dev.ekza.io/studio`. Verify that the library updates.
+   through `hub.dev.ekza.io/studio`. Verify that the library updates.
 3. Join the same match. Check that the other client sees the selected item.
 4. Exercise disconnect and resume; complete the match, then join another one.
    Record logs, version/build, source revision and device/OS, never credentials.
