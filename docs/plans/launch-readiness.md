@@ -358,9 +358,9 @@ Area: matchmaking/re-queue · **major** · S · code
   - Cancel is refused for a running match (`server/src/match_pool.rs:171-182`).
 - **Requirement:** Pressing Play after leaving a running match either shows "You are still in a match: Resume / ends in about N min" or creates a new queue entry. The player never sees a spinner that cannot connect.
 - **Acceptance:**
-  - [ ] A new view state (e.g. `MatchServiceView::InMatch { allocation_id }`) or an error code exists.
-  - [ ] Client test: the case renders a localized message with Resume.
-  - [ ] Server test: the state is visible within one tick. With LR-11 in place, the seat frees after the reclaim window.
+  - [x] A new view state (e.g. `MatchServiceView::InMatch { allocation_id }`) or an error code exists. Done as `MatchServiceView::Assigned { in_match: Some(InMatch { ends_within_secs }) }`, additive so protocol 11 stays.
+  - [x] Client test: the case renders a localized message with Resume.
+  - [x] Server test: the state is visible within one tick. With LR-11 in place, the seat frees after the reclaim window.
 - **Depends on:** LR-11
 
 #### LR-14 — Client update path

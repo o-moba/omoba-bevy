@@ -284,7 +284,7 @@ sequenceDiagram
 | File | Writer | Shape / rule |
 | --- | --- | --- |
 | `manifest.json` | lobby, once | `{version:1, allocation_id:<32 hex>, endpoint, bind, preference, humans:[{profile_id, session_id, team}], join_deadline_ms}`. ≤ 16 KiB. 1–10 unique humans (unique profiles and sessions), ≤ 5 per team. `humans_only` needs exactly 10. `bot_practice` is one party (≤ party size) on one team. Join deadline is allocation time + 180 s |
-| `status.json` | worker heartbeat, at most once per second. The lobby writes `failed` on spawn failure or on exit without a status | `{allocation_id, server_epoch, heartbeat_ms, phase: ready\|forming\|running\|settling\|finished\|failed\|recovering, result_id}`. `ready` until someone joins, then `forming`; `settling` while the result or abandonment is not yet settled. A recovering worker reports its origin epoch. Read only when ≤ 4 KiB and its `allocation_id` matches |
+| `status.json` | worker heartbeat, at most once per second. The lobby writes `failed` on spawn failure or on exit without a status | `{allocation_id, server_epoch, heartbeat_ms, phase: ready\|forming\|running\|settling\|finished\|failed\|recovering, result_id, ends_by_ms?}`. `ready` until someone joins, then `forming`; `settling` while the result or abandonment is not yet settled. A recovering worker reports its origin epoch. `ends_by_ms` (Unix ms, only while `running`) is when the match ends at the latest: the duration cap or, while no human is connected, the abandoned-match reaping (`ServerRuntime::latest_match_end`). Read only when ≤ 4 KiB and its `allocation_id` matches |
 | `cancel.json` | the lobby (refused once the status is `running` or `settling`), or the worker when an allocated member cancels before the round starts | content `true`; presence = cancelled |
 | `worker.log`, `outbox/` | worker | logs, durable results |
 
@@ -307,10 +307,17 @@ Timers (`match_pool.rs`, worker side in `match_service.rs`):
 
 **Lobby → client.** The handoff goes out as `CareerView.match_service`:
 
-- `MatchServiceView::Assigned{allocation: MatchAllocation{allocation_id, endpoint, preference, team, human_count, bot_count, rated (humans == 10), join_deadline_ms}}`;
-- otherwise `Waiting`, `Allocating` or `Failed{code}` (`queue_full`, `already_queued`, `capacity_busy`, `worker_spawn_failed`, `profile_has_another_session`).
+- `MatchServiceView::Assigned{allocation: MatchAllocation{allocation_id, endpoint, preference, team, human_count, bot_count, rated (humans == 10), join_deadline_ms}, in_match?}`;
+- otherwise `Waiting`, `Allocating` or `Failed{code}` (`queue_full`, `already_queued`, `capacity_busy`, `worker_spawn_failed`, `profile_has_another_session`, `allocation_cancelled_or_expired`).
 
 The client validates the endpoint (`persistence::validate_game_server_addr`), sends `SessionUiCommand::ConnectAllocated`, and re-sends its retained `join` once it is authenticated on the worker (`client/src/match_service.rs`).
+
+**In-match state (LR-13).** Every allocated human joins before a worker's match starts, so a slot whose fresh receipt is `running` is a seat its player left or lost. The lobby then answers `Assigned` with `in_match: {ends_within_secs?}`: seconds until the match ends at the latest, from the receipt's `ends_by_ms`.
+
+- `FindMatch` adds no queue entry while the profile holds that seat. The view is computed from the receipt on every career view, without waiting for a lobby tick.
+- Once the worker reports `finished` or `failed` for a match the lobby saw running (`Slot::ran`), the next tick drops the assignment without an error, and the next `FindMatch` queues. `allocation_cancelled_or_expired` is reported only for an allocation that failed before it ran.
+- The client never hands off to an in-match allocation. The searching screen shows the `rejoin` copy ("You are still in a match · it ends in N min at the latest") with **Resume** and keeps retrying `FindMatch`. Resume sends `SessionUiCommand::ResumeMatch`: the saved resume hint when it names the same allocation, otherwise the view's allocation with this search's lock-in, which the worker reads as a reclaim. A blocked join returns to the lobby (`net/recovery.rs` `resume_actions`, `MatchServiceClient::resume_in_match`).
+- The field is additive (`serde(default)`, skipped when absent). A protocol 11 client without it reads a plain handoff, as before. A new `MatchServiceView` variant would need a protocol bump (`MatchServiceView` is strict in `wire_enums.rs`), and protocol 12 is reserved for LR-67.
 
 **Worker admission** (`authorize_allocated_join`):
 

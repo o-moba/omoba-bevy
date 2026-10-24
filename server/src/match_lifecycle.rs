@@ -107,6 +107,23 @@ impl ServerRuntime {
             .then_some(ForcedEnd::AbandonedReaped)
     }
 
+    /// The latest moment the running match ends unless a base falls first:
+    /// the duration cap or, while no human is connected to a worker, the
+    /// abandoned-match reaping (`None` when no match is running). A reclaim
+    /// resets the reaping, so the value can move later again.
+    pub(crate) fn latest_match_end(&self, now: Instant) -> Option<Instant> {
+        let started = self.match_started_at?;
+        if !matches!(self.world.game_state, GameState::Running) {
+            return None;
+        }
+        let capped = started + self.max_match_duration;
+        let reaped = self
+            .unattended_since
+            .filter(|_| self.match_service.worker().is_some())
+            .map(|since| since + SESSION_RECLAIM_WINDOW + ABANDONED_MATCH_GRACE);
+        Some(reaped.map_or(capped, |reaped| reaped.min(capped)).max(now))
+    }
+
     fn capped(&self, now: Instant) -> Option<ForcedEnd> {
         let started = self.match_started_at?;
         let live = matches!(self.world.game_state, GameState::Running)
@@ -285,6 +302,56 @@ mod tests {
             rt.career_allocation_for_test().unwrap().outcome,
             MatchOutcome::Interrupted
         );
+        cleanup(&rt);
+    }
+
+    /// LR-13: a running worker reports when its match ends at the latest:
+    /// the cap while a human plays, the reaping once every human left, and
+    /// the cap again after a reclaim.
+    #[test]
+    fn the_running_receipt_reports_the_latest_end_for_players_who_left() {
+        let (mut rt, addr, join, now) = running_worker();
+        let left_ms = |rt: &ServerRuntime| {
+            let status = status(rt);
+            assert_eq!(status.phase, Phase::Running);
+            status
+                .ends_by_ms
+                .unwrap()
+                .saturating_sub(crate::match_allocation::unix_ms())
+        };
+        let near = |actual: u64, expected: Duration| {
+            let expected = expected.as_millis() as u64;
+            assert!(
+                actual <= expected && actual + 5_000 > expected,
+                "{actual} ms, expected about {expected} ms"
+            );
+        };
+        let cap = rt.max_match_duration;
+        rt.tick(now, 0.0);
+        rt.tick_match_service(now);
+        near(left_ms(&rt), cap);
+
+        rt.handle_packet(addr, ClientPacket::Leave, now);
+        let left = now + Duration::from_secs(1);
+        rt.tick(left, 0.0);
+        rt.tick_match_service(left);
+        near(left_ms(&rt), SESSION_RECLAIM_WINDOW + ABANDONED_MATCH_GRACE);
+
+        let back = left + Duration::from_secs(1);
+        rt.career.backend.test_authenticated(
+            addr,
+            shared::career::ProfileSummary::new("a".repeat(64), "Alice".into()),
+            "seat-a",
+        );
+        rt.handle_packet(addr, join, back);
+        rt.tick(back, 0.0);
+        rt.tick_match_service(back);
+        near(left_ms(&rt), cap - Duration::from_secs(2));
+        // Nothing to report once the match no longer runs.
+        rt.world.game_state = GameState::Victory {
+            winner: shared::map::Team::Green,
+        };
+        assert_eq!(rt.latest_match_end(back), None);
         cleanup(&rt);
     }
 

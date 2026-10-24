@@ -54,6 +54,8 @@ Sources: `server/src/match_service.rs`, `server/src/match_pool.rs`, `server/src/
 4. The worker reports its phase in a `status.json` heartbeat. The lobby hands out the endpoint only while the worker reports `ready`, `forming` or `running` with a fresh heartbeat and is neither recovering nor cancelled (`Slot::ready`). A spawned process alone is not enough.
 
    The client then switches its UDP session to that endpoint (`SessionUiCommand::ConnectAllocated`).
+
+   A `running` receipt is never a fresh handoff: the profile left that match or lost its connection. The lobby answers with the in-match state (`Assigned{in_match}`, with the latest end), adds no queue entry, and the client offers **Resume** instead of connecting (LR-13, [protocols.md §5](protocols.md#5-lobby--worker-allocation-handoff)).
 5. A worker whose match has not started gives up when it is cancelled or its join deadline passes, and settles the round as `Abandoned`.
    - A cancel writes `cancel.json`. The lobby writes it, and the worker writes it itself when an allocated player cancels there before the start (`career_runtime.rs`). The lobby refuses to cancel once the worker is `running` or `settling`.
    - The worker settles every result through its own career outbox and exits 30 s after reaching a terminal phase (`finished` or `failed`).
@@ -70,7 +72,7 @@ Sources: `server/src/match_service.rs`, `server/src/match_pool.rs`, `server/src/
 - The lobby polls the pool at most once per second and launches at most 4 new workers per pass (`Lobby::tick`). Each poll also relaunches at most 4 recovery workers (`Pool::poll`).
 - The queue holds at most 128 entries (`MAX_WAITING`, error `queue_full`). An entry expires 15 s after its last explicit `FindMatch` retry. A Home heartbeat does not renew it.
 - The lobby tracks at most 512 requests. A request is dropped 120 s after its last touch unless it is queued or assigned.
-- `capacity_busy` means every worker port is in use. A failed allocation is reported to its players as `allocation_cancelled_or_expired`.
+- `capacity_busy` means every worker port is in use. An allocation that fails before its match ran is reported to its players as `allocation_cancelled_or_expired`. When a match the lobby saw running ends, its seats free without an error and the next `FindMatch` queues (LR-13).
 - The lobby refuses to start with more than 100 retained allocations or 4096 entries in the match root (`Pool::from_env`).
 - The pool settings (`OMOBA_MATCH_ROOT`, `OMOBA_MATCH_CAPACITY`, `OMOBA_MATCH_FIRST_PORT`, `OMOBA_MATCH_BIND_IP`, `OMOBA_MATCH_PUBLIC_HOST`, `OMOBA_MATCH_EXECUTABLE`) and their defaults are in [protocols.md §5](protocols.md#5-lobby--worker-allocation-handoff). The deployed values per host are in the [port summary](#port-summary).
 

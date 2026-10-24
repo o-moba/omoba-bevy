@@ -155,6 +155,7 @@ pub(crate) fn resume_actions(
     )>,
     mut flow: ResMut<MatchServiceClient>,
     resume: Res<ResumeMatchState>,
+    career: Option<Res<CareerClient>>,
 ) {
     // Reader and writer use separate cursors: the emitted ConnectAllocated is
     // consumed by the normal lifecycle later this frame.
@@ -163,6 +164,27 @@ pub(crate) fn resume_actions(
         .read()
         .any(|event| matches!(event, SessionUiCommand::ResumeMatch));
     if !resume_requested {
+        return;
+    }
+    // The lobby's in-match answer to this search (LR-13). The saved hint of
+    // the same allocation is preferred: it holds the exact committed join and
+    // the match scope that guards against a reused worker port.
+    let view = career.as_ref().map(|career| &career.view);
+    let live = view.and_then(|view| {
+        flow.in_match(view)
+            .map(|(seat, _)| seat.allocation_id.clone())
+    });
+    if let (Some(view), Some(live)) = (view, live)
+        && resume
+            .saved
+            .as_ref()
+            .is_none_or(|saved| saved.allocation.allocation_id != live)
+    {
+        if let Some(endpoint) = flow.resume_in_match(view) {
+            messages
+                .p1()
+                .write(SessionUiCommand::ConnectAllocated(endpoint));
+        }
         return;
     }
     let Some(saved) = &resume.saved else {
