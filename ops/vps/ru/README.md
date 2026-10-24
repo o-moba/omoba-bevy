@@ -74,7 +74,15 @@ in argv; a generated secret is never replaced.
 ```sh
 # ~/.ssh/config:  Host vds-ru / HostName <RU IPv4> / User root / IdentityFile …
 export RU_HOST=vds-ru RU_IP=<RU VPS IPv4>
+python3 ops/vps/ru/ru_host.py names   # the RU names and the DNS A records to set; local only
 ```
+
+The public names (lobby, Account API, portal) and the RU DNS zone come from the RU
+profile in [scripts/markets.py](../../../scripts/markets.py) and are written nowhere
+else: the tool reads them on the Mac and sends them to the host, where `status` and
+`bootstrap` check DNS against them. It refuses a kit whose `Caddyfile.ru` sites or
+`OMOBA_PORTAL_ORIGIN` lines do not match them, so a rename edits `markets.py` and then
+the kit files it names.
 
 1. **Bootstrap a fresh host** (idempotent; run it again after changing the kit):
    ```sh
@@ -157,7 +165,8 @@ unit's only writable folder.
   (version, ICU, loopback, roles, schema), Caddy and its Caddyfile, firewall, sshd,
   users and folder modes, env files, Node.js, releases, units enabled and running,
   UDP 4000, `127.0.0.1:40550/health/ready`, the portal on `127.0.0.1:3010`, DNS (A
-  records for the three names point here; no AAAA for the lobby), memory and disk.
+  records for the three names of `ru_host.py names` point here; no AAAA for the
+  lobby), memory and disk.
 - `python3 scripts/release.py preflight --market ru` from any computer: lobby DNS,
   `https://account.ru.omoba.io/health/ready`, the portal, and the topology: through
   the portal `GET /api/me` must be the Account API's 401 and `GET /api/releases` 200

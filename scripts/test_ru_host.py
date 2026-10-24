@@ -10,6 +10,7 @@ against the fakes.
 from __future__ import annotations
 
 import contextlib
+import dataclasses
 import hashlib
 import io
 import json
@@ -28,7 +29,9 @@ from urllib.parse import urlsplit
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "ops/vps/ru"))
+sys.path.insert(0, str(ROOT / "scripts"))
 
+import markets  # noqa: E402
 import ru_host  # noqa: E402
 
 RU_IP = "95.163.10.20"
@@ -37,6 +40,8 @@ PROD_IP = "77.246.105.57"
 VK_ID = "51234567"
 GRANTS = (ROOT / ru_host.GRANTS).read_text()
 KIT = ru_host.kit()
+NAMES = KIT["names"]   # the RU profile of scripts/markets.py
+RU_PORTAL = markets.MARKETS["ru"].portal
 PASSWORD_IN_SQL = re.compile(r"ALTER ROLE (\w+) LOGIN PASSWORD '([^']+)'")
 HAS_DATA_FILTER = hasattr(tarfile, "data_filter")
 HEX64 = re.compile(r"[0-9a-f]{64}")
@@ -76,7 +81,7 @@ class FakeSystem:
         self.fail_caddy_validate = False
         self.fail_migrate = False
         self.ufw = {"active": False, "incoming": "deny", "rules": []}
-        self.dns = {name: {socket.AF_INET: {RU_IP}, socket.AF_INET6: set()} for name in ru_host.PUBLIC_NAMES}
+        self.dns = {NAMES[key]: {socket.AF_INET: {RU_IP}, socket.AF_INET6: set()} for key in ru_host.HOST_KEYS}
         # PostgreSQL after `apt-get install postgresql` (Ubuntu 24.04: 16 with ICU, localhost).
         self.pg = {"version": 160004, "icu": True, "listen": "localhost", "port": 5432}
         self.roles, self.passwords = {}, {}
@@ -448,7 +453,7 @@ class HostCase(unittest.TestCase):
 
     def payload(self, **extra):
         return {"expected_ip": RU_IP, "dev_ip": None, "behind_nat": False, "units": dict(KIT["units"]),
-                "examples": dict(KIT["examples"]), "caddyfile": KIT["caddyfile"], **extra}
+                "examples": dict(KIT["examples"]), "caddyfile": KIT["caddyfile"], "names": dict(NAMES), **extra}
 
     def bootstrap(self, **extra):
         return self.fresh().bootstrap(self.payload(kind="bootstrap", vkid=VK_ID, **extra))
@@ -497,7 +502,7 @@ class RuKitTest(unittest.TestCase):
 
     def test_the_repository_units_pass_every_rule(self):
         for kind, text in KIT["units"].items():
-            self.assertEqual(ru_host.unit_problems(kind, text), [], kind)
+            self.assertEqual(ru_host.unit_problems(kind, text, (NAMES["zone"],)), [], kind)
 
     def test_lobby_and_account_api_wait_for_postgres_and_never_give_up(self):
         for kind in ("lobby", "account-api"):
@@ -568,6 +573,59 @@ class RuKitTest(unittest.TestCase):
                 ru_host.kit()
         self.assertIn("does not proxy to 127.0.0.1:3010", refused.exception.message)
 
+    def test_the_names_are_the_ru_profile_of_markets_py(self):
+        ru = markets.MARKETS["ru"]
+        self.assertEqual(NAMES, {"lobby": ru.lobby.rpartition(":")[0], "account_api": urlsplit(ru.account_api).hostname,
+                                 "portal": urlsplit(ru.portal).hostname, "zone": ru.zones[0]})
+        self.assertEqual(ru.lobby.rpartition(":")[2], str(ru_host.LOBBY_PORT))
+        # Written once: the tool itself holds none of them, so a rename edits markets.py only.
+        source = Path(ru_host.__file__).read_text()
+        for name in NAMES.values():
+            self.assertNotIn(name, source)
+
+    def test_a_renamed_profile_moves_every_check(self):
+        # Any rename (the omoba.ru sweep, here a made-up zone that is never the real one)
+        # changes what the kit, `names` and the DNS check expect, with no edit to the tool.
+        moved = dataclasses.replace(markets.MARKETS["ru"], lobby="lobby.play.example:4000",
+                                    account_api="https://account.play.example", portal="https://play.example",
+                                    zones=("play.example",))
+        with mock.patch.dict(markets.MARKETS, {"ru": moved}):
+            names = ru_host.ru_names()
+            self.assertEqual(names, {"lobby": "lobby.play.example", "account_api": "account.play.example",
+                                     "portal": "play.example", "zone": "play.example"})
+            # Caddyfile.ru and the env examples still serve the current names: the kit says so.
+            with self.assertRaises(ru_host.Refused) as refused:
+                ru_host.kit()
+            for needle in ("Caddyfile.ru has no account.play.example site", "Caddyfile.ru has no play.example site",
+                           "account-api.env.example: OMOBA_PORTAL_ORIGIN is", "portal.env.example: OMOBA_PORTAL_ORIGIN is"):
+                self.assertIn(needle, refused.exception.message)
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                self.assertEqual(ru_host.main(["names"]), 0)
+            printed = json.loads(out.getvalue())
+        self.assertEqual(printed["dns"]["A"], ["lobby.play.example", "account.play.example", "play.example"])
+        self.assertEqual((printed["lobby"], printed["portal"]), ("lobby.play.example:4000", "https://play.example"))
+        resolve = lambda name, family: {RU_IP} if family == socket.AF_INET else set()  # noqa: E731
+        self.assertEqual(ru_host.dns_problems(resolve, RU_IP, names), ([], []))
+        problems, _ = ru_host.dns_problems(lambda name, family: set(), RU_IP, names)
+        self.assertEqual(problems, [f"{name} has no A record; point it at {RU_IP}"
+                                    for name in ("lobby.play.example", "account.play.example", "play.example")])
+
+    def test_a_profile_the_host_cannot_serve_is_refused(self):
+        ru = markets.MARKETS["ru"]
+        cases = {
+            "must use port 4000": dataclasses.replace(ru, lobby=ru.lobby.rpartition(":")[0] + ":4100"),
+            "must be the bare origin": dataclasses.replace(ru, portal=ru.portal + "/play"),
+            "overlaps the production or dev names": dataclasses.replace(ru, zones=("omoba.io",)),
+            "is outside the RU zone": dataclasses.replace(ru, account_api="https://account.example.ru"),
+            "overlaps the cn market's": dataclasses.replace(ru, zones=markets.MARKETS["cn"].zones),
+            "is not a lowercase DNS name": dataclasses.replace(ru, zones=()),
+        }
+        for needle, profile in cases.items():
+            with mock.patch.dict(markets.MARKETS, {"ru": profile}), self.assertRaises(ru_host.Refused, msg=needle) as refused:
+                ru_host.ru_names()
+            self.assertIn(needle, refused.exception.message)
+
 
 class ParsersTest(unittest.TestCase):
     UFW = """Status: active
@@ -619,8 +677,8 @@ To                         Action      From
         good = ru_host.fill_env(example, ru_host.placeholder_fill(values, RU_IP, VK_ID))
         self.assertEqual(ru_host.env_problems("account-api", good, example, RU_IP), ([], []))
         self.assertIn("# openssl rand -hex 32", good, "comments are kept")
-        wrong = good.replace("OMOBA_PORTAL_ORIGIN=https://app.ru.omoba.io", "OMOBA_PORTAL_ORIGIN=https://evil.example")
-        self.assertIn("OMOBA_PORTAL_ORIGIN must be 'https://app.ru.omoba.io' as in account-api.env.example",
+        wrong = good.replace(f"OMOBA_PORTAL_ORIGIN={RU_PORTAL}", "OMOBA_PORTAL_ORIGIN=https://evil.example")
+        self.assertIn(f"OMOBA_PORTAL_ORIGIN must be '{RU_PORTAL}' as in account-api.env.example",
                       ru_host.env_problems("account-api", wrong, example)[0])
         no_vk = ru_host.fill_env(example, ru_host.placeholder_fill(values, RU_IP, None))
         self.assertEqual(ru_host.env_problems("account-api", no_vk, example)[0],
@@ -651,27 +709,42 @@ To                         Action      From
         self.assertIn("loopback only", problems[2])
 
     def test_dns_must_point_at_the_ru_host_without_aaaa_for_the_lobby(self):
-        dns = {name: {socket.AF_INET: {RU_IP}, socket.AF_INET6: set()} for name in ru_host.PUBLIC_NAMES}
+        dns = {NAMES[key]: {socket.AF_INET: {RU_IP}, socket.AF_INET6: set()} for key in ru_host.HOST_KEYS}
         resolve = lambda name, family: dns[name][family]  # noqa: E731
-        self.assertEqual(ru_host.dns_problems(resolve, RU_IP), ([], []))
-        dns["lobby.ru.omoba.io"][socket.AF_INET6] = {"2a00::1"}
-        dns["app.ru.omoba.io"][socket.AF_INET] = {"1.2.3.4"}
-        problems, _ = ru_host.dns_problems(resolve, RU_IP)
+        self.assertEqual(ru_host.dns_problems(resolve, RU_IP, NAMES), ([], []))
+        dns[NAMES["lobby"]][socket.AF_INET6] = {"2a00::1"}
+        dns[NAMES["portal"]][socket.AF_INET] = {"1.2.3.4"}
+        problems, _ = ru_host.dns_problems(resolve, RU_IP, NAMES)
         self.assertEqual(len(problems), 2, problems)
 
     def test_names_of_other_contours_are_foreign(self):
+        own = (NAMES["zone"],)
         for name in ("vds-eternal", "vds-dev", PROD_IP, "omoba.io", "app.omoba.io", "lobby.dev.omoba.io",
                      "registry.ekza.io", "root@vds-eternal", "APP.OMOBA.IO."):
-            self.assertTrue(ru_host.is_foreign_name(name), name)
-        for name in ("vds-ru", "lobby.ru.omoba.io", "account.ru.omoba.io", RU_IP, "postgresql.service"):
-            self.assertFalse(ru_host.is_foreign_name(name), name)
+            self.assertTrue(ru_host.is_foreign_name(name, own), name)
+        for name in ("vds-ru", NAMES["lobby"], NAMES["account_api"], NAMES["portal"], RU_IP, "postgresql.service"):
+            self.assertFalse(ru_host.is_foreign_name(name, own), name)
+
+    def test_the_host_half_checks_the_names_it_is_given(self):
+        self.assertEqual(ru_host.names_problems(NAMES), [])
+        self.assertEqual(ru_host.names_problems(None), ["the payload lacks the RU names (scripts/markets.py)"])
+        for zone in ("omoba.io", "dev.omoba.io", "x.dev.omoba.io", "app.omoba.io", "ekza.io", "dev.ekza.io"):
+            names = {key: f"{key.replace('_', '-')}.{zone}" for key in ru_host.HOST_KEYS}
+            problems = ru_host.names_problems({**names, "zone": zone})
+            self.assertTrue(problems and problems[0].startswith(f"the RU zone {zone} overlaps the production or dev"),
+                            (zone, problems))
+        self.assertIn("the RU portal name app.omoba.io is outside the RU zone " + NAMES["zone"],
+                      ru_host.names_problems({**NAMES, "portal": "app.omoba.io"}))
+        self.assertTrue(ru_host.names_problems({**NAMES, "portal": NAMES["account_api"]}))
+        self.assertIn("the RU lobby name (not shown) is not a lowercase DNS name",
+                      ru_host.names_problems({**NAMES, "lobby": "lobby x; rm -rf /"}))
         self.assertFalse(ru_host.touches_foreign("/opt/omoba-ru/current"))
         self.assertTrue(ru_host.touches_foreign("/opt/omoba/current"))
         self.assertTrue(ru_host.touches_foreign("/opt/omoba-ru/../omoba-dev/x"))
 
     def test_the_ru_address_must_be_public_and_not_another_vps(self):
         self.assertEqual(ru_host.validate_ru_ip(f" {RU_IP} "), RU_IP)
-        for value in (PROD_IP, "127.0.0.1", "10.1.2.3", "192.168.1.5", "100.64.0.1", "0.0.0.0", "lobby.ru.omoba.io"):
+        for value in (PROD_IP, "127.0.0.1", "10.1.2.3", "192.168.1.5", "100.64.0.1", "0.0.0.0", NAMES["lobby"]):
             with self.assertRaises(ru_host.Refused, msg=value):
                 ru_host.validate_ru_ip(value)
         with self.assertRaises(ru_host.Refused):
@@ -693,6 +766,18 @@ class BootstrapTest(HostCase):
                    or (call[0] == "ufw" and call[1] != "status")
                    or (call[0] == "systemctl" and call[1] not in ("show", "is-active", "is-enabled"))]
         self.assertEqual(changes, [])
+
+    def test_the_host_half_uses_the_names_of_the_payload(self):
+        # It has no checkout: the names come only from the Mac half (scripts/markets.py).
+        for names in (None, {**NAMES, "zone": "omoba.io"}):
+            for check in (self.fresh().status, self.fresh().bootstrap_preflight):
+                with self.assertRaises(ru_host.Refused, msg=(names, check)):
+                    check(self.payload(kind="bootstrap", names=names))
+        self.fake.dns.clear()
+        report = self.fresh().bootstrap_preflight(self.payload(kind="bootstrap", vkid=VK_ID))
+        self.assertIn(f"DNS: {NAMES['portal']} has no A record; point it at {RU_IP}", report["warnings"])
+        self.assertEqual(self.fresh().status(self.payload())["facts"]["names"],
+                         {key: NAMES[key] for key in ru_host.HOST_KEYS})
 
     def test_bootstrap_refuses_other_contours_and_platforms(self):
         cases = {
@@ -1038,11 +1123,11 @@ class PortalAndRebootTest(HostCase):
         self.fake.ufw["rules"].append(("allow", "5432/tcp", ""))
         self.fake.tcp.add(("0.0.0.0", 5432))
         os.unlink(self.fake.p(ru_host.SSHD_DROPIN))
-        self.fake.dns["lobby.ru.omoba.io"][socket.AF_INET] = set()
+        self.fake.dns[NAMES["lobby"]][socket.AF_INET] = set()
         os.chmod(self.fake.p(ru_host.ENV_PATHS["portal"]), 0o644)
         problems = "\n".join(self.fresh().status(self.payload())["problems"])
         for needle in ("ufw opens 5432/tcp", "PostgreSQL listens on ['0.0.0.0:5432']", "sshd passwordauthentication",
-                       "lobby.ru.omoba.io has no A record", "portal.env has mode 0o644"):
+                       f"{NAMES['lobby']} has no A record", "portal.env has mode 0o644"):
             self.assertIn(needle, problems)
 
 

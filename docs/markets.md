@@ -127,8 +127,9 @@ The steps that need accounts, money or legal decisions are the owner's.
    login with an SSH key. `ops/vps/ru/ru_host.py bootstrap` installs PostgreSQL 16+
    and Caddy on it. The Roskomnadzor notice as a personal-data operator and a
    Russian privacy policy / user agreement are the owner's.
-2. **DNS.** A records `lobby.ru.omoba.io`, `account.ru.omoba.io`,
-   `app.ru.omoba.io` → the RU VPS.
+2. **DNS.** A records for the RU lobby, Account API and portal names of the RU
+   profile in `scripts/markets.py` → the RU VPS (`ops/vps/ru/ru_host.py names`
+   prints them; `ru_host.py status` checks them).
 3. **VK ID app.** At id.vk.ru create a *Web* app, trusted redirect URL
    `https://app.ru.omoba.io/api/auth/vk/callback`, scope `vkid.personal_info`,
    enable sign-in with OK and Mail.ru. Its numeric app id is

@@ -26,6 +26,8 @@ contacted; nothing on the host changes without --apply:
     python3 ops/vps/ru/ru_host.py status
     python3 ops/vps/ru/ru_host.py reboot-check --apply
     python3 ops/vps/ru/ru_host.py rollback --kind server|portal --release <name> --apply
+    # the RU public names (scripts/markets.py) and the DNS A records the owner sets; local only
+    python3 ops/vps/ru/ru_host.py names
 
 Guards. On the Mac, before any ssh: the alias and its `ssh -G` HostName must not be
 the production or dev VPS, HostName must equal $RU_IP (an IPv4 literal in
@@ -120,8 +122,12 @@ MIN_POSTGRES = 16
 MIN_UBUNTU = (24, 4)
 MIN_NODE = (20, 9)        # Next.js 16
 PACKAGES = ("postgresql", "caddy", "ufw", "openssh-server")
-PUBLIC_NAMES = ("lobby.ru.omoba.io", "account.ru.omoba.io", "app.ru.omoba.io")
-RU_ZONE = "ru.omoba.io"
+# The RU public names and DNS zone are written only in scripts/markets.py (MARKETS["ru"]):
+# the Mac half reads them there (ru_names) and hands them to the host half in every
+# payload, so the DNS, Caddyfile and unit checks follow a rename of that one file.
+HOST_KEYS = ("lobby", "account_api", "portal")
+NAME_KEYS = (*HOST_KEYS, "zone")
+DNS_NAME = re.compile(r"(?=.{1,253}\Z)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?")
 GRANTS = "account-api/ops/grants.sql"
 MIGRATION_LOGIN_SECONDS = 900
 MIN_FREE_MIB = 2048
@@ -224,14 +230,14 @@ def in_zone(name: str, zones) -> bool:
     return any(name == zone or name.endswith("." + zone) for zone in zones)
 
 
-def is_foreign_name(value: str) -> bool:
+def is_foreign_name(value: str, own_zones=()) -> bool:
     """The production or dev VPS (alias or address) or an omoba.io / ekza.io name outside
-    ru.omoba.io (case and trailing dot ignored)."""
+    `own_zones`, the RU zone from scripts/markets.py (case and trailing dot ignored)."""
     name = (value or "").strip().lower().rstrip(".")
     if "@" in name:
         name = name.rsplit("@", 1)[1]
     return name in PROD_SSH_ALIASES or name in DEV_SSH_ALIASES or name in PROD_IPS or \
-        (in_zone(name, PUBLIC_ZONES) and not in_zone(name, (RU_ZONE,)))
+        (in_zone(name, PUBLIC_ZONES) and not in_zone(name, own_zones))
 
 
 ALLOWED_WRITES = (OPT, STATE, BACKUPS, CADDYFILE, CADDYFILE + ".orig", CADDYFILE + ".omoba-next",
@@ -246,8 +252,32 @@ def assert_ru_constants() -> None:
     if USER in FOREIGN_USERS or PORTAL_USER in FOREIGN_USERS or \
             any(name[:-len(".service")] in FOREIGN_UNITS for name in UNIT_FILES.values()):
         raise Refused("an RU user or unit equals a production or dev one")
-    if is_foreign_name(DEFAULT_HOST) or any(is_foreign_name(name) for name in PUBLIC_NAMES):
+    if is_foreign_name(DEFAULT_HOST):
         raise Refused("RU host defaults name another contour")
+
+
+def names_problems(names) -> list[str]:
+    """The RU public names (scripts/markets.py, carried in the payload) must be DNS names in
+    the RU zone, the zone must cover no production or dev name (inside omoba.io / ekza.io
+    only the market's own `ru.` subzone qualifies), and the Account API and the portal need
+    their own Caddy sites."""
+    if not isinstance(names, dict) or set(names) != set(NAME_KEYS):
+        return ["the payload lacks the RU names (scripts/markets.py)"]
+    problems = [f"the RU {key} name {printable(names[key])} is not a lowercase DNS name" for key in NAME_KEYS
+                if not isinstance(names[key], str) or not DNS_NAME.fullmatch(names[key])]
+    if problems:
+        return problems
+    zone = names["zone"]
+    market_zones = tuple(f"{MARKET}.{public}" for public in PUBLIC_ZONES)
+    if (in_zone(zone, PUBLIC_ZONES) and zone not in market_zones) or \
+            any(in_zone(public, (zone,)) for public in PUBLIC_ZONES):
+        problems.append(f"the RU zone {zone} overlaps the production or dev names; inside "
+                        f"{' / '.join(PUBLIC_ZONES)} only {' or '.join(market_zones)} is the RU market's")
+    problems += [f"the RU {key} name {names[key]} is outside the RU zone {zone}"
+                 for key in HOST_KEYS if not in_zone(names[key], (zone,))]
+    if names["account_api"] == names["portal"]:
+        problems.append(f"the RU Account API and portal share the name {names['portal']}; Caddy serves them apart")
+    return problems
 
 
 def ipv4_literal(value: str) -> str | None:
@@ -341,8 +371,9 @@ def arena_ports(lobby_unit: str) -> tuple[int, int]:
     return first, last
 
 
-def unit_problems(kind: str, text: str) -> list[str]:
-    """Every reason this is not the RU unit of `kind`; empty means it is."""
+def unit_problems(kind: str, text: str, own_zones=()) -> list[str]:
+    """Every reason this is not the RU unit of `kind`; empty means it is. `own_zones`: the
+    RU zone, whose names are not another contour's."""
     name = UNIT_FILES[kind]
     problems = []
     directives, environment = parse_unit(text or "")
@@ -371,7 +402,7 @@ def unit_problems(kind: str, text: str) -> list[str]:
                 if touches_foreign(token):
                     problems.append(f"{name}: {key} references production/dev path {token}")
             for token in re.findall(r"[A-Za-z0-9][A-Za-z0-9.-]*", value):
-                if is_foreign_name(token):
+                if is_foreign_name(token, own_zones):
                     problems.append(f"{name}: {key} references another contour's host {token}")
     if any(token in (text or "").lower() for token in FORBIDDEN_TOKENS):
         problems.append(f"{name}: mentions hosted Supabase or the production project")
@@ -611,18 +642,19 @@ def ssh_ports(effective: str) -> set[int]:
     return ports or {22}
 
 
-def dns_problems(resolve, expected_ip: str) -> tuple[list, list]:
-    """The RU names must resolve to this host only (A); the lobby name must have no AAAA,
-    since the lobby binds IPv4 and clients would try IPv6 first."""
+def dns_problems(resolve, expected_ip: str, names: dict) -> tuple[list, list]:
+    """The RU names (scripts/markets.py, from the payload) must resolve to this host only (A);
+    the lobby name must have no AAAA, since the lobby binds IPv4 and clients would try IPv6
+    first."""
     problems, warnings = [], []
-    for name in PUBLIC_NAMES:
+    for name in dict.fromkeys(names[key] for key in HOST_KEYS):
         v4 = resolve(name, socket.AF_INET)
         v6 = {address for address in resolve(name, socket.AF_INET6) if not address.lower().startswith("::ffff:")}
         if not v4:
             problems.append(f"{name} has no A record; point it at {expected_ip}")
         elif v4 != {expected_ip}:
             problems.append(f"{name} resolves to {sorted(v4)}, not {expected_ip}")
-        if v6 and name == PUBLIC_NAMES[0]:
+        if v6 and name == names["lobby"]:
             problems.append(f"{name} has AAAA records {sorted(v6)}; the lobby binds IPv4 only: remove them")
         elif v6:
             warnings.append(f"{name} has AAAA records {sorted(v6)}; they must reach this host's Caddy")
@@ -1070,12 +1102,20 @@ class Host:
         if problems:
             raise Refused("; ".join(problems))
 
+    def payload_names(self, payload: dict) -> dict:
+        """The RU public names the Mac half read from scripts/markets.py."""
+        problems = names_problems(payload.get("names"))
+        if problems:
+            raise Refused("; ".join(problems))
+        return payload["names"]
+
     def payload_units(self, payload: dict) -> dict:
         units = payload.get("units") or {}
+        own_zones = (self.payload_names(payload)["zone"],)
         for kind, text in units.items():
             if kind not in KINDS:
                 raise Refused(f"unknown unit kind {kind!r}")
-            problems = unit_problems(kind, text)
+            problems = unit_problems(kind, text, own_zones)
             if problems:
                 raise Refused("unit is not the RU unit: " + "; ".join(problems))
         return units
@@ -1220,6 +1260,7 @@ class Host:
         """Everything the RU host needs, checked read-only. `ok` only when nothing is missing."""
         problems, warnings, facts = [], [], {}
         expected_ip = payload.get("expected_ip")
+        names = self.payload_names(payload)
         units = self.payload_units(payload)
         self.payload_examples(payload)
         problems += self.identity_problems(payload)
@@ -1324,8 +1365,9 @@ class Host:
             facts[f"{label.lower().replace(' ', '_')}_http"] = status
             if status not in good:
                 problems.append(f"GET {url} answered {status or 'nothing'}")
+        facts["names"] = {key: names[key] for key in HOST_KEYS}
         if expected_ip:
-            more, notes = dns_problems(self.resolve, expected_ip)
+            more, notes = dns_problems(self.resolve, expected_ip, names)
             problems += more
             warnings += notes
         facts["available_mib"] = self.available_mib()
@@ -1339,6 +1381,7 @@ class Host:
     def bootstrap_preflight(self, payload: dict) -> dict:
         """What bootstrap would do, and what blocks it. Read-only."""
         self.guard_identity(payload, require_marker=False)
+        names = self.payload_names(payload)
         units = self.payload_units(payload)
         examples = self.payload_examples(payload)
         problems, warnings, would = [], [], []
@@ -1392,7 +1435,7 @@ class Host:
             if self.read(unit_path(kind)) != units.get(kind):
                 would.append(f"install {unit_path(kind)}")
         would.append("systemctl enable postgresql caddy (+ each RU unit whose release is installed)")
-        more, notes = dns_problems(self.resolve, payload["expected_ip"])
+        more, notes = dns_problems(self.resolve, payload["expected_ip"], names)
         warnings += [f"DNS: {note}" for note in more + notes]
         return {"mode": "preflight", "kind": "bootstrap", "ok": not problems, "problems": problems,
                 "warnings": warnings, "would": would}
@@ -2098,24 +2141,71 @@ def repo_root() -> Path:
     return Path(__file__).resolve().parents[3]
 
 
-def kit() -> dict:
-    """The repository's RU host kit: units, env examples and Caddyfile.ru, checked."""
+def markets_module():
+    """scripts/markets.py of this checkout. Mac only: the host half has no checkout and
+    gets the RU names in the payload."""
+    scripts = str(repo_root() / "scripts")
+    if scripts not in sys.path:
+        sys.path.insert(0, scripts)
+    import markets
+    return markets
+
+
+def ru_names() -> dict:
+    """The RU public names from the RU profile in scripts/markets.py, the one place they are
+    written: the lobby host (without its port), the Account API and portal hosts and the
+    RU DNS zone (zones[0])."""
+    markets = markets_module()
+    profile = markets.market(MARKET)
+    lobby, _, port = (profile.lobby or "").rpartition(":")
+    names = {"lobby": lobby.lower().rstrip("."),
+             "account_api": (urlsplit(profile.account_api or "").hostname or "").rstrip("."),
+             "portal": (urlsplit(profile.portal or "").hostname or "").rstrip("."),
+             "zone": (profile.zones[0] if profile.zones else "").lower().rstrip(".")}
+    problems = names_problems(names)
+    if port != str(LOBBY_PORT):
+        problems.append(f"the lobby {profile.lobby!r} must use port {LOBBY_PORT}, the lobby unit's SERVER_ADDR")
+    for key in ("account_api", "portal"):
+        if getattr(profile, key) != f"https://{names[key]}":
+            problems.append(f"{key} {getattr(profile, key)!r} must be the bare origin https://{names[key]} "
+                            "(Caddy serves it on 443)")
+    for key, other in markets.MARKETS.items():
+        overlap = [zone for zone in other.zones
+                   if in_zone(zone, (names["zone"],)) or in_zone(names["zone"], (zone,))]
+        if key != MARKET and overlap:
+            problems.append(f"the RU zone {names['zone']} overlaps the {key} market's {', '.join(overlap)}")
+    if problems:
+        raise Refused("the RU profile in scripts/markets.py: " + "; ".join(problems))
+    return names
+
+
+def kit(names: dict | None = None) -> dict:
+    """The repository's RU host kit: units, env examples and Caddyfile.ru, checked against
+    each other and against the RU names (default: ru_names(), from scripts/markets.py)."""
+    names = names or ru_names()
+    own_zones = (names["zone"],)
     units = {kind: (RU_DIR / name).read_text() for kind, name in UNIT_FILES.items()}
     examples = {kind: (RU_DIR / name).read_text() for kind, name in ENV_EXAMPLES.items()}
     caddyfile = (RU_DIR / "Caddyfile.ru").read_text()
-    problems = [problem for kind, text in units.items() for problem in unit_problems(kind, text)]
+    problems = [problem for kind, text in units.items() for problem in unit_problems(kind, text, own_zones)]
     problems += [problem for kind, text in examples.items() for problem in example_problems(kind, text)]
-    for site in PUBLIC_NAMES[1:]:
-        if f"{site} {{" not in caddyfile:
-            problems.append(f"Caddyfile.ru has no {site} site")
+    for key in ("account_api", "portal"):
+        if not re.search(rf"(?m)^{re.escape(names[key])}\s*\{{", caddyfile):
+            problems.append(f"Caddyfile.ru has no {names[key]} site (the RU {key} in scripts/markets.py)")
+    for kind in ("account-api", "portal"):
+        origin = parse_env(examples[kind])[0].get("OMOBA_PORTAL_ORIGIN")
+        if origin != f"https://{names['portal']}":
+            problems.append(f"{ENV_EXAMPLES[kind]}: OMOBA_PORTAL_ORIGIN is {origin!r}, not the RU portal "
+                            f"https://{names['portal']} (scripts/markets.py)")
     for address in (ACCOUNT_API_ADDR, PORTAL_ADDR):
         if f"reverse_proxy {address[0]}:{address[1]}" not in caddyfile:
             problems.append(f"Caddyfile.ru does not proxy to {address[0]}:{address[1]}")
     problems += [f"Caddyfile.ru names another contour's host {token}"
-                 for token in re.findall(r"[A-Za-z0-9][A-Za-z0-9.-]*\.[a-z]{2,}", caddyfile) if is_foreign_name(token)]
+                 for token in re.findall(r"[A-Za-z0-9][A-Za-z0-9.-]*\.[a-z]{2,}", caddyfile)
+                 if is_foreign_name(token, own_zones)]
     if problems:
         raise Refused("the RU host kit is inconsistent: " + "; ".join(problems))
-    return {"units": units, "examples": examples, "caddyfile": caddyfile}
+    return {"units": units, "examples": examples, "caddyfile": caddyfile, "names": names}
 
 
 def ssh_config(alias: str) -> dict | None:
@@ -2178,7 +2268,8 @@ def resolve_target(args, need_ip: bool, country: bool = False, config_reader=Non
 
 def base_payload(target: dict, files: dict) -> dict:
     return {"expected_ip": target["expected_ip"], "dev_ip": target["dev_ip"], "behind_nat": target["behind_nat"],
-            "units": files["units"], "examples": files["examples"], "caddyfile": files["caddyfile"]}
+            "units": files["units"], "examples": files["examples"], "caddyfile": files["caddyfile"],
+            "names": files["names"]}
 
 
 def ssh_remote(alias: str, mode: str, payload: dict | None = None, check: bool = True):
@@ -2443,6 +2534,17 @@ def command_status(args) -> int:
     return 0 if report.get("ok") else 1
 
 
+def command_names(args) -> int:
+    """The RU public names (scripts/markets.py) and the DNS records the owner sets. Local only."""
+    names = ru_names()
+    print(json.dumps({"market": MARKET, "source": "scripts/markets.py",
+                      "lobby": f"{names['lobby']}:{LOBBY_PORT}", "account_api": f"https://{names['account_api']}",
+                      "portal": f"https://{names['portal']}", "zone": names["zone"],
+                      "dns": {"A": list(dict.fromkeys(names[key] for key in HOST_KEYS)),
+                              "points_to": f"the RU VPS IPv4 (${IP_ENV})", "no_AAAA": [names["lobby"]]}}, indent=2))
+    return 0
+
+
 def command_reboot_check(args, sleep=time.sleep, clock=time.monotonic) -> int:
     """Reboot the RU host and prove every service comes back with no manual step."""
     target = resolve_target(args, need_ip=True)
@@ -2521,6 +2623,8 @@ def main(argv=None) -> int:
     reboot.add_argument("--apply", action="store_true", help="really reboot (default: status and plan only)")
     reboot.add_argument("--boot-timeout", type=int, default=600)
     reboot.add_argument("--ready-timeout", type=int, default=300)
+    sub.add_parser("names", help="print the RU public names from scripts/markets.py and the DNS records "
+                                 "to set (local only)")
     for command in (bootstrap, ship, portal, rollback, status, reboot):
         command.add_argument("--host", help=f"ssh alias of the RU VPS (default: ${HOST_ENV} or {DEFAULT_HOST})")
         command.add_argument("--ip", help=f"RU VPS IPv4 the alias must connect to (default: ${IP_ENV})")
@@ -2533,7 +2637,7 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
     return {"bootstrap": command_bootstrap, "ship": command_ship, "portal-bundle": command_portal_bundle,
             "ship-portal": command_ship_portal, "rollback": command_rollback, "status": command_status,
-            "reboot-check": command_reboot_check}[args.command](args)
+            "reboot-check": command_reboot_check, "names": command_names}[args.command](args)
 
 
 if __name__ == "__main__":

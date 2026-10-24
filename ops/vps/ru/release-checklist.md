@@ -12,6 +12,10 @@ Platforms: Windows, Linux, macOS and Android (iOS has no RU build,
 `dist/v<version>-ru/` exactly as published (the same sha256 as `SHA256SUMS`), never a
 local debug build.
 
+`<RU portal>`, `<RU Account API>` and `<RU lobby>` (host:port) below are the RU
+profile's names in [scripts/markets.py](../../../scripts/markets.py), the only place
+they are written; `python3 ops/vps/ru/ru_host.py names` prints them.
+
 ## 1. Server and build gate (once per release)
 
 | # | Check | How | Pass when |
@@ -22,7 +26,7 @@ local debug build.
 | S4 | Portal ship | `ru_host.py portal-bundle --web <omoba-web>`, `ru_host.py ship-portal --bundle … --apply` | `DEPLOYED` (or `UNCHANGED`) |
 | S5 | Host status | `ru_host.py status` | `"ok": true`, no problems |
 | S6 | Public preflight | `make release-ru-preflight` from a computer outside the host | prints `"ready": true` |
-| S7 | Lobby compatibility | `cargo run --locked --quiet -p shared --example compatibility -- check lobby.ru.omoba.io:4000 dist/v<v>-ru/compatibility.json` | exit 0 |
+| S7 | Lobby compatibility | `cargo run --locked --quiet -p shared --example compatibility -- check <RU lobby> dist/v<v>-ru/compatibility.json` | exit 0 |
 | S8 | Worker compatibility | while a bot match from P3 runs: the same command against `<RU IPv4>:41000` (or the worker port in `journalctl -u omoba-lobby-ru`) | exit 0 |
 | S9 | Reboot (new host, or after a kit change) | `ru_host.py reboot-check --apply` | `"ok": true`; note `seconds_to_ready` |
 | S10 | Downloads | `make release-ru-publish`, `releases.json` installed (README, "Check") | the portal lists every package with the right sha256 |
@@ -35,8 +39,8 @@ For Android use a Vulkan device from the published minimum list (LR-25).
 | # | Check | Steps | Pass when |
 | --- | --- | --- | --- |
 | P1 | Clean install, first run in Russian | Remove the `omoba-bevy-ru` settings folder (Android: uninstall `space.ekza.omoba.ru`). Install the package, start it. | First screen and menus in Russian, no English or raw keys, legal links and consent (LR-06) shown, no crash; the game reaches the RU lobby |
-| P2 | VK sign-in | Profile → «Войти через VK ID» → sign in on `app.ru.omoba.io` → confirm the link in the game. Then sign in on the portal in another browser. | The game shows the linked account; the portal shows the same profile; a second device can join the account through VK |
-| P3 | Bot match | Play a server bot match («Боты на сервере») to the end. | The match ends normally; the result and XP show in the game and in the history on `app.ru.omoba.io` |
+| P2 | VK sign-in | Profile → «Войти через VK ID» → sign in on `<RU portal>` → confirm the link in the game. Then sign in on the portal in another browser. | The game shows the linked account; the portal shows the same profile; a second device can join the account through VK |
+| P3 | Bot match | Play a server bot match («Боты на сервере») to the end. | The match ends normally; the result and XP show in the game and in the history on `<RU portal>` |
 | P4 | Casual queue | Two clients (any platforms) queue Casual. | They land in one match (bots fill after the wait); the match is unrated and appears in both histories |
 | P5 | Ranked queue | Queue Ranked. | The searching screen shows the queue count; after 5 minutes it offers Casual without leaving Ranked (O-1); with 10 humans the match is rated |
 | P6 | Reconnect | Mid-match, kill the client (Android: swipe it away), start it again within 180 s. | «Вернуться в матч» rejoins the same seat; a bot played it meanwhile |

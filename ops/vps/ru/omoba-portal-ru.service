@@ -1,5 +1,5 @@
 # RU player portal (omoba-web `output: standalone`, built with OMOBA_MARKET=ru) on
-# 127.0.0.1:3010 behind Caddy (Caddyfile.ru, app.ru.omoba.io). It calls the Account
+# 127.0.0.1:3010 behind Caddy (Caddyfile.ru, the RU portal name). It calls the Account
 # API on loopback (README.md, "Topology"). Installed by ops/vps/ru/ru_host.py
 # bootstrap; releases go to /opt/omoba-ru/portal/releases/<name> with `ru_host.py
 # ship-portal`, which also links the release's .next/cache to the cache directory
