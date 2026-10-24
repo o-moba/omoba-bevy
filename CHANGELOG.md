@@ -5,6 +5,18 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Market builds are gated at compile time. A build without Ekza (`OMOBA_MARKET=ru`
+  or `cn`) starts no Ekza store, account link, wallet pairing or community
+  sculpture, pins closed loopback registry and passport endpoints (ignoring
+  `OMOBA_REGISTRY_URL`/`OMOBA_PASSPORT_URL`) and shows no Studio, wallet, Ekza
+  library or market UI in Collection, hero select and the draft; a saved Ekza
+  weapon falls back to the class default. Its server admits no protected avatar
+  or `ekza-` weapon and makes no registry or passport request. A build without
+  Supporter registers no Supporter or StoreKit plugin and hides "Support OMOBA".
+  First launch opens in the market's language, and a non-global market keeps its
+  settings in `omoba-bevy-<market>[-<contour>]`. The global build is unchanged.
+  See [the session note](docs/progress/2026-10-23-market-gating.md).
+
 - The Ekza rendition builder (`scripts/ekza_build_rendition.py`, profile
   `desktop/humanoid-glb-v1`) now bakes idle/walk/attack/cast/death onto VRM 1.0
   (`VRMC_vrm`) sources instead of failing with `build_failed: no VRM extension`.

@@ -164,8 +164,12 @@ pub fn account_connected() -> bool {
     STATE.lock().unwrap().session.is_some()
 }
 
-/// The menu button toggles between connecting and signing out of this installation.
+/// The menu button toggles between connecting and signing out of this
+/// installation. A build without Ekza never connects.
 pub fn connect_account() {
+    if !shared::market::FEATURES.ekza {
+        return;
+    }
     let mut state = STATE.lock().unwrap();
     if state.session.is_some() {
         state.sign_out();

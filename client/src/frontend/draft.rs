@@ -865,47 +865,52 @@ fn render_draft(
                         }
                         let connected = crate::passport::account_connected();
                         let owned = choices.iter().any(|c| c.group == HandheldGroup::Library);
-                        picker
-                            .spawn(Node {
-                                flex_wrap: FlexWrap::Wrap,
-                                column_gap: Val::Px(6.0),
-                                row_gap: Val::Px(2.0),
-                                align_items: AlignItems::Center,
-                                flex_shrink: 0.0,
-                                ..default()
-                            })
-                            .with_children(|row| {
-                                row.spawn((
-                                    widgets::label(
-                                        tr("collection.weapons_library"),
-                                        12.0,
-                                        theme::GOLD,
-                                    ),
-                                    Name::new("DraftWeaponLibraryHeading"),
-                                ));
-                                if !owned {
+                        // Without Ekza there is no library: no heading, hint or Connect.
+                        let library_listed = HandheldGroup::listed(shared::market::FEATURES.ekza)
+                            .contains(&HandheldGroup::Library);
+                        if library_listed {
+                            picker
+                                .spawn(Node {
+                                    flex_wrap: FlexWrap::Wrap,
+                                    column_gap: Val::Px(6.0),
+                                    row_gap: Val::Px(2.0),
+                                    align_items: AlignItems::Center,
+                                    flex_shrink: 0.0,
+                                    ..default()
+                                })
+                                .with_children(|row| {
                                     row.spawn((
                                         widgets::label(
-                                            super::collection::library_hint(connected),
-                                            11.0,
-                                            theme::MUTED,
+                                            tr("collection.weapons_library"),
+                                            12.0,
+                                            theme::GOLD,
                                         ),
-                                        Name::new("DraftWeaponMarketHint"),
+                                        Name::new("DraftWeaponLibraryHeading"),
                                     ));
-                                }
-                                // The full layout already shows Connect in the avatar library.
-                                if compact && !connected {
-                                    action_button(
-                                        row,
-                                        tr("draft.button.connect_ekza"),
-                                        DraftAction::Connect,
-                                        "DraftWeaponsConnect",
-                                        116.0,
-                                        false,
-                                        false,
-                                    );
-                                }
-                            });
+                                    if !owned {
+                                        row.spawn((
+                                            widgets::label(
+                                                super::collection::library_hint(connected),
+                                                11.0,
+                                                theme::MUTED,
+                                            ),
+                                            Name::new("DraftWeaponMarketHint"),
+                                        ));
+                                    }
+                                    // The full layout already shows Connect in the avatar library.
+                                    if compact && !connected {
+                                        action_button(
+                                            row,
+                                            tr("draft.button.connect_ekza"),
+                                            DraftAction::Connect,
+                                            "DraftWeaponsConnect",
+                                            116.0,
+                                            false,
+                                            false,
+                                        );
+                                    }
+                                });
+                        }
                         // "My Ekza library" on its own row, then everything else.
                         for library in [true, false] {
                             if library && !owned {
@@ -1002,7 +1007,9 @@ fn render_draft(
                                 Name::new("DraftAvatarCatalogue"),
                             ))
                             .with_children(|avatars| {
-                                for defaults in [true, false] {
+                                for &defaults in super::collection::avatar_sections(
+                                    shared::market::FEATURES.ekza,
+                                ) {
                                     avatars.spawn((
                                         widgets::label(
                                             if defaults {

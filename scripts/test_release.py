@@ -597,7 +597,10 @@ exec "$DIR/Omoba.app/Contents/MacOS/server"
         self.assertEqual(set(sources), set(release.CLIENT_DEFAULT_ENVS))
         for key, path in sources.items():
             self.assertIn(f'option_env!("{key}")', (release.ROOT / path).read_text(), path)
-        self.assertIn('format!("omoba-bevy-{suffix}")', (release.ROOT / "client/src/platform.rs").read_text())
+        # scripts/markets.py config_dir mirrors this rule: omoba-bevy[-<market>][-<contour>].
+        platform = (release.ROOT / "client/src/platform.rs").read_text()
+        self.assertIn("market.storage_suffix()", platform)
+        self.assertIn('"omoba-bevy".to_owned()', platform)
 
     def test_every_compile_time_setting_in_the_sources_is_scrubbed(self):
         import re

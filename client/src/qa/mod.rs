@@ -46,12 +46,14 @@ mod visual_qa;
 
 /// The env-triggered QA plugins, in the order `main` added them before the
 /// groups. `VisualQaPlugin` nests `BetaUiQaPlugin` and `NavigationQaPlugin`,
-/// `FrontendQaPlugin` nests `AvatarQaPlugin` and `FrontendFlowQaPlugin`.
+/// `FrontendQaPlugin` nests `AvatarQaPlugin` and `FrontendFlowQaPlugin`. The
+/// Supporter harnesses drive `SupporterPlugin`'s resources, so a build without
+/// Supporter (which has no such plugin) disables them too.
 pub(crate) struct QaPlugins;
 
 impl PluginGroup for QaPlugins {
     fn build(self) -> PluginGroupBuilder {
-        PluginGroupBuilder::start::<Self>()
+        let group = PluginGroupBuilder::start::<Self>()
             .add(frontend_qa::FrontendQaPlugin)
             .add(visual_qa::VisualQaPlugin)
             .add(social_qa::SocialQaPlugin)
@@ -77,7 +79,14 @@ impl PluginGroup for QaPlugins {
             .add(result_qa::ResultQaPlugin)
             .add(ui_gallery::UiGalleryPlugin)
             .add(help_qa::HelpQaPlugin)
-            .add(boot_qa::BootQaPlugin)
+            .add(boot_qa::BootQaPlugin);
+        if shared::market::FEATURES.supporter {
+            group
+        } else {
+            group
+                .disable::<supporter::SupporterQaPlugin>()
+                .disable::<supporter_world::SupporterWorldQaPlugin>()
+        }
     }
 }
 

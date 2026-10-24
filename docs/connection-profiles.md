@@ -46,6 +46,13 @@ The desktop OMOBA Dev app reads the same variables over its running profile,
 but ignores one that names a production lobby, registry or passport (the same
 refusal as a custom profile).
 
+A build without Ekza (`OMOBA_MARKET=ru` or `cn`, or `OMOBA_FEATURE_EKZA=off`)
+runs every profile with the closed loopback registry (`http://127.0.0.1:9`) and
+passport, no market and no Studio, and ignores `OMOBA_REGISTRY_URL` and
+`OMOBA_PASSPORT_URL`; the connection panel of such a dev app shows only the
+lobby. Its settings folder carries the market (`omoba-bevy-ru`,
+`omoba-bevy-ru-dev`). See `shared/src/market.rs`.
+
 A self-hosted production build can also compile its own lobby and registry:
 `scripts/release.py build <platform> --server host:port --registry https://…`.
 
