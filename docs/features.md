@@ -1,5 +1,15 @@
 # Feature Inventory
 
+## Markets and sign in with VK ID
+
+Each build serves one market: `global` (today's product), `ru` (a free game on
+Russian servers, no Ekza ecosystem, no purchases, Russian by default) or `cn`
+(prepared, not packaged yet). `release.py --market ru` makes the RU set with its
+own servers, settings folder and Android app. RU players sign in with VK ID
+(VK, OK, Mail.ru) on the RU portal and from Profile in the game; the game's
+device key stays the account, and a VK sign-in is linked to a profile only after
+the game confirms. See [markets](markets.md).
+
 ## Temporary community sculptures
 
 One decorative slot beside the Wendigo pit displays the Registry-approved

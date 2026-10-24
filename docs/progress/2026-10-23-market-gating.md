@@ -15,10 +15,12 @@ before. Builds on `shared::market` (`MARKET`, `FEATURES`). Task artifacts:
   no account poll in `lib.rs`); `passport::initialize` skips
   `OMOBA_PASSPORT_CONNECT` pairing; `passport::connect` and
   `ekza_account::connect_account` never start a flow.
-- `connection_profile::for_market`: every profile runs with `CLOSED_REGISTRY`
-  (`http://127.0.0.1:9`) and `CLOSED_PASSPORT`, no market and no Studio;
-  `install` ignores `OMOBA_REGISTRY_URL`/`OMOBA_PASSPORT_URL` (logged). The dev
-  connection panel lists only the lobby (`mobile_ui::detail_rows`).
+- `connection_profile::for_market`: `install` pins `CLOSED_REGISTRY`
+  (`http://127.0.0.1:9`) and `CLOSED_PASSPORT` and ignores
+  `OMOBA_REGISTRY_URL`/`OMOBA_PASSPORT_URL` (logged); the market hint reads the
+  pinned profile, which names no market or Studio. The profile and the choice
+  saved for the next start stay as the player picked them. The dev connection
+  panel lists only the lobby (`mobile_ui::detail_rows`).
 - `plugins::presentation_plugins` disables `SponsorshipPlugin`.
 - Collection: `CollectionFilter::tabs` (no Studio tab), `avatar_sections` (no
   Studio section, shared with the draft), no wallet button, no weapon refresh,
@@ -57,3 +59,16 @@ Market-wide:
 - The custom-profile registry field of the dev connection panel stays (its
   value is replaced by the closed registry when Ekza is off).
 - Release tooling (`scripts/`), VK ID sign-in UI.
+
+## Checks (2026-10-24, after merging into `feat/market-profiles`)
+
+- Global: `cargo check --workspace --all-targets`, `cargo clippy --workspace
+  --all-targets -- -D warnings`, `cargo clippy -p client --no-default-features`,
+  `cargo test --workspace` (client 1418, server 343, shared 147, harness 31,
+  passport 50, Account API 15 + Postgres suites separately) — pass.
+- RU (`OMOBA_MARKET=ru`): workspace clippy `-D warnings`; client 1418, server
+  343, shared, passport, Account API lib and every harness test — pass.
+- AC8 captures: not taken. The Mac's screen was locked during the run, so the
+  GPU window rendered black frames; the gates are covered by the unit tests
+  above, not by a visual check.
+
