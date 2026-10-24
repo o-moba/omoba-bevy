@@ -373,7 +373,7 @@ The sequence and its owner-only steps are in [RELEASING.md](../RELEASING.md) ("T
 
 Which binaries each lobby runs:
 
-- **Dev and RU lobbies** run binaries from their contour or market Linux package. `ops/vps/dev/lobby_dev.py ship --package` refuses anything that is not a dev Linux package (`read_package`, `DEV_PACKAGE`). [ops/vps/ru/README.md](../../ops/vps/ru/README.md) allows only the RU Linux package.
+- **Dev and RU lobbies** run binaries from their contour or market Linux package. `ops/vps/dev/lobby_dev.py ship --package` refuses anything that is not a dev Linux package (`read_package`, `DEV_PACKAGE`). `ops/vps/ru/ru_host.py ship --package` likewise accepts only the RU Linux package (`read_package`, `RU_PACKAGE`: `omoba-<v>-ru-linux-x64.tar.gz`, x86-64 ELF binaries).
 - **The production lobby** is built separately. [ops/vps/README.md](../../ops/vps/README.md) builds only Linux `server` and `omoba-account-api` with `--release --locked` into `/opt/omoba/releases/<source>/`. The global Linux package does not contain `omoba-account-api`.
 
 ## Player portal (`omoba-web`)
@@ -390,7 +390,7 @@ Which binaries each lobby runs:
 |---|---|---|
 | Production `app.omoba.io` | Vercel project `omoba-app` | Next.js preset, `npm ci` + `npm run build`. Guest-mode env (`OMOBA_PORTAL_ORIGIN`, `OMOBA_ACCOUNT_MODE=disabled`). `.vercelignore` excludes env files, `.agent`, Git metadata and builds. Deployed from the merged commit or a clean export; the repo has no deploy script for it |
 | Dev `app.dev.omoba.io` | Vercel project `omoba-app-dev` | `scripts/vercel-dev.sh`, described below |
-| RU `app.ru.omoba.io` | Self-hosted on the RU VPS, never Vercel | `npm run build` with the RU env, then `npm start`. `scripts/start.mjs` copies `.next/static` and `public/` into `.next/standalone` and runs `server.js` on `127.0.0.1:$PORT` (default 3010) behind Caddy ([ops/vps/ru/Caddyfile.ru](../../ops/vps/ru/Caddyfile.ru), `portal.env.example`). The runtime env must repeat the build's market |
+| RU `app.ru.omoba.io` | Self-hosted on the RU VPS, never Vercel | `npm run build` with the RU env on a clean checkout, then `ops/vps/ru/ru_host.py portal-bundle` packs `.next/standalone` with `.next/static` and `public/` (no `.next/cache`, no `.env*`) and `ship-portal` installs it under `/opt/omoba-ru/portal/releases/`. `omoba-portal-ru.service` runs that release's `server.js` on `127.0.0.1:3010` behind Caddy ([ops/vps/ru/README.md › Portal bundle](../../ops/vps/ru/README.md#portal-bundle), [Caddyfile.ru](../../ops/vps/ru/Caddyfile.ru), `portal.env.example`). Both tools refuse a build whose `server.js` is not the RU production build. The runtime env must repeat the build's market |
 
 `scripts/vercel-dev.sh [--apply] plan|setup|deploy|check` deploys the dev portal. It is a dry run by default and pins the Vercel CLI to 63.1.2.
 

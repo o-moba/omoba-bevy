@@ -254,16 +254,17 @@ The dev VPS is a dedicated host and is never the production VPS. Tools read its 
 
 ### RU host (planned)
 
-A single VPS in Russia is meant to serve everything Russian players reach. Russian personal-data law (152-FZ) requires VK-linked accounts, sessions and IP rate limits to be stored in Russia. RU builds already contain the DNS names, which start answering once the host is deployed. Runbooks: [markets.md › RU release runbook](../markets.md#ru-release-runbook) and [ops/vps/ru/README.md](../../ops/vps/ru/README.md). The host is not deployable as written; the remaining blockers are listed in [ops/vps/ru/README.md](../../ops/vps/ru/README.md) and [launch-readiness.md](../plans/launch-readiness.md).
+A single VPS in Russia is meant to serve everything Russian players reach. Russian personal-data law (152-FZ) requires VK-linked accounts, sessions and IP rate limits to be stored in Russia. RU builds already contain the DNS names, which start answering once the host is deployed. Runbooks: [markets.md › RU release runbook](../markets.md#ru-release-runbook) and [ops/vps/ru/README.md](../../ops/vps/ru/README.md). The host is not deployed yet. `ops/vps/ru/ru_host.py` sets a fresh Ubuntu host up and ships to it (LR-01); off-host backups (LR-03) and monitoring (LR-17) are still open ([launch-readiness.md](../plans/launch-readiness.md)).
 
 | Item | Value | Source |
 | --- | --- | --- |
-| Lobby | `omoba-lobby-ru.service`, user `omoba-ru`, with the same limits as production. It runs `/opt/omoba-ru/current/omoba-server`, the `omoba-server` binary from the RU Linux package (built with `OMOBA_MARKET=ru`), and sets no Registry or passport URL. | [omoba-lobby-ru.service](../../ops/vps/ru/omoba-lobby-ru.service) |
-| Account API | `omoba-account-api-ru.service` on `127.0.0.1:40550`, with `OMOBA_TRUST_LOOPBACK_PROXY=1`, the VK ID app id and the social secret. Limits: `MemoryMax=256M`, `CPUQuota=50%`. It refuses payment settings and serves no Ekza library. | [omoba-account-api-ru.service](../../ops/vps/ru/omoba-account-api-ru.service), [account-api.env.example](../../ops/vps/ru/account-api.env.example) |
-| Portal | The omoba-web standalone build with `OMOBA_MARKET=ru` on `127.0.0.1:3010`. It calls the Account API directly on `http://127.0.0.1:40550` with no portal ingress key and forwards the browser's `X-Real-IP`, which Caddy writes (`OMOBA_TRUST_LOOPBACK_PROXY=1` on the portal and the API). It refuses to serve without that flag, or with a non-loopback API and no valid key. | [portal.env.example](../../ops/vps/ru/portal.env.example), [README › Topology](../../ops/vps/ru/README.md#topology), omoba-web `src/lib/security.mjs` |
+| Lobby | `omoba-lobby-ru.service`, user `omoba-ru`, with the same limits as production. It runs `/opt/omoba-ru/current/omoba-server`, the `omoba-server` binary from the RU Linux package (built with `OMOBA_MARKET=ru`), and sets no Registry or passport URL. It starts after `postgresql.service` (`After=`/`Wants=`) and restarts on any exit every 5 s with no start limit (`Restart=always`, `StartLimitIntervalSec=0`). | [omoba-lobby-ru.service](../../ops/vps/ru/omoba-lobby-ru.service) |
+| Account API | `omoba-account-api-ru.service` on `127.0.0.1:40550`, with `OMOBA_TRUST_LOOPBACK_PROXY=1`, the VK ID app id and the social secret. Limits: `MemoryMax=256M`, `CPUQuota=50%`. It refuses payment settings and serves no Ekza library. Same PostgreSQL ordering and restart policy as the lobby. | [omoba-account-api-ru.service](../../ops/vps/ru/omoba-account-api-ru.service), [account-api.env.example](../../ops/vps/ru/account-api.env.example) |
+| Portal | `omoba-portal-ru.service`, user `omoba-portal-ru`: the omoba-web standalone build with `OMOBA_MARKET=ru` (`/opt/omoba-ru/portal/current/server.js` on Node.js from `/opt/omoba-ru/node/current`) on `127.0.0.1:3010`, `Restart=always`, `MemoryMax=512M`, `CPUQuota=100%`, no Next.js telemetry. It calls the Account API directly on `http://127.0.0.1:40550` with no portal ingress key and forwards the browser's `X-Real-IP`, which Caddy writes (`OMOBA_TRUST_LOOPBACK_PROXY=1` on the portal and the API). It refuses to serve without that flag, or with a non-loopback API and no valid key. | [omoba-portal-ru.service](../../ops/vps/ru/omoba-portal-ru.service), [portal.env.example](../../ops/vps/ru/portal.env.example), [README › Topology](../../ops/vps/ru/README.md#topology), omoba-web `src/lib/security.mjs` |
 | Ingress | Caddy on TCP 443 with automatic HTTPS. `account.ru.omoba.io` allows `GET /health/live` and `/health/ready` and the native POST allowlist (see [below](#account-api-ingress-allowlists)); everything else, every portal route included, gets 403. `app.ru.omoba.io` proxies to the portal. Both overwrite `X-Real-IP` with the client's address. | [Caddyfile.ru](../../ops/vps/ru/Caddyfile.ru) |
-| Database | `omoba_ru`, with an owner role and the runtime roles `omoba_game` and `omoba_portal` | [ops/vps/ru/README.md](../../ops/vps/ru/README.md) |
+| Database | Ubuntu's PostgreSQL 16+ with the `und-x-icu` collation, on `127.0.0.1:5432` only. Database `omoba_ru` (UTF8, collation C.UTF-8), owner role `omoba_owner` (no login outside migrations) and the runtime roles `omoba_game` and `omoba_portal`, whose passwords are generated on the host into the root-only env files | [ops/vps/ru/README.md](../../ops/vps/ru/README.md) |
 | Downloads | `make release-ru-publish` writes `releases.json` from the verified IPFS receipts. It is installed as `OMOBA_RELEASE_CATALOG`, and the portal lists it through the Account API `releases` read (`account-api/src/lib.rs`). | Same |
+| Host and deploy | `ru_host.py` runs on the Mac and pipes itself to `ssh root@<RU VPS> python3 -`. `bootstrap`: Ubuntu packages only, firewall (ufw: SSH, TCP 443, UDP 4000 and the arena range from the lobby unit), key-only SSH (`sshd_config.d/00-omoba-ru.conf`), users, env files, database, units. `ship` / `ship-portal`: staged immutable releases, `pg_dump` and migrations before the switch, verification and rollback. `status` checks everything read-only; `reboot-check` proves a reboot needs no manual step. The public names come from the RU profile in `scripts/markets.py` (`ru_host.py names`) and reach the host in each payload; DNS and the `Caddyfile.ru` sites are checked against them. It refuses the production and dev hosts on both sides and, for bootstrap, an address `whois` does not place in Russia. | [ru_host.py](../../ops/vps/ru/ru_host.py), [README](../../ops/vps/ru/README.md), [release-checklist.md](../../ops/vps/ru/release-checklist.md) |
 
 ```mermaid
 flowchart LR
@@ -275,7 +276,7 @@ flowchart LR
     lobby["omoba-lobby-ru<br/>server role lobby, UDP 4000"]
     workers["match workers<br/>UDP 41000-41001"]
     api["omoba-account-api-ru<br/>127.0.0.1:40550"]
-    portal["Player portal, standalone<br/>127.0.0.1:3010"]
+    portal["omoba-portal-ru, standalone<br/>127.0.0.1:3010"]
     pg[("PostgreSQL<br/>database omoba_ru")]
     files[("/var/lib/omoba-ru<br/>matches, lobby-outbox")]
   end
@@ -403,8 +404,7 @@ The build and CI mechanics are in [build-and-release.md](build-and-release.md). 
 - **Lobby and Ekza.** The lobby unit sets `OMOBA_REGISTRY_URL`, and match workers inherit it. Whether the lobby process itself ever calls the Ekza Registry or passport was not confirmed. The admission code runs on the join path (`runtime/dispatch.rs`, `prematch.rs`).
 - **RU host.**
   - It is not deployed yet.
-  - `ops/vps/ru/` has no unit file for the RU portal; the README says only "its own service".
-  - Neither the RU host nor production has a guarded ship tool like `lobby_dev.py`.
+  - Production has no guarded ship tool like `lobby_dev.py` or `ops/vps/ru/ru_host.py`.
 - **RU-feature dev builds.**
   - They use the dev lobby and the dev Account API, which are global-market binaries without `vk_sign_in` or VK ID settings. The dev ingress also omits `/v1/auth/social/link`. How VK ID sign-in is meant to be tested in the hosted dev contour is not documented.
   - The RU dev Android app uses the same package id as the global dev app (`space.ekza.omoba.dev`).

@@ -2,12 +2,14 @@
 # (python3 scripts/release.py build linux --market ru) under /opt/omoba-ru/current.
 # A build for another market must never run here: the RU server has no Ekza
 # registry or passport and grants no paid cosmetics.
+# Installed and shipped by ops/vps/ru/ru_host.py (README.md). The lobby needs the
+# career database at start, so it starts after the local PostgreSQL and never stops
+# retrying: a crash or a slow database restarts it every 5 s, without a start limit.
 [Unit]
 Description=OMOBA RU lobby and bounded match workers
-After=network-online.target
-Wants=network-online.target
-StartLimitIntervalSec=120
-StartLimitBurst=6
+After=network-online.target postgresql.service
+Wants=network-online.target postgresql.service
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
@@ -15,7 +17,8 @@ User=omoba-ru
 Group=omoba-ru
 WorkingDirectory=/var/lib/omoba-ru
 # OMOBA_DATABASE_URL (game runtime role) and OMOBA_MATCH_PUBLIC_HOST (this host's
-# public IPv4, the address clients reach match workers on).
+# public IPv4, the address clients reach match workers on). Written on the host by
+# ru_host.py bootstrap (root, 0600); it must not repeat a setting of this unit.
 EnvironmentFile=/opt/omoba-ru/lobby.env
 Environment=SERVER_ADDR=0.0.0.0:4000
 Environment=OMOBA_SERVER_ROLE=lobby
@@ -28,7 +31,7 @@ Environment=OMOBA_MATCH_FIRST_PORT=41000
 Environment=OMOBA_MATCH_CAPACITY=2
 Environment=OMOBA_MATCH_EXECUTABLE=/opt/omoba-ru/current/omoba-server
 ExecStart=/opt/omoba-ru/current/omoba-server
-Restart=on-failure
+Restart=always
 RestartSec=5
 KillMode=control-group
 TimeoutStopSec=20

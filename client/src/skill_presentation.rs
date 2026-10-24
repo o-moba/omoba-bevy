@@ -3,13 +3,13 @@
 pub(crate) mod accents;
 pub(crate) mod bodies;
 pub(crate) mod cast;
-mod category;
+pub(crate) mod category;
 mod effects;
 #[cfg(feature = "qa")]
 pub(crate) mod evidence;
 pub(crate) mod geometry;
 pub(crate) mod impacts;
-mod schema;
+pub(crate) mod schema;
 #[cfg(any(test, feature = "qa"))]
 mod signature;
 pub(crate) mod stage;
@@ -84,7 +84,7 @@ fn fnv64(bytes: &[u8]) -> u64 {
 }
 
 impl SkillPresentation {
-    fn parse(json: &str) -> Result<Self, String> {
+    pub(crate) fn parse(json: &str) -> Result<Self, String> {
         if json.len() > schema::MAX_BYTES {
             return Err("Skill presentation exceeds 256 KiB".into());
         }
@@ -231,7 +231,7 @@ pub(crate) struct MotionCue {
 }
 
 /// The playback rates a windup fitted to its telegraph may take.
-const FITTED_RATES: (f32, f32) = (0.5, 2.0);
+pub(crate) const FITTED_RATES: (f32, f32) = (0.5, 2.0);
 
 impl MotionCue {
     /// A clip played once from its trigger: a release, a recast or a basic attack.
