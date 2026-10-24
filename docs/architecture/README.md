@@ -45,7 +45,7 @@ These pages link to the documents below instead of repeating them. When they dis
 | Settings folder | `omoba-bevy[-<market>][-<contour>]`. Each folder has its own device key |
 | Account API | `omoba-account-api`: loopback HTTP service over the career database |
 | Portal / BFF | `omoba-web`: the Next.js backend-for-frontend. The browser holds only HttpOnly cookies |
-| Portal ingress key | `X-Omoba-Portal-Key` (env `OMOBA_ACCOUNT_INGRESS_KEY`). The ingress requires it on non-native `/v1/*` routes |
+| Portal ingress key | `X-Omoba-Portal-Key` (env `OMOBA_ACCOUNT_INGRESS_KEY`). The hosted dev ingress requires it on non-native `/v1/*` routes; RU has none (its portal calls the API on loopback) |
 | Ekza Registry / passport | External Ekza services for avatars, weapons, library and tickets. Used only in `ekza` builds |
 
 ## Known drift in older docs

@@ -116,7 +116,7 @@ flowchart LR
 ## ADR-004: Sign in with VK ID goes through the Account API and reaches the device-key account
 
 - **Date:** 2026-10-23 (Account API, `428ccac`) to 2026-10-24 (in-game flow `6bd67dd` and its signature test `7198913`; merged to `dev` in PR #107). Recorded retrospectively.
-- **Status:** Accepted, partly implemented. The code and tests (with a loopback VK stand-in) are done. The real VK ID app, RU hosting and DNS are owner steps that have not been done yet, and the RU portal-to-Account-API ingress is a known deployment blocker ([system.md](system.md#open-questions)).
+- **Status:** Accepted, partly implemented. The code and tests (with a loopback VK stand-in) are done. The real VK ID app, RU hosting and DNS are owner steps that have not been done yet, The RU portal reaches the Account API on loopback ([ops/vps/ru/README.md › Topology](../../ops/vps/ru/README.md#topology)).
 
 **Context.** The RU market needs a familiar sign-in for the website and for new devices. ADR-001 already defines the account. Personal data of Russian players must be stored in Russia.
 
@@ -128,7 +128,7 @@ flowchart LR
   - **Unlinked VK account:** after VK sign-in the BFF offers the ticket to the pending enrollment (`POST /v1/auth/social/attach`), and the enrollment status reads `social_pending` with a short display name. The game asks the player to confirm, then signs `omoba.social.link.v1` over `shared::device_account::SocialLink` with its active device key (`CareerIdentity::sign_social_link`, `POST /v1/auth/social/link`).
   - **Already-linked VK account:** the browser is signed in as that account and approves the device enrollment instead. The device switches after a restart without merging profiles.
 - One VK account belongs to one profile (a unique index). Codes are single-use and expire in five minutes. Unlinking needs a fresh sign-in (`DELETE /v1/me/social/vk`). Expired tickets and unlinked identities left idle for 30 days are cleaned up (`account-api/README.md`, "Sign in with VK ID").
-- `vk`, `ticket` and `attach` are BFF routes behind the portal ingress key. Only `social/link` is on the public native ingress (ADR-016; [protocols.md](protocols.md#routes-by-exposure)).
+- `vk`, `ticket` and `attach` are BFF routes, called by the portal on loopback on RU and refused by the public ingress. Only `social/link` is on the public native ingress (ADR-016; [protocols.md](protocols.md#routes-by-exposure)).
 
 ```mermaid
 sequenceDiagram
@@ -395,7 +395,7 @@ sequenceDiagram
 - The browser holds only HttpOnly cookies, `__Host-` prefixed on HTTPS ([protocols.md](protocols.md#7-portal-bff-omoba-web) lists them). Pairing secrets, API bearer values and the Ekza library link token never reach browser storage, public environment variables or rendered JSON.
 - **Over the Account API:** `OMOBA_ACCOUNT_API_URL` is server-side only. Upstream paths pass an allowlist (`allowedPath` in `src/lib/security.mjs`, which also admits the workshop's `me/class-builds` routes), and mutations need same-origin CSRF proof.
 - **Over the Ekza Registry:** the market page and the `/api/ekza/*` and `/api/sponsor/*` routes read the Ekza Registry directly through `registryRequest` (`src/lib/market-server.mjs`: fixed origin, 5 s budget including the body, size cap, `redirect: "error"`). The Ekza Registry link token is held in an HttpOnly cookie (`src/lib/ekza-link.mjs`).
-- **Exposure:** the database is never public, and the Account API binds to loopback only (a non-loopback `OMOBA_ACCOUNT_BIND` fails, `account-api/src/main.rs`). The TLS ingress exposes only the native signed routes. Every other `/v1/*` route is internal to the portal BFF and needs the portal ingress key at the ingress; that includes pairing creation and the VK `vk`, `ticket` and `attach` routes. The full route set must never be exposed as a browser backend (`account-api/README.md`, "Runtime"). The route-by-route exposure is in [protocols.md](protocols.md#routes-by-exposure).
+- **Exposure:** the database is never public, and the Account API binds to loopback only (a non-loopback `OMOBA_ACCOUNT_BIND` fails, `account-api/src/main.rs`). The TLS ingress exposes only the native signed routes. Every other `/v1/*` route is internal to the portal BFF: it needs the portal ingress key at the ingress (hosted dev) or is refused there and called by the portal on loopback (RU); that includes pairing creation and the VK `vk`, `ticket` and `attach` routes. The full route set must never be exposed as a browser backend (`account-api/README.md`, "Runtime"). The route-by-route exposure is in [protocols.md](protocols.md#routes-by-exposure).
 - Contour and market are fixed at build time. A runtime contour or market that differs from the build stops the server at startup, and the root layout re-validates both on each request (the contour also against the request host). Any misconfiguration fails closed (ADR-002, ADR-003).
 
 **Consequences.** A new Account-API-backed portal feature needs an Account API route, an allowlist entry and feature gating (ADR-005). An Ekza-Registry-backed feature needs no Account API route, but it must sit behind the `ekza` gate: without `ekza`, `/api/ekza/*` and `/api/sponsor/*` answer 404 before reading a cookie or contacting the Ekza Registry (`omoba-web` `docs/markets.md`).

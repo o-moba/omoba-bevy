@@ -712,9 +712,44 @@ class Markets(unittest.TestCase):
                                         fetch=lambda url: 503)
         self.assertFalse(down["ready"])
         self.assertEqual(down["checks"]["account_api"]["url"], "https://account.ru.omoba.io/health/ready")
-        up = release.preflight_report("ru", resolve=lambda host: ["203.0.113.7"], fetch=lambda url: 200)
-        self.assertTrue(up["ready"])
+        up = release.preflight_report("ru", resolve=lambda host: ["203.0.113.7"], fetch=self.ru_host())
+        self.assertTrue(up["ready"], up)
         self.assertFalse(release.preflight_report("cn")["ready"])
+
+    @staticmethod
+    def ru_host(**overrides):
+        """A deployed RU host as the preflight sees it (ops/vps/ru/README.md#topology)."""
+        answers = {"https://app.ru.omoba.io/api/me": 401, "https://account.ru.omoba.io/v1/me": 403, **overrides}
+        return lambda url: answers.get(url, 200)
+
+    def test_preflight_fails_on_a_403_from_a_key_gated_route(self):
+        dns = lambda host: ["203.0.113.7"]
+        for url in ("https://app.ru.omoba.io/api/me", "https://app.ru.omoba.io/api/releases"):
+            with self.subTest(url):
+                report = release.preflight_report("ru", resolve=dns, fetch=self.ru_host(**{url: 403}))
+                self.assertFalse(report["ready"])
+                failed = [check for check in report["checks"].values() if not check["ok"]]
+                self.assertEqual([check["url"] for check in failed], [url])
+                self.assertIn("LR-02", failed[0]["problem"])
+        # A portal that cannot use the Account API at all is not ready either.
+        for status in (400, 500, 502, 503):
+            report = release.preflight_report("ru", resolve=dns, fetch=self.ru_host(**{"https://app.ru.omoba.io/api/me": status}))
+            self.assertFalse(report["checks"]["portal_account"]["ok"], status)
+            self.assertNotIn("problem", report["checks"]["portal_account"])
+        # The portal and health answer, but the gated route is unreachable over the network.
+        def unreachable(url):
+            if url.endswith("/api/releases"):
+                raise OSError("reset")
+            return self.ru_host()(url)
+        self.assertEqual(release.preflight_report("ru", resolve=dns, fetch=unreachable)["checks"]["portal_releases"]["error"], "OSError")
+
+    def test_preflight_fails_when_the_public_account_api_passes_portal_routes(self):
+        report = release.preflight_report("ru", resolve=lambda host: ["203.0.113.7"],
+                                          fetch=self.ru_host(**{"https://account.ru.omoba.io/v1/me": 401}))
+        self.assertFalse(report["ready"])
+        closed = report["checks"]["account_api_portal_routes_closed"]
+        self.assertEqual((closed["status"], closed["expected"]), (401, 403))
+        self.assertIn("Caddyfile.ru", closed["problem"])
 
     def test_catalog_lists_only_verified_downloads_in_the_api_schema(self):
         receipt = {"windows": {"file": "Omoba-0.45.0-ru-windows-x64.zip", "bytes": 123, "sha256": "a" * 64,

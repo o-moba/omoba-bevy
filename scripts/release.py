@@ -1331,8 +1331,25 @@ def command_markets(args) -> int:
     return 0
 
 
+# LR-02 (ops/vps/ru/README.md#topology): through the portal, Account API routes that
+# the public ingress gates answer as the API does (no session: 401, downloads: 200);
+# on the public Account API name the same routes stay refused (403).
+PORTAL_ROUTE_CHECKS = (
+    ("portal_account", "portal", "/api/me", 401),
+    ("portal_releases", "portal", "/api/releases", 200),
+    ("account_api_portal_routes_closed", "account_api", "/v1/me", 403),
+)
+PORTAL_ROUTE_PROBLEMS = {
+    "gated": "a key-gated Account API route answered 403 through the portal: the portal does not reach the "
+             "Account API (LR-02; ops/vps/ru/README.md#topology)",
+    "open": "the public Account API name passes a portal route; serve only the native routes and health "
+            "(ops/vps/ru/Caddyfile.ru)",
+}
+
+
 def preflight_report(market: str, resolve=None, fetch=None) -> dict:
-    """Whether a market's lobby name resolves and its Account API / portal answer over HTTPS."""
+    """Whether a market's lobby name resolves, its Account API / portal answer over HTTPS,
+    and the portal reaches the Account API while the public API name refuses portal routes."""
     import socket
     import urllib.request
     preset = market_presets.market(market)
@@ -1360,6 +1377,21 @@ def preflight_report(market: str, resolve=None, fetch=None) -> dict:
             checks[name] = {"url": url, "ok": 200 <= status < 400, "status": status}
         except OSError as error:
             checks[name] = {"url": url, "ok": False, "error": type(error).__name__}
+    if preset.account_api and preset.portal:
+        origins = {"portal": preset.portal, "account_api": preset.account_api}
+        for name, origin, path, expected in PORTAL_ROUTE_CHECKS:
+            url = origins[origin] + path
+            try:
+                status = fetch(url)
+            except OSError as error:
+                checks[name] = {"url": url, "ok": False, "expected": expected, "error": type(error).__name__}
+                continue
+            check = {"url": url, "ok": status == expected, "status": status, "expected": expected}
+            if status == 403 and expected != 403:
+                check["problem"] = PORTAL_ROUTE_PROBLEMS["gated"]
+            elif expected == 403 and status != 403:
+                check["problem"] = PORTAL_ROUTE_PROBLEMS["open"]
+            checks[name] = check
     return {"market": market, "blocked": preset.blocked,
             "ready": not preset.blocked and bool(checks) and all(c["ok"] for c in checks.values()),
             "checks": checks}
@@ -1515,7 +1547,8 @@ def main(argv=None) -> int:
                    "-<market> package names (scripts/markets.py)")
     sub.add_parser("check", help="what this host can build")
     sub.add_parser("markets", help="print every market's features, servers and platforms")
-    preflight = sub.add_parser("preflight", help="check that a market's servers answer (DNS, HTTPS health)")
+    preflight = sub.add_parser("preflight", help="check that a market's servers answer (DNS, HTTPS health, "
+                                                 "portal to Account API)")
     preflight.add_argument("--market", choices=tuple(MARKETS), default="ru")
     catalog = sub.add_parser("catalog", help="write the Account API download catalog from publish receipts")
     catalog.add_argument("--market", choices=tuple(MARKETS), default="ru")
