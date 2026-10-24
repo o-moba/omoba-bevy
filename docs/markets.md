@@ -116,6 +116,10 @@ a code is single-use and expires in five minutes; unlinking needs a fresh sign-i
 
 ## RU release runbook
 
+Before following it, read [the launch-readiness plan](plans/launch-readiness.md):
+its M0 specs are the launch blockers (among them LR-02, the portal ↔ Account API
+ingress of the RU kit).
+
 The steps that need accounts, money or legal decisions are the owner's.
 
 1. **Hosting in Russia.** Personal data of Russian players (the VK-linked

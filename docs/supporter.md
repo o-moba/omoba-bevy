@@ -120,8 +120,8 @@ thirty seconds without a successful check; no silent fallback to a guest account
 
 ## Database upgrade and runtime permissions
 
-Core career schema is version 3; portal schema is independently version 6.
-The new `006_supporter_recognition.sql` migration adds public acknowledgement
+Core career schema is version 3; portal schema is independently version 7 (migration 7 adds
+sign in with VK ID, `docs/markets.md`). `006_supporter_recognition.sql` adds public acknowledgement
 with an opt-out default; it does not grant paid access or publish any account.
 Run the existing owner-only Account API `migrate` command, then
 `account-api/ops/grants.sql` with your existing runtime role names. Apply first

@@ -165,10 +165,9 @@ these capabilities. Old limited sessions are invalidated by the account upgrade.
 ## Private class workshop prototype
 
 Portal migration 004 adds owner-scoped private class preferences; 005 adds the
-separate encrypted Ekza library connection. Startup also accepts existing portal
-v3/v4 schemas without running DDL. Missing class-build tables return
-503 `class_builds_unavailable`; missing Ekza connection tables return 200 with
-`state: unavailable` until their migrations are applied. No new browser authorization scopes are
+separate encrypted Ekza library connection. Startup requires exactly the portal
+schema versions this build serves (`PORTAL_SCHEMA`, 1–7) and runs no DDL, so run
+`migrate` first. No new browser authorization scopes are
 added: private named builds use the existing personal-settings consent.
 
 `GET/POST /v1/me/class-builds` lists/creates up to 50 documents per profile.
