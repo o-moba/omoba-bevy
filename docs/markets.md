@@ -123,11 +123,13 @@ The steps that need accounts, money or legal decisions are the owner's.
 
 1. **Hosting in Russia.** Personal data of Russian players (the VK-linked
    account, sessions, IP-based rate limits) must be stored in Russia (152-ФЗ):
-   one Russian VPS (2 vCPU / 4 GB is enough to start) with PostgreSQL 16+ and
-   Caddy. The Roskomnadzor notice as a personal-data operator and a Russian
-   privacy policy / user agreement are the owner's.
-2. **DNS.** A records `lobby.ru.omoba.io`, `account.ru.omoba.io`,
-   `app.ru.omoba.io` → the RU VPS.
+   one Russian VPS with Ubuntu 24.04+ (2 vCPU / 4 GB is enough to start), root
+   login with an SSH key. `ops/vps/ru/ru_host.py bootstrap` installs PostgreSQL 16+
+   and Caddy on it. The Roskomnadzor notice as a personal-data operator and a
+   Russian privacy policy / user agreement are the owner's.
+2. **DNS.** A records for the RU lobby, Account API and portal names of the RU
+   profile in `scripts/markets.py` → the RU VPS (`ops/vps/ru/ru_host.py names`
+   prints them; `ru_host.py status` checks them).
 3. **VK ID app.** At id.vk.ru create a *Web* app, trusted redirect URL
    `https://app.ru.omoba.io/api/auth/vk/callback`, scope `vkid.personal_info`,
    enable sign-in with OK and Mail.ru. Its numeric app id is
@@ -136,16 +138,22 @@ The steps that need accounts, money or legal decisions are the owner's.
 4. **Packages.** `make release-ru` builds `dist/v<version>-ru/`: macOS, Windows,
    Linux (with the RU `omoba-server` and `omoba-account-api`) and Android
    (`space.ekza.omoba.ru`). `make release-ru-publish` pins them to IPFS.
-5. **Servers** (`ops/vps/ru/README.md`): migrate the database with the RU
-   `omoba-account-api migrate`, apply `account-api/ops/grants.sql`, install
-   `omoba-lobby-ru.service` and `omoba-account-api-ru.service`, the RU portal
-   (omoba-web with `OMOBA_MARKET=ru`, calling the Account API on loopback:
-   `ops/vps/ru/README.md#topology`) and `Caddyfile.ru`.
-6. **Check.** `make release-ru-preflight` (DNS, `/health/ready`, portal, and the
-   portal ↔ Account API path: `/api/me` 401 and `/api/releases` 200 through the
-   portal, a public `/v1/me` refused with 403), then
+5. **Servers** with `ops/vps/ru/ru_host.py` (`ops/vps/ru/README.md`): `bootstrap`
+   sets up the host (PostgreSQL with ICU, Caddy with `Caddyfile.ru`, firewall,
+   key-only SSH, users, env files with secrets made on the host, the database and
+   the three units); `ship --package <RU Linux package>` migrates the database with
+   the RU `omoba-account-api migrate`, applies `account-api/ops/grants.sql` and
+   starts the lobby and the Account API; `portal-bundle` + `ship-portal` install the
+   RU portal (omoba-web with `OMOBA_MARKET=ru`, calling the Account API on loopback:
+   `ops/vps/ru/README.md#topology`).
+6. **Check.** `ru_host.py status` (the whole host, read-only) and, on a new host,
+   `ru_host.py reboot-check --apply`; `make release-ru-preflight` (DNS,
+   `/health/ready`, portal, and the portal ↔ Account API path: `/api/me` 401 and
+   `/api/releases` 200 through the portal, a public `/v1/me` refused with 403), then
    one real round: install the RU package, play a bot match, Profile →
    «Войти через VK ID», link, sign in on the portal, sign in on a second device.
+   Every release then runs the [RU release checklist](../ops/vps/ru/release-checklist.md)
+   on every platform and stores its result in `docs/progress/`.
 7. **Distribution.** Publish the IPFS links on the RU portal
    (`OMOBA_RELEASE_CATALOG`) and, if wanted, RuStore / VK Play (store accounts
    and age rating are the owner's).
