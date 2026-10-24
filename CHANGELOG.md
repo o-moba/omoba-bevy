@@ -5,6 +5,19 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Game contract: OMOBA describes what creators may make for it as an Ekza Game
+  Protocol document, `shared/assets/catalog/game-contract.json`
+  (`ekza.game-contract.v1`, profile `omoba.character.v1`, CC0-1.0): 107 animation
+  slots keyed by gameplay identity (101 customizable), 18 targets with their
+  checklists and character offers, the default the game plays in every slot and
+  the rule table a custom clip must pass, tuned against the 57 shipped motions.
+  Generated from the game's own rows, kits, motion library and engine constants
+  (`OMOBA_WRITE_GAME_CONTRACT=1 cargo test -p client --lib game_contract_is_current`,
+  then `scripts/export_game_contract.py`), with its JSON Schemas, 45 package and
+  12 contract conformance fixtures (`scripts/build_game_contract_fixtures.py`) and
+  notes on each hero's asset needs for GP5. No engine behaviour changes. See
+  [the reference](docs/game-contract.md).
+
 - Documentation: a current architecture set in `docs/architecture/` (system and
   deployment, identity and accounts, protocols, data, build and release,
   methodology, an ADR log) written from the code and fact-checked against it, and
