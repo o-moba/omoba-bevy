@@ -183,7 +183,7 @@ Area: legal (152-FZ) · **blocker** · S · owner
   - No operator entity exists. The landing credits "Wotori Studio", and the only contact is Telegram (`landing-v2/apps/omoba/src/app/privacy/page.tsx:160-176`).
   - The RKN notice is listed as an owner step, with no record that it was filed (`docs/markets.md:121-125`).
 - **Requirement:**
-  - Decide the entity: ИП, ООО or self-employed. The same entity is used for the RuStore, VK ID and VK Play accounts.
+  - Decide the entity: ИП or ООО. Self-employed (НПД) status is not enough once the RU market sells supporter auras: the YooKassa shop with «Чеки от ЮKassa» (LR-67) needs an ИП or ООО. The same entity is used for the YooKassa, RuStore, VK ID and VK Play accounts.
   - File the operator notice (152-FZ art. 22).
   - Either file a cross-border notice or state that no RU personal data leaves Russia. Check off-site backups, Pinata, and Vercel/Supabase analytics on RU-facing pages.
 - **Acceptance:**
