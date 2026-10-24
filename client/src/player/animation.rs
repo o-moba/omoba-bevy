@@ -108,7 +108,7 @@ pub(super) struct CharacterAnimationSet {
 /// Grace period before Run falls back to Idle. Remote players advance in
 /// snapshot-interpolation bursts with still frames in between; without this
 /// hysteresis the animation flaps Run<->Idle several times per second.
-const LOCOMOTION_IDLE_GRACE_SECS: f32 = 0.25;
+pub(crate) const LOCOMOTION_IDLE_GRACE_SECS: f32 = 0.25;
 
 #[derive(Component)]
 pub(crate) struct PlayerAnimationBinding {
@@ -132,7 +132,7 @@ pub(crate) struct PlayerAnimationBinding {
 
 /// How long a windup started by an accepted cast is held while the telegraph of that cast
 /// is not replicated to this client. No telegraph of a skill that holds a pose lasts longer.
-pub(super) const UNSEEN_HOLD_SECS: f32 = 1.2;
+pub(crate) const UNSEEN_HOLD_SECS: f32 = 1.2;
 
 /// Evidence of the clip that carries a hero's pose.
 #[cfg(feature = "qa")]
@@ -389,9 +389,12 @@ pub(super) fn start_hero_animation(
     }
 }
 
+/// Seconds an outgoing clip takes to fade out under the clip that replaced it.
+pub(crate) const BLEND_SECS: f32 = 0.12;
+
 /// Fade outgoing clips without changing authoritative action timing or root movement.
 fn blend_hero_animation(player: &mut AnimationPlayer, current: AnimationNodeIndex, delta: f32) {
-    let step = (delta / 0.12).clamp(0.0, 1.0);
+    let step = (delta / BLEND_SECS).clamp(0.0, 1.0);
     let mut remove = Vec::new();
     let mut outgoing = 0.0;
     for (node, active) in player.playing_animations_mut() {

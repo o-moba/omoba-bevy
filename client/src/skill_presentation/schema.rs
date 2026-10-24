@@ -25,6 +25,10 @@ pub(super) const MAX_BYTES: usize = 256 * 1024;
 const MAX_SKILLS: usize = 80;
 /// An edge-released clip must show its contact pose within this time of the accepted cast.
 pub(crate) const CONTACT_LIMIT_SECS: f32 = 0.15;
+/// Playback rates a row may give its clip (`motion.rate`, `motion.recast_rate`, `rate`).
+pub(crate) const ROW_RATE: RangeInclusive<f32> = 0.5..=2.0;
+/// Fractions of a clip a row may skip at its start (`motion.start`, `start`).
+pub(crate) const ROW_START: RangeInclusive<f32> = 0.0..=0.8;
 /// The skill colour and the matter colour must differ by this much relative luminance.
 pub(crate) const MIN_LUMINANCE_GAP: f32 = 0.25;
 
@@ -849,9 +853,9 @@ fn motion_block(
 ) -> Result<(), String> {
     action_clip(motion, "release", &profile.release)?;
     let playback = &profile.motion;
-    in_range(playback.rate, 0.5..=2.0, "motion.rate")?;
-    in_range(playback.start, 0.0..=0.8, "motion.start")?;
-    in_range(playback.recast_rate, 0.5..=2.0, "motion.recast_rate")?;
+    in_range(playback.rate, ROW_RATE, "motion.rate")?;
+    in_range(playback.start, ROW_START, "motion.start")?;
+    in_range(playback.recast_rate, ROW_RATE, "motion.recast_rate")?;
     let derived = derived_phase(key);
     if let Some(phase) = playback.phase
         && phase != MotionPhase::Instant
@@ -1386,8 +1390,8 @@ fn basic_row(
     if !(1..=2).contains(&basic.motions.len()) {
         return Err("`motions` needs one or two clips".into());
     }
-    in_range(basic.rate, 0.5..=2.0, "rate")?;
-    in_range(basic.start, 0.0..=0.8, "start")?;
+    in_range(basic.rate, ROW_RATE, "rate")?;
+    in_range(basic.start, ROW_START, "start")?;
     for name in &basic.motions {
         action_clip(motion, "motions", name)?;
         if let Some(late) = late_contact(motion, "motions", name, basic.rate, basic.start) {

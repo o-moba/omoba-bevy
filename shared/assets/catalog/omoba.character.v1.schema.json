@@ -1,0 +1,192 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omoba.io/schemas/omoba.character.v1.json",
+  "title": "omoba.character.v1",
+  "description": "The OMOBA profile of the Ekza Game Protocol: the shape of `ext[\"omoba.character.v1\"]` at each position of an `ekza.game-contract.v1` document. Readers apply $defs/document to the document's ext, $defs/target to each target's, $defs/animationSlot and $defs/assetSlot to each slot's by its kind.",
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "id": { "type": "string", "pattern": "^[a-z][a-z0-9_]{0,47}$" },
+    "itemId": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,63}$" },
+    "range": { "type": "array", "minItems": 2, "maxItems": 2, "items": { "type": "number" } },
+    "secs": { "type": "number", "minimum": 0, "maximum": 60 },
+    "handheldRef": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object", "additionalProperties": false, "required": ["item", "byMode", "bone", "muzzleWindowSecs"],
+          "properties": {
+            "item": { "$ref": "#/$defs/itemId" },
+            "byMode": { "type": "object", "additionalProperties": { "$ref": "#/$defs/itemId" } },
+            "bone": { "enum": ["rightHand", "leftHand"] },
+            "muzzleWindowSecs": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/range" }] }
+          }
+        }
+      ]
+    },
+    "document": {
+      "type": "object", "additionalProperties": false,
+      "required": ["gameplayRevision", "presentationSha256", "motionLibrary", "protocolVersion", "timing", "customPlayback"],
+      "properties": {
+        "gameplayRevision": { "type": "string", "maxLength": 64 },
+        "presentationSha256": { "$ref": "#/$defs/sha256" },
+        "motionLibrary": {
+          "type": "object", "additionalProperties": false, "required": ["schemaVersion", "sha256", "clips"],
+          "properties": {
+            "schemaVersion": { "type": "integer", "minimum": 1 },
+            "sha256": { "$ref": "#/$defs/sha256" },
+            "clips": { "type": "integer", "minimum": 1, "maximum": 256 }
+          }
+        },
+        "protocolVersion": { "type": "integer", "minimum": 1 },
+        "timing": {
+          "type": "object", "additionalProperties": false,
+          "required": ["blendSecs", "idleGraceSecs", "facingHoldSecs", "contactLimitSecs", "rowRate", "rowStart", "fitRate",
+                       "unseenHoldSecs", "freshSecs", "maxGapSecs", "deathCut", "movementInterruptsAction", "newActionRestarts"],
+          "properties": {
+            "blendSecs": { "$ref": "#/$defs/secs" },
+            "idleGraceSecs": { "$ref": "#/$defs/secs" },
+            "facingHoldSecs": {
+              "type": "object", "additionalProperties": false, "required": ["basic", "skill"],
+              "properties": { "basic": { "$ref": "#/$defs/secs" }, "skill": { "$ref": "#/$defs/secs" } }
+            },
+            "contactLimitSecs": { "$ref": "#/$defs/secs" },
+            "rowRate": { "$ref": "#/$defs/range" },
+            "rowStart": { "$ref": "#/$defs/range" },
+            "fitRate": { "$ref": "#/$defs/range" },
+            "unseenHoldSecs": { "$ref": "#/$defs/secs" },
+            "freshSecs": { "$ref": "#/$defs/secs" },
+            "maxGapSecs": { "$ref": "#/$defs/secs" },
+            "deathCut": { "const": "immediate" },
+            "movementInterruptsAction": { "type": "boolean" },
+            "newActionRestarts": { "type": "boolean" }
+          }
+        },
+        "customPlayback": {
+          "type": "object", "additionalProperties": false, "required": ["rate", "start"],
+          "properties": { "rate": { "const": 1 }, "start": { "const": 0 } }
+        }
+      }
+    },
+    "target": {
+      "type": "object", "additionalProperties": false, "required": ["heroKind", "role", "basicAttack", "kit", "handheld"],
+      "properties": {
+        "heroKind": { "enum": ["class", "any"] },
+        "role": { "type": ["string", "null"], "maxLength": 32 },
+        "basicAttack": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object", "additionalProperties": false,
+              "required": ["rangeM", "cooldownSecs", "attackRateCap", "minIntervalSecs"],
+              "properties": {
+                "rangeM": { "type": "number", "exclusiveMinimum": 0 },
+                "cooldownSecs": { "type": "number", "exclusiveMinimum": 0 },
+                "attackRateCap": { "type": "number", "minimum": 1 },
+                "minIntervalSecs": { "type": "number", "exclusiveMinimum": 0 }
+              }
+            }
+          ]
+        },
+        "kit": {
+          "type": "array", "maxItems": 4,
+          "items": {
+            "type": "object", "additionalProperties": false, "required": ["key", "skill", "name"],
+            "properties": {
+              "key": { "enum": ["q", "w", "e", "r"] },
+              "skill": { "$ref": "#/$defs/id" },
+              "name": { "type": "string", "minLength": 1, "maxLength": 64 }
+            }
+          }
+        },
+        "handheld": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object", "additionalProperties": false, "required": ["default", "byMode", "bone"],
+              "properties": {
+                "default": { "$ref": "#/$defs/itemId" },
+                "byMode": { "type": "object", "additionalProperties": { "$ref": "#/$defs/itemId" } },
+                "bone": { "enum": ["rightHand", "leftHand"] }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "animationSlot": {
+      "type": "object", "additionalProperties": false,
+      "required": ["group", "role", "phase", "edgeReleased", "row", "telegraph", "handheld"],
+      "properties": {
+        "group": { "enum": ["base", "basic", "skill"] },
+        "role": { "enum": ["idle", "run", "walk", "death", "basic", "release", "recast", "windup"] },
+        "phase": { "enum": ["locomotion", "state", "instant", "warn_fire", "fuse", "parry"] },
+        "edgeReleased": { "type": "boolean" },
+        "row": {
+          "type": "object", "additionalProperties": false,
+          "required": ["motion", "durationSecs", "contactSecs", "rate", "start", "effectiveContactSecs", "standInFor"],
+          "properties": {
+            "motion": { "$ref": "#/$defs/id" },
+            "durationSecs": { "type": "number", "exclusiveMinimum": 0, "maximum": 10 },
+            "contactSecs": { "type": ["number", "null"], "minimum": 0 },
+            "rate": { "type": "number", "minimum": 0.5, "maximum": 2 },
+            "start": { "type": "number", "minimum": 0, "maximum": 0.8 },
+            "effectiveContactSecs": { "type": ["number", "null"] },
+            "standInFor": { "type": ["string", "null"], "maxLength": 64 }
+          }
+        },
+        "telegraph": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object", "additionalProperties": false, "required": ["secs", "serverWindupSecs", "fitWindup"],
+              "properties": {
+                "secs": { "type": "number", "exclusiveMinimum": 0 },
+                "serverWindupSecs": { "type": ["number", "null"], "minimum": 0 },
+                "fitWindup": { "type": "boolean" }
+              }
+            }
+          ]
+        },
+        "handheld": { "$ref": "#/$defs/handheldRef" },
+        "skill": { "$ref": "#/$defs/id" },
+        "class": { "$ref": "#/$defs/id" },
+        "weaponMode": { "type": "string", "pattern": "^[a-z][a-z0-9_]{0,15}$" }
+      },
+      "allOf": [
+        { "if": { "properties": { "group": { "const": "skill" } } }, "then": { "required": ["skill"] } },
+        { "if": { "properties": { "group": { "const": "basic" } } }, "then": { "required": ["class"] } }
+      ]
+    },
+    "assetSlot": {
+      "type": "object", "additionalProperties": false,
+      "required": ["catalogRole", "status", "item", "model", "uses", "baseline", "gripMetadata"],
+      "properties": {
+        "catalogRole": { "enum": ["held_weapon", "projectile", "world_prop", "engine_effect"] },
+        "status": { "enum": ["supported", "planned", "engine_owned"] },
+        "item": { "oneOf": [{ "$ref": "#/$defs/itemId" }, { "type": "null" }] },
+        "model": { "oneOf": [{ "enum": ["rocket", "trap", "hook", "lantern", "orb"] }, { "type": "null" }] },
+        "uses": {
+          "type": "array", "minItems": 1, "maxItems": 16,
+          "items": {
+            "type": "object", "additionalProperties": false,
+            "properties": {
+              "skillId": { "$ref": "#/$defs/id" },
+              "basicAttackId": { "$ref": "#/$defs/id" },
+              "phase": { "type": "string", "pattern": "^[a-z][a-z_]{0,31}$" },
+              "state": { "type": "string", "pattern": "^[a-z][a-z_]{0,31}$" }
+            },
+            "oneOf": [{ "required": ["skillId"] }, { "required": ["basicAttackId"] }]
+          }
+        },
+        "baseline": {
+          "type": "object", "additionalProperties": false, "required": ["kind", "path"],
+          "properties": {
+            "kind": { "enum": ["model", "reference", "procedural"] },
+            "path": { "type": ["string", "null"], "maxLength": 200 }
+          }
+        },
+        "gripMetadata": { "oneOf": [{ "const": "ekza_handheld_v1" }, { "type": "null" }] }
+      }
+    }
+  }
+}
