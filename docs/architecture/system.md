@@ -122,7 +122,7 @@ All game traffic is UDP, and datagrams are JSON-encoded (`serde_json`; `server/s
 | Client | Account API | HTTPS POST, no redirects: pairing, device enrollment and recovery, Supporter, VK link | Runtime environment, otherwise compiled (`OMOBA_ACCOUNT_API_URL` + `OMOBA_PORTAL_ORIGIN`). `OMOBA_ALLOW_INSECURE_LOCAL=1` allows loopback HTTP. A dev build accepts only `account.dev.omoba.io` with `app.dev.omoba.io`. | `passport/src/web_account.rs` (`from_env`, `validate_contour_endpoints`), `device_account.rs`, `supporter_account.rs` |
 | Client | System browser | Opens a URL: market, Studio, `<portal>/connect?code=` | Connection profile or market portal (see [link targets](#build-axes-contour-and-market)) | `client/src/connection_profile.rs`, [markets.md](../markets.md) |
 | Browser | Portal | HTTPS | `app.omoba.io`, `app.dev.omoba.io`, `app.ru.omoba.io` | omoba-web `docs/vercel.md`, `ops/vps/ru/Caddyfile.ru` |
-| Portal BFF | Account API | HTTPS server-to-server, no redirects. Only hosted dev sends the portal ingress key, and the dev Caddy checks and strips it ([protocols.md §7](protocols.md#7-portal-bff-omoba-web)). Other contours and markets send none ([Open questions](#open-questions)). | `OMOBA_ACCOUNT_API_URL` | omoba-web `src/lib/security.mjs` (`accountIngressHeaders`), `src/app/api/[...path]/route.ts` |
+| Portal BFF | Account API | Server-to-server, no redirects. A non-loopback API (hosted dev, HTTPS) gets the portal ingress key, which the dev Caddy checks and strips. A loopback API (RU, `http://127.0.0.1:40550`) gets no key and, with `OMOBA_TRUST_LOOPBACK_PROXY=1`, the browser's `X-Real-IP` ([protocols.md §7](protocols.md#7-portal-bff-omoba-web)). | `OMOBA_ACCOUNT_API_URL` | omoba-web `src/lib/security.mjs` (`accountIngressHeaders`, `accountUpstreamHeaders`), `src/app/api/[...path]/route.ts` |
 | Portal BFF | Ekza Registry | HTTPS: `/market`, `/api/ekza/*`, `/api/sponsor/*` | `registry.ekza.io` or `registry.dev.ekza.io` | omoba-web `src/lib/market-server.mjs`, `sponsor-server.mjs` |
 | Account API | PostgreSQL | SQL as the portal runtime role | Loopback | `account-api/README.md` |
 | Account API | VK ID (`id.vk.ru`) | HTTPS authorization-code exchange. Tokens are not stored. | RU only | `account-api/src/social.rs` |
@@ -251,16 +251,16 @@ The dev VPS is a dedicated host and is never the production VPS. Tools read its 
 
 ### RU host (planned)
 
-A single VPS in Russia is meant to serve everything Russian players reach. Russian personal-data law (152-FZ) requires VK-linked accounts, sessions and IP rate limits to be stored in Russia. RU builds already contain the DNS names, which start answering once the host is deployed. Runbooks: [markets.md › RU release runbook](../markets.md#ru-release-runbook) and [ops/vps/ru/README.md](../../ops/vps/ru/README.md). The host is not deployable as written: see the portal ingress blocker under [Open questions](#open-questions).
+A single VPS in Russia is meant to serve everything Russian players reach. Russian personal-data law (152-FZ) requires VK-linked accounts, sessions and IP rate limits to be stored in Russia. RU builds already contain the DNS names, which start answering once the host is deployed. Runbooks: [markets.md › RU release runbook](../markets.md#ru-release-runbook) and [ops/vps/ru/README.md](../../ops/vps/ru/README.md). The host is not deployable as written; the remaining blockers are listed in [ops/vps/ru/README.md](../../ops/vps/ru/README.md) and [launch-readiness.md](../plans/launch-readiness.md).
 
 | Item | Value | Source |
 | --- | --- | --- |
 | Lobby | `omoba-lobby-ru.service`, user `omoba-ru`, with the same limits as production. It runs `/opt/omoba-ru/current/omoba-server`, the `omoba-server` binary from the RU Linux package (built with `OMOBA_MARKET=ru`), and sets no Registry or passport URL. | [omoba-lobby-ru.service](../../ops/vps/ru/omoba-lobby-ru.service) |
 | Account API | `omoba-account-api-ru.service` on `127.0.0.1:40550`, with `OMOBA_TRUST_LOOPBACK_PROXY=1`, the VK ID app id and the social secret. Limits: `MemoryMax=256M`, `CPUQuota=50%`. It refuses payment settings and serves no Ekza library. | [omoba-account-api-ru.service](../../ops/vps/ru/omoba-account-api-ru.service), [account-api.env.example](../../ops/vps/ru/account-api.env.example) |
-| Portal | The omoba-web standalone build with `OMOBA_MARKET=ru` on `127.0.0.1:3010`. It reaches the Account API through the public name `https://account.ru.omoba.io`, which loops back through Caddy rather than going to `127.0.0.1:40550` directly. The env example sets the portal ingress key (`OMOBA_ACCOUNT_INGRESS_KEY`), but the portal code sends it only in the `dev` contour ([Open questions](#open-questions)). | [portal.env.example](../../ops/vps/ru/portal.env.example), omoba-web `src/lib/security.mjs` |
-| Ingress | Caddy on TCP 443 with automatic HTTPS. `account.ru.omoba.io` allows `GET /health/live` and `/health/ready`, the native POST allowlist (see [below](#account-api-ingress-allowlists)), and other `/v1/*` routes only with the portal ingress key. Everything else gets 403. `app.ru.omoba.io` proxies to the portal. | [Caddyfile.ru](../../ops/vps/ru/Caddyfile.ru) |
+| Portal | The omoba-web standalone build with `OMOBA_MARKET=ru` on `127.0.0.1:3010`. It calls the Account API directly on `http://127.0.0.1:40550` with no portal ingress key and forwards the browser's `X-Real-IP`, which Caddy writes (`OMOBA_TRUST_LOOPBACK_PROXY=1` on the portal and the API). It refuses to serve without that flag, or with a non-loopback API and no valid key. | [portal.env.example](../../ops/vps/ru/portal.env.example), [README › Topology](../../ops/vps/ru/README.md#topology), omoba-web `src/lib/security.mjs` |
+| Ingress | Caddy on TCP 443 with automatic HTTPS. `account.ru.omoba.io` allows `GET /health/live` and `/health/ready` and the native POST allowlist (see [below](#account-api-ingress-allowlists)); everything else, every portal route included, gets 403. `app.ru.omoba.io` proxies to the portal. Both overwrite `X-Real-IP` with the client's address. | [Caddyfile.ru](../../ops/vps/ru/Caddyfile.ru) |
 | Database | `omoba_ru`, with an owner role and the runtime roles `omoba_game` and `omoba_portal` | [ops/vps/ru/README.md](../../ops/vps/ru/README.md) |
-| Downloads | `make release-ru-publish` writes `releases.json` from the verified IPFS receipts. It is installed as `OMOBA_RELEASE_CATALOG`, and the portal lists it through the Account API `releases` read (`account-api/src/lib.rs`), which is subject to the same portal ingress blocker. | Same |
+| Downloads | `make release-ru-publish` writes `releases.json` from the verified IPFS receipts. It is installed as `OMOBA_RELEASE_CATALOG`, and the portal lists it through the Account API `releases` read (`account-api/src/lib.rs`). | Same |
 
 ```mermaid
 flowchart LR
@@ -288,8 +288,8 @@ flowchart LR
   client -.->|"opens /connect?code= in the browser"| browser
   browser -->|"HTTPS app.ru.omoba.io"| caddy
   browser -->|"OAuth 2.1 PKCE authorize"| vk
-  caddy -->|"app.ru"| portal
-  portal -->|"HTTPS account.ru via public name (portal ingress key expected by Caddy, not sent today)"| caddy
+  caddy -->|"app.ru, X-Real-IP overwritten"| portal
+  portal -->|"HTTP loopback, browser X-Real-IP forwarded"| api
   caddy -->|"account.ru allowlist"| api
   api -->|"SQL, portal role"| pg
   api -->|"HTTPS code exchange"| vk
@@ -299,7 +299,7 @@ The VK ID flow, the `/connect` page and the guarantee that the website never cre
 
 ### Account API ingress allowlists
 
-Routes, authentication and exposure for the whole Account API are specified once in [protocols.md §6](protocols.md#6-account-api-http-contract). This section records only the deployment difference between the two ingress configurations in this repository. Each passes these signed native client routes without the portal ingress key; every other `/v1/*` route needs the key, and both also allow `GET /health/live` and `/health/ready`. The native lists follow each host's market features. [account-api/README.md](../../account-api/README.md) lists the union, with each conditional route marked.
+Routes, authentication and exposure for the whole Account API are specified once in [protocols.md §6](protocols.md#6-account-api-http-contract). This section records only the deployment difference between the two ingress configurations in this repository. Each passes these signed native client routes without the portal ingress key and also allows `GET /health/live` and `/health/ready`. Every other `/v1/*` route needs the key on the dev fragment and is refused on RU, whose portal calls the API on loopback. The native lists follow each host's market features. [account-api/README.md](../../account-api/README.md) lists the union, with each conditional route marked.
 
 | Native POST route | Dev fragment (`account_api_dev.py` `NATIVE`) | RU (`Caddyfile.ru` `@native`) |
 | --- | --- | --- |
@@ -385,25 +385,13 @@ The build and CI mechanics are in [build-and-release.md](build-and-release.md). 
 - [ops/vps/dev/README.md](../../ops/vps/dev/README.md)
 - [ops/vps/ru/README.md](../../ops/vps/ru/README.md)
 - [RUNBOOK.md](../../RUNBOOK.md)
-- [plans/launch-readiness.md](../plans/launch-readiness.md): launch blockers, including LR-02 for the portal ingress
+- [plans/launch-readiness.md](../plans/launch-readiness.md): launch blockers
 - [plans/game-directory.md](../plans/game-directory.md): a concept only, one fixed entry point routing to lobbies; not scheduled
 - omoba-web `docs/vercel.md` and `docs/markets.md`
 
 ## Open questions
 
-- **Deployment blocker: the RU portal sends no portal ingress key.** Tracked as LR-02 in [launch-readiness.md](../plans/launch-readiness.md).
-  - `Caddyfile.ru` passes a non-native `/v1/*` request to the Account API only with `X-Omoba-Portal-Key`, and answers 403 otherwise. `ops/vps/ru/portal.env.example` sets the key, and omoba-web `docs/markets.md` describes the VK callback as sending it.
-  - omoba-web `accountIngressHeaders` (`src/lib/security.mjs`) returns the key only in the `dev` contour, with accounts enabled, for exactly `https://account.dev.omoba.io`; `tests/account-ingress.test.mjs` asserts this. The RU portal runs in the `production` contour against `https://account.ru.omoba.io`, so it sends no key.
-  - Every Account API call the RU portal makes therefore gets 403. The helper feeds all three upstream paths:
-    - The catch-all BFF (`src/app/api/[...path]/route.ts`), so every allowlisted route ([protocols.md §7](protocols.md#7-portal-bff-omoba-web)) fails. That includes browser-side web pairing (`auth/pairings`, `/status`, `/complete`, `/cancel`, and the cancel of an older pairing before a new one), `auth/logout`, `GET me` and every `me/*` route RU enables (matches, statistics, friends, sessions, devices, recovery codes, profile, settings, class builds, `DELETE me/social/vk`), `players`, `matches`, `releases` (the RU download catalogue) and the VK ticket and attach (`auth/social/{ticket,attach}`).
-    - The VK callback (`src/app/api/auth/vk/callback/route.ts`, headers from `upstreamHeaders` in `src/lib/vk-route.ts`): `POST /v1/auth/social/vk`, the VK code exchange.
-    - Server-rendered reads in `src/lib/server-api.ts`: `GET /v1/me` and `POST /v1/auth/social/ticket`.
-  - Only the native client routes in `@native` are unaffected.
-  - Either the portal or the ingress has to change before the RU host can serve accounts. LR-02 prefers having the portal call the loopback API directly, with `OMOBA_TRUST_LOOPBACK_PROXY=1` on both sides. The alternative is a `production` branch in `accountIngressHeaders`.
-- **Client IP behind the ingress.** Both ingress configurations in this repository (the dev fragment and `Caddyfile.ru`) overwrite `X-Real-IP` with the connecting peer (`header_up X-Real-IP {remote_host}`). Both Account APIs run with `OMOBA_TRUST_LOOPBACK_PROXY=1`, so they key per-IP limits on that peer. A portal that reaches the API through the public ingress is that peer:
-  - Hosted dev: the Vercel `omoba-app-dev` deployment, once accounts are enabled there. The API sees Vercel's egress address, not the browser's.
-  - RU: the portal on the same host, which loops back through `https://account.ru.omoba.io`. The API sees the host's own address. `portal.env.example` does not set `OMOBA_TRUST_LOOPBACK_PROXY`, so the portal forwards no browser IP either; even if it did, Caddy would overwrite it.
-  - Per-IP buckets on portal routes then become shared by every player of that portal: for example pairing creation at 5 per minute and social sign-in at 30 per minute ([bucket table](identity-and-accounts.md#revocation-expiry-and-limits)). This is inferred from the config and was not observed at run time. LR-02 in [launch-readiness.md](../plans/launch-readiness.md) covers it together with the portal ingress key.
+- **Client IP behind the hosted dev ingress.** The dev fragment overwrites `X-Real-IP` with the connecting peer (`header_up X-Real-IP {remote_host}`), and the dev Account API runs with `OMOBA_TRUST_LOOPBACK_PROXY=1`, so it keys per-IP limits on that peer. The hosted dev portal (Vercel `omoba-app-dev`, once accounts are enabled there) reaches the API through that ingress, so the API sees Vercel's egress address, not the browser's, and per-IP buckets on portal routes (pairing creation 5 per minute, social sign-in 30 per minute; [bucket table](identity-and-accounts.md#revocation-expiry-and-limits)) are shared by every dev player. This is inferred from the config. The RU host does not have this problem: its portal calls the API on loopback and forwards Caddy's `X-Real-IP` ([ops/vps/ru/README.md › Topology](../../ops/vps/ru/README.md#topology)).
 - **Hosted dev accounts.** The last recorded status (2026-10-13, omoba-web `docs/vercel.md`) has `omoba-app-dev` in guest mode. It is not recorded whether `omoba-account-api-dev` has since been activated and the dev portal switched to `OMOBA_ACCOUNT_MODE=enabled`.
 - **Production PostgreSQL.**
   - `omoba-lobby.service` has `Requires=docker.service`, but `ops/vps/README.md` does not say what Docker provides there; it may be the PostgreSQL 16 instance.

@@ -502,7 +502,7 @@ Other runtime secrets and configuration key no stored rows, but belong in the sa
 
 - `OMOBA_APPLE_VERIFIER_SECRET` (`BillingConfig::from_env` in `supporter.rs`)
 - the `OMOBA_SOLANA_*` provider settings (`supporter/solana.rs`). Each `supporter_orders` row stores its own network, mint and recipient.
-- the portal ingress key (`OMOBA_ACCOUNT_INGRESS_KEY`), shared by the portal server and the Account API ingress ([ops/vps/dev/README.md](../../ops/vps/dev/README.md)). The RU deployment blocker around it is described in [system.md](system.md#open-questions).
+- the portal ingress key (`OMOBA_ACCOUNT_INGRESS_KEY`), shared by the portal server and the Account API ingress ([ops/vps/dev/README.md](../../ops/vps/dev/README.md)). Hosted dev only: the RU portal calls the Account API on loopback and has no key ([ops/vps/ru/README.md › Topology](../../ops/vps/ru/README.md#topology)).
 
 ## Client-side local state
 

@@ -58,7 +58,9 @@ Do not broadly expose all API routes as an alternative browser backend.
 3010 for isolated development; never enable it for a remote HTTP site.
 
 For a private loopback ingress that overwrites `X-Real-IP`, both services can set
-`OMOBA_TRUST_LOOPBACK_PROXY=1`. Without this flag IP headers are ignored and limits
+`OMOBA_TRUST_LOOPBACK_PROXY=1`. On one host the portal then calls this API directly
+on loopback and forwards the `X-Real-IP` its own ingress wrote
+([ops/vps/ru/README.md › Topology](../ops/vps/ru/README.md#topology)). Without this flag IP headers are ignored and limits
 apply to socket peers. With it a valid header is required. Never enable it on an
 unprotected listener or pass an inbound header through unchanged. Rate limits live
 in PostgreSQL and are shared by API replicas. Apply edge per-IP/body/time limits too.
@@ -96,8 +98,8 @@ then reads `social_pending` with a short display name; the game links it with
 `POST /v1/auth/social/link`, signed by its active key over the enrollment
 (`shared::device_account::SocialLink`). A website sign-in never creates a game
 profile; one VK account links to one profile; `DELETE /v1/me/social/vk` (fresh
-session) unlinks. `vk`, `ticket` and `attach` are BFF routes: keep them behind
-the portal ingress key. Expired tickets and unlinked identities idle for 30 days
+session) unlinks. `vk`, `ticket` and `attach` are BFF routes: keep them off the
+public ingress (behind the portal ingress key, or loopback only as on RU). Expired tickets and unlinked identities idle for 30 days
 are cleaned up. Tests: `tests/social_postgres.rs` (loopback VK stand-in).
 
 Free markets (`supporter` off) serve no `supporter` route and refuse Apple or

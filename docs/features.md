@@ -8,7 +8,10 @@ Russian servers, no Ekza ecosystem, no purchases, Russian by default) or `cn`
 own servers, settings folder and Android app. RU players sign in with VK ID
 (VK, OK, Mail.ru) on the RU portal and from Profile in the game; the game's
 device key stays the account, and a VK sign-in is linked to a profile only after
-the game confirms. See [markets](markets.md).
+the game confirms. On the RU host the portal calls the Account API on loopback
+and forwards each player's address, so sign-in limits stay per player;
+`release.py preflight --market ru` checks that path
+([topology](../ops/vps/ru/README.md#topology)). See [markets](markets.md).
 
 ## Temporary community sculptures
 
