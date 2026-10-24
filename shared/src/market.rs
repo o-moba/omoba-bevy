@@ -22,11 +22,8 @@
 //! The market is independent of the build *contour* (`OMOBA_DEFAULT_CONFIG_DIR_SUFFIX`,
 //! production or the `dev` tester app): an RU dev build is the OMOBA Dev app with
 //! RU features. See `docs/markets.md`.
-use serde::{Deserialize, Serialize};
-
-/// A market one build serves.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+/// A market one build serves. Compile-time only: never serialized.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Market {
     /// Europe and the rest of the world: the full current product.
     Global,
@@ -37,7 +34,7 @@ pub enum Market {
 }
 
 /// What a market (or a per-build override) switches on.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Features {
     /// The Ekza ecosystem: the registry catalogue and store avatars, the Ekza
     /// passport (wallet pairing, protected avatars), the Ekza Library and its
