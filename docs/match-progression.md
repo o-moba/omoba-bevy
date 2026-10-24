@@ -151,7 +151,9 @@ rounds are explicitly unranked. Approved public `public-casual-v1` bot games awa
 50 XP for a win and 25 for a loss, with unchanged rating and rated-match count.
 Only authenticated humans receive that progression; bots never own career profiles.
 Development, custom-map, standalone practice and interrupted/abandoned games grant
-no public progression XP. Other saved unrated results can retain history and
+no public progression XP. The server itself ends a running match as interrupted when
+no human has been connected for the 180 s reclaim window plus 30 s, or at the hard
+duration cap (`OMOBA_MATCH_MAX_DURATION_SECS`, default 45 minutes). Other saved unrated results can retain history and
 participation counters without ranked rewards. The system does not claim bot
 detection or smurf prevention.
 

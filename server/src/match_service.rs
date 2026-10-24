@@ -57,11 +57,12 @@ impl MatchService {
             None
         }
     }
-    pub fn from_env() -> Result<Self, String> {
+    /// `bound` is this process's bound UDP address (`SERVER_ADDR`).
+    pub fn from_env(bound: std::net::SocketAddr) -> Result<Self, String> {
         match std::env::var("OMOBA_SERVER_ROLE").ok().as_deref() {
             None | Some("") | Some("standalone") => Ok(Self::Standalone),
             Some("lobby") => {
-                let pool = crate::match_pool::Pool::from_env()?;
+                let pool = crate::match_pool::Pool::from_env(bound)?;
                 let assignments = pool
                     .slots
                     .iter()
