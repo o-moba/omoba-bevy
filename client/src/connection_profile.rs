@@ -55,7 +55,9 @@ pub(crate) const LOCAL_REGISTRY: &str = "http://127.0.0.1:8018";
 const LOCAL_MARKET: &str = "127.0.0.1:3010/market";
 const LOCAL_STUDIO: &str = "127.0.0.1:5188/studio";
 const PRODUCTION_MARKET: &str = "app.omoba.io/market";
-const PRODUCTION_STUDIO: &str = "studio.ekza.io/studio";
+/// The Ekza Hub's upload pages (the publishing site, formerly "Ekza Studio";
+/// studio.ekza.io is now the Ekza Studio editor and redirects `/studio` here).
+const PRODUCTION_STUDIO: &str = "hub.ekza.io/studio";
 /// Longest custom lobby address or registry URL the panel accepts.
 pub(crate) const MAX_FIELD_CHARS: usize = 96;
 /// Bound on the selection file: it holds two short strings.
@@ -246,7 +248,7 @@ fn contour_profile(contour: &str, compiled: &Compiled) -> ConnectionProfile {
         ),
         passport: compiled.passport.unwrap_or(CLOSED_PASSPORT).to_owned(),
         market: format!("app.{contour}.omoba.io/market"),
-        studio: format!("studio.{contour}.ekza.io/studio"),
+        studio: format!("hub.{contour}.ekza.io/studio"),
         storage: Path::new(PROFILES_DIR).join(ProfileId::Dev.key()),
     }
 }
@@ -823,7 +825,7 @@ mod tests {
             assert_eq!(dev.lobby, "lobby.dev.omoba.io:4100");
             assert_eq!(dev.registry, "https://registry.dev.ekza.io");
             assert_eq!(dev.market, "app.dev.omoba.io/market");
-            assert_eq!(dev.studio, "studio.dev.ekza.io/studio");
+            assert_eq!(dev.studio, "hub.dev.ekza.io/studio");
             assert!(dev.passport_closed());
             assert_eq!(dev.storage, Path::new("profiles/dev"));
         }

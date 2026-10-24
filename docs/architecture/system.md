@@ -160,7 +160,7 @@ Link targets the client opens (`client/src/connection_profile.rs`: `production_p
 
 | Build or profile | Market link | Studio link |
 | --- | --- | --- |
-| Production profile (`prod` builds) | `app.omoba.io/market` | `studio.ekza.io/studio` |
+| Production profile (`prod` builds) | `app.omoba.io/market` | `hub.ekza.io/studio` |
 | Contour (Dev profile) | `app.<contour>.omoba.io/market` | `studio.<contour>.ekza.io/studio` |
 | Local profile | `127.0.0.1:3010/market` | `127.0.0.1:5188/studio` |
 | Builds without `ekza` | None | None |
@@ -179,7 +179,7 @@ Each market has its own database, accounts and device keys. The settings folder 
 | Account API | Not a service (only `migrate` runs) | `127.0.0.1:40550` behind Caddy as `account.dev.omoba.io` | `127.0.0.1:40550` behind Caddy as `account.ru.omoba.io` | `127.0.0.1:40550` |
 | Portal | Vercel, `app.omoba.io` | Vercel, `app.dev.omoba.io` | `127.0.0.1:3010` behind Caddy as `app.ru.omoba.io` | `127.0.0.1:3010` |
 | PostgreSQL | The existing PostgreSQL 16 instance, reached through localhost (port and packaging unconfirmed), database `omoba` | Dev Supabase Postgres at `127.0.0.1:54322`, database `omoba_dev` | `127.0.0.1:5432`, database `omoba_ru` | Any (disposable for tests) |
-| Registry / Studio | `registry.ekza.io` / `studio.ekza.io` | `registry.dev.ekza.io` / `studio.dev.ekza.io` on the same VPS | None | `127.0.0.1:8018` / `127.0.0.1:5188` (Local profile) |
+| Registry / Hub | `registry.ekza.io` / `hub.ekza.io` | `registry.dev.ekza.io` / `hub.dev.ekza.io` on the same VPS | None | `127.0.0.1:8018` / `127.0.0.1:5188` (Local profile) |
 
 ### Production host (global market)
 
@@ -214,7 +214,7 @@ flowchart LR
   subgraph ekza["Ekza services, external"]
     reg["Ekza Registry<br/>registry.ekza.io"]
     pass["Passport<br/>avatar.ekza.io/api/passport"]
-    studio["Studio<br/>studio.ekza.io"]
+    studio["Hub<br/>hub.ekza.io"]
   end
   dist["Packages<br/>GitHub draft releases, IPFS via Pinata, TestFlight"]
 
@@ -246,7 +246,7 @@ The dev VPS is a dedicated host and is never the production VPS. Tools read its 
 | Passport | `OMOBA_PASSPORT_URL=http://127.0.0.1:9/api/passport` is a closed port, because no dev passport exists and the SDK default is production. | Same |
 | Database | `omoba_dev` (roles `omoba_dev_owner`, `omoba_dev_game`, `omoba_dev_portal`) inside the dev Supabase Postgres container. It lives in that stack's Docker volume and can be lost; the next ship recreates it. | [dev README](../../ops/vps/dev/README.md) |
 | Account API | `omoba-account-api-dev` on `127.0.0.1:40550`, connecting as `omoba_dev_portal`. `account_api_dev.py` has the following guards and outputs:<br>• It runs only as root on the host whose `hostname -I` lists the documented dev address.<br>• It refuses production markers and an exposed database port, and requires an unprivileged portal role.<br>• It writes `/opt/omoba-dev/account-api.env`, the portal ingress key file `/opt/omoba-dev/account-api-ingress.key` and a Caddy fragment at `/opt/ekza-dev/secrets/caddy/account-api.caddy` for the dev Registry's Caddy.<br>• Before activating, it checks the dev contour, the exact revision, the binary's SHA-256 and that the portal schema versions match the ones the release serves. | `ops/vps/dev/account_api_dev.py` (`guard`, `fragment`, `validate_activation`) |
-| Ekza | `registry.dev.ekza.io` and `studio.dev.ekza.io` run on the same VPS and are deployed from the ekza-registry repository. | omoba-web `docs/vercel.md` |
+| Ekza | `registry.dev.ekza.io` and `hub.dev.ekza.io` run on the same VPS and are deployed from the ekza-registry repository; the Ekza Studio editor is `studio.dev.ekza.io` on Vercel. | omoba-web `docs/vercel.md` |
 | Portal | Vercel `omoba-app-dev` at `app.dev.omoba.io`, with `OMOBA_CONTOUR=dev`, `noindex` and a DEV badge. With accounts enabled it must use exactly `https://account.dev.omoba.io` and a 64-hex portal ingress key (`OMOBA_ACCOUNT_INGRESS_KEY`). | omoba-web `docs/vercel.md`, `src/lib/security.mjs` `contourPortal` |
 | Deploy | `lobby_dev.py ship` runs a plan, then `--check`, then `--apply`: preflight, stage, upload, database, activate, with rollback. It refuses every production marker. `account_api_dev.py` sets up the dev Account API, and omoba-web `scripts/vercel-dev.sh` deploys the dev portal. | [dev README](../../ops/vps/dev/README.md) |
 
