@@ -521,6 +521,26 @@ sequenceDiagram
 
 ---
 
+## ADR-024: RU monetization: YooKassa donations buy monthly tiered auras
+
+- **Date:** 2026-10-24 (owner decision). Implementation: LR-67 in [../plans/launch-readiness.md](../plans/launch-readiness.md).
+- **Status:** Accepted; implementation pending. Amends ADR-003 (the RU preset had `supporter` off) and ADR-005 (RU stays without Ekza but is no longer free of payments).
+
+**Context.** The owner wants the Russian launch to earn money from players who support the project, through the Hero Supporter auras players already see on each other, and to grow from that revenue. Russian players cannot use Apple or Solana checkout here; the owner already runs YooKassa for another product.
+
+**Decision.**
+- The RU market turns `supporter` on with YooKassa as its only payment provider; the provider list is a market property, so global stays Apple + Solana.
+- A donation is a one-time YooKassa payment on the RU portal (100–10 000 ₽ tiers or a custom amount). It grants a 30-day cosmetic aura; the tier is the sum of donations inside the current 30-day window, so the aura reflects what a player gives per month, not their lifetime total.
+- Higher tiers look better (pink, green, blue, red, then three rainbow shimmer levels). Auras never change combat, matchmaking or rating.
+- Tier styles are new `AuraStyle` variants with a protocol bump; the server re-checks every equipped style against the tier.
+- The vibe-piano payment rules apply: re-read every webhook object, persist the idempotence key before the POST, replay only within 23 h, settle exactly once, refunds reduce the grant, receipts through «Чеки от ЮKassa».
+
+**Consequences.** RU clients render other players' auras (the plugin is on in RU). The RU release needs a YooKassa shop for an ИП or ООО, a public offer and a real fiscal-receipt test. Client and server ship together because of the protocol bump.
+
+**Links:** [../supporter.md](../supporter.md), [../markets.md](../markets.md), [identity-and-accounts.md](identity-and-accounts.md), [protocols.md](protocols.md).
+
+---
+
 ## Proposals not yet decided
 
 - **Game directory and server routing** (concept, 2026-10-13, not scheduled). Clients would fetch one HTTPS directory document per contour instead of using a compiled lobby address, and pick a lobby whose compatibility contract matches their own (phases D0 to D4). The document is proposed to be Ed25519-signed with a public key baked into the client. Where it is hosted (a portal route or a static signed file on the game host) is undecided. See [../plans/game-directory.md](../plans/game-directory.md). If adopted, it would amend ADR-002 and ADR-013.
