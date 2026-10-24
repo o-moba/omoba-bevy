@@ -1056,6 +1056,14 @@ follows.
 - A lobby that binds beyond loopback refuses to start while `OMOBA_MATCH_PUBLIC_HOST` is unset or loopback, because players would be sent to their own machine (LR-01).
 - Code: `server/src/match_lifecycle.rs`, `server/src/match_pool.rs` (`public_worker_host`). See [the session note](progress/2026-10-24-lr-11.md).
 
+## Honest state after leaving a running match (LR-13, unreleased)
+
+- A player who left a running match (Leave, crash or lost connection) and presses **Play** sees «You are still in a match · it ends in N min at the latest» with **Resume match**, instead of a "Match found · connecting…" spinner that never connected. N is the duration cap, or the abandoned-match reaping while no human is connected.
+- **Resume** returns to the same hero in that match. Waiting on the screen also works: once the match ends, the search queues a new match by itself. **Cancel** returns Home.
+- The lobby never adds a second queue entry for a profile that still holds a running seat, and a played match that ended frees the seat without an error code.
+- Copy in en, ru and zh-Hans (`client/i18n/*/rejoin.json`).
+- Code: `server/src/match_service.rs` (`Lobby::view`), `server/src/match_pool.rs` (`Slot::ran`), worker `status.json` `ends_by_ms`, `shared/src/match_service.rs` (`InMatch`), `client/src/match_service.rs`, `client/src/frontend/searching.rs`. See [the session note](progress/2026-10-24-lr-13.md).
+
 ## Multiplayer Session Reliability
 
 - **TASK-14 (client)**: Explicit session states, non-blocking wait when the server is down, bounded `WaitingForServer` timeout, stale snapshot detection while connected, UDP transport error thresholds, snapshot-channel disconnect detection when the UDP thread ends, full teardown (replicated entities + team overlay) on disconnect, manual reconnect via **Retry** (no silent rejoin into a match), pause menu auto-closes on **Disconnected**, minimap hidden unless **Connected**.

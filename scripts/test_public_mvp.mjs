@@ -12,11 +12,13 @@ const opts = Object.fromEntries(process.argv.slice(2).map(s => s.replace(/^--/, 
 const clientsCount = Number(opts.clients || 1);
 const preference = opts.preference || 'bot_practice';
 const scenario = opts.scenario || 'load';
-assert(['load','lifecycle','lobby-restart','recovery'].includes(scenario), 'unknown scenario');
+assert(['load','lifecycle','lobby-restart','recovery','abandoned'].includes(scenario), 'unknown scenario');
 if(scenario!=='load') assert(clientsCount===1 && preference==='bot_practice', `${scenario} uses --clients=1 --preference=bot_practice`);
 const soakSecs = Number(opts.seconds || 15);
 const inputHz = Number(opts['input-hz'] ?? 20);
 assert(Number.isFinite(inputHz)&&inputHz>=0&&inputHz<=60, 'input-hz must be between 0 and 60');
+// The gameplay protocol of the server under test, so the probe follows bumps.
+const protocolVersion = Number(/pub const PROTOCOL_VERSION: u16 = (\d+);/.exec(fs.readFileSync(new URL('../shared/src/protocol.rs', import.meta.url), 'utf8'))[1]);
 const lobbyPort = Number(opts.port || 45500);
 const workerPort = Number(opts['worker-port'] || 45600);
 const root = path.resolve(opts.output || `.agent/tasks/TASK-PUBLIC-MVP-2026-09-22/raw/live-${Date.now()}`);
@@ -77,7 +79,7 @@ class Client {
    if(v.challenge && !v.auth_nonce && !this.auth && this.authChallenge?.nonce!==v.challenge.nonce) {this.authChallenge=v.challenge;this.next=0;}
    if(v.auth_nonce && v.profile){this.auth=v.auth_nonce;this.profile=v.profile;if(this.stage==='authenticating')this.stage=this.port===lobbyPort?(this.autoQueue?'queued':'authenticated'):(this.autoJoin?'joining':'authenticated');}
    if(this.port===lobbyPort && v.match_service?.state==='assigned' && v.match_service_request_id===this.queueId) {
-    this.allocation=v.match_service.allocation;this.allocationsSeen.push(this.allocation);if(!this.autoHandoff)return;this.snapshot=null;this.socket.close();this.port=Number(this.allocation.endpoint.split(':').at(-1));this.stage='probing';this.bind();
+    this.allocation=v.match_service.allocation;this.inMatch=v.match_service.in_match??null;this.allocationsSeen.push(this.allocation);if(!this.autoHandoff)return;this.snapshot=null;this.socket.close();this.port=Number(this.allocation.endpoint.split(':').at(-1));this.stage='probing';this.bind();
    }
    return;
   }
@@ -95,7 +97,7 @@ class Client {
   // Retry admission until authentication completes, just like the native Hello
   // loop. A lost proof must not strand a synthetic client forever. Authenticate
   // retries are timer-driven, never echoed for every repeated server view.
-  if(!this.auth&&now-this.lastProbe>=1000){this.lastProbe=now;this.send({type:'transport_probe',protocol_version:2,client_nonce:this.nonce,padding:'0'.repeat(384)});}
+  if(!this.auth&&now-this.lastProbe>=1000){this.lastProbe=now;this.send({type:'transport_probe',protocol_version:protocolVersion,client_nonce:this.nonce,padding:'0'.repeat(384)});}
   if(!this.path)return;
   if(!this.auth){if(now>=this.next){this.next=now+2000;const c=this.authChallenge;this.bootstrap({type:'career',request:c?{action:'authenticate',challenge:c,signature:sign(this.key,['omoba.career.auth.v1',c.public_key,c.nonce,c.server_epoch,c.session_id,c.nickname])}:{action:'challenge',public_key:this.publicKey,nickname:this.nickname,session_id:this.session}});}return;}
   // Representative signed movement-command verification/dispatch load. Current
@@ -139,10 +141,11 @@ async function pumpFor(ms, onTick=()=>{}) {
  const end=performance.now()+ms;
  await pumpUntil('observation window',()=>performance.now()>=end,ms+1500,onTick);
 }
-const ids = snapshot => snapshot.players.map(p=>String(p.id)).sort();
+// Vision filters the snapshot's players; the live scoreboard lists every participant.
+const ids = snapshot => (snapshot.scoreboard?.players??[]).map(p=>String(p.player_id)).sort();
 const careerProgress = client => Object.fromEntries(['profile_id','rating','rated_matches','matches_played','wins','losses','progression_xp'].map(k=>[k,client.profile[k]]));
 function assertRoster(client, expected) {
- assert.equal(client.snapshot.players.length,10,'running match must retain ten participants');
+ assert.equal(ids(client.snapshot).length,10,'running match must retain ten participants');
  assert.deepEqual(ids(client.snapshot),expected,'a fresh identity entered or replaced an allocated participant');
  assert.equal(new Set(ids(client.snapshot)).size,10,'duplicate player identity');
 }
@@ -222,6 +225,9 @@ async function lifecycle(original) {
  await pumpFor(5500);
  const resumed=new Client(original.index,lobbyPort,original);resumed.queueId=original.queueId+1;all.push(resumed);
  await pumpUntil('original participant reconnect via lobby',()=>resumed.stage==='running',25000);
+ // LR-13: the lobby reports a running seat as the in-match state, with when the match ends at the latest.
+ const inMatch=seconds=>Number.isInteger(seconds)&&seconds>0&&seconds<=2700;
+ assert(inMatch(resumed.inMatch?.ends_within_secs),`lobby did not report the running seat as in-match: ${wire(resumed.inMatch)}`);
  assert.equal(resumed.port,oldPort,'reconnect allocated a second worker');
  assert.equal(resumed.allocation.allocation_id,allocation.allocation_id,'reconnect duplicated active allocation');
  assert.equal(resumed.snapshot.your_id,oldId,'reconnect replaced the player identity');
@@ -230,8 +236,12 @@ async function lifecycle(original) {
  const after=resumed.snapshot.players.find(p=>p.id===oldId);
  assert(after.level>=before.level,'reconnect reset in-match level');
  if(after.level===before.level)assert(after.xp>=before.xp,'reconnect reset in-match experience');
- assert(after.gold>=before.gold,'reconnect reset earned gold');
- assert.deepEqual(after.inventory,before.inventory,'reconnect lost inventory');
+ // The takeover bot may shop while the player is away: earned gold only grows
+ // and no owned item is lost.
+ const earned=(client,id)=>client.snapshot.scoreboard?.players.find(p=>String(p.player_id)===String(id))?.earned_gold??0;
+ assert(earned(resumed,oldId)>=earned(original,oldId),'reconnect reset earned gold');
+ const owned=[...after.inventory];
+ for(const item of before.inventory){const index=owned.indexOf(item);assert(index>=0,'reconnect lost inventory');owned.splice(index,1);}
  assert.equal(resumed.snapshot.players.filter(p=>!p.is_bot).length,1,'reconnect created a duplicate human');
  await pumpFor(1000,()=>assertRoster(resumed,baseline));
  const manifests=fs.readdirSync(path.join(root,'matches'),{withFileTypes:true})
@@ -241,7 +251,24 @@ async function lifecycle(original) {
  assert.equal(manifests.filter(m=>m.humans.some(h=>h.profile_id===waiting.profile.profile_id)).length,0,'cancelled waiter was allocated');
  checks.checks.push({name:'same_participant_reconnect',status:'PASS',player_id:oldId,port:oldPort,allocation_id:allocation.allocation_id,progress:careerProgress(resumed),roster:baseline,in_match_before:{level:before.level,xp:before.xp,gold:before.gold},in_match_after:{level:after.level,xp:after.xp,gold:after.gold}});
  report.scenarios.push('same_profile_session_reconnect_preserves_player_progress_and_worker');
- for(const client of [waiting,stranger,resumed])assert.equal(client.errors.length,0,`client ${client.index} transport errors`);
+
+ // LR-13: a deliberate Leave keeps the running seat under bot control. Play
+ // on the lobby then answers with the in-match state, never a fresh match,
+ // and resuming reclaims the same hero.
+ console.log(wire({phase:'lifecycle',action:'leave_then_play'}));
+ resumed.gameplay({type:'leave'});
+ await pumpFor(300);
+ resumed.close();
+ const back=new Client(original.index,lobbyPort,original);back.queueId=resumed.queueId+1;all.push(back);
+ await pumpUntil('play after leave resumes the running seat',()=>back.stage==='running',25000);
+ assert(inMatch(back.inMatch?.ends_within_secs),`lobby did not report the left seat as in-match: ${wire(back.inMatch)}`);
+ assert.equal(back.allocation.allocation_id,allocation.allocation_id,'play after leave allocated another match');
+ assert.equal(back.snapshot.your_id,oldId,'resume replaced the player identity');
+ await pumpFor(1000,()=>assertRoster(back,baseline));
+ assert.equal(allocationManifests().filter(m=>m.humans.some(h=>h.profile_id===back.profile.profile_id)).length,1,'play after leave created a second manifest');
+ checks.checks.push({name:'leave_then_play_resumes_running_seat',status:'PASS',allocation_id:allocation.allocation_id,ends_within_secs:back.inMatch.ends_within_secs});
+ report.scenarios.push('leave_then_play_shows_in_match_and_resumes_the_seat');
+ for(const client of [waiting,stranger,resumed,back])assert.equal(client.errors.length,0,`client ${client.index} transport errors`);
 }
 function allocationStatus(id) {
  try{return parse(fs.readFileSync(path.join(root,'matches',id,'status.json')))}catch{return null;}
@@ -260,6 +287,44 @@ function ownedWorkerPid(port) {
  const group=Number(spawnSync('ps',['-o','pgid=','-p',String(pid)],{encoding:'utf8'}).stdout?.trim());
  assert(ownedGroups.has(group)&&pid!==lobby.pid, 'refusing to signal a process outside this probe');
  return pid;
+}
+// LR-11 + LR-13: the only human leaves a running bot practice. Until the worker
+// reaps it (reclaim window + grace, about 210 s of real time), Play on the
+// lobby answers with the in-match state, never a fresh handoff or a failure;
+// then the seat frees silently and Play allocates a new match.
+async function abandoned(original) {
+ const allocation=original.allocation;
+ const checks=report.abandoned={checks:[],allocation_id:allocation.allocation_id};
+ console.log(wire({phase:'abandoned',action:'leave'}));
+ original.gameplay({type:'leave'});
+ await pumpFor(300);
+ original.close();
+ const leftAt=performance.now();
+ const player=new Client(original.index,lobbyPort,original,{autoQueue:false,autoJoin:false,autoHandoff:false});
+ player.queueId=original.queueId+1;all.push(player);
+ await pumpUntil('lobby authentication after leave',()=>!!player.auth);
+ let nextFind=0,nextProgress=0,inMatchAnswers=0,firstEnds=null;
+ await pumpUntil('abandoned match reaped and a new match allocated',()=>player.allocation&&player.allocation.allocation_id!==allocation.allocation_id,330000,now=>{
+  const view=player.career?.match_service;
+  if(view?.state==='assigned'&&view.allocation.allocation_id===allocation.allocation_id){
+   assert(view.in_match,'the left running match was handed out as a fresh match');
+   inMatchAnswers++;firstEnds??=view.in_match.ends_within_secs;
+  }
+  assert.notEqual(view?.state,'failed',`play after leaving answered failed: ${wire(view)}`);
+  if(now>=nextFind){nextFind=now+2000;player.account({action:'find_match',request_id:player.queueId,preference:'bot_practice'});}
+  if(now>=nextProgress){nextProgress=now+15000;console.log(wire({phase:'abandoned',elapsed_seconds:Math.round((now-leftAt)/1000),match_service:view?.state,ends_within_secs:view?.in_match?.ends_within_secs}));}
+ });
+ const waited=(performance.now()-leftAt)/1000;
+ assert(inMatchAnswers>0,'the lobby never reported the left match as in-match');
+ assert(waited>=180,`the seat freed before the reclaim window: ${waited}s`);
+ assert(firstEnds>0&&firstEnds<=215,`in-match end is not the reaping deadline: ${firstEnds}`);
+ const status=allocationStatus(allocation.allocation_id);
+ assert.equal(status?.phase,'failed','the abandoned worker did not retire');
+ const log=fs.readFileSync(path.join(root,'matches',allocation.allocation_id,'worker.log'),'utf8');
+ assert(/MATCH_METRIC event=abandoned_reaped outcome=Interrupted/.test(log),'worker did not log the reaping');
+ assert.equal(allocationManifests().filter(m=>m.humans.some(h=>h.profile_id===player.profile.profile_id)).length,2);
+ checks.checks.push({name:'left_match_in_match_until_reaped_then_new_match',status:'PASS',waited_seconds:waited,in_match_answers:inMatchAnswers,first_ends_within_secs:firstEnds,new_allocation_id:player.allocation.allocation_id});
+ report.scenarios.push('left_running_match_shows_in_match_until_reaped_then_play_queues');
 }
 async function restartAndRecover(original, crashWorker) {
  const allocation=original.allocation, baseline=ids(original.snapshot), progress=careerProgress(original), workerEpoch=original.epoch;
@@ -366,13 +431,14 @@ try {
   await delay(20);
  }
  assert(all.length===clientsCount && all.every(c=>c.stage==='running'),'not all clients reached Running; inspect clients.json');
- const allocations=new Map();for(const c of all){const id=c.allocation.allocation_id;if(!allocations.has(id))allocations.set(id,[]);allocations.get(id).push(c);assert.equal(c.snapshot.players.length,10);assert.equal(c.errors.length,0);assert(performance.now()-c.lastSnapshot<2000,'active match stopped delivering snapshots');}
+ const allocations=new Map();for(const c of all){const id=c.allocation.allocation_id;if(!allocations.has(id))allocations.set(id,[]);allocations.get(id).push(c);assert.equal(ids(c.snapshot).length,10);assert.equal(c.errors.length,0);assert(performance.now()-c.lastSnapshot<2000,'active match stopped delivering snapshots');}
  assert.equal(new Set([...allocations.values()].map(cs=>cs[0].port)).size,allocations.size,'distinct arenas require distinct ports');
- for(const cs of allocations.values()){const roster=new Set(cs[0].snapshot.players.map(p=>p.id));for(const c of cs)assert(roster.has(c.snapshot.your_id));}
+ for(const cs of allocations.values()){const roster=new Set(ids(cs[0].snapshot));for(const c of cs)assert(roster.has(String(c.snapshot.your_id)));}
  report.scenarios.push('allocated_draft_countdown_loading_running','distinct_workers_and_ten_player_rosters');
  report.arenas=allocations.size;report.total_bytes=all.reduce((n,c)=>n+c.bytes,0);report.total_datagrams=all.reduce((n,c)=>n+c.packets,0);report.elapsed_seconds=(performance.now()-start)/1000;
  const gaps=all.flatMap(c=>c.gaps).sort((a,b)=>a-b);report.snapshot_gap_ms={p50:gaps[Math.floor(gaps.length*.5)],p95:gaps[Math.floor(gaps.length*.95)],p99:gaps[Math.floor(gaps.length*.99)],max:gaps.at(-1)};
  if(scenario==='lifecycle')await lifecycle(all[0]);
+ if(scenario==='abandoned')await abandoned(all[0]);
  if(scenario==='lobby-restart'||scenario==='recovery')await restartAndRecover(all[0],scenario==='recovery');
  report.total_transforms_sent=all.reduce((n,c)=>n+c.transforms,0);
  report.total_sent_datagrams=all.reduce((n,c)=>n+c.sentPackets,0);

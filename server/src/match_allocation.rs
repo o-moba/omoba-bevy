@@ -104,6 +104,17 @@ pub(crate) struct Status {
     pub heartbeat_ms: u64,
     pub phase: Phase,
     pub result_id: Option<String>,
+    /// While `running`: the Unix time (ms) by which the match ends at the
+    /// latest, its duration cap or, while no human is connected, the
+    /// abandoned-match reaping. The lobby shows it to a player who left (LR-13).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ends_by_ms: Option<u64>,
+}
+impl Status {
+    /// The match was played: it is running or ended with a winner.
+    pub fn played(&self) -> bool {
+        matches!(self.phase, Phase::Running | Phase::Finished)
+    }
 }
 pub(crate) fn atomic_json(path: &Path, value: &impl Serialize) -> io::Result<()> {
     let bytes = serde_json::to_vec(value).map_err(io::Error::other)?;

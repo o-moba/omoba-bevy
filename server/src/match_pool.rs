@@ -13,6 +13,9 @@ pub(crate) struct Slot {
     directory: PathBuf,
     child: Option<Child>,
     recovering: bool,
+    /// The lobby saw this match running (LR-13). Its later failure ends a
+    /// played match; it is not a cancelled or expired allocation.
+    ran: bool,
 }
 pub(crate) struct Pool {
     // Kernel-owned advisory lock is released on crash as well as normal drop.
@@ -143,6 +146,7 @@ impl Pool {
                 archive(&pool.root, &directory, &manifest.allocation_id);
                 continue;
             }
+            let ran = status.as_ref().is_some_and(Status::played);
             pool.slots.insert(
                 manifest.allocation_id.clone(),
                 Slot {
@@ -151,6 +155,7 @@ impl Pool {
                     directory,
                     child: None,
                     recovering: false,
+                    ran,
                 },
             );
         }
@@ -199,6 +204,7 @@ impl Pool {
                     heartbeat_ms: match_allocation::unix_ms(),
                     phase: Phase::Failed,
                     result_id: None,
+                    ends_by_ms: None,
                 };
                 let _ = match_allocation::atomic_json(&directory.join("status.json"), &status);
                 return Err("worker_spawn_failed".into());
@@ -213,6 +219,7 @@ impl Pool {
                 directory,
                 child: Some(child),
                 recovering: false,
+                ran: false,
             },
         );
         Ok(id)
@@ -248,6 +255,7 @@ impl Pool {
                         heartbeat_ms: now,
                         phase: Phase::Failed,
                         result_id: None,
+                        ends_by_ms: None,
                     };
                     if match_allocation::atomic_json(&slot.directory.join("status.json"), &status)
                         .is_ok()
@@ -311,6 +319,12 @@ impl Slot {
 
     pub fn refresh_status(&mut self) {
         self.status = self.latest_status();
+        self.ran |= self.status.as_ref().is_some_and(Status::played);
+    }
+
+    /// The lobby saw this match running (LR-13).
+    pub fn ran(&self) -> bool {
+        self.ran
     }
 
     pub fn occupies_port(&self) -> bool {
@@ -329,13 +343,21 @@ impl Slot {
             .as_ref()
             .is_some_and(|s| matches!(s.phase, Phase::Finished | Phase::Failed))
     }
+    #[cfg(test)]
     pub fn ready(&self) -> bool {
-        !self.recovering
-            && !self.cancelled()
-            && self.latest_status().as_ref().is_some_and(|s| {
-                matches!(s.phase, Phase::Ready | Phase::Forming | Phase::Running)
-                    && match_allocation::unix_ms().saturating_sub(s.heartbeat_ms) < 10_000
-            })
+        self.ready_status().is_some()
+    }
+
+    /// The worker's latest receipt while the slot is ready: not recovering or
+    /// cancelled, `ready`, `forming` or `running`, with a fresh heartbeat.
+    pub fn ready_status(&self) -> Option<Status> {
+        if self.recovering || self.cancelled() {
+            return None;
+        }
+        self.latest_status().filter(|s| {
+            matches!(s.phase, Phase::Ready | Phase::Forming | Phase::Running)
+                && match_allocation::unix_ms().saturating_sub(s.heartbeat_ms) < 10_000
+        })
     }
 }
 fn read_status(dir: &std::path::Path, id: &str) -> Option<Status> {
@@ -423,6 +445,14 @@ impl Pool {
     pub(crate) fn write_status_for_test(&self, id: &str, status: &Status) {
         match_allocation::atomic_json(&self.slots[id].directory.join("status.json"), status)
             .unwrap();
+    }
+
+    /// The slot as a restarted lobby adopts it: the worker lives on, but
+    /// this lobby is not its parent. Reaps the stand-in test child.
+    pub(crate) fn adopt_for_test(&mut self, id: &str) {
+        if let Some(mut child) = self.slots.get_mut(id).unwrap().child.take() {
+            child.wait().unwrap();
+        }
     }
 
     pub(crate) fn test_directory(&self) -> &std::path::Path {
@@ -551,6 +581,7 @@ mod tests {
             heartbeat_ms: match_allocation::unix_ms(),
             phase: Phase::Ready,
             result_id: None,
+            ends_by_ms: None,
         });
         assert!(p.slots[&id].ready());
         assert!(p.cancel(&id));
@@ -639,6 +670,7 @@ mod tests {
             heartbeat_ms: match_allocation::unix_ms() - age_ms,
             phase: Phase::Failed,
             result_id: Some("r".repeat(32)),
+            ends_by_ms: None,
         };
         p.write_status_for_test(&id, &retired(1_000));
         p.poll();
@@ -670,6 +702,7 @@ mod tests {
             heartbeat_ms: match_allocation::unix_ms(),
             phase: Phase::Running,
             result_id: None,
+            ends_by_ms: None,
         });
         assert!(!p.cancel(&id));
         assert!(!p.slots[&id].cancelled());

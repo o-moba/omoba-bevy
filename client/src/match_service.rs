@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 use bevy::prelude::*;
 use shared::{
     career::CareerView,
-    match_service::{MatchAllocation, MatchPreference, MatchServiceView},
+    match_service::{InMatch, MatchAllocation, MatchPreference, MatchServiceView},
 };
 
 use crate::{
@@ -38,6 +38,9 @@ pub(crate) struct MatchServiceClient {
     /// A fresh search must not re-enter a worker whose seat we already left.
     /// Its terminal disk receipt can lag the client result or reconnect cutoff.
     last_left_allocation: Option<String>,
+    /// The player chose Resume on the lobby's in-match state (LR-13). Like a
+    /// saved resume, a blocked join returns to the lobby instead of waiting.
+    resuming: bool,
 }
 
 /// A queued "Play again": the lobby to return to and the lock-in to send.
@@ -116,6 +119,47 @@ impl MatchServiceClient {
         self.active && (self.pending_join.is_some() || self.allocation.is_none())
     }
 
+    /// The lobby's answer to this search, once it answered this request.
+    fn answer<'a>(&self, view: &'a CareerView) -> Option<&'a MatchServiceView> {
+        (self.active
+            && self.allocation.is_none()
+            && view.match_service_request_id == Some(self.request_id))
+        .then_some(view.match_service.as_ref())
+        .flatten()
+    }
+
+    /// The running match that still holds this player's seat, as the lobby
+    /// answered this search (LR-13): the searching screen offers Resume.
+    pub fn in_match<'a>(&self, view: &'a CareerView) -> Option<(&'a MatchAllocation, InMatch)> {
+        self.answer(view)?.in_match()
+    }
+
+    /// The lobby still hands out the allocation this player left, which the
+    /// search never re-enters: that match is closing, not connecting.
+    pub fn closing_left_allocation(&self, view: &CareerView) -> bool {
+        matches!(
+            self.answer(view),
+            Some(MatchServiceView::Assigned { allocation, in_match: None })
+                if self.last_left_allocation.as_deref() == Some(allocation.allocation_id.as_str())
+        )
+    }
+
+    /// Resume on the in-match state: go back to that seat with this search's
+    /// lock-in, which the worker reads as a reclaim of the retained hero.
+    /// Returns the endpoint to connect to, or `None` when nothing can be
+    /// resumed.
+    pub fn resume_in_match(&mut self, view: &CareerView) -> Option<String> {
+        let allocation = self.in_match(view)?.0.clone();
+        crate::persistence::validate_game_server_addr(&allocation.endpoint)?;
+        self.pending_join.as_ref()?;
+        let endpoint = allocation.endpoint.clone();
+        self.last_left_allocation = None;
+        self.allocation = Some(allocation);
+        self.last_request = None;
+        self.resuming = true;
+        Some(endpoint)
+    }
+
     pub fn take_return_to_lobby(&mut self) -> Option<String> {
         let allocation = self.allocation.take();
         if let Some(allocation) = &allocation {
@@ -124,6 +168,7 @@ impl MatchServiceClient {
         let destination = allocation.and(self.lobby_addr.take());
         self.active = false;
         self.resume_scope = None;
+        self.resuming = false;
         self.pending_join = None;
         self.last_request = None;
         self.lobby_addr = None;
@@ -205,7 +250,7 @@ fn update_match_service(
         {
             session.defer_active_seat_rejection();
         }
-        if flow.resume_scope.is_some() && session.join_blocked() {
+        if (flow.resume_scope.is_some() || flow.resuming) && session.join_blocked() {
             // Return through the normal cleanup once. The saved record remains
             // available for an explicit later attempt; no automatic loop from Home.
             session.abandon_join();
@@ -231,8 +276,13 @@ fn update_match_service(
         }
         return;
     }
+    // A running match is never a handoff: the player resumes it explicitly,
+    // and retries keep the search alive until it ends (LR-13).
     if career.view.match_service_request_id == Some(flow.request_id)
-        && let Some(MatchServiceView::Assigned { allocation }) = &career.view.match_service
+        && let Some(MatchServiceView::Assigned {
+            allocation,
+            in_match: None,
+        }) = &career.view.match_service
         && flow.last_left_allocation.as_deref() != Some(allocation.allocation_id.as_str())
     {
         if crate::persistence::validate_game_server_addr(&allocation.endpoint).is_some() {
@@ -353,9 +403,22 @@ pub(crate) fn status_text(view: &MatchServiceView) -> String {
             )
         }
         MatchServiceView::Allocating => tr("searching.match.allocating").into(),
+        MatchServiceView::Assigned {
+            in_match: Some(state),
+            ..
+        } => in_match_text(*state),
         MatchServiceView::Assigned { .. } => tr("searching.match.assigned").into(),
         MatchServiceView::Failed { code } => trf("searching.match.failed", &[("code", code)]),
     }
+}
+
+/// The in-match state (LR-13): the player is still in a running match, which
+/// ends by the given time at the latest.
+pub(crate) fn in_match_text(state: InMatch) -> String {
+    state.ends_within_minutes().map_or_else(
+        || tr("rejoin.status_open").to_owned(),
+        |minutes| trf("rejoin.status", &[("minutes", &minutes)]),
+    )
 }
 
 #[cfg(test)]
@@ -655,6 +718,7 @@ mod tests {
                 match_service_request_id: Some(request_id),
                 match_service: Some(MatchServiceView::Assigned {
                     allocation: allocation(),
+                    in_match: None,
                 }),
                 ..default()
             };
@@ -689,6 +753,7 @@ mod tests {
             .view
             .match_service = Some(MatchServiceView::Assigned {
             allocation: next_allocation.clone(),
+            in_match: None,
         });
         app.update();
         assert_eq!(
@@ -702,6 +767,227 @@ mod tests {
         );
         assert!(app.world_mut().resource_mut::<Messages<SessionUiCommand>>().drain()
             .any(|command| matches!(command, SessionUiCommand::ConnectAllocated(endpoint) if endpoint == next_allocation.endpoint)));
+    }
+
+    fn in_match(ends_within_secs: Option<u64>) -> MatchServiceView {
+        MatchServiceView::Assigned {
+            allocation: allocation(),
+            in_match: Some(InMatch { ends_within_secs }),
+        }
+    }
+
+    /// LR-13: Play after leaving a running match. The lobby answers with the
+    /// in-match state: no handoff and no endless "connecting", the search
+    /// keeps retrying (it queues once the match ends), and Resume goes back to
+    /// that seat with this search's lock-in.
+    #[test]
+    fn play_after_leaving_a_running_match_offers_resume_instead_of_a_handoff() {
+        let lobby = "127.0.0.1:4000";
+        let mut app = App::new();
+        app.init_resource::<CareerClient>()
+            .init_resource::<crate::net::recovery::ResumeMatchState>()
+            .add_message::<NetworkCommand>()
+            .add_message::<SessionUiCommand>()
+            .insert_resource(CareerIdentity::authenticated_for_test(lobby, 9, "seat-a"))
+            .insert_resource(ClientSessionId("seat-a".into()))
+            .insert_resource(GameStateSnapshot {
+                meta: shared::protocol::SnapshotMeta::new(9, 1, 1),
+                ..default()
+            })
+            .add_systems(
+                Update,
+                (crate::net::recovery::resume_actions, update_match_service).chain(),
+            );
+        let mut session = ClientSession::default();
+        session.set_state_for_test(crate::net::ClientConnectionState::Connected);
+        session.set_server_addr_for_test(lobby);
+        app.insert_resource(session);
+        // The player was in this allocation and pressed Leave …
+        let mut flow = MatchServiceClient {
+            active: true,
+            allocation: Some(allocation()),
+            lobby_addr: Some(lobby.into()),
+            ..default()
+        };
+        assert_eq!(flow.take_return_to_lobby().as_deref(), Some(lobby));
+        // … then Play on Home: a fresh search.
+        let idle = CareerView {
+            match_service: Some(MatchServiceView::Idle),
+            ..default()
+        };
+        assert!(flow.intercept_join(&idle, lobby, &lock_in()));
+        let request_id = flow.request_id;
+        app.insert_resource(flow);
+        app.world_mut().resource_mut::<CareerClient>().view = CareerView {
+            match_service_request_id: Some(request_id),
+            match_service: Some(in_match(Some(600))),
+            ..default()
+        };
+        let drain_network = |app: &mut App| {
+            app.world_mut()
+                .resource_mut::<Messages<NetworkCommand>>()
+                .drain()
+                .collect::<Vec<_>>()
+        };
+        let drain_session = |app: &mut App| {
+            app.world_mut()
+                .resource_mut::<Messages<SessionUiCommand>>()
+                .drain()
+                .collect::<Vec<_>>()
+        };
+        for _ in 0..2 {
+            app.world_mut()
+                .resource_mut::<MatchServiceClient>()
+                .last_request = Some(Instant::now() - Duration::from_secs(3));
+            app.update();
+            assert!(drain_session(&mut app).is_empty(), "never a handoff");
+            let sent = drain_network(&mut app);
+            assert!(
+                matches!(sent[..], [NetworkCommand::Career(shared::career::CareerRequest::FindMatch { request_id: id, .. })] if id == request_id),
+                "the search keeps retrying: {sent:?}"
+            );
+            let flow = app.world().resource::<MatchServiceClient>();
+            assert!(flow.allocation.is_none() && flow.is_searching());
+            let view = &app.world().resource::<CareerClient>().view;
+            let (seat, state) = flow.in_match(view).expect("the in-match state");
+            assert_eq!(seat.allocation_id, "allocated");
+            assert_eq!(state.ends_within_minutes(), Some(10));
+            assert!(!flow.closing_left_allocation(view));
+        }
+        // A stale answer (another request) offers nothing.
+        let mut stale = app.world().resource::<CareerClient>().view.clone();
+        stale.match_service_request_id = Some(request_id + 1);
+        assert!(
+            app.world()
+                .resource::<MatchServiceClient>()
+                .in_match(&stale)
+                .is_none()
+        );
+
+        // Resume.
+        app.world_mut().write_message(SessionUiCommand::ResumeMatch);
+        app.update();
+        let connect = drain_session(&mut app);
+        assert!(
+            connect.iter().any(|command| matches!(command, SessionUiCommand::ConnectAllocated(endpoint) if endpoint == "127.0.0.1:4001")),
+            "{connect:?}"
+        );
+        assert!(
+            drain_network(&mut app).is_empty(),
+            "no FindMatch once resuming"
+        );
+        {
+            let flow = app.world().resource::<MatchServiceClient>();
+            assert_eq!(
+                flow.allocation.as_ref().map(|a| a.allocation_id.as_str()),
+                Some("allocated")
+            );
+            assert!(flow.resuming && flow.last_left_allocation.is_none());
+        }
+        // On the worker, the retained lock-in reclaims the seat.
+        app.world_mut()
+            .resource_mut::<ClientSession>()
+            .set_server_addr_for_test("127.0.0.1:4001");
+        app.insert_resource(CareerIdentity::authenticated_for_test(
+            "127.0.0.1:4001",
+            9,
+            "seat-a",
+        ));
+        app.update();
+        assert!(matches!(
+            drain_network(&mut app)[..],
+            [NetworkCommand::JoinPrematch { .. }]
+        ));
+        // A worker that refuses the seat sends the player back to the lobby.
+        app.world_mut()
+            .resource_mut::<ClientSession>()
+            .reject_for_test(shared::protocol::JoinRejection::SessionActive);
+        app.update();
+        assert!(
+            drain_session(&mut app)
+                .iter()
+                .any(|command| matches!(command, SessionUiCommand::LeaveMatch))
+        );
+        assert!(!app.world().resource::<MatchServiceClient>().active);
+    }
+
+    /// The allocation this player left, while the lobby still hands it out
+    /// before its match runs, reads as closing, never as connecting.
+    #[test]
+    fn a_left_allocation_still_handed_out_reads_as_closing() {
+        let lobby = "127.0.0.1:4000";
+        let idle = CareerView {
+            match_service: Some(MatchServiceView::Idle),
+            ..default()
+        };
+        let mut flow = MatchServiceClient {
+            active: true,
+            allocation: Some(allocation()),
+            lobby_addr: Some(lobby.into()),
+            ..default()
+        };
+        flow.take_return_to_lobby();
+        assert!(flow.intercept_join(&idle, lobby, &lock_in()));
+        let mut view = CareerView {
+            match_service_request_id: Some(flow.request_id),
+            match_service: Some(MatchServiceView::Assigned {
+                allocation: allocation(),
+                in_match: None,
+            }),
+            ..default()
+        };
+        assert!(flow.closing_left_allocation(&view));
+        assert!(flow.in_match(&view).is_none());
+        view.match_service = Some(MatchServiceView::Assigned {
+            allocation: MatchAllocation {
+                allocation_id: "another".into(),
+                ..allocation()
+            },
+            in_match: None,
+        });
+        assert!(!flow.closing_left_allocation(&view), "a new match connects");
+    }
+
+    /// The in-match copy in every language, with and without a known end.
+    #[test]
+    fn the_in_match_state_is_localized() {
+        if crate::i18n::testing::isolated("match_service::tests::the_in_match_state_is_localized") {
+            return;
+        }
+        use crate::i18n::{I18nPlugin, Locale, LocaleId};
+        let mut app = App::new();
+        app.add_plugins(I18nPlugin::default());
+        assert_eq!(
+            status_text(&in_match(Some(121))),
+            "You are still in a match · it ends in 3 min at the latest.\nResume it, or wait here: the search starts when it ends."
+        );
+        assert_eq!(
+            status_text(&in_match(None)),
+            "You are still in a match.\nResume it, or wait here: the search starts when it ends."
+        );
+        for (locale, ends) in [
+            (
+                "ru",
+                "Вы всё ещё в матче · он закончится не позже чем через 3 мин.",
+            ),
+            ("zh-Hans", "你仍在一场对局中 · 最多 3 分钟后结束。"),
+        ] {
+            app.world_mut()
+                .resource_mut::<Locale>()
+                .set(LocaleId::parse(locale).unwrap());
+            let text = status_text(&in_match(Some(121)));
+            assert!(text.starts_with(ends), "{locale}: {text}");
+            assert!(!text.contains("match ·"), "{locale}: {text}");
+            assert_ne!(status_text(&in_match(None)), text);
+            assert_eq!(
+                tr("rejoin.resume"),
+                if locale == "ru" {
+                    "Вернуться в матч"
+                } else {
+                    "继续对局"
+                }
+            );
+        }
     }
 
     #[test]
