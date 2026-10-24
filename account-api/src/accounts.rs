@@ -26,7 +26,7 @@ pub async fn me(app: &App, s: &Session) -> Result<Value> {
         .await
         .map_err(game_error)?;
     Ok(
-        json!({"profile":profile_dto(&profile),"settings":settings(app,&s.profile_id).await?,"rules":{"newcomer_matches":shared::career::NEWCOMER_MATCHES},"session":{"session_id":s.session_id}}),
+        json!({"profile":profile_dto(&profile),"settings":settings(app,&s.profile_id).await?,"rules":{"newcomer_matches":shared::career::NEWCOMER_MATCHES},"session":{"session_id":s.session_id},"social":social::linked(app,&s.profile_id).await?}),
     )
 }
 pub async fn player(app: &App, s: Option<&Session>, id: &str) -> Result<Value> {
@@ -35,8 +35,13 @@ pub async fn player(app: &App, s: Option<&Session>, id: &str) -> Result<Value> {
     }
     let actor = s.map(|s| s.profile_id.as_str()).unwrap_or("");
     // Access flags and public fields come from one MVCC snapshot, avoiding privacy TOCTOU.
-    let row=sqlx::query("SELECT p.profile_id,p.nickname,p.rating,p.rated_matches,p.matches_played,p.wins,p.losses,p.progression_xp::text AS xp,coalesce(s.public_profile_enabled,false) AS public,coalesce(s.public_stats_enabled,false) AS stats,($1=$2 OR EXISTS(SELECT 1 FROM career_friendships WHERE low_id=least($1,$2) AND high_id=greatest($1,$2))) AS contact FROM career_profiles p LEFT JOIN portal.profile_settings s USING(profile_id) WHERE p.profile_id=$2")
-        .bind(actor).bind(id).fetch_optional(&app.pool).await?.ok_or_else(forbidden)?;
+    let row=sqlx::query("SELECT p.profile_id,p.nickname,p.rating,p.rated_matches,p.matches_played,p.wins,p.losses,p.progression_xp::text AS xp,coalesce(s.public_profile_enabled,false) AS public,coalesce(s.public_stats_enabled,false) AS stats,($1=$2 OR EXISTS(SELECT 1 FROM career_friendships WHERE low_id=least($1,$2) AND high_id=greatest($1,$2))) AS contact,
+        coalesce(pref.recognition_visible,false) AS supporter_visible,credit.months_supported,credit.hero_until
+        FROM career_profiles p LEFT JOIN portal.profile_settings s USING(profile_id)
+        LEFT JOIN portal.supporter_preferences pref USING(profile_id)
+        CROSS JOIN LATERAL (SELECT count(*) AS months_supported,max(valid_until) FILTER (WHERE valid_from<=$3 AND valid_until>$3) AS hero_until FROM portal.supporter_grants g WHERE g.profile_id=p.profile_id AND g.revoked_at IS NULL) credit
+        WHERE p.profile_id=$2")
+        .bind(actor).bind(id).bind(now()).fetch_optional(&app.pool).await?.ok_or_else(forbidden)?;
     let contact: bool = row.try_get("contact")?;
     if !contact && !row.try_get::<bool, _>("public")? {
         return Err(forbidden());
@@ -51,6 +56,17 @@ pub async fn player(app: &App, s: Option<&Session>, id: &str) -> Result<Value> {
         let n = xp.parse::<u64>().map_err(|_| invalid())?;
         p["progression_xp"] = json!(xp);
         p["level"] = json!((1 + n / 1000).to_string());
+    }
+    if row.try_get::<bool, _>("public")?
+        && row.try_get::<bool, _>("supporter_visible")?
+        && row.try_get::<i64, _>("months_supported")? > 0
+    {
+        let until: Option<i64> = row.try_get("hero_until")?;
+        p["supporter"] = json!({
+            "months_supported":row.try_get::<i64,_>("months_supported")?,
+            "hero_active":until.is_some(),
+            "hero_until":until,
+        });
     }
     Ok(json!({"profile":p,"access":if contact{"contact"}else{"public"}}))
 }

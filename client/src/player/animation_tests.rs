@@ -29,7 +29,7 @@ fn skill_motion_waits_for_phase_deduplicates_and_respects_cancel_death_respawn()
     let mut app = App::new();
     let mut set = animation_set();
     set.motion_nodes
-        .push(("spell_prepare".into(), set.attack_node.unwrap()));
+        .push(("spell_charge".into(), set.attack_node.unwrap()));
     let mut library = PlayerAnimationLibrary::default();
     library
         .sets
@@ -1352,6 +1352,58 @@ fn a_telegraph_starts_its_windup_and_its_release_once_each() {
     assert_eq!(asked, [20, 21]);
 }
 
+/// ANIM-5: a Dawn Ray warning first seen late (a lost snapshot, a caster leaving fog, a
+/// reconnect) is joined where it has got to. The fitted charge enters as far as the
+/// telegraph has run, at its rate, so its raised hands still form before the ray fires; a
+/// fresh warning enters at the first key, and the release still starts at its own. The
+/// replicated time counts the 0.15 s tail on top of the telegraph still to run.
+#[test]
+fn a_late_ray_warning_enters_its_charge_where_the_telegraph_has_got_to() {
+    use crate::skill_presentation::SkillPresentation;
+    use shared::loadout::{CoreId, EffectVisualKind, SkillId};
+    let target = SkillPresentation::target();
+    let ray = target.profile(SkillId::DawnRay).unwrap().clone();
+    let (class, kit, slot) = kit_with(CoreId::Dawnweaver, SkillId::DawnRay);
+    // (replicated remaining time, seconds into the 1 s rig clip at the fitted rate 1.0)
+    for (remaining, entry) in [(0.95, 0.0), (0.85, 0.0), (0.5, 0.45), (0.2, 0.75)] {
+        let mut rig = Rig::new(SkillPresentation::target(), class, kit.clone());
+        rig.act(1, slot, PlayerActionKind::Cast);
+        rig.effects().push(shared::loadout::SkillEffectState {
+            remaining_secs: remaining,
+            ..own_effect(9, SkillId::DawnRay, EffectVisualKind::BeamWarning)
+        });
+        rig.app.update();
+        assert_eq!(
+            rig.state(),
+            rig.set.motion(ray.windup.as_deref().unwrap()),
+            "{remaining}"
+        );
+        let seek = rig.clip().seek_time();
+        assert!(
+            (seek - entry).abs() < 1e-4,
+            "{remaining}: entered at {seek}"
+        );
+        // Held, it is not joined again; fired, the release enters at its first key.
+        rig.app.update();
+        assert!((rig.clip().seek_time() - seek).abs() < 1e-4, "{remaining}");
+        rig.effects()[0].kind = EffectVisualKind::Beam;
+        rig.app.update();
+        assert_eq!(rig.state(), rig.set.motion(&ray.release), "{remaining}");
+        assert_eq!(rig.clip().seek_time(), 0.0, "{remaining}");
+    }
+    // A loop held under a late telegraph enters at its first key: it has no contact to reach.
+    let (class, kit, wave) = kit_with(CoreId::Riftshot, SkillId::HorizonWave);
+    let mut rig = Rig::new(SkillPresentation::target(), class, kit);
+    rig.act(1, wave, PlayerActionKind::Cast);
+    rig.effects().push(shared::loadout::SkillEffectState {
+        remaining_secs: 0.3,
+        ..own_effect(9, SkillId::HorizonWave, EffectVisualKind::BeamWarning)
+    });
+    rig.app.update();
+    assert_eq!(rig.state(), rig.set.motion("aim_hold_loop"));
+    assert_eq!(rig.clip().seek_time(), 0.0);
+}
+
 /// The kit of a core, and the slot one of its skills sits in.
 fn kit_with(
     core: shared::loadout::CoreId,
@@ -1710,8 +1762,8 @@ fn action_clips_enter_at_their_start_and_play_at_their_rate() {
         EffectVisualKind::BeamWarning,
     ));
     rig.act(1, ray, PlayerActionKind::Cast);
-    assert_eq!(rig.state(), rig.set.motion("spell_prepare"));
-    assert_eq!(rig.clip().speed(), 0.625);
+    assert_eq!(rig.state(), rig.set.motion("spell_charge"));
+    assert_eq!(rig.clip().speed(), 1.0);
     assert_eq!(rig.clip().repeat_mode(), RepeatAnimation::Never);
     let (class, wave_kit, wave) = kit_with(CoreId::Riftshot, SkillId::HorizonWave);
     let mut rig = Rig::new(SkillPresentation::target(), class, wave_kit);
@@ -1875,4 +1927,72 @@ fn a_standing_remote_hero_idles_whatever_height_it_has_before_grounding() {
 
 fn class_of(kit: &shared::loadout::LoadoutState) -> shared::HeroClass {
     kit.recipe.as_ref().unwrap().core.class()
+}
+
+/// A VRM-tagged model whose rig is outside the runtime humanoid subset must keep
+/// its embedded (rendition-baked) clips instead of standing static.
+#[test]
+fn rejected_runtime_rig_falls_back_to_embedded_clips() {
+    use bevy::gltf::Gltf;
+    let mut app = App::new();
+    app.add_plugins((MinimalPlugins, AssetPlugin::default()))
+        .init_asset::<Gltf>()
+        .init_asset::<AnimationClip>()
+        .init_asset::<AnimationGraph>()
+        .init_resource::<PlayerAnimationLibrary>()
+        .init_resource::<crate::world::AvatarAssetCache>()
+        .init_resource::<crate::humanoid::HumanoidRuntimeLibrary>()
+        .add_systems(Update, super::animation::setup_player_animation_library);
+    // VRM 1.0 metadata without the required humanoid bones: the runtime rig rejects it.
+    let source = bevy::gltf::gltf::Gltf::from_slice(
+        br#"{"asset":{"version":"2.0"},"extensionsUsed":["VRMC_vrm"],
+            "extensions":{"VRMC_vrm":{"specVersion":"1.0","humanoid":{"humanBones":{}}}}}"#,
+    )
+    .expect("minimal glTF");
+    assert!(source.extension_value("VRMC_vrm").is_some());
+    let clip = |app: &mut App| {
+        app.world_mut()
+            .resource_mut::<Assets<AnimationClip>>()
+            .add(AnimationClip::default())
+    };
+    let named: Vec<_> = ["idle", "walk", "attack", "cast", "death"]
+        .into_iter()
+        .map(|name| (name, clip(&mut app)))
+        .collect();
+    let gltf = app.world_mut().resource_mut::<Assets<Gltf>>().add(Gltf {
+        scenes: vec![],
+        named_scenes: default(),
+        meshes: vec![],
+        named_meshes: default(),
+        materials: vec![],
+        named_materials: default(),
+        nodes: vec![],
+        named_nodes: default(),
+        skins: vec![],
+        named_skins: default(),
+        default_scene: None,
+        animations: named.iter().map(|(_, handle)| handle.clone()).collect(),
+        named_animations: named
+            .iter()
+            .map(|(name, handle)| ((*name).into(), handle.clone()))
+            .collect(),
+        source: Some(source),
+    });
+    app.world_mut().spawn((
+        Player,
+        NetworkCharacterChoice(CharacterChoice::Ipfs),
+        NetworkAvatar(Some("vrm1-rendition".into())),
+        crate::model_scale::ModelScaleSource {
+            gltf,
+            key: "vrm1-rendition".into(),
+        },
+    ));
+    app.update();
+    let library = app.world().resource::<PlayerAnimationLibrary>();
+    let set = library
+        .sets
+        .get(&AvatarKey::Roster("vrm1-rendition".into()))
+        .expect("embedded clips are used when the runtime rig is rejected");
+    assert!(!set.runtime);
+    assert!(set.attack_node.is_some() && set.cast_node.is_some() && set.death_node.is_some());
 }

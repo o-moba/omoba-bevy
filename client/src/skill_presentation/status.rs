@@ -183,8 +183,9 @@ impl StatePaint {
         Self::Shade,
     ];
 
-    /// The colour and the HDR gain it is drawn with.
-    const fn look(self) -> ([f32; 3], f32) {
+    /// The colour and the HDR gain it is drawn with. The pop of a detonated mark is drawn
+    /// in the gold of the mark (`impacts::radiance_pop`).
+    pub(crate) const fn look(self) -> ([f32; 3], f32) {
         match self {
             Self::Gold => ([1.0, 0.74, 0.08], 4.5),
             Self::Rose => ([1.0, 0.14, 0.46], 4.0),

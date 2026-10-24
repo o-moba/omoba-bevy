@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 
-.PHONY: compatibility-manifest compatibility-check help server server-dev practice practice-server game game2d start start-release play play-bots bots stop restart verify-task-12 verify-gameplay iphone-check iphone iphone-box android-check android android-universal check fmt fmt-check lint check-no-qa test test-scripts test-postgres release-check release-all release-publish release-local release-mac release-linux release-android release-ios release-testflight release-ci release-draft release-notes showcase demo-video trailer-clips
+.PHONY: compatibility-manifest compatibility-check help server server-dev practice practice-server game game2d start start-release play play-bots bots stop restart verify-task-12 verify-gameplay iphone-check iphone iphone-box android-check android android-universal check fmt fmt-check lint check-no-qa test test-scripts test-postgres release-check release-all release-publish release-local release-mac release-linux release-android release-ios release-testflight release-ci release-draft release-notes release-dev release-markets release-ru release-ru-preflight release-ru-publish showcase demo-video trailer-clips sdk-pin-check
 
 # ---------------------------------------------------------------------------
 # Match modes (TASK-22)
@@ -25,6 +25,7 @@ LOCAL_SERVER_ADDR ?= 127.0.0.1:4000
 IPHONE_OUTPUT ?= builds/iphone
 ANDROID_OUTPUT ?= target/mobile/android
 ANDROID_SERVER ?=
+SDK_BRANCH ?=
 SHOWCASE_OUTPUT ?= builds/showcase
 DEMO_OUTPUT ?= builds/demo
 UI_AUDIT_OUTPUT ?= ../omoba-ui/captures/$(shell date +%F)
@@ -65,6 +66,13 @@ test-scripts: ## Python launcher, packaging, asset-gate and iOS tooling tests
 # CI runs the same script in the `postgres` job.
 test-postgres: ## PostgreSQL-backed tests (set OMOBA_TEST_DATABASE_URL to a disposable database)
 	python3 scripts/postgres_tests.py
+
+# Not part of `check`: reads the SDK's GitHub repository. Cargo fetches the pinned
+# ekza-bevy-sdk commit from there, so a commit only in a local checkout or in
+# ~/.cargo/git builds here and fails CI and fresh clones. Run before opening a PR
+# that moves the pin; SDK_BRANCH=dev (or main) before merging into that branch.
+sdk-pin-check: ## Check the pinned ekza-bevy-sdk commit is on an SDK branch (SDK_BRANCH=dev: merged there)
+	python3 scripts/check_sdk_pin.py $(if $(SDK_BRANCH),--branch "$(SDK_BRANCH)")
 
 # Physical iOS package; install the Rust iOS target and select Xcode first.
 # Optional signing with existing credentials is documented in mobile/ios/README.md.
@@ -208,6 +216,22 @@ release-all: ## All five platforms on this Mac for PROD_SERVER into dist/v<versi
 release-publish: ## Pin dist/v<version>/ packages to IPFS (needs PINATA_JWT) and verify the downloads
 	OMOBA_ANDROID_UNIVERSAL=1 python3 scripts/release.py publish
 
+# Market builds (docs/markets.md): one market per package set, own servers,
+# settings folder and package names. RU = free game, no Ekza, VK ID sign-in.
+release-markets: ## Print every market's features, servers and platforms
+	python3 scripts/release.py markets
+
+release-ru-preflight: ## Check that the RU lobby, Account API and portal answer
+	python3 scripts/release.py preflight --market ru
+
+release-ru: ## RU market packages (macOS, Windows, Linux + RU Account API, Android) into dist/v<version>-ru/
+	OMOBA_ANDROID_UNIVERSAL=1 python3 scripts/release.py check
+	OMOBA_ANDROID_UNIVERSAL=1 python3 scripts/release.py build all --market ru $(RELEASE_FLAGS)
+
+release-ru-publish: ## Pin dist/v<version>-ru/ packages to IPFS (needs PINATA_JWT)
+	OMOBA_ANDROID_UNIVERSAL=1 python3 scripts/release.py publish --market ru
+	python3 scripts/release.py catalog --market ru
+
 release-local: ## Build every package this computer can (macOS, iPhone archive, Linux via Docker, Android if SDK)
 	python3 scripts/release.py build all $(RELEASE_FLAGS)
 
@@ -234,6 +258,13 @@ release-draft: ## Upload local dist/ packages to a DRAFT GitHub release
 
 release-notes: ## Print release notes for the current version
 	python3 scripts/release.py notes
+
+# DEV-contour tester packages (desktop only) into dist/v<version>-dev/: dev lobby
+# lobby.dev.omoba.io:4100 (DEV_SERVER=<dev VPS IPv4>:4100 without DNS), dev registry,
+# own settings folder. See ops/vps/dev/README.md.
+DEV_SERVER ?=
+release-dev: ## DEV tester packages (macOS/Windows/Linux this Mac can build) for the dev contour
+	python3 scripts/release.py build all --contour dev $(if $(DEV_SERVER),--server $(DEV_SERVER),)
 
 # Staged native screenshots for the website, stores and README: desktop and
 # phone-preview scenes (hero select, lane fight, shop) from a local dev build.

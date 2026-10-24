@@ -25,7 +25,7 @@
   "account.wallet.status.connected": "Wallet connected · your Ekza avatars are listed below the defaults",
   "account.wallet.unavailable": "Wallet connection unavailable: {error}",
   "account.source.default": "Included",
-  "account.source.library": "Your library",
+  "account.source.library": "My Ekza library",
   "account.source.purchased": "Owned",
   "account.source.community": "Free · Studio",
   "account.avatar.default": "Default avatar"

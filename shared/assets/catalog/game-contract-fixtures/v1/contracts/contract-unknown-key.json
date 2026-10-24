@@ -1,0 +1,2532 @@
+{
+  "schema": "ekza.game-contract.v1",
+  "schemaVersion": "1.0",
+  "minReaderVersion": "1.0",
+  "game": {
+    "id": "omoba",
+    "name": "OMOBA"
+  },
+  "revision": "sha256-dccce5fa9f2979e2f2cedf9a19c240cd3ac61c634bd707150c0aa065387058ef",
+  "previousRevision": "sha256-cef9e7eb5beb16ce902df9be509af1881ff026bb6f14ef66a5b015c26b53e6e9",
+  "license": "CC0-1.0",
+  "source": {
+    "commit": "6d34f986355880f787979a3bcee5d69130f28672",
+    "exporter": "scripts/export_game_contract.py",
+    "inputsSha256": "7b6d78d4ca9b132f62b0f53c76d88d49e87f36e6edace546de8da43c21ceeeb0"
+  },
+  "profiles": {
+    "required": [],
+    "used": [
+      "omoba.character.v1"
+    ]
+  },
+  "rigs": {
+    "humanoid": {
+      "drivenBones": [
+        "chest",
+        "head",
+        "hips",
+        "leftFoot",
+        "leftHand",
+        "leftIndexDistal",
+        "leftIndexIntermediate",
+        "leftIndexProximal",
+        "leftLittleDistal",
+        "leftLittleIntermediate",
+        "leftLittleProximal",
+        "leftLowerArm",
+        "leftLowerLeg",
+        "leftMiddleDistal",
+        "leftMiddleIntermediate",
+        "leftMiddleProximal",
+        "leftRingDistal",
+        "leftRingIntermediate",
+        "leftRingProximal",
+        "leftShoulder",
+        "leftThumbDistal",
+        "leftThumbIntermediate",
+        "leftThumbProximal",
+        "leftToes",
+        "leftUpperArm",
+        "leftUpperLeg",
+        "neck",
+        "rightFoot",
+        "rightHand",
+        "rightIndexDistal",
+        "rightIndexIntermediate",
+        "rightIndexProximal",
+        "rightLittleDistal",
+        "rightLittleIntermediate",
+        "rightLittleProximal",
+        "rightLowerArm",
+        "rightLowerLeg",
+        "rightMiddleDistal",
+        "rightMiddleIntermediate",
+        "rightMiddleProximal",
+        "rightRingDistal",
+        "rightRingIntermediate",
+        "rightRingProximal",
+        "rightShoulder",
+        "rightThumbDistal",
+        "rightThumbIntermediate",
+        "rightThumbProximal",
+        "rightToes",
+        "rightUpperArm",
+        "rightUpperLeg",
+        "spine",
+        "upperChest"
+      ],
+      "ext": {},
+      "facing": "as-vrm-spec",
+      "fingers": "optional",
+      "kind": "vrm-humanoid",
+      "lengthUnit": {
+        "from": "hips-to-feet",
+        "name": "legLength",
+        "referenceM": 0.813
+      },
+      "maxHumanoidBones": 64,
+      "maxNodes": 4096,
+      "requiredBones": [
+        "hips",
+        "spine",
+        "head",
+        "leftUpperArm",
+        "leftLowerArm",
+        "leftHand",
+        "rightUpperArm",
+        "rightLowerArm",
+        "rightHand",
+        "leftUpperLeg",
+        "leftLowerLeg",
+        "leftFoot",
+        "rightUpperLeg",
+        "rightLowerLeg",
+        "rightFoot"
+      ],
+      "requiredBonesVrm0": [
+        "chest",
+        "neck"
+      ],
+      "restPose": "t-pose",
+      "sourceFormats": [
+        "vrm1",
+        "vrm0"
+      ],
+      "thumbsRecommended": true,
+      "uniformScale": "humanoid-bones-and-ancestors"
+    }
+  },
+  "sockets": {
+    "hand.left": {
+      "bone": "leftHand",
+      "ext": {},
+      "fillable": false,
+      "frame": "palm",
+      "label": "Left hand (palm)",
+      "rig": "humanoid"
+    },
+    "hand.right": {
+      "bone": "rightHand",
+      "ext": {},
+      "fillable": false,
+      "frame": "palm",
+      "label": "Right hand (palm)",
+      "rig": "humanoid"
+    }
+  },
+  "packaging": {
+    "character": {
+      "binding": "manifest",
+      "containers": [
+        "vrm1",
+        "vrm0"
+      ],
+      "ext": {},
+      "manifestKey": "ekza_package_v1",
+      "maxBytes": 52428800,
+      "maxFills": 48,
+      "maxJsonBytes": 4194304,
+      "rendition": {
+        "platform": "desktop",
+        "profile": "humanoid-glb-v2",
+        "version": 1
+      },
+      "slotKinds": [
+        "animation"
+      ]
+    }
+  },
+  "rules": [
+    {
+      "checkedBy": [
+        "tool",
+        "hub",
+        "builder",
+        "game"
+      ],
+      "id": "pack.manifest",
+      "params": {
+        "key": "ekza_package_v1",
+        "schema": "ekza.package.v1"
+      },
+      "scope": "package",
+      "severity": "error"
+    },
+    {
+      "checkedBy": [
+        "tool",
+        "hub",
+        "builder",
+        "game"
+      ],
+      "id": "pack.contract",
+      "params": {},
+      "scope": "package",
+      "severity": "error"
+    },
+    {
+      "checkedBy": [
+        "tool",
+        "hub",
+        "builder",
+        "game"
+      ],
+      "id": "pack.target",
+      "params": {},
+      "scope": "package",
+      "severity": "error"
+    },
+    {
+      "checkedBy": [
+        "tool",
+        "hub",
+        "builder",
+        "game"
+      ],
+      "id": "pack.bytes",
+      "params": {
+        "from": "packaging",
+        "maxAnimationBytes": 4194304
+      },
+      "scope": "package",
+      "severity": "error"
+    },
+    {
+      "checkedBy": [
+        "tool",
+        "hub",
+        "builder",
+        "game"
+      ],
+      "id": "pack.slot-known",
+      "params": {},
+      "scope": "package",
+      "severity": "error"
+    },
+    {
+      "checkedBy": [
+        "tool",
+        "hub",
+        "builder",
+        "game"
+      ],
+      "id": "pack.ref",
+      "params": {
+        "animationNameEqualsSlot": true,
+        "nodeNameEqualsRootName": true
+      },
+      "scope": "package",
+      "severity": "error"
+    },
+    {
+      "checkedBy": [
+        "tool",
+        "hub",
+        "builder",
+        "game"
+      ],
+      "id": "pack.unreferenced",
+      "params": {},
+      "scope": "package",
+      "severity": "warning"
+    },
+    {
+      "checkedBy": [
+        "tool",
+        "builder",
+        "game"
+      ],
+      "id": "rig.humanoid",
+      "params": {
+        "from": "rigs"
+      },
+      "scope": "rig",
+      "severity": "error"
+    },
+    {
+      "checkedBy": [
+        "tool",
+        "builder",
+        "game"
+      ],
+      "id": "clip.channels",
+      "params": {
+        "rotation": "driven-bones",
+        "scale": false,
+        "translation": [
+          "hips"
+        ],
+        "vrm1BoneMap": {
+          "leftThumbMetacarpal": "leftThumbProximal",
+          "leftThumbProximal": "leftThumbIntermediate",
+          "rightThumbMetacarpal": "rightThumbProximal",
+          "rightThumbProximal": "rightThumbIntermediate"
+        },
+        "weights": false
+      },
+      "scope": "animation",
+      "severity": "error"
+    },
+    {
+      "checkedBy": [
+        "tool",
+        "builder",
+        "game"
+      ],
+      "id": "clip.sampler",
+      "params": {
+        "interpolation": [
+          "LINEAR",
+          "STEP"
+        ],
+        "startsAtSecs": 0,
+        "timeEpsilonSecs": 0.0001,
+        "unitQuatEpsilon": 0.001
+      },
+      "scope": "animation",
+      "severity": "error"
+    },
+    {
+      "checkedBy": [
+        "tool",
+        "builder",
+        "game"
+      ],
+      "id": "clip.keys",
+      "params": {
+        "maxKeysPerChannel": 4096,
+        "maxSampleRateHz": 60
+      },
+      "scope": "animation",
+      "severity": "error"
+    },
+    {
+      "checkedBy": [
+        "tool",
+        "builder",
+        "game"
+      ],
+      "id": "clip.duration",
+      "params": {
+        "from": "slot.animation.window"
+      },
+      "scope": "animation",
+      "severity": "error"
+    },
+    {
+      "checkedBy": [
+        "tool",
+        "builder",
+        "game"
+      ],
+      "id": "clip.in-place",
+      "params": {
+        "maxDown": 1.25,
+        "maxHorizontal": 0.15,
+        "maxHorizontalHold": 0.75,
+        "maxUp": 1.5,
+        "reference": "rest-pose",
+        "unit": "legLength"
+      },
+      "scope": "animation",
+      "severity": "error"
+    },
+    {
+      "checkedBy": [
+        "tool",
+        "builder",
+        "game"
+      ],
+      "id": "clip.loop-closure",
+      "params": {
+        "maxBoneDegrees": 2,
+        "maxHipsOffset": 0.01,
+        "unit": "legLength"
+      },
+      "scope": "animation",
+      "severity": "error"
+    },
+    {
+      "checkedBy": [
+        "tool",
+        "builder",
+        "game"
+      ],
+      "id": "clip.markers",
+      "params": {
+        "from": "slot.animation.markers",
+        "metaKey": "ekza_animation_v1",
+        "toleranceSecs": 0.0001
+      },
+      "scope": "animation",
+      "severity": "error"
+    },
+    {
+      "checkedBy": [
+        "tool",
+        "builder",
+        "game"
+      ],
+      "id": "clip.min-interval",
+      "params": {
+        "from": "slot.animation.minIntervalSecs"
+      },
+      "scope": "animation",
+      "severity": "warning"
+    }
+  ],
+  "slots": {
+    "base.death": {
+      "alternatesWith": [],
+      "animation": {
+        "inPlace": true,
+        "leadInSecs": null,
+        "loop": false,
+        "markers": {},
+        "minIntervalSecs": null,
+        "playback": "hold",
+        "rig": "humanoid",
+        "window": {
+          "maxSecs": 3,
+          "minSecs": 0.5,
+          "targetSecs": 2.375
+        }
+      },
+      "asset": null,
+      "customizable": true,
+      "customizableFrom": "1",
+      "default": {
+        "loop": false,
+        "markers": {},
+        "name": "death",
+        "playSecs": 2.375,
+        "preview": null
+      },
+      "description": null,
+      "ext": {
+        "omoba.character.v1": {
+          "edgeReleased": false,
+          "group": "base",
+          "handheld": null,
+          "phase": "state",
+          "role": "death",
+          "row": {
+            "contactSecs": null,
+            "durationSecs": 2.375,
+            "effectiveContactSecs": null,
+            "motion": "death",
+            "rate": 1,
+            "standInFor": null,
+            "start": 0
+          },
+          "telegraph": null
+        }
+      },
+      "kind": "animation",
+      "label": "Death",
+      "required": false,
+      "reserved": false,
+      "sharesDefaultWith": [],
+      "socket": null,
+      "usedBy": [
+        "*"
+      ]
+    },
+    "base.idle": {
+      "alternatesWith": [],
+      "animation": {
+        "inPlace": true,
+        "leadInSecs": null,
+        "loop": true,
+        "markers": {},
+        "minIntervalSecs": null,
+        "playback": "loop",
+        "rig": "humanoid",
+        "window": {
+          "maxSecs": 4,
+          "minSecs": 1,
+          "targetSecs": 2.5
+        }
+      },
+      "asset": null,
+      "customizable": true,
+      "customizableFrom": "1",
+      "default": {
+        "loop": true,
+        "markers": {},
+        "name": "idle",
+        "playSecs": 2.5,
+        "preview": null
+      },
+      "description": null,
+      "ext": {
+        "omoba.character.v1": {
+          "edgeReleased": false,
+          "group": "base",
+          "handheld": null,
+          "phase": "locomotion",
+          "role": "idle",
+          "row": {
+            "contactSecs": null,
+            "durationSecs": 2.5,
+            "effectiveContactSecs": null,
+            "motion": "idle",
+            "rate": 1,
+            "standInFor": null,
+            "start": 0
+          },
+          "telegraph": null
+        }
+      },
+      "kind": "animation",
+      "label": "Idle",
+      "required": false,
+      "reserved": false,
+      "sharesDefaultWith": [],
+      "socket": null,
+      "usedBy": [
+        "*"
+      ]
+    },
+    "base.run": {
+      "alternatesWith": [],
+      "animation": {
+        "inPlace": true,
+        "leadInSecs": null,
+        "loop": true,
+        "markers": {},
+        "minIntervalSecs": null,
+        "playback": "loop",
+        "rig": "humanoid",
+        "window": {
+          "maxSecs": 1.2,
+          "minSecs": 0.4,
+          "targetSecs": 0.6667
+        }
+      },
+      "asset": null,
+      "customizable": true,
+      "customizableFrom": "1",
+      "default": {
+        "loop": true,
+        "markers": {},
+        "name": "run",
+        "playSecs": 0.6667,
+        "preview": null
+      },
+      "description": null,
+      "ext": {
+        "omoba.character.v1": {
+          "edgeReleased": false,
+          "group": "base",
+          "handheld": null,
+          "phase": "locomotion",
+          "role": "run",
+          "row": {
+            "contactSecs": null,
+            "durationSecs": 0.6667,
+            "effectiveContactSecs": null,
+            "motion": "run",
+            "rate": 1,
+            "standInFor": null,
+            "start": 0
+          },
+          "telegraph": null
+        }
+      },
+      "kind": "animation",
+      "label": "Run (all movement)",
+      "required": false,
+      "reserved": false,
+      "sharesDefaultWith": [],
+      "socket": null,
+      "usedBy": [
+        "*"
+      ],
+      "tempo": 1
+    },
+    "base.walk": {
+      "alternatesWith": [],
+      "animation": {
+        "inPlace": true,
+        "leadInSecs": null,
+        "loop": true,
+        "markers": {},
+        "minIntervalSecs": null,
+        "playback": "loop",
+        "rig": "humanoid",
+        "window": {
+          "maxSecs": 2,
+          "minSecs": 0.8,
+          "targetSecs": 1.3333
+        }
+      },
+      "asset": null,
+      "customizable": false,
+      "customizableFrom": null,
+      "default": {
+        "loop": true,
+        "markers": {},
+        "name": "walk",
+        "playSecs": 1.3333,
+        "preview": null
+      },
+      "description": null,
+      "ext": {
+        "omoba.character.v1": {
+          "edgeReleased": false,
+          "group": "base",
+          "handheld": null,
+          "phase": "locomotion",
+          "role": "walk",
+          "row": {
+            "contactSecs": null,
+            "durationSecs": 1.3333,
+            "effectiveContactSecs": null,
+            "motion": "walk",
+            "rate": 1,
+            "standInFor": null,
+            "start": 0
+          },
+          "telegraph": null
+        }
+      },
+      "kind": "animation",
+      "label": "Walk (reserved; not played yet)",
+      "required": false,
+      "reserved": true,
+      "sharesDefaultWith": [],
+      "socket": null,
+      "usedBy": [
+        "*"
+      ]
+    },
+    "basic.dawnweaver.0": {
+      "alternatesWith": [
+        "basic.dawnweaver.1"
+      ],
+      "animation": {
+        "inPlace": true,
+        "leadInSecs": null,
+        "loop": false,
+        "markers": {
+          "contact": {
+            "maxSecs": 0.15,
+            "required": true,
+            "targetSecs": 0.0429
+          }
+        },
+        "minIntervalSecs": 0.75,
+        "playback": "action",
+        "rig": "humanoid",
+        "window": {
+          "maxSecs": 1.2,
+          "minSecs": 0.15,
+          "targetSecs": 0.2857
+        }
+      },
+      "asset": null,
+      "customizable": true,
+      "customizableFrom": "1",
+      "default": {
+        "loop": false,
+        "markers": {
+          "contact": 0.0429
+        },
+        "name": "point_command",
+        "playSecs": 0.2857,
+        "preview": null
+      },
+      "description": null,
+      "ext": {
+        "omoba.character.v1": {
+          "class": "dawnweaver",
+          "edgeReleased": true,
+          "group": "basic",
+          "handheld": {
+            "bone": "rightHand",
+            "byMode": {},
+            "item": "dawn-scepter",
+            "muzzleWindowSecs": null
+          },
+          "phase": "instant",
+          "role": "basic",
+          "row": {
+            "contactSecs": 0.16,
+            "durationSecs": 0.5,
+            "effectiveContactSecs": 0.0429,
+            "motion": "point_command",
+            "rate": 1.4,
+            "standInFor": null,
+            "start": 0.2
+          },
+          "telegraph": null
+        }
+      },
+      "kind": "animation",
+      "label": "Basic attack 1",
+      "required": false,
+      "reserved": false,
+      "sharesDefaultWith": [],
+      "socket": null,
+      "usedBy": [
+        "dawnweaver"
+      ]
+    },
+    "basic.dawnweaver.1": {
+      "alternatesWith": [
+        "basic.dawnweaver.0"
+      ],
+      "animation": {
+        "inPlace": true,
+        "leadInSecs": null,
+        "loop": false,
+        "markers": {
+          "contact": {
+            "maxSecs": 0.15,
+            "required": true,
+            "targetSecs": 0.119
+          }
+        },
+        "minIntervalSecs": 0.75,
+        "playback": "action",
+        "rig": "humanoid",
+        "window": {
+          "maxSecs": 1.2,
+          "minSecs": 0.15,
+          "targetSecs": 0.2381
+        }
+      },
+      "asset": null,
+      "customizable": true,
+      "customizableFrom": "1",
+      "default": {
+        "loop": false,
+        "markers": {
+          "contact": 0.119
+        },
+        "name": "spell_finish",
+        "playSecs": 0.2381,
+        "preview": null
+      },
+      "description": null,
+      "ext": {
+        "omoba.character.v1": {
+          "class": "dawnweaver",
+          "edgeReleased": true,
+          "group": "basic",
+          "handheld": {
+            "bone": "rightHand",
+            "byMode": {},
+            "item": "dawn-scepter",
+            "muzzleWindowSecs": null
+          },
+          "phase": "instant",
+          "role": "basic",
+          "row": {
+            "contactSecs": 0.25,
+            "durationSecs": 0.4167,
+            "effectiveContactSecs": 0.119,
+            "motion": "spell_finish",
+            "rate": 1.4,
+            "standInFor": null,
+            "start": 0.2
+          },
+          "telegraph": null
+        }
+      },
+      "kind": "animation",
+      "label": "Basic attack 2",
+      "required": false,
+      "reserved": false,
+      "sharesDefaultWith": [],
+      "socket": null,
+      "usedBy": [
+        "dawnweaver"
+      ]
+    },
+    "basic.warden.0": {
+      "alternatesWith": [
+        "basic.warden.1"
+      ],
+      "animation": {
+        "inPlace": true,
+        "leadInSecs": null,
+        "loop": false,
+        "markers": {
+          "contact": {
+            "maxSecs": 0.15,
+            "required": true,
+            "targetSecs": 0.1269
+          }
+        },
+        "minIntervalSecs": 0.5152,
+        "playback": "action",
+        "rig": "humanoid",
+        "window": {
+          "maxSecs": 1.2,
+          "minSecs": 0.15,
+          "targetSecs": 0.4231
+        }
+      },
+      "asset": null,
+      "customizable": true,
+      "customizableFrom": "1",
+      "default": {
+        "loop": false,
+        "markers": {
+          "contact": 0.1269
+        },
+        "name": "slash_down",
+        "playSecs": 0.4231,
+        "preview": null
+      },
+      "description": null,
+      "ext": {
+        "omoba.character.v1": {
+          "class": "warden",
+          "edgeReleased": true,
+          "group": "basic",
+          "handheld": null,
+          "phase": "instant",
+          "role": "basic",
+          "row": {
+            "contactSecs": 0.165,
+            "durationSecs": 0.55,
+            "effectiveContactSecs": 0.1269,
+            "motion": "slash_down",
+            "rate": 1.3,
+            "standInFor": null,
+            "start": 0
+          },
+          "telegraph": null
+        }
+      },
+      "kind": "animation",
+      "label": "Basic attack 1",
+      "required": false,
+      "reserved": false,
+      "sharesDefaultWith": [],
+      "socket": null,
+      "usedBy": [
+        "warden"
+      ]
+    },
+    "basic.warden.1": {
+      "alternatesWith": [
+        "basic.warden.0"
+      ],
+      "animation": {
+        "inPlace": true,
+        "leadInSecs": null,
+        "loop": false,
+        "markers": {
+          "contact": {
+            "maxSecs": 0.15,
+            "required": true,
+            "targetSecs": 0.1269
+          }
+        },
+        "minIntervalSecs": 0.5152,
+        "playback": "action",
+        "rig": "humanoid",
+        "window": {
+          "maxSecs": 1.2,
+          "minSecs": 0.15,
+          "targetSecs": 0.4231
+        }
+      },
+      "asset": null,
+      "customizable": true,
+      "customizableFrom": "1",
+      "default": {
+        "loop": false,
+        "markers": {
+          "contact": 0.1269
+        },
+        "name": "slash_down_m",
+        "playSecs": 0.4231,
+        "preview": null
+      },
+      "description": null,
+      "ext": {
+        "omoba.character.v1": {
+          "class": "warden",
+          "edgeReleased": true,
+          "group": "basic",
+          "handheld": null,
+          "phase": "instant",
+          "role": "basic",
+          "row": {
+            "contactSecs": 0.165,
+            "durationSecs": 0.55,
+            "effectiveContactSecs": 0.1269,
+            "motion": "slash_down_m",
+            "rate": 1.3,
+            "standInFor": null,
+            "start": 0
+          },
+          "telegraph": null
+        }
+      },
+      "kind": "animation",
+      "label": "Basic attack 2",
+      "required": false,
+      "reserved": false,
+      "sharesDefaultWith": [],
+      "socket": null,
+      "usedBy": [
+        "warden"
+      ]
+    },
+    "basic.wildspark.0": {
+      "alternatesWith": [],
+      "animation": {
+        "inPlace": true,
+        "leadInSecs": null,
+        "loop": false,
+        "markers": {
+          "contact": {
+            "maxSecs": 0.15,
+            "required": true,
+            "targetSecs": 0.0455
+          }
+        },
+        "minIntervalSecs": 0.4375,
+        "playback": "action",
+        "rig": "humanoid",
+        "window": {
+          "maxSecs": 1.2,
+          "minSecs": 0.15,
+          "targetSecs": 0.2727
+        }
+      },
+      "asset": null,
+      "customizable": true,
+      "customizableFrom": "1",
+      "default": {
+        "loop": false,
+        "markers": {
+          "contact": 0.0455
+        },
+        "name": "burst_fire",
+        "playSecs": 0.2727,
+        "preview": null
+      },
+      "description": null,
+      "ext": {
+        "omoba.character.v1": {
+          "class": "wildspark",
+          "edgeReleased": true,
+          "group": "basic",
+          "handheld": {
+            "bone": "rightHand",
+            "byMode": {
+              "rockets": "wild-launcher"
+            },
+            "item": "wild-repeater",
+            "muzzleWindowSecs": [
+              0.08,
+              0.25
+            ]
+          },
+          "phase": "instant",
+          "role": "basic",
+          "row": {
+            "contactSecs": 0.075,
+            "durationSecs": 0.45,
+            "effectiveContactSecs": 0.0455,
+            "motion": "burst_fire",
+            "rate": 1.65,
+            "standInFor": null,
+            "start": 0
+          },
+          "telegraph": null
+        }
+      },
+      "kind": "animation",
+      "label": "Basic attack",
+      "required": false,
+      "reserved": false,
+      "sharesDefaultWith": [],
+      "socket": null,
+      "usedBy": [
+        "wildspark"
+      ]
+    },
+    "basic.wildspark.rockets.0": {
+      "alternatesWith": [],
+      "animation": {
+        "inPlace": true,
+        "leadInSecs": null,
+        "loop": false,
+        "markers": {
+          "contact": {
+            "maxSecs": 0.15,
+            "required": true,
+            "targetSecs": 0.1478
+          }
+        },
+        "minIntervalSecs": 0.4375,
+        "playback": "action",
+        "rig": "humanoid",
+        "window": {
+          "maxSecs": 1.2,
+          "minSecs": 0.15,
+          "targetSecs": 0.6957
+        }
+      },
+      "asset": null,
+      "customizable": true,
+      "customizableFrom": "1",
+      "default": {
+        "loop": false,
+        "markers": {
+          "contact": 0.1478
+        },
+        "name": "shot_heavy",
+        "playSecs": 0.6957,
+        "preview": null
+      },
+      "description": null,
+      "ext": {
+        "omoba.character.v1": {
+          "class": "wildspark",
+          "edgeReleased": true,
+          "group": "basic",
+          "handheld": {
+            "bone": "rightHand",
+            "byMode": {
+              "rockets": "wild-launcher"
+            },
+            "item": "wild-launcher",
+            "muzzleWindowSecs": [
+              0.08,
+              0.25
+            ]
+          },
+          "phase": "instant",
+          "role": "basic",
+          "row": {
+            "contactSecs": 0.17,
+            "durationSecs": 0.8,
+            "effectiveContactSecs": 0.1478,
+            "motion": "shot_heavy",
+            "rate": 1.15,
+            "standInFor": null,
+            "start": 0
+          },
+          "telegraph": null,
+          "weaponMode": "rockets"
+        }
+      },
+      "kind": "animation",
+      "label": "Basic attack (rocket mode)",
+      "required": false,
+      "reserved": false,
+      "sharesDefaultWith": [
+        "skill.wild_rocket.release"
+      ],
+      "socket": null,
+      "usedBy": [
+        "wildspark"
+      ]
+    },
+    "skill.barkskin.release": {
+      "alternatesWith": [],
+      "animation": {
+        "inPlace": true,
+        "leadInSecs": null,
+        "loop": false,
+        "markers": {
+          "contact": {
+            "maxSecs": 0.15,
+            "required": true,
+            "targetSecs": 0.1389
+          }
+        },
+        "minIntervalSecs": null,
+        "playback": "action",
+        "rig": "humanoid",
+        "window": {
+          "maxSecs": 1.2,
+          "minSecs": 0.15,
+          "targetSecs": 0.5556
+        }
+      },
+      "asset": null,
+      "customizable": true,
+      "customizableFrom": "1",
+      "default": {
+        "loop": false,
+        "markers": {
+          "contact": 0.1389
+        },
+        "name": "guard",
+        "playSecs": 0.5556,
+        "preview": null
+      },
+      "description": null,
+      "ext": {
+        "omoba.character.v1": {
+          "edgeReleased": true,
+          "group": "skill",
+          "handheld": null,
+          "phase": "instant",
+          "role": "release",
+          "row": {
+            "contactSecs": 0.3333,
+            "durationSecs": 0.8333,
+            "effectiveContactSecs": 0.1389,
+            "motion": "guard",
+            "rate": 1.2,
+            "standInFor": null,
+            "start": 0.2
+          },
+          "skill": "barkskin",
+          "telegraph": null
+        }
+      },
+      "kind": "animation",
+      "label": "Barkskin (W) — release",
+      "required": false,
+      "reserved": false,
+      "sharesDefaultWith": [],
+      "socket": null,
+      "usedBy": [
+        "warden"
+      ]
+    },
+    "skill.dawn_barrier.release": {
+      "alternatesWith": [],
+      "animation": {
+        "inPlace": true,
+        "leadInSecs": null,
+        "loop": false,
+        "markers": {
+          "contact": {
+            "maxSecs": 0.15,
+            "required": true,
+            "targetSecs": 0.0867
+          }
+        },
+        "minIntervalSecs": null,
+        "playback": "action",
+        "rig": "humanoid",
+        "window": {
+          "maxSecs": 1.2,
+          "minSecs": 0.15,
+          "targetSecs": 0.2667
+        }
+      },
+      "asset": null,
+      "customizable": true,
+      "customizableFrom": "1",
+      "default": {
+        "loop": false,
+        "markers": {
+          "contact": 0.0867
+        },
+        "name": "toss_underhand",
+        "playSecs": 0.2667,
+        "preview": null
+      },
+      "description": null,
+      "ext": {
+        "omoba.character.v1": {
+          "edgeReleased": true,
+          "group": "skill",
+          "handheld": {
+            "bone": "rightHand",
+            "byMode": {},
+            "item": "dawn-scepter",
+            "muzzleWindowSecs": null
+          },
+          "phase": "instant",
+          "role": "release",
+          "row": {
+            "contactSecs": 0.13,
+            "durationSecs": 0.4,
+            "effectiveContactSecs": 0.0867,
+            "motion": "toss_underhand",
+            "rate": 1.5,
+            "standInFor": null,
+            "start": 0
+          },
+          "skill": "dawn_barrier",
+          "telegraph": null
+        }
+      },
+      "kind": "animation",
+      "label": "Returning Aegis (W) — release",
+      "required": false,
+      "reserved": false,
+      "sharesDefaultWith": [
+        "skill.wild_traps.release"
+      ],
+      "socket": null,
+      "usedBy": [
+        "dawnweaver"
+      ]
+    },
+    "skill.dawn_bind.release": {
+      "alternatesWith": [],
+      "animation": {
+        "inPlace": true,
+        "leadInSecs": null,
+        "loop": false,
+        "markers": {
+          "contact": {
+            "maxSecs": 0.15,
+            "required": true,
+            "targetSecs": 0.096
+          }
+        },
+        "minIntervalSecs": null,
+        "playback": "action",
+        "rig": "humanoid",
+        "window": {
+          "maxSecs": 1.2,
+          "minSecs": 0.15,
+          "targetSecs": 0.384
+        }
+      },
+      "asset": null,
+      "customizable": true,
+      "customizableFrom": "1",
+      "default": {
+        "loop": false,
+        "markers": {
+          "contact": 0.096
+        },
+        "name": "cast_thrust_r",
+        "playSecs": 0.384,
+        "preview": null
+      },
+      "description": null,
+      "ext": {
+        "omoba.character.v1": {
+          "edgeReleased": true,
+          "group": "skill",
+          "handheld": {
+            "bone": "rightHand",
+            "byMode": {},
+            "item": "dawn-scepter",
+            "muzzleWindowSecs": null
+          },
+          "phase": "instant",
+          "role": "release",
+          "row": {
+            "contactSecs": 0.24,
+            "durationSecs": 0.6,
+            "effectiveContactSecs": 0.096,
+            "motion": "cast_thrust_r",
+            "rate": 1.25,
+            "standInFor": null,
+            "start": 0.2
+          },
+          "skill": "dawn_bind",
+          "telegraph": null
+        }
+      },
+      "kind": "animation",
+      "label": "Gleaming Snare (Q) — release",
+      "required": false,
+      "reserved": false,
+      "sharesDefaultWith": [],
+      "socket": null,
+      "usedBy": [
+        "dawnweaver"
+      ]
+    },
+    "skill.dawn_field.recast": {
+      "alternatesWith": [],
+      "animation": {
+        "inPlace": true,
+        "leadInSecs": null,
+        "loop": false,
+        "markers": {
+          "contact": {
+            "maxSecs": 0.15,
+            "required": true,
+            "targetSecs": 0.0694
+          }
+        },
+        "minIntervalSecs": null,
+        "playback": "action",
+        "rig": "humanoid",
+        "window": {
+          "maxSecs": 1.2,
+          "minSecs": 0.15,
+          "targetSecs": 0.2778
+        }
+      },
+      "asset": null,
+      "customizable": true,
+      "customizableFrom": "1",
+      "default": {
+        "loop": false,
+        "markers": {
+          "contact": 0.0694
+        },
+        "name": "draw_in",
+        "playSecs": 0.2778,
+        "preview": null
+      },
+      "description": null,
+      "ext": {
+        "omoba.character.v1": {
+          "edgeReleased": true,
+          "group": "skill",
+          "handheld": {
+            "bone": "rightHand",
+            "byMode": {},
+            "item": "dawn-scepter",
+            "muzzleWindowSecs": null
+          },
+          "phase": "instant",
+          "role": "recast",
+          "row": {
+            "contactSecs": 0.125,
+            "durationSecs": 0.5,
+            "effectiveContactSecs": 0.0694,
+            "motion": "draw_in",
+            "rate": 1.8,
+            "standInFor": null,
+            "start": 0
+          },
+          "skill": "dawn_field",
+          "telegraph": null
+        }
+      },
+      "kind": "animation",
+      "label": "Luminous Field (E) — recast",
+      "required": false,
+      "reserved": false,
+      "sharesDefaultWith": [],
+      "socket": null,
+      "usedBy": [
+        "dawnweaver"
+      ]
+    },
+    "skill.dawn_field.release": {
+      "alternatesWith": [],
+      "animation": {
+        "inPlace": true,
+        "leadInSecs": null,
+        "loop": false,
+        "markers": {
+          "contact": {
+            "maxSecs": 0.15,
+            "required": true,
+            "targetSecs": 0.1078
+          }
+        },
+        "minIntervalSecs": null,
+        "playback": "action",
+        "rig": "humanoid",
+        "window": {
+          "maxSecs": 1.2,
+          "minSecs": 0.15,
+          "targetSecs": 0.3516
+        }
+      },
+      "asset": null,
+      "customizable": true,
+      "customizableFrom": "1",
+      "default": {
+        "loop": false,
+        "markers": {
+          "contact": 0.1078
+        },
+        "name": "kneel_plant",
+        "playSecs": 0.3516,
+        "preview": null
+      },
+      "description": null,
+      "ext": {
+        "omoba.character.v1": {
+          "edgeReleased": true,
+          "group": "skill",
+          "handheld": {
+            "bone": "rightHand",
+            "byMode": {},
+            "item": "dawn-scepter",
+            "muzzleWindowSecs": null
+          },
+          "phase": "instant",
+          "role": "release",
+          "row": {
+            "contactSecs": 0.36,
+            "durationSecs": 0.75,
+            "effectiveContactSecs": 0.1078,
+            "motion": "kneel_plant",
+            "rate": 1.6,
+            "standInFor": null,
+            "start": 0.25
+          },
+          "skill": "dawn_field",
+          "telegraph": null
+        }
+      },
+      "kind": "animation",
+      "label": "Luminous Field (E) — release",
+      "required": false,
+      "reserved": false,
+      "sharesDefaultWith": [],
+      "socket": null,
+      "usedBy": [
+        "dawnweaver"
+      ]
+    },
+    "skill.dawn_ray.release": {
+      "alternatesWith": [],
+      "animation": {
+        "inPlace": true,
+        "leadInSecs": 0.8,
+        "loop": false,
+        "markers": {
+          "contact": {
+            "maxSecs": null,
+            "required": true,
+            "targetSecs": 0.05
+          }
+        },
+        "minIntervalSecs": null,
+        "playback": "action",
+        "rig": "humanoid",
+        "window": {
+          "maxSecs": 1.2,
+          "minSecs": 0.15,
+          "targetSecs": 0.6
+        }
+      },
+      "asset": null,
+      "customizable": true,
+      "customizableFrom": "1",
+      "default": {
+        "loop": false,
+        "markers": {
+          "contact": 0.05
+        },
+        "name": "ray_release",
+        "playSecs": 0.6,
+        "preview": null
+      },
+      "description": null,
+      "ext": {
+        "omoba.character.v1": {
+          "edgeReleased": false,
+          "group": "skill",
+          "handheld": {
+            "bone": "rightHand",
+            "byMode": {},
+            "item": "dawn-scepter",
+            "muzzleWindowSecs": null
+          },
+          "phase": "warn_fire",
+          "role": "release",
+          "row": {
+            "contactSecs": 0.05,
+            "durationSecs": 0.6,
+            "effectiveContactSecs": 0.05,
+            "motion": "ray_release",
+            "rate": 1,
+            "standInFor": null,
+            "start": 0
+          },
+          "skill": "dawn_ray",
+          "telegraph": {
+            "fitWindup": true,
+            "secs": 0.8,
+            "serverWindupSecs": 0.8
+          }
+        }
+      },
+      "kind": "animation",
+      "label": "Horizon Ray (R) — release",
+      "required": false,
+      "reserved": false,
+      "sharesDefaultWith": [],
+      "socket": null,
+      "usedBy": [
+        "dawnweaver"
+      ]
+    },
+    "skill.dawn_ray.windup": {
+      "alternatesWith": [],
+      "animation": {
+        "inPlace": true,
+        "leadInSecs": null,
+        "loop": false,
+        "markers": {},
+        "minIntervalSecs": null,
+        "playback": "hold",
+        "rig": "humanoid",
+        "window": {
+          "maxSecs": 2,
+          "minSecs": 0.3,
+          "targetSecs": 0.8
+        }
+      },
+      "asset": null,
+      "customizable": false,
+      "customizableFrom": "1.1",
+      "default": {
+        "loop": false,
+        "markers": {},
+        "name": "spell_charge",
+        "playSecs": 0.8,
+        "preview": null
+      },
+      "description": null,
+      "ext": {
+        "omoba.character.v1": {
+          "edgeReleased": false,
+          "group": "skill",
+          "handheld": {
+            "bone": "rightHand",
+            "byMode": {},
+            "item": "dawn-scepter",
+            "muzzleWindowSecs": null
+          },
+          "phase": "warn_fire",
+          "role": "windup",
+          "row": {
+            "contactSecs": 0.64,
+            "durationSecs": 0.8,
+            "effectiveContactSecs": 0.64,
+            "motion": "spell_charge",
+            "rate": 1,
+            "standInFor": null,
+            "start": 0
+          },
+          "skill": "dawn_ray",
+          "telegraph": {
+            "fitWindup": true,
+            "secs": 0.8,
+            "serverWindupSecs": 0.8
+          }
+        }
+      },
+      "kind": "animation",
+      "label": "Horizon Ray (R) — wind-up",
+      "required": false,
+      "reserved": false,
+      "sharesDefaultWith": [],
+      "socket": null,
+      "usedBy": [
+        "dawnweaver"
+      ]
+    },
+    "skill.feral_swipe.release": {
+      "alternatesWith": [],
+      "animation": {
+        "inPlace": true,
+        "leadInSecs": null,
+        "loop": false,
+        "markers": {
+          "contact": {
+            "maxSecs": 0.15,
+            "required": true,
+            "targetSecs": 0.087
+          }
+        },
+        "minIntervalSecs": null,
+        "playback": "action",
+        "rig": "humanoid",
+        "window": {
+          "maxSecs": 1.2,
+          "minSecs": 0.15,
+          "targetSecs": 0.5217
+        }
+      },
+      "asset": null,
+      "customizable": true,
+      "customizableFrom": "1",
+      "default": {
+        "loop": false,
+        "markers": {
+          "contact": 0.087
+        },
+        "name": "jab_cross",
+        "playSecs": 0.5217,
+        "preview": null
+      },
+      "description": null,
+      "ext": {
+        "omoba.character.v1": {
+          "edgeReleased": true,
+          "group": "skill",
+          "handheld": null,
+          "phase": "instant",
+          "role": "release",
+          "row": {
+            "contactSecs": 0.1,
+            "durationSecs": 0.6,
+            "effectiveContactSecs": 0.087,
+            "motion": "jab_cross",
+            "rate": 1.15,
+            "standInFor": null,
+            "start": 0
+          },
+          "skill": "feral_swipe",
+          "telegraph": null
+        }
+      },
+      "kind": "animation",
+      "label": "Feral Swipe (Q) — release",
+      "required": false,
+      "reserved": false,
+      "sharesDefaultWith": [],
+      "socket": null,
+      "usedBy": [
+        "warden"
+      ]
+    },
+    "skill.hunters_mark.release": {
+      "alternatesWith": [],
+      "animation": {
+        "inPlace": true,
+        "leadInSecs": null,
+        "loop": false,
+        "markers": {
+          "contact": {
+            "maxSecs": 0.15,
+            "required": true,
+            "targetSecs": 0.075
+          }
+        },
+        "minIntervalSecs": null,
+        "playback": "action",
+        "rig": "humanoid",
+        "window": {
+          "maxSecs": 1.2,
+          "minSecs": 0.15,
+          "targetSecs": 0.375
+        }
+      },
+      "asset": null,
+      "customizable": true,
+      "customizableFrom": "1",
+      "default": {
+        "loop": false,
+        "markers": {
+          "contact": 0.075
+        },
+        "name": "hurl_overhand",
+        "playSecs": 0.375,
+        "preview": null
+      },
+      "description": null,
+      "ext": {
+        "omoba.character.v1": {
+          "edgeReleased": true,
+          "group": "skill",
+          "handheld": null,
+          "phase": "instant",
+          "role": "release",
+          "row": {
+            "contactSecs": 0.2,
+            "durationSecs": 0.5,
+            "effectiveContactSecs": 0.075,
+            "motion": "hurl_overhand",
+            "rate": 1,
+            "standInFor": null,
+            "start": 0.25
+          },
+          "skill": "hunters_mark",
+          "telegraph": null
+        }
+      },
+      "kind": "animation",
+      "label": "Hunter's Mark (E) — release",
+      "required": false,
+      "reserved": false,
+      "sharesDefaultWith": [],
+      "socket": null,
+      "usedBy": [
+        "warden"
+      ]
+    },
+    "skill.primal_maul.release": {
+      "alternatesWith": [],
+      "animation": {
+        "inPlace": true,
+        "leadInSecs": null,
+        "loop": false,
+        "markers": {
+          "contact": {
+            "maxSecs": 0.15,
+            "required": true,
+            "targetSecs": 0.0682
+          }
+        },
+        "minIntervalSecs": null,
+        "playback": "action",
+        "rig": "humanoid",
+        "window": {
+          "maxSecs": 1.2,
+          "minSecs": 0.15,
+          "targetSecs": 0.6136
+        }
+      },
+      "asset": null,
+      "customizable": true,
+      "customizableFrom": "1",
+      "default": {
+        "loop": false,
+        "markers": {
+          "contact": 0.0682
+        },
+        "name": "cleave_slam",
+        "playSecs": 0.6136,
+        "preview": null
+      },
+      "description": null,
+      "ext": {
+        "omoba.character.v1": {
+          "edgeReleased": true,
+          "group": "skill",
+          "handheld": null,
+          "phase": "instant",
+          "role": "release",
+          "row": {
+            "contactSecs": 0.3,
+            "durationSecs": 0.9,
+            "effectiveContactSecs": 0.0682,
+            "motion": "cleave_slam",
+            "rate": 1.1,
+            "standInFor": null,
+            "start": 0.25
+          },
+          "skill": "primal_maul",
+          "telegraph": null
+        }
+      },
+      "kind": "animation",
+      "label": "Primal Maul (R) — release",
+      "required": false,
+      "reserved": false,
+      "sharesDefaultWith": [],
+      "socket": null,
+      "usedBy": [
+        "warden"
+      ]
+    },
+    "skill.wild_rocket.release": {
+      "alternatesWith": [],
+      "animation": {
+        "inPlace": true,
+        "leadInSecs": null,
+        "loop": false,
+        "markers": {
+          "contact": {
+            "maxSecs": 0.15,
+            "required": true,
+            "targetSecs": 0.13
+          }
+        },
+        "minIntervalSecs": null,
+        "playback": "action",
+        "rig": "humanoid",
+        "window": {
+          "maxSecs": 1.2,
+          "minSecs": 0.15,
+          "targetSecs": 0.76
+        }
+      },
+      "asset": null,
+      "customizable": true,
+      "customizableFrom": "1",
+      "default": {
+        "loop": false,
+        "markers": {
+          "contact": 0.13
+        },
+        "name": "shot_heavy",
+        "playSecs": 0.76,
+        "preview": null
+      },
+      "description": null,
+      "ext": {
+        "omoba.character.v1": {
+          "edgeReleased": true,
+          "group": "skill",
+          "handheld": {
+            "bone": "rightHand",
+            "byMode": {
+              "rockets": "wild-launcher"
+            },
+            "item": "wild-launcher",
+            "muzzleWindowSecs": [
+              0.08,
+              0.25
+            ]
+          },
+          "phase": "instant",
+          "role": "release",
+          "row": {
+            "contactSecs": 0.17,
+            "durationSecs": 0.8,
+            "effectiveContactSecs": 0.13,
+            "motion": "shot_heavy",
+            "rate": 1,
+            "standInFor": null,
+            "start": 0.05
+          },
+          "skill": "wild_rocket",
+          "telegraph": null
+        }
+      },
+      "kind": "animation",
+      "label": "Last Spark (R) — release",
+      "required": false,
+      "reserved": false,
+      "sharesDefaultWith": [
+        "basic.wildspark.rockets.0"
+      ],
+      "socket": null,
+      "usedBy": [
+        "wildspark"
+      ]
+    },
+    "skill.wild_switch.release": {
+      "alternatesWith": [],
+      "animation": {
+        "inPlace": true,
+        "leadInSecs": null,
+        "loop": false,
+        "markers": {
+          "contact": {
+            "maxSecs": 0.15,
+            "required": true,
+            "targetSecs": 0.1267
+          }
+        },
+        "minIntervalSecs": null,
+        "playback": "action",
+        "rig": "humanoid",
+        "window": {
+          "maxSecs": 1.2,
+          "minSecs": 0.15,
+          "targetSecs": 0.3
+        }
+      },
+      "asset": null,
+      "customizable": true,
+      "customizableFrom": "1",
+      "default": {
+        "loop": false,
+        "markers": {
+          "contact": 0.1267
+        },
+        "name": "reload_snap",
+        "playSecs": 0.3,
+        "preview": null
+      },
+      "description": null,
+      "ext": {
+        "omoba.character.v1": {
+          "edgeReleased": true,
+          "group": "skill",
+          "handheld": {
+            "bone": "rightHand",
+            "byMode": {
+              "rockets": "wild-launcher"
+            },
+            "item": "wild-repeater",
+            "muzzleWindowSecs": null
+          },
+          "phase": "instant",
+          "role": "release",
+          "row": {
+            "contactSecs": 0.34,
+            "durationSecs": 0.6,
+            "effectiveContactSecs": 0.1267,
+            "motion": "reload_snap",
+            "rate": 1.5,
+            "standInFor": null,
+            "start": 0.25
+          },
+          "skill": "wild_switch",
+          "telegraph": null
+        }
+      },
+      "kind": "animation",
+      "label": "Switchfire (Q) — release",
+      "required": false,
+      "reserved": false,
+      "sharesDefaultWith": [],
+      "socket": null,
+      "usedBy": [
+        "wildspark"
+      ]
+    },
+    "skill.wild_traps.release": {
+      "alternatesWith": [],
+      "animation": {
+        "inPlace": true,
+        "leadInSecs": null,
+        "loop": false,
+        "markers": {
+          "contact": {
+            "maxSecs": 0.15,
+            "required": true,
+            "targetSecs": 0.1
+          }
+        },
+        "minIntervalSecs": null,
+        "playback": "action",
+        "rig": "humanoid",
+        "window": {
+          "maxSecs": 1.2,
+          "minSecs": 0.15,
+          "targetSecs": 0.3077
+        }
+      },
+      "asset": null,
+      "customizable": true,
+      "customizableFrom": "1",
+      "default": {
+        "loop": false,
+        "markers": {
+          "contact": 0.1
+        },
+        "name": "toss_underhand",
+        "playSecs": 0.3077,
+        "preview": null
+      },
+      "description": null,
+      "ext": {
+        "omoba.character.v1": {
+          "edgeReleased": true,
+          "group": "skill",
+          "handheld": {
+            "bone": "rightHand",
+            "byMode": {
+              "rockets": "wild-launcher"
+            },
+            "item": "wild-repeater",
+            "muzzleWindowSecs": null
+          },
+          "phase": "instant",
+          "role": "release",
+          "row": {
+            "contactSecs": 0.13,
+            "durationSecs": 0.4,
+            "effectiveContactSecs": 0.1,
+            "motion": "toss_underhand",
+            "rate": 1.3,
+            "standInFor": null,
+            "start": 0
+          },
+          "skill": "wild_traps",
+          "telegraph": null
+        }
+      },
+      "kind": "animation",
+      "label": "Snapline (E) — release",
+      "required": false,
+      "reserved": false,
+      "sharesDefaultWith": [
+        "skill.dawn_barrier.release"
+      ],
+      "socket": null,
+      "usedBy": [
+        "wildspark"
+      ]
+    },
+    "skill.wild_zap.release": {
+      "alternatesWith": [],
+      "animation": {
+        "inPlace": true,
+        "leadInSecs": null,
+        "loop": false,
+        "markers": {
+          "contact": {
+            "maxSecs": 0.15,
+            "required": true,
+            "targetSecs": 0.0379
+          }
+        },
+        "minIntervalSecs": null,
+        "playback": "action",
+        "rig": "humanoid",
+        "window": {
+          "maxSecs": 1.2,
+          "minSecs": 0.15,
+          "targetSecs": 0.5682
+        }
+      },
+      "asset": null,
+      "customizable": true,
+      "customizableFrom": "1",
+      "default": {
+        "loop": false,
+        "markers": {
+          "contact": 0.0379
+        },
+        "name": "pistol_shoot",
+        "playSecs": 0.5682,
+        "preview": null
+      },
+      "description": null,
+      "ext": {
+        "omoba.character.v1": {
+          "edgeReleased": true,
+          "group": "skill",
+          "handheld": {
+            "bone": "rightHand",
+            "byMode": {
+              "rockets": "wild-launcher"
+            },
+            "item": "wild-launcher",
+            "muzzleWindowSecs": [
+              0.08,
+              0.25
+            ]
+          },
+          "phase": "instant",
+          "role": "release",
+          "row": {
+            "contactSecs": 0.0417,
+            "durationSecs": 0.625,
+            "effectiveContactSecs": 0.0379,
+            "motion": "pistol_shoot",
+            "rate": 1.1,
+            "standInFor": null,
+            "start": 0
+          },
+          "skill": "wild_zap",
+          "telegraph": null
+        }
+      },
+      "kind": "animation",
+      "label": "Shockline (W) — release",
+      "required": false,
+      "reserved": false,
+      "sharesDefaultWith": [],
+      "socket": null,
+      "usedBy": [
+        "wildspark"
+      ]
+    }
+  },
+  "families": {},
+  "targets": [
+    {
+      "accepts": [
+        {
+          "families": [],
+          "label": "Character for any hero",
+          "listing": "every-customizable-slot",
+          "mustFill": [],
+          "package": "character",
+          "requirementId": "character.any",
+          "slots": [
+            "base.idle",
+            "base.run",
+            "base.death"
+          ]
+        }
+      ],
+      "ext": {
+        "omoba.character.v1": {
+          "basicAttack": null,
+          "handheld": null,
+          "heroKind": "any",
+          "kit": [],
+          "role": null
+        }
+      },
+      "families": [],
+      "id": "any",
+      "kind": "any",
+      "name": "Any hero",
+      "sections": [
+        {
+          "id": "base",
+          "key": null,
+          "label": "Base",
+          "slots": [
+            "base.idle",
+            "base.run",
+            "base.death"
+          ]
+        }
+      ],
+      "slots": [
+        "base.idle",
+        "base.run",
+        "base.death"
+      ],
+      "subtitle": null
+    },
+    {
+      "accepts": [
+        {
+          "families": [],
+          "label": "Character for Warden",
+          "listing": "every-customizable-slot",
+          "mustFill": [],
+          "package": "character",
+          "requirementId": "character.warden",
+          "slots": [
+            "base.idle",
+            "base.run",
+            "base.death",
+            "basic.warden.0",
+            "basic.warden.1",
+            "skill.feral_swipe.release",
+            "skill.barkskin.release",
+            "skill.hunters_mark.release",
+            "skill.primal_maul.release"
+          ]
+        }
+      ],
+      "ext": {
+        "omoba.character.v1": {
+          "basicAttack": {
+            "attackRateCap": 1.65,
+            "cooldownSecs": 0.85,
+            "minIntervalSecs": 0.5152,
+            "rangeM": 5
+          },
+          "handheld": null,
+          "heroKind": "class",
+          "kit": [
+            {
+              "key": "q",
+              "name": "Feral Swipe",
+              "skill": "feral_swipe"
+            },
+            {
+              "key": "w",
+              "name": "Barkskin",
+              "skill": "barkskin"
+            },
+            {
+              "key": "e",
+              "name": "Hunter's Mark",
+              "skill": "hunters_mark"
+            },
+            {
+              "key": "r",
+              "name": "Primal Maul",
+              "skill": "primal_maul"
+            }
+          ],
+          "role": "jungle"
+        }
+      },
+      "families": [],
+      "id": "warden",
+      "kind": "character",
+      "name": "Warden",
+      "sections": [
+        {
+          "id": "base",
+          "key": null,
+          "label": "Base",
+          "slots": [
+            "base.idle",
+            "base.run",
+            "base.death"
+          ]
+        },
+        {
+          "id": "basic",
+          "key": null,
+          "label": "Basic attack",
+          "slots": [
+            "basic.warden.0",
+            "basic.warden.1"
+          ]
+        },
+        {
+          "id": "q",
+          "key": "Q",
+          "label": "Feral Swipe",
+          "slots": [
+            "skill.feral_swipe.release"
+          ]
+        },
+        {
+          "id": "w",
+          "key": "W",
+          "label": "Barkskin",
+          "slots": [
+            "skill.barkskin.release"
+          ]
+        },
+        {
+          "id": "e",
+          "key": "E",
+          "label": "Hunter's Mark",
+          "slots": [
+            "skill.hunters_mark.release"
+          ]
+        },
+        {
+          "id": "r",
+          "key": "R",
+          "label": "Primal Maul",
+          "slots": [
+            "skill.primal_maul.release"
+          ]
+        }
+      ],
+      "slots": [
+        "base.idle",
+        "base.run",
+        "base.death",
+        "basic.warden.0",
+        "basic.warden.1",
+        "skill.feral_swipe.release",
+        "skill.barkskin.release",
+        "skill.hunters_mark.release",
+        "skill.primal_maul.release"
+      ],
+      "subtitle": "jungle"
+    },
+    {
+      "accepts": [
+        {
+          "families": [],
+          "label": "Character for Dawnweaver",
+          "listing": "every-customizable-slot",
+          "mustFill": [],
+          "package": "character",
+          "requirementId": "character.dawnweaver",
+          "slots": [
+            "base.idle",
+            "base.run",
+            "base.death",
+            "basic.dawnweaver.0",
+            "basic.dawnweaver.1",
+            "skill.dawn_bind.release",
+            "skill.dawn_barrier.release",
+            "skill.dawn_field.release",
+            "skill.dawn_field.recast",
+            "skill.dawn_ray.release"
+          ]
+        }
+      ],
+      "ext": {
+        "omoba.character.v1": {
+          "basicAttack": {
+            "attackRateCap": 1.6,
+            "cooldownSecs": 1.2,
+            "minIntervalSecs": 0.75,
+            "rangeM": 10
+          },
+          "handheld": {
+            "bone": "rightHand",
+            "byMode": {},
+            "default": "dawn-scepter"
+          },
+          "heroKind": "class",
+          "kit": [
+            {
+              "key": "q",
+              "name": "Gleaming Snare",
+              "skill": "dawn_bind"
+            },
+            {
+              "key": "w",
+              "name": "Returning Aegis",
+              "skill": "dawn_barrier"
+            },
+            {
+              "key": "e",
+              "name": "Luminous Field",
+              "skill": "dawn_field"
+            },
+            {
+              "key": "r",
+              "name": "Horizon Ray",
+              "skill": "dawn_ray"
+            }
+          ],
+          "role": "mid"
+        }
+      },
+      "families": [],
+      "id": "dawnweaver",
+      "kind": "character",
+      "name": "Dawnweaver",
+      "sections": [
+        {
+          "id": "base",
+          "key": null,
+          "label": "Base",
+          "slots": [
+            "base.idle",
+            "base.run",
+            "base.death"
+          ]
+        },
+        {
+          "id": "basic",
+          "key": null,
+          "label": "Basic attack",
+          "slots": [
+            "basic.dawnweaver.0",
+            "basic.dawnweaver.1"
+          ]
+        },
+        {
+          "id": "q",
+          "key": "Q",
+          "label": "Gleaming Snare",
+          "slots": [
+            "skill.dawn_bind.release"
+          ]
+        },
+        {
+          "id": "w",
+          "key": "W",
+          "label": "Returning Aegis",
+          "slots": [
+            "skill.dawn_barrier.release"
+          ]
+        },
+        {
+          "id": "e",
+          "key": "E",
+          "label": "Luminous Field",
+          "slots": [
+            "skill.dawn_field.release",
+            "skill.dawn_field.recast"
+          ]
+        },
+        {
+          "id": "r",
+          "key": "R",
+          "label": "Horizon Ray",
+          "slots": [
+            "skill.dawn_ray.windup",
+            "skill.dawn_ray.release"
+          ]
+        }
+      ],
+      "slots": [
+        "base.idle",
+        "base.run",
+        "base.death",
+        "basic.dawnweaver.0",
+        "basic.dawnweaver.1",
+        "skill.dawn_bind.release",
+        "skill.dawn_barrier.release",
+        "skill.dawn_field.release",
+        "skill.dawn_field.recast",
+        "skill.dawn_ray.windup",
+        "skill.dawn_ray.release"
+      ],
+      "subtitle": "mid"
+    },
+    {
+      "accepts": [
+        {
+          "families": [],
+          "label": "Character for Wildspark",
+          "listing": "every-customizable-slot",
+          "mustFill": [],
+          "package": "character",
+          "requirementId": "character.wildspark",
+          "slots": [
+            "base.idle",
+            "base.run",
+            "base.death",
+            "basic.wildspark.0",
+            "basic.wildspark.rockets.0",
+            "skill.wild_switch.release",
+            "skill.wild_zap.release",
+            "skill.wild_traps.release",
+            "skill.wild_rocket.release"
+          ]
+        }
+      ],
+      "ext": {
+        "omoba.character.v1": {
+          "basicAttack": {
+            "attackRateCap": 1.6,
+            "cooldownSecs": 0.7,
+            "minIntervalSecs": 0.4375,
+            "rangeM": 11.5
+          },
+          "handheld": {
+            "bone": "rightHand",
+            "byMode": {
+              "rockets": "wild-launcher"
+            },
+            "default": "wild-repeater"
+          },
+          "heroKind": "class",
+          "kit": [
+            {
+              "key": "q",
+              "name": "Switchfire",
+              "skill": "wild_switch"
+            },
+            {
+              "key": "w",
+              "name": "Shockline",
+              "skill": "wild_zap"
+            },
+            {
+              "key": "e",
+              "name": "Snapline",
+              "skill": "wild_traps"
+            },
+            {
+              "key": "r",
+              "name": "Last Spark",
+              "skill": "wild_rocket"
+            }
+          ],
+          "role": "carry"
+        }
+      },
+      "families": [],
+      "id": "wildspark",
+      "kind": "character",
+      "name": "Wildspark",
+      "sections": [
+        {
+          "id": "base",
+          "key": null,
+          "label": "Base",
+          "slots": [
+            "base.idle",
+            "base.run",
+            "base.death"
+          ]
+        },
+        {
+          "id": "basic",
+          "key": null,
+          "label": "Basic attack",
+          "slots": [
+            "basic.wildspark.0",
+            "basic.wildspark.rockets.0"
+          ]
+        },
+        {
+          "id": "q",
+          "key": "Q",
+          "label": "Switchfire",
+          "slots": [
+            "skill.wild_switch.release"
+          ]
+        },
+        {
+          "id": "w",
+          "key": "W",
+          "label": "Shockline",
+          "slots": [
+            "skill.wild_zap.release"
+          ]
+        },
+        {
+          "id": "e",
+          "key": "E",
+          "label": "Snapline",
+          "slots": [
+            "skill.wild_traps.release"
+          ]
+        },
+        {
+          "id": "r",
+          "key": "R",
+          "label": "Last Spark",
+          "slots": [
+            "skill.wild_rocket.release"
+          ]
+        }
+      ],
+      "slots": [
+        "base.idle",
+        "base.run",
+        "base.death",
+        "basic.wildspark.0",
+        "basic.wildspark.rockets.0",
+        "skill.wild_switch.release",
+        "skill.wild_zap.release",
+        "skill.wild_traps.release",
+        "skill.wild_rocket.release"
+      ],
+      "subtitle": "carry"
+    }
+  ],
+  "retired": {
+    "families": {},
+    "slots": {},
+    "targets": {}
+  },
+  "ext": {
+    "omoba.character.v1": {
+      "customPlayback": {
+        "rate": 1,
+        "start": 0
+      },
+      "gameplayRevision": "standard-kits-8",
+      "motionLibrary": {
+        "clips": 57,
+        "schemaVersion": 1,
+        "sha256": "2af1a6a0332bee5a840554efd7f4efdbf85941efe744c4b03df7fad382879a9a"
+      },
+      "presentationSha256": "fe544cd0df722b9dd21753804c77091e3d8ddb64e863aebbfcfb3f0db4958ae4",
+      "protocolVersion": 11,
+      "timing": {
+        "blendSecs": 0.12,
+        "contactLimitSecs": 0.15,
+        "deathCut": "immediate",
+        "facingHoldSecs": {
+          "basic": 0.45,
+          "skill": 0.7
+        },
+        "fitRate": [
+          0.5,
+          2
+        ],
+        "freshSecs": 0.15,
+        "idleGraceSecs": 0.25,
+        "maxGapSecs": 0.25,
+        "movementInterruptsAction": false,
+        "newActionRestarts": true,
+        "rowRate": [
+          0.5,
+          2
+        ],
+        "rowStart": [
+          0,
+          0.8
+        ],
+        "unseenHoldSecs": 1.2
+      }
+    }
+  }
+}

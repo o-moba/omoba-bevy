@@ -5,6 +5,12 @@ It describes all 17 classes, their 68 skills, current basic attacks, semantic
 motion references and authored cosmetic requirements. The executable game and
 combat protocol do not consume this document in this iteration.
 
+What creators may submit to the game - every animation slot of every hero, its
+default and the rules a custom clip must pass - is the separate
+[game contract](game-contract.md) (`ekza.game-contract.v1`), which uses the same
+canonical JSON and revision rule. Its asset slots will be cut from this
+catalogue's requirements (GP5).
+
 The original [Studio proposal (PR #78)](https://github.com/o-moba/omoba-bevy/pull/78) remains the
 roadmap for Registry publication, requirement-targeted review and playable sets.
 This export implements discovery and preparation of a contribution brief. It does
@@ -129,7 +135,12 @@ configured GLB fallback; Last Spark uses a different flying rocket; Snapline's
 three traps reuse one model. Shockline and explosion effects remain engine-owned.
 The exporter asserts the current tumbler precedence so a presentation change
 cannot silently preserve an obsolete brief. Explicitly selected handhelds still
-remain selected in both weapon modes; coordinated two-gun skins are future work.
+remain selected in both weapon modes. A one-GLB
+[Wildspark set](handheld-weapons.md#wildspark-set-repeater-and-launcher-in-one-glb)
+switches between its own repeater and launcher variants; two independently
+approved guns are future work. Both Q briefs ask for that one set GLB under the
+Studio requirement `wildspark.handheld.set`. The catalogue keeps its two
+per-mode rows and exports no third row for the set.
 
 Only the six current class-default handheld GLBs are publicly copied, with the
 CC-BY-4.0 grant from `client/assets/weapons/LICENSE.md`. The seven-item weapon

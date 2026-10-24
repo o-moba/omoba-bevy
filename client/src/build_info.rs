@@ -13,12 +13,24 @@ pub(crate) fn label() -> &'static str {
                     .map(|p| p.join("assets/legal/XCODE-BUILD.json"))
             })
             .and_then(|path| std::fs::read_to_string(path).ok());
-        format_label(
-            env!("CARGO_PKG_VERSION"),
-            cfg!(debug_assertions),
-            receipt.as_deref(),
+        with_market(
+            format_label(
+                env!("CARGO_PKG_VERSION"),
+                cfg!(debug_assertions),
+                receipt.as_deref(),
+            ),
+            shared::market::MARKET,
         )
     })
+}
+
+/// A build for another market than global names it (`v0.44.0 · Release · ru`);
+/// the full feature line is in the startup log (`shared::market::describe`).
+fn with_market(label: String, market: shared::market::Market) -> String {
+    match market {
+        shared::market::Market::Global => label,
+        market => format!("{label} · {}", market.key()),
+    }
 }
 
 fn format_label(version: &str, debug: bool, receipt: Option<&str>) -> String {
@@ -67,6 +79,15 @@ mod tests {
             format_label("0.28.1-rc.1", true, Some(receipt)),
             "v0.28.1-rc.1 (14) · 52bf02d* · Debug"
         );
+    }
+
+    #[test]
+    fn only_a_non_global_build_names_its_market() {
+        use shared::market::Market;
+        let label = || "v0.44.0 · Release".to_owned();
+        assert_eq!(with_market(label(), Market::Global), "v0.44.0 · Release");
+        assert_eq!(with_market(label(), Market::Ru), "v0.44.0 · Release · ru");
+        assert_eq!(with_market(label(), Market::Cn), "v0.44.0 · Release · cn");
     }
 
     #[test]

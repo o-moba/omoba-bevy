@@ -1,0 +1,40 @@
+# RU market Account API (docs/markets.md): game accounts, devices and sign in with
+# VK ID. Install `omoba-account-api` from the RU Linux package: it is built with
+# OMOBA_MARKET=ru, so it refuses payment settings and serves no Ekza library.
+# Installed and shipped by ops/vps/ru/ru_host.py (README.md). It starts after the
+# local PostgreSQL and never stops retrying (every 5 s, no start limit).
+[Unit]
+Description=OMOBA RU Account API
+After=network-online.target postgresql.service omoba-lobby-ru.service
+Wants=network-online.target postgresql.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=omoba-ru
+Group=omoba-ru
+# See account-api.env.example: database (portal runtime role), portal origin,
+# portal secret, VK ID app id and social secret, bind and loopback proxy.
+EnvironmentFile=/opt/omoba-ru/account-api.env
+ExecStart=/opt/omoba-ru/current/omoba-account-api
+Restart=always
+RestartSec=5
+TimeoutStopSec=15
+KillSignal=SIGINT
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+CapabilityBoundingSet=
+MemoryMax=256M
+CPUQuota=50%
+TasksMax=64
+
+[Install]
+WantedBy=multi-user.target

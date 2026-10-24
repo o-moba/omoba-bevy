@@ -3,9 +3,10 @@
 //!
 //! A row of the skill registry gives its skill a voice: a sample, a speed, a slice of the
 //! sample and, for the local hero, up to two later notes. Such a voice is set off by an
-//! accepted action the client observed, by a telegraph that fired or by an accepted
-//! receipt, and by nothing else. The later notes are admitted together with the first one
-//! and wait at most 240 ms for their turn; a voice that was refused is never tried again.
+//! accepted action the client observed, by a telegraph that appeared or fired or by an
+//! accepted receipt, and by nothing else. The later notes are admitted together with the
+//! first one and wait at most 240 ms for their turn; a voice that was refused is never tried
+//! again.
 mod policy;
 
 use std::collections::BTreeMap;
@@ -25,7 +26,11 @@ use crate::{
     mobile_controls::MobileControls,
     net::{ClientSession, GameState, GameStateSnapshot, NetworkPlayerId, PlayerProgression},
     player::Player,
-    skill_presentation::{SkillPresentation, cast::SkillCastObserved, stage::StageEvent},
+    skill_presentation::{
+        SkillPresentation,
+        cast::SkillCastObserved,
+        stage::{StageEvent, TelegraphSeen},
+    },
     team::Team,
 };
 pub(crate) use policy::AudioCue;
@@ -41,6 +46,8 @@ impl Plugin for GameAudioPlugin {
         app.init_resource::<GameAudioRuntime>()
             .init_resource::<GameAudioDiagnostics>()
             .add_message::<AudioCueRequest>()
+            // The stage tracker reports first sights of telegraphs to whoever listens.
+            .add_message::<TelegraphSeen>()
             .add_systems(Startup, load_audio)
             .add_systems(
                 Update,
@@ -90,7 +97,7 @@ pub(crate) struct GameAudioDiagnostics {
 #[cfg(feature = "qa")]
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub(crate) struct RowVoice {
-    /// `cast`, `recast`, `release`, `impact` or `attack`.
+    /// `cast`, `recast`, `telegraph`, `release`, `impact` or `attack`.
     pub(crate) moment: &'static str,
     /// The id of the skill row, or the class of a basic-attack row.
     pub(crate) row: &'static str,
@@ -260,12 +267,14 @@ struct SkillVoices<'w, 's> {
     cast_cursor: Local<'s, MessageCursor<SkillCastObserved>>,
     stages: Option<Res<'w, Messages<StageEvent>>>,
     stage_cursor: Local<'s, MessageCursor<StageEvent>>,
+    telegraphs: Option<Res<'w, Messages<TelegraphSeen>>>,
+    telegraph_cursor: Local<'s, MessageCursor<TelegraphSeen>>,
 }
 
 impl SkillVoices<'_, '_> {
-    /// The accepted actions and the stage events since the previous frame. They are taken
-    /// in every frame, so none is voiced late.
-    fn take(&mut self) -> (Vec<SkillCastObserved>, Vec<StageEvent>) {
+    /// The accepted actions, the stage events and the telegraphs that appeared since the
+    /// previous frame. They are taken in every frame, so none is voiced late.
+    fn take(&mut self) -> (Vec<SkillCastObserved>, Vec<StageEvent>, Vec<TelegraphSeen>) {
         (
             self.casts.as_deref().map_or_else(Vec::new, |casts| {
                 self.cast_cursor.read(casts).cloned().collect()
@@ -273,6 +282,11 @@ impl SkillVoices<'_, '_> {
             self.stages.as_deref().map_or_else(Vec::new, |stages| {
                 self.stage_cursor.read(stages).cloned().collect()
             }),
+            self.telegraphs
+                .as_deref()
+                .map_or_else(Vec::new, |telegraphs| {
+                    self.telegraph_cursor.read(telegraphs).cloned().collect()
+                }),
         )
     }
 }
@@ -383,7 +397,7 @@ fn update_audio(
                 ),
         ),
     );
-    let (casts, stages) = skills.take();
+    let (casts, stages, telegraphs) = skills.take();
     if let (Some(registry), Some(listener)) = (skills.registry.as_deref(), local) {
         let heroes: Vec<HeroHeard> = world
             .actors
@@ -405,6 +419,7 @@ fn update_audio(
                 heroes: &heroes,
                 casts: &casts,
                 stages: &stages,
+                telegraphs: &telegraphs,
             },
             &mut candidates,
         );

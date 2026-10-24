@@ -50,6 +50,9 @@ docs/*
 !docs/controller.md
 !docs/party.md
 !docs/RELEASING.md
+!docs/connection-profiles.md
+!docs/markets.md
+!docs/community-sculptures.md
 !docs/release-compatibility.md
 !docs/bot-practice-and-social.md
 !docs/game-audio.md
@@ -120,6 +123,8 @@ docs/profiles/*
 !docs/ARCHITECTURE_REPORT.md
 !docs/plans/
 !docs/plans/**
+!docs/architecture/
+!docs/architecture/**
 
 # Local career receipts and device identity are runtime data, never source.
 .omoba/

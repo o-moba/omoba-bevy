@@ -6,6 +6,7 @@ pub mod crypto;
 pub mod devices;
 pub mod ekza_library;
 pub mod read;
+pub mod social;
 pub mod supporter;
 
 use axum::{
@@ -30,9 +31,14 @@ use std::{
 
 pub const DEVICES_MIGRATION: &str = include_str!("../migrations/002_devices.sql");
 pub const SUPPORTER_MIGRATION: &str = include_str!("../migrations/003_supporter.sql");
+pub const SUPPORTER_RECOGNITION_MIGRATION: &str =
+    include_str!("../migrations/006_supporter_recognition.sql");
 pub const PORTAL_MIGRATION: &str = include_str!("../migrations/001_portal.sql");
 pub const EKZA_LIBRARY_MIGRATION: &str = include_str!("../migrations/005_ekza_library.sql");
 pub const CLASS_BUILDS_MIGRATION: &str = include_str!("../migrations/004_class_builds.sql");
+pub const SOCIAL_MIGRATION: &str = include_str!("../migrations/007_social_sign_in.sql");
+/// Every portal schema version this build serves, in order.
+pub const PORTAL_SCHEMA: [i32; 7] = [1, 2, 3, 4, 5, 6, 7];
 #[derive(Clone)]
 pub struct Config {
     pub origin: String,
@@ -44,6 +50,7 @@ pub struct Config {
 pub struct App {
     pub billing: Arc<supporter::BillingConfig>,
     pub ekza: Arc<ekza_library::EkzaConfig>,
+    pub social: Arc<social::SocialConfig>,
     pub pool: PgPool,
     pub career: CareerStore,
     pub config: Arc<Config>,
@@ -112,6 +119,18 @@ pub fn game_error(message: String) -> Error {
     invalid()
 }
 
+fn validate_portal_schema(versions: &[i32]) -> Result<()> {
+    // Recognition reads require migration 6 and social sign-in migration 7, including
+    // existing endpoints. Reject an old deployment at startup instead of failing later.
+    if versions != PORTAL_SCHEMA {
+        return Err(Error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "unsupported_portal_schema",
+        ));
+    }
+    Ok(())
+}
+
 impl App {
     pub async fn connect(url: &str, config: Config) -> Result<Self> {
         let pool = PgPoolOptions::new()
@@ -139,20 +158,31 @@ impl App {
             sqlx::query_scalar("SELECT version FROM portal.schema_version ORDER BY version")
                 .fetch_all(&pool)
                 .await?;
-        if versions != [1, 2, 3] && versions != [1, 2, 3, 4] && versions != [1, 2, 3, 4, 5] {
+        validate_portal_schema(&versions)?;
+        let billing = supporter::BillingConfig::from_env().map_err(|_| {
+            Error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "invalid_billing_configuration",
+            )
+        })?;
+        // A free market's build refuses payment configuration instead of ignoring it.
+        if !shared::market::FEATURES.supporter
+            && (billing.apple.is_some() || billing.solana.is_some())
+        {
             return Err(Error(
                 StatusCode::SERVICE_UNAVAILABLE,
-                "unsupported_portal_schema",
+                "billing_configured_without_supporter",
             ));
         }
         Ok(Self {
             ekza: Arc::new(ekza_library::EkzaConfig::from_env(&config.origin)?),
-            billing: Arc::new(supporter::BillingConfig::from_env().map_err(|_| {
+            social: Arc::new(social::SocialConfig::from_env().map_err(|_| {
                 Error(
                     StatusCode::SERVICE_UNAVAILABLE,
-                    "invalid_billing_configuration",
+                    "invalid_social_configuration",
                 )
             })?),
+            billing: Arc::new(billing),
             pool,
             career,
             config: Arc::new(config),
@@ -185,6 +215,7 @@ impl App {
         sqlx::query("DELETE FROM portal.operation_receipts WHERE (session_id,operation_key) IN (SELECT session_id,operation_key FROM portal.operation_receipts WHERE expires_at<$1 LIMIT 1000)").bind(now()).execute(&self.pool).await?;
         sqlx::query("DELETE FROM portal.web_sessions WHERE session_id IN (SELECT s.session_id FROM portal.web_sessions s WHERE s.expires_at<$1 AND NOT EXISTS(SELECT 1 FROM portal.operation_receipts r WHERE r.session_id=s.session_id) LIMIT 1000)").bind(now()-86400).execute(&self.pool).await?;
         sqlx::query("DELETE FROM portal.audit_events WHERE id IN (SELECT id FROM portal.audit_events WHERE created_at<clock_timestamp()-interval '30 days' LIMIT 1000)").execute(&self.pool).await?;
+        social::cleanup(self).await?;
         Ok(())
     }
 }
@@ -216,6 +247,8 @@ pub async fn migrate(url: &str) -> std::result::Result<(), String> {
         (3, SUPPORTER_MIGRATION),
         (4, CLASS_BUILDS_MIGRATION),
         (5, EKZA_LIBRARY_MIGRATION),
+        (6, SUPPORTER_RECOGNITION_MIGRATION),
+        (7, SOCIAL_MIGRATION),
     ] {
         let applied: bool = sqlx::query_scalar(
             "SELECT EXISTS(SELECT 1 FROM portal.schema_version WHERE version=$1)",
@@ -236,7 +269,7 @@ pub async fn migrate(url: &str) -> std::result::Result<(), String> {
             .fetch_all(&mut *tx)
             .await
             .map_err(|_| "Cannot read portal version")?;
-    if versions != [1, 2, 3, 4, 5] {
+    if versions != PORTAL_SCHEMA {
         return Err("Unsupported portal schema version".into());
     }
     tx.commit().await.map_err(|_| "Cannot commit migration")?;
@@ -344,6 +377,28 @@ async fn dispatch(
             _ => Err(forbidden()),
         };
     }
+    // Sign in with VK ID. `social/link` is the game's (public ingress); the
+    // others are the portal BFF's (internal only, like pairing creation).
+    if method == Method::POST && path.starts_with("auth/social/") {
+        app.rate(&ip, "social-sign-in", 30).await?;
+        return match path {
+            "auth/social/vk" => social::vk_sign_in(app, body).await,
+            "auth/social/ticket" => social::ticket(app, body).await,
+            "auth/social/attach" => social::attach(app, body).await,
+            "auth/social/link" => social::link(app, body).await,
+            _ => Err(forbidden()),
+        };
+    }
+    // A free market's build serves no payment or Supporter route at all.
+    if !shared::market::FEATURES.supporter
+        && (path.starts_with("supporter") || path.starts_with("me/supporter"))
+    {
+        return Err(forbidden());
+    }
+    // Without the Ekza ecosystem there is no library connection to read or start.
+    if !shared::market::FEATURES.ekza && path.starts_with("me/ekza-library") {
+        return Err(forbidden());
+    }
     if method == Method::POST && path == "supporter/native" {
         app.rate(&ip, "native-supporter-ip", 60).await?;
         return supporter::native(app, body).await;
@@ -383,6 +438,10 @@ async fn dispatch(
     }
     if method == Method::GET && path == "releases" {
         return read::releases(app);
+    }
+    if method == Method::GET && path == "supporters" {
+        app.rate(&ip, "public-supporters", 120).await?;
+        return supporter::recognition::directory(app, query).await;
     }
     if method == Method::GET && path.starts_with("players/") {
         let session = if headers.contains_key("authorization") {
@@ -443,6 +502,9 @@ async fn dispatch(
         }
         ("GET", "me/supporter") => supporter::dashboard(app, &session.profile_id).await,
         ("PATCH", "me/supporter/aura") => supporter::equip(app, &session.profile_id, body).await,
+        ("PATCH", "me/supporter/recognition") => {
+            supporter::recognition::set(app, &session.profile_id, body).await
+        }
         ("GET", "me/supporter/solana/orders") => {
             supporter::solana::orders(app, &session.profile_id).await
         }
@@ -471,6 +533,7 @@ async fn dispatch(
             accounts::search(app, &session, query).await
         }
         ("GET", "me/sessions") => auth::sessions(app, &session).await,
+        ("DELETE", "me/social/vk") => social::unlink(app, &session).await,
         ("POST", "auth/logout") => auth::logout(app, &session).await,
         ("DELETE", p) if p.starts_with("me/sessions/") => {
             auth::revoke(app, &session, &p[12..]).await
@@ -493,4 +556,26 @@ pub async fn timestamp(pool: &PgPool, seconds: i64) -> Result<String> {
 }
 pub fn row_text(row: &sqlx::postgres::PgRow, column: &str) -> Result<String> {
     Ok(row.try_get(column)?)
+}
+
+#[cfg(test)]
+mod schema_tests {
+    use super::*;
+
+    #[test]
+    fn runtime_requires_complete_schema_seven_before_serving_existing_routes() {
+        assert!(validate_portal_schema(&[1, 2, 3, 4, 5, 6, 7]).is_ok());
+        for old_or_unknown in [
+            vec![1, 2, 3],
+            vec![1, 2, 3, 4],
+            vec![1, 2, 3, 4, 5],
+            vec![1, 2, 3, 4, 5, 6],
+            vec![1, 2, 3, 5, 6, 7],
+            vec![1, 2, 3, 4, 5, 6, 7, 8],
+        ] {
+            let error = validate_portal_schema(&old_or_unknown).unwrap_err();
+            assert_eq!(error.0, StatusCode::SERVICE_UNAVAILABLE);
+            assert_eq!(error.1, "unsupported_portal_schema");
+        }
+    }
 }

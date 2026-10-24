@@ -3,13 +3,13 @@
 pub(crate) mod accents;
 pub(crate) mod bodies;
 pub(crate) mod cast;
-mod category;
+pub(crate) mod category;
 mod effects;
 #[cfg(feature = "qa")]
 pub(crate) mod evidence;
 pub(crate) mod geometry;
 pub(crate) mod impacts;
-mod schema;
+pub(crate) mod schema;
 #[cfg(any(test, feature = "qa"))]
 mod signature;
 pub(crate) mod stage;
@@ -84,7 +84,7 @@ fn fnv64(bytes: &[u8]) -> u64 {
 }
 
 impl SkillPresentation {
-    fn parse(json: &str) -> Result<Self, String> {
+    pub(crate) fn parse(json: &str) -> Result<Self, String> {
         if json.len() > schema::MAX_BYTES {
             return Err("Skill presentation exceeds 256 KiB".into());
         }
@@ -231,7 +231,7 @@ pub(crate) struct MotionCue {
 }
 
 /// The playback rates a windup fitted to its telegraph may take.
-const FITTED_RATES: (f32, f32) = (0.5, 2.0);
+pub(crate) const FITTED_RATES: (f32, f32) = (0.5, 2.0);
 
 impl MotionCue {
     /// A clip played once from its trigger: a release, a recast or a basic attack.
@@ -269,6 +269,37 @@ impl MotionCue {
             start: 0.0,
             looping: clip.is_some_and(|clip| clip.looping),
         })
+    }
+
+    /// Seconds the library clip of this cue plays from where it enters to its last key, at
+    /// its rate. A loop, or a motion the library does not have, has no end.
+    pub(crate) fn play_secs(&self) -> Option<f32> {
+        if self.looping || self.rate <= 0.0 {
+            return None;
+        }
+        let library = crate::humanoid::SharedHumanoidMotion::embedded().ok()?;
+        let clip = library.clips.get(&self.motion)?;
+        Some(clip.duration * (1.0 - self.start.clamp(0.0, 1.0)) / self.rate)
+    }
+
+    /// Seconds into its clip at which this held windup enters when its telegraph `effect` is
+    /// first seen: as far as the telegraph has run, at the windup's rate, so a warning seen
+    /// late (a lost snapshot, a caster leaving fog, a reconnect) still reaches its contact
+    /// when the server fires. A warning seen within [`stage::FRESH_SECS`] of its cast enters
+    /// at the first key, as a cast accent counts it fresh (rule E-16); a loop always does.
+    pub(crate) fn windup_entry_secs(&self, effect: &SkillEffectState) -> f32 {
+        if !self.hold || self.looping {
+            return 0.0;
+        }
+        let Some(telegraph) = category::telegraph_secs(effect.skill) else {
+            return 0.0;
+        };
+        let elapsed = stage::view(effect).progress * telegraph;
+        if elapsed > stage::FRESH_SECS {
+            elapsed * self.rate
+        } else {
+            0.0
+        }
     }
 }
 

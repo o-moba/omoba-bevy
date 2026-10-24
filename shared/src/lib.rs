@@ -7,6 +7,7 @@
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
+pub mod bot_profile;
 pub mod career;
 pub mod catalog;
 pub mod combat;
@@ -20,6 +21,7 @@ pub mod jungle;
 pub mod live_score;
 pub mod loadout;
 pub mod map;
+pub mod market;
 pub mod match_service;
 pub mod math;
 pub mod navigation;
@@ -32,6 +34,7 @@ pub mod public_transport;
 pub mod sandbox;
 pub mod shop;
 pub mod social;
+pub mod sponsorship;
 pub mod supporter;
 pub mod transport;
 pub mod utility;

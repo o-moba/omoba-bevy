@@ -9,6 +9,9 @@ mod equipped_tests;
 #[path = "wildspark_tests.rs"]
 mod wildspark_tests;
 
+#[path = "dawnweaver_tests.rs"]
+mod dawnweaver_tests;
+
 fn addr(n: u16) -> SocketAddr {
     format!("127.0.0.1:{}", 56000 + n).parse().unwrap()
 }
@@ -193,7 +196,7 @@ fn ray_warns_then_consumes_and_reapplies_radiance_basic_consumes_once() {
     assert!(advance(&mut w, later, 0.7).is_empty());
     let events = advance(&mut w, later + duration(0.7), 0.15);
     assert_eq!(events.len(), 2);
-    assert_eq!(w.players[&addr(2)].hero.hp, 886.0);
+    assert_eq!(w.players[&addr(2)].hero.hp, 878.0);
     let owner = w.players[&addr(1)].hero.identity.id;
     let events = basic_impact(
         &mut w,

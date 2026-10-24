@@ -488,6 +488,10 @@ enum Action {
     DevicesRecoveryEdit,
     DevicesRecover,
     DevicesConfirm,
+    /// Sign in with VK ID: a device request whose code opens the portal in a browser.
+    SocialStart,
+    /// Link the waiting VK sign-in to this game profile.
+    SocialLink,
     WebOpen,
     WebEdit,
     WebLookup,
@@ -693,6 +697,8 @@ fn actions(
         web::act(action, &mut career, &identity, &mut web_worker);
         devices::act(action, &mut career, &identity, &mut device_worker);
         match action {
+            // A build without Supporter has no panel to open.
+            Action::Supporter if !shared::market::FEATURES.supporter => {}
             Action::Supporter => {
                 career.close();
                 if let Some(state) = supporter.as_deref_mut() {
@@ -707,7 +713,9 @@ fn actions(
             | Action::DevicesPoll
             | Action::DevicesRecoveryEdit
             | Action::DevicesRecover
-            | Action::DevicesConfirm => {}
+            | Action::DevicesConfirm
+            | Action::SocialStart
+            | Action::SocialLink => {}
             Action::WebOpen
             | Action::WebEdit
             | Action::WebLookup
@@ -1686,25 +1694,37 @@ fn profile_body(parent: &mut ChildSpawnerCommands, career: &CareerClient) {
             ..default()
         })
         .with_children(|row| {
-            button(
-                row,
-                tr("career.button.devices"),
-                Action::DevicesOpen,
-                "CareerDevices",
-            );
-            button(
-                row,
-                tr("career.button.website"),
-                Action::WebOpen,
-                "CareerWebsite",
-            );
-            button(
-                row,
-                tr("career.button.supporter"),
-                Action::Supporter,
-                "CareerSupporter",
-            );
+            for (key, action, name) in account_links(shared::market::FEATURES) {
+                button(row, tr(key), action, name);
+            }
         });
+}
+
+/// The account row under the profile: devices, the website and, in a build
+/// that sells Supporter, "Support OMOBA".
+/// The Profile's account buttons: «Sign in with VK ID» first where the market
+/// signs in with VK, then devices and the website, and Supporter where sold.
+fn account_links(features: shared::market::Features) -> Vec<(&'static str, Action, &'static str)> {
+    let mut links = Vec::new();
+    if devices::vk_button_visible(features) {
+        links.push(("devices.button.vk", Action::SocialStart, "CareerVkSignIn"));
+    }
+    links.extend([
+        (
+            "career.button.devices",
+            Action::DevicesOpen,
+            "CareerDevices",
+        ),
+        ("career.button.website", Action::WebOpen, "CareerWebsite"),
+    ]);
+    if features.supporter {
+        links.push((
+            "career.button.supporter",
+            Action::Supporter,
+            "CareerSupporter",
+        ));
+    }
+    links
 }
 
 fn friend_code_label(parent: &mut ChildSpawnerCommands, handle: &str) {
@@ -2668,6 +2688,26 @@ fn render(
 mod tests {
     use super::*;
 
+    #[test]
+    fn profile_buttons_follow_the_market_supporter_and_vk_sign_in() {
+        use shared::market::Market;
+        let names = |market: Market| -> Vec<&str> {
+            account_links(market.default_features())
+                .into_iter()
+                .map(|(_, _, name)| name)
+                .collect()
+        };
+        assert_eq!(
+            names(Market::Global),
+            ["CareerDevices", "CareerWebsite", "CareerSupporter"]
+        );
+        assert_eq!(
+            names(Market::Ru),
+            ["CareerVkSignIn", "CareerDevices", "CareerWebsite"]
+        );
+        assert_eq!(names(Market::Cn), ["CareerDevices", "CareerWebsite"]);
+    }
+
     /// O11: a store avatar's portrait resolves through the passport path
     /// (`ekza://avatars/...`), not a bundled `avatars/` file.
     #[test]
@@ -3589,6 +3629,7 @@ mod tests {
                 code: Some("ABCDEFGH".into()),
                 profile_id: None,
                 nickname: None,
+                social: None,
             });
             career.devices.focused = true;
         }

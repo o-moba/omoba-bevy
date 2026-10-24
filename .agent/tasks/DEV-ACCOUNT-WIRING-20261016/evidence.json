@@ -1,0 +1,142 @@
+{
+  "task_id": "DEV-ACCOUNT-WIRING-20261016",
+  "overall_status": "PASS",
+  "acceptance_criteria": [
+    {
+      "id": "AC1",
+      "text": "All native DEV packagers bake exact DEV account and portal defaults; production unchanged.",
+      "status": "PASS",
+      "proof": [
+        {
+          "type": "command",
+          "path": ".agent/tasks/DEV-ACCOUNT-WIRING-20261016/raw/release-tests.log",
+          "exit_code": 0
+        },
+        {
+          "type": "command",
+          "path": ".agent/tasks/DEV-ACCOUNT-WIRING-20261016/raw/android-tests.log",
+          "exit_code": 0
+        },
+        {
+          "type": "command",
+          "path": ".agent/tasks/DEV-ACCOUNT-WIRING-20261016/raw/ios-tests.log",
+          "exit_code": 0
+        },
+        {
+          "type": "command",
+          "path": ".agent/tasks/DEV-ACCOUNT-WIRING-20261016/raw/ios-source-guard-tests.log",
+          "exit_code": 0
+        }
+      ],
+      "gaps": []
+    },
+    {
+      "id": "AC2",
+      "text": "DEV native account transport rejects cross-contour runtime endpoints.",
+      "status": "PASS",
+      "proof": [
+        {
+          "type": "command",
+          "path": ".agent/tasks/DEV-ACCOUNT-WIRING-20261016/raw/rust-tests.log",
+          "exit_code": 0
+        }
+      ],
+      "gaps": []
+    },
+    {
+      "id": "AC3",
+      "text": "DEV Account API library routes to DEV and rejects noncanonical DEV origins, including DNS trailing dots.",
+      "status": "PASS",
+      "proof": [
+        {
+          "type": "command",
+          "path": ".agent/tasks/DEV-ACCOUNT-WIRING-20261016/raw/rust-tests.log",
+          "exit_code": 0
+        }
+      ],
+      "gaps": []
+    },
+    {
+      "id": "AC4",
+      "text": "Focused gates and independent root source review pass.",
+      "status": "PASS",
+      "proof": [
+        {
+          "type": "command",
+          "path": ".agent/tasks/DEV-ACCOUNT-WIRING-20261016/raw/rust-tests.log",
+          "exit_code": 0
+        },
+        {
+          "type": "command",
+          "path": ".agent/tasks/DEV-ACCOUNT-WIRING-20261016/raw/release-tests.log",
+          "exit_code": 0
+        },
+        {
+          "type": "command",
+          "path": ".agent/tasks/DEV-ACCOUNT-WIRING-20261016/raw/android-tests.log",
+          "exit_code": 0
+        },
+        {
+          "type": "command",
+          "path": ".agent/tasks/DEV-ACCOUNT-WIRING-20261016/raw/ios-tests.log",
+          "exit_code": 0
+        },
+        {
+          "type": "command",
+          "path": ".agent/tasks/DEV-ACCOUNT-WIRING-20261016/raw/ios-source-guard-tests.log",
+          "exit_code": 0
+        },
+        {
+          "type": "command",
+          "path": ".agent/tasks/DEV-ACCOUNT-WIRING-20261016/raw/clippy.log",
+          "exit_code": 0
+        },
+        {
+          "type": "command",
+          "path": ".agent/tasks/DEV-ACCOUNT-WIRING-20261016/raw/fmt.log",
+          "exit_code": 0
+        }
+      ],
+      "gaps": []
+    },
+    {
+      "id": "AC5",
+      "text": "Game ship preserves an enabled portal login; new roles and migration owner stay locked.",
+      "status": "PASS",
+      "proof": [
+        {
+          "type": "command",
+          "path": ".agent/tasks/DEV-ACCOUNT-WIRING-20261016/raw/lobby-tests.log",
+          "exit_code": 0
+        }
+      ],
+      "gaps": []
+    }
+  ],
+  "changed_files": [
+    ".github/workflows/ci.yml",
+    "CHANGELOG.md",
+    "account-api/src/ekza_library.rs",
+    "docs/features.md",
+    "mobile/android/test_build.py",
+    "mobile/ios/test_xcode_build.py",
+    "ops/vps/dev/lobby_dev.py",
+    "passport/src/web_account.rs",
+    "scripts/contours.py",
+    "scripts/release.py",
+    "scripts/test_lobby_dev.py",
+    "scripts/test_release.py"
+  ],
+  "commands_for_fresh_verifier": [
+    "CARGO_TARGET_DIR=/Users/wotori/git/ekza/omoba-bevy/target cargo test --locked -p omoba-passport -p omoba-account-api --lib",
+    "/opt/homebrew/bin/python3 -m unittest discover -s scripts -p test_release.py",
+    "/opt/homebrew/bin/python3 -m unittest discover -s scripts -p test_lobby_dev.py",
+    "/opt/homebrew/bin/python3 -m unittest discover -s mobile/ios -p test_*.py",
+    "/opt/homebrew/bin/python3 -m unittest discover -s mobile/android -p test_*.py"
+  ],
+  "known_gaps": [
+    "Artifact build/deployment/TestFlight state is separate and not claimed here.",
+    "Cargo reported an unrelated global cache auto-clean permission warning; compilation and strict Clippy passed without changing global cache permissions.",
+    "Three existing opt-in live server/database tooling tests skipped in local Python suite; no new SQL schema or gameplay behavior changed."
+  ]
+}

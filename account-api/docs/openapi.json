@@ -3,7 +3,7 @@
   "info": {
     "title": "Omoba Account API",
     "version": "0.21.0-rc.1",
-    "description": "Browser clients use the Next.js BFF, not these bearer endpoints directly. No match/reward write endpoints. All private replies are no-store. Native proofs are domain-separated Ed25519; signing tuple is defined in shared/src/web_account.rs."
+    "description": "Browser clients use the Next.js BFF, not these bearer endpoints directly. No match/reward write endpoints. All private replies are no-store. Native proofs are domain-separated Ed25519; signing tuple is defined in shared/src/web_account.rs. Sign in with VK ID (portal schema 7) is enabled by OMOBA_VKID_CLIENT_ID and OMOBA_SOCIAL_SECRET in a vk_sign_in build; `auth/social/link` is native, the other social routes are the portal BFF's."
   },
   "paths": {
     "/v1/auth/pairings": {
@@ -4506,6 +4506,591 @@
           }
         }
       }
+    },
+    "/v1/auth/social/vk": {
+      "post": {
+        "summary": "Portal BFF only: verify a VK ID callback (code exchange happens here) and sign in, or register an unlinked identity",
+        "operationId": "post_auth_social_vk",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "state": {
+                          "type": "string",
+                          "const": "signed_in"
+                        },
+                        "session_token": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{64}$"
+                        },
+                        "profile": {
+                          "type": "object",
+                          "properties": {
+                            "profile_id": {
+                              "type": "string",
+                              "pattern": "^[0-9a-f]{64}$"
+                            },
+                            "nickname": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "profile_id",
+                            "nickname"
+                          ],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": [
+                        "state",
+                        "session_token",
+                        "profile"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "state": {
+                          "type": "string",
+                          "const": "unlinked"
+                        },
+                        "social_ticket": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{64}$"
+                        },
+                        "display_name": {
+                          "type": "string",
+                          "maxLength": 40
+                        },
+                        "expires_at": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      },
+                      "required": [
+                        "state",
+                        "social_ticket",
+                        "display_name",
+                        "expires_at"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Absent or private resource",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "State/idempotency conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Shared rate limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Dependency unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "VK ID refused the authorization code",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "method": {
+                    "type": "string",
+                    "enum": [
+                      "vkid",
+                      "ok_ru",
+                      "mail_ru"
+                    ]
+                  },
+                  "code": {
+                    "type": "string",
+                    "maxLength": 1024
+                  },
+                  "code_verifier": {
+                    "type": "string",
+                    "minLength": 43,
+                    "maxLength": 128
+                  },
+                  "device_id": {
+                    "type": "string",
+                    "maxLength": 512
+                  },
+                  "redirect_uri": {
+                    "type": "string",
+                    "description": "Exactly <portal origin>/api/auth/vk/callback"
+                  },
+                  "state": {
+                    "type": "string",
+                    "maxLength": 512
+                  }
+                },
+                "required": [
+                  "method",
+                  "code",
+                  "code_verifier",
+                  "device_id",
+                  "redirect_uri",
+                  "state"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/auth/social/ticket": {
+      "post": {
+        "summary": "Portal BFF only: describe an unlinked VK sign-in ticket",
+        "operationId": "post_auth_social_ticket",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "display_name": {
+                      "type": "string"
+                    },
+                    "expires_at": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "linked": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "display_name",
+                    "expires_at",
+                    "linked"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Absent or private resource",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Shared rate limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Dependency unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "social_ticket": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$"
+                  }
+                },
+                "required": [
+                  "social_ticket"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/auth/social/attach": {
+      "post": {
+        "summary": "Portal BFF only: offer an unlinked VK sign-in to the game enrollment the browser was opened for",
+        "operationId": "post_auth_social_attach",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "const": "social_pending"
+                    },
+                    "label": {
+                      "type": "string"
+                    },
+                    "expires_at": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "label",
+                    "expires_at"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Absent or private resource",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "State/idempotency conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Shared rate limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Dependency unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "code": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9]{8}$"
+                  },
+                  "social_ticket": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$"
+                  }
+                },
+                "required": [
+                  "code",
+                  "social_ticket"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/auth/social/link": {
+      "post": {
+        "summary": "Native: link the VK sign-in waiting on this game's enrollment to the profile of its active key (Ed25519, omoba.social.link.v1 in shared/src/device_account.rs)",
+        "operationId": "post_auth_social_link",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "state": {
+                      "type": "string",
+                      "const": "linked"
+                    },
+                    "profile_id": {
+                      "type": "string",
+                      "pattern": "^[0-9a-f]{64}$"
+                    },
+                    "nickname": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "state",
+                    "profile_id",
+                    "nickname"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Absent or private resource",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "State/idempotency conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Shared rate limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Dependency unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SignedSocialLink"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/me/social/vk": {
+      "delete": {
+        "summary": "Forget the account's VK sign-in; needs a session created within ten minutes",
+        "operationId": "delete_me_social_vk",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "const": "unlinked"
+                    }
+                  },
+                  "required": [
+                    "status"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Expired or missing session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Fresh confirmation required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Absent or private resource",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Shared rate limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Dependency unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -4694,13 +5279,21 @@
               "session_id"
             ],
             "additionalProperties": false
+          },
+          "social": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SocialLinked"
+            },
+            "description": "Linked sign-in methods (portal schema 7)."
           }
         },
         "required": [
           "profile",
           "settings",
           "rules",
-          "session"
+          "session",
+          "social"
         ],
         "additionalProperties": false
       },
@@ -5988,7 +6581,7 @@
           },
           "catalog_revision": {
             "type": "string",
-            "const": "standard-kits-6"
+            "const": "standard-kits-8"
           },
           "core": {
             "type": "string",
@@ -6304,6 +6897,81 @@
           }
         ],
         "description": "Whitelisted connection state only. Device codes, access tokens and library items never reach the browser. Username is a display label, not an immutable identity or unified SSO subject."
+      },
+      "SocialLinked": {
+        "type": "object",
+        "properties": {
+          "provider": {
+            "type": "string",
+            "enum": [
+              "vk"
+            ]
+          },
+          "method": {
+            "type": "string",
+            "enum": [
+              "vkid",
+              "ok_ru",
+              "mail_ru"
+            ]
+          },
+          "linked_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "provider",
+          "method",
+          "linked_at"
+        ],
+        "additionalProperties": false
+      },
+      "SignedSocialLink": {
+        "type": "object",
+        "properties": {
+          "link": {
+            "type": "object",
+            "properties": {
+              "enrollment_id": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "enrollment_key": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "public_key": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "origin": {
+                "type": "string"
+              },
+              "expires_at": {
+                "type": "string",
+                "pattern": "^[0-9]+$"
+              }
+            },
+            "required": [
+              "enrollment_id",
+              "enrollment_key",
+              "public_key",
+              "origin",
+              "expires_at"
+            ],
+            "additionalProperties": false
+          },
+          "signature": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{128}$"
+          }
+        },
+        "required": [
+          "link",
+          "signature"
+        ],
+        "additionalProperties": false
       }
     }
   }

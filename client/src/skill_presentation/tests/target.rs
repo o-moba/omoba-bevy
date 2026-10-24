@@ -123,7 +123,7 @@ fn target_parses() {
             .count()
     };
     assert_eq!(cast(|cast| cast.movement.is_some()), 10);
-    assert_eq!(cast(|cast| cast.link.is_some()), 14);
+    assert_eq!(cast(|cast| cast.link.is_some()), 13);
     assert_eq!(cast(|cast| cast.area), 3);
     assert_eq!(cast(|cast| cast.recast.is_some()), 7);
     assert_eq!(cast(|cast| cast.recast == Some(AccentPattern::None)), 5);
@@ -478,10 +478,10 @@ fn findings_name_what_the_ratchet_counts() {
 }
 
 /// The clips a final row plays, as a release, a windup, a recast or a basic attack.
-/// `attack` and `pistol_aim` stay in the library without a user.
-const REQUIRED_MOTIONS: [&str; 48] = [
+/// `attack`, `pistol_aim` and `spell_prepare` (the plain spell enter that Dawn Ray's charge
+/// replaced) stay in the library without a user.
+const REQUIRED_MOTIONS: [&str; 49] = [
     "cast",
-    "spell_prepare",
     "spell_finish",
     "pistol_shoot",
     "punch",
@@ -528,6 +528,8 @@ const REQUIRED_MOTIONS: [&str; 48] = [
     "toss_underhand",
     "place_quick",
     "kneel_plant",
+    "spell_charge",
+    "ray_release",
 ];
 
 /// The vocabulary IDs the packaged rows draw, by pick list.
@@ -766,7 +768,7 @@ fn target_uses_every_required_vocabulary_id() {
         used.ids.keys()
     );
 
-    // The clips are the library minus the base states and the two without a user.
+    // The clips are the library minus the base states and the clips without a user.
     let library = SharedHumanoidMotion::embedded().unwrap();
     let spare: BTreeSet<&str> = library
         .clips
@@ -783,6 +785,7 @@ fn target_uses_every_required_vocabulary_id() {
             "idle",
             "pistol_aim",
             "run",
+            "spell_prepare",
             "walk"
         ])
     );

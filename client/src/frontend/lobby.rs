@@ -56,6 +56,8 @@ pub(crate) enum LobbyAction {
     Accept(u64),
     Decline(u64),
     Kick(u64),
+    /// A contour build's connection panel (`mobile_ui::ServerEntry`).
+    Connection,
 }
 
 #[derive(Component)]
@@ -147,7 +149,8 @@ struct LobbySignature {
     public: bool,
     friends: bool,
     server: String,
-    field: super::server_field::ServerField,
+    /// The running connection profile, only when this build offers a selector.
+    connection: Option<crate::connection_profile::ProfileId>,
     /// The locale generation: a language change rebuilds the screen.
     locale: u32,
     viewport: (u32, u32),
@@ -161,7 +164,7 @@ fn signature(
     party: &PartyClient,
     career: &crate::career::CareerClient,
     session: &ClientSession,
-    field: &super::server_field::ServerField,
+    connection: Option<&crate::connection_profile::ActiveConnection>,
     locale: Option<&Locale>,
     viewport: Vec2,
     scale: f32,
@@ -174,7 +177,12 @@ fn signature(
         public: career.view.match_service.is_some(),
         friends: career.view.storage_enabled,
         server: session.server_addr().to_owned(),
-        field: field.clone(),
+        connection: crate::mobile_ui::offers_connection(connection).then(|| {
+            connection.map_or_else(
+                || crate::connection_profile::active().id,
+                |connection| connection.profile.id,
+            )
+        }),
         locale: locale.map_or(0, Locale::generation),
         viewport: (viewport.x.to_bits(), viewport.y.to_bits()),
         scale: scale.to_bits(),
@@ -341,7 +349,7 @@ fn spawn_lobby(
     selection: Res<crate::team::TeamSelection>,
     mut stage: ResMut<PartyStage>,
     platform: Res<crate::ui::UiPlatform>,
-    field: Res<super::server_field::ServerField>,
+    connection: Option<Res<crate::connection_profile::ActiveConnection>>,
     locale: Option<Res<Locale>>,
     windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
     scale: Res<UiScale>,
@@ -357,7 +365,7 @@ fn spawn_lobby(
         &party,
         &career,
         &session,
-        &field,
+        connection.as_deref(),
         locale.as_deref(),
         viewport,
         scale.0,
@@ -877,100 +885,11 @@ fn spawn_social(parent: &mut ChildSpawnerCommands, sig: &LobbySignature, phone: 
                         for player in &view.online {
                             spawn_online_row(column, view, player);
                         }
-                        // Connection details are secondary and scroll with the social list.
-                        column
-                            .spawn(Node {
-                                flex_direction: FlexDirection::Column,
-                                row_gap: Val::Px(6.0),
-                                margin: UiRect::top(Val::Px(8.0)),
-                                flex_shrink: 0.0,
-                                ..default()
-                            })
-                            .with_children(|server| {
-                                server.spawn(label(tr("lobby.server.title"), 11.0, theme::MUTED));
-                                server.spawn(label(
-                                    if sig.field.editing {
-                                        format!("{}▏", sig.field.text)
-                                    } else {
-                                        sig.server.clone()
-                                    },
-                                    12.0,
-                                    theme::MUTED,
-                                ));
-                                if sig.field.editing {
-                                    server
-                                        .spawn(Node {
-                                            column_gap: Val::Px(6.0),
-                                            flex_wrap: FlexWrap::Wrap,
-                                            ..default()
-                                        })
-                                        .with_children(|row| {
-                                            for (preset, key, id) in [
-                                                (
-                                                    crate::session_config::ServerPreset::Beta,
-                                                    "phone.server.beta",
-                                                    "LobbyServerBeta",
-                                                ),
-                                                (
-                                                    crate::session_config::ServerPreset::Local,
-                                                    "phone.server.local",
-                                                    "LobbyServerLocal",
-                                                ),
-                                            ] {
-                                                button(
-                                                    row,
-                                                    tr(key),
-                                                    112.0,
-                                                    ButtonKind::Secondary,
-                                                    super::server_field::ServerFieldAction::Preset(
-                                                        preset,
-                                                    ),
-                                                    id,
-                                                );
-                                            }
-                                        });
-                                    server.spawn(label(
-                                        tr("lobby.server.hint"),
-                                        11.0,
-                                        theme::MUTED,
-                                    ));
-                                    if let Some(error) = sig.field.error {
-                                        server.spawn(label(tr(error), 12.0, theme::DANGER_HOVER));
-                                    }
-                                    server
-                                        .spawn(Node {
-                                            column_gap: Val::Px(6.0),
-                                            ..default()
-                                        })
-                                        .with_children(|row| {
-                                            button(
-                                                row,
-                                                tr("lobby.server.connect"),
-                                                100.0,
-                                                ButtonKind::Secondary,
-                                                super::server_field::ServerFieldAction::Connect,
-                                                "LobbyServerConnect",
-                                            );
-                                            button(
-                                                row,
-                                                tr("common.cancel"),
-                                                96.0,
-                                                ButtonKind::Link,
-                                                super::server_field::ServerFieldAction::Cancel,
-                                                "LobbyServerCancel",
-                                            );
-                                        });
-                                } else if !phone {
-                                    button(
-                                        server,
-                                        tr("lobby.server.change"),
-                                        112.0,
-                                        ButtonKind::Link,
-                                        super::server_field::ServerFieldAction::Edit,
-                                        "LobbyServerChange",
-                                    );
-                                }
-                            });
+                        // A contour build's connection is secondary and scrolls with
+                        // the social list; production shows none (no server selection).
+                        if let Some(profile) = sig.connection {
+                            spawn_connection_row(column, profile, &sig.server);
+                        }
                     });
                     body.spawn((
                         Node {
@@ -999,6 +918,45 @@ fn spawn_social(parent: &mut ChildSpawnerCommands, sig: &LobbySignature, phone: 
                         ));
                     });
                 });
+        });
+}
+
+/// The running connection profile and lobby, and the button that opens the
+/// connection panel (contour builds only).
+fn spawn_connection_row(
+    column: &mut ChildSpawnerCommands,
+    profile: crate::connection_profile::ProfileId,
+    server: &str,
+) {
+    column
+        .spawn((
+            Node {
+                flex_direction: FlexDirection::Column,
+                row_gap: Val::Px(6.0),
+                margin: UiRect::top(Val::Px(8.0)),
+                flex_shrink: 0.0,
+                ..default()
+            },
+            Name::new("LobbyConnection"),
+        ))
+        .with_children(|row| {
+            row.spawn(label(tr("lobby.connection.title"), 11.0, theme::MUTED));
+            row.spawn(label(
+                trf(
+                    "lobby.connection.line",
+                    &[("profile", &tr(profile.label_key())), ("lobby", &server)],
+                ),
+                12.0,
+                theme::MUTED,
+            ));
+            button(
+                row,
+                tr("lobby.connection.change"),
+                112.0,
+                ButtonKind::Link,
+                LobbyAction::Connection,
+                "LobbyConnectionChange",
+            );
         });
 }
 
@@ -1082,10 +1040,17 @@ fn lobby_actions(
     session: Res<ClientSession>,
     party: Res<PartyClient>,
     mut career: ResMut<crate::career::CareerClient>,
+    mut server_entry: Option<ResMut<crate::mobile_ui::ServerEntry>>,
+    connection: Option<Res<crate::connection_profile::ActiveConnection>>,
 ) {
     for Activated { action, .. } in activated.read() {
         match *action {
             LobbyAction::Back => next.set(AppScreen::Home),
+            LobbyAction::Connection => {
+                if let Some(entry) = server_entry.as_deref_mut() {
+                    crate::mobile_ui::open_connection_panel(entry, &session, connection.as_deref());
+                }
+            }
             LobbyAction::Friends => crate::career::open_friends_modal(&mut career, &mut requests),
             LobbyAction::Play(preference) => {
                 if party.view.is_leader() {
@@ -1131,7 +1096,7 @@ fn refresh_lobby(
     selection: Res<crate::team::TeamSelection>,
     stage: ResMut<PartyStage>,
     platform: Res<crate::ui::UiPlatform>,
-    field: Res<super::server_field::ServerField>,
+    connection: Option<Res<crate::connection_profile::ActiveConnection>>,
     roots: Query<Entity, With<LobbyRoot>>,
     locale: Option<Res<Locale>>,
     mut last: Local<Option<LobbySignature>>,
@@ -1145,7 +1110,7 @@ fn refresh_lobby(
         &party,
         &career,
         &session,
-        &field,
+        connection.as_deref(),
         locale.as_deref(),
         viewport,
         scale.0,
@@ -1168,8 +1133,8 @@ fn refresh_lobby(
         .despawn_related::<Children>()
         .despawn();
     spawn_lobby(
-        commands, party, career, session, card, selection, stage, platform, field, locale, windows,
-        scale,
+        commands, party, career, session, card, selection, stage, platform, connection, locale,
+        windows, scale,
     );
 }
 
@@ -1326,6 +1291,60 @@ mod tests {
             spawn_online_row(root, &party_view(1, 1, &[1, 2, 3, 4, 5]), &player)
         });
         assert!(harness::find(full.world_mut(), "LobbyInvite42").is_none());
+    }
+
+    /// Production's party lobby has no server field or connection row; a
+    /// contour build's names its running profile and opens the panel.
+    #[test]
+    fn only_a_contour_build_lobby_shows_the_connection_row() {
+        use crate::connection_profile::{ActiveConnection, ProfileId};
+        use crate::ui::test_id::harness;
+        for contour in [None, Some("dev")] {
+            let connection = ActiveConnection::for_contour(contour, None);
+            let sig = signature(
+                &PartyClient::default(),
+                &crate::career::CareerClient::default(),
+                &ClientSession::default(),
+                Some(&connection),
+                None,
+                Vec2::new(1280.0, 720.0),
+                1.0,
+                None,
+                crate::team::CharacterChoice::default(),
+            );
+            assert_eq!(sig.connection, contour.map(|_| ProfileId::Dev));
+            for phone in [false, true] {
+                let mut app = harness::kit_app();
+                app.add_ui_action::<LobbyAction>();
+                harness::spawn_ui(app.world_mut(), |root| spawn_social(root, &sig, phone));
+                app.update();
+                let names: Vec<String> = app
+                    .world_mut()
+                    .query::<crate::ui::test_id::NodeKey>()
+                    .iter(app.world())
+                    .map(|key| key.as_str().to_owned())
+                    .collect();
+                let server_ui = names
+                    .iter()
+                    .filter(|name| {
+                        name.starts_with("LobbyServer") || name.starts_with("LobbyConnection")
+                    })
+                    .count();
+                assert_eq!(
+                    server_ui > 0,
+                    contour.is_some(),
+                    "{contour:?} phone {phone}"
+                );
+                if contour.is_some() {
+                    harness::press(app.world_mut(), "LobbyConnectionChange");
+                    app.update();
+                    assert_eq!(
+                        harness::drain_actions::<LobbyAction>(app.world_mut()),
+                        vec![LobbyAction::Connection]
+                    );
+                }
+            }
+        }
     }
 
     #[test]

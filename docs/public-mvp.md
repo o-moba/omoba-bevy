@@ -88,6 +88,12 @@ clients. The first worker port must be nonzero and the range must fit in a UDP
 port number. `GAME_SERVER_ADDR=play.example.com:4000 ./client` connects a native
 client. Keep private state directories inaccessible to other users.
 
+The lobby refuses to start when it or its workers bind beyond loopback while
+`OMOBA_MATCH_PUBLIC_HOST` is unset or loopback. `OMOBA_MATCH_MAX_DURATION_SECS`
+(default 2700, 45 minutes) caps every running match; a capped match, or one that no
+human has attended for the 180 s reclaim window plus 30 s, settles as interrupted
+and unrated, and its worker exits.
+
 The packaged `launch-lobby.sh` validates required deployment values; review them
 before launching. `OMOBA_MATCH_EXECUTABLE` can override the worker binary; by
 default the lobby spawns the same server executable. Workers inherit the database
@@ -148,6 +154,10 @@ without traffic. Public datagrams are capped at 12 KiB, with signed command payl
 capped at 8 KiB. Each receive pass stops after 128 packets or two milliseconds.
 These limits bound application work; they are not a measured DDoS capacity.
 
+A player who left a running match keeps the seat (a bot plays it). Play on the
+lobby then answers with the in-match state and Resume, not a new queue entry,
+until the match ends; the next FindMatch after that queues (LR-13).
+
 A signed queue cancellation and signed Leave both clear lobby intent. Only explicit
 FindMatch retries renew a waiting entry; ordinary authenticated Home heartbeats do
 not prevent its 15-second expiry after lost cancellation packets. Cancelling an
@@ -169,6 +179,7 @@ OMOBA_TEST_DATABASE_URL='postgres://localhost/omoba_test' make test-postgres
 export OMOBA_TEST_DATABASE_URL='postgres://localhost/omoba_test'
 export HARNESS_SERVER_BIN="$PWD/target/debug/server"
 node scripts/test_public_mvp.mjs --scenario=lifecycle --clients=1 --preference=bot_practice
+node scripts/test_public_mvp.mjs --scenario=abandoned --clients=1 --preference=bot_practice
 node scripts/test_public_mvp.mjs --scenario=recovery --clients=1 --preference=bot_practice --seconds=5
 node scripts/test_public_mvp.mjs --clients=100 --preference=humans_only --seconds=30 --input-hz=20
 node scripts/test_public_mvp.mjs --clients=100 --preference=bot_practice --seconds=30 --input-hz=20
@@ -179,14 +190,18 @@ drives real signed packets/draft/loading, saves raw logs and reports, and stops 
 own processes. By default it sends signed current-pose Transform commands at a
 requested 20 Hz per running human. It records actual sent counts, observed rate,
 snapshot intervals and process CPU/RSS; stationary commands exercise authentication
-and dispatch but do not replace a moving-client, combat-input or WAN test.
+and dispatch but do not replace a moving-client, combat-input or WAN test. It reads
+`PROTOCOL_VERSION` from `shared/src/protocol.rs` and checks rosters on the live
+scoreboard, because vision filters the players in a snapshot.
 
 The recovery scenario requires local `ps` and `lsof`. It stops only the lobby to
 verify adoption of a surviving worker, then signals the exact owned worker and
 checks durable interrupted history and reassignment. It waits real clocks: an
 adopted worker can take about 100 seconds to be declared stale and the recovery
 child has a further 120-second gate. Allow several minutes; do not shorten database
-leases or fabricate timestamps to make this check pass. `--scenario=lobby-restart`
+leases or fabricate timestamps to make this check pass. The abandoned scenario
+leaves a running bot practice and waits the real reaping (about 210 s): Play must
+answer in-match until then and allocate a new match after. `--scenario=lobby-restart`
 runs only the shorter adoption check.
 
 Node uses built-in cryptography without an added package dependency. The task

@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use shared::career::ProfileSummary;
-use shared::match_service::{MatchAllocation, MatchPreference, MatchServiceView};
+use shared::match_service::{InMatch, MatchAllocation, MatchPreference, MatchServiceView};
 use shared::wire::{GameState, ServerPacket};
 
 use crate::match_allocation::{AllocatedHuman, Manifest, Phase, Status, Worker, unix_ms};
@@ -57,11 +57,12 @@ impl MatchService {
             None
         }
     }
-    pub fn from_env() -> Result<Self, String> {
+    /// `bound` is this process's bound UDP address (`SERVER_ADDR`).
+    pub fn from_env(bound: std::net::SocketAddr) -> Result<Self, String> {
         match std::env::var("OMOBA_SERVER_ROLE").ok().as_deref() {
             None | Some("") | Some("standalone") => Ok(Self::Standalone),
             Some("lobby") => {
-                let pool = crate::match_pool::Pool::from_env()?;
+                let pool = crate::match_pool::Pool::from_env(bound)?;
                 let assignments = pool
                     .slots
                     .iter()
@@ -150,6 +151,9 @@ impl MatchService {
         {
             lobby.assignments.remove(&profile.profile_id);
         }
+        // A live allocation is either still being handed off or, once its
+        // match runs, a seat this profile left: the view offers Resume and
+        // the next FindMatch after the match ends queues (LR-13).
         if lobby.assignments.contains_key(&profile.profile_id) {
             return;
         }
@@ -215,21 +219,30 @@ impl MatchService {
                     .iter()
                     .find(|h| h.profile_id == profile && h.session_id == session)
                 {
-                    return Some(if slot.ready() {
-                        MatchServiceView::Assigned {
-                            allocation: MatchAllocation {
-                                allocation_id: id.clone(),
-                                endpoint: slot.manifest.endpoint.clone(),
-                                preference: slot.manifest.preference,
-                                team: h.team,
-                                human_count: slot.manifest.humans.len() as u32,
-                                bot_count: 10 - slot.manifest.humans.len() as u32,
-                                rated: slot.manifest.humans.len() == 10,
-                                join_deadline_ms: slot.manifest.join_deadline_ms,
-                            },
-                        }
-                    } else {
-                        MatchServiceView::Allocating
+                    let Some(status) = slot.ready_status() else {
+                        return Some(MatchServiceView::Allocating);
+                    };
+                    // Every allocated human joins before a worker's match
+                    // starts, so a running match on the lobby view is one this
+                    // profile left: it can resume the seat, not be handed a
+                    // fresh match (LR-13).
+                    let in_match = (status.phase == Phase::Running).then(|| InMatch {
+                        ends_within_secs: status
+                            .ends_by_ms
+                            .map(|end| end.saturating_sub(unix_ms()).div_ceil(1000)),
+                    });
+                    return Some(MatchServiceView::Assigned {
+                        allocation: MatchAllocation {
+                            allocation_id: id.clone(),
+                            endpoint: slot.manifest.endpoint.clone(),
+                            preference: slot.manifest.preference,
+                            team: h.team,
+                            human_count: slot.manifest.humans.len() as u32,
+                            bot_count: 10 - slot.manifest.humans.len() as u32,
+                            rated: slot.manifest.humans.len() == 10,
+                            join_deadline_ms: slot.manifest.join_deadline_ms,
+                        },
+                        in_match,
                     });
                 }
                 return Some(MatchServiceView::Failed {
@@ -284,10 +297,13 @@ impl MatchService {
                 if !slot.terminal() {
                     return true;
                 }
-                if slot
-                    .status
-                    .as_ref()
-                    .is_some_and(|s| s.phase == Phase::Failed)
+                // A played match that ended (finished, capped or reaped) frees
+                // its seat silently; the next FindMatch queues (LR-13).
+                if !slot.ran()
+                    && slot
+                        .status
+                        .as_ref()
+                        .is_some_and(|s| s.phase == Phase::Failed)
                 {
                     lobby
                         .errors
@@ -617,6 +633,14 @@ impl ServerRuntime {
         } else {
             Phase::Ready
         };
+        // A player who left sees this on the lobby (LR-13).
+        let ends_by_ms = (phase == Phase::Running)
+            .then(|| self.latest_match_end(now))
+            .flatten()
+            .map(|end| {
+                let left = end.saturating_duration_since(now).as_millis();
+                unix_ms().saturating_add(u64::try_from(left).unwrap_or(u64::MAX))
+            });
         let MatchService::Worker(worker) = &mut self.match_service else {
             return;
         };
@@ -644,6 +668,7 @@ impl ServerRuntime {
                     heartbeat_ms: unix_ms(),
                     phase: Phase::Failed,
                     result_id,
+                    ends_by_ms: None,
                 };
                 if crate::match_allocation::atomic_json(
                     &worker.directory.join("status.json"),
@@ -670,6 +695,7 @@ impl ServerRuntime {
                 heartbeat_ms: unix_ms(),
                 phase: phase.clone(),
                 result_id,
+                ends_by_ms,
             };
             if crate::match_allocation::atomic_json(&worker.directory.join("status.json"), &status)
                 .is_ok()
@@ -847,6 +873,7 @@ mod tests {
             heartbeat_ms: unix_ms(),
             phase: Phase::Running,
             result_id: Some("finished-round".into()),
+            ends_by_ms: None,
         };
         pool.slots.get_mut(&id).unwrap().status = Some(receipt.clone());
         // Worker writes between lobby polls. Its cache deliberately stays Running.
@@ -897,6 +924,153 @@ mod tests {
             assert!(!lobby.assignments.contains_key(&entry.profile.profile_id));
             assert_eq!(lobby.waiting.len(), 1);
         }
+    }
+
+    fn lobby_with(pool: crate::match_pool::Pool, assignments: &[(&Waiting, &str)]) -> MatchService {
+        MatchService::Lobby(Lobby {
+            pool,
+            waiting: vec![],
+            assignments: assignments
+                .iter()
+                .map(|(w, id)| (w.profile.profile_id.clone(), (*id).to_owned()))
+                .collect(),
+            errors: HashMap::new(),
+            requests: HashMap::new(),
+            order: 1,
+            last_poll: None,
+        })
+    }
+
+    /// LR-13: Play after leaving a running match shows the in-match state
+    /// with its latest end at once (no lobby tick needed) and queues nobody.
+    /// Once the worker ends the match (LR-11 reaping), the seat frees without
+    /// an error and the next FindMatch queues.
+    #[test]
+    fn a_player_who_left_a_running_match_sees_it_and_queues_once_it_ends() {
+        let now = Instant::now();
+        let entry = w(1, MatchPreference::BotPractice, now);
+        let (profile, session) = (&entry.profile.profile_id, &entry.session);
+        let mut pool = crate::match_pool::Pool::for_test();
+        let directory = pool.test_directory().to_path_buf();
+        let id = pool
+            .allocate(manifest_for(std::slice::from_ref(&entry)))
+            .unwrap();
+        let mut receipt = Status {
+            allocation_id: id.clone(),
+            server_epoch: 7,
+            heartbeat_ms: unix_ms(),
+            phase: Phase::Running,
+            result_id: Some("r".repeat(32)),
+            ends_by_ms: Some(unix_ms() + 200_000),
+        };
+        pool.write_status_for_test(&id, &receipt);
+        // A live worker (the stand-in child exits at once and would be
+        // relaunched in recovery).
+        pool.adopt_for_test(&id);
+        let mut service = lobby_with(pool, &[(&entry, &id)]);
+        let find_match = |service: &mut MatchService, request_id| {
+            service.enqueue(
+                entry.profile.clone(),
+                session.clone(),
+                request_id,
+                entry.preference,
+                None,
+                now,
+            );
+        };
+        let in_match = |service: &MatchService| match service.view(profile, session, now) {
+            Some(MatchServiceView::Assigned {
+                allocation,
+                in_match: Some(state),
+            }) => {
+                assert_eq!(allocation.allocation_id, id);
+                assert_eq!(allocation.endpoint, "127.0.0.1:45000");
+                state
+            }
+            other => panic!("expected the in-match state, got {other:?}"),
+        };
+        find_match(&mut service, 2);
+        assert_eq!(service.request_id(profile, session), Some(2));
+        let secs = in_match(&service).ends_within_secs.unwrap();
+        assert!((195..=200).contains(&secs), "{secs}");
+        // Retries and lobby ticks keep the seat and add no queue entry.
+        service.tick(now + Duration::from_secs(1));
+        find_match(&mut service, 2);
+        in_match(&service);
+        let MatchService::Lobby(lobby) = &service else {
+            unreachable!()
+        };
+        assert!(lobby.waiting.is_empty());
+        assert!(lobby.errors.is_empty());
+
+        // The worker reaped the unattended match and retired.
+        receipt.phase = Phase::Failed;
+        receipt.ends_by_ms = None;
+        receipt.heartbeat_ms = unix_ms();
+        if let MatchService::Lobby(lobby) = &service {
+            lobby.pool.write_status_for_test(&id, &receipt);
+        }
+        service.tick(now + Duration::from_secs(2));
+        assert_eq!(
+            service.view(profile, session, now),
+            Some(MatchServiceView::Idle),
+            "a played match that ended is not a failed allocation"
+        );
+        find_match(&mut service, 2);
+        assert!(matches!(
+            service.view(profile, session, now),
+            Some(MatchServiceView::Waiting { .. })
+        ));
+        let _ = std::fs::remove_dir_all(directory); // Only this test's unique fixture.
+    }
+
+    /// The handoff itself is unchanged: a worker that has not started its
+    /// match is handed out without the in-match state, and an allocation
+    /// that fails before it ran still reports why.
+    #[test]
+    fn an_unstarted_worker_is_a_plain_handoff_and_its_failure_is_reported() {
+        let now = Instant::now();
+        let entry = w(1, MatchPreference::BotPractice, now);
+        let (profile, session) = (&entry.profile.profile_id, &entry.session);
+        let mut pool = crate::match_pool::Pool::for_test();
+        let directory = pool.test_directory().to_path_buf();
+        let id = pool
+            .allocate(manifest_for(std::slice::from_ref(&entry)))
+            .unwrap();
+        let mut receipt = Status {
+            allocation_id: id.clone(),
+            server_epoch: 7,
+            heartbeat_ms: unix_ms(),
+            phase: Phase::Forming,
+            result_id: None,
+            ends_by_ms: None,
+        };
+        pool.write_status_for_test(&id, &receipt);
+        let mut service = lobby_with(pool, &[(&entry, &id)]);
+        service.enqueue(
+            entry.profile.clone(),
+            session.clone(),
+            2,
+            entry.preference,
+            None,
+            now,
+        );
+        assert!(matches!(
+            service.view(profile, session, now),
+            Some(MatchServiceView::Assigned { in_match: None, .. })
+        ));
+        receipt.phase = Phase::Failed;
+        if let MatchService::Lobby(lobby) = &service {
+            lobby.pool.write_status_for_test(&id, &receipt);
+        }
+        service.tick(now + Duration::from_secs(1));
+        assert_eq!(
+            service.view(profile, session, now),
+            Some(MatchServiceView::Failed {
+                code: "allocation_cancelled_or_expired".into()
+            })
+        );
+        let _ = std::fs::remove_dir_all(directory); // Only this test's unique fixture.
     }
 
     #[test]

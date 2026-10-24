@@ -4,7 +4,7 @@ Rust 0.21.0-rc.1 HTTP adapter for the existing game career store. Axum 0.8.9,
 SQLx PostgreSQL, ring 0.17.14. No HTTP endpoint can settle matches or change rewards.
 The adapter reuses the game friendship transaction and nickname validation rules.
 [OpenAPI 3.1](docs/openapi.json) describes the wire contract. Game core schema is
-version 3 (revocable device keys); portal schema has its own version 5 and never runs Prisma/Drizzle push.
+version 3 (revocable device keys); portal schema has its own version 7 and never runs Prisma/Drizzle push.
 
 ## Database and migration
 
@@ -18,7 +18,7 @@ psql "$MIGRATION_DATABASE_URL" -v portal_role=omoba_portal -v game_role=omoba_ga
 ```
 
 The migration command initializes the game’s existing v1 migration when needed,
-then applies portal v1–v5 under an advisory lock. Repeated execution is safe. Existing
+then applies portal v1–v7 under an advisory lock. Repeated execution is safe. Existing
 unknown versions fail closed. Runtime startup verifies versions and performs no DDL.
 For game-only initialization, `cargo run -p server --bin migrate-career --locked` uses
 `OMOBA_DATABASE_URL`. This replaces implicit DDL at game-worker startup.
@@ -50,15 +50,17 @@ Do not log it or expose it in `NEXT_PUBLIC_` variables.
 Default `OMOBA_ACCOUNT_BIND=127.0.0.1:40550`; non-loopback binds fail. TLS is terminated
 by your existing trusted ingress. Native clients need ingress routes for POST
 `/v1/auth/pairings/lookup`, `/approve`, `/deny`,
-`/v1/auth/devices/create`, `/status`, `/recover`, `/complete`, and
-`/v1/supporter/native`. Apple notifications use only the separately configured
+`/v1/auth/devices/create`, `/status`, `/recover`, `/complete`,
+`/v1/supporter/native` and, with VK ID enabled, `/v1/auth/social/link`. Apple notifications use only the separately configured
 `/v1/supporter/apple/notifications` route. Next’s BFF uses the internal API.
 Do not broadly expose all API routes as an alternative browser backend.
 `OMOBA_ALLOW_INSECURE_LOCAL=1` permits the exact localhost/127.0.0.1 portal on port
 3010 for isolated development; never enable it for a remote HTTP site.
 
 For a private loopback ingress that overwrites `X-Real-IP`, both services can set
-`OMOBA_TRUST_LOOPBACK_PROXY=1`. Without this flag IP headers are ignored and limits
+`OMOBA_TRUST_LOOPBACK_PROXY=1`. On one host the portal then calls this API directly
+on loopback and forwards the `X-Real-IP` its own ingress wrote
+([ops/vps/ru/README.md › Topology](../ops/vps/ru/README.md#topology)). Without this flag IP headers are ignored and limits
 apply to socket peers. With it a valid header is required. Never enable it on an
 unprotected listener or pass an inbound header through unchanged. Rate limits live
 in PostgreSQL and are shared by API replicas. Apply edge per-IP/body/time limits too.
@@ -73,6 +75,35 @@ At most twenty active sessions are allowed per account; further completion retur
 `session_limit` until an existing session is revoked or expires. The account lock
 serializes this limit across simultaneous approvals.
 Revoking other sessions requires a new game confirmation within ten minutes.
+
+## Sign in with VK ID (portal schema 7)
+
+Markets with the `vk_sign_in` feature (`docs/markets.md`; the RU build) sign
+players in with VK ID: VK, OK and Mail.ru are one VK ID web app (OAuth 2.1 with
+PKCE, public client). Set `OMOBA_VKID_CLIENT_ID` (the numeric app id) and
+`OMOBA_SOCIAL_SECRET` (64 lowercase hex, generated once and never rotated: it keys
+every stored identity). Neither set disables the routes (404). A build without
+`vk_sign_in` refuses to start with them set. `OMOBA_VKID_LOCAL_FIXTURE_ORIGIN`
+(loopback http only) points the exchange at a local stand-in for tests.
+
+The portal BFF forwards the VK callback to `POST /v1/auth/social/vk`; this
+service exchanges the code at `id.vk.ru` (with the callback's `device_id` and
+`state`), reads the user, and never stores its token, name or e-mail: an identity
+is `HMAC(OMOBA_SOCIAL_SECRET, vk user id)`. A linked identity receives a normal
+seven-day browser session (label "VK ID", "OK" or "Mail.ru", the same 20-session
+cap). An unlinked one receives a 30-minute ticket. `POST /v1/auth/social/ticket`
+describes a ticket; `POST /v1/auth/social/attach` offers it to the pending game
+enrollment whose code the game opened the browser with; the enrollment's status
+then reads `social_pending` with a short display name; the game links it with
+`POST /v1/auth/social/link`, signed by its active key over the enrollment
+(`shared::device_account::SocialLink`). A website sign-in never creates a game
+profile; one VK account links to one profile; `DELETE /v1/me/social/vk` (fresh
+session) unlinks. `vk`, `ticket` and `attach` are BFF routes: keep them off the
+public ingress (behind the portal ingress key, or loopback only as on RU). Expired tickets and unlinked identities idle for 30 days
+are cleaned up. Tests: `tests/social_postgres.rs` (loopback VK stand-in).
+
+Free markets (`supporter` off) serve no `supporter` route and refuse Apple or
+Solana settings; without `ekza` there is no `me/ekza-library` route.
 
 ## Projection and retention
 
@@ -136,10 +167,9 @@ these capabilities. Old limited sessions are invalidated by the account upgrade.
 ## Private class workshop prototype
 
 Portal migration 004 adds owner-scoped private class preferences; 005 adds the
-separate encrypted Ekza library connection. Startup also accepts existing portal
-v3/v4 schemas without running DDL. Missing class-build tables return
-503 `class_builds_unavailable`; missing Ekza connection tables return 200 with
-`state: unavailable` until their migrations are applied. No new browser authorization scopes are
+separate encrypted Ekza library connection. Startup requires exactly the portal
+schema versions this build serves (`PORTAL_SCHEMA`, 1–7) and runs no DDL, so run
+`migrate` first. No new browser authorization scopes are
 added: private named builds use the existing personal-settings consent.
 
 `GET/POST /v1/me/class-builds` lists/creates up to 50 documents per profile.

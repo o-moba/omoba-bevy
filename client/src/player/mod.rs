@@ -20,6 +20,11 @@ pub(crate) use animation::HeroClips;
 #[cfg(any(test, feature = "qa"))]
 pub(crate) use animation::PlayerAnimationBinding;
 pub(crate) use animation::register_hero_animation_systems;
+/// Engine timings the game contract publishes (`crate::game_contract`).
+#[cfg(test)]
+pub(crate) use animation::{BLEND_SECS, LOCOMOTION_IDLE_GRACE_SECS, UNSEEN_HOLD_SECS};
+#[cfg(test)]
+pub(crate) use facing::{BASIC_FACING_HOLD_SECS, SKILL_FACING_HOLD_SECS};
 pub(crate) use input::{mobile_screen_direction, viewport_to_simulation_world};
 
 use animation::{PlayerAnimationLibrary, sync_jump_fallback_mode};

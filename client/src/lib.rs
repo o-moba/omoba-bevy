@@ -11,6 +11,8 @@ mod career_identity;
 mod combat;
 mod combat_feedback;
 mod combat_visuals;
+mod connection_profile;
+mod contour_badge;
 mod creatures3d;
 mod dash_preview;
 mod debug;
@@ -64,6 +66,7 @@ mod session_config;
 mod shop;
 mod skill_icons;
 mod social;
+mod sponsorship;
 mod sprite;
 mod sprite_roster;
 mod supporter;
@@ -84,6 +87,14 @@ use sprite::PlayerVisualMode;
 #[bevy_main]
 pub fn main() {
     shared::catalog::ensure_loaded();
+    // Before the app (and its logger) exists, like the roster summary.
+    eprintln!(
+        "Market: {}",
+        shared::market::describe(shared::market::MARKET, shared::market::FEATURES)
+    );
+    // The connection profile decides the registry, passport and the profile's
+    // own folder before any store, account call or socket opens.
+    connection_profile::install();
     // The one environment read of the avatar roster source, before any screen,
     // QA harness or the passport store looks an avatar up.
     let roster_source = omoba_passport::avatars::RosterSource::from_env();
@@ -92,6 +103,11 @@ pub fn main() {
     #[cfg(feature = "qa")]
     if let Some(directory) = std::env::var_os("OMOBA_ANIMATION_QA") {
         qa::animation_qa::run(directory.into());
+        return;
+    }
+    #[cfg(feature = "qa")]
+    if std::env::var_os("OMOBA_SPONSOR_QA_DIR").is_some_and(|v| !v.is_empty()) {
+        qa::sponsorship_qa::run(passport::initialize_store());
         return;
     }
     if let Err(error) = sandbox::validate_launch() {
@@ -109,8 +125,13 @@ pub fn main() {
     let mut app = App::new();
     platform::configure_app(&mut app);
     // Purchased Ekza avatars live outside the (possibly read-only) bundle.
-    // Asset sources must exist before AssetPlugin is added.
+    // Asset sources must exist before AssetPlugin is added. A build without
+    // Ekza has no store, so no account poll and no `ekza://` source.
     if let Some(store_root) = passport::initialize_store() {
+        // Restore a saved Ekza connection now, in the background, instead of
+        // when a screen that polls the account (Collection, hero select,
+        // draft) first opens: Home starts with the account and its library.
+        passport::poll_account();
         app.register_asset_source(
             omoba_passport::store::ASSET_SOURCE,
             bevy::asset::io::AssetSourceBuilder::platform_default(
@@ -149,5 +170,7 @@ pub fn main() {
     }
 }
 
+#[cfg(test)]
+mod game_contract;
 #[cfg(test)]
 mod test_support;

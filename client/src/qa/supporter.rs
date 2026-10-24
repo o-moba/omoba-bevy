@@ -1,8 +1,12 @@
 //! Explicit native renderer QA for the supporter panel: previews only, without
 //! changing any account grant. `OMOBA_SUPPORTER_QA_DIR` (with
 //! `OMOBA_QA_SUPPORTER=1`, which opens the panel) writes the screenshots;
-//! `OMOBA_SUPPORTER_QA_MOTION=1` captures the orbit sequence instead.
-use crate::supporter::SupporterUiState;
+//! `OMOBA_SUPPORTER_QA_MOTION=1` captures the moving Hero sequence instead.
+//! Every palette uses one viewport (`OMOBA_QA_WIDTH/HEIGHT`, default 1280x720).
+use crate::{
+    i18n::Locale,
+    supporter::{HERO_AURA_ELEMENT_BUDGET, SupporterUiState},
+};
 use bevy::prelude::*;
 use shared::supporter::AuraStyle;
 
@@ -20,6 +24,12 @@ impl Plugin for SupporterQaPlugin {
                     frames: 0,
                     pending: false,
                     motion: std::env::var("OMOBA_SUPPORTER_QA_MOTION").is_ok_and(|v| v == "1"),
+                    pixels: UVec2::new(
+                        dimension("OMOBA_QA_WIDTH", 1280, 320, 3840),
+                        dimension("OMOBA_QA_HEIGHT", 720, 180, 2160),
+                    ),
+                    last_capture: 0.,
+                    captures: Vec::new(),
                 })
                 .add_systems(
                     PostUpdate,
@@ -27,6 +37,14 @@ impl Plugin for SupporterQaPlugin {
                 );
         }
     }
+}
+
+fn dimension(key: &str, fallback: u32, min: u32, max: u32) -> u32 {
+    std::env::var(key)
+        .ok()
+        .and_then(|v| v.parse::<u32>().ok())
+        .filter(|v| (min..=max).contains(v))
+        .unwrap_or(fallback)
 }
 
 /// Explicit native renderer QA: previews only, without changing any account grant.
@@ -38,6 +56,9 @@ struct SupporterQa {
     frames: u32,
     pending: bool,
     motion: bool,
+    pixels: UVec2,
+    last_capture: f64,
+    captures: Vec<serde_json::Value>,
 }
 fn capture_preview(
     mut commands: Commands,
@@ -45,6 +66,8 @@ fn capture_preview(
     mut state: ResMut<SupporterUiState>,
     mut windows: Query<&mut Window, With<bevy::window::PrimaryWindow>>,
     mut exit: MessageWriter<bevy::app::AppExit>,
+    time: Res<Time>,
+    locale: Res<Locale>,
 ) {
     use bevy::render::view::screenshot::{Screenshot, ScreenshotCaptured, save_to_disk};
     if qa.started.elapsed() > std::time::Duration::from_secs(120) {
@@ -52,45 +75,71 @@ fn capture_preview(
         return;
     }
     if qa.stage >= if qa.motion { 24 } else { 3 } {
-        exit.write(bevy::app::AppExit::Success);
+        let manifest = serde_json::json!({
+            "renderer": "native Bevy",
+            "scene": "isolated cosmetic preview; same spawn_aura renderer as world actors",
+            "world_session_verified": false,
+            "account_entitlement_created": false,
+            "physical_device_verified": false,
+            "locale": locale.id().code(),
+            "viewport": [qa.pixels.x, qa.pixels.y],
+            "mesh_elements_per_aura": HERO_AURA_ELEMENT_BUDGET,
+            "motion": qa.motion,
+            "captures": qa.captures,
+        });
+        let written = serde_json::to_vec_pretty(&manifest)
+            .ok()
+            .is_some_and(|data| {
+                std::fs::write(qa.directory.join("hero-preview-manifest.json"), data).is_ok()
+            });
+        exit.write(if written {
+            bevy::app::AppExit::Success
+        } else {
+            bevy::app::AppExit::error()
+        });
         return;
     }
     let captures = [
-        ("solar-desktop.png", AuraStyle::Solar, 960, 600),
-        ("lunar-phone.png", AuraStyle::Lunar, 844, 390),
-        ("verdant-phone.png", AuraStyle::Verdant, 844, 390),
+        ("hero-solar-preview.png", AuraStyle::Solar),
+        ("hero-lunar-preview.png", AuraStyle::Lunar),
+        ("hero-verdant-preview.png", AuraStyle::Verdant),
     ];
-    let (name, style, width, height) = if qa.motion {
-        (
-            format!("orbit-{:03}.png", qa.stage),
-            AuraStyle::Solar,
-            960,
-            600,
-        )
+    let (name, style) = if qa.motion {
+        (format!("hero-motion-{:03}.png", qa.stage), AuraStyle::Solar)
     } else {
-        let (name, style, width, height) = captures[qa.stage];
-        (name.to_string(), style, width, height)
+        let (name, style) = captures[qa.stage];
+        (name.to_string(), style)
     };
     state.open = true;
     state.selected = style;
     if let Ok(mut window) = windows.single_mut() {
         window.resolution.set_scale_factor_override(Some(1.0));
-        if window.physical_width() != width || window.physical_height() != height {
-            window.resolution.set_physical_resolution(width, height);
+        if window.physical_width() != qa.pixels.x || window.physical_height() != qa.pixels.y {
+            window
+                .resolution
+                .set_physical_resolution(qa.pixels.x, qa.pixels.y);
         }
     }
     if qa.pending {
         return;
     }
     qa.frames += 1;
-    if qa.frames < if qa.motion && qa.stage > 0 { 6 } else { 60 } {
+    if if qa.motion && qa.stage > 0 {
+        time.elapsed_secs_f64() - qa.last_capture < 0.12
+    } else {
+        qa.frames < 60
+    } {
         return;
     }
     if std::fs::create_dir_all(&qa.directory).is_err() {
         exit.write(bevy::app::AppExit::error());
         return;
     }
-    let path = qa.directory.join(name);
+    let path = qa.directory.join(&name);
+    qa.last_capture = time.elapsed_secs_f64();
+    qa.captures.push(serde_json::json!({
+        "file": name, "palette": style.id(), "animation_seconds": time.elapsed_secs_f64(),
+    }));
     qa.pending = true;
     commands
         .spawn(Screenshot::primary_window())

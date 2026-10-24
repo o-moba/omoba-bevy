@@ -57,6 +57,37 @@ impl RateLimitedDiagnostic {
     }
 }
 
+/// Whether datagrams for `player` can go to `addr` at all: a human seat on a
+/// real network endpoint. Bots and detached human seats (bot- or
+/// idle-controlled after a Leave or timeout) live at internal `[::]:N` actor
+/// addresses that the IPv4 socket cannot address, so every per-tick stream
+/// skips them instead of failing once per datagram.
+pub(crate) fn network_endpoint(
+    addr: std::net::SocketAddr,
+    player: &crate::entities::ConnectedPlayer,
+) -> bool {
+    !bots::is_bot_address(addr) && !player.hero.identity.is_bot
+}
+
+impl ServerRuntime {
+    /// A recipient of the match streams (world snapshots, chat and
+    /// reactions): a human network endpoint that passed this role's endpoint
+    /// admission. A seat whose human left or timed out moves to an internal
+    /// address (worker) or out of the roster (standalone), so it never
+    /// matches; its identity-keyed subscriptions resume on reclaim.
+    pub(crate) fn live_match_endpoint(&self, addr: std::net::SocketAddr, now: Instant) -> bool {
+        self.world
+            .players
+            .get(&addr)
+            .is_some_and(|player| network_endpoint(addr, player))
+            && if self.match_service.is_public() {
+                self.public_transport.validated(addr, now)
+            } else {
+                self.endpoint_verified(addr)
+            }
+    }
+}
+
 pub(crate) struct ServerRuntime {
     pub(crate) session_recovery: crate::session_recovery::SessionRecovery,
     pub(crate) sandbox: Option<sandbox::SandboxRuntime>,
@@ -92,6 +123,11 @@ pub(crate) struct ServerRuntime {
     pub(crate) snapshot_tick: u64,
     pub(crate) match_started_at: Option<Instant>,
     pub(crate) empty_since: Option<Instant>,
+    /// Worker only: since when a running match has had no human on a
+    /// network endpoint (`match_lifecycle.rs`).
+    pub(crate) unattended_since: Option<Instant>,
+    /// The hard cap on a running match (`OMOBA_MATCH_MAX_DURATION_SECS`).
+    pub(crate) max_match_duration: Duration,
     pub(crate) metrics_players: HashMap<u64, (u32, bool)>,
     pub(crate) metrics_objectives: HashSet<u64>,
 }
@@ -191,6 +227,8 @@ impl ServerRuntime {
             snapshot_tick: 0,
             match_started_at: None,
             empty_since: None,
+            unattended_since: None,
+            max_match_duration: crate::match_lifecycle::DEFAULT_MATCH_MAX_DURATION,
             metrics_players: HashMap::new(),
             metrics_objectives: HashSet::new(),
         }
@@ -218,7 +256,8 @@ pub(crate) fn run() -> io::Result<()> {
     socket.set_nonblocking(true)?;
     println!("UDP game server is listening on {bind_addr}");
 
-    let match_service = match_service::MatchService::from_env().map_err(io::Error::other)?;
+    let match_service =
+        match_service::MatchService::from_env(socket.local_addr()?).map_err(io::Error::other)?;
     if match_service.is_public()
         && std::env::var("OMOBA_DATABASE_URL")
             .ok()
@@ -254,8 +293,31 @@ pub(crate) fn run() -> io::Result<()> {
         ),
     }
 
+    let max_match_duration = crate::match_lifecycle::max_match_duration(
+        std::env::var(crate::match_lifecycle::MATCH_MAX_DURATION_ENV)
+            .ok()
+            .as_deref(),
+    )
+    .map_err(io::Error::other)?;
+    println!(
+        "Match duration cap: {} s ({})",
+        max_match_duration.as_secs(),
+        crate::match_lifecycle::MATCH_MAX_DURATION_ENV
+    );
+
     let mut runtime = ServerRuntime::new_with_map(socket, match_config, map_config);
     runtime.match_service = match_service;
+    runtime.max_match_duration = max_match_duration;
+    let bot_difficulty = bots::boot_bot_difficulty(
+        runtime.match_service.is_public(),
+        runtime.rules.fills_with_bots,
+        || std::env::var(shared::bot_profile::BotDifficulty::ENV).ok(),
+    )
+    .map_err(io::Error::other)?;
+    if let Some(level) = bot_difficulty {
+        runtime.set_bot_difficulty(level);
+        println!("Practice bot level: {} for both teams", level.name());
+    }
     if std::env::var("OMOBA_COMBAT_SANDBOX").as_deref() == Ok("1") {
         if !runtime.rules.combat_sandbox_allowed
             || runtime.match_service.is_public()

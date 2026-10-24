@@ -1,0 +1,65 @@
+# OMOBA DEV lobby on the dedicated dev VPS (ssh alias vds-dev). Test contour, not production.
+# Install and update only with ops/vps/dev/lobby_dev.py (target guard, dry-run, rollback);
+# runbook: ops/vps/dev/README.md.
+# Every name differs from production (ops/vps/omoba-lobby.service): user omoba-dev,
+# /opt/omoba-dev and /var/lib/omoba-dev, UDP 4100 + match port 41100 (production
+# 4000 + 41000-41001), the dev registry, the dev career database and a closed passport.
+# Hardening matches production so the dev lobby rehearses the production unit.
+# A public lobby does not start without OMOBA_DATABASE_URL, and matchmaking needs signed
+# accounts in that database. database.env holds only that URL: database omoba_dev, role
+# omoba_dev_game, in the dev Supabase Postgres on this host (127.0.0.1:54322). lobby_dev.py
+# creates it on the host (root, 0600) and refuses any other database.
+# There is no dev Ekza passport yet and the SDK default is production, so protected-avatar
+# tickets go to a closed loopback port and fail closed. Match workers inherit this environment.
+# OMOBA_MATCH_PUBLIC_HOST is the address clients reach the match worker on. The
+# default needs a DNS A record (no AAAA) lobby.dev.omoba.io -> dev VPS IPv4;
+# `lobby_dev.py ship --public-host <dev IP>` replaces only that value.
+[Unit]
+Description=OMOBA DEV lobby (test contour, not production)
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=120
+StartLimitBurst=6
+
+[Service]
+Type=simple
+User=omoba-dev
+Group=omoba-dev
+WorkingDirectory=/var/lib/omoba-dev
+EnvironmentFile=/opt/omoba-dev/database.env
+Environment=SERVER_ADDR=0.0.0.0:4100
+Environment=OMOBA_SERVER_ROLE=lobby
+Environment=OMOBA_MATCH_MODE=release
+Environment=OMOBA_TEAM_SIZE=5
+Environment=OMOBA_MATCH_ROOT=/var/lib/omoba-dev/matches
+Environment=OMOBA_CAREER_OUTBOX=/var/lib/omoba-dev/lobby-outbox
+Environment=OMOBA_MATCH_BIND_IP=0.0.0.0
+Environment=OMOBA_MATCH_PUBLIC_HOST=lobby.dev.omoba.io
+Environment=OMOBA_MATCH_FIRST_PORT=41100
+Environment=OMOBA_MATCH_CAPACITY=1
+Environment=OMOBA_MATCH_EXECUTABLE=/opt/omoba-dev/current/server
+Environment=OMOBA_REGISTRY_URL=https://registry.dev.ekza.io
+Environment=OMOBA_PASSPORT_URL=http://127.0.0.1:9/api/passport
+ExecStart=/opt/omoba-dev/current/server
+Restart=on-failure
+RestartSec=5
+KillMode=control-group
+TimeoutStopSec=20
+# The dev VPS (2 vCPU / 4 GB) also runs the dev Supabase stack, registry and Studio:
+# the lobby group (lobby + one match worker) is capped, and the kernel prefers it
+# over the database when memory runs out.
+MemoryHigh=448M
+MemoryMax=512M
+CPUQuota=100%
+OOMScoreAdjust=300
+TasksMax=96
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/omoba-dev
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+
+[Install]
+WantedBy=multi-user.target
