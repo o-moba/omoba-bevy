@@ -651,6 +651,44 @@ Area: platform · **major** · M · code
   - [ ] Minimum Android version, Vulkan and RAM are published on the portal and in the store listing.
 - **Depends on:** LR-24
 
+#### LR-67 — RU donations through YooKassa with tiered hero auras
+Area: monetization · **launch scope** (owner request 2026-10-24) · L · code + owner
+- **Now:**
+  - Hero Supporter exists for the global market only: Solana USDC on the website and Apple StoreKit, a 30-day grant, and three auras (Solar, Lunar, Verdant) that any active grant unlocks (`docs/supporter.md`; `account-api/src/supporter.rs`, `supporter/solana.rs`; `career-store/src/career_store.rs` `supporter_status`; `server/src/career_backend.rs` `authorized_supporter_aura`; `client/src/supporter.rs`).
+  - In RU the `supporter` feature is off: the client registers neither Supporter plugin (so other players' auras are not drawn either), the Account API serves no supporter route and refuses billing settings, the portal hides the pages (`docs/progress/2026-10-23-market-gating.md`).
+  - `AuraStyle` is a Strict wire enum (`shared/src/protocol/wire_enums.rs`); grants always expire (`valid_until` NOT NULL, 400-day cap); no grant carries an amount; no YooKassa code exists in the repositories.
+  - A complete, battle-tested YooKassa integration exists in the owner's vibe-piano project (one-time payments, «Чеки от ЮKassa», webhook re-reads, 23-hour idempotent replay, refunds); its rules are listed below.
+- **Model (owner decisions 2026-10-24):**
+  - Russian players donate on the RU portal: tiers **100, 250, 500, 1000, 2500, 5000, 10000 ₽** or a custom amount (min 100 ₽, max 100 000 ₽).
+  - Each successful donation is a grant valid for **30 days** from payment, recorded with its amount in kopecks.
+  - The player's tier is the **sum of donations whose 30-day window covers now** ("monthly donation"): ≥100 **Rose** (pink), ≥250 **Jade** (green), ≥500 **Azure** (blue), ≥1000 **Crimson** (red), ≥2500 **Prism I** (rainbow shimmer), ≥5000 **Prism II** (faster shimmer, sparkles), ≥10000 **Prism III** (fastest shimmer, crown ring). Names are working names; the owner may rename them. A player paying 100 ₽ every month stays Rose; 1000 ₽ every month stays Crimson.
+  - The player wears any style up to the current tier, or hides the aura. Every player in a match sees it; bots never wear one.
+  - Global keeps Solar/Lunar/Verdant through Apple and Solana, unchanged.
+- **Requirement:**
+  - **Market:** RU `supporter` feature on, with the payment provider list `[yookassa]`; global `[apple, solana]`. The provider list is a market property in `shared/src/market.rs`, `scripts/markets.py` and the portal `market-profile.mjs`. The Account API refuses YooKassa settings in global builds and Apple/Solana settings in RU builds. RU clients register `SupporterPlugin` (panel and world rendering) but no StoreKit bridge.
+  - **Wire:** `AuraStyle` gains the seven tier styles with a protocol bump to 12 (policy in `wire_enums.rs`); `PROTOCOL_VERSION`, golden tests and `docs/release-compatibility.md` updated. Client and server ship together (section 7, O-12).
+  - **Account API (portal migration 009):** provider `yookassa` in the supporter CHECKs; `amount_minor` on grants (NULL for older providers); a durable attempt table (request key, provider idempotence key persisted before the POST, provider payment id, amount, RUB, frozen receipt snapshot, accepted offer version, status `created|charging|submitted|succeeded|canceled|failed`, lease, timestamps) and a refund table; grants for the new tables in `ops/grants.sql`.
+    - `POST /v1/me/supporter/yookassa/checkout` `{amount_rub, receipt_email, quote, offer_version}` with an `Idempotency-Key` → `{confirmation_url}` (HTTPS only, no credentials).
+    - `GET /v1/me/supporter/yookassa/payments` (recent, owner-scoped).
+    - `POST /v1/supporter/yookassa/notifications` (public, through the RU ingress): never trusts the body, re-reads the payment or refund with the shop credentials, acknowledges unknown objects with 200 without an API call, answers 5xx on processing errors so YooKassa retries.
+    - A reconciliation loop (next to the Apple one) polls `submitted` attempts with queue rotation, replays lost creates with the **same** key while younger than 23 h (older → manual review, never a new POST), and scans refunds with a durable cursor; new charges stop when the refund scan is stale.
+    - Settlement is exactly-once in one transaction through `apply_event_tx`: success grants 30 days with the amount; a late `canceled` never downgrades a success; a refund (full or partial) reduces or revokes that grant and the tier is recomputed; a refund that overtakes its payment settles the payment first.
+    - 54-FZ: «Чеки от ЮKassa»: `receipt.customer.email` required, one item, `payment_subject: service`, `payment_mode: full_payment`, `vat_code` from `OMOBA_YOOKASSA_VAT_CODE` (1–12; 1 = без НДС), description «OMOBA — поддержка проекта (аура на 30 дней)».
+    - Env: `OMOBA_YOOKASSA_SHOP_ID`, `OMOBA_YOOKASSA_SECRET_KEY`, `OMOBA_YOOKASSA_VAT_CODE`, `OMOBA_YOOKASSA_NEW_CHARGES` (exactly `1` enables new charges; reconciliation always runs), a loopback test stand-in origin for tests only. Return URL `<portal>/supporter?paid=1`.
+    - Never log provider bodies (card/customer data), only `x-request-id`; amounts in kopecks without floats; the quote the browser shows must equal the server's (409 `reload` otherwise).
+  - **Entitlement:** the tier and the allowed styles are computed in one place shared by the Account API dashboard, `equip`, the career store and the server's `authorized_supporter_aura` (the server re-checks the equipped style against the tier every refresh). `months_supported` counts distinct calendar months with a donation for YooKassa grants.
+  - **Client:** new palettes for the four solid tiers; the Prism tiers animate hue per frame on their shared material (all wearers of one style shimmer in sync), with intensity growing per tier; 2D fallback colours; the aura budget (23 elements) stays, the Prism III crown counts inside it; the Supporter panel in RU shows the tier, the days left, the unlocked styles and «Поддержать на сайте» (opens `<portal>/supporter`), never an in-app purchase; aura names and panel strings in en, ru, zh-Hans.
+  - **Portal (RU):** `/supporter` with the tier cards (colour swatch and CSS preview, rainbow for Prism), a custom amount, the receipt e-mail, an offer checkbox linking `/offer`, the redirect, the return state («Проверяем оплату…», poll `me/supporter` 5 × 1.5 s, «Не оплачивайте повторно»), current tier and history; no Solana or Apple copy; prices and the offer readable without sign-in; `/supporters` recognition enabled in RU.
+- **Acceptance:**
+  - [ ] Unit tests: tier thresholds and the 30-day window sum (incl. expiry and partial refunds); custom amount bounds; protocol 12 golden tests; market provider lists (RU yookassa only, global unchanged).
+  - [ ] Account API Postgres tests against a loopback YooKassa stand-in: checkout persists the key before the POST; lost-create replay under 23 h reuses the key, over 23 h goes to manual review; webhook with unknown id makes no API call; duplicate `succeeded` grants once; `canceled` after `succeeded` is ignored; refund before payment; partial and full refunds recompute the tier; the restricted portal role works.
+  - [ ] Server/harness: a player with a 1000 ₽ donation equips Crimson; equipping Prism I is refused; a second client sees the aura on that hero; after expiry the aura disappears within one refresh.
+  - [ ] RU client: `SupporterPlugin` registered, StoreKit not; panel opens the portal; other players' auras render (UI-tree test; visual capture when the screen is available).
+  - [ ] Portal unit and e2e tests (YooKassa stand-in): all tiers and a custom amount, quote mismatch → reload, return polling, no crypto/Solana/Apple on RU pages, global unchanged.
+  - [ ] Docs: `docs/supporter.md`, `docs/markets.md`, `account-api/README.md`, OpenAPI, the RU runbook (shop settings, webhook URL `https://account.ru.omoba.io/v1/supporter/yookassa/notifications`, test shop), Caddy native list, ADR-024.
+- **Owner:** a YooKassa shop for an ИП or ООО (receipts for самозанятые are not covered by this design), «Чеки от ЮKassa» enabled, the VAT code confirmed, the webhook URL and events (`payment.succeeded`, `payment.canceled`, `payment.waiting_for_capture`, `refund.succeeded`) registered, a test shop for staging; a public offer (оферта) for supporter cosmetics with refund terms and the seller's requisites (ФИО, ИНН, ОГРНИП, address, e-mail, phone) published at `/offer` (draft from LR-06); a real test payment that checks the fiscal receipt before announcing.
+- **Depends on:** LR-01, LR-02, LR-04/LR-06 (offer), LR-14 (protocol bump ships with the update path)
+
 ### M1 — First public weeks (self-running hardening)
 
 #### LR-26 — Drain mode, maintenance notices and announcements
@@ -1535,3 +1573,7 @@ single, documented setting the owner can change later.
 | — | **Release label**: «Открытая бета». | LR-23 |
 | — | **Owner notifications** (feedback, alerts): one Telegram bot configured on the RU host (`OMOBA_TELEGRAM_BOT_TOKEN`, `OMOBA_TELEGRAM_CHAT_ID`); without it, notifications go to the journal only. | LR-17, LR-20 |
 | — | **Schema numbers** reserved for M0: career core migration 004 = admission/new-profile limits (LR-16), 005 = sanctions (LR-15); portal migration 008 = feedback (LR-20). | LR-15, LR-16, LR-20 |
+| — | **RU monetization (owner, 2026-10-24)**: the RU market sells supporter auras through YooKassa (LR-67). This replaces the earlier "no payments in RU" assumption: where specs say the RU build sells nothing, read "sells only YooKassa supporter auras; no Apple, Solana, crypto or Ekza". | LR-67 |
+| — | **RU surfaces**: no donate-with-crypto, wallet, Solana or Ekza content; the RU Supporter page (YooKassa) and `/supporters` are allowed and linked from the portal navigation. | LR-22, LR-67 |
+| — | **Legal drafts** (LR-06) also include a draft **public offer** (оферта) for supporter cosmetics at `/offer`: what is sold (a 30-day cosmetic aura, no gameplay advantage), prices, payment through YooKassa, refunds, and placeholders for the seller's requisites (ФИО, ИНН, ОГРНИП, address, e-mail, phone). Prices and the offer are readable without sign-in. | LR-06, LR-67 |
+| — | **Reserved numbers**: portal migration 009 = YooKassa supporter (LR-67); game protocol 12 = tier aura styles (LR-67). | LR-67 |
