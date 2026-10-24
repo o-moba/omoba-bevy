@@ -15,12 +15,19 @@
 //! - The QA harnesses override `WinitSettings` with `continuous()`, after
 //!   `platform::configure_app` and `DefaultPlugins`.
 //!
+//! The build's market (`shared::market::FEATURES`) disables whole plugins
+//! rather than gating their systems: without Ekza no `SponsorshipPlugin`
+//! (registry-served community sculptures), without Supporter neither
+//! `SupporterPlugin` nor `SupporterStoreKitPlugin` (the StoreKit tick reads the
+//! first one's resources). Disabled plugins keep their place in the order.
+//!
 //! Nothing else reads the world inside `build`. The debug tooling
 //! (`SandboxPlugin`, `DebugAccessPlugin`, `PracticeSandboxPlugin`,
 //! `GodModePlugin`, `DebugConsolePlugin`) is `DebugPlugins`, right after `GameplayPlugins`
 //! (where it used to be last), so the build order is unchanged.
 
 use bevy::app::{PluginGroup, PluginGroupBuilder};
+use shared::market::Features;
 
 use crate::{
     battlefield_atmosphere::BattlefieldAtmospherePlugin,
@@ -125,38 +132,48 @@ pub(crate) struct PresentationPlugins;
 
 impl PluginGroup for PresentationPlugins {
     fn build(self) -> PluginGroupBuilder {
-        PluginGroupBuilder::start::<Self>()
-            // Shared by both backends. The clock comes first: the effect,
-            // feedback, particle and projectile plugins below read it.
-            .add(crate::vfx_clock::VfxClockPlugin)
-            .add(CameraPlugin)
-            .add(crate::dash_preview::DashPreviewPlugin)
-            .add(crate::recall::RecallPlugin)
-            .add(SetupPlugin)
-            .add(ModelScalePlugin)
-            .add(CombatVisualsPlugin)
-            .add(crate::skill_presentation::SkillPresentationPlugin)
-            .add(crate::held_weapons::HeldWeaponsPlugin)
-            .add(CombatFeedbackPlugin)
-            .add(GameVfxPlugin)
-            .add(ReactionVisualsPlugin)
-            .add(TeamVisionPlugin)
-            .add(GameAudioPlugin)
-            .add(MapVisualsPlugin)
-            // 2D sprite backend.
-            .add(SpriteVisualsPlugin)
-            .add(Presentation2dPlugin)
-            .add(World2dPlugin)
-            // 3D model backend.
-            .add(Presentation3dPlugin)
-            .add(Verdant3dPlugin)
-            .add(crate::sponsorship::SponsorshipPlugin)
-            .add(DecorPlugin)
-            .add(JungleVisualsPlugin)
-            .add(MinionVisualsPlugin)
-            .add(BossesPlugin)
-            .add(ProjectileVisualsPlugin)
-            .add(BattlefieldAtmospherePlugin)
+        presentation_plugins(shared::market::FEATURES)
+    }
+}
+
+/// [`PresentationPlugins`] of a build with `features`.
+fn presentation_plugins(features: Features) -> PluginGroupBuilder {
+    let group = PluginGroupBuilder::start::<PresentationPlugins>()
+        // Shared by both backends. The clock comes first: the effect,
+        // feedback, particle and projectile plugins below read it.
+        .add(crate::vfx_clock::VfxClockPlugin)
+        .add(CameraPlugin)
+        .add(crate::dash_preview::DashPreviewPlugin)
+        .add(crate::recall::RecallPlugin)
+        .add(SetupPlugin)
+        .add(ModelScalePlugin)
+        .add(CombatVisualsPlugin)
+        .add(crate::skill_presentation::SkillPresentationPlugin)
+        .add(crate::held_weapons::HeldWeaponsPlugin)
+        .add(CombatFeedbackPlugin)
+        .add(GameVfxPlugin)
+        .add(ReactionVisualsPlugin)
+        .add(TeamVisionPlugin)
+        .add(GameAudioPlugin)
+        .add(MapVisualsPlugin)
+        // 2D sprite backend.
+        .add(SpriteVisualsPlugin)
+        .add(Presentation2dPlugin)
+        .add(World2dPlugin)
+        // 3D model backend.
+        .add(Presentation3dPlugin)
+        .add(Verdant3dPlugin)
+        .add(crate::sponsorship::SponsorshipPlugin)
+        .add(DecorPlugin)
+        .add(JungleVisualsPlugin)
+        .add(MinionVisualsPlugin)
+        .add(BossesPlugin)
+        .add(ProjectileVisualsPlugin)
+        .add(BattlefieldAtmospherePlugin);
+    if features.ekza {
+        group
+    } else {
+        group.disable::<crate::sponsorship::SponsorshipPlugin>()
     }
 }
 
@@ -166,29 +183,71 @@ pub(crate) struct UiPlugins;
 
 impl PluginGroup for UiPlugins {
     fn build(self) -> PluginGroupBuilder {
-        PluginGroupBuilder::start::<Self>()
-            .add(UiKitPlugin)
-            .add(crate::connection_profile::ConnectionProfilePlugin)
-            .add(crate::render_settings::RenderSettingsPlugin)
-            .add(MobileControlsPlugin)
-            .add(MobileUiPlugin)
-            .add(FrontendPlugin)
-            .add(crate::frontend::boot::BootSplashPlugin)
-            .add(TeamSelectPlugin)
-            .add(GameStateUiPlugin)
-            .add(crate::hud_layout::HudLayoutPlugin)
-            .add(crate::contour_badge::ContourBadgePlugin)
-            .add(MatchHudPlugin)
-            .add(EdgeHudPlugin)
-            .add(MinimapPlugin)
-            .add(ShopPlugin)
-            .add(HelpOverlayPlugin)
-            .add(PauseMenuPlugin)
-            .add(crate::phone_layout_preview::PhoneLayoutPreviewPlugin)
-            .add(SocialPlugin)
-            .add(PartyPlugin)
-            .add(CareerPlugin)
-            .add(SupporterPlugin)
-            .add(SupporterStoreKitPlugin)
+        ui_plugins(shared::market::FEATURES)
+    }
+}
+
+/// [`UiPlugins`] of a build with `features`.
+fn ui_plugins(features: Features) -> PluginGroupBuilder {
+    let group = PluginGroupBuilder::start::<UiPlugins>()
+        .add(UiKitPlugin)
+        .add(crate::connection_profile::ConnectionProfilePlugin)
+        .add(crate::render_settings::RenderSettingsPlugin)
+        .add(MobileControlsPlugin)
+        .add(MobileUiPlugin)
+        .add(FrontendPlugin)
+        .add(crate::frontend::boot::BootSplashPlugin)
+        .add(TeamSelectPlugin)
+        .add(GameStateUiPlugin)
+        .add(crate::hud_layout::HudLayoutPlugin)
+        .add(crate::contour_badge::ContourBadgePlugin)
+        .add(MatchHudPlugin)
+        .add(EdgeHudPlugin)
+        .add(MinimapPlugin)
+        .add(ShopPlugin)
+        .add(HelpOverlayPlugin)
+        .add(PauseMenuPlugin)
+        .add(crate::phone_layout_preview::PhoneLayoutPreviewPlugin)
+        .add(SocialPlugin)
+        .add(PartyPlugin)
+        .add(CareerPlugin)
+        .add(SupporterPlugin)
+        .add(SupporterStoreKitPlugin);
+    if features.supporter {
+        group
+    } else {
+        group
+            .disable::<SupporterPlugin>()
+            .disable::<SupporterStoreKitPlugin>()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use shared::market::Market;
+
+    #[test]
+    fn free_markets_register_no_ekza_placements_and_no_supporter_store() {
+        let global = Market::Global.default_features();
+        assert!(presentation_plugins(global).enabled::<crate::sponsorship::SponsorshipPlugin>());
+        let ui = ui_plugins(global);
+        assert!(ui.enabled::<SupporterPlugin>() && ui.enabled::<SupporterStoreKitPlugin>());
+        for market in [Market::Ru, Market::Cn] {
+            let features = market.default_features();
+            let presentation = presentation_plugins(features);
+            assert!(presentation.contains::<crate::sponsorship::SponsorshipPlugin>());
+            assert!(!presentation.enabled::<crate::sponsorship::SponsorshipPlugin>());
+            assert!(presentation.enabled::<Verdant3dPlugin>(), "{market:?}");
+            let ui = ui_plugins(features);
+            assert!(!ui.enabled::<SupporterPlugin>() && !ui.enabled::<SupporterStoreKitPlugin>());
+            assert!(ui.enabled::<CareerPlugin>(), "{market:?}");
+        }
+        // One feature flips one gate.
+        let supporter_only = Features {
+            ekza: false,
+            ..global
+        };
+        assert!(ui_plugins(supporter_only).enabled::<SupporterPlugin>());
     }
 }

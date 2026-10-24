@@ -17,6 +17,9 @@ GRANT SELECT,INSERT,UPDATE,DELETE ON portal.ekza_library_links TO :"portal_role"
 GRANT SELECT,INSERT,UPDATE,DELETE ON portal.class_builds TO :"portal_role";
 GRANT SELECT,INSERT,UPDATE,DELETE ON portal.device_enrollments,portal.recovery_codes,
   portal.supporter_nonces TO :"portal_role";
+-- Sign in with VK ID (portal schema 7): keyed identity hashes, tickets, game links.
+GRANT SELECT,INSERT,UPDATE,DELETE ON portal.social_identities,portal.social_tickets,
+  portal.social_links TO :"portal_role";
 GRANT SELECT,INSERT ON portal.supporter_events TO :"portal_role";
 GRANT SELECT,INSERT,UPDATE ON portal.supporter_accounts,portal.supporter_grants,
   portal.supporter_preferences,portal.supporter_orders TO :"portal_role";

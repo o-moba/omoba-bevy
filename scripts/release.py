@@ -46,6 +46,21 @@ dev build refuses production ones. Production clients have no server selection.
 No build inherits a compile-time default (OMOBA_DEFAULT_*, OMOBA_ACCOUNT_API_URL,
 OMOBA_PORTAL_ORIGIN, EKZA_DEV_HTTP_HOST) from the shell.
 
+Markets (scripts/markets.py, shared/src/market.rs) are a second axis: a build
+serves one market. `--market ru` is a free game on the Russian servers (no Ekza
+ecosystem, no purchases, Russian by default, VK ID sign-in on the RU portal);
+`--feature ekza=on` flips one feature for a test build without a new market:
+
+    python3 scripts/release.py markets                      # presets, servers, platforms
+    python3 scripts/release.py preflight --market ru        # are the RU servers up?
+    python3 scripts/release.py build all --market ru        # Omoba-<v>-ru-* in dist/v<v>-ru/
+    python3 scripts/release.py build macos --market ru --server 127.0.0.1:4000 \
+        --account-api http://127.0.0.1:40550 --portal http://127.0.0.1:3010   # local RU stack
+
+RU packages keep their settings in `omoba-bevy-ru`, the Android app is
+space.ekza.omoba.ru, and the RU Linux package also carries omoba-account-api
+(built for the market) for the RU servers. See docs/markets.md.
+
 Nothing here publishes on its own: `draft` creates an unpublished draft
 release, `publish` pins packages to IPFS, `ios --upload` is the only step that
 sends a build to App Store Connect, and each must be asked for explicitly.
@@ -86,6 +101,8 @@ from contours import (ACCOUNT_API_ENV, PORTAL_ORIGIN_ENV, DEV_ACCOUNT_API, DEV_P
                       DEV_PASSPORT, DEV_REGISTRY, MOBILE, PASSPORT_DEFAULT_ENV, REGISTRY_DEFAULT_ENV,
                       SERVER_DEFAULT_ENV)
 from ios_release_guard import require_production_source
+import markets as market_presets  # noqa: E402
+from markets import FEATURE_ENVS, MARKET_ENV, MARKETS  # noqa: E402
 CLIENT_DEFAULT_ENVS = (SERVER_DEFAULT_ENV, REGISTRY_DEFAULT_ENV, PASSPORT_DEFAULT_ENV, CONFIG_SUFFIX_ENV)
 # Every compile-time setting the workspace (`option_env!`) or the pinned Ekza SDK
 # (EKZA_DEV_HTTP_HOST, ekza-bevy-sdk src/registry.rs) reads. A build drops all of
@@ -93,7 +110,8 @@ CLIENT_DEFAULT_ENVS = (SERVER_DEFAULT_ENV, REGISTRY_DEFAULT_ENV, PASSPORT_DEFAUL
 # then sets only its Flavor's values; scripts/test_release.py keeps this list in
 # step with the sources.
 BUILD_TIME_ENV_PREFIX = "OMOBA_DEFAULT_"
-BUILD_TIME_ENVS = CLIENT_DEFAULT_ENVS + ("OMOBA_ACCOUNT_API_URL", "OMOBA_PORTAL_ORIGIN", "EKZA_DEV_HTTP_HOST")
+BUILD_TIME_ENVS = CLIENT_DEFAULT_ENVS + ("OMOBA_ACCOUNT_API_URL", "OMOBA_PORTAL_ORIGIN", "EKZA_DEV_HTTP_HOST",
+                                         MARKET_ENV, *FEATURE_ENVS.values())
 
 # Contours. Production: the public beta lobby on the production VPS and the Ekza
 # registry/Studio. DEV: ops/vps/omoba-lobby-dev.service on the dedicated dev VPS
@@ -106,8 +124,12 @@ DEV_PLATFORMS = PLATFORMS
 # The dev Linux package also carries the dev lobby's schema migration tool
 # (ops/vps/dev/lobby_dev.py runs `omoba-account-api migrate` on the dev VPS).
 DEV_LINUX_TOOLS = ("omoba-account-api",)
+# A market with its own account service ships the Account API built for it in its
+# Linux package: the market's servers run exactly the features its clients have.
+MARKET_LINUX_TOOLS = ("omoba-account-api",)
 DEV_IP_ENV = "DEV_IP"
 PROD_VPS_IPS = frozenset({"77.246.105.57"})
+BETA_LOBBY = "77.246.105.57:4000"
 PUBLIC_ZONES = ("omoba.io", "ekza.io")
 DEV_ZONES = ("dev.omoba.io", "dev.ekza.io")
 DEV_TAG = re.compile(r"v\d+\.\d+\.\d+-dev\.\d+")
@@ -116,12 +138,18 @@ LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 
 @dataclass(frozen=True)
 class Flavor:
-    """What one build bakes in: contour, initial server, registry and passport, settings folder."""
+    """What one build bakes in: contour, market, initial server, registry and passport,
+    account service and portal, settings folder."""
     contour: str = "prod"
     server: str | None = None
     registry: str | None = None
     config_suffix: str | None = None
     passport: str | None = None
+    market: str = "global"
+    features: tuple[tuple[str, bool], ...] = ()
+    """--feature overrides of the market preset, sorted."""
+    account_api: str | None = None
+    portal: str | None = None
 
     @property
     def dev(self) -> bool:
@@ -129,8 +157,8 @@ class Flavor:
 
     @property
     def label(self) -> str:
-        """Inserted after the version in package and dist directory names."""
-        return "-dev" if self.dev else ""
+        """Inserted after the version in package and dist directory names: -ru, -dev, -ru-dev."""
+        return MARKETS[self.market].label + ("-dev" if self.dev else "")
 
     @property
     def app_name(self) -> str:
@@ -138,18 +166,26 @@ class Flavor:
 
     @property
     def bundle_id(self) -> str:
-        return MAC_BUNDLE_ID + ".dev" if self.dev else MAC_BUNDLE_ID
+        market = "" if self.market == "global" else f".{self.market}"
+        return MAC_BUNDLE_ID + market + (".dev" if self.dev else "")
 
     @property
     def config_dir(self) -> str:
         """Mirrors client/src/platform.rs config_directory_name."""
-        return f"omoba-bevy-{self.config_suffix}" if self.config_suffix else "omoba-bevy"
+        return market_presets.config_dir(self.market, self.config_suffix)
+
+    @property
+    def resolved_features(self) -> dict[str, bool]:
+        return market_presets.resolve_features(self.market, dict(self.features))
 
     def client_defaults(self) -> dict[str, str]:
         values = {SERVER_DEFAULT_ENV: self.server, REGISTRY_DEFAULT_ENV: self.registry,
-                  PASSPORT_DEFAULT_ENV: self.passport, CONFIG_SUFFIX_ENV: self.config_suffix}
+                  PASSPORT_DEFAULT_ENV: self.passport, CONFIG_SUFFIX_ENV: self.config_suffix,
+                  ACCOUNT_API_ENV: self.account_api, PORTAL_ORIGIN_ENV: self.portal}
         if self.dev:
-            values.update({ACCOUNT_API_ENV: DEV_ACCOUNT_API, PORTAL_ORIGIN_ENV: DEV_PORTAL_ORIGIN})
+            values.update({ACCOUNT_API_ENV: self.account_api or DEV_ACCOUNT_API,
+                           PORTAL_ORIGIN_ENV: self.portal or DEV_PORTAL_ORIGIN})
+        values.update(market_presets.market_env(self.market, dict(self.features)))
         return {key: value for key, value in values.items() if value}
 
 
@@ -197,11 +233,11 @@ def release_notes(version: str, changelog: str) -> str:
     return body.strip() + "\n"
 
 
-def artifact_name(version: str, target: str, contour: str = "prod") -> str:
-    """Package file name; a dev-contour package carries `-dev` after the version."""
+def artifact_name(version: str, target: str, contour: str = "prod", market: str = "global") -> str:
+    """Package file name: the version, then `-<market>` (not for global) and `-dev`."""
     if contour not in CONTOURS:
         raise SystemExit(f"unknown contour {contour!r}")
-    label = version + ("-dev" if contour == "dev" else "")
+    label = version + market_presets.market(market).label + ("-dev" if contour == "dev" else "")
     return {
         "macos": f"Omoba-{label}-macos-arm64.zip",
         "windows": f"Omoba-{label}-windows-x64.zip",
@@ -372,14 +408,79 @@ def is_prod_host(host: str | None) -> bool:
     return bool(host) and (host in PROD_VPS_IPS or (in_zone(host, PUBLIC_ZONES) and not in_zone(host, DEV_ZONES)))
 
 
+def validate_origin(name: str, origin: str | None) -> str | None:
+    """--account-api / --portal: an exact https:// origin (http:// only on loopback), no path."""
+    if origin is None:
+        return None
+    parts = urlsplit(origin)
+    try:
+        parts.port
+    except ValueError:
+        raise SystemExit(f"--{name} has an invalid port: {origin!r}") from None
+    if (parts.scheme not in ("https", "http") or not parts.hostname or parts.username is not None
+            or parts.password is not None or parts.query or parts.fragment or parts.path not in ("", "/")
+            or origin.endswith("/") or any(ch.isspace() or ch in "\"'\\" for ch in origin)):
+        raise SystemExit(f"--{name} must be an exact https:// origin without a path, got {origin!r}")
+    if parts.scheme == "http" and parts.hostname not in LOOPBACK_HOSTS:
+        raise SystemExit(f"--{name} may use http:// only on loopback, got {origin!r}")
+    return origin
+
+
+def other_market_zone(market: str, host: str | None) -> str | None:
+    """The market whose own servers `host` belongs to, if it is not `market`."""
+    for key, preset in MARKETS.items():
+        if key != market and in_zone(host, preset.zones):
+            return key
+    return None
+
+
 def resolve_flavor(contour: str = "prod", server: str | None = None, registry: str | None = None,
-                   passport: str | None = None) -> Flavor:
-    """Validate a build's endpoints and refuse to cross contours in either direction."""
+                   passport: str | None = None, market: str = "global",
+                   features: dict[str, bool] | None = None, account_api: str | None = None,
+                   portal: str | None = None) -> Flavor:
+    """Validate a build's endpoints and refuse to cross contours or markets."""
     if contour not in CONTOURS:
         raise SystemExit(f"--contour must be one of {', '.join(CONTOURS)}, got {contour!r}")
+    preset = market_presets.market(market)
+    if preset.blocked:
+        raise SystemExit(f"cannot package --market {market}: {preset.blocked}")
+    resolved = market_presets.resolve_features(market, features)
     server = validate_server(server)
     registry = validate_registry(registry)
     passport = validate_passport(passport)
+    account_api = validate_origin("account-api", account_api)
+    portal = validate_origin("portal", portal)
+    if not resolved["ekza"] and (registry or passport):
+        raise SystemExit("--registry/--passport need the ekza feature; this market builds without Ekza")
+    for name, value in (("--server", endpoint_host(server)), ("--account-api", registry_host(account_api)),
+                        ("--portal", registry_host(portal))):
+        if owner := other_market_zone(market, value):
+            raise SystemExit(f"{name} {value} is a {owner} market server; build with --market {owner}")
+    if (account_api is None) != (portal is None):
+        raise SystemExit("--account-api and --portal go together (the portal trusts exactly one service)")
+    if contour == "dev" and account_api:
+        raise SystemExit("OMOBA Dev always uses the DEV Account API and portal (passport/src/web_account.rs)")
+    if market != "global":
+        if server and server == BETA_LOBBY:
+            raise SystemExit(f"{server} is the global public lobby; a {market} build uses its market's lobby")
+        overrides = tuple(sorted((features or {}).items()))
+        if contour == "dev":
+            flavor = resolve_flavor("dev", server, registry, passport)
+            return Flavor("dev", flavor.server, flavor.registry if resolved["ekza"] else None,
+                          DEV_CONFIG_SUFFIX, flavor.passport if resolved["ekza"] else None, market,
+                          overrides, account_api, portal)
+        return Flavor("prod", server or preset.lobby, registry, None, passport, market, overrides,
+                      account_api or preset.account_api, portal or preset.portal)
+    if features:
+        flavor = resolve_flavor(contour, server, registry, passport)
+        ekza = resolved["ekza"]
+        return Flavor(flavor.contour, flavor.server, flavor.registry if ekza else None,
+                      flavor.config_suffix, flavor.passport if ekza else None, "global",
+                      tuple(sorted(features.items())), account_api, portal)
+    if account_api:
+        flavor = resolve_flavor(contour, server, registry, passport)
+        return Flavor(flavor.contour, flavor.server, flavor.registry, flavor.config_suffix,
+                      flavor.passport, "global", (), account_api, portal)
     if contour == "dev":
         server = server or DEV_LOBBY
         registry = registry or DEV_REGISTRY
@@ -655,7 +756,7 @@ def build_macos(version: str, out: Path, flavor: Flavor) -> Path:
         host.chmod(0o755)
         # Ad-hoc signature: required on Apple silicon; not a notarized identity.
         run("codesign", "--force", "--deep", "--sign", "-", app)
-        archive = out / artifact_name(version, "macos", flavor.contour)
+        archive = out / artifact_name(version, "macos", flavor.contour, flavor.market)
         # ditto keeps the bundle layout and signature intact.
         run("ditto", "-c", "-k", "--keepParent", stage, archive)
         return archive
@@ -697,14 +798,19 @@ def build_windows(version: str, out: Path, flavor: Flavor) -> Path:
     with tempfile.TemporaryDirectory() as temporary:
         stage = Path(temporary) / flavor.app_name
         stage_windows(stage, version, flavor, binaries["client"], binaries["server"])
-        archive = out / artifact_name(version, "windows", flavor.contour)
+        archive = out / artifact_name(version, "windows", flavor.contour, flavor.market)
         zip_tree(stage, archive, flavor.app_name)
         return archive
 
 
+def linux_tools(flavor: Flavor) -> tuple[str, ...]:
+    """Extra binaries of a Linux package: the dev lobby's migration tool, or a market's Account API."""
+    return DEV_LINUX_TOOLS if flavor.dev else MARKET_LINUX_TOOLS if flavor.market != "global" else ()
+
+
 def linux_binaries(flavor: Flavor) -> tuple[str, ...]:
-    """Cargo packages a Linux package is built from; dev adds the lobby's migration tool."""
-    return DESKTOP_BINARIES + (DEV_LINUX_TOOLS if flavor.dev else ())
+    """Cargo packages a Linux package is built from."""
+    return DESKTOP_BINARIES + linux_tools(flavor)
 
 
 def stage_linux(stage: Path, version: str, flavor: Flavor, client: Path, server_binary: Path,
@@ -712,7 +818,7 @@ def stage_linux(stage: Path, version: str, flavor: Flavor, client: Path, server_
     stage.mkdir(parents=True)
     shutil.copy2(client, stage / "omoba")
     shutil.copy2(server_binary, stage / "omoba-server")
-    expected = DEV_LINUX_TOOLS if flavor.dev else ()
+    expected = linux_tools(flavor)
     if set(tools or {}) != set(expected):
         raise SystemExit(f"a {flavor.contour} Linux package carries exactly {list(expected)}, "
                          f"got {sorted(tools or {})}")
@@ -799,7 +905,7 @@ def linux_docker_env_args(flavor: Flavor) -> list[str]:
 
 
 def build_linux(version: str, out: Path, flavor: Flavor) -> Path:
-    archive = out / artifact_name(version, "linux", flavor.contour)
+    archive = out / artifact_name(version, "linux", flavor.contour, flavor.market)
     packages = linux_binaries(flavor)
     if host_platform() == "linux":
         binaries = cargo_release(packages, client_env(flavor))
@@ -897,14 +1003,14 @@ def build_android(version: str, out: Path, flavor: Flavor) -> Path:
         args += ["--ndk", ndk]
     if flavor.server:
         args += ["--server", flavor.server]
-    args += ["--contour", flavor.contour]
+    args += ["--contour", flavor.contour, "--market", flavor.market]
     run(*args, env=client_env(flavor))
-    apk = work / f"omoba-{version}{flavor.label}-android-{abi}-debug.apk"
+    apk = work / f"omoba-{version}{flavor.label}-android-{abi}-debug.apk"  # build.py apk_name
     if not apk.is_file():
         raise SystemExit(f"Android build produced no {apk.name}")
     for leftover in ("omoba-unaligned.apk", "omoba-unsigned.apk"):
         (work / leftover).unlink(missing_ok=True)
-    target = out / artifact_name(version, "android", flavor.contour)
+    target = out / artifact_name(version, "android", flavor.contour, flavor.market)
     shutil.copy2(apk, target)
     return target
 
@@ -1046,7 +1152,7 @@ def build_ios(version: str, out: Path, flavor: Flavor, build_number: str | None,
               f"({MOBILE[flavor.contour].bundle_id}); assign it to testers in TestFlight.")
         remember_ios_build(number)
     ipas = list(export.glob("*.ipa"))
-    target = out / artifact_name(version, "ios", flavor.contour)
+    target = out / artifact_name(version, "ios", flavor.contour, flavor.market)
     if ipas:
         shutil.copy2(ipas[0], target)
         return target
@@ -1055,15 +1161,16 @@ def build_ios(version: str, out: Path, flavor: Flavor, build_number: str | None,
 
 # ---------------------------------------------------------------- commands
 
-def dist_path(version: str, base: Path | None, contour: str = "prod") -> Path:
-    """dist/v<version>/ for production, dist/v<version>-dev/ for the dev contour."""
+def dist_path(version: str, base: Path | None, contour: str = "prod", market: str = "global") -> Path:
+    """dist/v<version>[-<market>][-dev]/: one folder per market and contour."""
     if contour not in CONTOURS:
         raise SystemExit(f"unknown contour {contour!r}")
-    return (base or ROOT / "dist") / (tag_for(version) + ("-dev" if contour == "dev" else ""))
+    label = market_presets.market(market).label + ("-dev" if contour == "dev" else "")
+    return (base or ROOT / "dist") / (tag_for(version) + label)
 
 
-def dist_dir(version: str, base: Path | None, contour: str = "prod") -> Path:
-    directory = dist_path(version, base, contour)
+def dist_dir(version: str, base: Path | None, contour: str = "prod", market: str = "global") -> Path:
+    directory = dist_path(version, base, contour, market)
     directory.mkdir(parents=True, exist_ok=True)
     return directory
 
@@ -1085,32 +1192,42 @@ def write_compatibility_manifest(out: Path, version: str) -> Path:
 
 def build_targets(platform_arg: str, flavor: Flavor, buildable: dict) -> list[str]:
     """Platforms one `build` invocation makes. Every platform has a dev app with its own
-    identity (desktop -dev packages, phones space.ekza.omoba.dev)."""
+    identity (desktop -dev packages, phones space.ekza.omoba.dev); a market packages
+    only its own platforms (scripts/markets.py)."""
+    allowed = set(MARKETS[flavor.market].platforms) & (set(DEV_PLATFORMS) if flavor.dev else set(PLATFORMS))
     if platform_arg != "all":
         if flavor.dev and platform_arg not in DEV_PLATFORMS:
             raise SystemExit(f"no dev-contour app for {platform_arg}")
+        if platform_arg not in allowed:
+            raise SystemExit(f"the {flavor.market} market is not packaged for {platform_arg}")
         return [platform_arg]
-    return [p for p in PLATFORMS if buildable[p] and (not flavor.dev or p in DEV_PLATFORMS)]
+    return [p for p in PLATFORMS if buildable[p] and p in allowed]
 
 
 def build_plan(version: str, flavor: Flavor, targets: list[str], out: Path) -> dict:
-    return {"version": version, "contour": flavor.contour, "server": flavor.server,
-            "registry": flavor.registry, "passport": flavor.passport, "config_dir": flavor.config_dir,
+    return {"version": version, "contour": flavor.contour, "market": flavor.market,
+            "features": flavor.resolved_features, "server": flavor.server,
+            "registry": flavor.registry, "passport": flavor.passport, "account_api": flavor.account_api,
+            "portal": flavor.portal, "config_dir": flavor.config_dir,
             "compiled_defaults": flavor.client_defaults(),
             "linux_binaries": list(linux_binaries(flavor)) if "linux" in targets else [], "dist": str(out),
-            "packages": [str(out / artifact_name(version, target, flavor.contour)) for target in targets]}
+            "packages": [str(out / artifact_name(version, target, flavor.contour, flavor.market))
+                         for target in targets]}
 
 
 def command_build(args) -> int:
     version = workspace_version()
-    flavor = resolve_flavor(args.contour, args.server, args.registry, args.passport)
+    flavor = resolve_flavor(args.contour, args.server, args.registry, args.passport, args.market,
+                            market_presets.parse_feature_overrides(args.feature), args.account_api,
+                            args.portal)
     report = check_report()
     targets = build_targets(args.platform, flavor, report["platforms"])
     if args.dry_run:
         print(json.dumps({"dry_run": True, **build_plan(version, flavor, targets,
-                                                        dist_path(version, args.out, flavor.contour))}, indent=2))
+                                                        dist_path(version, args.out, flavor.contour,
+                                                                  flavor.market))}, indent=2))
         return 0
-    out = dist_dir(version, args.out, flavor.contour)
+    out = dist_dir(version, args.out, flavor.contour, flavor.market)
     minimum = float(os.environ.get("OMOBA_MIN_FREE_GIB", "20"))
     if args.platform == "all" and report["free_gib"] < minimum:
         raise SystemExit(f"only {report['free_gib']} GiB free; a full release needs ~{minimum:g} GiB "
@@ -1167,21 +1284,23 @@ def pinata_pin(path: Path, token: str) -> str:
 def command_publish(args) -> int:
     """Pin every built package to IPFS, re-download it and record the verified links."""
     version = workspace_version()
-    contour = args.contour
+    contour, market = args.contour, getattr(args, "market", "global")
+    market_presets.market(market)
     if args.dry_run:
-        out = dist_path(version, args.out, contour)
-        pending = [str(out / artifact_name(version, target, contour)) for target in PLATFORMS
-                   if (out / artifact_name(version, target, contour)).is_file()]
-        print(json.dumps({"dry_run": True, "contour": contour, "dist": str(out), "would_pin": pending}, indent=2))
+        out = dist_path(version, args.out, contour, market)
+        pending = [str(out / artifact_name(version, target, contour, market)) for target in PLATFORMS
+                   if (out / artifact_name(version, target, contour, market)).is_file()]
+        print(json.dumps({"dry_run": True, "contour": contour, "market": market, "dist": str(out),
+                          "would_pin": pending}, indent=2))
         return 0
     token = os.environ.get("PINATA_JWT")
     if not token:
         raise SystemExit("Set PINATA_JWT to pin packages")
-    out = dist_dir(version, args.out, contour)
+    out = dist_dir(version, args.out, contour, market)
     receipt_path = out / "ipfs.json"
     receipt = json.loads(receipt_path.read_text()) if receipt_path.is_file() else {}
     for target in PLATFORMS:
-        path = out / artifact_name(version, target, contour)
+        path = out / artifact_name(version, target, contour, market)
         if not path.is_file():
             continue
         digest = sha256(path)
@@ -1203,14 +1322,117 @@ def command_publish(args) -> int:
     return 0
 
 
+def command_markets(args) -> int:
+    print(json.dumps({key: {"features": preset.features, "locale": preset.locale,
+                            "settings_folder": market_presets.config_dir(key, None),
+                            "lobby": preset.lobby or BETA_LOBBY, "account_api": preset.account_api,
+                            "portal": preset.portal, "platforms": list(preset.platforms),
+                            "blocked": preset.blocked} for key, preset in MARKETS.items()}, indent=2))
+    return 0
+
+
+def preflight_report(market: str, resolve=None, fetch=None) -> dict:
+    """Whether a market's lobby name resolves and its Account API / portal answer over HTTPS."""
+    import socket
+    import urllib.request
+    preset = market_presets.market(market)
+    resolve = resolve or (lambda host: sorted({info[4][0] for info in socket.getaddrinfo(host, None)}))
+    def default_fetch(url: str) -> int:
+        try:
+            with urllib.request.urlopen(urllib.request.Request(url, method="GET"), timeout=8) as response:
+                return response.status
+        except urllib.error.HTTPError as error:
+            return error.code
+    fetch = fetch or default_fetch
+    checks = {}
+    if preset.lobby:
+        host = endpoint_host(preset.lobby)
+        try:
+            checks["lobby_dns"] = {"host": host, "ok": True, "addresses": resolve(host)}
+        except OSError as error:
+            checks["lobby_dns"] = {"host": host, "ok": False, "error": type(error).__name__}
+    for name, url in (("account_api", preset.account_api and preset.account_api + "/health/ready"),
+                      ("portal", preset.portal and preset.portal + "/")):
+        if not url:
+            continue
+        try:
+            status = fetch(url)
+            checks[name] = {"url": url, "ok": 200 <= status < 400, "status": status}
+        except OSError as error:
+            checks[name] = {"url": url, "ok": False, "error": type(error).__name__}
+    return {"market": market, "blocked": preset.blocked,
+            "ready": not preset.blocked and bool(checks) and all(c["ok"] for c in checks.values()),
+            "checks": checks}
+
+
+def command_preflight(args) -> int:
+    report = preflight_report(args.market)
+    print(json.dumps(report, indent=2))
+    return 0 if report["ready"] else 1
+
+
+CATALOG_PLATFORMS = {"macos": ("macos", "arm64"), "windows": ("windows", "x86_64"),
+                     "linux": ("linux", "x86_64"), "android": ("android", "universal")}
+CATALOG_INSTRUCTIONS = {
+    "ru": {"macos": "Распакуйте архив и перенесите Omoba.app в «Программы». Первый запуск: правый клик → Открыть.",
+           "windows": "Распакуйте архив целиком и запустите Omoba.exe. SmartScreen: «Подробнее» → «Выполнить в любом случае».",
+           "linux": "Распакуйте архив и запустите ./omoba.",
+           "android": "Разрешите установку из браузера или файлового менеджера и откройте APK."},
+}
+DEFAULT_INSTRUCTIONS = {"macos": "Unzip and move Omoba.app to Applications; first start: right-click -> Open.",
+                        "windows": "Unzip the whole folder and run Omoba.exe.",
+                        "linux": "Unpack and run ./omoba.",
+                        "android": "Allow installs from your browser or file manager, then open the APK."}
+
+
+def release_catalog(receipt: dict, version: str, market: str, published_at: str) -> dict:
+    """The Account API download catalog (OMOBA_RELEASE_CATALOG, account-api/README.md#downloads)
+    from `publish` receipts: only packages whose gateway bytes were verified."""
+    instructions = CATALOG_INSTRUCTIONS.get(market, DEFAULT_INSTRUCTIONS)
+    releases = []
+    for target, (platform_name, architecture) in CATALOG_PLATFORMS.items():
+        entry = receipt.get(target)
+        if not entry:
+            continue
+        if not str(entry["url"]).startswith("https://") or not re.fullmatch(r"[0-9a-f]{64}", entry["sha256"]):
+            raise SystemExit(f"{target}: receipt is not a verified https download")
+        releases.append({"platform": platform_name, "architecture": architecture, "version": version,
+                         "url": entry["url"], "sha256": entry["sha256"], "size_bytes": str(entry["bytes"]),
+                         "published_at": published_at, "instructions": instructions[target],
+                         "test_status": "playtest"})
+    return {"releases": releases}
+
+
+def command_catalog(args) -> int:
+    version = workspace_version()
+    out = dist_path(version, args.out, "prod", args.market)
+    receipt_path = out / "ipfs.json"
+    if not receipt_path.is_file():
+        raise SystemExit(f"{receipt_path} is missing: run `publish --market {args.market}` first")
+    published = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(receipt_path.stat().st_mtime))
+    catalog = release_catalog(json.loads(receipt_path.read_text()), version, args.market, published)
+    target = out / "releases.json"
+    target.write_text(json.dumps(catalog, indent=2, ensure_ascii=False) + "\n")
+    print(f"{target}: {len(catalog['releases'])} downloads; install it as the market Account API's "
+          "OMOBA_RELEASE_CATALOG (ops/vps/ru/README.md)")
+    return 0
+
+
 def command_notes(args) -> int:
     version = workspace_version()
     print(release_notes(version, (ROOT / "CHANGELOG.md").read_text()))
     return 0
 
 
-def release_tag(contour: str, tag: str | None, version: str) -> str:
-    """Dev packages only ever go to an explicit v<version>-dev.N tag, never a production one."""
+def release_tag(contour: str, tag: str | None, version: str, market: str = "global") -> str:
+    """Dev packages only ever go to an explicit v<version>-dev.N tag, never a production one;
+    a market's packages to its own v<version>-<market> tag."""
+    if market != "global":
+        label = market_presets.market(market).label
+        expected = tag_for(version) + label
+        if contour == "dev" or (tag or expected) != expected:
+            raise SystemExit(f"{market} market releases go to {expected} (production contour only)")
+        return expected
     if contour == "dev":
         if not tag or not DEV_TAG.fullmatch(tag):
             raise SystemExit(f"dev-contour releases need an explicit --tag/--ref like {tag_for(version)}-dev.1, "
@@ -1224,17 +1446,19 @@ def release_tag(contour: str, tag: str | None, version: str) -> str:
 
 def command_draft(args) -> int:
     version = workspace_version()
-    contour = args.contour
-    tag = release_tag(contour, args.tag, version)
+    contour, market = args.contour, getattr(args, "market", "global")
+    tag = release_tag(contour, args.tag, version, market)
     target = args.target or ("dev" if contour == "dev" else "main")
     title = f"OMOBA {version} DEV (test contour)" if contour == "dev" else f"OMOBA {version} (playtest)"
+    if market != "global":
+        title = f"OMOBA {version} ({market.upper()} market)"
     if args.dry_run:
-        out = dist_path(version, args.out, contour)
+        out = dist_path(version, args.out, contour, market)
         files = sorted(str(p) for p in out.iterdir() if p.is_file()) if out.is_dir() else []
-        print(json.dumps({"dry_run": True, "contour": contour, "tag": tag, "target": target,
-                          "title": title, "dist": str(out), "files": files}, indent=2))
+        print(json.dumps({"dry_run": True, "contour": contour, "market": market, "tag": tag,
+                          "target": target, "title": title, "dist": str(out), "files": files}, indent=2))
         return 0
-    out = dist_dir(version, args.out, contour)
+    out = dist_dir(version, args.out, contour, market)
     files = sorted(p for p in out.iterdir() if p.is_file())
     if not files:
         raise SystemExit(f"{out} is empty; build first")
@@ -1256,6 +1480,9 @@ def command_draft(args) -> int:
 
 def ci_command(args, version: str) -> list[str]:
     """The `gh workflow run` invocation for release.yml; dev runs build the dev branch by default."""
+    if getattr(args, "market", "global") != "global":
+        raise SystemExit("release.yml builds the global market only; build market packages on the Mac "
+                         f"(python3 scripts/release.py build all --market {args.market})")
     flavor = resolve_flavor(args.contour, args.server, args.registry)
     tag = release_tag(flavor.contour, args.ref, version)
     branch = args.branch or ("dev" if flavor.dev else "main")
@@ -1284,7 +1511,15 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="command", required=True)
     contour_help = "prod (default) or dev: dev lobby + dev registry, own settings folder, -dev package names"
+    market_help = ("global (default), ru or cn: the market's features, servers, settings folder and "
+                   "-<market> package names (scripts/markets.py)")
     sub.add_parser("check", help="what this host can build")
+    sub.add_parser("markets", help="print every market's features, servers and platforms")
+    preflight = sub.add_parser("preflight", help="check that a market's servers answer (DNS, HTTPS health)")
+    preflight.add_argument("--market", choices=tuple(MARKETS), default="ru")
+    catalog = sub.add_parser("catalog", help="write the Account API download catalog from publish receipts")
+    catalog.add_argument("--market", choices=tuple(MARKETS), default="ru")
+    catalog.add_argument("--out", type=Path)
     build = sub.add_parser("build", help="build platform packages into dist/v<version>/")
     build.add_argument("platform", choices=PLATFORMS + ("all",))
     build.add_argument("--server", help="initial game server host:port compiled into clients")
@@ -1292,6 +1527,11 @@ def main(argv=None) -> int:
     build.add_argument("--passport", help="Ekza passport URL (…/api/passport) compiled into clients "
                                           f"(dev default: {DEV_PASSPORT}, closed)")
     build.add_argument("--contour", choices=CONTOURS, default="prod", help=contour_help)
+    build.add_argument("--market", choices=tuple(MARKETS), default="global", help=market_help)
+    build.add_argument("--feature", action="append", metavar="NAME=on|off",
+                       help="override one market feature (ekza, supporter, vk_sign_in); repeatable")
+    build.add_argument("--account-api", help="Account API origin compiled into clients (default: the market's)")
+    build.add_argument("--portal", help="player portal origin compiled into clients (with --account-api)")
     build.add_argument("--out", type=Path, help="dist base directory (default: dist/)")
     build.add_argument("--ios-build", help="iOS build number (default: local xcconfig + 1)")
     build.add_argument("--upload", action="store_true", help="iOS: upload to App Store Connect / TestFlight")
@@ -1301,12 +1541,14 @@ def main(argv=None) -> int:
     publish.add_argument("--out", type=Path)
     publish.add_argument("--gateway", default="https://ekza.mypinata.cloud")
     publish.add_argument("--contour", choices=CONTOURS, default="prod", help=contour_help)
+    publish.add_argument("--market", choices=tuple(MARKETS), default="global", help=market_help)
     publish.add_argument("--dry-run", action="store_true", help="list the packages that would be pinned")
     draft = sub.add_parser("draft", help="create or update a DRAFT GitHub release with dist/ files")
     draft.add_argument("--tag", help="release tag (dev contour: required, v<version>-dev.N)")
     draft.add_argument("--target", help="commit/branch the new tag points at (default: main; dev contour: dev)")
     draft.add_argument("--out", type=Path)
     draft.add_argument("--contour", choices=CONTOURS, default="prod", help=contour_help)
+    draft.add_argument("--market", choices=tuple(MARKETS), default="global", help=market_help)
     draft.add_argument("--dry-run", action="store_true", help="print the tag, target and files; change nothing")
     ci = sub.add_parser("ci", help="run the GitHub release workflow (all platforms)")
     ci.add_argument("--ref", help="release tag to create/update (default: v<version>; dev contour: required)")
@@ -1314,13 +1556,15 @@ def main(argv=None) -> int:
     ci.add_argument("--server")
     ci.add_argument("--registry")
     ci.add_argument("--contour", choices=CONTOURS, default="prod", help=contour_help)
+    ci.add_argument("--market", choices=tuple(MARKETS), default="global", help=market_help)
     ci.add_argument("--dry-run", action="store_true", help="print the gh command; start nothing")
     args = parser.parse_args(argv)
     if args.command == "check":
         print(json.dumps(check_report(), indent=2))
         return 0
     return {"build": command_build, "notes": command_notes, "draft": command_draft, "ci": command_ci,
-            "publish": command_publish}[args.command](args)
+            "publish": command_publish, "markets": command_markets,
+            "preflight": command_preflight, "catalog": command_catalog}[args.command](args)
 
 
 if __name__ == "__main__":

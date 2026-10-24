@@ -9,6 +9,10 @@ Toolchains are supplied by the caller: this script never installs or upgrades th
 space.ekza.omoba.dev, label "OMOBA Dev", the DEV-ribbon launcher icons in res-dev/
 and the dev lobby, registry, closed passport and settings folder compiled in, so it
 installs beside the production app (space.ekza.omoba.beta) on one phone.
+
+`--market ru` builds a market's own app (scripts/markets.py): space.ekza.omoba.ru,
+label "OMOBA", the market's lobby, Account API and portal and `OMOBA_MARKET` compiled
+in. With `--contour dev` the market's features go into the OMOBA Dev app.
 """
 from __future__ import annotations
 
@@ -26,7 +30,8 @@ import zipfile
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
-from contours import CONTOURS, MOBILE, compile_defaults
+from contours import ACCOUNT_API_ENV, CONTOURS, MOBILE, PORTAL_ORIGIN_ENV, SERVER_DEFAULT_ENV, compile_defaults
+from markets import MARKET_ENV, MARKETS, market as market_preset
 from package_licenses import add_legal_notices_to_zip, collect_legal_notices
 
 PRODUCTION_PACKAGE = 'package="space.ekza.omoba.beta"'
@@ -46,16 +51,25 @@ ABIS = {
 DEFAULT_ABI = "arm64-v8a"
 
 
-def manifest_for(template: str, version: str, version_code: int, contour: str = "prod") -> str:
-    """The manifest of one app: the version, and the contour's package and label."""
-    identity = MOBILE[contour]
+def identity_for(contour: str = "prod", market: str = "global") -> tuple[str, str]:
+    """(package, label) of one app: the contour's, or a market's own production app."""
+    preset = market_preset(market)
+    if contour == "prod" and preset.android:
+        return preset.android["bundle_id"], preset.android["display_name"]
+    return MOBILE[contour].bundle_id, MOBILE[contour].display_name
+
+
+def manifest_for(template: str, version: str, version_code: int, contour: str = "prod",
+                 market: str = "global") -> str:
+    """The manifest of one app: the version, and the contour's (or market's) package and label."""
+    package, label = identity_for(contour, market)
     for needle in ("__VERSION__", 'android:versionCode="1"', PRODUCTION_PACKAGE, PRODUCTION_LABEL):
         if needle not in template:
             raise RuntimeError(f"AndroidManifest.xml no longer contains {needle}")
     return (template.replace("__VERSION__", version)
             .replace('android:versionCode="1"', f'android:versionCode="{version_code}"')
-            .replace(PRODUCTION_PACKAGE, f'package="{identity.bundle_id}"')
-            .replace(PRODUCTION_LABEL, f'android:label="{identity.display_name}"'))
+            .replace(PRODUCTION_PACKAGE, f'package="{package}"')
+            .replace(PRODUCTION_LABEL, f'android:label="{label}"'))
 
 
 def resource_dir(contour: str = "prod") -> Path:
@@ -63,15 +77,20 @@ def resource_dir(contour: str = "prod") -> Path:
     return Path(__file__).with_name(MOBILE[contour].android_res)
 
 
-def apk_name(version: str, abi_tag: str, contour: str = "prod") -> str:
-    """The signed APK; a dev APK never overwrites a production one in --output."""
-    label = version + ("-dev" if contour == "dev" else "")
+def apk_name(version: str, abi_tag: str, contour: str = "prod", market: str = "global") -> str:
+    """The signed APK; a dev or market APK never overwrites a production one in --output."""
+    label = version + market_preset(market).label + ("-dev" if contour == "dev" else "")
     return f"omoba-{label}-android-{abi_tag}-debug.apk"
 
 
-def contour_env(env: dict, contour: str, server: str | None) -> dict:
+def contour_env(env: dict, contour: str, server: str | None, market: str = "global") -> dict:
     """Cargo's environment: no compile-time default from the shell, then the
-    contour's (production: only --server; dev: its lobby, registry, passport, folder)."""
+    contour's (production: only --server; dev: its lobby, registry, passport, folder)
+    and the market's (OMOBA_MARKET; production: its lobby, Account API and portal).
+    Feature overrides (OMOBA_FEATURE_*) come only from scripts/release.py."""
+    preset = market_preset(market)
+    if env.get(MARKET_ENV, "") not in ("", market if market != "global" else ""):
+        raise RuntimeError(f"{MARKET_ENV}={env[MARKET_ENV]} does not match --market {market}")
     if contour == "dev":
         for key in [key for key in env if key.startswith("OMOBA_DEFAULT_") or key == "EKZA_DEV_HTTP_HOST"]:
             del env[key]
@@ -80,6 +99,12 @@ def contour_env(env: dict, contour: str, server: str | None) -> dict:
         # (scripts/release.py already hands it a scrubbed environment).
         env.pop("OMOBA_DEFAULT_CONFIG_DIR_SUFFIX", None)
     env.update(compile_defaults(contour, server))
+    if market != "global":
+        env[MARKET_ENV] = market
+        if contour == "prod":
+            env[SERVER_DEFAULT_ENV] = server or preset.lobby
+            env.setdefault(ACCOUNT_API_ENV, preset.account_api)
+            env.setdefault(PORTAL_ORIGIN_ENV, preset.portal)
     return env
 
 
@@ -98,6 +123,8 @@ def main():
     parser.add_argument("--server", help="optional host:port compiled as the lobby (dev: replaces lobby.dev.omoba.io:4100)")
     parser.add_argument("--contour", choices=CONTOURS, default="prod",
                         help="prod (default, space.ekza.omoba.beta) or dev (the OMOBA Dev app, space.ekza.omoba.dev)")
+    parser.add_argument("--market", choices=tuple(MARKETS), default="global",
+                        help="global (default) or a market's own app, e.g. ru (space.ekza.omoba.ru)")
     parser.add_argument("--version-code", type=int, default=1)
     parser.add_argument("--universal", action="store_true",
                          help="build all supported ABIs (arm64-v8a, armeabi-v7a, x86_64) into one APK "
@@ -165,7 +192,8 @@ def main():
         "free_bytes": free, "ready_to_build": not problems,
         "problems": problems,
         "distribution": "local debug APK; no public endpoint, publication or release signing",
-        "contour": args.contour, "package": MOBILE[args.contour].bundle_id,
+        "contour": args.contour, "market": args.market,
+        "package": identity_for(args.contour, args.market)[0],
     }
     print(json.dumps(report, indent=2))
     if problems:
@@ -205,7 +233,7 @@ def main():
             "-C", "link-arg=-Wl,--no-undefined",
             "-C", "link-arg=-lc++abi",
         ])
-        contour_env(env, args.contour, args.server)
+        contour_env(env, args.contour, args.server, args.market)
         run([tools["cargo"], "rustc", "--locked", "-p", "client", "--lib", "--target", rust_target,
              "--crate-type", "cdylib"], env=env)
         library = out / f"cargo/{rust_target}/debug/libclient.so"
@@ -217,7 +245,7 @@ def main():
         packaged_libs[abi] = packaged_lib
     version = re.search(r'(?ms)^\[workspace\.package\]\s*\n(?:(?!^\[).)*?^version\s*=\s*"([^"\n]+)"', (ROOT / "Cargo.toml").read_text()).group(1)
     manifest_text = manifest_for(Path(__file__).with_name("AndroidManifest.xml").read_text(), version,
-                                 args.version_code, args.contour)
+                                 args.version_code, args.contour, args.market)
     manifest = out / "AndroidManifest.xml"
     manifest.write_text(manifest_text)
     unaligned = out / "omoba-unaligned.apk"
@@ -240,7 +268,7 @@ def main():
                  "-storepass", "android", "-keypass", "android", "-alias", "androiddebugkey",
                  "-keyalg", "RSA", "-keysize", "2048", "-validity", "3650",
                  "-dname", "CN=Omoba Local Debug,O=Development,C=US"])
-        artifact = out / apk_name(version, abi_tag, args.contour)
+        artifact = out / apk_name(version, abi_tag, args.contour, args.market)
         run([paths["apksigner"], "sign", "--ks", keystore, "--ks-key-alias", "androiddebugkey",
              "--ks-pass", "pass:android", "--key-pass", "pass:android", "--out", artifact, unsigned])
         run([paths["apksigner"], "verify", "--verbose", artifact])

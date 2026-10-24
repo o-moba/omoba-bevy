@@ -1,5 +1,15 @@
 # Feature Inventory
 
+## Markets and sign in with VK ID
+
+Each build serves one market: `global` (today's product), `ru` (a free game on
+Russian servers, no Ekza ecosystem, no purchases, Russian by default) or `cn`
+(prepared, not packaged yet). `release.py --market ru` makes the RU set with its
+own servers, settings folder and Android app. RU players sign in with VK ID
+(VK, OK, Mail.ru) on the RU portal and from Profile in the game; the game's
+device key stays the account, and a VK sign-in is linked to a profile only after
+the game confirms. See [markets](markets.md).
+
 ## Temporary community sculptures
 
 One decorative slot beside the Wendigo pit displays the Registry-approved
@@ -455,6 +465,18 @@ new geometry or trajectories can be added there without modifying combat rules.
 This is a lightweight Bevy mesh/material particle foundation, without an extra
 GPU particle plugin or dynamic lights. Phone performance still needs device QA.
 These source changes are newer than TestFlight 0.20.0 (4).
+
+## Market builds
+
+One build serves one market (`shared/src/market.rs`). The global build is the
+full product. A free-market build (`OMOBA_MARKET=ru` or `cn`) ships the same
+heroes, packaged avatars, weapons and gameplay without the Ekza ecosystem and
+without purchases: no Ekza store, account link, wallet pairing, Studio tab or
+section, Ekza weapon library or catalogue, market hint, community sculpture or
+"Support OMOBA"; its client pins closed loopback Ekza endpoints and its server
+denies every hosted avatar or weapon. It opens in the market's language and keeps
+its settings in `omoba-bevy-<market>[-<contour>]`. The Home build line names the
+market (`· ru`); the startup log prints the full feature set.
 
 ## Shared accounts and Hero Supporter cosmetics
 

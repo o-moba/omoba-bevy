@@ -186,7 +186,7 @@ pub(super) fn body(parent: &mut ChildSpawnerCommands, career: &CareerClient) {
         label(
             parent,
             trf(
-                "web.challenge",
+                challenge_key(shared::market::FEATURES.supporter),
                 &[
                     ("origin", &c.origin),
                     (
@@ -231,9 +231,35 @@ pub(super) fn body(parent: &mut ChildSpawnerCommands, career: &CareerClient) {
     }
 }
 
+/// What the website may do: a build without Supporter has no Supporter to manage.
+fn challenge_key(supporter: bool) -> &'static str {
+    if supporter {
+        "web.challenge"
+    } else {
+        "web.challenge_free"
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn a_build_without_supporter_never_offers_supporter_management() {
+        use shared::market::Market;
+        assert_eq!(
+            challenge_key(Market::Global.default_features().supporter),
+            "web.challenge"
+        );
+        for market in [Market::Ru, Market::Cn] {
+            let key = challenge_key(market.default_features().supporter);
+            for locale in crate::i18n::available_locales() {
+                let full = crate::i18n::tr_in("web.challenge", locale);
+                let free = crate::i18n::tr_in(key, locale);
+                assert!(free.len() < full.len(), "{}", locale.code());
+            }
+            assert!(!crate::i18n::tr_in(key, crate::i18n::LocaleId::ENGLISH).contains("Supporter"));
+        }
+    }
     #[test]
     fn code_paste_is_bounded_and_atomic() {
         let mut code = String::new();

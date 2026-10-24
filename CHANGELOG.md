@@ -5,6 +5,40 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Markets: one build per region (`docs/markets.md`). `shared::market` bakes
+  `OMOBA_MARKET` (`global` default, `ru`, `cn`) and `OMOBA_FEATURE_EKZA|SUPPORTER|
+  VK_SIGN_IN` overrides into every crate; an unknown value fails the build.
+  `scripts/release.py --market ru [--feature NAME=on|off] [--account-api URL
+  --portal URL]` compiles the market's lobby, Account API and portal, names
+  packages `Omoba-<v>-ru-*` in `dist/v<v>-ru/`, packages only the market's
+  platforms (RU: macOS, Windows, Linux with the RU Account API, Android as
+  `space.ekza.omoba.ru`), and refuses another market's servers; `markets`,
+  `preflight` and `catalog` commands and `make release-ru*` targets support the
+  RU release. `ops/vps/ru/` holds the RU server units, Caddy ingress and env
+  examples. CN stays blocked until it has servers and sign-in providers.
+- Sign in with VK ID (VK, OK, Mail.ru) for markets with `vk_sign_in`. The Account
+  API (portal schema 7) exchanges the portal's authorization code itself and keeps
+  a VK user only as an HMAC under `OMOBA_SOCIAL_SECRET`. A linked VK account signs
+  the website in; an unknown one registers without creating a game profile and
+  is linked only when the game confirms with its active device key
+  (`POST /v1/auth/social/link`). In the game, Profile → «Войти через VK ID» opens
+  the portal's `/connect?code=…`, checks the request every three seconds, then
+  links this profile or switches to the VK account after a restart. Free-market
+  Account API builds serve no Supporter or Ekza library route and refuse billing
+  settings. See [the session note](docs/progress/2026-10-24-market-profiles.md).
+
+- Market builds are gated at compile time. A build without Ekza (`OMOBA_MARKET=ru`
+  or `cn`) starts no Ekza store, account link, wallet pairing or community
+  sculpture, pins closed loopback registry and passport endpoints (ignoring
+  `OMOBA_REGISTRY_URL`/`OMOBA_PASSPORT_URL`) and shows no Studio, wallet, Ekza
+  library or market UI in Collection, hero select and the draft; a saved Ekza
+  weapon falls back to the class default. Its server admits no protected avatar
+  or `ekza-` weapon and makes no registry or passport request. A build without
+  Supporter registers no Supporter or StoreKit plugin and hides "Support OMOBA".
+  First launch opens in the market's language, and a non-global market keeps its
+  settings in `omoba-bevy-<market>[-<contour>]`. The global build is unchanged.
+  See [the session note](docs/progress/2026-10-23-market-gating.md).
+
 - The Ekza rendition builder (`scripts/ekza_build_rendition.py`, profile
   `desktop/humanoid-glb-v1`) now bakes idle/walk/attack/cast/death onto VRM 1.0
   (`VRMC_vrm`) sources instead of failing with `build_failed: no VRM extension`.
