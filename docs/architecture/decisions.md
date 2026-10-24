@@ -116,7 +116,7 @@ flowchart LR
 ## ADR-004: Sign in with VK ID goes through the Account API and reaches the device-key account
 
 - **Date:** 2026-10-23 (Account API, `428ccac`) to 2026-10-24 (in-game flow `6bd67dd` and its signature test `7198913`; merged to `dev` in PR #107). Recorded retrospectively.
-- **Status:** Accepted, partly implemented. The code and tests (with a loopback VK stand-in) are done. The real VK ID app, RU hosting and DNS are owner steps that have not been done yet, The RU portal reaches the Account API on loopback ([ops/vps/ru/README.md › Topology](../../ops/vps/ru/README.md#topology)).
+- **Status:** Accepted, partly implemented. The code and tests (with a loopback VK stand-in) are done. The real VK ID app, RU hosting and DNS are owner steps that have not been done yet. The RU portal reaches the Account API on loopback ([ops/vps/ru/README.md › Topology](../../ops/vps/ru/README.md#topology)).
 
 **Context.** The RU market needs a familiar sign-in for the website and for new devices. ADR-001 already defines the account. Personal data of Russian players must be stored in Russia.
 
