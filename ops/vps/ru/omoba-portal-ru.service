@@ -1,0 +1,58 @@
+# RU player portal (omoba-web `output: standalone`, built with OMOBA_MARKET=ru) on
+# 127.0.0.1:3010 behind Caddy (Caddyfile.ru, app.ru.omoba.io). It calls the Account
+# API on loopback (README.md, "Topology"). Installed by ops/vps/ru/ru_host.py
+# bootstrap; releases go to /opt/omoba-ru/portal/releases/<name> with `ru_host.py
+# ship-portal`, which also links the release's .next/cache to the cache directory
+# below. Node.js (>= 20.9, Next.js 16) lives in /opt/omoba-ru/node/current.
+# The unit runs server.js itself, so a crash of the server is a crash of the unit
+# and restarts it (scripts/start.mjs is only for development).
+[Unit]
+Description=OMOBA RU player portal
+After=network-online.target omoba-account-api-ru.service
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=omoba-portal-ru
+Group=omoba-portal-ru
+WorkingDirectory=/opt/omoba-ru/portal/current
+# See portal.env.example: market, portal origin, loopback Account API, trust switch,
+# VK ID app id and PORT=3010. It must not repeat a setting of this unit.
+EnvironmentFile=/opt/omoba-ru/portal.env
+Environment=NODE_ENV=production
+Environment=HOSTNAME=127.0.0.1
+Environment=NODE_OPTIONS=--max-old-space-size=320
+# Nothing leaves Russia from this host: no Next.js telemetry.
+Environment=NEXT_TELEMETRY_DISABLED=1
+ExecStart=/opt/omoba-ru/node/current/bin/node /opt/omoba-ru/portal/current/server.js
+Restart=always
+RestartSec=5
+TimeoutStopSec=15
+CacheDirectory=omoba-portal-ru
+CacheDirectoryMode=0700
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+RestrictNamespaces=true
+LockPersonality=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+CapabilityBoundingSet=
+MemoryHigh=448M
+MemoryMax=512M
+CPUQuota=100%
+TasksMax=64
+
+[Install]
+WantedBy=multi-user.target

@@ -11,7 +11,12 @@ device key stays the account, and a VK sign-in is linked to a profile only after
 the game confirms. On the RU host the portal calls the Account API on loopback
 and forwards each player's address, so sign-in limits stay per player;
 `release.py preflight --market ru` checks that path
-([topology](../ops/vps/ru/README.md#topology)). See [markets](markets.md).
+([topology](../ops/vps/ru/README.md#topology)). One tool, `ops/vps/ru/ru_host.py`,
+sets a fresh Ubuntu host up in Russia (PostgreSQL with ICU, Caddy, firewall, key-only
+SSH, secrets made on the host), ships the lobby, Account API and portal with rollback,
+checks the whole host and proves a reboot needs no manual step; every service there
+restarts on its own. Each release runs the
+[RU release checklist](../ops/vps/ru/release-checklist.md). See [markets](markets.md).
 
 ## Temporary community sculptures
 
