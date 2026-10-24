@@ -116,7 +116,7 @@ flowchart LR
 ## ADR-004: Sign in with VK ID goes through the Account API and reaches the device-key account
 
 - **Date:** 2026-10-23 (Account API, `428ccac`) to 2026-10-24 (in-game flow `6bd67dd` and its signature test `7198913`; merged to `dev` in PR #107). Recorded retrospectively.
-- **Status:** Accepted, partly implemented. The code and tests (with a loopback VK stand-in) are done. The real VK ID app, RU hosting and DNS are owner steps that have not been done yet, and the RU portal-to-Account-API ingress is a known deployment blocker ([system.md](system.md#open-questions)).
+- **Status:** Accepted, partly implemented. The code and tests (with a loopback VK stand-in) are done. The real VK ID app, RU hosting and DNS are owner steps that have not been done yet. The RU portal reaches the Account API on loopback ([ops/vps/ru/README.md › Topology](../../ops/vps/ru/README.md#topology)).
 
 **Context.** The RU market needs a familiar sign-in for the website and for new devices. ADR-001 already defines the account. Personal data of Russian players must be stored in Russia.
 
@@ -128,7 +128,7 @@ flowchart LR
   - **Unlinked VK account:** after VK sign-in the BFF offers the ticket to the pending enrollment (`POST /v1/auth/social/attach`), and the enrollment status reads `social_pending` with a short display name. The game asks the player to confirm, then signs `omoba.social.link.v1` over `shared::device_account::SocialLink` with its active device key (`CareerIdentity::sign_social_link`, `POST /v1/auth/social/link`).
   - **Already-linked VK account:** the browser is signed in as that account and approves the device enrollment instead. The device switches after a restart without merging profiles.
 - One VK account belongs to one profile (a unique index). Codes are single-use and expire in five minutes. Unlinking needs a fresh sign-in (`DELETE /v1/me/social/vk`). Expired tickets and unlinked identities left idle for 30 days are cleaned up (`account-api/README.md`, "Sign in with VK ID").
-- `vk`, `ticket` and `attach` are BFF routes behind the portal ingress key. Only `social/link` is on the public native ingress (ADR-016; [protocols.md](protocols.md#routes-by-exposure)).
+- `vk`, `ticket` and `attach` are BFF routes, called by the portal on loopback on RU and refused by the public ingress. Only `social/link` is on the public native ingress (ADR-016; [protocols.md](protocols.md#routes-by-exposure)).
 
 ```mermaid
 sequenceDiagram
@@ -395,7 +395,7 @@ sequenceDiagram
 - The browser holds only HttpOnly cookies, `__Host-` prefixed on HTTPS ([protocols.md](protocols.md#7-portal-bff-omoba-web) lists them). Pairing secrets, API bearer values and the Ekza library link token never reach browser storage, public environment variables or rendered JSON.
 - **Over the Account API:** `OMOBA_ACCOUNT_API_URL` is server-side only. Upstream paths pass an allowlist (`allowedPath` in `src/lib/security.mjs`, which also admits the workshop's `me/class-builds` routes), and mutations need same-origin CSRF proof.
 - **Over the Ekza Registry:** the market page and the `/api/ekza/*` and `/api/sponsor/*` routes read the Ekza Registry directly through `registryRequest` (`src/lib/market-server.mjs`: fixed origin, 5 s budget including the body, size cap, `redirect: "error"`). The Ekza Registry link token is held in an HttpOnly cookie (`src/lib/ekza-link.mjs`).
-- **Exposure:** the database is never public, and the Account API binds to loopback only (a non-loopback `OMOBA_ACCOUNT_BIND` fails, `account-api/src/main.rs`). The TLS ingress exposes only the native signed routes. Every other `/v1/*` route is internal to the portal BFF and needs the portal ingress key at the ingress; that includes pairing creation and the VK `vk`, `ticket` and `attach` routes. The full route set must never be exposed as a browser backend (`account-api/README.md`, "Runtime"). The route-by-route exposure is in [protocols.md](protocols.md#routes-by-exposure).
+- **Exposure:** the database is never public, and the Account API binds to loopback only (a non-loopback `OMOBA_ACCOUNT_BIND` fails, `account-api/src/main.rs`). The TLS ingress exposes only the native signed routes. Every other `/v1/*` route is internal to the portal BFF: it needs the portal ingress key at the ingress (hosted dev) or is refused there and called by the portal on loopback (RU); that includes pairing creation and the VK `vk`, `ticket` and `attach` routes. The full route set must never be exposed as a browser backend (`account-api/README.md`, "Runtime"). The route-by-route exposure is in [protocols.md](protocols.md#routes-by-exposure).
 - Contour and market are fixed at build time. A runtime contour or market that differs from the build stops the server at startup, and the root layout re-validates both on each request (the contour also against the request host). Any misconfiguration fails closed (ADR-002, ADR-003).
 
 **Consequences.** A new Account-API-backed portal feature needs an Account API route, an allowlist entry and feature gating (ADR-005). An Ekza-Registry-backed feature needs no Account API route, but it must sit behind the `ekza` gate: without `ekza`, `/api/ekza/*` and `/api/sponsor/*` answer 404 before reading a cookie or contacting the Ekza Registry (`omoba-web` `docs/markets.md`).
@@ -518,6 +518,26 @@ sequenceDiagram
 **Consequences.** Evidence for a claim lives in its progress note or task folder. A device or language that was not tested is never reported as verified.
 
 **Links:** [methodology.md](methodology.md), [../REFACTORING.md](../REFACTORING.md#process-rules-agreed-with-the-maintainer), [../../CONTRIBUTING.md](../../CONTRIBUTING.md), [../RELEASING.md](../RELEASING.md).
+
+---
+
+## ADR-024: RU monetization: YooKassa donations buy monthly tiered auras
+
+- **Date:** 2026-10-24 (owner decision). Implementation: LR-67 in [../plans/launch-readiness.md](../plans/launch-readiness.md).
+- **Status:** Accepted; implementation pending. Amends ADR-003 (the RU preset had `supporter` off) and ADR-005 (RU stays without Ekza but is no longer free of payments).
+
+**Context.** The owner wants the Russian launch to earn money from players who support the project, through the Hero Supporter auras players already see on each other, and to grow from that revenue. Russian players cannot use Apple or Solana checkout here; the owner already runs YooKassa for another product.
+
+**Decision.**
+- The RU market turns `supporter` on with YooKassa as its only payment provider; the provider list is a market property, so global stays Apple + Solana.
+- A donation is a one-time YooKassa payment on the RU portal (100–10 000 ₽ tiers or a custom amount). It grants a 30-day cosmetic aura; the tier is the sum of donations inside the current 30-day window, so the aura reflects what a player gives per month, not their lifetime total.
+- Higher tiers look better (pink, green, blue, red, then three rainbow shimmer levels). Auras never change combat, matchmaking or rating.
+- Tier styles are new `AuraStyle` variants with a protocol bump; the server re-checks every equipped style against the tier.
+- The vibe-piano payment rules apply: re-read every webhook object, persist the idempotence key before the POST, replay only within 23 h, settle exactly once, refunds reduce the grant, receipts through «Чеки от ЮKassa».
+
+**Consequences.** RU clients render other players' auras (the plugin is on in RU). The RU release needs a YooKassa shop for an ИП or ООО, a public offer and a real fiscal-receipt test. Client and server ship together because of the protocol bump.
+
+**Links:** [../supporter.md](../supporter.md), [../markets.md](../markets.md), [identity-and-accounts.md](identity-and-accounts.md), [protocols.md](protocols.md).
 
 ---
 

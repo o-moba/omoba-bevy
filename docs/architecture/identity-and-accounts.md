@@ -197,7 +197,7 @@ sequenceDiagram
 
 ## Account API exposure
 
-The Account API binds only to loopback (default `127.0.0.1:40550`; non-loopback binds fail, `account-api/src/main.rs`). TLS and route exposure belong to the ingress ([`account-api/README.md`](../../account-api/README.md), "Runtime"). In outline, the routes the game calls are signed native POSTs on an explicit ingress allowlist, and the other `/v1/*` routes are meant for the portal BFF and need the portal ingress key.
+The Account API binds only to loopback (default `127.0.0.1:40550`; non-loopback binds fail, `account-api/src/main.rs`). TLS and route exposure belong to the ingress ([`account-api/README.md`](../../account-api/README.md), "Runtime"). In outline, the routes the game calls are signed native POSTs on an explicit ingress allowlist, and the other `/v1/*` routes are meant for the portal BFF: behind the portal ingress key (hosted dev) or reached by the portal on loopback only (RU, [ops/vps/ru/README.md › Topology](../../ops/vps/ru/README.md#topology)).
 
 - Every route with its caller, exposure and authentication: [protocols.md › Routes by exposure](./protocols.md#routes-by-exposure).
 - The native allowlist on each host (dev, RU): [system.md › Account API ingress allowlists](./system.md#account-api-ingress-allowlists).
@@ -399,7 +399,7 @@ To avoid leaking which accounts or rows exist, failed ownership checks answer `4
 
 ### Rate-limit buckets
 
-Rate limits are per-minute buckets keyed by `HMAC(portal secret, scope, identity)` and shared between replicas through Postgres (`App::rate`, [`account-api/src/lib.rs`](../../account-api/src/lib.rs)). A 429 response carries `rate_limited` and `Retry-After: 60`. A per-IP bucket uses the socket peer, or `X-Real-IP` only when `OMOBA_TRUST_LOOPBACK_PROXY=1` and the peer is loopback ([protocols.md › Envelope, limits, idempotency](./protocols.md#envelope-limits-idempotency)). Behind the portal and the ingress, that address can be the portal host instead of the player ([system.md › Open questions](./system.md#open-questions)).
+Rate limits are per-minute buckets keyed by `HMAC(portal secret, scope, identity)` and shared between replicas through Postgres (`App::rate`, [`account-api/src/lib.rs`](../../account-api/src/lib.rs)). A 429 response carries `rate_limited` and `Retry-After: 60`. A per-IP bucket uses the socket peer, or `X-Real-IP` only when `OMOBA_TRUST_LOOPBACK_PROXY=1` and the peer is loopback ([protocols.md › Envelope, limits, idempotency](./protocols.md#envelope-limits-idempotency)). On RU the portal forwards the player's address on its loopback calls. Behind the hosted dev ingress, that address can be the portal host instead of the player ([system.md › Open questions](./system.md#open-questions)).
 
 | Bucket | Keyed by | Limit per minute |
 |---|---|---|
@@ -503,7 +503,6 @@ Market presets; a build may flip any feature with `OMOBA_FEATURE_<NAME>=on|off`:
 - **Scope enforcement.** The 7 web scopes are signed consent, but sessions are all-or-nothing: no per-route scope check exists in `account-api/src/lib.rs` or `auth.rs`. It is unclear whether per-scope enforcement is planned.
 - **Supporter scope in free markets (ru, cn).** Builds without `supporter` still sign `supporter:write` in the fixed scope list and only change the displayed text (`challenge_key`). Confirm this is intended.
 - **Strength of a VK sign-in.** A linked VK session is as strong as a game-approved one. It is fresh for 600 s and can add devices, rotate recovery codes and revoke devices, so control of the VK account means control of the profile. [`../markets.md`](../markets.md) presents VK as a way to reach the account from new devices, so this looks intended. No document states the takeover consequence, or whether device and recovery actions should need a game confirmation. [`../../account-api/README.md`](../../account-api/README.md) ("Runtime") describes the check for revoking other sessions as "a new game confirmation", yet a VK session passes it too (`auth::revoke` looks only at `created_at`). Unlinking VK also leaves VK-created sessions valid. Confirm both behaviours are intended; then fix either the code or that README sentence.
-- **RU portal ingress key.** A deployment blocker (LR-02), written up in [system.md › Open questions](./system.md#open-questions).
 - **Returning to a previous profile.** Keys backed up in `saved-devices/` and in `enrolled-device-*` folders have no in-game restore path. How a player returns to an earlier local profile is not documented.
 - **Global accounts.** Global production runs no Account API, and its portal is in guest mode ([system.md › Production host](./system.md#production-host-global-market)). Global players therefore have no website sign-in, device-linking or recovery path, and the device key file is their only credential. omoba-web `docs/vercel.md` calls this the initial guest prototype. No document says when global accounts will be enabled, or how players should back up the key until then.
 - **Older docs.** Drift in older documents that touches this page is listed once in [README › Known drift in older docs](./README.md#known-drift-in-older-docs).

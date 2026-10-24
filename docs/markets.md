@@ -117,8 +117,7 @@ a code is single-use and expires in five minutes; unlinking needs a fresh sign-i
 ## RU release runbook
 
 Before following it, read [the launch-readiness plan](plans/launch-readiness.md):
-its M0 specs are the launch blockers (among them LR-02, the portal ↔ Account API
-ingress of the RU kit).
+its M0 specs are the launch blockers.
 
 The steps that need accounts, money or legal decisions are the owner's.
 
@@ -140,8 +139,11 @@ The steps that need accounts, money or legal decisions are the owner's.
 5. **Servers** (`ops/vps/ru/README.md`): migrate the database with the RU
    `omoba-account-api migrate`, apply `account-api/ops/grants.sql`, install
    `omoba-lobby-ru.service` and `omoba-account-api-ru.service`, the RU portal
-   (omoba-web with `OMOBA_MARKET=ru`) and `Caddyfile.ru`.
-6. **Check.** `make release-ru-preflight` (DNS, `/health/ready`, portal), then
+   (omoba-web with `OMOBA_MARKET=ru`, calling the Account API on loopback:
+   `ops/vps/ru/README.md#topology`) and `Caddyfile.ru`.
+6. **Check.** `make release-ru-preflight` (DNS, `/health/ready`, portal, and the
+   portal ↔ Account API path: `/api/me` 401 and `/api/releases` 200 through the
+   portal, a public `/v1/me` refused with 403), then
    one real round: install the RU package, play a bot match, Profile →
    «Войти через VK ID», link, sign in on the portal, sign in on a second device.
 7. **Distribution.** Publish the IPFS links on the RU portal

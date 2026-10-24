@@ -1,6 +1,9 @@
-# RU ingress (Caddy, automatic HTTPS). Replace PORTAL_KEY with the portal's
-# OMOBA_ACCOUNT_INGRESS_KEY. Only native game routes are public; everything else
-# on the Account API needs the portal key, like the DEV ingress.
+# RU ingress (Caddy, automatic HTTPS). The portal runs on this host and calls the
+# Account API directly on 127.0.0.1:40550 (README.md, "Topology"), so account.ru
+# serves only the game's native routes and health; every other Account API route
+# answers 403 here and needs no portal key. Both proxies OVERWRITE X-Real-IP with
+# the connecting client: the Account API and the portal trust it only because of
+# that (OMOBA_TRUST_LOOPBACK_PROXY=1 on both).
 account.ru.omoba.io {
     header X-Content-Type-Options nosniff
     request_body {
@@ -10,10 +13,6 @@ account.ru.omoba.io {
         method POST
         path /v1/auth/pairings/lookup /v1/auth/pairings/approve /v1/auth/pairings/deny /v1/auth/devices/create /v1/auth/devices/status /v1/auth/devices/recover /v1/auth/devices/complete /v1/auth/social/link
     }
-    @portal {
-        path /v1/*
-        header X-Omoba-Portal-Key PORTAL_KEY
-    }
     @health {
         method GET
         path /health/live /health/ready
@@ -21,13 +20,6 @@ account.ru.omoba.io {
     handle @native {
         reverse_proxy 127.0.0.1:40550 {
             header_up X-Real-IP {remote_host}
-            header_up -X-Omoba-Portal-Key
-        }
-    }
-    handle @portal {
-        reverse_proxy 127.0.0.1:40550 {
-            header_up X-Real-IP {remote_host}
-            header_up -X-Omoba-Portal-Key
         }
     }
     handle @health {
@@ -38,6 +30,8 @@ account.ru.omoba.io {
     }
 }
 
+# The player portal. The browser's address reaches the Account API only through
+# this header: the portal forwards it on its loopback calls.
 app.ru.omoba.io {
     reverse_proxy 127.0.0.1:3010 {
         header_up X-Real-IP {remote_host}
