@@ -23,7 +23,10 @@ use crate::world::{build_minion_path, spawn_position_for_team, structure_collisi
 use crate::{basic_attack, hero_stats, match_stats, shop, vision};
 
 const THINK_INTERVAL: Duration = Duration::from_millis(250);
+/// At most one route plan per bot per interval (LR-10).
 const ROUTE_INTERVAL: Duration = Duration::from_millis(800);
+/// A route waypoint, or the destination, this close is reached.
+const ARRIVAL: f32 = 0.2;
 use shared::hero_balance::BOT_ENGAGE_RANGE as VISION;
 use shared::math::hero_yaw_towards;
 /// A five-player team, one class per duty. Bots take the first entry whose
@@ -114,7 +117,8 @@ pub mod sim_probe {
     #[derive(Clone, Copy, Debug, PartialEq)]
     pub enum Event {
         /// The health retreat triggered (`retreat_hp`, re-armed by
-        /// `rearm_secs`) at this health fraction. `continued` when the bot
+        /// `rearm_secs`) at this health fraction (`fraction_below`, so it
+        /// reads strictly below the line it crossed). `continued` when the bot
         /// was already backing off on a retreat timer or `resume_hp`, so the
         /// trigger only extended that retreat.
         HealthRetreat {
@@ -130,14 +134,32 @@ pub mod sim_probe {
             bot: SocketAddr,
             answer: ThreatAnswer,
         },
-        /// A route was planned (the simulator's cost and thrash indicator).
-        Route { bot: SocketAddr },
+        /// A route was planned (the simulator's cost and thrash indicator);
+        /// `found` is false when the plan found no route.
+        Route { bot: SocketAddr, found: bool },
     }
 
     #[cfg(any(test, feature = "test-support"))]
     thread_local! {
         static LOG: std::cell::RefCell<Option<Vec<Event>>> =
             const { std::cell::RefCell::new(None) };
+    }
+
+    /// `hp / max_hp`, rounded down to an `f32`. The retreat trigger
+    /// `hp < max_hp * line` implies the exact fraction is below `line`, but
+    /// an `f32` division can round it up to `line` itself (600 max, 198 hp,
+    /// line 0.33), which would read as a retreat at the line.
+    pub(super) fn fraction_below(hp: f32, max_hp: f32) -> f32 {
+        if max_hp <= 0.0 {
+            return 0.0;
+        }
+        let exact = f64::from(hp) / f64::from(max_hp);
+        let rounded = exact as f32;
+        if f64::from(rounded) > exact && rounded > 0.0 {
+            f32::from_bits(rounded.to_bits() - 1)
+        } else {
+            rounded
+        }
     }
 
     #[cfg(any(test, feature = "test-support"))]
@@ -1162,7 +1184,12 @@ struct Controller {
     profile: BotProfile,
     waypoint: usize,
     route: VecDeque<[f32; 2]>,
+    /// The destination the current route was planned to.
     goal: Option<[f32; 2]>,
+    /// The last plan found no route to `goal`.
+    unreachable: bool,
+    /// The earliest next plan: at most one per `ROUTE_INTERVAL`, whatever
+    /// emptied the route (LR-10).
     next_route: Instant,
     next_think: Instant,
     next_retreat: Instant,
@@ -1189,6 +1216,7 @@ impl Controller {
             waypoint: 1,
             route: VecDeque::new(),
             goal: None,
+            unreachable: false,
             next_route: now,
             next_think: now,
             next_retreat: now,
@@ -1208,7 +1236,6 @@ impl Controller {
         self.retreat_until = Some(now + Duration::from_secs_f32(profile.retreat_secs));
         self.target = None;
         self.route.clear();
-        self.next_route = now;
     }
 }
 
@@ -1650,7 +1677,7 @@ impl CombatHost<'_> {
             if retreat_low && now >= controller.next_retreat {
                 sim_probe::record(|| sim_probe::Event::HealthRetreat {
                     bot: addr,
-                    hp: hp_fraction(player),
+                    hp: sim_probe::fraction_below(player.hero.hp, player.hero.max_hp),
                     continued: controller.retreat_until.is_some_and(|until| now < until)
                         || controller.retreat_started.is_some(),
                 });
@@ -1661,7 +1688,6 @@ impl CombatHost<'_> {
                     controller.retreat_started.get_or_insert(now);
                 }
                 controller.route.clear();
-                controller.next_route = now;
             }
             // `resume_hp`: a health retreat goes on until health is back, but
             // never past `retreat_cap_secs` from its start.
@@ -1846,7 +1872,6 @@ impl CombatHost<'_> {
                 if controller.target != previous_target {
                     controller.holding_range = false;
                     controller.route.clear();
-                    controller.next_route = now;
                 }
                 if let Some(target) = controller.target {
                     if self.world.players[&addr].hero.skills.loadout.is_some() {
@@ -2050,7 +2075,6 @@ impl CombatHost<'_> {
                 controller.route.clear();
                 controller.goal = None;
                 controller.holding_range = false;
-                controller.next_route = now;
             }
             let origin = current_origin;
             let target = controller
@@ -2128,7 +2152,7 @@ impl CombatHost<'_> {
                     // never advance the lane behind an unsupported defense.
                     let projected_arrival = controller.goal == Some(waypoint)
                         && controller.route.back().is_some_and(|end| {
-                            (end[0] - origin[0]).hypot(end[1] - origin[1]) < 0.2
+                            (end[0] - origin[0]).hypot(end[1] - origin[1]) < ARRIVAL
                         });
                     if !near && !projected_arrival {
                         break;
@@ -2136,7 +2160,6 @@ impl CombatHost<'_> {
                     controller.waypoint += 1;
                     controller.route.clear();
                     controller.goal = None;
-                    controller.next_route = now;
                 }
                 let point = path[controller.waypoint.min(path.len() - 1)];
                 lane_staging_destination(
@@ -2151,27 +2174,56 @@ impl CombatHost<'_> {
             if turret_retreat.is_some() {
                 desired = destination;
             } else if !in_range {
-                let goal_changed = controller
+                let mut goal_changed = controller
                     .goal
                     .is_none_or(|p| (p[0] - destination[0]).hypot(p[1] - destination[1]) > 2.0);
-                if controller.route.is_empty() || (now >= controller.next_route && goal_changed) {
-                    sim_probe::record(|| sim_probe::Event::Route { bot: addr });
+                let arrived =
+                    (destination[0] - origin[0]).hypot(destination[1] - origin[1]) < ARRIVAL;
+                // A route plans once per interval at most: an emptied route
+                // (a new decision, a failed plan, a walked route) waits for
+                // the interval like a moved goal. At the destination there
+                // is nothing to plan.
+                if now >= controller.next_route
+                    && (goal_changed || (controller.route.is_empty() && !arrived))
+                {
                     controller.next_route = now + ROUTE_INTERVAL;
                     controller.goal = Some(destination);
-                    controller.route = shared::navigation::world_navigation()
-                        .plan_route(origin, destination, &safe_discs)
-                        .unwrap_or_default()
-                        .into();
+                    let route = shared::navigation::world_navigation().plan_route(
+                        origin,
+                        destination,
+                        &safe_discs,
+                    );
+                    sim_probe::record(|| sim_probe::Event::Route {
+                        bot: addr,
+                        found: route.is_some(),
+                    });
+                    controller.unreachable = route.is_none();
+                    controller.route = route.unwrap_or_default().into();
+                    goal_changed = false;
                 }
                 while controller
                     .route
                     .front()
-                    .is_some_and(|p| (p[0] - origin[0]).hypot(p[1] - origin[1]) < 0.2)
+                    .is_some_and(|p| (p[0] - origin[0]).hypot(p[1] - origin[1]) < ARRIVAL)
                 {
                     controller.route.pop_front();
                 }
                 if let Some(point) = controller.route.front().copied() {
                     desired = point;
+                } else if !arrived
+                    && (goal_changed || !controller.unreachable)
+                    && shared::navigation::world_navigation().segment_clear_with_discs(
+                        origin,
+                        destination,
+                        &discs,
+                    )
+                {
+                    // Until the next plan, walk a clear line straight to the
+                    // destination. The turret clip below still stops the
+                    // step at an uncovered tower's range and lets the bot in
+                    // as soon as minion cover arrives. Behind terrain or a
+                    // structure, or after a failed plan, hold still.
+                    desired = destination;
                 }
             } else {
                 controller.route.clear();

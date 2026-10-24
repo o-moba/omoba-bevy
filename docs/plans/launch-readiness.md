@@ -308,9 +308,9 @@ Area: bot performance · **major** · M · code
   - At most one plan per `ROUTE_INTERVAL` per bot, including after a failure.
   - Reuse buffers: the static grid plus an overlay of dynamic discs.
 - **Acceptance:**
-  - [ ] The simulator shows ≤ 80 plans per bot-minute at every level.
-  - [ ] The hot path does not allocate, or uses per-thread buffers.
-  - [ ] Elite trace-equivalence and parity tests stay green, or the baseline is re-recorded with a justification.
+  - [x] The simulator shows ≤ 80 plans per bot-minute at every level.
+  - [x] The hot path does not allocate, or uses per-thread buffers.
+  - [x] Elite trace-equivalence and parity tests stay green, or the baseline is re-recorded with a justification.
   - [ ] The LR-09 probe shows more arenas per vCPU.
   - [ ] Offline frame time is measured on a low-end Android device.
 - **Depends on:** —

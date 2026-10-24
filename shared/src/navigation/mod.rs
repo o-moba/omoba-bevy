@@ -2,6 +2,8 @@
 //!
 //! Static convex footprints are indexed and rasterized once. Orders use bounded
 //! A* over cached safe grid edges, then exact swept geometry to smooth the path.
+//! Live structure discs are overlaid per order on per-thread search buffers
+//! that every plan reuses, so a plan allocates only the route it returns.
 //! No renderer, ECS, physics engine or additional dependency is required.
 
 mod geometry;
@@ -11,6 +13,7 @@ mod tests;
 
 use geometry::{add, cross, distance_squared, polygon_clearance, scale, sub};
 use serde::Deserialize;
+use std::cell::RefCell;
 use std::collections::HashSet;
 use std::sync::OnceLock;
 
@@ -216,38 +219,47 @@ impl NavigationMap {
         ]
     }
 
-    fn candidates(&self, from: Point, to: Point) -> Vec<usize> {
+    /// Whether `clear` holds for every obstacle whose cached broad phase
+    /// overlaps the box spanned by `from` and `to`, each tested once in
+    /// identifier order. The index list is a per-thread buffer, so movement
+    /// and planning checks do not allocate.
+    fn all_candidates(&self, from: Point, to: Point, clear: impl Fn(&Obstacle) -> bool) -> bool {
+        thread_local! {
+            static CANDIDATES: RefCell<Vec<usize>> = const { RefCell::new(Vec::new()) };
+        }
         let [left, top] = self.bin_coordinates([from[0].min(to[0]), from[1].min(to[1])]);
         let [right, bottom] = self.bin_coordinates([from[0].max(to[0]), from[1].max(to[1])]);
-        let mut candidates = Vec::new();
-        for row in top..=bottom {
-            for column in left..=right {
-                candidates.extend_from_slice(&self.bins[row * self.bin_width + column]);
+        let check = |candidates: &mut Vec<usize>| {
+            candidates.clear();
+            for row in top..=bottom {
+                for column in left..=right {
+                    candidates.extend_from_slice(&self.bins[row * self.bin_width + column]);
+                }
             }
-        }
-        candidates.sort_unstable();
-        candidates.dedup();
-        candidates
+            candidates.sort_unstable();
+            candidates.dedup();
+            candidates
+                .iter()
+                .all(|&index| clear(&self.obstacles[index]))
+        };
+        CANDIDATES.with(|buffer| match buffer.try_borrow_mut() {
+            Ok(mut candidates) => check(&mut candidates),
+            Err(_) => check(&mut Vec::new()),
+        })
     }
 
     fn static_point_clear(&self, point: Point, radius: f32) -> bool {
         self.bounds.contains(point)
-            && self.candidates(point, point).into_iter().all(|index| {
-                polygon_clearance(point, &self.obstacles[index].vertices).0 + EPSILON >= radius
+            && self.all_candidates(point, point, |obstacle| {
+                polygon_clearance(point, &obstacle.vertices).0 + EPSILON >= radius
             })
     }
 
     fn static_segment_clear(&self, from: Point, to: Point, radius: f32, escape: bool) -> bool {
         self.bounds.contains(from)
             && self.bounds.contains(to)
-            && self.candidates(from, to).into_iter().all(|index| {
-                geometry::polygon_segment_clear(
-                    from,
-                    to,
-                    &self.obstacles[index].vertices,
-                    radius,
-                    escape,
-                )
+            && self.all_candidates(from, to, |obstacle| {
+                geometry::polygon_segment_clear(from, to, &obstacle.vertices, radius, escape)
             })
     }
 
@@ -261,15 +273,11 @@ impl NavigationMap {
                 point[axis] - radius >= self.bounds.min[axis]
                     && point[axis] + radius <= self.bounds.max[axis]
             })
-            && self
-                .candidates(
-                    [point[0] - radius, point[1] - radius],
-                    [point[0] + radius, point[1] + radius],
-                )
-                .into_iter()
-                .all(|index| {
-                    polygon_clearance(point, &self.obstacles[index].vertices).0 + EPSILON >= radius
-                })
+            && self.all_candidates(
+                [point[0] - radius, point[1] - radius],
+                [point[0] + radius, point[1] + radius],
+                |obstacle| polygon_clearance(point, &obstacle.vertices).0 + EPSILON >= radius,
+            )
     }
 
     /// Static physical hero clearance, without optional route padding.
