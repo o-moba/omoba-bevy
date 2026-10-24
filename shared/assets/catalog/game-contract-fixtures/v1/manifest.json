@@ -781,7 +781,7 @@
       "bytes": 13612
     },
     "packages/clip-too-short.glb": {
-      "sha256": "a928d4901048b6557925e07c58af0419d23c0dd4ac34a2800ecad09436fffa0e",
+      "sha256": "3318fd671794321fa0504934e3f35da54cfd7a898552b28bf02cbb4c3369719e",
       "bytes": 11108
     },
     "packages/clip-translation-on-spine.glb": {
@@ -797,8 +797,8 @@
       "bytes": 4564
     },
     "packages/ok-shared-animation.glb": {
-      "sha256": "38468a678878490661eee5088971528eb9cc0a99afcb7323792d6a9002dc7b27",
-      "bytes": 14084
+      "sha256": "46ad0ea494667d4cba5c89f26b16bc50d62889513276485a40092fd61ac1a134",
+      "bytes": 13892
     },
     "packages/ok-vrm0-three-slots.glb": {
       "sha256": "746538da816eeb949d219caabb160edbf1a2c2aada72e13066a53ee7f23fac8e",

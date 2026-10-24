@@ -416,7 +416,7 @@ def cases(contract, retired):
         ("ok-vrm0-three-slots", None, "the same on a VRM 0.x rig (facing -Z, 17 bones)",
          dict(vrm=0, clips=baseline(), manifest=manifest(THREE)), verdict(slots=PASS3)),
         ("ok-shared-animation", None, "one animation serves the rocket basic attack and Last Spark",
-         dict(clips=baseline() + [Clip("basic.wildspark.rockets.0", duration=0.5, contact=0.13)],
+         dict(clips=baseline() + [Clip("basic.wildspark.rockets.0", duration=0.4, contact=0.13)],
               manifest=manifest({**THREE, "basic.wildspark.rockets.0": (3, 0.13),
                                  "skill.wild_rocket.release": (3, 0.13)})),
          verdict(slots={**PASS3, "basic.wildspark.rockets.0": "pass", "skill.wild_rocket.release": "pass"})),
@@ -507,7 +507,7 @@ def cases(contract, retired):
     clip_case("clip-120hz", "clip.keys", "sampled at 120 Hz", basic,
               baseline(basic=Clip(basic, hz=120)))
     clip_case("clip-too-short", "clip.duration", "a 0.1 s basic attack (window 0.15-1.2 s)", basic,
-              baseline(basic=Clip(basic, duration=0.1, contact=0.05)))
+              baseline(basic=Clip(basic, duration=0.1, contact=0.05)), custom={**THREE, basic: (1, 0.05)})
     clip_case("clip-too-long", "clip.duration", "a 1.5 s Shockline release", "skill.wild_zap.release",
               baseline(zap=Clip("skill.wild_zap.release", duration=1.5, contact=0.12)))
     clip_case("clip-run-cycle-1.3s", "clip.duration", "a 1.3 s run cycle (window 0.4-1.2 s)", "base.run",
