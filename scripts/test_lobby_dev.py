@@ -1107,10 +1107,11 @@ class UnitChecks(unittest.TestCase):
 
     def test_production_names_are_every_public_name_outside_the_dev_zones(self):
         for name in ("avatar.ekza.io", "Avatar.Ekza.IO.", "registry.ekza.io", "omoba.io", "x.y.omoba.io",
-                     "root@app.omoba.io", "vds-eternal", PROD_IP):
+                     "root@app.omoba.io", "vds-eternal", PROD_IP, "omoba.ru", "account.omoba.ru",
+                     "Lobby.Omoba.RU."):
             self.assertTrue(lobby_dev.is_production_name(name), name)
         for name in ("vds-dev", "lobby.dev.omoba.io", "registry.dev.ekza.io", "dev.ekza.io", DEV_IP,
-                     "notomoba.io", "127.0.0.1", "omoba.io.example"):
+                     "notomoba.io", "127.0.0.1", "omoba.io.example", "notomoba.ru"):
             self.assertFalse(lobby_dev.is_production_name(name), name)
 
     def test_paths_compare_by_component(self):

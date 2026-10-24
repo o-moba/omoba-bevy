@@ -645,7 +645,7 @@ mod tests {
             public_worker_host(None, local, loopback).unwrap(),
             "127.0.0.1"
         );
-        for host in ["lobby.ru.omoba.io", "203.0.113.7", "lobby.dev.omoba.io"] {
+        for host in ["lobby.omoba.ru", "203.0.113.7", "lobby.dev.omoba.io"] {
             assert_eq!(public_worker_host(Some(host), public, any).unwrap(), host);
         }
     }

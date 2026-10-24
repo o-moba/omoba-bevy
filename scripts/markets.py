@@ -60,15 +60,15 @@ class Market:
 
 MARKETS = {
     "global": Market("global", {"ekza": True, "supporter": True, "vk_sign_in": False}, "en", None),
-    # The RU servers are planned under ru.omoba.io (docs/markets.md: DNS, hosting in
+    # The RU servers are planned under omoba.ru (REG.RU; docs/markets.md: DNS, hosting in
     # Russia, VK ID app). A build bakes these names in; they answer once deployed.
     "ru": Market("ru", {"ekza": False, "supporter": False, "vk_sign_in": True}, "ru", "ru",
-                 lobby="lobby.ru.omoba.io:4000",
-                 account_api="https://account.ru.omoba.io",
-                 portal="https://app.ru.omoba.io",
+                 lobby="lobby.omoba.ru:4000",
+                 account_api="https://account.omoba.ru",
+                 portal="https://omoba.ru",
                  # No RU App Store record yet: iOS RU is not packaged.
                  platforms=("macos", "windows", "linux", "android"),
-                 zones=("ru.omoba.io",),
+                 zones=("omoba.ru",),
                  android={"bundle_id": "space.ekza.omoba.ru", "display_name": "OMOBA"}),
     "cn": Market("cn", {"ekza": False, "supporter": False, "vk_sign_in": False}, "zh-Hans", "cn",
                  platforms=(), zones=("cn.omoba.io",),

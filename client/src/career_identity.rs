@@ -763,7 +763,7 @@ mod tests {
             ..default()
         };
         let pending = SigningKey::from_bytes(&[4; 32]);
-        let origin = "https://app.ru.omoba.io";
+        let origin = "https://omoba.ru";
         let enrollment = shared::device_account::DeviceEnrollment {
             enrollment_id: "a".repeat(64),
             public_key: hex(pending.verifying_key().as_bytes()),

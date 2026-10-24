@@ -71,7 +71,7 @@ The remaining M0 work runs in parallel with these: queues (LR-08), match lifecyc
 #### LR-01 — RU production stack provisioned and self-starting
 Area: hosting/deployment · **blocker** · M · ops (owner buys the VPS and sets DNS)
 - **Now:**
-  - The RU hostnames are baked into builds (`lobby.ru.omoba.io:4000`, `account.ru.omoba.io`, `app.ru.omoba.io`), but nothing is deployed (`docs/markets.md:16-17,23-25`; `docs/progress/2026-10-24-market-profiles.md:53`).
+  - The RU hostnames are baked into builds (`lobby.omoba.ru:4000`, `account.omoba.ru`, `omoba.ru`), but nothing is deployed (`docs/markets.md:16-17,23-25`; `docs/progress/2026-10-24-market-profiles.md:53`).
   - RU builds refuse the global lobby (`docs/markets.md:39-40`), so an RU client has nowhere to connect.
   - `ops/vps/ru` has units only for the lobby and the Account API. The portal is "run as its own service" with no unit (`ops/vps/ru/README.md:34-36`), and `market-web/scripts/start.mjs` exits when its child exits.
   - Units wait only for `network-online.target`, not for `postgresql.service`. The lobby has `StartLimitBurst=6` in 120 s.
@@ -80,7 +80,7 @@ Area: hosting/deployment · **blocker** · M · ops (owner buys the VPS and sets
   - The release gate `docs/release-gate-checklist.md` dates from April and is stale. The only current check is runbook step 6 (`docs/markets.md:139-141`).
 - **Requirement:** Postgres, the lobby with its workers, the Account API and the portal run on a host in Russia. Each service restarts on its own after a crash or a reboot, and RU packages connect to it.
 - **Acceptance:**
-  - [ ] `make release-ru-preflight` prints `ready:true`, and `compatibility -- check lobby.ru.omoba.io:4000 …` exits 0 against the lobby and one worker.
+  - [ ] `make release-ru-preflight` prints `ready:true`, and `compatibility -- check lobby.omoba.ru:4000 …` exits 0 against the lobby and one worker.
   - [ ] `ops/vps/ru/omoba-portal-ru.service` exists, with `Restart=always`, memory caps and a dedicated user.
   - [ ] The lobby and Account API units have `After=`/`Wants=postgresql.service`.
   - [ ] A reboot test brings everything up with no manual step.
@@ -99,7 +99,7 @@ Area: hosting/deployment · **blocker** · M · ops (owner buys the VPS and sets
     - the incompatible-server prompt
 
     The result is stored in `docs/progress` for every release.
-  - [ ] An RU client plays a server bot match and a 2-client casual match, and the history shows on `app.ru.omoba.io`.
+  - [ ] An RU client plays a server bot match and a 2-client casual match, and the history shows on `omoba.ru`.
 - **Depends on:** — (owner checklist: VPS and DNS)
 
 #### LR-02 — Portal reaches the Account API with its key and the real client IP
@@ -172,7 +172,7 @@ Area: legal (152-FZ) · **blocker** · M · owner
 
   They also name the operator and its address, a contact e-mail, the storage location (RU VPS), retention per data type and any cross-border transfers. Finally, they set out a procedure for data-subject requests: deletion is a manual operator procedure until LR-42 ships.
 - **Acceptance:**
-  - [ ] Published at stable Russian URLs (e.g. `app.ru.omoba.io/privacy`, `/terms`) with a version and an effective date.
+  - [ ] Published at stable Russian URLs (e.g. `omoba.ru/privacy`, `/terms`) with a version and an effective date.
   - [ ] Every data category in `account-api/migrations/001-007` and `docs/bot-practice-and-social.md` (chat) is covered.
   - [ ] Counsel review (date and reviewer) is recorded in `docs/markets.md`, RU runbook step 1.
 - **Depends on:** LR-05
@@ -378,7 +378,7 @@ Area: install/update · **blocker** · M · code
   - The compatibility reply carries the minimum release and the update URL.
   - `docs/RELEASING.md` defines which changes bump `GAMEPLAY_REVISION`, says clients ship before the server, and requires a player notice before a forced update. The alternative is to move balance values into server data (O-12).
 - **Acceptance:**
-  - [ ] On a mismatch, the RU client shows "Требуется обновление" with a button to `app.ru.omoba.io/download` for its platform.
+  - [ ] On a mismatch, the RU client shows "Требуется обновление" with a button to `omoba.ru/download` for its platform.
   - [ ] A newer compatible build shows a banner on Home.
   - [ ] The compatibility reply, or a signed document, carries min release and update URL, with tests for bad and expired documents.
   - [ ] No production string mentions choosing a server, and all strings exist in en, ru and zh-Hans.
@@ -496,7 +496,7 @@ Area: sign-in · **major** · S · owner
   - The VK ID app does not exist yet (`docs/progress/2026-10-24-market-profiles.md:52`).
   - Without `OMOBA_VKID_CLIENT_ID`, the portal shows no VK buttons (`market-web/src/components/portal.tsx:59-61`).
 - **Requirement:** Create the VK ID web app:
-  - trusted redirect `https://app.ru.omoba.io/api/auth/vk/callback`
+  - trusted redirect `https://omoba.ru/api/auth/vk/callback`
   - scope `vkid.personal_info`
   - OK and Mail.ru enabled
   - LR-04 URLs entered in the VK ID cabinet
@@ -563,7 +563,7 @@ Area: landing/portal/packages · **major** · M · code (the owner approves the 
     - is English only
     - has null download links except macOS (`src/lib/beta-access.ts:47-93`)
     - says "A public matchmaking server is not available yet" (`section-beta.tsx:180-184`) and "five hero classes" (`app/page.tsx:17`)
-    - has no link to `app.ru.omoba.io`
+    - has no link to `omoba.ru`
     - links crypto `/donate` (Ekza) from the header, footer and sitemap (`site-header.tsx:57-60,94-97`; `site-footer.tsx:51`)
     - loads Vercel and Supabase analytics (`layout.tsx:143-144`)
   - The RU portal (`market-web`):
@@ -574,7 +574,7 @@ Area: landing/portal/packages · **major** · M · code (the owner approves the 
   - The package README is an English "playtest build" that ignores the market (`scripts/release.py:508-583`).
   - The RU Linux tarball ships `omoba-account-api` (`scripts/release.py:129,808-809`).
 - **Requirement:**
-  - A Russian landing (e.g. `ru.omoba.io`), hosted in Russia, with no foreign analytics. It:
+  - A Russian landing (`omoba.ru`, section 7), hosted in Russia, with no foreign analytics. It:
     - makes accurate claims: 16 classes, the Verdant map, and the modes from LR-08
     - has download buttons from the RU `releases.json`, with SHA-256
     - links the community, the legal documents and the age sign
@@ -605,7 +605,7 @@ Area: distribution · **major** · S · ops
   - The status label is chosen by the owner (e.g. "Открытая бета").
   - Downloads are counted per platform.
 - **Acceptance:**
-  - [ ] `releases.json` URLs are on `*.ru.omoba.io` and their SHA-256 values verify.
+  - [ ] `releases.json` URLs are on `omoba.ru` and their SHA-256 values verify.
   - [ ] The portal shows the chosen status.
   - [ ] Download counts per platform are available.
   - [ ] A test download from a Russian network is recorded.
@@ -685,7 +685,7 @@ Area: monetization · **launch scope** (owner request 2026-10-24) · L · code +
   - [ ] Server/harness: a player with a 1000 ₽ donation equips Crimson; equipping Prism I is refused; a second client sees the aura on that hero; after expiry the aura disappears within one refresh.
   - [ ] RU client: `SupporterPlugin` registered, StoreKit not; panel opens the portal; other players' auras render (UI-tree test; visual capture when the screen is available).
   - [ ] Portal unit and e2e tests (YooKassa stand-in): all tiers and a custom amount, quote mismatch → reload, return polling, no crypto/Solana/Apple on RU pages, global unchanged.
-  - [ ] Docs: `docs/supporter.md`, `docs/markets.md`, `account-api/README.md`, OpenAPI, the RU runbook (shop settings, webhook URL `https://account.ru.omoba.io/v1/supporter/yookassa/notifications`, test shop), Caddy native list, ADR-024.
+  - [ ] Docs: `docs/supporter.md`, `docs/markets.md`, `account-api/README.md`, OpenAPI, the RU runbook (shop settings, webhook URL `https://account.omoba.ru/v1/supporter/yookassa/notifications`, test shop), Caddy native list, ADR-024.
 - **Owner:** a YooKassa shop for an ИП or ООО (receipts for самозанятые are not covered by this design), «Чеки от ЮKassa» enabled, the VAT code confirmed, the webhook URL and events (`payment.succeeded`, `payment.canceled`, `payment.waiting_for_capture`, `refund.succeeded`) registered, a test shop for staging; a public offer (оферта) for supporter cosmetics with refund terms and the seller's requisites (ФИО, ИНН, ОГРНИП, address, e-mail, phone) published at `/offer` (draft from LR-06); a real test payment that checks the fiscal receipt before announcing.
 - **Depends on:** LR-01, LR-02, LR-04/LR-06 (offer), LR-14 (protocol bump ships with the update path)
 
@@ -1567,7 +1567,7 @@ single, documented setting the owner can change later.
 | O-15 | Account deletion: a manual e-mail procedure at launch, described in the privacy policy (self-service later, LR-42). | LR-04 |
 | O-16 | One RU VPS runs PostgreSQL, the lobby and workers, the Account API, the portal and the download host behind Caddy. | LR-01, LR-23 |
 | O-19 | Feedback and crash reports attach logs only when the player ticks a box (off by default). | LR-20 |
-| — | **RU landing** = the RU portal's guest home at `app.ru.omoba.io` (hosted in Russia, no foreign analytics); the omoba.io landing is not changed for M0. | LR-22 |
+| — | **RU landing** = the RU portal's guest home at `omoba.ru` (hosted in Russia, no foreign analytics); the omoba.io landing is not changed for M0. | LR-22 |
 | — | **Legal texts**: Russian drafts of the privacy policy and user agreement ship with a visible "проект" banner and version `0-draft`; the owner replaces them with the counsel-approved texts (LR-04) before publication. | LR-04, LR-06 |
 | — | **Age category**: plumbing with the RU value `12+` as a placeholder the owner confirms with counsel before publication (with chat off). | LR-07 |
 | — | **Release label**: «Открытая бета». | LR-23 |
@@ -1577,4 +1577,4 @@ single, documented setting the owner can change later.
 | — | **RU surfaces**: no donate-with-crypto, wallet, Solana or Ekza content; the RU Supporter page (YooKassa) and `/supporters` are allowed and linked from the portal navigation. | LR-22, LR-67 |
 | — | **Legal drafts** (LR-06) also include a draft **public offer** (оферта) for supporter cosmetics at `/offer`: what is sold (a 30-day cosmetic aura, no gameplay advantage), prices, payment through YooKassa, refunds, and placeholders for the seller's requisites (ФИО, ИНН, ОГРНИП, address, e-mail, phone). Prices and the offer are readable without sign-in. | LR-06, LR-67 |
 | — | **Reserved numbers**: portal migration 009 = YooKassa supporter (LR-67); game protocol 12 = tier aura styles (LR-67). | LR-67 |
-| — | **RU domain (owner, 2026-10-24)**: the RU market lives on **omoba.ru** (registered at REG.RU, DNS there): `https://omoba.ru` = RU portal and landing (VK ID callback `https://omoba.ru/api/auth/vk/callback`, `/privacy`, `/terms`, `/offer`, `/supporter`, `/download`), `https://account.omoba.ru` = Account API (YooKassa webhook `https://account.omoba.ru/v1/supporter/yookassa/notifications`), `lobby.omoba.ru:4000` = lobby and match workers. These replace every `*.ru.omoba.io` name in this plan. New code and docs take names from `scripts/markets.py` / `shared/src/market.rs`, never literals; existing `ru.omoba.io` references are replaced in one sweep after the M0 run. The global ecosystem (`omoba.io`, Ekza) is untouched; Ekza comes to RU later feature by feature (`--feature ekza=on`). | all RU specs |
+| — | **RU domain (owner, 2026-10-24)**: the RU market lives on **omoba.ru** (registered at REG.RU, DNS there): `https://omoba.ru` = RU portal and landing (VK ID callback `https://omoba.ru/api/auth/vk/callback`, `/privacy`, `/terms`, `/offer`, `/supporter`, `/download`), `https://account.omoba.ru` = Account API (YooKassa webhook `https://account.omoba.ru/v1/supporter/yookassa/notifications`), `lobby.omoba.ru:4000` = lobby and match workers. They replaced the earlier `*.ru.omoba.io` names everywhere on 2026-10-24 (`scripts/markets.py` zone `omoba.ru`; clients, release tooling and the dev host tool treat `omoba.ru` as a production zone). New code and docs take names from `scripts/markets.py` / `shared/src/market.rs`, never literals. The global ecosystem (`omoba.io`, Ekza) is untouched; Ekza comes to RU later feature by feature (`--feature ekza=on`). | all RU specs |

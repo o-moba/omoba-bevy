@@ -74,12 +74,12 @@ mod tests {
     #[test]
     fn sign_in_urls_carry_only_a_well_formed_code() {
         assert_eq!(
-            super::sign_in_url("https://app.ru.omoba.io", "ABCD2345").unwrap(),
-            "https://app.ru.omoba.io/connect?code=ABCD2345"
+            super::sign_in_url("https://omoba.ru", "ABCD2345").unwrap(),
+            "https://omoba.ru/connect?code=ABCD2345"
         );
         for bad in ["abcd2345", "ABCD234", "ABCD23456", "ABCD&x=1", "ABCD 234"] {
             assert!(
-                super::sign_in_url("https://app.ru.omoba.io", bad).is_err(),
+                super::sign_in_url("https://omoba.ru", bad).is_err(),
                 "{bad}"
             );
         }
