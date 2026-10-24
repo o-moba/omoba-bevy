@@ -22,9 +22,10 @@
 //! Graphics, audio, language and the career identity stay shared.
 //!
 //! A build without Ekza (`shared::market::FEATURES.ekza` off, the free RU/CN
-//! markets) runs every profile with the closed loopback registry and passport,
-//! no market and no Studio ([`for_market`]), and takes no desktop registry or
-//! passport override: no Ekza host is ever contacted.
+//! markets) pins the closed loopback registry and passport and names no market
+//! or Studio whatever its profile names ([`for_market`]), and takes no desktop
+//! registry or passport override: no Ekza host is ever contacted. The profile
+//! itself (and the choice saved for the next start) is unchanged.
 // i18n-strict
 use std::io;
 use std::path::{Path, PathBuf};
@@ -525,10 +526,7 @@ fn saved_choice(path: Option<&Path>) -> Option<Selection> {
 pub(crate) fn active() -> &'static ConnectionProfile {
     ACTIVE.get_or_init(|| {
         let saved = saved_choice(selection_path().as_deref());
-        for_market(
-            resolve(BUILD_CONTOUR, saved.as_ref(), &COMPILED),
-            shared::market::FEATURES.ekza,
-        )
+        resolve(BUILD_CONTOUR, saved.as_ref(), &COMPILED)
     })
 }
 
@@ -592,8 +590,9 @@ pub(crate) fn install() -> &'static ConnectionProfile {
         eprintln!("Moved the Ekza store into {}", profile.storage.display());
     }
     let ekza = shared::market::FEATURES.ekza;
+    let pinned = for_market(profile.clone(), ekza);
     let registry = endpoint_override(&[omoba_passport::store::REGISTRY_URL_ENV], ekza)
-        .unwrap_or_else(|| profile.registry.clone());
+        .unwrap_or_else(|| pinned.registry.clone());
     omoba_passport::community::set_registry_url(registry);
     let passport = endpoint_override(
         &[
@@ -602,14 +601,14 @@ pub(crate) fn install() -> &'static ConnectionProfile {
         ],
         ekza,
     )
-    .unwrap_or_else(|| profile.passport.clone());
+    .unwrap_or_else(|| pinned.passport.clone());
     omoba_passport::set_passport_url(passport);
     // Before the app (and its logger) exists, like the roster summary.
     eprintln!(
         "Connection profile {}: lobby {}, registry {}",
         profile.id.key(),
         profile.lobby,
-        profile.registry
+        pinned.registry
     );
     profile
 }
@@ -693,7 +692,6 @@ impl ActiveConnection {
                 builtin_profile(contour, id, &self.compiled).ok_or(ProfileError::Production)
             }
         }
-        .map(|profile| for_market(profile, shared::market::FEATURES.ekza))
     }
 
     /// Saves `profile` as the choice for the next start. Choosing the running

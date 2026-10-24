@@ -55,7 +55,8 @@ pub(crate) const BUILD_CONTOUR: Option<&str> = match option_env!("OMOBA_DEFAULT_
 /// tester is never sent to the production market. The i18n hints show it as
 /// `{market}`. Empty in a build without Ekza, which names no market.
 pub(crate) fn market_address() -> String {
-    crate::connection_profile::active().market.clone()
+    use crate::connection_profile::{active, for_market};
+    for_market(active().clone(), shared::market::FEATURES.ekza).market
 }
 
 /// The lobby this process connects to unless a desktop `GAME_SERVER_ADDR`
