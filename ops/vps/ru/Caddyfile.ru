@@ -1,10 +1,10 @@
 # RU ingress (Caddy, automatic HTTPS). The portal runs on this host and calls the
-# Account API directly on 127.0.0.1:40550 (README.md, "Topology"), so account.ru
+# Account API directly on 127.0.0.1:40550 (README.md, "Topology"), so account.omoba.ru
 # serves only the game's native routes and health; every other Account API route
 # answers 403 here and needs no portal key. Both proxies OVERWRITE X-Real-IP with
 # the connecting client: the Account API and the portal trust it only because of
 # that (OMOBA_TRUST_LOOPBACK_PROXY=1 on both).
-account.ru.omoba.io {
+account.omoba.ru {
     header X-Content-Type-Options nosniff
     request_body {
         max_size 64KB
@@ -32,7 +32,7 @@ account.ru.omoba.io {
 
 # The player portal. The browser's address reaches the Account API only through
 # this header: the portal forwards it on its loopback calls.
-app.ru.omoba.io {
+omoba.ru {
     reverse_proxy 127.0.0.1:3010 {
         header_up X-Real-IP {remote_host}
     }

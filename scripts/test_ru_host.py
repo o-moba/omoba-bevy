@@ -728,7 +728,8 @@ To                         Action      From
     def test_the_host_half_checks_the_names_it_is_given(self):
         self.assertEqual(ru_host.names_problems(NAMES), [])
         self.assertEqual(ru_host.names_problems(None), ["the payload lacks the RU names (scripts/markets.py)"])
-        for zone in ("omoba.io", "dev.omoba.io", "x.dev.omoba.io", "app.omoba.io", "ekza.io", "dev.ekza.io"):
+        for zone in ("omoba.io", "dev.omoba.io", "x.dev.omoba.io", "app.omoba.io", "ekza.io", "dev.ekza.io",
+                     "ru.omoba.io"):
             names = {key: f"{key.replace('_', '-')}.{zone}" for key in ru_host.HOST_KEYS}
             problems = ru_host.names_problems({**names, "zone": zone})
             self.assertTrue(problems and problems[0].startswith(f"the RU zone {zone} overlaps the production or dev"),

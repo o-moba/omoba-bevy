@@ -124,7 +124,7 @@ All game traffic is UDP, and datagrams are JSON-encoded (`serde_json`; `server/s
 | Client | Ekza passport | HTTPS: wallet pairing, tickets | The connection profile's passport | `passport/src/lib.rs` |
 | Client | Account API | HTTPS POST, no redirects: pairing, device enrollment and recovery, Supporter, VK link | Runtime environment, otherwise compiled (`OMOBA_ACCOUNT_API_URL` + `OMOBA_PORTAL_ORIGIN`). `OMOBA_ALLOW_INSECURE_LOCAL=1` allows loopback HTTP. A dev build accepts only `account.dev.omoba.io` with `app.dev.omoba.io`. | `passport/src/web_account.rs` (`from_env`, `validate_contour_endpoints`), `device_account.rs`, `supporter_account.rs` |
 | Client | System browser | Opens a URL: market, Studio, `<portal>/connect?code=` | Connection profile or market portal (see [link targets](#build-axes-contour-and-market)) | `client/src/connection_profile.rs`, [markets.md](../markets.md) |
-| Browser | Portal | HTTPS | `app.omoba.io`, `app.dev.omoba.io`, `app.ru.omoba.io` | omoba-web `docs/vercel.md`, `ops/vps/ru/Caddyfile.ru` |
+| Browser | Portal | HTTPS | `app.omoba.io`, `app.dev.omoba.io`, `omoba.ru` | omoba-web `docs/vercel.md`, `ops/vps/ru/Caddyfile.ru` |
 | Portal BFF | Account API | Server-to-server, no redirects. A non-loopback API (hosted dev, HTTPS) gets the portal ingress key, which the dev Caddy checks and strips. A loopback API (RU, `http://127.0.0.1:40550`) gets no key and, with `OMOBA_TRUST_LOOPBACK_PROXY=1`, the browser's `X-Real-IP` ([protocols.md §7](protocols.md#7-portal-bff-omoba-web)). | `OMOBA_ACCOUNT_API_URL` | omoba-web `src/lib/security.mjs` (`accountIngressHeaders`, `accountUpstreamHeaders`), `src/app/api/[...path]/route.ts` |
 | Portal BFF | Ekza Registry | HTTPS: `/market`, `/api/ekza/*`, `/api/sponsor/*` | `registry.ekza.io` or `registry.dev.ekza.io` | omoba-web `src/lib/market-server.mjs`, `sponsor-server.mjs` |
 | Account API | PostgreSQL | SQL as the portal runtime role | Loopback | `account-api/README.md` |
@@ -152,7 +152,7 @@ Both axes are compile-time settings. A wrong value fails the build; there is no 
 | --- | --- | --- | --- | --- | --- | --- |
 | `global` · prod | Phones: `space.ekza.omoba.beta` ("Omoba Beta"). macOS: `Omoba.app`, `space.ekza.omoba.desktop`. | `omoba-bevy` | `77.246.105.57:4000` (`BETA_GAME_SERVER_ADDR`), unless the release compiles `--server` (in CI: the `server` input or the repository variable `OMOBA_RELEASE_SERVER`) | `registry.ekza.io` / `avatar.ekza.io/api/passport` | None compiled / `app.omoba.io` in guest mode | Production VPS; Vercel `omoba-app` |
 | `global` · dev | Phones: `space.ekza.omoba.dev` ("OMOBA Dev"). macOS: `Omoba Dev.app`, `space.ekza.omoba.desktop.dev`. | `omoba-bevy-dev` | `lobby.dev.omoba.io:4100` (Dev profile) | `registry.dev.ekza.io` / closed loopback | `account.dev.omoba.io` / `app.dev.omoba.io` | Dev VPS; Vercel `omoba-app-dev` |
-| `ru` · prod | Android: `space.ekza.omoba.ru` ("OMOBA"). macOS: `space.ekza.omoba.desktop.ru`. No iOS. | `omoba-bevy-ru` | `lobby.ru.omoba.io:4000` | None (closed loopback) | `account.ru.omoba.io` / `app.ru.omoba.io` | RU VPS (planned) |
+| `ru` · prod | Android: `space.ekza.omoba.ru` ("OMOBA"). macOS: `space.ekza.omoba.desktop.ru`. No iOS. | `omoba-bevy-ru` | `lobby.omoba.ru:4000` | None (closed loopback) | `account.omoba.ru` / `omoba.ru` | RU VPS (planned) |
 | `ru` · dev | The OMOBA Dev phone app (`space.ekza.omoba.dev`) with RU features. macOS: `space.ekza.omoba.desktop.ru.dev`. | `omoba-bevy-ru-dev` | Dev lobby | None (closed loopback) | Dev Account API / dev portal | Dev VPS |
 | `cn` | — | `omoba-bevy-cn` | Not decided | None | Not decided | Packaging refused (`blocked` in `scripts/markets.py`) |
 
@@ -178,8 +178,8 @@ Each market has its own database, accounts and device keys. The settings folder 
 | Lobby | UDP 4000 | UDP 4100 | UDP 4000 | UDP 4000 |
 | Match workers | UDP 41000–41001 (capacity 2) | UDP 41100 (capacity 1) | UDP 41000–41001 (capacity 2) | From UDP 41000 (capacity 16), bound to 127.0.0.1 |
 | Worker public host | `77.246.105.57` | `lobby.dev.omoba.io` (A record only, no AAAA) | Host IPv4 from `lobby.env` | `127.0.0.1` |
-| Account API | Not a service (only `migrate` runs) | `127.0.0.1:40550` behind Caddy as `account.dev.omoba.io` | `127.0.0.1:40550` behind Caddy as `account.ru.omoba.io` | `127.0.0.1:40550` |
-| Portal | Vercel, `app.omoba.io` | Vercel, `app.dev.omoba.io` | `127.0.0.1:3010` behind Caddy as `app.ru.omoba.io` | `127.0.0.1:3010` |
+| Account API | Not a service (only `migrate` runs) | `127.0.0.1:40550` behind Caddy as `account.dev.omoba.io` | `127.0.0.1:40550` behind Caddy as `account.omoba.ru` | `127.0.0.1:40550` |
+| Portal | Vercel, `app.omoba.io` | Vercel, `app.dev.omoba.io` | `127.0.0.1:3010` behind Caddy as `omoba.ru` | `127.0.0.1:3010` |
 | PostgreSQL | The existing PostgreSQL 16 instance, reached through localhost (port and packaging unconfirmed), database `omoba` | Dev Supabase Postgres at `127.0.0.1:54322`, database `omoba_dev` | `127.0.0.1:5432`, database `omoba_ru` | Any (disposable for tests) |
 | Registry / Hub | `registry.ekza.io` / `hub.ekza.io` | `registry.dev.ekza.io` / `hub.dev.ekza.io` on the same VPS | None | `127.0.0.1:8018` / `127.0.0.1:5188` (Local profile) |
 
@@ -261,7 +261,7 @@ A single VPS in Russia is meant to serve everything Russian players reach. Russi
 | Lobby | `omoba-lobby-ru.service`, user `omoba-ru`, with the same limits as production. It runs `/opt/omoba-ru/current/omoba-server`, the `omoba-server` binary from the RU Linux package (built with `OMOBA_MARKET=ru`), and sets no Registry or passport URL. It starts after `postgresql.service` (`After=`/`Wants=`) and restarts on any exit every 5 s with no start limit (`Restart=always`, `StartLimitIntervalSec=0`). | [omoba-lobby-ru.service](../../ops/vps/ru/omoba-lobby-ru.service) |
 | Account API | `omoba-account-api-ru.service` on `127.0.0.1:40550`, with `OMOBA_TRUST_LOOPBACK_PROXY=1`, the VK ID app id and the social secret. Limits: `MemoryMax=256M`, `CPUQuota=50%`. It refuses payment settings and serves no Ekza library. Same PostgreSQL ordering and restart policy as the lobby. | [omoba-account-api-ru.service](../../ops/vps/ru/omoba-account-api-ru.service), [account-api.env.example](../../ops/vps/ru/account-api.env.example) |
 | Portal | `omoba-portal-ru.service`, user `omoba-portal-ru`: the omoba-web standalone build with `OMOBA_MARKET=ru` (`/opt/omoba-ru/portal/current/server.js` on Node.js from `/opt/omoba-ru/node/current`) on `127.0.0.1:3010`, `Restart=always`, `MemoryMax=512M`, `CPUQuota=100%`, no Next.js telemetry. It calls the Account API directly on `http://127.0.0.1:40550` with no portal ingress key and forwards the browser's `X-Real-IP`, which Caddy writes (`OMOBA_TRUST_LOOPBACK_PROXY=1` on the portal and the API). It refuses to serve without that flag, or with a non-loopback API and no valid key. | [omoba-portal-ru.service](../../ops/vps/ru/omoba-portal-ru.service), [portal.env.example](../../ops/vps/ru/portal.env.example), [README › Topology](../../ops/vps/ru/README.md#topology), omoba-web `src/lib/security.mjs` |
-| Ingress | Caddy on TCP 443 with automatic HTTPS. `account.ru.omoba.io` allows `GET /health/live` and `/health/ready` and the native POST allowlist (see [below](#account-api-ingress-allowlists)); everything else, every portal route included, gets 403. `app.ru.omoba.io` proxies to the portal. Both overwrite `X-Real-IP` with the client's address. | [Caddyfile.ru](../../ops/vps/ru/Caddyfile.ru) |
+| Ingress | Caddy on TCP 443 with automatic HTTPS. `account.omoba.ru` allows `GET /health/live` and `/health/ready` and the native POST allowlist (see [below](#account-api-ingress-allowlists)); everything else, every portal route included, gets 403. `omoba.ru` proxies to the portal. Both overwrite `X-Real-IP` with the client's address. | [Caddyfile.ru](../../ops/vps/ru/Caddyfile.ru) |
 | Database | Ubuntu's PostgreSQL 16+ with the `und-x-icu` collation, on `127.0.0.1:5432` only. Database `omoba_ru` (UTF8, collation C.UTF-8), owner role `omoba_owner` (no login outside migrations) and the runtime roles `omoba_game` and `omoba_portal`, whose passwords are generated on the host into the root-only env files | [ops/vps/ru/README.md](../../ops/vps/ru/README.md) |
 | Downloads | `make release-ru-publish` writes `releases.json` from the verified IPFS receipts. It is installed as `OMOBA_RELEASE_CATALOG`, and the portal lists it through the Account API `releases` read (`account-api/src/lib.rs`). | Same |
 | Host and deploy | `ru_host.py` runs on the Mac and pipes itself to `ssh root@<RU VPS> python3 -`. `bootstrap`: Ubuntu packages only, firewall (ufw: SSH, TCP 443, UDP 4000 and the arena range from the lobby unit), key-only SSH (`sshd_config.d/00-omoba-ru.conf`), users, env files, database, units. `ship` / `ship-portal`: staged immutable releases, `pg_dump` and migrations before the switch, verification and rollback. `status` checks everything read-only; `reboot-check` proves a reboot needs no manual step. The public names come from the RU profile in `scripts/markets.py` (`ru_host.py names`) and reach the host in each payload; DNS and the `Caddyfile.ru` sites are checked against them. It refuses the production and dev hosts on both sides and, for bootstrap, an address `whois` does not place in Russia. | [ru_host.py](../../ops/vps/ru/ru_host.py), [README](../../ops/vps/ru/README.md), [release-checklist.md](../../ops/vps/ru/release-checklist.md) |
@@ -272,7 +272,7 @@ flowchart LR
   browser["Web browser"]
   vk["VK ID<br/>id.vk.ru"]
   subgraph ru["RU VPS, planned, hosted in Russia"]
-    caddy["Caddy TCP 443<br/>account.ru.omoba.io, app.ru.omoba.io"]
+    caddy["Caddy TCP 443<br/>account.omoba.ru, omoba.ru"]
     lobby["omoba-lobby-ru<br/>server role lobby, UDP 4000"]
     workers["match workers<br/>UDP 41000-41001"]
     api["omoba-account-api-ru<br/>127.0.0.1:40550"]
@@ -290,11 +290,11 @@ flowchart LR
   workers -->|"career-store SQL"| pg
   client -->|"HTTPS: native device routes, social link"| caddy
   client -.->|"opens /connect?code= in the browser"| browser
-  browser -->|"HTTPS app.ru.omoba.io"| caddy
+  browser -->|"HTTPS omoba.ru"| caddy
   browser -->|"OAuth 2.1 PKCE authorize"| vk
-  caddy -->|"app.ru, X-Real-IP overwritten"| portal
+  caddy -->|"omoba.ru, X-Real-IP overwritten"| portal
   portal -->|"HTTP loopback, browser X-Real-IP forwarded"| api
-  caddy -->|"account.ru allowlist"| api
+  caddy -->|"account.omoba.ru allowlist"| api
   api -->|"SQL, portal role"| pg
   api -->|"HTTPS code exchange"| vk
 ```
