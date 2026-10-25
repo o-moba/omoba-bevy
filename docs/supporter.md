@@ -2,7 +2,8 @@
 
 Hero Supporter is voluntary cosmetic account access. No purchase modifies damage, health, XP,
 rating, matchmaking, visibility rules or hitboxes. Solar, Lunar and Verdant use
-the same lightweight mesh-based effect with separate color presentation.
+the same lightweight mesh-based effect with separate color presentation, and so
+do the seven Hero tier styles (Rose to Prism III, [below](#hero-tiers)).
 
 ## Delivery status
 
@@ -19,10 +20,16 @@ usability or App Review acceptance. The Apple verification policy is under
 the separately approved production dependency. Do not enable Apple checkout with
 a mock verifier or a service that only decodes JWT payloads.
 
-**Planned (ADR-025; LR-67, LR-69):**
-- Tiers count provider-neutral points: YooKassa gives 1 point per ruble, and each Apple tier product gives 100 to 10 000.
+Implemented for LR-67 (the tier engine, LR-67a): provider-neutral tier points,
+the seven tier styles (protocol 12), YooKassa grant settlement and its durable
+tables (portal schema 9), the RU market selling through YooKassa only, and the
+in-game panel with the website link. Not yet built: the YooKassa checkout,
+webhook and reconciliation (LR-67b) and the RU portal pages (LR-67c).
+
+**Planned (ADR-025; LR-69):**
+- Each Apple tier product gives 100 to 10 000 points (YooKassa already gives 1 point per ruble).
 - Seven non-renewing 30-day Apple products ($0.99 to $99.99) replace the monthly subscription, which was never sold.
-- The iOS app shows no web payment link.
+- The iOS app shows no web payment link (M0 builds already never show one).
 
 ## Monthly Hero status and public thanks
 
@@ -62,6 +69,89 @@ The Account API adds `recognition` to the existing private supporter dashboard,
 public `GET /v1/supporters`. Public player responses include a small supporter
 summary only when that same acknowledgement is public. Existing game/native
 SupporterStatus and network messages are unchanged.
+
+## Hero tiers
+
+The Russian market (and later Apple, LR-69) sells monthly Hero tiers (LR-67,
+ADR-024, ADR-025). Every grant carries **tier points** set only by the Account
+API from the provider rule: YooKassa gives one point per whole ruble paid
+(`amount_minor / 100`, recomputed after partial refunds); Apple and Solana grants
+carry 0 points in M0 (Solana until O-27). A player's points are the sum over the
+grants whose 30-day window covers now: SQL `portal.supporter_points(profile, at)`.
+`shared::supporter::SupporterTier::for_points` turns them into a tier:
+
+| Tier | Points (₽ within 30 days) | Style |
+| --- | ---: | --- |
+| Rose | 100 | pink |
+| Jade | 250 | green |
+| Azure | 500 | blue |
+| Crimson | 1000 | red |
+| Prism I | 2500 | rainbow shimmer |
+| Prism II | 5000 | faster shimmer, stronger sparks |
+| Prism III | 10000 | fastest shimmer, crown ring |
+
+A player paying 100 ₽ every month stays Rose; 1000 ₽ every month stays Crimson.
+Points are never shown; the panel says in plain words that donations within 30
+days add up.
+
+**One entitlement rule** (`AuraStyle::unlocked`): the base styles (Solar, Lunar,
+Verdant) need any active grant of any provider; a tier style also needs its
+tier's points. The Account API dashboard and `PATCH /v1/me/supporter/aura`, the
+career store's `supporter_status` and `equip_supporter_aura` (SQL checks the
+grant and `portal.supporter_points` in the same statement) and the game server's
+`authorized_supporter_aura` all use it. A stored style the tier no longer allows
+steps down to the highest unlocked style (`AuraStyle::effective`); a hidden aura
+stays hidden. The server re-checks the equipped style on every refresh (10 s)
+and on every snapshot, and refuses a tier style past `tier_until` until the next
+refresh says otherwise.
+
+**Status.** `SupporterStatus` (protocol 12) adds `tier_points` and `tier_until`,
+the end of the current tier from a sweep over the active grants'
+ends (`shared::supporter::tier_until`); each `SupporterGrantSummary` adds its
+`tier_points`. Older JSON without these fields still decodes (as 0 and none).
+Both readers return at most 64 grant rows (`STATUS_GRANT_LIMIT`), active ones
+first; the tier sum itself is never bounded.
+
+**Default aura.** After a player's first grant the equipped style is the highest
+style the points unlock (`AuraStyle::highest_unlocked`: the tier's style, or
+Solar below Rose). The Account API writes it in `apply_event_tx`; the career
+store shows the same style when no preference row exists. A placeholder Solar row
+written by the recognition toggle before any payment is upgraded on the first
+grant; an explicitly hidden aura is kept hidden.
+
+**Credited months.** `months_supported` counts one month per nonrevoked grant,
+except YooKassa donations, which count distinct UTC calendar months with a
+donation (`portal.supporter_months`): several donations in one month credit it once.
+
+**Rendering.** The four solid tiers are palettes of the existing 23-element
+effect. The Prism tiers cycle their hue every frame on the style's shared
+materials (orbits, heads and body glow at three hue offsets), so all wearers of
+one style shimmer in sync; only worn styles are repainted. Speed and glow grow
+from Prism I to III; Prism II and III also have larger sparks, and Prism III wears
+a crown ring above the head in place of one spark, so the budget stays 23 elements
+(35 in the 2D fallback, which has its own colours from the same palette).
+
+**Purchase surface.** The panel asks `payment_surface()` (client
+`supporter.rs`) how this build sells: `Website` («Поддержать на сайте») opens the
+region portal's `/supporter` in the browser where the market sells through
+YooKassa on a non-iOS build; `StoreKit` is the global iOS app; otherwise the
+panel shows no purchase. An iOS build never links to a web payment. The RU client
+registers `SupporterPlugin` (panel and everyone's auras) but not the StoreKit
+bridge, which compiles only for `target_os = "ios"` anyway.
+
+**YooKassa settlement (data half).** `account-api/src/supporter/yookassa.rs`
+settles payments and refunds that the provider flow re-read from YooKassa with
+the shop credentials (never a webhook body): `settle_payment_tx` grants 30 days
+from capture once, with the amount in kopecks and its points, and marks the
+attempt `succeeded`; a late `canceled` never downgrades a success; a pending
+payment marks its attempt `submitted`; an unknown payment writes nothing.
+`settle_refund_tx` settles the payment first (a refund can overtake it), records
+each refund once, recomputes the grant's points from all refunds of the payment
+and revokes the grant on a full refund. A different amount than the attempt's is
+refused. The durable tables (`supporter_yookassa_attempts` with the Idempotence-Key
+persisted before the POST, `supporter_yookassa_refunds`, the refund-scan cursor
+and operator issues) are in portal migration 9; the checkout, webhook and
+reconciliation loop that use them are LR-67b.
 
 ## Hero aura rendering
 
@@ -125,9 +215,14 @@ thirty seconds without a successful check; no silent fallback to a guest account
 
 ## Database upgrade and runtime permissions
 
-Core career schema is version 3; portal schema is independently version 7 (migration 7 adds
-sign in with VK ID, `docs/markets.md`). `006_supporter_recognition.sql` adds public acknowledgement
+Core career schema is version 3; portal schema is independently versions 1–7 and 9
+(migration 7 adds sign in with VK ID, `docs/markets.md`; 8 is reserved for LR-20
+feedback). `006_supporter_recognition.sql` adds public acknowledgement
 with an opt-out default; it does not grant paid access or publish any account.
+`009_yookassa_supporter.sql` adds provider `yookassa`, `amount_minor` and
+`tier_points` on grants (existing rows keep 0 points), the seven tier aura ids,
+`portal.supporter_points` and `portal.supporter_months`, and the YooKassa
+attempt, refund, refund-scan and issue tables.
 Run the existing owner-only Account API `migrate` command, then
 `account-api/ops/grants.sql` with your existing runtime role names. Apply first
 to an isolated database and verify backups before an operator-approved rollout.
@@ -140,7 +235,10 @@ Deploy matching clients before expecting users to reauthorize the portal.
 
 The portal may insert a new proved career key and update its revocation date,
 but cannot reassign or delete it or change account XP/rating. The game role reads
-grants and writes only cosmetic preferences. It cannot issue payments/grants.
+grants, executes `portal.supporter_points` and writes only cosmetic preferences.
+It cannot issue payments/grants. The portal role (the Account API) may read,
+insert and update the YooKassa attempts, the refund-scan cursor and issues, and
+insert refunds; it can delete none of them.
 Legacy broad update/delete permissions on career keys are removed by the grants
 script. Missing billing tables/permissions disable cosmetics; do not interpret
 that condition as a successful provider configuration.

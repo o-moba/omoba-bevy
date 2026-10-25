@@ -108,58 +108,74 @@ where
 
 impl CareerStore {
     /// Read only provider-verified grants. Missing billing migrations fail closed.
+    /// One read-only snapshot: the bounded grant list (active first), the Hero
+    /// tier sum (`portal.supporter_points`) and the stored aura, combined by the
+    /// same rule as the Account API (`SupporterStatus::from_grants`).
     pub async fn supporter_status(
         &self,
         profile_id: &str,
     ) -> Result<shared::supporter::SupporterStatus, String> {
-        use shared::supporter::{AuraStyle, SupporterGrantSummary, SupporterStatus};
-        let rows = sqlx::query("SELECT provider, valid_from, valid_until, revoked_at, renewal_enabled, EXTRACT(EPOCH FROM now())::bigint AS now FROM portal.supporter_grants WHERE profile_id=$1 ORDER BY (revoked_at IS NULL AND valid_from<=EXTRACT(EPOCH FROM now())::bigint AND valid_until>EXTRACT(EPOCH FROM now())::bigint) DESC, valid_until DESC LIMIT 64")
-            .bind(profile_id).fetch_all(&self.pool).await.map_err(|_| "Supporter storage is unavailable.".to_string())?;
-        let mut status = SupporterStatus::default();
-        for row in rows {
-            let from: i64 = row.get("valid_from");
-            let until: i64 = row.get("valid_until");
-            let now: i64 = row.get("now");
-            let revoked = row.get::<Option<i64>, _>("revoked_at").is_some();
-            if !revoked && from <= now && until > now {
-                status.active = true;
-                status.active_until = Some(status.active_until.unwrap_or(0).max(until));
-            }
-            status.grants.push(SupporterGrantSummary {
-                provider: row.get("provider"),
-                valid_from: from,
-                valid_until: until,
-                revoked,
-                renewal_enabled: row.get("renewal_enabled"),
-            });
-        }
-        if status.active {
-            let selected: Option<Option<String>> = sqlx::query_scalar(
-                "SELECT aura FROM portal.supporter_preferences WHERE profile_id=$1",
-            )
-            .bind(profile_id)
-            .fetch_optional(&self.pool)
+        use shared::supporter::{
+            AuraStyle, STATUS_GRANT_LIMIT, SupporterGrantSummary, SupporterStatus, tier_points,
+        };
+        let unavailable = |_| "Supporter storage is unavailable.".to_string();
+        let mut tx = self.pool.begin().await.map_err(unavailable)?;
+        sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
+            .execute(&mut *tx)
             .await
-            .map_err(|_| "Supporter storage is unavailable.".to_string())?;
-            status.equipped_aura = selected
-                .unwrap_or(Some("solar".into()))
-                .as_deref()
-                .and_then(AuraStyle::from_id);
-        }
-        Ok(status)
+            .map_err(unavailable)?;
+        let (now, points): (i64, i64) = sqlx::query_as(
+            "SELECT EXTRACT(EPOCH FROM now())::bigint, portal.supporter_points($1, EXTRACT(EPOCH FROM now())::bigint)",
+        )
+        .bind(profile_id)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(unavailable)?;
+        let rows = sqlx::query("SELECT provider, valid_from, valid_until, revoked_at, renewal_enabled, tier_points FROM portal.supporter_grants WHERE profile_id=$1 ORDER BY (revoked_at IS NULL AND valid_from<=$2 AND valid_until>$2) DESC, valid_until DESC LIMIT $3")
+            .bind(profile_id).bind(now).bind(STATUS_GRANT_LIMIT).fetch_all(&mut *tx).await.map_err(unavailable)?;
+        let grants = rows
+            .iter()
+            .map(|row| SupporterGrantSummary {
+                provider: row.get("provider"),
+                valid_from: row.get("valid_from"),
+                valid_until: row.get("valid_until"),
+                revoked: row.get::<Option<i64>, _>("revoked_at").is_some(),
+                renewal_enabled: row.get("renewal_enabled"),
+                tier_points: tier_points(i64::from(row.get::<i32, _>("tier_points"))),
+            })
+            .collect();
+        let preference: Option<Option<String>> =
+            sqlx::query_scalar("SELECT aura FROM portal.supporter_preferences WHERE profile_id=$1")
+                .bind(profile_id)
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(unavailable)?;
+        tx.commit().await.map_err(unavailable)?;
+        Ok(SupporterStatus::from_grants(
+            grants,
+            now,
+            tier_points(points),
+            preference.map(|aura| aura.as_deref().and_then(AuraStyle::from_id)),
+        ))
     }
 
     /// Caller has already verified a signed, active profile key. SQL checks the
-    /// grant in the same statement that changes the cosmetic preference.
+    /// grant and the Hero tier in the same statement that changes the cosmetic
+    /// preference: a base style needs an active grant, a tier style its points.
     pub async fn equip_supporter_aura(
         &self,
         profile_id: &str,
         aura: Option<shared::supporter::AuraStyle>,
     ) -> Result<shared::supporter::SupporterStatus, String> {
-        let updated = sqlx::query("INSERT INTO portal.supporter_preferences(profile_id,aura) SELECT $1,$2 WHERE $2::text IS NULL OR EXISTS (SELECT 1 FROM portal.supporter_grants WHERE profile_id=$1 AND revoked_at IS NULL AND valid_from<=EXTRACT(EPOCH FROM now())::bigint AND valid_until>EXTRACT(EPOCH FROM now())::bigint) ON CONFLICT(profile_id) DO UPDATE SET aura=EXCLUDED.aura")
-            .bind(profile_id).bind(aura.map(|a| a.id())).execute(&self.pool).await.map_err(|_| "Supporter storage is unavailable.".to_string())?;
+        let required = i64::from(aura.map_or(0, |style| style.required_points()));
+        let updated = sqlx::query("INSERT INTO portal.supporter_preferences(profile_id,aura) SELECT $1,$2 WHERE $2::text IS NULL OR (EXISTS (SELECT 1 FROM portal.supporter_grants WHERE profile_id=$1 AND revoked_at IS NULL AND valid_from<=EXTRACT(EPOCH FROM now())::bigint AND valid_until>EXTRACT(EPOCH FROM now())::bigint) AND portal.supporter_points($1,EXTRACT(EPOCH FROM now())::bigint)>=$3) ON CONFLICT(profile_id) DO UPDATE SET aura=EXCLUDED.aura")
+            .bind(profile_id).bind(aura.map(|a| a.id())).bind(required).execute(&self.pool).await.map_err(|_| "Supporter storage is unavailable.".to_string())?;
         if updated.rows_affected() == 0 {
-            return Err("An active Supporter membership is required to equip an aura.".into());
+            return Err(if required > 0 {
+                "This aura needs a higher Hero tier this month.".into()
+            } else {
+                "An active Supporter membership is required to equip an aura.".into()
+            });
         }
         self.supporter_status(profile_id).await
     }

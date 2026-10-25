@@ -63,6 +63,8 @@ fn period(id: &str, start: i64, end: i64) -> VerifiedEvent {
         revoked_at: None,
         event_version: 1,
         renewal_enabled: Some(false),
+        amount_minor: None,
+        refunded_minor: None,
     }
 }
 
@@ -190,7 +192,7 @@ async fn lifetime_months_include_expired_future_and_more_than_status_history_wit
             .unwrap()
             .grants
             .len(),
-        100
+        shared::supporter::STATUS_GRANT_LIMIT as usize
     );
     let dashboard = supporter::dashboard(&app, &profile).await.unwrap();
     assert_eq!(dashboard["recognition"]["months_supported"], 107);

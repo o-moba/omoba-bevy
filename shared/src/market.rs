@@ -11,10 +11,11 @@
 //!
 //! - [`Market::Global`] (no `OMOBA_MARKET`, the default): Europe and the rest of
 //!   the world. Everything the game has today: the Ekza ecosystem and paid
-//!   Hero Supporter cosmetics. Sign-in is game ↔ website pairing.
-//! - [`Market::Ru`]: Russia. A free game on Russian servers: no Ekza services, no
-//!   payments, Russian by default, sign-in with VK ID (VK, OK, Mail.ru) through
-//!   the market's player portal.
+//!   Hero Supporter cosmetics (Apple, Solana). Sign-in is game ↔ website pairing.
+//! - [`Market::Ru`]: Russia, on Russian servers: no Ekza services, Hero Supporter
+//!   auras sold only through YooKassa donations on the market's player portal
+//!   (LR-67, ADR-024), Russian by default, sign-in with VK ID (VK, OK, Mail.ru)
+//!   through the same portal.
 //! - [`Market::Cn`]: mainland China. A free game, no Ekza services, no payments,
 //!   Simplified Chinese by default. Its endpoints and sign-in providers are not
 //!   decided yet; the release tooling refuses to package it until they are.
@@ -27,7 +28,7 @@
 pub enum Market {
     /// Europe and the rest of the world: the full current product.
     Global,
-    /// Russia: free, no Ekza, no payments, VK ID sign-in.
+    /// Russia: no Ekza, YooKassa supporter donations, VK ID sign-in.
     Ru,
     /// Mainland China: free, no Ekza, no payments.
     Cn,
@@ -42,8 +43,9 @@ pub struct Features {
     /// (community sculptures). Off: only the game's packaged content exists and
     /// no Ekza host is ever contacted.
     pub ekza: bool,
-    /// Paid cosmetics: Hero Supporter checkout (StoreKit in the game, the
-    /// website's Solana checkout). Off: the game is free and shows no purchase.
+    /// Paid cosmetics: Hero Supporter checkout through the market's
+    /// [`PaymentProvider`]s, the Supporter panel and other players' auras. Off:
+    /// the game is free and shows no purchase.
     pub supporter: bool,
     /// Sign in with VK ID (VK, OK, Mail.ru) through the player portal.
     pub vk_sign_in: bool,
@@ -77,6 +79,49 @@ impl Feature {
             Self::VkSignIn => "OMOBA_FEATURE_VK_SIGN_IN",
         }
     }
+}
+
+/// A payment provider that sells Hero Supporter access (`docs/supporter.md`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum PaymentProvider {
+    /// StoreKit in the iOS app, verified by the Account API.
+    Apple,
+    /// USDC on the website (`/supporter`).
+    Solana,
+    /// One-time ruble donations on the website (`/supporter`), «Чеки от ЮKassa».
+    YooKassa,
+}
+
+impl PaymentProvider {
+    pub const ALL: [Self; 3] = [Self::Apple, Self::Solana, Self::YooKassa];
+
+    /// The provider id in grants, events, `scripts/markets.py` and the portal.
+    pub const fn key(self) -> &'static str {
+        match self {
+            Self::Apple => "apple",
+            Self::Solana => "solana",
+            Self::YooKassa => "yookassa",
+        }
+    }
+
+    /// Whether this provider's grants carry Hero tier points today: YooKassa
+    /// (1 ₽ = 1 point). Apple tier products follow in LR-69; Solana carries
+    /// none unless O-27 decides otherwise.
+    pub const fn carries_tier_points(self) -> bool {
+        matches!(self, Self::YooKassa)
+    }
+}
+
+/// Whether any of `providers` can reach a Hero tier (shows the tier styles).
+pub const fn sells_tiers(providers: &[PaymentProvider]) -> bool {
+    let mut i = 0;
+    while i < providers.len() {
+        if providers[i].carries_tier_points() {
+            return true;
+        }
+        i += 1;
+    }
+    false
 }
 
 impl Market {
@@ -117,7 +162,7 @@ impl Market {
             },
             Self::Ru => Features {
                 ekza: false,
-                supporter: false,
+                supporter: true,
                 vk_sign_in: true,
             },
             Self::Cn => Features {
@@ -125,6 +170,16 @@ impl Market {
                 supporter: false,
                 vk_sign_in: false,
             },
+        }
+    }
+
+    /// Who sells Hero Supporter access in this market when its `supporter`
+    /// feature is on (ADR-024). LR-68/LR-69 make this per region × channel.
+    pub const fn payment_providers(self) -> &'static [PaymentProvider] {
+        match self {
+            Self::Global => &[PaymentProvider::Apple, PaymentProvider::Solana],
+            Self::Ru => &[PaymentProvider::YooKassa],
+            Self::Cn => &[],
         }
     }
 
@@ -214,7 +269,34 @@ pub const fn supporter() -> bool {
     FEATURES.supporter
 }
 
-/// One line for logs and the build-info overlay: `ru (ekza off, supporter off, vk_sign_in on)`.
+/// The payment providers this build sells through: [`MARKET`]'s list while
+/// `supporter` is on, none otherwise.
+pub const fn payment_providers() -> &'static [PaymentProvider] {
+    providers_of(MARKET, FEATURES)
+}
+
+/// A market's providers under a feature set (`supporter` off sells nothing).
+pub const fn providers_of(market: Market, features: Features) -> &'static [PaymentProvider] {
+    if features.supporter {
+        market.payment_providers()
+    } else {
+        &[]
+    }
+}
+
+/// Whether `providers` lists `provider`.
+pub const fn sells(providers: &[PaymentProvider], provider: PaymentProvider) -> bool {
+    let mut i = 0;
+    while i < providers.len() {
+        if providers[i] as u8 == provider as u8 {
+            return true;
+        }
+        i += 1;
+    }
+    false
+}
+
+/// One line for logs and the build-info overlay: `ru (ekza off, supporter on, vk_sign_in on)`.
 pub fn describe(market: Market, features: Features) -> String {
     let flags = Feature::ALL
         .iter()
@@ -272,18 +354,50 @@ mod tests {
     }
 
     #[test]
-    fn presets_keep_ekza_and_payments_out_of_ru_and_cn() {
+    fn presets_keep_ekza_out_of_ru_and_cn_and_payments_out_of_cn() {
         let global = Market::Global.default_features();
         assert!(global.ekza && global.supporter && !global.vk_sign_in);
         let ru = Market::Ru.default_features();
-        assert!(!ru.ekza && !ru.supporter && ru.vk_sign_in);
+        assert!(!ru.ekza && ru.supporter && ru.vk_sign_in);
         let cn = Market::Cn.default_features();
         assert!(!cn.ekza && !cn.supporter && !cn.vk_sign_in);
     }
 
     #[test]
+    fn ru_sells_only_through_yookassa_and_global_keeps_apple_and_solana() {
+        use PaymentProvider::*;
+        assert_eq!(Market::Global.payment_providers(), &[Apple, Solana]);
+        assert_eq!(Market::Ru.payment_providers(), &[YooKassa]);
+        assert!(Market::Cn.payment_providers().is_empty());
+        for market in Market::ALL {
+            let features = market.default_features();
+            assert_eq!(
+                providers_of(market, features),
+                market.payment_providers(),
+                "{market:?}"
+            );
+            // Turning `supporter` off sells nothing, whatever the market lists.
+            let free = Features {
+                supporter: false,
+                ..features
+            };
+            assert!(providers_of(market, free).is_empty(), "{market:?}");
+        }
+        assert!(sells(&[Apple, Solana], Solana) && !sells(&[Apple, Solana], YooKassa));
+        assert!(sells(&[YooKassa], YooKassa) && !sells(&[YooKassa], Apple));
+        assert!(!sells(&[], Apple));
+        assert!(sells_tiers(Market::Ru.payment_providers()));
+        assert!(!sells_tiers(Market::Global.payment_providers()));
+        assert!(!sells_tiers(&[]));
+        assert_eq!(
+            PaymentProvider::ALL.map(PaymentProvider::key),
+            ["apple", "solana", "yookassa"]
+        );
+    }
+
+    #[test]
     fn overrides_flip_one_feature_and_reject_typos() {
-        let ru = Features::resolve(Market::Ru, Some("on"), None, Some("")).unwrap();
+        let ru = Features::resolve(Market::Ru, Some("on"), Some("off"), Some("")).unwrap();
         assert_eq!(
             ru,
             Features {
@@ -316,9 +430,19 @@ mod tests {
         assert_eq!(Market::Global.storage_suffix(), None);
         assert_eq!(Market::Ru.storage_suffix(), Some("ru"));
         assert_eq!(Market::Cn.storage_suffix(), Some("cn"));
+        // Pinned: the RU line changed with LR-67 (supporter on); the portal's
+        // `describeMarket` prints the same line.
         assert_eq!(
             describe(Market::Ru, Market::Ru.default_features()),
-            "ru (ekza off, supporter off, vk_sign_in on)"
+            "ru (ekza off, supporter on, vk_sign_in on)"
+        );
+        assert_eq!(
+            describe(Market::Global, Market::Global.default_features()),
+            "global (ekza on, supporter on, vk_sign_in off)"
+        );
+        assert_eq!(
+            describe(Market::Cn, Market::Cn.default_features()),
+            "cn (ekza off, supporter off, vk_sign_in off)"
         );
     }
 

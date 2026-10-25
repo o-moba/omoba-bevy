@@ -8,7 +8,9 @@ use serde::{Deserialize, Serialize};
 
 // Version 10 adds practice commands, public respawn timers and distinct bullet/rocket styles.
 // The release handshake also gates the compact map and revised combat catalogue.
-pub const PROTOCOL_VERSION: u16 = 11;
+// Version 12 adds the seven Hero tier aura styles (`AuraStyle`, a strict enum) and
+// the tier fields of `SupporterStatus` (LR-67); client and server ship together.
+pub const PROTOCOL_VERSION: u16 = 12;
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]

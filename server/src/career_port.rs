@@ -70,4 +70,7 @@ pub(crate) trait CareerPort {
     fn test_reject_start(&mut self, id: &str, error: &str);
     #[cfg(test)]
     fn test_is_playing(&self, addr: SocketAddr) -> bool;
+    /// Start the next access refresh (presence, key and Supporter status) now.
+    #[cfg(test)]
+    fn test_refresh_now(&mut self);
 }

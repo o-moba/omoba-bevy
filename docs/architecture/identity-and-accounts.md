@@ -364,10 +364,11 @@ sequenceDiagram
   - that the nonce is single-use (`portal.supporter_nonces`, `request_replayed`).
 
   The client never sends an entitlement assertion.
-- **Free markets (ru, cn).** Their presets turn `supporter` off. With `supporter` off:
+- **Free market (cn).** Its preset turns `supporter` off. With `supporter` off:
   - the Account API serves no `supporter*` or `me/supporter*` route (404), including `GET /v1/supporters`,
   - the Account API refuses billing configuration,
   - the client registers neither the panel nor StoreKit.
+- **RU market (LR-67).** `supporter` is on with YooKassa as the only provider (`shared::market::payment_providers`). The Account API refuses Apple and Solana settings (`payment_provider_not_in_market`) and serves no Apple or Solana route; the client registers the panel and every player's aura but no StoreKit bridge, and its panel links to the portal's `/supporter` («Поддержать на сайте»). The in-game status and equip go through the game server as everywhere else.
 
 ## Ekza links (global market only)
 
@@ -470,7 +471,7 @@ Market presets; a build may flip any feature with `OMOBA_FEATURE_<NAME>=on|off`:
 | Device key and lobby career | yes | yes | not decided |
 | Account API / portal | No Account API; portal in guest mode (no sign-in, devices or recovery) ([system.md › Production host](./system.md#production-host-global-market)) | RU Account API and portal (host planned, [system.md › RU host](./system.md#ru-host-planned)) | not decided |
 | VK ID | off | on | off |
-| Supporter (and native requests) | on | off | off |
+| Supporter (and native requests) | on (Apple, Solana) | on (YooKassa on the portal; LR-67) | off |
 | Ekza links | on | off | off |
 
 - **Contours.** Each contour (`prod`, `dev`; the portal spells them `production`, `dev`) has its own settings folder and therefore its own device key. The packaged dev contour pins its exact Account API and portal pair (client `validate_contour_endpoints`, portal `contourPortal`).
@@ -501,7 +502,7 @@ Market presets; a build may flip any feature with `OMOBA_FEATURE_<NAME>=on|off`:
 
 - **Server identity in the career handshake.** `omoba.career.auth.v1` binds the server nonce, epoch and session id, but not a server identity or address. The transport explicitly does not authenticate the server, and the career identity is shared across connection profiles, including custom servers. No document says whether relaying a challenge through a hostile server is inside or outside the threat model.
 - **Scope enforcement.** The 7 web scopes are signed consent, but sessions are all-or-nothing: no per-route scope check exists in `account-api/src/lib.rs` or `auth.rs`. It is unclear whether per-scope enforcement is planned.
-- **Supporter scope in free markets (ru, cn).** Builds without `supporter` still sign `supporter:write` in the fixed scope list and only change the displayed text (`challenge_key`). Confirm this is intended.
+- **Supporter scope in free markets (cn).** Builds without `supporter` still sign `supporter:write` in the fixed scope list and only change the displayed text (`challenge_key`). Confirm this is intended.
 - **Strength of a VK sign-in.** A linked VK session is as strong as a game-approved one. It is fresh for 600 s and can add devices, rotate recovery codes and revoke devices, so control of the VK account means control of the profile. [`../markets.md`](../markets.md) presents VK as a way to reach the account from new devices, so this looks intended. No document states the takeover consequence, or whether device and recovery actions should need a game confirmation. [`../../account-api/README.md`](../../account-api/README.md) ("Runtime") describes the check for revoking other sessions as "a new game confirmation", yet a VK session passes it too (`auth::revoke` looks only at `created_at`). Unlinking VK also leaves VK-created sessions valid. Confirm both behaviours are intended; then fix either the code or that README sentence.
 - **Returning to a previous profile.** Keys backed up in `saved-devices/` and in `enrolled-device-*` folders have no in-game restore path. How a player returns to an earlier local profile is not documented.
 - **Global accounts.** Global production runs no Account API, and its portal is in guest mode ([system.md › Production host](./system.md#production-host-global-market)). Global players therefore have no website sign-in, device-linking or recovery path, and the device key file is their only credential. omoba-web `docs/vercel.md` calls this the initial guest prototype. No document says when global accounts will be enabled, or how players should back up the key until then.

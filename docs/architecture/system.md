@@ -309,7 +309,7 @@ Routes, authentication and exposure for the whole Account API are specified once
 | --- | --- | --- |
 | `/v1/auth/pairings/{lookup,approve,deny}` | Yes | Yes |
 | `/v1/auth/devices/{create,status,recover,complete}` | Yes | Yes |
-| `/v1/supporter/native` | Yes | No (RU has no `supporter`) |
+| `/v1/supporter/native` | Yes | No (RU sells through YooKassa on the portal and has no StoreKit bridge; LR-67b adds the YooKassa webhook route) |
 | `/v1/auth/social/link` | No | Yes (RU has `vk_sign_in`) |
 
 ### CN market
@@ -366,7 +366,7 @@ The build and CI mechanics are in [build-and-release.md](build-and-release.md). 
   - A build without `ekza` ignores Ekza endpoint overrides (`endpoint_override`).
 - **Release tooling.** `release.py` refuses cross-contour endpoints, another market's zone, the global lobby in a market build, `--registry`/`--passport` without `ekza`, and blocked markets (`resolve_flavor`).
 - **Server.** Public roles refuse to start without a database. A build without `ekza` never contacts Ekza.
-- **Account API.** It binds loopback only, requires an exact HTTPS portal origin, and refuses payment settings without `supporter` and VK ID settings without `vk_sign_in`. It also refuses to start unless the portal schema is exactly v1–v7 (`PORTAL_SCHEMA`, `account-api/src/lib.rs`; `account-api/src/main.rs`; [account-api README](../../account-api/README.md)).
+- **Account API.** It binds loopback only, requires an exact HTTPS portal origin, and refuses payment settings without `supporter`, settings of a payment provider its market does not sell through (LR-67) and VK ID settings without `vk_sign_in`. It also refuses to start unless the portal schema is exactly v1–v7 and v9 (`PORTAL_SCHEMA`, `account-api/src/lib.rs`; `account-api/src/main.rs`; [account-api README](../../account-api/README.md)).
 - **Portal.** There is no fallback to `production` (omoba-web `docs/vercel.md` › Contours, `docs/markets.md`).
   - **Build.** `next.config.ts` fails the build on a malformed contour or market value (`assertContour`, `assertMarket`).
   - **Startup.** `src/instrumentation.ts` throws at startup on a malformed value, or on a build made for another contour, market or feature set (`assertBuiltContour`, `assertBuiltMarket`), so the server answers 500 to every request.
