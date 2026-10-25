@@ -61,9 +61,17 @@ RU packages keep their settings in `omoba-bevy-ru`, the Android app is
 space.ekza.omoba.ru, and the RU Linux package also carries omoba-account-api
 (built for the market) for the RU servers. See docs/markets.md.
 
+A market with its own download host (scripts/markets.py `downloads_path`, LR-23)
+publishes there first and keeps IPFS as the mirror:
+
+    python3 scripts/release.py publish --market ru --rsync-target vds-ru:/opt/omoba-ru/downloads
+    python3 scripts/release.py catalog --market ru           # releases.json: host URLs + IPFS mirrors
+    python3 scripts/release.py verify-downloads --market ru  # what the portal lists, byte for byte
+
 Nothing here publishes on its own: `draft` creates an unpublished draft
-release, `publish` pins packages to IPFS, `ios --upload` is the only step that
-sends a build to App Store Connect, and each must be asked for explicitly.
+release, `publish` uploads packages to the market's download host and pins them
+to IPFS, `ios --upload` is the only step that sends a build to App Store
+Connect, and each must be asked for explicitly.
 """
 from __future__ import annotations
 
@@ -1281,27 +1289,151 @@ def pinata_pin(path: Path, token: str) -> str:
     return json.loads(result.stdout)["IpfsHash"]
 
 
+# ---------------------------------------------------------------- download host (LR-23)
+
+# A market with `downloads_path` (scripts/markets.py) serves its packages from its own
+# host: `publish` copies them with rsync into <target>/<tag>/ and reads every one back
+# from <downloads>/<tag>/<file>; IPFS stays the mirror. The RU host serves that folder
+# with Caddy (ops/vps/ru/README.md#downloads).
+DOWNLOADS_TARGET_ENV = "OMOBA_DOWNLOADS_RSYNC_TARGET"
+RSYNC_TARGET = re.compile(r"(?:[a-z_][a-z0-9_-]*@)?(?P<host>[A-Za-z0-9][A-Za-z0-9._-]*):(?P<path>/[A-Za-z0-9._/-]*)")
+RSYNC_SSH = "ssh -o BatchMode=yes -o ConnectTimeout=10"
+MAX_DOWNLOAD_BYTES = 4 << 30
+
+
+def download_url(market: str, version: str, name: str) -> str | None:
+    """Where the market's download host serves one package: <downloads>/<tag>/<name>."""
+    base = market_presets.market(market).downloads
+    return f"{base}/{tag_for(version)}/{name}" if base else None
+
+
+def ssh_hostname(alias: str) -> str | None:
+    """`ssh -G`: the address an ssh alias connects to, from local config only (no network)."""
+    try:
+        result = subprocess.run(["ssh", "-G", alias], capture_output=True, text=True, timeout=10)
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return None
+    for line in result.stdout.splitlines() if result.returncode == 0 else ():
+        key, _, value = line.partition(" ")
+        if key.lower() == "hostname":
+            return value.strip().lower().rstrip(".")
+    return None
+
+
+def rsync_target(value: str | None, market: str, resolve=None) -> str:
+    """--rsync-target: `[user@]host:/absolute/folder` of the market's download host. Never the
+    production or dev VPS, a dev name or another market's or the global servers' name, by
+    itself or through the ssh alias."""
+    if not value:
+        raise SystemExit(f"the {market} market publishes to its download host: pass --rsync-target "
+                         f"[user@]host:/folder or set {DOWNLOADS_TARGET_ENV}")
+    match = RSYNC_TARGET.fullmatch(value)
+    if not match or ".." in match["path"].split("/") or match["path"].rstrip("/") == "":
+        raise SystemExit(f"--rsync-target must be [user@]host:/absolute/folder, got {value!r}")
+    host = match["host"].lower().rstrip(".")
+    own = MARKETS[market].zones
+    for name in filter(None, (host, (resolve or ssh_hostname)(host))):
+        if name in PROD_VPS_IPS or is_dev_host(name) or other_market_zone(market, name) or \
+                (in_zone(name, PUBLIC_ZONES) and not in_zone(name, own)):
+            raise SystemExit(f"--rsync-target {value} reaches {name}, not the {market} download host")
+    return value.rstrip("/")
+
+
+def rsync_command(staging: Path, target: str) -> list[str]:
+    """Copy the staged <tag>/ folder (0755, packages 0644: Caddy reads them) into the target with
+    its modes. Files already there are never replaced (a published package does not change); the
+    HTTPS read-back then proves the bytes. Only flags macOS's openrsync also knows."""
+    return ["rsync", "-r", "-t", "-p", "--ignore-existing", "-e", RSYNC_SSH, str(staging), target + "/"]
+
+
+def https_digest(url: str, limit: int = MAX_DOWNLOAD_BYTES) -> tuple[str, int]:
+    """(sha256, bytes) of what an HTTPS URL serves, streamed."""
+    import urllib.request
+    if not url.startswith("https://"):
+        raise SystemExit(f"{url} is not an https:// download")
+    digest, size = hashlib.sha256(), 0
+    with urllib.request.urlopen(urllib.request.Request(url, method="GET"), timeout=60) as response:
+        while chunk := response.read(1 << 20):
+            size += len(chunk)
+            if size > limit:
+                raise SystemExit(f"{url} is larger than {limit} bytes")
+            digest.update(chunk)
+    return digest.hexdigest(), size
+
+
+def publish_to_host(out: Path, packages: list[Path], version: str, market: str, target: str,
+                    run_command=None, digest=https_digest) -> dict:
+    """Upload the packages to the market's download host, read each back over HTTPS and record
+    the verified links in downloads.json. Packages already verified with the same hash are skipped."""
+    receipt_path = out / "downloads.json"
+    receipt = json.loads(receipt_path.read_text()) if receipt_path.is_file() else {}
+    pending = {}
+    for path in packages:
+        target_name = next(t for t in PLATFORMS if artifact_name(version, t, "prod", market) == path.name)
+        entry = receipt.get(target_name)
+        if not (entry and entry.get("sha256") == sha256(path) and entry.get("file") == path.name):
+            pending[target_name] = path
+    if not pending:
+        return receipt
+    staging = out / ".downloads" / tag_for(version)
+    shutil.rmtree(staging.parent, ignore_errors=True)
+    staging.mkdir(parents=True)
+    staging.chmod(0o755)
+    try:
+        for path in pending.values():
+            try:
+                os.link(path, staging / path.name)
+            except OSError:
+                shutil.copy2(path, staging / path.name)
+            (staging / path.name).chmod(0o644)   # world-readable, also the dist file it links
+        (run_command or (lambda command: run(*command)))(rsync_command(staging, target))
+    finally:
+        shutil.rmtree(staging.parent, ignore_errors=True)
+    for target_name, path in pending.items():
+        url = download_url(market, version, path.name)
+        expected = sha256(path)
+        served, size = digest(url)
+        if served != expected or size != path.stat().st_size:
+            raise SystemExit(f"{url} does not serve the local {path.name}: a published package never changes; "
+                             "build a new version (or remove the stale file on the host by hand)")
+        receipt[target_name] = {"file": path.name, "bytes": path.stat().st_size, "sha256": expected, "url": url}
+        receipt_path.write_text(json.dumps(receipt, indent=2) + "\n")
+    return receipt
+
+
 def command_publish(args) -> int:
-    """Pin every built package to IPFS, re-download it and record the verified links."""
+    """Upload every built package to the market's download host (when it has one) and pin it to
+    IPFS, re-download each copy and record the verified links."""
     version = workspace_version()
     contour, market = args.contour, getattr(args, "market", "global")
-    market_presets.market(market)
+    host = market_presets.market(market).downloads if contour == "prod" else None
+    out = dist_path(version, args.out, contour, market)
+    packages = [out / artifact_name(version, target, contour, market) for target in PLATFORMS
+                if (out / artifact_name(version, target, contour, market)).is_file()]
+    destination = getattr(args, "rsync_target", None) or os.environ.get(DOWNLOADS_TARGET_ENV)
+    if host:
+        destination = rsync_target(destination, market)
+        # iOS is never a direct download (App Store / TestFlight only).
+        packages = [path for path in packages if not path.name.endswith(".ipa")]
     if args.dry_run:
-        out = dist_path(version, args.out, contour, market)
-        pending = [str(out / artifact_name(version, target, contour, market)) for target in PLATFORMS
-                   if (out / artifact_name(version, target, contour, market)).is_file()]
-        print(json.dumps({"dry_run": True, "contour": contour, "market": market, "dist": str(out),
-                          "would_pin": pending}, indent=2))
+        plan = {"dry_run": True, "contour": contour, "market": market, "dist": str(out),
+                "would_pin": [str(path) for path in packages]}
+        if host:
+            plan["download_host"] = {"rsync": rsync_command(out / ".downloads" / tag_for(version), destination),
+                                     "would_verify": [download_url(market, version, path.name) for path in packages]}
+        print(json.dumps(plan, indent=2))
         return 0
     token = os.environ.get("PINATA_JWT")
     if not token:
         raise SystemExit("Set PINATA_JWT to pin packages")
     out = dist_dir(version, args.out, contour, market)
+    if host:
+        print(json.dumps(publish_to_host(out, packages, version, market, destination), indent=2))
     receipt_path = out / "ipfs.json"
     receipt = json.loads(receipt_path.read_text()) if receipt_path.is_file() else {}
     for target in PLATFORMS:
         path = out / artifact_name(version, target, contour, market)
-        if not path.is_file():
+        if not path.is_file() or path not in packages:
             continue
         digest = sha256(path)
         entry = receipt.get(target)
@@ -1423,6 +1555,12 @@ DEFAULT_INSTRUCTIONS = {"macos": "Unzip and move Omoba.app to Applications; firs
                         "android": "Allow installs from your browser or file manager, then open the APK."}
 
 
+def verified_https(entry: dict, what: str) -> None:
+    if not str(entry.get("url", "")).startswith("https://") or \
+            not re.fullmatch(r"[0-9a-f]{64}", str(entry.get("sha256", ""))):
+        raise SystemExit(f"{what}: receipt is not a verified https download")
+
+
 def release_order_key(label: str) -> tuple:
     """SemVer precedence of a release label, as the game reads it
     (shared::compatibility::ReleaseVersion): 0.45.0 < 0.46.0-rc.1 < 0.46.0; `+build` ignored."""
@@ -1436,16 +1574,18 @@ def release_order_key(label: str) -> tuple:
                        for part in match.group(4).split(".")))
 
 
-def release_catalog(receipt: dict, version: str, market: str, published_at: str,
+def release_catalog(receipt: dict, version: str, market: str, published_at: str, mirrors: dict | None = None,
                     min_release: str | None = None) -> dict:
     """The Account API download catalog (OMOBA_RELEASE_CATALOG, account-api/README.md#downloads)
-    from `publish` receipts: only packages whose gateway bytes were verified.
+    from `publish` receipts: only packages whose served bytes were verified. A market with a
+    download host lists its host's URLs (downloads.json) with the IPFS copy (ipfs.json) as
+    `mirror_url`; other markets list the IPFS copies. Every entry names the market's region,
+    the `direct` channel and the market's release status.
 
-    Every entry carries its build channel (`direct`) and, when the market has a portal, the
-    portal's download page for its platform as `update_url` (the game's update button).
-    `min_release` (optional) is the oldest release that may still play online: a game below it
-    shows Update required even while the servers accept it, so it needs the same player notice
-    as a server switch (docs/RELEASING.md)."""
+    When the market has a portal, every entry also carries the portal's download page for its
+    platform as `update_url` (the game's update button). `min_release` (optional) is the oldest
+    release that may still play online: a game below it shows Update required even while the
+    servers accept it, so it needs the same player notice as a server switch (docs/RELEASING.md)."""
     if min_release is not None:
         try:
             too_new = release_order_key(min_release) > release_order_key(version)
@@ -1453,41 +1593,120 @@ def release_catalog(receipt: dict, version: str, market: str, published_at: str,
             raise SystemExit(f"--min-release: {error}") from None
         if too_new:
             raise SystemExit(f"--min-release {min_release} is newer than this release {version}")
-    portal = market_presets.market(market).portal
+    preset = market_presets.market(market)
     instructions = CATALOG_INSTRUCTIONS.get(market, DEFAULT_INSTRUCTIONS)
     releases = []
     for target, (platform_name, architecture) in CATALOG_PLATFORMS.items():
         entry = receipt.get(target)
         if not entry:
             continue
-        if not str(entry["url"]).startswith("https://") or not re.fullmatch(r"[0-9a-f]{64}", entry["sha256"]):
-            raise SystemExit(f"{target}: receipt is not a verified https download")
+        verified_https(entry, target)
+        if preset.downloads and entry["url"] != download_url(market, version, entry.get("file", "")):
+            raise SystemExit(f"{target}: {entry['url']} is not on the {market} download host {preset.downloads}")
         release = {"platform": platform_name, "architecture": architecture, "version": version,
                    "url": entry["url"], "sha256": entry["sha256"], "size_bytes": str(entry["bytes"]),
                    "published_at": published_at, "instructions": instructions[target],
-                   "test_status": "playtest", "channel": CATALOG_CHANNEL}
-        if portal:
-            release["update_url"] = f"{portal}/download?platform={platform_name}"
+                   "test_status": preset.release_label, "region": preset.region, "channel": CATALOG_CHANNEL}
+        if preset.portal:
+            release["update_url"] = f"{preset.portal}/download?platform={platform_name}"
         if min_release is not None:
             release["min_release"] = min_release
+        mirror = (mirrors or {}).get(target)
+        if mirror:
+            verified_https(mirror, f"{target} mirror")
+            if mirror["sha256"] != entry["sha256"]:
+                raise SystemExit(f"{target}: the IPFS mirror holds other bytes than the download host; "
+                                 f"run `publish --market {market}` again")
+            release["mirror_url"] = mirror["url"]
         releases.append(release)
     return {"releases": releases}
 
 
 def command_catalog(args) -> int:
     version = workspace_version()
+    preset = market_presets.market(args.market)
     out = dist_path(version, args.out, "prod", args.market)
-    receipt_path = out / "ipfs.json"
+    ipfs_path = out / "ipfs.json"
+    receipt_path = out / "downloads.json" if preset.downloads else ipfs_path
     if not receipt_path.is_file():
         raise SystemExit(f"{receipt_path} is missing: run `publish --market {args.market}` first")
+    mirrors = json.loads(ipfs_path.read_text()) if preset.downloads and ipfs_path.is_file() else None
     published = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(receipt_path.stat().st_mtime))
     catalog = release_catalog(json.loads(receipt_path.read_text()), version, args.market, published,
-                              args.min_release)
+                              mirrors=mirrors, min_release=args.min_release)
+    missing = [entry["platform"] for entry in catalog["releases"] if preset.downloads and "mirror_url" not in entry]
+    if missing:
+        print(f"warning: no IPFS mirror for {', '.join(missing)} (publish pins it)", file=sys.stderr)
     target = out / "releases.json"
     target.write_text(json.dumps(catalog, indent=2, ensure_ascii=False) + "\n")
     print(f"{target}: {len(catalog['releases'])} downloads; install it as the market Account API's "
-          "OMOBA_RELEASE_CATALOG (ops/vps/ru/README.md)")
+          "OMOBA_RELEASE_CATALOG (ops/vps/ru/README.md#downloads), then run verify-downloads")
     return 0
+
+
+def load_catalog(source: str, fetch_bytes=None) -> dict:
+    """A download catalog from an https:// URL (the portal's /api/releases) or a local file."""
+    if source.startswith("https://"):
+        import urllib.request
+
+        def default_fetch(url: str) -> bytes:
+            request = urllib.request.Request(url, headers={"Accept": "application/json"})
+            with urllib.request.urlopen(request, timeout=15) as response:
+                return response.read(131073)
+        raw = (fetch_bytes or default_fetch)(source)
+    else:
+        raw = Path(source).read_bytes()
+    if len(raw) > 131072:
+        raise SystemExit(f"{source}: the catalog is larger than the Account API accepts")
+    catalog = json.loads(raw)
+    if not isinstance(catalog, dict) or not isinstance(catalog.get("releases"), list):
+        raise SystemExit(f"{source}: not a download catalog")
+    return catalog
+
+
+def downloads_report(market: str, catalog: dict, source: str, digest=https_digest) -> dict:
+    """Whether every listed package is on the market's download host with the market's region,
+    channel and release status, and whether it (and its mirror) serves exactly its SHA-256 and size."""
+    preset = market_presets.market(market)
+    entries, platforms = [], set()
+    for release in catalog["releases"]:
+        problems = []
+        url, mirror = str(release.get("url", "")), release.get("mirror_url")
+        if preset.downloads and not url.startswith(preset.downloads + "/"):
+            problems.append(f"not on the download host {preset.downloads}")
+        for field, expected in (("region", preset.region), ("channel", CATALOG_CHANNEL),
+                                ("test_status", preset.release_label)):
+            if release.get(field) != expected:
+                problems.append(f"{field} is {release.get(field)!r}, not {expected!r}")
+        for label, link in (("download", url), ("mirror", mirror)):
+            if label == "mirror" and not link:
+                continue
+            try:
+                served, size = digest(link)
+            except (OSError, SystemExit) as error:
+                problems.append(f"{label} {link} failed: {type(error).__name__}")
+                continue
+            if served != release.get("sha256"):
+                problems.append(f"{label} {link} serves sha256 {served}, not the catalog's")
+            if str(size) != str(release.get("size_bytes")):
+                problems.append(f"{label} {link} serves {size} bytes, not {release.get('size_bytes')}")
+        platforms.add(release.get("platform"))
+        entries.append({"platform": release.get("platform"), "version": release.get("version"), "url": url,
+                        "mirror_url": mirror, "ok": not problems, "problems": problems})
+    expected = {CATALOG_PLATFORMS[target][0] for target in preset.platforms if target in CATALOG_PLATFORMS}
+    missing = sorted(expected - platforms)
+    return {"market": market, "catalog": source, "ready": bool(entries) and not missing and all(
+        entry["ok"] for entry in entries), "missing_platforms": missing, "entries": entries}
+
+
+def command_verify_downloads(args) -> int:
+    preset = market_presets.market(args.market)
+    if not preset.portal and not args.catalog:
+        raise SystemExit(f"the {args.market} market has no portal; pass --catalog <releases.json>")
+    source = args.catalog or preset.portal + "/api/releases"
+    report = downloads_report(args.market, load_catalog(source), source)
+    print(json.dumps(report, indent=2, ensure_ascii=False))
+    return 0 if report["ready"] else 1
 
 
 def command_notes(args) -> int:
@@ -1595,6 +1814,10 @@ def main(argv=None) -> int:
     catalog.add_argument("--out", type=Path)
     catalog.add_argument("--min-release", help="oldest release that may still play online: older games "
                                                "show Update required (needs a player notice, RELEASING.md)")
+    verify = sub.add_parser("verify-downloads", help="download every package a market's catalog lists (and its "
+                                                     "mirror) and check host, region, status, SHA-256 and size")
+    verify.add_argument("--market", choices=tuple(MARKETS), default="ru")
+    verify.add_argument("--catalog", help="releases.json or an https:// URL (default: <portal>/api/releases)")
     build = sub.add_parser("build", help="build platform packages into dist/v<version>/")
     build.add_argument("platform", choices=PLATFORMS + ("all",))
     build.add_argument("--server", help="initial game server host:port compiled into clients")
@@ -1612,12 +1835,15 @@ def main(argv=None) -> int:
     build.add_argument("--upload", action="store_true", help="iOS: upload to App Store Connect / TestFlight")
     build.add_argument("--dry-run", action="store_true", help="print what would be built and baked in; build nothing")
     sub.add_parser("notes", help="print release notes for the current version")
-    publish = sub.add_parser("publish", help="pin dist/ packages to IPFS (Pinata) and verify the gateway copy")
+    publish = sub.add_parser("publish", help="upload dist/ packages to the market's download host (rsync), pin "
+                                             "them to IPFS (Pinata) and verify every served copy")
     publish.add_argument("--out", type=Path)
     publish.add_argument("--gateway", default="https://ekza.mypinata.cloud")
     publish.add_argument("--contour", choices=CONTOURS, default="prod", help=contour_help)
     publish.add_argument("--market", choices=tuple(MARKETS), default="global", help=market_help)
-    publish.add_argument("--dry-run", action="store_true", help="list the packages that would be pinned")
+    publish.add_argument("--rsync-target", help="[user@]host:/folder of the market's download host "
+                                                f"(default: ${DOWNLOADS_TARGET_ENV}); markets with one only")
+    publish.add_argument("--dry-run", action="store_true", help="list the uploads and pins; contact nothing")
     draft = sub.add_parser("draft", help="create or update a DRAFT GitHub release with dist/ files")
     draft.add_argument("--tag", help="release tag (dev contour: required, v<version>-dev.N)")
     draft.add_argument("--target", help="commit/branch the new tag points at (default: main; dev contour: dev)")
@@ -1639,7 +1865,8 @@ def main(argv=None) -> int:
         return 0
     return {"build": command_build, "notes": command_notes, "draft": command_draft, "ci": command_ci,
             "publish": command_publish, "markets": command_markets,
-            "preflight": command_preflight, "catalog": command_catalog}[args.command](args)
+            "preflight": command_preflight, "catalog": command_catalog,
+            "verify-downloads": command_verify_downloads}[args.command](args)
 
 
 if __name__ == "__main__":

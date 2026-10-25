@@ -29,7 +29,8 @@ they are written; `python3 ops/vps/ru/ru_host.py names` prints them.
 | S7 | Lobby compatibility | `cargo run --locked --quiet -p shared --example compatibility -- check <RU lobby> dist/v<v>-ru/compatibility.json` | exit 0 |
 | S8 | Worker compatibility | while a bot match from P3 runs: the same command against `<RU IPv4>:41000` (or the worker port in `journalctl -u omoba-lobby-ru`) | exit 0 |
 | S9 | Reboot (new host, or after a kit change) | `ru_host.py reboot-check --apply` | `"ok": true`; note `seconds_to_ready` |
-| S10 | Downloads | `make release-ru-publish`, `releases.json` installed (README, "Check") | the portal lists every package with the right sha256 |
+| S10 | Downloads | `make release-ru-publish` (RU host + IPFS mirror), `releases.json` installed ([README › Downloads](README.md#downloads)), then `make release-ru-verify-downloads` | `"ready": true`: every platform listed on `<RU portal>/downloads/`, status «Открытая бета», each package and its mirror match the catalog's sha256 and size |
+| S11 | Download from a Russian network | Download one package from `<RU portal>`'s download page over a Russian connection (no VPN); `ru_host.py downloads --since <today>` | the sha256 matches the page and the count for that platform went up; note the network and platform |
 
 ## 2. Per platform
 
@@ -49,7 +50,7 @@ For Android use a Vulkan device from the published minimum list (LR-25).
 
 ## 3. Decision
 
-- Any FAIL in S1–S8 or P1–P8 blocks the announcement. Fix and rerun the affected
+- Any FAIL in S1–S8, S10–S11 or P1–P8 blocks the announcement. Fix and rerun the affected
   rows, or roll back (`ru_host.py rollback`, [README › Rollback](README.md#rollback)).
 - Record N/A only with the reason and the owner's approval.
 - The owner signs off the result file in `docs/progress/`.
@@ -74,6 +75,7 @@ Commit <sha>; packages dist/v<version>-ru/ (SHA256SUMS sha256 <…>); server rel
 | S8 | | |
 | S9 | | seconds_to_ready = |
 | S10 | | |
+| S11 | | network, platform, count |
 
 | # | Windows | Linux | macOS | Android (device, Android version) |
 | --- | --- | --- | --- | --- |

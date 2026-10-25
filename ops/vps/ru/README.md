@@ -2,7 +2,8 @@
 
 One Russian VPS runs everything Russian players reach: PostgreSQL, the lobby and
 match workers (UDP 4000, 41000–41001), the Account API (behind Caddy at
-`account.omoba.ru`) and the player portal (`omoba.ru`). Keep it apart
+`account.omoba.ru`), the player portal (`omoba.ru`) and the game downloads
+(`omoba.ru/downloads/`, [Downloads](#downloads)). Keep it apart
 from the global production host: each market has its own database, accounts and
 device keys. Background and the release steps: [docs/markets.md](../../../docs/markets.md).
 
@@ -10,11 +11,12 @@ Only binaries from the RU Linux package (`python3 scripts/release.py build linux
 --market ru`, `omoba-<version>-ru-linux-x64.tar.gz`) may run here: they are built
 with `OMOBA_MARKET=ru` (no Ekza, no payments, VK ID sign-in).
 
-> **Status (LR-01, LR-03).** Everything up to the host is ready: [ru_host.py](ru_host.py)
+> **Status (LR-01, LR-03, LR-23).** Everything up to the host is ready: [ru_host.py](ru_host.py)
 > sets up a fresh Ubuntu host, ships the server package and the portal, checks the
 > whole host and runs the reboot test; [ru_backup.py](ru_backup.py) backs it up every
 > night, encrypted and off-host, before every migration, and drills a restore every
-> month ([Backups](#backups-escrow-and-restore-drill)). Still open before a public launch:
+> month ([Backups](#backups-escrow-and-restore-drill)); the host serves the game
+> packages and counts their downloads ([Downloads](#downloads)). Still open before a public launch:
 > monitoring and alerts beyond the backups (LR-17) and the capacity measurement (LR-09).
 > The owner buys the VPS, sets DNS, creates the VK ID app, provides the backup storage
 > in Russia, makes the backup key and names the escrow holder.
@@ -29,6 +31,7 @@ Everything below runs on this one host; only Caddy listens publicly for HTTP.
 | --- | --- | --- | --- |
 | Game (native signed routes) | `https://account.omoba.ru` → Caddy → `127.0.0.1:40550` | `@native` allowlist and health only; every other route answers 403 | `X-Real-IP`, overwritten by Caddy with the game's address |
 | Browser | `https://omoba.ru` → Caddy → portal `127.0.0.1:3010` | the whole portal | — (Caddy overwrites `X-Real-IP` with the browser's address) |
+| Browser, game update button | `https://omoba.ru/downloads/<tag>/<package>` → Caddy `file_server` on `/opt/omoba-ru/downloads` | the packages only, no listing ([Downloads](#downloads)) | — (static files; Caddy logs the request, shortened) |
 | Portal (BFF, VK callback, server reads) | `http://127.0.0.1:40550` directly | loopback HTTP, no portal ingress key | `X-Real-IP`, the browser's address forwarded by the portal |
 
 - `OMOBA_TRUST_LOOPBACK_PROXY=1` is set on the Account API and the portal. The
@@ -55,6 +58,7 @@ Everything below runs on this one host; only Caddy listens publicly for HTTP.
 | Account API, user `omoba-ru`, `127.0.0.1:40550` | `/opt/omoba-ru/current/omoba-account-api` | [omoba-account-api-ru.service](omoba-account-api-ru.service) |
 | Portal, user `omoba-portal-ru`, `127.0.0.1:3010` | `/opt/omoba-ru/portal/current/server.js` on `/opt/omoba-ru/node/current/bin/node` | [omoba-portal-ru.service](omoba-portal-ru.service) |
 | Caddy, TCP 443 | `/etc/caddy/Caddyfile` = [Caddyfile.ru](Caddyfile.ru) | `caddy.service` |
+| Downloads (LR-23): packages, root 0755/0644, and Caddy's log of them | `/opt/omoba-ru/downloads/<tag>/`; `/var/log/caddy/omoba-ru-downloads.log` (caddy, 0640) | `release.py publish --market ru` (rsync); read by `caddy.service` |
 | Env files (root, 0600) | `/opt/omoba-ru/{lobby,account-api,portal}.env` from the `*.env.example` files here | read by systemd |
 | Backups (LR-03), root | [ru_backup.py](ru_backup.py) as `/opt/omoba-ru/backup/ru_backup.py`; settings `/opt/omoba-ru/backup.env` (root 0600, from [backup.env.example](backup.env.example)), keys in `/opt/omoba-ru/backup-keys/` (0700); host copies in `/var/backups/omoba-ru/` (0700) | [omoba-backup-ru.timer](omoba-backup-ru.timer) nightly, [omoba-restore-drill-ru.timer](omoba-restore-drill-ru.timer) monthly, [omoba-backup-check-ru.timer](omoba-backup-check-ru.timer) hourly |
 
@@ -111,7 +115,9 @@ the kit files it names.
    - Roles `omoba_owner` (NOLOGIN), `omoba_game`, `omoba_portal` and database
      `omoba_ru` (UTF8, collation C.UTF-8; handles use `und-x-icu` explicitly).
    - [Caddyfile.ru](Caddyfile.ru) after `caddy validate`; the old file is kept as
-     `Caddyfile.orig`.
+     `Caddyfile.orig`. Before it, the download folder `/opt/omoba-ru/downloads` and
+     Caddy's download log `/var/log/caddy/omoba-ru-downloads.log`, owned by `caddy`
+     (created before `caddy validate`, which runs as root, could create it root-owned).
    - Key-only SSH: `/etc/ssh/sshd_config.d/00-omoba-ru.conf` (sorts before
      cloud-init's file), checked with `sshd -t` and `sshd -T`. Refused while
      `/root/.ssh/authorized_keys` is empty.
@@ -178,7 +184,9 @@ unit's only writable folder.
 - `python3 ops/vps/ru/ru_host.py status`: marker, Ubuntu, packages, PostgreSQL
   (version, ICU, loopback, roles, schema), Caddy and its Caddyfile, firewall, sshd,
   users and folder modes, env files, Node.js, releases, units enabled and running,
-  UDP 4000, `127.0.0.1:40550/health/ready`, the portal on `127.0.0.1:3010`, DNS (A
+  UDP 4000, `127.0.0.1:40550/health/ready`, the portal on `127.0.0.1:3010`, the
+  download folder and Caddy's download log (owned by `caddy`; `facts.downloads` lists
+  the published versions), DNS (A
   records for the three names of `ru_host.py names` point here; no AAAA for the
   lobby), memory and disk, and the backups: the installed kit and timers and
   `ru_backup.py check --remote` (a set off-host from the last 26 h, no failed run or
@@ -193,17 +201,74 @@ unit's only writable folder.
 - Releases: the [RU release checklist](release-checklist.md), with its result in
   `docs/progress/` for every release.
 
-Downloads on the portal: `make release-ru-publish` also writes
-`dist/v<version>-ru/releases.json` from the verified IPFS receipts; copy it to
-`/opt/omoba-ru/releases.json` and set `OMOBA_RELEASE_CATALOG` to it in
-`/opt/omoba-ru/account-api.env`. The game reads the same catalog for its
-**Update available** banner and the **Update required** download button (LR-14).
+Downloads on the portal: see [Downloads](#downloads).
+
+## Downloads
+
+The RU packages (Windows, Linux, macOS, Android) are served from this host
+(LR-23, O-10); the Pinata IPFS copies are the mirror. The download path, the portal
+origin and the release status come from the RU profile in
+[scripts/markets.py](../../../scripts/markets.py) (`downloads_path`, `portal`,
+`release_label` «Открытая бета»): no fourth DNS name, the portal's Caddy site serves
+`/downloads/`.
+
+| Piece | Where |
+| --- | --- |
+| Packages | `/opt/omoba-ru/downloads/v<version>/<package>`, root, folders 0755, files 0644; served at `https://omoba.ru/downloads/v<version>/<package>` without a listing; rsync's in-progress dot files are hidden |
+| Catalog | `dist/v<version>-ru/releases.json` → `/opt/omoba-ru/releases.json`, `OMOBA_RELEASE_CATALOG` in `account-api.env`; the portal's download page, the game's **Update available** banner and its **Update required** button read it (`GET /v1/releases`, LR-14) |
+| Download log | `/var/log/caddy/omoba-ru-downloads.log` (caddy 0640): JSON, only `/downloads/` requests, address shortened to /24 (IPv4) or /48 (IPv6), no request headers (no cookies, no user agent); rolled at 50 MiB, kept 90 days |
+
+Publish a release (on the Mac, after `make release-ru`):
+
+```sh
+make release-ru-publish   # RU_DOWNLOADS_TARGET defaults to ${RU_HOST:-vds-ru}:/opt/omoba-ru/downloads
+# = release.py publish --market ru --rsync-target …  then  release.py catalog --market ru
+scp dist/v<version>-ru/releases.json $RU_HOST:/opt/omoba-ru/releases.json
+# once: OMOBA_RELEASE_CATALOG=/opt/omoba-ru/releases.json in /opt/omoba-ru/account-api.env,
+# then systemctl restart omoba-account-api-ru
+make release-ru-verify-downloads   # release.py verify-downloads --market ru
+```
+
+- `publish --market ru` refuses a target on the production or dev VPS (also through
+  the ssh alias's HostName) and needs `PINATA_JWT`. It copies the new packages with
+  `rsync --ignore-existing` into `<target>/v<version>/` (a published file is never
+  replaced), then downloads each one from `https://omoba.ru/downloads/…` and compares
+  SHA-256 and size; `dist/v<version>-ru/downloads.json` records the verified links.
+  Then it pins the IPFS mirror as before (`ipfs.json`). `--dry-run` prints the rsync
+  command and the URLs and contacts nothing.
+- `catalog --market ru` writes `releases.json` from `downloads.json`: `url` on the RU
+  host, `mirror_url` the IPFS copy with the same SHA-256, `test_status` «Открытая бета»,
+  `region` `ru`, `channel` `direct`, `update_url` the portal's download page for the
+  platform (account-api/README.md#downloads). `--min-release X` adds `min_release`:
+  games older than X must update even without a server switch (a forced update: post
+  the player notice first).
+- `verify-downloads --market ru` reads the catalog the portal serves
+  (`https://omoba.ru/api/releases`, or `--catalog <file>` before installing it),
+  downloads every package and its mirror, and checks the host, region, channel,
+  status, SHA-256 and size. It exits 0 only when every RU platform is listed and correct.
+- A package rebuilt under a published name fails the read-back: publish a new version,
+  or remove the stale file on the host by hand first.
+
 For a release that changes the compatibility contract, install the new catalog and
 post the player notice **before** shipping the server
 ([RELEASING.md](../../../docs/RELEASING.md#updates-and-contract-changes-lr-14)).
-`release.py catalog --market ru --min-release X` writes a catalog that requires the
-update from games older than X even without a server switch (also a forced update:
-notice first).
+
+**Counting downloads.** `python3 ops/vps/ru/ru_host.py downloads [--since YYYY-MM-DD]
+[--until YYYY-MM-DD]` pipes [ru_downloads.py](ru_downloads.py) to the host (the same
+target guards as `status`) and prints totals per platform, per version and per UTC day;
+no address leaves the host. A download is a GET of a package answered 200 or 206,
+counted once per shortened address, file and day (a resumed download counts once;
+players sharing a carrier NAT or a /24 on the same day count once, so the numbers are
+a floor); `completed` counts answers that sent the whole file at once, `requests` every
+GET. The log keeps 90 days: record the totals of a period in `docs/progress/` before
+they roll off. The shortened addresses in the log stay on this host in Russia; the
+privacy policy (LR-04, owner) must name this log and its 90 days.
+
+**A test download from a Russian network** (once per new host, and in the release
+checklist): from a Russian connection (a phone on a Russian carrier without VPN, or a
+computer in Russia), download one package from the portal's download page, compare its
+SHA-256 with the page, then run `ru_host.py downloads --since <today>` and record the
+count for that platform with the date, network and platform in `docs/progress/`.
 
 ## Backups, escrow and restore drill
 
