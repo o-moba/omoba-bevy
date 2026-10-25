@@ -121,6 +121,8 @@ wire_enums! {
     crate::career::FriendPresence => Strict [Offline, Online, Playing],
     crate::sandbox::BotBehavior => Strict [Stationary, Flee, Attack, Fight],
     crate::protocol::wire::CharacterChoice => Strict [Ipfs, Toka, Wang, Cube, Paco],
+    // LR-15: `CareerView.sanctions`, `SocialView.mute`; tolerant so a later kind is additive.
+    crate::moderation::SanctionKind => Tolerant [ChatMute, MatchmakingBan, RankedBan, AccountBan, NameReset, Unknown],
 }
 
 /// Serde enums in `shared` that the UDP protocol does not carry, and why.
@@ -282,6 +284,10 @@ fn tolerant_enums_decode_an_unknown_value() {
         serde_json::from_str::<crate::bot_profile::BotDifficulty>(FUTURE).unwrap(),
         crate::bot_profile::BotDifficulty::Unknown
     );
+    assert_eq!(
+        serde_json::from_str::<crate::moderation::SanctionKind>(FUTURE).unwrap(),
+        crate::moderation::SanctionKind::Unknown
+    );
     let tolerant: Vec<&str> = WIRE_ENUMS
         .iter()
         .filter(|(_, decoding, _)| *decoding == Decoding::Tolerant)
@@ -296,7 +302,8 @@ fn tolerant_enums_decode_an_unknown_value() {
             "PlayerActionKind",
             "CombatEntityKind",
             "ProjectileStyle",
-            "MinionKind"
+            "MinionKind",
+            "SanctionKind"
         ],
         "a tolerant enum needs an unknown-value case above"
     );

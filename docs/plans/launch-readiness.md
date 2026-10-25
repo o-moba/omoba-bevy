@@ -407,11 +407,11 @@ Area: moderation/admin · **blocker** · M · code (+ops runbook)
   - Sanction audit rows are kept for at least a year.
   - A RUNBOOK section covers looking up a player, applying or lifting a sanction, and turning chat off.
 - **Acceptance:**
-  - [ ] A sanctioned profile is refused with a localized message and expiry. Lifting the sanction restores access without a restart.
-  - [ ] A `chat_mute` returns "muted until …", and the muted player's messages reach no one (server test).
-  - [ ] Force-rename changes the handle, writes an audit row, and the next presence shows the new name.
-  - [ ] The kill switch stops all chat delivery (test).
-  - [ ] `RUNBOOK.md` has a moderation section.
+  - [x] A sanctioned profile is refused with a localized message and expiry. Lifting the sanction restores access without a restart. Done: career schema 5 (`career_sanctions`), read at sign-in and with every 10-second access refresh (`CareerStore::access`). An account ban refuses the game sign-in (`error_code` `account_banned`, the ban's end in `CareerView.sanctions`), every website session and new website sign-in (`403 account_banned`); matchmaking and ranked bans refuse `FindMatch` (`Failed{matchmaking_ban|ranked_ban}`). Copy with the end in en, ru and zh-Hans (`client/i18n/*/moderation.json`; Russian UI-tree test on the search screen; no visual check, the Mac's screen is locked). Lifting: `match_service::tests::sanctions_refuse_find_match_with_their_code_until_lifted`, `career_backend::tests::access_refreshes_apply_and_lift_sanctions_and_a_name_reset`, the Account API session test; a suspended client signs in again every minute.
+  - [x] A `chat_mute` returns "muted until …", and the muted player's messages reach no one (server test). Done: `social::tests::a_moderated_runtime_delivers_no_muted_or_switched_off_chat` and `a_muted_sender_is_refused_with_its_end_and_spends_no_cooldown` (`SocialView.error_code` `chat_muted` and `mute` with its end; what the player sent before the mute is dropped too; reactions stay).
+  - [x] Force-rename changes the handle, writes an audit row, and the next presence shows the new name. Done: `omoba-account-api rename` (a `name_reset` sanction: `Player#NNNN`, renames locked until it ends) with its `career_moderation_events` row (`career_store_sanctions_apply_expire_lift_and_audit`); the access refresh carries the new name and `party::tests::a_banned_player_leaves_presence_and_a_reset_name_shows_in_the_next_presence` shows it in the next presence.
+  - [x] The kill switch stops all chat delivery (test). Done: `OMOBA_CHAT=off` per server (set in `ops/vps/ru/omoba-lobby-ru.service`, enforced by `ru_host.py`) and `omoba-account-api chat off` for every server of the database without a restart (polled every 5 s); chat is refused and held chat dropped, reactions stay (`social::tests::the_chat_switch_and_a_mute_drop_held_chat_but_keep_reactions`); clients show a localized "chat is turned off" state.
+  - [x] `RUNBOOK.md` has a moderation section. Done: "Moderation (LR-15)": look up a player, apply and lift sanctions, force a rename, turn chat off; audit rows are kept at least a year (a trigger refuses deleting younger ones).
 - **Depends on:** LR-01, LR-16 (a throttle on new profiles, so bans hold)
 
 #### LR-16 — Admission and abuse limits

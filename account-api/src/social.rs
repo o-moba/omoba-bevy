@@ -302,6 +302,7 @@ pub async fn vk_sign_in(app: &App, body: &[u8]) -> Result<Value> {
             .bind(&profile)
             .fetch_one(&mut *tx)
             .await?;
+    crate::moderation::refuse_banned(&mut *tx, &profile).await?;
     let active:i64=sqlx::query_scalar("SELECT count(*) FROM portal.web_sessions WHERE profile_id=$1 AND NOT revoked AND expires_at>$2 AND last_seen>$2-86400")
         .bind(&profile).bind(current).fetch_one(&mut *tx).await?;
     if active >= 20 {

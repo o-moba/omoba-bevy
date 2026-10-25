@@ -319,6 +319,23 @@ impl PartyState {
         self.dissolve_empty(party_id);
     }
 
+    /// Takes a player out of presence, its party and every invite: a
+    /// sanction hides it (LR-15), so nobody sees it online or can invite it.
+    pub(crate) fn withdraw(&mut self, player_id: u64) {
+        self.leave(player_id);
+        self.presence.remove(&player_id);
+        let invited: Vec<u64> = self
+            .invites
+            .iter()
+            .filter(|i| i.to == player_id)
+            .map(|i| i.party_id)
+            .collect();
+        self.invites.retain(|i| i.to != player_id);
+        for party_id in invited {
+            self.dissolve_empty(party_id);
+        }
+    }
+
     pub(crate) fn kick(&mut self, leader: u64, target: u64) -> Result<(), PartyError> {
         let party_id = self.party_id_of(leader).ok_or(PartyError::NoParty)?;
         if self.parties[&party_id].leader != leader {
@@ -523,6 +540,17 @@ impl ServerRuntime {
         player.last_seen = now;
         let player_id = player.hero.identity.id;
         let result = match command {
+            // An account or matchmaking ban hides the player (LR-15); the
+            // presence also carries a moderator's name reset to others.
+            PartyCommand::Presence { .. }
+                if shared::moderation::hides_presence(
+                    &self.career.backend.sanctions(addr),
+                    crate::moderation::unix_now(),
+                ) =>
+            {
+                self.party.withdraw(player_id);
+                Ok(())
+            }
             PartyCommand::Presence { nickname, avatar } => {
                 let profile = self.career.backend.profile(addr);
                 let nickname = profile.as_ref().map_or(nickname, |p| p.nickname.clone());

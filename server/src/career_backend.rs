@@ -20,6 +20,7 @@ use ed25519_dalek::{Signature, VerifyingKey};
 use omoba_career_store::career_store::CareerStore;
 use serde::{Deserialize, Serialize};
 use shared::career::*;
+use shared::moderation::{Sanction, SanctionKind};
 
 use crate::admission::{Limits, SourceIp};
 use crate::career_port::CareerPort;
@@ -40,6 +41,8 @@ const RETENTION_BATCH: u32 = 200;
 const MAX_JOBS: usize = 256;
 const COSMETIC_CACHE_TTL: Duration = Duration::from_secs(30);
 const CHALLENGE_TTL: Duration = Duration::from_secs(30);
+/// How often the worker reads the database-wide chat switch (LR-15).
+const CHAT_SWITCH_POLL: Duration = Duration::from_secs(5);
 
 fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
@@ -133,12 +136,18 @@ pub(crate) enum Reply {
         nonce: String,
         key_active: Option<bool>,
         supporter: Option<shared::supporter::SupporterStatus>,
+        /// The profile's current name and active sanctions (LR-15); `None`
+        /// when the database could not be read.
+        nickname: Option<String>,
+        sanctions: Option<Vec<Sanction>>,
     },
     Login {
         addr: SocketAddr,
         challenge: AuthChallenge,
-        result: Result<CareerView, String>,
+        result: Result<CareerView, LoginRefusal>,
     },
+    /// The database-wide chat switch (LR-15).
+    ChatSwitch(bool),
     Action {
         addr: SocketAddr,
         nonce: String,
@@ -152,6 +161,26 @@ pub(crate) enum Reply {
         result: MatchResult,
         profiles: Vec<ProfileSummary>,
     },
+}
+
+/// A refused sign-in: the English text, and the sanctions that refused it
+/// (an account ban), so the client can say until when.
+pub(crate) struct LoginRefusal {
+    pub(crate) error: String,
+    pub(crate) sanctions: Vec<Sanction>,
+}
+impl From<String> for LoginRefusal {
+    fn from(error: String) -> Self {
+        Self {
+            error,
+            sanctions: Vec::new(),
+        }
+    }
+}
+impl From<&str> for LoginRefusal {
+    fn from(error: &str) -> Self {
+        error.to_owned().into()
+    }
 }
 
 #[derive(Clone, Copy, Serialize, Deserialize)]
@@ -271,6 +300,8 @@ impl MemoryLink {
                     nonce,
                     key_active: Some(true),
                     supporter: Some(Default::default()),
+                    nickname: None,
+                    sanctions: None,
                 });
             }
             Job::Action {
@@ -363,6 +394,9 @@ pub(crate) struct CareerBackend<L: JobLink = WorkerLink> {
     pending_ids: HashSet<String>,
     rejected: HashMap<String, String>,
     limits: Limits,
+    /// The database-wide chat switch as last read; `None` before the first
+    /// read or without a database (LR-15).
+    chat_switch: Option<bool>,
 }
 #[cfg(test)]
 pub(crate) type MemoryCareer = CareerBackend<MemoryLink>;
@@ -384,6 +418,7 @@ impl<L: JobLink> CareerBackend<L> {
             pending_ids: HashSet::new(),
             rejected: HashMap::new(),
             limits: Limits::default(),
+            chat_switch: None,
         }
     }
 }
@@ -572,6 +607,16 @@ impl<L: JobLink> CareerPort for CareerBackend<L> {
         self.clients.get(&addr).is_some_and(|client| client.playing)
     }
     #[cfg(test)]
+    fn test_set_sanctions(&mut self, addr: SocketAddr, sanctions: Vec<Sanction>) {
+        if let Some(client) = self.clients.get_mut(&addr) {
+            client.view.sanctions = sanctions;
+        }
+    }
+    #[cfg(test)]
+    fn test_set_chat_switch(&mut self, enabled: Option<bool>) {
+        self.chat_switch = enabled;
+    }
+    #[cfg(test)]
     fn test_refresh_now(&mut self) {
         self.last_presence = Instant::now() - Duration::from_secs(10);
     }
@@ -624,7 +669,23 @@ impl<L: JobLink> CareerPort for CareerBackend<L> {
                 status.active_until = None;
             }
         }
+        let now = unix_seconds();
+        view.sanctions.retain(|sanction| sanction.active_at(now));
         view
+    }
+    fn sanctions(&self, addr: SocketAddr) -> Vec<Sanction> {
+        let now = unix_seconds();
+        self.clients.get(&addr).map_or_else(Vec::new, |c| {
+            c.view
+                .sanctions
+                .iter()
+                .filter(|sanction| sanction.active_at(now))
+                .copied()
+                .collect()
+        })
+    }
+    fn chat_switch(&self) -> Option<bool> {
+        self.chat_switch
     }
     fn forget(&mut self, addr: SocketAddr) {
         self.clients.remove(&addr);
@@ -875,11 +936,14 @@ impl<L: JobLink> CareerPort for CareerBackend<L> {
                 Reply::RecoveryChecked => {
                     self.recovery_checked = Some(Instant::now());
                 }
+                Reply::ChatSwitch(enabled) => self.chat_switch = Some(enabled),
                 Reply::RefreshAccess {
                     addr,
                     nonce,
                     key_active,
                     supporter,
+                    nickname,
+                    sanctions,
                 } => {
                     let Some(c) = self.clients.get_mut(&addr) else {
                         continue;
@@ -887,12 +951,35 @@ impl<L: JobLink> CareerPort for CareerBackend<L> {
                     if c.auth.as_ref().is_none_or(|auth| auth.nonce != nonce) {
                         continue;
                     }
+                    if let Some(sanctions) = sanctions {
+                        c.view.sanctions = sanctions;
+                    }
+                    // A moderator's name reset shows in the next presence (LR-15).
+                    if let (Some(name), Some(profile)) = (nickname, c.view.profile.as_mut()) {
+                        profile.nickname = name;
+                    }
+                    let banned = shared::moderation::active(
+                        &c.view.sanctions,
+                        SanctionKind::AccountBan,
+                        unix_seconds(),
+                    )
+                    .is_some();
                     if key_active == Some(false) {
                         c.auth = None;
                         c.profile_ready = false;
                         c.view.auth_nonce = None;
                         c.view.supporter = Some(Default::default());
                         c.view.error = Some("This device was revoked. Authorize this device again from your account.".into());
+                    } else if banned {
+                        // An account ban ends the signed session at once, as a
+                        // revoked key does; signing in again is refused while
+                        // it lasts (LR-15).
+                        c.auth = None;
+                        c.profile_ready = false;
+                        c.view.auth_nonce = None;
+                        c.view.supporter = Some(Default::default());
+                        c.view.error = Some(shared::moderation::ACCOUNT_BANNED_TEXT.into());
+                        c.view.error_code = Some(error_code::ACCOUNT_BANNED.into());
                     } else {
                         if key_active == Some(true) {
                             c.key_checked = Some(Instant::now());
@@ -929,9 +1016,11 @@ impl<L: JobLink> CareerPort for CareerBackend<L> {
                             c.profile_ready = true;
                             c.sequence = 0;
                         }
-                        Err(e) => {
-                            c.view.error_code = sign_in_error_code(&e).map(str::to_owned);
-                            c.view.error = Some(e);
+                        Err(refusal) => {
+                            c.view.error_code =
+                                sign_in_error_code(&refusal.error).map(str::to_owned);
+                            c.view.error = Some(refusal.error);
+                            c.view.sanctions = refusal.sanctions;
                         }
                     }
                 }
@@ -949,6 +1038,7 @@ impl<L: JobLink> CareerPort for CareerBackend<L> {
                     }
                     c.view.response_id = request_id;
                     c.view.error = None;
+                    c.view.error_code = None;
                     c.view.history.clear();
                     c.view.history_loaded = false;
                     c.view.history_next = None;
@@ -984,7 +1074,10 @@ impl<L: JobLink> CareerPort for CareerBackend<L> {
                                 c.view.visited_profile = view.visited_profile;
                             }
                         }
-                        Err(e) => c.view.error = Some(e),
+                        Err(e) => {
+                            c.view.error_code = action_error_code(&e).map(str::to_owned);
+                            c.view.error = Some(e);
+                        }
                     }
                 }
                 Reply::Started(id) => {
@@ -1356,6 +1449,16 @@ fn answer(
                         admission.new_profiles,
                     )
                     .await?;
+                // An account ban refuses the sign-in itself (LR-15).
+                let sanctions = store.active_sanctions(&profile.profile_id).await?;
+                if shared::moderation::active(&sanctions, SanctionKind::AccountBan, unix_seconds())
+                    .is_some()
+                {
+                    return Err(LoginRefusal {
+                        error: shared::moderation::ACCOUNT_BANNED_TEXT.into(),
+                        sanctions,
+                    });
+                }
                 let (history, _) = store.history(&profile.profile_id, None).await?;
                 let last_result = match history.first() {
                     Some(last) => store
@@ -1368,6 +1471,7 @@ fn answer(
                     supporter: store.supporter_status(&profile.profile_id).await.ok(),
                     profile: Some(profile),
                     last_result,
+                    sanctions,
                     ..Default::default()
                 })
             });
@@ -1409,8 +1513,15 @@ fn sign_in_error_code(error: &str) -> Option<&'static str> {
     match error {
         NEW_PROFILE_LIMIT_ERROR => Some(error_code::NEW_PROFILE_LIMIT),
         NEW_PROFILES_PAUSED_ERROR => Some(error_code::NEW_PROFILES_PAUSED),
+        shared::moderation::ACCOUNT_BANNED_TEXT => Some(error_code::ACCOUNT_BANNED),
         _ => None,
     }
+}
+
+/// The client's code for a refused account action (LR-15: a locked rename).
+fn action_error_code(error: &str) -> Option<&'static str> {
+    (error == omoba_career_store::career_store::moderation::NAME_LOCKED_ERROR)
+        .then_some(shared::career::error_code::NAME_LOCKED)
 }
 
 fn worker(
@@ -1440,6 +1551,7 @@ fn worker(
     let mut parked: VecDeque<(Instant, Job)> = VecDeque::new();
     // The first retention run waits out a restart's reconnect storm.
     let mut next_retention = Instant::now() + Duration::from_secs(300);
+    let mut last_chat_poll: Option<Instant> = None;
     while connected || !pending.is_empty() {
         if store.is_none() && last_retry.elapsed() >= Duration::from_secs(2) {
             last_retry = Instant::now();
@@ -1493,23 +1605,28 @@ fn worker(
                 public_key,
                 profile_id,
             }) => {
-                let (key_active, supporter) = match &store {
-                    Some(s) => rt.block_on(async {
-                        let active = s.key_is_active(&public_key, &profile_id).await.ok();
-                        let supporter = if active == Some(true) {
-                            s.supporter_status(&profile_id).await.ok()
-                        } else {
-                            None
-                        };
-                        (active, supporter)
-                    }),
-                    None => (None, None),
+                // One query: the key, the current name and the sanctions.
+                let access = match &store {
+                    Some(s) => rt.block_on(s.access(&public_key, &profile_id)).ok(),
+                    None => None,
                 };
+                let key_active = access.as_ref().map(|a| a.key_active);
+                let supporter = match &store {
+                    Some(s) if key_active == Some(true) => {
+                        rt.block_on(s.supporter_status(&profile_id)).ok()
+                    }
+                    _ => None,
+                };
+                let (nickname, sanctions) = access
+                    .map(|a| (a.nickname, Some(a.sanctions)))
+                    .unwrap_or_default();
                 let _ = replies.try_send(Reply::RefreshAccess {
                     addr,
                     nonce,
                     key_active,
                     supporter,
+                    nickname,
+                    sanctions,
                 });
             }
             Ok(Job::Presence(presence)) => {
@@ -1531,6 +1648,14 @@ fn worker(
             };
             if let Some(reply) = reply {
                 let _ = replies.try_send(reply);
+            }
+        }
+        if let Some(s) = &store
+            && last_chat_poll.is_none_or(|at| at.elapsed() >= CHAT_SWITCH_POLL)
+        {
+            last_chat_poll = Some(Instant::now());
+            if let Ok(enabled) = rt.block_on(s.chat_enabled()) {
+                let _ = replies.try_send(Reply::ChatSwitch(enabled));
             }
         }
         if let (Some(days), Some(s)) = (admission.retention_days, &store)
@@ -1808,6 +1933,134 @@ mod tests {
         assert_eq!(logins(&backend), 2);
     }
     #[test]
+    fn an_account_ban_refuses_sign_in_with_its_end_and_lifting_it_needs_no_restart() {
+        use shared::moderation::{ACCOUNT_BANNED_TEXT, Sanction, SanctionKind};
+        let key = SigningKey::from_bytes(&[4; 32]);
+        let addr = at([203, 0, 113, 10], 50000);
+        let mut backend = MemoryCareer::test_backend(7);
+        backend.handle(addr, challenge_request(4));
+        let challenge = backend.view(addr).challenge.unwrap();
+        let authenticate = CareerRequest::Authenticate {
+            challenge: challenge.clone(),
+            signature: hex(&key.sign(&challenge.signing_bytes()).to_bytes()),
+        };
+        backend.clients.get_mut(&addr).unwrap().last_request = None;
+        backend.handle(addr, authenticate.clone());
+        let until = unix_seconds() + 3600;
+        let ban = Sanction {
+            kind: SanctionKind::AccountBan,
+            until: Some(until),
+        };
+        backend.link.replies.push_back(Reply::Login {
+            addr,
+            challenge: challenge.clone(),
+            result: Err(LoginRefusal {
+                error: ACCOUNT_BANNED_TEXT.into(),
+                sanctions: vec![ban],
+            }),
+        });
+        backend.poll();
+        let view = backend.view(addr);
+        assert_eq!(
+            view.error_code.as_deref(),
+            Some(shared::career::error_code::ACCOUNT_BANNED)
+        );
+        assert_eq!(view.sanctions, vec![ban], "the client can say until when");
+        assert!(view.profile.is_none() && backend.authenticated_session(addr).is_none());
+        // Party presence still sees the refused endpoint's ban.
+        assert_eq!(backend.sanctions(addr), vec![ban]);
+        // Lifted: the next sign-in (the client retries) goes to the store again.
+        backend.link.jobs.clear();
+        backend.clients.get_mut(&addr).unwrap().last_request = None;
+        backend.handle(addr, authenticate);
+        assert!(
+            backend
+                .link
+                .jobs
+                .iter()
+                .any(|job| matches!(job, Job::Login { .. }))
+        );
+    }
+
+    #[test]
+    fn access_refreshes_apply_and_lift_sanctions_and_a_name_reset() {
+        use shared::moderation::{Sanction, SanctionKind};
+        let addr = "127.0.0.1:30031".parse().unwrap();
+        let mut backend = MemoryCareer::test_backend(9);
+        backend.test_authenticated(
+            addr,
+            ProfileSummary::new("a".repeat(64), "Rude#0001".into()),
+            "session",
+        );
+        let mute = Sanction {
+            kind: SanctionKind::ChatMute,
+            until: Some(unix_seconds() + 600),
+        };
+        let refresh = |sanctions: Vec<Sanction>, nickname: Option<&str>| Reply::RefreshAccess {
+            addr,
+            nonce: "b".repeat(64),
+            key_active: Some(true),
+            supporter: None,
+            nickname: nickname.map(str::to_owned),
+            sanctions: Some(sanctions),
+        };
+        backend
+            .link
+            .replies
+            .push_back(refresh(vec![mute], Some("Player#0042")));
+        backend.poll();
+        assert_eq!(backend.sanctions(addr), vec![mute]);
+        assert_eq!(backend.profile(addr).unwrap().nickname, "Player#0042");
+        assert!(backend.authenticated_session(addr).is_some());
+        // An expired sanction is gone from the view at once, a lifted one at
+        // the next refresh.
+        backend.clients.get_mut(&addr).unwrap().view.sanctions = vec![Sanction {
+            kind: SanctionKind::RankedBan,
+            until: Some(unix_seconds() - 1),
+        }];
+        assert!(backend.view(addr).sanctions.is_empty());
+        assert!(backend.sanctions(addr).is_empty());
+        backend.link.replies.push_back(refresh(vec![mute], None));
+        backend.poll();
+        backend.link.replies.push_back(refresh(Vec::new(), None));
+        backend.poll();
+        assert!(backend.sanctions(addr).is_empty());
+        // A database outage keeps what was last read.
+        backend.link.replies.push_back(refresh(vec![mute], None));
+        backend.poll();
+        backend.link.replies.push_back(Reply::RefreshAccess {
+            addr,
+            nonce: "b".repeat(64),
+            key_active: None,
+            supporter: None,
+            nickname: None,
+            sanctions: None,
+        });
+        backend.poll();
+        assert_eq!(backend.sanctions(addr), vec![mute]);
+        // An account ban applied while signed in ends the session at once.
+        backend.link.replies.push_back(refresh(
+            vec![Sanction {
+                kind: SanctionKind::AccountBan,
+                until: None,
+            }],
+            None,
+        ));
+        backend.poll();
+        assert!(backend.authenticated_session(addr).is_none());
+        assert!(backend.profile(addr).is_none());
+        assert_eq!(
+            backend.view(addr).error_code.as_deref(),
+            Some(shared::career::error_code::ACCOUNT_BANNED)
+        );
+        // The chat switch as the worker last read it.
+        assert_eq!(backend.chat_switch(), None);
+        backend.link.replies.push_back(Reply::ChatSwitch(false));
+        backend.poll();
+        assert_eq!(backend.chat_switch(), Some(false));
+    }
+
+    #[test]
     fn supporter_is_denied_for_free_expired_disabled_stale_and_unauthenticated_profiles() {
         use shared::supporter::{AuraStyle, SupporterStatus};
         let mut status = SupporterStatus {
@@ -1913,6 +2166,8 @@ mod tests {
             nonce,
             key_active: Some(true),
             supporter: Some(SupporterStatus::default()),
+            nickname: None,
+            sanctions: None,
         });
         backend.poll();
         assert_eq!(backend.supporter_aura(addr), None);
@@ -1932,6 +2187,8 @@ mod tests {
             nonce: "b".repeat(64),
             key_active: Some(false),
             supporter: None,
+            nickname: None,
+            sanctions: None,
         });
         backend.poll();
         assert!(backend.authenticated_session(addr).is_none());
@@ -1957,6 +2214,8 @@ mod tests {
             nonce: "b".repeat(64),
             key_active: None,
             supporter: None,
+            nickname: None,
+            sanctions: None,
         });
         backend.poll();
         assert_eq!(backend.clients[&addr].key_checked, Some(expired));

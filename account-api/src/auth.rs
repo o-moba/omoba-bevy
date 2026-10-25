@@ -116,6 +116,10 @@ pub async fn decide(app: &App, body: &[u8], decision: WebPairDecision) -> Result
     .fetch_optional(&mut *tx)
     .await?
     .ok_or_else(forbidden)?;
+    // A suspended account approves no website sign-in (LR-15).
+    if decision == WebPairDecision::Approve {
+        crate::moderation::refuse_banned(&mut *tx, &profile).await?;
+    }
     let state = if decision == WebPairDecision::Approve {
         "approved"
     } else {
@@ -222,6 +226,7 @@ pub async fn complete(app: &App, body: &[u8]) -> Result<Value> {
     if !key_active {
         return Err(forbidden());
     }
+    crate::moderation::refuse_banned(&mut *tx, &profile).await?;
     let active:i64=sqlx::query_scalar("SELECT count(*) FROM portal.web_sessions WHERE profile_id=$1 AND NOT revoked AND expires_at>$2 AND last_seen>$2-86400")
         .bind(&profile).bind(current).fetch_one(&mut *tx).await?;
     if active >= 20 {
@@ -251,11 +256,14 @@ pub async fn session(app: &App, headers: &HeaderMap) -> Result<Session> {
     }
     let row=sqlx::query("UPDATE portal.web_sessions SET last_seen=$2 WHERE token_hash=$1 AND authorization_version=2 AND NOT revoked AND expires_at>$2 AND last_seen>$2-86400 RETURNING session_id,profile_id,created_at")
         .bind(crypto::mac(&app.config.secret,"session-token",token)).bind(now()).fetch_optional(&app.pool).await?.ok_or_else(credential_error)?;
-    Ok(Session {
+    let session = Session {
         session_id: row_text(&row, "session_id")?,
         profile_id: row_text(&row, "profile_id")?,
         created_at: row.try_get("created_at")?,
-    })
+    };
+    // A suspended account's sessions stay, unusable, until the ban ends (LR-15).
+    crate::moderation::refuse_banned(&app.pool, &session.profile_id).await?;
+    Ok(session)
 }
 pub async fn sessions(app: &App, s: &Session) -> Result<Value> {
     let rows=sqlx::query("SELECT session_id,label,created_at,last_seen,expires_at FROM portal.web_sessions WHERE profile_id=$1 AND NOT revoked AND expires_at>$2 AND last_seen>$2-86400 ORDER BY created_at DESC LIMIT 100").bind(&s.profile_id).bind(now()).fetch_all(&app.pool).await?;

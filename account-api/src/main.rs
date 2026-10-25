@@ -1,4 +1,5 @@
-use omoba_account_api::{App, Config, crypto, migrate, router};
+use omoba_account_api::{App, Config, crypto, migrate, moderation, router};
+use omoba_career_store::career_store::CareerStore;
 use std::net::SocketAddr;
 
 #[tokio::main]
@@ -14,6 +15,23 @@ async fn run() -> Result<(), String> {
         migrate(&url).await?;
         println!("Career and Account API migrations ready.");
         return Ok(());
+    }
+    // Operator commands (LR-15): player lookup, sanctions, chat switch.
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if args
+        .first()
+        .is_some_and(|first| moderation::COMMANDS.contains(&first.as_str()))
+    {
+        let command = moderation::parse(&args)?;
+        let store = CareerStore::connect_runtime(&url).await?;
+        print!("{}", moderation::run(&store, command).await?);
+        return Ok(());
+    }
+    if let Some(unknown) = args.first() {
+        return Err(format!(
+            "Unknown command {unknown:?}.\n{}",
+            moderation::USAGE
+        ));
     }
     let origin =
         std::env::var("OMOBA_PORTAL_ORIGIN").map_err(|_| "Set the trusted OMOBA_PORTAL_ORIGIN")?;

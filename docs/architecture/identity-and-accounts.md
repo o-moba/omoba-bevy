@@ -94,6 +94,7 @@ The client runs one handshake for each *scope* `(server address, server epoch, c
 3. **Client → server:** `Authenticate { challenge, signature }` over `omoba.career.auth.v1`, signed inline in `identity_driver`.
 4. **Server logs the key in.** The server checks that the challenge is the one it issued and still fresh, verifies the signature with `verify_strict`, and queues `Job::Login`. `CareerStore::authenticate(public_key, nickname)` then takes a transaction advisory lock on the key:
    - **Known key:** returns the profile and keeps the saved nickname. A revoked key is refused with *"This device key was revoked…"*.
+   - **Account ban (LR-15).** After the store answers, the worker reads the profile's active sanctions; an active `account_ban` refuses the sign-in with `error_code` `account_banned` and the ban in `CareerView.sanctions`, so the client shows until when. The client signs in again a minute later, so a lifted ban needs no restart. A ban applied while signed in ends the authorization at the next 10-second access refresh, as a revoked key does.
    - **Unknown key:** inserts a new `career_profiles` row and a matching `career_keys` row. The `profile_id` is two random UUIDs without dashes (64 hex characters) and is *not* derived from the key. The key row has no label, so it gets the column default `Original device`.
    - **New-profile limits (LR-16).** A game server signs in through `authenticate_from`: an unknown key gets a profile only while its source IP (IPv4 address, IPv6 /64) created fewer than 10 profiles in the last 24 hours and everyone fewer than 5000 (`OMOBA_LIMIT_NEW_PROFILES_*`). The refusal creates nothing; the view carries `error_code` `new_profile_limit` or `new_profiles_paused`, which the client shows localized and stops retrying on. Known keys always sign in. The count lives in PostgreSQL (`career_profile_admissions`, a salted hash of the source, 48 h).
 5. **Client is authenticated.** The reply carries `auth_nonce = challenge.nonce` and the profile. The client treats itself as authenticated once both are present. It retries every 2 s and gives up after 25 s (`RETRY`, `AUTH_TIMEOUT`).
@@ -188,6 +189,8 @@ sequenceDiagram
   - not revoked,
   - within its 7-day absolute lifetime,
   - seen within the last day.
+
+  While the profile has an active `account_ban` (LR-15), every session-authenticated request answers `403 account_banned` without revoking the session, so it works again once the ban ends or is lifted. Pairing approval and completion and VK sign-in refuse the same way, so no new session is created ([`moderation.rs`](../../account-api/src/moderation.rs) `refuse_banned`).
 - **Labels.** Pairing sessions get the column default `Browser` ([`001_portal.sql`](../../account-api/migrations/001_portal.sql)). VK sessions take the method label (`VK ID`, `OK`, `Mail.ru`).
 - **Limit.** At most 20 active sessions per profile, serialized by a row lock on the profile. Further sign-ins get `session_limit`. The same rule applies to VK ID sessions.
 - **Fresh session.** A session created no more than 600 s ago is "fresh", whether it came from pairing completion or from a VK sign-in (`devices.rs` `fresh`, `auth::revoke`). These actions require a fresh session:

@@ -498,6 +498,23 @@ lobby logs the values it runs with (`Admission limits: …`).
 - The journal shows `PROFILE_RETENTION pruned=N …` when the retention job deleted
   profiles.
 
+## Chat and moderation (LR-15)
+
+- **Chat is off.** The lobby unit sets `OMOBA_CHAT=off` (owner default O-9): no text chat
+  on RU servers; reactions stay. Match workers inherit it, and the lobby logs
+  `Chat: off (OMOBA_CHAT; …)` at start. `ru_host.py` refuses a lobby unit without it, and
+  `lobby.env` must not repeat it. Turning chat on needs the owner's legal check (ОРИ,
+  149-FZ), then `Environment=OMOBA_CHAT=on` in the unit and the matching rule in
+  `ru_host.py` (`UNIT_ENV_RULES`), and a `ship`.
+- **Sanctions and the runtime kill switch** are `omoba-account-api` commands run on the
+  host as `omoba-ru` with the Account API's env file, so the database password is never
+  typed: `systemd-run --quiet --pipe --wait --uid=omoba-ru --gid=omoba-ru -p
+  EnvironmentFile=/opt/omoba-ru/account-api.env /opt/omoba-ru/current/omoba-account-api
+  player 'Name#1234'`. Applying, lifting, renaming and `chat off` take effect within
+  about 10 seconds, without a restart. Procedure: [RUNBOOK.md › Moderation](../../../RUNBOOK.md#moderation-lr-15).
+- Career schema 5 (sanctions, the moderation audit, the chat switch) and its grants are
+  applied by `ship` like every migration.
+
 ## Rollback
 
 `python3 ops/vps/ru/ru_host.py rollback --kind server --release <v>-ru-<sha7> --apply`

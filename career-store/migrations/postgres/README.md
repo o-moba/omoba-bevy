@@ -2,7 +2,7 @@
 
 `career_store.rs` uses these PostgreSQL migrations with SQLx dynamic queries. It
 does not use the older SQLite prototype. `connect` applies career schema versions
-1–4 transactionally under a migration advisory lock, upgrades supported earlier
+1–5 transactionally under a migration advisory lock, upgrades supported earlier
 versions, and rejects unknown versions. Since 0.20.0-rc.1, use `migrate-career` (or Account API `migrate`)
 explicitly as the migration owner. The game worker uses `connect_runtime` and
 requires no DDL permissions; startup rejects missing/unknown versions. See
@@ -68,6 +68,28 @@ or live presence, under the key's sign-in lock. A profile that any other row sti
 references (portal sessions, settings, sign-in links, Supporter grants) fails its
 foreign key and is kept. The key row goes with the profile, so the device signs in to
 a fresh profile. The game role may execute it but still cannot delete a key itself.
+
+## Moderation (schema 5, LR-15)
+
+`career_sanctions` holds one row per sanction: `profile_id`, `kind` (`chat_mute`,
+`matchmaking_ban`, `ranked_ban`, `account_ban`, `name_reset`), `reason`, `created_at`,
+`created_by`, `expires_at` (NULL: until lifted) and, once lifted early, `lifted_at`,
+`lifted_by` and `lift_reason`. A sanction is active while it is neither lifted nor
+expired. `CareerStore::add_sanction` and `lift_sanction` write one
+`career_moderation_events` row in the same transaction (actor, action, profile,
+sanction, JSON detail with kind, reason, end and, for a name reset, the old and the
+new name). That audit table has no foreign key (the record outlives the profile); its
+trigger refuses every UPDATE and deleting a row younger than a year. A `name_reset`
+renames the profile to `Player#NNNN` with a free tag in the same transaction, and
+`rename` refuses with `NAME_LOCKED_ERROR` while it is active. `career_chat_switch` is
+one row, the database-wide chat switch (`set_chat`, audited as `chat_switched`).
+
+Game servers read with `access(public_key, profile_id)` (key active, current name and
+active sanctions in one query, at every 10-second access refresh),
+`active_sanctions` (sign-in) and `chat_enabled` (polled every 5 s). A sanction's
+foreign key keeps its profile from `career_prune_unplayed_profiles`. Operators use the
+`omoba-account-api sanction|rename|player|chat` commands (`RUNBOOK.md` › Moderation),
+which also run with the portal role.
 
 ## Allocation and result lifecycle
 

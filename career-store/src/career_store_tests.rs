@@ -1471,3 +1471,256 @@ async fn career_store_prunes_only_old_unplayed_unlinked_profiles() {
     assert_eq!(f.store.prune_unplayed_profiles(30, 100).await.unwrap(), 0);
     f.close().await;
 }
+
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "requires OMOBA_TEST_DATABASE_URL and real PostgreSQL"]
+async fn career_store_sanctions_apply_expire_lift_and_audit() {
+    use moderation::{NAME_LOCKED_ERROR, NewSanction};
+    use shared::moderation::{Sanction, SanctionKind};
+    let f = Fixture::new().await;
+    let a = f.profile(1).await;
+    let key = format!("{:064x}", 1);
+    let new = |kind, duration_secs| NewSanction {
+        profile_id: &a.profile_id,
+        kind,
+        reason: "Spam in team chat",
+        duration_secs,
+        actor: "ops.anna",
+    };
+    let clean = f.store.access(&key, &a.profile_id).await.unwrap();
+    assert!(clean.key_active && clean.sanctions.is_empty());
+    assert_eq!(clean.nickname.as_deref(), Some(a.nickname.as_str()));
+
+    // Applied: visible to the game at once, with its end.
+    let mute = f
+        .store
+        .add_sanction(new(SanctionKind::ChatMute, Some(3600)))
+        .await
+        .unwrap();
+    assert!(mute.renamed.is_none() && mute.sanction.active);
+    let until = mute.sanction.expires_at.unwrap();
+    assert!((until - mute.sanction.created_at - 3600).abs() <= 1);
+    let ban = f
+        .store
+        .add_sanction(new(SanctionKind::AccountBan, None))
+        .await
+        .unwrap();
+    assert_eq!(ban.sanction.expires_at, None);
+    let access = f.store.access(&key, &a.profile_id).await.unwrap();
+    assert_eq!(
+        access.sanctions,
+        vec![
+            Sanction {
+                kind: SanctionKind::ChatMute,
+                until: Some(until)
+            },
+            Sanction {
+                kind: SanctionKind::AccountBan,
+                until: None
+            }
+        ]
+    );
+    assert_eq!(
+        f.store.active_sanctions(&a.profile_id).await.unwrap(),
+        access.sanctions
+    );
+
+    // An expired sanction no longer applies; a lifted one neither.
+    let ranked = f
+        .store
+        .add_sanction(new(SanctionKind::RankedBan, Some(60)))
+        .await
+        .unwrap();
+    sqlx::query("UPDATE career_sanctions SET created_at=clock_timestamp()-interval '2 hours', expires_at=clock_timestamp()-interval '1 second' WHERE sanction_id=$1")
+        .bind(ranked.sanction.sanction_id)
+        .execute(&f.store.pool)
+        .await
+        .unwrap();
+    let lifted = f
+        .store
+        .lift_sanction(ban.sanction.sanction_id, "Appeal accepted", "ops.boris")
+        .await
+        .unwrap();
+    assert!(!lifted.active);
+    assert_eq!(lifted.lifted_by.as_deref(), Some("ops.boris"));
+    assert_eq!(lifted.lift_reason.as_deref(), Some("Appeal accepted"));
+    assert!(
+        f.store
+            .lift_sanction(ban.sanction.sanction_id, "Again", "ops.boris")
+            .await
+            .is_err(),
+        "a lifted sanction cannot be lifted twice"
+    );
+    assert!(
+        f.store
+            .lift_sanction(ranked.sanction.sanction_id, "Expired", "ops.boris")
+            .await
+            .is_err(),
+        "an expired sanction cannot be lifted"
+    );
+    assert_eq!(
+        f.store.active_sanctions(&a.profile_id).await.unwrap(),
+        vec![Sanction {
+            kind: SanctionKind::ChatMute,
+            until: Some(until)
+        }]
+    );
+    let active = f.store.sanctions(&a.profile_id, false).await.unwrap();
+    assert_eq!(active.len(), 1);
+    assert_eq!(
+        f.store.sanctions(&a.profile_id, true).await.unwrap().len(),
+        3
+    );
+
+    // A name reset renames to Player#NNNN, locks renames, and is audited.
+    let reset = f
+        .store
+        .add_sanction(new(SanctionKind::NameReset, Some(7 * 86_400)))
+        .await
+        .unwrap();
+    let (old_name, new_name) = reset.renamed.clone().unwrap();
+    assert_eq!(old_name, a.nickname);
+    let tag = new_name.strip_prefix("Player#").unwrap();
+    assert!(tag.len() == 4 && tag.bytes().all(|b| b.is_ascii_digit()));
+    assert_eq!(
+        f.store.profile(&a.profile_id).await.unwrap().nickname,
+        new_name
+    );
+    assert_eq!(
+        f.store.access(&key, &a.profile_id).await.unwrap().nickname,
+        Some(new_name.clone())
+    );
+    assert_eq!(
+        f.store
+            .rename(&a.profile_id, "Offensive")
+            .await
+            .unwrap_err(),
+        NAME_LOCKED_ERROR
+    );
+    f.store
+        .lift_sanction(reset.sanction.sanction_id, "Name is fine now", "ops.anna")
+        .await
+        .unwrap();
+    assert!(
+        f.store
+            .rename(&a.profile_id, "Fine")
+            .await
+            .unwrap()
+            .nickname
+            .starts_with("Fine#")
+    );
+
+    // Refusals: bad input never writes a row.
+    for bad in [
+        NewSanction {
+            reason: " ",
+            ..new(SanctionKind::ChatMute, Some(60))
+        },
+        NewSanction {
+            actor: "ops anna",
+            ..new(SanctionKind::ChatMute, Some(60))
+        },
+        new(SanctionKind::ChatMute, Some(0)),
+        new(
+            SanctionKind::ChatMute,
+            Some(moderation::MAX_SANCTION_SECS + 1),
+        ),
+        new(SanctionKind::Unknown, Some(60)),
+        NewSanction {
+            profile_id: &"f".repeat(64),
+            ..new(SanctionKind::ChatMute, Some(60))
+        },
+    ] {
+        assert!(f.store.add_sanction(bad).await.is_err(), "{bad:?}");
+    }
+
+    // The audit trail: every write, newest first; append-only for a year.
+    let events = f
+        .store
+        .moderation_events(Some(&a.profile_id), 50)
+        .await
+        .unwrap();
+    let actions: Vec<_> = events.iter().map(|e| e.action.as_str()).collect();
+    assert_eq!(
+        actions,
+        [
+            "sanction_lifted",
+            "sanction_added",
+            "sanction_lifted",
+            "sanction_added",
+            "sanction_added",
+            "sanction_added"
+        ]
+    );
+    assert_eq!(events[1].detail["kind"], "name_reset");
+    assert_eq!(events[1].detail["new_name"], new_name.as_str());
+    assert_eq!(events[1].detail["old_name"], a.nickname.as_str());
+    assert_eq!(events[1].actor, "ops.anna");
+    for statement in [
+        "UPDATE career_moderation_events SET actor='someone-else'",
+        "DELETE FROM career_moderation_events",
+    ] {
+        let error = sqlx::query(statement)
+            .execute(&f.store.pool)
+            .await
+            .unwrap_err();
+        assert_eq!(
+            error.as_database_error().and_then(|e| e.code()).as_deref(),
+            Some("23514"),
+            "{statement}"
+        );
+    }
+
+    // The chat switch, audited without a profile.
+    assert!(f.store.chat_enabled().await.unwrap());
+    let off = f
+        .store
+        .set_chat(false, "Raid in chat", "ops.anna")
+        .await
+        .unwrap();
+    assert!(!off.enabled && off.changed_by == "ops.anna");
+    assert!(!f.store.chat_enabled().await.unwrap());
+    let chat_events = f.store.moderation_events(None, 10).await.unwrap();
+    assert_eq!(chat_events.len(), 1);
+    assert_eq!(chat_events[0].detail["enabled"], false);
+    f.store.set_chat(true, "Over", "ops.anna").await.unwrap();
+    assert!(f.store.chat_enabled().await.unwrap());
+
+    // Lookup by handle or ID, with keys.
+    assert!(f.store.find_profile("Nobody#0000").await.is_err());
+    let found = f
+        .store
+        .find_profile(&f.store.profile(&a.profile_id).await.unwrap().nickname)
+        .await
+        .unwrap();
+    assert_eq!(found.profile_id, a.profile_id);
+    assert_eq!(
+        f.store
+            .find_profile(&a.profile_id)
+            .await
+            .unwrap()
+            .profile_id,
+        a.profile_id
+    );
+    let keys = f.store.profile_keys(&a.profile_id).await.unwrap();
+    assert_eq!(keys.len(), 1);
+    assert_eq!(keys[0].key_prefix, &key[..16]);
+
+    // A sanctioned profile that never played is not pruned: the ban holds.
+    let throwaway = f.profile(2).await;
+    f.store
+        .add_sanction(NewSanction {
+            profile_id: &throwaway.profile_id,
+            ..new(SanctionKind::MatchmakingBan, None)
+        })
+        .await
+        .unwrap();
+    sqlx::query("UPDATE career_keys SET created_at=clock_timestamp()-interval '40 days' WHERE profile_id=$1")
+        .bind(&throwaway.profile_id)
+        .execute(&f.store.pool)
+        .await
+        .unwrap();
+    assert_eq!(f.store.prune_unplayed_profiles(30, 100).await.unwrap(), 0);
+    assert!(f.store.profile(&throwaway.profile_id).await.is_ok());
+    f.close().await;
+}

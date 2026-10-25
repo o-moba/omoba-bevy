@@ -10,6 +10,7 @@
 
 use bevy::prelude::*;
 use shared::career::QueueView;
+use shared::match_service::MatchServiceView;
 
 use super::AppScreen;
 use super::widgets;
@@ -286,6 +287,11 @@ fn refresh_status(
             .is_some_and(|flow| flow.closing_left_allocation(&career.view))
         {
             tr("rejoin.closing").to_owned()
+        } else if let MatchServiceView::Failed { code } = view
+            && let Some(text) = crate::moderation::refusal_text(code, &career.view.sanctions)
+        {
+            // A matchmaking or ranked ban (LR-15), with its end.
+            text
         } else {
             crate::match_service::status_text(view)
         }
@@ -526,6 +532,80 @@ mod tests {
         assert!(!shown(&mut app, "SearchingResume"));
         assert!(hero_shown(&mut app));
         assert_eq!(status(&mut app), "Матч найден · подготовка арены…");
+    }
+
+    /// LR-15: a matchmaking ban and a suspended account are refused on the
+    /// search screen in the player's language (here Russian) with their end.
+    #[test]
+    fn a_sanction_refusal_renders_in_russian_with_its_end() {
+        if crate::i18n::testing::isolated(
+            "frontend::searching::tests::a_sanction_refusal_renders_in_russian_with_its_end",
+        ) {
+            return;
+        }
+        use crate::i18n::{I18nPlugin, Locale, LocaleId};
+        use crate::ui::test_id::harness;
+        use shared::moderation::{Sanction, SanctionKind, code};
+        let mut app = harness::kit_app();
+        app.add_plugins((bevy::state::app::StatesPlugin, I18nPlugin::default()))
+            .insert_state(AppScreen::Searching)
+            .insert_resource(crate::ui::UiPlatform(crate::platform::UiProfile::Desktop))
+            .init_resource::<TeamSelection>()
+            .init_resource::<CareerClient>()
+            .init_resource::<GameStateSnapshot>()
+            .add_message::<SessionUiCommand>()
+            .add_plugins(SearchingScreenPlugin);
+        let mut session = ClientSession::default();
+        session.set_state_for_test(crate::net::ClientConnectionState::Connected);
+        app.insert_resource(session);
+        let mut flow = MatchServiceClient::default();
+        flow.active = true;
+        app.insert_resource(flow);
+        let until = Some(1_893_456_000); // 2030-01-01 00:00 UTC
+        {
+            let mut career = app.world_mut().resource_mut::<CareerClient>();
+            career.view.match_service = Some(MatchServiceView::Failed {
+                code: code::MATCHMAKING_BAN.into(),
+            });
+            career.view.sanctions = vec![Sanction {
+                kind: SanctionKind::MatchmakingBan,
+                until,
+            }];
+        }
+        app.world_mut()
+            .resource_mut::<Locale>()
+            .set(LocaleId::parse("ru").unwrap());
+        app.update();
+        app.update();
+        let status = |app: &mut App| {
+            app.world_mut()
+                .query_filtered::<&Text, With<SearchingStatus>>()
+                .single(app.world())
+                .unwrap()
+                .0
+                .clone()
+        };
+        assert_eq!(
+            status(&mut app),
+            "Поиск матчей недоступен вам до 2030-01-01 00:00 UTC."
+        );
+        {
+            let mut career = app.world_mut().resource_mut::<CareerClient>();
+            career.view = shared::career::CareerView {
+                error: Some(shared::moderation::ACCOUNT_BANNED_TEXT.into()),
+                error_code: Some(code::ACCOUNT_BANNED.into()),
+                sanctions: vec![Sanction {
+                    kind: SanctionKind::AccountBan,
+                    until,
+                }],
+                ..Default::default()
+            };
+        }
+        app.update();
+        assert_eq!(
+            status(&mut app),
+            "Ваш аккаунт заблокирован до 2030-01-01 00:00 UTC."
+        );
     }
 
     /// LR-08: a Ranked search names its queue and rating, shows how many
