@@ -14,6 +14,9 @@
 //! - Each round runs twice in one process. Each `GameWorld` gets its own
 //!   `HashMap` keys, so equal traces show the scenario does not depend on
 //!   iteration order.
+//! - Each round also checks the route budget (LR-10): a bot's plans are at
+//!   least `ROUTE_INTERVAL` apart, and the round stays within 80 plans per
+//!   bot-minute.
 //! - The digests must equal the committed baseline. The first baseline was
 //!   recorded from the pre-refactor brain (`origin/dev` `ce04e5f` plus this
 //!   test only), which proved the Elite profile is the old behaviour exactly.
@@ -42,9 +45,9 @@
 //!    fingerprint in `common/tests/fixtures/elite_bot_trace.txt` with it.
 //! 3. Re-record each other block from the same commit on its `libm` with
 //!    `OMOBA_BOT_TRACE_OUT=<file> OMOBA_BOT_TRACE_LABEL=<label> cargo test -p common elite_command_trace`
-//!    (the glibc 2.43 block on the dev VPS builder). If that is not possible,
-//!    delete the block: a stale block fails on its `libm`, a missing one only
-//!    skips the comparison there.
+//!    (the glibc 2.43 block on the dev VPS builder, the macOS block on the
+//!    owner's Mac). If that is not possible, delete the block: a stale block
+//!    fails on its `libm`, a missing one only skips the comparison there.
 //! 4. Say in the commit message that it re-baselines the Elite trace, and why.
 //!
 //! A new `libm` gets its block the same way, from the current commit.
@@ -214,6 +217,9 @@ struct Trace {
     ticks: Vec<String>,
     digests: Vec<u64>,
     summary: Summary,
+    /// Route plans, and those that found no route.
+    plans: u32,
+    failed_plans: u32,
 }
 
 fn run_trace(scenario: Scenario) -> Trace {
@@ -224,10 +230,28 @@ fn run_trace(scenario: Scenario) -> Trace {
     let mut ticks = Vec::with_capacity(TICKS);
     let mut summary = Summary::default();
     let mut previous: HashMap<SocketAddr, (bool, bool, Option<TargetId>)> = HashMap::new();
+    let mut last_plan: HashMap<SocketAddr, Instant> = HashMap::new();
+    let (mut plans, mut failed_plans) = (0, 0);
     command_trace::start();
+    sim_probe::start();
     for _ in 0..TICKS {
         practice.advance(DT);
         let now = practice.now;
+        // LR-10: one plan per bot per `ROUTE_INTERVAL` at most, whatever
+        // emptied its route, a failed plan included.
+        for event in sim_probe::drain() {
+            if let sim_probe::Event::Route { bot, found } = event {
+                if let Some(last) = last_plan.insert(bot, now) {
+                    assert!(
+                        now - last >= ROUTE_INTERVAL,
+                        "{scenario:?}: bot {bot} planned again after {:?}",
+                        now - last
+                    );
+                }
+                plans += 1;
+                failed_plans += u32::from(!found);
+            }
+        }
         let mut block = String::new();
         for command in command_trace::drain() {
             match command.split(' ').nth(1) {
@@ -280,6 +304,7 @@ fn run_trace(scenario: Scenario) -> Trace {
         ticks.push(block);
     }
     command_trace::stop();
+    sim_probe::stop();
     summary.structures_down = practice
         .world
         .structures
@@ -301,6 +326,8 @@ fn run_trace(scenario: Scenario) -> Trace {
         ticks,
         digests,
         summary,
+        plans,
+        failed_plans,
     }
 }
 
@@ -388,6 +415,20 @@ fn deterministic_trace(scenario: Scenario) -> Trace {
         );
     }
     assert_eq!(first.summary, second.summary, "{scenario:?}");
+    assert_eq!(
+        (first.plans, first.failed_plans),
+        (second.plans, second.failed_plans),
+        "{scenario:?}"
+    );
+    // LR-10: the round stays inside the route budget of 80 plans per
+    // bot-minute (each bot's spacing is checked in `run_trace`).
+    let bot_minutes = 10.0 * TICKS as f32 * DT / 60.0;
+    assert!(
+        first.plans as f32 / bot_minutes <= 80.0,
+        "{scenario:?}: {} route plans ({} found none) in {bot_minutes} bot-minutes",
+        first.plans,
+        first.failed_plans
+    );
     // Each round must exercise the knobs the profile replaces.
     let summary = &first.summary;
     match scenario {
