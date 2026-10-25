@@ -89,6 +89,7 @@ impl PluginGroup for NetPlugins {
         PluginGroupBuilder::start::<Self>()
             .add(ClientPersistencePlugin)
             .add(NetworkingPlugin)
+            .add(crate::update::ClientUpdatePlugin)
             .add(MatchServicePlugin)
             .add(CareerIdentityPlugin)
     }

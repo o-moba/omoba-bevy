@@ -1541,6 +1541,8 @@ CATALOG_PLATFORMS = {"macos": ("macos", "arm64"), "windows": ("windows", "x86_64
 # downloads. Store channels come with LR-68; the game reads only its own channel's
 # entries (passport/src/release_catalog.rs DIRECT).
 CATALOG_CHANNEL = "direct"
+RELEASE_LABEL = re.compile(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)"
+                           r"(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?")
 CATALOG_INSTRUCTIONS = {
     "ru": {"macos": "Распакуйте архив и перенесите Omoba.app в «Программы». Первый запуск: правый клик → Открыть.",
            "windows": "Распакуйте архив целиком и запустите Omoba.exe. SmartScreen: «Подробнее» → «Выполнить в любом случае».",
@@ -1559,12 +1561,38 @@ def verified_https(entry: dict, what: str) -> None:
         raise SystemExit(f"{what}: receipt is not a verified https download")
 
 
-def release_catalog(receipt: dict, version: str, market: str, published_at: str, mirrors: dict | None = None) -> dict:
+def release_order_key(label: str) -> tuple:
+    """SemVer precedence of a release label, as the game reads it
+    (shared::compatibility::ReleaseVersion): 0.45.0 < 0.46.0-rc.1 < 0.46.0; `+build` ignored."""
+    match = RELEASE_LABEL.fullmatch(label.split("+", 1)[0])
+    if not match:
+        raise ValueError(f"not a release label: {label!r}")
+    core = tuple(int(part) for part in match.group(1, 2, 3))
+    if match.group(4) is None:
+        return core, (1,)
+    return core, (0, *((0, int(part), "") if part.isdigit() else (1, 0, part)
+                       for part in match.group(4).split(".")))
+
+
+def release_catalog(receipt: dict, version: str, market: str, published_at: str, mirrors: dict | None = None,
+                    min_release: str | None = None) -> dict:
     """The Account API download catalog (OMOBA_RELEASE_CATALOG, account-api/README.md#downloads)
     from `publish` receipts: only packages whose served bytes were verified. A market with a
     download host lists its host's URLs (downloads.json) with the IPFS copy (ipfs.json) as
     `mirror_url`; other markets list the IPFS copies. Every entry names the market's region,
-    the `direct` channel and the market's release status."""
+    the `direct` channel and the market's release status.
+
+    When the market has a portal, every entry also carries the portal's download page for its
+    platform as `update_url` (the game's update button). `min_release` (optional) is the oldest
+    release that may still play online: a game below it shows Update required even while the
+    servers accept it, so it needs the same player notice as a server switch (docs/RELEASING.md)."""
+    if min_release is not None:
+        try:
+            too_new = release_order_key(min_release) > release_order_key(version)
+        except ValueError as error:
+            raise SystemExit(f"--min-release: {error}") from None
+        if too_new:
+            raise SystemExit(f"--min-release {min_release} is newer than this release {version}")
     preset = market_presets.market(market)
     instructions = CATALOG_INSTRUCTIONS.get(market, DEFAULT_INSTRUCTIONS)
     releases = []
@@ -1579,6 +1607,10 @@ def release_catalog(receipt: dict, version: str, market: str, published_at: str,
                    "url": entry["url"], "sha256": entry["sha256"], "size_bytes": str(entry["bytes"]),
                    "published_at": published_at, "instructions": instructions[target],
                    "test_status": preset.release_label, "region": preset.region, "channel": CATALOG_CHANNEL}
+        if preset.portal:
+            release["update_url"] = f"{preset.portal}/download?platform={platform_name}"
+        if min_release is not None:
+            release["min_release"] = min_release
         mirror = (mirrors or {}).get(target)
         if mirror:
             verified_https(mirror, f"{target} mirror")
@@ -1600,7 +1632,8 @@ def command_catalog(args) -> int:
         raise SystemExit(f"{receipt_path} is missing: run `publish --market {args.market}` first")
     mirrors = json.loads(ipfs_path.read_text()) if preset.downloads and ipfs_path.is_file() else None
     published = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(receipt_path.stat().st_mtime))
-    catalog = release_catalog(json.loads(receipt_path.read_text()), version, args.market, published, mirrors)
+    catalog = release_catalog(json.loads(receipt_path.read_text()), version, args.market, published,
+                              mirrors=mirrors, min_release=args.min_release)
     missing = [entry["platform"] for entry in catalog["releases"] if preset.downloads and "mirror_url" not in entry]
     if missing:
         print(f"warning: no IPFS mirror for {', '.join(missing)} (publish pins it)", file=sys.stderr)
@@ -1779,6 +1812,8 @@ def main(argv=None) -> int:
     catalog = sub.add_parser("catalog", help="write the Account API download catalog from publish receipts")
     catalog.add_argument("--market", choices=tuple(MARKETS), default="ru")
     catalog.add_argument("--out", type=Path)
+    catalog.add_argument("--min-release", help="oldest release that may still play online: older games "
+                                               "show Update required (needs a player notice, RELEASING.md)")
     verify = sub.add_parser("verify-downloads", help="download every package a market's catalog lists (and its "
                                                      "mirror) and check host, region, status, SHA-256 and size")
     verify.add_argument("--market", choices=tuple(MARKETS), default="ru")

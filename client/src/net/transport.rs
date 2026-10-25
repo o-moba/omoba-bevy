@@ -10,7 +10,9 @@ use std::{
     time::{Duration, Instant},
 };
 
-use shared::compatibility::{CompatibilityIssue, CompatibilityProbe, ReleaseContract};
+use shared::compatibility::{
+    CompatibilityIssue, CompatibilityProbe, ReleaseContract, ServerReport, UpdateNotice,
+};
 use shared::protocol::{PROTOCOL_VERSION, SnapshotOrder};
 use shared::transport::{SnapshotAssembler, TransportError};
 use shared::wire::{ClientPacket, ServerPacket};
@@ -49,6 +51,8 @@ pub enum NetThreadSignal {
     Compatibility {
         server: Option<ReleaseContract>,
         issue: Option<CompatibilityIssue>,
+        /// The server's update notice (LR-14), when it sent a valid one.
+        update: Option<UpdateNotice>,
     },
 }
 
@@ -70,6 +74,7 @@ pub(in crate::net) fn spawn_network_transport(
 ) {
     client_session.clear_join_attempt();
     client_session.server_contract = None;
+    client_session.server_update = None;
     client_session.compatibility_issue = None;
     client_session.snapshot_order = SnapshotOrder::default();
     client_session.server_addr_display.clone_from(&server_addr);
@@ -167,7 +172,7 @@ fn connect_resolved_udp_server(
 fn verify_server_compatibility(
     socket: &UdpSocket,
     timeout: Duration,
-) -> Result<ReleaseContract, CompatibilityIssue> {
+) -> Result<ServerReport, CompatibilityIssue> {
     let mut nonce = [0_u8; 16];
     getrandom::fill(&mut nonce).map_err(|_| CompatibilityIssue::Unavailable)?;
     let probe = CompatibilityProbe::new(
@@ -189,8 +194,8 @@ fn verify_server_compatibility(
         for _ in 0..32 {
             match socket.recv(&mut buffer) {
                 Ok(len) => {
-                    if let Some(server) = probe.accept(&buffer[..len]) {
-                        return Ok(server);
+                    if let Some(report) = probe.accept_report(&buffer[..len]) {
+                        return Ok(report);
                     }
                 }
                 Err(error) if error.kind() == io::ErrorKind::WouldBlock => break,
@@ -225,19 +230,26 @@ pub(in crate::net) fn run_udp_client(
         return;
     }
     let result = verify_server_compatibility(&socket, Duration::from_secs(4));
-    let (server, issue) = match result {
-        Ok(server) => {
+    let (server, issue, update) = match result {
+        Ok(ServerReport {
+            contract: server,
+            update,
+        }) => {
             let issue = ReleaseContract::current().compare(&server).err();
             println!(
-                "Server compatibility at {server_addr}: client={:?}, server={server:?}, issue={issue:?}",
+                "Server compatibility at {server_addr}: client={:?}, server={server:?}, issue={issue:?}, update={update:?}",
                 ReleaseContract::current()
             );
-            (Some(server), issue)
+            (Some(server), issue, update)
         }
-        Err(issue) => (None, Some(issue)),
+        Err(issue) => (None, Some(issue), None),
     };
     if signals
-        .send(NetThreadSignal::Compatibility { server, issue })
+        .send(NetThreadSignal::Compatibility {
+            server,
+            issue,
+            update,
+        })
         .is_err()
         || issue.is_some()
     {
@@ -651,7 +663,13 @@ mod tests {
         let (len, peer) = server.recv_from(&mut bytes).unwrap();
         let mut contract = ReleaseContract::current();
         contract.release = "99.2.3".into();
-        let reply = shared::compatibility::response(&bytes[..len], &contract).unwrap();
+        let notice = UpdateNotice {
+            min_release: "99.2.3".into(),
+            url: Some("https://portal.example/download".into()),
+        };
+        let reply =
+            shared::compatibility::response_with_update(&bytes[..len], &contract, Some(&notice))
+                .unwrap();
         let mut stale: serde_json::Value = serde_json::from_slice(&reply).unwrap();
         stale["nonce"] = "00".repeat(16).into();
         server
@@ -659,7 +677,13 @@ mod tests {
             .unwrap();
         server.send_to(b"{}", peer).unwrap();
         server.send_to(&reply, peer).unwrap();
-        assert_eq!(worker.join().unwrap(), Ok(contract));
+        assert_eq!(
+            worker.join().unwrap(),
+            Ok(ServerReport {
+                contract,
+                update: Some(notice),
+            })
+        );
     }
 
     #[test]

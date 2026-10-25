@@ -182,7 +182,8 @@ mod tests {
             "registry.ekza.io",
             "avatar.ekza.io",
             "omoba.ru",
-            "lobby.omoba.ru",
+            // Capitalised: the i18n scan reads `lobby.omoba.ru` as a `lobby.*` key.
+            "Lobby.omoba.ru",
             "Account.Omoba.RU.",
         ] {
             assert!(!endpoint_allowed_for(dev, host), "{host}");

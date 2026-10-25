@@ -215,7 +215,7 @@ origin and the release status come from the RU profile in
 | Piece | Where |
 | --- | --- |
 | Packages | `/opt/omoba-ru/downloads/v<version>/<package>`, root, folders 0755, files 0644; served at `https://omoba.ru/downloads/v<version>/<package>` without a listing; rsync's in-progress dot files are hidden |
-| Catalog | `dist/v<version>-ru/releases.json` → `/opt/omoba-ru/releases.json`, `OMOBA_RELEASE_CATALOG` in `account-api.env`; the portal's download page and the game's update button read it (`GET /v1/releases`) |
+| Catalog | `dist/v<version>-ru/releases.json` → `/opt/omoba-ru/releases.json`, `OMOBA_RELEASE_CATALOG` in `account-api.env`; the portal's download page, the game's **Update available** banner and its **Update required** button read it (`GET /v1/releases`, LR-14) |
 | Download log | `/var/log/caddy/omoba-ru-downloads.log` (caddy 0640): JSON, only `/downloads/` requests, address shortened to /24 (IPv4) or /48 (IPv6), no request headers (no cookies, no user agent); rolled at 50 MiB, kept 90 days |
 
 Publish a release (on the Mac, after `make release-ru`):
@@ -238,13 +238,20 @@ make release-ru-verify-downloads   # release.py verify-downloads --market ru
   command and the URLs and contacts nothing.
 - `catalog --market ru` writes `releases.json` from `downloads.json`: `url` on the RU
   host, `mirror_url` the IPFS copy with the same SHA-256, `test_status` «Открытая бета»,
-  `region` `ru`, `channel` `direct` (account-api/README.md#downloads).
+  `region` `ru`, `channel` `direct`, `update_url` the portal's download page for the
+  platform (account-api/README.md#downloads). `--min-release X` adds `min_release`:
+  games older than X must update even without a server switch (a forced update: post
+  the player notice first).
 - `verify-downloads --market ru` reads the catalog the portal serves
   (`https://omoba.ru/api/releases`, or `--catalog <file>` before installing it),
   downloads every package and its mirror, and checks the host, region, channel,
   status, SHA-256 and size. It exits 0 only when every RU platform is listed and correct.
 - A package rebuilt under a published name fails the read-back: publish a new version,
   or remove the stale file on the host by hand first.
+
+For a release that changes the compatibility contract, install the new catalog and
+post the player notice **before** shipping the server
+([RELEASING.md](../../../docs/RELEASING.md#updates-and-contract-changes-lr-14)).
 
 **Counting downloads.** `python3 ops/vps/ru/ru_host.py downloads [--since YYYY-MM-DD]
 [--until YYYY-MM-DD]` pipes [ru_downloads.py](ru_downloads.py) to the host (the same

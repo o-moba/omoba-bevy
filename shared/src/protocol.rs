@@ -49,10 +49,10 @@ impl JoinRejection {
                 "This session is active in another client. Close it, then retry."
             }
             Self::ProtocolMismatch => {
-                "Client and server network protocols differ. Update the game or choose a compatible server."
+                "Client and server network protocols differ. Update the game."
             }
             Self::MapGeometryMismatch => {
-                "This server uses a different map geometry. Install the matching map release."
+                "This server uses a different map version. Update the game."
             }
             Self::AvatarNotAuthorized => {
                 "Avatar or weapon approval failed. Refresh Studio, select approved equipment and retry."

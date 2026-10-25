@@ -82,7 +82,7 @@ sequenceDiagram
     participant C as Client UDP thread
     participant S as Server role
     C->>S: compatibility_probe {nonce, client contract, padding}
-    S-->>C: compatibility_report {nonce, server contract}
+    S-->>C: compatibility_report {nonce, server contract, update?}
     Note over C: compare contracts, stop on mismatch or after 4 s
     C->>S: hello {protocol_version} as raw JSON
     C->>S: transport_probe {protocol_version, client_nonce, padding}
@@ -165,7 +165,7 @@ Tests that pin the wire:
 
 ## 2. Compatibility preflight
 
-The envelope (`CompatibilityDatagram::{CompatibilityProbe, CompatibilityReport}`) is deliberately independent of `PROTOCOL_VERSION`, so a server can still describe its contract to a client whose gameplay protocol differs. `ReleaseContract` carries `handshake`, `release`, `protocol`, `catalog`, `geometry` and `gameplay`. `compare` ignores `release`, because compatible patch releases may differ. The bump policy per field is the table directly under the first heading of [release-compatibility.md](../release-compatibility.md).
+The envelope (`CompatibilityDatagram::{CompatibilityProbe, CompatibilityReport}`) is deliberately independent of `PROTOCOL_VERSION`, so a server can still describe its contract to a client whose gameplay protocol differs. `ReleaseContract` carries `handshake`, `release`, `protocol`, `catalog`, `geometry` and `gameplay`. `compare` ignores `release`, because compatible patch releases may differ. The bump policy per field is the table directly under the first heading of [release-compatibility.md](../release-compatibility.md). Since LR-14 the report may also carry an additive `update` object, `UpdateNotice { min_release, url? }`: the server's own release and `<portal>/download` from the portal origin compiled into the server. Older clients ignore it and older servers never send it, so `HANDSHAKE_VERSION` stays 1.
 
 Mechanics (`shared/src/compatibility.rs`, `client/src/net/transport.rs` `verify_server_compatibility`, `server/src/public_transport.rs` `compatibility_reply`):
 
@@ -173,13 +173,14 @@ Mechanics (`shared/src/compatibility.rs`, `client/src/net/transport.rs` `verify_
 - The server replies only to a well-formed probe (padding 512–1024, a valid contract) that passed the role's datagram size cap (§1.4) and does not come from a bot address. Its reply is never larger than the request. All sources share a budget of 64 replies per second per process. It allocates no per-source state, account, seat or match.
 - Until a correlated report verifies the server, the client sends nothing else. There is no legacy bypass.
 - The nonce correlates attempts. It does not authenticate the server.
+- The update notice is optional and is sent only while the reply still fits the request. The client drops a notice whose release does not parse or whose link is not plain HTTPS (`UpdateNotice::valid`). It opens a notice link only when the link lies on its own trusted portal (`client/src/update.rs`).
 
 ### What an outdated client sees
 
 | Situation | Detected by | Result |
 | --- | --- | --- |
-| Contract differs (handshake, protocol, catalog, geometry or gameplay) | client `ReleaseContract::compare` | category text `net.compatibility.<issue>` (`client/i18n/*/net.json`, e.g. "Network versions are incompatible. Update the game or choose another server."). Teardown `CompatibilityMismatch`, join error `ProtocolMismatch`, automatic reconnect stopped. Retry runs a fresh check (`client/src/net/session.rs`) |
-| No valid report within 4 s (server offline, or older than the handshake) | `CompatibilityIssue::Unavailable` | "Server unverified: offline or outdated…", handled as a transport failure. It never claims a mismatch |
+| Contract differs (handshake, protocol, catalog, geometry or gameplay) | client `ReleaseContract::compare`, then `mismatch_side` on the release labels and the update notice | `ClientSession::compatibility_verdict`. **Update required** (`client/i18n/*/update.json`): Home replaces Play with a download button for `<portal>/download?platform=…` (`client/src/update.rs`). **Servers updating** when this game is newer than the server: Home retries every 30 s. Settings add the category (`net.compatibility.<issue>`). Teardown `CompatibilityMismatch`, join error `ProtocolMismatch`, automatic reconnect stopped. Retry runs a fresh check (`client/src/net/session.rs`) |
+| No valid report within 4 s (server offline, or older than the handshake) | `CompatibilityIssue::Unavailable` | "Server unverified: offline or updating…", handled as a transport failure. It never claims a mismatch |
 | Framed fragment carries another protocol | `SnapshotAssembler` → `TransportError::Version` | `JoinRejection::ProtocolMismatch` text ("Client and server network protocols differ…"), reconnect stopped |
 | `hello` with another `protocol_version` reaches a standalone server | `handle_hello` | the status snapshot carries `join_error: "protocol_mismatch"` |
 | Unframed snapshot whose `protocol_version` differs | `client/src/net/ingest.rs` | `ProtocolMismatch` |
@@ -380,7 +381,7 @@ In the table, **native** means on the ingress POST allowlist and called by the g
 | VK link | `POST /v1/auth/social/link` | Ed25519 `omoba.social.link.v1` by the active device key | native (VK markets) |
 | Native Supporter | `POST /v1/supporter/native` | Ed25519 `omoba.supporter.native.v1` (`shared/src/supporter.rs`) | native (Supporter markets, iOS) |
 | Apple notifications | `POST /v1/supporter/apple/notifications` | Apple-signed payload ([supporter.md](../supporter.md)) | separately configured; in neither repo ingress config |
-| Public reads | `GET /v1/releases`, `GET /v1/supporters` (only with `supporter`), `GET /v1/players/{profile_id}` (reads an optional bearer session) | none | BFF |
+| Public reads | `GET /v1/releases`, `GET /v1/supporters` (only with `supporter`), `GET /v1/players/{profile_id}` (reads an optional bearer session) | none | BFF; the game reads `releases` for updates (`passport/src/release_catalog.rs`, LR-14) |
 | Session routes | everything else: `/v1/me…`, `GET /v1/players`, `GET /v1/matches/{id}`, `POST /v1/auth/logout`, devices, recovery codes, class builds, Ekza library, Supporter dashboard/checkout | `Authorization: Bearer <64 hex>` | BFF |
 | Health | `GET /health/live`, `/health/ready` | none | public |
 

@@ -133,8 +133,8 @@ pub(in crate::net) fn sync_connection_status_ui(
         return;
     };
     // Written every frame, so a language change shows at once.
-    let status = if let Some(issue) = client_session.compatibility_issue {
-        compatibility_message(issue).to_owned()
+    let status = if let Some(verdict) = client_session.compatibility_verdict() {
+        verdict.message()
     } else if let Some(reason) = client_session.join_error {
         data::join_rejection(reason).to_owned()
     } else if client_session.join_exhausted {
@@ -163,6 +163,30 @@ pub(in crate::net) fn sync_connection_status_ui(
     }
 }
 
+/// What a failed compatibility check means for the player (LR-14,
+/// `ClientSession::compatibility_verdict`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum CompatibilityVerdict {
+    /// No valid answer: the server is offline, updating or too old to answer.
+    Unverified,
+    /// The servers run a newer release: this game must be updated.
+    UpdateRequired,
+    /// This game is newer than the servers: they switch to it shortly.
+    ServersUpdating,
+}
+
+impl CompatibilityVerdict {
+    /// The line screens print for it.
+    pub(crate) fn message(self) -> String {
+        let version = env!("CARGO_PKG_VERSION");
+        match self {
+            Self::Unverified => tr("net.compatibility.unavailable").to_owned(),
+            Self::UpdateRequired => trf("update.required.detail", &[("version", &version)]),
+            Self::ServersUpdating => trf("update.servers_updating", &[("version", &version)]),
+        }
+    }
+}
+
 /// The connection as a screen reports it (`loading-shell.md` status
 /// priority, rows 1–6): the same inputs as the floating panel, without its
 /// developer lines (server address, `GAME_SERVER_ADDR`).
@@ -170,7 +194,7 @@ pub(in crate::net) fn sync_connection_status_ui(
 pub(crate) enum LinkStatus {
     /// The server refused the join (after a reconnect, or a protocol mismatch).
     Rejected(shared::protocol::JoinRejection),
-    Compatibility(shared::compatibility::CompatibilityIssue),
+    Compatibility(CompatibilityVerdict),
     /// The server never confirmed the join.
     Unconfirmed,
     /// The transport dropped; the auto-reconnect is on its `attempt`.
@@ -205,7 +229,7 @@ impl LinkStatus {
     /// The line a screen prints for it (`None` = nothing to say).
     pub(crate) fn detail(self) -> Option<String> {
         match self {
-            LinkStatus::Compatibility(issue) => Some(compatibility_message(issue).to_owned()),
+            LinkStatus::Compatibility(verdict) => Some(verdict.message()),
             LinkStatus::Rejected(reason) => Some(data::join_rejection(reason).to_owned()),
             LinkStatus::Unconfirmed => Some(tr("net.status.join_unconfirmed").to_owned()),
             LinkStatus::Reconnecting { attempt } => {
@@ -223,8 +247,8 @@ impl LinkStatus {
 
 /// Where the session stands, first match wins (`loading-shell.md`).
 pub(crate) fn link_status(session: &ClientSession) -> LinkStatus {
-    if let Some(issue) = session.compatibility_issue {
-        return LinkStatus::Compatibility(issue);
+    if let Some(verdict) = session.compatibility_verdict() {
+        return LinkStatus::Compatibility(verdict);
     }
     if let Some(reason) = session.join_error {
         return LinkStatus::Rejected(reason);
@@ -285,16 +309,18 @@ fn connection_line(client_session: &ClientSession) -> String {
     }
 }
 
-fn compatibility_message(issue: shared::compatibility::CompatibilityIssue) -> &'static str {
+/// Which part of the contract differs, for Settings (a diagnostic, not
+/// advice): `None` unless a server answered with another contract.
+pub(crate) fn compatibility_reason(session: &ClientSession) -> Option<&'static str> {
     use shared::compatibility::CompatibilityIssue as Issue;
-    tr(match issue {
+    Some(tr(match session.compatibility_issue? {
         Issue::Handshake => "net.compatibility.handshake",
         Issue::Protocol => "net.compatibility.protocol",
         Issue::Catalog => "net.compatibility.catalog",
         Issue::Geometry => "net.compatibility.geometry",
         Issue::Gameplay => "net.compatibility.gameplay",
-        Issue::Unavailable => "net.compatibility.unavailable",
-    })
+        Issue::Unavailable => return None,
+    }))
 }
 
 #[cfg(test)]
@@ -344,6 +370,65 @@ mod tests {
             texts(&mut app).0,
             "服务器未确认你的加入请求。请点击“重试”再试一次。"
         );
+    }
+
+    /// LR-14: an older game is told to update, a newer one that the servers
+    /// are switching to it; a server's stated minimum wins over its label.
+    #[test]
+    fn a_mismatch_reads_as_update_required_or_servers_updating() {
+        use shared::compatibility::{CompatibilityIssue, ReleaseContract, UpdateNotice};
+        let session = |server_release: &str, min_release: Option<&str>| {
+            let mut session = ClientSession {
+                compatibility_issue: Some(CompatibilityIssue::Gameplay),
+                server_contract: Some(ReleaseContract {
+                    release: server_release.into(),
+                    ..ReleaseContract::current()
+                }),
+                server_update: min_release.map(|min_release| UpdateNotice {
+                    min_release: min_release.into(),
+                    url: None,
+                }),
+                ..default()
+            };
+            session.state = ClientConnectionState::Disconnected;
+            session
+        };
+        let newer = "999.0.0";
+        let older = "0.0.1";
+        for (session, verdict) in [
+            (session(newer, None), CompatibilityVerdict::UpdateRequired),
+            (
+                session(newer, Some(newer)),
+                CompatibilityVerdict::UpdateRequired,
+            ),
+            (session(older, None), CompatibilityVerdict::ServersUpdating),
+            (
+                session(older, Some(older)),
+                CompatibilityVerdict::ServersUpdating,
+            ),
+            (
+                session(older, Some(newer)),
+                CompatibilityVerdict::UpdateRequired,
+            ),
+        ] {
+            assert_eq!(session.compatibility_verdict(), Some(verdict));
+            assert_eq!(link_status(&session), LinkStatus::Compatibility(verdict));
+            assert!(link_status(&session).can_retry());
+            assert_eq!(
+                compatibility_reason(&session),
+                Some(tr("net.compatibility.gameplay"))
+            );
+        }
+        let unverified = ClientSession {
+            compatibility_issue: Some(CompatibilityIssue::Unavailable),
+            ..default()
+        };
+        assert_eq!(
+            unverified.compatibility_verdict(),
+            Some(CompatibilityVerdict::Unverified)
+        );
+        assert_eq!(compatibility_reason(&unverified), None);
+        assert_eq!(ClientSession::default().compatibility_verdict(), None);
     }
 
     #[test]

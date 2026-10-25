@@ -773,15 +773,20 @@ class Markets(unittest.TestCase):
                             "url": release.download_url("ru", "0.45.0", name)}}
         ipfs = {"windows": {"file": name, "bytes": 123, "sha256": "a" * 64, "cid": "c",
                             "url": f"https://ekza.mypinata.cloud/ipfs/c/{name}"}}
-        catalog = release.release_catalog(host, "0.45.0", "ru", "2026-10-23T00:00:00Z", ipfs)
+        catalog = release.release_catalog(host, "0.45.0", "ru", "2026-10-23T00:00:00Z", mirrors=ipfs)
         self.assertEqual(len(catalog["releases"]), 1)
         entry = catalog["releases"][0]
         self.assertEqual(entry["url"], f"{ru.portal}{ru.downloads_path}/v0.45.0/{name}")
         self.assertEqual(urlsplit(entry["url"]).hostname, urlsplit(ru.portal).hostname)
         self.assertEqual(entry["mirror_url"], ipfs["windows"]["url"])
         self.assertEqual((entry["test_status"], entry["region"], entry["channel"]), ("Открытая бета", "ru", "direct"))
+        self.assertEqual(set(entry), {"platform", "architecture", "version", "url", "sha256", "size_bytes",
+                                      "published_at", "instructions", "test_status", "region", "channel",
+                                      "update_url", "mirror_url"})
         self.assertEqual((entry["platform"], entry["size_bytes"]), ("windows", "123"))
         self.assertIn("Omoba.exe", entry["instructions"])
+        # LR-68 rules: the channel and the update page per (channel, platform), on the market's portal.
+        self.assertEqual(entry["update_url"], f"{ru.portal}/download?platform=windows")
         # The Account API's Release schema (additionalProperties: false) knows every field.
         schema = json.loads((release.ROOT / "account-api/docs/openapi.json").read_text())["components"]["schemas"]["Release"]
         self.assertFalse(schema["additionalProperties"])
@@ -801,7 +806,7 @@ class Markets(unittest.TestCase):
         }
         for case, (primary, mirrors) in refused.items():
             with self.subTest(case), self.assertRaises(SystemExit):
-                release.release_catalog(primary, "0.45.0", "ru", "t", mirrors)
+                release.release_catalog(primary, "0.45.0", "ru", "t", mirrors=mirrors)
         # Without a download host (global) the IPFS copies stay the links, as before.
         global_name = release.artifact_name("0.45.0", "windows")
         entry = release.release_catalog({"windows": {**ipfs["windows"], "file": global_name}}, "0.45.0",
@@ -809,6 +814,7 @@ class Markets(unittest.TestCase):
         self.assertEqual((entry["url"], entry["test_status"], entry["region"]),
                          (ipfs["windows"]["url"], "playtest", "global"))
         self.assertNotIn("mirror_url", entry)
+        self.assertNotIn("update_url", entry, "no portal, no update page")
 
     def test_catalog_command_reads_the_host_receipt_and_the_mirror(self):
         from unittest import mock
@@ -816,7 +822,7 @@ class Markets(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             out = Path(temporary) / "v0.45.0-ru"
             out.mkdir()
-            args = mock.Mock(market="ru", out=Path(temporary))
+            args = mock.Mock(market="ru", out=Path(temporary), min_release=None)
             with mock.patch.object(release, "workspace_version", return_value="0.45.0"), \
                     contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()) as err:
                 (out / "ipfs.json").write_text(json.dumps({"linux": {"file": name, "bytes": 5, "sha256": "c" * 64,
@@ -989,6 +995,37 @@ class Markets(unittest.TestCase):
                     release.load_catalog(str(path))
         self.assertEqual(release.load_catalog("https://omoba.ru/api/releases", lambda url: b'{"releases": []}'),
                          {"releases": []})
+
+    def test_catalog_minimum_release_is_optional_and_never_above_the_release(self):
+        name = release.artifact_name("0.46.0", "linux", "prod", "ru")
+        receipt = {"linux": {"file": name, "bytes": 1, "sha256": "b" * 64,
+                             "url": release.download_url("ru", "0.46.0", name)}}
+        catalog = release.release_catalog(receipt, "0.46.0", "ru", "t", min_release="0.46.0-rc.1")
+        self.assertEqual(catalog["releases"][0]["min_release"], "0.46.0-rc.1")
+        self.assertEqual(release.release_catalog(receipt, "0.46.0", "ru", "t", min_release="0.46.0")["releases"][0]
+                         ["min_release"], "0.46.0")
+        for bad in ("0.46.1", "0.47.0-rc.1", "latest", "0.46"):
+            with self.assertRaises(SystemExit, msg=bad):
+                release.release_catalog(receipt, "0.46.0", "ru", "t", min_release=bad)
+        key = release.release_order_key
+        self.assertLess(key("0.45.0"), key("0.46.0-rc.1"))
+        self.assertLess(key("0.46.0-rc.1"), key("0.46.0-rc.2"))
+        self.assertLess(key("0.46.0-rc.2"), key("0.46.0-rc.10"))
+        self.assertLess(key("0.46.0-rc.10"), key("0.46.0"))
+        self.assertEqual(key("0.46.0+build.7"), key("0.46.0"))
+
+    def test_the_client_reads_the_catalog_platform_names(self):
+        """LR-14: the game finds its own package in releases.json by these names."""
+        import re
+        source = (release.ROOT / "client/src/update.rs").read_text()
+        table = source[source.index("const CATALOG_PLATFORMS"):source.index("const MISMATCH_REFRESH")]
+        client = dict(re.findall(r'\("([a-z]+)", "([a-z0-9_]+)"\)', table))
+        self.assertEqual(set(client.values()), {platform for platform, _ in release.CATALOG_PLATFORMS.values()})
+        for _, architecture in release.CATALOG_PLATFORMS.values():
+            # The client maps Rust's aarch64 to arm64; a universal package matches any.
+            self.assertIn(architecture, {"arm64", "x86_64", "universal"})
+        self.assertIn('pub const UNIVERSAL: &str = "universal";',
+                      (release.ROOT / "passport/src/release_catalog.rs").read_text())
 
     def test_android_market_app_has_its_own_identity_and_endpoints(self):
         import importlib.util
