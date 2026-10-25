@@ -47,10 +47,11 @@ For Android use a Vulkan device from the published minimum list (LR-25).
 | P6 | Reconnect | Mid-match, kill the client (Android: swipe it away), start it again within 180 s. | «Вернуться в матч» rejoins the same seat; a bot played it meanwhile |
 | P7 | Update over the previous version | Install the previous RU release, sign in, play one match, then install this release over it. | Same profile, device key and history; settings kept; no second account |
 | P8 | Incompatible server | Start the previous release (or a client with a different protocol) against the new server. | The localized update-required prompt with a download button (LR-14), no endless reconnect, no crash |
+| P9 | Protect progress and reinstall (LR-18) | Fresh player: finish one bot match, back on Home press «Защитить» on the card → «Привязать VK ID» → link. Note the player tag and the profile on `<RU portal>`. Uninstall (Android: uninstall the app; desktop: remove the settings folder), install again, accept, Profile → «Войти через VK ID» with the same VK ID → «Использовать этот аккаунт после перезапуска» → restart. Then Profile → «Защитить прогресс» → «Создать коды восстановления», write one code down, uninstall again, install, «Привязать или восстановить аккаунт» → «Ввести код восстановления» → restart. | The card appears after the first match and is gone once VK is linked; Profile shows «VK ID привязан»; after each reinstall the game plays the same profile (same tag, rating, history; the same profile on the portal), never a merge; the used code shows one fewer unused code |
 
 ## 3. Decision
 
-- Any FAIL in S1–S8, S10–S11 or P1–P8 blocks the announcement. Fix and rerun the affected
+- Any FAIL in S1–S8, S10–S11 or P1–P9 blocks the announcement. Fix and rerun the affected
   rows, or roll back (`ru_host.py rollback`, [README › Rollback](README.md#rollback)).
 - Record N/A only with the reason and the owner's approval.
 - The owner signs off the result file in `docs/progress/`.
@@ -87,6 +88,7 @@ Commit <sha>; packages dist/v<version>-ru/ (SHA256SUMS sha256 <…>); server rel
 | P6 | | | | |
 | P7 | | | | |
 | P8 | | | | |
+| P9 | | | | |
 
 Blockers: <none | list>
 Decision: <ship | no ship>, <owner>, <date>

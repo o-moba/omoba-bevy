@@ -54,7 +54,7 @@ Do not log it or expose it in `NEXT_PUBLIC_` variables.
 Default `OMOBA_ACCOUNT_BIND=127.0.0.1:40550`; non-loopback binds fail. TLS is terminated
 by your existing trusted ingress. Native clients need ingress routes for POST
 `/v1/auth/pairings/lookup`, `/approve`, `/deny`,
-`/v1/auth/devices/create`, `/status`, `/recover`, `/complete`,
+`/v1/auth/devices/create`, `/status`, `/recover`, `/complete`, `/recovery-codes`,
 `/v1/supporter/native` and, with VK ID enabled, `/v1/auth/social/link`. Apple notifications use only the separately configured
 `/v1/supporter/apple/notifications` route. Next’s BFF uses the internal API.
 Do not broadly expose all API routes as an alternative browser backend.
@@ -79,6 +79,13 @@ At most twenty active sessions are allowed per account; further completion retur
 `session_limit` until an existing session is revoked or expires. The account lock
 serializes this limit across simultaneous approvals.
 Revoking other sessions requires a new game confirmation within ten minutes.
+
+In-game recovery codes (LR-18): `POST /v1/auth/devices/recovery-codes`, signed by
+the game's active device key (`omoba.recovery.native.v1`, at most 60 s, single-use
+nonce), reads the account's protection (`status`: unused codes, linked sign-ins,
+active devices) or issues a new set of codes (`rotate`, the same table and the
+same per-profile limit as `POST /v1/me/recovery-codes`). It needs no portal
+session and no schema change. Tests: `tests/recovery_native_postgres.rs`.
 
 ## Sign in with VK ID (portal schema 7)
 

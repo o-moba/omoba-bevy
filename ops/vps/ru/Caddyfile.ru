@@ -11,7 +11,7 @@ account.omoba.ru {
     }
     @native {
         method POST
-        path /v1/auth/pairings/lookup /v1/auth/pairings/approve /v1/auth/pairings/deny /v1/auth/devices/create /v1/auth/devices/status /v1/auth/devices/recover /v1/auth/devices/complete /v1/auth/social/link
+        path /v1/auth/pairings/lookup /v1/auth/pairings/approve /v1/auth/pairings/deny /v1/auth/devices/create /v1/auth/devices/status /v1/auth/devices/recover /v1/auth/devices/complete /v1/auth/devices/recovery-codes /v1/auth/social/link
     }
     @health {
         method GET

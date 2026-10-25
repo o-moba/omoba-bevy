@@ -314,6 +314,32 @@ impl CareerIdentity {
         Ok(shared::supporter::SignedNativeSupporterRequest { request, signature })
     }
 
+    /// Only typed requests about this key's own account protection are signed
+    /// (LR-18: read it, or issue recovery codes).
+    pub(crate) fn sign_recovery_request(
+        &self,
+        action: shared::device_account::RecoveryAction,
+        trusted_origin: &str,
+        now_secs: u64,
+    ) -> Result<shared::device_account::SignedNativeRecoveryRequest, String> {
+        let key = self.key.as_ref().ok_or(tr("identity.not_ready"))?;
+        let mut nonce = [0; 32];
+        getrandom::fill(&mut nonce).map_err(|_| tr("identity.random_unavailable"))?;
+        let request = shared::device_account::NativeRecoveryRequest {
+            origin: trusted_origin.into(),
+            public_key: self.public_key()?,
+            nonce: hex(&nonce),
+            expires_at: now_secs
+                .saturating_add(shared::device_account::RECOVERY_REQUEST_SECONDS - 5),
+            action,
+        };
+        request
+            .validate(trusted_origin, &request.public_key, now_secs)
+            .map_err(str::to_owned)?;
+        let signature = hex(&key.sign(&request.signing_bytes()).to_bytes());
+        Ok(shared::device_account::SignedNativeRecoveryRequest { request, signature })
+    }
+
     /// Only the typed link of a pending enrollment's website sign-in is signed.
     pub(crate) fn sign_social_link(
         &self,
@@ -817,6 +843,48 @@ mod tests {
         assert!(
             CareerIdentity::default()
                 .sign_social_link(&enrollment, origin, 1000)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn a_recovery_request_is_signed_by_the_active_key_with_a_fresh_nonce() {
+        use ed25519_dalek::{Signature, VerifyingKey};
+        use shared::device_account::RecoveryAction;
+        let identity = CareerIdentity {
+            key: Some(SigningKey::from_bytes(&[5; 32])),
+            ..default()
+        };
+        let origin = "https://omoba.ru";
+        let first = identity
+            .sign_recovery_request(RecoveryAction::Rotate, origin, 1000)
+            .unwrap();
+        let second = identity
+            .sign_recovery_request(RecoveryAction::Rotate, origin, 1000)
+            .unwrap();
+        assert_ne!(first.request.nonce, second.request.nonce);
+        assert_eq!(first.request.public_key, identity.public_key().unwrap());
+        assert_eq!(first.request.action, RecoveryAction::Rotate);
+        assert!(
+            first
+                .request
+                .validate(origin, &first.request.public_key, 1000)
+                .is_ok()
+        );
+        let key =
+            VerifyingKey::from_bytes(&decode_key(&first.request.public_key).unwrap()).unwrap();
+        let mut signature = [0; 64];
+        for (i, byte) in signature.iter_mut().enumerate() {
+            *byte = u8::from_str_radix(&first.signature[i * 2..i * 2 + 2], 16).unwrap();
+        }
+        key.verify_strict(
+            &first.request.signing_bytes(),
+            &Signature::from_bytes(&signature),
+        )
+        .unwrap();
+        assert!(
+            CareerIdentity::default()
+                .sign_recovery_request(RecoveryAction::Status, origin, 1000)
                 .is_err()
         );
     }

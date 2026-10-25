@@ -14,7 +14,7 @@ RU = Path(__file__).resolve().parents[1] / "ops" / "vps" / "ru"
 # Signed routes the RU game calls (docs/architecture/system.md, "Account API ingress allowlists").
 RU_NATIVE = ["/v1/auth/pairings/lookup", "/v1/auth/pairings/approve", "/v1/auth/pairings/deny",
              "/v1/auth/devices/create", "/v1/auth/devices/status", "/v1/auth/devices/recover",
-             "/v1/auth/devices/complete", "/v1/auth/social/link"]
+             "/v1/auth/devices/complete", "/v1/auth/devices/recovery-codes", "/v1/auth/social/link"]
 
 
 def env_file(name: str) -> dict[str, str]:

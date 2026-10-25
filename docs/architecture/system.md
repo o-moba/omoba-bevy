@@ -313,6 +313,7 @@ Routes, authentication and exposure for the whole Account API are specified once
 | --- | --- | --- |
 | `/v1/auth/pairings/{lookup,approve,deny}` | Yes | Yes |
 | `/v1/auth/devices/{create,status,recover,complete}` | Yes | Yes |
+| `/v1/auth/devices/recovery-codes` (LR-18) | Yes | Yes |
 | `/v1/supporter/native` | Yes | No (RU has no `supporter`) |
 | `/v1/auth/social/link` | No | Yes (RU has `vk_sign_in`) |
 

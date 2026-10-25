@@ -27,7 +27,8 @@ NATIVE = (
     '/v1/auth/pairings/lookup', '/v1/auth/pairings/approve',
     '/v1/auth/pairings/deny', '/v1/auth/devices/create',
     '/v1/auth/devices/status', '/v1/auth/devices/recover',
-    '/v1/auth/devices/complete', '/v1/supporter/native',
+    '/v1/auth/devices/complete', '/v1/auth/devices/recovery-codes',
+    '/v1/supporter/native',
 )
 
 def run(args, stdin=None):

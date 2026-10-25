@@ -479,6 +479,8 @@ class DevContour(unittest.TestCase):
         manifest = (release.ROOT / "mobile/android/AndroidManifest.xml").read_text()
         self.assertIn(f'package="{prod.bundle_id}"', manifest)
         self.assertIn(f'android:label="{prod.display_name}"', manifest)
+        # The device key never goes to a cloud backup (ADR-026, LR-18).
+        self.assertIn('android:allowBackup="false"', manifest)
         for identity in (prod, dev):
             self.assertTrue((release.ROOT / "mobile/ios/Assets.xcassets"
                              / f"{identity.ios_app_icon}.appiconset/AppIcon.png").is_file())
@@ -704,6 +706,22 @@ class Markets(unittest.TestCase):
             readme = release.player_readme("0.45.0", "linux", ru)
         self.assertIn("Support: help@omoba.ru", readme)
         self.assertIn("Telegram: https://t.me/omoba_ru", readme)
+
+    def test_readmes_say_how_progress_survives_a_reinstall(self):
+        """LR-18: progress follows the VK-linked account where the market signs in with VK
+        ID; recovery codes everywhere an account service exists; nothing in dev builds."""
+        ru = " ".join(release.player_readme("0.45.0", "android", release.resolve_flavor(market="ru")).split())
+        self.assertIn("Progress follows the VK-linked account", ru)
+        self.assertIn("Прогресс следует за аккаунтом, привязанным к VK", ru)
+        self.assertIn('"Protect progress"', ru)
+        with_service = " ".join(release.player_readme(
+            "0.45.0", "linux", release.resolve_flavor(account_api="https://account.example.org",
+                                                      portal="https://players.example.org")).split())
+        self.assertIn("Save recovery codes", with_service)
+        self.assertNotIn("VK", with_service)
+        self.assertNotIn("YOUR PROGRESS", release.player_readme("0.45.0", "linux"))
+        self.assertNotIn("YOUR PROGRESS", release.player_readme(
+            "0.45.0", "linux", release.resolve_flavor("dev", market="ru")))
 
     def test_publication_needs_the_public_source_tag(self):
         listed = "abc123\trefs/tags/v0.45.0-ru\n"

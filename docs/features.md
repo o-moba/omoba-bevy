@@ -1130,6 +1130,16 @@ follows.
 - Copy in en, ru and zh-Hans (`client/i18n/*/legal.json`).
 - Code: `shared/src/market.rs` (`Market::legal`, `Legal`), `scripts/markets.py` (`Legal`), `client/src/legal.rs`, `client/src/pause_menu.rs` (About tab), `scripts/release.py` (`legal_readme`, `require_public_source_tag`). See [markets](markets.md#legal-documents-and-links-lr-06) and [the session note](progress/2026-10-24-lr-06-client.md).
 
+## Protect progress (LR-18, unreleased)
+
+- After the first completed match, and again after the first ranked match, Home shows a dismissible card: «Защитите прогресс: VK ID или код восстановления.» (Protect / Not now). After that a "Not now" hides it until the next completed match; it stops once the profile is protected or after three declines. The record (`protect_prompt.json`: declines, matches at the last decline) lives in the region's settings folder.
+- Profile shows the account's protection (VK ID linked, unused recovery codes, or not protected yet) and a «Защитить прогресс» button. The Protect modal links VK ID where the region signs in with it and creates or replaces recovery codes in the game; replacing a set that still has unused codes needs a second press. The eight codes are shown once, grouped for reading, never stored or logged, and gone when the modal closes.
+- The codes come from a native Account API route signed by the device key (`POST /v1/auth/devices/recovery-codes`, `omoba.recovery.native.v1`, single-use nonce), on the RU and dev ingress allowlists; no portal session and no schema change.
+- «Привязать или восстановить аккаунт» offers «Ввести код восстановления» next to «Войти через VK ID» and the device request, and a request started from it asks for the code first.
+- Progress follows the VK-linked account; RU package READMEs say so. The VK-verified support procedure is [account recovery](account-recovery.md); Android keeps `allowBackup=false` ([ADR-026](architecture/decisions.md#adr-026-android-keeps-allowbackupfalse-progress-survives-a-reinstall-through-vk-id-or-recovery-codes)).
+- Copy in en, ru and zh-Hans (`client/i18n/*/protect.json`).
+- Code: `shared/src/device_account.rs` (`NativeRecoveryRequest`, `AccountProtection`), `account-api/src/devices.rs` (`native_recovery`), `passport/src/device_account.rs`, `client/src/career_protection.rs`, `client/src/career_identity.rs` (`sign_recovery_request`), `client/src/career_devices.rs`, `client/src/frontend/home.rs`, `scripts/release.py` (`progress_readme`). See [the session note](progress/2026-10-24-lr-18.md).
+
 ## Multiplayer Session Reliability
 
 - **TASK-14 (client)**: Explicit session states, non-blocking wait when the server is down, bounded `WaitingForServer` timeout, stale snapshot detection while connected, UDP transport error thresholds, snapshot-channel disconnect detection when the UDP thread ends, full teardown (replicated entities + team overlay) on disconnect, manual reconnect via **Retry** (no silent rejoin into a match), pause menu auto-closes on **Disconnected**, minimap hidden unless **Connected**.
