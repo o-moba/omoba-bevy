@@ -2,8 +2,9 @@
 
 ## Markets and sign in with VK ID
 
-Each build serves one market: `global` (today's product), `ru` (a free game on
-Russian servers, no Ekza ecosystem, no purchases, Russian by default) or `cn`
+Each build serves one market: `global` (today's product), `ru` (Russian servers,
+no Ekza ecosystem, Hero Supporter auras sold only through YooKassa donations on
+the RU portal, Russian by default) or `cn`
 (prepared, not packaged yet). `release.py --market ru` makes the RU set with its
 own servers, settings folder and Android app. RU players sign in with VK ID
 (VK, OK, Mail.ru) on the RU portal and from Profile in the game; the game's
@@ -538,7 +539,27 @@ purchase/restore and retains unfinished transactions until server confirmation.
 The Apple adapter requires an authenticated verifier and App Store setup; local
 fixtures are not proof of a real sandbox purchase or App Review approval.
 
-Core career schema is version 3 and portal schema is version 6. Run owner migrations and the
+### Monthly Hero tiers (LR-67)
+
+Russian players donate on the RU portal through YooKassa; every donation is a
+30-day grant worth one tier point per ruble, and the donations covering now add up
+to a tier: Rose (100), Jade (250), Azure (500), Crimson (1000) and Prism I–III
+(2500, 5000, 10000). Each tier unlocks its own aura style on top of Solar, Lunar
+and Verdant, which any active grant unlocks; everyone in a match sees it. One
+shared rule decides what a player may wear (Account API, career store and the
+game server, which re-checks every refresh), and a style the tier no longer
+covers steps down to the best one it does. The four solid tiers are new palettes
+of the 23-element aura; the Prism tiers shimmer through the rainbow in sync for
+all wearers, faster and brighter per tier, Prism III with a crown ring inside the
+same budget. The Supporter panel shows the tier with its end date and the tier it
+steps down to, lists the styles and, on RU desktop and Android builds, opens
+«Поддержать на сайте» (`<portal>/supporter`); iOS builds never link to a web
+payment. Protocol 12 carries the new styles; portal schema 9 stores amounts,
+points and the durable YooKassa attempts and refunds, and the Account API
+settles re-read payments and refunds exactly once. The checkout, webhook and
+portal pages follow in LR-67b and LR-67c. See [Hero tiers](supporter.md#hero-tiers).
+
+Core career schema is version 3 and portal schema is versions 1–7 and 9. Run owner migrations and the
 updated runtime grants before deploying matching game/API releases. See
 [Supporter operations](supporter.md) for rollout boundaries and test procedures.
 

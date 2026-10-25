@@ -1,10 +1,11 @@
 # Markets: one build per region
 
 OMOBA is built separately for each market. A market decides which services and
-storefront rules a build has, which servers it talks to, the first-launch
-language and how players sign in. It is a compile-time choice: a Russian build
-cannot be switched to the Ekza ecosystem or to payments at run time, and a
-typo in a market or feature name fails the build.
+storefront rules a build has, who sells Hero Supporter access, which servers it
+talks to, the first-launch language and how players sign in. It is a
+compile-time choice: a Russian build cannot be switched to the Ekza ecosystem or
+to another market's payment providers at run time, and a typo in a market or
+feature name fails the build.
 
 > **Planned (ADR-025, LR-68):** one app per platform for Russia and the
 > international market. The account's region, confirmed on first launch, will
@@ -16,7 +17,8 @@ typo in a market or feature name fails the build.
 | --- | --- | --- | --- |
 | Who | Europe and the rest of the world | Russia | mainland China |
 | Ekza ecosystem (`ekza`) | on | **off** | off |
-| Paid cosmetics (`supporter`) | on | **off** (free game) | off |
+| Paid cosmetics (`supporter`) | on | **on** (LR-67) | off |
+| Payment providers | Apple, Solana | **YooKassa** donations on the portal | none |
 | Sign in with VK ID (`vk_sign_in`) | off | **on** | off |
 | First-launch language | English | Russian | Simplified Chinese |
 | Lobby | `77.246.105.57:4000` | `lobby.omoba.ru:4000` | not decided |
@@ -38,10 +40,13 @@ are deployed (`make release-ru-preflight` checks).
 - `shared/src/market.rs` — `MARKET` and `FEATURES`, read by every crate (client,
   server, Account API). `OMOBA_MARKET` selects the market;
   `OMOBA_FEATURE_EKZA|SUPPORTER|VK_SIGN_IN=on|off` flips one feature of its preset
-  for a test build. Both are `const`: unknown values are a compile error.
-- `scripts/markets.py` — the same presets plus each market's servers, settings
-  folder, Android identity, platforms, download path and release status label, for
-  `scripts/release.py` and
+  for a test build. Both are `const`: unknown values are a compile error. Each
+  market also lists its payment providers (`Market::payment_providers`;
+  `payment_providers()` is empty while `supporter` is off). LR-68/LR-69 make the
+  list per region × channel.
+- `scripts/markets.py` — the same presets and payment providers plus each
+  market's servers, settings folder, Android identity, platforms, download path
+  and release status label, for `scripts/release.py` and
   `mobile/android/build.py`. `scripts/test_release.py` checks it against the Rust
   module.
 - `Market::legal` (Rust) and `Legal` (`markets.py`) — the legal documents, source
@@ -53,7 +58,9 @@ are deployed (`make release-ru-preflight` checks).
   package. A build refuses another market's servers, the global public lobby in a
   market build, and `--registry/--passport` without the `ekza` feature.
 - The portal (omoba-web) reads the same `OMOBA_MARKET` / `OMOBA_FEATURE_*`
-  variables (`docs/markets.md` there).
+  variables (`docs/markets.md` there). Its `src/lib/market-profile.mjs` still has
+  RU `supporter` off and no provider list until LR-67c; the parity tests there are
+  written by hand and do not read this repository.
 
 The market is independent of the build **contour** (`docs/connection-profiles.md`):
 `--market ru --contour dev` is the OMOBA Dev tester app with RU features, the dev
@@ -73,8 +80,21 @@ serves no Ekza library route. The portal has no market, sponsor or creator pages
 
 **`supporter` off** — nothing is sold. The client registers no Hero Supporter
 panel or StoreKit bridge and shows no "Support OMOBA" button. The Account API
-serves no `supporter` route and refuses to start with Apple or Solana settings.
-The portal has no Supporter pages.
+serves no `supporter` route and refuses to start with Apple, Solana or YooKassa
+settings. The portal has no Supporter pages.
+
+**`supporter` on** — the market sells through its own providers only (LR-67):
+
+- The Account API refuses to start with another market's provider settings
+  (`payment_provider_not_in_market`): YooKassa settings in a global build, Apple
+  or Solana settings in an RU build (until LR-69). It serves no route of a
+  provider the market does not list (`.../apple/...`, `.../solana/...`,
+  `.../yookassa/...` answer 404).
+- The client registers `SupporterPlugin` (the panel and every player's aura); the
+  StoreKit bridge only where Apple is sold. The panel's purchase surface comes
+  from `payment_surface()`: the RU build on Windows, macOS, Linux and Android
+  shows «Поддержать на сайте», which opens `<portal>/supporter`; no iOS build ever
+  links to a web payment. See [supporter.md](supporter.md#hero-tiers).
 
 **`vk_sign_in` on** — sign in with VK ID (VK, Одноклассники and Mail.ru are one
 VK ID app) on the portal and from the game, below.

@@ -105,6 +105,13 @@ pub(crate) fn aura(style: AuraStyle) -> &'static str {
         AuraStyle::Solar => "aura.solar",
         AuraStyle::Lunar => "aura.lunar",
         AuraStyle::Verdant => "aura.verdant",
+        AuraStyle::Rose => "aura.rose",
+        AuraStyle::Jade => "aura.jade",
+        AuraStyle::Azure => "aura.azure",
+        AuraStyle::Crimson => "aura.crimson",
+        AuraStyle::PrismI => "aura.prism_i",
+        AuraStyle::PrismII => "aura.prism_ii",
+        AuraStyle::PrismIII => "aura.prism_iii",
     })
 }
 

@@ -124,7 +124,7 @@ flowchart LR
 | Market | Features (ekza / supporter / vk_sign_in) | Servers compiled in | Platforms | State |
 |---|---|---|---|---|
 | `global` | on / on / off | None by default (the client's built-in public lobby) | macOS, Windows, Linux, Android, iOS | Live |
-| `ru` | off / off / on | `lobby.omoba.ru:4000`, `account.omoba.ru`, `omoba.ru` (zone `omoba.ru`) | macOS, Windows, Linux, Android (no iOS) | Packaged. `preflight` shows whether the servers answer |
+| `ru` | off / on (YooKassa only) / on | `lobby.omoba.ru:4000`, `account.omoba.ru`, `omoba.ru` (zone `omoba.ru`) | macOS, Windows, Linux, Android (no iOS) | Packaged. `preflight` shows whether the servers answer |
 | `cn` | off / off / off | Not decided | None | `blocked` |
 
 `blocked` is checked only in `resolve_flavor()`:

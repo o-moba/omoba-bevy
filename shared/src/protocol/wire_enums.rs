@@ -27,7 +27,7 @@ use std::path::Path;
 use crate::protocol::PROTOCOL_VERSION;
 
 /// The protocol version this variant list was last reviewed for.
-const POLICY_PROTOCOL_VERSION: u16 = 11;
+const POLICY_PROTOCOL_VERSION: u16 = 12;
 // CompatibilityDatagram is an independent pre-game envelope; review its
 // variants against HANDSHAKE_VERSION, not the gameplay PROTOCOL_VERSION.
 const POLICY_HANDSHAKE_VERSION: u16 = 1;
@@ -89,7 +89,8 @@ wire_enums! {
     crate::social::SocialCommand => Strict [Subscribe, Chat, Reaction],
     crate::match_service::TakeoverPolicy => Strict [Idle, Bot],
     crate::match_service::MatchPreference => Strict [Casual, Ranked, BotPractice],
-    crate::supporter::AuraStyle => Strict [Solar, Lunar, Verdant],
+    // Protocol 12 added the seven tier styles (LR-67).
+    crate::supporter::AuraStyle => Strict [Solar, Lunar, Verdant, Rose, Jade, Azure, Crimson, PrismI, PrismII, PrismIII],
     crate::handheld::HandheldSelection => Strict [ClassDefault, Unequipped, Item],
     crate::career::FriendAction => Strict [Request, Accept, Reject, Cancel, Remove],
     crate::career::CareerAction => Strict [FindMatch, SupporterStatus, EquipSupporterAura, Social, History, Detail, Friends, Friend, Profile, LookupPlayer, Rename, CancelQueue],

@@ -5,7 +5,8 @@ SQLx PostgreSQL, ring 0.17.14. No HTTP endpoint can settle matches or change rew
 The adapter reuses the game friendship transaction and nickname validation rules.
 [OpenAPI 3.1](docs/openapi.json) describes the wire contract. Game core schema is
 version 4 (3 = revocable device keys, 4 = admission limits and profile retention, LR-16);
-portal schema has its own version 7 and never runs Prisma/Drizzle push.
+portal schema has its own versions 1–7 and 9 (8 is reserved for LR-20 feedback) and never
+runs Prisma/Drizzle push.
 
 ## Database and migration
 
@@ -19,7 +20,7 @@ psql "$MIGRATION_DATABASE_URL" -v portal_role=omoba_portal -v game_role=omoba_ga
 ```
 
 The migration command initializes the game’s existing v1 migration when needed,
-then applies portal v1–v7 under an advisory lock. Repeated execution is safe. Existing
+then applies portal v1–v7 and v9 under an advisory lock. Repeated execution is safe. Existing
 unknown versions fail closed. Runtime startup verifies versions and performs no DDL.
 For game-only initialization, `cargo run -p server --bin migrate-career --locked` uses
 `OMOBA_DATABASE_URL`. This replaces implicit DDL at game-worker startup.
@@ -106,8 +107,41 @@ session) unlinks. `vk`, `ticket` and `attach` are BFF routes: keep them off the
 public ingress (behind the portal ingress key, or loopback only as on RU). Expired tickets and unlinked identities idle for 30 days
 are cleaned up. Tests: `tests/social_postgres.rs` (loopback VK stand-in).
 
-Free markets (`supporter` off) serve no `supporter` route and refuse Apple or
-Solana settings; without `ekza` there is no `me/ekza-library` route.
+Free markets (`supporter` off) serve no `supporter` route and refuse Apple,
+Solana or YooKassa settings; without `ekza` there is no `me/ekza-library` route.
+A market with `supporter` on sells only through its own providers
+(`shared::market::payment_providers`): a global build refuses YooKassa settings,
+an RU build refuses Apple and Solana settings (until LR-69), both with
+`payment_provider_not_in_market` at startup, and routes of an unlisted provider
+answer 404 (`supporter::provider_route_allowed`).
+
+## Hero tiers and YooKassa (portal schema 9, LR-67)
+
+`009_yookassa_supporter.sql` adds provider `yookassa` to the supporter CHECKs,
+`amount_minor` (kopecks, YooKassa only) and `tier_points` (default 0, existing rows
+keep 0) on `portal.supporter_grants`, the seven tier aura ids, and two functions:
+`portal.supporter_points(profile, at)` (the tier sum of the grants covering `at`)
+and `portal.supporter_months(profile)` (credited months: YooKassa donations count
+distinct UTC calendar months). `ops/grants.sql` gives both runtime roles EXECUTE on
+`supporter_points` and the portal role on `supporter_months`.
+
+Tier points are set only here, in `apply_event_tx`, from the provider rule
+(YooKassa: whole rubles after refunds; Apple and Solana: 0 in M0). The dashboard
+(`GET /v1/me/supporter`) adds `providers`, a `catalog` entry per style with
+`tier_points` (0 = any active grant) and `unlocked`, and `supporter.tier_points` /
+`supporter.tier_until`. `PATCH /v1/me/supporter/aura` refuses a tier style without
+its points (403 `tier_required`).
+
+YooKassa settings (all-or-none; the provider flow that uses them is LR-67b):
+`OMOBA_YOOKASSA_SHOP_ID` (digits), `OMOBA_YOOKASSA_SECRET_KEY`,
+`OMOBA_YOOKASSA_VAT_CODE` (1–12; 1 = без НДС) and `OMOBA_YOOKASSA_NEW_CHARGES`
+(exactly `1` allows new charges; reconciliation always runs). The settlement
+functions in `src/supporter/yookassa.rs` take payments and refunds re-read from
+YooKassa and settle them exactly once (see [supporter.md](../docs/supporter.md#hero-tiers)).
+The migration also creates the durable attempt, refund, refund-scan cursor and
+issue tables; the portal role may read, insert and update them but delete none.
+Tests: `tests/yookassa_settlement_postgres.rs` (synthetic provider objects,
+restricted portal role).
 
 ## Projection and retention
 
@@ -188,7 +222,7 @@ these capabilities. Old limited sessions are invalidated by the account upgrade.
 
 Portal migration 004 adds owner-scoped private class preferences; 005 adds the
 separate encrypted Ekza library connection. Startup requires exactly the portal
-schema versions this build serves (`PORTAL_SCHEMA`, 1–7) and runs no DDL, so run
+schema versions this build serves (`PORTAL_SCHEMA`, 1–7 and 9) and runs no DDL, so run
 `migrate` first. No new browser authorization scopes are
 added: private named builds use the existing personal-settings consent.
 

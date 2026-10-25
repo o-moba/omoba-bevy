@@ -23,9 +23,19 @@ GRANT SELECT,INSERT,UPDATE,DELETE ON portal.social_identities,portal.social_tick
 GRANT SELECT,INSERT ON portal.supporter_events TO :"portal_role";
 GRANT SELECT,INSERT,UPDATE ON portal.supporter_accounts,portal.supporter_grants,
   portal.supporter_preferences,portal.supporter_orders TO :"portal_role";
+-- YooKassa donations (portal schema 9): attempts, refunds, the refund-scan cursor
+-- and operator issues are billing audit, so no DELETE. Only the Account API
+-- (this role) writes grants and their tier points.
+GRANT SELECT,INSERT,UPDATE ON portal.supporter_yookassa_attempts,
+  portal.supporter_yookassa_refund_scan,portal.supporter_yookassa_issues TO :"portal_role";
+GRANT SELECT,INSERT ON portal.supporter_yookassa_refunds TO :"portal_role";
+GRANT EXECUTE ON FUNCTION portal.supporter_points(text,bigint),
+  portal.supporter_months(text) TO :"portal_role";
 GRANT USAGE ON SCHEMA portal TO :"game_role";
 GRANT SELECT ON portal.supporter_grants,portal.supporter_preferences TO :"game_role";
 GRANT INSERT,UPDATE ON portal.supporter_preferences TO :"game_role";
+-- The game reads the Hero tier sum (status, equip, the server's aura check).
+GRANT EXECUTE ON FUNCTION portal.supporter_points(text,bigint) TO :"game_role";
 GRANT SELECT ON career_schema_version TO :"game_role";
 GRANT SELECT,INSERT,UPDATE,DELETE ON career_profiles,career_matches,
   career_participants,career_active_profiles,career_friendships,career_presence TO :"game_role";

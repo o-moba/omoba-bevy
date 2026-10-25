@@ -9,7 +9,8 @@ device keys. Background and the release steps: [docs/markets.md](../../../docs/m
 
 Only binaries from the RU Linux package (`python3 scripts/release.py build linux
 --market ru`, `omoba-<version>-ru-linux-x64.tar.gz`) may run here: they are built
-with `OMOBA_MARKET=ru` (no Ekza, no payments, VK ID sign-in).
+with `OMOBA_MARKET=ru` (no Ekza, Hero Supporter through YooKassa only, VK ID sign-in;
+the YooKassa shop settings and webhook arrive with LR-67b).
 
 > **Status (LR-01, LR-03, LR-23, LR-17 ops).** Everything up to the host is ready: [ru_host.py](ru_host.py)
 > sets up a fresh Ubuntu host, ships the server package and the portal, checks the

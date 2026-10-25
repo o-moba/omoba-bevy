@@ -647,7 +647,8 @@ class Markets(unittest.TestCase):
         import re
         import markets
         source = (release.ROOT / "shared/src/market.rs").read_text()
-        features = source[source.index("pub const fn default_features"):source.index("pub const fn default_locale")]
+        features = source[source.index("pub const fn default_features"):source.index("pub const fn payment_providers")]
+        providers = source[source.index("pub const fn payment_providers"):source.index("pub const fn default_locale")]
         locales = source[source.index("pub const fn default_locale"):source.index("pub const fn storage_suffix")]
         suffixes = source[source.index("pub const fn storage_suffix"):source.index("impl Features")]
         names = {"global": "Global", "ru": "Ru", "cn": "Cn"}
@@ -657,12 +658,30 @@ class Markets(unittest.TestCase):
             arm = re.search(rf"Self::{variant} => Features \{{(.*?)\}}", features, re.S).group(1)
             rust = {name: value == "true" for name, value in re.findall(r"(\w+): (true|false)", arm)}
             self.assertEqual(rust, preset.features, key)
+            arm = re.search(rf"Self::{variant} => &\[(.*?)\]", providers, re.S).group(1)
+            listed = tuple(re.findall(r"PaymentProvider::(\w+)", arm))
+            keys = {"Apple": "apple", "Solana": "solana", "YooKassa": "yookassa"}
+            self.assertEqual(tuple(keys[name] for name in listed), preset.payment_providers, key)
             self.assertIn(f'Self::{variant} => "{preset.locale}"', locales)
             expected = f'Some("{preset.storage_suffix}")' if preset.storage_suffix else "None"
             self.assertIn(f"Self::{variant} => {expected}", suffixes)
         for name, env in markets.FEATURE_ENVS.items():
             self.assertIn(f'option_env!("{env}")', source, name)
         self.assertIn('option_env!("OMOBA_MARKET")', source)
+        for provider in markets.PAYMENT_PROVIDERS:
+            self.assertIn(f'=> "{provider}"', source[source.index("impl PaymentProvider"):], provider)
+
+    def test_ru_sells_only_yookassa_and_global_keeps_apple_and_solana(self):
+        import markets
+        self.assertEqual(markets.payment_providers("ru"), ("yookassa",))
+        self.assertEqual(markets.payment_providers("global"), ("apple", "solana"))
+        self.assertEqual(markets.payment_providers("cn"), ())
+        self.assertTrue(markets.MARKETS["ru"].features["supporter"])
+        # Turning supporter off sells nothing; the build bakes only the switch.
+        self.assertEqual(markets.payment_providers("ru", {"supporter": False}), ())
+        self.assertEqual(markets.market_env("ru", {"supporter": False}),
+                         {"OMOBA_MARKET": "ru", "OMOBA_FEATURE_SUPPORTER": "off"})
+        self.assertEqual(markets.market_env("ru"), {"OMOBA_MARKET": "ru"})
 
     def test_legal_links_mirror_the_rust_market_module(self):
         """LR-06: markets.py `Legal` equals shared/src/market.rs `Market::legal`, field for field."""

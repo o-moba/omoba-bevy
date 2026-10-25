@@ -3,15 +3,16 @@ use crate::*;
 use serde::Deserialize;
 use shared::career::valid_profile_id;
 
-/// One unique, nonrefunded provider period credits one configured monthly purchase.
-/// This aggregate deliberately includes expired and already-paid future periods and
-/// never uses the bounded status/grants response or divides provider dates by 30 days.
+/// One unique, nonrefunded provider period credits one configured monthly purchase;
+/// YooKassa donations credit each UTC calendar month with a donation once
+/// (`portal.supporter_months`, portal schema 9). This aggregate deliberately includes
+/// expired and already-paid future periods and never uses the bounded status/grants
+/// response or divides provider dates by 30 days.
 pub async fn get(app: &App, profile: &str) -> Result<Value> {
     let row = sqlx::query(
         "SELECT coalesce(p.recognition_visible,false) AS visible,
                 coalesce(s.public_profile_enabled,false) AS public_profile_enabled,
-                (SELECT count(*) FROM portal.supporter_grants g
-                 WHERE g.profile_id=c.profile_id AND g.revoked_at IS NULL) AS months_supported
+                portal.supporter_months(c.profile_id) AS months_supported
          FROM career_profiles c
          LEFT JOIN portal.supporter_preferences p USING(profile_id)
          LEFT JOIN portal.profile_settings s USING(profile_id)
@@ -44,19 +45,20 @@ pub async fn set(app: &App, profile: &str, body: &[u8]) -> Result<Value> {
     let row = sqlx::query(
         "WITH updated AS (
             INSERT INTO portal.supporter_preferences(profile_id,aura,recognition_visible)
-            VALUES($1,'solar',$2)
+            VALUES($1,$3,$2)
             ON CONFLICT(profile_id) DO UPDATE
               SET recognition_visible=EXCLUDED.recognition_visible
             RETURNING profile_id,recognition_visible
          )
          SELECT u.recognition_visible AS visible,
                 coalesce(s.public_profile_enabled,false) AS public_profile_enabled,
-                (SELECT count(*) FROM portal.supporter_grants g
-                 WHERE g.profile_id=u.profile_id AND g.revoked_at IS NULL) AS months_supported
+                portal.supporter_months(u.profile_id) AS months_supported
          FROM updated u LEFT JOIN portal.profile_settings s USING(profile_id)",
     )
     .bind(profile)
     .bind(preference.visible)
+    // A placeholder until the first grant picks the highest unlocked style.
+    .bind(super::PLACEHOLDER_AURA.id())
     .fetch_one(&app.pool)
     .await?;
     recognition_dto(&row)
@@ -106,7 +108,7 @@ pub async fn directory(app: &App, raw: Option<&str>) -> Result<Value> {
          JOIN portal.profile_settings settings USING(profile_id)
          JOIN career_profiles p USING(profile_id)
          CROSS JOIN LATERAL (
-             SELECT count(*) AS months_supported,
+             SELECT portal.supporter_months(p.profile_id) AS months_supported,
                     max(valid_until) FILTER (WHERE valid_from<=$1 AND valid_until>$1) AS hero_until
              FROM portal.supporter_grants g
              WHERE g.profile_id=p.profile_id AND g.revoked_at IS NULL

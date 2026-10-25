@@ -16,7 +16,7 @@ Snapshot: game dev 6d34f98, portal dev 604bc34, 2026-10-24. See [README](README.
 | Store | Technology | Schema owner | Writers | Durability | Detail |
 | --- | --- | --- | --- | --- | --- |
 | Career core (`public.career_*`) | PostgreSQL, versions 1–4 | `career-store` crate (migrations embedded with `include_str!`) | Every game server process (lobby and match workers) through `CareerStore`. The Account API may rename (`nickname`), add or revoke device keys, and change friendships. | Permanent. Match receipts are append-only. | [career-store README](../../career-store/migrations/postgres/README.md) |
-| Portal (`portal.*`) | PostgreSQL, same database, versions 1–7 | `account-api` crate | Account API. The game writes one table (`supporter_preferences`). | Mixed. TTL cleanup, see [Retention](#retention-and-cleanup). | [account-api README](../../account-api/README.md) |
+| Portal (`portal.*`) | PostgreSQL, same database, versions 1–7 and 9 (8 reserved for LR-20) | `account-api` crate | Account API. The game writes one table (`supporter_preferences`). | Mixed. TTL cleanup, see [Retention](#retention-and-cleanup). | [account-api README](../../account-api/README.md) |
 | Match root (`OMOBA_MATCH_ROOT`) | Files: JSON manifests and status | `server/src/match_allocation.rs`, `match_pool.rs` | Lobby (allocates) and match workers (report status) | Kept on disk. Finished allocations move to `archive/`. | [§ Match root](#match-root-allocation-manifests) |
 | Career outbox (`OMOBA_CAREER_OUTBOX`, per worker `outbox/`) | Files: one JSON per `result_id` | `server/src/career_backend.rs` | The career worker thread of each server process | Until the database acknowledges the record. Exceptions are listed under [Retention](#retention-and-cleanup). | [§ Outbox](#settlement-and-the-durable-outbox) |
 | Client settings folder | Files: JSON, one folder per market and contour | `client/src/platform.rs`, `persistence.rs`, `career_identity.rs`, `connection_profile.rs` | Native client | Player's device | [§ Client](#client-side-local-state) |
@@ -79,7 +79,7 @@ flowchart LR
 - **Career tables live in `public`.** Portal migrations reference `public.career_profiles` and `public.career_matches` by schema name (`account-api/migrations/001_portal.sql`). The Account API pins `search_path TO public` on every connection (`App::connect` in `account-api/src/lib.rs`).
 - **Two independent version tables.**
   - `career_schema_version` (expected `[1,2,3,4]`, `SCHEMA_VERSIONS` in `career-store/src/career_store.rs`). `CareerStore::from_pool` creates it (`CREATE TABLE IF NOT EXISTS`), not `001_career.sql`.
-  - `portal.schema_version` (expected `[1..7]`, `PORTAL_SCHEMA` in `account-api/src/lib.rs`).
+  - `portal.schema_version` (expected `[1..7, 9]`, `PORTAL_SCHEMA` in `account-api/src/lib.rs`).
 
   A portal migration never touches `career_schema_version` (comment in `001_portal.sql`).
 - **PostgreSQL versions.**
@@ -96,7 +96,7 @@ Migrations run only on the explicit admin path. Runtime processes check versions
 | Command | Applies | Lock | Pool | Source |
 | --- | --- | --- | --- | --- |
 | `cargo run -p server --bin migrate-career` (or the packaged `migrate-career`) | Career v1–4 | `pg_advisory_xact_lock(721946001)`, one transaction | `CareerStore::open_pool`: 4 connections unless `OMOBA_SERVER_ROLE=match`, same session settings as the game | `server/src/bin/migrate-career.rs` → `CareerStore::connect` → `from_pool` |
-| `omoba-account-api migrate` | Career v1–4 first (`CareerStore::connect`), then portal v1–7 in a second transaction | `721946001` for career, `721946101` for portal | Career step as above. Portal step uses a separate 1-connection pool. | `account-api/src/lib.rs` `migrate` |
+| `omoba-account-api migrate` | Career v1–4 first (`CareerStore::connect`), then portal v1–7 and 9 in a second transaction | `721946001` for career, `721946101` for portal | Career step as above. Portal step uses a separate 1-connection pool. | `account-api/src/lib.rs` `migrate` |
 
 | Career version | File | Change |
 | --- | --- | --- |
@@ -117,11 +117,12 @@ Migrations run only on the explicit admin path. Runtime processes check versions
 | 5 | `005_ekza_library.sql` | `ekza_library_links`: one sealed Ekza library connection per profile |
 | 6 | `006_supporter_recognition.sql` | `supporter_preferences.recognition_visible` (default false, private) |
 | 7 | `007_social_sign_in.sql` | VK ID: `social_identities` (HMAC of the VK user id only), `social_tickets` (30 min), `social_links` |
+| 9 | `009_yookassa_supporter.sql` | LR-67: provider `yookassa`; `supporter_grants.amount_minor` (YooKassa only) and `tier_points` (default 0); the tier aura ids; functions `supporter_points(profile, at)` and `supporter_months(profile)`; `supporter_yookassa_attempts`, `supporter_yookassa_refunds`, `supporter_yookassa_refund_scan` (one row), `supporter_yookassa_issues`. Version 8 is reserved for LR-20 feedback |
 
 **What happens on a version mismatch.**
 
 - **Game server.** It keeps running against a wrong or missing career version. Its `omoba-career` thread calls `CareerStore::connect_runtime`, discards the error with `.ok()` and retries every 2 s (`server/src/career_backend.rs`). Meanwhile records stay in the outbox; a sign-in or account action waits up to 10 s for the store and then replies "Profile storage is unavailable. Retry shortly."
-- **Account API.** It refuses to start unless career is exactly `[1,2,3,4]` (`runtime_from_pool`, called inside `App::connect`) and portal is exactly `[1..7]` (`validate_portal_schema`). The portal process therefore depends on the career version too.
+- **Account API.** It refuses to start unless career is exactly `[1,2,3,4]` (`runtime_from_pool`, called inside `App::connect`) and portal is exactly `PORTAL_SCHEMA` (`[1..7, 9]`, `validate_portal_schema`). The portal process therefore depends on the career version too.
 - **Migrate commands.** They fail on unknown version sets.
 
 **Rollout order** (inferred, not stated as a rule in the repo):
@@ -155,6 +156,7 @@ This rule is inferred from `account-api/ops/grants.sql` and PostgreSQL semantics
 - USAGE on all sequences in `public`.
 - SELECT on `portal.supporter_grants`.
 - SELECT, INSERT and UPDATE on `portal.supporter_preferences`.
+- EXECUTE on `portal.supporter_points(text, bigint)` (the Hero tier sum).
 
 #### Portal runtime grants
 
@@ -167,6 +169,8 @@ This rule is inferred from `account-api/ops/grants.sql` and PostgreSQL semantics
 - Full DML on the other portal tables, with these exceptions:
   - `supporter_events`: SELECT and INSERT only.
   - `supporter_accounts`, `supporter_grants`, `supporter_preferences` and `supporter_orders`: no DELETE.
+  - `supporter_yookassa_attempts`, `supporter_yookassa_refund_scan` and `supporter_yookassa_issues`: SELECT, INSERT and UPDATE; `supporter_yookassa_refunds`: SELECT and INSERT.
+- EXECUTE on `portal.supporter_points(text, bigint)` and `portal.supporter_months(text)`.
 
 Runtime roles must not inherit owner or superuser membership. On databases older than PostgreSQL 15, revoke `CREATE` on `public` from `PUBLIC` (`grants.sql` footer).
 
@@ -324,7 +328,7 @@ Tables with no foreign key are left out of the diagram:
 | Privacy | `profile_settings` | All flags default off. A row is created lazily (`INSERT … ON CONFLICT DO NOTHING`). | `accounts.rs` |
 | Analytics | `projected_results`, `player_match_facts` | Derived from settled `career_matches.result`. The raw JSON stays the source of truth. See [Projection](#projection). | `read.rs` `project` |
 | Devices | `device_enrollments`, `recovery_codes` | See [Devices and recovery](#devices-and-recovery). | `devices.rs`, [supporter.md](../supporter.md) |
-| Supporter | `supporter_*` | Grants come only from verified provider events. `supporter_events` is insert-only for the portal role. The first active grant creates `supporter_preferences` with aura `solar`. Without a stored row, the game's `supporter_status` also defaults the equipped aura to solar. Free markets (ru, cn) serve no Supporter routes, and their Account API refuses to start with billing configured (`billing_configured_without_supporter`). | `supporter.rs`, `supporter/solana.rs`, `lib.rs`, `career_store.rs` `supporter_status`, [supporter.md](../supporter.md) |
+| Supporter | `supporter_*` | Grants come only from verified provider events. `supporter_events` is insert-only for the portal role. Each grant carries `tier_points` set by the Account API from the provider rule (YooKassa: whole rubles after refunds), and the tier is `supporter_points` at now. The first grant creates `supporter_preferences` with the highest style the points unlock (`AuraStyle::highest_unlocked`: the tier's style, or `solar`). Without a stored row, the game's `supporter_status` shows the same style. A free market (cn) serves no Supporter routes, and its Account API refuses to start with billing configured (`billing_configured_without_supporter`); a market refuses another market's provider settings (`payment_provider_not_in_market`). | `supporter.rs`, `supporter/solana.rs`, `lib.rs`, `career_store.rs` `supporter_status`, [supporter.md](../supporter.md) |
 | Workshop | `class_builds` | Private preferences. Saving one never admits a class to a match. | `class_builds.rs` |
 | Ekza library | `ekza_library_links` | The device code (while pending) or the access token (when connected) is sealed under the portal secret. The associated data is `ekza-library:{profile}:{registry origin}:{phase}`. The Ekza Registry origin is derived from `OMOBA_PORTAL_ORIGIN` (`EkzaConfig::for_portal`) or the local fixture origin. | `ekza_library.rs` |
 | VK ID | `social_identities`, `social_tickets`, `social_links` | Identity = `HMAC(OMOBA_SOCIAL_SECRET, vk user id)`. No name, e-mail or token is stored. The display name lives only in a ticket or link and expires with it. | `social.rs`, `007_social_sign_in.sql` |
@@ -348,8 +352,8 @@ The flows, their signatures and their rate limits are in [identity-and-accounts.
 | `career_matches`, `career_participants`, `career_active_profiles` | All writes: start, checkpoint, stage, settle, adopt, recover. Done by the owning worker, or by the recovering process. | Read: history, detail, projection |
 | `career_friendships` | Friend actions (INSERT, UPDATE, DELETE) | Friend actions via `CareerStore::apply_friend_action`, in the same transaction as the idempotency receipt |
 | `career_presence` | `touch_presences` from every process. Settlement clears `result_id`. | Read only |
-| `portal.supporter_grants` | Read (`supporter_status`, at sign-in and on access refresh) | Write (provider events, Apple reconciliation) |
-| `portal.supporter_preferences` | INSERT/UPDATE the aura, gated in SQL on an active grant (`equip_supporter_aura`) | Write (aura, recognition, default `solar` on first grant) |
+| `portal.supporter_grants` | Read (`supporter_status`, at sign-in and on access refresh; the tier through `supporter_points`) | Write (provider events, Apple reconciliation, YooKassa settlement); the only writer of `tier_points` |
+| `portal.supporter_preferences` | INSERT/UPDATE the aura, gated in SQL on an active grant and, for a tier style, its points (`equip_supporter_aura`) | Write (aura, recognition, highest unlocked style on first grant) |
 | Other `portal.*` | None | Owner |
 
 **Inside the game server.**

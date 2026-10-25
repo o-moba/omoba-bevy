@@ -2832,9 +2832,15 @@ mod tests {
             names(Market::Global),
             ["CareerDevices", "CareerWebsite", "CareerSupporter"]
         );
+        // RU sells supporter auras through YooKassa on the portal (LR-67).
         assert_eq!(
             names(Market::Ru),
-            ["CareerVkSignIn", "CareerDevices", "CareerWebsite"]
+            [
+                "CareerVkSignIn",
+                "CareerDevices",
+                "CareerWebsite",
+                "CareerSupporter"
+            ]
         );
         assert_eq!(names(Market::Cn), ["CareerDevices", "CareerWebsite"]);
     }
