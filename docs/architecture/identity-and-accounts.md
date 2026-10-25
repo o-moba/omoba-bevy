@@ -371,7 +371,7 @@ sequenceDiagram
   - the Account API serves no `supporter*` or `me/supporter*` route (404), including `GET /v1/supporters`,
   - the Account API refuses billing configuration,
   - the client registers neither the panel nor StoreKit.
-- **RU market (LR-67).** `supporter` is on with YooKassa as the only provider (`shared::market::payment_providers`). The Account API refuses Apple and Solana settings (`payment_provider_not_in_market`) and serves no Apple or Solana route; the client registers the panel and every player's aura but no StoreKit bridge, and its panel links to the portal's `/supporter` («Поддержать на сайте»). The in-game status and equip go through the game server as everywhere else.
+- **RU market (LR-67).** `supporter` is on with YooKassa as the only provider (`shared::market::payment_providers`). The Account API refuses Apple and Solana settings (`payment_provider_not_in_market`) and serves no Apple or Solana route; the client registers the panel and every player's aura but no StoreKit bridge, and its panel links to the portal's `/supporter` («Поддержать на сайте»). The in-game status and equip go through the game server as everywhere else. The portal starts a donation with `POST /v1/me/supporter/yookassa/checkout`; YooKassa's webhook and the Account API's reconciliation loop settle it into a grant ([supporter.md › YooKassa donations](../supporter.md#yookassa-donations)).
 
 ## Ekza links (global market only)
 
@@ -419,6 +419,8 @@ Rate limits are per-minute buckets keyed by `HMAC(portal secret, scope, identity
 | `social-link-key` | key | 10 |
 | `native-supporter-ip` / `native-supporter` | IP / key | 60 / 30 |
 | `apple-notification-ip` | IP | 120 |
+| `yookassa-notification-ip` / `yookassa-notification` | IP / everyone | 120 / 600 |
+| `yookassa-checkout` (on top of `write`) | profile | 10 |
 | `public-profile`, `public-supporters` | IP | 120 each |
 | `read` / `write` (session routes) | profile | 120 / 20 |
 | `search` / `stats` | profile | 30 / 10 |

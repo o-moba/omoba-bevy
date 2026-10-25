@@ -556,8 +556,13 @@ steps down to, lists the styles and, on RU desktop and Android builds, opens
 «Поддержать на сайте» (`<portal>/supporter`); iOS builds never link to a web
 payment. Protocol 12 carries the new styles; portal schema 9 stores amounts,
 points and the durable YooKassa attempts and refunds, and the Account API
-settles re-read payments and refunds exactly once. The checkout, webhook and
-portal pages follow in LR-67b and LR-67c. See [Hero tiers](supporter.md#hero-tiers).
+settles re-read payments and refunds exactly once. The Account API starts a
+donation (a 54-FZ receipt through «Чеки от ЮKassa», the Idempotence-Key stored
+before the payment is created), takes YooKassa's webhook without trusting its
+body, and reconciles open payments, lost creates (23 hours) and refunds every
+minute; new charges pause by themselves when the refund scan is stale. The RU
+portal pages follow in LR-67c. See [Hero tiers](supporter.md#hero-tiers) and
+[YooKassa donations](supporter.md#yookassa-donations).
 
 Core career schema is version 3 and portal schema is versions 1–7 and 9. Run owner migrations and the
 updated runtime grants before deploying matching game/API releases. See

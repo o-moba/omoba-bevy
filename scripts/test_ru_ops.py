@@ -1,7 +1,7 @@
 """The RU host kit (ops/vps/ru) describes one topology (README.md#topology, LR-02):
 the portal calls the loopback Account API with OMOBA_TRUST_LOOPBACK_PROXY=1 on both
 sides, Caddy overwrites X-Real-IP on the portal site (omoba.ru), and the Account API site
-(account.omoba.ru) serves only native routes."""
+(account.omoba.ru) serves only native routes and YooKassa's webhook (LR-67)."""
 from __future__ import annotations
 
 import re
@@ -15,6 +15,9 @@ RU = Path(__file__).resolve().parents[1] / "ops" / "vps" / "ru"
 RU_NATIVE = ["/v1/auth/pairings/lookup", "/v1/auth/pairings/approve", "/v1/auth/pairings/deny",
              "/v1/auth/devices/create", "/v1/auth/devices/status", "/v1/auth/devices/recover",
              "/v1/auth/devices/complete", "/v1/auth/social/link"]
+# YooKassa's HTTP notifications (LR-67): the shop's webhook URL is this path on
+# account.omoba.ru (ops/vps/ru/README.md, "YooKassa").
+RU_YOOKASSA = ["/v1/supporter/yookassa/notifications"]
 
 
 def env_file(name: str) -> dict[str, str]:
@@ -76,12 +79,26 @@ class RuTopologyTest(unittest.TestCase):
         self.assertNotIn("X-Omoba-Portal-Key", self.account)
         self.assertNotIn("PORTAL_KEY", self.account)
         handles = re.findall(r"handle(?: (@\w+))? \{", self.account)
-        self.assertEqual(handles, ["@native", "@health", ""], "native, health, then 403 for the rest")
+        self.assertEqual(handles, ["@native", "@yookassa", "@health", ""],
+                         "native, the YooKassa webhook, health, then 403 for the rest")
         self.assertRegex(self.account, r'handle \{\s*respond "Forbidden" 403\s*\}')
         # The Account API keys native limits on the game's address, never on Caddy's.
         native_proxy = re.search(r"handle @native \{\s*reverse_proxy 127\.0\.0\.1:40550 \{(.*?)\n\s*\}", self.account, re.S)
         self.assertIsNotNone(native_proxy, self.account)
         self.assertRegex(native_proxy.group(1), r"header_up\s+X-Real-IP\s+\{remote_host\}")
+
+    def test_account_ru_passes_only_the_yookassa_webhook_as_its_own_public_handle(self):
+        # A POST of exactly the notification path, not a prefix: checkout and the payment
+        # list stay portal-only (loopback), like every other Supporter route.
+        webhook = re.search(r"@yookassa\s*\{\s*method POST\s+path ([^\n]+)\s*\}", self.account)
+        self.assertIsNotNone(webhook, self.account)
+        self.assertEqual(webhook.group(1).split(), RU_YOOKASSA)
+        self.assertFalse(any("*" in path for path in webhook.group(1).split()))
+        self.assertTrue(set(RU_YOOKASSA).isdisjoint(RU_NATIVE), "its own handle, not the native list")
+        # Per-IP notification limits use YooKassa's address, overwritten by Caddy.
+        proxy = re.search(r"handle @yookassa \{\s*reverse_proxy 127\.0\.0\.1:40550 \{(.*?)\n\s*\}", self.account, re.S)
+        self.assertIsNotNone(proxy, self.account)
+        self.assertRegex(proxy.group(1), r"header_up\s+X-Real-IP\s+\{remote_host\}")
 
 
 if __name__ == "__main__":

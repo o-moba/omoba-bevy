@@ -410,6 +410,13 @@ async fn dispatch(
         app.rate(&ip, "apple-notification-ip", 120).await?;
         return supporter::apple_notification(app, body).await;
     }
+    // Public through the RU ingress: the body is only a hint, every object is
+    // re-read with the shop credentials (LR-67).
+    if method == Method::POST && path == "supporter/yookassa/notifications" {
+        app.rate(&ip, "yookassa-notification-ip", 120).await?;
+        app.rate("all", "yookassa-notification", 600).await?;
+        return supporter::yookassa::notification(app, body).await;
+    }
     if method == Method::POST && path.starts_with("auth/pairings") {
         app.rate(
             &ip,
@@ -516,6 +523,12 @@ async fn dispatch(
         }
         ("POST", "me/supporter/solana/confirm") => {
             supporter::solana::confirm(app, &session.profile_id, body).await
+        }
+        ("POST", "me/supporter/yookassa/checkout") => {
+            supporter::yookassa::checkout(app, &session.profile_id, headers, body).await
+        }
+        ("GET", "me/supporter/yookassa/payments") => {
+            supporter::yookassa::payments(app, &session.profile_id).await
         }
         ("POST", "me/supporter/apple/prepare") => {
             supporter::apple_prepare(app, &session.profile_id).await
