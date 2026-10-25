@@ -655,6 +655,25 @@ class HealthTest(unittest.TestCase):
         self.assertIn("<3>the last successful backup is 30 h old", journal)
         self.assertNotIn("AAAAAAAAAAAA", journal)
 
+    def test_the_hosts_one_bot_in_alerts_env_carries_the_backup_alerts(self):
+        """LR-17: without its own lines, backup.env uses the RU host's bot in alerts.env."""
+        folder = self.work.name
+        token = "654321:" + "C" * 30
+        alerts = write(Path(folder) / "alerts.env", f"OMOBA_TELEGRAM_BOT_TOKEN={token}\n"
+                                                    "OMOBA_TELEGRAM_CHAT_ID=-1002\nOMOBA_ALERT_REPEAT_MINUTES=60\n")
+        cfg = rb.Config(env_file(folder, OMOBA_BACKUP_DIR=f"{folder}/backups", OMOBA_ALERTS_ENV=alerts))
+        ctx = Context(cfg, now=self.clock, notify_opener=self.telegram, stderr=self.journal)
+        self.assertTrue(ctx.alert("backup-failed", f"backup failed near {token}"))
+        url, text = self.telegram.sent[-1]
+        self.assertTrue(url.startswith("https://api.telegram.org/bot654321:"))
+        self.assertNotIn(token, text + self.journal.getvalue())
+        # backup.env's own lines win; a placeholder or missing alerts.env means no bot.
+        self.assertEqual(self.cfg.telegram(), ("123456:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "-1001"))
+        write(alerts, "#OMOBA_TELEGRAM_BOT_TOKEN=CHANGE_ME\nOMOBA_TELEGRAM_CHAT_ID=CHANGE_ME\n")
+        self.assertEqual(rb.Config(cfg.path).telegram(), ("", ""))
+        os.unlink(alerts)
+        self.assertEqual(rb.Config(cfg.path).telegram(), ("", ""))
+
     def test_an_undelivered_alert_is_logged_without_the_token(self):
         self.telegram.fail = urllib.error.URLError("bot123456:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAA unreachable")
         self.assertFalse(self.ctx().alert("x", "backup failed"))

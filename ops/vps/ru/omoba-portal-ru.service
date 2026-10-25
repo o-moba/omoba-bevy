@@ -11,6 +11,8 @@ Description=OMOBA RU player portal
 After=network-online.target omoba-account-api-ru.service
 Wants=network-online.target
 StartLimitIntervalSec=0
+# Any failure (also each crash before the restart) alerts the owner (LR-17).
+OnFailure=omoba-alert-ru@%n.service
 
 [Service]
 Type=simple
