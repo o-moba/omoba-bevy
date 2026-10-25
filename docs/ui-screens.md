@@ -91,6 +91,7 @@ Harness: `client/src/qa/career_visual_qa.rs`; server: none; env: `OMOBA_CAREER_Q
 | Career · website account | `07-website-account.png` | desktop, phone | Profile → Player website | `client/src/career_web.rs` | fixture data, labelled |
 | Career · devices | `08-devices.png` | desktop, phone | Profile → Link or recover account | `client/src/career_devices.rs` | fixture data, labelled |
 | Career · match detail (bottom) | `09-result-bottom.png` | desktop, phone | Match detail, scrolled | `client/src/career.rs` | fixture data, labelled |
+| Career · protect progress | `10-protect.png` | desktop, phone | Profile → Protect progress, or the Home card after the first match | `client/src/career_protection.rs` | fixture data, labelled |
 
 ## 06-supporter · `supporter`
 

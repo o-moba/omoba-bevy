@@ -324,7 +324,7 @@ Tables with no foreign key are left out of the diagram:
 
 - `schema_version`
 - `rate_limits` (HMAC identity × 1-minute bucket)
-- `supporter_nonces` (native replay protection)
+- `supporter_nonces` (native replay protection: Supporter requests and, since LR-18, in-game recovery-code requests)
 
 | Area | Tables | Notes | Source |
 | --- | --- | --- | --- |
@@ -461,7 +461,7 @@ The Account API runs `read::project(128)` and `App::cleanup` every 5 s, `reconci
 | `audit_events` | 30 days | `cleanup` |
 | `device_enrollments` | Expire after 300 s (`ENROLLMENT_SECONDS` in `shared/src/device_account.rs`, [supporter.md](../supporter.md)). Deleted 1 day after expiry unless a recovery code refers to them. Approved ones without a recovery-code reference are deleted on key revocation. | `cleanup`, `devices.rs` |
 | `recovery_codes` | Marked consumed when used or replaced. Rows are never deleted. | `devices.rs` |
-| `supporter_nonces` | Deleted 60 s after expiry | `cleanup` |
+| `supporter_nonces` (also in-game recovery-code requests) | Deleted 60 s after expiry | `cleanup` |
 | `supporter_events`, `supporter_grants`, `supporter_orders`, `supporter_accounts`, `supporter_preferences` | Permanent (billing audit) | none |
 | `social_tickets` | 30 min (`TICKET_SECONDS`). Also deleted when the identity is linked. | `social::cleanup`, `social.rs` |
 | `social_identities` (unlinked) | Deleted after 30 days without sign-in, unless any `social_links` row refers to them | `social::cleanup` (`UNLINKED_RETENTION_SECONDS`) |

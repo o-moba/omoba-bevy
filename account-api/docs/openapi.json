@@ -5099,6 +5099,85 @@
         }
       }
     },
+    "/v1/auth/devices/recovery-codes": {
+      "post": {
+        "summary": "Native (LR-18): the active device key reads its account's protection (status) or issues a new set of recovery codes (rotate). Ed25519 omoba.recovery.native.v1 in shared/src/device_account.rs, single-use nonce, 60-second maximum lifetime; no portal session",
+        "operationId": "post_auth_devices_recovery_codes",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SignedNativeRecoveryRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Committed; rotate carries the new codes once",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountProtection"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid, expired or foreign-origin request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown or revoked key, or a signature by another key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Replayed nonce (request_replayed)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited (per IP, per key; rotate also per profile)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Dependency unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/me/supporter/yookassa/checkout": {
       "post": {
         "summary": "Start a YooKassa donation (RU): persist the attempt, its Idempotence-Key and receipt, then create the payment",
@@ -7427,6 +7506,94 @@
           "signature"
         ],
         "additionalProperties": false
+      },
+      "SignedNativeRecoveryRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "request": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "origin": {
+                "type": "string"
+              },
+              "public_key": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "nonce": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "expires_at": {
+                "type": "integer",
+                "format": "int64",
+                "description": "Unix seconds, at most 60 s ahead"
+              },
+              "action": {
+                "type": "string",
+                "enum": [
+                  "status",
+                  "rotate"
+                ]
+              }
+            },
+            "required": [
+              "origin",
+              "public_key",
+              "nonce",
+              "expires_at",
+              "action"
+            ]
+          },
+          "signature": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{128}$"
+          }
+        },
+        "required": [
+          "request",
+          "signature"
+        ]
+      },
+      "AccountProtection": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "recovery_codes_remaining": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "linked_sign_ins": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "vk"
+              ]
+            }
+          },
+          "active_devices": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "recovery_codes": {
+            "type": "array",
+            "minItems": 8,
+            "maxItems": 8,
+            "items": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "description": "Only in the rotate reply; shown once"
+          }
+        },
+        "required": [
+          "recovery_codes_remaining",
+          "linked_sign_ins",
+          "active_devices"
+        ]
       },
       "YooKassaQuote": {
         "type": "object",

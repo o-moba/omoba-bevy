@@ -61,6 +61,10 @@ enum HomeAction {
     Update,
     /// "Later" on the update-available banner.
     DismissUpdate,
+    /// Opens Protect progress from its card (LR-18).
+    Protect,
+    /// "Not now" on the protect-progress card.
+    DeclineProtect,
 }
 
 #[derive(Component)]
@@ -304,6 +308,8 @@ struct HomeSignature {
     party: Option<(usize, String, bool)>,
     /// What the update path offers (LR-14, `crate::update`).
     update: Option<crate::update::UpdateOffer>,
+    /// The protect-progress card is due (LR-18).
+    protect: bool,
     /// The locale generation: a language change rebuilds the screen.
     locale: u32,
     /// Phone menu scaling settles after the window exists; rebuild once it
@@ -325,6 +331,7 @@ fn signature(
     HomeSignature {
         resume_available: false,
         update: None,
+        protect: false,
         locale: locale.map_or(0, Locale::generation),
         ui_scale_bits: ui_scale.to_bits(),
         viewport_bits: (viewport.x.to_bits(), viewport.y.to_bits()),
@@ -439,6 +446,7 @@ fn spawn_home(
     resume: Option<Res<crate::net::recovery::ResumeMatchState>>,
     connection: Option<Res<crate::connection_profile::ActiveConnection>>,
     update: Option<Res<crate::update::ClientUpdate>>,
+    prompt: Option<Res<crate::career::protection::ProtectPrompt>>,
 ) {
     let can_resume = resume.as_ref().is_some_and(|resume| resume.saved.is_some());
     let connection = connection.as_deref();
@@ -503,6 +511,10 @@ fn spawn_home(
         }
         _ => None,
     };
+    // Protect progress (LR-18) waits for a free banner slot.
+    let protect_banner = party_line.invite.is_none()
+        && update_banner.is_none()
+        && crate::career::protection::home_card(&career, prompt.as_deref());
     let (status, status_color) = connection_line(&session);
     let profile = career.view.profile.clone();
     let last_match = career
@@ -651,7 +663,9 @@ fn spawn_home(
                 profile.as_ref(),
                 &career.nickname,
                 &thumbnails,
-                if phone && (party_line.invite.is_some() || update_banner.is_some()) {
+                if phone
+                    && (party_line.invite.is_some() || update_banner.is_some() || protect_banner)
+                {
                     None
                 } else {
                     last_match.as_deref()
@@ -995,6 +1009,8 @@ fn spawn_home(
                 spawn_invite_banner(root, *party_id, from, phone, platform.is_mobile(), fit);
             } else if let Some(version) = &update_banner {
                 spawn_update_banner(root, version, phone, platform.is_mobile(), fit);
+            } else if protect_banner {
+                spawn_protect_banner(root, phone, platform.is_mobile(), fit);
             }
             if !platform.is_mobile() {
                 root.spawn((
@@ -1250,6 +1266,7 @@ fn home_actions(
     mut server_entry: Option<ResMut<crate::mobile_ui::ServerEntry>>,
     connection: Option<Res<crate::connection_profile::ActiveConnection>>,
     mut update: Option<ResMut<crate::update::ClientUpdate>>,
+    mut prompt: Option<ResMut<crate::career::protection::ProtectPrompt>>,
 ) {
     let in_party = party.as_ref().is_some_and(|p| p.in_party());
     let leads = party.as_ref().is_some_and(|p| p.view.is_leader());
@@ -1327,6 +1344,14 @@ fn home_actions(
                     update.dismiss();
                 }
             }
+            HomeAction::Protect => career.open_protect_modal(),
+            HomeAction::DeclineProtect => {
+                if let (Some(prompt), Some(profile)) =
+                    (prompt.as_deref_mut(), career.view.profile.as_ref())
+                {
+                    prompt.decline(profile);
+                }
+            }
         }
     }
 }
@@ -1349,7 +1374,11 @@ fn refresh_home(
     windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
     resume: Option<Res<crate::net::recovery::ResumeMatchState>>,
     connection: Option<Res<crate::connection_profile::ActiveConnection>>,
-    update: Option<Res<crate::update::ClientUpdate>>,
+    // Grouped: a system takes at most 16 parameters.
+    (update, prompt): (
+        Option<Res<crate::update::ClientUpdate>>,
+        Option<Res<crate::career::protection::ProtectPrompt>>,
+    ),
 ) {
     let mut current = signature(
         &career,
@@ -1364,6 +1393,7 @@ fn refresh_home(
     );
     current.resume_available = resume.as_ref().is_some_and(|resume| resume.saved.is_some());
     current.update = update.as_ref().and_then(|update| update.offer(&session));
+    current.protect = crate::career::protection::home_card(&career, prompt.as_deref());
     if last.as_ref() == Some(&current) {
         return;
     }
@@ -1377,7 +1407,7 @@ fn refresh_home(
         .despawn();
     spawn_home(
         commands, career, session, card, thumbnails, preview, platform, ui_scale, party, locale,
-        windows, resume, connection, update,
+        windows, resume, connection, update, prompt,
     );
 }
 
@@ -1433,6 +1463,36 @@ fn spawn_update_banner(
             ),
         ],
         ("HomeUpdateBanner", "HomeUpdateBannerLabel"),
+        phone,
+        mobile,
+        fit,
+    );
+}
+
+/// "Protect your progress" (LR-18) in the invite's slot, when no invite or
+/// update offer is shown. The copy names the region's ways to protect it.
+fn spawn_protect_banner(parent: &mut ChildSpawnerCommands, phone: bool, mobile: bool, fit: f32) {
+    spawn_choice_banner(
+        parent,
+        tr(if crate::career::protection::vk_offered() {
+            "protect.prompt.vk"
+        } else {
+            "protect.prompt.codes"
+        })
+        .to_owned(),
+        [
+            (
+                tr("protect.prompt.protect"),
+                HomeAction::Protect,
+                "HomeProtect",
+            ),
+            (
+                tr("protect.prompt.later"),
+                HomeAction::DeclineProtect,
+                "HomeProtectLater",
+            ),
+        ],
+        ("HomeProtectBanner", "HomeProtectBannerLabel"),
         phone,
         mobile,
         fit,
@@ -2166,6 +2226,91 @@ mod tests {
                 (home_actions, refresh_home).chain().after(UiSet::Dispatch),
             );
         app
+    }
+
+    /// LR-18 acceptance: a fresh install is asked to protect its progress
+    /// after its first match. "Not now" hides the card for three completed
+    /// matches or until the first ranked match; Protect opens Protect progress;
+    /// a protected account is not asked.
+    #[test]
+    fn a_fresh_install_is_asked_to_protect_its_progress_after_the_first_match() {
+        use crate::career::{CareerModal, protection::ProtectPrompt};
+        use crate::ui::test_id::harness;
+        use shared::device_account::AccountProtection;
+        let mut session = ClientSession::default();
+        session.set_state_for_test(ClientConnectionState::Connected);
+        let mut app = update_home(
+            crate::update::ClientUpdate::for_test(None, || Ok(vec![])),
+            session,
+        );
+        app.insert_resource(ProtectPrompt::at(None));
+        let set_profile = |app: &mut App, matches: u32, ranked: u32| {
+            let mut profile = shared::career::ProfileSummary::new("a".repeat(64), "Hero".into());
+            profile.matches_played = matches;
+            profile.rated_matches = ranked;
+            app.world_mut().resource_mut::<CareerClient>().view.profile = Some(profile);
+        };
+        let banner = |app: &mut App| harness::find(app.world_mut(), "HomeProtect").is_some();
+        set_profile(&mut app, 0, 0);
+        app.world_mut()
+            .resource_mut::<CareerClient>()
+            .protection
+            .status = Some(AccountProtection {
+            active_devices: 1,
+            ..default()
+        });
+        app.update();
+        assert!(!banner(&mut app), "no card before the first match");
+        set_profile(&mut app, 1, 0);
+        app.update();
+        assert!(banner(&mut app));
+        assert_eq!(
+            named_text(&mut app, "HomeProtectBannerLabel").as_deref(),
+            Some(if crate::career::protection::vk_offered() {
+                "Protect your progress: link VK ID or save a recovery code."
+            } else {
+                "Protect your progress: save a recovery code."
+            })
+        );
+        harness::press(app.world_mut(), "HomeProtectLater");
+        app.update();
+        app.update();
+        assert!(!banner(&mut app));
+        assert_eq!(app.world().resource::<ProtectPrompt>().record().declines, 1);
+        set_profile(&mut app, 3, 0);
+        app.update();
+        assert!(
+            !banner(&mut app),
+            "two more casual matches do not bring it back"
+        );
+        set_profile(&mut app, 4, 0);
+        app.update();
+        assert!(banner(&mut app), "the third one does");
+        harness::press(app.world_mut(), "HomeProtectLater");
+        app.update();
+        app.update();
+        assert!(!banner(&mut app));
+        assert_eq!(app.world().resource::<ProtectPrompt>().record().declines, 2);
+        set_profile(&mut app, 5, 1);
+        app.update();
+        assert!(banner(&mut app), "the first ranked match comes sooner");
+        harness::press(app.world_mut(), "HomeProtect");
+        app.update();
+        assert_eq!(
+            app.world().resource::<CareerClient>().modal,
+            CareerModal::Protect
+        );
+        app.world_mut()
+            .resource_mut::<CareerClient>()
+            .protection
+            .status = Some(AccountProtection {
+            recovery_codes_remaining: 8,
+            active_devices: 1,
+            ..default()
+        });
+        app.update();
+        app.update();
+        assert!(!banner(&mut app), "a protected account is not asked");
     }
 
     fn named_text(app: &mut App, name: &str) -> Option<String> {

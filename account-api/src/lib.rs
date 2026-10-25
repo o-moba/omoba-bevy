@@ -360,6 +360,12 @@ async fn dispatch(
     } else {
         addr.ip().to_string()
     }; // Only an explicitly configured, overwriting loopback ingress is trusted.
+    // The game's own account protection (LR-18), signed by its active key. Its own
+    // per-IP bucket: one status read per session must not eat enrollment attempts.
+    if method == Method::POST && path == "auth/devices/recovery-codes" {
+        app.rate(&ip, "recovery-native-ip", 60).await?;
+        return devices::native_recovery(app, body).await;
+    }
     if method == Method::POST && path.starts_with("auth/devices/") {
         app.rate(
             &ip,

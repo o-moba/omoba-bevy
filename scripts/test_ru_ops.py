@@ -14,7 +14,7 @@ RU = Path(__file__).resolve().parents[1] / "ops" / "vps" / "ru"
 # Signed routes the RU game calls (docs/architecture/system.md, "Account API ingress allowlists").
 RU_NATIVE = ["/v1/auth/pairings/lookup", "/v1/auth/pairings/approve", "/v1/auth/pairings/deny",
              "/v1/auth/devices/create", "/v1/auth/devices/status", "/v1/auth/devices/recover",
-             "/v1/auth/devices/complete", "/v1/auth/social/link"]
+             "/v1/auth/devices/complete", "/v1/auth/devices/recovery-codes", "/v1/auth/social/link"]
 # YooKassa's HTTP notifications (LR-67): the shop's webhook URL is this path on
 # account.omoba.ru (ops/vps/ru/README.md, "YooKassa").
 RU_YOOKASSA = ["/v1/supporter/yookassa/notifications"]
