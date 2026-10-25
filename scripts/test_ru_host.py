@@ -236,6 +236,8 @@ class FakeSystem:
             self.unit("postgresql")["active"] = True
             self.tcp.add(("127.0.0.1", 5432))
         if package == "caddy":
+            # Ubuntu's caddy package brings its system user (Caddy runs as it).
+            self.users["caddy"] = {"uid": 985, "home": "/var/lib/caddy", "shell": "/usr/sbin/nologin"}
             self.enabled.add("caddy")
             self.unit("caddy")["active"] = True
             self.tcp.add(("*", 443))
@@ -901,7 +903,7 @@ class BootstrapTest(HostCase):
         fake = self.fake
         self.assertTrue({"postgresql", "caddy", "ufw"} <= fake.packages)
         self.assertEqual(json.loads(Path(fake.p(ru_host.MARKER)).read_text())["ip"], RU_IP)
-        self.assertEqual(set(fake.users), {"omoba-ru", "omoba-portal-ru"})
+        self.assertEqual(set(fake.users), {"omoba-ru", "omoba-portal-ru", "caddy"}, "caddy is the package's")
         self.assertEqual(fake.users["omoba-portal-ru"]["shell"], "/usr/sbin/nologin")
         for path, _, mode in ru_host.DIRS:
             self.assertEqual(oct(os.stat(fake.p(path)).st_mode & 0o777), oct(int(mode, 8)), path)
@@ -924,6 +926,12 @@ class BootstrapTest(HostCase):
         # Caddy, SSH, firewall, units.
         self.assertEqual(Path(fake.p("/etc/caddy/Caddyfile")).read_text(), KIT["caddyfile"])
         self.assertIn("file_server", Path(fake.p("/etc/caddy/Caddyfile.orig")).read_text())
+        # Downloads (LR-23): the served folder, and Caddy's log created before `caddy validate`.
+        self.assertTrue(os.path.isdir(fake.p(ru_host.DOWNLOADS)))
+        self.assertEqual(os.stat(fake.p(ru_host.DOWNLOAD_LOG)).st_mode & 0o777, 0o640)
+        self.assertIn(["chown", "caddy:caddy", fake.p(ru_host.DOWNLOAD_LOG)], fake.calls)
+        validate = next(i for i, call in enumerate(fake.calls) if call[:2] == ["caddy", "validate"])
+        self.assertLess(fake.calls.index(["chown", "caddy:caddy", fake.p(ru_host.DOWNLOAD_LOG)]), validate)
         self.assertEqual(Path(fake.p(ru_host.SSHD_DROPIN)).read_text(), ru_host.SSHD_TEXT)
         self.assertTrue(fake.ufw["active"])
         self.assertEqual(fake.ufw["incoming"], "deny")
@@ -1294,6 +1302,27 @@ class PortalAndRebootTest(HostCase):
                       problems)
         self.assertFalse(any(problem.startswith("backups: ") for problem in problems), "a changed tool is not run")
 
+    def test_status_lists_published_downloads_and_a_log_caddy_cannot_write(self):
+        """LR-23: release.py publish fills DOWNLOADS/<tag>/; Caddy must own its download log."""
+        self.ship()
+        self.ship_portal(portal_bundle(self.work.name))
+        os.makedirs(self.fake.p(ru_host.DOWNLOADS + "/v0.45.0"))
+        os.makedirs(self.fake.p(ru_host.DOWNLOADS + "/.downloads"))   # a stray rsync staging folder
+        report = self.fresh().status(self.payload())
+        self.assertTrue(report["ok"], report["problems"])
+        self.assertEqual(report["facts"]["downloads"], ["v0.45.0"])
+        with mock.patch.object(ru_host.Host, "uid", lambda host, user: 0 if user == "caddy" else os.getuid()):
+            problems = self.fresh().status(self.payload())["problems"]
+        self.assertIn(f"{ru_host.DOWNLOAD_LOG} is not owned by caddy: Caddy cannot log downloads", problems)
+        os.unlink(self.fake.p(ru_host.DOWNLOAD_LOG))
+        problems = self.fresh().status(self.payload())["problems"]
+        self.assertIn(f"{ru_host.DOWNLOAD_LOG} is missing (bootstrap creates it for Caddy)", problems)
+        # Bootstrap creates it again and leaves an existing log (with its counts) alone.
+        self.assertIn(f"create {ru_host.DOWNLOAD_LOG} (caddy, 0640)", self.bootstrap()["done"])
+        Path(self.fake.p(ru_host.DOWNLOAD_LOG)).write_text('{"status": 200}\n')
+        self.assertNotIn(f"create {ru_host.DOWNLOAD_LOG} (caddy, 0640)", self.bootstrap()["done"])
+        self.assertEqual(Path(self.fake.p(ru_host.DOWNLOAD_LOG)).read_text(), '{"status": 200}\n')
+
     def test_status_reports_drift(self):
         self.ship()
         self.ship_portal(portal_bundle(self.work.name))
@@ -1394,6 +1423,39 @@ class MacTargetTest(unittest.TestCase):
                 ru_host.command_reboot_check(args(host="vds-ru", ip=RU_IP, apply=True, boot_timeout=1,
                                                   ready_timeout=1))
             run.assert_not_called()
+
+    def test_downloads_are_counted_on_the_ru_host_only(self):
+        """LR-23: the counter runs on the host as piped stdin; only totals come back."""
+        calls = []
+
+        def run(command, **kwargs):
+            calls.append((command, kwargs))
+            return subprocess.CompletedProcess(command, 0, b'{"total_downloads": 3}\n', b"")
+        ru = markets.MARKETS["ru"]
+        with mock.patch.object(ru_host, "ssh_config", return_value={"hostname": RU_IP, "user": "root"}):
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                self.assertEqual(ru_host.command_downloads(args(host="vds-ru", ip=RU_IP, since="2026-11-01",
+                                                                until=None), run=run), 0)
+            self.assertEqual(json.loads(out.getvalue()), {"total_downloads": 3})
+            command, kwargs = calls[0]
+            self.assertEqual(command[:9], ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", "vds-ru",
+                                           "python3", "-", "count"])
+            self.assertEqual(command[9:], ["--log", ru_host.DOWNLOAD_LOG, "--prefix", ru.downloads_path,
+                                           "--label", ru.label, "--since", "2026-11-01"])
+            self.assertEqual(kwargs["input"], (ROOT / "ops/vps/ru/ru_downloads.py").read_bytes())
+            # Refused before any ssh: a bad day, the production VPS, a host that is not $RU_IP.
+            calls.clear()
+            for bad in (dict(since="1 day ago"), dict(until="2026-11-01; reboot")):
+                with self.assertRaises(ru_host.Refused):
+                    ru_host.command_downloads(args(host="vds-ru", ip=RU_IP, **{"since": None, "until": None, **bad}),
+                                              run=run)
+            with self.assertRaises(ru_host.Refused):
+                ru_host.command_downloads(args(host="vds-eternal", ip=RU_IP, since=None, until=None), run=run)
+        with mock.patch.object(ru_host, "ssh_config", return_value={"hostname": PROD_IP, "user": "root"}), \
+                self.assertRaises(ru_host.Refused):
+            ru_host.command_downloads(args(host="vds-ru", ip=RU_IP, since=None, until=None), run=run)
+        self.assertEqual(calls, [])
 
     def test_a_dry_run_contacts_nothing(self):
         with mock.patch.object(ru_host, "ssh_remote") as remote, mock.patch.object(ru_host, "ssh_config",

@@ -128,8 +128,11 @@ operation receipt refers to them. No replay recording or player-presence fabrica
 Optional `OMOBA_RELEASE_CATALOG` points to a curated JSON file:
 `{"releases":[]}` is a valid honest empty catalog. Entries follow the OpenAPI Release
 schema: platform, architecture, version, HTTPS URL, SHA-256, decimal size_bytes,
-RFC3339 published_at, installation instructions, test_status. Populate only after
-independently fetching/verifying the exact public artifact. Never list an unsigned
+RFC3339 published_at, installation instructions, test_status. Optional `region`,
+`channel` and `mirror_url` (LR-23: the market, `direct`, an IPFS copy of the same bytes)
+are passed through unchanged; `scripts/release.py catalog` writes them and only HTTPS
+links. Populate only after independently fetching/verifying the exact public
+artifact (`release.py verify-downloads`). Never list an unsigned
 or privately provisioned IPA as publicly installable. No upload or shell launcher
 exists in the browser. Missing configuration shows no downloads.
 

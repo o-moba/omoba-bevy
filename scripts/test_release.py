@@ -1,7 +1,11 @@
+import contextlib
+import io
+import json
 import tempfile
 import unittest
 import zipfile
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import release
 
@@ -108,10 +112,11 @@ class ReleaseHelpers(unittest.TestCase):
             with mock.patch.dict(release.os.environ, {"PINATA_JWT": "t"}), \
                     mock.patch.object(release, "workspace_version", return_value=version), \
                     mock.patch.object(release, "dist_dir", return_value=out), \
+                    mock.patch.object(release, "dist_path", return_value=out), \
                     mock.patch.object(release, "pinata_pin", side_effect=AssertionError("re-pinned")):
                 self.assertEqual(release.command_publish(
                     mock.Mock(out=None, gateway="https://g", contour="prod", market="global",
-                              dry_run=False)), 0)
+                              rsync_target=None, dry_run=False)), 0)
 
 
     def test_android_package_name_follows_the_universal_switch(self):
@@ -758,18 +763,232 @@ class Markets(unittest.TestCase):
         self.assertEqual((closed["status"], closed["expected"]), (401, 403))
         self.assertIn("Caddyfile.ru", closed["problem"])
 
-    def test_catalog_lists_only_verified_downloads_in_the_api_schema(self):
-        receipt = {"windows": {"file": "Omoba-0.45.0-ru-windows-x64.zip", "bytes": 123, "sha256": "a" * 64,
-                               "cid": "c", "url": "https://ekza.mypinata.cloud/ipfs/c/Omoba-0.45.0-ru-windows-x64.zip"}}
-        catalog = release.release_catalog(receipt, "0.45.0", "ru", "2026-10-23T00:00:00Z")
+    def test_catalog_lists_the_ru_host_with_its_ipfs_mirror_in_the_api_schema(self):
+        """LR-23: releases.json URLs are on the RU download host, IPFS is the mirror, every entry
+        names the region, the direct channel and the owner's status label."""
+        import markets
+        ru = markets.MARKETS["ru"]
+        name = release.artifact_name("0.45.0", "windows", "prod", "ru")
+        host = {"windows": {"file": name, "bytes": 123, "sha256": "a" * 64,
+                            "url": release.download_url("ru", "0.45.0", name)}}
+        ipfs = {"windows": {"file": name, "bytes": 123, "sha256": "a" * 64, "cid": "c",
+                            "url": f"https://ekza.mypinata.cloud/ipfs/c/{name}"}}
+        catalog = release.release_catalog(host, "0.45.0", "ru", "2026-10-23T00:00:00Z", ipfs)
         self.assertEqual(len(catalog["releases"]), 1)
         entry = catalog["releases"][0]
-        self.assertEqual(set(entry), {"platform", "architecture", "version", "url", "sha256", "size_bytes",
-                                      "published_at", "instructions", "test_status"})
+        self.assertEqual(entry["url"], f"{ru.portal}{ru.downloads_path}/v0.45.0/{name}")
+        self.assertEqual(urlsplit(entry["url"]).hostname, urlsplit(ru.portal).hostname)
+        self.assertEqual(entry["mirror_url"], ipfs["windows"]["url"])
+        self.assertEqual((entry["test_status"], entry["region"], entry["channel"]), ("Открытая бета", "ru", "direct"))
         self.assertEqual((entry["platform"], entry["size_bytes"]), ("windows", "123"))
         self.assertIn("Omoba.exe", entry["instructions"])
+        # The Account API's Release schema (additionalProperties: false) knows every field.
+        schema = json.loads((release.ROOT / "account-api/docs/openapi.json").read_text())["components"]["schemas"]["Release"]
+        self.assertFalse(schema["additionalProperties"])
+        self.assertLessEqual(set(entry), set(schema["properties"]))
+        self.assertLessEqual(set(schema["required"]), set(entry))
+        self.assertNotIn("mirror_url", schema["required"])
+        # account-api/src/read.rs: every required field a non-empty string of at most 2000 bytes.
+        for field in schema["required"]:
+            self.assertTrue(isinstance(entry[field], str) and 0 < len(entry[field].encode()) <= 2000, field)
+        refused = {
+            "plain http": ({"windows": {**host["windows"], "url": "http://x/y"}}, None),
+            "IPFS as the primary": (ipfs, None),
+            "another version's folder": ({"windows": {**host["windows"],
+                                                      "url": release.download_url("ru", "0.44.0", name)}}, None),
+            "a mirror with other bytes": (host, {"windows": {**ipfs["windows"], "sha256": "b" * 64}}),
+            "a mirror over http": (host, {"windows": {**ipfs["windows"], "url": "http://gw/x"}}),
+        }
+        for case, (primary, mirrors) in refused.items():
+            with self.subTest(case), self.assertRaises(SystemExit):
+                release.release_catalog(primary, "0.45.0", "ru", "t", mirrors)
+        # Without a download host (global) the IPFS copies stay the links, as before.
+        global_name = release.artifact_name("0.45.0", "windows")
+        entry = release.release_catalog({"windows": {**ipfs["windows"], "file": global_name}}, "0.45.0",
+                                        "global", "t")["releases"][0]
+        self.assertEqual((entry["url"], entry["test_status"], entry["region"]),
+                         (ipfs["windows"]["url"], "playtest", "global"))
+        self.assertNotIn("mirror_url", entry)
+
+    def test_catalog_command_reads_the_host_receipt_and_the_mirror(self):
+        from unittest import mock
+        name = release.artifact_name("0.45.0", "linux", "prod", "ru")
+        with tempfile.TemporaryDirectory() as temporary:
+            out = Path(temporary) / "v0.45.0-ru"
+            out.mkdir()
+            args = mock.Mock(market="ru", out=Path(temporary))
+            with mock.patch.object(release, "workspace_version", return_value="0.45.0"), \
+                    contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()) as err:
+                (out / "ipfs.json").write_text(json.dumps({"linux": {"file": name, "bytes": 5, "sha256": "c" * 64,
+                                                                     "url": "https://gw/ipfs/x/" + name}}))
+                with self.assertRaises(SystemExit) as missing:
+                    release.command_catalog(args)
+                self.assertIn("downloads.json is missing", str(missing.exception))
+                (out / "downloads.json").write_text(json.dumps({"linux": {
+                    "file": name, "bytes": 5, "sha256": "c" * 64, "url": release.download_url("ru", "0.45.0", name)}}))
+                self.assertEqual(release.command_catalog(args), 0)
+                written = json.loads((out / "releases.json").read_text())
+                self.assertEqual(written["releases"][0]["mirror_url"], "https://gw/ipfs/x/" + name)
+                self.assertIn("Открытая бета", (out / "releases.json").read_text(), "UTF-8, not escaped")
+                (out / "ipfs.json").unlink()
+                self.assertEqual(release.command_catalog(args), 0)
+                self.assertIn("no IPFS mirror for linux", err.getvalue())
+
+    def test_the_rsync_target_is_the_market_download_host_only(self):
+        from unittest import mock
+        quiet = lambda host: None  # noqa: E731
+        self.assertEqual(release.rsync_target("vds-ru:/opt/omoba-ru/downloads/", "ru", quiet),
+                         "vds-ru:/opt/omoba-ru/downloads")
+        self.assertEqual(release.rsync_target("root@omoba.ru:/opt/omoba-ru/downloads", "ru", quiet),
+                         "root@omoba.ru:/opt/omoba-ru/downloads")
+        refused = ["", None, "vds-ru", "vds-ru:downloads", "vds-ru:/", "vds-ru:/opt/../etc", "vds-ru:/a b",
+                   "vds-ru:/x;reboot", "-e sh:/x", "77.246.105.57:/opt/omoba-ru/downloads",
+                   "lobby.dev.omoba.io:/x", "app.omoba.io:/x", "registry.ekza.io:/x", "cn.omoba.io:/x"]
+        for value in refused:
+            with self.subTest(value), self.assertRaises(SystemExit):
+                release.rsync_target(value, "ru", quiet)
+        # An alias that connects to the production VPS or $DEV_IP is refused too.
         with self.assertRaises(SystemExit):
-            release.release_catalog({"linux": {**receipt["windows"], "url": "http://x/y"}}, "0.45.0", "ru", "t")
+            release.rsync_target("vds-ru:/opt/omoba-ru/downloads", "ru", lambda host: "77.246.105.57")
+        with mock.patch.dict(release.os.environ, {"DEV_IP": "203.0.113.10"}), self.assertRaises(SystemExit):
+            release.rsync_target("vds-ru:/opt/omoba-ru/downloads", "ru", lambda host: "203.0.113.10")
+
+    def test_publish_uploads_to_the_download_host_once_and_reads_every_package_back(self):
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as temporary, mock.patch.dict(release.os.environ,
+                                                                         {"OMOBA_ANDROID_UNIVERSAL": "1"}):
+            out = Path(temporary)
+            packages = []
+            for target in ("windows", "linux", "android"):
+                path = out / release.artifact_name("0.45.0", target, "prod", "ru")
+                path.write_bytes(target.encode() * 10)
+                packages.append(path)
+            served = {release.download_url("ru", "0.45.0", path.name): path for path in packages}
+            packages[1].chmod(0o600)   # a private dist file is still served readable
+            commands, staged, modes = [], [], {}
+
+            def rsync(command):
+                commands.append(command)
+                staged.extend(sorted(p.name for p in Path(command[-2]).iterdir()))
+                modes.update({p.name: p.stat().st_mode & 0o777 for p in (Path(command[-2]), *Path(command[-2]).iterdir())})
+
+            def digest(url):
+                data = served[url].read_bytes()
+                return release.hashlib.sha256(data).hexdigest(), len(data)
+            receipt = release.publish_to_host(out, packages, "0.45.0", "ru", "vds-ru:/opt/omoba-ru/downloads",
+                                              run_command=rsync, digest=digest)
+            command = commands[0]
+            self.assertEqual(command[:-2], ["rsync", "-r", "-t", "-p", "--ignore-existing",
+                                            "-e", "ssh -o BatchMode=yes -o ConnectTimeout=10"])
+            self.assertEqual((Path(command[-2]).name, command[-1]), ("v0.45.0", "vds-ru:/opt/omoba-ru/downloads/"))
+            self.assertEqual(staged, sorted(path.name for path in packages))
+            self.assertEqual(modes, {"v0.45.0": 0o755, **{path.name: 0o644 for path in packages}})
+            self.assertFalse((out / ".downloads").exists(), "the staging folder is removed")
+            self.assertEqual(set(receipt), {"windows", "linux", "android"})
+            self.assertTrue(all(entry["url"].startswith("https://omoba.ru/downloads/v0.45.0/")
+                                for entry in receipt.values()))
+            self.assertEqual(json.loads((out / "downloads.json").read_text()), receipt)
+            # Published and verified: nothing is uploaded again.
+            release.publish_to_host(out, packages, "0.45.0", "ru", "vds-ru:/x", run_command=rsync, digest=digest)
+            self.assertEqual(len(commands), 1)
+            # A rebuilt package under the same name: the host keeps the old file, the check says so.
+            packages[0].write_bytes(b"rebuilt")
+            with self.assertRaises(SystemExit) as stale:
+                release.publish_to_host(out, packages, "0.45.0", "ru", "vds-ru:/x", run_command=lambda c: None,
+                                        digest=lambda url: ("0" * 64, 7))
+            self.assertIn("never changes", str(stale.exception))
+            self.assertNotEqual(json.loads((out / "downloads.json").read_text())["windows"]["sha256"], "0" * 64)
+
+    def test_publish_dry_run_plans_the_upload_and_contacts_nothing(self):
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as temporary:
+            out = Path(temporary) / "v0.45.0-ru"
+            out.mkdir()
+            for target in ("windows", "linux"):
+                (out / release.artifact_name("0.45.0", target, "prod", "ru")).write_bytes(b"x")
+            args = mock.Mock(out=Path(temporary), gateway="https://g", contour="prod", market="ru",
+                             rsync_target="vds-ru:/opt/omoba-ru/downloads", dry_run=True)
+            printed = io.StringIO()
+            with mock.patch.object(release, "workspace_version", return_value="0.45.0"), \
+                    mock.patch.object(release, "ssh_hostname", return_value="95.163.10.20"), \
+                    mock.patch.object(release.subprocess, "run", side_effect=AssertionError("contacted")), \
+                    mock.patch.object(release.subprocess, "check_call", side_effect=AssertionError("contacted")), \
+                    mock.patch.object(release, "https_digest", side_effect=AssertionError("contacted")), \
+                    contextlib.redirect_stdout(printed):
+                self.assertEqual(release.command_publish(args), 0)
+                plan = json.loads(printed.getvalue())
+                self.assertEqual(plan["download_host"]["rsync"][-1], "vds-ru:/opt/omoba-ru/downloads/")
+                self.assertEqual(plan["download_host"]["would_verify"], [
+                    release.download_url("ru", "0.45.0", release.artifact_name("0.45.0", t, "prod", "ru"))
+                    for t in ("windows", "linux")])
+                self.assertEqual(len(plan["would_pin"]), 2)
+                self.assertFalse((out / ".downloads").exists())
+                self.assertFalse((out / "downloads.json").exists())
+                # A market with a download host needs the target, even for a dry run.
+                with mock.patch.dict(release.os.environ, {release.DOWNLOADS_TARGET_ENV: ""}), \
+                        self.assertRaises(SystemExit) as missing:
+                    release.command_publish(mock.Mock(out=Path(temporary), contour="prod", market="ru",
+                                                      rsync_target=None, dry_run=True))
+                self.assertIn("--rsync-target", str(missing.exception))
+                # The global market and the dev contour keep the IPFS-only publish.
+                printed.truncate(0)
+                printed.seek(0)
+                self.assertEqual(release.command_publish(mock.Mock(out=Path(temporary), contour="prod", market="global",
+                                                                   rsync_target=None, dry_run=True)), 0)
+                self.assertNotIn("download_host", json.loads(printed.getvalue()))
+
+    def test_verify_downloads_checks_what_the_portal_lists_byte_for_byte(self):
+        import markets
+        ru = markets.MARKETS["ru"]
+        files = {}
+        releases = []
+        for target, (platform_name, architecture) in release.CATALOG_PLATFORMS.items():
+            name = release.artifact_name("0.45.0", target, "prod", "ru")
+            data = target.encode() * 3
+            url, mirror = release.download_url("ru", "0.45.0", name), f"https://gw/ipfs/c/{name}"
+            files[url] = files[mirror] = data
+            releases.append({"platform": platform_name, "architecture": architecture, "version": "0.45.0",
+                             "url": url, "mirror_url": mirror, "sha256": release.hashlib.sha256(data).hexdigest(),
+                             "size_bytes": str(len(data)), "test_status": ru.release_label, "region": "ru",
+                             "channel": "direct"})
+
+        def digest(url):
+            if url not in files:
+                raise OSError("404")
+            return release.hashlib.sha256(files[url]).hexdigest(), len(files[url])
+        good = release.downloads_report("ru", {"releases": releases}, "x", digest)
+        self.assertTrue(good["ready"], good)
+        self.assertEqual(good["missing_platforms"], [])
+        broken = [dict(r) for r in releases]
+        broken[0]["url"] = broken[0]["mirror_url"]                  # IPFS as the primary
+        broken[1]["test_status"] = "playtest"
+        broken[2]["sha256"] = "0" * 64
+        files[broken[3]["mirror_url"]] = b"tampered"
+        report = release.downloads_report("ru", {"releases": broken}, "x", digest)
+        self.assertFalse(report["ready"])
+        problems = [" ".join(entry["problems"]) for entry in report["entries"]]
+        self.assertIn("not on the download host", problems[0])
+        self.assertIn("test_status is 'playtest'", problems[1])
+        self.assertIn("serves sha256", problems[2])
+        self.assertIn("mirror", problems[3])
+        missing = release.downloads_report("ru", {"releases": releases[1:]}, "x", digest)
+        self.assertFalse(missing["ready"])
+        self.assertEqual(missing["missing_platforms"], [release.CATALOG_PLATFORMS["macos"][0]])
+        self.assertFalse(release.downloads_report("ru", {"releases": []}, "x", digest)["ready"])
+        unreachable = release.downloads_report("ru", {"releases": releases[:1]}, "x", lambda url: (_ for _ in ()).throw(OSError()))
+        self.assertIn("failed: OSError", unreachable["entries"][0]["problems"][0])
+
+    def test_the_catalog_loads_from_the_portal_or_a_file(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary, "releases.json")
+            path.write_text('{"releases": []}')
+            self.assertEqual(release.load_catalog(str(path)), {"releases": []})
+            for bad in ('{"items": []}', "[]", " " * 131073):
+                path.write_text(bad)
+                with self.subTest(bad[:10]), self.assertRaises(SystemExit):
+                    release.load_catalog(str(path))
+        self.assertEqual(release.load_catalog("https://omoba.ru/api/releases", lambda url: b'{"releases": []}'),
+                         {"releases": []})
 
     def test_android_market_app_has_its_own_identity_and_endpoints(self):
         import importlib.util

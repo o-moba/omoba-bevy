@@ -6235,6 +6235,21 @@
           },
           "test_status": {
             "type": "string"
+          },
+          "channel": {
+            "type": "string",
+            "pattern": "^[a-z0-9_-]{1,32}$",
+            "default": "direct",
+            "description": "Build channel of the package; the game reads only its own channel's entries (LR-14, LR-68)."
+          },
+          "region": {
+            "type": "string",
+            "description": "The account region the package serves (scripts/markets.py, LR-23); passed through."
+          },
+          "mirror_url": {
+            "type": "string",
+            "format": "uri",
+            "description": "An HTTPS mirror (IPFS) of the same bytes as `url` (LR-23); passed through."
           }
         },
         "required": [

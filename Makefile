@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 
-.PHONY: compatibility-manifest compatibility-check help server server-dev practice practice-server game game2d start start-release play play-bots bots stop restart verify-task-12 verify-gameplay iphone-check iphone iphone-box android-check android android-universal check fmt fmt-check lint check-no-qa test test-scripts test-postgres release-check release-all release-publish release-local release-mac release-linux release-android release-ios release-testflight release-ci release-draft release-notes release-dev release-markets release-ru release-ru-preflight release-ru-publish showcase demo-video trailer-clips sdk-pin-check
+.PHONY: compatibility-manifest compatibility-check help server server-dev practice practice-server game game2d start start-release play play-bots bots stop restart verify-task-12 verify-gameplay iphone-check iphone iphone-box android-check android android-universal check fmt fmt-check lint check-no-qa test test-scripts test-postgres release-check release-all release-publish release-local release-mac release-linux release-android release-ios release-testflight release-ci release-draft release-notes release-dev release-markets release-ru release-ru-preflight release-ru-publish release-ru-verify-downloads showcase demo-video trailer-clips sdk-pin-check
 
 # ---------------------------------------------------------------------------
 # Match modes (TASK-22)
@@ -228,9 +228,15 @@ release-ru: ## RU market packages (macOS, Windows, Linux + RU Account API, Andro
 	OMOBA_ANDROID_UNIVERSAL=1 python3 scripts/release.py check
 	OMOBA_ANDROID_UNIVERSAL=1 python3 scripts/release.py build all --market ru $(RELEASE_FLAGS)
 
-release-ru-publish: ## Pin dist/v<version>-ru/ packages to IPFS (needs PINATA_JWT)
-	OMOBA_ANDROID_UNIVERSAL=1 python3 scripts/release.py publish --market ru
+# LR-23: the RU packages live on the RU host (Caddy serves ops/vps/ru/README.md#downloads);
+# IPFS is the mirror. The rsync target is the RU VPS alias and its downloads folder.
+RU_DOWNLOADS_TARGET ?= $(or $(RU_HOST),vds-ru):/opt/omoba-ru/downloads
+release-ru-publish: ## Upload dist/v<version>-ru/ packages to the RU download host, pin the IPFS mirror (needs PINATA_JWT), write releases.json
+	OMOBA_ANDROID_UNIVERSAL=1 python3 scripts/release.py publish --market ru --rsync-target "$(RU_DOWNLOADS_TARGET)"
 	python3 scripts/release.py catalog --market ru
+
+release-ru-verify-downloads: ## Download every package the RU portal lists (and its mirror) and check host, status and SHA-256
+	python3 scripts/release.py verify-downloads --market ru
 
 release-local: ## Build every package this computer can (macOS, iPhone archive, Linux via Docker, Android if SDK)
 	python3 scripts/release.py build all $(RELEASE_FLAGS)
