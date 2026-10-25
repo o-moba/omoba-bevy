@@ -92,7 +92,7 @@ flowchart LR
 ## ADR-003: Markets are a compile-time build axis
 
 - **Date:** 2026-10-23 (`428ccac`, `feat(market): add build-time markets …`); reached `dev` through PR #107 on 2026-10-24. Recorded retrospectively.
-- **Status:** Accepted. `global` and `ru` can be packaged. `cn` is blocked until its servers and sign-in providers exist.
+- **Status:** Accepted. `global` and `ru` can be packaged. `cn` is blocked until its servers and sign-in providers exist. Amended by ADR-025: clients will bind a runtime region in one app per platform; server processes keep the compile-time market.
 
 **Context.** The Russian and Chinese builds need a free game with no Ekza ecosystem and no payments, their own servers, and in Russia a local sign-in provider and data residency. The global build has to keep working unchanged. A run-time switch could let a regional build reach payments or Ekza hosts.
 
@@ -116,7 +116,7 @@ flowchart LR
 ## ADR-004: Sign in with VK ID goes through the Account API and reaches the device-key account
 
 - **Date:** 2026-10-23 (Account API, `428ccac`) to 2026-10-24 (in-game flow `6bd67dd` and its signature test `7198913`; merged to `dev` in PR #107). Recorded retrospectively.
-- **Status:** Accepted, partly implemented. The code and tests (with a loopback VK stand-in) are done. The real VK ID app, RU hosting and DNS are owner steps that have not been done yet. The RU portal reaches the Account API on loopback ([ops/vps/ru/README.md › Topology](../../ops/vps/ru/README.md#topology)).
+- **Status:** Accepted, partly implemented. The code and tests (with a loopback VK stand-in) are done. The real VK ID app, RU hosting and DNS are owner steps that have not been done yet. The RU portal reaches the Account API on loopback ([ops/vps/ru/README.md › Topology](../../ops/vps/ru/README.md#topology)). Amended by ADR-025: equal first-party sign-in options next to the website, in-app unlink, and Sign in with Apple for the international region only.
 
 **Context.** The RU market needs a familiar sign-in for the website and for new devices. ADR-001 already defines the account. Personal data of Russian players must be stored in Russia.
 
@@ -168,7 +168,7 @@ sequenceDiagram
 ## ADR-005: Free markets gate whole plugins and close endpoints; the Ekza SDK stays a dependency
 
 - **Date:** 2026-10-23 (merged into `feat/market-profiles` and into `dev` through PR #107 on 2026-10-24). Recorded retrospectively.
-- **Status:** Accepted.
+- **Status:** Accepted. Amended by ADR-025: the unified client registers the union of plugins and gates region-specific systems with run conditions; Ekza clients are never constructed in the RU region.
 
 **Context.** A build for a free market (ru, cn) must contact no Ekza host, show no Ekza, Studio, wallet or market UI and sell nothing. It must keep the shipped heroes, avatars, weapons and gameplay. Scattering checks through the code would be hard to audit.
 
@@ -378,10 +378,11 @@ sequenceDiagram
 - Workers freeze their roster. Fresh players cannot join a running match, and a disconnected participant can reclaim their seat.
 - Public roles admit only signed commands (`omoba.gameplay.command.v1`).
 - Reward policy `public-casual-v1`: approved bot-filled games give 50 XP for a win and 25 XP for a loss and do not change rating. Rating comes only from eligible bot-free PvP, which gives 150/100 XP. Newcomers (fewer than 20 rated matches) are matched separately, and the compatible rating spread is bounded at 300 points.
+- Since LR-08 the player chooses the queue, and the queue decides rating, not the head count: only **Ranked** (ten humans of one rated cohort, never bot-filled) can be rated. **Casual PvP** (every cohort together, bots after 30 s, possibly ten humans) and **vs Bots** settle as `public-casual-v1` with reasons `casual_queue` and `allocated_bots`. The lobby and the store share one cohort policy (`career-store/src/matchmaking.rs`), so the lobby never forms a rated roster the store rejects.
 - Public admission limits per process: at most 512 endpoint records, 64 probes per second, 120 packets per second per endpoint; datagrams capped at 12 KiB and signed command payloads at 8 KiB (`docs/public-mvp.md`). These bound application work; they are not a measured DDoS capacity.
 
 **Consequences.**
-- There is one region and one coordinator, with no distributed lobby scheduling. Humans-only queues can wait when the compatible count is too small.
+- There is one region and one coordinator, with no distributed lobby scheduling. Ranked can wait when the compatible count is too small; after 5 minutes it offers to also search Casual PvP (owner default O-1, [match-progression.md](../match-progression.md#low-population-ranked-policy)).
 - Parties live in one server process's memory (`docs/party.md`).
 - Signed commands authenticate the client but do not encrypt the traffic or authenticate the server.
 
@@ -407,7 +408,7 @@ sequenceDiagram
 ## ADR-017: Hero Supporter is cosmetic, server-authorized and fail-closed
 
 - **Date:** 2026-09-16 (0.20.0-rc.5); monthly Hero naming and recognition on 2026-10-15. Recorded retrospectively.
-- **Status:** Accepted. Real provider rollout (Apple sandbox and production, a real Solana payment) is still pending.
+- **Status:** Accepted. Real provider rollout (Apple sandbox and production, a real Solana payment) is still pending. Amended by ADR-025: seven non-renewing Apple tier products replace the monthly subscription, which was never sold.
 
 **Decision.**
 - No purchase changes damage, health, XP, rating, matchmaking, visibility or hitboxes.
@@ -476,7 +477,7 @@ sequenceDiagram
 - There are four levels, Recruit, Regular, Veteran and Elite, with one name in code, on the wire and in the UI (D4). Elite is the bots as they were before the levels existed.
 - Lower levels are more cautious: they retreat earlier, never dive towers and focus less. Reaction time and aim are never slowed.
 - The practice level applies to both teams (D2). The picker's first-run default will be Regular (D3). Until the picker exists every host defaults to Elite, and `OMOBA_BOT_DIFFICULTY` is a tester override, read only by desktop offline practice and by a standalone server that fills with bots (`boot_bot_difficulty` in `server/src/bots.rs`).
-- Online play stays Elite: Quick-match fill, the lobby's Server bot match (D1), the party "Play vs bots" and takeover of a disconnected human. Lobby and match workers never read `OMOBA_BOT_DIFFICULTY`, and the lobby removes it from the worker environment (`server/src/match_pool.rs`, `env_remove`).
+- Online play stays Elite: Casual PvP fill (Quick match before LR-08), the lobby's Server bot match (D1), the party "Play vs bots" and takeover of a disconnected human. Lobby and match workers never read `OMOBA_BOT_DIFFICULTY`, and the lobby removes it from the worker environment (`server/src/match_pool.rs`, `env_remove`).
 - Personas, when built, always carry a visible AI label.
 - Competitive rating stays PvP-only and bot-free.
 
@@ -526,7 +527,7 @@ sequenceDiagram
 ## ADR-024: RU monetization: YooKassa donations buy monthly tiered auras
 
 - **Date:** 2026-10-24 (owner decision). Implementation: LR-67 in [../plans/launch-readiness.md](../plans/launch-readiness.md).
-- **Status:** Accepted; implementation pending. Amends ADR-003 (the RU preset had `supporter` off) and ADR-005 (RU stays without Ekza but is no longer free of payments).
+- **Status:** Accepted; implementation pending. Amends ADR-003 (the RU preset had `supporter` off) and ADR-005 (RU stays without Ekza but is no longer free of payments). Amended by ADR-025: providers are chosen per region × channel, and the tier counts provider-neutral points.
 
 **Context.** The owner wants the Russian launch to earn money from players who support the project, through the Hero Supporter auras players already see on each other, and to grow from that revenue. Russian players cannot use Apple or Solana checkout here; the owner already runs YooKassa for another product.
 
@@ -543,9 +544,78 @@ sequenceDiagram
 
 ---
 
+## ADR-025: One app per platform; the account's region chooses servers, sign-in and payments; tiers are provider-neutral points
+
+- **Date:** 2026-10-24 (owner decisions). Implementation: LR-67 (amended), LR-68 and LR-69 in [../plans/launch-readiness.md](../plans/launch-readiness.md).
+- **Status:** Accepted; implementation pending. Amends:
+  - **ADR-003:** clients bind a runtime region, and servers keep the compile-time market.
+  - **ADR-004:** adds Sign in with Apple (international), equal first-party sign-in options, and unlink.
+  - **ADR-005:** the unified client registers the union of plugins and gates region-specific systems with run conditions.
+  - **ADR-017:** Apple sells seven non-renewing tier products instead of a monthly subscription.
+  - **ADR-024:** providers per region × channel, and the tier counts points across providers.
+
+  ADR-002 is kept: the region card chooses a whole baked endpoint set per (region, contour) and is not a server picker.
+
+**Context.**
+- **One app.** The owner wants one production app per platform for Russia and the rest of the world. Today the market is a build axis (`shared/src/market.rs`): RU has its own Android package and no iOS (`scripts/markets.py`; `docs/markets.md:161`).
+- **Russian sign-in law.** Under 149-FZ art. 8 part 10, owners who are RF citizens or Russian entities may authorize users located in Russia only by a Russian phone number, ЕСИА, ЕБС, or a system owned by an RF citizen without other citizenship or by a Russian entity. KoAP 13.55 fines apply from 2026-07-07; the amounts come from secondary sources (https://pravo.ru/news/264596/).
+- **Russian data law.** 152-FZ art. 18 part 5, as worded from 2025-07-01, forbids recording, storing and similar operations on RF citizens' data in databases located outside Russia.
+- **Apple.**
+  - Web-acquired items may be used in the app only if they are also sold as IAP (3.1.3(b)). Outside the US, the app may not steer to other payment methods (3.1.1(a), 3.1.3).
+  - Social login on the primary account requires an equivalent login (4.8).
+  - In-app deletion and in-app revocation of social credentials are required (5.1.1(v)).
+  - Since 2026-04-01, Russian users can pay only from an existing Apple balance (https://support.apple.com/126891).
+- **Google Play.**
+  - Play has exempted payments from users in Russia from its billing requirement since 2022-08-02 (https://support.google.com/googleplay/android-developer/answer/11950272).
+  - Play requires in-app and web account deletion.
+- **International contour.** No global production Account API exists yet (`docs/architecture/system.md:181`).
+
+**Decision.**
+- **The account decides the region.** A production client carries `global` and `ru`. Each process binds one region; the player confirms it on first launch, and a switch needs a cold start.
+  - Each region has its own profile, folders, endpoints, database and legal documents.
+  - Accounts are never merged or replicated.
+  - Server processes stay single-region at compile time.
+- **Channels are a build property** (`app_store | google_play | rustore | direct`) and decide the purchase surface:
+  - iOS sells StoreKit tier products and never shows a web payment link;
+  - Play links to the RU portal for RU accounts only;
+  - direct builds link to the region portal.
+- **Sign-in.**
+  - RU signs in through omoba.ru (VK ID, OK, Mail.ru), with recovery code and pairing offered as equal first-party options.
+  - International uses Sign in with Apple (no scopes, gated for Russian signals, R2b).
+  - Every channel can unlink a social identity in the app.
+  - Only HMAC(`sub`) is stored.
+- **Tier points.**
+  - A grant carries `tier_points`: YooKassa 1 ₽ = 1 point; Apple products 100 … 10000; Solana 0 unless O-27.
+  - The tier is the sum over covering grants, computed by one shared function and re-checked by the server.
+  - Any active grant unlocks the base styles.
+- **Apple.**
+  - Seven non-renewing 30-day products ($0.99 … $99.99).
+  - The account's region verifies; event ids are built from facts only.
+  - First purchases come from device delivery, restore from server-side history, refunds from a daily poll.
+  - No production notification URL until R2b and counsel.
+- **Deletion.** Every store channel has in-app deletion, and each portal has a `/delete` page.
+
+**Consequences.**
+- **Startup and network.**
+  - Region-scoped startup moves behind `region::bind`, and lazy global accessors are removed.
+  - Every HTTP client built in this repository goes through a host policy per (region, contour).
+  - Ekza SDK clients are never constructed in RU, and a network-audit boot proves RU-only traffic.
+- **One binary for both regions.** Ekza must be unreachable in RU at runtime, not compiled out. The RU-locked build remains for servers, CI and M0 until LR-68 R3.
+- **Release trains.** Every protocol or gameplay bump is a two-region train, servers first. The compatibility reply carries an optional `region` without a protocol bump.
+- **Apple traffic.** The RU host calls Apple's server API, and Apple history returns other regions' transactions for shared Apple IDs. Both regions drop these in memory, which is listed for counsel (O-30).
+- **Revenue.**
+  - Apple revenue from RUS storefronts will be close to zero.
+  - RU-account iOS sales, if any, come from non-RUS storefronts, and their payout is open (O-24).
+  - RU revenue stays mainly on YooKassa, through direct downloads and Play.
+- **Legal exposure** of Sign in with Apple, of our own first-party sign-in, and of RF citizens' data on the global contour depends on O-22, O-23 and O-30.
+
+**Links:** [../plans/launch-readiness.md](../plans/launch-readiness.md) (LR-67, LR-68, LR-69), [../markets.md](../markets.md), [../supporter.md](../supporter.md), [identity-and-accounts.md](identity-and-accounts.md), [system.md](system.md), [protocols.md](protocols.md), [../plans/game-directory.md](../plans/game-directory.md).
+
+---
+
 ## Proposals not yet decided
 
-- **Game directory and server routing** (concept, 2026-10-13, not scheduled). Clients would fetch one HTTPS directory document per contour instead of using a compiled lobby address, and pick a lobby whose compatibility contract matches their own (phases D0 to D4). The document is proposed to be Ed25519-signed with a public key baked into the client. Where it is hosted (a portal route or a static signed file on the game host) is undecided. See [../plans/game-directory.md](../plans/game-directory.md). If adopted, it would amend ADR-002 and ADR-013.
+- **Game directory and server routing** (concept, 2026-10-13, not scheduled). Clients would fetch one HTTPS directory document per contour instead of using a compiled lobby address, and pick a lobby whose compatibility contract matches their own (phases D0 to D4). The document is proposed to be Ed25519-signed with a public key baked into the client. Where it is hosted (a portal route or a static signed file on the game host) is undecided. See [../plans/game-directory.md](../plans/game-directory.md). If adopted, it would amend ADR-002 and ADR-013. LR-68 (ADR-025) needs D0 for the global lobby (a DNS name instead of `77.246.105.57`, O-31) and serves the D1 document per region.
 - **Architecture backlog R18 to R23**: separating actor identity, controller and transport presence; an unattended-match resource policy; brush geometry in map data; splitting skill execution; catalog order; UI reuse. See [../REFACTORING.md](../REFACTORING.md#todo--prioritized-separately-reviewable-slices).
 
 ## Open questions

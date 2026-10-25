@@ -260,6 +260,11 @@ pub enum CareerAction {
     FindMatch {
         request_id: u64,
         preference: crate::match_service::MatchPreference,
+        /// A Ranked search that also searches Casual PvP, keeping its place
+        /// in Ranked (LR-08). Omitted when false, so the signed bytes of a
+        /// protocol 11 request without it are unchanged.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        also_casual: bool,
     },
     SupporterStatus {
         request_id: u64,
@@ -326,6 +331,9 @@ pub enum CareerRequest {
     FindMatch {
         request_id: u64,
         preference: crate::match_service::MatchPreference,
+        /// See [`CareerAction::FindMatch`].
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        also_casual: bool,
     },
     SupporterStatus {
         request_id: u64,
@@ -394,9 +402,11 @@ impl CareerRequest {
             Self::FindMatch {
                 request_id,
                 preference,
+                also_casual,
             } => CareerAction::FindMatch {
                 request_id: *request_id,
                 preference: *preference,
+                also_casual: *also_casual,
             },
             Self::SupporterStatus { request_id } => CareerAction::SupporterStatus {
                 request_id: *request_id,
@@ -546,6 +556,40 @@ mod tests {
             original,
             authorized_signing_bytes(20, "nonce", 1, &CareerAction::Social { request: changed })
         );
+    }
+
+    /// LR-08: a protocol 11 FindMatch has no `also_casual`. It decodes as
+    /// false, and the signed bytes the server rebuilds from it are the bytes
+    /// the old client signed, so its signature still verifies.
+    #[test]
+    fn find_match_without_the_casual_offer_keeps_its_signed_bytes() {
+        use crate::match_service::MatchPreference;
+        let legacy = r#"{"action":"find_match","request_id":7,"preference":"quick"}"#;
+        let action: CareerAction = serde_json::from_str(legacy).unwrap();
+        assert_eq!(
+            action,
+            CareerAction::FindMatch {
+                request_id: 7,
+                preference: MatchPreference::Casual,
+                also_casual: false,
+            }
+        );
+        assert_eq!(serde_json::to_string(&action).unwrap(), legacy);
+        let signed = |action: &CareerAction| authorized_signing_bytes(20, "nonce", 1, action);
+        // The exact bytes a protocol 11 client signed for this request.
+        let legacy_bytes = format!(r#"["omoba.career.request.v1",20,"nonce",1,{legacy}]"#);
+        assert_eq!(signed(&action), legacy_bytes.as_bytes());
+
+        let offer = CareerRequest::FindMatch {
+            request_id: 7,
+            preference: MatchPreference::Ranked,
+            also_casual: true,
+        }
+        .account_action()
+        .unwrap();
+        let bytes = serde_json::to_string(&offer).unwrap();
+        assert!(bytes.contains(r#""preference":"humans_only","also_casual":true"#));
+        assert_ne!(signed(&offer), legacy_bytes.as_bytes());
     }
 
     #[test]

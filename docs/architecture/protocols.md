@@ -248,7 +248,7 @@ sequenceDiagram
     participant L as Lobby process
     participant D as Allocation directory
     participant W as Worker process
-    C->>L: career authorized find_match {request_id, preference}
+    C->>L: career authorized find_match {request_id, preference, also_casual?}
     L->>L: queue and form units by preference and party
     L->>D: create dir (0700), write manifest.json atomically (0600)
     L->>W: spawn OMOBA_MATCH_EXECUTABLE (default: lobby's own executable) with OMOBA_SERVER_ROLE=match
@@ -284,7 +284,7 @@ sequenceDiagram
 
 | File | Writer | Shape / rule |
 | --- | --- | --- |
-| `manifest.json` | lobby, once | `{version:1, allocation_id:<32 hex>, endpoint, bind, preference, humans:[{profile_id, session_id, team}], join_deadline_ms}`. ≤ 16 KiB. 1–10 unique humans (unique profiles and sessions), ≤ 5 per team. `humans_only` needs exactly 10. `bot_practice` is one party (≤ party size) on one team. Join deadline is allocation time + 180 s |
+| `manifest.json` | lobby, once | `{version:1, allocation_id:<32 hex>, endpoint, bind, preference, humans:[{profile_id, session_id, team}], join_deadline_ms}`. ≤ 16 KiB. 1–10 unique humans (unique profiles and sessions), ≤ 5 per team. `humans_only` (Ranked) needs exactly 10. `bot_practice` is one party (≤ party size) on one team. Only `humans_only` runs `release` rules; `quick` (Casual PvP, 1–10 humans) and `bot_practice` run `practice` (`Manifest::match_mode`). Join deadline is allocation time + 180 s |
 | `status.json` | worker heartbeat, at most once per second. The lobby writes `failed` on spawn failure or on exit without a status | `{allocation_id, server_epoch, heartbeat_ms, phase: ready\|forming\|running\|settling\|finished\|failed\|recovering, result_id, ends_by_ms?}`. `ready` until someone joins, then `forming`; `settling` while the result or abandonment is not yet settled. A recovering worker reports its origin epoch. `ends_by_ms` (Unix ms, only while `running`) is when the match ends at the latest: the duration cap or, while no human is connected, the abandoned-match reaping (`ServerRuntime::latest_match_end`). Read only when ≤ 4 KiB and its `allocation_id` matches |
 | `cancel.json` | the lobby (refused once the status is `running` or `settling`), or the worker when an allocated member cancels before the round starts | content `true`; presence = cancelled |
 | `worker.log`, `outbox/` | worker | logs, durable results |
@@ -308,8 +308,14 @@ Timers (`match_pool.rs`, worker side in `match_service.rs`):
 
 **Lobby → client.** The handoff goes out as `CareerView.match_service`:
 
-- `MatchServiceView::Assigned{allocation: MatchAllocation{allocation_id, endpoint, preference, team, human_count, bot_count, rated (humans == 10), join_deadline_ms}, in_match?}`;
-- otherwise `Waiting`, `Allocating` or `Failed{code}` (`queue_full`, `already_queued`, `capacity_busy`, `worker_spawn_failed`, `profile_has_another_session`, `allocation_cancelled_or_expired`).
+- `MatchServiceView::Assigned{allocation: MatchAllocation{allocation_id, endpoint, preference, team, human_count, bot_count, rated (preference == Ranked), join_deadline_ms}, in_match?}`;
+- otherwise `Waiting{preference, humans, needed, elapsed_secs, bot_fill_after_secs, capacity_wait, searching?, casual_offer_after_secs?, also_casual?}`, `Allocating` or `Failed{code}` (`queue_full`, `already_queued`, `capacity_busy`, `worker_spawn_failed`, `profile_has_another_session`, `allocation_cancelled_or_expired`, `ranked_party_cohort`).
+
+**Queues (LR-08).** `MatchPreference` keeps its protocol 11 wire names: `humans_only` is Ranked, `quick` is Casual PvP, `bot_practice` is vs Bots. Everything LR-08 adds is additive (`serde(default)`, skipped when empty), so protocol 11 peers keep working and the protocol stays 11:
+
+- `find_match.also_casual` (only sent when true): a Ranked search that also searches Casual PvP. Omitted, the signed `omoba.career.request.v1` bytes are those an older client signed. The lobby honours it only after `casual_offer_after_secs`.
+- `Waiting.searching`: entries searching this queue, every cohort included (`None` for vs Bots). `casual_offer_after_secs`: Ranked only, 300. `also_casual`: the lobby also searches Casual PvP for this entry (for a party, once every member asked).
+- `Failed{ranked_party_cohort}`: a Ranked party whose members are not one rated cohort; the client shows its own copy (`queue.failed.<code>`), an older client the code.
 
 The client validates the endpoint (`persistence::validate_game_server_addr`), sends `SessionUiCommand::ConnectAllocated`, and re-sends its retained `join` once it is authenticated on the worker (`client/src/match_service.rs`).
 

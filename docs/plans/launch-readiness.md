@@ -80,17 +80,17 @@ Area: hosting/deployment · **blocker** · M · ops (owner buys the VPS and sets
   - The release gate `docs/release-gate-checklist.md` dates from April and is stale. The only current check is runbook step 6 (`docs/markets.md:139-141`).
 - **Requirement:** Postgres, the lobby with its workers, the Account API and the portal run on a host in Russia. Each service restarts on its own after a crash or a reboot, and RU packages connect to it.
 - **Acceptance:**
-  - [ ] `make release-ru-preflight` prints `ready:true`, and `compatibility -- check lobby.omoba.ru:4000 …` exits 0 against the lobby and one worker.
-  - [ ] `ops/vps/ru/omoba-portal-ru.service` exists, with `Restart=always`, memory caps and a dedicated user.
-  - [ ] The lobby and Account API units have `After=`/`Wants=postgresql.service`.
-  - [ ] A reboot test brings everything up with no manual step.
-  - [ ] A bootstrap script or section installs and verifies:
+  - [ ] `make release-ru-preflight` prints `ready:true`, and `compatibility -- check lobby.omoba.ru:4000 …` exits 0 against the lobby and one worker. Needs the host: release checklist rows S6–S8.
+  - [x] `ops/vps/ru/omoba-portal-ru.service` exists, with `Restart=always`, memory caps and a dedicated user.
+  - [x] The lobby and Account API units have `After=`/`Wants=postgresql.service`.
+  - [ ] A reboot test brings everything up with no manual step. The test is `ops/vps/ru/ru_host.py reboot-check --apply` (simulated in `scripts/test_ru_host.py`); the real run needs the host (checklist row S9).
+  - [x] A bootstrap script or section installs and verifies (`ops/vps/ru/ru_host.py bootstrap`, proven against a fake Ubuntu host and its SQL against real PostgreSQL; the first real run is on the RU host):
     - PostgreSQL 16+ with `und-x-icu`
     - Caddy
-    - firewall open only for UDP 4000, the arena range and TCP 443
+    - firewall open only for UDP 4000, the arena range and TCP 443 (plus SSH)
     - key-only SSH
   - [x] A public lobby with an unset or loopback public host and a non-loopback bind exits with a clear error (unit test).
-  - [ ] A written RU release checklist replaces the April gate. For each platform it covers:
+  - [x] A written RU release checklist (`ops/vps/ru/release-checklist.md`) replaces the April gate. For each platform it covers:
     - clean install and first run in Russian
     - VK sign-in
     - a bot match and the casual and ranked queues
@@ -99,7 +99,7 @@ Area: hosting/deployment · **blocker** · M · ops (owner buys the VPS and sets
     - the incompatible-server prompt
 
     The result is stored in `docs/progress` for every release.
-  - [ ] An RU client plays a server bot match and a 2-client casual match, and the history shows on `omoba.ru`.
+  - [ ] An RU client plays a server bot match and a 2-client casual match, and the history shows on `omoba.ru`. Needs the host: checklist rows P3 and P4.
 - **Depends on:** — (owner checklist: VPS and DNS)
 
 #### LR-02 — Portal reaches the Account API with its key and the real client IP
@@ -254,15 +254,15 @@ Area: matchmaking/modes · **blocker** · M · code (owner sets the policy)
   - Searching, draft and loading show the queue and a Rated/Unrated badge.
   - The owner's low-population ranked policy (O-1) is recorded in `docs/match-progression.md`.
 - **Acceptance:**
-  - [ ] Distinct Ranked and Casual variants exist. Old clients' Quick/HumansOnly either keeps working on the wire or receives update-required (LR-14).
-  - [ ] Unit tests:
+  - [x] Distinct Ranked and Casual variants exist. Old clients' Quick/HumansOnly either keeps working on the wire or receives update-required (LR-14). Done: `MatchPreference::{Casual, Ranked}` keep the wire names `quick`/`humans_only`; every new field is additive, so protocol 11 stays.
+  - [x] Unit tests:
     - 10 humans in Casual → unrated
     - 10 humans in Ranked → rated
     - Ranked never bot-fills
-  - [ ] One newcomer and one veteran in Casual after 30 s get one allocation with 2 humans.
-  - [ ] A party {1000 newcomer, 1400 veteran} plus 8 solo players never yields a rated manifest the store rejects.
-  - [ ] Frontend QA captures in en and ru show the three choices and the rated badge.
-  - [ ] `docs/features.md` and `docs/public-mvp.md` describe the shipped modes, and the orphan key is either used or removed.
+  - [x] One newcomer and one veteran in Casual after 30 s get one allocation with 2 humans.
+  - [x] A party {1000 newcomer, 1400 veteran} plus 8 solo players never yields a rated manifest the store rejects.
+  - [ ] Frontend QA captures in en and ru show the three choices and the rated badge. UI-tree tests cover both languages; the native captures need an unlocked screen.
+  - [x] `docs/features.md` and `docs/public-mvp.md` describe the shipped modes, and the orphan key is either used or removed.
 - **Depends on:** O-1, O-2
 
 #### LR-09 — Arena capacity measured and sized on the RU host
@@ -660,14 +660,14 @@ Area: monetization · **launch scope** (owner request 2026-10-24) · L · code +
   - A complete, battle-tested YooKassa integration exists in the owner's vibe-piano project (one-time payments, «Чеки от ЮKassa», webhook re-reads, 23-hour idempotent replay, refunds); its rules are listed below.
 - **Model (owner decisions 2026-10-24):**
   - Russian players donate on the RU portal: tiers **100, 250, 500, 1000, 2500, 5000, 10000 ₽** or a custom amount (min 100 ₽, max 100 000 ₽).
-  - Each successful donation is a grant valid for **30 days** from payment, recorded with its amount in kopecks.
-  - The player's tier is the **sum of donations whose 30-day window covers now** ("monthly donation"): ≥100 **Rose** (pink), ≥250 **Jade** (green), ≥500 **Azure** (blue), ≥1000 **Crimson** (red), ≥2500 **Prism I** (rainbow shimmer), ≥5000 **Prism II** (faster shimmer, sparkles), ≥10000 **Prism III** (fastest shimmer, crown ring). Names are working names; the owner may rename them. A player paying 100 ₽ every month stays Rose; 1000 ₽ every month stays Crimson.
+  - Each successful donation is a grant valid for **30 days** from payment, recorded with its amount in kopecks and its **tier points** (1 point per whole ruble paid: `amount_minor / 100` rounded down, recomputed after partial refunds).
+  - The player's tier is the **sum of tier points of the grants whose 30-day window covers now** ("monthly donation"): ≥100 **Rose** (pink), ≥250 **Jade** (green), ≥500 **Azure** (blue), ≥1000 **Crimson** (red), ≥2500 **Prism I** (rainbow shimmer), ≥5000 **Prism II** (faster shimmer, sparkles), ≥10000 **Prism III** (fastest shimmer, crown ring). Names are working names; the owner may rename them. A player paying 100 ₽ every month stays Rose; 1000 ₽ every month stays Crimson. Points are provider-neutral: in M0 only YooKassa grants carry points; Apple tier products add fixed points later (LR-69); Solana grants carry 0 points unless O-27 decides otherwise.
   - The player wears any style up to the current tier, or hides the aura. Every player in a match sees it; bots never wear one.
-  - Global keeps Solar/Lunar/Verdant through Apple and Solana, unchanged.
+  - Solar, Lunar and Verdant stay base styles unlocked by any active grant of any provider (unchanged rule); the tier styles need points. Global Apple and Solana are unchanged in M0; LR-69 replaces the monthly Apple product.
 - **Requirement:**
-  - **Market:** RU `supporter` feature on, with the payment provider list `[yookassa]`; global `[apple, solana]`. The provider list is a market property in `shared/src/market.rs`, `scripts/markets.py` and the portal `market-profile.mjs`. The Account API refuses YooKassa settings in global builds and Apple/Solana settings in RU builds. RU clients register `SupporterPlugin` (panel and world rendering) but no StoreKit bridge.
-  - **Wire:** `AuraStyle` gains the seven tier styles with a protocol bump to 12 (policy in `wire_enums.rs`); `PROTOCOL_VERSION`, golden tests and `docs/release-compatibility.md` updated. Client and server ship together (section 7, O-12).
-  - **Account API (portal migration 009):** provider `yookassa` in the supporter CHECKs; `amount_minor` on grants (NULL for older providers); a durable attempt table (request key, provider idempotence key persisted before the POST, provider payment id, amount, RUB, frozen receipt snapshot, accepted offer version, status `created|charging|submitted|succeeded|canceled|failed`, lease, timestamps) and a refund table; grants for the new tables in `ops/grants.sql`.
+  - **Market:** RU `supporter` feature on, with the payment provider list `[yookassa]`; global `[apple, solana]`. The provider list is a market property in `shared/src/market.rs`, `scripts/markets.py` and the portal `market-profile.mjs`. The Account API refuses YooKassa settings in global builds and Apple/Solana settings in RU builds. RU clients register `SupporterPlugin` (panel and world rendering) but no StoreKit bridge. The provider list becomes per region × channel in LR-68/LR-69. Until LR-69 the RU Account API keeps refusing Apple and Solana settings.
+  - **Wire:** `AuraStyle` gains the seven tier styles with a protocol bump to 12 (policy in `wire_enums.rs`); `PROTOCOL_VERSION`, golden tests and `docs/release-compatibility.md` updated. Client and server ship together (section 7, O-12). `SupporterGrantSummary` gains `tier_points`; `SupporterStatus` gains `tier_points` and `tier_until` (end of the current tier from a sweep over active grants), in the same protocol 12.
+  - **Account API (portal migration 009):** provider `yookassa` in the supporter CHECKs; `amount_minor` on grants (NULL for other providers) and a provider-neutral `tier_points integer NOT NULL DEFAULT 0`, set only by the Account API from the provider rule (YooKassa: whole rubles after refunds); existing rows keep 0 (no environment-driven backfill); a durable attempt table (request key, provider idempotence key persisted before the POST, provider payment id, amount, RUB, frozen receipt snapshot, accepted offer version, status `created|charging|submitted|succeeded|canceled|failed`, lease, timestamps) and a refund table; grants for the new tables in `ops/grants.sql`.
     - `POST /v1/me/supporter/yookassa/checkout` `{amount_rub, receipt_email, quote, offer_version}` with an `Idempotency-Key` → `{confirmation_url}` (HTTPS only, no credentials).
     - `GET /v1/me/supporter/yookassa/payments` (recent, owner-scoped).
     - `POST /v1/supporter/yookassa/notifications` (public, through the RU ingress): never trusts the body, re-reads the payment or refund with the shop credentials, acknowledges unknown objects with 200 without an API call, answers 5xx on processing errors so YooKassa retries.
@@ -676,18 +676,550 @@ Area: monetization · **launch scope** (owner request 2026-10-24) · L · code +
     - 54-FZ: «Чеки от ЮKassa»: `receipt.customer.email` required, one item, `payment_subject: service`, `payment_mode: full_payment`, `vat_code` from `OMOBA_YOOKASSA_VAT_CODE` (1–12; 1 = без НДС), description «OMOBA — поддержка проекта (аура на 30 дней)».
     - Env: `OMOBA_YOOKASSA_SHOP_ID`, `OMOBA_YOOKASSA_SECRET_KEY`, `OMOBA_YOOKASSA_VAT_CODE`, `OMOBA_YOOKASSA_NEW_CHARGES` (exactly `1` enables new charges; reconciliation always runs), a loopback test stand-in origin for tests only. Return URL `<portal>/supporter?paid=1`.
     - Never log provider bodies (card/customer data), only `x-request-id`; amounts in kopecks without floats; the quote the browser shows must equal the server's (409 `reload` otherwise).
-  - **Entitlement:** the tier and the allowed styles are computed in one place shared by the Account API dashboard, `equip`, the career store and the server's `authorized_supporter_aura` (the server re-checks the equipped style against the tier every refresh). `months_supported` counts distinct calendar months with a donation for YooKassa grants.
-  - **Client:** new palettes for the four solid tiers; the Prism tiers animate hue per frame on their shared material (all wearers of one style shimmer in sync), with intensity growing per tier; 2D fallback colours; the aura budget (23 elements) stays, the Prism III crown counts inside it; the Supporter panel in RU shows the tier, the days left, the unlocked styles and «Поддержать на сайте» (opens `<portal>/supporter`), never an in-app purchase; aura names and panel strings in en, ru, zh-Hans.
-  - **Portal (RU):** `/supporter` with the tier cards (colour swatch and CSS preview, rainbow for Prism), a custom amount, the receipt e-mail, an offer checkbox linking `/offer`, the redirect, the return state («Проверяем оплату…», poll `me/supporter` 5 × 1.5 s, «Не оплачивайте повторно»), current tier and history; no Solana or Apple copy; prices and the offer readable without sign-in; `/supporters` recognition enabled in RU.
+  - **Entitlement:** the tier and the allowed styles come from one function: `shared::supporter::SupporterTier::for_points` plus SQL `portal.supporter_points(profile, at)`. The base styles need any active grant; each tier style needs its points. The Account API dashboard, `equip`, the career store and the server's `authorized_supporter_aura` use it, and the server re-checks the equipped style every refresh. After a first grant, the default aura is the highest unlocked style, by one rule shared by `apply_event_tx` and `career_store` (both currently hard-code `'solar'`), with one row bound (64) in both readers. `months_supported` counts distinct calendar months with a donation for YooKassa grants.
+  - **Client:** new palettes for the four solid tiers; the Prism tiers animate hue per frame on their shared material (all wearers of one style shimmer in sync), with intensity growing per tier; 2D fallback colours; the aura budget (23 elements) stays, the Prism III crown counts inside it; the Supporter panel shows the step-down (tier until date, then the next tier), the unlocked styles and the purchase surface returned by `payment_surface()` (constant in M0: `direct` → «Поддержать на сайте», which opens `<portal>/supporter`); the StoreKit bridge compiles only for `target_os = "ios"`; aura names and panel strings in en, ru, zh-Hans.
+  - **Portal (RU):** `/supporter` with the tier cards (colour swatch and CSS preview, rainbow for Prism), a custom amount, the receipt e-mail, an offer checkbox linking `/offer`, the redirect, the return state («Проверяем оплату…», poll `me/supporter` 5 × 1.5 s, «Не оплачивайте повторно»), current tier and history; no Solana or Apple copy; prices and the offer readable without sign-in; `/supporters` recognition enabled in RU. Supporter navigation, `/supporter` and `/offer` links sit behind one switch (used later by `?app=<channel>`). A public `/delete` page describes the deletion procedure.
 - **Acceptance:**
-  - [ ] Unit tests: tier thresholds and the 30-day window sum (incl. expiry and partial refunds); custom amount bounds; protocol 12 golden tests; market provider lists (RU yookassa only, global unchanged).
+  - [ ] Unit tests: tier thresholds and the 30-day window sum (incl. expiry and partial refunds); custom amount bounds; protocol 12 golden tests; market provider lists (RU yookassa only, global unchanged); points: 1 ₽ = 1 point, partial refund recomputes points, base styles need any active grant, tier styles need points; the pinned `describe` line.
   - [ ] Account API Postgres tests against a loopback YooKassa stand-in: checkout persists the key before the POST; lost-create replay under 23 h reuses the key, over 23 h goes to manual review; webhook with unknown id makes no API call; duplicate `succeeded` grants once; `canceled` after `succeeded` is ignored; refund before payment; partial and full refunds recompute the tier; the restricted portal role works.
   - [ ] Server/harness: a player with a 1000 ₽ donation equips Crimson; equipping Prism I is refused; a second client sees the aura on that hero; after expiry the aura disappears within one refresh.
-  - [ ] RU client: `SupporterPlugin` registered, StoreKit not; panel opens the portal; other players' auras render (UI-tree test; visual capture when the screen is available).
+  - [ ] RU client: `SupporterPlugin` registered, StoreKit not; panel opens the portal and reads `payment_surface()`; other players' auras render (UI-tree test; visual capture when the screen is available).
   - [ ] Portal unit and e2e tests (YooKassa stand-in): all tiers and a custom amount, quote mismatch → reload, return polling, no crypto/Solana/Apple on RU pages, global unchanged.
   - [ ] Docs: `docs/supporter.md`, `docs/markets.md`, `account-api/README.md`, OpenAPI, the RU runbook (shop settings, webhook URL `https://account.omoba.ru/v1/supporter/yookassa/notifications`, test shop), Caddy native list, ADR-024.
 - **Owner:** a YooKassa shop for an ИП or ООО (receipts for самозанятые are not covered by this design), «Чеки от ЮKassa» enabled, the VAT code confirmed, the webhook URL and events (`payment.succeeded`, `payment.canceled`, `payment.waiting_for_capture`, `refund.succeeded`) registered, a test shop for staging; a public offer (оферта) for supporter cosmetics with refund terms and the seller's requisites (ФИО, ИНН, ОГРНИП, address, e-mail, phone) published at `/offer` (draft from LR-06); a real test payment that checks the fiscal receipt before announcing.
 - **Depends on:** LR-01, LR-02, LR-04/LR-06 (offer), LR-14 (protocol bump ships with the update path)
+
+#### LR-68 — One app per platform; the account's region chooses servers, sign-in, data and payments
+Area: architecture/accounts/distribution · **blocker for the first unified store release** (R0 is inside M0) · L · code + ops + owner
+- **Now:**
+  - **Region is a compile-time build axis.**
+    - `MARKET` and `FEATURES` are constants (`shared/src/market.rs`; ADR-003).
+    - Plugin sets are fixed from `FEATURES` when the App is built (`client/src/plugins.rs:135,186,214-221`).
+    - The settings folder comes from the const market (`client/src/platform.rs:115` `config_directory_name(shared::market::MARKET, …)`).
+    - Phones cannot relaunch the process (`platform.rs:177` `CAN_RELAUNCH`).
+  - **Region-scoped state is lazy and global.**
+    - `connection_profile::active()` is `ACTIVE.get_or_init(..)` on a `static OnceLock` (`client/src/connection_profile.rs:515,528-529`). The first read locks in whatever it sees.
+    - `main` runs `connection_profile::install()`, `passport::initialize()` and `passport::initialize_store()` before `App::new()` (`client/src/lib.rs`).
+  - **Endpoints come from two systems.**
+    - The lobby, Registry and passport come from `ConnectionProfile`. The global lobby is the IP literal `77.246.105.57:4000` (`client/src/session_config.rs:34`).
+    - The Account API comes from `WebAccountApi::from_env` (`passport/src/web_account.rs`). The passport crate calls it directly (`passport/src/device_account.rs:13`).
+    - `passport` depends on `shared`, not on `client`.
+    - The Ekza SDK is an external crate with its own HTTP feature (`Cargo.toml:27`; `passport/Cargo.toml:8`).
+    - The dev contour is pinned to `*.dev.omoba.io` (`scripts/contours.py:36-41`; `validate_contour_endpoints` in `web_account.rs`).
+  - **The international region has no account backend.** Global production runs only `migrate`, and the portal answers `503 account_service_disabled` (`docs/architecture/system.md:181,198,201`).
+  - **iOS and Android identities.**
+    - iOS is global-only, and only on TestFlight (`docs/markets.md:161`; `mobile/ios/README.md`).
+    - The production phone identity is `space.ekza.omoba.beta` ("Omoba Beta", `scripts/contours.py:6`).
+    - RU Android uses `space.ekza.omoba.ru` (`scripts/markets.py`).
+    - The APK is signed with a public debug keystore (LR-24).
+  - **Sign-in.**
+    - VK ID, OK and Mail.ru only, through the website `/connect` (`client/src/career_devices.rs:1-8,24`; ADR-004).
+    - `social_identities.provider` allows only `'vk'` (`account-api/migrations/007_social_sign_in.sql`).
+    - iOS opens Safari (`mobile/ios/BrowserBridge.swift`), and `Info.plist` registers no URL scheme.
+    - The account row has no unlink action (`client/src/career.rs:1707-1729`).
+  - **Device key.** It is a file in the region folder (`client/src/career_identity.rs:23`), so it is deleted when the iOS app is uninstalled.
+  - **Existing data.** No RU-contour data exists (LR-01 is open). Russian citizens' career data (device keys, nicknames, match history) may already exist on the global contour, whose host location is unrecorded (O-30).
+- **Model (owner decisions 2026-10-24):**
+  - **One app per platform.** One production app per platform (App Store, Google Play, RuStore, direct Android and desktop) serves both regions.
+  - **Two regions.**
+    - `ru`: `https://omoba.ru`, `https://account.omoba.ru`, `lobby.omoba.ru:4000`. All data stays in Russia.
+    - `global` ("International"): `https://app.omoba.io`, `https://account.omoba.io`, and a lobby DNS name fixed in O-31 (proposed `lobby.omoba.io:4000`).
+  - **The account belongs to its region.** It is never merged or replicated across regions.
+  - **Sign-in.** RU uses the omoba.ru website (VK ID, OK, Mail.ru) next to the first-party options. International uses Sign in with Apple (R2b). Apple sign-in is never offered in RU.
+  - **Ekza** stays off in RU and is added later, one feature at a time.
+  - **Payments** depend on region × channel. iOS never links or steers to web payments (LR-69).
+- **Requirement:**
+  - **Region profile (`shared`).**
+    - `shared/src/region.rs` holds `RegionProfile`: `id`, `portal`, `account_api`, `lobby`, `zones`, `sign_in`, legal URLs (LR-06), `default_locale`, `features`, `storage_suffix`, `data_residency`. It also holds one `const REGIONS` table.
+    - It provides `bind(id)` (once per process, `OnceLock`), `active() -> Option<&RegionProfile>` and `has(Feature)`. All of these are readable from `client` and `passport`.
+    - `Market` stays as an alias for one release. `Features` gains `apple_sign_in`: global on, RU off, CN off. `scripts/markets.py` `FEATURES`, the portal `FEATURES` and the parity tests change in the same commit.
+    - `shared/regions.json` is generated from the table.
+      - `scripts/markets.py` reads it.
+      - omoba-web vendors a copy at `src/lib/regions.json`. A sync script records the omoba-bevy commit and the SHA-256, and release checks the pin on both sides.
+      - Packaging-only fields (Android identity, `blocked` reason) stay in Python.
+  - **Build channel.**
+    - `OMOBA_CHANNEL = app_store | google_play | rustore | direct` is set at compile time by the packager. The region never changes it.
+    - Every production client carries `{global, ru}`; `cn` stays blocked.
+    - Server, Account API and portal processes keep the compile-time market: one deployment serves one region.
+    - The RU-locked client build (`OMOBA_MARKET=ru`) binds `ru` at startup with no picker, for M0, CI and tests, until R3.
+  - **Binding (client).**
+    - **Union of plugins.** The App registers every plugin any region uses. Each region-specific system runs under `run_if(region::has(Feature::…))` and `run_if(region::bound_and_accepted)`. This amends ADR-005: in the unified client, region gates are run conditions, not plugin removal.
+    - **Plugin test.** A test lists the systems of the Ekza, Supporter, StoreKit and VK plugins and checks that each carries its gate.
+    - **Bind-time setup.** `connection_profile::install`, `passport::initialize`, `initialize_store`, `poll_account` and every Ekza SDK client are built in `region::on_bound()`, and Ekza clients only when `has(Ekza)`.
+    - **No lazy accessors.** `get_or_init` accessors are replaced by values set at bind time. They return `None` before bind, and a debug assertion fails on a region read before bind.
+    - **Folders.** `platform::preferences_directory` takes the bound region. Device-level paths use a separate accessor.
+    - **`ekza://` source.** It is always registered and resolves its root through `region::active()` at read time. It returns NotFound when the region has no Ekza.
+    - **Lint.** A source lint forbids `shared::market::{MARKET, FEATURES}` reads in `client/` outside the region module, and `WebAccountApi::from_env` outside the region-aware constructor.
+  - **First run.**
+    - **Order:** language → one region card with its legal links and acceptance checkbox (LR-06) → age sign (LR-07) → Home.
+    - **One Confirm** binds the region in-process (this is the first bind, not a switch). Nothing runs before it: no socket, no DNS lookup, no HTTP request.
+    - **Suggestion.** The device region RU, or a Russian time zone, suggests `ru`; otherwise `global`. The StoreKit storefront is not read before Confirm.
+    - **Card texts.** They describe servers and language, not residence (O-32). They are channel-aware.
+      - «Россия»: «Русскоязычные серверы в России · данные хранятся в России · вход через VK ID, OK, Mail.ru».
+      - "International": "Servers outside Russia · omoba.io". "Sign in with Apple" is added only on iOS, from R2b, and only when not gated.
+      - Footnote: each region keeps its own profile, friends and progress.
+  - **Switching.**
+    - Settings → Region writes `pending` to `region.json` after a confirmation.
+    - Desktop relaunches (`platform::relaunch`).
+    - Phones show a full-screen "Restart required" state that cannot be dismissed. It stops all region traffic: network plugins run only while `!switch_pending`. The new region binds on the next cold start.
+    - **Blocking.** The switch is blocked while StoreKit holds unfinished catalog transactions of the current region ("Finish the pending purchase first").
+    - Nothing is copied or merged. The other region's profile stays on disk.
+  - **Folders.**
+    - **Device root** `omoba-bevy-device[-contour]`. It holds `region.json` (`{region, pending, chosen_at, apple_tokens: {token: region}, schema}`) and device preferences (language, graphics, audio, controls). `saved_language()` reads the device root.
+    - **Region folders** keep their names: `omoba-bevy`, `omoba-bevy-ru` and their `-dev` forms. They hold the identity, enrollments, connection profile, Ekza store, match resume, profile card, legal acceptance and catalog cache.
+    - **Override.** `OMOBA_CLIENT_CONFIG_DIR` is the device root, and region folders sit under it.
+    - **Preferences migration.** On first launch `client_preferences.json` is split: device fields go to the root. When both region folders have preferences, the most recently modified file wins.
+    - **Profile migration.** If exactly one region folder exists, that region is preselected and the card shows "Your profile <nick> is here". If both exist, both are shown and nothing is preselected.
+  - **iOS identity.** The device key is also stored in the Keychain (`kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`, no iCloud sync), one entry per region and contour.
+    - A reinstall restores the profile from the Keychain and preselects that region.
+    - Apple does not guarantee that Keychain items survive uninstall, so LR-69's restore screen still covers a lost key.
+  - **Endpoints and host policy.**
+    - **Endpoint owner.** One `ConnectionProfile` per (region, contour) owns the lobby, Account API, portal and, for global only, the Registry, passport and Ekza gateways. `WebAccountApi` is built from `shared::region::active()`. Environment overrides are desktop-only and must pass the policy.
+    - **Policy table** (`validate_contour_endpoints` is generalized to (region, contour)):
+      - (`ru`, prod): allow `omoba.ru` and subdomains, plus loopback and private LAN (desktop only). Deny everything else, including `omoba.io`, `ekza.io` and `77.246.105.57`.
+      - (`global`, prod): allow `omoba.io`, `ekza.io` and the Ekza asset/IPFS gateway hosts (enumerated in R1, for example `*.mypinata.cloud`). Deny `omoba.ru`.
+      - (`global`, dev) and (`ru`, dev): allow only the `dev.omoba.io` and `dev.ekza.io` subdomains. RU on the dev contour uses the global dev servers. This exception holds on the dev contour only, which carries no real RU data.
+    - **Where it is enforced:**
+      - profile resolution;
+      - `WebAccountApi::new`;
+      - lobby and match-allocation addresses (a bare IP is accepted only if it equals the resolved lobby address);
+      - the Registry and passport setters;
+      - the release catalog and feedback (LR-14, LR-20);
+      - `platform::open_external_url`.
+    - **One builder.** Every `reqwest` client in this repository is built through one policy builder with a resolver that refuses names outside the policy. Redirects stay disabled.
+    - **Ekza SDK.** The SDK's clients cannot take the resolver. In RU they are never constructed, and the network audit proves it.
+    - **Names, not IPs.** The global lobby moves from the IP literal to its DNS name (O-31; game-directory D0). Production match workers announce a DNS name in the region zone. The D1 directory is served per region.
+  - **Sign-in, RU (all channels).**
+    - **Protocol unchanged:** enrollment → `<region.portal>/connect?code=` → VK ID, OK or Mail.ru → `omoba.social.link.v1` (ADR-004). Labels stay as they are (`devices.button.vk`, `devices.vk.*`).
+    - **Equal options (Guideline 4.8).** The RU sign-in sheet shows three options with equal prominence:
+      - «Войти через VK ID, OK или Mail.ru» (website);
+      - «Ввести код восстановления» (LR-18);
+      - «Связать с другим устройством» (pairing).
+      The last two collect no personal data.
+    - **`app_store` channel.** The website opens in `ASWebAuthenticationSession` with `prefersEphemeralWebBrowserSession = true` and the callback scheme `omoba-auth` (registered in `Info.plist` `CFBundleURLTypes`).
+      - `/connect?code=…&app=app_store` ends by redirecting to `omoba-auth://connect/done?status=ok|cancel`.
+      - Cancel and success are handled separately, and the game still confirms through the enrollment poll.
+      - The store-mode flag travels in the URL, plus a short-lived cookie with `Path=/connect`. It never sits in the portal session.
+  - **Linked sign-in and unlink (Guideline 5.1.1(v); all regions and channels).**
+    - Profile → Devices gets a "Linked sign-in" row that lists the linked VK, OK, Mail.ru or Apple identities.
+    - «Отвязать / Unlink» sends a signed `POST /v1/me/social/unlink` (domain `omoba.social.unlink.v1`) to the region's Account API.
+    - For Apple, the server also calls Apple's revoke-token endpoint.
+  - **Sign-in, international (R2b).**
+    - **Native iOS.** `ASAuthorizationAppleIDProvider` with no scopes. The nonce is random per attempt; the server stores its SHA-256 with the enrollment.
+    - **Route.** The game posts the identity token and authorization code to `POST /v1/auth/social/apple`. The request is signed by the device key with domain `omoba.social.apple.v1`, which binds the origin, enrollment id, token hash and expiry.
+    - **The international Account API:**
+      - verifies the JWT (issuer, audience = bundle id, nonce, expiry);
+      - stores only HMAC(`sub`) under `OMOBA_SOCIAL_SECRET` (portal migration 011 adds `'apple'`);
+      - keeps only the sealed refresh token, for revocation;
+      - follows ADR-004's link and switch rules and never creates a profile over HTTP.
+    - **Web.** Sign in with Apple JS (Services ID) on `app.omoba.io`.
+    - **Apple server-to-server notifications** for consent revocation and account deletion unlink the identity.
+    - **Gating.** Sign in with Apple is hidden in the client, and refused on the server with `403 region_unavailable`, when:
+      - the storefront is `RUS`;
+      - the device region is RU;
+      - the request IP is in RU according to a local GeoIP database (source, licence and update schedule recorded in the runbook).
+      Only a reason code is logged.
+  - **Servers and data.**
+    - Each region's database holds only its own accounts. There are no cross-region leaderboards, friends or parties.
+    - Apple transactions of another region, returned by Apple history calls, are dropped in memory and never written or logged (LR-69).
+    - **Compatibility reply.** `ReleaseContract` gains `#[serde(default)] region: Option<String>`. There is no protocol or handshake bump, and the reply stays at or below `MAX_PROBE_BYTES`. The client shows a diagnostic for another region's lobby. Enforcement is the host policy, because the reply does not authenticate the server (`shared/src/compatibility.rs:1-2`).
+    - **Friend codes.** They are displayed with a region prefix (`RU·nick#1234`). The `shared::career` parser accepts both forms. The client refuses a foreign-prefix code locally with a localized message. There is no server change.
+  - **Channel purchase rules.** `payment_surface(region, channel)`:
+
+    | Channel | `global` | `ru` |
+    |---|---|---|
+    | `app_store` | none (R2a); StoreKit tier products (R2b, LR-69) | StoreKit tier products (R2a, LR-69) |
+    | `google_play` | none: no purchase entry, no link | link to `omoba.ru/supporter` (Play's Russia exemption; re-checked every release; O-25) |
+    | `rustore` | n/a | none until O-26 |
+    | `direct` | link to `app.omoba.io/supporter` once the global Account API is live | link to `omoba.ru/supporter` |
+
+    - No cell links to another channel's payment method.
+    - **Portal opened from a store build.** `/connect`, devices, privacy, terms, delete and the IAP footer pages carry `?app=<channel>` in the URL. They render without Supporter navigation, without `/supporter` and `/offer` links, and without payment-method text.
+  - **Deletion.** Every store channel offers the in-app deletion request (LR-69). Each portal publishes a public `/delete` page (`omoba.ru/delete`, `app.omoba.io/delete`), which goes into Play Console's Data safety form.
+  - **Release catalog.** `GET /v1/releases` per region gains `channel` and `store_url`. Store builds get their store link, never a web download link. A protocol or gameplay bump is a two-region train: both regions' servers, then `make compatibility-check` against each lobby, then store builds.
+  - **Android identity and signing.**
+    - One package id across Play, RuStore and direct downloads (O-21).
+    - A release keystore (LR-24) is enrolled in Play App Signing as the owner's own key, so all channels share one certificate.
+    - `versionCode` is monotonic across channels.
+    - The M0 RU-locked APK and the unified APK replace each other under the shared id. Each keeps its data in its own region folder.
+  - **Phases.**
+    - **R0** (S, inside M0, no behaviour change):
+      - `shared::region` with `bind` fixed to the build market;
+      - `regions.json` plus the vendored portal copy;
+      - one endpoint owner and the lint;
+      - the `describe` line pinned to its new value.
+    - **R1** (M):
+      - `OMOBA_CHANNEL`;
+      - union plugins with run conditions;
+      - device root and `region.json`;
+      - the first-run card and migration;
+      - the restart-required switch;
+      - the host policy for (region, contour) and the resolver;
+      - the network-audit QA boot.
+    - **R2a** (L; needs LR-01, LR-42 and the international deletion intake from O-31):
+      - **iOS:** the RU sign-in sheet with equal options; `ASWebAuthenticationSession` with callback; the Keychain identity.
+      - **Accounts:** unlink; in-app deletion on store channels; `/delete` pages.
+      - **Purchases:** LR-69 for RU accounts; the Play build with the RU link.
+      - **Release:** catalog `channel`; `region` in `ReleaseContract`; friend-code prefix.
+      - The International region on iOS is device-key only, with no sign-in and no purchase surface.
+    - **R2b** (M–L; after O-22, O-23, O-31): `account.omoba.io`; Sign in with Apple native and web; international StoreKit; the global `direct` link. A production notification URL only if counsel agrees.
+    - **R3** (M, after R2a; R2b not required):
+      - App Store submission of the unified app;
+      - RU Android and desktop packages switch to the unified client;
+      - the RU-locked build is retired as a player package;
+      - RELEASING.md gets the two-region train.
+- **Acceptance:**
+  - [ ] **R0.**
+    - Market tests pass for every `Region::ALL` value through a bound-region fixture.
+    - The `regions.json` regeneration, `markets.py` parity and portal SHA-pin tests pass.
+    - The lint is clean.
+    - The RU-locked build prints the pinned new `describe` line, for example `ru (ekza off, supporter on, vk_sign_in on, apple_sign_in off)`.
+  - [ ] **Run-condition tests.**
+    - Every Ekza, Supporter, StoreKit and VK system carries its region gate.
+    - A RU QA boot records that no Ekza system ran.
+    - A region read before bind fails the debug assertion.
+  - [ ] **Network audit** (`OMOBA_QA_NET_AUDIT`), covering the app's own DNS, HTTP and UDP:
+    - nothing before Confirm;
+    - in RU, only `*.omoba.ru` and loopback while visiting Home, Collection, Profile and Supporter;
+    - in global, no `omoba.ru`.
+    - OS framework traffic (StoreKit, AuthenticationServices) is listed as out of scope.
+  - [ ] **Folder and migration tests.**
+    - Folder matrix: region × contour, including (`ru`, dev).
+    - Migration matrix: one folder, both, neither, preference conflict.
+    - The override semantics.
+    - A switch keeps both identities, and switching back restores the first.
+    - Switch → background → foreground still shows the restart screen.
+    - A switch with an unfinished current-region transaction is blocked.
+  - [ ] **Host policy tests.**
+    - RU refuses every `omoba.io`/`ekza.io` name and `77.246.105.57`.
+    - Global refuses `omoba.ru`.
+    - (`ru`, dev) allows only `*.dev.omoba.io`.
+    - A match allocation to a foreign IP is refused.
+  - [ ] **`payment_surface` tests.**
+    - Matrix test: no web link on `app_store`, or on (`global`, `google_play`).
+    - UI-tree tests of the Profile account row for every (region, channel) pair.
+  - [ ] **iOS RU sign-in.**
+    - The sheet shows website, recovery-code and pairing options with equal prominence.
+    - The `ASWebAuthenticationSession` callback closes the sheet on success and on cancel.
+    - After store-mode sign-in, a normal Safari visit to `omoba.ru/supporter` renders the page (portal e2e).
+  - [ ] **Unlink.** A UI-tree test of the unlink row in both regions. A Postgres test: unlink removes the HMAC row and keeps the profile reachable through its device key.
+  - [ ] **Sign in with Apple (R2b) Postgres tests:**
+    - wrong audience, wrong nonce, expired token and replayed token are refused;
+    - an unknown `sub` links to the current profile;
+    - a linked `sub` switches;
+    - a second Apple id on the same profile is refused;
+    - the RU deployment refuses the route;
+    - an RU IP is refused.
+    Portal unit and e2e tests for Sign in with Apple JS.
+  - [ ] **Cross-region.** Another region's lobby is diagnosed. A foreign-prefix friend code is refused. An old server without `region` is still accepted.
+  - [ ] **Ingress tests per region.** RU exposes no `/v1/auth/social/apple`. Both regions expose `/v1/me/social/unlink` and `/v1/me/deletion`.
+  - [ ] **Release catalog.** `channel` and `store_url` are present. Store builds never receive a web download URL.
+  - [ ] **Play build string audit.** No payment link in (`global`, `google_play`).
+  - [ ] **Real rounds.** Each region plays one real round on its own servers: bot match, website sign-in, second device.
+  - [ ] **Docs.** The architecture edits are made. `docs/markets.md` records the iOS decision (closes LR-66).
+- **Owner:** decisions O-21 to O-23, O-25, O-26, O-30 to O-32.
+  - DNS for `account.omoba.io` and the global lobby name.
+  - An App ID with Sign in with Apple, a Services ID and a key (R2b).
+  - A release keystore and Play App Signing with your own key.
+  - Android developer verification for the `direct` and `rustore` channels before the 2027 global rollout.
+  - A counsel opinion on 149-FZ art. 8 part 10 and 152-FZ art. 18 part 5 before R2b.
+- **Depends on:** LR-01 (RU host), LR-06 (consent), LR-18 (recovery code entry), LR-24 (signing key), LR-42 (erasure), LR-69 (R2a payments), O-31 (international deletion intake for R2a; full contour for R2b), game-directory D0
+
+#### LR-69 — iOS tier auras as Apple in-app purchases in the profile card
+Area: monetization/iOS · **blocker for the first iOS release that shows auras** · L · code + owner
+- **Now:**
+  - **StoreKit bridge.** It sells one monthly auto-renewing product. Swift rejects anything that is not `.autoRenewable` with a one-month period. Restore filters `Transaction.currentEntitlements` to that product (`mobile/ios/SupporterStoreKit.swift`).
+  - **Account API.** It has one product (`OMOBA_APPLE_PRODUCT_ID`, `account-api/src/supporter.rs:21`). An unknown token gets 403 (`:347-364`).
+  - **Reconciliation.** It walks known originals only: 16 per tick every 300 s under an advisory lock (`supporter.rs:426-434`; `account-api/src/main.rs:59`).
+  - **Verifier.** It requires `'Auto-Renewable Subscription'`, `PURCHASED` and a token (`billing/apple-verifier/verified-events.mjs:8-11`). Its `event_version` is `signedDate` (`:13`), and its `event_id` hashes the whole normalized event (`:37`). Apple re-signs on every response, so each re-read inserts a new `supporter_events` row.
+  - **Client queue.** An unverified receipt retries every 60 s, and the queue holds at most 16 receipts (`client/src/supporter_storekit.rs:150,181`).
+  - **Entitlement.** `active` is any covering grant. The default aura is hard-coded to `'solar'` in two readers (`supporter.rs:193`; `career-store/src/career_store.rs:145`). The row limits differ: 100 and 64.
+  - **Stacking is blocked** by `purchase_allowed_at` (`client/src/supporter.rs:954-966`) and by the Solana `already_supported` check.
+  - **Copy.** Swift sends English-only messages, and the UI copy says "Monthly subscription. Auto-renews…".
+  - **Apple documentation.** `Transaction.all` lists unfinished consumables, non-consumables and auto-renewable subscriptions, not non-renewing subscriptions. `Transaction.currentEntitlements` has only "the latest transaction for each non-renewing subscription" (https://developer.apple.com/documentation/storekit/transaction/currententitlements).
+  - **Privacy manifest.** `mobile/ios/PrivacyInfo.xcprivacy` declares only the file-timestamp and boot-time API reasons. It has no collected-data types.
+- **Model (owner decisions 2026-10-24):**
+  - The iOS app never links or steers to web payments.
+  - Every aura obtainable on the web and usable in the iOS app is also sold as an in-app purchase (3.1.3(b): "provided those items are also available as in-app purchases").
+  - **RU charges.** In Russia, only an existing Apple Account balance can pay. Since 2026-04-01 the balance cannot be topped up in Russia either (https://support.apple.com/126891). This is accepted.
+  - The player picks an aura in the profile card and pays a fixed price. There are no custom amounts.
+- **Requirement:**
+  - **Product type.** Seven **Non-Renewing Subscription** products, each worth 30 days from `purchaseDate`. There is no subscription group. The monthly product is removed from configuration and code.
+  - **Catalog.**
+    - `shared/src/supporter.rs` `APPLE_TIER_PRODUCTS` compiles (suffix, tier, points).
+    - Product id = `<contour bundle id>.aura.<tier>.30d`. The client takes the prefix from its contour (prod per O-21, dev `space.ekza.omoba.dev`). The server takes the bundle id from its deployment configuration.
+    - The verifier accepts the resulting list. Ids are never reused.
+
+    | Tier | Points | US base price | Suffix |
+    |---|---:|---:|---|
+    | Rose | 100 | $0.99 | `aura.rose.30d` |
+    | Jade | 250 | $2.49 | `aura.jade.30d` |
+    | Azure | 500 | $4.99 | `aura.azure.30d` |
+    | Crimson | 1000 | $9.99 | `aura.crimson.30d` |
+    | Prism I | 2500 | $24.99 | `aura.prism1.30d` |
+    | Prism II | 5000 | $49.99 | `aura.prism2.30d` |
+    | Prism III | 10000 | $99.99 | `aura.prism3.30d` |
+
+    Other storefronts use Apple's equalization, unless O-29 sets manual CIS prices. Points are never displayed.
+  - **Grants and events.**
+    - **One event per transaction:**
+      - `period_id` = `original_transaction_id` = `transactionId`;
+      - `valid_from = purchaseDate`, `valid_until = purchaseDate + 2 592 000 s`;
+      - `revoked_at = revocationDate`, `renewal_enabled = false`.
+    - **Fact-based identity.**
+      - `event_id = 'apple:tx:' + transactionId + ':' + (revocationDate ?? 'live')`;
+      - `event_version = max(purchaseDate, revocationDate ?? 0)`;
+      - `signedDate` is not used, so re-reads add no rows.
+    - **Points.** `tier_points` comes from the Account API's catalog, never from the verifier or the client.
+    - **Validation.** `VerifiedEvent::validate` requires exactly 30 days for Apple. The provider set is `apple|solana|yookassa`.
+    - **Portal migration 010** (numbered in merge order; LR-69 merges before Sign in with Apple's 011):
+      - Apple audit columns `product_id`, `storefront`, `price_milli`, `currency`;
+      - `supporter_apple_customers(app_account_token, anchor_transaction_id, last_polled_at)`;
+      - `supporter_apple_token_tombstones(app_account_token, erased_at)`, written by LR-42 erasure.
+      `PORTAL_SCHEMA` (`account-api/src/lib.rs:41`) and `ops/grants.sql` (game role: new tables, `EXECUTE` on `portal.supporter_points`) are updated with it.
+  - **Tier across providers.**
+    - Apple grants add their catalog points to LR-67's provider-neutral sum (`SupporterTier::for_points`, `portal.supporter_points`).
+    - Any active grant unlocks Solar, Lunar and Verdant (unchanged). Apple Rose therefore covers Solana Hero for 3.1.3(b).
+    - Solana stays unchanged (0 points, one active grant) unless O-27 decides otherwise.
+    - `months_supported` counts distinct UTC calendar months of `valid_from` for Apple grants.
+  - **Stacking.** Only the active-grant clause of `purchase_allowed_at` is removed. The storage, auth nonce, profile and error checks stay.
+  - **Refunds.**
+    - `REFUND`/`REVOKE`, or a refund-history hit, sets `revoked_at`. Only that grant's points go away.
+    - `REFUND_REVERSED` is handled manually.
+    - `CONSUMPTION_REQUEST` is ignored at launch.
+  - **Verification by the account's region.**
+    - **Routing.** `ApplePrepare`, `AppleVerify`, `AppleRestore` and polling go to `region.account_api`. RU runs in R2a; international from R2b.
+    - **Secrets.** The bundle id, In-App Purchase key, issuer id and environment are server secrets on each region host. The RU Account API accepts Apple settings from LR-69 on.
+    - **`apple_prepare`** returns `{app_account_token, products:[ids], environment}`, plus `product_id` (the first id) for one release for existing TestFlight clients.
+    - **`accept_apple` outcomes:**
+      - own token: credit, and the device finishes;
+      - another profile in this region: credit that owner, answer `{credited_to_other_account:true, nick}`, and the device finishes;
+      - a tombstoned (erased) token: `{credited_to_other_account:true, erased:true}`, and the device finishes;
+      - a token unknown to this region: `200 {status:"not_this_region"}`, with no write and no log. The client drops that receipt from its retry queue without finishing it, so it never counts against the 16-receipt limit.
+    - **Pending foreign transactions.** The client records `{token: region}` from `apple_prepare` in the device root. It defers foreign-region unfinished transactions without submitting them, and shows no repeated error toast.
+  - **Discovery, restore and polling.**
+    - **First purchases.** Device delivery (`Transaction.unfinished`, `Transaction.updates`) is the authoritative way first purchases are found. Finish only after the server commits.
+    - **Restore.** «Восстановить покупки» runs `AppStore.sync()`. It then sends one known signed transaction (from `currentEntitlements` or `unfinished`) as `AppleRestore` to the region API.
+      - The server calls Get Transaction History v2 (`productType=NON_RENEWABLE`, `revision` paging) and Get Refund History.
+      - It credits every catalog transaction with `purchaseDate` within 31 days, each by its own token.
+      - It drops foreign tokens in memory.
+      - The reply lists the outcome of each transaction.
+    - **Polling.** Refund history is polled once a day for every known customer whose grant `valid_until` falls in the last 120 days.
+      - The batch is `ceil(due / ticks)` under the existing advisory lock.
+      - The call budget is 1 call plus paging per customer per day, well under Apple's 10 req/s.
+      - The lag is exported as a metric.
+    - **Notifications.** No production App Store Server Notifications URL is set until R2b and counsel (O-22). If one is set later, it handles `ONE_TIME_CHARGE` and `REFUND`, and answers unknown tokens with 200 and no write.
+    - **Verifier service.** It is an HTTP loopback service, `billing/apple-verifier/server.mjs`, on Apple's `SignedDataVerifier` and `AppStoreServerAPIClient` (O-28). It runs on both region hosts.
+  - **StoreKit bridge.**
+    - It configures the seven ids and requires `.nonRenewable`.
+    - It emits `products:[{id, display_price}]` and the storefront country code.
+    - It provides `purchase(product_id, token)` and `restore()`.
+    - Errors are sent as codes, mapped to i18n keys in en, ru and zh-Hans.
+  - **Profile card UX (iOS).**
+    - **Entry.** An aura chip on the profile card, and the Profile "Aura" button, open the modal.
+    - **Header.** It shows the step-down: "Crimson until 28 Oct · then Rose until 20 Nov", or "No aura".
+    - **Grid.** 7 tier cards plus Solar, Lunar and Verdant: 2 columns on phones, 4 on tablets. Tapping a card previews it locally for free.
+    - **Card states:**
+      - Wearing: "Hide aura".
+      - Unlocked: "Wear". There is no Buy on unlocked lower tiers.
+      - Current top tier: "Wear" plus "Extend · price".
+      - Locked: "Buy {tier} · {displayPrice}". When a cheaper product reaches this tier now, a second line offers "Reach now with {product} · price".
+      - Base style: "Included with any aura". It cannot be bought.
+      - Confirming: other Buy buttons are disabled.
+      - Awaiting approval (Ask to Buy).
+      - Not available: the product did not load.
+    - **Outcome line** under every Buy. It is computed locally from the per-grant points and `valid_until` in `SupporterStatus`, for example "Prism III until 24 Nov, then Prism II until 2 Dec". It also names the receiving profile: «Для <nick> · Россия».
+    - **Disclosure** under every Buy: "30-day aura · does not renew · cosmetic only · purchases in the last 30 days add up toward higher auras". No numeric balance is shown.
+    - **RUS storefront.** A neutral note sits above the grid before any tap: "App Store purchases in your country are possible only from your Apple Account balance". Failure and cancel codes in RUS map to this note.
+    - **Results.**
+      - Toast "Credited to profile <nick>" for `credited_to_other_account`.
+      - Restore result screen: "These purchases belong to profile <nick>. Use your recovery code or sign in to get them back", with a link to recovery.
+    - **Footer:** Restore purchases, Terms, Privacy. These are store-mode variants with no payment-method text and no `/offer` link (LR-68).
+    - **No steering text.** No hard-coded string mentions donations («пожертвование»), the website, YooKassa, Solana, web ruble tier prices or currency literals. Every price is StoreKit's `displayPrice`. `supporter.store.subscription` and the monthly copy are removed.
+  - **In-app account deletion (every store channel; overrides O-15 for them).**
+    - Profile → Settings → «Удалить аккаунт / Delete account», with a confirmation that names what is lost (profile, devices, aura entitlement).
+    - It sends a signed `POST /v1/me/deletion` to the region. The server refuses the key at once and queues erasure under LR-42 (`Deleted#NNNN` tombstone, Apple token tombstone).
+    - The app says "deleted within 30 days". Manual processing behind the request is allowed.
+    - Apple sign-in tokens are revoked (R2b).
+    - Payment ledger rows are kept depersonalized for the counsel's retention period.
+    - International accounts in R2a use the deletion intake from O-31.
+  - **App Store Connect (owner).**
+    - **Prerequisites.** Gated by O-21 (identity) and O-24 (payouts) before any product is created:
+      - Paid Apps Agreement, tax and banking;
+      - Small Business Program;
+      - EU DSA trader status (O-22). If the owner will not publish trader details, the 27 EU storefronts are excluded and `docs/markets.md` records it.
+    - **Products.** The 7 products in all storefronts including Russia.
+      - Names and descriptions in en, ru and zh-Hans, for example "Crimson Aura — 30 days. Cosmetic, does not renew. Purchases in the last 30 days add up."
+      - One review screenshot each.
+      - No subscription group; promoted IAP and offer codes off.
+    - **Keys and testers.**
+      - The In-App Purchase key on each region host.
+      - Sandbox testers in the US and RU storefronts, including a zero-balance RU tester.
+    - **App Privacy:**
+      - Identifiers → User ID, linked;
+      - Purchases → Purchase History;
+      - Gameplay Content and Product Interaction;
+      - Diagnostics and Customer Support / Other User Content once LR-20 ships on iOS.
+      - No name or e-mail, and no tracking.
+      `PrivacyInfo.xcprivacy` gains matching `NSPrivacyCollectedDataTypes`.
+    - **Metadata.** The description, screenshots, What's New and IAP localizations pass the same no-steering audit.
+  - **Review notes (draft).**
+    - **Playing without login.** The game is fully playable without login. The account is a first-party device key; no name, e-mail or phone is collected.
+    - **Region choice.** First launch asks for a region.
+      - Russia: optional website sign-in (VK ID, OK, Mail.ru), with equal first-party options next to it (recovery code, device pairing). Sign in with Apple cannot be offered to users in Russia (149-FZ art. 8 part 10).
+      - International (R2b): Sign in with Apple.
+    - **Purchases.** Choose "Russia" to test in-app purchases in R2a.
+    - **Auras.** Cosmetic 30-day non-renewing purchases. Every aura usable in the app is sold in the app (3.1.3(b)), with no links or calls to action toward other purchase methods.
+    - **Restore.** Restore purchases is in the aura modal. Unlink is in Profile → Devices; deletion in Profile → Settings.
+    - **Demo access.** A recovery code for a pre-seeded RU profile, with steps.
+- **Acceptance:**
+  - [ ] **Unit tests:**
+    - catalog ids are unique per contour, and points equal the thresholds;
+    - `for_points` boundaries;
+    - step-down and outcome-line computation;
+    - "cheapest reach" selection;
+    - old `SupporterStatus` JSON still deserializes.
+  - [ ] **Verifier tests:**
+    - non-renewing is accepted;
+    - auto-renewing, an unknown product, `FAMILY_SHARED` and a missing token are rejected;
+    - `REFUND` revokes;
+    - the same transaction with two `signedDate` values yields one `event_id`.
+  - [ ] **Account API Postgres tests:**
+    - Apple Rose plus YooKassa 250 ₽ gives Jade;
+    - a refund lowers the tier;
+    - equipping Prism I with 1000 points is refused;
+    - re-polling adds no `supporter_events` row;
+    - another profile's token credits its owner;
+    - a tombstoned token finishes;
+    - an unknown token gets `not_this_region` with no row and no log;
+    - `AppleRestore` credits two same-tier purchases;
+    - the RU configuration accepts Apple settings and refuses Solana;
+    - `months_supported` counts distinct months;
+    - `PORTAL_SCHEMA` and the grants match migration 010.
+  - [ ] **Client tests.**
+    - `not_this_region` and deferred foreign receipts never fill the 16-entry queue.
+    - A region switch is blocked with an unfinished current-region transaction.
+  - [ ] **Server/harness.** An Apple Crimson grant equips Crimson. After the refund, the aura disappears within one refresh.
+  - [ ] **iOS UI-tree tests.**
+    - Every card state, including base styles, Extend only on the top tier, and the outcome line.
+    - The RUS note, the credited-to-other toast and the restore result screen.
+    - No numeric balance.
+  - [ ] **String audit** of hard-coded iOS strings, StoreKit copy, store-mode Terms and Privacy, and App Store metadata and IAP localizations (checklist).
+  - [ ] **`mobile/ios/Products.storekit`** holds the 7 products.
+  - [ ] **Sandbox matrix** recorded in `docs/progress/`:
+    - each tier;
+    - stacking (two of the same tier);
+    - Ask to Buy, cancel, declined;
+    - refund;
+    - reinstall plus restore (Keychain key present → same profile; key lost → restore result screen);
+    - a second game account on the same Apple ID;
+    - RU zero-balance note;
+    - a region switch with an unfinished transaction is blocked, and a deferred foreign transaction is credited after switching back.
+  - [ ] **RU host.** An outbound probe to the App Store Server API succeeds (sandbox). The verifier service runs on the RU host.
+  - [ ] **In-app deletion.** It blocks the key immediately. The LR-42 Postgres test leaves no rows after erasure. A Play build has both the in-app and the `/delete` path.
+  - [ ] **Docs:** `docs/supporter.md`, ADR-025, `docs/markets.md`, OpenAPI, the RU runbook (Apple key, verifier service, migration of the `OMOBA_APPLE_*` variables).
+- **Owner:**
+  - Decisions O-21, O-24 (before products are created), O-28 and O-29.
+  - O-22 (DSA trader status).
+  - App Store Connect setup and submission as listed.
+  - The retention period for payment rows from counsel.
+  - A planned response to a 4.8 rejection: name the equal first-party options; if needed, ship RU iOS with website sign-in removed and recovery code plus pairing only.
+- **Depends on:** LR-67 (migration 009, protocol 12, tier engine), LR-68 R1 (runtime region, channel), LR-01 (`account.omoba.ru`), LR-42 (erasure), LR-06 (Terms/Privacy), O-21, O-24, O-28; the international part depends on LR-68 R2b and O-31
+
+#### Documentation changes when LR-68 and LR-69 land
+The architecture pages describe what is built, so they change in the PRs that build it, not before:
+- **`docs/architecture/system.md`**
+  - **Build axes.** "Build axes: contour and market" becomes "Build axes: contour, channel and region":
+    - clients bind a runtime region; servers keep the compile-time market;
+    - add `OMOBA_CHANNEL`;
+    - add the device root `omoba-bevy-device[-contour]` next to the region folders.
+  - **Components › Game client:**
+    - endpoints come from the bound region's connection profile (`shared::region`), and desktop overrides must pass the host policy;
+    - Ekza SDK clients exist only when the region has Ekza.
+  - **Communication paths.** Add:
+    - Account API (each region) → App Store Server API (outbound HTTPS: history, refund history, transaction info);
+    - international Account API → Apple ID (R2b: token exchange and revocation);
+    - VK ID is RU only;
+    - no App Store notification path until R2b.
+  - **Production host (global market):**
+    - planned `account.omoba.io`, the deletion intake and the lobby DNS name (O-31);
+    - "host location unrecorded (O-30)".
+  - **RU host:**
+    - "accepts YooKassa settings, and Apple settings from LR-69; refuses Solana";
+    - the Apple In-App Purchase key and the Node verifier service.
+  - **Fail-closed guards.** Add the host policy per (region, contour), the policy resolver, run-condition gates, the network-audit QA boot, and the optional `region` in `ReleaseContract`.
+  - **Ingress allowlists.** Add `/v1/me/deletion`, `/v1/me/social/unlink` and the Apple restore action in both regions. `/v1/auth/social/apple` is international only.
+- **`docs/architecture/identity-and-accounts.md`**
+  - **Principles.** Add: "An account belongs to one region; an installation holds one identity per region; regions are never merged; on iOS the device key is also kept in the Keychain."
+  - **Sign in with VK ID:**
+    - equal first-party options on the same sheet (Guideline 4.8);
+    - iOS uses an ephemeral `ASWebAuthenticationSession` with the `omoba-auth` callback;
+    - labels are the same on all channels.
+  - **New section "Linked sign-in and unlink":** `omoba.social.unlink.v1`, and Apple token revocation.
+  - **New section "Sign in with Apple (international, R2b)":**
+    - random nonce, `omoba.social.apple.v1`, HMAC(`sub`), no scopes;
+    - sealed refresh token for revocation;
+    - server notifications;
+    - gating.
+  - **Signature domains.** Add `omoba.social.apple.v1`, `omoba.social.unlink.v1` and the deletion domain.
+  - **Markets, contours and database roles:**
+    - the table becomes per region;
+    - Supporter: RU = YooKassa web plus Apple on iOS; global = Solana web, plus Apple on iOS from R2b;
+    - the schema list includes portal 8–11.
+  - **Open questions.** Close "Supporter scope in free markets". Point "Global accounts" to O-31, and the global host location to O-30.
+  - **Add "Account deletion":** in-app request on store channels, `/delete` pages, LR-42 erasure, Apple token tombstones.
+- **`docs/architecture/build-and-release.md`**
+  - **Compile-time settings.** Add `OMOBA_CHANNEL`. `OMOBA_MARKET` now applies to server binaries, CI and RU-locked builds.
+  - **Build axes.** `contour × market (Flavor)` becomes `contour × channel`; production clients carry both regions.
+  - **Identities:**
+    - one production identity per platform (O-21), with the dev identity kept;
+    - one Android signing certificate across channels through Play App Signing with the owner's key;
+    - `versionCode` monotonic across channels;
+    - Android developer verification for `direct` and `rustore` before 2027.
+  - **Release flow.** The two-region train; the release catalog per region carries `channel` and `store_url`.
+  - **Platform builders › iOS:**
+    - `Products.storekit`;
+    - update `PrivacyInfo.xcprivacy` (add `NSPrivacyCollectedDataTypes`);
+    - `CFBundleURLTypes` `omoba-auth`;
+    - the Sign in with Apple capability (R2b).
+- **`docs/architecture/protocols.md`**
+  - **Current version markers.** Protocol 12 includes `SupporterGrantSummary.tier_points`, `SupporterStatus.tier_points` and `tier_until`. There is no protocol 13.
+  - **§2 Compatibility preflight.** `ReleaseContract.region` is optional (`serde(default)`), diagnostic only; enforcement is the host policy.
+  - **§6 Account API HTTP contract / Routes by exposure:**
+    - `POST /v1/me/deletion`, `POST /v1/me/social/unlink` (native, signed);
+    - `POST /v1/auth/social/apple` (native, signed, international);
+    - Sign in with Apple notifications (public, international);
+    - `NativeSupporterAction::AppleRestore`;
+    - `apple_prepare` returns `products` (plus `product_id` for one release);
+    - `accept_apple` outcomes: `credited_to_other_account`, `erased`, `not_this_region`.
+  - **§9.** "Market switches" becomes "Region and channel switches", including the `payment_surface` matrix.
+- **`docs/markets.md`**
+  - **Title and intro:** "Regions: one app, the account's region decides".
+  - **Tables.** Region rows plus a channel matrix replace the per-build platform table.
+  - **Line 161** becomes: "iOS ships as one App Store app; RU accounts use it with website sign-in or first-party sign-in and StoreKit tier products (LR-68, LR-69)."
+  - **Sign in with VK ID.** Same labels on all channels, with equal first-party options.
+  - **Adding a market** becomes "Adding a region": `shared/src/region.rs` → `regions.json` → `markets.py` and the vendored portal copy (fixes the stale `market.mjs` pointer, decisions.md open question 7).
+  - **EU storefronts.** Record their availability (O-22).
+  - **RU release runbook:**
+    - Apple key and verifier on the RU host;
+    - Play's Russia exemption re-checked each release;
+    - RU-locked packages until R3.
+- **`docs/supporter.md`**
+  - **Delivery status.** Tier points, seven non-renewing Apple products, the provider matrix per region × channel.
+  - **Monthly Hero status.** Replace the "monthly subscription" requirement with the non-renewing tier model. `months_supported` uses distinct months for YooKassa and Apple.
+  - **Payment periods and ownership:**
+    - stacking allowed for Apple and YooKassa;
+    - another profile's token credits its owner;
+    - a refund removes only that grant's points;
+    - base styles need any active grant.
+  - **Apple provider boundary:**
+    - catalog per contour;
+    - `.nonRenewable` only;
+    - fact-based `event_id`;
+    - device delivery for first purchases, `AppleRestore` through history, daily refund history;
+    - no production notification URL;
+    - error codes.
+  - **Add iOS UX rules:** no web or donation wording, `displayPrice` only, outcome line and stacking disclosure, no visible balance.
 
 ### M1 — First public weeks (self-running hardening)
 
@@ -1544,6 +2076,18 @@ M1 is about 50 engineer-weeks (six L specs plus about 19 M specs), owner items e
 | O-18 | Ranked cross-play between touch and mouse players | LR-53 |
 | O-19 | Consent model for attaching logs and crash data to feedback and crash reports | LR-20, LR-29 |
 | O-20 | When does the global market launch? This decides when the directory and global hostname work (D0/D1) is needed | LR-57 |
+| O-21 | Production app identity for the one app per platform. Default: a new id (for example `io.omoba.game`) chosen before the first public listing, before any IAP product is created and before the first public RU APK. Changing it later means a new app, lost reviews and new product ids. Android: own key uploaded to Play App Signing. | LR-68, LR-69, LR-24, LR-50 |
+| O-22 | Who owns the international contour (omoba.io, `account.omoba.io`) and the Apple developer account: the Russian ИП or ООО, or a non-Russian entity? This decides: 149-FZ art. 8 part 10 (Russian-citizen or Russian-entity owners); whether our own first-party sign-in qualifies (it needs an owner who is an RF citizen without other citizenship, or a Russian entity); 152-FZ art. 18 part 5; the public EU DSA trader details (address, phone, e-mail), or else the EU storefronts are excluded; and whether a Russian-resident operator may accept USDC on `app.omoba.io` under the digital-currency rules in force since 2026-09-01 (unverified; counsel). | LR-68, LR-69, LR-05 |
+| O-23 | Sign in with Apple at R2b: gated by Russian signals (default), not offered at all, or only after O-22 moves the contour to a foreign entity? | LR-68 |
+| O-24 | Apple payouts and tax: can the account holder receive payouts (bank country, sanctions)? Currency control, tax-agent VAT on Apple's commission, the 54-FZ position, Small Business Program eligibility. This gates product creation in App Store Connect. | LR-69 |
+| O-25 | Google Play: publish the unified app (default) with the RU YooKassa link under Play's Russia exemption and no purchase entry for global, or skip Play? Requires in-app plus web deletion and Data safety. The RU region is open to non-residents while the exemption covers users in Russia; counsel to confirm. | LR-68 |
+| O-26 | RuStore: may the RU build link to the YooKassa page, or must it use RuStore payments? A written answer from RuStore is needed before the RuStore listing. | LR-50, LR-67, LR-68 |
+| O-27 | Solana: keep 0 tier points (default; global unchanged), or give a Solana grant tier points (for example 500 = Azure), which also requires lifting the `already_supported` stacking block? | LR-67, LR-69 |
+| O-28 | Approve Apple's App Store Server Library as a production dependency of `billing/apple-verifier/`. No Apple sale can be verified without it. | LR-69 |
+| O-29 | Confirm the price ladder ($0.99 … $99.99) and the 7 product names. Optionally set manual prices in KZ, TR, AM, GE, KG and UZ at or above ruble parity (default: Apple's equalization). | LR-69 |
+| O-30 | Russian citizens' data on the global contour: where is the global host (`77.246.105.57`), and who operates it? Do existing global profiles of RF citizens need moving or erasure? Is a self-declaration on the region card enough for citizens abroad who pick International, and with what wording? Is transient receipt of RU-account Apple payloads abroad acceptable? The RKN notice (LR-05) lists every database location and any cross-border transfer. | LR-68, LR-69, LR-05 |
+| O-31 | The international contour: the global lobby DNS name (D0); a deletion intake for international accounts before R2a (a minimal `account.omoba.io` with only deletion and releases, or a signed lobby action); the full Account API and portal accounts for R2b (host, data location, operator). | LR-68, LR-69, O-20 |
+| O-32 | Is the RU region open to anyone (default yes, for example Russian-speaking players in the CIS), with cards worded by servers and language? | LR-68 |
 
 ---
 
@@ -1578,3 +2122,57 @@ single, documented setting the owner can change later.
 | — | **Legal drafts** (LR-06) also include a draft **public offer** (оферта) for supporter cosmetics at `/offer`: what is sold (a 30-day cosmetic aura, no gameplay advantage), prices, payment through YooKassa, refunds, and placeholders for the seller's requisites (ФИО, ИНН, ОГРНИП, address, e-mail, phone). Prices and the offer are readable without sign-in. | LR-06, LR-67 |
 | — | **Reserved numbers**: portal migration 009 = YooKassa supporter (LR-67); game protocol 12 = tier aura styles (LR-67). | LR-67 |
 | — | **RU domain (owner, 2026-10-24)**: the RU market lives on **omoba.ru** (registered at REG.RU, DNS there): `https://omoba.ru` = RU portal and landing (VK ID callback `https://omoba.ru/api/auth/vk/callback`, `/privacy`, `/terms`, `/offer`, `/supporter`, `/download`), `https://account.omoba.ru` = Account API (YooKassa webhook `https://account.omoba.ru/v1/supporter/yookassa/notifications`), `lobby.omoba.ru:4000` = lobby and match workers. They replaced the earlier `*.ru.omoba.io` names everywhere on 2026-10-24 (`scripts/markets.py` zone `omoba.ru`; clients, release tooling and the dev host tool treat `omoba.ru` as a production zone). New code and docs take names from `scripts/markets.py` / `shared/src/market.rs`, never literals. The global ecosystem (`omoba.io`, Ekza) is untouched; Ekza comes to RU later feature by feature (`--feature ekza=on`). | all RU specs |
+| — | **One app per platform (owner, 2026-10-24)**: production clients carry `global` and `ru`. On first launch the player confirms one region card with its legal acceptance; the suggestion comes from the device region or time zone, with no network. Switching takes effect after a cold start, with a blocking restart screen on phones. Each region keeps its own profile and folder. Servers, the Account API and the portal stay one deployment per region. | LR-68, ADR-025 |
+| — | **Build channel**: `OMOBA_CHANNEL = app_store \| google_play \| rustore \| direct`, set by the packager. It decides the purchase surface and the update link. | LR-68 |
+| — | **Purchase surface**: `app_store` = StoreKit (RU from R2a, global from R2b). `google_play` = link to `omoba.ru/supporter` for `ru` (Play's Russia exemption), none for `global`. `direct` = the region portal's `/supporter`. `rustore` = none until O-26. | LR-67, LR-68, LR-69 |
+| — | **iOS tier products**: seven Non-Renewing Subscriptions, 30 days from purchase. US base $0.99 / $2.49 / $4.99 / $9.99 / $24.99 / $49.99 / $99.99 (Rose … Prism III); other storefronts equalized. Ids are `<contour bundle>.aura.<tier>.30d`. The monthly product is retired; it was never sold. | LR-69 |
+| — | **Tier points**: the tier is the sum over covering grants. YooKassa 1 ₽ = 1 point; Apple products give their threshold; Solana gives 0 until O-27. The base styles need any active grant. Points are never displayed; stacking is disclosed in plain words. | LR-67, LR-69 |
+| — | **Apple verification**: done by the account's region. First purchases come from device delivery; restore uses the server's transaction history; refunds come from a daily refund-history poll. There is no production notification URL until R2b and counsel. A foreign region's transactions are dropped in memory. | LR-69 |
+| — | **RU sign-in**: the same labels on all channels (VK ID, OK, Mail.ru named plainly), plus a recovery code and device pairing as equal options. iOS uses an ephemeral `ASWebAuthenticationSession` with the `omoba-auth` callback. | LR-68 |
+| — | **Unlink**: Profile → Devices lists linked sign-ins, each with Unlink (VK, OK, Mail.ru, Apple). | LR-68 |
+| — | **Sign in with Apple**: international only (R2b), no scopes. It is hidden and refused for the RUS storefront, RU device region or RU IP (local GeoIP); only a reason code is logged. | LR-68 |
+| O-15 (store channels) | **In-app deletion request** in Profile → Settings on every store channel, plus a public `/delete` page on each portal (Play Data safety). The key is refused at once; erasure follows within 30 days under LR-42. `direct` builds keep the e-mail procedure until LR-42 ships. | LR-69, LR-42 |
+| — | **iOS identity**: the device key is also kept in the Keychain (this device only, no iCloud sync), so a reinstall keeps the profile. | LR-68 |
+| — | **App identity**: a new production identity (for example `io.omoba.game`, O-21) before the first public listing and before any IAP product exists. The same id is used across Play, RuStore and direct downloads, signed with one owner key enrolled in Play App Signing. | LR-68, LR-24 |
+| — | **Store-mode portal pages** (`?app=<channel>` in the URL, never in the session): no Supporter navigation, no `/supporter` or `/offer` links, no payment-method text. | LR-67, LR-68 |
+| — | **Region for players**: RU is open to anyone. Cards describe servers and language, not residence (O-32). | LR-68 |
+| — | **Reserved numbers**: portal migrations in merge order, currently 010 = LR-69 Apple tier products, 011 = Sign in with Apple. No game protocol bump for regions: `ReleaseContract.region` is an optional field; friend-code prefixes are client-side. | LR-68, LR-69 |
+
+### Rules for M0 items so they survive LR-68 (2026-10-25)
+
+LR-68 turns the compile-time market into a runtime region in one app per platform. M0 work follows these rules so it does not have to be rewritten:
+
+Rules for every item:
+- Read region values only through one accessor. Until R0 lands, that is one function in your module over `shared::market::{MARKET, FEATURES}`; R0 swaps its body for `shared::region::active()`.
+- Add no new `MARKET == Ru` branches and no host or URL literals.
+- Do not add `OnceLock::get_or_init` region state. Assume one binary may later run either region.
+
+- **LR-06 (consent):**
+  - Legal URLs (privacy, terms, offer, source, support, delete) go in the market/region table, not in screen code.
+  - Store acceptance in the region folder as `{region, doc_version, accepted_at}`.
+  - Gate traffic with one run condition, `bound_and_accepted`.
+  - Build the screen as a card that can later carry the region choice. Region and legal become one Confirm.
+- **LR-14 (update path):**
+  - The catalog URL comes from the region's `account_api`.
+  - The compatibility reply stays `ReleaseContract`, with no protocol bump for new optional fields.
+  - The catalog carries `min_release`, `update_url` and `channel` (`direct` now).
+  - The button target is chosen per (channel, platform). Never show a web download in an iOS build.
+- **LR-18 (protect progress):**
+  - In-game recovery-code entry is a first-class sign-in option. Later it sits next to the website button with equal prominence (Guideline 4.8).
+  - Keep the route in the common Account API code, not behind `vk_sign_in`.
+  - Prompt copy comes from the region's sign-in methods.
+- **LR-20 (feedback):**
+  - `POST {region.account_api}/v1/feedback` with `region` and `channel`, and no global fallback.
+  - Record what is sent (free text, version, logs on opt-in) for the App Privacy and Data safety answers.
+- **LR-22 (RU web entry):**
+  - Use only `omoba.ru` names from `scripts/markets.py`.
+  - Put one navigation switch on Supporter links, `/supporter` and `/offer`.
+  - Keep Terms and Privacy text free of payment-method details, or split those into `/offer`, so store-mode variants are cheap.
+  - Add a public `/delete` page.
+- **LR-23 (RU downloads):**
+  - `releases.json` entries carry `region` and `channel` (`direct`) next to the platform.
+  - URLs are on `omoba.ru`; IPFS stays a mirror.
+- **Packaging:**
+  - Do not publish a public RU APK under `space.ekza.omoba.ru` before O-21.
+  - Create the release keystore for LR-24 so that the same key can be enrolled in Play App Signing.
+  - Keep `versionCode` monotonic across channels.

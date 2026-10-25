@@ -144,7 +144,7 @@ fn only_the_leader_launches_and_every_launch_is_new() {
         Err(PartyError::NotLeader)
     );
     let first = state.launch(1, MatchPreference::BotPractice, now).unwrap();
-    let second = state.launch(1, MatchPreference::Quick, now).unwrap();
+    let second = state.launch(1, MatchPreference::Casual, now).unwrap();
     assert!(second.sequence > first.sequence);
     let seen = state.view(2, now, |_| false, &no_friends()).party.unwrap();
     assert_eq!(seen.launch, Some(second));
@@ -363,7 +363,7 @@ fn a_launched_party_holds_the_draft_until_its_members_join() {
         addr(2),
         ClientPacket::Party {
             command: PartyCommand::Launch {
-                preference: MatchPreference::Quick,
+                preference: MatchPreference::Casual,
             },
         },
         now,

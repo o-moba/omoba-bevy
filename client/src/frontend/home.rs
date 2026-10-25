@@ -40,8 +40,11 @@ impl Plugin for HomeScreenPlugin {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum HomeAction {
+    /// Casual PvP on the public lobby (LR-08); the server's only match
+    /// elsewhere.
     Play,
     Resume,
+    Ranked,
     BotPractice,
     OfflinePractice,
     Card,
@@ -735,9 +738,7 @@ fn spawn_home(
             let play_label = match &party_line.party {
                 Some((size, _, true)) => trf("home.play.party", &[("size", size)]),
                 Some(_) => tr("home.play.party_lobby").to_owned(),
-                None if career.view.match_service.is_some() => {
-                    tr("home.play.quick_match").to_owned()
-                }
+                None if career.view.match_service.is_some() => tr("queue.play.casual").to_owned(),
                 None => tr("home.play.play").to_owned(),
             };
             root.spawn((
@@ -838,56 +839,74 @@ fn spawn_home(
                         theme::MUTED,
                     ));
                 }
+                let row_width = if phone { 220.0 * unit } else { 280.0 };
+                let row_height = home_control_size(
+                    if phone { 44.0 * unit } else { 46.0 },
+                    platform.is_mobile(),
+                    fit,
+                );
+                let secondary = |width: f32| Node {
+                    width: Val::Px(width),
+                    height: Val::Px(row_height),
+                    justify_content: JustifyContent::Center,
+                    align_items: AlignItems::Center,
+                    column_gap: Val::Px(space::S8 * unit),
+                    border_radius: BorderRadius::all(Val::Px(radius::MD * unit)),
+                    ..default()
+                };
+                // The public lobby's other queues (LR-08): Ranked and vs Bots
+                // side by side under Casual PvP, in one row so the column
+                // keeps its height on a phone.
+                if !can_resume && career.view.match_service.is_some() {
+                    let gap = space::S8 * unit;
+                    column
+                        .spawn((
+                            Node {
+                                width: Val::Px(row_width),
+                                column_gap: Val::Px(gap),
+                                ..default()
+                            },
+                            Name::new("HomeQueues"),
+                        ))
+                        .with_children(|row| {
+                            for (label, action, id) in [
+                                ("queue.ranked", HomeAction::Ranked, "HomeRanked"),
+                                ("queue.bots", HomeAction::BotPractice, "HomeBotPractice"),
+                            ] {
+                                let button = kit::spawn_button(
+                                    row,
+                                    secondary((row_width - gap) / 2.0),
+                                    tr(label),
+                                    TextStyle::new(TextRole::Button),
+                                    ButtonKind::Secondary,
+                                    None,
+                                    action,
+                                    id.into(),
+                                    (),
+                                );
+                                if !session.is_connected() {
+                                    row.commands().entity(button).insert(Pressable {
+                                        disabled: true,
+                                        ..default()
+                                    });
+                                }
+                            }
+                        });
+                }
                 // Local practice remains available even when a server advertises
                 // matchmaking. A server bot allocation and socket-free practice
                 // are distinct choices, with different progress guarantees.
-                for (label, action, id) in [
-                    (
-                        "home.button.bot_practice",
-                        HomeAction::BotPractice,
-                        "HomeBotPractice",
-                    ),
-                    (
-                        "home.button.offline_practice",
-                        HomeAction::OfflinePractice,
-                        "HomeOfflinePractice",
-                    ),
-                ] {
-                    if action == HomeAction::BotPractice
-                        && (can_resume || career.view.match_service.is_none())
-                    {
-                        continue;
-                    }
-                    let button = kit::spawn_button(
-                        column,
-                        Node {
-                            width: Val::Px(if phone { 220.0 * unit } else { 280.0 }),
-                            height: Val::Px(home_control_size(
-                                if phone { 44.0 * unit } else { 46.0 },
-                                platform.is_mobile(),
-                                fit,
-                            )),
-                            justify_content: JustifyContent::Center,
-                            align_items: AlignItems::Center,
-                            column_gap: Val::Px(space::S8 * unit),
-                            border_radius: BorderRadius::all(Val::Px(radius::MD * unit)),
-                            ..default()
-                        },
-                        tr(label),
-                        TextStyle::new(TextRole::Button),
-                        ButtonKind::Secondary,
-                        Some(Icon::NavBot),
-                        action,
-                        id.into(),
-                        (),
-                    );
-                    if action == HomeAction::BotPractice && !session.is_connected() {
-                        column.commands().entity(button).insert(Pressable {
-                            disabled: true,
-                            ..default()
-                        });
-                    }
-                }
+                kit::spawn_button(
+                    column,
+                    secondary(row_width),
+                    tr("home.button.offline_practice"),
+                    TextStyle::new(TextRole::Button),
+                    ButtonKind::Secondary,
+                    Some(Icon::NavBot),
+                    HomeAction::OfflinePractice,
+                    "HomeOfflinePractice".into(),
+                    (),
+                );
                 column.spawn((
                     widgets::label(
                         tr("home.offline_hint"),
@@ -1204,6 +1223,16 @@ fn spawn_home_nav(
     );
 }
 
+/// The queue a Home play button searches (LR-08).
+fn queue_of(action: HomeAction) -> shared::match_service::MatchPreference {
+    use shared::match_service::MatchPreference;
+    match action {
+        HomeAction::Ranked => MatchPreference::Ranked,
+        HomeAction::BotPractice => MatchPreference::BotPractice,
+        _ => MatchPreference::Casual,
+    }
+}
+
 fn home_actions(
     mut next: ResMut<NextState<AppScreen>>,
     mut career: ResMut<CareerClient>,
@@ -1227,18 +1256,12 @@ fn home_actions(
                 session_ui.write(crate::net::SessionUiCommand::ResumeMatch);
                 next.set(AppScreen::Searching);
             }
-            HomeAction::Play | HomeAction::BotPractice if in_party => {
+            HomeAction::Play | HomeAction::Ranked | HomeAction::BotPractice if in_party => {
                 // A party plays together: the leader launches it, a member
                 // waits for the leader in the lobby.
                 if leads {
-                    let preference = match *action {
-                        HomeAction::BotPractice => {
-                            shared::match_service::MatchPreference::BotPractice
-                        }
-                        _ => shared::match_service::MatchPreference::Quick,
-                    };
                     requests.write(NetworkCommand::Party(shared::party::PartyCommand::Launch {
-                        preference,
+                        preference: queue_of(*action),
                     }));
                 } else {
                     next.set(AppScreen::Lobby);
@@ -1262,16 +1285,13 @@ fn home_actions(
                 session_ui.write(crate::net::SessionUiCommand::StartOffline);
                 next.set(AppScreen::HeroSelect);
             }
-            HomeAction::Play | HomeAction::BotPractice => {
+            HomeAction::Play | HomeAction::Ranked | HomeAction::BotPractice => {
                 // Backing out of the practice picker restores the saved server first.
                 if session.is_offline() {
                     session_ui.write(crate::net::SessionUiCommand::LeaveMatch);
                 }
 
-                matchmaking.preference = match *action {
-                    HomeAction::BotPractice => shared::match_service::MatchPreference::BotPractice,
-                    _ => shared::match_service::MatchPreference::Quick,
-                };
+                matchmaking.preference = queue_of(*action);
                 next.set(AppScreen::HeroSelect);
             }
             HomeAction::Card => next.set(AppScreen::Card),
@@ -1913,6 +1933,137 @@ mod tests {
                 .resource::<Messages<NetworkCommand>>()
                 .is_empty()
         );
+    }
+
+    /// LR-08: the public lobby's Home offers the three queues, Casual PvP as
+    /// the main button with Ranked and vs Bots beside each other, in the
+    /// active language; each button searches its own queue, and a party
+    /// leader launches the party into it.
+    #[test]
+    fn the_public_lobby_offers_ranked_casual_and_vs_bots() {
+        if crate::i18n::testing::isolated(
+            "frontend::home::tests::the_public_lobby_offers_ranked_casual_and_vs_bots",
+        ) {
+            return;
+        }
+        use crate::i18n::{I18nPlugin, LocaleId};
+        use crate::ui::test_id::harness;
+        use shared::match_service::MatchPreference;
+        let home = |locale: &str, public: bool| {
+            let mut app = harness::kit_app();
+            app.add_plugins((bevy::state::app::StatesPlugin, I18nPlugin::default()))
+                .init_state::<AppScreen>()
+                .init_resource::<Assets<Image>>()
+                .init_resource::<super::super::preview::AvatarPreview>()
+                .init_resource::<CareerClient>()
+                .init_resource::<ClientSession>()
+                .init_resource::<ProfileCard>()
+                .init_resource::<AvatarThumbnails>()
+                .init_resource::<crate::party::PartyClient>()
+                .init_resource::<crate::match_service::MatchServiceClient>()
+                .insert_resource(crate::ui::UiPlatform(crate::platform::UiProfile::Desktop))
+                .add_message::<NetworkCommand>()
+                .add_message::<crate::net::SessionUiCommand>()
+                .add_ui_action::<HomeAction>()
+                .add_systems(Update, home_actions.after(UiSet::Dispatch));
+            app.world_mut()
+                .resource_mut::<Locale>()
+                .set(LocaleId::parse(locale).unwrap());
+            app.world_mut()
+                .resource_mut::<CareerClient>()
+                .view
+                .match_service = public.then_some(shared::match_service::MatchServiceView::Idle);
+            app.world_mut()
+                .resource_mut::<ClientSession>()
+                .set_state_for_test(ClientConnectionState::Connected);
+            app.add_systems(Startup, spawn_home);
+            app.update();
+            app
+        };
+        let text_of = |app: &mut App, id: &str| -> String {
+            let entity = harness::find(app.world_mut(), id).unwrap_or_else(|| panic!("no {id}"));
+            let mut texts = vec![];
+            let mut stack = vec![entity];
+            while let Some(entity) = stack.pop() {
+                if let Some(text) = app.world().get::<Text>(entity) {
+                    texts.push(text.0.clone());
+                }
+                if let Some(children) = app.world().get::<Children>(entity) {
+                    stack.extend(children.iter());
+                }
+            }
+            texts.join(" ")
+        };
+        for (locale, casual, ranked, bots) in [
+            ("en", "CASUAL PVP", "Ranked", "vs Bots"),
+            ("ru", "ОБЫЧНЫЙ PVP", "Рейтинговый", "Против ботов"),
+        ] {
+            let mut app = home(locale, true);
+            assert_eq!(text_of(&mut app, "HomePlay"), casual, "{locale}");
+            assert_eq!(text_of(&mut app, "HomeRanked"), ranked, "{locale}");
+            assert_eq!(text_of(&mut app, "HomeBotPractice"), bots, "{locale}");
+            for id in ["HomePlay", "HomeRanked", "HomeBotPractice"] {
+                let button = harness::find(app.world_mut(), id).unwrap();
+                assert!(
+                    !app.world()
+                        .get::<Pressable>(button)
+                        .is_some_and(|p| p.disabled),
+                    "{id}"
+                );
+            }
+        }
+        for (id, queue) in [
+            ("HomeRanked", MatchPreference::Ranked),
+            ("HomeBotPractice", MatchPreference::BotPractice),
+            ("HomePlay", MatchPreference::Casual),
+        ] {
+            // Each press leaves Home for hero select.
+            let mut app = home("en", true);
+            harness::press(app.world_mut(), id);
+            app.update();
+            assert_eq!(
+                app.world()
+                    .resource::<crate::match_service::MatchServiceClient>()
+                    .preference,
+                queue,
+                "{id}"
+            );
+        }
+        // No public lobby: one Play button, no queues to pick.
+        let mut app = home("en", false);
+        assert!(harness::find(app.world_mut(), "HomeRanked").is_none());
+        assert!(harness::find(app.world_mut(), "HomeBotPractice").is_none());
+        assert_eq!(text_of(&mut app, "HomePlay"), "PLAY");
+        // A party leader launches the whole party into the chosen queue.
+        let mut leader = home("en", true);
+        leader
+            .world_mut()
+            .resource_mut::<crate::party::PartyClient>()
+            .view = shared::party::PartyView {
+            you: 1,
+            party: Some(shared::party::PartyInfo {
+                party_id: 4,
+                leader: 1,
+                members: Vec::new(),
+                launch: None,
+            }),
+            invites: Vec::new(),
+            online: Vec::new(),
+        };
+        harness::press(leader.world_mut(), "HomeRanked");
+        leader.update();
+        let launches: Vec<_> = leader
+            .world_mut()
+            .resource_mut::<Messages<NetworkCommand>>()
+            .drain()
+            .filter_map(|command| match command {
+                NetworkCommand::Party(shared::party::PartyCommand::Launch { preference }) => {
+                    Some(preference)
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(launches, [MatchPreference::Ranked]);
     }
 
     #[test]

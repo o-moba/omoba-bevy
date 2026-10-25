@@ -12,6 +12,27 @@ pub const MAX_RATING_SPREAD: i32 = 300;
 pub const MAX_RATING: i32 = 5000;
 pub const ELO_K: i32 = 32;
 
+/// The one rated cohort policy (LR-08): `candidate` belongs to a cohort whose
+/// lowest rating is `low`'s, in the same newcomer bracket and at most
+/// [`MAX_RATING_SPREAD`] above it. The career queue, the public lobby's Ranked
+/// search and the store's rated-start check all use it.
+pub fn fits_cohort(low: &ProfileSummary, candidate: &ProfileSummary) -> bool {
+    candidate.newcomer() == low.newcomer()
+        && candidate.rating >= low.rating
+        && rating_distance(low.rating, candidate.rating) <= MAX_RATING_SPREAD as i64
+}
+
+/// These profiles form one rated cohort: one newcomer bracket and at most
+/// [`MAX_RATING_SPREAD`] between the lowest and the highest rating. An empty
+/// set is no cohort.
+pub fn same_cohort<'a>(profiles: impl IntoIterator<Item = &'a ProfileSummary>) -> bool {
+    let profiles: Vec<_> = profiles.into_iter().collect();
+    let Some(low) = profiles.iter().copied().min_by_key(|p| p.rating) else {
+        return false;
+    };
+    profiles.iter().all(|p| fits_cohort(low, p))
+}
+
 #[derive(Clone, Debug)]
 pub struct WaitingPlayer {
     pub player_id: u64,
@@ -230,21 +251,11 @@ impl Matchmaker {
         let compatible = self
             .waiting
             .iter()
-            .filter(|low| {
-                low.profile.newcomer() == entry.profile.newcomer()
-                    && low.profile.rating <= entry.profile.rating
-                    && rating_distance(low.profile.rating, entry.profile.rating)
-                        <= MAX_RATING_SPREAD as i64
-            })
+            .filter(|low| fits_cohort(&low.profile, &entry.profile))
             .map(|low| {
                 self.waiting
                     .iter()
-                    .filter(|candidate| {
-                        candidate.profile.newcomer() == entry.profile.newcomer()
-                            && candidate.profile.rating >= low.profile.rating
-                            && rating_distance(low.profile.rating, candidate.profile.rating)
-                                <= MAX_RATING_SPREAD as i64
-                    })
+                    .filter(|candidate| fits_cohort(&low.profile, &candidate.profile))
                     .count()
             })
             .max()
@@ -286,12 +297,7 @@ fn oldest_feasible_cohort(waiting: &[WaitingPlayer], needed: usize) -> Option<Ve
     for low in waiting {
         let mut candidates: Vec<_> = waiting
             .iter()
-            .filter(|entry| {
-                entry.profile.newcomer() == low.profile.newcomer()
-                    && entry.profile.rating >= low.profile.rating
-                    && rating_distance(low.profile.rating, entry.profile.rating)
-                        <= MAX_RATING_SPREAD as i64
-            })
+            .filter(|entry| fits_cohort(&low.profile, &entry.profile))
             .collect();
         if candidates.len() < needed {
             continue;
@@ -779,5 +785,26 @@ mod tests {
             queue.reserve_match(17),
             Err(QueueError::InvalidTeamSize)
         ));
+    }
+
+    /// LR-08: one cohort policy for the queue, the lobby and the store.
+    #[test]
+    fn one_cohort_is_one_newcomer_bracket_within_the_spread() {
+        let newcomer = profile(1, 1000, 0);
+        let veteran = profile(2, 1000, NEWCOMER_MATCHES);
+        let edge = profile(3, 1000 + MAX_RATING_SPREAD, 0);
+        let beyond = profile(4, 1001 + MAX_RATING_SPREAD, 0);
+        assert!(same_cohort([&newcomer, &edge]));
+        assert!(same_cohort([&edge, &newcomer]), "order does not matter");
+        assert!(!same_cohort([&newcomer, &beyond]));
+        assert!(!same_cohort([&newcomer, &veteran]));
+        assert!(!same_cohort(std::iter::empty::<&ProfileSummary>()));
+        assert!(fits_cohort(&newcomer, &edge));
+        assert!(!fits_cohort(&edge, &newcomer), "below the cohort's low");
+        // The party of the LR-08 report: a 1000 newcomer and a 1400 veteran.
+        assert!(!same_cohort([
+            &newcomer,
+            &profile(5, 1400, NEWCOMER_MATCHES)
+        ]));
     }
 }

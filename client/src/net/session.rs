@@ -1858,7 +1858,7 @@ mod tests {
         flow.allocation = Some(shared::match_service::MatchAllocation {
             allocation_id: "handoff-test".into(),
             endpoint: arena_address.clone(),
-            preference: shared::match_service::MatchPreference::Quick,
+            preference: shared::match_service::MatchPreference::Casual,
             team: shared::map::Team::Green,
             human_count: 1,
             bot_count: 9,
