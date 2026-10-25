@@ -115,6 +115,13 @@ A market's legal table (`shared/src/market.rs` `Market::legal`, `scripts/markets
 The global and CN markets have none of these, so their game shows no card and no
 About page, and their README is unchanged.
 
+The portal's table (omoba-web `MARKET_LEGAL`) also carries two portal-only URLs:
+`offer` (`omoba.ru/offer`, LR-67) and `delete` (`omoba.ru/delete`, O-15): the public
+account-deletion page, readable without sign-in, which describes the manual e-mail
+procedure of the privacy policy until deletion ships in the game (LR-42, LR-69) and is
+the URL for Play's Data safety form. The game's table gains `delete` with the in-app
+deletion request (LR-69).
+
 **First launch (game).** A market with a `version` shows a card before anything
 else can be used: the documents open in the browser, the age sign and the
 language switch are on it, and **Continue** stays disabled until the player ticks

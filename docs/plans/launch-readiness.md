@@ -593,6 +593,7 @@ Area: landing/portal/packages · **major** · M · code (the owner approves the 
   - [x] `scripts/test_release.py` asserts the RU README is in Russian and includes the support e-mail, policy URLs and age sign. The real support e-mail waits for the owner (LR-21); until then `build` prints a note and the README names the portal.
   - [x] The RU Linux player tarball has no `omoba-account-api`. The RU servers are the separate bundle `release.py build server --market ru` (`ops/vps/ru/README.md#server-bundle`), the only file `ru_host.py ship` accepts.
   - [x] The global landing and README are unchanged. The omoba.io landing is not touched; the global and dev READMEs are pinned byte for byte in `scripts/test_release.py`.
+  - [x] A public `/delete` page (section 7, rules for LR-22; O-15). Code done (2026-10-25): omoba-web serves `omoba.ru/delete` without sign-in, in ru, en and zh, from the portal's legal table (portal-only `delete`, like `offer`; global and cn 404). It describes the manual e-mail procedure of the privacy draft (subject, nickname with tag, owner check, device keys refused once confirmed, erasure within 30 days, anonymised results); the address is a placeholder until LR-21. `tests/ru-landing.e2e.mjs`, `tests/market-profiles.e2e.mjs`, `tests/legal.test.mjs`. Needs owner: the support e-mail, counsel's check with the policy (LR-04), the URL in Play's Data safety form (LR-69).
 - **Depends on:** LR-04, LR-07, LR-08, LR-21, LR-23
 
 #### LR-23 — RU-hosted downloads and public release labels
