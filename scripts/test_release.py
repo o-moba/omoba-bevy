@@ -771,6 +771,19 @@ class Markets(unittest.TestCase):
         with self.assertRaises(SystemExit):
             release.release_catalog({"linux": {**receipt["windows"], "url": "http://x/y"}}, "0.45.0", "ru", "t")
 
+    def test_the_client_reads_the_catalog_platform_names(self):
+        """LR-14: the game finds its own package in releases.json by these names."""
+        import re
+        source = (release.ROOT / "client/src/update.rs").read_text()
+        table = source[source.index("const CATALOG_PLATFORMS"):source.index("const MISMATCH_REFRESH")]
+        client = dict(re.findall(r'\("([a-z]+)", "([a-z0-9_]+)"\)', table))
+        self.assertEqual(set(client.values()), {platform for platform, _ in release.CATALOG_PLATFORMS.values()})
+        for _, architecture in release.CATALOG_PLATFORMS.values():
+            # The client maps Rust's aarch64 to arm64; a universal package matches any.
+            self.assertIn(architecture, {"arm64", "x86_64", "universal"})
+        self.assertIn('pub const UNIVERSAL: &str = "universal";',
+                      (release.ROOT / "passport/src/release_catalog.rs").read_text())
+
     def test_android_market_app_has_its_own_identity_and_endpoints(self):
         import importlib.util
         spec = importlib.util.spec_from_file_location("android_build", release.ROOT / "mobile/android/build.py")

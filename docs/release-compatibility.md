@@ -17,9 +17,20 @@ These revisions are deliberately maintained API contracts, not a claim that a ve
 
 ## User-visible behavior
 
-A correlated valid report unlocks normal transport/authentication. A mismatch reports the specific category and stops automatic reconnect; Retry or a different server can run a new check. Settings show game/server release labels and verified/incompatible status. A four-second timeout says verification is unavailable: it does not claim a protocol mismatch or compatibility. Existing bounded reconnect behavior remains available for a disconnected match.
+A correlated valid report unlocks normal transport/authentication. A mismatch stops automatic reconnect and is read by its direction (LR-14, `shared::compatibility::mismatch_side`):
 
-Unanswered/legacy servers never get a silent compatibility bypass. Therefore **deploy the server first**, then distribute 0.41.0 clients. Existing clients retain the old admission path on the new server and are not retroactively certified by this handshake. A pre-0.41.0 server may still be protocol-compatible, but cannot verify the new client and will not admit it through the new client's gate. The currently deployed 0.40.1 Beta must be upgraded before distributing 0.41.0 clients.
+- **Update required** when the server runs a newer release (or the release labels cannot tell): Home replaces Play with a download button that opens the portal's download page for this platform, and names the newest catalog release. The iPhone build says to update through the App Store or TestFlight instead.
+- **Servers updating** when this game is newer than the server and not below its stated minimum: clients ship before the server, so Home keeps checking every 30 s and connects once the server is switched.
+
+Settings show game/server release labels, verified/incompatible status and the differing category (protocol, catalogue, map, gameplay). A four-second timeout says verification is unavailable: it does not claim a protocol mismatch or compatibility. Existing bounded reconnect behavior remains available for a disconnected match.
+
+### Update notice and release catalog (LR-14)
+
+Since LR-14 a report may carry an optional `update` object: `min_release` (the server's own release) and `url` (`<portal>/download`, from the `OMOBA_PORTAL_ORIGIN` compiled into the server build). It is additive: older clients ignore the field, older servers never send it, and a server includes it only while the reply still fits the request. Like the rest of the report it is unauthenticated, so the client drops a notice with an unreadable release or a link that is not plain HTTPS, and opens a notice link only when it lies on the client's own trusted portal. Otherwise it builds `<portal>/download?platform=<platform>` itself. A report for an earlier attempt (stale nonce) is still refused whole.
+
+The client also reads the market's release catalog (`GET /v1/releases`, `omoba_passport::release_catalog`) over its compiled HTTPS Account API at boot and after an update-required mismatch (at most once a minute). A malformed or oversized catalog is refused. Entries with an unreadable version or a non-HTTPS link are skipped, and a catalog whose newest entry is not newer than the running game offers nothing. A newer entry for the platform shows the **Update available** banner until **Later**. The release order and the player notice are in [RELEASING.md](RELEASING.md#updates-and-contract-changes-lr-14).
+
+Unanswered/legacy servers never get a silent compatibility bypass. Therefore, for the 0.41.0 introduction of this check, **the server was deployed first**, then 0.41.0 clients were distributed. Later contract changes follow the LR-14 order in [RELEASING.md](RELEASING.md#updates-and-contract-changes-lr-14): stage and verify the server, ship the clients, notify players, then switch the servers. Existing clients retain the old admission path on the new server and are not retroactively certified by this handshake. A pre-0.41.0 server may still be protocol-compatible, but cannot verify the new client and will not admit it through the new client's gate. The currently deployed 0.40.1 Beta must be upgraded before distributing 0.41.0 clients.
 
 ## Release commands
 
@@ -47,8 +58,8 @@ Exit codes: 0 verified compatible, 2 confirmed mismatch, 3 unavailable/invalid i
 1. Freeze source; decide which compatibility revisions change. Run `make check` (matrix, nonce/size/rate, UDP admission and lifecycle regressions included).
 2. Build client/server artifacts and keep their manifests and checksums. Compare manifests.
 3. Start the candidate server in staging, probe it with the candidate client manifest, and run the normal signed admission/reconnect/gameplay smoke. Also test a deliberate mismatched manifest: it must exit 2.
-4. Under deployment authorization, update lobby and worker binary source together. Probe both roles. Retain prior artifacts and manifests.
-5. Publish mobile builds only after the live endpoint verifies compatibility. Record the manifests, probe JSON, source commits and artifact checksums.
+4. For a contract change, publish the client packages and the release catalog, and post the player notice, before the switch ([RELEASING.md](RELEASING.md#updates-and-contract-changes-lr-14)). Then, under deployment authorization, update lobby and worker binary source together. Probe both roles. Retain prior artifacts and manifests.
+5. Publish store builds (TestFlight) once the staged endpoint verifies compatibility. Record the manifests, probe JSON, source commits and artifact checksums.
 6. Before rollback, probe/compare the rollback server with every client version still supported. Do not roll a 0.41 client back onto an unverified 0.40 server. A rollback that changes the contract needs a matching client or another compatible endpoint.
 
 ## Bounds and trust

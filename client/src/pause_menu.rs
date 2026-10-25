@@ -2073,6 +2073,10 @@ fn sync_settings_server_addr_label(
             next.push('\n');
             next.push_str(&detail);
         }
+        if let Some(reason) = crate::net::compatibility_reason(&session) {
+            next.push('\n');
+            next.push_str(reason);
+        }
     }
     if let Ok(mut text) = label_q.single_mut() {
         if text.0 != next {

@@ -66,9 +66,11 @@ impl PublicTransport {
         if self.compatibility_probes >= MAX_PROBES_PER_SECOND {
             return None;
         }
-        let reply = shared::compatibility::response(
+        // LR-14: the report names the oldest admitted release and the update page.
+        let reply = shared::compatibility::response_with_update(
             bytes,
             &shared::compatibility::ReleaseContract::current(),
+            Some(&shared::compatibility::UpdateNotice::current()),
         )?;
         self.compatibility_probes += 1;
         Some(reply)
@@ -328,6 +330,11 @@ mod tests {
             let reply = gate.compatibility_reply(address(1), &request, now).unwrap();
             assert!(reply.len() <= request.len());
             assert_eq!(probe.accept(&reply), Some(client.clone()));
+            // LR-14: the report names the oldest admitted release (this server's).
+            assert_eq!(
+                probe.accept_report(&reply).unwrap().update,
+                Some(shared::compatibility::UpdateNotice::current())
+            );
             assert!(gate.endpoints.is_empty());
         }
         assert!(

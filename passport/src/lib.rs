@@ -9,6 +9,7 @@ pub mod community;
 pub mod device_account;
 pub mod entitlements;
 pub mod humanoid;
+pub mod release_catalog;
 pub mod sponsorship;
 pub mod store;
 pub mod supporter_account;

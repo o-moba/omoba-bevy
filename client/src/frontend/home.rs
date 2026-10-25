@@ -54,6 +54,10 @@ enum HomeAction {
     Server,
     AcceptInvite(u64),
     DeclineInvite(u64),
+    /// Opens the update page (LR-14).
+    Update,
+    /// "Later" on the update-available banner.
+    DismissUpdate,
 }
 
 #[derive(Component)]
@@ -295,6 +299,8 @@ struct HomeSignature {
     invite: Option<(u64, String)>,
     /// Party size and leader, when in a party.
     party: Option<(usize, String, bool)>,
+    /// What the update path offers (LR-14, `crate::update`).
+    update: Option<crate::update::UpdateOffer>,
     /// The locale generation: a language change rebuilds the screen.
     locale: u32,
     /// Phone menu scaling settles after the window exists; rebuild once it
@@ -315,6 +321,7 @@ fn signature(
     let profile = career.view.profile.as_ref();
     HomeSignature {
         resume_available: false,
+        update: None,
         locale: locale.map_or(0, Locale::generation),
         ui_scale_bits: ui_scale.to_bits(),
         viewport_bits: (viewport.x.to_bits(), viewport.y.to_bits()),
@@ -386,13 +393,21 @@ pub fn last_match_line(result: &shared::career::MatchResult, profile_id: Option<
 
 /// Shared status line: the home header and the picker header both use it.
 pub(crate) fn connection_line(session: &ClientSession) -> (String, Color) {
-    if let Some(issue) = session.compatibility_issue {
-        let key = if issue == shared::compatibility::CompatibilityIssue::Unavailable {
-            "net.compatibility.unverified_short"
-        } else {
-            "net.compatibility.incompatible_short"
-        };
-        return (tr(key).to_owned(), color::TEXT_DANGER);
+    use crate::net::CompatibilityVerdict;
+    match session.compatibility_verdict() {
+        Some(CompatibilityVerdict::Unverified) => {
+            return (
+                tr("net.compatibility.unverified_short").to_owned(),
+                color::TEXT_DANGER,
+            );
+        }
+        Some(CompatibilityVerdict::UpdateRequired) => {
+            return (tr("update.pill.required").to_owned(), color::TEXT_DANGER);
+        }
+        Some(CompatibilityVerdict::ServersUpdating) => {
+            return (tr("update.pill.servers_updating").to_owned(), theme::GOLD);
+        }
+        None => {}
     }
     match session.state() {
         ClientConnectionState::Connected => (tr("home.connection.online").to_owned(), theme::JADE),
@@ -420,6 +435,7 @@ fn spawn_home(
     windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
     resume: Option<Res<crate::net::recovery::ResumeMatchState>>,
     connection: Option<Res<crate::connection_profile::ActiveConnection>>,
+    update: Option<Res<crate::update::ClientUpdate>>,
 ) {
     let can_resume = resume.as_ref().is_some_and(|resume| resume.saved.is_some());
     let connection = connection.as_deref();
@@ -468,6 +484,22 @@ fn spawn_home(
         ui_scale_value,
         viewport,
     );
+    let offer = update.as_ref().and_then(|update| update.offer(&session));
+    // A party invite is time-bound: it keeps the banner slot first.
+    let update_banner = match &offer {
+        Some(crate::update::UpdateOffer::Available { version, .. })
+            if party_line.invite.is_none() =>
+        {
+            Some(version.clone())
+        }
+        _ => None,
+    };
+    let required = match &offer {
+        Some(crate::update::UpdateOffer::Required { latest, link }) => {
+            Some((latest.clone(), link.is_some()))
+        }
+        _ => None,
+    };
     let (status, status_color) = connection_line(&session);
     let profile = career.view.profile.clone();
     let last_match = career
@@ -616,7 +648,7 @@ fn spawn_home(
                 profile.as_ref(),
                 &career.nickname,
                 &thumbnails,
-                if phone && party_line.invite.is_some() {
+                if phone && (party_line.invite.is_some() || update_banner.is_some()) {
                     None
                 } else {
                     last_match.as_deref()
@@ -725,6 +757,8 @@ fn spawn_home(
                 if !phone {
                     column.spawn(widgets::label(tr("home.enter_arena"), 12.0, theme::GOLD));
                 }
+                // Update required (LR-14): the update takes Play's place.
+                let download = required.as_ref().is_some_and(|(_, link)| *link) && !can_resume;
                 let play = kit::spawn_button(
                     column,
                     if phone {
@@ -743,27 +777,40 @@ fn spawn_home(
                     },
                     if can_resume {
                         tr("home.play.resume").to_owned()
+                    } else if download {
+                        tr("update.button.download").to_owned()
                     } else {
                         play_label
                     },
                     TextStyle::new(TextRole::ButtonLg),
                     ButtonKind::Primary,
-                    Some(Icon::HudAttack),
+                    Some(if download {
+                        Icon::NavRefreshCw
+                    } else {
+                        Icon::HudAttack
+                    }),
                     if can_resume {
                         HomeAction::Resume
+                    } else if download {
+                        HomeAction::Update
                     } else {
                         HomeAction::Play
                     },
-                    "HomePlay".into(),
+                    if download { "HomeUpdate" } else { "HomePlay" }.into(),
                     (),
                 );
-                if !can_resume && !matches!(session.state(), ClientConnectionState::Connected) {
+                if !can_resume
+                    && !download
+                    && !matches!(session.state(), ClientConnectionState::Connected)
+                {
                     column.commands().entity(play).insert(Pressable {
                         disabled: true,
                         ..default()
                     });
                 }
-                if session.compatibility_issue.is_some() {
+                if let Some((latest, link)) = &required {
+                    spawn_update_required(column, latest.as_deref(), *link, phone, unit);
+                } else if session.compatibility_issue.is_some() {
                     column.spawn((
                         widgets::label(
                             crate::net::link_status(&session)
@@ -924,6 +971,8 @@ fn spawn_home(
 
             if let Some((party_id, from)) = &party_line.invite {
                 spawn_invite_banner(root, *party_id, from, phone, platform.is_mobile(), fit);
+            } else if let Some(version) = &update_banner {
+                spawn_update_banner(root, version, phone, platform.is_mobile(), fit);
             }
             if !platform.is_mobile() {
                 root.spawn((
@@ -1168,6 +1217,7 @@ fn home_actions(
     mut help: Option<ResMut<crate::help_overlay::HelpOverlayVisible>>,
     mut server_entry: Option<ResMut<crate::mobile_ui::ServerEntry>>,
     connection: Option<Res<crate::connection_profile::ActiveConnection>>,
+    mut update: Option<ResMut<crate::update::ClientUpdate>>,
 ) {
     let in_party = party.as_ref().is_some_and(|p| p.in_party());
     let leads = party.as_ref().is_some_and(|p| p.view.is_leader());
@@ -1244,6 +1294,16 @@ fn home_actions(
                     crate::mobile_ui::open_connection_panel(entry, &session, connection.as_deref());
                 }
             }
+            HomeAction::Update => {
+                if let Some(update) = update.as_deref_mut() {
+                    update.open_link(&session);
+                }
+            }
+            HomeAction::DismissUpdate => {
+                if let Some(update) = update.as_deref_mut() {
+                    update.dismiss();
+                }
+            }
         }
     }
 }
@@ -1266,6 +1326,7 @@ fn refresh_home(
     windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
     resume: Option<Res<crate::net::recovery::ResumeMatchState>>,
     connection: Option<Res<crate::connection_profile::ActiveConnection>>,
+    update: Option<Res<crate::update::ClientUpdate>>,
 ) {
     let mut current = signature(
         &career,
@@ -1279,6 +1340,7 @@ fn refresh_home(
         }),
     );
     current.resume_available = resume.as_ref().is_some_and(|resume| resume.saved.is_some());
+    current.update = update.as_ref().and_then(|update| update.offer(&session));
     if last.as_ref() == Some(&current) {
         return;
     }
@@ -1292,7 +1354,7 @@ fn refresh_home(
         .despawn();
     spawn_home(
         commands, career, session, card, thumbnails, preview, platform, ui_scale, party, locale,
-        windows, resume, connection,
+        windows, resume, connection, update,
     );
 }
 
@@ -1302,6 +1364,123 @@ fn spawn_invite_banner(
     parent: &mut ChildSpawnerCommands,
     party_id: u64,
     from: &str,
+    phone: bool,
+    mobile: bool,
+    fit: f32,
+) {
+    spawn_choice_banner(
+        parent,
+        trf("home.invite", &[("name", &from)]),
+        [
+            (
+                tr("home.button.accept"),
+                HomeAction::AcceptInvite(party_id),
+                "HomeAcceptInvite",
+            ),
+            (
+                tr("home.button.decline"),
+                HomeAction::DeclineInvite(party_id),
+                "HomeDeclineInvite",
+            ),
+        ],
+        ("HomePartyInvite", "HomePartyInviteLabel"),
+        phone,
+        mobile,
+        fit,
+    );
+}
+
+/// "Update available" (LR-14) in the invite's slot, when no invite is shown.
+fn spawn_update_banner(
+    parent: &mut ChildSpawnerCommands,
+    version: &str,
+    phone: bool,
+    mobile: bool,
+    fit: f32,
+) {
+    spawn_choice_banner(
+        parent,
+        trf("update.available", &[("version", &version)]),
+        [
+            (tr("update.button.get"), HomeAction::Update, "HomeUpdateGet"),
+            (
+                tr("update.button.later"),
+                HomeAction::DismissUpdate,
+                "HomeUpdateLater",
+            ),
+        ],
+        ("HomeUpdateBanner", "HomeUpdateBannerLabel"),
+        phone,
+        mobile,
+        fit,
+    );
+}
+
+/// "Update required" under the update button: what happened and, when there
+/// is no download link (iPhone), where the update comes from.
+fn spawn_update_required(
+    column: &mut ChildSpawnerCommands,
+    latest: Option<&str>,
+    link: bool,
+    phone: bool,
+    unit: f32,
+) {
+    let version = env!("CARGO_PKG_VERSION");
+    let mut body = trf(
+        if link {
+            "update.required.body"
+        } else {
+            "update.required.body_store"
+        },
+        &[("version", &version)],
+    );
+    if let Some(latest) = latest {
+        body.push('\n');
+        body.push_str(&trf("update.required.latest", &[("version", &latest)]));
+    }
+    column
+        .spawn((
+            Node {
+                width: Val::Percent(100.0),
+                flex_direction: FlexDirection::Column,
+                row_gap: Val::Px(space::S4 * unit),
+                padding: UiRect::all(Val::Px(if phone { 4.0 } else { 8.0 } * unit)),
+                border: UiRect::all(Val::Px(border::HAIRLINE)),
+                border_radius: BorderRadius::all(Val::Px(radius::MD)),
+                ..default()
+            },
+            BackgroundColor(theme::PANEL),
+            BorderColor::all(color::TEXT_DANGER),
+            Name::new("HomeUpdateRequired"),
+        ))
+        .with_children(|panel| {
+            panel.spawn((
+                widgets::label(
+                    tr("update.required.title"),
+                    if phone { 12.0 * unit } else { 16.0 },
+                    color::TEXT_DANGER,
+                ),
+                Name::new("HomeUpdateRequiredTitle"),
+            ));
+            panel.spawn((
+                widgets::label(body, if phone { 10.0 * unit } else { 13.0 }, theme::IVORY),
+                Node {
+                    width: Val::Percent(100.0),
+                    ..default()
+                },
+                Name::new("HomeUpdateRequiredBody"),
+            ));
+        });
+}
+
+/// A bounded two-choice banner in the left column (the party invite, the
+/// update offer). On phones it replaces the recent match chip, leaving both
+/// the top utility row and the hero stage clear.
+fn spawn_choice_banner(
+    parent: &mut ChildSpawnerCommands,
+    text: String,
+    choices: [(&str, HomeAction, &'static str); 2],
+    (name, label_name): (&'static str, &'static str),
     phone: bool,
     mobile: bool,
     fit: f32,
@@ -1324,11 +1503,11 @@ fn spawn_invite_banner(
             },
             BackgroundColor(theme::TILE_SELECTED),
             BorderColor::all(theme::GOLD),
-            Name::new("HomePartyInvite"),
+            Name::new(name),
         ))
         .with_children(|banner| {
             banner.spawn((
-                Text::new(trf("home.invite", &[("name", &from)])),
+                Text::new(text),
                 theme::role_text(TextRole::Caption),
                 TextLayout::new(Justify::Left, LineBreak::WordOrCharacter),
                 Node {
@@ -1338,7 +1517,7 @@ fn spawn_invite_banner(
                     overflow: Overflow::clip(),
                     ..default()
                 },
-                Name::new("HomePartyInviteLabel"),
+                Name::new(label_name),
             ));
             banner
                 .spawn(Node {
@@ -1349,18 +1528,7 @@ fn spawn_invite_banner(
                     ..default()
                 })
                 .with_children(|actions| {
-                    for (label, action, id) in [
-                        (
-                            "home.button.accept",
-                            HomeAction::AcceptInvite(party_id),
-                            "HomeAcceptInvite",
-                        ),
-                        (
-                            "home.button.decline",
-                            HomeAction::DeclineInvite(party_id),
-                            "HomeDeclineInvite",
-                        ),
-                    ] {
+                    for (label, action, id) in choices {
                         kit::spawn_button(
                             actions,
                             Node {
@@ -1373,7 +1541,7 @@ fn spawn_invite_banner(
                                 padding: UiRect::horizontal(Val::Px(space::S4)),
                                 ..default()
                             },
-                            tr(label),
+                            label,
                             TextStyle::new(TextRole::Button).sized(Metric::new(13.0, 13.0)),
                             ButtonKind::Secondary,
                             None,
@@ -1821,6 +1989,172 @@ mod tests {
             status(&mut app),
             connection_line(app.world().resource::<ClientSession>()).0
         );
+    }
+
+    /// The Home app the LR-14 tests build: the screen, its actions and its
+    /// rebuild, with the update state `update`.
+    fn update_home(update: crate::update::ClientUpdate, session: ClientSession) -> App {
+        use crate::i18n::I18nPlugin;
+        use crate::ui::test_id::harness;
+        let mut app = harness::kit_app();
+        app.add_plugins((bevy::state::app::StatesPlugin, I18nPlugin::default()))
+            .init_state::<AppScreen>()
+            .init_resource::<Assets<Image>>()
+            .init_resource::<super::super::preview::AvatarPreview>()
+            .init_resource::<CareerClient>()
+            .insert_resource(session)
+            .init_resource::<ProfileCard>()
+            .init_resource::<AvatarThumbnails>()
+            .init_resource::<crate::party::PartyClient>()
+            .init_resource::<crate::match_service::MatchServiceClient>()
+            .insert_resource(update)
+            .insert_resource(crate::ui::UiPlatform(crate::platform::UiProfile::Desktop))
+            .add_message::<NetworkCommand>()
+            .add_message::<crate::net::SessionUiCommand>()
+            .add_ui_action::<HomeAction>()
+            .add_systems(Startup, spawn_home)
+            .add_systems(
+                Update,
+                (home_actions, refresh_home).chain().after(UiSet::Dispatch),
+            );
+        app
+    }
+
+    fn named_text(app: &mut App, name: &str) -> Option<String> {
+        app.world_mut()
+            .query::<(&Name, &Text)>()
+            .iter(app.world())
+            .find(|(found, _)| found.as_str() == name)
+            .map(|(_, text)| text.0.clone())
+    }
+
+    /// LR-14 acceptance: on a mismatch an outdated RU game shows «Требуется
+    /// обновление», and its button opens the portal's download page for this
+    /// platform (the portal compiled into the build; `https://omoba.ru` for RU).
+    #[test]
+    fn an_outdated_game_shows_update_required_with_a_download_button() {
+        if crate::i18n::testing::isolated(
+            "frontend::home::tests::an_outdated_game_shows_update_required_with_a_download_button",
+        ) {
+            return;
+        }
+        use crate::i18n::LocaleId;
+        use crate::ui::test_id::harness;
+        use shared::compatibility::{CompatibilityIssue, ReleaseContract, UpdateNotice};
+        let portal = "https://portal.example";
+        let mut session = ClientSession::default();
+        session.set_state_for_test(ClientConnectionState::Disconnected);
+        session.compatibility_issue = Some(CompatibilityIssue::Gameplay);
+        session.server_contract = Some(ReleaseContract {
+            release: "999.0.0".into(),
+            ..ReleaseContract::current()
+        });
+        session.server_update = Some(UpdateNotice {
+            min_release: "999.0.0".into(),
+            url: Some(format!("{portal}/download")),
+        });
+        let mut update = crate::update::ClientUpdate::for_test(Some(portal), || Ok(vec![]));
+        update.publish_for_test("999.0.0");
+        let mut app = update_home(update, session);
+        app.world_mut()
+            .resource_mut::<Locale>()
+            .set(LocaleId::parse("ru").unwrap());
+        app.update();
+        app.update();
+        assert!(harness::find(app.world_mut(), "HomePlay").is_none());
+        let button = harness::find(app.world_mut(), "HomeUpdate").unwrap();
+        assert!(
+            !app.world()
+                .get::<Pressable>(button)
+                .is_some_and(|pressable| pressable.disabled)
+        );
+        let label = app
+            .world()
+            .get::<Children>(button)
+            .unwrap()
+            .iter()
+            .find_map(|child| app.world().get::<Text>(child))
+            .unwrap()
+            .0
+            .clone();
+        assert_eq!(label, "Скачать обновление");
+        assert_eq!(
+            named_text(&mut app, "HomeUpdateRequiredTitle").as_deref(),
+            Some("Требуется обновление")
+        );
+        let body = named_text(&mut app, "HomeUpdateRequiredBody").unwrap();
+        assert!(body.contains(env!("CARGO_PKG_VERSION")), "{body}");
+        assert!(body.contains("Новая версия: 999.0.0"), "{body}");
+        assert_eq!(
+            named_text(&mut app, "HomeConnectionStatus").as_deref(),
+            Some("Требуется обновление")
+        );
+        harness::press(app.world_mut(), "HomeUpdate");
+        app.update();
+        let opened = app
+            .world()
+            .resource::<crate::update::ClientUpdate>()
+            .opened
+            .clone()
+            .unwrap();
+        assert!(
+            opened.starts_with(&format!("{portal}/download")),
+            "{opened}"
+        );
+        assert_eq!(
+            opened.contains("?platform="),
+            cfg!(any(
+                target_os = "macos",
+                target_os = "windows",
+                target_os = "linux",
+                target_os = "android"
+            ))
+        );
+    }
+
+    /// A game newer than the servers is told they are updating, with no
+    /// update button; a newer published release shows the banner until Later.
+    #[test]
+    fn servers_updating_and_the_dismissible_update_banner() {
+        use crate::ui::test_id::harness;
+        use shared::compatibility::{CompatibilityIssue, ReleaseContract};
+        let mut session = ClientSession::default();
+        session.set_state_for_test(ClientConnectionState::Disconnected);
+        session.compatibility_issue = Some(CompatibilityIssue::Gameplay);
+        session.server_contract = Some(ReleaseContract {
+            release: "0.0.1".into(),
+            ..ReleaseContract::current()
+        });
+        let update =
+            crate::update::ClientUpdate::for_test(Some("https://portal.example"), || Ok(vec![]));
+        let mut app = update_home(update, session);
+        app.update();
+        assert!(harness::find(app.world_mut(), "HomeUpdate").is_none());
+        assert!(harness::find(app.world_mut(), "HomePlay").is_some());
+        let detail = named_text(&mut app, "HomeCompatibilityDetail").unwrap();
+        assert!(detail.contains("switching to your version"), "{detail}");
+        assert_eq!(
+            named_text(&mut app, "HomeConnectionStatus").as_deref(),
+            Some("Servers updating")
+        );
+
+        let mut connected = ClientSession::default();
+        connected.set_state_for_test(ClientConnectionState::Connected);
+        *app.world_mut().resource_mut::<ClientSession>() = connected;
+        app.world_mut()
+            .resource_mut::<crate::update::ClientUpdate>()
+            .publish_for_test("999.0.0");
+        app.update();
+        assert_eq!(
+            named_text(&mut app, "HomeUpdateBannerLabel").as_deref(),
+            Some("Update available: version 999.0.0")
+        );
+        assert!(harness::find(app.world_mut(), "HomeUpdateGet").is_some());
+        harness::press(app.world_mut(), "HomeUpdateLater");
+        app.update();
+        app.update();
+        assert!(named_text(&mut app, "HomeUpdateBannerLabel").is_none());
+        assert!(harness::find(app.world_mut(), "HomePlay").is_some());
     }
 
     #[test]

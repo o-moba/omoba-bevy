@@ -74,6 +74,7 @@ mod supporter_storekit;
 mod team;
 mod team_vision;
 mod ui;
+mod update;
 mod verdant3d;
 mod vfx_clock;
 mod world;

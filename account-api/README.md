@@ -133,6 +133,11 @@ independently fetching/verifying the exact public artifact. Never list an unsign
 or privately provisioned IPA as publicly installable. No upload or shell launcher
 exists in the browser. Missing configuration shows no downloads.
 
+The game reads the same `GET /v1/releases` at boot and after an update-required
+mismatch (LR-14, `passport/src/release_catalog.rs`): the newest entry for its platform
+and architecture (`universal` matches any) drives the **Update available** banner.
+An empty catalog offers no update.
+
 ## Backup, restore, rollback
 
 Back up the full database (core + portal) with `pg_dump -Fc`; also retain configuration

@@ -378,11 +378,11 @@ Area: install/update · **blocker** · M · code
   - The compatibility reply carries the minimum release and the update URL.
   - `docs/RELEASING.md` defines which changes bump `GAMEPLAY_REVISION`, says clients ship before the server, and requires a player notice before a forced update. The alternative is to move balance values into server data (O-12).
 - **Acceptance:**
-  - [ ] On a mismatch, the RU client shows "Требуется обновление" with a button to `omoba.ru/download` for its platform.
-  - [ ] A newer compatible build shows a banner on Home.
-  - [ ] The compatibility reply, or a signed document, carries min release and update URL, with tests for bad and expired documents.
-  - [ ] No production string mentions choosing a server, and all strings exist in en, ru and zh-Hans.
-  - [ ] The RELEASING.md rule is recorded.
+  - [x] On a mismatch, the RU client shows "Требуется обновление" with a button to `omoba.ru/download` for its platform. Done as Home's update panel: the download button replaces Play and opens `<portal>/download?platform=…` on the portal compiled from `scripts/markets.py` (UI-tree test in Russian; no visual check, the Mac's screen is locked).
+  - [x] A newer compatible build shows a banner on Home. Dismissible with **Later**; read from `GET /v1/releases` at boot and after a mismatch.
+  - [x] The compatibility reply, or a signed document, carries min release and update URL, with tests for bad and expired documents. Done in the reply (`UpdateNotice`, additive on handshake 1). Tests cover bad notices and catalogs, stale-nonce reports and stale catalogs; no signed document was added.
+  - [x] No production string mentions choosing a server, and all strings exist in en, ru and zh-Hans.
+  - [x] The RELEASING.md rule is recorded ("Updates and contract changes").
 - **Depends on:** LR-01, LR-23
 
 #### LR-15 — Moderation minimum: sanctions, chat kill switch, operator CLI
