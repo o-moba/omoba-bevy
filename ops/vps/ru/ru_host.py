@@ -31,6 +31,8 @@ contacted; nothing on the host changes without --apply:
     python3 ops/vps/ru/ru_host.py rollback --kind server|portal --release <name> --apply
     # the RU public names (scripts/markets.py) and the DNS A records the owner sets; local only
     python3 ops/vps/ru/ru_host.py names
+    # downloads per platform from Caddy's log of the download path (LR-23); totals only
+    python3 ops/vps/ru/ru_host.py downloads [--since 2026-11-01] [--until 2026-11-30]
 
 Guards. On the Mac, before any ssh: the alias and its `ssh -G` HostName must not be
 the production or dev VPS, HostName must equal $RU_IP (an IPv4 literal in
@@ -41,11 +43,11 @@ to run where a production or dev marker exists (units, users, folders, addresses
 on anything but Ubuntu 24.04+ x86-64, or where $RU_IP is not a local address
 (--behind-nat accepts provider NAT). Bootstrap writes /opt/omoba-ru/host.json; every
 later run needs it to name market ru and $RU_IP. It writes only below /opt/omoba-ru,
-/var/lib/omoba-ru, /var/backups/omoba-ru, its own unit files, /etc/caddy/Caddyfile
-and /etc/ssh/sshd_config.d/00-omoba-ru.conf, never prints or passes a secret in argv,
-never overwrites a generated secret, never interrupts a running match, never migrates
-without the encrypted off-host backup of ru_backup.py (LR-03) and rolls a failed ship
-back to the previous release.
+/var/lib/omoba-ru, /var/backups/omoba-ru, /var/log/caddy (the download log), its own unit
+files, /etc/caddy/Caddyfile and /etc/ssh/sshd_config.d/00-omoba-ru.conf, never prints or
+passes a secret in argv, never overwrites a generated secret, never interrupts a running
+match, never migrates without the encrypted off-host backup of ru_backup.py (LR-03) and
+rolls a failed ship back to the previous release.
 """
 from __future__ import annotations
 
@@ -94,6 +96,16 @@ STATE = "/var/lib/omoba-ru"
 STATE_DIRS = (STATE, STATE + "/matches", STATE + "/lobby-outbox")
 PORTAL_CACHE = "/var/cache/omoba-portal-ru"   # the portal unit's CacheDirectory
 BACKUPS = "/var/backups/omoba-ru"
+# Downloads (LR-23): `release.py publish --market ru` copies the packages into DOWNLOADS/<tag>/;
+# Caddy serves them under the portal's downloads path (scripts/markets.py `downloads_path`)
+# and logs only those requests to DOWNLOAD_LOG, which ru_downloads.py counts.
+DOWNLOADS = OPT + "/downloads"
+CADDY_USER = "caddy"              # created by Ubuntu's caddy package
+CADDY_LOGS = "/var/log/caddy"
+DOWNLOAD_LOG = CADDY_LOGS + "/omoba-ru-downloads.log"
+DOWNLOAD_COUNTER = "ru_downloads.py"
+DOWNLOAD_PATH = re.compile(r"(?:/[a-z0-9][a-z0-9_-]*)+")
+DAY = re.compile(r"\d{4}-\d{2}-\d{2}")
 # Backups (LR-03): ru_backup.py with its units and timers, its settings and keys.
 BACKUP_TOOL_DIR = OPT + "/backup"
 BACKUP_SCRIPT = BACKUP_TOOL_DIR + "/ru_backup.py"
@@ -123,7 +135,8 @@ ENV_PATHS = {kind: f"{OPT}/{name[:-len('.example')]}" for kind, name in ENV_EXAM
 DIRS = ((OPT, "root", "0755"), (RELEASES, "root", "0755"), (PORTAL, "root", "0755"),
         (PORTAL_RELEASES, "root", "0755"), (NODE, "root", "0755"), (INCOMING, "root", "0700"),
         *((path, USER, "0700") for path in STATE_DIRS),
-        (BACKUP_TOOL_DIR, "root", "0755"), (BACKUP_KEYS, "root", "0700"), (BACKUPS, "root", "0700"))
+        (BACKUP_TOOL_DIR, "root", "0755"), (BACKUP_KEYS, "root", "0700"), (BACKUPS, "root", "0700"),
+        (DOWNLOADS, "root", "0755"), (CADDY_LOGS, CADDY_USER, "0750"))
 USERS = {USER: STATE, PORTAL_USER: "/nonexistent"}
 
 LOBBY_PORT = 4000
@@ -268,7 +281,7 @@ def is_foreign_name(value: str, own_zones=()) -> bool:
         (in_zone(name, PUBLIC_ZONES) and not in_zone(name, own_zones))
 
 
-ALLOWED_WRITES = (OPT, STATE, BACKUPS, CADDYFILE, CADDYFILE + ".orig", CADDYFILE + ".omoba-next",
+ALLOWED_WRITES = (OPT, STATE, BACKUPS, CADDY_LOGS, CADDYFILE, CADDYFILE + ".orig", CADDYFILE + ".omoba-next",
                   SSHD_DROPIN, *(f"{UNIT_DIR}/{name}" for name in (*UNIT_FILES.values(), *BACKUP_UNITS)),
                   f"{UNIT_DIR}/{LIMITS_UNIT_FILE}")
 
@@ -1441,6 +1454,14 @@ class Host:
         facts["caddy"] = self.out("caddy", "version").split(" ")[0] if "caddy" not in missing else None
         if self.read(CADDYFILE) != payload.get("caddyfile"):
             problems.append(f"{CADDYFILE} is not ops/vps/ru/Caddyfile.ru (bootstrap installs it)")
+        log = self.p(DOWNLOAD_LOG)
+        if not os.path.isfile(log) or os.path.islink(log):
+            problems.append(f"{DOWNLOAD_LOG} is missing (bootstrap creates it for Caddy)")
+        elif os.stat(log).st_uid != self.uid(CADDY_USER):
+            problems.append(f"{DOWNLOAD_LOG} is not owned by {CADDY_USER}: Caddy cannot log downloads")
+        downloads = self.p(DOWNLOADS)
+        facts["downloads"] = sorted(name for name in os.listdir(downloads) if not name.startswith(".")) \
+            if os.path.isdir(downloads) and not os.path.islink(downloads) else []
         if not any(port == HTTPS_PORT for _, port in self.listeners("tcp")):
             problems.append(f"nothing listens on TCP {HTTPS_PORT} (Caddy)")
         effective = self.ssh_effective()
@@ -1588,6 +1609,8 @@ class Host:
                 would.append(f"fill {', '.join(sorted(fill))} in {ENV_PATHS[kind]}")
             if any(PLACEHOLDER in value for key, value in values.items() if key not in fill):
                 warnings.append(f"{ENV_PATHS[kind]} keeps a placeholder: pass --vkid-client-id (VK ID app, LR-19)")
+        if not os.path.lexists(self.p(DOWNLOAD_LOG)):
+            would.append(f"create {DOWNLOAD_LOG} ({CADDY_USER}, 0640) for the download counts")
         if self.read(CADDYFILE) != payload.get("caddyfile"):
             would.append(f"install Caddyfile.ru as {CADDYFILE} (caddy validate first), enable + reload caddy")
         if self.read(SSHD_DROPIN) != SSHD_TEXT:
@@ -1638,6 +1661,7 @@ class Host:
             raise Refused("PostgreSQL: " + "; ".join(problems))
         done += self.ensure_env_files(examples, payload["expected_ip"], payload.get("vkid"))
         done += self.ensure_database(state)
+        done += self.ensure_download_log()
         done += self.ensure_caddy(payload["caddyfile"])
         done += self.ensure_ssh()
         done += self.ensure_firewall(units["lobby"])
@@ -1777,6 +1801,15 @@ class Host:
         if state.get("database_owner") is None:
             done.append(f"database {DB_NAME}")
         return [f"create {', '.join(done)}"] if done else []
+
+    def ensure_download_log(self) -> list:
+        """Caddy appends the download log (LR-23) as its own user. Create the file caddy-owned
+        before `caddy validate` (run as root) could create it root-owned."""
+        if os.path.lexists(self.p(DOWNLOAD_LOG)):
+            return []
+        self._write(DOWNLOAD_LOG, "", 0o640)
+        self.command("chown", f"{CADDY_USER}:{CADDY_USER}", self.p(DOWNLOAD_LOG))
+        return [f"create {DOWNLOAD_LOG} ({CADDY_USER}, 0640)"]
 
     def ensure_caddy(self, caddyfile: str) -> list:
         done = []
@@ -2490,6 +2523,48 @@ def ru_names() -> dict:
     return names
 
 
+def ru_downloads_path() -> str:
+    """The path of the RU download host on the portal origin (scripts/markets.py
+    `downloads_path`, LR-23): no fourth name, the portal's site serves it."""
+    path = markets_module().market(MARKET).downloads_path
+    if not isinstance(path, str) or not DOWNLOAD_PATH.fullmatch(path):
+        raise Refused(f"the RU profile in scripts/markets.py: downloads_path {path!r} must be a path "
+                      "like /downloads (LR-23)")
+    return path
+
+
+def caddy_site(caddyfile: str, name: str) -> str | None:
+    """The `name { … }` site block of a Caddyfile, braces balanced; None when absent."""
+    found = re.search(rf"(?m)^{re.escape(name)}\s*\{{", caddyfile)
+    if found is None:
+        return None
+    depth = 0
+    for index in range(caddyfile.index("{", found.start()), len(caddyfile)):
+        depth += {"{": 1, "}": -1}.get(caddyfile[index], 0)
+        if depth == 0:
+            return caddyfile[found.start():index + 1]
+    return None
+
+
+def download_site_problems(caddyfile: str, portal: str, path: str) -> list[str]:
+    """The portal site serves DOWNLOADS under `path`, logs only those requests to DOWNLOAD_LOG
+    with shortened addresses and no request headers (LR-23)."""
+    site = caddy_site(caddyfile, portal)
+    if site is None:
+        return []   # reported as a missing site
+    needles = {f"handle_path {path}/*": f"serve {DOWNLOADS} under {path}/",
+               f"root * {DOWNLOADS}": f"serve {DOWNLOADS} under {path}/",
+               "file_server": "serve the packages with file_server",
+               f"output file {DOWNLOAD_LOG}": f"log the downloads to {DOWNLOAD_LOG}",
+               "request>headers delete": "drop request headers from the download log",
+               "ip_mask": "shorten addresses in the download log"}
+    problems = [f"Caddyfile.ru's {portal} site does not {why} (`{needle}`)" for needle, why in needles.items()
+                if needle not in site]
+    if not re.search(r"skip_log\s+@\w+", site) or not re.search(rf"not path {re.escape(path)}/\*", site):
+        problems.append(f"Caddyfile.ru's {portal} site logs more than {path}/ (skip_log with `not path {path}/*`)")
+    return problems
+
+
 def kit(names: dict | None = None) -> dict:
     """The repository's RU host kit: units, env examples and Caddyfile.ru, checked against
     each other and against the RU names (default: ru_names(), from scripts/markets.py)."""
@@ -2511,6 +2586,7 @@ def kit(names: dict | None = None) -> dict:
         if origin != f"https://{names['portal']}":
             problems.append(f"{ENV_EXAMPLES[kind]}: OMOBA_PORTAL_ORIGIN is {origin!r}, not the RU portal "
                             f"https://{names['portal']} (scripts/markets.py)")
+    problems += download_site_problems(caddyfile, names["portal"], ru_downloads_path())
     for address in (ACCOUNT_API_ADDR, PORTAL_ADDR):
         if f"reverse_proxy {address[0]}:{address[1]}" not in caddyfile:
             problems.append(f"Caddyfile.ru does not proxy to {address[0]}:{address[1]}")
@@ -2905,6 +2981,27 @@ def command_status(args) -> int:
     return 0 if report.get("ok") else 1
 
 
+def command_downloads(args, run=subprocess.run) -> int:
+    """Downloads per platform from the host's Caddy log (LR-23): ru_downloads.py runs on the
+    host as root, read-only, and prints totals only (no address leaves the host)."""
+    target = resolve_target(args, need_ip=True)
+    profile = markets_module().market(MARKET)
+    counter = ["count", "--log", DOWNLOAD_LOG, "--prefix", ru_downloads_path(), "--label", profile.label]
+    for flag in ("since", "until"):
+        value = getattr(args, flag, None)
+        if value is not None:
+            if not DAY.fullmatch(value):
+                raise Refused(f"--{flag} must be YYYY-MM-DD, got {value!r}")
+            counter += [f"--{flag}", value]
+    command = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", target["alias"], "python3", "-", *counter]
+    result = run(command, input=(RU_DIR / DOWNLOAD_COUNTER).read_bytes(), capture_output=True)
+    sys.stderr.write(result.stderr.decode(errors="replace"))
+    if result.returncode:
+        raise SystemExit(f"counting downloads on {target['alias']} failed (exit {result.returncode})")
+    print(result.stdout.decode().strip())
+    return 0
+
+
 def command_names(args) -> int:
     """The RU public names (scripts/markets.py) and the DNS records the owner sets. Local only."""
     names = ru_names()
@@ -3003,7 +3100,11 @@ def main(argv=None) -> int:
                                            "save them here (LR-03)")
     escrow.add_argument("--recipient-file", required=True, help="the escrow holder's armored public key")
     escrow.add_argument("--out", required=True, help="where to save the encrypted file (must not exist)")
-    for command in (bootstrap, ship, portal, rollback, status, reboot, escrow):
+    downloads = sub.add_parser("downloads", help="downloads per platform, version and day from Caddy's log of "
+                                                 "the download path (read-only; totals only)")
+    downloads.add_argument("--since", help="first UTC day counted, YYYY-MM-DD")
+    downloads.add_argument("--until", help="last UTC day counted, YYYY-MM-DD")
+    for command in (bootstrap, ship, portal, rollback, status, reboot, escrow, downloads):
         command.add_argument("--host", help=f"ssh alias of the RU VPS (default: ${HOST_ENV} or {DEFAULT_HOST})")
         command.add_argument("--ip", help=f"RU VPS IPv4 the alias must connect to (default: ${IP_ENV})")
         command.add_argument("--behind-nat", action="store_true",
@@ -3016,7 +3117,7 @@ def main(argv=None) -> int:
     return {"bootstrap": command_bootstrap, "ship": command_ship, "portal-bundle": command_portal_bundle,
             "ship-portal": command_ship_portal, "rollback": command_rollback, "status": command_status,
             "reboot-check": command_reboot_check, "names": command_names,
-            "escrow": command_escrow}[args.command](args)
+            "escrow": command_escrow, "downloads": command_downloads}[args.command](args)
 
 
 if __name__ == "__main__":
