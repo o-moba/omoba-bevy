@@ -130,10 +130,20 @@ build writes that file into its own `OMOBA_CLIENT_CONFIG_DIR` first.
 **Settings → About** lists the build label, the age sign, the documents, this
 release's source and the channels that are set.
 
-**Packages.** The README of an RU package ends with the age sign and the links
-(`release.py legal_readme`). `release.py catalog --market ru` refuses to write the
-download catalog until the public tag `v<version>-ru` exists on GitHub, so the
-source link always resolves.
+**Packages.** The README of an RU player package is Russian (LR-22, markets.py
+`player_readme`, `release.py ru_player_readme`): the release status and the age sign
+at the top; what the game is (hero classes counted from `shared/assets/catalog`, the
+Verdant Arena, the modes named as the game's `client/i18n/ru` names them); install;
+sign-in with VK ID and recovery, named as the game's buttons; the support and
+community channels that are set and the portal; the system requirements of that
+package (the macOS minimum of its Info.plist, the glibc of the Linux build image, the
+APK manifest's Android minimum and Vulkan); and the documents, the source of the
+release and the age sign. It has no hosting notes. Dev builds keep the English
+tester README, ending with the bilingual legal block (`legal_readme`); the global
+README is unchanged. `release.py catalog --market ru` refuses to write the download
+catalog until the public tag `v<version>-ru` exists on GitHub, so the source link
+always resolves. While the owner has not provided the support e-mail and a community
+(LR-21), `build` prints a note and the README names only the portal.
 
 When the counsel-approved texts replace the drafts, give them a new `version` in
 both tables (and the portal's): every player is asked again.
@@ -209,14 +219,16 @@ The steps that need accounts, money or legal decisions are the owner's.
    `OMOBA_VKID_CLIENT_ID` for both the portal and the Account API. No secret is
    used (public PKCE client).
 4. **Packages.** `make release-ru` builds `dist/v<version>-ru/`: macOS, Windows,
-   Linux (with the RU `omoba-server` and `omoba-account-api`) and Android
-   (`space.ekza.omoba.ru`). `make release-ru-publish` uploads them to the RU host
+   Linux and Android (`space.ekza.omoba.ru`) player packages with the Russian README,
+   and the RU server bundle `dist/v<version>-ru/server/omoba-<version>-ru-server-linux-x64.tar.gz`
+   (`release.py build server --market ru`: the RU `omoba-server` and
+   `omoba-account-api`, which no player package carries, LR-22). `make release-ru-publish` uploads the player packages to the RU host
    (`omoba.ru/downloads/`), pins the IPFS mirror and writes `releases.json`
    (`ops/vps/ru/README.md#downloads`).
 5. **Servers** with `ops/vps/ru/ru_host.py` (`ops/vps/ru/README.md`): `bootstrap`
    sets up the host (PostgreSQL with ICU, Caddy with `Caddyfile.ru`, firewall,
    key-only SSH, users, env files with secrets made on the host, the database and
-   the three units); `ship --package <RU Linux package>` migrates the database with
+   the three units); `ship --package <RU server bundle>` migrates the database with
    the RU `omoba-account-api migrate`, applies `account-api/ops/grants.sql` and
    starts the lobby and the Account API; `portal-bundle` + `ship-portal` install the
    RU portal (omoba-web with `OMOBA_MARKET=ru`, calling the Account API on loopback:
@@ -239,8 +251,10 @@ The steps that need accounts, money or legal decisions are the owner's.
    draft --market ru`, then `gh release edit v<version>-ru --draft=false`): the game's
    About page and the README link its source, and `catalog` refuses until the tag
    exists (LR-06). Then install `releases.json` as the RU Account API's
-   `OMOBA_RELEASE_CATALOG`: the portal's download page and the game's update button
-   then link the RU host, with IPFS as the mirror and the status «Открытая бета».
+   `OMOBA_RELEASE_CATALOG`: the portal's guest home and download page and the game's
+   update button then link the RU host, with IPFS as the mirror and the status «Открытая
+   бета». The RU landing is that guest home at `omoba.ru` (omoba-web `docs/markets.md`,
+   «RU landing», LR-22); once it answers, the owner adds the site to Yandex Webmaster.
    `make release-ru-verify-downloads` checks every listed package byte for byte; a
    test download from a Russian network and `ru_host.py downloads` prove the counts
    (LR-23). RuStore / VK Play later (store accounts and age rating are the owner's).

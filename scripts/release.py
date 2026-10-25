@@ -58,8 +58,14 @@ ecosystem, no purchases, Russian by default, VK ID sign-in on the RU portal);
         --account-api http://127.0.0.1:40550 --portal http://127.0.0.1:3010   # local RU stack
 
 RU packages keep their settings in `omoba-bevy-ru`, the Android app is
-space.ekza.omoba.ru, and the RU Linux package also carries omoba-account-api
-(built for the market) for the RU servers. See docs/markets.md.
+space.ekza.omoba.ru, and their README.txt is Russian (install, VK ID sign-in, support,
+legal links, age sign, system requirements; no hosting notes). The RU servers come from
+a separate server bundle, never from a player package (LR-22):
+
+    python3 scripts/release.py build server --market ru     # dist/v<v>-ru/server/omoba-<v>-ru-server-linux-x64.tar.gz
+
+It carries the lobby (`omoba-server`) and `omoba-account-api`, built for the market, for
+ops/vps/ru/ru_host.py ship. `build all --market ru` builds it too. See docs/markets.md.
 
 A market with its own download host (scripts/markets.py `downloads_path`, LR-23)
 publishes there first and keeps IPFS as the mirror:
@@ -96,6 +102,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
 PLATFORMS = ("macos", "windows", "linux", "android", "ios")
+# Not a player platform: a market's own servers (LR-22), built for Linux x86-64.
+SERVER_TARGET = "server"
 DESKTOP_BINARIES = ("client", "server")
 MAC_BUNDLE_ID = "space.ekza.omoba.desktop"
 ANDROID_KEYSTORE = Path.home() / ".config/omoba/android-playtest.keystore"
@@ -133,9 +141,15 @@ DEV_PLATFORMS = PLATFORMS
 # The dev Linux package also carries the dev lobby's schema migration tool
 # (ops/vps/dev/lobby_dev.py runs `omoba-account-api migrate` on the dev VPS).
 DEV_LINUX_TOOLS = ("omoba-account-api",)
-# A market with its own account service ships the Account API built for it in its
-# Linux package: the market's servers run exactly the features its clients have.
-MARKET_LINUX_TOOLS = ("omoba-account-api",)
+# A market with its own servers (markets.py `server_bundle`) ships them in a separate server
+# bundle built with the market's environment, so its servers run exactly the features its
+# clients have and no player package carries server tools (LR-22): cargo package -> file.
+SERVER_BUNDLE_BINARIES = {"server": "omoba-server", "omoba-account-api": "omoba-account-api"}
+# macOS packages (LSMinimumSystemVersion) and the README's system requirements.
+MAC_MIN_SYSTEM = "12.0"
+# Linux packages are built in rust:<toolchain>-bookworm (build_linux): Debian 12's glibc.
+LINUX_MIN_GLIBC = "2.36"
+ANDROID_MANIFEST = ROOT / "mobile/android/AndroidManifest.xml"
 DEV_IP_ENV = "DEV_IP"
 PROD_VPS_IPS = frozenset({"77.246.105.57"})
 BETA_LOBBY = "77.246.105.57:4000"
@@ -515,6 +529,10 @@ def resolve_flavor(contour: str = "prod", server: str | None = None, registry: s
 
 
 def player_readme(version: str, target: str, flavor: Flavor = PROD) -> str:
+    """README.txt of a player package: the market's production README (markets.py
+    `player_readme`), else the English playtest README, which dev builds always use."""
+    if not flavor.dev and MARKETS[flavor.market].player_readme == "ru":
+        return ru_player_readme(version, target, flavor)
     server = flavor.server
     server_line = (f"This build connects to {server} by default." if server else
                    "This build plays on the public OMOBA lobby.")
@@ -610,6 +628,131 @@ def legal_readme(version: str, flavor: Flavor = PROD) -> str:
     if not lines:
         return ""
     return "\nПРАВОВАЯ ИНФОРМАЦИЯ / LEGAL\n" + "\n".join(lines) + "\n"
+
+
+def client_text(locale: str, key: str) -> str:
+    """One string of the game's own UI (client/i18n/<locale>/<namespace>.json), so the README
+    names buttons and modes exactly as the game shows them."""
+    namespace = key.split(".", 1)[0]
+    return json.loads((ROOT / f"client/i18n/{locale}/{namespace}.json").read_text(encoding="utf-8"))[key]
+
+
+def hero_class_count() -> int:
+    """Hero classes the game ships (shared/assets/catalog/heroes.json)."""
+    return len(json.loads((ROOT / "shared/assets/catalog/heroes.json").read_text(encoding="utf-8"))["classes"])
+
+
+ANDROID_RELEASES = {26: "8.0", 27: "8.1", 28: "9", 29: "10", 30: "11", 31: "12", 32: "12L", 33: "13",
+                    34: "14", 35: "15", 36: "16"}
+
+
+def android_minimums(manifest: Path = ANDROID_MANIFEST) -> tuple[int, bool]:
+    """(minimum API level, Vulkan required) as the APK's manifest declares them."""
+    text = manifest.read_text(encoding="utf-8")
+    api = int(re.search(r'android:minSdkVersion="(\d+)"', text).group(1))
+    vulkan = re.search(r'<uses-feature android:name="android\.hardware\.vulkan\.level"[^>]*'
+                       r'android:required="true"', text) is not None
+    return api, vulkan
+
+
+def ru_system_requirements(target: str) -> list[str]:
+    """What one package needs, read from how it is built: the macOS minimum of its Info.plist,
+    the glibc of the Linux build image, the APK manifest's minimum API and Vulkan, and the
+    render backends the game compiles (DirectX 12 and Vulkan on Windows, Vulkan on Linux and
+    Android, Metal on macOS)."""
+    if target == "macos":
+        return [f"macOS {MAC_MIN_SYSTEM.split('.')[0]} или новее, Mac с процессором Apple (M1 или новее)."]
+    if target == "windows":
+        return ["Windows 10 или 11, 64-разрядная (x64).",
+                "Видеокарта с поддержкой DirectX 12 или Vulkan."]
+    if target == "linux":
+        return [f"64-разрядный Linux (x86-64) с glibc {LINUX_MIN_GLIBC} или новее, например Debian 12 "
+                "или Ubuntu 24.04.",
+                "Драйвер видеокарты с поддержкой Vulkan; звук через ALSA (libasound2)."]
+    if target == "android":
+        api, vulkan = android_minimums()
+        release = ANDROID_RELEASES.get(api, f"API {api}")
+        return [f"Android {release} или новее (API {api})" + (" с поддержкой Vulkan." if vulkan else ".")]
+    return []
+
+
+def ru_player_readme(version: str, target: str, flavor: Flavor) -> str:
+    """The Russian README of the RU market's player packages (LR-22): what the game is, install,
+    sign-in with VK ID, feedback and support, system requirements, the legal documents and the
+    age sign. Names come from markets.py (portal, `Legal`, `release_label`), the game's own UI
+    texts (client/i18n/ru) and its catalog; no hosting notes (the RU servers ship as their own
+    bundle, `build server`)."""
+    preset = MARKETS[flavor.market]
+    legal = preset.legal
+    portal = flavor.portal or preset.portal
+
+    def ui(key: str) -> str:
+        return client_text("ru", key)
+
+    title = f"OMOBA {version} — {preset.release_label}"
+    modes = ", ".join(f"«{ui(key)}»" for key in ("queue.ranked", "queue.casual", "queue.bots"))
+    lines = [title, "=" * len(title)]
+    if legal.age_rating:
+        lines.append(f"Возрастная категория: {legal.age_rating}")
+    lines += ["",
+              "OMOBA — бесплатная командная MOBA с открытым исходным кодом: матчи пять на пять",
+              f"на Изумрудной арене, классов героев: {hero_class_count()}.",
+              f"Режимы: {modes} и «{ui('home.button.offline_practice')}»",
+              "(без сервера и аккаунта).",
+              "", "УСТАНОВКА"]
+    install = CATALOG_INSTRUCTIONS.get(flavor.market, DEFAULT_INSTRUCTIONS)
+    if target == "macos":
+        app = f"{flavor.app_name}.app"
+        app_path = f'"/path/to/{app}"' if " " in app else f"/path/to/{app}"
+        lines += [f"- {install['macos']}",
+                  "- Сборка не нотаризована Apple. Если macOS не открывает игру даже через",
+                  "  «Открыть», выполните в Терминале:",
+                  f"      xattr -dr com.apple.quarantine {app_path}"]
+    elif target == "linux":
+        lines += [f"- {install['linux']}",
+                  f"      tar -xzf {artifact_name(version, 'linux', flavor.contour, flavor.market)}",
+                  f"      cd omoba-{version}{flavor.label} && ./omoba"]
+    elif target in install:
+        lines.append(f"- {install[target]}")
+    lines += ["- При первом запуске прочитайте и примите Пользовательское соглашение и Политику",
+              "  конфиденциальности (ссылки ниже).",
+              "", "ВХОД И ПРОГРЕСС",
+              "Игра создаёт ваш профиль при первом запуске, его ключ хранится на этом устройстве."]
+    if flavor.resolved_features["vk_sign_in"]:
+        lines += [f"Чтобы видеть свои матчи на сайте {portal} и играть на других устройствах,",
+                  f"войдите через VK ID: «{ui('career.button.profile')}» → «{ui('devices.button.vk')}».",
+                  "Войдите через VK, OK или Mail.ru в браузере и подтвердите привязку в игре."]
+    lines += [f"Код восстановления и новое устройство: «{ui('career.button.profile')}» →",
+              f"«{ui('career.button.devices')}».",
+              "", "ОБРАТНАЯ СВЯЗЬ И ПОДДЕРЖКА"]
+    channels = [(label, value) for label, value in (("Поддержка", legal.support_email),
+                                                     ("Сообщество ВКонтакте", legal.community_vk),
+                                                     ("Telegram", legal.community_telegram)) if value]
+    lines += [f"{label}: {value}" for label, value in channels]
+    if portal:
+        lines.append(f"Сайт игры и загрузки: {portal}")
+    lines += ["", "СИСТЕМНЫЕ ТРЕБОВАНИЯ"]
+    lines += [f"- {line}" for line in ru_system_requirements(target)]
+    lines += ["- Подключение к интернету для сетевых матчей (UDP); офлайн-тренировка работает без сети.",
+              "", "ПРАВОВАЯ ИНФОРМАЦИЯ"]
+    for label, value in (("Возрастная категория", legal.age_rating),
+                         ("Пользовательское соглашение", legal.terms),
+                         ("Политика конфиденциальности", legal.privacy),
+                         ("Исходный код этой версии", legal.source_for(version))):
+        if value:
+            lines.append(f"{label}: {value}")
+    lines.append("Лицензии и авторы ресурсов: папка legal/ и файл ATTRIBUTION.md.")
+    return "\n".join(lines) + "\n"
+
+
+def readme_gaps(flavor: Flavor) -> list[str]:
+    """What the owner still has to provide before the market's README can name it (LR-21)."""
+    if flavor.dev or MARKETS[flavor.market].player_readme == "playtest":
+        return []
+    legal = MARKETS[flavor.market].legal
+    return [name for name, value in (("support e-mail", legal.support_email),
+                                     ("community (VK or Telegram)", legal.community_vk or legal.community_telegram))
+            if not value]
 
 
 # ---------------------------------------------------------------- checks
@@ -744,7 +887,7 @@ def mac_info_plist(version: str, flavor: Flavor, icon: str | None) -> dict:
         "CFBundleName": flavor.app_name, "CFBundleDisplayName": "OMOBA Dev" if flavor.dev else "OMOBA",
         "CFBundleIdentifier": flavor.bundle_id, "CFBundleExecutable": "client",
         "CFBundlePackageType": "APPL", "CFBundleShortVersionString": version.split("-")[0],
-        "CFBundleVersion": version, "LSMinimumSystemVersion": "12.0",
+        "CFBundleVersion": version, "LSMinimumSystemVersion": MAC_MIN_SYSTEM,
         "NSHighResolutionCapable": True, "LSApplicationCategoryType": "public.app-category.games",
     }
     if icon:
@@ -836,8 +979,9 @@ def build_windows(version: str, out: Path, flavor: Flavor) -> Path:
 
 
 def linux_tools(flavor: Flavor) -> tuple[str, ...]:
-    """Extra binaries of a Linux package: the dev lobby's migration tool, or a market's Account API."""
-    return DEV_LINUX_TOOLS if flavor.dev else MARKET_LINUX_TOOLS if flavor.market != "global" else ()
+    """Extra binaries of a Linux package: the dev lobby's migration tool. A production player
+    package carries none; a market's own servers ship as the server bundle (LR-22)."""
+    return DEV_LINUX_TOOLS if flavor.dev else ()
 
 
 def linux_binaries(flavor: Flavor) -> tuple[str, ...]:
@@ -936,17 +1080,12 @@ def linux_docker_env_args(flavor: Flavor) -> list[str]:
     return [part for key, value in flavor.client_defaults().items() for part in ("-e", f"{key}={value}")]
 
 
-def build_linux(version: str, out: Path, flavor: Flavor) -> Path:
-    archive = out / artifact_name(version, "linux", flavor.contour, flavor.market)
-    packages = linux_binaries(flavor)
+def linux_release_binaries(flavor: Flavor, packages: tuple[str, ...]) -> dict[str, Path]:
+    """Release executables of these cargo packages for Linux x86-64 with the flavor's compiled
+    defaults: natively on Linux, otherwise inside the pinned Docker toolchain image (offline
+    from the local cache when Docker cannot reach the registry)."""
     if host_platform() == "linux":
-        binaries = cargo_release(packages, client_env(flavor))
-        with tempfile.TemporaryDirectory() as temporary:
-            stage = Path(temporary) / f"omoba-{version}{flavor.label}"
-            stage_linux(stage, version, flavor, binaries["client"], binaries["server"],
-                        {name: binaries[name] for name in packages if name not in DESKTOP_BINARIES})
-            run("tar", "-czf", archive, "-C", stage.parent, stage.name)
-        return archive
+        return cargo_release(packages, client_env(flavor))
     if not shutil.which("docker"):
         raise SystemExit("linux packages need a Linux host, Docker, or the GitHub release workflow")
     # Build inside the pinned toolchain image, then package here.
@@ -979,14 +1118,95 @@ def build_linux(version: str, out: Path, flavor: Flavor) -> Path:
             "-e", "CARGO_TARGET_DIR=/cache", "-e", "CARGO_HOME=/cache/cargo-home",
             "-e", f"PATH=/cache/{installed.name}/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
             *env_args, base, "sh", "-c", script)
-    # target/linux-docker is shared by every contour: package it right away. The dev
-    # lobby is installed from this package's omoba-server (ops/vps/dev/lobby_dev.py).
+    # target/linux-docker is shared by every contour and market: the caller packages these
+    # files right away. The dev lobby is installed from the dev package's omoba-server
+    # (ops/vps/dev/lobby_dev.py).
     release = target_dir / "release"
+    return {name: release / name for name in packages}
+
+
+def build_linux(version: str, out: Path, flavor: Flavor) -> Path:
+    archive = out / artifact_name(version, "linux", flavor.contour, flavor.market)
+    packages = linux_binaries(flavor)
+    binaries = linux_release_binaries(flavor, packages)
     with tempfile.TemporaryDirectory() as temporary:
         stage = Path(temporary) / f"omoba-{version}{flavor.label}"
-        stage_linux(stage, version, flavor, release / "client", release / "server",
-                    {name: release / name for name in packages if name not in DESKTOP_BINARIES})
+        stage_linux(stage, version, flavor, binaries["client"], binaries["server"],
+                    {name: binaries[name] for name in packages if name not in DESKTOP_BINARIES})
         run("tar", "-czf", archive, "-C", stage.parent, stage.name)
+    return archive
+
+
+def server_bundle_name(version: str, market: str) -> str:
+    """The market's server bundle: `omoba-<v>-<market>-server-linux-x64.tar.gz` (ru_host.py
+    RU_PACKAGE), one folder `omoba-<v>-<market>-server/` inside."""
+    return f"{server_bundle_root(version, market)}-linux-x64.tar.gz"
+
+
+def server_bundle_root(version: str, market: str) -> str:
+    return f"omoba-{version}{market_presets.market(market).label}-server"
+
+
+def server_dist_dir(out: Path) -> Path:
+    """Server bundles sit beside, not among, the player packages: `draft` uploads and
+    `publish` offers only the player packages of dist/v<version>-<market>/."""
+    return out / "server"
+
+
+def require_server_bundle(flavor: Flavor) -> None:
+    if flavor.dev:
+        raise SystemExit("the dev lobby is installed from the dev Linux package; there is no dev server bundle")
+    if not MARKETS[flavor.market].server_bundle:
+        raise SystemExit(f"the {flavor.market} market has no servers of its own to bundle "
+                         "(the production lobby is built on its host, ops/vps/README.md)")
+
+
+def server_readme(version: str, flavor: Flavor) -> str:
+    """The operator note in the server bundle: what it is for and where it is installed from."""
+    preset = MARKETS[flavor.market]
+    features = ", ".join(f"{name} {'on' if value else 'off'}" for name, value in flavor.resolved_features.items())
+    return f"""OMOBA {version} — {flavor.market.upper()} server bundle
+This is not a game package. It holds the {flavor.market.upper()} market's servers, built with
+OMOBA_MARKET={flavor.market} ({features}):
+
+  omoba-server        lobby and match workers ({preset.lobby})
+  omoba-account-api   Account API ({preset.account_api}); `omoba-account-api migrate`
+                      applies the database migrations
+
+Install and update them only with ops/vps/ru/ru_host.py ship --package <this file>
+(ops/vps/ru/README.md). Players download the game packages from {preset.portal}.
+
+Licenses and attributions: see the legal/ folder and ATTRIBUTION.md.
+"""
+
+
+def stage_server_bundle(stage: Path, version: str, flavor: Flavor, binaries: dict[str, Path]) -> None:
+    """omoba-server, omoba-account-api, the legal notices and the operator README."""
+    from package_licenses import collect_legal_notices, copy_legal_notices
+    require_server_bundle(flavor)
+    if set(binaries) != set(SERVER_BUNDLE_BINARIES):
+        raise SystemExit(f"a server bundle carries exactly {sorted(SERVER_BUNDLE_BINARIES)}, got {sorted(binaries)}")
+    stage.mkdir(parents=True)
+    for package, name in SERVER_BUNDLE_BINARIES.items():
+        shutil.copy2(binaries[package], stage / name)
+        (stage / name).chmod(0o755)
+    copy_legal_notices(collect_legal_notices(ROOT), stage / "legal")
+    shutil.copy2(ROOT / "ATTRIBUTION.md", stage / "ATTRIBUTION.md")
+    (stage / "README.txt").write_text(server_readme(version, flavor), encoding="utf-8")
+
+
+def build_server_bundle(version: str, out: Path, flavor: Flavor) -> Path:
+    """The market's lobby and Account API for its own host (ops/vps/ru/ru_host.py ship)."""
+    require_server_bundle(flavor)
+    binaries = linux_release_binaries(flavor, tuple(SERVER_BUNDLE_BINARIES))
+    directory = server_dist_dir(out)
+    directory.mkdir(parents=True, exist_ok=True)
+    archive = directory / server_bundle_name(version, flavor.market)
+    with tempfile.TemporaryDirectory() as temporary:
+        stage = Path(temporary) / server_bundle_root(version, flavor.market)
+        stage_server_bundle(stage, version, flavor, binaries)
+        run("tar", "-czf", archive, "-C", stage.parent, stage.name)
+    write_checksums(directory)
     return archive
 
 
@@ -1225,7 +1445,11 @@ def write_compatibility_manifest(out: Path, version: str) -> Path:
 def build_targets(platform_arg: str, flavor: Flavor, buildable: dict) -> list[str]:
     """Platforms one `build` invocation makes. Every platform has a dev app with its own
     identity (desktop -dev packages, phones space.ekza.omoba.dev); a market packages
-    only its own platforms (scripts/markets.py)."""
+    only its own platforms (scripts/markets.py). A market with its own servers also builds
+    its server bundle (`server`, needs what a Linux package needs; LR-22)."""
+    if platform_arg == SERVER_TARGET:
+        require_server_bundle(flavor)
+        return [SERVER_TARGET]
     allowed = set(MARKETS[flavor.market].platforms) & (set(DEV_PLATFORMS) if flavor.dev else set(PLATFORMS))
     if platform_arg != "all":
         if flavor.dev and platform_arg not in DEV_PLATFORMS:
@@ -1233,7 +1457,10 @@ def build_targets(platform_arg: str, flavor: Flavor, buildable: dict) -> list[st
         if platform_arg not in allowed:
             raise SystemExit(f"the {flavor.market} market is not packaged for {platform_arg}")
         return [platform_arg]
-    return [p for p in PLATFORMS if buildable[p] and p in allowed]
+    targets = [p for p in PLATFORMS if buildable[p] and p in allowed]
+    if not flavor.dev and MARKETS[flavor.market].server_bundle and buildable["linux"]:
+        targets.append(SERVER_TARGET)
+    return targets
 
 
 def build_plan(version: str, flavor: Flavor, targets: list[str], out: Path) -> dict:
@@ -1244,7 +1471,11 @@ def build_plan(version: str, flavor: Flavor, targets: list[str], out: Path) -> d
             "compiled_defaults": flavor.client_defaults(),
             "linux_binaries": list(linux_binaries(flavor)) if "linux" in targets else [], "dist": str(out),
             "packages": [str(out / artifact_name(version, target, flavor.contour, flavor.market))
-                         for target in targets]}
+                         for target in targets if target != SERVER_TARGET],
+            "server_bundle": (str(server_dist_dir(out) / server_bundle_name(version, flavor.market))
+                              if SERVER_TARGET in targets else None),
+            "readme": MARKETS[flavor.market].player_readme if not flavor.dev else "playtest",
+            "readme_gaps": readme_gaps(flavor)}
 
 
 def command_build(args) -> int:
@@ -1281,12 +1512,17 @@ def command_build(args) -> int:
                 built.append(build_android(version, out, flavor))
             elif target == "ios":
                 built.append(build_ios(version, out, flavor, args.ios_build, args.upload))
+            elif target == SERVER_TARGET:
+                built.append(build_server_bundle(version, out, flavor))
         except (SystemExit, subprocess.CalledProcessError) as error:
             failed[target] = str(error)
             print(f"!! {target} failed: {error}", file=sys.stderr)
             if args.platform != "all":
                 raise
     write_checksums(out)
+    for gap in readme_gaps(flavor):
+        print(f"note: the {flavor.market} README names no {gap} yet (scripts/markets.py Legal, LR-21)",
+              file=sys.stderr)
     summary = {"version": version, "contour": flavor.contour, "server": flavor.server,
                "registry": flavor.registry, "passport": flavor.passport, "config_dir": flavor.config_dir,
                "dist": str(out),
@@ -1893,7 +2129,8 @@ def main(argv=None) -> int:
     verify.add_argument("--market", choices=tuple(MARKETS), default="ru")
     verify.add_argument("--catalog", help="releases.json or an https:// URL (default: <portal>/api/releases)")
     build = sub.add_parser("build", help="build platform packages into dist/v<version>/")
-    build.add_argument("platform", choices=PLATFORMS + ("all",))
+    build.add_argument("platform", choices=PLATFORMS + (SERVER_TARGET, "all"),
+                       help="a player platform, `server` (a market's own servers, LR-22) or all")
     build.add_argument("--server", help="initial game server host:port compiled into clients")
     build.add_argument("--registry", help="initial Ekza registry origin compiled into clients")
     build.add_argument("--passport", help="Ekza passport URL (…/api/passport) compiled into clients "

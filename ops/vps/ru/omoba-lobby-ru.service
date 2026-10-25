@@ -1,5 +1,5 @@
-# RU market lobby (docs/markets.md). Install the `server` from the RU Linux package
-# (python3 scripts/release.py build linux --market ru) under /opt/omoba-ru/current.
+# RU market lobby (docs/markets.md). Install `omoba-server` from the RU server bundle
+# (python3 scripts/release.py build server --market ru) under /opt/omoba-ru/current.
 # A build for another market must never run here: the RU server has no Ekza
 # registry or passport and grants no paid cosmetics.
 # Installed and shipped by ops/vps/ru/ru_host.py (README.md). The lobby needs the

@@ -224,7 +224,7 @@ release-markets: ## Print every market's features, servers and platforms
 release-ru-preflight: ## Check that the RU lobby, Account API and portal answer
 	python3 scripts/release.py preflight --market ru
 
-release-ru: ## RU market packages (macOS, Windows, Linux + RU Account API, Android) into dist/v<version>-ru/
+release-ru: ## RU market packages (macOS, Windows, Linux, Android) and the RU server bundle into dist/v<version>-ru/
 	OMOBA_ANDROID_UNIVERSAL=1 python3 scripts/release.py check
 	OMOBA_ANDROID_UNIVERSAL=1 python3 scripts/release.py build all --market ru $(RELEASE_FLAGS)
 

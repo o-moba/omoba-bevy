@@ -1130,6 +1130,13 @@ follows.
 - The download path and the status label live in the RU profile of `scripts/markets.py` (`downloads_path`, `release_label`, `region`); the global market keeps its IPFS links and the `playtest` label.
 - Code: `scripts/release.py` (`publish_to_host`, `release_catalog`, `downloads_report`), `scripts/markets.py`, `ops/vps/ru/Caddyfile.ru`, `ops/vps/ru/ru_downloads.py`, `ops/vps/ru/ru_host.py` (`downloads`, the download folder and log). See [RU downloads](../ops/vps/ru/README.md#downloads) and [the session note](progress/2026-10-24-lr-23.md).
 
+## RU web entry point, Russian README and server bundle (LR-22, unreleased)
+
+- The RU landing is the RU portal's own guest home at `omoba.ru` (omoba-web, hosted in Russia, no foreign analytics): the number of hero classes counted from the game's catalog, the Verdant Arena, Ranked, Casual PvP, vs Bots and Offline practice named as the game names them, download buttons from the RU release catalog with SHA-256 and sizes in МБ, the status «Открытая бета» in the page language, the legal, source and community links and the age sign `12+`. Signed-in players go from `/` to `/me`; the workshop is labelled experimental; no RU page shows donate, wallet, crypto or Ekza content. The omoba.io landing is unchanged.
+- RU player packages carry a Russian README.txt: what the game is, install, sign-in with VK ID («Профиль» → «Войти через VK ID») and recovery, support and community channels once the owner sets them, the package's system requirements, the documents, the release's source and the age sign. It has no hosting notes. The global and dev READMEs are unchanged byte for byte.
+- The RU Linux player package no longer carries `omoba-account-api`: the RU lobby and Account API are their own server bundle (`release.py build server --market ru`, also in `make release-ru`), the only file `ru_host.py ship` accepts.
+- Code: `scripts/release.py` (`ru_player_readme`, `ru_system_requirements`, `build_server_bundle`, `stage_server_bundle`), `scripts/markets.py` (`player_readme`, `server_bundle`), `ops/vps/ru/ru_host.py` (`RU_PACKAGE`); omoba-web `src/components/guest-home.tsx`, `src/lib/releases.mjs`, `src/lib/market-profile.mjs` (`marketLanding`). See [markets](markets.md#legal-documents-and-links-lr-06), [the RU server bundle](../ops/vps/ru/README.md#server-bundle) and [the session note](progress/2026-10-24-lr-22.md).
+
 ## Admission and abuse limits (LR-16, unreleased)
 
 - One source (an address, or a household or carrier NAT behind one) can no longer lock everyone else out of login or hold the arenas: transport probes and compatibility replies are budgeted per IP and per /24 before the global budget, which keeps a reserve for new sources; one IP holds at most 8 endpoints and 8 career clients.

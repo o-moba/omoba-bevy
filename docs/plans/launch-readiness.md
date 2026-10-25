@@ -587,12 +587,12 @@ Area: landing/portal/packages · **major** · M · code (the owner approves the 
     - `OMOBA_SITE_URL` points to the RU landing
   - A Russian README for the RU market covering install, VK sign-in, feedback and support, legal links, the age sign and system requirements. Hosting notes are removed from player packages.
 - **Acceptance:**
-  - [ ] The RU landing is indexed (Yandex Webmaster) with ru hreflang, and its claims match the current RU release.
-  - [ ] RU landing and portal tests assert that `/donate`, wallets, "Ekza" and "crypto" are absent.
-  - [ ] With `OMOBA_MARKET=ru`, `/` renders the guest home when signed out and `/me` when signed in.
-  - [ ] `scripts/test_release.py` asserts the RU README is in Russian and includes the support e-mail, policy URLs and age sign.
-  - [ ] The RU Linux player tarball has no `omoba-account-api`.
-  - [ ] The global landing and README are unchanged.
+  - [ ] The RU landing is indexed (Yandex Webmaster) with ru hreflang, and its claims match the current RU release. Code done (2026-10-24): omoba-web's RU guest home is indexable in production with a canonical link and `hreflang="ru"`; it counts the hero classes from the game's catalog snapshot, names the map and the LR-08 modes as the game does and lists the RU catalog's downloads. Needs the RU host, then the owner adds the site to Yandex Webmaster.
+  - [x] RU landing and portal tests assert that `/donate`, wallets, "Ekza" and "crypto" are absent. omoba-web `tests/ru-landing.e2e.mjs` (ten RU pages, text and links) and `tests/landing.test.mjs`.
+  - [x] With `OMOBA_MARKET=ru`, `/` renders the guest home when signed out and `/me` when signed in. `tests/ru-landing.e2e.mjs`.
+  - [x] `scripts/test_release.py` asserts the RU README is in Russian and includes the support e-mail, policy URLs and age sign. The real support e-mail waits for the owner (LR-21); until then `build` prints a note and the README names the portal.
+  - [x] The RU Linux player tarball has no `omoba-account-api`. The RU servers are the separate bundle `release.py build server --market ru` (`ops/vps/ru/README.md#server-bundle`), the only file `ru_host.py ship` accepts.
+  - [x] The global landing and README are unchanged. The omoba.io landing is not touched; the global and dev READMEs are pinned byte for byte in `scripts/test_release.py`.
 - **Depends on:** LR-04, LR-07, LR-08, LR-21, LR-23
 
 #### LR-23 — RU-hosted downloads and public release labels
