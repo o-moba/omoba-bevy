@@ -144,7 +144,11 @@ settles payments and refunds that the provider flow re-read from YooKassa with
 the shop credentials (never a webhook body): `settle_payment_tx` grants 30 days
 from capture once, with the amount in kopecks and its points, and marks the
 attempt `succeeded`; a late `canceled` never downgrades a success; a pending
-payment marks its attempt `submitted`; an unknown payment writes nothing.
+payment marks its attempt `submitted`; an unknown payment writes nothing. A
+payment whose create response was lost binds to its attempt by the attempt id it
+carries; the attempt is locked by that id, so a settlement that raced the binding
+still settles it (never as unknown), and an attempt bound to another payment is
+not rebound.
 `settle_refund_tx` settles the payment first (a refund can overtake it), records
 each refund once, recomputes the grant's points from all refunds of the payment
 and revokes the grant on a full refund. A different amount than the attempt's is

@@ -184,16 +184,24 @@ struct Attempt {
 
 /// The attempt this payment belongs to, locked: by provider payment id, else
 /// (a lost create response) by the attempt id it carried, binding the payment.
+///
+/// The fallback locks the attempt by id alone. A concurrent settlement of the
+/// same lost-create payment may bind it while this one waits for the row lock;
+/// a `provider_payment_id IS NULL` predicate would then be re-checked after
+/// that commit and skip the row, and a payment of ours would settle as
+/// Unknown (a refund lost). The bound id is checked after the lock instead:
+/// unbound binds, this payment goes on, another payment's attempt is not this
+/// payment's (Unknown: an operator reviews it).
 async fn locked_attempt(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     payment: &VerifiedPayment,
 ) -> Result<Option<Attempt>> {
-    let read = |row: sqlx::postgres::PgRow| -> Result<Attempt> {
+    let read = |row: &sqlx::postgres::PgRow| -> Result<Attempt> {
         Ok(Attempt {
-            attempt_id: row_text(&row, "attempt_id")?,
-            profile_id: row_text(&row, "profile_id")?,
+            attempt_id: row_text(row, "attempt_id")?,
+            profile_id: row_text(row, "profile_id")?,
             amount_minor: row.try_get("amount_minor")?,
-            status: row_text(&row, "status")?,
+            status: row_text(row, "status")?,
         })
     };
     if let Some(row) = sqlx::query("SELECT attempt_id,profile_id,amount_minor,status FROM portal.supporter_yookassa_attempts WHERE provider_payment_id=$1 FOR UPDATE")
@@ -201,25 +209,33 @@ async fn locked_attempt(
         .fetch_optional(&mut **tx)
         .await?
     {
-        return read(row).map(Some);
+        return read(&row).map(Some);
     }
     let Some(id) = &payment.attempt_id else {
         return Ok(None);
     };
-    let Some(row) = sqlx::query("SELECT attempt_id,profile_id,amount_minor,status FROM portal.supporter_yookassa_attempts WHERE attempt_id=$1 AND provider_payment_id IS NULL FOR UPDATE")
+    let Some(row) = sqlx::query("SELECT attempt_id,profile_id,amount_minor,status,provider_payment_id FROM portal.supporter_yookassa_attempts WHERE attempt_id=$1 FOR UPDATE")
         .bind(id)
         .fetch_optional(&mut **tx)
         .await?
     else {
         return Ok(None);
     };
-    sqlx::query("UPDATE portal.supporter_yookassa_attempts SET provider_payment_id=$2,updated_at=$3 WHERE attempt_id=$1")
-        .bind(id)
-        .bind(&payment.payment_id)
-        .bind(now())
-        .execute(&mut **tx)
-        .await?;
-    read(row).map(Some)
+    let bound: Option<String> = row.try_get("provider_payment_id")?;
+    match bound.as_deref() {
+        None => {
+            sqlx::query("UPDATE portal.supporter_yookassa_attempts SET provider_payment_id=$2,updated_at=$3 WHERE attempt_id=$1")
+                .bind(id)
+                .bind(&payment.payment_id)
+                .bind(now())
+                .execute(&mut **tx)
+                .await?;
+        }
+        // Bound by a settlement that committed while this one waited.
+        Some(bound) if bound == payment.payment_id => {}
+        Some(_) => return Ok(None),
+    }
+    read(&row).map(Some)
 }
 
 fn grant_event(

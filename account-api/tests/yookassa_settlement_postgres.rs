@@ -330,6 +330,112 @@ async fn unknown_payments_write_nothing_and_lost_creates_bind_by_attempt() {
     cleanup(&app, &profile).await;
 }
 
+/// Other backends of this database waiting on a lock.
+async fn lock_waiters(app: &App) -> i64 {
+    sqlx::query_scalar("SELECT count(*) FROM pg_stat_activity WHERE datname=current_database() AND pid<>pg_backend_pid() AND wait_event_type='Lock'")
+        .fetch_one(&app.pool)
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+#[ignore = "requires isolated OMOBA_PORTAL_TEST_DATABASE_URL"]
+async fn settlements_racing_a_lost_create_binding_never_settle_as_unknown() {
+    let app = app().await;
+    let profile = account(&app).await;
+    // The create response was lost: the attempt has no payment id yet.
+    let id = attempt(&app, &profile, 1000, None).await;
+    sqlx::query(
+        "UPDATE portal.supporter_yookassa_attempts SET status='charging' WHERE attempt_id=$1",
+    )
+    .bind(&id)
+    .execute(&app.pool)
+    .await
+    .unwrap();
+    let payment = VerifiedPayment {
+        attempt_id: Some(id.clone()),
+        ..paid(&format!("pay-{}", crypto::random::<8>()), 1000, now() - 30)
+    };
+    // The first settlement binds the payment and grants, not yet committed.
+    let mut first = app.pool.begin().await.unwrap();
+    assert_eq!(
+        yookassa::settle_payment_tx(&mut first, &payment)
+            .await
+            .unwrap(),
+        Settlement::Changed
+    );
+    // A full refund and a duplicate success arrive meanwhile: both miss the
+    // uncommitted binding and wait on the attempt row.
+    let full = refund(
+        &format!("ref-{}", crypto::random::<8>()),
+        &payment.payment_id,
+        1000,
+    );
+    let refunding = tokio::spawn({
+        let (app, payment, full) = (app.clone(), payment.clone(), full.clone());
+        async move { settle_refund(&app, &payment, &full).await }
+    });
+    let duplicate = tokio::spawn({
+        let (app, payment) = (app.clone(), payment.clone());
+        async move { settle_payment(&app, &payment).await }
+    });
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while lock_waiters(&app).await < 2 {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the concurrent settlements never waited on the attempt"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    first.commit().await.unwrap();
+    // Neither is Unknown: the refund counts once and revokes, the duplicate is one.
+    assert_eq!(
+        refunding.await.unwrap().unwrap(),
+        Settlement::Changed,
+        "the refund of a payment of ours was dropped"
+    );
+    assert_eq!(duplicate.await.unwrap().unwrap(), Settlement::Unchanged);
+    let refunds: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM portal.supporter_yookassa_refunds WHERE refund_id=$1 AND provider_payment_id=$2")
+            .bind(&full.refund_id)
+            .bind(&payment.payment_id)
+            .fetch_one(&app.pool)
+            .await
+            .unwrap();
+    assert_eq!(refunds, 1);
+    let (amount, points, revoked) = grant(&app, &payment.payment_id).await;
+    assert_eq!((amount, points), (1000 * KOPECKS, 0));
+    assert!(revoked.is_some());
+    assert_eq!(status_of(&app, &id).await, "succeeded");
+    assert!(!supporter::status(&app, &profile).await.unwrap().active);
+    // Another payment carrying the same attempt id is not this attempt's: it
+    // writes nothing and never rebinds the attempt.
+    let other = VerifiedPayment {
+        payment_id: format!("pay-{}", crypto::random::<8>()),
+        ..payment.clone()
+    };
+    assert_eq!(
+        settle_payment(&app, &other).await.unwrap(),
+        Settlement::Unknown
+    );
+    let bound: Option<String> = sqlx::query_scalar(
+        "SELECT provider_payment_id FROM portal.supporter_yookassa_attempts WHERE attempt_id=$1",
+    )
+    .bind(&id)
+    .fetch_one(&app.pool)
+    .await
+    .unwrap();
+    assert_eq!(bound.as_deref(), Some(payment.payment_id.as_str()));
+    let events: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM portal.supporter_events WHERE period_id=$1")
+            .bind(&other.payment_id)
+            .fetch_one(&app.pool)
+            .await
+            .unwrap();
+    assert_eq!(events, 0);
+    cleanup(&app, &profile).await;
+}
+
 #[tokio::test]
 #[ignore = "requires isolated OMOBA_PORTAL_TEST_DATABASE_URL"]
 async fn the_tier_sums_this_windows_donations_and_months_count_calendar_months() {
