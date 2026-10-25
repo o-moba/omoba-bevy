@@ -104,7 +104,9 @@ CREATE TABLE portal.supporter_yookassa_refund_scan (
   key text PRIMARY KEY CHECK(key='refunds'),
   watermark bigint NOT NULL,
   window_end bigint,
-  cursor text CHECK(cursor ~ '^[!-~]{1,512}$'),
+  -- YooKassa's opaque list cursor: printable ASCII, at most 512 characters
+  -- (PostgreSQL regular expressions cap a repetition count at 255).
+  cursor text CHECK(cursor ~ '^[!-~]+$' AND length(cursor)<=512),
   lease_until bigint,
   last_successful_at bigint,
   updated_at bigint NOT NULL,

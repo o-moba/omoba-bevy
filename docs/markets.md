@@ -89,7 +89,10 @@ settings. The portal has no Supporter pages.
   (`payment_provider_not_in_market`): YooKassa settings in a global build, Apple
   or Solana settings in an RU build (until LR-69). It serves no route of a
   provider the market does not list (`.../apple/...`, `.../solana/...`,
-  `.../yookassa/...` answer 404).
+  `.../yookassa/...` answer 404). In RU the portal starts a donation through
+  `POST /v1/me/supporter/yookassa/checkout`, and the RU ingress passes YooKassa's
+  webhook (`/v1/supporter/yookassa/notifications`); see
+  [supporter.md › YooKassa donations](supporter.md#yookassa-donations).
 - The client registers `SupporterPlugin` (the panel and every player's aura); the
   StoreKit bridge only where Apple is sold. The panel's purchase surface comes
   from `payment_surface()`: the RU build on Windows, macOS, Linux and Android

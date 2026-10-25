@@ -1,9 +1,9 @@
 # RU ingress (Caddy, automatic HTTPS). The portal runs on this host and calls the
 # Account API directly on 127.0.0.1:40550 (README.md, "Topology"), so account.omoba.ru
-# serves only the game's native routes and health; every other Account API route
-# answers 403 here and needs no portal key. Both proxies OVERWRITE X-Real-IP with
-# the connecting client: the Account API and the portal trust it only because of
-# that (OMOBA_TRUST_LOOPBACK_PROXY=1 on both).
+# serves only the game's native routes, YooKassa's webhook and health; every other
+# Account API route answers 403 here and needs no portal key. Both proxies OVERWRITE
+# X-Real-IP with the connecting client: the Account API and the portal trust it only
+# because of that (OMOBA_TRUST_LOOPBACK_PROXY=1 on both).
 account.omoba.ru {
     header X-Content-Type-Options nosniff
     request_body {
@@ -13,11 +13,23 @@ account.omoba.ru {
         method POST
         path /v1/auth/pairings/lookup /v1/auth/pairings/approve /v1/auth/pairings/deny /v1/auth/devices/create /v1/auth/devices/status /v1/auth/devices/recover /v1/auth/devices/complete /v1/auth/devices/recovery-codes /v1/auth/social/link
     }
+    # YooKassa's HTTP notifications (LR-67, README.md "YooKassa"). Public: the API
+    # trusts nothing in the body and re-reads every payment and refund with the
+    # shop credentials; objects it did not create cost no call to YooKassa.
+    @yookassa {
+        method POST
+        path /v1/supporter/yookassa/notifications
+    }
     @health {
         method GET
         path /health/live /health/ready
     }
     handle @native {
+        reverse_proxy 127.0.0.1:40550 {
+            header_up X-Real-IP {remote_host}
+        }
+    }
+    handle @yookassa {
         reverse_proxy 127.0.0.1:40550 {
             header_up X-Real-IP {remote_host}
         }

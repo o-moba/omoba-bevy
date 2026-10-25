@@ -20,11 +20,13 @@ usability or App Review acceptance. The Apple verification policy is under
 the separately approved production dependency. Do not enable Apple checkout with
 a mock verifier or a service that only decodes JWT payloads.
 
-Implemented for LR-67 (the tier engine, LR-67a): provider-neutral tier points,
+Implemented for LR-67: the tier engine (LR-67a: provider-neutral tier points,
 the seven tier styles (protocol 12), YooKassa grant settlement and its durable
 tables (portal schema 9), the RU market selling through YooKassa only, and the
-in-game panel with the website link. Not yet built: the YooKassa checkout,
-webhook and reconciliation (LR-67b) and the RU portal pages (LR-67c).
+in-game panel with the website link) and the YooKassa provider flow in the
+Account API (LR-67b: checkout, the webhook, reconciliation; [below](#yookassa-donations)).
+Not yet built: the RU portal pages (LR-67c). Tests use a loopback YooKassa
+stand-in; no real shop, test shop payment or fiscal receipt has been seen yet.
 
 **Planned (ADR-025; LR-69):**
 - Each Apple tier product gives 100 to 10 000 points (YooKassa already gives 1 point per ruble).
@@ -155,7 +157,7 @@ and revokes the grant on a full refund. A different amount than the attempt's is
 refused. The durable tables (`supporter_yookassa_attempts` with the Idempotence-Key
 persisted before the POST, `supporter_yookassa_refunds`, the refund-scan cursor
 and operator issues) are in portal migration 9; the checkout, webhook and
-reconciliation loop that use them are LR-67b.
+reconciliation loop that use them are described in [YooKassa donations](#yookassa-donations).
 
 ## Hero aura rendering
 
@@ -292,6 +294,68 @@ reference placement, signature uniqueness and the original quote time window.
 Browser-supplied JSON transaction data cannot grant access. Expired quotes remain
 confirmable if payment happened within their window. The account's recent orders
 remain available after reload; never pay again just because confirmation is slow.
+
+## YooKassa donations
+
+The RU market sells Hero tiers through one-time YooKassa payments started on the
+RU portal (`account-api/src/supporter/yookassa/`, LR-67b). The rules come from
+the owner's production YooKassa integration:
+
+- **The body of a notification is never trusted.** The webhook
+  (`POST /v1/supporter/yookassa/notifications`, public through the RU ingress)
+  only names an object. One this API did not create is acknowledged with 200 and
+  no call to YooKassa: a payment is known when it is bound to an attempt or its
+  metadata names a posted attempt still waiting for its create reply, a refund
+  only when its payment is bound (the player gets the redirect only after the
+  bind, so an unbound attempt never has a paid payment). Lingering failed or
+  review attempts open nothing. A known one is re-read with the shop
+  credentials (`GET /v3/payments/{id}`, `GET /v3/refunds/{id}`) and settled; a
+  named object YooKassa does not have (404) is acknowledged too; any other
+  processing error answers 5xx so YooKassa delivers it again.
+- **The Idempotence-Key is persisted before the POST.** The checkout commits the
+  attempt with its key, the amount, the accepted offer version and the frozen
+  receipt, claims it (`charging`, two-minute lease), and only then calls
+  `POST /v3/payments`. A crash or a lost reply leaves a durable attempt.
+- **A lost create is replayed with the same key, only within 23 hours.** The
+  replay sends the same body (the frozen receipt, the same description and
+  metadata), so YooKassa answers with the payment the first request created.
+  Past 23 hours the attempt goes to manual review (`provider_replay_window_expired`
+  and an issue row) and is never posted again, with a new key or the old one.
+- **Settlement happens exactly once.** Every provider reply goes through
+  `settle_payment_tx` / `settle_refund_tx` ([Hero tiers](#hero-tiers)): a success
+  grants 30 days from capture with the amount and its points; a late `canceled`
+  never downgrades a success; a refund settles its payment first and recomputes or
+  revokes. A payment whose metadata names another attempt is not settled.
+- **Refunds are found even without a webhook.** The reconciliation loop scans the
+  shop's refunds in a fixed window with YooKassa's opaque cursor stored in
+  `supporter_yookassa_refund_scan`; a refund it cannot settle (pending, of an
+  unknown payment, failed) is queued as an issue before the cursor moves. A failed
+  list restarts the same window. New charges stop when the scan has not succeeded
+  for 30 minutes.
+- **54-FZ receipts through «Чеки от ЮKassa».** Each payment carries a receipt with
+  the player's e-mail, one item «OMOBA — поддержка проекта (аура на 30 дней)»,
+  `payment_subject: service`, `payment_mode: full_payment` and `vat_code` from
+  `OMOBA_YOOKASSA_VAT_CODE` (1–12; 1 = без НДС). The e-mail is required and
+  is used only for the receipt; it never becomes a sign-in.
+- **No provider body is logged**, only an operation, the HTTP status and
+  YooKassa's `x-request-id`. Amounts are integer kopecks.
+
+**Checkout.** The portal shows a quote (`amount_minor`, `RUB`, 30 days and the tier
+the donation reaches by itself) and posts it with the amount, the receipt e-mail,
+the accepted offer version and an `Idempotency-Key`. A quote that is not the
+server's answers `409 reload`. The answer is YooKassa's HTTPS redirect; YooKassa
+returns the player to `<portal>/supporter?paid=1`. `GET
+/v1/me/supporter/yookassa/payments` lists the player's recent donations and
+re-reads the newest open one, so the return page sees a payment before its
+webhook. New charges need `OMOBA_YOOKASSA_NEW_CHARGES=1` and a fresh refund scan;
+reconciliation of existing attempts always runs.
+
+**Operators.** `portal.supporter_yookassa_issues` (open rows have no `resolved_at`)
+lists what needs a person: `replay_window_expired`, `amount_mismatch`,
+`settlement_failed`, `pending_refund`, `unknown_payment`. Shop settings, the
+webhook and the test shop are in the RU runbook
+([ops/vps/ru/README.md › YooKassa](../ops/vps/ru/README.md#yookassa)); the routes
+and error codes in [account-api/README.md](../account-api/README.md#yookassa-provider-flow-lr-67b).
 
 ## Apple provider boundary
 

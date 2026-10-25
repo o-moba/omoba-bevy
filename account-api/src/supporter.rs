@@ -385,6 +385,7 @@ pub async fn dashboard(app: &App, profile: &str) -> Result<Value> {
         "recognition": recognition::get(app, profile).await?,
         "apple": apple,
         "solana": solana,
+        "yookassa": yookassa::offer(app).await?,
     }))
 }
 /// Every style with what it needs (`tier_points` 0 = any active grant) and
@@ -650,6 +651,7 @@ mod tests {
             secret_key: "test_secret_key".into(),
             vat_code: 1,
             new_charges: false,
+            api_base: yookassa::PRODUCTION_API.into(),
         }
     }
     fn apple() -> AppleConfig {
@@ -724,6 +726,7 @@ mod tests {
         }
         for path in [
             "me/supporter/yookassa/checkout",
+            "me/supporter/yookassa/payments",
             "supporter/yookassa/notifications",
         ] {
             assert!(provider_route_allowed(path, ru), "{path}");
