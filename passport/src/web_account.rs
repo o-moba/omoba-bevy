@@ -81,6 +81,31 @@ impl WebAccountApi {
         }
         serde_json::from_slice(&bytes).map_err(|_| "Invalid website response.".into())
     }
+    /// A public read of at most `limit` bytes (no redirects, the same timeouts).
+    pub(crate) fn get_bytes(&self, path: &str, limit: usize) -> Result<Vec<u8>, String> {
+        let response = self
+            .client
+            .get(
+                self.base
+                    .join(path)
+                    .map_err(|_| "Invalid website endpoint.")?,
+            )
+            .send()
+            .map_err(|_| "Website service is unavailable. Try again.")?;
+        let status = response.status();
+        let mut bytes = Vec::new();
+        response
+            .take(limit as u64 + 1)
+            .read_to_end(&mut bytes)
+            .map_err(|_| "Website response was interrupted.")?;
+        if bytes.len() > limit {
+            return Err("Website response is too large.".into());
+        }
+        if !status.is_success() {
+            return Err("Website service is unavailable. Try again.".into());
+        }
+        Ok(bytes)
+    }
     pub fn lookup(&self, code: &str, public_key: &str) -> Result<WebPairChallenge, String> {
         #[derive(Deserialize)]
         struct Response {

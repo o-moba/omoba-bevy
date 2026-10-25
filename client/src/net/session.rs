@@ -171,6 +171,8 @@ pub struct ClientSession {
     pub(in crate::net) join_attempts: u32,
     pub(in crate::net) join_error: Option<JoinRejection>,
     pub(crate) server_contract: Option<shared::compatibility::ReleaseContract>,
+    /// The server's update notice from the same report (LR-14).
+    pub(crate) server_update: Option<shared::compatibility::UpdateNotice>,
     pub(crate) compatibility_issue: Option<shared::compatibility::CompatibilityIssue>,
     pub(in crate::net) join_exhausted: bool,
     pub(in crate::net) snapshot_order: SnapshotOrder,
@@ -200,6 +202,7 @@ impl Default for ClientSession {
             join_attempts: 0,
             join_error: None,
             server_contract: None,
+            server_update: None,
             compatibility_issue: None,
             join_exhausted: false,
             snapshot_order: SnapshotOrder::default(),
@@ -261,6 +264,28 @@ fn should_attempt_reconnect(
 }
 
 impl ClientSession {
+    /// What the last compatibility check means for the player (LR-14):
+    /// `None` while nothing failed.
+    pub(crate) fn compatibility_verdict(&self) -> Option<super::CompatibilityVerdict> {
+        use shared::compatibility::{CompatibilityIssue, MismatchSide, ReleaseContract};
+        let issue = self.compatibility_issue?;
+        if issue == CompatibilityIssue::Unavailable {
+            return Some(super::CompatibilityVerdict::Unverified);
+        }
+        let side = self.server_contract.as_ref().map(|server| {
+            shared::compatibility::mismatch_side(
+                &ReleaseContract::current(),
+                server,
+                self.server_update.as_ref(),
+            )
+        });
+        Some(if side == Some(MismatchSide::ServerOutdated) {
+            super::CompatibilityVerdict::ServersUpdating
+        } else {
+            super::CompatibilityVerdict::UpdateRequired
+        })
+    }
+
     pub(crate) fn compatibility_summary(&self) -> String {
         let Some(server) = &self.server_contract else {
             return crate::i18n::tr("net.compatibility.pending").to_owned();
@@ -713,6 +738,7 @@ pub(in crate::net) fn perform_network_teardown(
     cam_state.locked = false;
 
     client_session.server_contract = None;
+    client_session.server_update = None;
     warn!("Network teardown: {reason}");
     if teardown_shows_select(client_session.last_join.is_some()) {
         // Nothing was committed: the player is somewhere in the front end and
@@ -996,7 +1022,11 @@ pub(in crate::net) fn update_session_lifecycle(
 
     while let Ok(signal) = channels.signals.try_recv() {
         match signal {
-            NetThreadSignal::Compatibility { server, issue } => {
+            NetThreadSignal::Compatibility {
+                server,
+                issue,
+                update,
+            } => {
                 if issue.is_some() && client_session.state != ClientConnectionState::Disconnected {
                     perform_network_teardown(
                         if issue == Some(shared::compatibility::CompatibilityIssue::Unavailable) {
@@ -1019,6 +1049,7 @@ pub(in crate::net) fn update_session_lifecycle(
                     );
                 }
                 client_session.server_contract = server;
+                client_session.server_update = update;
                 client_session.compatibility_issue = issue;
                 if issue.is_some_and(|reason| {
                     reason != shared::compatibility::CompatibilityIssue::Unavailable
@@ -1356,10 +1387,15 @@ mod tests {
             Update,
             (update_session_lifecycle, flush_session_events).chain(),
         );
+        let notice = shared::compatibility::UpdateNotice {
+            min_release: env!("CARGO_PKG_VERSION").into(),
+            url: None,
+        };
         signals_tx
             .send(NetThreadSignal::Compatibility {
                 server: Some(shared::compatibility::ReleaseContract::current()),
                 issue: Some(shared::compatibility::CompatibilityIssue::Catalog),
+                update: Some(notice.clone()),
             })
             .unwrap();
         app.update();
@@ -1370,13 +1406,19 @@ mod tests {
             Some(shared::compatibility::CompatibilityIssue::Catalog)
         );
         assert!(session.server_contract.is_some());
+        assert_eq!(session.server_update, Some(notice));
         assert!(!session.reconnect.active);
         assert!(crate::net::link_status(session).can_retry());
+        // Same release, another contract: this game is the one to update.
+        assert_eq!(
+            session.compatibility_verdict(),
+            Some(crate::net::CompatibilityVerdict::UpdateRequired)
+        );
         assert!(
             crate::net::link_status(session)
                 .detail()
                 .unwrap()
-                .contains("catalogue")
+                .contains("can no longer play online")
         );
     }
 

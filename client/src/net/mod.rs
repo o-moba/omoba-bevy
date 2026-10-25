@@ -30,7 +30,7 @@ pub(crate) use interpolate::NetworkGroundingSet;
 pub use session::{
     ClientConnectionState, ClientSession, NetIncomingDisconnected, SessionEvent, SessionUiCommand,
 };
-pub(crate) use status_ui::{LinkStatus, link_status};
+pub(crate) use status_ui::{CompatibilityVerdict, LinkStatus, compatibility_reason, link_status};
 
 use apply::{
     StagedSnapshot, respawn_players_with_new_store_models, respawn_sandbox_models,

@@ -80,6 +80,66 @@ make compatibility-check GAME_SERVER_ADDR=HOST:PORT COMPATIBILITY_MANIFEST=dist/
 A nonzero result blocks distribution until diagnosed; do not bypass an unverified
 server. Direct Xcode/server builds must retain a manifest from the same frozen source.
 
+## Updates and contract changes (LR-14)
+
+Policy (launch default O-12): client and server ship together. Balance values stay
+compiled into both, so a contract change is a **forced update**. An incompatible
+game shows **Update required** with a download button, and a newer compatible
+release shows a dismissible **Update available** banner on Home. The game reads the
+market's release catalog (`GET /v1/releases` of its Account API, the `releases.json`
+installed as `OMOBA_RELEASE_CATALOG`) at boot and after a mismatch. The button opens a
+page on the portal compiled into the build (`scripts/markets.py`): the catalog entry's
+`update_url`, by default `<portal>/download?platform=<platform>`. The iPhone build has no
+link: it updates through the App Store or TestFlight. A build without a portal (the
+global market today) shows no button and tells players to download the new version from
+the official site. The lobby's compatibility report carries its release as the minimum
+and the portal's download page (`UpdateNotice`, [release-compatibility.md](release-compatibility.md)).
+
+**Catalog fields** (`scripts/release.py catalog`, [account-api/README.md](../account-api/README.md#downloads)).
+Every entry carries `channel` (`direct`). The game reads only the entries of its own
+channel; store channels arrive with LR-68. On a market with a portal, each entry also
+carries `update_url`, the page its update button opens. `catalog --min-release X` adds
+`min_release`: games of that channel and platform below X show **Update required** even
+while the servers still accept them. That is a forced update too, so it needs the same
+player notice (step 3 below). `min_release` may not be newer than the release itself.
+
+**What bumps a revision** (`shared/src/compatibility.rs` and the fields in
+[release-compatibility.md](release-compatibility.md)):
+
+- `GAMEPLAY_REVISION`: anything the client simulates, predicts or shows from its own
+  compiled data that must equal the server's. That covers shared simulation rules
+  (`common/src/sim/`, `common/src/command.rs`), movement, dash and collision, damage,
+  cooldown, cost and range numbers, hero and item stats and growth (`common::balance`,
+  the shared catalogs), targeting and vision rules, and offline-practice behaviour
+  shared with the server.
+- `PROTOCOL_VERSION`, `CATALOG_REVISION`, `GEOMETRY_ID`: a wire change, a skill or kit
+  contract change, or a map geometry change. Each has its own rule in
+  [release-compatibility.md](release-compatibility.md).
+- No bump for server-only behaviour the client does not predict: bot decisions,
+  matchmaking, match lifecycle, settlement, moderation, logging. The same goes for
+  UI, text, audio, textures, animation and VFX-only changes.
+- When unsure, bump. A needless forced update costs one download. A missing bump lets a
+  mismatched client mispredict silently.
+
+**Order of a contract-changing release:**
+
+1. Build and stage the new server. Verify the new client manifest against the staged
+   lobby and worker (`make compatibility-check`, [compatibility gate](#compatibility-gate)).
+2. **Ship the clients first.** Publish the packages to the download host and install the
+   new `releases.json`. Old clients now show **Update available**. A player who updates
+   early sees "the servers are switching to your version" and connects by itself once
+   they do (Home retries every 30 s).
+3. **Notify players before the forced update.** Post the time of the server switch in the
+   market's community channels, and leave at least the banner period between steps 2
+   and 4. Without a notice, a server switch must not change the contract.
+4. Switch the lobby and the workers. Old clients now get **Update required** and the
+   download button.
+
+**Alternative (O-12, not chosen for launch):** move balance values into server-sent
+data so balance-only changes stop being contract changes. That needs a protocol for the
+values, client-side caching and tests that prediction uses them. It is a later decision
+for the owner.
+
 ## Turnkey release
 
 1. Merge the release PR to `main` with CI green (`make check` locally first, and

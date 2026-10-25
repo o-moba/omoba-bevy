@@ -6235,6 +6235,24 @@
           },
           "test_status": {
             "type": "string"
+          },
+          "channel": {
+            "type": "string",
+            "pattern": "^[a-z0-9_-]{1,32}$",
+            "default": "direct",
+            "description": "Build channel of the package; the game reads only its own channel's entries (LR-14, LR-68)."
+          },
+          "min_release": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "description": "Oldest release of this channel and platform that may still play online; never above version."
+          },
+          "update_url": {
+            "type": "string",
+            "format": "uri",
+            "maxLength": 256,
+            "description": "HTTPS page the game's update button opens for this channel and platform."
           }
         },
         "required": [
