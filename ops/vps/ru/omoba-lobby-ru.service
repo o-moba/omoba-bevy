@@ -32,6 +32,10 @@ Environment=OMOBA_MATCH_BIND_IP=0.0.0.0
 Environment=OMOBA_MATCH_FIRST_PORT=41000
 Environment=OMOBA_MATCH_CAPACITY=2
 Environment=OMOBA_MATCH_EXECUTABLE=/opt/omoba-ru/current/omoba-server
+# Text chat off at launch (owner default O-9, LR-15); reactions stay. Match workers
+# inherit it. Turning it on needs the owner's legal check (ОРИ, 149-FZ) and changes
+# ru_host.py's unit rule too. `omoba-account-api chat off` is the runtime kill switch.
+Environment=OMOBA_CHAT=off
 ExecStart=/opt/omoba-ru/current/omoba-server
 Restart=always
 RestartSec=5

@@ -38,6 +38,9 @@ pub(super) struct DeviceState {
     pub social: bool,
     /// The portal page was opened (or offered) for the request's code.
     pub browser_opened: bool,
+    /// This request was started by «Enter a recovery code» (LR-18): it asks
+    /// for a saved code first.
+    pub recovery_entry: bool,
 }
 #[derive(Resource, Default)]
 pub(super) struct Worker {
@@ -127,7 +130,7 @@ pub(super) fn act(
     }
     let result = (|| -> Result<(), String> {
         match action {
-            Action::DevicesStart | Action::SocialStart => {
+            Action::DevicesStart | Action::DevicesRecoveryStart | Action::SocialStart => {
                 let api = DeviceAccountApi::from_env()?;
                 let directory = identity.enrollment_directory()?;
                 let mut key = load_or_create_key(&directory)?;
@@ -167,6 +170,7 @@ pub(super) fn act(
                 career.devices.focused = false;
                 career.devices.recovery_code.clear();
                 career.devices.social = matches!(action, Action::SocialStart);
+                career.devices.recovery_entry = matches!(action, Action::DevicesRecoveryStart);
                 career.devices.browser_opened = false;
                 worker.next_poll = None;
                 launch(worker, proof);
@@ -272,6 +276,9 @@ pub(super) fn poll(
     if std::mem::take(&mut worker.linking) {
         match value {
             Ok(status) if status.state == "linked" => {
+                // The account is protected now: Profile and Home read it again.
+                career.protection.status = None;
+                career.protection.wanted = true;
                 finish_social(&mut career, &mut worker, tr("devices.vk.linked").into())
             }
             Ok(_) => career.devices.message = Some(tr("devices.error.stopped").into()),
@@ -484,6 +491,28 @@ pub(super) fn body(parent: &mut ChildSpawnerCommands, career: &CareerClient) {
                     "DeviceVkLink",
                 );
             }
+        } else if status.state == "pending" && state.recovery_entry {
+            label(
+                parent,
+                tr("protect.recovery.entry"),
+                16.,
+                ui::IVORY,
+                "DeviceRecoveryPrompt",
+            );
+            button(
+                parent,
+                &recovery_field(state),
+                Action::DevicesRecoveryEdit,
+                "DeviceRecoveryField",
+            );
+            if !state.busy {
+                button(
+                    parent,
+                    tr("devices.button.recover"),
+                    Action::DevicesRecover,
+                    "DeviceRecover",
+                );
+            }
         } else if status.state == "pending" {
             if let Some(code) = &status.code {
                 label(
@@ -550,6 +579,8 @@ pub(super) fn body(parent: &mut ChildSpawnerCommands, career: &CareerClient) {
             }
         }
     }
+    // Three equal ways in (LR-68 rules): the website (VK ID) where the region
+    // signs in with it, a saved recovery code, another device.
     if !state.busy && !state.restart_required {
         if vk_button_visible(shared::market::FEATURES) {
             button(
@@ -559,6 +590,12 @@ pub(super) fn body(parent: &mut ChildSpawnerCommands, career: &CareerClient) {
                 "DeviceVkSignIn",
             );
         }
+        button(
+            parent,
+            tr("protect.button.enter_code"),
+            Action::DevicesRecoveryStart,
+            "DeviceRecoveryStart",
+        );
         button(
             parent,
             tr("devices.button.start"),
@@ -620,6 +657,53 @@ mod social_tests {
         assert!(vk_button_visible(Market::Ru.default_features()));
         assert!(!vk_button_visible(Market::Global.default_features()));
         assert!(!vk_button_visible(Market::Cn.default_features()));
+    }
+
+    /// LR-18 and the LR-68 rules: a saved recovery code is its own way in,
+    /// next to VK ID (where the region has it) and another device; a request
+    /// started from it asks for the code, not for the portal.
+    #[test]
+    fn a_recovery_code_is_a_first_class_way_in() {
+        let mut app = App::new();
+        app.insert_resource(crate::ui::UiPlatform(UiProfile::Desktop))
+            .insert_resource(CareerClient {
+                modal: CareerModal::Devices,
+                ..default()
+            })
+            .add_systems(Update, render);
+        app.update();
+        let ids = |app: &mut App| -> Vec<String> {
+            app.world_mut()
+                .query::<crate::ui::test_id::NodeKey>()
+                .iter(app.world())
+                .map(|key| key.as_str().to_owned())
+                .collect()
+        };
+        let options = ids(&mut app);
+        for id in ["DeviceRecoveryStart", "DeviceStart"] {
+            assert!(options.iter().any(|found| found == id), "{id}: {options:?}");
+        }
+        assert_eq!(
+            options.iter().any(|found| found == "DeviceVkSignIn"),
+            vk_button_visible(shared::market::FEATURES)
+        );
+        {
+            let mut career = app.world_mut().resource_mut::<CareerClient>();
+            career.devices.recovery_entry = true;
+            career.devices.status = Some(status("pending", Some("ABCD2345"), None)); // i18n-allow
+        }
+        app.update();
+        let asked = ids(&mut app);
+        for id in [
+            "DeviceRecoveryPrompt",
+            "DeviceRecoveryField",
+            "DeviceRecover",
+        ] {
+            assert!(asked.iter().any(|found| found == id), "{id}: {asked:?}");
+        }
+        for id in ["DeviceCode", "DevicePoll", "DevicePortalInstructions"] {
+            assert!(!asked.iter().any(|found| found == id), "{id}: {asked:?}");
+        }
     }
 
     #[test]

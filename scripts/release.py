@@ -604,8 +604,37 @@ ANDROID
 - {"OMOBA Dev installs beside OMOBA; its Connection button picks Dev, Local or Custom." if flavor.dev else "It plays on the public OMOBA lobby."}
 """,
     }.get(target, "")
-    return (common + specific + legal_readme(version, flavor)
+    return (common + specific + progress_readme(flavor) + legal_readme(version, flavor)
             + "\nLicenses and attributions: see the legal/ folder and ATTRIBUTION.md.\n")
+
+
+def progress_readme(flavor: Flavor = PROD) -> str:
+    """How progress survives a reinstall (LR-18), for a production build with an account
+    service: where the market signs in with VK ID, progress follows the VK-linked
+    account; everywhere, recovery codes. A dev build's accounts may be reset, so it says
+    nothing. The Russian README of the RU packages says the same in Russian
+    (`ru_player_readme`)."""
+    if flavor.dev or not flavor.account_api:
+        return ""
+    if flavor.resolved_features["vk_sign_in"]:
+        return """
+ПРОГРЕСС / YOUR PROGRESS
+Рейтинг, уровень и история хранятся на сервере. Прогресс следует за аккаунтом,
+привязанным к VK: привяжите VK ID (Профиль -> «Войти через VK ID») или сохраните
+коды восстановления (Профиль -> «Защитить прогресс»). После переустановки или на
+новом устройстве войдите с тем же VK ID или введите код («Привязать или
+восстановить аккаунт»).
+Your rating, level and history are kept on the server. Progress follows the
+VK-linked account: link VK ID (Profile -> "Sign in with VK ID") or save recovery
+codes (Profile -> "Protect progress"). After a reinstall or on a new device, sign
+in with the same VK ID or enter a code ("Link or recover account").
+"""
+    return """
+YOUR PROGRESS
+Your rating, level and history are kept on the server, and this installation's key
+opens them. Save recovery codes (Profile -> "Protect progress") so a reinstall or a
+new device can come back to the same profile ("Link or recover account").
+"""
 
 
 def legal_readme(version: str, flavor: Flavor = PROD) -> str:
@@ -678,8 +707,8 @@ def ru_system_requirements(target: str) -> list[str]:
 
 def ru_player_readme(version: str, target: str, flavor: Flavor) -> str:
     """The Russian README of the RU market's player packages (LR-22): what the game is, install,
-    sign-in with VK ID, feedback and support, system requirements, the legal documents and the
-    age sign. Names come from markets.py (portal, `Legal`, `release_label`), the game's own UI
+    sign-in with VK ID and how progress survives a reinstall (LR-18), feedback and support,
+    system requirements, the legal documents and the age sign. Names come from markets.py (portal, `Legal`, `release_label`), the game's own UI
     texts (client/i18n/ru) and its catalog; no hosting notes (the RU servers ship as their own
     bundle, `build server`)."""
     preset = MARKETS[flavor.market]
@@ -717,13 +746,21 @@ def ru_player_readme(version: str, target: str, flavor: Flavor) -> str:
     lines += ["- При первом запуске прочитайте и примите Пользовательское соглашение и Политику",
               "  конфиденциальности (ссылки ниже).",
               "", "ВХОД И ПРОГРЕСС",
-              "Игра создаёт ваш профиль при первом запуске, его ключ хранится на этом устройстве."]
-    if flavor.resolved_features["vk_sign_in"]:
-        lines += [f"Чтобы видеть свои матчи на сайте {portal} и играть на других устройствах,",
+              "Игра создаёт ваш профиль при первом запуске, его ключ хранится на этом устройстве.",
+              "Рейтинг, уровень и история хранятся на сервере."]
+    vk = flavor.resolved_features["vk_sign_in"]
+    if vk:
+        lines += ["Прогресс следует за аккаунтом, привязанным к VK.",
+                  f"Чтобы видеть свои матчи на сайте {portal} и играть на других устройствах,",
                   f"войдите через VK ID: «{ui('career.button.profile')}» → «{ui('devices.button.vk')}».",
                   "Войдите через VK, OK или Mail.ru в браузере и подтвердите привязку в игре."]
-    lines += [f"Код восстановления и новое устройство: «{ui('career.button.profile')}» →",
-              f"«{ui('career.button.devices')}».",
+    # How progress survives a reinstall (LR-18), with the game's own button names.
+    lines += [f"Коды восстановления: «{ui('career.button.profile')}» → «{ui('protect.button.open')}» →",
+              f"«{ui('protect.button.create')}».",
+              "После переустановки или на новом устройстве "
+              + ("войдите с тем же VK ID или введите код:" if vk else "введите код:"),
+              f"«{ui('career.button.profile')}» → «{ui('career.button.devices')}» →",
+              f"«{ui('protect.button.enter_code')}».",
               "", "ОБРАТНАЯ СВЯЗЬ И ПОДДЕРЖКА"]
     channels = [(label, value) for label, value in (("Поддержка", legal.support_email),
                                                      ("Сообщество ВКонтакте", legal.community_vk),

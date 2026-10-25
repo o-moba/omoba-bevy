@@ -33,6 +33,7 @@ Status values: **Accepted** (in force and implemented), **Accepted, partly imple
 | [021](#adr-021-bot-difficulty-is-behavioural-rated-play-stays-bot-free) | Bot difficulty is behavioural; rated play stays bot-free | 2026-10-13 to 10-14 | Accepted, partly implemented |
 | [022](#adr-022-the-creator-asset-loop-comes-before-the-class-workshop) | Creator asset loop before class workshop | 2026-10-05; amended 2026-10-10 | Accepted, amended |
 | [023](#adr-023-delivery-process-green-gate-dated-progress-notes-english-focused-ui-checks) | Delivery process: green gate, progress notes, focused UI checks | 2026-09-25 / 09-29 | Accepted |
+| [026](#adr-026-android-keeps-allowbackupfalse-progress-survives-a-reinstall-through-vk-id-or-recovery-codes) | Android keeps `allowBackup=false`; progress survives a reinstall through VK ID or recovery codes | 2026-10-25 | Accepted |
 
 Build axes referred to below:
 
@@ -527,7 +528,7 @@ sequenceDiagram
 ## ADR-024: RU monetization: YooKassa donations buy monthly tiered auras
 
 - **Date:** 2026-10-24 (owner decision). Implementation: LR-67 in [../plans/launch-readiness.md](../plans/launch-readiness.md).
-- **Status:** Accepted; partly implemented. The tier engine is built (LR-67a: provider lists per market, protocol 12 tier styles, portal schema 9, tier points, the shared entitlement rule, YooKassa settlement, client palettes and the website link); the YooKassa checkout, webhook and reconciliation (LR-67b) and the RU portal pages (LR-67c) are not. Amends ADR-003 (the RU preset had `supporter` off) and ADR-005 (RU stays without Ekza but is no longer free of payments). Amended by ADR-025: providers are chosen per region × channel, and the tier counts provider-neutral points.
+- **Status:** Accepted; partly implemented. The tier engine is built (LR-67a: provider lists per market, protocol 12 tier styles, portal schema 9, tier points, the shared entitlement rule, YooKassa settlement, client palettes and the website link), and so is the Account API's YooKassa flow (LR-67b: checkout, webhook, reconciliation with the refund scan, tested against a loopback stand-in); the RU portal pages (LR-67c), the real shop and a real fiscal receipt are not. Amends ADR-003 (the RU preset had `supporter` off) and ADR-005 (RU stays without Ekza but is no longer free of payments). Amended by ADR-025: providers are chosen per region × channel, and the tier counts provider-neutral points.
 
 **Context.** The owner wants the Russian launch to earn money from players who support the project, through the Hero Supporter auras players already see on each other, and to grow from that revenue. Russian players cannot use Apple or Solana checkout here; the owner already runs YooKassa for another product.
 
@@ -610,6 +611,30 @@ sequenceDiagram
 - **Legal exposure** of Sign in with Apple, of our own first-party sign-in, and of RF citizens' data on the global contour depends on O-22, O-23 and O-30.
 
 **Links:** [../plans/launch-readiness.md](../plans/launch-readiness.md) (LR-67, LR-68, LR-69), [../markets.md](../markets.md), [../supporter.md](../supporter.md), [identity-and-accounts.md](identity-and-accounts.md), [system.md](system.md), [protocols.md](protocols.md), [../plans/game-directory.md](../plans/game-directory.md).
+
+---
+
+## ADR-026: Android keeps `allowBackup=false`; progress survives a reinstall through VK ID or recovery codes
+
+- **Date:** 2026-10-25 (LR-18 in [../plans/launch-readiness.md](../plans/launch-readiness.md)).
+- **Status:** Accepted. Device-to-device transfer on Android 12+ is not excluded yet (see Consequences).
+
+**Context.** The device key in `career_identity.json` is the account (ADR-001). An Android reinstall deletes it, and the next start makes a new profile at rating 1000. `android:allowBackup="true"` would bring the key back after a reinstall through Google's Auto Backup, but:
+- the account's credential would leave the device and be kept by a third party, outside the region whose data must stay in Russia (152-FZ), and on a service that is not reliable for RU players;
+- a restore clones one key onto every device restored from the same backup: they play as one device, revoking it on the portal ends all of them, and the portal cannot tell them apart;
+- iOS keeps the key in the Keychain for this device only, with no iCloud sync (ADR-025). One rule for both platforms is simpler to explain to players and support.
+
+**Decision.**
+- `mobile/android/AndroidManifest.xml` keeps `android:allowBackup="false"`: no cloud backup of the settings folder, so the key never leaves the device.
+- A reinstall or a new phone reaches the old profile only through what the account service can verify: a linked VK ID, a recovery code or another active device ([../account-recovery.md](../account-recovery.md)). LR-18 makes these reachable in the game: the Home card after the first completed match and again after the first ranked match, the protection status in Profile, and recovery codes issued in the game (`POST /v1/auth/devices/recovery-codes`, `omoba.recovery.native.v1`).
+- Support never restores a profile by hand.
+
+**Consequences.**
+- A player who reinstalls without protection loses the old profile, as ADR-001 already says; the in-game prompt exists to make that rare.
+- **Device-to-device transfer.** For apps targeting Android 12 (API 31) or higher, `allowBackup="false"` stops cloud backup but not a device-to-device transfer, and this app targets API 35. A transfer to a new phone may therefore copy the key, and both phones then play as one device until the old one is reset. Excluding the settings folder from transfers needs `android:dataExtractionRules` with a resource file in both resource folders (`res/`, `res-dev/`), an APK build and a check on a device. That belongs to the Android release build (LR-24) and device validation (LR-25); this record is amended when it lands.
+- `scripts/test_release.py` fails if the manifest stops saying `allowBackup="false"`.
+
+**Links:** [identity-and-accounts.md](identity-and-accounts.md#one-account-on-many-devices), [../account-recovery.md](../account-recovery.md), [../markets.md](../markets.md#sign-in-with-vk-id).
 
 ---
 

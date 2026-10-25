@@ -9,7 +9,7 @@ device keys. Background and the release steps: [docs/markets.md](../../../docs/m
 
 Only binaries from the RU server bundle may run here ([Server bundle](#server-bundle)):
 they are built with `OMOBA_MARKET=ru` (no Ekza, Hero Supporter through YooKassa only, VK
-ID sign-in; the YooKassa shop settings and webhook arrive with LR-67b).
+ID sign-in; the shop settings and the webhook are in [YooKassa](#yookassa)).
 
 > **Status (LR-01, LR-03, LR-23, LR-17 ops).** Everything up to the host is ready: [ru_host.py](ru_host.py)
 > sets up a fresh Ubuntu host, ships the server package and the portal, checks the
@@ -34,6 +34,7 @@ Everything below runs on this one host; only Caddy listens publicly for HTTP.
 | Caller | Reaches | How | Client address the Account API sees |
 | --- | --- | --- | --- |
 | Game (native signed routes) | `https://account.omoba.ru` → Caddy → `127.0.0.1:40550` | `@native` allowlist and health only; every other route answers 403 | `X-Real-IP`, overwritten by Caddy with the game's address |
+| YooKassa (HTTP notifications) | `https://account.omoba.ru/v1/supporter/yookassa/notifications` → Caddy → `127.0.0.1:40550` | its own `@yookassa` handle: that one POST path ([YooKassa](#yookassa)) | `X-Real-IP`, overwritten by Caddy with YooKassa's address |
 | Browser | `https://omoba.ru` → Caddy → portal `127.0.0.1:3010` | the whole portal | — (Caddy overwrites `X-Real-IP` with the browser's address) |
 | Browser, game update button | `https://omoba.ru/downloads/<tag>/<package>` → Caddy `file_server` on `/opt/omoba-ru/downloads` | the packages only, no listing ([Downloads](#downloads)) | — (static files; Caddy logs the request, shortened) |
 | Portal (BFF, VK callback, server reads) | `http://127.0.0.1:40550` directly | loopback HTTP, no portal ingress key | `X-Real-IP`, the browser's address forwarded by the portal |
@@ -520,6 +521,121 @@ lobby logs the values it runs with (`Admission limits: …`).
   `arena_limit` and `practice_cooldown` on the searching screen.
 - The journal shows `PROFILE_RETENTION pruned=N …` when the retention job deleted
   profiles.
+
+## YooKassa
+
+Hero Supporter (LR-67) is sold in RU through one-time YooKassa payments on
+`omoba.ru/supporter`. The Account API holds the shop and is the only process that
+talks to YooKassa; the portal forwards the checkout and redirects the player.
+Without the shop settings the portal sells nothing and everything else works, so
+the host can launch before the shop exists.
+
+**The shop (owner, in the YooKassa merchant profile):**
+- A shop of an ИП or ООО for the site `https://omoba.ru` (receipts for
+  самозанятые are not covered by this design), with «Чеки от ЮKassa» connected.
+- The VAT code of the receipts, confirmed with the accountant (`1` = без НДС, for
+  example on УСН).
+- Integration → HTTP notifications: URL
+  `https://account.omoba.ru/v1/supporter/yookassa/notifications` and the events
+  `payment.succeeded`, `payment.waiting_for_capture`, `payment.canceled`,
+  `refund.succeeded`.
+- Integration → API keys: a secret key. It goes only into
+  `/opt/omoba-ru/account-api.env`, never into a chat, a commit or a ticket.
+- A separate **test shop** (test cards, no money) for staging runs.
+- The public offer at `omoba.ru/offer` with the refund terms and the seller's
+  requisites (LR-06), and a real test payment whose fiscal receipt is checked
+  before announcing.
+
+**Settings** in `/opt/omoba-ru/account-api.env` (examples, commented out, in
+[account-api.env.example](account-api.env.example)); then
+`systemctl restart omoba-account-api-ru`:
+
+| Setting | Value |
+| --- | --- |
+| `OMOBA_YOOKASSA_SHOP_ID` | the shop id (digits) |
+| `OMOBA_YOOKASSA_SECRET_KEY` | the shop's secret key |
+| `OMOBA_YOOKASSA_VAT_CODE` | 54-FZ `vat_code` 1–12 of the receipt item |
+| `OMOBA_YOOKASSA_NEW_CHARGES` | `0` (paused) or `1` (new charges open) |
+
+The first three together or none; the API refuses to start with a partial shop
+and `ru_host.py status` reports one. `OMOBA_YOOKASSA_TEST_API_ORIGIN` (a loopback
+test stand-in) is refused by the release build and by `status`.
+
+**Turning it on:**
+1. Fill the settings with `OMOBA_YOOKASSA_NEW_CHARGES=0` and restart. Within a
+   minute the reconciliation loop has scanned the shop's refunds:
+   `SELECT to_timestamp(last_successful_at) FROM portal.supporter_yookassa_refund_scan;`
+   is recent and `journalctl -u omoba-account-api-ru` shows no `yookassa` errors.
+2. Run the whole flow against the test shop first (a staging host or a local
+   stack): a tier and a custom amount, the redirect and the return to
+   `/supporter?paid=1`, the aura in a match, a partial and a full refund from the
+   YooKassa dashboard (the tier drops, then the aura disappears).
+3. Set `OMOBA_YOOKASSA_NEW_CHARGES=1`, restart, make one real payment and check its
+   fiscal receipt e-mail, then announce.
+4. To pause sales, set `0` and restart. Paid and open payments still settle: the
+   webhook and the reconciliation loop always run.
+
+**What the API guarantees.** The notification body is never trusted: unknown
+objects (a payment not bound to an attempt, a refund of such a payment) are
+acknowledged without a call, also while attempts wait in manual review; known
+ones are re-read with the shop key and settled once, and one YooKassa answers
+404 for is acknowledged too. A checkout commits its Idempotence-Key before the POST; a lost
+create is replayed with the same key for 23 hours, then goes to manual review.
+New charges stop by themselves (`503 new_charges_paused`) when the refund scan has
+not succeeded for 30 minutes (YooKassa unreachable or the key wrong). Logs carry
+only operations, statuses and YooKassa's `x-request-id`, never card or customer
+data. Details: [docs/supporter.md › YooKassa donations](../../../docs/supporter.md#yookassa-donations).
+
+**Manual review.** Open issues:
+
+```sql
+SELECT provider_object_id, object_type, code, occurrences, to_timestamp(last_seen_at)
+  FROM portal.supporter_yookassa_issues WHERE resolved_at IS NULL ORDER BY last_seen_at;
+```
+
+- `replay_window_expired` (`provider_object_id` is the attempt id): a create whose
+  reply was lost for 23 hours. Search the YooKassa dashboard for a payment with
+  that `attempt_id` in its metadata. If there is one, deliver its notification by
+  hand (below); the API binds and settles it.
+- `amount_mismatch`, `settlement_failed`: YooKassa's object did not settle; compare
+  it with `portal.supporter_yookassa_attempts` before doing anything.
+- `pending_refund` and failed refunds are retried every minute; `unknown_payment`
+  is a refund of a payment this API did not create (not an OMOBA donation).
+
+Because the API re-reads every object, a hand-made notification is safe and is the
+way to settle one object now (`<payment>`, `<refund>`, `<attempt>` from the dashboard
+or the issue):
+
+```sh
+curl -sS -X POST https://account.omoba.ru/v1/supporter/yookassa/notifications \
+  -H 'content-type: application/json' \
+  -d '{"event":"payment.succeeded","object":{"id":"<payment>","metadata":{"attempt_id":"<attempt>"}}}'
+curl -sS -X POST https://account.omoba.ru/v1/supporter/yookassa/notifications \
+  -H 'content-type: application/json' \
+  -d '{"event":"refund.succeeded","object":{"id":"<refund>","payment_id":"<payment>"}}'
+```
+
+Then close the issue as the database owner:
+`UPDATE portal.supporter_yookassa_issues SET resolved_at=extract(epoch from now())::bigint WHERE provider_object_id='<id>';`.
+The receipt e-mail is stored with each attempt (the frozen 54-FZ receipt): it is
+personal data the privacy policy names (LR-04).
+
+## Chat and moderation (LR-15)
+
+- **Chat is off.** The lobby unit sets `OMOBA_CHAT=off` (owner default O-9): no text chat
+  on RU servers; reactions stay. Match workers inherit it, and the lobby logs
+  `Chat: off (OMOBA_CHAT; …)` at start. `ru_host.py` refuses a lobby unit without it, and
+  `lobby.env` must not repeat it. Turning chat on needs the owner's legal check (ОРИ,
+  149-FZ), then `Environment=OMOBA_CHAT=on` in the unit and the matching rule in
+  `ru_host.py` (`UNIT_ENV_RULES`), and a `ship`.
+- **Sanctions and the runtime kill switch** are `omoba-account-api` commands run on the
+  host as `omoba-ru` with the Account API's env file, so the database password is never
+  typed: `systemd-run --quiet --pipe --wait --uid=omoba-ru --gid=omoba-ru -p
+  EnvironmentFile=/opt/omoba-ru/account-api.env /opt/omoba-ru/current/omoba-account-api
+  player 'Name#1234'`. Applying, lifting, renaming and `chat off` take effect within
+  about 10 seconds, without a restart. Procedure: [RUNBOOK.md › Moderation](../../../RUNBOOK.md#moderation-lr-15).
+- Career schema 5 (sanctions, the moderation audit, the chat switch) and its grants are
+  applied by `ship` like every migration.
 
 ## Rollback
 

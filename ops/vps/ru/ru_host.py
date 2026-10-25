@@ -249,7 +249,10 @@ UNIT_RULES = {
 UNIT_ENV_RULES = {
     "lobby": {"SERVER_ADDR": f"0.0.0.0:{LOBBY_PORT}", "OMOBA_SERVER_ROLE": "lobby",
               "OMOBA_MATCH_ROOT": STATE + "/matches", "OMOBA_CAREER_OUTBOX": STATE + "/lobby-outbox",
-              "OMOBA_MATCH_EXECUTABLE": CURRENT + "/omoba-server"},
+              "OMOBA_MATCH_EXECUTABLE": CURRENT + "/omoba-server",
+              # RU chat off at launch (owner default O-9, LR-15): turning it on needs the
+              # owner's legal check (ОРИ, 149-FZ) and a change here and in the unit.
+              "OMOBA_CHAT": "off"},
     "account-api": {},
     "portal": {"HOSTNAME": PORTAL_ADDR[0], "NODE_ENV": "production", "NEXT_TELEMETRY_DISABLED": "1"},
 }
@@ -738,14 +741,53 @@ def env_problems(kind: str, text: str, example: str, expected_ip: str | None = N
                      for key in values if key in unit_env]
     if any(token in (text or "").lower() for token in FORBIDDEN_TOKENS):
         problems.append("mentions hosted Supabase or the production project")
+    if kind == "account-api":
+        problems += yookassa_problems(values)
     warnings += [f"{key} is not in {ENV_EXAMPLES[kind]}" for key in values
                  if key not in wanted and not optional_setting(kind, key)]
     return problems, warnings
 
 
 def optional_setting(kind: str, key: str) -> bool:
-    """A documented setting an env file may add (README.md, "Admission limits", LR-16)."""
+    """A documented setting an env file may add (README.md, "Admission limits", LR-16;
+    "YooKassa", LR-67)."""
+    if kind == "account-api":
+        return key in YOOKASSA_KEYS
     return kind == "lobby" and (key.startswith("OMOBA_LIMIT_") or key == "OMOBA_PROFILE_RETENTION_DAYS")
+
+
+# The optional YooKassa shop of the Account API (LR-67, README.md "YooKassa"): the first
+# three together or none; NEW_CHARGES is the switch (exactly 1 opens new charges).
+YOOKASSA_KEYS = ("OMOBA_YOOKASSA_SHOP_ID", "OMOBA_YOOKASSA_SECRET_KEY", "OMOBA_YOOKASSA_VAT_CODE",
+                 "OMOBA_YOOKASSA_NEW_CHARGES")
+# Points the API at a loopback stand-in; only debug builds accept it and a host never has it.
+YOOKASSA_TEST_ORIGIN = "OMOBA_YOOKASSA_TEST_API_ORIGIN"
+
+
+def yookassa_problems(values: dict) -> list[str]:
+    """Problems of the Account API's optional YooKassa settings, as the API checks them at
+    startup (account-api/src/supporter/yookassa.rs), so a typo fails here, not at start."""
+    problems = []
+    if YOOKASSA_TEST_ORIGIN in values:
+        problems.append(f"{YOOKASSA_TEST_ORIGIN} is a test stand-in; a host never sets it")
+    set_keys = [key for key in YOOKASSA_KEYS if values.get(key)]
+    if not set_keys:
+        return problems
+    shop, secret, vat, new_charges = (values.get(key, "") for key in YOOKASSA_KEYS)
+    missing = [key for key in YOOKASSA_KEYS[:3] if not values.get(key)]
+    if missing:
+        problems.append("YooKassa needs " + ", ".join(missing) + " too (all three or none)")
+    if any(PLACEHOLDER in values.get(key, "") for key in YOOKASSA_KEYS):
+        problems.append("a YooKassa setting is still a placeholder (needs the owner's shop, LR-67)")
+    if shop and PLACEHOLDER not in shop and not re.fullmatch(r"[0-9]{1,20}", shop):
+        problems.append("OMOBA_YOOKASSA_SHOP_ID must be the numeric shop id")
+    if secret and PLACEHOLDER not in secret and not re.fullmatch(r"[!-~]{8,256}", secret):
+        problems.append("OMOBA_YOOKASSA_SECRET_KEY must be the shop's secret key (8-256 printable characters)")
+    if vat and not re.fullmatch(r"[1-9]|1[0-2]", vat):
+        problems.append("OMOBA_YOOKASSA_VAT_CODE must be a 54-FZ vat_code 1-12 (1 = без НДС)")
+    if new_charges and new_charges not in ("0", "1"):
+        problems.append("OMOBA_YOOKASSA_NEW_CHARGES must be 1 (open) or 0 (paused)")
+    return problems
 
 
 def placeholder_fill(values: dict, expected_ip: str | None, vkid: str | None) -> dict:

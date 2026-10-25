@@ -167,6 +167,90 @@ pub struct SignedSocialLink {
     pub signature: String,
 }
 
+/// Lifetime of a [`NativeRecoveryRequest`].
+pub const RECOVERY_REQUEST_SECONDS: u64 = 60;
+
+/// What the game asks about its own account's protection (LR-18).
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum RecoveryAction {
+    /// Read the account's protection ([`AccountProtection`]).
+    Status,
+    /// Issue a new set of recovery codes; the unused codes of the old set stop working.
+    Rotate,
+}
+
+/// A request of the game's **active** device key about its own account: read
+/// its protection, or issue recovery codes in the game without the portal
+/// (LR-18). The key resolves the profile; a single-use nonce and an expiry of
+/// at most [`RECOVERY_REQUEST_SECONDS`] stop replays.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct NativeRecoveryRequest {
+    pub origin: String,
+    pub public_key: String,
+    /// 32 random bytes, lowercase hex.
+    pub nonce: String,
+    /// Unix seconds.
+    pub expires_at: u64,
+    pub action: RecoveryAction,
+}
+impl NativeRecoveryRequest {
+    pub fn validate(&self, origin: &str, public_key: &str, now: u64) -> Result<(), &'static str> {
+        if self.origin != origin
+            || self.public_key != public_key
+            || !lowercase_hex(&self.public_key, 32)
+            || !lowercase_hex(&self.nonce, 32)
+            || self.expires_at <= now
+            || self.expires_at > now.saturating_add(RECOVERY_REQUEST_SECONDS)
+        {
+            return Err("Invalid or expired account request.");
+        }
+        Ok(())
+    }
+    pub fn signing_bytes(&self) -> Vec<u8> {
+        serde_json::to_vec(&(
+            "omoba.recovery.native.v1",
+            &self.origin,
+            &self.public_key,
+            &self.nonce,
+            self.expires_at,
+            self.action,
+        ))
+        .expect("typed recovery request tuple")
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct SignedNativeRecoveryRequest {
+    pub request: NativeRecoveryRequest,
+    pub signature: String,
+}
+
+/// How a reinstall or a new device can reach the account, as the game shows it
+/// (`POST /v1/auth/devices/recovery-codes`).
+// No Debug: the reply that issues codes carries them, and they are bearer secrets.
+#[derive(Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AccountProtection {
+    /// Unused recovery codes of the current set.
+    pub recovery_codes_remaining: u32,
+    /// Linked website sign-ins by provider (`vk`), never an identifier.
+    pub linked_sign_ins: Vec<String>,
+    /// Device keys that can play as this account.
+    pub active_devices: u32,
+    /// Only in the reply that issued them: shown once, never stored by the game.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub recovery_codes: Vec<String>,
+}
+impl AccountProtection {
+    /// A lost or reinstalled device can come back to this account: a website
+    /// sign-in (VK ID) is linked or an unused recovery code exists.
+    pub fn protected(&self) -> bool {
+        !self.linked_sign_ins.is_empty() || self.recovery_codes_remaining > 0
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -219,6 +303,110 @@ mod tests {
         assert_ne!(
             link.signing_bytes(),
             e.signing_bytes(DeviceAction::Status, None, None)
+        );
+    }
+
+    #[test]
+    fn recovery_requests_bind_every_field_and_never_verify_as_another_proof() {
+        let request = NativeRecoveryRequest {
+            origin: "https://players.example".into(),
+            public_key: "b".repeat(64),
+            nonce: "c".repeat(64),
+            expires_at: 1060,
+            action: RecoveryAction::Status,
+        };
+        assert!(
+            request
+                .validate(&request.origin, &request.public_key, 1000)
+                .is_ok()
+        );
+        assert!(
+            request
+                .validate("https://evil.example", &request.public_key, 1000)
+                .is_err()
+        );
+        assert!(
+            request
+                .validate(&request.origin, &"d".repeat(64), 1000)
+                .is_err()
+        );
+        // Expired, or valid for longer than a minute.
+        assert!(
+            request
+                .validate(&request.origin, &request.public_key, 1060)
+                .is_err()
+        );
+        assert!(
+            request
+                .validate(&request.origin, &request.public_key, 999)
+                .is_err()
+        );
+        let mut short_nonce = request.clone();
+        short_nonce.nonce = "c".repeat(63);
+        assert!(
+            short_nonce
+                .validate(&request.origin, &request.public_key, 1000)
+                .is_err()
+        );
+        let bytes = request.signing_bytes();
+        assert!(bytes.starts_with(br#"["omoba.recovery.native.v1","#));
+        for changed in [
+            NativeRecoveryRequest {
+                action: RecoveryAction::Rotate,
+                ..request.clone()
+            },
+            NativeRecoveryRequest {
+                nonce: "e".repeat(64),
+                ..request.clone()
+            },
+            NativeRecoveryRequest {
+                expires_at: 1059,
+                ..request.clone()
+            },
+            NativeRecoveryRequest {
+                origin: "https://other.example".into(),
+                ..request.clone()
+            },
+        ] {
+            assert_ne!(changed.signing_bytes(), bytes);
+        }
+        // Another domain's proof over the same key never verifies as this one.
+        assert_ne!(
+            bytes,
+            enrollment().signing_bytes(DeviceAction::Status, None, None)
+        );
+        let wire: SignedNativeRecoveryRequest = serde_json::from_str(&format!(
+            r#"{{"request":{{"origin":"https://players.example","public_key":"{}","nonce":"{}","expires_at":1060,"action":"rotate"}},"signature":"00"}}"#,
+            "b".repeat(64),
+            "c".repeat(64)
+        ))
+        .unwrap();
+        assert_eq!(wire.request.action, RecoveryAction::Rotate);
+    }
+
+    #[test]
+    fn protection_counts_a_linked_sign_in_or_an_unused_code() {
+        let mut protection = AccountProtection {
+            active_devices: 3,
+            ..AccountProtection::default()
+        };
+        // Other devices alone do not protect a lost phone's progress (LR-18).
+        assert!(!protection.protected());
+        protection.recovery_codes_remaining = 1;
+        assert!(protection.protected());
+        protection.recovery_codes_remaining = 0;
+        protection.linked_sign_ins = vec!["vk".into()];
+        assert!(protection.protected());
+        // Codes are sent only in the reply that issued them.
+        let status: AccountProtection = serde_json::from_str(
+            r#"{"recovery_codes_remaining":8,"linked_sign_ins":[],"active_devices":1}"#,
+        )
+        .unwrap();
+        assert!(status.recovery_codes.is_empty());
+        assert!(
+            !serde_json::to_string(&status)
+                .unwrap()
+                .contains("recovery_codes\"")
         );
     }
 

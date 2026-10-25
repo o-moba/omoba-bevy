@@ -366,6 +366,29 @@ impl MatchService {
             casual_since: (preference == MatchPreference::Casual).then_some(now),
         });
     }
+    /// Answers a `FindMatch` with a refusal `code` instead of queueing it (a
+    /// moderation sanction, LR-15): the profile leaves the queue, and its view
+    /// is `Failed { code }` until a later `FindMatch` is accepted.
+    pub fn refuse(
+        &mut self,
+        profile: &str,
+        session: String,
+        request_id: u64,
+        code: &str,
+        now: Instant,
+    ) {
+        let Self::Lobby(lobby) = self else {
+            return;
+        };
+        if lobby.requests.len() >= 512 && !lobby.requests.contains_key(profile) {
+            return;
+        }
+        lobby
+            .requests
+            .insert(profile.to_owned(), (session, request_id, now));
+        lobby.waiting.retain(|w| w.profile.profile_id != profile);
+        lobby.errors.insert(profile.to_owned(), code.to_owned());
+    }
     pub fn cancel(&mut self, profile: &str) {
         let Self::Lobby(lobby) = self else {
             return;
@@ -1400,6 +1423,105 @@ mod tests {
             assert_eq!(probe.accept(&sent[0].1), Some(ReleaseContract::current()));
             assert!(runtime.world.players.is_empty());
         }
+        let _ = std::fs::remove_dir_all(directory); // Only this test's unique fixture.
+    }
+
+    #[test]
+    fn sanctions_refuse_find_match_with_their_code_until_lifted() {
+        use crate::runtime::ports::{ManualClock, MemoryTransport};
+        use ed25519_dalek::Signer;
+        use shared::career::{CareerAction, CareerRequest};
+        use shared::moderation::{Sanction, SanctionKind, code};
+        let now = Instant::now();
+        let (lobby, directory) = practice_lobby();
+        let mut rt = ServerRuntime::for_test(
+            MemoryTransport::new("127.0.0.1:4000".parse().unwrap()),
+            ManualClock::new(now),
+            crate::career_backend::MemoryCareer::test_backend(7),
+            crate::match_rules::MatchConfig::dev(),
+        );
+        rt.match_service = lobby;
+        let player: std::net::SocketAddr = "127.0.0.1:60200".parse().unwrap();
+        rt.career.backend.test_authenticated(
+            player,
+            ProfileSummary::new("c".repeat(64), "Rude#0001".into()),
+            "rude",
+        );
+        let key = ed25519_dalek::SigningKey::from_bytes(&[7; 32]);
+        let mut sequence = 0;
+        let mut find = |rt: &mut ServerRuntime, preference| {
+            // One account request per 100 ms per endpoint.
+            std::thread::sleep(Duration::from_millis(110));
+            sequence += 1;
+            let action = CareerAction::FindMatch {
+                request_id: sequence,
+                preference,
+                also_casual: false,
+            };
+            let nonce = "b".repeat(64);
+            let signature = key
+                .sign(&shared::career::authorized_signing_bytes(
+                    7, &nonce, sequence, &action,
+                ))
+                .to_bytes()
+                .iter()
+                .map(|b| format!("{b:02x}"))
+                .collect();
+            rt.career.backend.handle(
+                player,
+                CareerRequest::Authorized {
+                    session_nonce: nonce,
+                    sequence,
+                    action,
+                    signature,
+                },
+            );
+            rt.poll_career(now);
+            rt.career_view(player, now).match_service.unwrap()
+        };
+        let failed = |code: &str| MatchServiceView::Failed { code: code.into() };
+        let hour = crate::moderation::unix_now() + 3600;
+        rt.career.backend.test_set_sanctions(
+            player,
+            vec![Sanction {
+                kind: SanctionKind::RankedBan,
+                until: Some(hour),
+            }],
+        );
+        assert_eq!(
+            find(&mut rt, MatchPreference::Ranked),
+            failed(code::RANKED_BAN)
+        );
+        assert!(matches!(
+            find(&mut rt, MatchPreference::Casual),
+            MatchServiceView::Waiting { .. }
+        ));
+        // A matchmaking ban applied while searching takes the player out.
+        rt.career.backend.test_set_sanctions(
+            player,
+            vec![Sanction {
+                kind: SanctionKind::MatchmakingBan,
+                until: None,
+            }],
+        );
+        assert_eq!(
+            find(&mut rt, MatchPreference::Casual),
+            failed(code::MATCHMAKING_BAN)
+        );
+        assert_eq!(
+            find(&mut rt, MatchPreference::BotPractice),
+            failed(code::MATCHMAKING_BAN)
+        );
+        let MatchService::Lobby(lobby) = &rt.match_service else {
+            unreachable!()
+        };
+        assert!(lobby.waiting.is_empty());
+        // Lifted: the next search queues, with no restart.
+        rt.career.backend.test_set_sanctions(player, Vec::new());
+        assert!(matches!(
+            find(&mut rt, MatchPreference::Ranked),
+            MatchServiceView::Waiting { .. }
+        ));
         let _ = std::fs::remove_dir_all(directory); // Only this test's unique fixture.
     }
 

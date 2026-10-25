@@ -3,7 +3,7 @@
   "info": {
     "title": "Omoba Account API",
     "version": "0.21.0-rc.1",
-    "description": "Browser clients use the Next.js BFF, not these bearer endpoints directly. No match/reward write endpoints. All private replies are no-store. Native proofs are domain-separated Ed25519; signing tuple is defined in shared/src/web_account.rs. Sign in with VK ID (portal schema 7) is enabled by OMOBA_VKID_CLIENT_ID and OMOBA_SOCIAL_SECRET in a vk_sign_in build; `auth/social/link` is native, the other social routes are the portal BFF's."
+    "description": "Browser clients use the Next.js BFF, not these bearer endpoints directly. No match/reward write endpoints. All private replies are no-store. Native proofs are domain-separated Ed25519; signing tuple is defined in shared/src/web_account.rs. Sign in with VK ID (portal schema 7) is enabled by OMOBA_VKID_CLIENT_ID and OMOBA_SOCIAL_SECRET in a vk_sign_in build; `auth/social/link` is native, the other social routes are the portal BFF's. Moderation (LR-15): while a profile has an active account ban, every session-authenticated route, pairing approval and completion and VK sign-in answer 403 `account_banned`; `PATCH /v1/me/profile` answers 403 `name_locked` while a moderator's name reset lasts. Sanctions are applied with the `omoba-account-api sanction|rename|chat` operator commands, never over HTTP."
   },
   "paths": {
     "/v1/auth/pairings": {
@@ -5098,6 +5098,435 @@
           }
         }
       }
+    },
+    "/v1/auth/devices/recovery-codes": {
+      "post": {
+        "summary": "Native (LR-18): the active device key reads its account's protection (status) or issues a new set of recovery codes (rotate). Ed25519 omoba.recovery.native.v1 in shared/src/device_account.rs, single-use nonce, 60-second maximum lifetime; no portal session",
+        "operationId": "post_auth_devices_recovery_codes",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SignedNativeRecoveryRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Committed; rotate carries the new codes once",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountProtection"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid, expired or foreign-origin request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown or revoked key, or a signature by another key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Replayed nonce (request_replayed)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited (per IP, per key; rotate also per profile)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Dependency unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/me/supporter/yookassa/checkout": {
+      "post": {
+        "summary": "Start a YooKassa donation (RU): persist the attempt, its Idempotence-Key and receipt, then create the payment",
+        "description": "Only in a market that sells through YooKassa (RU); 404 elsewhere. The same Idempotency-Key is the same attempt: its payment is re-read, never created again. YooKassa returns the player to <portal>/supporter?paid=1.",
+        "operationId": "post_me_supporter_yookassa_checkout",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 16,
+              "maxLength": 80,
+              "pattern": "^[A-Za-z0-9-]+$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "amount_rub": {
+                    "type": "integer",
+                    "minimum": 100,
+                    "maximum": 100000,
+                    "description": "A tier (100, 250, 500, 1000, 2500, 5000, 10000) or any whole amount in range."
+                  },
+                  "receipt_email": {
+                    "type": "string",
+                    "maxLength": 254,
+                    "description": "Required for the \u00ab\u0427\u0435\u043a\u0438 \u043e\u0442 \u042eKassa\u00bb receipt; never a sign-in."
+                  },
+                  "quote": {
+                    "$ref": "#/components/schemas/YooKassaQuote"
+                  },
+                  "offer_version": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9._-]{1,40}$",
+                    "description": "The public offer version the player accepted."
+                  }
+                },
+                "required": [
+                  "amount_rub",
+                  "receipt_email",
+                  "quote",
+                  "offer_version"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "YooKassa's redirect for the pending payment",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/YooKassaCheckout"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_request, amount_not_allowed, receipt_email_invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or expired session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not a YooKassa market",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "reload (quote differs), idempotency_conflict, payment_succeeded, payment_canceled, payment_in_progress, payment_manual_review, too_many_open_payments",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "payment_provider_rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "new_charges_paused, payment_provider_unavailable, database_unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/me/supporter/yookassa/payments": {
+      "get": {
+        "summary": "The account's recent YooKassa donations (RU)",
+        "description": "Up to 20 attempts of the last year, newest first. The newest submitted payment of the last hour is re-read from YooKassa first (at most every 5 s).",
+        "operationId": "get_me_supporter_yookassa_payments",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Owner-scoped donations",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "payments": {
+                      "type": "array",
+                      "maxItems": 20,
+                      "items": {
+                        "$ref": "#/components/schemas/YooKassaPayment"
+                      }
+                    }
+                  },
+                  "required": [
+                    "payments"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or expired session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not a YooKassa market",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Dependency unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/supporter/yookassa/notifications": {
+      "post": {
+        "summary": "YooKassa HTTP notifications (RU, public): the body only names an object, which is re-read with the shop credentials",
+        "description": "Events payment.succeeded, payment.waiting_for_capture, payment.canceled, refund.succeeded. An object this API did not create (a payment neither bound to an attempt nor naming a posted, unbound attempt in its metadata; a refund of a payment not bound to an attempt) is acknowledged (ignored) without a call to YooKassa. A named object YooKassa does not have (404) is acknowledged (ignored) too. Any other processing error answers 5xx so YooKassa delivers the notification again.",
+        "operationId": "post_supporter_yookassa_notifications",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string"
+                  },
+                  "event": {
+                    "type": "string"
+                  },
+                  "object": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "payment_id": {
+                        "type": "string"
+                      },
+                      "metadata": {
+                        "type": "object"
+                      }
+                    }
+                  }
+                },
+                "required": [
+                  "event",
+                  "object"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Settled (accepted) or not this API's object (ignored)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "status": {
+                      "enum": [
+                        "accepted",
+                        "ignored"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "status"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Not JSON",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not a YooKassa market",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited (per IP and in total)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "notification_not_processed: the object did not settle; YooKassa retries",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "payment_provider_rejected: YooKassa refused the re-read (for example a wrong shop key); YooKassa retries",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "payment_provider_unavailable or database_unavailable; YooKassa retries",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -5112,7 +5541,8 @@
         "type": "object",
         "properties": {
           "code": {
-            "type": "string"
+            "type": "string",
+            "description": "Stable error code, for example invalid_request, session_expired, account_banned (403, LR-15), name_locked (403, LR-15), not_found, state_changed, rate_limited, database_unavailable."
           },
           "request_id": {
             "type": "string"
@@ -6477,6 +6907,10 @@
               ]
             },
             "description": "Payment providers this market sells through (global: apple, solana; RU: yookassa)."
+          },
+          "yookassa": {
+            "type": "object",
+            "description": "available boolean (YooKassa configured, RU only); when configured also new_charges boolean (OMOBA_YOOKASSA_NEW_CHARGES=1 and a refund scan in the last 30 minutes), currency RUB, duration_days 30, min_rub 100, max_rub 100000, tiers_rub [100,250,500,1000,2500,5000,10000]."
           }
         },
         "required": [
@@ -6484,7 +6918,8 @@
           "apple",
           "solana",
           "catalog",
-          "providers"
+          "providers",
+          "yookassa"
         ]
       },
       "SupporterCheckout": {
@@ -7071,6 +7506,212 @@
           "signature"
         ],
         "additionalProperties": false
+      },
+      "SignedNativeRecoveryRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "request": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "origin": {
+                "type": "string"
+              },
+              "public_key": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "nonce": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "expires_at": {
+                "type": "integer",
+                "format": "int64",
+                "description": "Unix seconds, at most 60 s ahead"
+              },
+              "action": {
+                "type": "string",
+                "enum": [
+                  "status",
+                  "rotate"
+                ]
+              }
+            },
+            "required": [
+              "origin",
+              "public_key",
+              "nonce",
+              "expires_at",
+              "action"
+            ]
+          },
+          "signature": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{128}$"
+          }
+        },
+        "required": [
+          "request",
+          "signature"
+        ]
+      },
+      "AccountProtection": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "recovery_codes_remaining": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "linked_sign_ins": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "vk"
+              ]
+            }
+          },
+          "active_devices": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "recovery_codes": {
+            "type": "array",
+            "minItems": 8,
+            "maxItems": 8,
+            "items": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "description": "Only in the rotate reply; shown once"
+          }
+        },
+        "required": [
+          "recovery_codes_remaining",
+          "linked_sign_ins",
+          "active_devices"
+        ]
+      },
+      "YooKassaQuote": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "What the portal showed the player; it must equal the server's quote for amount_rub (409 reload otherwise).",
+        "properties": {
+          "amount_minor": {
+            "type": "integer",
+            "format": "int64",
+            "description": "amount_rub \u00d7 100 (kopecks)"
+          },
+          "currency": {
+            "const": "RUB"
+          },
+          "duration_days": {
+            "const": 30
+          },
+          "tier": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "rose",
+              "jade",
+              "azure",
+              "crimson",
+              "prism_i",
+              "prism_ii",
+              "prism_iii",
+              null
+            ],
+            "description": "The tier this donation reaches by itself."
+          }
+        },
+        "required": [
+          "amount_minor",
+          "currency",
+          "duration_days",
+          "tier"
+        ]
+      },
+      "YooKassaCheckout": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "confirmation_url": {
+            "type": "string",
+            "format": "uri",
+            "pattern": "^https://",
+            "description": "YooKassa's payment page; never carries credentials."
+          },
+          "attempt_id": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{32}$"
+          }
+        },
+        "required": [
+          "confirmation_url",
+          "attempt_id"
+        ]
+      },
+      "YooKassaPayment": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "attempt_id": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{32}$"
+          },
+          "provider_payment_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "amount_minor": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "currency": {
+            "const": "RUB"
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "succeeded",
+              "canceled",
+              "review"
+            ],
+            "description": "review: past the 23-hour replay window or mismatched; an operator looks at it."
+          },
+          "refunded_minor": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "created_at": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "settled_at": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          }
+        },
+        "required": [
+          "attempt_id",
+          "provider_payment_id",
+          "amount_minor",
+          "currency",
+          "status",
+          "refunded_minor",
+          "created_at",
+          "settled_at"
+        ]
       }
     }
   }

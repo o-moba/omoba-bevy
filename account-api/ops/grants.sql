@@ -50,6 +50,16 @@ GRANT SELECT,INSERT(public_key,profile_id) ON career_keys TO :"game_role";
 GRANT SELECT ON career_admission_salt TO :"game_role";
 GRANT SELECT,INSERT,DELETE ON career_profile_admissions TO :"game_role";
 GRANT EXECUTE ON FUNCTION career_prune_unplayed_profiles(integer, integer) TO :"game_role";
+-- Moderation (career schema 5, LR-15): game servers read sanctions and the chat
+-- switch. Operators run `omoba-account-api sanction|rename|chat` with the portal
+-- role: it applies and lifts sanctions (only the lift columns may change), writes
+-- the append-only audit and switches chat. No runtime role may delete either.
+GRANT SELECT ON career_sanctions,career_chat_switch TO :"game_role";
+GRANT SELECT,INSERT,UPDATE(lifted_at,lifted_by,lift_reason) ON career_sanctions TO :"portal_role";
+GRANT SELECT,INSERT ON career_moderation_events TO :"portal_role";
+GRANT SELECT,UPDATE(enabled,changed_at,changed_by) ON career_chat_switch TO :"portal_role";
+GRANT USAGE ON SEQUENCE career_sanctions_sanction_id_seq,career_moderation_events_seq_seq
+  TO :"portal_role";
 -- Neither runtime role receives schema CREATE, ownership, or migration privileges.
 -- In a legacy database, explicitly remove public schema CREATE from PUBLIC before
 -- deployment. Fresh PostgreSQL 15+ databases already use the owner-only default.

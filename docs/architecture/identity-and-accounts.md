@@ -94,6 +94,7 @@ The client runs one handshake for each *scope* `(server address, server epoch, c
 3. **Client → server:** `Authenticate { challenge, signature }` over `omoba.career.auth.v1`, signed inline in `identity_driver`.
 4. **Server logs the key in.** The server checks that the challenge is the one it issued and still fresh, verifies the signature with `verify_strict`, and queues `Job::Login`. `CareerStore::authenticate(public_key, nickname)` then takes a transaction advisory lock on the key:
    - **Known key:** returns the profile and keeps the saved nickname. A revoked key is refused with *"This device key was revoked…"*.
+   - **Account ban (LR-15).** After the store answers, the worker reads the profile's active sanctions; an active `account_ban` refuses the sign-in with `error_code` `account_banned` and the ban in `CareerView.sanctions`, so the client shows until when. The client signs in again a minute later, so a lifted ban needs no restart. A ban applied while signed in ends the authorization at the next 10-second access refresh, as a revoked key does.
    - **Unknown key:** inserts a new `career_profiles` row and a matching `career_keys` row. The `profile_id` is two random UUIDs without dashes (64 hex characters) and is *not* derived from the key. The key row has no label, so it gets the column default `Original device`.
    - **New-profile limits (LR-16).** A game server signs in through `authenticate_from`: an unknown key gets a profile only while its source IP (IPv4 address, IPv6 /64) created fewer than 10 profiles in the last 24 hours and everyone fewer than 5000 (`OMOBA_LIMIT_NEW_PROFILES_*`). The refusal creates nothing; the view carries `error_code` `new_profile_limit` or `new_profiles_paused`, which the client shows localized and stops retrying on. Known keys always sign in. The count lives in PostgreSQL (`career_profile_admissions`, a salted hash of the source, 48 h).
 5. **Client is authenticated.** The reply carries `auth_nonce = challenge.nonce` and the profile. The client treats itself as authenticated once both are present. It retries every 2 s and gives up after 25 s (`RETRY`, `AUTH_TIMEOUT`).
@@ -188,6 +189,8 @@ sequenceDiagram
   - not revoked,
   - within its 7-day absolute lifetime,
   - seen within the last day.
+
+  While the profile has an active `account_ban` (LR-15), every session-authenticated request answers `403 account_banned` without revoking the session, so it works again once the ban ends or is lifted. Pairing approval and completion and VK sign-in refuse the same way, so no new session is created ([`moderation.rs`](../../account-api/src/moderation.rs) `refuse_banned`).
 - **Labels.** Pairing sessions get the column default `Browser` ([`001_portal.sql`](../../account-api/migrations/001_portal.sql)). VK sessions take the method label (`VK ID`, `OK`, `Mail.ru`).
 - **Limit.** At most 20 active sessions per profile, serialized by a row lock on the profile. Further sign-ins get `session_limit`. The same rule applies to VK ID sessions.
 - **Fresh session.** A session created no more than 600 s ago is "fresh", whether it came from pairing completion or from a VK sign-in (`devices.rs` `fresh`, `auth::revoke`). These actions require a fresh session:
@@ -213,7 +216,7 @@ Sources:
 - Detailed user flow: [`../supporter.md`](../supporter.md), section "One account on phone and PC"
 - Contract: [`shared/src/device_account.rs`](../../shared/src/device_account.rs)
 - Server: [`account-api/src/devices.rs`](../../account-api/src/devices.rs)
-- Game: [`career_devices.rs`](../../client/src/career_devices.rs)
+- Game: [`career_devices.rs`](../../client/src/career_devices.rs), [`career_protection.rs`](../../client/src/career_protection.rs) (Protect progress, LR-18)
 
 **Enrollment.** The new installation signs every enrollment call with a *separate pending key* under `omoba.device.enroll.v1`. The signed tuple binds:
 
@@ -238,6 +241,11 @@ Sources:
 **Recovery codes.**
 
 - **Issuing.** A fresh session calls `POST /v1/me/recovery-codes` (at most 2 per minute per profile) and receives 8 random 32-byte hex codes. They are shown once and stored as `HMAC("recovery-code")`. A new set consumes the unused codes of the old set.
+- **Issuing in the game (LR-18).** Profile → «Защитить прогресс» / Protect progress, or the Home card, calls `POST /v1/auth/devices/recovery-codes` (`devices::native_recovery`), signed by the **active** device key under `omoba.recovery.native.v1` (`CareerIdentity::sign_recovery_request`). The body is `shared::device_account::SignedNativeRecoveryRequest`: origin, key, a 32-byte nonce, an expiry of at most 60 s and the action:
+  - `status` returns the account's protection (`AccountProtection`): unused codes, linked sign-ins by provider (`vk`), active devices. The game shows it in Profile and uses it for the Home card.
+  - `rotate` issues a new set exactly like the portal (same table, same per-profile `recovery-rotate` budget, shared with the portal) and returns the codes once with the new status. The audit event is `recovery_codes_rotated_in_game`.
+
+  The key must be active (`career_keys`, not revoked; read under `FOR SHARE` after the profile lock, the order revocation uses). The nonce is single-use in `portal.supporter_nonces` (no new table: nonces are random and the signature domain separates the proofs), so a captured request cannot be replayed for a second set; a replay answers `409 request_replayed` before it spends the rotation budget. No fresh portal session is needed: an active key already reaches one through web pairing, so the route grants nothing the key did not have. The game never stores or logs the codes; they leave the screen when the modal closes. No portal migration.
 - **Using a code.** `recover` is signed with the code. The server allows 5 attempts per minute per key. It consumes the code, binds it to the enrollment and approves the enrollment for the code's profile. It also revokes **all** web sessions of that profile. Repeating the call with the same code and enrollment returns the current state. The player then runs `complete` as above.
 
 ```mermaid
@@ -371,7 +379,7 @@ sequenceDiagram
   - the Account API serves no `supporter*` or `me/supporter*` route (404), including `GET /v1/supporters`,
   - the Account API refuses billing configuration,
   - the client registers neither the panel nor StoreKit.
-- **RU market (LR-67).** `supporter` is on with YooKassa as the only provider (`shared::market::payment_providers`). The Account API refuses Apple and Solana settings (`payment_provider_not_in_market`) and serves no Apple or Solana route; the client registers the panel and every player's aura but no StoreKit bridge, and its panel links to the portal's `/supporter` («Поддержать на сайте»). The in-game status and equip go through the game server as everywhere else.
+- **RU market (LR-67).** `supporter` is on with YooKassa as the only provider (`shared::market::payment_providers`). The Account API refuses Apple and Solana settings (`payment_provider_not_in_market`) and serves no Apple or Solana route; the client registers the panel and every player's aura but no StoreKit bridge, and its panel links to the portal's `/supporter` («Поддержать на сайте»). The in-game status and equip go through the game server as everywhere else. The portal starts a donation with `POST /v1/me/supporter/yookassa/checkout`; YooKassa's webhook and the Account API's reconciliation loop settle it into a grant ([supporter.md › YooKassa donations](../supporter.md#yookassa-donations)).
 
 ## Ekza links (global market only)
 
@@ -397,9 +405,10 @@ All three links are gated by `FEATURES.ekza`, which the free-market presets (ru,
 | Unlinked VK identity | 30 days without a sign-in | | Deleted when idle and no pending link refers to it |
 | Linked VK identity | Until unlinked | One VK account per profile | `DELETE /v1/me/social/vk` (fresh session) |
 | Native Supporter request | Up to 60 s | One use per nonce | |
+| Native recovery request (LR-18) | Up to 60 s | One use per nonce | |
 | Portal Ekza library link | Pending 10 min | One per profile | `DELETE /v1/me/ekza-library`. A 401/410 from the Ekza Registry removes it |
 
-To avoid leaking which accounts or rows exist, failed ownership checks answer `404 not_found` (`forbidden()`). A secondary `audit_events` log is kept for 30 days. It records `pair_approved`, `session_created`, `device_linked`, `device_revoked`, `account_recovered`, `social_sign_in`, `social_linked`, `social_unlinked` and similar events.
+To avoid leaking which accounts or rows exist, failed ownership checks answer `404 not_found` (`forbidden()`). A secondary `audit_events` log is kept for 30 days. It records `pair_approved`, `session_created`, `device_linked`, `device_revoked`, `account_recovered`, `recovery_codes_rotated` (portal), `recovery_codes_rotated_in_game`, `social_sign_in`, `social_linked`, `social_unlinked` and similar events.
 
 ### Rate-limit buckets
 
@@ -414,11 +423,14 @@ Rate limits are per-minute buckets keyed by `HMAC(portal secret, scope, identity
 | `device-enrollment` (status: 120) | IP | 10 |
 | `device-create-key` | key | 5 |
 | `recovery-attempt` | key | 5 |
-| `recovery-rotate` | profile | 2 |
+| `recovery-rotate` (portal and in-game) | profile | 2 |
+| `recovery-native-ip` / `recovery-native-key` (`auth/devices/recovery-codes`; not charged to `device-enrollment`) | IP / key | 60 / 10 |
 | `social-sign-in` (every `auth/social/*` route) | IP | 30 |
 | `social-link-key` | key | 10 |
 | `native-supporter-ip` / `native-supporter` | IP / key | 60 / 30 |
 | `apple-notification-ip` | IP | 120 |
+| `yookassa-notification-ip` / `yookassa-notification` | IP / everyone | 120 / 600 |
+| `yookassa-checkout` (on top of `write`) | profile | 10 |
 | `public-profile`, `public-supporters` | IP | 120 each |
 | `read` / `write` (session routes) | profile | 120 / 20 |
 | `search` / `stats` | profile | 30 / 10 |
@@ -436,13 +448,14 @@ Every signed message is `serde_json` of a tuple whose first element is the domai
 | `omoba.device.enroll.v1` | `shared::device_account::DeviceEnrollment::signing_bytes(action, target, code)` | `career_devices.rs` `sign` (**pending** enrollment key in `Worker.key`) | `account-api/src/devices.rs` `proof` | `origin`, `enrollment_id`, `public_key`, `label`, `expires_at`, `action`, `target_profile`, `recovery_code` | Lifetime of at most 300 s. Key, origin, label and expiry must match the stored row (`matches`). `target_profile` only for `complete`, `recovery_code` only for `recover` |
 | `omoba.social.link.v1` | `shared::device_account::SocialLink::signing_bytes` | `CareerIdentity::sign_social_link` (**active** device key) | `account-api/src/social.rs` `link` | `origin`, `enrollment_id`, `enrollment_key`, `public_key`, `expires_at` | The active key must differ from the enrollment key. Enrollment pending and unexpired. Repeated success is idempotent |
 | `omoba.supporter.native.v1` | `shared::supporter::NativeSupporterRequest::signing_bytes` | `CareerIdentity::sign_supporter_request` (device key, iOS) | `account-api/src/supporter.rs` `native` | `origin`, `public_key`, `nonce`, `expires_at` (number), `action` | Lifetime of at most 60 s, single-use nonce |
+| `omoba.recovery.native.v1` | `shared::device_account::NativeRecoveryRequest::signing_bytes` | `CareerIdentity::sign_recovery_request` (**active** device key) | `account-api/src/devices.rs` `native_recovery` | `origin`, `public_key`, `nonce`, `expires_at` (number), `action` (`status`/`rotate`) | Lifetime of at most 60 s, single-use nonce (`portal.supporter_nonces`), active key only |
 
 The domain-separation tests are:
 
 - in [`shared/src/career.rs`](../../shared/src/career.rs): `auth_message_is_domain_bound_and_injective_for_separators` (`omoba.career.auth.v1`) and `social_account_action_signs_the_complete_match_scoped_request`,
 - in `server/src/career_backend.rs`: `signatures_bind_domain_nonce_epoch_sequence_and_action` (request tuple),
 - in `web_account.rs`: the golden tuple test,
-- in `device_account.rs`: the action and target tests (*"A link proof can never verify as an enrollment proof"*),
+- in `device_account.rs`: the action and target tests (*"A link proof can never verify as an enrollment proof"*) and `recovery_requests_bind_every_field_and_never_verify_as_another_proof`,
 - in `shared/src/public_transport.rs`: the field-mutation test.
 
 Strings such as `omoba.class-build.v1`, `omoba.workshop.v1`, `omoba.asset-catalog.v1` and `ekza.account.library.v1` are document schema discriminators, not signature domains. `omoba.persona.v1` appears only as a proposed profile-id hash in [`../plans/bot-personas.md`](../plans/bot-personas.md).

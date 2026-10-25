@@ -89,7 +89,10 @@ settings. The portal has no Supporter pages.
   (`payment_provider_not_in_market`): YooKassa settings in a global build, Apple
   or Solana settings in an RU build (until LR-69). It serves no route of a
   provider the market does not list (`.../apple/...`, `.../solana/...`,
-  `.../yookassa/...` answer 404).
+  `.../yookassa/...` answer 404). In RU the portal starts a donation through
+  `POST /v1/me/supporter/yookassa/checkout`, and the RU ingress passes YooKassa's
+  webhook (`/v1/supporter/yookassa/notifications`); see
+  [supporter.md › YooKassa donations](supporter.md#yookassa-donations).
 - The client registers `SupporterPlugin` (the panel and every player's aura); the
   StoreKit bridge only where Apple is sold. The panel's purchase surface comes
   from `payment_surface()`: the RU build on Windows, macOS, Linux and Android
@@ -141,7 +144,8 @@ release's source and the channels that are set.
 `player_readme`, `release.py ru_player_readme`): the release status and the age sign
 at the top; what the game is (hero classes counted from `shared/assets/catalog`, the
 Verdant Arena, the modes named as the game's `client/i18n/ru` names them); install;
-sign-in with VK ID and recovery, named as the game's buttons; the support and
+sign-in with VK ID and how progress survives a reinstall (it follows the VK-linked
+account; recovery codes, LR-18), named as the game's buttons; the support and
 community channels that are set and the portal; the system requirements of that
 package (the macOS minimum of its Info.plist, the glibc of the Linux build image, the
 APK manifest's Android minimum and Vulkan); and the documents, the source of the
@@ -191,6 +195,16 @@ the game's own signature over its pending request; one VK account per profile;
 a code is single-use and expires in five minutes; unlinking needs a fresh sign-in
 (`DELETE /v1/me/social/vk`). Contract: `account-api/docs/openapi.json`; tests:
 `account-api/tests/social_postgres.rs`.
+
+**Protect progress (LR-18).** Progress follows the VK-linked account: after a
+reinstall or on a new phone, Profile → «Войти через VK ID» with the same VK ID
+brings back the same profile. After the first completed match, and again after the
+first ranked match, Home asks to link VK ID or save a recovery code until the profile
+is protected or the player declined three times; Profile shows the protection, and
+«Защитить прогресс» creates recovery codes in the game
+(`POST /v1/auth/devices/recovery-codes`, signed by the device key). «Ввести код
+восстановления» sits next to the VK and device options. Support restores nothing by
+hand: [account recovery](account-recovery.md).
 
 ## Adding a market
 

@@ -487,6 +487,8 @@ class DevContour(unittest.TestCase):
         manifest = (release.ROOT / "mobile/android/AndroidManifest.xml").read_text()
         self.assertIn(f'package="{prod.bundle_id}"', manifest)
         self.assertIn(f'android:label="{prod.display_name}"', manifest)
+        # The device key never goes to a cloud backup (ADR-026, LR-18).
+        self.assertIn('android:allowBackup="false"', manifest)
         for identity in (prod, dev):
             self.assertTrue((release.ROOT / "mobile/ios/Assets.xcassets"
                              / f"{identity.ios_app_icon}.appiconset/AppIcon.png").is_file())
@@ -893,6 +895,31 @@ class Markets(unittest.TestCase):
         no_linux = {**report["platforms"], "linux": False}
         self.assertNotIn("server", release.build_targets("all", release.resolve_flavor(market="ru"), no_linux))
         self.assertNotIn("server", release.build_targets("all", release.PROD, report["platforms"]))
+
+    def test_readmes_say_how_progress_survives_a_reinstall(self):
+        """LR-18: progress follows the VK-linked account where the market signs in with VK
+        ID; recovery codes everywhere an account service exists; nothing in dev builds."""
+        # The RU README is Russian (LR-22), with the game's own button names.
+        ui = lambda key: release.client_text("ru", key)
+        ru = " ".join(release.player_readme("0.45.0", "android", release.resolve_flavor(market="ru")).split())
+        self.assertIn("Прогресс следует за аккаунтом, привязанным к VK", ru)
+        self.assertIn(f"«{ui('career.button.profile')}» → «{ui('protect.button.open')}» → "
+                      f"«{ui('protect.button.create')}»", ru)
+        self.assertIn("войдите с тем же VK ID или введите код: "
+                      f"«{ui('career.button.profile')}» → «{ui('career.button.devices')}» → "
+                      f"«{ui('protect.button.enter_code')}»", ru)
+        no_vk = " ".join(release.player_readme("0.45.0", "android", release.resolve_flavor(
+            market="ru", features={"vk_sign_in": False})).split())
+        self.assertIn(f"«{ui('protect.button.create')}»", no_vk)
+        self.assertIn("После переустановки или на новом устройстве введите код:", no_vk)
+        with_service = " ".join(release.player_readme(
+            "0.45.0", "linux", release.resolve_flavor(account_api="https://account.example.org",
+                                                      portal="https://players.example.org")).split())
+        self.assertIn("Save recovery codes", with_service)
+        self.assertNotIn("VK", with_service)
+        self.assertNotIn("YOUR PROGRESS", release.player_readme("0.45.0", "linux"))
+        self.assertNotIn("YOUR PROGRESS", release.player_readme(
+            "0.45.0", "linux", release.resolve_flavor("dev", market="ru")))
 
     def test_publication_needs_the_public_source_tag(self):
         listed = "abc123\trefs/tags/v0.45.0-ru\n"

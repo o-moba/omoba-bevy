@@ -496,6 +496,11 @@ pub struct CareerView {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error_code: Option<String>,
     pub loading: bool,
+    /// This profile's active moderation sanctions (LR-15): kind and end only.
+    /// Also set on a refused sign-in, so the client can say until when.
+    /// Additive: older peers ignore it.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub sanctions: Vec<crate::moderation::Sanction>,
 }
 
 /// Stable codes of [`CareerView::error_code`].
@@ -505,6 +510,10 @@ pub mod error_code {
     pub const NEW_PROFILE_LIMIT: &str = "new_profile_limit";
     /// A new device key while new profiles are paused for today (LR-16).
     pub const NEW_PROFILES_PAUSED: &str = "new_profiles_paused";
+    /// A sign-in of a profile with an active `account_ban` (LR-15).
+    pub const ACCOUNT_BANNED: &str = crate::moderation::code::ACCOUNT_BANNED;
+    /// A rename while a moderator's `name_reset` is active (LR-15).
+    pub const NAME_LOCKED: &str = crate::moderation::code::NAME_LOCKED;
 }
 
 #[cfg(test)]

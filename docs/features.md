@@ -556,8 +556,13 @@ steps down to, lists the styles and, on RU desktop and Android builds, opens
 «Поддержать на сайте» (`<portal>/supporter`); iOS builds never link to a web
 payment. Protocol 12 carries the new styles; portal schema 9 stores amounts,
 points and the durable YooKassa attempts and refunds, and the Account API
-settles re-read payments and refunds exactly once. The checkout, webhook and
-portal pages follow in LR-67b and LR-67c. See [Hero tiers](supporter.md#hero-tiers).
+settles re-read payments and refunds exactly once. The Account API starts a
+donation (a 54-FZ receipt through «Чеки от ЮKassa», the Idempotence-Key stored
+before the payment is created), takes YooKassa's webhook without trusting its
+body, and reconciles open payments, lost creates (23 hours) and refunds every
+minute; new charges pause by themselves when the refund scan is stale. The RU
+portal pages follow in LR-67c. See [Hero tiers](supporter.md#hero-tiers) and
+[YooKassa donations](supporter.md#yookassa-donations).
 
 Core career schema is version 3 and portal schema is versions 1–7 and 9. Run owner migrations and the
 updated runtime grants before deploying matching game/API releases. See
@@ -1133,7 +1138,7 @@ follows.
 ## RU web entry point, Russian README and server bundle (LR-22, unreleased)
 
 - The RU landing is the RU portal's own guest home at `omoba.ru` (omoba-web, hosted in Russia, no foreign analytics): the number of hero classes counted from the game's catalog, the Verdant Arena, Ranked, Casual PvP, vs Bots and Offline practice named as the game names them, download buttons from the RU release catalog with SHA-256 and sizes in МБ, the status «Открытая бета» in the page language, the legal, source and community links and the age sign `12+`. Signed-in players go from `/` to `/me`; the workshop is labelled experimental; no RU page shows donate, wallet, crypto or Ekza content. The omoba.io landing is unchanged.
-- RU player packages carry a Russian README.txt: what the game is, install, sign-in with VK ID («Профиль» → «Войти через VK ID») and recovery, support and community channels once the owner sets them, the package's system requirements, the documents, the release's source and the age sign. It has no hosting notes. The global and dev READMEs are unchanged byte for byte.
+- RU player packages carry a Russian README.txt: what the game is, install, sign-in with VK ID («Профиль» → «Войти через VK ID»), how progress survives a reinstall (it follows the VK-linked account; recovery codes, LR-18), support and community channels once the owner sets them, the package's system requirements, the documents, the release's source and the age sign. It has no hosting notes. The global and dev READMEs are unchanged byte for byte.
 - The RU Linux player package no longer carries `omoba-account-api`: the RU lobby and Account API are their own server bundle (`release.py build server --market ru`, also in `make release-ru`), the only file `ru_host.py ship` accepts.
 - The RU portal serves a public `/delete` page (`omoba.ru/delete`, linked from every legal footer): how to have an account deleted without signing in, in ru, en and zh. Until deletion ships in the game (LR-42, LR-69) it is the operator's e-mail procedure from the privacy policy: device keys refused once the request is confirmed, erasure within 30 days, match results kept anonymised. The support address appears once the owner sets it (LR-21).
 - Code: `scripts/release.py` (`ru_player_readme`, `ru_system_requirements`, `build_server_bundle`, `stage_server_bundle`), `scripts/markets.py` (`player_readme`, `server_bundle`), `ops/vps/ru/ru_host.py` (`RU_PACKAGE`); omoba-web `src/components/guest-home.tsx`, `src/components/deletion.tsx`, `src/lib/releases.mjs`, `src/lib/market-profile.mjs` (`marketLanding`, `delete`). See [markets](markets.md#legal-documents-and-links-lr-06), [the RU server bundle](../ops/vps/ru/README.md#server-bundle) and [the session note](progress/2026-10-24-lr-22.md).
@@ -1168,6 +1173,27 @@ follows.
 - The host's one Telegram bot lives in `alerts.env`; the backup alerts (LR-03) use it too. The public names come from `scripts/markets.py`.
 - Not yet: the lobby's queue, capacity and allocation metrics with their alerts, and bounded match archives (LR-17 server part).
 - Code: `ops/vps/ru/ru_monitor.py`, `ops/vps/ru/omoba-alert-ru@.service`, `ops/vps/ru/omoba-monitor-ru.{service,timer}`, `ops/vps/ru/postgresql-alert-ru.conf`, `ops/vps/ru/alerts.env.example`, `ops/vps/ru/journald-omoba-ru.conf`, `ops/vps/ru/ru_host.py` (install and `status`), `scripts/market_probe.py`, `ops/probe/`, `scripts/release.py` (`preflight`). See [Monitoring and alerts](../ops/vps/ru/README.md#monitoring-and-alerts), [the external probe](../ops/probe/README.md) and [the session note](progress/2026-10-24-lr-17-ops.md).
+
+## Protect progress (LR-18, unreleased)
+
+- After the first completed match, and again after the first ranked match, Home shows a dismissible card: «Защитите прогресс: VK ID или код восстановления.» (Protect / Not now). A "Not now" hides it for three completed matches, or until the first ranked match if that comes sooner, so players who never play ranked are asked again too; it stops once the profile is protected or after three declines. The record (`protect_prompt.json`: declines, matches at the last decline) lives in the region's settings folder.
+- Profile shows the account's protection (VK ID linked, unused recovery codes, or not protected yet) and a «Защитить прогресс» button. The Protect modal links VK ID where the region signs in with it and creates or replaces recovery codes in the game; replacing a set that still has unused codes needs a second press. The eight codes are shown once, grouped for reading, never stored or logged, and gone when the modal closes.
+- The codes come from a native Account API route signed by the device key (`POST /v1/auth/devices/recovery-codes`, `omoba.recovery.native.v1`, single-use nonce), on the RU and dev ingress allowlists; no portal session and no schema change.
+- «Привязать или восстановить аккаунт» offers «Ввести код восстановления» next to «Войти через VK ID» and the device request, and a request started from it asks for the code first.
+- Progress follows the VK-linked account; RU package READMEs and the RU portal (guest home, sign-in, `/connect`, Devices; o-moba/omoba-web#20) say so. The VK-verified support procedure is [account recovery](account-recovery.md); Android keeps `allowBackup=false` ([ADR-026](architecture/decisions.md#adr-026-android-keeps-allowbackupfalse-progress-survives-a-reinstall-through-vk-id-or-recovery-codes)).
+- Copy in en, ru and zh-Hans (`client/i18n/*/protect.json`).
+- Code: `shared/src/device_account.rs` (`NativeRecoveryRequest`, `AccountProtection`), `account-api/src/devices.rs` (`native_recovery`), `passport/src/device_account.rs`, `client/src/career_protection.rs`, `client/src/career_identity.rs` (`sign_recovery_request`), `client/src/career_devices.rs`, `client/src/frontend/home.rs`, `scripts/release.py` (`progress_readme`). See [the session note](progress/2026-10-24-lr-18.md).
+
+## Moderation minimum (LR-15, unreleased)
+
+- Operators put sanctions on a profile with `omoba-account-api sanction add|list|lift` and look players up with `omoba-account-api player <Name#1234 | profile-id>`: `chat_mute`, `matchmaking_ban`, `ranked_ban`, `account_ban` and `name_reset`, each for a duration (`30m`, `7d`, …) or until lifted, with a reason and the operator's name. Procedure: [RUNBOOK.md › Moderation](../RUNBOOK.md#moderation-lr-15).
+- Game servers read a profile's sanctions at sign-in and every 10 seconds, so applying or lifting one takes effect without a restart. An account ban refuses the game sign-in (and ends a signed-in session), every website session and new website sign-in; a matchmaking ban refuses every search, a ranked ban only Ranked; account and matchmaking bans hide the player from party presence and take them out of their party; a chat mute refuses their chat and drops what they sent in the last 30 seconds, while reactions stay.
+- `omoba-account-api rename <player>` resets a name to `Player#NNNN` and locks renames (game and website) until the reset ends; party presence shows the new name within seconds.
+- Chat kill switch: `OMOBA_CHAT=off` on a server (the RU lobby unit sets it, owner default O-9; match workers inherit it), or `omoba-account-api chat off` for every server of the database within seconds. Reactions are never switched off.
+- The player sees each refusal in their language with its end in UTC: the suspended sign-in and the search refusals on the search screen and the career panel, «muted until …» or «chat is turned off» in the match chat, which then offers no keyboard. A suspended client signs in again every minute, so a lifted ban needs no restart.
+- Every moderation action writes an audit row in the same transaction (`career_moderation_events`, career schema 5); rows are append-only and cannot be deleted before they are a year old. A sanctioned profile is never pruned as unplayed, so a ban on a throwaway key holds.
+- Copy in en, ru and zh-Hans (`client/i18n/*/moderation.json`).
+- Code: `shared/src/moderation.rs`, `career-store/migrations/postgres/005_sanctions.sql`, `career-store/src/moderation.rs`, `account-api/src/moderation.rs`, `server/src/career_backend.rs`, `server/src/social.rs`, `server/src/party.rs`, `server/src/match_service.rs`, `client/src/moderation.rs`, `client/src/social.rs`. See [the session note](progress/2026-10-24-lr-15.md).
 
 ## Multiplayer Session Reliability
 

@@ -311,9 +311,20 @@ pub(crate) fn run() -> io::Result<()> {
         crate::match_lifecycle::MATCH_MAX_DURATION_ENV
     );
 
+    let chat = shared::moderation::chat_from_env(
+        std::env::var(shared::moderation::CHAT_ENV).ok().as_deref(),
+    )
+    .map_err(io::Error::other)?;
+    println!(
+        "Chat: {} ({}; `omoba-account-api chat off` also turns it off at runtime); reactions always on",
+        if chat { "on" } else { "off" },
+        shared::moderation::CHAT_ENV
+    );
+
     let mut runtime = ServerRuntime::new_with_map(socket, match_config, map_config, limits);
     runtime.match_service = match_service;
     runtime.max_match_duration = max_match_duration;
+    runtime.social.set_env_chat(chat);
     let bot_difficulty = bots::boot_bot_difficulty(
         runtime.match_service.is_public(),
         runtime.rules.fills_with_bots,
