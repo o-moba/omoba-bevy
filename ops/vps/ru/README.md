@@ -2,7 +2,7 @@
 
 One Russian VPS runs everything Russian players reach: PostgreSQL, the lobby and
 match workers (UDP 4000, 41000–41001), the Account API (behind Caddy at
-`account.ru.omoba.io`) and the player portal (`app.ru.omoba.io`). Keep it apart
+`account.omoba.ru`) and the player portal (`omoba.ru`). Keep it apart
 from the global production host: each market has its own database, accounts and
 device keys. Background and the release steps: [docs/markets.md](../../../docs/markets.md).
 
@@ -24,8 +24,8 @@ Everything below runs on this one host; only Caddy listens publicly for HTTP.
 
 | Caller | Reaches | How | Client address the Account API sees |
 | --- | --- | --- | --- |
-| Game (native signed routes) | `https://account.ru.omoba.io` → Caddy → `127.0.0.1:40550` | `@native` allowlist and health only; every other route answers 403 | `X-Real-IP`, overwritten by Caddy with the game's address |
-| Browser | `https://app.ru.omoba.io` → Caddy → portal `127.0.0.1:3010` | the whole portal | — (Caddy overwrites `X-Real-IP` with the browser's address) |
+| Game (native signed routes) | `https://account.omoba.ru` → Caddy → `127.0.0.1:40550` | `@native` allowlist and health only; every other route answers 403 | `X-Real-IP`, overwritten by Caddy with the game's address |
+| Browser | `https://omoba.ru` → Caddy → portal `127.0.0.1:3010` | the whole portal | — (Caddy overwrites `X-Real-IP` with the browser's address) |
 | Portal (BFF, VK callback, server reads) | `http://127.0.0.1:40550` directly | loopback HTTP, no portal ingress key | `X-Real-IP`, the browser's address forwarded by the portal |
 
 - `OMOBA_TRUST_LOOPBACK_PROXY=1` is set on the Account API and the portal. The
@@ -34,7 +34,7 @@ Everything below runs on this one host; only Caddy listens publicly for HTTP.
   loopback-only. Per-IP limits (social sign-in 30/min, pairing creation 5/min) are
   therefore per player, never per host.
 - There is no portal ingress key on RU: the portal never goes through
-  `account.ru.omoba.io`, and that name never passes a portal route.
+  `account.omoba.ru`, and that name never passes a portal route.
 - The portal refuses to serve (journal: `OMOBA portal misconfigured, refusing to
   serve`) with an Account API that is not on loopback and no valid
   `OMOBA_ACCOUNT_INGRESS_KEY`, or with the loopback API and no
@@ -168,10 +168,10 @@ unit's only writable folder.
   records for the three names of `ru_host.py names` point here; no AAAA for the
   lobby), memory and disk.
 - `python3 scripts/release.py preflight --market ru` from any computer: lobby DNS,
-  `https://account.ru.omoba.io/health/ready`, the portal, and the topology: through
+  `https://account.omoba.ru/health/ready`, the portal, and the topology: through
   the portal `GET /api/me` must be the Account API's 401 and `GET /api/releases` 200
   (a 403 there means a portal route was refused, LR-02), and
-  `https://account.ru.omoba.io/v1/me` must be 403 (portal routes stay off the public
+  `https://account.omoba.ru/v1/me` must be 403 (portal routes stay off the public
   name).
 - `journalctl -u omoba-lobby-ru -u omoba-account-api-ru -u omoba-portal-ru -u caddy`.
 - Releases: the [RU release checklist](release-checklist.md), with its result in

@@ -13,15 +13,15 @@ typo in a market or feature name fails the build.
 | Paid cosmetics (`supporter`) | on | **off** (free game) | off |
 | Sign in with VK ID (`vk_sign_in`) | off | **on** | off |
 | First-launch language | English | Russian | Simplified Chinese |
-| Lobby | `77.246.105.57:4000` | `lobby.ru.omoba.io:4000` | not decided |
-| Account API / portal | none in production | `account.ru.omoba.io` / `app.ru.omoba.io` | not decided |
+| Lobby | `77.246.105.57:4000` | `lobby.omoba.ru:4000` | not decided |
+| Account API / portal | none in production | `account.omoba.ru` / `omoba.ru` | not decided |
 | Settings folder | `omoba-bevy` | `omoba-bevy-ru` | `omoba-bevy-cn` |
 | Packages | `Omoba-<v>-*` | `Omoba-<v>-ru-*` in `dist/v<v>-ru/` | — |
 | Android app | `space.ekza.omoba.beta` | `space.ekza.omoba.ru`, "OMOBA" | — |
 | Platforms | macOS, Windows, Linux, Android, iOS | macOS, Windows, Linux, Android | none yet (blocked) |
 
 Players can still pick any language in Settings. The RU servers are planned names
-under `ru.omoba.io`; a build bakes them in and they answer once the RU servers
+under `omoba.ru` (registered at REG.RU); a build bakes them in and they answer once the RU servers
 are deployed (`make release-ru-preflight` checks).
 
 ## Where a market lives
@@ -75,7 +75,7 @@ stored only as an HMAC of its user id under `OMOBA_SOCIAL_SECRET`
 (`account-api/migrations/007_social_sign_in.sql`).
 
 **Registration on the website.** The player presses «Войти через VK ID» (or OK,
-Mail.ru) on `app.ru.omoba.io`. The portal sends the VK callback to
+Mail.ru) on `omoba.ru`. The portal sends the VK callback to
 `POST /v1/auth/social/vk`. An unknown VK account gets a 30-minute browser ticket,
 not a game profile: the site asks the player to install OMOBA and press
 «Войти через VK ID» in the game.
@@ -131,7 +131,7 @@ The steps that need accounts, money or legal decisions are the owner's.
    profile in `scripts/markets.py` → the RU VPS (`ops/vps/ru/ru_host.py names`
    prints them; `ru_host.py status` checks them).
 3. **VK ID app.** At id.vk.ru create a *Web* app, trusted redirect URL
-   `https://app.ru.omoba.io/api/auth/vk/callback`, scope `vkid.personal_info`,
+   `https://omoba.ru/api/auth/vk/callback`, scope `vkid.personal_info`,
    enable sign-in with OK and Mail.ru. Its numeric app id is
    `OMOBA_VKID_CLIENT_ID` for both the portal and the Account API. No secret is
    used (public PKCE client).

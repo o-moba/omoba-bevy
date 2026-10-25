@@ -100,7 +100,7 @@ flowchart LR
 - `shared/src/market.rs` defines `Market { Global, Ru, Cn }`. Each market is a preset of `Features { ekza, supporter, vk_sign_in }`.
 - `MARKET` and `FEATURES` are `const` values read at compile time from `OMOBA_MARKET` and `OMOBA_FEATURE_EKZA|SUPPORTER|VK_SIGN_IN=on|off`. An unknown value is a `const` panic, so a typo fails the build.
 - Each market builds once, with its own servers, settings folder (`omoba-bevy-ru`), package names (`Omoba-<v>-ru-*`), Android identity (`space.ekza.omoba.ru`), first-launch locale and platform list.
-- The RU market ships macOS, Windows, Linux and Android. It does not ship iOS, which needs its own App Store Connect record. Its planned servers are `lobby.ru.omoba.io:4000`, `https://account.ru.omoba.io` and `https://app.ru.omoba.io` (`scripts/markets.py`; `docs/markets.md`).
+- The RU market ships macOS, Windows, Linux and Android. It does not ship iOS, which needs its own App Store Connect record. Its planned servers are `lobby.omoba.ru:4000`, `https://account.omoba.ru` and `https://omoba.ru` (`scripts/markets.py`; `docs/markets.md`).
 - The market never goes into serde (`fix(market): keep the market out of serde …`).
 - `scripts/markets.py` mirrors the presets and adds the release data (servers, zones, platforms, `blocked`). `scripts/test_release.py` keeps the two files in step. `scripts/release.py` sets `OMOBA_MARKET` and the feature variables for each build from these presets (`markets.market_env`).
 - The market is independent of the contour: `--market ru --contour dev` is the dev tester app with RU features.

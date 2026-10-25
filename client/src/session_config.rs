@@ -36,9 +36,9 @@ pub const BETA_GAME_SERVER_ADDR: &str = "77.246.105.57:4000";
 /// Hosts of the production lobby. A contour build never connects to them, on any port.
 const PRODUCTION_LOBBY_HOSTS: &[std::net::Ipv4Addr] = &[std::net::Ipv4Addr::new(77, 246, 105, 57)];
 
-/// Public zones; inside them only `<contour>.omoba.io` / `<contour>.ekza.io` names
-/// belong to a contour build.
-const PUBLIC_ZONES: &[&str] = &["omoba.io", "ekza.io"];
+/// Public production zones (global `omoba.io` and `ekza.io`, the RU market's `omoba.ru`);
+/// inside them only `<contour>.<zone>` names belong to a contour build.
+const PUBLIC_ZONES: &[&str] = &["omoba.io", "ekza.io", "omoba.ru"];
 
 /// The contour this build was made for: `Some("dev")` for a dev-contour tester build,
 /// `None` for production. The same compile-time value names the settings folder
@@ -76,7 +76,7 @@ pub(crate) fn startup_server_addr() -> String {
 
 /// Whether a build of `contour` may connect to `host` (an IP literal or a DNS
 /// name, without the port). Production builds accept every host; a contour build
-/// refuses the production lobby and every production `omoba.io` / `ekza.io` name.
+/// refuses the production lobby and every production `omoba.io` / `ekza.io` / `omoba.ru` name.
 /// This build's rule is `endpoint_allowed_for(BUILD_CONTOUR, host)`.
 pub(crate) fn endpoint_allowed_for(contour: Option<&str>, host: &str) -> bool {
     let Some(contour) = contour else {
@@ -181,6 +181,9 @@ mod tests {
             "ekza.io",
             "registry.ekza.io",
             "avatar.ekza.io",
+            "omoba.ru",
+            "lobby.omoba.ru",
+            "Account.Omoba.RU.",
         ] {
             assert!(!endpoint_allowed_for(dev, host), "{host}");
         }
@@ -195,6 +198,7 @@ mod tests {
             "localhost",
             "192.168.1.20",
             "notomoba.io",
+            "notomoba.ru",
             "play.dev.omoba.io.example",
         ] {
             assert!(endpoint_allowed_for(dev, host), "{host}");

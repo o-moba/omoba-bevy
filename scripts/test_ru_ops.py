@@ -1,6 +1,7 @@
 """The RU host kit (ops/vps/ru) describes one topology (README.md#topology, LR-02):
 the portal calls the loopback Account API with OMOBA_TRUST_LOOPBACK_PROXY=1 on both
-sides, Caddy overwrites X-Real-IP on app.ru, and account.ru serves only native routes."""
+sides, Caddy overwrites X-Real-IP on the portal site (omoba.ru), and the Account API site
+(account.omoba.ru) serves only native routes."""
 from __future__ import annotations
 
 import re
@@ -26,8 +27,12 @@ def env_file(name: str) -> dict[str, str]:
 
 
 def site(caddyfile: str, host: str) -> str:
-    """The `host { … }` block, braces balanced."""
-    start = caddyfile.index(host + " {")
+    """The `host { … }` block, braces balanced. The site address starts a line, so the
+    portal `omoba.ru` never matches inside `account.omoba.ru`."""
+    found = re.search(rf"(?m)^{re.escape(host)} \{{", caddyfile)
+    if found is None:
+        raise AssertionError(host + " has no site block")
+    start = found.start()
     depth = 0
     for index in range(caddyfile.index("{", start), len(caddyfile)):
         depth += {"{": 1, "}": -1}.get(caddyfile[index], 0)
@@ -41,8 +46,8 @@ class RuTopologyTest(unittest.TestCase):
         self.portal = env_file("portal.env.example")
         self.api = env_file("account-api.env.example")
         caddyfile = (RU / "Caddyfile.ru").read_text()
-        self.account = site(caddyfile, "account.ru.omoba.io")
-        self.app = site(caddyfile, "app.ru.omoba.io")
+        self.account = site(caddyfile, "account.omoba.ru")
+        self.app = site(caddyfile, "omoba.ru")
 
     def test_the_portal_calls_the_loopback_api_and_both_trust_the_loopback_proxy(self):
         self.assertEqual(self.portal["OMOBA_ACCOUNT_API_URL"], "http://" + self.api["OMOBA_ACCOUNT_BIND"])
@@ -57,14 +62,14 @@ class RuTopologyTest(unittest.TestCase):
         self.assertEqual(self.api["OMOBA_PORTAL_ORIGIN"], markets.MARKETS["ru"].portal)
 
     def test_app_ru_overwrites_x_real_ip_for_the_loopback_portal(self):
-        self.assertTrue(markets.MARKETS["ru"].portal.endswith("//app.ru.omoba.io"))
+        self.assertTrue(markets.MARKETS["ru"].portal.endswith("//omoba.ru"))
         proxy = re.search(r"reverse_proxy\s+127\.0\.0\.1:(\d+)\s*\{(.*?)\n\s*\}", self.app, re.S)
         self.assertIsNotNone(proxy, self.app)
         self.assertEqual(proxy.group(1), self.portal["PORT"])
         self.assertRegex(proxy.group(2), r"header_up\s+X-Real-IP\s+\{remote_host\}")
 
     def test_account_ru_serves_only_native_routes_and_health(self):
-        self.assertTrue(markets.MARKETS["ru"].account_api.endswith("//account.ru.omoba.io"))
+        self.assertTrue(markets.MARKETS["ru"].account_api.endswith("//account.omoba.ru"))
         native = re.search(r"@native\s*\{\s*method POST\s+path ([^\n]+)\s*\}", self.account)
         self.assertIsNotNone(native, self.account)
         self.assertEqual(native.group(1).split(), RU_NATIVE)

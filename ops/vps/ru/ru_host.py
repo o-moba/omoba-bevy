@@ -258,9 +258,8 @@ def assert_ru_constants() -> None:
 
 def names_problems(names) -> list[str]:
     """The RU public names (scripts/markets.py, carried in the payload) must be DNS names in
-    the RU zone, the zone must cover no production or dev name (inside omoba.io / ekza.io
-    only the market's own `ru.` subzone qualifies), and the Account API and the portal need
-    their own Caddy sites."""
+    the RU zone (scripts/markets.py), the zone must neither cover nor sit inside a production or dev
+    zone (omoba.io / ekza.io), and the Account API and the portal need their own Caddy sites."""
     if not isinstance(names, dict) or set(names) != set(NAME_KEYS):
         return ["the payload lacks the RU names (scripts/markets.py)"]
     problems = [f"the RU {key} name {printable(names[key])} is not a lowercase DNS name" for key in NAME_KEYS
@@ -268,11 +267,9 @@ def names_problems(names) -> list[str]:
     if problems:
         return problems
     zone = names["zone"]
-    market_zones = tuple(f"{MARKET}.{public}" for public in PUBLIC_ZONES)
-    if (in_zone(zone, PUBLIC_ZONES) and zone not in market_zones) or \
-            any(in_zone(public, (zone,)) for public in PUBLIC_ZONES):
-        problems.append(f"the RU zone {zone} overlaps the production or dev names; inside "
-                        f"{' / '.join(PUBLIC_ZONES)} only {' or '.join(market_zones)} is the RU market's")
+    if in_zone(zone, PUBLIC_ZONES) or any(in_zone(public, (zone,)) for public in PUBLIC_ZONES):
+        problems.append(f"the RU zone {zone} overlaps the production or dev names "
+                        f"({' / '.join(PUBLIC_ZONES)}); the RU market has its own zone")
     problems += [f"the RU {key} name {names[key]} is outside the RU zone {zone}"
                  for key in HOST_KEYS if not in_zone(names[key], (zone,))]
     if names["account_api"] == names["portal"]:

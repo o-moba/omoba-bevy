@@ -130,7 +130,7 @@ MARKET_LINUX_TOOLS = ("omoba-account-api",)
 DEV_IP_ENV = "DEV_IP"
 PROD_VPS_IPS = frozenset({"77.246.105.57"})
 BETA_LOBBY = "77.246.105.57:4000"
-PUBLIC_ZONES = ("omoba.io", "ekza.io")
+PUBLIC_ZONES = ("omoba.io", "ekza.io", "omoba.ru")
 DEV_ZONES = ("dev.omoba.io", "dev.ekza.io")
 DEV_TAG = re.compile(r"v\d+\.\d+\.\d+-dev\.\d+")
 LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
@@ -404,7 +404,7 @@ def is_dev_host(host: str | None) -> bool:
 
 
 def is_prod_host(host: str | None) -> bool:
-    """The production VPS, or any public omoba.io / ekza.io name outside the dev zones."""
+    """The production VPS, or any public omoba.io / ekza.io / omoba.ru (RU) name outside the dev zones."""
     return bool(host) and (host in PROD_VPS_IPS or (in_zone(host, PUBLIC_ZONES) and not in_zone(host, DEV_ZONES)))
 
 

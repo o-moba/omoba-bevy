@@ -174,7 +174,7 @@ class DevContour(unittest.TestCase):
                        "LOBBY.OMOBA.IO.:4100", "play.ekza.io:4000"):
             with self.assertRaises(SystemExit, msg=server):
                 release.resolve_flavor("dev", server=server)
-        for registry in ("https://registry.ekza.io", "https://REGISTRY.ekza.io/", "https://studio.ekza.io",
+        for registry in ("https://registry.ekza.io", "https://REGISTRY.ekza.io/", "https://studio.ekza.io", "https://hub.ekza.io",
                          "https://registry.ekza.io./v1", "https://wss.ekza.io/mirror", "https://ekza.io"):
             with self.assertRaises(SystemExit, msg=registry):
                 release.resolve_flavor("dev", registry=registry)
@@ -184,7 +184,8 @@ class DevContour(unittest.TestCase):
                        "x.dev.ekza.io:4000"):
             with self.assertRaises(SystemExit, msg=server):
                 release.resolve_flavor(server=server)
-        for registry in ("https://registry.dev.ekza.io", "https://Registry.Dev.Ekza.io/", "https://studio.dev.ekza.io"):
+        for registry in ("https://registry.dev.ekza.io", "https://Registry.Dev.Ekza.io/", "https://studio.dev.ekza.io",
+                         "https://hub.dev.ekza.io"):
             with self.assertRaises(SystemExit, msg=registry):
                 release.resolve_flavor(registry=registry)
         with self.assertRaises(SystemExit):
@@ -204,6 +205,12 @@ class DevContour(unittest.TestCase):
         self.assertTrue(release.is_prod_host("omoba.io"))
         self.assertTrue(release.is_prod_host("app.omoba.io"))
         self.assertFalse(release.is_prod_host("notomoba.io"))
+        # The RU market's own zone is production too: a dev build never bakes it.
+        self.assertTrue(release.is_prod_host("omoba.ru"))
+        self.assertTrue(release.is_prod_host("lobby.omoba.ru"))
+        self.assertFalse(release.is_prod_host("notomoba.ru"))
+        with self.assertRaises(SystemExit):
+            release.resolve_flavor("dev", server="lobby.omoba.ru:4000")
         self.assertFalse(release.is_prod_host("lobby.dev.omoba.io"))
         self.assertFalse(release.is_prod_host("dev.ekza.io"))
         self.assertTrue(release.is_dev_host("dev.omoba.io"))
@@ -641,14 +648,14 @@ class Markets(unittest.TestCase):
     def test_ru_build_bakes_its_market_servers_folder_and_names(self):
         ru = release.resolve_flavor(market="ru")
         self.assertEqual((ru.server, ru.account_api, ru.portal),
-                         ("lobby.ru.omoba.io:4000", "https://account.ru.omoba.io", "https://app.ru.omoba.io"))
+                         ("lobby.omoba.ru:4000", "https://account.omoba.ru", "https://omoba.ru"))
         self.assertEqual((ru.registry, ru.passport), (None, None))
         self.assertEqual(ru.config_dir, "omoba-bevy-ru")
         self.assertEqual(ru.label, "-ru")
         self.assertEqual(ru.bundle_id, "space.ekza.omoba.desktop.ru")
         defaults = ru.client_defaults()
         self.assertEqual(defaults["OMOBA_MARKET"], "ru")
-        self.assertEqual(defaults["OMOBA_DEFAULT_GAME_SERVER_ADDR"], "lobby.ru.omoba.io:4000")
+        self.assertEqual(defaults["OMOBA_DEFAULT_GAME_SERVER_ADDR"], "lobby.omoba.ru:4000")
         self.assertNotIn("OMOBA_DEFAULT_REGISTRY_URL", defaults)
         self.assertFalse(any(key.startswith("OMOBA_FEATURE_") for key in defaults))
         self.assertEqual(release.artifact_name("0.45.0", "windows", "prod", "ru"), "Omoba-0.45.0-ru-windows-x64.zip")
@@ -665,8 +672,8 @@ class Markets(unittest.TestCase):
     def test_markets_never_cross_servers_and_overrides_are_explicit(self):
         for bad in (dict(market="ru", registry="https://registry.ekza.io"),
                     dict(market="ru", server="77.246.105.57:4000"),
-                    dict(server="lobby.ru.omoba.io:4000"),
-                    dict(market="ru", account_api="https://account.ru.omoba.io"),
+                    dict(server="lobby.omoba.ru:4000"),
+                    dict(market="ru", account_api="https://account.omoba.ru"),
                     dict(market="cn"),
                     dict(market="ru", contour="dev", account_api="https://a.example", portal="https://p.example"),
                     dict(market="ru", portal="http://evil.example")):
@@ -711,7 +718,7 @@ class Markets(unittest.TestCase):
         down = release.preflight_report("ru", resolve=lambda host: (_ for _ in ()).throw(OSError()),
                                         fetch=lambda url: 503)
         self.assertFalse(down["ready"])
-        self.assertEqual(down["checks"]["account_api"]["url"], "https://account.ru.omoba.io/health/ready")
+        self.assertEqual(down["checks"]["account_api"]["url"], "https://account.omoba.ru/health/ready")
         up = release.preflight_report("ru", resolve=lambda host: ["203.0.113.7"], fetch=self.ru_host())
         self.assertTrue(up["ready"], up)
         self.assertFalse(release.preflight_report("cn")["ready"])
@@ -719,12 +726,12 @@ class Markets(unittest.TestCase):
     @staticmethod
     def ru_host(**overrides):
         """A deployed RU host as the preflight sees it (ops/vps/ru/README.md#topology)."""
-        answers = {"https://app.ru.omoba.io/api/me": 401, "https://account.ru.omoba.io/v1/me": 403, **overrides}
+        answers = {"https://omoba.ru/api/me": 401, "https://account.omoba.ru/v1/me": 403, **overrides}
         return lambda url: answers.get(url, 200)
 
     def test_preflight_fails_on_a_403_from_a_key_gated_route(self):
         dns = lambda host: ["203.0.113.7"]
-        for url in ("https://app.ru.omoba.io/api/me", "https://app.ru.omoba.io/api/releases"):
+        for url in ("https://omoba.ru/api/me", "https://omoba.ru/api/releases"):
             with self.subTest(url):
                 report = release.preflight_report("ru", resolve=dns, fetch=self.ru_host(**{url: 403}))
                 self.assertFalse(report["ready"])
@@ -733,7 +740,7 @@ class Markets(unittest.TestCase):
                 self.assertIn("LR-02", failed[0]["problem"])
         # A portal that cannot use the Account API at all is not ready either.
         for status in (400, 500, 502, 503):
-            report = release.preflight_report("ru", resolve=dns, fetch=self.ru_host(**{"https://app.ru.omoba.io/api/me": status}))
+            report = release.preflight_report("ru", resolve=dns, fetch=self.ru_host(**{"https://omoba.ru/api/me": status}))
             self.assertFalse(report["checks"]["portal_account"]["ok"], status)
             self.assertNotIn("problem", report["checks"]["portal_account"])
         # The portal and health answer, but the gated route is unreachable over the network.
@@ -745,7 +752,7 @@ class Markets(unittest.TestCase):
 
     def test_preflight_fails_when_the_public_account_api_passes_portal_routes(self):
         report = release.preflight_report("ru", resolve=lambda host: ["203.0.113.7"],
-                                          fetch=self.ru_host(**{"https://account.ru.omoba.io/v1/me": 401}))
+                                          fetch=self.ru_host(**{"https://account.omoba.ru/v1/me": 401}))
         self.assertFalse(report["ready"])
         closed = report["checks"]["account_api_portal_routes_closed"]
         self.assertEqual((closed["status"], closed["expected"]), (401, 403))
@@ -775,7 +782,7 @@ class Markets(unittest.TestCase):
         self.assertEqual(build.apk_name("0.45.0", "arm64", "prod", "ru"), "omoba-0.45.0-ru-android-arm64-debug.apk")
         env = build.contour_env({"OMOBA_DEFAULT_CONFIG_DIR_SUFFIX": "x"}, "prod", None, "ru")
         self.assertEqual((env["OMOBA_MARKET"], env["OMOBA_DEFAULT_GAME_SERVER_ADDR"], env["OMOBA_PORTAL_ORIGIN"]),
-                         ("ru", "lobby.ru.omoba.io:4000", "https://app.ru.omoba.io"))
+                         ("ru", "lobby.omoba.ru:4000", "https://omoba.ru"))
         self.assertNotIn("OMOBA_DEFAULT_CONFIG_DIR_SUFFIX", env)
         with self.assertRaises(RuntimeError):
             build.contour_env({"OMOBA_MARKET": "cn"}, "prod", None, "ru")

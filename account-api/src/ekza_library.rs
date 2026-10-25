@@ -38,7 +38,7 @@ impl EkzaConfig {
         if portal_origin == "https://app.dev.omoba.io" {
             return Self::new(
                 "https://registry.dev.ekza.io",
-                "https://studio.dev.ekza.io",
+                "https://hub.dev.ekza.io",
                 false,
             );
         }
@@ -54,7 +54,9 @@ impl EkzaConfig {
             // An almost-correct DEV configuration must never fall back to production.
             return Err(unavailable());
         }
-        Self::new("https://registry.ekza.io", "https://studio.ekza.io", false)
+        // The Ekza Hub (formerly the Studio site) approves device links. Since
+        // 2026-10-20 it is hub.ekza.io; studio.ekza.io is the Ekza Studio editor.
+        Self::new("https://registry.ekza.io", "https://hub.ekza.io", false)
     }
     /// Explicit local test seam. Never accepts a remote or credential-bearing origin.
     pub fn local_fixture(origin: &str, portal_origin: &str) -> Result<Self> {
@@ -338,11 +340,11 @@ mod tests {
     fn portal_routes_library_consent_within_its_contour() {
         let dev = EkzaConfig::for_portal("https://app.dev.omoba.io").unwrap();
         assert_eq!(dev.registry, "https://registry.dev.ekza.io");
-        assert_eq!(dev.studio, "https://studio.dev.ekza.io");
+        assert_eq!(dev.studio, "https://hub.dev.ekza.io");
         assert!(!dev.prototype);
         let prod = EkzaConfig::for_portal("https://app.omoba.io").unwrap();
         assert_eq!(prod.registry, "https://registry.ekza.io");
-        assert_eq!(prod.studio, "https://studio.ekza.io");
+        assert_eq!(prod.studio, "https://hub.ekza.io");
         assert!(!prod.prototype);
     }
     #[test]
@@ -360,6 +362,7 @@ mod tests {
             "https://other.dev.omoba.io.",
             "https://dev.omoba.io",
             "https://studio.dev.ekza.io",
+            "https://hub.dev.ekza.io",
         ] {
             assert!(EkzaConfig::for_portal(origin).is_err(), "{origin}");
         }

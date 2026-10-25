@@ -5,6 +5,16 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- RU market: the Russian servers move to the owner's **omoba.ru** domain
+  (registered at REG.RU): `https://omoba.ru` is the RU portal and landing (VK ID
+  callback `https://omoba.ru/api/auth/vk/callback`), `https://account.omoba.ru`
+  the Account API and `lobby.omoba.ru:4000` the lobby. `scripts/markets.py` (zone
+  `omoba.ru`), the RU host kit, Caddyfile.ru and the docs use the new names; no
+  `*.ru.omoba.io` name remains. `omoba.ru` is now a production zone wherever a
+  contour is checked: a dev build refuses it (client `endpoint_allowed_for`,
+  `release.py`), and so does the dev host tool. RU builds made before this change
+  baked the old names and must be rebuilt.
+
 - Game contract: OMOBA describes what creators may make for it as an Ekza Game
   Protocol document, `shared/assets/catalog/game-contract.json`
   (`ekza.game-contract.v1`, profile `omoba.character.v1`, CC0-1.0): 107 animation

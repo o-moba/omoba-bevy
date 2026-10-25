@@ -113,9 +113,10 @@ MIGRATION_LOGIN_SECONDS = 900
 
 PROD_SSH_ALIASES = frozenset({"vds-eternal"})
 PROD_IPS = frozenset({"77.246.105.57"})
-# Every omoba.io / ekza.io name outside the dev zones is production (as in scripts/release.py),
-# including names not listed anywhere yet, such as avatar.ekza.io (the production passport).
-PUBLIC_ZONES = ("omoba.io", "ekza.io")
+# Every omoba.io / ekza.io / omoba.ru (RU market) name outside the dev zones is production
+# (as in scripts/release.py), including names not listed anywhere yet, such as avatar.ekza.io
+# (the production passport).
+PUBLIC_ZONES = ("omoba.io", "ekza.io", "omoba.ru")
 DEV_ZONES = ("dev.omoba.io", "dev.ekza.io")
 PROD_DB_NAMES = frozenset({"omoba"})
 PROD_DB_ROLES = frozenset({"omoba_owner", "omoba_game", "omoba_portal"})
@@ -178,7 +179,7 @@ def in_zone(name: str, zones) -> bool:
 
 
 def is_production_name(value: str) -> bool:
-    """A production ssh alias, address, or any omoba.io / ekza.io name outside the dev zones
+    """A production ssh alias, address, or any omoba.io / ekza.io / omoba.ru name outside the dev zones
     (case and trailing dot ignored)."""
     name = (value or "").strip().lower().rstrip(".")
     if "@" in name:

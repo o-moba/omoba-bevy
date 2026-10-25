@@ -60,7 +60,7 @@ A self-hosted production build can also compile its own lobby and registry:
 
 | Profile | Lobby | Registry | Market | Studio | Passport |
 | --- | --- | --- | --- | --- | --- |
-| **Dev** (default) | `lobby.dev.omoba.io:4100` (or the build's `--server`) | `https://registry.dev.ekza.io` | `app.dev.omoba.io/market` | `studio.dev.ekza.io/studio` | closed (`http://127.0.0.1:9/api/passport`) |
+| **Dev** (default) | `lobby.dev.omoba.io:4100` (or the build's `--server`) | `https://registry.dev.ekza.io` | `app.dev.omoba.io/market` | `hub.dev.ekza.io/studio` (the Ekza Hub) | closed (`http://127.0.0.1:9/api/passport`) |
 | **Local** | `127.0.0.1:4000` | `http://127.0.0.1:8018` | `127.0.0.1:3010/market` | `127.0.0.1:5188/studio` | closed |
 | **Custom** | typed `host:port` | typed origin, optional (else Dev's) | Dev's | Dev's | closed |
 
