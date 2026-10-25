@@ -571,6 +571,10 @@ impl<L: JobLink> CareerPort for CareerBackend<L> {
     fn test_is_playing(&self, addr: SocketAddr) -> bool {
         self.clients.get(&addr).is_some_and(|client| client.playing)
     }
+    #[cfg(test)]
+    fn test_refresh_now(&mut self) {
+        self.last_presence = Instant::now() - Duration::from_secs(10);
+    }
     fn enabled(&self) -> bool {
         self.link.enabled()
     }
@@ -1106,13 +1110,13 @@ fn unix_seconds() -> i64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_secs().min(i64::MAX as u64) as i64)
 }
+/// The aura a player may show at `now`: re-checked against the grant window
+/// and, for a tier style, the Hero tier points every time (LR-67).
 fn authorized_supporter_aura(
     status: &shared::supporter::SupporterStatus,
     now: i64,
 ) -> Option<shared::supporter::AuraStyle> {
-    (status.active && status.active_until.is_some_and(|until| until > now))
-        .then_some(status.equipped_aura)
-        .flatten()
+    status.authorized_aura(now)
 }
 
 fn action_id(action: &CareerAction) -> Option<u64> {
@@ -1810,7 +1814,7 @@ mod tests {
             active: true,
             active_until: Some(101),
             equipped_aura: Some(AuraStyle::Solar),
-            grants: vec![],
+            ..Default::default()
         };
         assert_eq!(
             authorized_supporter_aura(&status, 100),
@@ -1834,7 +1838,7 @@ mod tests {
             active: true,
             active_until: Some(unix_seconds() + 60),
             equipped_aura: Some(AuraStyle::Verdant),
-            grants: vec![],
+            ..Default::default()
         });
         c.supporter_checked = Some(Instant::now());
         assert_eq!(backend.supporter_aura(addr), Some(AuraStyle::Verdant));
@@ -1844,6 +1848,73 @@ mod tests {
         let c = backend.clients.get_mut(&addr).unwrap();
         c.supporter_checked = Some(Instant::now());
         c.auth = None;
+        assert_eq!(backend.supporter_aura(addr), None);
+    }
+
+    #[test]
+    fn tier_auras_need_points_and_end_with_the_tier() {
+        use shared::supporter::{AuraStyle, SupporterGrantSummary, SupporterStatus};
+        let grant = |until: i64, points: u32| SupporterGrantSummary {
+            provider: "yookassa".into(),
+            valid_from: 0,
+            valid_until: until,
+            revoked: false,
+            renewal_enabled: Some(false),
+            tier_points: points,
+        };
+        // 1000 ₽ this month: Crimson; Prism I (2500) is refused even if a stale
+        // or forged status names it.
+        let crimson = SupporterStatus::from_grants(
+            vec![grant(200, 1000)],
+            100,
+            1000,
+            Some(Some(AuraStyle::Crimson)),
+        );
+        assert_eq!(
+            authorized_supporter_aura(&crimson, 100),
+            Some(AuraStyle::Crimson)
+        );
+        let forged = SupporterStatus {
+            equipped_aura: Some(AuraStyle::PrismI),
+            ..crimson.clone()
+        };
+        assert_eq!(authorized_supporter_aura(&forged, 100), None);
+        // Expiry removes the aura without waiting for a refresh.
+        assert_eq!(authorized_supporter_aura(&crimson, 200), None);
+        // A Solana grant (0 points) keeps base styles only.
+        let solana =
+            SupporterStatus::from_grants(vec![grant(200, 0)], 100, 0, Some(Some(AuraStyle::Rose)));
+        assert_eq!(solana.equipped_aura, Some(AuraStyle::Solar));
+        assert_eq!(
+            authorized_supporter_aura(&solana, 100),
+            Some(AuraStyle::Solar)
+        );
+        let addr = "127.0.0.1:30024".parse().unwrap();
+        let mut backend = MemoryCareer::test_backend(9);
+        backend.test_authenticated(
+            addr,
+            ProfileSummary::new("a".repeat(64), "Tester".into()),
+            "session",
+        );
+        let now = unix_seconds();
+        let c = backend.clients.get_mut(&addr).unwrap();
+        c.view.supporter = Some(SupporterStatus::from_grants(
+            vec![grant(now + 60, 1000)],
+            now,
+            1000,
+            Some(Some(AuraStyle::Crimson)),
+        ));
+        c.supporter_checked = Some(Instant::now());
+        assert_eq!(backend.supporter_aura(addr), Some(AuraStyle::Crimson));
+        // The next refresh reports the grant gone: the aura goes with it.
+        let nonce = backend.clients[&addr].auth.as_ref().unwrap().nonce.clone();
+        backend.link.replies.push_back(Reply::RefreshAccess {
+            addr,
+            nonce,
+            key_active: Some(true),
+            supporter: Some(SupporterStatus::default()),
+        });
+        backend.poll();
         assert_eq!(backend.supporter_aura(addr), None);
     }
 

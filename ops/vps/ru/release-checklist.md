@@ -25,12 +25,13 @@ they are written; `python3 ops/vps/ru/ru_host.py names` prints them.
 | S3 | Server ship | `ru_host.py ship --package dist/v<v>-ru/omoba-<v>-ru-linux-x64.tar.gz --check`, then `--apply` | preflight `ok`, result `DEPLOYED` (or `UNCHANGED`), the pre-migration backup listed (an off-host set and a rollback dump) when a schema existed |
 | S4 | Portal ship | `ru_host.py portal-bundle --web <omoba-web>`, `ru_host.py ship-portal --bundle … --apply` | `DEPLOYED` (or `UNCHANGED`) |
 | S5 | Host status | `ru_host.py status` | `"ok": true`, no problems (backups included: a set off-host from the last 26 h, a passed restore drill, a current escrow) |
-| S6 | Public preflight | `make release-ru-preflight` from a computer outside the host | prints `"ready": true` |
+| S6 | Public preflight | `make release-ru-preflight` from a computer outside the host (DNS, the lobby's UDP compatibility check, HTTPS routes; `python3 scripts/release.py preflight --market ru --contract dist/v<v>-ru/compatibility.json` also compares the release) | prints `"ready": true` |
 | S7 | Lobby compatibility | `cargo run --locked --quiet -p shared --example compatibility -- check <RU lobby> dist/v<v>-ru/compatibility.json` | exit 0 |
 | S8 | Worker compatibility | while a bot match from P3 runs: the same command against `<RU IPv4>:41000` (or the worker port in `journalctl -u omoba-lobby-ru`) | exit 0 |
 | S9 | Reboot (new host, or after a kit change) | `ru_host.py reboot-check --apply` | `"ok": true`; note `seconds_to_ready` |
 | S10 | Downloads | Publish the GitHub release `v<v>-ru` (its tag is the source link in the game and the README; `catalog` refuses until it exists), then `make release-ru-publish` (RU host + IPFS mirror), `releases.json` installed ([README › Downloads](README.md#downloads)), then `make release-ru-verify-downloads` | `"ready": true`: every platform listed on `<RU portal>/downloads/`, status «Открытая бета», each package and its mirror match the catalog's sha256 and size |
 | S11 | Download from a Russian network | Download one package from `<RU portal>`'s download page over a Russian connection (no VPN); `ru_host.py downloads --since <today>` | the sha256 matches the page and the count for that platform went up; note the network and platform |
+| S12 | Alerts | `ru_host.py status` (no `monitor:` problem); on the probe host `systemctl is-active omoba-probe@ru.timer` and `python3 /opt/omoba-probe/market_probe.py check --env-file /etc/omoba-probe/ru.env`; once per new host or bot, `ru_monitor.py test-alert` on the host ([README › Monitoring and alerts](README.md#monitoring-and-alerts)) | timer active, probe `ok`, the test message arrived; no unit alert was sent during S3/S4 (a planned restart is not a failure) |
 
 ## 2. Per platform
 
@@ -51,7 +52,7 @@ For Android use a Vulkan device from the published minimum list (LR-25).
 
 ## 3. Decision
 
-- Any FAIL in S1–S8, S10–S11 or P1–P9 blocks the announcement. Fix and rerun the affected
+- Any FAIL in S1–S8, S10–S12 or P1–P9 blocks the announcement. Fix and rerun the affected
   rows, or roll back (`ru_host.py rollback`, [README › Rollback](README.md#rollback)).
 - Record N/A only with the reason and the owner's approval.
 - The owner signs off the result file in `docs/progress/`.
@@ -77,6 +78,7 @@ Commit <sha>; packages dist/v<version>-ru/ (SHA256SUMS sha256 <…>); server rel
 | S9 | | seconds_to_ready = |
 | S10 | | |
 | S11 | | network, platform, count |
+| S12 | | |
 
 | # | Windows | Linux | macOS | Android (device, Android version) |
 | --- | --- | --- | --- | --- |

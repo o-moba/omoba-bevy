@@ -32,6 +32,12 @@ The client also reads the market's release catalog (`GET /v1/releases`, `omoba_p
 
 Unanswered/legacy servers never get a silent compatibility bypass. Therefore, for the 0.41.0 introduction of this check, **the server was deployed first**, then 0.41.0 clients were distributed. Later contract changes follow the LR-14 order in [RELEASING.md](RELEASING.md#updates-and-contract-changes-lr-14): stage and verify the server, ship the clients, notify players, then switch the servers. Existing clients retain the old admission path on the new server and are not retroactively certified by this handshake. A pre-0.41.0 server may still be protocol-compatible, but cannot verify the new client and will not admit it through the new client's gate. The currently deployed 0.40.1 Beta must be upgraded before distributing 0.41.0 clients.
 
+## Protocol 12: Hero tier auras (LR-67)
+
+Protocol 12 adds seven `AuraStyle` variants (`rose`, `jade`, `azure`, `crimson`, `prism_i`, `prism_ii`, `prism_iii`). `AuraStyle` is a strict wire enum (`shared/src/protocol/wire_enums.rs`): a protocol 11 client would drop every snapshot that carries one of them, so 11 and 12 refuse each other at `Hello` (`JoinRejection::ProtocolMismatch`) and the compatibility preflight reports a protocol mismatch. `SupporterStatus` gains `tier_points` and `tier_until`, and `SupporterGrantSummary` gains `tier_points`, in the same bump; these decode from older JSON as 0 and none. `protocol_12_carries_tier_auras_and_tier_status` in `shared/src/protocol/wire.rs` pins the bytes.
+
+Client and server ship together (section 7 O-12 of the [launch-readiness plan](plans/launch-readiness.md)) in the LR-14 order of [RELEASING.md](RELEASING.md#updates-and-contract-changes-lr-14): stage and verify the protocol 12 server, publish the protocol 12 clients and the release catalog, notify players, then switch the lobby and workers together. Protocol 11 clients then see **Update required**. The Account API's portal migration 9 has no protocol dependency and can be applied first.
+
 ## Release commands
 
 Use cache A in the primary checkout (or the coordinator-assigned B):

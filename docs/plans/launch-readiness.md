@@ -458,16 +458,16 @@ Area: observability · **major** · M · ops (+S code)
     - bot-fill share
     - capacity wait
     - failed allocations
-  - [ ] An external probe runs every minute against the UDP compatibility check, Account API `/health/ready` and the portal, and alerts to Telegram after 2 consecutive failures.
+  - [ ] An external probe runs every minute against the UDP compatibility check, Account API `/health/ready` and the portal, and alerts to Telegram after 2 consecutive failures. Shipped: `scripts/market_probe.py` with `ops/probe/omoba-probe@.{service,timer}` (names from `scripts/markets.py`); running it needs a probe host outside the RU host and the bot (owner, `ops/probe/README.md`).
   - [ ] Alerts exist for:
-    - any unit failure (`OnFailure=`)
-    - free disk below 15%
-    - capacity wait longer than N min
-    - failed allocations above N per hour
-    - a missing backup (LR-03)
-    - stale worker heartbeats
-  - [ ] `release.py preflight` adds a UDP compatibility probe.
-  - [ ] Archive retention by age or size is in place, `worker.log` is capped, and a journald drop-in sets `SystemMaxUse` and `MaxRetentionSec`. The retention of logs that contain IPs is stated in LR-04.
+    - any unit failure (`OnFailure=`): shipped, every RU unit and, by a drop-in, every PostgreSQL cluster unit → `omoba-alert-ru@.service` (`ru_monitor.py unit-failed`)
+    - free disk below 15%: shipped (`ru_monitor.py check`, every 5 minutes)
+    - capacity wait longer than N min: needs `QUEUE_METRIC` (server part)
+    - failed allocations above N per hour: needs `QUEUE_METRIC` (server part)
+    - a missing backup (LR-03): shipped, `ru_backup.py check --alert` on the host's one bot, plus a stopped backup timer
+    - stale worker heartbeats: shipped, a live worker's `status.json` older than 5 minutes while the lobby runs
+  - [x] `release.py preflight` adds a UDP compatibility probe (`lobby_udp`; `--contract` compares a release's `compatibility.json`).
+  - [ ] Archive retention by age or size is in place, `worker.log` is capped, and a journald drop-in sets `SystemMaxUse` and `MaxRetentionSec`. The retention of logs that contain IPs is stated in LR-04. The journald drop-in is shipped (`ops/vps/ru/journald-omoba-ru.conf`: 1 GiB, 30 days, installed by `ru_host.py bootstrap`); archive retention and the `worker.log` cap are the server part; LR-04 must name the 30 days.
 - **Depends on:** LR-01
 
 #### LR-18 — Protect progress: secure-account prompt and in-game recovery codes

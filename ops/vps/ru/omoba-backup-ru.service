@@ -9,6 +9,8 @@
 Description=OMOBA RU encrypted off-host backup
 After=network-online.target postgresql.service
 Wants=network-online.target postgresql.service
+# A failed run alerts the owner (LR-17; daily while it keeps failing).
+OnFailure=omoba-alert-ru@%n.service
 
 [Service]
 Type=oneshot

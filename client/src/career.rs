@@ -2906,13 +2906,15 @@ mod tests {
                 "CareerSupporter"
             ]
         );
+        // RU sells supporter auras through YooKassa on the portal (LR-67).
         assert_eq!(
             names(Market::Ru),
             [
                 "CareerVkSignIn",
                 "CareerProtect",
                 "CareerDevices",
-                "CareerWebsite"
+                "CareerWebsite",
+                "CareerSupporter"
             ]
         );
         assert_eq!(

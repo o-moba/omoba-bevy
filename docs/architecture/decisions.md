@@ -174,7 +174,7 @@ sequenceDiagram
 **Context.** A build for a free market (ru, cn) must contact no Ekza host, show no Ekza, Studio, wallet or market UI and sell nothing. It must keep the shipped heroes, avatars, weapons and gameplay. Scattering checks through the code would be hard to audit.
 
 **Decision.** Each feature is checked at a few choke points, and each check is a pure function tested for both markets:
-- Client plugin groups take `shared::market::FEATURES` and disable whole plugins: `SponsorshipPlugin` (`ekza`), `SupporterPlugin` and `SupporterStoreKitPlugin` (`supporter`) (`client/src/plugins.rs`). `QaPlugins` disables the two Supporter QA harnesses, `SupporterQaPlugin` and `SupporterWorldQaPlugin`, when `supporter` is off (`client/src/qa/mod.rs`).
+- Client plugin groups take `shared::market::FEATURES` and disable whole plugins: `SponsorshipPlugin` (`ekza`), `SupporterPlugin` and `SupporterStoreKitPlugin` (`supporter`; since LR-67 the StoreKit bridge also needs Apple among the market's payment providers, so the RU client has the panel without it) (`client/src/plugins.rs`). `QaPlugins` disables the two Supporter QA harnesses, `SupporterQaPlugin` and `SupporterWorldQaPlugin`, when `supporter` is off (`client/src/qa/mod.rs`).
 - `initialize_store` in the client's own `passport` module (`client/src/passport.rs`, not the `omoba-passport` crate) returns `None` without `ekza`, so there is no store, account link, weapon library, placements or `ekza://` source.
 - `connection_profile::for_market` swaps in closed loopback Ekza Registry and passport endpoints (`CLOSED_REGISTRY`, `http://127.0.0.1:9`; `CLOSED_PASSPORT`) and blanks the market and Studio URLs. While `install` pins the profile, `endpoint_override` ignores `OMOBA_REGISTRY_URL` and `OMOBA_PASSPORT_URL` when `ekza` is off (`client/src/connection_profile.rs`).
 - On the server, `PassportAdmissions::for_market(false)` denies protected avatars and `ekza-` weapons without making a request (`server/src/passport_admission.rs`).
@@ -199,7 +199,7 @@ sequenceDiagram
 - Wire types live only in `shared/src/protocol/wire.rs` (`shared::wire`) and are never copied into another crate. Client ECS components (`Team`, `StructureKind`) wrap shared types and convert with `From` at the network boundary.
 - Golden tests pin the exact JSON the server produced before the move (`golden_strings_match_the_server_before_the_move`), and round-trip tests cover the packet variants. When the move landed they covered all 18 `ClientPacket` and 3 `ServerPacket` variants (`docs/progress/2026-09-24-shared-wire-protocol.md`). The enums have since grown to 22 and 4. `every_client_packet_variant_round_trips` lists 19 tags (not `party`, `takeover_vote` or `interact`), and `every_server_packet_variant_round_trips` covers 3 (not `Party`). The party packets round-trip in `shared/src/party.rs` (see Open question 11).
 - Evolution rules (`docs/ARCHITECTURE.md`, "Protocol rules"):
-  - `PROTOCOL_VERSION` (currently 11, `shared/src/protocol.rs`) is bumped only for incompatible changes, and peers with another version are rejected at `Hello`.
+  - `PROTOCOL_VERSION` (currently 12, `shared/src/protocol.rs`; 12 added the LR-67 tier aura styles) is bumped only for incompatible changes, and peers with another version are rejected at `Hello`.
   - Additive fields carry `serde(default)`. A usually-absent optional field also carries `skip_serializing_if`, so existing bytes do not change.
   - Every wire enum is listed in `shared/src/protocol/wire_enums.rs` (test-only) with no `_` arm, so a new variant does not compile until someone decides whether it needs a version bump or a tolerant decoder. The list is pinned to `POLICY_PROTOCOL_VERSION`, and a source scan fails the tests until every new serde enum in `shared` is classified as wire or not wire.
   - Commands that must not replay (`BasicAttack`, `Utility`, `BuyItem`) carry `server_epoch`, `match_id` and a monotonic `request_id`. `Cast` carries none: a replayed cast is refused by the slot's cooldown, skill recovery and mana.
@@ -358,7 +358,7 @@ sequenceDiagram
 - PostgreSQL owns history, win/loss totals, progression and rating. Only the game server submits results. It does so through `CareerPort` and a bounded worker thread off the tick, with a local outbox and idempotent settlement (`docs/progress/2026-09-14-career-and-friends.md`).
 - The Account API links `omoba-career-store`, but no HTTP endpoint can settle a match or change rewards (`account-api/README.md`; [protocols.md](protocols.md#6-account-api-http-contract)).
 - Runtime processes check the schema and never run DDL. Migrations run once as an owner role: `omoba-account-api migrate` applies the career and portal schemas (`account-api/src/main.rs`), and `cargo run -p server --bin migrate-career` initializes the career schema alone for a game-only deployment (`server/src/bin/migrate-career.rs`). Runtime roles are restricted by `account-api/ops/grants.sql`.
-- The career (core) schema is version 3. The portal schema is versioned separately and is now version 7 (`account-api/migrations/007_social_sign_in.sql`).
+- The career (core) schema is version 3. The portal schema is versioned separately and is now versions 1–7 and 9 (`account-api/migrations/009_yookassa_supporter.sql`; 8 is reserved for LR-20).
 
 **Consequences.**
 - Every deployment has an explicit migration step before the runtime starts.
@@ -528,7 +528,7 @@ sequenceDiagram
 ## ADR-024: RU monetization: YooKassa donations buy monthly tiered auras
 
 - **Date:** 2026-10-24 (owner decision). Implementation: LR-67 in [../plans/launch-readiness.md](../plans/launch-readiness.md).
-- **Status:** Accepted; implementation pending. Amends ADR-003 (the RU preset had `supporter` off) and ADR-005 (RU stays without Ekza but is no longer free of payments). Amended by ADR-025: providers are chosen per region × channel, and the tier counts provider-neutral points.
+- **Status:** Accepted; partly implemented. The tier engine is built (LR-67a: provider lists per market, protocol 12 tier styles, portal schema 9, tier points, the shared entitlement rule, YooKassa settlement, client palettes and the website link); the YooKassa checkout, webhook and reconciliation (LR-67b) and the RU portal pages (LR-67c) are not. Amends ADR-003 (the RU preset had `supporter` off) and ADR-005 (RU stays without Ekza but is no longer free of payments). Amended by ADR-025: providers are chosen per region × channel, and the tier counts provider-neutral points.
 
 **Context.** The owner wants the Russian launch to earn money from players who support the project, through the Hero Supporter auras players already see on each other, and to grow from that revenue. Russian players cannot use Apple or Solana checkout here; the owner already runs YooKassa for another product.
 

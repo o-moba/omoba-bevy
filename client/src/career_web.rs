@@ -246,11 +246,14 @@ mod tests {
     #[test]
     fn a_build_without_supporter_never_offers_supporter_management() {
         use shared::market::Market;
-        assert_eq!(
-            challenge_key(Market::Global.default_features().supporter),
-            "web.challenge"
-        );
-        for market in [Market::Ru, Market::Cn] {
+        // RU sells supporter auras (LR-67): its consent names Supporter too.
+        for market in [Market::Global, Market::Ru] {
+            assert_eq!(
+                challenge_key(market.default_features().supporter),
+                "web.challenge"
+            );
+        }
+        for market in [Market::Cn] {
             let key = challenge_key(market.default_features().supporter);
             for locale in crate::i18n::available_locales() {
                 let full = crate::i18n::tr_in("web.challenge", locale);
