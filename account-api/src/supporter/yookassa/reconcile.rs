@@ -90,13 +90,21 @@ pub async fn resolve_issue<'e>(db: impl sqlx::PgExecutor<'e>, object: &str) -> R
 }
 
 /// Whether a refund of `payment` can be ours: the payment is bound to an
-/// attempt, or some posted attempt still waits for its lost create reply
-/// (the re-read payment then names it). Otherwise no provider call is made.
+/// attempt. Otherwise no provider call is made.
+///
+/// An unbound attempt (a lost create reply, one in manual review) never has
+/// a refundable payment: payments are redirects, and the player gets the
+/// redirect only after `settle` bound the payment to its attempt. So a
+/// refund naming any other payment is not an OMOBA donation (the refund scan
+/// queues it as `unknown_payment`), and the public webhook cannot make the
+/// shop's API answer for it.
 pub async fn refund_may_be_ours<'e>(db: impl sqlx::PgExecutor<'e>, payment: &str) -> Result<bool> {
-    Ok(sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM portal.supporter_yookassa_attempts WHERE provider_payment_id=$1) OR EXISTS(SELECT 1 FROM portal.supporter_yookassa_attempts WHERE provider_payment_id IS NULL AND status IN ('charging','failed') AND first_provider_attempt_at IS NOT NULL)")
-        .bind(payment)
-        .fetch_one(db)
-        .await?)
+    Ok(sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM portal.supporter_yookassa_attempts WHERE provider_payment_id=$1)",
+    )
+    .bind(payment)
+    .fetch_one(db)
+    .await?)
 }
 
 /// What became of one refund.

@@ -71,6 +71,8 @@ struct Shop {
     calls: usize,
     /// Create the payment but answer 500 (the reply is lost).
     lose_next_create: bool,
+    /// Refuse the next create with 400 (no payment).
+    reject_next_create: bool,
     /// Answer 503 to every GET.
     fail_gets: bool,
     /// Answer 503 to the next refund list.
@@ -126,6 +128,12 @@ async fn create_payment(
     });
     if !authorized(&headers) || key.is_empty() {
         return reply(StatusCode::UNAUTHORIZED, json!({"type": "error"}));
+    }
+    if std::mem::take(&mut shop.reject_next_create) {
+        return reply(
+            StatusCode::BAD_REQUEST,
+            json!({"type": "error", "code": "invalid_request"}),
+        );
     }
     // YooKassa answers a repeated key with the payment the first request made.
     if let Some(id) = shop.keys.get(&key).cloned() {
@@ -906,6 +914,201 @@ async fn webhooks_reread_known_objects_and_acknowledge_unknown_ones_without_a_ca
         .unwrap();
     assert_eq!(attempt(&app, &other_id).await.0, "canceled");
     assert_eq!(grants(&app, &profile).await, 1);
+    cleanup(&app, &profile).await;
+}
+
+/// An attempt of `profile` with this amount.
+async fn attempt_of(app: &App, profile: &str, amount_minor: i64) -> String {
+    sqlx::query_scalar("SELECT attempt_id FROM portal.supporter_yookassa_attempts WHERE profile_id=$1 AND amount_minor=$2")
+        .bind(profile)
+        .bind(amount_minor)
+        .fetch_one(&app.pool)
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+#[ignore = "requires isolated OMOBA_PORTAL_TEST_DATABASE_URL"]
+async fn unbound_attempts_never_open_the_webhook_to_unknown_objects() {
+    let owner = owner_app().await;
+    let stand = Stand::start(owner.pool.clone()).await;
+    let app = with_shop(owner, &stand, true);
+    quiesce(&app, true).await;
+    let profile = account(&app).await;
+
+    // A lost create past 23 hours: manual review, unbound for good.
+    stand.with(|shop| shop.lose_next_create = true);
+    donate(&app, &profile, &crypto::random::<16>(), 500)
+        .await
+        .unwrap_err();
+    let review = attempt_of(&app, &profile, 50_000).await;
+    sqlx::query("UPDATE portal.supporter_yookassa_attempts SET first_provider_attempt_at=$2 WHERE attempt_id=$1")
+        .bind(&review)
+        .bind(now() - yookassa::REPLAY_WINDOW_SECONDS - 1)
+        .execute(&app.pool)
+        .await
+        .unwrap();
+    assert_eq!(reconcile(&app).await.unwrap().review, 1);
+    assert_eq!(
+        attempt(&app, &review).await,
+        ("failed".into(), None, Some(checkout::REPLAY_EXPIRED.into()))
+    );
+    // A create YooKassa refused with a 4xx: failed, unbound, inside the window.
+    stand.with(|shop| shop.reject_next_create = true);
+    let error = donate(&app, &profile, &crypto::random::<16>(), 250)
+        .await
+        .unwrap_err();
+    assert_eq!(
+        (error.0, error.1),
+        (StatusCode::BAD_GATEWAY, "payment_provider_rejected")
+    );
+    let rejected = attempt_of(&app, &profile, 25_000).await;
+    assert_eq!(
+        attempt(&app, &rejected).await,
+        (
+            "failed".into(),
+            None,
+            Some("payment_provider_rejected".into())
+        )
+    );
+    // A posted attempt closed unbound, and a pristine one never posted.
+    stand.with(|shop| shop.reject_next_create = true);
+    donate(&app, &profile, &crypto::random::<16>(), 100)
+        .await
+        .unwrap_err();
+    let closed = attempt_of(&app, &profile, 10_000).await;
+    sqlx::query(
+        "UPDATE portal.supporter_yookassa_attempts SET status='canceled' WHERE attempt_id=$1",
+    )
+    .bind(&closed)
+    .execute(&app.pool)
+    .await
+    .unwrap();
+    let pristine = crypto::random::<16>();
+    sqlx::query("INSERT INTO portal.supporter_yookassa_attempts(attempt_id,profile_id,request_key,idempotence_key,amount_minor,receipt,offer_version,status,created_at,updated_at) SELECT $1,profile_id,md5($1)||md5(md5($1)),md5(md5(md5($1))),20000,receipt,offer_version,'created',$2,$2 FROM portal.supporter_yookassa_attempts WHERE attempt_id=$3")
+        .bind(&pristine)
+        .bind(now())
+        .bind(&closed)
+        .execute(&app.pool)
+        .await
+        .unwrap();
+    // And one donation of ours, bound to its payment.
+    let created = donate(&app, &profile, &crypto::random::<16>(), 1000)
+        .await
+        .unwrap();
+    let bound = payment_of(&app, created["attempt_id"].as_str().unwrap()).await;
+
+    // Forged objects: 200 ignored, and not a single call to the shop's API.
+    let calls = stand.calls();
+    for (event, object) in [
+        (
+            "refund.succeeded",
+            json!({"id": "3a000000-0015-5000-8000-forged", "payment_id": "2f-unknown-payment"}),
+        ),
+        (
+            "payment.succeeded",
+            json!({"id": "2f-unknown-payment", "status": "succeeded"}),
+        ),
+        (
+            "payment.succeeded",
+            json!({"id": "2f-unknown-payment", "metadata": {"attempt_id": closed}}),
+        ),
+        (
+            "payment.canceled",
+            json!({"id": "2f-unknown-payment", "metadata": {"attempt_id": pristine}}),
+        ),
+        (
+            "payment.succeeded",
+            json!({"id": "2f-unknown-payment", "metadata": {"attempt_id": "0".repeat(32)}}),
+        ),
+    ] {
+        assert_eq!(
+            notify(&app, event, object.clone()).await.unwrap()["status"],
+            "ignored",
+            "{event} {object}"
+        );
+    }
+    assert_eq!(stand.calls(), calls, "unknown objects cost no API call");
+
+    // A forged id next to an object of ours is re-read once; YooKassa's 404
+    // is an unknown object (200), not an error YooKassa would retry.
+    for (event, object) in [
+        (
+            "payment.succeeded",
+            json!({"id": "2f-forged-payment", "metadata": {"attempt_id": review}}),
+        ),
+        (
+            "payment.succeeded",
+            json!({"id": "2f-forged-payment", "metadata": {"attempt_id": rejected}}),
+        ),
+        (
+            "refund.succeeded",
+            json!({"id": "3a000000-0015-5000-8000-forged", "payment_id": bound}),
+        ),
+    ] {
+        let calls = stand.calls();
+        assert_eq!(
+            notify(&app, event, object.clone()).await.unwrap()["status"],
+            "ignored",
+            "{event} {object}"
+        );
+        assert_eq!(stand.calls(), calls + 1, "{event} {object}");
+    }
+    for id in [&review, &rejected, &closed, &pristine] {
+        assert_eq!(attempt(&app, id).await.1, None);
+    }
+
+    // The refund scan reads its page and queues a refund of another payment
+    // for an operator without re-reading that payment.
+    sqlx::query(
+        "UPDATE portal.supporter_yookassa_attempts SET last_polled_at=$2 WHERE profile_id=$1",
+    )
+    .bind(&profile)
+    .bind(now() + 1_000_000_000)
+    .execute(&app.pool)
+    .await
+    .unwrap();
+    let foreign = stand.refund("2f-unknown-payment", 100, now() - 5);
+    let calls = stand.calls();
+    let report = reconcile(&app).await.unwrap();
+    assert_eq!(
+        (report.refund_scan, report.refunds_checked, report.attempts),
+        ("complete", 1, 0),
+        "{report:?}"
+    );
+    assert_eq!(
+        stand.calls(),
+        calls + 1,
+        "one list page, no payment re-read"
+    );
+    assert_eq!(
+        open_issue(&app, &foreign).await.as_deref(),
+        Some("unknown_payment")
+    );
+
+    // An operator's hand-made notification still binds the review attempt's payment.
+    let review_payment = stand.with(|shop| {
+        shop.payments
+            .values()
+            .find(|payment| payment["metadata"]["attempt_id"] == review.as_str())
+            .unwrap()["id"]
+            .as_str()
+            .unwrap()
+            .to_owned()
+    });
+    stand.set_status(&review_payment, "canceled", false);
+    assert_eq!(
+        notify(
+            &app,
+            "payment.canceled",
+            json!({"id": review_payment, "metadata": {"attempt_id": review}})
+        )
+        .await
+        .unwrap()["status"],
+        "accepted"
+    );
+    assert_eq!(attempt(&app, &review).await.0, "canceled");
+    assert_eq!(payment_of(&app, &review).await, review_payment);
     cleanup(&app, &profile).await;
 }
 

@@ -384,10 +384,18 @@ fn request_id(response: &reqwest::Response) -> String {
         .unwrap_or_default()
 }
 
-/// The body of a successful reply. A non-2xx reply is logged by operation,
-/// status and request id only: 4xx is `payment_provider_rejected`, anything
-/// else `payment_provider_unavailable`.
-async fn body(operation: &str, response: reqwest::Result<reqwest::Response>) -> Result<Vec<u8>> {
+fn rejected() -> Error {
+    Error(StatusCode::BAD_GATEWAY, "payment_provider_rejected")
+}
+
+/// The body of a successful reply, `None` for 404 (the shop has no such
+/// object). A non-2xx reply is logged by operation, status and request id
+/// only: another 4xx is `payment_provider_rejected`, anything else
+/// `payment_provider_unavailable`.
+async fn found(
+    operation: &str,
+    response: reqwest::Result<reqwest::Response>,
+) -> Result<Option<Vec<u8>>> {
     let response = response.map_err(|_| {
         eprintln!("yookassa {operation}: unreachable");
         unavailable()
@@ -399,15 +407,19 @@ async fn body(operation: &str, response: reqwest::Result<reqwest::Response>) -> 
             status.as_u16(),
             request_id(&response)
         );
-        return Err(
-            if status.is_client_error() && status != StatusCode::TOO_MANY_REQUESTS {
-                Error(StatusCode::BAD_GATEWAY, "payment_provider_rejected")
-            } else {
-                unavailable()
-            },
-        );
+        return match status {
+            StatusCode::NOT_FOUND => Ok(None),
+            StatusCode::TOO_MANY_REQUESTS => Err(unavailable()),
+            _ if status.is_client_error() => Err(rejected()),
+            _ => Err(unavailable()),
+        };
     }
-    bounded_response(response, MAX_RESPONSE).await
+    bounded_response(response, MAX_RESPONSE).await.map(Some)
+}
+
+/// [`found`] where a 404 is `payment_provider_rejected` too.
+async fn body(operation: &str, response: reqwest::Result<reqwest::Response>) -> Result<Vec<u8>> {
+    found(operation, response).await?.ok_or_else(rejected)
 }
 
 /// `POST /payments` with the persisted Idempotence-Key. The caller stored the
@@ -428,8 +440,9 @@ pub async fn create_payment(
     parse_payment(&body("create payment", response).await?)
 }
 
-/// `GET /payments/{id}`: the source of truth, never a webhook body.
-pub async fn get_payment(config: &YooKassaConfig, id: &str) -> Result<ProviderPayment> {
+/// `GET /payments/{id}`: the source of truth, never a webhook body. `None`
+/// when the shop has no such payment.
+pub async fn find_payment(config: &YooKassaConfig, id: &str) -> Result<Option<ProviderPayment>> {
     if !provider_id(id) {
         return Err(payment_invalid());
     }
@@ -438,15 +451,23 @@ pub async fn get_payment(config: &YooKassaConfig, id: &str) -> Result<ProviderPa
         .basic_auth(&config.shop_id, Some(&config.secret_key))
         .send()
         .await;
-    let payment = parse_payment(&body("get payment", response).await?)?;
+    let Some(bytes) = found("get payment", response).await? else {
+        return Ok(None);
+    };
+    let payment = parse_payment(&bytes)?;
     if payment.payment.payment_id != id {
         return Err(payment_invalid());
     }
-    Ok(payment)
+    Ok(Some(payment))
 }
 
-/// `GET /refunds/{id}`.
-pub async fn get_refund(config: &YooKassaConfig, id: &str) -> Result<ProviderRefund> {
+/// [`find_payment`] of a payment that must exist (404 is `payment_provider_rejected`).
+pub async fn get_payment(config: &YooKassaConfig, id: &str) -> Result<ProviderPayment> {
+    find_payment(config, id).await?.ok_or_else(rejected)
+}
+
+/// `GET /refunds/{id}`. `None` when the shop has no such refund.
+pub async fn find_refund(config: &YooKassaConfig, id: &str) -> Result<Option<ProviderRefund>> {
     if !provider_id(id) {
         return Err(payment_invalid());
     }
@@ -455,11 +476,19 @@ pub async fn get_refund(config: &YooKassaConfig, id: &str) -> Result<ProviderRef
         .basic_auth(&config.shop_id, Some(&config.secret_key))
         .send()
         .await;
-    let refund = parse_refund(&body("get refund", response).await?)?;
+    let Some(bytes) = found("get refund", response).await? else {
+        return Ok(None);
+    };
+    let refund = parse_refund(&bytes)?;
     if refund.refund.refund_id != id {
         return Err(payment_invalid());
     }
-    Ok(refund)
+    Ok(Some(refund))
+}
+
+/// [`find_refund`] of a refund that must exist (404 is `payment_provider_rejected`).
+pub async fn get_refund(config: &YooKassaConfig, id: &str) -> Result<ProviderRefund> {
+    find_refund(config, id).await?.ok_or_else(rejected)
 }
 
 /// `GET /refunds` created in `(after, until]`, one page.

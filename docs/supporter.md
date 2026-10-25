@@ -303,9 +303,14 @@ the owner's production YooKassa integration:
 - **The body of a notification is never trusted.** The webhook
   (`POST /v1/supporter/yookassa/notifications`, public through the RU ingress)
   only names an object. One this API did not create is acknowledged with 200 and
-  no call to YooKassa. A known one is re-read with the shop credentials
-  (`GET /v3/payments/{id}`, `GET /v3/refunds/{id}`) and settled; any processing
-  error answers 5xx so YooKassa delivers it again.
+  no call to YooKassa: a payment is known when it is bound to an attempt or its
+  metadata names a posted attempt still waiting for its create reply, a refund
+  only when its payment is bound (the player gets the redirect only after the
+  bind, so an unbound attempt never has a paid payment). Lingering failed or
+  review attempts open nothing. A known one is re-read with the shop
+  credentials (`GET /v3/payments/{id}`, `GET /v3/refunds/{id}`) and settled; a
+  named object YooKassa does not have (404) is acknowledged too; any other
+  processing error answers 5xx so YooKassa delivers it again.
 - **The Idempotence-Key is persisted before the POST.** The checkout commits the
   attempt with its key, the amount, the accepted offer version and the frozen
   receipt, claims it (`charging`, two-minute lease), and only then calls

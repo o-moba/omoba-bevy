@@ -5324,7 +5324,7 @@
     "/v1/supporter/yookassa/notifications": {
       "post": {
         "summary": "YooKassa HTTP notifications (RU, public): the body only names an object, which is re-read with the shop credentials",
-        "description": "Events payment.succeeded, payment.waiting_for_capture, payment.canceled, refund.succeeded. An object this API did not create is acknowledged (ignored) without a call to YooKassa. Any processing error answers 5xx so YooKassa delivers the notification again.",
+        "description": "Events payment.succeeded, payment.waiting_for_capture, payment.canceled, refund.succeeded. An object this API did not create (a payment neither bound to an attempt nor naming a posted, unbound attempt in its metadata; a refund of a payment not bound to an attempt) is acknowledged (ignored) without a call to YooKassa. A named object YooKassa does not have (404) is acknowledged (ignored) too. Any other processing error answers 5xx so YooKassa delivers the notification again.",
         "operationId": "post_supporter_yookassa_notifications",
         "security": [],
         "requestBody": {
@@ -5418,6 +5418,16 @@
           },
           "500": {
             "description": "notification_not_processed: the object did not settle; YooKassa retries",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "payment_provider_rejected: YooKassa refused the re-read (for example a wrong shop key); YooKassa retries",
             "content": {
               "application/json": {
                 "schema": {

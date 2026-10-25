@@ -553,8 +553,10 @@ test stand-in) is refused by the release build and by `status`.
    webhook and the reconciliation loop always run.
 
 **What the API guarantees.** The notification body is never trusted: unknown
-objects are acknowledged without a call, known ones are re-read with the shop key
-and settled once. A checkout commits its Idempotence-Key before the POST; a lost
+objects (a payment not bound to an attempt, a refund of such a payment) are
+acknowledged without a call, also while attempts wait in manual review; known
+ones are re-read with the shop key and settled once, and one YooKassa answers
+404 for is acknowledged too. A checkout commits its Idempotence-Key before the POST; a lost
 create is replayed with the same key for 23 hours, then goes to manual review.
 New charges stop by themselves (`503 new_charges_paused`) when the refund scan has
 not succeeded for 30 minutes (YooKassa unreachable or the key wrong). Logs carry

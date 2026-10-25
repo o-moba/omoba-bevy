@@ -204,10 +204,15 @@ for the full list.
   every 5 s), so the return page sees a payment before its webhook.
 - `POST /v1/supporter/yookassa/notifications` (public; limits per IP 120/min and
   600/min in total): the body is only a hint. A payment or refund this API did
-  not create answers `200 {"status":"ignored"}` without a call to YooKassa; a
-  known one is re-read with the shop credentials and settled exactly once
-  (`200 {"status":"accepted"}`); a processing error answers 5xx so YooKassa
-  delivers it again.
+  not create answers `200 {"status":"ignored"}` without a call to YooKassa. A
+  payment is known when it is bound to an attempt or its metadata names a
+  posted, still unbound attempt (a lost create reply, also one in manual
+  review); a refund only when its payment is bound (an unbound attempt never
+  has a paid payment: the player gets the redirect after the bind). A known one
+  is re-read with the shop credentials and settled exactly once
+  (`200 {"status":"accepted"}`); a named object YooKassa answers 404 for is
+  `200 {"status":"ignored"}` too; any other processing error answers 5xx so
+  YooKassa delivers it again.
 - The dashboard (`GET /v1/me/supporter`) adds `yookassa`: `available`,
   `new_charges`, `currency`, `duration_days`, `min_rub`, `max_rub`, `tiers_rub`.
 - Reconciliation (`reconcile`, every 60 s next to the Apple loop): closes

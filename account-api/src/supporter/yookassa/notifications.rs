@@ -3,9 +3,13 @@
 //! The pushed body is only a hint. It names an object; nothing in it is
 //! trusted. A payment or refund this API cannot have created is acknowledged
 //! with 200 and no provider call (so the public route is no lever on the
-//! shop's API). A known one is re-read with the shop credentials and settled
-//! exactly once. Any processing error answers 5xx, so YooKassa delivers the
-//! notification again; the reconciliation loop recovers it either way.
+//! shop's API): a payment is known when it is bound to an attempt, or when its
+//! metadata names a posted attempt still waiting for its create reply; a
+//! refund when its payment is bound. A known one is re-read with the shop
+//! credentials and settled exactly once; one YooKassa does not have (404) is
+//! acknowledged the same way. Any other processing error answers 5xx, so
+//! YooKassa delivers the notification again; the reconciliation loop recovers
+//! it either way.
 use super::api;
 use super::checkout::settle;
 use super::reconcile::{RefundOutcome, handle_refund};
@@ -43,9 +47,11 @@ fn retry(error: Error) -> Error {
 }
 
 /// Whether this API created the payment: bound to an attempt, or (a create
-/// reply that was lost) naming an unbound attempt.
+/// reply that was lost) naming an unbound attempt that was posted. A pristine
+/// or closed attempt has no payment; one in manual review stays here, so an
+/// operator's hand-made notification binds its payment.
 async fn known_payment(app: &App, payment: &str, attempt: Option<&str>) -> Result<bool> {
-    Ok(sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM portal.supporter_yookassa_attempts WHERE provider_payment_id=$1) OR ($2::text IS NOT NULL AND EXISTS(SELECT 1 FROM portal.supporter_yookassa_attempts WHERE attempt_id=$2 AND provider_payment_id IS NULL))")
+    Ok(sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM portal.supporter_yookassa_attempts WHERE provider_payment_id=$1) OR ($2::text IS NOT NULL AND EXISTS(SELECT 1 FROM portal.supporter_yookassa_attempts WHERE attempt_id=$2 AND provider_payment_id IS NULL AND status IN ('charging','failed') AND first_provider_attempt_at IS NOT NULL))")
         .bind(payment)
         .bind(attempt)
         .fetch_one(&app.pool)
@@ -77,7 +83,9 @@ pub async fn notification(app: &App, body: &[u8]) -> Result<Value> {
         if !super::reconcile::refund_may_be_ours(&app.pool, payment).await? {
             return ignored();
         }
-        let refund = api::get_refund(config, id).await.map_err(retry)?;
+        let Some(refund) = api::find_refund(config, id).await.map_err(retry)? else {
+            return ignored();
+        };
         if refund.refund.payment_id != payment {
             return Err(retry(payment_invalid()));
         }
@@ -94,7 +102,9 @@ pub async fn notification(app: &App, body: &[u8]) -> Result<Value> {
     if !known_payment(app, id, attempt).await? {
         return ignored();
     }
-    let payment = api::get_payment(config, id).await.map_err(retry)?;
+    let Some(payment) = api::find_payment(config, id).await.map_err(retry)? else {
+        return ignored();
+    };
     match settle(app, &payment.payment).await.map_err(retry)? {
         Settlement::Unknown => ignored(),
         Settlement::Changed | Settlement::Unchanged => {
