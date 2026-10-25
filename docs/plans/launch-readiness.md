@@ -80,17 +80,17 @@ Area: hosting/deployment · **blocker** · M · ops (owner buys the VPS and sets
   - The release gate `docs/release-gate-checklist.md` dates from April and is stale. The only current check is runbook step 6 (`docs/markets.md:139-141`).
 - **Requirement:** Postgres, the lobby with its workers, the Account API and the portal run on a host in Russia. Each service restarts on its own after a crash or a reboot, and RU packages connect to it.
 - **Acceptance:**
-  - [ ] `make release-ru-preflight` prints `ready:true`, and `compatibility -- check lobby.omoba.ru:4000 …` exits 0 against the lobby and one worker.
-  - [ ] `ops/vps/ru/omoba-portal-ru.service` exists, with `Restart=always`, memory caps and a dedicated user.
-  - [ ] The lobby and Account API units have `After=`/`Wants=postgresql.service`.
-  - [ ] A reboot test brings everything up with no manual step.
-  - [ ] A bootstrap script or section installs and verifies:
+  - [ ] `make release-ru-preflight` prints `ready:true`, and `compatibility -- check lobby.omoba.ru:4000 …` exits 0 against the lobby and one worker. Needs the host: release checklist rows S6–S8.
+  - [x] `ops/vps/ru/omoba-portal-ru.service` exists, with `Restart=always`, memory caps and a dedicated user.
+  - [x] The lobby and Account API units have `After=`/`Wants=postgresql.service`.
+  - [ ] A reboot test brings everything up with no manual step. The test is `ops/vps/ru/ru_host.py reboot-check --apply` (simulated in `scripts/test_ru_host.py`); the real run needs the host (checklist row S9).
+  - [x] A bootstrap script or section installs and verifies (`ops/vps/ru/ru_host.py bootstrap`, proven against a fake Ubuntu host and its SQL against real PostgreSQL; the first real run is on the RU host):
     - PostgreSQL 16+ with `und-x-icu`
     - Caddy
-    - firewall open only for UDP 4000, the arena range and TCP 443
+    - firewall open only for UDP 4000, the arena range and TCP 443 (plus SSH)
     - key-only SSH
   - [x] A public lobby with an unset or loopback public host and a non-loopback bind exits with a clear error (unit test).
-  - [ ] A written RU release checklist replaces the April gate. For each platform it covers:
+  - [x] A written RU release checklist (`ops/vps/ru/release-checklist.md`) replaces the April gate. For each platform it covers:
     - clean install and first run in Russian
     - VK sign-in
     - a bot match and the casual and ranked queues
@@ -99,7 +99,7 @@ Area: hosting/deployment · **blocker** · M · ops (owner buys the VPS and sets
     - the incompatible-server prompt
 
     The result is stored in `docs/progress` for every release.
-  - [ ] An RU client plays a server bot match and a 2-client casual match, and the history shows on `omoba.ru`.
+  - [ ] An RU client plays a server bot match and a 2-client casual match, and the history shows on `omoba.ru`. Needs the host: checklist rows P3 and P4.
 - **Depends on:** — (owner checklist: VPS and DNS)
 
 #### LR-02 — Portal reaches the Account API with its key and the real client IP
