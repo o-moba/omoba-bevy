@@ -3,7 +3,7 @@
   "info": {
     "title": "Omoba Account API",
     "version": "0.21.0-rc.1",
-    "description": "Browser clients use the Next.js BFF, not these bearer endpoints directly. No match/reward write endpoints. All private replies are no-store. Native proofs are domain-separated Ed25519; signing tuple is defined in shared/src/web_account.rs. Sign in with VK ID (portal schema 7) is enabled by OMOBA_VKID_CLIENT_ID and OMOBA_SOCIAL_SECRET in a vk_sign_in build; `auth/social/link` is native, the other social routes are the portal BFF's."
+    "description": "Browser clients use the Next.js BFF, not these bearer endpoints directly. No match/reward write endpoints. All private replies are no-store. Native proofs are domain-separated Ed25519; signing tuple is defined in shared/src/web_account.rs. Sign in with VK ID (portal schema 7) is enabled by OMOBA_VKID_CLIENT_ID and OMOBA_SOCIAL_SECRET in a vk_sign_in build; `auth/social/link` is native, the other social routes are the portal BFF's. Moderation (LR-15): while a profile has an active account ban, every session-authenticated route, pairing approval and completion and VK sign-in answer 403 `account_banned`; `PATCH /v1/me/profile` answers 403 `name_locked` while a moderator's name reset lasts. Sanctions are applied with the `omoba-account-api sanction|rename|chat` operator commands, never over HTTP."
   },
   "paths": {
     "/v1/auth/pairings": {
@@ -5105,7 +5105,8 @@
         "type": "object",
         "properties": {
           "code": {
-            "type": "string"
+            "type": "string",
+            "description": "Stable error code, for example invalid_request, session_expired, account_banned (403, LR-15), name_locked (403, LR-15), not_found, state_changed, rate_limited, database_unavailable."
           },
           "request_id": {
             "type": "string"

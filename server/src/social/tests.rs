@@ -19,6 +19,7 @@ fn sender(id: u64, team: SocialTeam) -> Sender {
         alive: true,
         requires_signature: false,
         entitlements: Entitlements::default(),
+        mute: None,
     }
 }
 fn chat(id: u64, channel: SocialChannel, text: &str) -> SocialRequest {
@@ -514,5 +515,167 @@ fn social_send_failures_are_counted_on_their_own_limiter() {
         rt.snapshot_send_diagnostic.last_emitted_at.is_none()
             && rt.snapshot_send_diagnostic.suppressed == 0,
         "Social failures must not spend the world-snapshot diagnostic budget"
+    );
+}
+
+#[test]
+fn a_muted_sender_is_refused_with_its_end_and_spends_no_cooldown() {
+    use shared::moderation::{Sanction, SanctionKind, code};
+    let now = Instant::now();
+    let mut state = state(now);
+    let mute = Sanction {
+        kind: SanctionKind::ChatMute,
+        until: Some(1_900_000_000),
+    };
+    let mut muted = sender(1, SocialTeam::Green);
+    muted.mute = Some(mute);
+    for id in 1..=5 {
+        state.submit(
+            muted.clone(),
+            chat(id, SocialChannel::Match, "Buy gold"),
+            false,
+            now,
+        );
+    }
+    let own = state.view(&muted, now);
+    assert_eq!(own.error_code.as_deref(), Some(code::CHAT_MUTED));
+    assert_eq!(own.mute, Some(mute), "the client says until when");
+    assert!(state.events.is_empty());
+    assert!(
+        state
+            .view(&sender(2, SocialTeam::Green), now)
+            .events
+            .is_empty()
+    );
+    // Reactions stay, and the refusals spent no shared cooldown token.
+    let mut reaction = chat(6, SocialChannel::Match, "");
+    reaction.command = SocialCommand::Reaction {
+        reaction_id: "thumbs_up".into(),
+    };
+    state.submit(muted.clone(), reaction, false, now);
+    assert_eq!(state.events.len(), 1);
+    assert_eq!(state.view(&muted, now).error, None);
+}
+
+/// A request from `sender(2, …)`, whose session is `s2`.
+fn from_two(mut request: SocialRequest) -> SocialRequest {
+    request.session_id = "s2".into();
+    request
+}
+
+#[test]
+fn the_chat_switch_and_a_mute_drop_held_chat_but_keep_reactions() {
+    use shared::moderation::code;
+    let now = Instant::now();
+    let mut state = state(now);
+    state.submit(
+        sender(1, SocialTeam::Green),
+        chat(1, SocialChannel::Match, "Before the switch"),
+        false,
+        now,
+    );
+    let mut reaction = chat(2, SocialChannel::Match, "");
+    reaction.command = SocialCommand::Reaction {
+        reaction_id: "heart".into(),
+    };
+    state.submit(sender(1, SocialTeam::Green), reaction, false, now);
+    assert_eq!(state.events.len(), 2);
+    // Off on this server: held chat is gone for everyone, reactions stay.
+    state.set_env_chat(false);
+    state.apply_moderation(false, HashSet::new());
+    let view = state.view(&sender(2, SocialTeam::Blue), now);
+    assert!(view.chat_disabled);
+    assert_eq!(view.events.len(), 1);
+    assert!(matches!(
+        view.events[0].kind,
+        SocialEventKind::Reaction { .. }
+    ));
+    state.submit(
+        sender(2, SocialTeam::Blue),
+        from_two(chat(1, SocialChannel::Match, "Anyone?")),
+        false,
+        now,
+    );
+    let own = state.view(&sender(2, SocialTeam::Blue), now);
+    assert_eq!(own.error_code.as_deref(), Some(code::CHAT_DISABLED));
+    assert_eq!(state.events.len(), 1);
+    // Back on: the dropped message does not come back; new chat flows.
+    state.set_env_chat(true);
+    state.apply_moderation(false, HashSet::new());
+    assert!(!state.view(&sender(2, SocialTeam::Blue), now).chat_disabled);
+    state.submit(
+        sender(2, SocialTeam::Blue),
+        from_two(chat(2, SocialChannel::Match, "Back")),
+        false,
+        now,
+    );
+    assert_eq!(
+        state.view(&sender(1, SocialTeam::Green), now).events.len(),
+        2
+    );
+    // A mute drops what the player sent before it.
+    state.apply_moderation(false, HashSet::from([2]));
+    let events = state.view(&sender(1, SocialTeam::Green), now).events;
+    assert_eq!(events.len(), 1);
+    assert!(events.iter().all(|e| e.player_id != 2));
+}
+
+#[test]
+fn a_moderated_runtime_delivers_no_muted_or_switched_off_chat() {
+    use shared::moderation::{Sanction, SanctionKind, code};
+    let now = Instant::now();
+    let speaker: SocketAddr = "127.0.0.1:60610".parse().unwrap();
+    let listener: SocketAddr = "127.0.0.1:60611".parse().unwrap();
+    let (mut rt, _) = subscribed_runtime(&[(speaker, Team::Green), (listener, Team::Green)], now);
+    // The speaker signs in to a profile, as on a public worker.
+    rt.career.backend.test_authenticated(
+        speaker,
+        shared::career::ProfileSummary::new("a".repeat(64), "Rude#0001".into()),
+        "seat-0",
+    );
+    let message = |rt: &ServerRuntime, id: u64, text: &str| SocialRequest {
+        request_id: id,
+        server_epoch: rt.server_epoch,
+        match_id: rt.match_id,
+        session_id: "seat-0".into(),
+        command: SocialCommand::Chat {
+            channel: SocialChannel::Match,
+            text: text.into(),
+        },
+    };
+    let request = message(&rt, 2, "first");
+    rt.handle_social_request(speaker, request, true, now);
+    assert_eq!(rt.social.events.len(), 1);
+    let mute = Sanction {
+        kind: SanctionKind::ChatMute,
+        until: Some(crate::moderation::unix_now() + 3600),
+    };
+    rt.career.backend.test_set_sanctions(speaker, vec![mute]);
+    let request = message(&rt, 3, "second");
+    rt.handle_social_request(speaker, request, true, now);
+    let heard = |rt: &ServerRuntime, addr| {
+        let sender = rt.social_sender(addr).unwrap();
+        rt.social.view(&sender, now)
+    };
+    assert!(heard(&rt, listener).events.is_empty(), "reaches no one");
+    let own = heard(&rt, speaker);
+    assert_eq!(own.error_code.as_deref(), Some(code::CHAT_MUTED));
+    assert_eq!(own.mute, Some(mute));
+    // Lifted (the next access refresh): chat flows again, no restart.
+    rt.career.backend.test_set_sanctions(speaker, Vec::new());
+    let request = message(&rt, 4, "third");
+    rt.handle_social_request(speaker, request, true, now);
+    assert_eq!(heard(&rt, listener).events.len(), 1);
+    // The database switch turns chat off on a running server.
+    rt.career.backend.test_set_chat_switch(Some(false));
+    rt.send_social_views(now + Duration::from_secs(1));
+    assert!(rt.social.events.is_empty());
+    let request = message(&rt, 5, "fourth");
+    rt.handle_social_request(speaker, request, true, now);
+    assert!(rt.social.events.is_empty());
+    assert!(heard(&rt, listener).chat_disabled);
+    assert_eq!(
+        heard(&rt, speaker).error_code.as_deref(),
+        Some(code::CHAT_DISABLED)
     );
 }

@@ -1,0 +1,13 @@
+{
+  "moderation.account_banned.until": "你的账号已被暂停使用，直到 {until} UTC。",
+  "moderation.account_banned.plain": "你的账号已被暂停使用。",
+  "moderation.matchmaking_ban.until": "你在 {until} UTC 之前不能匹配对局。",
+  "moderation.matchmaking_ban.plain": "你不能匹配对局。",
+  "moderation.ranked_ban.until": "你在 {until} UTC 之前不能进行排位赛。\n仍可进行匹配对战和人机对战。",
+  "moderation.ranked_ban.plain": "你不能进行排位赛。\n仍可进行匹配对战和人机对战。",
+  "moderation.name_locked.until": "管理员已重置你的名字。{until} UTC 之后才能更改。",
+  "moderation.name_locked.plain": "管理员已重置你的名字。暂时不能更改。",
+  "moderation.chat_muted.until": "你在 {until} UTC 之前被禁止聊天。表情反应仍可使用。",
+  "moderation.chat_muted.plain": "你已被禁止聊天。表情反应仍可使用。",
+  "moderation.chat_disabled": "此服务器已关闭聊天。表情反应仍可使用。"
+}

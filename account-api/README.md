@@ -4,7 +4,8 @@ Rust 0.21.0-rc.1 HTTP adapter for the existing game career store. Axum 0.8.9,
 SQLx PostgreSQL, ring 0.17.14. No HTTP endpoint can settle matches or change rewards.
 The adapter reuses the game friendship transaction and nickname validation rules.
 [OpenAPI 3.1](docs/openapi.json) describes the wire contract. Game core schema is
-version 4 (3 = revocable device keys, 4 = admission limits and profile retention, LR-16);
+version 5 (3 = revocable device keys, 4 = admission limits and profile retention, LR-16,
+5 = sanctions, moderation audit and chat switch, LR-15);
 portal schema has its own version 7 and never runs Prisma/Drizzle push.
 
 ## Database and migration
@@ -33,7 +34,33 @@ relations, and maintain portal tables. It can enroll a proved new device key int
 rating, match outcomes, allocation identities or core migration versions. The game role
 counts new profiles in `career_profile_admissions` and may run only the owner-defined
 `career_prune_unplayed_profiles` to delete profiles that never played (LR-16); it still
-cannot delete a device key itself.
+cannot delete a device key itself. The game role reads sanctions and the chat switch; the
+portal role may also apply and lift sanctions (only the lift columns change), append to
+`career_moderation_events` and switch chat, so the operator commands below run with it.
+No runtime role may delete a sanction or an audit row (LR-15).
+
+## Moderation commands (LR-15)
+
+The same binary is the operator's moderation tool. With `OMOBA_DATABASE_URL` set (the
+portal role is enough):
+
+```sh
+omoba-account-api player <nickname#1234 | profile-id>
+omoba-account-api sanction add <player> <kind> (--for <duration> | --permanent) --reason <text> --by <operator>
+omoba-account-api sanction list <player> [--all]
+omoba-account-api sanction lift <sanction-id> --reason <text> --by <operator>
+omoba-account-api rename <player> (--for <duration> | --permanent) --reason <text> --by <operator>
+omoba-account-api chat [status | on | off --reason <text> --by <operator>]
+```
+
+Kinds: `chat_mute`, `matchmaking_ban`, `ranked_ban`, `account_ban`, `name_reset`
+(`rename` applies it: the name becomes `Player#NNNN`). Durations: `30m`, `12h`, `7d`,
+`2w`. Each change writes a `career_moderation_events` row in its transaction; game
+servers apply it within about 10 seconds without a restart. While an account ban is
+active, every session-authenticated route, pairing approval and completion and VK
+sign-in answer `403 account_banned` (sessions are not revoked, so they work again once
+the ban ends); `PATCH /v1/me/profile` answers `403 name_locked` during a name reset.
+Procedure, effects and the RU host invocation: [RUNBOOK.md › Moderation](../RUNBOOK.md#moderation-lr-15).
 
 ## Runtime
 
@@ -123,7 +150,9 @@ competing requests receive 429 with Retry-After.
 
 Pair codes live five minutes. Encrypted completion delivery lives sixty seconds.
 Expired pairings/rate buckets/receipts/audit entries are cleaned in bounded batches;
-operation receipts live eight days, audit entries thirty days. Core match receipts
+operation receipts live eight days, audit entries thirty days. Moderation audit rows
+(`career_moderation_events`, LR-15) are a separate career table that this cleanup
+never touches; they are kept at least a year. Core match receipts
 are retained. Expired sessions are removed after a one-day grace period once no
 operation receipt refers to them. No replay recording or player-presence fabrication is introduced.
 

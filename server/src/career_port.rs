@@ -43,6 +43,12 @@ pub(crate) trait CareerPort {
         addr: SocketAddr,
     ) -> Option<shared::public_transport::GameplayPrincipal>;
     fn view(&self, addr: SocketAddr) -> CareerView;
+    /// The endpoint's active moderation sanctions (LR-15): read at sign-in
+    /// (also kept from a refused one) and with every access refresh.
+    fn sanctions(&self, addr: SocketAddr) -> Vec<shared::moderation::Sanction>;
+    /// The database-wide chat switch as last read; `None` before the first
+    /// read or without a database.
+    fn chat_switch(&self) -> Option<bool>;
     fn forget(&mut self, addr: SocketAddr);
     fn touch(&mut self, addr: SocketAddr);
     fn set_playing(&mut self, addr: SocketAddr, playing: bool);
@@ -79,4 +85,12 @@ pub(crate) trait CareerPort {
     fn test_reject_start(&mut self, id: &str, error: &str);
     #[cfg(test)]
     fn test_is_playing(&self, addr: SocketAddr) -> bool;
+    #[cfg(test)]
+    fn test_set_sanctions(
+        &mut self,
+        addr: SocketAddr,
+        sanctions: Vec<shared::moderation::Sanction>,
+    );
+    #[cfg(test)]
+    fn test_set_chat_switch(&mut self, enabled: Option<bool>);
 }

@@ -28,6 +28,7 @@ mod match_service;
 mod match_stats;
 #[cfg(test)]
 mod minion_path_tests;
+mod moderation;
 #[cfg(test)]
 mod navigation_tests;
 mod neutrals;

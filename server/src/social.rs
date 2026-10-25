@@ -1,9 +1,10 @@
 //! Ephemeral, recipient-filtered social traffic. No SQL or asset downloads.
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 
 use shared::map::Team;
+use shared::moderation::{CHAT_DISABLED_TEXT, CHAT_MUTED_TEXT, Sanction, SanctionKind};
 use shared::social::{
     Entitlements, SocialChannel, SocialCommand, SocialEvent, SocialEventKind, SocialRequest,
     SocialTeam, SocialView, allowed_reactions, normalize_chat_text, reaction_allowed,
@@ -27,6 +28,8 @@ struct RecordedEvent {
 struct Receipt {
     request: SocialRequest,
     error: Option<String>,
+    /// The moderation code of `error` (LR-15).
+    code: Option<&'static str>,
 }
 struct RateBudget {
     tokens: f32,
@@ -59,8 +62,18 @@ pub(super) struct SocialRuntime {
     // Account/session identity survives endpoint replacement and round changes.
     limits: HashMap<String, RateBudget>,
     send_diagnostic: RateLimitedDiagnostic,
+    /// `OMOBA_CHAT=off` (LR-15): no text chat on this server, whatever the
+    /// database switch says. Reactions stay.
+    env_chat_off: bool,
+    /// The database-wide switch is off (`omoba-account-api chat off`), as the
+    /// career store last read it; refreshed before every request and send.
+    store_chat_off: bool,
+    /// Players whose chat mute is active now: their chat reaches no one,
+    /// including what they sent before the mute.
+    muted: HashSet<u64>,
 }
 
+#[derive(Clone)]
 struct Sender {
     id: u64,
     nickname: String,
@@ -70,9 +83,45 @@ struct Sender {
     alive: bool,
     requires_signature: bool,
     entitlements: Entitlements,
+    /// An active chat mute (LR-15).
+    mute: Option<Sanction>,
+}
+
+/// The moderation code of a refusal text (LR-15).
+fn refusal_code(error: &str) -> Option<&'static str> {
+    match error {
+        CHAT_MUTED_TEXT => Some(shared::moderation::code::CHAT_MUTED),
+        CHAT_DISABLED_TEXT => Some(shared::moderation::code::CHAT_DISABLED),
+        _ => None,
+    }
 }
 
 impl SocialRuntime {
+    /// Applies `OMOBA_CHAT` (read once at start).
+    pub(crate) fn set_env_chat(&mut self, enabled: bool) {
+        self.env_chat_off = !enabled;
+    }
+
+    /// Text chat is off on this server: by `OMOBA_CHAT=off` or the
+    /// database-wide switch.
+    pub(crate) fn chat_disabled(&self) -> bool {
+        self.env_chat_off || self.store_chat_off
+    }
+
+    /// Applies the database switch and the muted players. Chat held for the
+    /// history window is dropped when chat goes off or its sender is muted,
+    /// so it never reaches anyone, not even after chat comes back.
+    fn apply_moderation(&mut self, store_chat_off: bool, muted: HashSet<u64>) {
+        self.store_chat_off = store_chat_off;
+        self.muted = muted;
+        let chat_disabled = self.chat_disabled();
+        let muted = &self.muted;
+        self.events.retain(|record| {
+            !matches!(record.event.kind, SocialEventKind::Chat { .. })
+                || !(chat_disabled || muted.contains(&record.event.player_id))
+        });
+    }
+
     /// Whether this identity opted into the Social stream this round.
     #[cfg(test)]
     pub(crate) fn subscribed(&self, player_id: u64) -> bool {
@@ -121,11 +170,16 @@ impl SocialRuntime {
         } else if self.receipts.len() >= MAX_SENDERS {
             return;
         }
-        let error = self
-            .accept(&sender, &request, verified, now)
-            .err()
-            .map(str::to_owned);
-        self.receipts.insert(sender.id, Receipt { request, error });
+        let error = self.accept(&sender, &request, verified, now).err();
+        let code = error.and_then(refusal_code);
+        self.receipts.insert(
+            sender.id,
+            Receipt {
+                request,
+                error: error.map(str::to_owned),
+                code,
+            },
+        );
     }
 
     fn accept(
@@ -141,6 +195,15 @@ impl SocialRuntime {
         }
         if matches!(request.command, SocialCommand::Subscribe) {
             return Ok(());
+        }
+        // Moderation (LR-15): refused before any rate token is spent.
+        if matches!(request.command, SocialCommand::Chat { .. }) {
+            if self.chat_disabled() {
+                return Err(CHAT_DISABLED_TEXT);
+            }
+            if sender.mute.is_some() {
+                return Err(CHAT_MUTED_TEXT);
+            }
         }
         if !self.limits.contains_key(&sender.rate_key) && self.limits.len() >= MAX_SENDERS {
             return Err("Chat is busy. Retry shortly.");
@@ -193,10 +256,16 @@ impl SocialRuntime {
 
     fn view(&self, sender: &Sender, now: Instant) -> SocialView {
         let receipt = self.receipts.get(&sender.id);
+        let chat_disabled = self.chat_disabled();
         SocialView {
             events: self
                 .events
                 .iter()
+                .filter(|record| {
+                    let chat = matches!(record.event.kind, SocialEventKind::Chat { .. });
+                    // With chat off, or from a muted player, chat reaches no one.
+                    !(chat && (chat_disabled || self.muted.contains(&record.event.player_id)))
+                })
                 .filter(|record| {
                     now.saturating_duration_since(record.at) < HISTORY_TTL
                         && (!matches!(
@@ -219,6 +288,9 @@ impl SocialRuntime {
             request_id: receipt.map(|receipt| receipt.request.request_id),
             error: receipt.and_then(|receipt| receipt.error.clone()),
             allowed_reactions: allowed_reactions(&sender.entitlements),
+            error_code: receipt.and_then(|receipt| receipt.code).map(str::to_owned),
+            chat_disabled,
+            mute: sender.mute,
         }
     }
 }
@@ -261,7 +333,35 @@ impl ServerRuntime {
             // Free starter pack works offline. Operator/Passport grants must be
             // installed by a trusted entitlement adapter, never a player packet.
             entitlements: Entitlements::default(),
+            mute: shared::moderation::active(
+                &self.career.backend.sanctions(addr),
+                SanctionKind::ChatMute,
+                crate::moderation::unix_now(),
+            ),
         })
+    }
+
+    /// Refreshes what moderation decides for chat (LR-15): the database
+    /// switch and the players muted now.
+    fn sync_moderation(&mut self) {
+        let store_chat_off = self.career.backend.chat_switch() == Some(false);
+        let now = crate::moderation::unix_now();
+        let muted = self
+            .world
+            .players
+            .iter()
+            .filter(|(addr, player)| {
+                !player.hero.identity.is_bot
+                    && shared::moderation::active(
+                        &self.career.backend.sanctions(**addr),
+                        SanctionKind::ChatMute,
+                        now,
+                    )
+                    .is_some()
+            })
+            .map(|(_, player)| player.hero.identity.id)
+            .collect();
+        self.social.apply_moderation(store_chat_off, muted);
     }
 
     pub(super) fn handle_social_request(
@@ -273,6 +373,7 @@ impl ServerRuntime {
     ) {
         self.social
             .sync_round(self.server_epoch, self.match_id, now);
+        self.sync_moderation();
         let Some(sender) = self.social_sender(addr) else {
             return;
         };
@@ -300,6 +401,7 @@ impl ServerRuntime {
         }
         self.social.last_sent = Some(now);
         self.social.sequence = self.social.sequence.saturating_add(1);
+        self.sync_moderation();
         let recipients: Vec<_> = self
             .world
             .players

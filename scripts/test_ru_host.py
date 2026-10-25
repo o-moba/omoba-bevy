@@ -592,6 +592,7 @@ class RuKitTest(unittest.TestCase):
             "another contour": lobby.replace("[Service]\n", "[Service]\nEnvironment=OMOBA_REGISTRY_URL="
                                                            "https://registry.ekza.io\n"),
             "overlap": lobby.replace("OMOBA_MATCH_FIRST_PORT=41000", "OMOBA_MATCH_FIRST_PORT=3999"),
+            "OMOBA_CHAT": lobby.replace("Environment=OMOBA_CHAT=off", "Environment=OMOBA_CHAT=on"),
         }
         for needle, text in cases.items():
             problems = ru_host.unit_problems("lobby", text)

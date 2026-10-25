@@ -22,7 +22,7 @@ use std::{
 
 const MIGRATION: &str = include_str!("../migrations/postgres/001_career.sql");
 /// Every core career schema version, in order; a runtime requires all of them.
-pub const SCHEMA_VERSIONS: [i32; 4] = [1, 2, 3, 4];
+pub const SCHEMA_VERSIONS: [i32; 5] = [1, 2, 3, 4, 5];
 const RULESET: &str = "verdant-default-v1";
 pub(crate) const PUBLIC_CASUAL_RULESET: &str = "public-casual-v1";
 const MAX_JSON: usize = 1024 * 1024;
@@ -278,6 +278,11 @@ impl CareerStore {
             .execute(&mut *tx)
             .await?;
         }
+        if !versions.contains(&5) {
+            sqlx::raw_sql(include_str!("../migrations/postgres/005_sanctions.sql"))
+                .execute(&mut *tx)
+                .await?;
+        }
         tx.commit().await?;
         let owner: String = sqlx::query_scalar("SELECT gen_random_uuid()::text")
             .fetch_one(&pool)
@@ -396,19 +401,27 @@ impl CareerStore {
         })
         .await
     }
+    /// The player's own rename. Refused with [`moderation::NAME_LOCKED_ERROR`]
+    /// while a moderator's `name_reset` is active (LR-15).
     pub async fn rename(&self, id: &str, name: &str) -> Result<ProfileSummary, String> {
         retry(|| async {
             check_id(id)?;
             let name = normalize_nickname(name)?;
+            let mut tx = self.pool.begin().await?;
+            if moderation::name_locked(&mut tx, id).await? {
+                return Err(moderation::NAME_LOCKED_ERROR.into());
+            }
             let row = sqlx::query(
                 "UPDATE career_profiles SET nickname=$2 WHERE profile_id=$1 RETURNING *",
             )
             .bind(id)
             .bind(name)
-            .fetch_optional(&self.pool)
+            .fetch_optional(&mut *tx)
             .await?
             .ok_or("Profile not found.")?;
-            profile_row(&row)
+            let profile = profile_row(&row)?;
+            tx.commit().await?;
+            Ok(profile)
         })
         .await
     }
@@ -1378,6 +1391,9 @@ fn same_terminal_allocation(old: &MatchResult, new: &MatchResult) -> StoreResult
     }
     same_allocation(old, &comparable, roster_can_grow(old))
 }
+
+#[path = "moderation.rs"]
+pub mod moderation;
 
 #[cfg(test)]
 #[path = "career_store_tests.rs"]

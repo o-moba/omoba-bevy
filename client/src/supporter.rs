@@ -989,7 +989,7 @@ fn status_label(status: Option<&SupporterStatus>) -> String {
     )
 }
 /// Gregorian civil date from an epoch day; avoids a platform locale dependency.
-fn utc_timestamp(seconds: i64) -> String {
+pub(crate) fn utc_timestamp(seconds: i64) -> String {
     let days = seconds.div_euclid(86400);
     let z = days + 719468;
     let era = if z >= 0 { z } else { z - 146096 } / 146097;

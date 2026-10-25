@@ -222,7 +222,10 @@ UNIT_RULES = {
 UNIT_ENV_RULES = {
     "lobby": {"SERVER_ADDR": f"0.0.0.0:{LOBBY_PORT}", "OMOBA_SERVER_ROLE": "lobby",
               "OMOBA_MATCH_ROOT": STATE + "/matches", "OMOBA_CAREER_OUTBOX": STATE + "/lobby-outbox",
-              "OMOBA_MATCH_EXECUTABLE": CURRENT + "/omoba-server"},
+              "OMOBA_MATCH_EXECUTABLE": CURRENT + "/omoba-server",
+              # RU chat off at launch (owner default O-9, LR-15): turning it on needs the
+              # owner's legal check (ОРИ, 149-FZ) and a change here and in the unit.
+              "OMOBA_CHAT": "off"},
     "account-api": {},
     "portal": {"HOSTNAME": PORTAL_ADDR[0], "NODE_ENV": "production", "NEXT_TELEMETRY_DISABLED": "1"},
 }

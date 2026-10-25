@@ -1205,10 +1205,14 @@ fn result_title(result: &MatchResult, career: &CareerClient) -> &'static str {
 /// server's text.
 pub(crate) fn server_error_text(view: &CareerView) -> Option<String> {
     let error = view.error.as_ref()?;
+    let code = view.error_code.as_deref();
+    // A moderation refusal (LR-15) names its end from the view's sanctions.
+    if let Some(text) = code.and_then(|code| crate::moderation::refusal_text(code, &view.sanctions))
+    {
+        return Some(text);
+    }
     Some(
-        view.error_code
-            .as_deref()
-            .and_then(admission_error)
+        code.and_then(admission_error)
             .map_or_else(|| error.clone(), str::to_owned),
     )
 }
@@ -1223,13 +1227,16 @@ fn admission_error(code: &str) -> Option<&'static str> {
         .flatten()
 }
 
-/// A sign-in refusal that retrying on this connection cannot change: no new
-/// profile for this device today (LR-16).
+/// A sign-in refusal that retrying at once cannot change: no new profile for
+/// this device today (LR-16), or a suspended account (LR-15, which signs in
+/// again after `moderation::SUSPENDED_RETRY`).
 pub(crate) fn refuses_sign_in(code: &str) -> bool {
     use shared::career::error_code;
     matches!(
         code,
-        error_code::NEW_PROFILE_LIMIT | error_code::NEW_PROFILES_PAUSED
+        error_code::NEW_PROFILE_LIMIT
+            | error_code::NEW_PROFILES_PAUSED
+            | error_code::ACCOUNT_BANNED
     )
 }
 
@@ -2752,6 +2759,7 @@ mod tests {
         };
         assert!(refuses_sign_in(error_code::NEW_PROFILE_LIMIT));
         assert!(refuses_sign_in(error_code::NEW_PROFILES_PAUSED));
+        assert!(refuses_sign_in(error_code::ACCOUNT_BANNED));
         assert!(!refuses_sign_in("queue_full"));
         assert_eq!(server_error_text(&unknown).as_deref(), Some("server text"));
         assert_eq!(server_error_text(&CareerView::default()), None);

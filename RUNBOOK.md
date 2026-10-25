@@ -285,3 +285,75 @@ Player data never lives on a development machine. On the RU host,
   with `ru_host.py bootstrap` after the escrowed env files and keys are put back. Never
   test a restore over the running database: the monthly restore drill (2nd of the month)
   does that in a scratch database, and `ru_host.py status` reports its result.
+
+## Moderation (LR-15)
+
+Sanctions and the chat switch are applied with the `omoba-account-api` operator
+commands (`account-api/src/moderation.rs`). They use `OMOBA_DATABASE_URL`; the portal
+role is enough, and they change nothing but the moderation tables and, for a name
+reset, the name. Game servers apply every change within about 10 seconds (their
+access refresh and chat-switch poll), without a restart. On the RU host, run them as
+the Account API's user with its environment, so the database password is never typed
+or printed:
+
+```sh
+# on the RU host, as root (ssh): one alias for the session
+alias omoba-mod='systemd-run --quiet --pipe --wait --uid=omoba-ru --gid=omoba-ru \
+  -p EnvironmentFile=/opt/omoba-ru/account-api.env /opt/omoba-ru/current/omoba-account-api'
+omoba-mod player 'Name#1234'
+```
+
+Every command that changes something needs `--reason` (for the record, never shown to
+the player) and `--by` (your name or login). Durations are `30m`, `12h`, `7d` or `2w`;
+`--permanent` lasts until lifted. One of the two is required.
+
+**Look up a player.** `omoba-mod player <Name#1234 | profile-id>` prints the profile ID,
+matches and rating, the device keys (first 16 hex digits, label, added, revoked), every
+sanction (active, ended or lifted, with its number) and the last 20 moderation log
+entries. A report names the player as the game shows it (`Name#1234`); names change,
+so write the profile ID into the incident note.
+
+**Apply a sanction.**
+`omoba-mod sanction add <player> <kind> (--for 7d | --permanent) --reason "…" --by <you>`
+
+| Kind | Effect |
+|---|---|
+| `chat_mute` | The player's chat messages are refused («muted until …») and reach no one, including what they sent in the last 30 seconds; reactions stay |
+| `matchmaking_ban` | Every match search is refused («You cannot search for matches until …»); a search in progress ends; the player is hidden from party presence and leaves their party |
+| `ranked_ban` | Ranked searches are refused; Casual PvP and vs Bots stay |
+| `account_ban` | Game sign-in is refused («Your account is suspended until …»), a signed-in session ends at the next refresh (a running match drops the player), website sessions and new website sign-ins get `account_banned`; hidden from party presence |
+| `name_reset` | Same as `rename` below |
+
+**Force a rename.** `omoba-mod rename <player> (--for 7d | --permanent) --reason "…" --by <you>`
+renames the profile to `Player#NNNN` (a free tag) and records a `name_reset` sanction:
+until it ends, the player cannot rename in the game or on the website. Party presence
+and new matches show the new name within seconds; saved match results keep the names
+they were played with.
+
+**Lift a sanction.** `omoba-mod sanction list <player> [--all]` shows the numbers;
+`omoba-mod sanction lift <number> --reason "…" --by <you>` ends one early. Access
+returns at the next refresh: a search, chat or rename works again at once, and a
+suspended game client signs in again within a minute. Nothing restarts.
+
+**Turn chat off or on.** The RU lobby unit sets `OMOBA_CHAT=off` (owner default O-9):
+there is no text chat on RU servers, whatever the database says, and match workers
+inherit it. Turning RU chat on needs the owner's legal check (ОРИ, 149-FZ) and a change
+of the unit and of `ru_host.py`'s unit rule, then `ship`. The runtime kill switch works
+on every server of the database: `omoba-mod chat off --reason "…" --by <you>` stops all
+chat delivery within about 5 seconds (held messages are dropped, reactions stay),
+`omoba-mod chat on …` allows it again where `OMOBA_CHAT` allows it, and
+`omoba-mod chat status` shows the switch.
+
+**The record.** Every add, lift, rename and chat switch writes one row to
+`career_moderation_events` (time, `--by`, action, profile, sanction number, kind,
+reason, end, old and new name) in the same transaction. Rows cannot be changed, and
+the database refuses to delete one younger than a year; nothing deletes them
+automatically. The portal's own audit events (pairings, sessions) are separate and
+kept 30 days.
+
+**Limits of M0.** A sanction holds a profile, not a person: a new device key makes a new
+profile, within the new-profile limits per network (LR-16). A sanctioned profile is never
+deleted as unplayed, so a ban on a throwaway key keeps holding that key. There are no
+IP or device bans. The player sees the refusal in their language with its end in UTC;
+the website shows only the `account_banned` / `name_locked` codes until the portal adds
+copy for them.

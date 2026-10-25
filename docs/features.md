@@ -1120,6 +1120,17 @@ follows.
 - Copy in en, ru and zh-Hans (`client/i18n/*/admission.json`, `queue.failed.arena_limit`, `queue.failed.practice_cooldown`).
 - Code: `server/src/admission.rs`, `server/src/public_transport.rs`, `server/src/career_backend.rs`, `server/src/match_service.rs`, `career-store/migrations/postgres/004_admission_limits.sql`, `career-store/src/career_store.rs` (`authenticate_from`, `prune_unplayed_profiles`), `harness/tests/admission.rs`. See [the session note](progress/2026-10-24-lr-16.md).
 
+## Moderation minimum (LR-15, unreleased)
+
+- Operators put sanctions on a profile with `omoba-account-api sanction add|list|lift` and look players up with `omoba-account-api player <Name#1234 | profile-id>`: `chat_mute`, `matchmaking_ban`, `ranked_ban`, `account_ban` and `name_reset`, each for a duration (`30m`, `7d`, …) or until lifted, with a reason and the operator's name. Procedure: [RUNBOOK.md › Moderation](../RUNBOOK.md#moderation-lr-15).
+- Game servers read a profile's sanctions at sign-in and every 10 seconds, so applying or lifting one takes effect without a restart. An account ban refuses the game sign-in (and ends a signed-in session), every website session and new website sign-in; a matchmaking ban refuses every search, a ranked ban only Ranked; account and matchmaking bans hide the player from party presence and take them out of their party; a chat mute refuses their chat and drops what they sent in the last 30 seconds, while reactions stay.
+- `omoba-account-api rename <player>` resets a name to `Player#NNNN` and locks renames (game and website) until the reset ends; party presence shows the new name within seconds.
+- Chat kill switch: `OMOBA_CHAT=off` on a server (the RU lobby unit sets it, owner default O-9; match workers inherit it), or `omoba-account-api chat off` for every server of the database within seconds. Reactions are never switched off.
+- The player sees each refusal in their language with its end in UTC: the suspended sign-in and the search refusals on the search screen and the career panel, «muted until …» or «chat is turned off» in the match chat, which then offers no keyboard. A suspended client signs in again every minute, so a lifted ban needs no restart.
+- Every moderation action writes an audit row in the same transaction (`career_moderation_events`, career schema 5); rows are append-only and cannot be deleted before they are a year old. A sanctioned profile is never pruned as unplayed, so a ban on a throwaway key holds.
+- Copy in en, ru and zh-Hans (`client/i18n/*/moderation.json`).
+- Code: `shared/src/moderation.rs`, `career-store/migrations/postgres/005_sanctions.sql`, `career-store/src/moderation.rs`, `account-api/src/moderation.rs`, `server/src/career_backend.rs`, `server/src/social.rs`, `server/src/party.rs`, `server/src/match_service.rs`, `client/src/moderation.rs`, `client/src/social.rs`. See [the session note](progress/2026-10-24-lr-15.md).
+
 ## Multiplayer Session Reliability
 
 - **TASK-14 (client)**: Explicit session states, non-blocking wait when the server is down, bounded `WaitingForServer` timeout, stale snapshot detection while connected, UDP transport error thresholds, snapshot-channel disconnect detection when the UDP thread ends, full teardown (replicated entities + team overlay) on disconnect, manual reconnect via **Retry** (no silent rejoin into a match), pause menu auto-closes on **Disconnected**, minimap hidden unless **Connected**.
