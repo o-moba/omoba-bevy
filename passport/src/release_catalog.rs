@@ -3,6 +3,12 @@
 //! download page shows (`account-api/README.md#downloads`). The game reads it
 //! at boot and after a compatibility mismatch to offer an update.
 //!
+//! Each entry names its build channel (`channel`, [`DIRECT`] when absent),
+//! may carry the oldest release of that channel and platform that may still
+//! play online (`min_release`) and the page the update button opens
+//! (`update_url`). The game only reads entries of its own channel (LR-68
+//! rules in `docs/plans/launch-readiness.md` section 7).
+//!
 //! The catalog arrives over the build's trusted HTTPS endpoint. It is still
 //! checked here: a malformed or oversized document is refused whole, and an
 //! entry with an unreadable version or a link that is not plain HTTPS is
@@ -18,6 +24,13 @@ pub const MAX_RELEASES: usize = 32;
 /// The architecture of a package that installs on every architecture of its
 /// platform (`scripts/release.py` `CATALOG_PLATFORMS`: the Android APK).
 pub const UNIVERSAL: &str = "universal";
+/// The channel of builds installed from the market's own downloads, and of
+/// every entry that names none (`scripts/release.py` `CATALOG_CHANNEL`).
+pub const DIRECT: &str = "direct";
+
+fn direct() -> String {
+    DIRECT.into()
+}
 
 /// One downloadable package (the Account API's Release schema; the fields the
 /// game needs).
@@ -27,6 +40,17 @@ pub struct CatalogRelease {
     pub architecture: String,
     pub version: String,
     pub url: String,
+    /// The build channel this package is for; [`DIRECT`] when absent.
+    #[serde(default = "direct")]
+    pub channel: String,
+    /// The oldest release of this channel and platform that may still play
+    /// online. A game below it must update even when the servers accept it.
+    #[serde(default)]
+    pub min_release: Option<String>,
+    /// The page the update button opens for this channel and platform (a
+    /// download page now, a store page for a store channel).
+    #[serde(default)]
+    pub update_url: Option<String>,
 }
 
 impl CatalogRelease {
@@ -38,11 +62,18 @@ impl CatalogRelease {
                     .bytes()
                     .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b"_-".contains(&b))
         };
+        let version = |label: &str| label.len() <= 64 && ReleaseVersion::parse(label).is_some();
+        // A minimum above the package's own release could never be met.
+        let minimum = self.min_release.as_deref().is_none_or(|minimum| {
+            version(minimum) && ReleaseVersion::parse(minimum) <= self.release_version()
+        });
         name(&self.platform)
             && name(&self.architecture)
-            && self.version.len() <= 64
-            && ReleaseVersion::parse(&self.version).is_some()
+            && name(&self.channel)
+            && version(&self.version)
             && valid_update_url(&self.url)
+            && minimum
+            && self.update_url.as_deref().is_none_or(valid_update_url)
     }
 
     fn release_version(&self) -> Option<ReleaseVersion> {
@@ -72,17 +103,20 @@ pub fn parse(bytes: &[u8]) -> Result<Vec<CatalogRelease>, String> {
         .collect())
 }
 
-/// The newest release for `platform` and `architecture` (a [`UNIVERSAL`]
-/// package matches any architecture).
+/// The newest release of `channel` for `platform` and `architecture` (a
+/// [`UNIVERSAL`] package matches any architecture). Another channel's
+/// entries never count.
 pub fn newest<'a>(
     releases: &'a [CatalogRelease],
+    channel: &str,
     platform: &str,
     architecture: &str,
 ) -> Option<&'a CatalogRelease> {
     releases
         .iter()
         .filter(|release| {
-            release.platform == platform
+            release.channel == channel
+                && release.platform == platform
                 && (release.architecture == architecture || release.architecture == UNIVERSAL)
         })
         .filter(|release| release.release_version().is_some())
@@ -151,16 +185,18 @@ mod tests {
         ]))
         .unwrap();
         assert_eq!(releases.len(), 5);
-        let linux = newest(&releases, "linux", "x86_64").unwrap();
+        let linux = newest(&releases, DIRECT, "linux", "x86_64").unwrap();
         assert_eq!(linux.version, "0.46.0");
         assert_eq!(linux.url, "https://downloads.example/b.tar.gz");
         assert_eq!(
-            newest(&releases, "android", "arm64").unwrap().version,
+            newest(&releases, DIRECT, "android", "arm64")
+                .unwrap()
+                .version,
             "0.46.0"
         );
-        assert!(newest(&releases, "linux", "arm64").is_none());
-        assert!(newest(&releases, "ios", "arm64").is_none());
-        assert!(newest(&[], "linux", "x86_64").is_none());
+        assert!(newest(&releases, DIRECT, "linux", "arm64").is_none());
+        assert!(newest(&releases, DIRECT, "ios", "arm64").is_none());
+        assert!(newest(&[], DIRECT, "linux", "x86_64").is_none());
     }
 
     #[test]
@@ -209,6 +245,55 @@ mod tests {
         assert_eq!(releases[0].url, "https://d.example/ok");
     }
 
+    /// LR-68 rules: entries carry `channel` (absent = direct), `min_release`
+    /// and `update_url`; a game reads only its own channel, and a bad optional
+    /// field skips its entry.
+    #[test]
+    fn entries_carry_channel_minimum_and_update_page() {
+        let with = |fields: serde_json::Value| {
+            let mut entry = entry("linux", "x86_64", "0.46.0", "https://d.example/l");
+            for (key, value) in fields.as_object().unwrap() {
+                entry[key] = value.clone();
+            }
+            entry
+        };
+        let releases = parse(&document(vec![
+            entry("linux", "x86_64", "0.45.0", "https://d.example/old"),
+            with(json!({
+                "channel": "direct",
+                "min_release": "0.46.0-rc.1",
+                "update_url": "https://portal.example/download?platform=linux",
+            })),
+            with(json!({"channel": "rustore", "version": "0.99.0"})),
+            // Skipped: a minimum above its own release, an unreadable
+            // minimum, a plain-HTTP update page, an odd channel name.
+            with(json!({"version": "0.98.0", "min_release": "0.99.0"})),
+            with(json!({"version": "0.98.0", "min_release": "soon"})),
+            with(json!({"version": "0.98.0", "update_url": "http://portal.example/download"})),
+            with(json!({"version": "0.98.0", "channel": "App Store"})),
+            with(json!({"version": "0.98.0", "channel": ""})),
+        ]))
+        .unwrap();
+        assert_eq!(releases.len(), 3);
+        assert_eq!(releases[0].channel, DIRECT);
+        assert_eq!(releases[0].min_release, None);
+        assert_eq!(releases[0].update_url, None);
+        let direct = newest(&releases, DIRECT, "linux", "x86_64").unwrap();
+        assert_eq!(direct.version, "0.46.0");
+        assert_eq!(direct.min_release.as_deref(), Some("0.46.0-rc.1"));
+        assert_eq!(
+            direct.update_url.as_deref(),
+            Some("https://portal.example/download?platform=linux")
+        );
+        assert_eq!(
+            newest(&releases, "rustore", "linux", "x86_64")
+                .unwrap()
+                .version,
+            "0.99.0"
+        );
+        assert!(newest(&releases, "app_store", "linux", "x86_64").is_none());
+    }
+
     /// An honest empty catalog (`{"releases":[]}`) offers nothing; an old or
     /// stale catalog is just older entries, which never read as newer.
     #[test]
@@ -221,7 +306,7 @@ mod tests {
             "https://d.example/old",
         )]))
         .unwrap();
-        let newest = newest(&stale, "linux", "x86_64").unwrap();
+        let newest = newest(&stale, DIRECT, "linux", "x86_64").unwrap();
         assert_eq!(
             shared::compatibility::release_order(&newest.version, env!("CARGO_PKG_VERSION")),
             Some(std::cmp::Ordering::Less)
@@ -261,7 +346,9 @@ mod tests {
             WebAccountApi::new(&serve_once("200 OK", body), "http://127.0.0.1:3010", true).unwrap();
         let releases = api.releases().unwrap();
         assert_eq!(
-            newest(&releases, "linux", "x86_64").unwrap().version,
+            newest(&releases, DIRECT, "linux", "x86_64")
+                .unwrap()
+                .version,
             "0.46.0"
         );
         for (status, body) in [

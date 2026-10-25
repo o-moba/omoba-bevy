@@ -765,11 +765,32 @@ class Markets(unittest.TestCase):
         self.assertEqual(len(catalog["releases"]), 1)
         entry = catalog["releases"][0]
         self.assertEqual(set(entry), {"platform", "architecture", "version", "url", "sha256", "size_bytes",
-                                      "published_at", "instructions", "test_status"})
+                                      "published_at", "instructions", "test_status", "channel", "update_url"})
         self.assertEqual((entry["platform"], entry["size_bytes"]), ("windows", "123"))
         self.assertIn("Omoba.exe", entry["instructions"])
+        # LR-68 rules: the channel and the update page per (channel, platform), on the market's portal.
+        self.assertEqual(entry["channel"], "direct")
+        self.assertEqual(entry["update_url"], f"{release.MARKETS['ru'].portal}/download?platform=windows")
+        self.assertNotIn("update_url", release.release_catalog(receipt, "0.45.0", "global", "t")["releases"][0])
         with self.assertRaises(SystemExit):
             release.release_catalog({"linux": {**receipt["windows"], "url": "http://x/y"}}, "0.45.0", "ru", "t")
+
+    def test_catalog_minimum_release_is_optional_and_never_above_the_release(self):
+        receipt = {"linux": {"file": "Omoba-0.46.0-ru-linux-x64.tar.gz", "bytes": 1, "sha256": "b" * 64,
+                             "cid": "c", "url": "https://ekza.mypinata.cloud/ipfs/c/omoba.tar.gz"}}
+        catalog = release.release_catalog(receipt, "0.46.0", "ru", "t", min_release="0.46.0-rc.1")
+        self.assertEqual(catalog["releases"][0]["min_release"], "0.46.0-rc.1")
+        self.assertEqual(release.release_catalog(receipt, "0.46.0", "ru", "t", "0.46.0")["releases"][0]
+                         ["min_release"], "0.46.0")
+        for bad in ("0.46.1", "0.47.0-rc.1", "latest", "0.46"):
+            with self.assertRaises(SystemExit, msg=bad):
+                release.release_catalog(receipt, "0.46.0", "ru", "t", min_release=bad)
+        key = release.release_order_key
+        self.assertLess(key("0.45.0"), key("0.46.0-rc.1"))
+        self.assertLess(key("0.46.0-rc.1"), key("0.46.0-rc.2"))
+        self.assertLess(key("0.46.0-rc.2"), key("0.46.0-rc.10"))
+        self.assertLess(key("0.46.0-rc.10"), key("0.46.0"))
+        self.assertEqual(key("0.46.0+build.7"), key("0.46.0"))
 
     def test_the_client_reads_the_catalog_platform_names(self):
         """LR-14: the game finds its own package in releases.json by these names."""

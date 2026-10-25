@@ -87,11 +87,21 @@ compiled into both, so a contract change is a **forced update**. An incompatible
 game shows **Update required** with a download button, and a newer compatible
 release shows a dismissible **Update available** banner on Home. The game reads the
 market's release catalog (`GET /v1/releases` of its Account API, the `releases.json`
-installed as `OMOBA_RELEASE_CATALOG`) at boot and after a mismatch. The button opens
-`<portal>/download?platform=<platform>` on the portal compiled into the build
-(`scripts/markets.py`). The iPhone build has no link: it updates through the App Store
-or TestFlight. The lobby's compatibility report carries its release as the minimum and
-the portal's download page (`UpdateNotice`, [release-compatibility.md](release-compatibility.md)).
+installed as `OMOBA_RELEASE_CATALOG`) at boot and after a mismatch. The button opens a
+page on the portal compiled into the build (`scripts/markets.py`): the catalog entry's
+`update_url`, by default `<portal>/download?platform=<platform>`. The iPhone build has no
+link: it updates through the App Store or TestFlight. A build without a portal (the
+global market today) shows no button and tells players to download the new version from
+the official site. The lobby's compatibility report carries its release as the minimum
+and the portal's download page (`UpdateNotice`, [release-compatibility.md](release-compatibility.md)).
+
+**Catalog fields** (`scripts/release.py catalog`, [account-api/README.md](../account-api/README.md#downloads)).
+Every entry carries `channel` (`direct`). The game reads only the entries of its own
+channel; store channels arrive with LR-68. On a market with a portal, each entry also
+carries `update_url`, the page its update button opens. `catalog --min-release X` adds
+`min_release`: games of that channel and platform below X show **Update required** even
+while the servers still accept them. That is a forced update too, so it needs the same
+player notice (step 3 below). `min_release` may not be newer than the release itself.
 
 **What bumps a revision** (`shared/src/compatibility.rs` and the fields in
 [release-compatibility.md](release-compatibility.md)):

@@ -5,17 +5,22 @@
 //! - Source of truth: the market's release catalog, `GET /v1/releases` of the
 //!   Account API this build talks to (`OMOBA_ACCOUNT_API_URL`,
 //!   `omoba_passport::release_catalog`). It is read at boot and again after a
-//!   mismatch. A build without an Account API never asks and never offers an
-//!   update banner; a mismatch still says what to do.
+//!   mismatch, and only the entries of this build's channel count
+//!   ([`release_channel`], `direct` now). A build without an Account API never
+//!   asks and never offers an update banner; a mismatch still says what to do.
 //! - Required or not is the compatibility check's verdict
 //!   (`ClientSession::compatibility_verdict`): the server's release and its
-//!   update notice decide whether this game or the servers are behind.
-//! - The button opens the portal's download page for this platform
-//!   (`shared::compatibility::download_page`, the portal origin the build
-//!   trusts). The server's notice link is used only when it lies on that same
-//!   portal; without a portal, the catalog's package link. It is always a
-//!   download page, never a payment page. iPhone builds get no link: their
-//!   updates come from the App Store or TestFlight.
+//!   update notice decide whether this game or the servers are behind. The
+//!   catalog's `min_release` for this channel and platform also requires the
+//!   update, even while the servers accept the game.
+//! - The button target is chosen per (channel, platform) ([`update_link`]): a
+//!   direct build opens a page on the portal it trusts (the catalog's
+//!   `update_url`, else the server notice's link, else the portal's download
+//!   page, `shared::compatibility::download_page`); without a portal, the
+//!   catalog's package link. It is always a download page, never a payment
+//!   page. A store build (iPhone) opens only its catalog update page, never a
+//!   web download; without one the panel names the App Store or TestFlight.
+//!   A direct build that knows no link names the official site.
 // i18n-strict
 use bevy::prelude::*;
 use omoba_passport::release_catalog::{self, CatalogRelease};
@@ -37,6 +42,35 @@ const CATALOG_PLATFORMS: &[(&str, &str)] = &[
 
 /// A mismatch reads the catalog again at most this often.
 const MISMATCH_REFRESH: Duration = Duration::from_secs(60);
+
+/// This build's release channel: the only place that names it (LR-68 rules,
+/// `docs/plans/launch-readiness.md` section 7). Every build is `direct` until
+/// LR-68 makes the channel a runtime value.
+fn release_channel() -> &'static str {
+    release_catalog::DIRECT
+}
+
+/// A build whose updates come from a store: the iPhone build (App Store,
+/// TestFlight) and, after LR-68, every channel but `direct`.
+fn store_build() -> bool {
+    cfg!(target_os = "ios") || release_channel() != release_catalog::DIRECT
+}
+
+/// The text key of the Update required panel: download from the link; with no
+/// link, the App Store or TestFlight on iPhone, otherwise the official site.
+pub(crate) fn required_body(link: bool) -> &'static str {
+    required_body_for(link, cfg!(target_os = "ios"))
+}
+
+fn required_body_for(link: bool, ios: bool) -> &'static str {
+    if link {
+        "update.required.body"
+    } else if ios {
+        "update.required.body_store"
+    } else {
+        "update.required.body_site"
+    }
+}
 
 /// This game's catalog platform, if it has one.
 fn catalog_platform() -> Option<&'static str> {
@@ -79,23 +113,30 @@ impl UpdateOffer {
     }
 }
 
-/// The update link (see the module docs), `None` on iPhone.
+/// The update link for this build's (channel, platform), see the module docs:
+/// `catalog_page` is the catalog's `update_url` for this channel and platform,
+/// `notice_url` the server notice's link, `package_url` a newer catalog
+/// package.
 fn update_link(
-    ios: bool,
+    store: bool,
     portal: Option<&str>,
     platform: Option<&str>,
+    catalog_page: Option<&str>,
     notice_url: Option<&str>,
     package_url: Option<&str>,
 ) -> Option<String> {
-    if ios {
-        return None;
+    if store {
+        return catalog_page.map(str::to_owned);
     }
     let Some(portal) = portal else {
-        return package_url.map(str::to_owned);
+        return catalog_page.or(package_url).map(str::to_owned);
     };
     let prefix = format!("{}/", portal.trim_end_matches('/'));
-    match notice_url
-        .filter(|url| url.starts_with(&prefix) && shared::compatibility::valid_update_url(url))
+    let on_portal =
+        |url: &&str| url.starts_with(&prefix) && shared::compatibility::valid_update_url(url);
+    match catalog_page
+        .filter(on_portal)
+        .or(notice_url.filter(on_portal))
     {
         Some(url) if url.contains('?') => Some(url.to_owned()),
         Some(url) => Some(match platform {
@@ -114,7 +155,8 @@ pub(crate) struct ClientUpdate {
     /// The portal origin this build trusts (its download page); `None` when
     /// the build has no Account API, and then the catalog is never read.
     portal: Option<String>,
-    /// The newest catalog release for this platform, once read.
+    /// The newest catalog release of this channel for this platform, once
+    /// read.
     newest: Option<CatalogRelease>,
     pending: Option<Mutex<mpsc::Receiver<CatalogResult>>>,
     last_request: Option<Instant>,
@@ -151,11 +193,23 @@ impl ClientUpdate {
             shared::compatibility::release_order(&release.version, current)
                 == Some(Ordering::Greater)
         });
+        // The catalog's minimum for this channel and platform (it never
+        // exceeds its entry's release, so a newer release exists).
+        let below_minimum = self
+            .newest
+            .as_ref()
+            .and_then(|release| release.min_release.as_deref())
+            .is_some_and(|minimum| {
+                shared::compatibility::release_order(current, minimum) == Some(Ordering::Less)
+            });
         let link = || {
             update_link(
-                cfg!(target_os = "ios"),
+                store_build(),
                 self.portal.as_deref(),
                 catalog_platform(),
+                self.newest
+                    .as_ref()
+                    .and_then(|release| release.update_url.as_deref()),
                 session
                     .server_update
                     .as_ref()
@@ -163,7 +217,9 @@ impl ClientUpdate {
                 newer.map(|release| release.url.as_str()),
             )
         };
-        if session.compatibility_verdict() == Some(CompatibilityVerdict::UpdateRequired) {
+        if below_minimum
+            || session.compatibility_verdict() == Some(CompatibilityVerdict::UpdateRequired)
+        {
             return Some(UpdateOffer::Required {
                 latest: newer.map(|release| release.version.clone()),
                 link: link(),
@@ -228,7 +284,13 @@ impl ClientUpdate {
         match result {
             Ok(releases) => {
                 self.newest = catalog_platform().and_then(|platform| {
-                    release_catalog::newest(&releases, platform, catalog_architecture()).cloned()
+                    release_catalog::newest(
+                        &releases,
+                        release_channel(),
+                        platform,
+                        catalog_architecture(),
+                    )
+                    .cloned()
                 });
                 info!(
                     "Release catalog: {} releases, newest for this platform {:?}",
@@ -248,6 +310,9 @@ impl ClientUpdate {
             architecture: release_catalog::UNIVERSAL.into(),
             version: version.into(),
             url: format!("https://downloads.example/omoba-{version}"),
+            channel: release_catalog::DIRECT.into(),
+            min_release: None,
+            update_url: None,
         });
     }
 
@@ -315,6 +380,9 @@ mod tests {
             architecture: release_catalog::UNIVERSAL.into(),
             version: version.into(),
             url: format!("https://downloads.example/omoba-{version}"),
+            channel: release_catalog::DIRECT.into(),
+            min_release: None,
+            update_url: None,
         }
     }
 
@@ -339,6 +407,7 @@ mod tests {
                 false,
                 Some(PORTAL),
                 Some("android"),
+                None,
                 notice,
                 Some("https://d.example/a"),
             )
@@ -359,23 +428,137 @@ mod tests {
         ] {
             assert_eq!(page(Some(foreign)), download, "{foreign}");
         }
-        // No portal: the catalog package; iPhone: nothing (App Store, TestFlight).
+        // No portal: the catalog package; a store build without a catalog
+        // update page (iPhone): nothing (App Store, TestFlight).
         assert_eq!(
             update_link(
                 false,
                 None,
                 Some("linux"),
                 None,
+                None,
                 Some("https://d.example/a")
             ),
             Some("https://d.example/a".to_owned())
         );
-        assert_eq!(update_link(false, None, None, None, None), None);
-        assert_eq!(update_link(true, Some(PORTAL), None, None, None), None);
+        assert_eq!(update_link(false, None, None, None, None, None), None);
         assert_eq!(
-            update_link(false, Some(PORTAL), None, None, None),
+            update_link(true, Some(PORTAL), None, None, None, None),
+            None
+        );
+        assert_eq!(
+            update_link(false, Some(PORTAL), None, None, None, None),
             Some(format!("{PORTAL}/download"))
         );
+    }
+
+    /// LR-68 rules: the target is chosen per (channel, platform). A direct
+    /// build takes the catalog's update page when it lies on its portal; a
+    /// store build takes only the catalog's page and never a web download.
+    #[test]
+    fn the_catalog_update_page_is_chosen_per_channel() {
+        let ru_page = format!("{PORTAL}/download/ru");
+        let direct = |catalog: &str| {
+            update_link(
+                false,
+                Some(PORTAL),
+                Some("linux"),
+                Some(catalog),
+                Some(&format!("{PORTAL}/download")),
+                Some("https://d.example/a"),
+            )
+        };
+        assert_eq!(direct(&ru_page), Some(format!("{ru_page}?platform=linux")));
+        assert_eq!(
+            direct(&format!("{ru_page}?platform=windows")),
+            Some(format!("{ru_page}?platform=windows"))
+        );
+        assert_eq!(
+            direct("https://store.example/omoba"),
+            Some(format!("{PORTAL}/download?platform=linux")),
+            "a direct build stays on its own portal"
+        );
+        let store = |catalog: Option<&str>| {
+            update_link(
+                true,
+                Some(PORTAL),
+                Some("linux"),
+                catalog,
+                Some(&format!("{PORTAL}/download")),
+                Some("https://d.example/a"),
+            )
+        };
+        assert_eq!(
+            store(Some("https://store.example/omoba")),
+            Some("https://store.example/omoba".to_owned())
+        );
+        assert_eq!(store(None), None, "no web download in a store build");
+        assert_eq!(release_channel(), release_catalog::DIRECT);
+        assert_eq!(store_build(), cfg!(target_os = "ios"));
+    }
+
+    /// Without a link the panel names the store only on iPhone; any other
+    /// build (the global market has no Account API or portal) names the
+    /// official site.
+    #[test]
+    fn the_required_text_names_the_store_only_on_iphone() {
+        assert_eq!(required_body_for(true, false), "update.required.body");
+        assert_eq!(required_body_for(true, true), "update.required.body");
+        assert_eq!(required_body_for(false, true), "update.required.body_store");
+        assert_eq!(required_body_for(false, false), "update.required.body_site");
+        let update = ClientUpdate::for_test(None, || Ok(vec![]));
+        let Some(UpdateOffer::Required { link, .. }) = update.offer(&mismatch("999.0.0", None))
+        else {
+            panic!("an older game must update")
+        };
+        assert_eq!(link, None);
+        assert_eq!(
+            required_body(link.is_some()),
+            if cfg!(target_os = "ios") {
+                "update.required.body_store"
+            } else {
+                "update.required.body_site"
+            }
+        );
+    }
+
+    /// The catalog's `min_release` requires the update while the servers
+    /// still accept this game; its `update_url` is the button target.
+    #[test]
+    fn the_catalog_minimum_requires_the_update_without_a_mismatch() {
+        let mut update = ClientUpdate::for_test(Some(PORTAL), || Ok(vec![]));
+        let session = ClientSession::default();
+        let mut newest = release("999.0.0");
+        newest.update_url = Some(format!("{PORTAL}/download/ru"));
+        update.newest = Some(newest.clone());
+        assert!(matches!(
+            update.offer(&session),
+            Some(UpdateOffer::Available { .. })
+        ));
+        newest.min_release = Some(env!("CARGO_PKG_VERSION").into());
+        update.newest = Some(newest.clone());
+        assert!(
+            matches!(update.offer(&session), Some(UpdateOffer::Available { .. })),
+            "this game meets the minimum"
+        );
+        newest.min_release = Some("999.0.0".into());
+        update.newest = Some(newest);
+        let Some(UpdateOffer::Required { latest, link }) = update.offer(&session) else {
+            panic!("a game below the catalog minimum must update")
+        };
+        assert_eq!(latest.as_deref(), Some("999.0.0"));
+        let page = format!("{PORTAL}/download/ru");
+        let expected = match catalog_platform() {
+            Some(platform) if !store_build() => format!("{page}?platform={platform}"),
+            _ => page,
+        };
+        assert_eq!(link, Some(expected));
+        // "Later" cannot put it off.
+        update.dismiss();
+        assert!(matches!(
+            update.offer(&session),
+            Some(UpdateOffer::Required { .. })
+        ));
     }
 
     #[test]
@@ -453,7 +636,12 @@ mod tests {
         }
         let mut app = App::new();
         app.insert_resource(ClientUpdate::for_test(Some(PORTAL), || {
-            Ok(vec![release("999.0.0")])
+            // Another channel's newer package never counts for this build.
+            let store = CatalogRelease {
+                channel: "app_store".into(),
+                ..release("999.9.0")
+            };
+            Ok(vec![release("999.0.0"), store])
         }))
         .init_resource::<ClientSession>()
         .add_systems(Startup, read_catalog_at_boot)

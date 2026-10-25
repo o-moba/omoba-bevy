@@ -800,9 +800,12 @@ fn spawn_home(
                     if download { "HomeUpdate" } else { "HomePlay" }.into(),
                     (),
                 );
+                // No online play while an update is required, even when the
+                // servers still accept this game (the catalog's minimum).
                 if !can_resume
                     && !download
-                    && !matches!(session.state(), ClientConnectionState::Connected)
+                    && (required.is_some()
+                        || !matches!(session.state(), ClientConnectionState::Connected))
                 {
                     column.commands().entity(play).insert(Pressable {
                         disabled: true,
@@ -1437,7 +1440,8 @@ fn spawn_update_banner(
 }
 
 /// "Update required" under the update button: what happened and, when there
-/// is no download link (iPhone), where the update comes from.
+/// is no download link, where the update comes from (the App Store or
+/// TestFlight on iPhone, otherwise the official site).
 fn spawn_update_required(
     column: &mut ChildSpawnerCommands,
     latest: Option<&str>,
@@ -1446,14 +1450,7 @@ fn spawn_update_required(
     unit: f32,
 ) {
     let version = env!("CARGO_PKG_VERSION");
-    let mut body = trf(
-        if link {
-            "update.required.body"
-        } else {
-            "update.required.body_store"
-        },
-        &[("version", &version)],
-    );
+    let mut body = trf(crate::update::required_body(link), &[("version", &version)]);
     if let Some(latest) = latest {
         body.push('\n');
         body.push_str(&trf("update.required.latest", &[("version", &latest)]));
@@ -2261,6 +2258,56 @@ mod tests {
                 target_os = "android"
             ))
         );
+    }
+
+    /// A build without an Account API or portal (the global market) knows no
+    /// update link. On a mismatch it still shows the panel, with Play off,
+    /// and sends the player to the official site; only iPhone names the App
+    /// Store or TestFlight.
+    #[test]
+    fn an_outdated_game_without_a_portal_names_the_official_site() {
+        use crate::ui::test_id::harness;
+        use shared::compatibility::{CompatibilityIssue, ReleaseContract, UpdateNotice};
+        let mut session = ClientSession::default();
+        session.set_state_for_test(ClientConnectionState::Disconnected);
+        session.compatibility_issue = Some(CompatibilityIssue::Protocol);
+        session.server_contract = Some(ReleaseContract {
+            release: "999.0.0".into(),
+            ..ReleaseContract::current()
+        });
+        session.server_update = Some(UpdateNotice {
+            min_release: "999.0.0".into(),
+            url: None,
+        });
+        let update = crate::update::ClientUpdate::for_test(None, || Ok(vec![]));
+        let mut app = update_home(update, session);
+        app.update();
+        app.update();
+        assert!(harness::find(app.world_mut(), "HomeUpdate").is_none());
+        let play = harness::find(app.world_mut(), "HomePlay").unwrap();
+        assert!(
+            app.world()
+                .get::<Pressable>(play)
+                .is_some_and(|pressable| pressable.disabled)
+        );
+        assert_eq!(
+            named_text(&mut app, "HomeUpdateRequiredTitle").as_deref(),
+            Some("Update required")
+        );
+        let body = named_text(&mut app, "HomeUpdateRequiredBody").unwrap();
+        let version = env!("CARGO_PKG_VERSION");
+        let store = format!(
+            "Version {version} can no longer play online. Update the game in the App Store or TestFlight."
+        );
+        let site = format!(
+            "Version {version} can no longer play online. Download the new version from the official site."
+        );
+        if cfg!(target_os = "ios") {
+            assert_eq!(body, store);
+        } else {
+            assert_eq!(body, site);
+            assert!(!body.contains("App Store"), "{body}");
+        }
     }
 
     /// A game newer than the servers is told they are updating, with no

@@ -1405,6 +1405,12 @@ def command_preflight(args) -> int:
 
 CATALOG_PLATFORMS = {"macos": ("macos", "arm64"), "windows": ("windows", "x86_64"),
                      "linux": ("linux", "x86_64"), "android": ("android", "universal")}
+# The build channel of every package published here: installed from the market's own
+# downloads. Store channels come with LR-68; the game reads only its own channel's
+# entries (passport/src/release_catalog.rs DIRECT).
+CATALOG_CHANNEL = "direct"
+RELEASE_LABEL = re.compile(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)"
+                           r"(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?")
 CATALOG_INSTRUCTIONS = {
     "ru": {"macos": "Распакуйте архив и перенесите Omoba.app в «Программы». Первый запуск: правый клик → Открыть.",
            "windows": "Распакуйте архив целиком и запустите Omoba.exe. SmartScreen: «Подробнее» → «Выполнить в любом случае».",
@@ -1417,9 +1423,37 @@ DEFAULT_INSTRUCTIONS = {"macos": "Unzip and move Omoba.app to Applications; firs
                         "android": "Allow installs from your browser or file manager, then open the APK."}
 
 
-def release_catalog(receipt: dict, version: str, market: str, published_at: str) -> dict:
+def release_order_key(label: str) -> tuple:
+    """SemVer precedence of a release label, as the game reads it
+    (shared::compatibility::ReleaseVersion): 0.45.0 < 0.46.0-rc.1 < 0.46.0; `+build` ignored."""
+    match = RELEASE_LABEL.fullmatch(label.split("+", 1)[0])
+    if not match:
+        raise ValueError(f"not a release label: {label!r}")
+    core = tuple(int(part) for part in match.group(1, 2, 3))
+    if match.group(4) is None:
+        return core, (1,)
+    return core, (0, *((0, int(part), "") if part.isdigit() else (1, 0, part)
+                       for part in match.group(4).split(".")))
+
+
+def release_catalog(receipt: dict, version: str, market: str, published_at: str,
+                    min_release: str | None = None) -> dict:
     """The Account API download catalog (OMOBA_RELEASE_CATALOG, account-api/README.md#downloads)
-    from `publish` receipts: only packages whose gateway bytes were verified."""
+    from `publish` receipts: only packages whose gateway bytes were verified.
+
+    Every entry carries its build channel (`direct`) and, when the market has a portal, the
+    portal's download page for its platform as `update_url` (the game's update button).
+    `min_release` (optional) is the oldest release that may still play online: a game below it
+    shows Update required even while the servers accept it, so it needs the same player notice
+    as a server switch (docs/RELEASING.md)."""
+    if min_release is not None:
+        try:
+            too_new = release_order_key(min_release) > release_order_key(version)
+        except ValueError as error:
+            raise SystemExit(f"--min-release: {error}") from None
+        if too_new:
+            raise SystemExit(f"--min-release {min_release} is newer than this release {version}")
+    portal = market_presets.market(market).portal
     instructions = CATALOG_INSTRUCTIONS.get(market, DEFAULT_INSTRUCTIONS)
     releases = []
     for target, (platform_name, architecture) in CATALOG_PLATFORMS.items():
@@ -1428,10 +1462,15 @@ def release_catalog(receipt: dict, version: str, market: str, published_at: str)
             continue
         if not str(entry["url"]).startswith("https://") or not re.fullmatch(r"[0-9a-f]{64}", entry["sha256"]):
             raise SystemExit(f"{target}: receipt is not a verified https download")
-        releases.append({"platform": platform_name, "architecture": architecture, "version": version,
-                         "url": entry["url"], "sha256": entry["sha256"], "size_bytes": str(entry["bytes"]),
-                         "published_at": published_at, "instructions": instructions[target],
-                         "test_status": "playtest"})
+        release = {"platform": platform_name, "architecture": architecture, "version": version,
+                   "url": entry["url"], "sha256": entry["sha256"], "size_bytes": str(entry["bytes"]),
+                   "published_at": published_at, "instructions": instructions[target],
+                   "test_status": "playtest", "channel": CATALOG_CHANNEL}
+        if portal:
+            release["update_url"] = f"{portal}/download?platform={platform_name}"
+        if min_release is not None:
+            release["min_release"] = min_release
+        releases.append(release)
     return {"releases": releases}
 
 
@@ -1442,7 +1481,8 @@ def command_catalog(args) -> int:
     if not receipt_path.is_file():
         raise SystemExit(f"{receipt_path} is missing: run `publish --market {args.market}` first")
     published = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(receipt_path.stat().st_mtime))
-    catalog = release_catalog(json.loads(receipt_path.read_text()), version, args.market, published)
+    catalog = release_catalog(json.loads(receipt_path.read_text()), version, args.market, published,
+                              args.min_release)
     target = out / "releases.json"
     target.write_text(json.dumps(catalog, indent=2, ensure_ascii=False) + "\n")
     print(f"{target}: {len(catalog['releases'])} downloads; install it as the market Account API's "
@@ -1553,6 +1593,8 @@ def main(argv=None) -> int:
     catalog = sub.add_parser("catalog", help="write the Account API download catalog from publish receipts")
     catalog.add_argument("--market", choices=tuple(MARKETS), default="ru")
     catalog.add_argument("--out", type=Path)
+    catalog.add_argument("--min-release", help="oldest release that may still play online: older games "
+                                               "show Update required (needs a player notice, RELEASING.md)")
     build = sub.add_parser("build", help="build platform packages into dist/v<version>/")
     build.add_argument("platform", choices=PLATFORMS + ("all",))
     build.add_argument("--server", help="initial game server host:port compiled into clients")

@@ -185,6 +185,9 @@ Downloads on the portal: `make release-ru-publish` also writes
 For a release that changes the compatibility contract, install the new catalog and
 post the player notice **before** shipping the server
 ([RELEASING.md](../../../docs/RELEASING.md#updates-and-contract-changes-lr-14)).
+`release.py catalog --market ru --min-release X` writes a catalog that requires the
+update from games older than X even without a server switch (also a forced update:
+notice first).
 
 ## Rollback
 
