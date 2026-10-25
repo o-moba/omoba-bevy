@@ -18,7 +18,8 @@
 //!   deaths per minute; health retreats with the health at their start;
 //!   outnumbered and threat retreats; threat-response answers; tower shots
 //!   taken and tower-dive incidents; time fighting a hero, and how much of it
-//!   outnumbered.
+//!   outnumbered; route plans, and the plans that found no route. Each level
+//!   must stay within `ROUTE_BUDGET` plans per bot-minute (LR-10).
 //! - **Statistics.** Win rates are over decisive rounds, with 95% Wilson
 //!   intervals. Adjacent levels are compared with a one-sided two-proportion
 //!   z-test.
@@ -69,6 +70,8 @@ const DIVE_GAP: Duration = Duration::from_secs(3);
 const Z95: f64 = 1.959_964;
 /// A structure lead below this (in structures) at the cap is a draw.
 const DRAW_MARGIN: f64 = 0.05;
+/// Route plans per bot-minute any level may spend (LR-10).
+const ROUTE_BUDGET: f64 = 80.0;
 
 fn side_of(team: Team) -> usize {
     match team {
@@ -149,8 +152,9 @@ struct Side {
     threat_unreachable: u32,
     tower_hits: u32,
     dives: u32,
-    /// Routes planned.
+    /// Routes planned, and the plans among them that found no route.
     routes: u32,
+    route_failures: u32,
     hero_fight_secs: f64,
     outnumbered_fight_secs: f64,
     structures_destroyed: u32,
@@ -178,6 +182,7 @@ impl Side {
         self.tower_hits += other.tower_hits;
         self.dives += other.dives;
         self.routes += other.routes;
+        self.route_failures += other.route_failures;
         self.hero_fight_secs += other.hero_fight_secs;
         self.outnumbered_fight_secs += other.outnumbered_fight_secs;
         self.structures_destroyed += other.structures_destroyed;
@@ -266,7 +271,11 @@ fn play(
                     GateCause::Outnumbered => sides[side_by_addr[&bot]].outnumbered_retreats += 1,
                     GateCause::Threat => sides[side_by_addr[&bot]].threat_retreats += 1,
                 },
-                Event::Route { bot } => sides[side_by_addr[&bot]].routes += 1,
+                Event::Route { bot, found } => {
+                    let side = &mut sides[side_by_addr[&bot]];
+                    side.routes += 1;
+                    side.route_failures += u32::from(!found);
+                }
                 Event::ThreatAnswer { bot, answer } => {
                     let side = &mut sides[side_by_addr[&bot]];
                     match answer {
@@ -761,7 +770,7 @@ fn retreat_json(side: &Side) -> String {
 
 fn side_json(side: &Side) -> String {
     format!(
-        "{{\"kills_per_bot_min\":{},\"deaths_per_bot_min\":{},\"health_retreat_hp\":{},\"outnumbered_retreats_per_bot_min\":{},\"threat_retreats_per_bot_min\":{},\"threat_retaliations_per_bot_min\":{},\"threat_retreat_causes\":{{\"out_of_range\":{},\"refused\":{},\"refused_by_trade\":{},\"refused_by_outnumbered\":{},\"unreachable\":{}}},\"tower_hits_per_bot_min\":{},\"dives_per_bot_min\":{},\"routes_per_bot_min\":{},\"hero_fight_share\":{},\"outnumbered_fight_share\":{},\"structures_per_round\":{},\"structure_score_per_round\":{}}}",
+        "{{\"kills_per_bot_min\":{},\"deaths_per_bot_min\":{},\"health_retreat_hp\":{},\"outnumbered_retreats_per_bot_min\":{},\"threat_retreats_per_bot_min\":{},\"threat_retaliations_per_bot_min\":{},\"threat_retreat_causes\":{{\"out_of_range\":{},\"refused\":{},\"refused_by_trade\":{},\"refused_by_outnumbered\":{},\"unreachable\":{}}},\"tower_hits_per_bot_min\":{},\"dives_per_bot_min\":{},\"routes_per_bot_min\":{},\"route_failures_per_bot_min\":{},\"hero_fight_share\":{},\"outnumbered_fight_share\":{},\"structures_per_round\":{},\"structure_score_per_round\":{}}}",
         json_f(side.rate(f64::from(side.kills))),
         json_f(side.rate(f64::from(side.deaths))),
         retreat_json(side),
@@ -776,6 +785,7 @@ fn side_json(side: &Side) -> String {
         json_f(side.rate(f64::from(side.tower_hits))),
         json_f(side.rate(f64::from(side.dives))),
         json_f(side.rate(f64::from(side.routes))),
+        json_f(side.rate(f64::from(side.route_failures))),
         json_f(if side.seat_secs > 0.0 {
             side.hero_fight_secs / side.seat_secs
         } else {
@@ -983,6 +993,23 @@ fn checks(pairings: &[Pairing], tallies: &[Tally], profiles: &Profiles) -> Vec<C
                 hp.len(),
                 hp[hp.len() - 1],
                 line - 0.10
+            ),
+        });
+    }
+    // The route-planning CPU budget (docs/plans/launch-readiness.md, LR-10).
+    for level in ladder {
+        let side = level_side(pairings, tallies, level);
+        if side.seat_secs <= 0.0 {
+            continue;
+        }
+        let rate = side.rate(f64::from(side.routes));
+        checks.push(Check {
+            gating: true,
+            name: format!("routes_within_budget_{}", level.name()),
+            passed: rate <= ROUTE_BUDGET,
+            detail: format!(
+                "{rate:.1} plans per bot-minute <= {ROUTE_BUDGET}, {:.2} found no route",
+                side.rate(f64::from(side.route_failures))
             ),
         });
     }

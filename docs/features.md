@@ -611,6 +611,14 @@ Master, music, effects and UI volume are separately saved in client preferences.
 The scrolling settings menu supports mouse and touch. Stable cue IDs map to local
 Ogg assets in a versioned manifest. See [audio controls and authoring](game-audio.md).
 
+## Bot route-planning budget (LR-10, unreleased)
+
+- A bot plans a route at most once per `ROUTE_INTERVAL` (800 ms), whatever emptied its route: a new target, a retreat, a dash, a failed plan or a walked route. At its destination it plans nothing. Until the next plan it walks a clear straight line to the destination; the turret clip still stops it at an uncovered tower's range. Behind terrain or a structure, or after a failed plan, it holds still.
+- Route search reuses per-thread buffers: the static grid plus a bounding-box overlay of live structure discs, with stamped costs and visits instead of fresh full-grid vectors. A warm plan allocates only the route it returns; obstacle queries reuse a per-thread index list.
+- Measured in the difficulty simulator: 10–13 plans per bot-minute at every level, down from 199–254. The ladder and every gating check hold. The simulator now reports plans that found no route and gates each level at 80 plans per bot-minute.
+- Projectiles step in creation order, so two shots blocked by one wall in the same tick no longer depend on `HashMap` order.
+- Code: `common/src/bots.rs`, `shared/src/navigation/search.rs`, `shared/src/navigation/mod.rs`, `common/src/sim/projectiles.rs`. See [the session note](progress/2026-10-24-lr-10.md).
+
 ## Native bot practice and match communication
 
 A standalone practice server admits a solo player immediately and fills remaining
