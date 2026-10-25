@@ -28,7 +28,12 @@ fn example() -> ResolvedMap {
 fn runtime(config: ResolvedMap) -> ServerRuntime {
     let socket = UdpSocket::bind("127.0.0.1:0").unwrap();
     socket.set_nonblocking(true).unwrap();
-    ServerRuntime::new_with_map(socket, MatchConfig::dev(), config)
+    ServerRuntime::new_with_map(
+        socket,
+        MatchConfig::dev(),
+        config,
+        crate::admission::Limits::default(),
+    )
 }
 fn mid_only() -> HashMap<u64, Structure> {
     let mut definition = example_definition();

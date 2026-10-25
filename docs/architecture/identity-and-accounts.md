@@ -95,9 +95,12 @@ The client runs one handshake for each *scope* `(server address, server epoch, c
 4. **Server logs the key in.** The server checks that the challenge is the one it issued and still fresh, verifies the signature with `verify_strict`, and queues `Job::Login`. `CareerStore::authenticate(public_key, nickname)` then takes a transaction advisory lock on the key:
    - **Known key:** returns the profile and keeps the saved nickname. A revoked key is refused with *"This device key was revoked…"*.
    - **Unknown key:** inserts a new `career_profiles` row and a matching `career_keys` row. The `profile_id` is two random UUIDs without dashes (64 hex characters) and is *not* derived from the key. The key row has no label, so it gets the column default `Original device`.
+   - **New-profile limits (LR-16).** A game server signs in through `authenticate_from`: an unknown key gets a profile only while its source IP (IPv4 address, IPv6 /64) created fewer than 10 profiles in the last 24 hours and everyone fewer than 5000 (`OMOBA_LIMIT_NEW_PROFILES_*`). The refusal creates nothing; the view carries `error_code` `new_profile_limit` or `new_profiles_paused`, which the client shows localized and stops retrying on. Known keys always sign in. The count lives in PostgreSQL (`career_profile_admissions`, a salted hash of the source, 48 h).
 5. **Client is authenticated.** The reply carries `auth_nonce = challenge.nonce` and the profile. The client treats itself as authenticated once both are present. It retries every 2 s and gives up after 25 s (`RETRY`, `AUTH_TIMEOUT`).
 
-Server state is kept per UDP source address: at most 512 clients, one request per 100 ms, and removal after 120 s idle. A server without career storage serves unranked guest matches.
+Server state is kept per UDP source address: at most 512 clients and 8 per source IP (an idle client of a full IP gives way after 30 s), one request per 100 ms, and removal after 120 s idle. A server without career storage serves unranked guest matches.
+
+**Retention (LR-16).** The lobby deletes profiles that never played and that nothing else holds once their only key is older than 30 days (`OMOBA_PROFILE_RETENTION_DAYS`; `career_prune_unplayed_profiles`, [data.md › Retention](data.md#retention-and-cleanup)). The key goes with the profile, so that device signs in to a fresh profile. A profile with a match, XP, a friend, another or a revoked key, or any portal row (sign-in link, session, recovery, Supporter grant) is kept.
 
 ## Signed account requests and gameplay commands
 
@@ -278,7 +281,7 @@ Sources:
 The pieces:
 
 - **Gating.**
-  - **Game.** Only `vk_sign_in` builds show the button (`vk_button_visible`).
+  - **Game.** Only `vk_sign_in` builds show the button (`vk_button_visible`). The career actions and their Account API polls (VK sign-in, device links, website pairing) run only after the player accepted the market's legal documents on the first-launch card (`legal::bound_and_accepted`, LR-06).
   - **Account API.** `SocialConfig::from_env` enables VK only when both `OMOBA_VKID_CLIENT_ID` (numeric) and `OMOBA_SOCIAL_SECRET` (64 lowercase hex) are set. With neither set, the routes answer 404 `not_found`. With exactly one set, startup fails (`invalid_social_configuration`, from `App::connect`). Startup also fails when they are set in a build without `vk_sign_in`.
   - **Portal.** `/api/auth/vk/start` and `/api/auth/vk/callback` need both the `vkSignIn` feature and `OMOBA_VKID_CLIENT_ID` (`vkContext` → `vkSignInClientId`). The BFF catch-all forwards `auth/social/*` and `me/social/*` based on the `vkSignIn` feature alone (`allowedPath`).
 - **OAuth.** VK ID is a public client using OAuth 2.1 with PKCE S256 and scope `vkid.personal_info`.

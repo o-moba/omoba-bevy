@@ -193,6 +193,9 @@ pub(crate) struct CareerIdentity {
     saved_nickname: String,
     failed_nickname: Option<String>,
     pending_rename: Option<(String, u64, String)>,
+    /// The server refused a new profile for this key (LR-16): stop re-sending
+    /// the sign-in on this connection; a reconnect tries again.
+    refused: bool,
 }
 
 /// An in-process signing capability scoped to one authenticated server session.
@@ -414,6 +417,7 @@ impl CareerIdentity {
     }
 
     fn invalidate(&mut self) {
+        self.refused = false;
         self.scope = None;
         self.signed_challenge = None;
         self.challenge_requested = false;
@@ -674,6 +678,19 @@ fn identity_driver(
                 }
             }
         }
+        return;
+    }
+    if identity.authenticate_sent
+        && career
+            .view
+            .error_code
+            .as_deref()
+            .is_some_and(crate::career::refuses_sign_in)
+    {
+        identity.refused = true;
+        identity.next_retry = None;
+    }
+    if identity.refused {
         return;
     }
     let now = Instant::now();
