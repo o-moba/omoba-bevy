@@ -15,7 +15,11 @@ and forwards each player's address, so sign-in limits stay per player;
 sets a fresh Ubuntu host up in Russia (PostgreSQL with ICU, Caddy, firewall, key-only
 SSH, secrets made on the host), ships the lobby, Account API and portal with rollback,
 checks the whole host and proves a reboot needs no manual step; every service there
-restarts on its own. Each release runs the
+restarts on its own. `ops/vps/ru/ru_backup.py` backs the host up every night and before
+every migration: the database and the match archive, encrypted and signed, go to storage
+in Russia (14 daily and 8 weekly kept). A monthly drill restores the newest set into a
+scratch database and checks it. The secrets are escrowed offline, and a missed backup
+raises an alert. Each release runs the
 [RU release checklist](../ops/vps/ru/release-checklist.md). See [markets](markets.md).
 
 ## Temporary community sculptures

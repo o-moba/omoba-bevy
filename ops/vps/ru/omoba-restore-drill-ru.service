@@ -1,0 +1,29 @@
+# Monthly restore drill of the RU host (LR-03): the newest off-host backup set is
+# downloaded, decrypted with the backup secret key, restored into the scratch database
+# omoba_ru_restore_drill and compared with its manifest (tables, row counts, a digest of
+# every table's rows, both schema version lists, the match and outbox archive); the
+# scratch database is dropped afterwards. A failure alerts like a failed backup.
+# Installed by ops/vps/ru/ru_host.py bootstrap (README.md, "Backups, escrow and restore drill").
+[Unit]
+Description=OMOBA RU monthly restore drill
+After=network-online.target postgresql.service
+Wants=network-online.target postgresql.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /opt/omoba-ru/backup/ru_backup.py drill
+TimeoutStartSec=6h
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ReadWritePaths=/var/backups/omoba-ru
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+MemoryMax=1G

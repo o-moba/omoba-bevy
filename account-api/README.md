@@ -149,7 +149,10 @@ Back up the full database (core + portal) with `pg_dump -Fc`; also retain config
 and the portal secret securely, separately from the dump. Restore to a **new isolated
 database**, apply grants for existing runtime roles, verify both schema versions,
 row counts and immutable receipt checksums, then start the services against it.
-Never restore over the running production database as a test.
+Never restore over the running production database as a test. On the RU host
+`ops/vps/ru/ru_backup.py` does all of this on a schedule: nightly and pre-migration
+sets off-host, a monthly restore drill and the secrets escrow
+([ops/vps/ru/README.md](../ops/vps/ru/README.md#backups-escrow-and-restore-drill)).
 
 Rollback of the application does not require destructive SQL. Stop the portal and
 use a game binary compatible with career v3. Pre-v3 binaries fail schema checks;

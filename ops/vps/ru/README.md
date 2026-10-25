@@ -10,11 +10,14 @@ Only binaries from the RU Linux package (`python3 scripts/release.py build linux
 --market ru`, `omoba-<version>-ru-linux-x64.tar.gz`) may run here: they are built
 with `OMOBA_MARKET=ru` (no Ekza, no payments, VK ID sign-in).
 
-> **Status (LR-01).** Everything up to the host is ready: [ru_host.py](ru_host.py)
+> **Status (LR-01, LR-03).** Everything up to the host is ready: [ru_host.py](ru_host.py)
 > sets up a fresh Ubuntu host, ships the server package and the portal, checks the
-> whole host and runs the reboot test. Still open before a public launch: automated
-> off-host backups (LR-03), monitoring and alerts (LR-17) and the capacity
-> measurement (LR-09). The owner buys the VPS, sets DNS and creates the VK ID app.
+> whole host and runs the reboot test; [ru_backup.py](ru_backup.py) backs it up every
+> night, encrypted and off-host, before every migration, and drills a restore every
+> month ([Backups](#backups-escrow-and-restore-drill)). Still open before a public launch:
+> monitoring and alerts beyond the backups (LR-17) and the capacity measurement (LR-09).
+> The owner buys the VPS, sets DNS, creates the VK ID app, provides the backup storage
+> in Russia, makes the backup key and names the escrow holder.
 > See [the launch-readiness plan](../../../docs/plans/launch-readiness.md) and the
 > [RU release checklist](release-checklist.md).
 
@@ -53,6 +56,7 @@ Everything below runs on this one host; only Caddy listens publicly for HTTP.
 | Portal, user `omoba-portal-ru`, `127.0.0.1:3010` | `/opt/omoba-ru/portal/current/server.js` on `/opt/omoba-ru/node/current/bin/node` | [omoba-portal-ru.service](omoba-portal-ru.service) |
 | Caddy, TCP 443 | `/etc/caddy/Caddyfile` = [Caddyfile.ru](Caddyfile.ru) | `caddy.service` |
 | Env files (root, 0600) | `/opt/omoba-ru/{lobby,account-api,portal}.env` from the `*.env.example` files here | read by systemd |
+| Backups (LR-03), root | [ru_backup.py](ru_backup.py) as `/opt/omoba-ru/backup/ru_backup.py`; settings `/opt/omoba-ru/backup.env` (root 0600, from [backup.env.example](backup.env.example)), keys in `/opt/omoba-ru/backup-keys/` (0700); host copies in `/var/backups/omoba-ru/` (0700) | [omoba-backup-ru.timer](omoba-backup-ru.timer) nightly, [omoba-restore-drill-ru.timer](omoba-restore-drill-ru.timer) monthly, [omoba-backup-check-ru.timer](omoba-backup-check-ru.timer) hourly |
 
 All three OMOBA units restart on any exit every 5 s without a start limit
 (`Restart=always`, `StartLimitIntervalSec=0`); the lobby and the Account API start
@@ -91,14 +95,15 @@ the kit files it names.
        --node-sha256 <its line in nodejs.org/dist/v22.<x>.<y>/SHASUMS256.txt>
    python3 ops/vps/ru/ru_host.py bootstrap … --check   # then --apply
    ```
-   - Packages from Ubuntu's own mirrors only (`postgresql caddy ufw openssh-server`);
+   - Packages from Ubuntu's own mirrors only (`postgresql caddy ufw openssh-server gnupg`);
      no third-party apt repository. PostgreSQL must be 16+ with the `und-x-icu`
      collation and listen on loopback only, or bootstrap stops before writing secrets.
    - Node.js ≥ 20.9 for the portal (Next.js 16): the uploaded official tarball
      (sha256 checked) in `/opt/omoba-ru/node/v<x.y.z>`, or Ubuntu's `nodejs` when it is
      new enough (24.04 ships 18.x, so pass the tarball there).
    - Users `omoba-ru` and `omoba-portal-ru` (system, nologin); folders
-     `/opt/omoba-ru/{releases,portal/releases,node,incoming}`, `/var/lib/omoba-ru/{matches,lobby-outbox}` (0700).
+     `/opt/omoba-ru/{releases,portal/releases,node,incoming,backup,backup-keys}`,
+     `/var/lib/omoba-ru/{matches,lobby-outbox}` and `/var/backups/omoba-ru` (0700 but `backup`).
    - Env files from the examples: database passwords, `OMOBA_PORTAL_SECRET` and
      `OMOBA_SOCIAL_SECRET` are generated on the host; `OMOBA_MATCH_PUBLIC_HOST` is
      `$RU_IP`; `--vkid-client-id` fills both VK ID lines (without it they stay
@@ -116,14 +121,22 @@ the kit files it names.
      certificates. If the provider has its own firewall, open the same ports there.
    - The three unit files; `postgresql` and `caddy` enabled; an OMOBA unit is
      enabled once its release exists, so a boot never starts a missing binary.
+   - The backup kit: `ru_backup.py`, its three services and timers (the timers enabled
+     and started), and `/opt/omoba-ru/backup.env` from `backup.env.example`, written
+     once with placeholders and never replaced. Until the owner fills it, the nightly
+     backup fails and alerts, and `status` lists what is missing.
 2. **Lobby and Account API** from the RU Linux package:
    ```sh
    python3 scripts/release.py build linux --market ru
    python3 ops/vps/ru/ru_host.py ship --package dist/v<v>-ru/omoba-<v>-ru-linux-x64.tar.gz --apply
    ```
    Refused while a match runs. It stages `/opt/omoba-ru/releases/<v>-ru-<sha7>/`
-   (immutable, sha256-checked), takes `pg_dump -Fc` into `/var/backups/omoba-ru/` when
-   a schema exists, runs `omoba-account-api migrate` under a temporary, expiring
+   (immutable, sha256-checked); when a schema exists it runs the pre-migration backup
+   (`ru_backup.py backup --reason pre-migration`: an encrypted set off-host and a plain
+   rollback dump in `/var/backups/omoba-ru/`) and refuses to migrate while backups are
+   not configured or the backup fails (before launch, without storage,
+   `--local-backup-only` takes only the rollback dump); then it runs
+   `omoba-account-api migrate` under a temporary, expiring
    owner login, applies `account-api/ops/grants.sql`, switches `current`, installs
    changed units, enables and restarts both services and checks UDP 4000, the
    lobby's executable and `/health/ready`. Any failure rolls back to the previous
@@ -133,7 +146,8 @@ the kit files it names.
    python3 ops/vps/ru/ru_host.py portal-bundle --web ../omoba-web
    python3 ops/vps/ru/ru_host.py ship-portal --bundle dist/portal-ru/omoba-portal-ru-<rev7>.tar.gz --apply
    ```
-4. **Check** with `python3 ops/vps/ru/ru_host.py status` (read-only, exit 0 only
+4. **Backups and escrow**: [set them up once](#set-up-once-owner).
+5. **Check** with `python3 ops/vps/ru/ru_host.py status` (read-only, exit 0 only
    when nothing is missing) and once per new host `reboot-check --apply`.
 
 Each change is appended to `/opt/omoba-ru/deployments.jsonl`.
@@ -166,7 +180,9 @@ unit's only writable folder.
   users and folder modes, env files, Node.js, releases, units enabled and running,
   UDP 4000, `127.0.0.1:40550/health/ready`, the portal on `127.0.0.1:3010`, DNS (A
   records for the three names of `ru_host.py names` point here; no AAAA for the
-  lobby), memory and disk.
+  lobby), memory and disk, and the backups: the installed kit and timers and
+  `ru_backup.py check --remote` (a set off-host from the last 26 h, no failed run or
+  drill, a successful drill in the last 35 days, a current escrow, complete settings).
 - `python3 scripts/release.py preflight --market ru` from any computer: lobby DNS,
   `https://account.omoba.ru/health/ready`, the portal, and the topology: through
   the portal `GET /api/me` must be the Account API's 401 and `GET /api/releases` 200
@@ -189,11 +205,112 @@ post the player notice **before** shipping the server
 update from games older than X even without a server switch (also a forced update:
 notice first).
 
+## Backups, escrow and restore drill
+
+[ru_backup.py](ru_backup.py) runs on the host as root; `ru_host.py bootstrap` installs
+it with its units. It reads only `/opt/omoba-ru/backup.env`
+([backup.env.example](backup.env.example)) and never prints a secret.
+
+| What | Where | When | Kept |
+| --- | --- | --- | --- |
+| Backup set `omoba-ru-<UTC>-<reason>.tar.gpg`: `database.dump` (`pg_dump -Fc` of `omoba_ru`, career and portal), `state.tar.gz` (`/var/lib/omoba-ru/matches` with `archive/` and every allocation `outbox/`, and `/var/lib/omoba-ru/lobby-outbox`), `manifest.json` (rows and a digest per table, both schema version lists, sha256s); encrypted with GnuPG to the backup public key and signed with its secret key | **off-host:** the storage in Russia named by `OMOBA_BACKUP_TARGET` (`s3://` S3-compatible object storage or `sftp://` an SFTP account; the owner provides it); on the host: `/var/backups/omoba-ru/sets/` | nightly 00:30 UTC (03:30 Moscow), at the next boot after a missed night; before every migration (`ship`) | off-host: the newest set of each of the last 14 days with a set and of each of the last 8 weeks; host: the newest 2 |
+| Rollback dump (plain `pg_dump -Fc`) | `/var/backups/omoba-ru/omoba_ru-before-<release>-<UTC>.dump` (root 0600) | before every migration | the newest 3 |
+| Restore drill: the newest off-host set restored into `omoba_ru_restore_drill`, compared with its manifest (tables, row counts, the rows' digests, schema versions, the state archive), then dropped | the same PostgreSQL | the 2nd of every month, 02:30 UTC | result in `/var/backups/omoba-ru/state.json` |
+| Secrets escrow: `account-api.env` (`OMOBA_PORTAL_SECRET`, `OMOBA_SOCIAL_SECRET`), `lobby.env`, `portal.env`, `backup.env`, `host.json`, `backup-keys/`, encrypted to the escrow holder's public key | **offline with the escrow holder**; never on the backup storage | after bootstrap and after any change to those files | the holder keeps every version |
+
+`fetch` and the drill refuse a set the backup key did not sign: a set planted on the
+storage (by anyone with its login or the public key) never reaches `pg_restore`, which
+runs as the database superuser. A set that cannot be uploaded stays on the host and goes
+up with the next run. A failed
+backup or drill alerts at once; the hourly check alerts when no backup succeeded for
+26 h, when no drill succeeded for 35 days, and when the escrow is missing or stale.
+Alerts go to the journal (`journalctl -u omoba-backup-ru -u omoba-restore-drill-ru -u
+omoba-backup-check-ru`) and, with `OMOBA_TELEGRAM_BOT_TOKEN` and `OMOBA_TELEGRAM_CHAT_ID`
+in `backup.env`, to Telegram (one message per problem at most every 6 h, and one when
+everything passes again).
+
+**Escrow holder:** not named yet (owner checklist, LR-03). Record here who holds the
+backup secret key and the secrets escrow, how to reach them and where the files are
+kept; date the latest escrow below.
+
+| Escrow holder | Reach | Kept where | Backup key fingerprint | Latest escrow |
+| --- | --- | --- | --- | --- |
+| — | — | — | — | — |
+
+### Set up once (owner)
+
+1. **Storage in Russia** (152-FZ): an S3-compatible bucket (a key limited to that
+   bucket) or an SFTP account on another server in Russia. Not the RU VPS itself. The
+   host prunes old sets, so its key may delete; where the provider offers bucket
+   versioning or object lock, keep deleted objects for 30 days, so a compromised host
+   cannot erase the history.
+2. **Backup key** on the Mac: `python3 ops/vps/ru/ru_backup.py keygen --out <folder>`
+   writes `backup-public.asc` and `backup-secret.asc`. The escrow holder keeps
+   `backup-secret.asc` offline: without it no backup can be read.
+3. **Keys on the host** (the host signs every set with the secret key, and the drill
+   decrypts with it):
+   ```sh
+   scp <folder>/backup-public.asc <folder>/backup-secret.asc $RU_HOST:/opt/omoba-ru/backup-keys/
+   ssh $RU_HOST chmod 600 /opt/omoba-ru/backup-keys/backup-secret.asc
+   ```
+   SFTP only: the login key as `backup-keys/ssh_key` (0600) and the server's host key
+   as `backup-keys/known_hosts` (`ssh-keyscan -p <port> <host>`, fingerprint compared
+   with the provider's).
+4. **Settings:** `ssh $RU_HOST` and edit `/opt/omoba-ru/backup.env` (the storage, its
+   key or login, optionally the Telegram bot); then
+   `python3 /opt/omoba-ru/backup/ru_backup.py config` must print `ok`.
+5. **First backup and drill** on the host: `systemctl start omoba-backup-ru` and
+   `systemctl start omoba-restore-drill-ru` (each waits for the other's lock), then
+   `python3 /opt/omoba-ru/backup/ru_backup.py list` and `… check --remote`.
+6. **Escrow** from the Mac, with the holder's public key; plaintext never leaves the host:
+   ```sh
+   python3 ops/vps/ru/ru_host.py escrow --recipient-file holder-public.asc \
+       --out omoba-ru-secrets-$(date +%F).asc
+   ```
+   The holder checks it (`gpg --decrypt <file> | tar -tzv`) and stores it offline;
+   delete the local copy. Repeat after any change to those files (`status` says when).
+   The Android release keystore (LR-24) goes the same way, on the Mac:
+   `python3 ops/vps/ru/ru_backup.py escrow --recipient-file holder-public.asc --file
+   <keystore> > android-release-key.asc`.
+7. Fill in the escrow table above and run `python3 ops/vps/ru/ru_host.py status`.
+
+### Restore
+
+Stop writers first: `systemctl stop omoba-lobby-ru omoba-account-api-ru omoba-portal-ru`.
+Never restore over the running database as a test; the monthly drill does that safely.
+
+- **Undo a migration on this host:** restore the rollback dump of that ship (next section).
+- **From an off-host set on this host** (database damaged or lost):
+  ```sh
+  python3 /opt/omoba-ru/backup/ru_backup.py fetch --set latest --out /var/backups/omoba-ru/restore
+  runuser -u postgres -- pg_restore --clean --if-exists --exit-on-error -d omoba_ru \
+      < /var/backups/omoba-ru/restore/database.dump
+  ```
+  `fetch` keeps nothing unless the set's signature and checksums are right; `--set
+  <name>` picks an older set (`ru_backup.py list`). To bring back the match and
+  outbox state as well: `tar -xzf /var/backups/omoba-ru/restore/state.tar.gz -C /` and
+  `chown -R omoba-ru:omoba-ru /var/lib/omoba-ru`. Matches settled after the set was
+  taken are lost (their outbox files were already acknowledged). Start the services,
+  then delete the `restore` folder.
+- **Onto a new host** (the VPS is lost): a new VPS and DNS as in LR-01. From the escrow,
+  put `account-api.env`, `portal.env`, `lobby.env` (with `OMOBA_MATCH_PUBLIC_HOST` set to
+  the new address), `backup.env` and `backup-keys/` into `/opt/omoba-ru/` (root, 0600;
+  folders 0700) before `ru_host.py bootstrap`, which then keeps those secrets and
+  passwords; leave out `host.json`. Run `bootstrap --apply`, then on the host
+  `ru_backup.py fetch --set latest --out /var/backups/omoba-ru/restore` and
+  `runuser -u postgres -- pg_restore --exit-on-error -d omoba_ru < …/database.dump` into
+  the empty database, restore the state as above, then `ship` (it re-applies the grants)
+  and `ship-portal`. Check before announcing it: ratings and match history on the
+  portal, sign-in with an existing recovery code, and VK sign-in of an existing linked
+  account (it works only with the escrowed `OMOBA_SOCIAL_SECRET`).
+
 ## Rollback
 
 `python3 ops/vps/ru/ru_host.py rollback --kind server --release <v>-ru-<sha7> --apply`
 (or `--kind portal --release <rev7>-<sha8>`) points `current` at a release that is
 still staged and restarts; it runs no migration, so an older server only works on a
-schema it understands. To undo a migration, restore the `pg_dump` taken by that
-ship from `/var/backups/omoba-ru/` (`runuser -u postgres -- pg_restore --clean
---if-exists -d omoba_ru <dump>`) with the lobby and the Account API stopped. Never drop the database or delete match directories.
+schema it understands. To undo a migration, restore the rollback dump taken by that
+ship, `/var/backups/omoba-ru/omoba_ru-before-<release>-<UTC>.dump` (the newest three
+are kept; older ones are in the off-host sets), with the lobby and the Account API
+stopped: `runuser -u postgres -- pg_restore --clean --if-exists -d omoba_ru < <dump>`.
+Never drop the database or delete match directories.
