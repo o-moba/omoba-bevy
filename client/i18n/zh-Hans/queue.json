@@ -11,5 +11,7 @@
   "queue.offer.hint": "目前匹配排位赛的玩家不多。你可以同时进行匹配对战，并保留排位队列中的位置。",
   "queue.offer.party_pending": "队伍全员同意后，将同时进行匹配对战。",
   "queue.also_casual": "同时进行匹配对战 · 保留排位队列位置",
-  "queue.failed.ranked_party_cohort": "队伍成员的排位分差距过大，无法进行排位赛。\n请取消后一起进行匹配对战。"
+  "queue.failed.ranked_party_cohort": "队伍成员的排位分差距过大，无法进行排位赛。\n请取消后一起进行匹配对战。",
+  "queue.failed.arena_limit": "你的网络已有一场对局正在进行。\n请先完成该对局，或与其他玩家进行匹配对战。",
+  "queue.failed.practice_cooldown": "多场人机对战已开始却未进行。\n请几分钟后再试。"
 }

@@ -106,9 +106,9 @@ Source: `server/src/runtime/`.
 All game traffic is UDP, and datagrams are JSON-encoded (`serde_json`; `server/src/runtime/dispatch.rs`, `client/src/net/transport.rs`).
 
 - **Public roles.** Commands are wrapped in `PublicClientDatagram`, with a return-path probe and an Ed25519 `SignedCommand` (`shared/src/public_transport.rs`).
-- **Admission limits.** Public admission tracks at most 512 endpoints. The challenge TTL is 5 s, the validated-path TTL is 30 s, and each endpoint may send at most 120 packets per second (`server/src/public_transport.rs`). Public datagrams are at most 12 KiB, and signed commands at most 8 KiB.
+- **Admission limits.** Public admission tracks at most 512 endpoints, at most 8 per source IP. Probes are budgeted per second per source IP, per network and in all, with a reserve for new sources (LR-16, `server/src/admission.rs`). The challenge TTL is 5 s, the validated-path TTL is 30 s, and each endpoint may send at most 120 packets per second (`server/src/public_transport.rs`). Public datagrams are at most 12 KiB, and signed commands at most 8 KiB. On the RU host the kernel drops a source's datagrams beyond a per-address rate first (`ops/vps/ru/nftables-omoba.conf`). Every limit and its setting: [ops/vps/ru/README.md › Admission limits](../../ops/vps/ru/README.md#admission-limits-lr-16).
 - **Snapshots.** For clients that negotiated framing, snapshots are split into `OMB1` frames of at most 1200 bytes (`shared/src/transport.rs`, `server/src/snapshot.rs`).
-- **Compatibility probes.** Every role answers them, standalone included, from one budget of 64 replies per second per process ([release-compatibility.md](../release-compatibility.md)).
+- **Compatibility probes.** Every role answers them, standalone included, from a per-second budget per process: 8 per source IP, 32 per network, 64 in all with 16 kept for new sources ([release-compatibility.md](../release-compatibility.md), LR-16).
 - **Trust.** UDP is neither encrypted nor server-authenticated, so clients must trust the server address ([public-mvp.md](../public-mvp.md)).
 - **Contracts.** Every cross-boundary contract below is specified in [protocols.md](protocols.md). The rules for evolving the UDP protocol are in [ARCHITECTURE.md › Protocol rules](../ARCHITECTURE.md#protocol-rules).
 

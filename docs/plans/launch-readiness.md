@@ -431,12 +431,12 @@ Area: abuse/transport · **major** · M · code (+ops nftables)
   - A retention job deletes unlinked profiles with zero matches after 30 days.
   - `ops/vps/ru` ships nftables per-source hashlimit rules for UDP 4000 and the arena range.
 - **Acceptance:**
-  - [ ] 1000 probes/s from one address do not stop a second address from being admitted and getting a compatibility reply (unit test).
-  - [ ] One IP holds at most N endpoints or career clients (unit test).
-  - [ ] More than K new keys from one IP in 24 h are refused, while existing keys keep working (integration test).
-  - [ ] A second BotPractice allocation from an IP that already has one Forming or Running gets a localized refusal (unit test).
-  - [ ] 300 clients reconnecting after a restart all get in without "unavailable" errors (harness).
-  - [ ] The nftables snippet is installed, and the knobs are documented in `ops/vps/ru/README.md`.
+  - [x] 1000 probes/s from one address do not stop a second address from being admitted and getting a compatibility reply (unit test). Done: `public_transport::tests::a_flooding_source_cannot_lock_out_a_second_source`; budgets in `server/src/admission.rs`.
+  - [x] One IP holds at most N endpoints or career clients (unit test). Done: N = 8 (`OMOBA_LIMIT_ENDPOINTS_PER_IP`), `one_ip_holds_at_most_n_endpoints` and `one_ip_holds_at_most_n_career_clients`.
+  - [x] More than K new keys from one IP in 24 h are refused, while existing keys keep working (integration test). Done: K = 10 per IP, 5000 in all (career schema 4), `career_store_limits_new_profiles_per_source_and_in_total` against PostgreSQL; the refusal is localized (`error_code`, `client/i18n/*/admission.json`).
+  - [x] A second BotPractice allocation from an IP that already has one Forming or Running gets a localized refusal (unit test). Done: `arena_limit` (`OMOBA_LIMIT_ARENAS_PER_IP` = 1) and the abandon cooldown `practice_cooldown`, with `queue.failed.*` copy in en, ru and zh-Hans.
+  - [x] 300 clients reconnecting after a restart all get in without "unavailable" errors (harness). Done: `harness/tests/admission.rs` (PostgreSQL, ignored by default): 300 sign in, the lobby restarts on the same port, all 300 reconnect with no error and the same profiles.
+  - [x] The nftables snippet is installed, and the knobs are documented in `ops/vps/ru/README.md`. Done: `ops/vps/ru/nftables-omoba.conf` with unit `omoba-limits-ru`, installed (after `nft -c`) and checked by `ru_host.py bootstrap`/`status`, proven against the fake host; the first real load is on the RU host. Knobs: README "Admission limits".
 - **Depends on:** —
 
 #### LR-17 — Health signals, monitoring, alerts and disk retention

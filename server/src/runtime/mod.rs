@@ -146,23 +146,31 @@ impl ServerRuntime {
     /// career store configured by the environment (the process shape).
     #[cfg(test)]
     pub(crate) fn new(socket: UdpSocket, match_config: MatchConfig) -> Self {
-        Self::new_with_map(socket, match_config, shared::map::ResolvedMap::default())
+        Self::new_with_map(
+            socket,
+            match_config,
+            shared::map::ResolvedMap::default(),
+            crate::admission::Limits::default(),
+        )
     }
 
     pub(crate) fn new_with_map(
         socket: UdpSocket,
         match_config: MatchConfig,
         map_config: shared::map::ResolvedMap,
+        limits: crate::admission::Limits,
     ) -> Self {
         let server_epoch = fresh_server_epoch();
-        Self::with_ports(
+        let mut runtime = Self::with_ports(
             Box::new(UdpTransport(socket)),
             Box::new(SystemClock),
             server_epoch,
-            Box::new(career_backend::CareerBackend::new(server_epoch)),
+            Box::new(career_backend::CareerBackend::new(server_epoch, limits)),
             match_config,
             map_config,
-        )
+        );
+        runtime.public_transport = public_transport::PublicTransport::new(limits);
+        runtime
     }
 
     /// A socket-free runtime on a manual clock and an in-memory career
@@ -256,8 +264,10 @@ pub(crate) fn run() -> io::Result<()> {
     socket.set_nonblocking(true)?;
     println!("UDP game server is listening on {bind_addr}");
 
-    let match_service =
-        match_service::MatchService::from_env(socket.local_addr()?).map_err(io::Error::other)?;
+    let limits = crate::admission::Limits::from_env().map_err(io::Error::other)?;
+    println!("{}", limits.summary());
+    let match_service = match_service::MatchService::from_env(socket.local_addr()?, limits)
+        .map_err(io::Error::other)?;
     if match_service.is_public()
         && std::env::var("OMOBA_DATABASE_URL")
             .ok()
@@ -301,7 +311,7 @@ pub(crate) fn run() -> io::Result<()> {
         crate::match_lifecycle::MATCH_MAX_DURATION_ENV
     );
 
-    let mut runtime = ServerRuntime::new_with_map(socket, match_config, map_config);
+    let mut runtime = ServerRuntime::new_with_map(socket, match_config, map_config, limits);
     runtime.match_service = match_service;
     runtime.max_match_duration = max_match_duration;
     let bot_difficulty = bots::boot_bot_difficulty(

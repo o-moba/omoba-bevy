@@ -160,8 +160,11 @@ UDP admission validates return path before creating a gameplay endpoint, and
 world replication requires authenticated manifest membership. Empty bootstrap
 snapshots carry connection metadata only. Commands bind the
 saved Ed25519 key, transport nonce, authentication nonce, epoch, match and monotonic
-sequence. Per process, admission retains at most 512 endpoint records, accepts up
-to 64 probes per second, and limits each endpoint to 120 packets per second.
+sequence. Per process, admission retains at most 512 endpoint records (8 per source
+IP), accepts up to 64 probes per second after per-IP (8) and per-network (32)
+budgets with 16 kept for new sources, and limits each endpoint to 120 packets per
+second. New profiles, arenas held by one IP and abandoned vs Bots allocations are
+limited per source too (LR-16, `ops/vps/ru/README.md` "Admission limits").
 Challenges expire after five seconds; validated paths expire after 30 seconds
 without traffic. Public datagrams are capped at 12 KiB, with signed command payloads
 capped at 8 KiB. Each receive pass stops after 128 packets or two milliseconds.

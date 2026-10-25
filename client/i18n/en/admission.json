@@ -1,0 +1,4 @@
+{
+  "admission.error.new_profile_limit": "Too many new profiles were created from your network today. Try again tomorrow, or sign in on a device that already has a profile.",
+  "admission.error.new_profiles_paused": "New profiles are paused for today. Try again later, or sign in on a device that already has a profile."
+}
