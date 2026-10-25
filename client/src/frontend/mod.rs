@@ -94,7 +94,12 @@ impl Plugin for FrontendPlugin {
             .init_resource::<ScreenDriverPaused>()
             .init_resource::<JoinNotice>()
             .add_systems(Startup, bypass_shell_for_automation)
-            .add_systems(Update, retry_connection_from_menus)
+            // The menus reconnect only once the region's legal documents are
+            // accepted (LR-06).
+            .add_systems(
+                Update,
+                retry_connection_from_menus.run_if(crate::legal::bound_and_accepted),
+            )
             .add_systems(
                 Update,
                 scale_menus_to_the_window.after(crate::pause_menu::PauseMenuSet::Visuals),
@@ -502,6 +507,24 @@ fn retry_connection_from_menus(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// LR-06: the menus reconnect to the lobby only after the region's legal
+    /// acceptance.
+    #[test]
+    fn the_menus_reconnect_only_after_the_legal_acceptance() {
+        use crate::legal::gate_tests::{assert_carries, gate};
+        let mut app = App::new();
+        // The avatar preview makes its render target at build.
+        app.init_resource::<Assets<Image>>()
+            .add_plugins((bevy::state::app::StatesPlugin, FrontendPlugin));
+        assert_carries(
+            &app,
+            Update,
+            IntoSystem::system_type_id(&retry_connection_from_menus),
+            gate(),
+            "retry_connection_from_menus",
+        );
+    }
 
     /// LR-14: a game newer than the servers retries on the slow cadence (the
     /// servers are about to switch); an older one never does.

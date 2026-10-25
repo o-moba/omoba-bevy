@@ -335,9 +335,21 @@ pub(crate) struct ClientUpdatePlugin;
 
 impl Plugin for ClientUpdatePlugin {
     fn build(&self, app: &mut App) {
+        // The boot read waits for the region's legal acceptance (LR-06).
         app.init_resource::<ClientUpdate>()
-            .add_systems(Startup, read_catalog_at_boot)
-            .add_systems(Update, (read_catalog_after_mismatch, poll_catalog).chain());
+            .add_systems(
+                Startup,
+                read_catalog_at_boot.run_if(crate::legal::bound_and_accepted),
+            )
+            .add_systems(
+                Update,
+                (
+                    read_catalog_at_boot.run_if(on_message::<crate::legal::LegalAccepted>),
+                    read_catalog_after_mismatch,
+                    poll_catalog,
+                )
+                    .chain(),
+            );
     }
 }
 
@@ -371,6 +383,24 @@ fn poll_catalog(mut update: ResMut<ClientUpdate>) {
 mod tests {
     use super::*;
     use shared::compatibility::{CompatibilityIssue, ReleaseContract, UpdateNotice};
+
+    /// LR-06: the boot read of the release catalog (the Account API) waits
+    /// for the region's legal acceptance and runs in its frame.
+    #[test]
+    fn the_boot_catalog_read_waits_for_the_legal_acceptance() {
+        use crate::legal::gate_tests::{assert_carries, gate, on_acceptance};
+        let mut app = App::new();
+        app.add_plugins(ClientUpdatePlugin);
+        let read = IntoSystem::system_type_id(&read_catalog_at_boot);
+        assert_carries(&app, Startup, read, gate(), "catalog read at boot");
+        assert_carries(
+            &app,
+            Update,
+            read,
+            on_acceptance(),
+            "catalog read on acceptance",
+        );
+    }
 
     const PORTAL: &str = "https://portal.example";
 

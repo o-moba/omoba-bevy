@@ -16,6 +16,9 @@ A market is a preset of features plus the market's own servers:
 - **cn**: a free game for mainland China, Simplified Chinese by default. Its
   servers and sign-in providers are not decided, so it cannot be packaged yet.
 
+Each market also carries its legal table (`Legal`, LR-06): documents to accept, source
+link, support and community channels and age sign; global and cn have none.
+
 The contour (prod / dev, scripts/contours.py) is a separate axis: `--market ru
 --contour dev` is the OMOBA Dev tester app with RU features.
 """
@@ -26,6 +29,27 @@ from dataclasses import dataclass, field
 MARKET_ENV = "OMOBA_MARKET"
 FEATURES = ("ekza", "supporter", "vk_sign_in")
 FEATURE_ENVS = {name: f"OMOBA_FEATURE_{name.upper()}" for name in FEATURES}
+
+
+@dataclass(frozen=True)
+class Legal:
+    """A market's legal documents, source link, player channels and age sign (LR-06, LR-07,
+    LR-21): shared/src/market.rs `Market::legal`, field for field. None is "not provided" and
+    is not shown (the README skips it, the game hides it)."""
+    version: str | None = None
+    """Version of the user agreement and privacy policy the game asks a player to accept."""
+    privacy: str | None = None
+    terms: str | None = None
+    source: str | None = None
+    """Public source tree of a release; `{version}` stands for the release (`0.45.0`)."""
+    support_email: str | None = None
+    community_vk: str | None = None
+    community_telegram: str | None = None
+    age_rating: str | None = None
+    """Age category sign (436-FZ), for example `12+`."""
+
+    def source_for(self, version: str) -> str | None:
+        return self.source.replace("{version}", version) if self.source else None
 
 
 @dataclass(frozen=True)
@@ -51,6 +75,8 @@ class Market:
     """Why the market cannot be packaged yet."""
     android: dict[str, str] = field(default_factory=dict)
     """Production Android identity override: bundle_id, display_name."""
+    legal: Legal = Legal()
+    """Legal documents, source link, player channels and age sign; global has none."""
 
     @property
     def label(self) -> str:
@@ -69,7 +95,14 @@ MARKETS = {
                  # No RU App Store record yet: iOS RU is not packaged.
                  platforms=("macos", "windows", "linux", "android"),
                  zones=("omoba.ru",),
-                 android={"bundle_id": "space.ekza.omoba.ru", "display_name": "OMOBA"}),
+                 android={"bundle_id": "space.ekza.omoba.ru", "display_name": "OMOBA"},
+                 # Drafts (LR-04) until the counsel-approved texts bring a new version; support
+                 # and community wait for the owner (LR-21); 12+ is a placeholder (LR-07).
+                 legal=Legal(version="0-draft",
+                             privacy="https://omoba.ru/privacy",
+                             terms="https://omoba.ru/terms",
+                             source="https://github.com/o-moba/omoba-bevy/tree/v{version}-ru",
+                             age_rating="12+")),
     "cn": Market("cn", {"ekza": False, "supporter": False, "vk_sign_in": False}, "zh-Hans", "cn",
                  platforms=(), zones=("cn.omoba.io",),
                  blocked="the CN market has no servers or sign-in providers yet (docs/markets.md)"),

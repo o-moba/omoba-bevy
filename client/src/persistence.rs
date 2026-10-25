@@ -288,7 +288,7 @@ fn write_preferences_file(path: &Path, prefs: &ClientPreferencesFile) -> io::Res
 /// Writes `data` to a sibling temp file, then renames it over `path`. A
 /// crash or full disk mid-write leaves the previous file (and its
 /// `client_session_id`) intact instead of a truncated one.
-fn write_atomically(path: &Path, data: &[u8]) -> io::Result<()> {
+pub(crate) fn write_atomically(path: &Path, data: &[u8]) -> io::Result<()> {
     let mut temp_name = path.file_name().unwrap_or_default().to_os_string();
     temp_name.push(".tmp");
     let temp = path.with_file_name(temp_name);

@@ -81,12 +81,15 @@ use crate::{
     world2d::World2dPlugin,
 };
 
-/// Preferences, the server session, the match service and the career identity.
+/// The legal gate, preferences, the server session, the match service and
+/// the career identity. `LegalPlugin` comes first: its acceptance decides
+/// whether the boot opens any region traffic (LR-06).
 pub(crate) struct NetPlugins;
 
 impl PluginGroup for NetPlugins {
     fn build(self) -> PluginGroupBuilder {
         PluginGroupBuilder::start::<Self>()
+            .add(crate::legal::LegalPlugin)
             .add(ClientPersistencePlugin)
             .add(NetworkingPlugin)
             .add(crate::update::ClientUpdatePlugin)

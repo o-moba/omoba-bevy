@@ -1101,6 +1101,16 @@ follows.
 - Copy in en, ru and zh-Hans (`client/i18n/*/update.json`); the release rule is in [RELEASING.md](RELEASING.md#updates-and-contract-changes-lr-14).
 - Code: `shared/src/compatibility.rs` (`UpdateNotice`, `ReleaseVersion`, `mismatch_side`, `download_page`), `server/src/public_transport.rs`, `passport/src/release_catalog.rs`, `client/src/update.rs`, `client/src/frontend/home.rs`, `client/src/net/status_ui.rs`. See [the session note](progress/2026-10-24-lr-14.md).
 
+## Legal acceptance, About and age sign in the game (LR-06, unreleased)
+
+- An RU build opens with a card before anything else: «Перед игрой», the age sign `12+`, links to the User Agreement and the Privacy Policy on `omoba.ru` (opened in the browser), the document version (`0-draft`), a language switch and «Я принимаю…». **Continue** stays disabled until the switch is on.
+- Until the player accepts, the game opens no lobby connection, does not read the release catalog and offers no VK sign-in, device link or website pairing. The acceptance is kept in the market's settings folder (`legal_acceptance.json`: region, document version, time); a new document version asks again. It is not sent to a server yet.
+- Settings → «Об игре» shows the build label, `12+`, both documents and the source code of this release (`github.com/o-moba/omoba-bevy/tree/v<version>-ru`). Support e-mail, VK community and Telegram appear there once the owner provides them. The boot splash shows `12+` too.
+- RU package READMEs end with the age sign and the same links. `release.py catalog --market ru` refuses until the public tag `v<version>-ru` exists.
+- The global build is unchanged: its market has no legal table, so no card, no About page and no gate.
+- Copy in en, ru and zh-Hans (`client/i18n/*/legal.json`).
+- Code: `shared/src/market.rs` (`Market::legal`, `Legal`), `scripts/markets.py` (`Legal`), `client/src/legal.rs`, `client/src/pause_menu.rs` (About tab), `scripts/release.py` (`legal_readme`, `require_public_source_tag`). See [markets](markets.md#legal-documents-and-links-lr-06) and [the session note](progress/2026-10-24-lr-06-client.md).
+
 ## Multiplayer Session Reliability
 
 - **TASK-14 (client)**: Explicit session states, non-blocking wait when the server is down, bounded `WaitingForServer` timeout, stale snapshot detection while connected, UDP transport error thresholds, snapshot-channel disconnect detection when the UDP thread ends, full teardown (replicated entities + team overlay) on disconnect, manual reconnect via **Retry** (no silent rejoin into a match), pause menu auto-closes on **Disconnected**, minimap hidden unless **Connected**.

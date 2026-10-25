@@ -194,7 +194,9 @@ unit's only writable folder.
   `docs/progress/` for every release.
 
 Downloads on the portal: `make release-ru-publish` also writes
-`dist/v<version>-ru/releases.json` from the verified IPFS receipts; copy it to
+`dist/v<version>-ru/releases.json` from the verified IPFS receipts (only once the
+public GitHub tag `v<version>-ru` exists: the game's About page and the package
+README link its source, LR-06); copy it to
 `/opt/omoba-ru/releases.json` and set `OMOBA_RELEASE_CATALOG` to it in
 `/opt/omoba-ru/account-api.env`. The game reads the same catalog for its
 **Update available** banner and the **Update required** download button (LR-14).

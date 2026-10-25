@@ -29,7 +29,7 @@ they are written; `python3 ops/vps/ru/ru_host.py names` prints them.
 | S7 | Lobby compatibility | `cargo run --locked --quiet -p shared --example compatibility -- check <RU lobby> dist/v<v>-ru/compatibility.json` | exit 0 |
 | S8 | Worker compatibility | while a bot match from P3 runs: the same command against `<RU IPv4>:41000` (or the worker port in `journalctl -u omoba-lobby-ru`) | exit 0 |
 | S9 | Reboot (new host, or after a kit change) | `ru_host.py reboot-check --apply` | `"ok": true`; note `seconds_to_ready` |
-| S10 | Downloads | `make release-ru-publish`, `releases.json` installed (README, "Check") | the portal lists every package with the right sha256 |
+| S10 | Downloads | Publish the GitHub release `v<v>-ru` (its tag is the source link in the game and the README; `catalog` refuses until it exists), then `make release-ru-publish`, `releases.json` installed (README, "Check") | the portal lists every package with the right sha256 |
 
 ## 2. Per platform
 
@@ -38,7 +38,7 @@ For Android use a Vulkan device from the published minimum list (LR-25).
 
 | # | Check | Steps | Pass when |
 | --- | --- | --- | --- |
-| P1 | Clean install, first run in Russian | Remove the `omoba-bevy-ru` settings folder (Android: uninstall `space.ekza.omoba.ru`). Install the package, start it. | First screen and menus in Russian, no English or raw keys, legal links and consent (LR-06) shown, no crash; the game reaches the RU lobby |
+| P1 | Clean install, first run in Russian | Remove the `omoba-bevy-ru` settings folder (Android: uninstall `space.ekza.omoba.ru`). Install the package, start it. Open both documents from the card, tick the switch, press «Продолжить». Restart the game. Open Settings → «Об игре». | The legal card (LR-06) with `12+` comes first, in Russian, with no English or raw keys; the documents open on `<RU portal>`; the lobby is not reached before «Продолжить» and is reached after it; after the restart the card does not come back; About shows the build, `12+`, both documents and the source of `v<v>-ru`; no crash |
 | P2 | VK sign-in | Profile → «Войти через VK ID» → sign in on `<RU portal>` → confirm the link in the game. Then sign in on the portal in another browser. | The game shows the linked account; the portal shows the same profile; a second device can join the account through VK |
 | P3 | Bot match | Play a server bot match («Боты на сервере») to the end. | The match ends normally; the result and XP show in the game and in the history on `<RU portal>` |
 | P4 | Casual queue | Two clients (any platforms) queue Casual. | They land in one match (bots fill after the wait); the match is unrated and appears in both histories |

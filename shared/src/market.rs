@@ -148,6 +148,89 @@ impl Market {
             Self::Cn => Some("cn"),
         }
     }
+
+    /// The market's legal documents, source link, player channels and age sign
+    /// (LR-06, LR-07, LR-21). `scripts/markets.py` holds the same values for
+    /// the packages' README; the portal has its own copy
+    /// (omoba-web `market-profile.mjs`). The global market has none, so its
+    /// game shows no acceptance screen and no About page.
+    pub const fn legal(self) -> Legal {
+        match self {
+            Self::Global => Legal::NONE,
+            Self::Ru => Legal {
+                // The Russian drafts (LR-04, plan section 7) until the
+                // counsel-approved texts replace them with a new version.
+                version: Some("0-draft"),
+                privacy: Some("https://omoba.ru/privacy"),
+                terms: Some("https://omoba.ru/terms"),
+                source: Some("https://github.com/o-moba/omoba-bevy/tree/v{version}-ru"),
+                // The owner provides these (LR-21); empty until then.
+                support_email: None,
+                community_vk: None,
+                community_telegram: None,
+                // Placeholder the owner confirms with counsel (LR-07).
+                age_rating: Some("12+"),
+            },
+            Self::Cn => Legal::NONE,
+        }
+    }
+}
+
+/// A market's legal documents, source link, player channels and age sign
+/// ([`Market::legal`]). `None` is "not provided": nothing is shown for it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct Legal {
+    /// The version of the user agreement and privacy policy a player accepts
+    /// on first launch. A new version asks again; `None` asks nothing.
+    pub version: Option<&'static str>,
+    /// The privacy policy page.
+    pub privacy: Option<&'static str>,
+    /// The user agreement (terms of use) page.
+    pub terms: Option<&'static str>,
+    /// The public source tree of a release; `{version}` stands for the release
+    /// (`0.45.0`, see [`Legal::source_for`]). The tag is `release.py draft`'s.
+    pub source: Option<&'static str>,
+    /// The support e-mail address.
+    pub support_email: Option<&'static str>,
+    /// The market's VK community page.
+    pub community_vk: Option<&'static str>,
+    /// The market's Telegram channel.
+    pub community_telegram: Option<&'static str>,
+    /// The age category sign (436-FZ in Russia), for example `12+`.
+    pub age_rating: Option<&'static str>,
+}
+
+impl Legal {
+    /// Nothing to show and nothing to accept.
+    pub const NONE: Self = Self {
+        version: None,
+        privacy: None,
+        terms: None,
+        source: None,
+        support_email: None,
+        community_vk: None,
+        community_telegram: None,
+        age_rating: None,
+    };
+
+    /// The source link of `release` (`0.45.0` →
+    /// `https://github.com/o-moba/omoba-bevy/tree/v0.45.0-ru`).
+    pub fn source_for(&self, release: &str) -> Option<String> {
+        self.source
+            .map(|template| template.replace("{version}", release))
+    }
+
+    /// Whether a player has anything to read: a document, a link or the sign.
+    pub const fn any(&self) -> bool {
+        self.version.is_some()
+            || self.privacy.is_some()
+            || self.terms.is_some()
+            || self.source.is_some()
+            || self.support_email.is_some()
+            || self.community_vk.is_some()
+            || self.community_telegram.is_some()
+            || self.age_rating.is_some()
+    }
 }
 
 impl Features {
@@ -319,6 +402,30 @@ mod tests {
         assert_eq!(
             describe(Market::Ru, Market::Ru.default_features()),
             "ru (ekza off, supporter off, vk_sign_in on)"
+        );
+    }
+
+    #[test]
+    fn only_ru_has_legal_documents_and_its_links_stay_on_its_portal_or_source() {
+        assert_eq!(Market::Global.legal(), Legal::NONE);
+        assert_eq!(Market::Cn.legal(), Legal::NONE);
+        assert!(!Legal::NONE.any());
+        let ru = Market::Ru.legal();
+        assert!(ru.any());
+        assert_eq!(ru.version, Some("0-draft"));
+        assert_eq!(ru.age_rating, Some("12+"));
+        for link in [ru.privacy, ru.terms].into_iter().flatten() {
+            assert!(link.starts_with("https://omoba.ru/"), "{link}");
+        }
+        assert_eq!(
+            ru.source_for("0.45.0").as_deref(),
+            Some("https://github.com/o-moba/omoba-bevy/tree/v0.45.0-ru")
+        );
+        assert_eq!(Legal::NONE.source_for("0.45.0"), None);
+        // Hidden until the owner provides them (LR-21).
+        assert_eq!(
+            (ru.support_email, ru.community_vk, ru.community_telegram),
+            (None, None, None)
         );
     }
 

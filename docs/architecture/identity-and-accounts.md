@@ -278,7 +278,7 @@ Sources:
 The pieces:
 
 - **Gating.**
-  - **Game.** Only `vk_sign_in` builds show the button (`vk_button_visible`).
+  - **Game.** Only `vk_sign_in` builds show the button (`vk_button_visible`). The career actions and their Account API polls (VK sign-in, device links, website pairing) run only after the player accepted the market's legal documents on the first-launch card (`legal::bound_and_accepted`, LR-06).
   - **Account API.** `SocialConfig::from_env` enables VK only when both `OMOBA_VKID_CLIENT_ID` (numeric) and `OMOBA_SOCIAL_SECRET` (64 lowercase hex) are set. With neither set, the routes answer 404 `not_found`. With exactly one set, startup fails (`invalid_social_configuration`, from `App::connect`). Startup also fails when they are set in a build without `vk_sign_in`.
   - **Portal.** `/api/auth/vk/start` and `/api/auth/vk/callback` need both the `vkSignIn` feature and `OMOBA_VKID_CLIENT_ID` (`vkContext` → `vkSignInClientId`). The BFF catch-all forwards `auth/social/*` and `me/social/*` based on the `vkSignIn` feature alone (`allowedPath`).
 - **OAuth.** VK ID is a public client using OAuth 2.1 with PKCE S256 and scope `vkid.personal_info`.

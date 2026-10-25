@@ -577,7 +577,30 @@ ANDROID
 - {"OMOBA Dev installs beside OMOBA; its Connection button picks Dev, Local or Custom." if flavor.dev else "It plays on the public OMOBA lobby."}
 """,
     }.get(target, "")
-    return common + specific + "\nLicenses and attributions: see the legal/ folder and ATTRIBUTION.md.\n"
+    return (common + specific + legal_readme(version, flavor)
+            + "\nLicenses and attributions: see the legal/ folder and ATTRIBUTION.md.\n")
+
+
+def legal_readme(version: str, flavor: Flavor = PROD) -> str:
+    """The market's age sign, documents, source and channels (LR-06, LR-07, LR-21), from
+    markets.py `Legal`; a link the market does not have is left out, a market without any
+    (global) adds nothing. A dev build has no public source tag, so it names none."""
+    legal = MARKETS[flavor.market].legal
+    lines = []
+    if legal.age_rating:
+        lines.append(f"Возрастная категория / Age rating: {legal.age_rating}")
+    for label, value in (("Пользовательское соглашение / Terms of use", legal.terms),
+                         ("Политика конфиденциальности / Privacy policy", legal.privacy),
+                         ("Исходный код этой версии / Source code of this release",
+                          None if flavor.dev else legal.source_for(version)),
+                         ("Поддержка / Support", legal.support_email),
+                         ("Сообщество ВКонтакте / VK community", legal.community_vk),
+                         ("Telegram", legal.community_telegram)):
+        if value:
+            lines.append(f"{label}: {value}")
+    if not lines:
+        return ""
+    return "\nПРАВОВАЯ ИНФОРМАЦИЯ / LEGAL\n" + "\n".join(lines) + "\n"
 
 
 # ---------------------------------------------------------------- checks
@@ -665,7 +688,7 @@ def stage_common(destination: Path, version: str, target: str, flavor: Flavor, a
         raise SystemExit("packaged asset content gate failed: " + "; ".join(gate["errors"]))
     copy_legal_notices(collect_legal_notices(ROOT), destination / "legal")
     shutil.copy2(ROOT / "ATTRIBUTION.md", destination / "ATTRIBUTION.md")
-    (destination / "README.txt").write_text(player_readme(version, target, flavor))
+    (destination / "README.txt").write_text(player_readme(version, target, flavor), encoding="utf-8")
 
 
 def zip_tree(source: Path, archive: Path, root_name: str):
@@ -1327,7 +1350,9 @@ def command_markets(args) -> int:
                             "settings_folder": market_presets.config_dir(key, None),
                             "lobby": preset.lobby or BETA_LOBBY, "account_api": preset.account_api,
                             "portal": preset.portal, "platforms": list(preset.platforms),
-                            "blocked": preset.blocked} for key, preset in MARKETS.items()}, indent=2))
+                            "legal": {name: value for name, value in vars(preset.legal).items() if value},
+                            "blocked": preset.blocked} for key, preset in MARKETS.items()},
+                     indent=2, ensure_ascii=False))
     return 0
 
 
@@ -1474,12 +1499,39 @@ def release_catalog(receipt: dict, version: str, market: str, published_at: str,
     return {"releases": releases}
 
 
+def public_source_tag(version: str, market: str) -> str | None:
+    """The tag whose tree the game's About page and the README link as this release's source
+    (markets.py `Legal.source`, LR-06): `v<version>-<market>`; None without a source link."""
+    if not market_presets.market(market).legal.source:
+        return None
+    return release_tag("prod", None, version, market)
+
+
+def remote_tag_listing(tag: str) -> str:
+    """`git ls-remote` of one tag in the public repository (read-only)."""
+    return subprocess.run(["git", "ls-remote", "--tags", f"https://github.com/{REPO}.git", f"refs/tags/{tag}"],
+                          capture_output=True, text=True, timeout=60).stdout
+
+
+def require_public_source_tag(version: str, market: str, listing=remote_tag_listing) -> str | None:
+    """LR-06: the public tag exists before the release is published to players, so the
+    source link in the game and the README never points at nothing."""
+    tag = public_source_tag(version, market)
+    if tag and f"refs/tags/{tag}" not in listing(tag).split():
+        raise SystemExit(f"the public tag {tag} is missing on github.com/{REPO}; the game's About page and "
+                         f"the README link its source (LR-06). Publish the release first "
+                         f"(`release.py draft --market {market}`, then `gh release edit {tag} --draft=false "
+                         f"--repo {REPO}`) and rerun.")
+    return tag
+
+
 def command_catalog(args) -> int:
     version = workspace_version()
     out = dist_path(version, args.out, "prod", args.market)
     receipt_path = out / "ipfs.json"
     if not receipt_path.is_file():
         raise SystemExit(f"{receipt_path} is missing: run `publish --market {args.market}` first")
+    require_public_source_tag(version, args.market)
     published = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(receipt_path.stat().st_mtime))
     catalog = release_catalog(json.loads(receipt_path.read_text()), version, args.market, published,
                               args.min_release)

@@ -623,6 +623,12 @@ exec "$DIR/Omoba.app/Contents/MacOS/server"
         self.assertIn("ekza-bevy-sdk", (release.ROOT / "Cargo.toml").read_text())
 
 
+def dataclasses_replace_legal(ru_market, **legal):
+    """`ru_market` with these `Legal` fields replaced."""
+    import dataclasses
+    return dataclasses.replace(ru_market, legal=dataclasses.replace(ru_market.legal, **legal))
+
+
 class Markets(unittest.TestCase):
     def test_presets_mirror_the_rust_market_module(self):
         import re
@@ -644,6 +650,66 @@ class Markets(unittest.TestCase):
         for name, env in markets.FEATURE_ENVS.items():
             self.assertIn(f'option_env!("{env}")', source, name)
         self.assertIn('option_env!("OMOBA_MARKET")', source)
+
+    def test_legal_links_mirror_the_rust_market_module(self):
+        """LR-06: markets.py `Legal` equals shared/src/market.rs `Market::legal`, field for field."""
+        import dataclasses
+        import re
+        import markets
+        source = (release.ROOT / "shared/src/market.rs").read_text()
+        table = source[source.index("pub const fn legal"):source.index("pub struct Legal")]
+        struct = source[source.index("pub struct Legal"):source.index("impl Legal")]
+        fields = [field.name for field in dataclasses.fields(markets.Legal)]
+        self.assertEqual(re.findall(r"pub (\w+): Option<&'static str>", struct), fields)
+        variants = ["Global", "Ru", "Cn"]
+        for index, (key, variant) in enumerate(zip(("global", "ru", "cn"), variants)):
+            start = table.index(f"Self::{variant} =>")
+            arm = table[start:table.index("Self::" + variants[index + 1]) if index + 1 < len(variants) else None]
+            legal = markets.MARKETS[key].legal
+            if legal == markets.Legal():
+                self.assertIn(f"Self::{variant} => Legal::NONE", arm, key)
+                continue
+            rust = {name: value or None for name, _, value in
+                    re.findall(r'(\w+): (None|Some\("([^"]*)"\))', arm)}
+            self.assertEqual(rust, dataclasses.asdict(legal), key)
+
+    def test_ru_readme_names_the_age_sign_documents_and_source_tag(self):
+        import markets
+        ru = release.resolve_flavor(market="ru")
+        legal = markets.MARKETS["ru"].legal
+        for target in ("macos", "windows", "linux"):
+            readme = release.player_readme("0.45.0", target, ru)
+            self.assertIn(f"Age rating: {legal.age_rating}", readme)
+            self.assertIn(f"Privacy policy: {legal.privacy}", readme)
+            self.assertIn(f"Terms of use: {legal.terms}", readme)
+            self.assertIn("Source code of this release: https://github.com/o-moba/omoba-bevy/tree/v0.45.0-ru",
+                          readme)
+            # Support and community stay out until the owner provides them (LR-21).
+            self.assertNotIn("Support", readme)
+            self.assertNotIn("Telegram", readme)
+        # The source tag is the RU release tag `draft` creates.
+        self.assertTrue(legal.source_for("0.45.0").endswith("/tree/" + release.release_tag("prod", None, "0.45.0", "ru")))
+        # A dev build has no public tag; the global README is unchanged.
+        self.assertNotIn("Source code", release.player_readme("0.45.0", "linux", release.resolve_flavor("dev", market="ru")))
+        self.assertNotIn("LEGAL", release.player_readme("0.45.0", "linux"))
+        provided = dataclasses_replace_legal(ru_market=markets.MARKETS["ru"], support_email="help@omoba.ru",
+                                             community_telegram="https://t.me/omoba_ru")
+        from unittest import mock
+        with mock.patch.dict(markets.MARKETS, {"ru": provided}):
+            readme = release.player_readme("0.45.0", "linux", ru)
+        self.assertIn("Support: help@omoba.ru", readme)
+        self.assertIn("Telegram: https://t.me/omoba_ru", readme)
+
+    def test_publication_needs_the_public_source_tag(self):
+        listed = "abc123\trefs/tags/v0.45.0-ru\n"
+        self.assertEqual(release.require_public_source_tag("0.45.0", "ru", lambda tag: listed), "v0.45.0-ru")
+        for listing in ("", "abc123\trefs/tags/v0.45.0-ru-dev.1\n"):
+            with self.assertRaises(SystemExit) as refused:
+                release.require_public_source_tag("0.45.0", "ru", lambda tag, listing=listing: listing)
+            self.assertIn("v0.45.0-ru", str(refused.exception))
+        # A market without a source link checks nothing.
+        self.assertIsNone(release.require_public_source_tag("0.45.0", "global",
+                                                            lambda tag: self.fail("no lookup")))
 
     def test_ru_build_bakes_its_market_servers_folder_and_names(self):
         ru = release.resolve_flavor(market="ru")

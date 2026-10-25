@@ -25,6 +25,8 @@ typo in a market or feature name fails the build.
 | Packages | `Omoba-<v>-*` | `Omoba-<v>-ru-*` in `dist/v<v>-ru/` | — |
 | Android app | `space.ekza.omoba.beta` | `space.ekza.omoba.ru`, "OMOBA" | — |
 | Platforms | macOS, Windows, Linux, Android, iOS | macOS, Windows, Linux, Android | none yet (blocked) |
+| Legal documents to accept on first launch | none | `omoba.ru/terms`, `omoba.ru/privacy`, version `0-draft` | none |
+| Age sign | none | `12+` (placeholder until the owner confirms it, LR-07) | none |
 
 Players can still pick any language in Settings. The RU servers are planned names
 under `omoba.ru` (registered at REG.RU); a build bakes them in and they answer once the RU servers
@@ -40,6 +42,10 @@ are deployed (`make release-ru-preflight` checks).
   folder, Android identity and platforms, for `scripts/release.py` and
   `mobile/android/build.py`. `scripts/test_release.py` checks it against the Rust
   module.
+- `Market::legal` (Rust) and `Legal` (`markets.py`) — the legal documents, source
+  link, support and community channels and age sign of a market (see
+  [Legal documents and links](#legal-documents-and-links-lr-06)). The two are
+  checked field for field by `test_release.py`.
 - `release.py build … --market ru [--feature ekza=on] [--server H:P]
   [--account-api URL --portal URL]` bakes the market and its endpoints into every
   package. A build refuses another market's servers, the global public lobby in a
@@ -70,6 +76,45 @@ The portal has no Supporter pages.
 
 **`vk_sign_in` on** — sign in with VK ID (VK, Одноклассники and Mail.ru are one
 VK ID app) on the portal and from the game, below.
+
+## Legal documents and links (LR-06)
+
+A market's legal table (`shared/src/market.rs` `Market::legal`, `scripts/markets.py`
+`Legal`) holds:
+
+| Field | RU value | Shown |
+| --- | --- | --- |
+| `version` | `0-draft` (the Russian drafts, LR-04) | first-launch card |
+| `privacy`, `terms` | `https://omoba.ru/privacy`, `https://omoba.ru/terms` | card, Settings → About, package README |
+| `source` | `https://github.com/o-moba/omoba-bevy/tree/v{version}-ru` | About, README (`{version}` is the release) |
+| `support_email`, `community_vk`, `community_telegram` | empty until the owner provides them (LR-21) | About, README; hidden while empty |
+| `age_rating` | `12+` (placeholder, LR-07) | card, boot splash, About, README |
+
+The global and CN markets have none of these, so their game shows no card and no
+About page, and their README is unchanged.
+
+**First launch (game).** A market with a `version` shows a card before anything
+else can be used: the documents open in the browser, the age sign and the
+language switch are on it, and **Continue** stays disabled until the player ticks
+«Я принимаю Пользовательское соглашение и Политику конфиденциальности». Until
+then the game opens no lobby connection, does not read the release catalog and
+offers no VK sign-in, device link or website pairing (one run condition,
+`client/src/legal.rs` `bound_and_accepted`). The acceptance is stored in the
+market's settings folder as `legal_acceptance.json`
+(`{region, doc_version, accepted_at}`, Unix seconds); a new `version` asks again.
+It is not sent to a server yet. Automation gets no exception: a harness for an RU
+build writes that file into its own `OMOBA_CLIENT_CONFIG_DIR` first.
+
+**Settings → About** lists the build label, the age sign, the documents, this
+release's source and the channels that are set.
+
+**Packages.** The README of an RU package ends with the age sign and the links
+(`release.py legal_readme`). `release.py catalog --market ru` refuses to write the
+download catalog until the public tag `v<version>-ru` exists on GitHub, so the
+source link always resolves.
+
+When the counsel-approved texts replace the drafts, give them a new `version` in
+both tables (and the portal's): every player is asked again.
 
 ## Sign in with VK ID
 
@@ -110,9 +155,9 @@ a code is single-use and expires in five minutes; unlinking needs a fresh sign-i
 
 ## Adding a market
 
-1. Add the variant and its preset, locale and storage suffix to
-   `shared/src/market.rs`, and the same entry with servers, platforms and zones
-   to `scripts/markets.py` (`cargo test -p shared market`, `make test-scripts`).
+1. Add the variant and its preset, locale, storage suffix and legal table to
+   `shared/src/market.rs`, and the same entry with servers, platforms, zones and
+   `Legal` to `scripts/markets.py` (`cargo test -p shared market`, `make test-scripts`).
 2. Make sure `client/i18n/<locale>/` exists.
 3. If it needs new behaviour, add a feature to both files and gate it at one
    choke point (the market tests show the pattern).
@@ -163,8 +208,10 @@ The steps that need accounts, money or legal decisions are the owner's.
    «Войти через VK ID», link, sign in on the portal, sign in on a second device.
    Every release then runs the [RU release checklist](../ops/vps/ru/release-checklist.md)
    on every platform and stores its result in `docs/progress/`.
-7. **Distribution.** Publish the IPFS links on the RU portal
-   (`OMOBA_RELEASE_CATALOG`) and, if wanted, RuStore / VK Play (store accounts
-   and age rating are the owner's).
+7. **Distribution.** Publish the GitHub release `v<version>-ru` first (`release.py
+   draft --market ru`, then `gh release edit v<version>-ru --draft=false`): the game's
+   About page and the README link its source, and `catalog` refuses until the tag
+   exists. Then publish the IPFS links on the RU portal (`OMOBA_RELEASE_CATALOG`)
+   and, if wanted, RuStore / VK Play (store accounts and age rating are the owner's).
 
 iOS is not packaged for RU: it needs its own App Store Connect record.

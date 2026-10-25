@@ -435,6 +435,9 @@ impl Plugin for CareerPlugin {
                     nickname_input,
                 )
                     .chain()
+                    // VK sign-in, device links and website pairing wait for
+                    // the region's legal acceptance (LR-06).
+                    .distributive_run_if(crate::legal::bound_and_accepted)
                     .after(UiSet::Dispatch)
                     .after(crate::mobile_ui::address_keyboard)
                     .after(crate::net::ClientNetPipeline::ApplySnapshot)
@@ -2687,6 +2690,23 @@ fn render(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// LR-06 acceptance: a fresh profile cannot start a VK sign-in, a device
+    /// link or website pairing (or poll the Account API for them) before it
+    /// accepted the region's legal documents.
+    #[test]
+    fn vk_sign_in_devices_and_pairing_wait_for_the_legal_acceptance() {
+        use crate::legal::gate_tests::{assert_carries, gate};
+        let mut app = App::new();
+        app.add_plugins(CareerPlugin);
+        for (system, what) in [
+            (IntoSystem::system_type_id(&actions), "career actions"),
+            (IntoSystem::system_type_id(&devices::poll), "device poll"),
+            (IntoSystem::system_type_id(&web::poll), "pairing poll"),
+        ] {
+            assert_carries(&app, Update, system, gate(), what);
+        }
+    }
 
     #[test]
     fn profile_buttons_follow_the_market_supporter_and_vk_sign_in() {
