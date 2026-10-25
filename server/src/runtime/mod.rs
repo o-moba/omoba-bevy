@@ -271,11 +271,7 @@ pub(crate) fn run() -> io::Result<()> {
             return Err(io::Error::other("Worker bind differs from allocation"));
         }
         match_config = MatchConfig {
-            mode: if worker.manifest.humans.len() == 10 {
-                MatchMode::Release
-            } else {
-                MatchMode::Practice
-            },
+            mode: worker.manifest.match_mode(),
             team_size: 5,
         };
     }
