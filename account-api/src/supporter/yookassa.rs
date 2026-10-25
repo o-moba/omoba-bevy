@@ -1,11 +1,12 @@
 //! YooKassa supporter donations (LR-67): settings and exactly-once settlement.
 //!
-//! This is the data half. The provider flow (the checkout POST, the webhook
-//! route, the reconciliation loop; LR-67b) re-reads every payment and refund
-//! from YooKassa with the shop credentials and hands the result to
-//! [`settle_payment_tx`] / [`settle_refund_tx`]. Those write the grant through
-//! `apply_event_tx` in the caller's transaction, so a grant, its amount, its
-//! tier points and the attempt's status change together or not at all:
+//! The provider flow ([`checkout`]: the checkout POST and the payment list;
+//! [`notifications`]: the webhook; [`reconcile`]: the background loop) re-reads
+//! every payment and refund from YooKassa with the shop credentials ([`api`])
+//! and hands the result to [`settle_payment_tx`] / [`settle_refund_tx`]. Those
+//! write the grant through `apply_event_tx` in the caller's transaction, so a
+//! grant, its amount, its tier points and the attempt's status change together
+//! or not at all:
 //!
 //! - a succeeded payment grants 30 days from its capture, once, with its amount
 //!   in kopecks and one tier point per whole ruble;
@@ -16,8 +17,24 @@
 //!
 //! Never log a provider body (card and customer data); amounts are integer
 //! kopecks, never floats.
+pub mod api;
+pub mod checkout;
+pub mod notifications;
+pub mod reconcile;
+
+pub use checkout::{checkout, offer, payments};
+pub use notifications::notification;
+pub use reconcile::reconcile;
+
 use super::{VerifiedEvent, apply_event_tx, payment_invalid};
 use crate::*;
+
+/// The production YooKassa API. Tests point the client at a loopback stand-in
+/// through [`TEST_ORIGIN_VAR`], which only a debug build accepts.
+pub const PRODUCTION_API: &str = "https://api.yookassa.ru/v3";
+/// A loopback `http://` origin standing in for YooKassa in tests (debug builds
+/// only; a release build refuses to start with it).
+pub const TEST_ORIGIN_VAR: &str = "OMOBA_YOOKASSA_TEST_API_ORIGIN";
 
 /// Kopecks per ruble: amounts are integer kopecks, never floats.
 pub const KOPECKS: i64 = 100;
@@ -54,6 +71,21 @@ pub struct YooKassaConfig {
     /// Exactly `OMOBA_YOOKASSA_NEW_CHARGES=1` allows new charges;
     /// reconciliation of existing attempts always runs.
     pub new_charges: bool,
+    /// The API base: [`PRODUCTION_API`], or `<loopback origin>/v3` in tests.
+    pub api_base: String,
+}
+
+/// A loopback `http://` origin without credentials, path, query or fragment.
+fn loopback_origin(raw: &str) -> bool {
+    reqwest::Url::parse(raw).is_ok_and(|url| {
+        url.scheme() == "http"
+            && matches!(url.host_str(), Some("127.0.0.1" | "localhost" | "[::1]"))
+            && url.username().is_empty()
+            && url.password().is_none()
+            && url.path() == "/"
+            && url.query().is_none()
+            && url.fragment().is_none()
+    }) && !raw.ends_with('/')
 }
 
 impl YooKassaConfig {
@@ -69,12 +101,34 @@ impl YooKassaConfig {
     }
 
     /// `None` when no YooKassa variable is set; any one of them makes the
-    /// whole set required (a partial shop configuration fails closed).
+    /// whole set required (a partial shop configuration fails closed). A
+    /// release build refuses the loopback test origin.
     pub fn parse(
         var: impl Fn(&str) -> Option<String>,
     ) -> std::result::Result<Option<Self>, String> {
+        Self::parse_build(var, !cfg!(debug_assertions))
+    }
+
+    /// [`Self::parse`] for a release (`true`) or debug build.
+    pub fn parse_build(
+        var: impl Fn(&str) -> Option<String>,
+        release: bool,
+    ) -> std::result::Result<Option<Self>, String> {
+        let test_origin = var(TEST_ORIGIN_VAR).filter(|value| !value.is_empty());
+        if test_origin.is_some() && release {
+            return Err(format!("{TEST_ORIGIN_VAR} is refused in release builds"));
+        }
+        if test_origin
+            .as_deref()
+            .is_some_and(|origin| !loopback_origin(origin))
+        {
+            return Err(format!("{TEST_ORIGIN_VAR} must be a loopback http origin"));
+        }
         let values = Self::VARS.map(|name| var(name).filter(|value| !value.is_empty()));
         if values.iter().all(Option::is_none) {
+            if test_origin.is_some() {
+                return Err(format!("{TEST_ORIGIN_VAR} needs the shop settings"));
+            }
             return Ok(None);
         }
         let [Some(shop_id), Some(secret_key), Some(vat_code), new_charges] = values else {
@@ -99,6 +153,10 @@ impl YooKassaConfig {
             secret_key,
             vat_code: vat,
             new_charges: new_charges.as_deref() == Some("1"),
+            api_base: match test_origin {
+                Some(origin) => format!("{origin}/v3"),
+                None => PRODUCTION_API.into(),
+            },
         }))
     }
 }
@@ -209,7 +267,17 @@ async fn locked_attempt(
         .fetch_optional(&mut **tx)
         .await?
     {
-        return read(&row).map(Some);
+        let attempt = read(&row)?;
+        // Every payment this API creates carries its attempt id; a bound
+        // payment naming another attempt is not settled (an operator reviews it).
+        if payment
+            .attempt_id
+            .as_deref()
+            .is_some_and(|id| id != attempt.attempt_id)
+        {
+            return Err(payment_invalid());
+        }
+        return Ok(Some(attempt));
     }
     let Some(id) = &payment.attempt_id else {
         return Ok(None);
@@ -509,6 +577,48 @@ mod tests {
                 .collect();
             assert!(YooKassaConfig::parse(env(&pairs)).is_err(), "{name}={bad}");
         }
+    }
+
+    #[test]
+    fn the_test_origin_is_loopback_only_and_refused_in_release_builds() {
+        let full = [
+            ("OMOBA_YOOKASSA_SHOP_ID", "123456"),
+            ("OMOBA_YOOKASSA_SECRET_KEY", "test_abcdefgh123"),
+            ("OMOBA_YOOKASSA_VAT_CODE", "1"),
+        ];
+        for release in [false, true] {
+            let config = YooKassaConfig::parse_build(env(&full), release)
+                .unwrap()
+                .unwrap();
+            assert_eq!(config.api_base, PRODUCTION_API);
+        }
+        let mut stand_in = full.to_vec();
+        stand_in.push((TEST_ORIGIN_VAR, "http://127.0.0.1:18080"));
+        let config = YooKassaConfig::parse_build(env(&stand_in), false)
+            .unwrap()
+            .unwrap();
+        assert_eq!(config.api_base, "http://127.0.0.1:18080/v3");
+        // A production (release) build never talks to a stand-in.
+        assert!(YooKassaConfig::parse_build(env(&stand_in), true).is_err());
+        for bad in [
+            "https://api.yookassa.ru",
+            "http://evil.example",
+            "http://127.0.0.1:18080/v3",
+            "http://127.0.0.1:18080/",
+            "http://user@127.0.0.1:18080",
+        ] {
+            let mut pairs = full.to_vec();
+            pairs.push((TEST_ORIGIN_VAR, bad));
+            assert!(
+                YooKassaConfig::parse_build(env(&pairs), false).is_err(),
+                "{bad}"
+            );
+        }
+        // The origin alone is not a shop.
+        assert!(
+            YooKassaConfig::parse_build(env(&[(TEST_ORIGIN_VAR, "http://127.0.0.1:1")]), false)
+                .is_err()
+        );
     }
 
     #[test]

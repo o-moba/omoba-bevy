@@ -84,6 +84,24 @@ async fn run() -> Result<(), String> {
             }
         }
     });
+    // YooKassa (LR-67): re-read open attempts, replay lost creates inside the
+    // 23-hour window and scan refunds. Does nothing without shop settings.
+    let yookassa_worker = app.clone();
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        loop {
+            interval.tick().await;
+            match omoba_account_api::supporter::yookassa::reconcile(&yookassa_worker).await {
+                Ok(report) if report.eventful() => eprintln!(
+                    "{}",
+                    serde_json::json!({"event": "yookassa_reconciliation", "report": report})
+                ),
+                Ok(_) => {}
+                Err(error) => eprintln!("yookassa reconciliation: {}", error.1),
+            }
+        }
+    });
     let worker = app.clone();
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(5));

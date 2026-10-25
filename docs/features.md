@@ -556,8 +556,13 @@ steps down to, lists the styles and, on RU desktop and Android builds, opens
 «Поддержать на сайте» (`<portal>/supporter`); iOS builds never link to a web
 payment. Protocol 12 carries the new styles; portal schema 9 stores amounts,
 points and the durable YooKassa attempts and refunds, and the Account API
-settles re-read payments and refunds exactly once. The checkout, webhook and
-portal pages follow in LR-67b and LR-67c. See [Hero tiers](supporter.md#hero-tiers).
+settles re-read payments and refunds exactly once. The Account API starts a
+donation (a 54-FZ receipt through «Чеки от ЮKassa», the Idempotence-Key stored
+before the payment is created), takes YooKassa's webhook without trusting its
+body, and reconciles open payments, lost creates (23 hours) and refunds every
+minute; new charges pause by themselves when the refund scan is stale. The RU
+portal pages follow in LR-67c. See [Hero tiers](supporter.md#hero-tiers) and
+[YooKassa donations](supporter.md#yookassa-donations).
 
 Core career schema is version 3 and portal schema is versions 1–7 and 9. Run owner migrations and the
 updated runtime grants before deploying matching game/API releases. See
@@ -1160,6 +1165,16 @@ follows.
 - The host's one Telegram bot lives in `alerts.env`; the backup alerts (LR-03) use it too. The public names come from `scripts/markets.py`.
 - Not yet: the lobby's queue, capacity and allocation metrics with their alerts, and bounded match archives (LR-17 server part).
 - Code: `ops/vps/ru/ru_monitor.py`, `ops/vps/ru/omoba-alert-ru@.service`, `ops/vps/ru/omoba-monitor-ru.{service,timer}`, `ops/vps/ru/postgresql-alert-ru.conf`, `ops/vps/ru/alerts.env.example`, `ops/vps/ru/journald-omoba-ru.conf`, `ops/vps/ru/ru_host.py` (install and `status`), `scripts/market_probe.py`, `ops/probe/`, `scripts/release.py` (`preflight`). See [Monitoring and alerts](../ops/vps/ru/README.md#monitoring-and-alerts), [the external probe](../ops/probe/README.md) and [the session note](progress/2026-10-24-lr-17-ops.md).
+
+## Protect progress (LR-18, unreleased)
+
+- After the first completed match, and again after the first ranked match, Home shows a dismissible card: «Защитите прогресс: VK ID или код восстановления.» (Protect / Not now). A "Not now" hides it for three completed matches, or until the first ranked match if that comes sooner, so players who never play ranked are asked again too; it stops once the profile is protected or after three declines. The record (`protect_prompt.json`: declines, matches at the last decline) lives in the region's settings folder.
+- Profile shows the account's protection (VK ID linked, unused recovery codes, or not protected yet) and a «Защитить прогресс» button. The Protect modal links VK ID where the region signs in with it and creates or replaces recovery codes in the game; replacing a set that still has unused codes needs a second press. The eight codes are shown once, grouped for reading, never stored or logged, and gone when the modal closes.
+- The codes come from a native Account API route signed by the device key (`POST /v1/auth/devices/recovery-codes`, `omoba.recovery.native.v1`, single-use nonce), on the RU and dev ingress allowlists; no portal session and no schema change.
+- «Привязать или восстановить аккаунт» offers «Ввести код восстановления» next to «Войти через VK ID» and the device request, and a request started from it asks for the code first.
+- Progress follows the VK-linked account; RU package READMEs and the RU portal (guest home, sign-in, `/connect`, Devices; o-moba/omoba-web#20) say so. The VK-verified support procedure is [account recovery](account-recovery.md); Android keeps `allowBackup=false` ([ADR-026](architecture/decisions.md#adr-026-android-keeps-allowbackupfalse-progress-survives-a-reinstall-through-vk-id-or-recovery-codes)).
+- Copy in en, ru and zh-Hans (`client/i18n/*/protect.json`).
+- Code: `shared/src/device_account.rs` (`NativeRecoveryRequest`, `AccountProtection`), `account-api/src/devices.rs` (`native_recovery`), `passport/src/device_account.rs`, `client/src/career_protection.rs`, `client/src/career_identity.rs` (`sign_recovery_request`), `client/src/career_devices.rs`, `client/src/frontend/home.rs`, `scripts/release.py` (`progress_readme`). See [the session note](progress/2026-10-24-lr-18.md).
 
 ## Moderation minimum (LR-15, unreleased)
 

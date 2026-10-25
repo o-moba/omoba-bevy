@@ -924,6 +924,35 @@ To                         Action      From
         self.assertEqual(ru_host.env_problems("lobby", tuned, KIT["examples"]["lobby"])[1],
                          ["OMOBA_LIMITS is not in lobby.env.example"])
 
+    def test_the_yookassa_shop_is_optional_all_or_none_and_never_a_stand_in(self):
+        example = KIT["examples"]["account-api"]
+        # The example documents the shop commented out: bootstrap fills nothing for it.
+        self.assertIn("# OMOBA_YOOKASSA_SHOP_ID=CHANGE_ME", example)
+        self.assertFalse(set(ru_host.YOOKASSA_KEYS) & set(ru_host.parse_env(example)[0]))
+        good = ru_host.fill_env(example, ru_host.placeholder_fill(ru_host.parse_env(example)[0], RU_IP, VK_ID))
+        shop = good + ("OMOBA_YOOKASSA_SHOP_ID=123456\nOMOBA_YOOKASSA_SECRET_KEY=test_abcdefgh12345\n"
+                       "OMOBA_YOOKASSA_VAT_CODE=1\nOMOBA_YOOKASSA_NEW_CHARGES=1\n")
+        self.assertEqual(ru_host.env_problems("account-api", shop, example, RU_IP), ([], []))
+        self.assertEqual(ru_host.env_problems("account-api", shop.replace("NEW_CHARGES=1", "NEW_CHARGES=0"),
+                                              example, RU_IP), ([], []))
+        cases = {
+            "OMOBA_YOOKASSA_VAT_CODE=1\n": ("", "needs OMOBA_YOOKASSA_VAT_CODE too"),
+            "VAT_CODE=1\n": ("VAT_CODE=13\n", "vat_code 1-12"),
+            "SHOP_ID=123456": ("SHOP_ID=shop-1", "numeric shop id"),
+            "SECRET_KEY=test_abcdefgh12345": ("SECRET_KEY=CHANGE_ME", "still a placeholder"),
+            "NEW_CHARGES=1": ("NEW_CHARGES=yes", "must be 1 (open) or 0 (paused)"),
+        }
+        for old, (new, needle) in cases.items():
+            problems = ru_host.env_problems("account-api", shop.replace(old, new), example, RU_IP)[0]
+            self.assertTrue(any(needle in problem for problem in problems), (old, problems))
+        stand_in = shop + "OMOBA_YOOKASSA_TEST_API_ORIGIN=http://127.0.0.1:18080\n"
+        problems, warnings = ru_host.env_problems("account-api", stand_in, example, RU_IP)
+        self.assertEqual(problems, ["OMOBA_YOOKASSA_TEST_API_ORIGIN is a test stand-in; a host never sets it"])
+        self.assertEqual(warnings, ["OMOBA_YOOKASSA_TEST_API_ORIGIN is not in account-api.env.example"])
+        # The switch alone is no shop.
+        problems = ru_host.env_problems("account-api", good + "OMOBA_YOOKASSA_NEW_CHARGES=1\n", example, RU_IP)[0]
+        self.assertTrue(any("all three or none" in problem for problem in problems), problems)
+
     def test_postgres_must_be_16_with_icu_on_loopback(self):
         good = {"version": 160004, "icu": True, "listen": "localhost", "port": 5432, "database_owner": None}
         self.assertEqual(ru_host.postgres_problems(good), [])

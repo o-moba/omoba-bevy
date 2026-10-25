@@ -324,7 +324,7 @@ Tables with no foreign key are left out of the diagram:
 
 - `schema_version`
 - `rate_limits` (HMAC identity × 1-minute bucket)
-- `supporter_nonces` (native replay protection)
+- `supporter_nonces` (native replay protection: Supporter requests and, since LR-18, in-game recovery-code requests)
 
 | Area | Tables | Notes | Source |
 | --- | --- | --- | --- |
@@ -443,7 +443,7 @@ Retention:
 
 ## Retention and cleanup
 
-The Account API runs `read::project(128)` and `App::cleanup` every 5 s, and `reconcile_apple` every 300 s (`account-api/src/main.rs`). Cleanup deletes in bounded batches of 256 or 1000 rows, except the sealed-pairing delivery clear (`UPDATE web_pairings SET delivery=NULL`), which has no batch limit. `App::cleanup` also runs `social::cleanup`.
+The Account API runs `read::project(128)` and `App::cleanup` every 5 s, `reconcile_apple` every 300 s and the YooKassa `reconcile` every 60 s (`account-api/src/main.rs`). Cleanup deletes in bounded batches of 256 or 1000 rows, except the sealed-pairing delivery clear (`UPDATE web_pairings SET delivery=NULL`), which has no batch limit. `App::cleanup` also runs `social::cleanup`.
 
 | Data | Lifetime | Mechanism |
 | --- | --- | --- |
@@ -462,7 +462,7 @@ The Account API runs `read::project(128)` and `App::cleanup` every 5 s, and `rec
 | `audit_events` | 30 days | `cleanup` |
 | `device_enrollments` | Expire after 300 s (`ENROLLMENT_SECONDS` in `shared/src/device_account.rs`, [supporter.md](../supporter.md)). Deleted 1 day after expiry unless a recovery code refers to them. Approved ones without a recovery-code reference are deleted on key revocation. | `cleanup`, `devices.rs` |
 | `recovery_codes` | Marked consumed when used or replaced. Rows are never deleted. | `devices.rs` |
-| `supporter_nonces` | Deleted 60 s after expiry | `cleanup` |
+| `supporter_nonces` (also in-game recovery-code requests) | Deleted 60 s after expiry | `cleanup` |
 | `supporter_events`, `supporter_grants`, `supporter_orders`, `supporter_accounts`, `supporter_preferences` | Permanent (billing audit) | none |
 | `social_tickets` | 30 min (`TICKET_SECONDS`). Also deleted when the identity is linked. | `social::cleanup`, `social.rs` |
 | `social_identities` (unlinked) | Deleted after 30 days without sign-in, unless any `social_links` row refers to them | `social::cleanup` (`UNLINKED_RETENTION_SECONDS`) |
@@ -489,6 +489,10 @@ The Account API runs `read::project(128)` and `App::cleanup` every 5 s, and `rec
 
 `reconcile_apple` holds `pg_advisory_xact_lock(721946109)`. It reserves at most 16 subscriptions per pass and updates `last_reconciled_at` before any outbound call, so several API replicas do not spin on the same subscriptions (`account-api/src/supporter.rs`).
 
+### YooKassa reconciliation
+
+`supporter::yookassa::reconcile` (RU, LR-67) first marks `created` attempts that were never posted for an hour `canceled`. It then holds `pg_advisory_xact_lock(721946110)` while it reserves at most 8 open attempts, oldest `last_polled_at` first, and stamps them before any outbound call. Submitted payments are re-read; a lost create is replayed with its stored Idempotence-Key inside 23 hours, after that it gets `last_error='provider_replay_window_expired'` and an issue row. The refund scan leases the single `supporter_yookassa_refund_scan` row (10 minutes), pages a fixed window `(watermark, window_end]` with YooKassa's cursor (stored after each page) and, when the window is done, moves `watermark` to `window_end - 301 s` and stamps `last_successful_at`. A refund it cannot settle is written to `supporter_yookassa_issues` before the cursor moves. New charges need `last_successful_at` within 30 minutes (`account-api/src/supporter/yookassa/`).
+
 ### Advisory lock keys
 
 New lock users should pick unused numbers.
@@ -505,6 +509,8 @@ New lock users should pick unused numbers.
 | `hashtextextended(…, 721946104)` | `read.rs` analytics (per profile, try), `supporter.rs` (per provider subscription) | One analytics request per account; subscription claim |
 | `hashtextextended(profile_id, 721946105)` (bigint form) | `ekza_library.rs` | Per-account Ekza link |
 | `721946109` | `supporter.rs` reconciliation | One Apple reconciler |
+| `721946110` | `supporter/yookassa/reconcile.rs` | Reserve a batch of YooKassa attempts |
+| `hashtextextended(profile_id, 721946111)` | `supporter/yookassa/checkout.rs` | One profile's checkouts (the open-attempt cap) |
 
 ## Secrets that are part of the data
 

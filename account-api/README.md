@@ -82,9 +82,11 @@ Do not log it or expose it in `NEXT_PUBLIC_` variables.
 Default `OMOBA_ACCOUNT_BIND=127.0.0.1:40550`; non-loopback binds fail. TLS is terminated
 by your existing trusted ingress. Native clients need ingress routes for POST
 `/v1/auth/pairings/lookup`, `/approve`, `/deny`,
-`/v1/auth/devices/create`, `/status`, `/recover`, `/complete`,
+`/v1/auth/devices/create`, `/status`, `/recover`, `/complete`, `/recovery-codes`,
 `/v1/supporter/native` and, with VK ID enabled, `/v1/auth/social/link`. Apple notifications use only the separately configured
-`/v1/supporter/apple/notifications` route. Next’s BFF uses the internal API.
+`/v1/supporter/apple/notifications` route. In a YooKassa market (RU) the ingress
+also passes YooKassa's webhook, `POST /v1/supporter/yookassa/notifications`, as its
+own public route. Next’s BFF uses the internal API.
 Do not broadly expose all API routes as an alternative browser backend.
 `OMOBA_ALLOW_INSECURE_LOCAL=1` permits the exact localhost/127.0.0.1 portal on port
 3010 for isolated development; never enable it for a remote HTTP site.
@@ -107,6 +109,13 @@ At most twenty active sessions are allowed per account; further completion retur
 `session_limit` until an existing session is revoked or expires. The account lock
 serializes this limit across simultaneous approvals.
 Revoking other sessions requires a new game confirmation within ten minutes.
+
+In-game recovery codes (LR-18): `POST /v1/auth/devices/recovery-codes`, signed by
+the game's active device key (`omoba.recovery.native.v1`, at most 60 s, single-use
+nonce), reads the account's protection (`status`: unused codes, linked sign-ins,
+active devices) or issues a new set of codes (`rotate`, the same table and the
+same per-profile limit as `POST /v1/me/recovery-codes`). It needs no portal
+session and no schema change. Tests: `tests/recovery_native_postgres.rs`.
 
 ## Sign in with VK ID (portal schema 7)
 
@@ -159,16 +168,76 @@ Tier points are set only here, in `apply_event_tx`, from the provider rule
 `supporter.tier_until`. `PATCH /v1/me/supporter/aura` refuses a tier style without
 its points (403 `tier_required`).
 
-YooKassa settings (all-or-none; the provider flow that uses them is LR-67b):
-`OMOBA_YOOKASSA_SHOP_ID` (digits), `OMOBA_YOOKASSA_SECRET_KEY`,
-`OMOBA_YOOKASSA_VAT_CODE` (1–12; 1 = без НДС) and `OMOBA_YOOKASSA_NEW_CHARGES`
-(exactly `1` allows new charges; reconciliation always runs). The settlement
-functions in `src/supporter/yookassa.rs` take payments and refunds re-read from
-YooKassa and settle them exactly once (see [supporter.md](../docs/supporter.md#hero-tiers)).
-The migration also creates the durable attempt, refund, refund-scan cursor and
-issue tables; the portal role may read, insert and update them but delete none.
-Tests: `tests/yookassa_settlement_postgres.rs` (synthetic provider objects,
-restricted portal role).
+YooKassa settings (all-or-none): `OMOBA_YOOKASSA_SHOP_ID` (digits),
+`OMOBA_YOOKASSA_SECRET_KEY`, `OMOBA_YOOKASSA_VAT_CODE` (1–12; 1 = без НДС) and
+`OMOBA_YOOKASSA_NEW_CHARGES` (exactly `1` allows new charges; reconciliation always
+runs). Only a build whose market sells through YooKassa (RU) accepts them.
+`OMOBA_YOOKASSA_TEST_API_ORIGIN` (a loopback `http://` origin) points the client at
+a local stand-in for tests; a release build refuses to start with it. The secret
+key and provider bodies (card and customer data) are never logged: a failed call
+logs its operation, the HTTP status and YooKassa's `x-request-id` only. Amounts
+are integer kopecks. The migration also creates the durable attempt, refund,
+refund-scan cursor and issue tables; the portal role may read, insert and update
+them but delete none.
+
+### YooKassa provider flow (LR-67b)
+
+`src/supporter/yookassa/` (`api.rs` the REST client, `checkout.rs`,
+`notifications.rs`, `reconcile.rs`). The rules come from the owner's production
+YooKassa integration; see [supporter.md](../docs/supporter.md#yookassa-donations)
+for the full list.
+
+- `POST /v1/me/supporter/yookassa/checkout` (session, `Idempotency-Key` header,
+  16–80 of `[A-Za-z0-9-]`) with `{amount_rub, receipt_email, quote, offer_version}`
+  answers `{confirmation_url, attempt_id}`: the HTTPS redirect to YooKassa's
+  payment page (never one with credentials). `amount_rub` is a tier (100, 250,
+  500, 1000, 2500, 5000, 10000) or any whole amount from 100 to 100 000.
+  `quote` must equal the server's `{amount_minor, currency: "RUB",
+  duration_days: 30, tier}` for that amount, else `409 reload`. The attempt, its
+  Idempotence-Key and the frozen «Чеки от ЮKassa» receipt (the e-mail, one
+  `service` item paid with `full_payment`, `vat_code` from the env, «OMOBA —
+  поддержка проекта (аура на 30 дней)») are committed before the POST; the
+  return URL is `<OMOBA_PORTAL_ORIGIN>/supporter?paid=1`. The same key repeats the
+  same attempt (re-reading its payment, never creating another); the same key with
+  another amount, e-mail or offer is `409 idempotency_conflict`. Other codes:
+  `400 amount_not_allowed`, `400 receipt_email_invalid`, `409 payment_succeeded`,
+  `409 payment_canceled`, `409 payment_in_progress`, `409 payment_manual_review`,
+  `409 too_many_open_payments` (10 open attempts per day), `503 new_charges_paused`
+  (the switch is off, or the refund scan has not succeeded for 30 minutes),
+  `503 payment_provider_unavailable`, `502 payment_provider_rejected`.
+- `GET /v1/me/supporter/yookassa/payments`: the owner's last 20 attempts of the
+  year (`pending`, `succeeded`, `canceled` or `review`, with `refunded_minor`). It
+  first re-reads the owner's newest submitted payment of the last hour (at most
+  every 5 s), so the return page sees a payment before its webhook.
+- `POST /v1/supporter/yookassa/notifications` (public; limits per IP 120/min and
+  600/min in total): the body is only a hint. A payment or refund this API did
+  not create answers `200 {"status":"ignored"}` without a call to YooKassa. A
+  payment is known when it is bound to an attempt or its metadata names a
+  posted, still unbound attempt (a lost create reply, also one in manual
+  review); a refund only when its payment is bound (an unbound attempt never
+  has a paid payment: the player gets the redirect after the bind). A known one
+  is re-read with the shop credentials and settled exactly once
+  (`200 {"status":"accepted"}`); a named object YooKassa answers 404 for is
+  `200 {"status":"ignored"}` too; any other processing error answers 5xx so
+  YooKassa delivers it again.
+- The dashboard (`GET /v1/me/supporter`) adds `yookassa`: `available`,
+  `new_charges`, `currency`, `duration_days`, `min_rub`, `max_rub`, `tiers_rub`.
+- Reconciliation (`reconcile`, every 60 s next to the Apple loop): closes
+  never-posted attempts after an hour; polls 8 open attempts per pass, oldest
+  polled first; replays a lost create with the same key and body while the first
+  provider attempt is younger than 23 hours, after that marks it
+  `provider_replay_window_expired` with an issue for manual review and never posts
+  it again; scans refunds in a fixed window with YooKassa's cursor stored in
+  `supporter_yookassa_refund_scan` (2 pages of 32 per pass), queueing every refund
+  it cannot settle as an issue before the cursor moves. Each eventful pass logs a
+  `yookassa_reconciliation` JSON line with counts only.
+
+Tests: `tests/yookassa_settlement_postgres.rs` (settlement with synthetic provider
+objects, restricted portal role) and `tests/yookassa_provider_postgres.rs` (the
+whole flow against a loopback YooKassa stand-in: the key persisted before the POST,
+replays under and over 23 hours, webhooks for unknown objects without a call,
+duplicate and late webhooks, refunds before payments, partial and full refunds,
+the durable refund cursor, the restricted portal role, and the routes per market).
 
 ## Projection and retention
 
