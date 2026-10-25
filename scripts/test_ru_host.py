@@ -658,6 +658,10 @@ class RuKitTest(unittest.TestCase):
         self.assertTrue(any("OnFailure" in problem for problem in ru_host.unit_problems("lobby", lobby)))
         job = backup["units"]["omoba-backup-ru.service"].replace("OnFailure=omoba-alert-ru@%n.service\n", "")
         self.assertTrue(any("OnFailure" in problem for problem in ru_host.backup_unit_problems("omoba-backup-ru.service", job)))
+        # Every PostgreSQL cluster unit too, by a drop-in for postgresql@.service: Ubuntu's
+        # postgresql.service is only a wrapper that stays active.
+        self.assertEqual(ru_host.parse_unit(monitor["pg_alert"])[0], {"Unit.OnFailure": ["omoba-alert-ru@%n.service"]})
+        self.assertEqual(ru_host.PG_ALERT_DROPIN, "/etc/systemd/system/postgresql@.service.d/50-omoba-ru-alert.conf")
 
     def test_the_monitor_kit_passes_every_rule(self):
         monitor = ru_host.decode_monitor_kit(KIT["monitor_kit_z"])
@@ -701,6 +705,13 @@ class RuKitTest(unittest.TestCase):
             self.assertTrue(any(needle in problem for problem in ru_host.alerts_example_problems(text)), needle)
         import ru_monitor
         with mock.patch.object(ru_monitor, "TIMERS", {"omoba-backup-ru.timer": "x"}):
+            self.assertIn("ru_monitor.py's host layout differs from ru_host.py's",
+                          ru_host.alerts_example_problems(example))
+        for text in ("", monitor["pg_alert"].replace("OnFailure=", "OnSuccess="),
+                     monitor["pg_alert"] + "\n[Service]\nRestart=always\n"):
+            self.assertEqual(ru_host.pg_alert_problems(text),
+                             ["postgresql-alert-ru.conf: only [Unit] OnFailure=omoba-alert-ru@%n.service belongs in it"])
+        with mock.patch.object(ru_monitor, "PG_ADDRESS", ("127.0.0.1", 5433)):
             self.assertIn("ru_monitor.py's host layout differs from ru_host.py's",
                           ru_host.alerts_example_problems(example))
         broken = dict(monitor, journald="[Journal]\n")
@@ -930,6 +941,7 @@ class BootstrapTest(HostCase):
         self.assertTrue(report["ok"], report)
         self.assertIn("apt-get install postgresql caddy ufw", report["would"][0])
         self.assertTrue(any("omoba-portal-ru" in step for step in report["would"]))
+        self.assertIn(f"install {ru_host.PG_ALERT_DROPIN} (the alert for a failed PostgreSQL cluster)", report["would"])
         self.assertTrue(any("placeholder" in warning for warning in report["warnings"]))
         self.assertTrue(any("Node.js" in warning for warning in report["warnings"]))
         changes = [call for call in self.fake.calls
@@ -1050,6 +1062,9 @@ class BootstrapTest(HostCase):
         self.assertEqual(Path(alerts).read_text(), (ROOT / "ops/vps/ru/alerts.env.example").read_text())
         self.assertEqual(Path(fake.p(ru_host.JOURNALD_DROPIN)).read_text(),
                          (ROOT / "ops/vps/ru/journald-omoba-ru.conf").read_text())
+        self.assertEqual(Path(fake.p(ru_host.PG_ALERT_DROPIN)).read_text(),
+                         (ROOT / "ops/vps/ru/postgresql-alert-ru.conf").read_text())
+        self.assertIn(f"install {ru_host.PG_ALERT_DROPIN}", result["done"])
         self.assertIn(["systemctl", "restart", "systemd-journald"], fake.calls)
         self.assertTrue(fake.unit(ru_host.MONITOR_TIMER)["active"])
         # The alert template is in place before any unit that names it.
@@ -1416,21 +1431,28 @@ class PortalAndRebootTest(HostCase):
         self.assertIn("monitor: no Telegram bot in /opt/omoba-ru/alerts.env: alerts reach the journal only",
                       report["warnings"])
         self.fake.monitor_problems = [("disk:/", "only 9% free on the filesystem of / (1.8 of 20.0 GiB; alert below 15%)"),
-                                      ("unit:omoba-portal-ru.service", "omoba-portal-ru.service is not running")]
+                                      ("unit:omoba-portal-ru.service", "omoba-portal-ru.service is not running"),
+                                      ("postgres:connect", "PostgreSQL does not accept connections on port 5432")]
         self.fake.enabled.discard(ru_host.MONITOR_TIMER)
         os.chmod(self.fake.p(ru_host.ALERTS_ENV), 0o644)
         os.unlink(self.fake.p(ru_host.JOURNALD_DROPIN))
+        os.unlink(self.fake.p(ru_host.PG_ALERT_DROPIN))
         problems = self.fresh().status(self.payload())["problems"]
         for needle in ("monitor: only 9% free on the filesystem of /",
                        "omoba-monitor-ru.timer is not enabled: the host check would not run after a reboot",
                        "/opt/omoba-ru/alerts.env must be root-owned with mode 0600",
-                       "/etc/systemd/journald.conf.d/50-omoba-ru.conf is not ops/vps/ru/journald-omoba-ru.conf"):
+                       "/etc/systemd/journald.conf.d/50-omoba-ru.conf is not ops/vps/ru/journald-omoba-ru.conf",
+                       "/etc/systemd/system/postgresql@.service.d/50-omoba-ru-alert.conf is not "
+                       "ops/vps/ru/postgresql-alert-ru.conf (bootstrap installs it): a crashed PostgreSQL alerts only "
+                       "at the next host check"):
             self.assertTrue(any(problem.startswith(needle) for problem in problems), (needle, problems))
-        self.assertFalse([problem for problem in problems if "monitor: omoba-portal-ru" in problem])
-        # Bootstrap puts the limits and the timer back and leaves the owner's alerts.env alone.
+        self.assertFalse([problem for problem in problems if "monitor: omoba-portal-ru" in problem
+                          or "monitor: PostgreSQL" in problem], "status checks units and PostgreSQL itself")
+        # Bootstrap puts the limits, the drop-in and the timer back and leaves the owner's alerts.env alone.
         Path(self.fake.p(ru_host.ALERTS_ENV)).write_text("OMOBA_ALERT_DISK_MIN_FREE_PERCENT=20\n")
         done = self.bootstrap()["done"]
         self.assertIn(f"install {ru_host.JOURNALD_DROPIN}", done)
+        self.assertIn(f"install {ru_host.PG_ALERT_DROPIN}", done)
         self.assertIn(f"systemctl enable {ru_host.MONITOR_TIMER}", done)
         self.assertEqual(Path(self.fake.p(ru_host.ALERTS_ENV)).read_text(), "OMOBA_ALERT_DISK_MIN_FREE_PERCENT=20\n")
         Path(self.fake.p(ru_host.MONITOR_SCRIPT)).write_text("#!/usr/bin/env python3\n")

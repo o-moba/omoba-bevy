@@ -460,7 +460,7 @@ Area: observability · **major** · M · ops (+S code)
     - failed allocations
   - [ ] An external probe runs every minute against the UDP compatibility check, Account API `/health/ready` and the portal, and alerts to Telegram after 2 consecutive failures. Shipped: `scripts/market_probe.py` with `ops/probe/omoba-probe@.{service,timer}` (names from `scripts/markets.py`); running it needs a probe host outside the RU host and the bot (owner, `ops/probe/README.md`).
   - [ ] Alerts exist for:
-    - any unit failure (`OnFailure=`): shipped, every RU unit → `omoba-alert-ru@.service` (`ru_monitor.py unit-failed`)
+    - any unit failure (`OnFailure=`): shipped, every RU unit and, by a drop-in, every PostgreSQL cluster unit → `omoba-alert-ru@.service` (`ru_monitor.py unit-failed`)
     - free disk below 15%: shipped (`ru_monitor.py check`, every 5 minutes)
     - capacity wait longer than N min: needs `QUEUE_METRIC` (server part)
     - failed allocations above N per hour: needs `QUEUE_METRIC` (server part)

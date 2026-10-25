@@ -296,7 +296,8 @@ what to look at first; the full list is in
 | Alert | First look |
 | --- | --- |
 | `<unit> failed (…)`, from `omoba-alert-ru@` | `journalctl -u <unit> -n 200`. A service is restarted by systemd every 5 s; repeated failures mean a crash loop: roll back (`ru_host.py rollback`) when a release caused it |
-| `<unit> is not running` | `systemctl status <unit>`; an enabled RU service must run. PostgreSQL down takes the lobby and the Account API with it |
+| `<unit> is not running` | `systemctl status <unit>`; an enabled RU service must run |
+| `postgresql@<v>-main.service failed`/`is not running`, `PostgreSQL does not accept connections on port 5432` | `journalctl -u postgresql@<v>-main.service -n 200`, `pg_lsclusters`, `df -h /var/lib/postgresql`. It takes the lobby and the Account API with it (the probe's `/health/ready` fails too). Once the cause is fixed, `systemctl start postgresql@<v>-main`; `systemctl status postgresql` says nothing, it is only a wrapper |
 | `<timer> is disabled/inactive` | `systemctl enable --now <timer>`; without it no backup is made or none is reported |
 | `only N% free on the filesystem of <path>` | `df -h`, `du -xsh /var/backups/omoba-ru/* /var/lib/omoba-ru/matches/archive`; the journal keeps itself to 1 GiB |
 | `match worker <id> (…) has written no heartbeat` | `journalctl -u omoba-lobby-ru`; the lobby relaunches stale workers, so a lasting one is stuck: its directory under `/var/lib/omoba-ru/matches/` |

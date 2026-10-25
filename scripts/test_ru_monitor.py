@@ -11,6 +11,7 @@ import http.client
 import io
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -28,10 +29,12 @@ T0 = 1_790_000_000.0
 TOKEN = "123456:" + "B" * 30
 BOT = f"OMOBA_TELEGRAM_BOT_TOKEN={TOKEN}\nOMOBA_TELEGRAM_CHAT_ID=-1001\n"
 LOBBY = ru_monitor.LOBBY
+CLUSTER = "postgresql@16-main.service"
+PG_ISREADY = ["pg_isready", "-h", "127.0.0.1", "-p", "5432", "-t", "10"]
 
 
 class FakeHost:
-    """systemd units as `systemctl show` reports them, a disk and a clock."""
+    """systemd units as `systemctl show` reports them, pg_isready, a disk and a clock."""
 
     def __init__(self):
         healthy = {"LoadState": "loaded", "ActiveState": "active", "SubState": "running",
@@ -43,6 +46,11 @@ class FakeHost:
                                 "UnitFileState": "static"}
         for name in ru_monitor.TIMERS:
             self.units[name] = {**healthy, "SubState": "waiting", "Type": ""}
+        # Ubuntu 24.04: postgresql.service is postgresql-common's wrapper, a oneshot that stays
+        # active/exited whatever its clusters do; the server is the cluster's own unit.
+        self.units["postgresql.service"] = {**healthy, "SubState": "exited", "Type": "oneshot"}
+        self.units[CLUSTER] = {**healthy, "Type": "forking"}
+        self.pg_ready = 0
         self.free = 0.5
         self.clock = T0
         self.uptime = 3600.0
@@ -50,6 +58,9 @@ class FakeHost:
 
     def run(self, args):
         self.calls.append(args)
+        if args[0] == "pg_isready":
+            assert args == PG_ISREADY, args
+            return subprocess.CompletedProcess(args, self.pg_ready, "", "")
         assert args[:2] == ["systemctl", "show"] and args[3].startswith("--property="), args
         unit = self.units.get(args[2], {"LoadState": "not-found", "ActiveState": "inactive"})
         return subprocess.CompletedProcess(args, 0, "".join(f"{key}={value}\n" for key, value in unit.items()), "")
@@ -78,6 +89,7 @@ class MonitorCase(unittest.TestCase):
         for path in ru_monitor.DISK_PATHS:
             os.makedirs(os.path.join(self.root, path.lstrip("/")), exist_ok=True)
         os.makedirs(self.p(ru_monitor.MATCH_ROOT), exist_ok=True)
+        self.cluster("16", "main")
         self.host = FakeHost()
         self.telegram = Telegram()
         self.journal = io.StringIO()
@@ -99,6 +111,14 @@ class MonitorCase(unittest.TestCase):
                                   now=lambda: self.host.clock, monotonic=lambda: 10 + self.host.uptime,
                                   statvfs=self.host.statvfs, opener=self.telegram, stderr=self.journal,
                                   hostname="ru-1")
+
+    def cluster(self, version, name, start=None):
+        """A cluster as `apt-get install postgresql` creates it: /etc/postgresql/<version>/<name>/."""
+        folder = self.p(f"{ru_monitor.PG_CONF_DIR}/{version}/{name}")
+        os.makedirs(folder, exist_ok=True)
+        Path(folder, "postgresql.conf").write_text("port = 5432\n")
+        if start is not None:
+            Path(folder, "start.conf").write_text(f"# Automatic startup configuration\n{start}\n")
 
     def check(self):
         report = self.monitor().check()
@@ -138,27 +158,67 @@ class CheckTest(MonitorCase):
         self.assertTrue(report["ok"], report["problems"])
         self.assertEqual(list(report["facts"]["disk"]), ["/"], "one entry per filesystem")
         self.assertEqual(report["warnings"], [])
+        self.assertEqual((report["facts"]["postgres"]["clusters"], report["facts"]["postgres"]["accepting"]),
+                         (["16-main"], True))
 
     def test_units(self):
         units = self.host.units
         units["omoba-portal-ru.service"].update(ActiveState="activating", SubState="auto-restart", NRestarts="14")
         units["omoba-account-api-ru.service"].update(ActiveState="inactive", UnitFileState="disabled")
-        units["postgresql.service"].update(ActiveState="failed", SubState="failed")
+        units["caddy.service"].update(ActiveState="failed", SubState="failed")
+        # A crashed cluster: its own unit failed, the wrapper still active/exited.
+        units[CLUSTER].update(ActiveState="failed", SubState="failed", Result="signal")
         units["omoba-backup-ru.service"].update(ActiveState="failed", Result="exit-code")
         units["omoba-backup-check-ru.timer"].update(UnitFileState="disabled", ActiveState="inactive")
         del units["omoba-restore-drill-ru.timer"]
         report = self.check()
-        self.assertEqual(report["codes"], ["unit:omoba-portal-ru.service", "unit:postgresql.service",
+        self.assertEqual(report["codes"], ["unit:omoba-portal-ru.service", "unit:caddy.service",
                                            "unit:omoba-backup-ru.service", "unit:omoba-restore-drill-ru.timer",
-                                           "unit:omoba-backup-check-ru.timer"],
+                                           "unit:omoba-backup-check-ru.timer", f"unit:{CLUSTER}"],
                          "a disabled RU service has no release yet and is not a problem")
         problems = "\n".join(report["problems"])
         for needle in ("omoba-portal-ru.service is not running (activating/auto-restart, 14 restarts",
+                       f"{CLUSTER} is not running (failed/failed, 0 restarts; journalctl -u {CLUSTER})",
                        "omoba-backup-ru.service: the last run failed (exit-code",
                        "omoba-restore-drill-ru.timer is not installed: no monthly restore drill runs",
                        "omoba-backup-check-ru.timer is disabled, inactive: a missing or failed backup is no longer "
                        "reported (systemctl enable --now omoba-backup-check-ru.timer)"):
             self.assertIn(needle, problems)
+
+    def test_postgres_watches_the_cluster_not_the_wrapper(self):
+        """Ubuntu's postgresql.service stays active/exited with its cluster down; the check
+        watches postgresql@<version>-<name>.service and then port 5432."""
+        units = self.host.units
+        units[CLUSTER].update(ActiveState="inactive", SubState="dead")      # pg_ctlcluster 16 main stop
+        report = self.check()
+        self.assertEqual(report["codes"], [f"unit:{CLUSTER}"])
+        self.assertIn(f"{CLUSTER} is not running (inactive/dead", report["problems"][0])
+        self.assertNotIn(PG_ISREADY, self.host.calls, "a stopped unit already says why")
+        self.assertEqual(units["postgresql.service"]["ActiveState"], "active", "the wrapper hides it")
+        # The unit runs but the server takes no connection (recovery, a hung postmaster).
+        units[CLUSTER].update(ActiveState="active", SubState="running")
+        for code, why in ((2, "no response"), (1, "it rejects connections: starting, stopping or recovering"),
+                          (127, "pg_isready did not run")):
+            self.host.pg_ready = code
+            report = self.check()
+            self.assertEqual(report["codes"], ["postgres:connect"])
+            self.assertEqual(report["problems"][0], f"PostgreSQL does not accept connections on port 5432 ({why}; "
+                                                    f"journalctl -u {CLUSTER})")
+        self.host.pg_ready = 0
+        # Every cluster that starts at boot is watched; manual, disabled and half-made ones are not.
+        self.cluster("17", "main")
+        self.cluster("16", "scratch", start="manual")
+        self.cluster("16", "old", start="disabled")
+        os.makedirs(self.p(f"{ru_monitor.PG_CONF_DIR}/16/empty"))
+        units["postgresql@17-main.service"] = {"LoadState": "loaded", "ActiveState": "failed", "SubState": "failed"}
+        report = self.check()
+        self.assertEqual(report["facts"]["postgres"]["clusters"], ["16-main", "17-main"])
+        self.assertEqual(report["codes"], ["unit:postgresql@17-main.service"])
+        # No cluster that starts at boot: nothing to watch is itself the problem.
+        shutil.rmtree(self.p(ru_monitor.PG_CONF_DIR))
+        report = self.check()
+        self.assertEqual(report["codes"], ["postgres:cluster"])
+        self.assertIn("no PostgreSQL cluster in /etc/postgresql starts at boot", report["problems"][0])
 
     def test_disk_below_the_threshold(self):
         self.host.free = 0.149
@@ -310,6 +370,28 @@ class UnitFailedTest(MonitorCase):
         self.host.units[other]["ActiveState"] = "inactive"
         self.monitor().alert_check()
         self.assertIn("omoba-nftables-ru.service: ok again", self.telegram.sent[-1])
+
+    def test_a_crashed_cluster_is_one_alert_from_the_drop_in_and_the_check(self):
+        """postgresql-alert-ru.conf gives the cluster unit OnFailure=; the host check reports it
+        under the same code, so one crash is one message until the hourly reminder."""
+        self.host.units[CLUSTER].update(ActiveState="failed", SubState="failed", Result="signal")
+        self.failed(CLUSTER, service_result="signal", exit_code="killed", exit_status="KILL")
+        self.assertEqual(self.telegram.sent, [
+            f"OMOBA RU host ru-1: unit failed\n- {CLUSTER} failed (signal, killed KILL); it stays down, 0 restarts "
+            f"so far (journalctl -u {CLUSTER})"])
+        self.host.clock += 300
+        report = self.monitor().alert_check()
+        self.assertEqual(report["problems"], [f"{CLUSTER} is not running (failed/failed, 0 restarts; "
+                                              f"journalctl -u {CLUSTER})"])
+        self.assertEqual((report["alerted"], len(self.telegram.sent)), ([], 1))
+        self.host.units[CLUSTER].update(ActiveState="active", SubState="running")
+        self.host.clock += 300
+        self.monitor().alert_check()
+        self.assertEqual(len(self.telegram.sent), 1, "resolved only after 15 minutes without it")
+        self.host.clock += 900
+        self.monitor().alert_check()
+        self.assertEqual(self.telegram.sent[-1], f"OMOBA RU host ru-1: resolved\n- {CLUSTER}: ok again "
+                                                 "(first seen 2026-09-21 14:13 UTC)")
 
     def test_refusals(self):
         with self.assertRaises(ru_monitor.MonitorError):

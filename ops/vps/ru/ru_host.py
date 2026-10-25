@@ -46,8 +46,9 @@ on anything but Ubuntu 24.04+ x86-64, or where $RU_IP is not a local address
 (--behind-nat accepts provider NAT). Bootstrap writes /opt/omoba-ru/host.json; every
 later run needs it to name market ru and $RU_IP. It writes only below /opt/omoba-ru,
 /var/lib/omoba-ru, /var/backups/omoba-ru, /var/log/caddy (the download log), its own unit
-files, /etc/caddy/Caddyfile, /etc/ssh/sshd_config.d/00-omoba-ru.conf and the journal limits
-/etc/systemd/journald.conf.d/50-omoba-ru.conf (LR-17), never prints or
+files, /etc/caddy/Caddyfile, /etc/ssh/sshd_config.d/00-omoba-ru.conf, the journal limits
+/etc/systemd/journald.conf.d/50-omoba-ru.conf and the PostgreSQL alert drop-in
+/etc/systemd/system/postgresql@.service.d/50-omoba-ru-alert.conf (LR-17), never prints or
 passes a secret in argv, never overwrites a generated secret, never interrupts a running
 match, never migrates without the encrypted off-host backup of ru_backup.py (LR-03) and
 rolls a failed ship back to the previous release.
@@ -138,6 +139,11 @@ JOURNALD_DROPIN = JOURNALD_DIR + "/50-omoba-ru.conf"
 JOURNALD_SOURCE = "journald-omoba-ru.conf"
 PYTHON = "/usr/bin/python3"
 UNIT_DIR = "/etc/systemd/system"
+# The alert for every PostgreSQL cluster unit (postgresql@<version>-<name>.service): Ubuntu's
+# postgresql.service is only a wrapper that stays active whatever its clusters do (LR-17).
+PG_ALERT_DIR = UNIT_DIR + "/postgresql@.service.d"
+PG_ALERT_DROPIN = PG_ALERT_DIR + "/50-omoba-ru-alert.conf"
+PG_ALERT_SOURCE = "postgresql-alert-ru.conf"
 CADDYFILE = "/etc/caddy/Caddyfile"
 SSHD_DROPIN = "/etc/ssh/sshd_config.d/00-omoba-ru.conf"
 AUTHORIZED_KEYS = "/root/.ssh/authorized_keys"
@@ -291,7 +297,7 @@ def is_foreign_name(value: str, own_zones=()) -> bool:
 
 
 ALLOWED_WRITES = (OPT, STATE, BACKUPS, CADDY_LOGS, CADDYFILE, CADDYFILE + ".orig", CADDYFILE + ".omoba-next",
-                  SSHD_DROPIN, JOURNALD_DROPIN,
+                  SSHD_DROPIN, JOURNALD_DROPIN, PG_ALERT_DROPIN,
                   *(f"{UNIT_DIR}/{name}" for name in (*UNIT_FILES.values(), *BACKUP_UNITS, *MONITOR_UNITS)))
 
 
@@ -548,6 +554,13 @@ def journald_problems(text: str) -> list[str]:
     return problems
 
 
+def pg_alert_problems(text: str) -> list[str]:
+    """The PostgreSQL drop-in only gives every cluster unit the RU alert (LR-17)."""
+    if parse_unit(text or "")[0] != {"Unit.OnFailure": [ON_FAILURE]}:
+        return [f"{PG_ALERT_SOURCE}: only [Unit] OnFailure={ON_FAILURE} belongs in it"]
+    return []
+
+
 def monitor_kit_problems(monitor, own_zones=()) -> list[str]:
     if not isinstance(monitor, dict) or not isinstance(monitor.get("units"), dict) or \
             set(monitor["units"]) != set(MONITOR_UNITS):
@@ -561,6 +574,7 @@ def monitor_kit_problems(monitor, own_zones=()) -> list[str]:
     if not isinstance(example, str) or "\nOMOBA_ALERT_DISK_MIN_FREE_PERCENT=" not in example:
         problems.append(f"the monitor kit lacks {ALERTS_ENV_EXAMPLE}")
     problems += journald_problems(monitor.get("journald"))
+    problems += pg_alert_problems(monitor.get("pg_alert"))
     return problems
 
 
@@ -1667,6 +1681,8 @@ class Host:
             would.append(f"write {ALERTS_ENV} (root 0600) from {ALERTS_ENV_EXAMPLE}; the owner adds the Telegram bot")
         if self.read(JOURNALD_DROPIN) != monitor["journald"]:
             would.append(f"install {JOURNALD_DROPIN} (journal limits), restart systemd-journald")
+        if self.read(PG_ALERT_DROPIN) != monitor["pg_alert"]:
+            would.append(f"install {PG_ALERT_DROPIN} (the alert for a failed PostgreSQL cluster)")
         would.append("systemctl enable postgresql caddy (+ each RU unit whose release is installed) and start "
                      + " ".join((*BACKUP_TIMERS, MONITOR_TIMER)))
         more, notes = dns_problems(self.resolve, payload["expected_ip"], names)
@@ -1965,8 +1981,8 @@ class Host:
         return done
 
     def ensure_monitor_kit(self, monitor: dict) -> list:
-        """ru_monitor.py, the alert template, the host check and its timer, alerts.env with
-        placeholders (never replaced) and the journal limits (LR-17)."""
+        """ru_monitor.py, the alert template, the host check and its timer, the PostgreSQL alert
+        drop-in, alerts.env with placeholders (never replaced) and the journal limits (LR-17)."""
         done = []
         if self.read(MONITOR_SCRIPT) != monitor["script"]:
             self._write(MONITOR_SCRIPT, monitor["script"], 0o755)
@@ -1978,6 +1994,12 @@ class Host:
                 self._write(path, monitor["units"][name], 0o644)
                 done.append(f"install {path}")
                 changed = True
+        if self.read(PG_ALERT_DROPIN) != monitor["pg_alert"]:
+            if not os.path.isdir(self.p(PG_ALERT_DIR)):
+                self.command("install", "-d", "-o", "root", "-g", "root", "-m", "0755", self.p(PG_ALERT_DIR))
+            self._write(PG_ALERT_DROPIN, monitor["pg_alert"], 0o644)
+            done.append(f"install {PG_ALERT_DROPIN}")
+            changed = True
         if changed:
             self.command("systemctl", "daemon-reload")
         if self.read(ALERTS_ENV) is None:
@@ -2001,7 +2023,8 @@ class Host:
 
     def monitor_report(self, payload: dict) -> tuple[list, list, dict]:
         """The monitor kit as installed, its timer, the journal limits and the host check's disk
-        and worker findings (`ru_monitor.py check`; its unit findings are this status's own)."""
+        and worker findings (`ru_monitor.py check`; its unit and PostgreSQL findings are this
+        status's own: units above, PostgreSQL through psql)."""
         monitor = self.payload_monitor_kit(payload)
         problems, warnings = [], []
         script_ok = self.read(MONITOR_SCRIPT) == monitor["script"]
@@ -2012,6 +2035,9 @@ class Host:
                 problems.append(f"{UNIT_DIR}/{name} differs from ops/vps/ru/{name} (bootstrap installs it)")
         if self.read(JOURNALD_DROPIN) != monitor["journald"]:
             problems.append(f"{JOURNALD_DROPIN} is not ops/vps/ru/{JOURNALD_SOURCE} (bootstrap installs it)")
+        if self.read(PG_ALERT_DROPIN) != monitor["pg_alert"]:
+            problems.append(f"{PG_ALERT_DROPIN} is not ops/vps/ru/{PG_ALERT_SOURCE} (bootstrap installs it): "
+                            "a crashed PostgreSQL alerts only at the next host check")
         local = self.p(ALERTS_ENV)
         if not os.path.isfile(local) or os.path.islink(local):
             problems.append(f"{ALERTS_ENV} is missing (bootstrap writes it)")
@@ -2036,7 +2062,7 @@ class Host:
                                 f"({redact(result.stderr.strip())[-300:] or 'no output'})")
             else:
                 problems += [f"monitor: {text}" for code, text in zip(report["codes"], report["problems"])
-                             if not str(code).startswith("unit:")]
+                             if not str(code).startswith(("unit:", "postgres:"))]
                 warnings += [f"monitor: {warning}" for warning in report.get("warnings") or []]
                 facts = {key: (report.get("facts") or {}).get(key) for key in ("disk", "workers")}
         return problems, warnings, facts
@@ -2677,7 +2703,8 @@ def kit(names: dict | None = None) -> dict:
     monitor = {"script": (RU_DIR / "ru_monitor.py").read_text(),
                "units": {name: (RU_DIR / name).read_text() for name in MONITOR_UNITS},
                "env_example": (RU_DIR / ALERTS_ENV_EXAMPLE).read_text(),
-               "journald": (RU_DIR / JOURNALD_SOURCE).read_text()}
+               "journald": (RU_DIR / JOURNALD_SOURCE).read_text(),
+               "pg_alert": (RU_DIR / PG_ALERT_SOURCE).read_text()}
     problems += monitor_kit_problems(monitor, own_zones)
     problems += alerts_example_problems(monitor["env_example"])
     if problems:
@@ -2702,7 +2729,7 @@ def alerts_example_problems(text: str) -> list[str]:
             ru_monitor.MATCH_ROOT != UNIT_ENV_RULES["lobby"]["OMOBA_MATCH_ROOT"] or \
             set(ru_monitor.SERVICES) != set(UNIT_FILES.values()) or ru_monitor.LOBBY != UNIT_FILES["lobby"] or \
             set(ru_monitor.JOBS) != set(jobs) or set(ru_monitor.TIMERS) != set(BACKUP_TIMERS) or \
-            not {BACKUPS, STATE}.issubset(ru_monitor.DISK_PATHS):
+            ru_monitor.PG_ADDRESS != (DB_HOST, DB_PORT) or not {BACKUPS, STATE}.issubset(ru_monitor.DISK_PATHS):
         problems.append("ru_monitor.py's host layout differs from ru_host.py's")
     return problems
 
@@ -2918,8 +2945,8 @@ def command_bootstrap(args) -> int:
         f"roles {', '.join(DB_ROLES)}, database {DB_NAME}",
         f"Caddyfile.ru -> {CADDYFILE}; {SSHD_DROPIN} (key-only SSH); ufw: SSH, {HTTPS_PORT}/tcp, "
         f"{LOBBY_PORT}/udp, the arena range",
-        "monitoring (LR-17): ru_monitor.py, the OnFailure= alert, the 5-minute host check, "
-        f"{ALERTS_ENV} (placeholders) and the journal limits {JOURNALD_DROPIN}",
+        "monitoring (LR-17): ru_monitor.py, the OnFailure= alert (also for every PostgreSQL cluster), "
+        f"the 5-minute host check, {ALERTS_ENV} (placeholders) and the journal limits {JOURNALD_DROPIN}",
         "units installed; postgresql, caddy and units with a release enabled; full status at the end"]}
 
     def apply() -> int:

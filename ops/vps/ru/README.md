@@ -57,7 +57,7 @@ Everything below runs on this one host; only Caddy listens publicly for HTTP.
 
 | Piece | Where | Started by |
 | --- | --- | --- |
-| PostgreSQL 16+ (Ubuntu package, ICU `und-x-icu`), database `omoba_ru`, `127.0.0.1:5432` only | cluster `/var/lib/postgresql` | `postgresql.service` |
+| PostgreSQL 16+ (Ubuntu package, ICU `und-x-icu`), database `omoba_ru`, `127.0.0.1:5432` only | cluster `/var/lib/postgresql` | `postgresql@<version>-main.service` (`postgresql.service` is postgresql-common's wrapper, a oneshot that stays active) |
 | Lobby + match workers, user `omoba-ru` | `/opt/omoba-ru/current/omoba-server`, state in `/var/lib/omoba-ru` | [omoba-lobby-ru.service](omoba-lobby-ru.service) |
 | Account API, user `omoba-ru`, `127.0.0.1:40550` | `/opt/omoba-ru/current/omoba-account-api` | [omoba-account-api-ru.service](omoba-account-api-ru.service) |
 | Portal, user `omoba-portal-ru`, `127.0.0.1:3010` | `/opt/omoba-ru/portal/current/server.js` on `/opt/omoba-ru/node/current/bin/node` | [omoba-portal-ru.service](omoba-portal-ru.service) |
@@ -65,7 +65,7 @@ Everything below runs on this one host; only Caddy listens publicly for HTTP.
 | Downloads (LR-23): packages, root 0755/0644, and Caddy's log of them | `/opt/omoba-ru/downloads/<tag>/`; `/var/log/caddy/omoba-ru-downloads.log` (caddy, 0640) | `release.py publish --market ru` (rsync); read by `caddy.service` |
 | Env files (root, 0600) | `/opt/omoba-ru/{lobby,account-api,portal}.env` from the `*.env.example` files here | read by systemd |
 | Backups (LR-03), root | [ru_backup.py](ru_backup.py) as `/opt/omoba-ru/backup/ru_backup.py`; settings `/opt/omoba-ru/backup.env` (root 0600, from [backup.env.example](backup.env.example)), keys in `/opt/omoba-ru/backup-keys/` (0700); host copies in `/var/backups/omoba-ru/` (0700) | [omoba-backup-ru.timer](omoba-backup-ru.timer) nightly, [omoba-restore-drill-ru.timer](omoba-restore-drill-ru.timer) monthly, [omoba-backup-check-ru.timer](omoba-backup-check-ru.timer) hourly |
-| Monitoring and alerts (LR-17), root | [ru_monitor.py](ru_monitor.py) as `/opt/omoba-ru/monitor/ru_monitor.py`; settings `/opt/omoba-ru/alerts.env` (root 0600, from [alerts.env.example](alerts.env.example)); state in `/var/lib/omoba-ru-monitor/`; journal limits `/etc/systemd/journald.conf.d/50-omoba-ru.conf` ([journald-omoba-ru.conf](journald-omoba-ru.conf)) | [omoba-alert-ru@.service](omoba-alert-ru@.service) on any unit's failure (`OnFailure=`), [omoba-monitor-ru.timer](omoba-monitor-ru.timer) every 5 minutes |
+| Monitoring and alerts (LR-17), root | [ru_monitor.py](ru_monitor.py) as `/opt/omoba-ru/monitor/ru_monitor.py`; settings `/opt/omoba-ru/alerts.env` (root 0600, from [alerts.env.example](alerts.env.example)); state in `/var/lib/omoba-ru-monitor/`; journal limits `/etc/systemd/journald.conf.d/50-omoba-ru.conf` ([journald-omoba-ru.conf](journald-omoba-ru.conf)); the PostgreSQL alert drop-in `/etc/systemd/system/postgresql@.service.d/50-omoba-ru-alert.conf` ([postgresql-alert-ru.conf](postgresql-alert-ru.conf)) | [omoba-alert-ru@.service](omoba-alert-ru@.service) on any unit's failure (`OnFailure=`), [omoba-monitor-ru.timer](omoba-monitor-ru.timer) every 5 minutes |
 
 All three OMOBA units restart on any exit every 5 s without a start limit
 (`Restart=always`, `StartLimitIntervalSec=0`), and each failure alerts the owner
@@ -139,8 +139,9 @@ the kit files it names.
      backup fails and alerts, and `status` lists what is missing.
    - The monitoring kit (LR-17), installed before the units that name it: `ru_monitor.py`,
      the alert template `omoba-alert-ru@.service`, the host check and its timer (enabled
-     and started), `/opt/omoba-ru/alerts.env` from `alerts.env.example` (written once,
-     never replaced) and the journal limits, after which `systemd-journald` restarts.
+     and started), the drop-in that gives every PostgreSQL cluster unit the alert,
+     `/opt/omoba-ru/alerts.env` from `alerts.env.example` (written once, never replaced)
+     and the journal limits, after which `systemd-journald` restarts.
 2. **Lobby and Account API** from the RU Linux package:
    ```sh
    python3 scripts/release.py build linux --market ru
@@ -294,8 +295,9 @@ alerts stay in the journal.
 
 | Alert | Source | When | Repeats while it lasts |
 | --- | --- | --- | --- |
-| A unit failed: lobby, Account API, portal, backup, restore drill, backup check, host check | `OnFailure=omoba-alert-ru@%n.service` in every RU unit → `ru_monitor.py unit-failed` | at once, also on each crash before `Restart=` brings a service back (systemd 254+; Ubuntu 24.04 has 255) | hourly for a service; daily for a timer job, whose tool sends the details itself |
-| An enabled RU service, PostgreSQL or Caddy is not running | `ru_monitor.py check --alert` ([omoba-monitor-ru.timer](omoba-monitor-ru.timer), every 5 minutes) | at the next check | hourly |
+| A unit failed: lobby, Account API, portal, backup, restore drill, backup check, host check, a PostgreSQL cluster | `OnFailure=omoba-alert-ru@%n.service` in every RU unit and, by [postgresql-alert-ru.conf](postgresql-alert-ru.conf), in every `postgresql@<version>-<name>.service` → `ru_monitor.py unit-failed` | at once, also on each crash before `Restart=` brings a service back (systemd 254+; Ubuntu 24.04 has 255) | hourly for a service; daily for a timer job, whose tool sends the details itself |
+| An enabled RU service or Caddy is not running | `ru_monitor.py check --alert` ([omoba-monitor-ru.timer](omoba-monitor-ru.timer), every 5 minutes) | at the next check | hourly |
+| A PostgreSQL cluster that starts at boot (`/etc/postgresql/<version>/<name>/`, as `pg_lsclusters` lists it) is not running, or port 5432 accepts no connection (`pg_isready`, no login). `postgresql.service` is only postgresql-common's wrapper, active whatever its clusters do, so the check watches `postgresql@<version>-<name>.service` | the same check; a crash also alerts at once through the drop-in, under the same alert | at the next check | hourly |
 | A backup, drill or backup-check timer is disabled or stopped: no backup is made, or a missing one is no longer reported | the same check | at the next check | hourly |
 | Free disk below 15% on a filesystem the host writes to (`/`, PostgreSQL, `/var/lib/omoba-ru`, `/var/backups/omoba-ru`, `/var/log`, `/opt/omoba-ru`) | the same check | at the next check | hourly |
 | A live match worker has written no heartbeat (`<match root>/<allocation>/status.json`) for 5 minutes while the lobby has run that long (the lobby relaunches a stale worker after 100 s) | the same check | at the next check | hourly |

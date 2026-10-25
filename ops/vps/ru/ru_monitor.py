@@ -11,7 +11,10 @@ the host's one Telegram bot and the alert thresholds.
     ru_monitor.py test-alert              # one test message: is the bot set up?
 
 `check` finds:
-- an RU service that is enabled but not running, or PostgreSQL or Caddy down;
+- an RU service that is enabled but not running, or Caddy down;
+- a PostgreSQL cluster down: its postgresql@<version>-<name>.service not running, or no
+  connection accepted on port 5432 (Ubuntu's postgresql.service is only a wrapper that
+  stays active whatever its clusters do);
 - a failed backup, restore drill or backup check run, and a backup timer that is
   disabled or stopped (then no backup is made and no missing backup is reported);
 - free disk below OMOBA_ALERT_DISK_MIN_FREE_PERCENT (15) on any filesystem the host
@@ -56,7 +59,15 @@ SAFE_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 # The RU host's units (ru_host.py checks these lists against its own kit).
 LOBBY = "omoba-lobby-ru.service"
 SERVICES = (LOBBY, "omoba-account-api-ru.service", "omoba-portal-ru.service")
-SYSTEM_SERVICES = ("postgresql.service", "caddy.service")
+SYSTEM_SERVICES = ("caddy.service",)
+# PostgreSQL: Ubuntu's postgresql.service is postgresql-common's wrapper (Type=oneshot,
+# ExecStart=/bin/true, RemainAfterExit=yes), active/exited even with every cluster down.
+# Each cluster runs as postgresql@<version>-<name>.service; the ones that start at boot are
+# /etc/postgresql/<version>/<name>/ with start.conf "auto" or none (pg_lsclusters).
+PG_CONF_DIR = "/etc/postgresql"
+PG_ADDRESS = ("127.0.0.1", 5432)                    # DB_HOST, DB_PORT of ru_host.py
+PG_ISREADY = {1: "it rejects connections: starting, stopping or recovering", 2: "no response",
+              3: "pg_isready made no attempt"}
 JOBS = ("omoba-backup-ru.service", "omoba-restore-drill-ru.service", "omoba-backup-check-ru.service")
 TIMERS = {"omoba-backup-ru.timer": "no nightly backup is made",
           "omoba-restore-drill-ru.timer": "no monthly restore drill runs",
@@ -174,8 +185,8 @@ def gib(size: int) -> str:
 def label(code: str) -> str:
     """What a problem code is about, for the "resolved" message."""
     kind, _, subject = code.partition(":")
-    return {"unit": subject, "disk": f"free disk on {subject}", "worker": f"match worker {subject[:8]}"}.get(
-        kind, "alerts.env" if kind == "config" else code)
+    return {"unit": subject, "disk": f"free disk on {subject}", "worker": f"match worker {subject[:8]}",
+            "postgres": "PostgreSQL"}.get(kind, "alerts.env" if kind == "config" else code)
 
 
 # ---------------------------------------------------------------- the monitor
@@ -230,6 +241,11 @@ class Monitor:
             return None
         return self.monotonic() - entered / 1e6 if entered else None
 
+    @staticmethod
+    def not_running(name: str, unit: dict) -> str:
+        return (f"{name} is not running ({unit.get('ActiveState') or 'unknown'}/{unit.get('SubState') or 'unknown'}, "
+                f"{unit.get('NRestarts') or 0} restarts; journalctl -u {name})")
+
     def unit_problems(self) -> tuple[list, dict]:
         """[(code, text, repeat seconds)], facts."""
         repeat, job_repeat = self.cfg.number("OMOBA_ALERT_REPEAT_MINUTES") * 60, \
@@ -240,9 +256,7 @@ class Monitor:
             if name in SERVICES and unit.get("UnitFileState") != "enabled":
                 continue     # an RU service is enabled once its release is installed (ru_host.py ship)
             if unit.get("ActiveState") != "active":
-                problems.append((f"unit:{name}", f"{name} is not running ({unit.get('ActiveState') or 'unknown'}/"
-                                                 f"{unit.get('SubState') or 'unknown'}, {unit.get('NRestarts') or 0} "
-                                                 f"restarts; journalctl -u {name})", repeat))
+                problems.append((f"unit:{name}", self.not_running(name, unit), repeat))
         for name in JOBS:
             unit = facts[name] = self.unit(name)
             if unit.get("ActiveState") == "failed":
@@ -255,6 +269,61 @@ class Monitor:
                     f"{unit.get('UnitFileState') or 'unknown'}, {unit.get('ActiveState') or 'unknown'}"
                 problems.append((f"unit:{name}", f"{name} is {state}: {consequence} "
                                                  f"(systemctl enable --now {name})", repeat))
+        return problems, facts
+
+    def postgres_clusters(self) -> list:
+        """The PostgreSQL clusters that start at boot, as `<version>-<name>` (pg_lsclusters)."""
+        clusters, root = [], self.p(PG_CONF_DIR)
+        try:
+            versions = sorted(name for name in os.listdir(root) if re.fullmatch(r"\d{1,3}(?:\.\d{1,3})?", name))
+        except OSError:
+            return []
+        for version in versions:
+            try:
+                names = sorted(os.listdir(os.path.join(root, version)))
+            except OSError:
+                continue
+            for name in names:
+                folder = os.path.join(root, version, name)
+                if not re.fullmatch(r"[A-Za-z0-9_.-]{1,64}", name) or \
+                        not os.path.isfile(os.path.join(folder, "postgresql.conf")):
+                    continue
+                try:
+                    words = [line.split("#", 1)[0].strip() for line in
+                             Path(folder, "start.conf").read_text().splitlines()]
+                    start = next((word for word in words if word), "auto")
+                except FileNotFoundError:
+                    start = "auto"
+                except (OSError, UnicodeDecodeError):
+                    start = "unreadable"
+                if start == "auto":
+                    clusters.append(f"{version}-{name}")
+        return clusters
+
+    def postgres_problems(self) -> tuple[list, dict]:
+        """Each cluster's unit running, then port 5432 accepting connections (pg_isready; it
+        does not log in). A connection is tried only while every cluster unit runs: a stopped
+        unit already says why."""
+        repeat = self.cfg.number("OMOBA_ALERT_REPEAT_MINUTES") * 60
+        clusters = self.postgres_clusters()
+        facts = {"clusters": clusters}
+        if not clusters:
+            return [("postgres:cluster", f"no PostgreSQL cluster in {PG_CONF_DIR} starts at boot "
+                                         f"(pg_lsclusters)", repeat)], facts
+        problems, units = [], [f"postgresql@{cluster}.service" for cluster in clusters]
+        for name in units:
+            unit = facts[name] = self.unit(name)
+            if unit.get("ActiveState") != "active":
+                problems.append((f"unit:{name}", self.not_running(name, unit), repeat))
+        if problems:
+            return problems, facts
+        host, port = PG_ADDRESS
+        result = self.run(["pg_isready", "-h", host, "-p", str(port), "-t", "10"])
+        facts["accepting"] = result.returncode == 0
+        if result.returncode != 0:
+            problems.append(("postgres:connect", f"PostgreSQL does not accept connections on port {port} "
+                                                 f"({PG_ISREADY.get(result.returncode, 'pg_isready did not run')}; "
+                                                 f"journalctl -u {' -u '.join(units)})", repeat))
         return problems, facts
 
     def disk_problems(self) -> tuple[list, dict]:
@@ -323,6 +392,8 @@ class Monitor:
         for text in self.cfg.problems:
             problems.append(("config", f"{self.cfg.path}: {text}", self.cfg.number("OMOBA_ALERT_REPEAT_MINUTES") * 60))
         more, facts["units"] = self.unit_problems()
+        problems += more
+        more, facts["postgres"] = self.postgres_problems()
         problems += more
         more, facts["disk"] = self.disk_problems()
         problems += more
@@ -492,7 +563,7 @@ def main(argv=None, stdout=None, monitor=None) -> int:
     sub = parser.add_subparsers(dest="command", required=True)
     failed = sub.add_parser("unit-failed", help="OnFailure= handler: alert that UNIT failed")
     failed.add_argument("unit")
-    check = sub.add_parser("check", help="units, timers, disk and match workers; exit 1 on a problem "
+    check = sub.add_parser("check", help="units, timers, PostgreSQL, disk and match workers; exit 1 on a problem "
                                          "(with --alert: exit 0 once the alerts went out)")
     check.add_argument("--json", action="store_true")
     check.add_argument("--alert", action="store_true", help="alert (journal, Telegram) and remember what was sent")
