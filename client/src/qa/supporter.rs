@@ -74,7 +74,7 @@ fn capture_preview(
         exit.write(bevy::app::AppExit::error());
         return;
     }
-    if qa.stage >= if qa.motion { 24 } else { AuraStyle::ALL.len() } {
+    if qa.stage >= if qa.motion { 24 } else { 3 } {
         let manifest = serde_json::json!({
             "renderer": "native Bevy",
             "scene": "isolated cosmetic preview; same spawn_aura renderer as world actors",
@@ -99,12 +99,16 @@ fn capture_preview(
         });
         return;
     }
-    // Every style, base and tier (LR-67): `hero-<id>-preview.png`.
+    let captures = [
+        ("hero-solar-preview.png", AuraStyle::Solar),
+        ("hero-lunar-preview.png", AuraStyle::Lunar),
+        ("hero-verdant-preview.png", AuraStyle::Verdant),
+    ];
     let (name, style) = if qa.motion {
         (format!("hero-motion-{:03}.png", qa.stage), AuraStyle::Solar)
     } else {
-        let style = AuraStyle::ALL[qa.stage];
-        (format!("hero-{}-preview.png", style.id()), style)
+        let (name, style) = captures[qa.stage];
+        (name.to_string(), style)
     };
     state.open = true;
     state.selected = style;
