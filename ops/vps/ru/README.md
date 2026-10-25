@@ -242,7 +242,9 @@ make release-ru-verify-downloads   # release.py verify-downloads --market ru
   SHA-256 and size; `dist/v<version>-ru/downloads.json` records the verified links.
   Then it pins the IPFS mirror as before (`ipfs.json`). `--dry-run` prints the rsync
   command and the URLs and contacts nothing.
-- `catalog --market ru` writes `releases.json` from `downloads.json`: `url` on the RU
+- `catalog --market ru` refuses until the public GitHub tag `v<version>-ru` exists (the
+  game's About page and the package README link its source, LR-06). It writes
+  `releases.json` from `downloads.json`: `url` on the RU
   host, `mirror_url` the IPFS copy with the same SHA-256, `test_status` «Открытая бета»,
   `region` `ru`, `channel` `direct`, `update_url` the portal's download page for the
   platform (account-api/README.md#downloads). `--min-release X` adds `min_release`:

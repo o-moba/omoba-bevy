@@ -75,7 +75,7 @@ These values change from release to release. Read them from the source when it m
 
 ### 1.3 Connection sequence
 
-The client runs one UDP I/O thread per transport (`client/src/net/transport.rs`, `run_udp_client`). Each new transport opens with a preflight: first connect, Retry, reconnect, server change and lobby → worker redirect all count. Offline practice (`client/src/net/offline.rs`, `LocalPractice`) uses the same `ClientPacket`/`ServerPacket` channels in-process, with no socket and no preflight.
+The client runs one UDP I/O thread per transport (`client/src/net/transport.rs`, `run_udp_client`). Each new transport opens with a preflight: first connect, Retry, reconnect, server change and lobby → worker redirect all count. The first connect happens at boot, or in a market with legal documents (RU) only once the player accepted them (`client/src/legal.rs`, LR-06). Offline practice (`client/src/net/offline.rs`, `LocalPractice`) uses the same `ClientPacket`/`ServerPacket` channels in-process, with no socket and no preflight.
 
 ```mermaid
 sequenceDiagram
