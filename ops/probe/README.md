@@ -13,6 +13,10 @@ Each round, [market_probe.py](../../scripts/market_probe.py) checks:
 | `account_api` | `GET <account_api>/health/ready` answers 200 |
 | `portal` | `GET <portal>/` answers 200–399 |
 
+A server that answers with something other than HTTP, or a check that breaks in any
+other way, fails that check with the error's class name (`BadStatusLine`, ...); the
+round still records its other checks and its state, so the alert below still goes out.
+
 A check that fails 2 rounds in a row (`OMOBA_PROBE_FAILURES`) sends one Telegram
 message, a reminder every 60 minutes while it stays down
 (`OMOBA_PROBE_REPEAT_MINUTES`) and one message when it answers again. Every alert

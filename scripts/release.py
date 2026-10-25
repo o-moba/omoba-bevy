@@ -1485,6 +1485,7 @@ def preflight_report(market: str, resolve=None, fetch=None, udp=None, contract: 
     with `contract`, compatibly with that release), its Account API / portal answer over
     HTTPS, and the portal reaches the Account API while the public API name refuses portal
     routes."""
+    import http.client
     import socket
     import urllib.request
     preset = market_presets.market(market)
@@ -1514,7 +1515,7 @@ def preflight_report(market: str, resolve=None, fetch=None, udp=None, contract: 
         try:
             status = fetch(url)
             checks[name] = {"url": url, "ok": 200 <= status < 400, "status": status}
-        except OSError as error:
+        except (OSError, http.client.HTTPException) as error:
             checks[name] = {"url": url, "ok": False, "error": type(error).__name__}
     if preset.account_api and preset.portal:
         origins = {"portal": preset.portal, "account_api": preset.account_api}
@@ -1522,7 +1523,7 @@ def preflight_report(market: str, resolve=None, fetch=None, udp=None, contract: 
             url = origins[origin] + path
             try:
                 status = fetch(url)
-            except OSError as error:
+            except (OSError, http.client.HTTPException) as error:
                 checks[name] = {"url": url, "ok": False, "expected": expected, "error": type(error).__name__}
                 continue
             check = {"url": url, "ok": status == expected, "status": status, "expected": expected}

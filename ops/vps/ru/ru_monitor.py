@@ -32,6 +32,7 @@ import argparse
 import contextlib
 import datetime as dt
 import fcntl
+import http.client
 import json
 import os
 import re
@@ -420,7 +421,7 @@ class Monitor:
         try:
             with self.opener(request, timeout=20):
                 return True
-        except (urllib.error.URLError, OSError, ValueError) as error:
+        except (urllib.error.URLError, OSError, ValueError, http.client.HTTPException) as error:
             self.log(f"the Telegram alert was not delivered: {redact(str(error), [token])}", 4)
             return False
 

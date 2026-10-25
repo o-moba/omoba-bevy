@@ -8,6 +8,7 @@ a real loopback HTTP server. Nothing here leaves the machine or needs cargo.
 from __future__ import annotations
 
 import contextlib
+import http.client
 import http.server
 import io
 import json
@@ -124,6 +125,33 @@ def http_server(**answers):
         server.server_close()
 
 
+@contextlib.contextmanager
+def non_http_server(reply: bytes):
+    """A loopback TCP server that answers every request with `reply` instead of HTTP."""
+    listener = socket.create_server(("127.0.0.1", 0))
+    listener.settimeout(0.05)
+    stopped = threading.Event()
+
+    def serve():
+        while not stopped.is_set():
+            try:
+                connection, _ = listener.accept()
+            except socket.timeout:
+                continue
+            with connection, contextlib.suppress(OSError):
+                connection.settimeout(2)
+                connection.recv(4096)
+                connection.sendall(reply)
+    thread = threading.Thread(target=serve, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{listener.getsockname()[1]}"
+    finally:
+        stopped.set()
+        thread.join(2)
+        listener.close()
+
+
 class WireTest(unittest.TestCase):
     def test_the_probe_follows_the_rust_contract(self):
         self.assertEqual(market_probe.HANDSHAKE_VERSION, rust_const("HANDSHAKE_VERSION"))
@@ -223,6 +251,25 @@ class HttpTest(unittest.TestCase):
         gone = market_probe.http_check(origin + "/", (200,))
         self.assertFalse(gone["ok"])
         self.assertIn(gone["error"], ("ConnectionRefusedError", "URLError"))
+
+    def test_a_reply_that_is_not_http_fails_the_check(self):
+        """http.client raises these past urllib unwrapped; they must not escape the check."""
+        for reply, error in ((b"garbage\r\n\r\n", "BadStatusLine"), (b"HTTP/1.1 200 " + b"x" * 70000, "LineTooLong")):
+            with self.subTest(error), non_http_server(reply) as origin:
+                self.assertEqual(market_probe.http_check(origin + "/", range(200, 400)),
+                                 {"url": origin + "/", "ok": False, "error": error})
+
+    def test_a_check_that_raises_fails_alone(self):
+        def fetch(url):
+            raise RuntimeError("unexpected")
+
+        def udp(address, port, client, timeout):
+            raise KeyError("server")
+        checks = market_probe.run_checks(settings(), resolve=lambda host: ["203.0.113.7"], fetch=fetch, udp=udp)
+        self.assertEqual(checks, {
+            "lobby_udp": {"endpoint": "lobby.example:4000", "ok": False, "error": "KeyError"},
+            "account_api": {"url": "https://account.example/health/ready", "ok": False, "error": "RuntimeError"},
+            "portal": {"url": "https://portal.example/", "ok": False, "error": "RuntimeError"}})
 
 
 def settings(**extra):
@@ -354,8 +401,34 @@ class RoundTest(unittest.TestCase):
                                         "https://account.example/health/ready: HTTP 503 (2 checks in a row, since "
                                         "2026-09-21 14:13 UTC)"])
 
+    def test_a_portal_that_answers_garbage_alerts_on_the_second_round(self):
+        """A malformed HTTP reply fails that one check; the round keeps the others, saves its
+        state (before Telegram is tried) and alerts on the second round."""
+        saved = []
+
+        def opener(request, timeout):
+            saved.append(json.loads(Path(self.state, "state.json").read_text())["checks"]["portal"])
+            return RoundTest.opener(self, request, timeout)
+        self.opener = opener
+        config = settings(OMOBA_PROBE_ACCOUNT_API=None)
+        with non_http_server(b"garbage\r\n\r\n") as origin:
+            config["OMOBA_PROBE_PORTAL"] = origin       # loopback over plain HTTP; settings want https
+            first, _ = self.round(config, fetch=None)
+            self.assertEqual(first["checks"]["portal"], {"url": origin + "/", "ok": False, "error": "BadStatusLine"})
+            self.assertTrue(first["checks"]["lobby_udp"]["ok"], "the other checks of the round are kept")
+            self.assertEqual((first["alerted"], self.sent), ([], []))
+            second, journal = self.round(config, fetch=None)
+        self.assertEqual(len(self.sent), 1)
+        self.assertIn(f"OMOBA ru: down (external probe on probe-1)\n- portal {origin}/: BadStatusLine "
+                      "(2 checks in a row", self.texts()[0])
+        self.assertIn("<3>OMOBA ru: down", journal)
+        self.assertEqual(saved[0]["failures"], 2)
+        self.assertIn("alerted_at", saved[0], "the state is saved before the alert is sent")
+        state = json.loads(Path(self.state, "state.json").read_text())
+        self.assertEqual(state["last_round"]["ok"], False)
+
     def test_without_a_bot_alerts_stay_in_the_journal(self):
-        quiet = settings(OMOBA_TELEGRAM_BOT_TOKEN="CHANGE_ME", OMOBA_TELEGRAM_CHAT_ID="CHANGE_ME")
+        quiet =settings(OMOBA_TELEGRAM_BOT_TOKEN="CHANGE_ME", OMOBA_TELEGRAM_CHAT_ID="CHANGE_ME")
         self.lobby_up = False
         self.round(quiet)
         result, journal = self.round(quiet)
@@ -375,6 +448,12 @@ class RoundTest(unittest.TestCase):
                                        fetch=lambda url: 200, udp=self.udp, opener=broken, host="probe-1")
         self.assertIn("not delivered", stderr.getvalue())
         self.assertNotIn(token, stderr.getvalue())
+
+        def garbled(request, timeout):
+            raise http.client.BadStatusLine("garbage")
+        with contextlib.redirect_stderr(io.StringIO()) as stderr:
+            self.assertFalse(market_probe.telegram(settings(), "x", opener=garbled))
+        self.assertIn("not delivered", stderr.getvalue())
 
     def test_run_needs_a_state_folder_and_reads_the_environment(self):
         environment = {"OMOBA_PROBE_MARKET": "ru", "OMOBA_PROBE_PORTAL": "https://portal.example",
@@ -413,7 +492,10 @@ class UnitTest(unittest.TestCase):
         self.assertIn("\nOnCalendar=*-*-* *:*:00\n", timer)
         self.assertIn("\nWantedBy=timers.target\n", timer)
         timeout = int(re.search(r"\nTimeoutStartSec=(\d+)s\n", service).group(1))
-        self.assertLess(market_probe.UDP_TIMEOUT + 2 * market_probe.HTTP_TIMEOUT, timeout)
+        # The socket timeouts of a round leave 20 s of the start timeout for name lookups,
+        # which have no timeout of their own.
+        budget = market_probe.UDP_TIMEOUT + 2 * market_probe.HTTP_TIMEOUT + market_probe.TELEGRAM_TIMEOUT
+        self.assertLessEqual(budget + 20, timeout)
         self.assertLess(timeout, 60, "a round ends before the next minute")
 
 

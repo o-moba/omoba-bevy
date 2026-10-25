@@ -7,6 +7,7 @@ that call it are checked in test_ru_host.py (RuKitTest).
 from __future__ import annotations
 
 import contextlib
+import http.client
 import io
 import json
 import os
@@ -243,6 +244,13 @@ class AlertTest(MonitorCase):
         journal = self.journal.getvalue()
         self.assertIn("<4>the Telegram alert was not delivered", journal)
         self.assertNotIn(TOKEN, journal)
+
+    def test_a_reply_that_is_not_http_is_an_undelivered_alert(self):
+        self.telegram.fail = http.client.BadStatusLine("garbage")
+        self.host.free = 0.05
+        report = self.alert()
+        self.assertFalse(report["telegram"]["problems"])
+        self.assertIn("<4>the Telegram alert was not delivered", self.journal.getvalue())
 
     def test_test_alert(self):
         out = io.StringIO()

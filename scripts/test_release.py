@@ -736,6 +736,17 @@ class Markets(unittest.TestCase):
         self.assertTrue(up["ready"], up)
         self.assertFalse(release.preflight_report("cn")["ready"])
 
+    def test_preflight_fails_a_server_that_answers_without_http(self):
+        import http.client
+
+        def garbled(url):
+            raise http.client.BadStatusLine("garbage")
+        report = release.preflight_report("ru", udp=LOBBY_UP, resolve=lambda host: ["203.0.113.7"], fetch=garbled)
+        self.assertFalse(report["ready"])
+        http_checks = {name: check["error"] for name, check in report["checks"].items() if "url" in check}
+        self.assertEqual(set(http_checks.values()), {"BadStatusLine"})
+        self.assertIn("portal", http_checks)
+
     def test_preflight_probes_the_lobby_over_udp(self):
         """LR-17: the lobby must answer the UDP compatibility check at the address DNS gave."""
         calls = []

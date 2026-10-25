@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import http.client
 import ipaddress
 import json
 import os
@@ -62,6 +63,7 @@ PROBE_CLIENT = {"handshake": HANDSHAKE_VERSION, "release": "0.0.0", "protocol": 
 UDP_TIMEOUT = 4.0       # like `shared --example compatibility check`
 UDP_INTERVAL = 0.5
 HTTP_TIMEOUT = 8.0
+TELEGRAM_TIMEOUT = 10.0
 
 # Settings of an installed probe (systemd EnvironmentFile, or --env-file).
 TARGET_KEYS = ("OMOBA_PROBE_LOBBY", "OMOBA_PROBE_ACCOUNT_API", "OMOBA_PROBE_PORTAL")
@@ -218,9 +220,11 @@ def http_status(url: str, timeout: float = HTTP_TIMEOUT) -> int:
 
 
 def http_check(url: str, good, fetch=None) -> dict:
+    """A server that answers with something other than HTTP (BadStatusLine, LineTooLong, ...:
+    http.client raises them past urllib unwrapped) fails the check like an unreachable one."""
     try:
         status = (fetch or http_status)(url)
-    except (OSError, ValueError) as error:
+    except (OSError, ValueError, http.client.HTTPException) as error:
         reason = getattr(error, "reason", None)
         detail = type(reason).__name__ if isinstance(reason, BaseException) else type(error).__name__
         return {"url": url, "ok": False, "error": detail}
@@ -231,14 +235,25 @@ def http_check(url: str, good, fetch=None) -> dict:
 
 
 def run_checks(settings: dict, resolve=None, fetch=None, udp=None) -> dict:
-    """One round over the configured targets: {check name: result}."""
-    checks = {}
+    """One round over the configured targets: {check name: result}. A check that raises
+    anyway fails with the exception's class as its error, so the round still saves its
+    state and alerts."""
+    planned = []
     if settings.get("OMOBA_PROBE_LOBBY"):
-        checks["lobby_udp"] = lobby_check(settings["OMOBA_PROBE_LOBBY"], resolve=resolve, udp=udp)
+        endpoint = settings["OMOBA_PROBE_LOBBY"]
+        planned.append(("lobby_udp", {"endpoint": endpoint}, lambda: lobby_check(endpoint, resolve=resolve, udp=udp)))
     if settings.get("OMOBA_PROBE_ACCOUNT_API"):
-        checks["account_api"] = http_check(settings["OMOBA_PROBE_ACCOUNT_API"] + "/health/ready", (200,), fetch)
+        ready = settings["OMOBA_PROBE_ACCOUNT_API"] + "/health/ready"
+        planned.append(("account_api", {"url": ready}, lambda: http_check(ready, (200,), fetch)))
     if settings.get("OMOBA_PROBE_PORTAL"):
-        checks["portal"] = http_check(settings["OMOBA_PROBE_PORTAL"] + "/", range(200, 400), fetch)
+        portal = settings["OMOBA_PROBE_PORTAL"] + "/"
+        planned.append(("portal", {"url": portal}, lambda: http_check(portal, range(200, 400), fetch)))
+    checks = {}
+    for name, target, check in planned:
+        try:
+            checks[name] = check()
+        except Exception as error:  # noqa: BLE001 - one broken check must not cost the round
+            checks[name] = {**target, "ok": False, "error": type(error).__name__}
     return checks
 
 
@@ -389,9 +404,9 @@ def telegram(settings: dict, text: str, opener=None) -> bool:
     data = urllib.parse.urlencode({"chat_id": chat, "text": text[:3500], "disable_web_page_preview": "true"}).encode()
     request = urllib.request.Request(f"https://api.telegram.org/bot{token}/sendMessage", data=data, method="POST")
     try:
-        with (opener or urllib.request.urlopen)(request, timeout=20):
+        with (opener or urllib.request.urlopen)(request, timeout=TELEGRAM_TIMEOUT):
             return True
-    except (urllib.error.URLError, OSError, ValueError) as error:
+    except (urllib.error.URLError, OSError, ValueError, http.client.HTTPException) as error:
         print(f"<4>the Telegram alert was not delivered: {redact(str(error), token)}", file=sys.stderr, flush=True)
         return False
 
@@ -447,6 +462,10 @@ def run_round(settings: dict, state_dir: str, now=time.time, resolve=None, fetch
     checks = run_checks(settings, resolve=resolve, fetch=fetch, udp=udp)
     moment = now()
     alerts, recoveries = advance(state, checks, settings, moment)
+    state["last_round"] = {"at": clock(moment), "ok": all(check["ok"] for check in checks.values())}
+    # Saved before Telegram is tried: a round that the unit's TimeoutStartSec cuts short
+    # while sending (a hanging resolver) still keeps its counts.
+    save_state(path, state)
     market = settings["OMOBA_PROBE_MARKET"]
     where = host or socket.gethostname()
     token = settings.get("OMOBA_TELEGRAM_BOT_TOKEN", "")
@@ -458,8 +477,6 @@ def run_round(settings: dict, state_dir: str, now=time.time, resolve=None, fetch
         text = redact(title + "\n" + "\n".join(lines), token)
         print(f"<{priority}>{text}", file=sys.stderr, flush=True)
         delivered[kind] = telegram(settings, text, opener)
-    state["last_round"] = {"at": clock(moment), "ok": all(check["ok"] for check in checks.values())}
-    save_state(path, state)
     return {"market": market, "ok": state["last_round"]["ok"], "checks": checks,
             "alerted": alerts, "recovered": recoveries, "telegram": delivered}
 
