@@ -5,6 +5,7 @@ pub mod class_builds;
 pub mod crypto;
 pub mod devices;
 pub mod ekza_library;
+pub mod moderation;
 pub mod read;
 pub mod social;
 pub mod supporter;

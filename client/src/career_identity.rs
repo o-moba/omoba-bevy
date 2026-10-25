@@ -196,6 +196,9 @@ pub(crate) struct CareerIdentity {
     /// The server refused a new profile for this key (LR-16): stop re-sending
     /// the sign-in on this connection; a reconnect tries again.
     refused: bool,
+    /// A suspended account (LR-15) signs in again at this time, so lifting
+    /// the ban restores access without restarting the game.
+    refused_until: Option<Instant>,
 }
 
 /// An in-process signing capability scoped to one authenticated server session.
@@ -251,6 +254,7 @@ impl CareerIdentity {
                 "Sign in before using your profile." // i18n-allow
                     | "Account authorization could not be refreshed. Reconnect when the account service is available." // i18n-allow
                     | "This device was revoked. Authorize this device again from your account." // i18n-allow
+                    | shared::moderation::ACCOUNT_BANNED_TEXT
             )
         ) {
             // Reusing the saved key is safe: the new Authenticate still needs
@@ -418,6 +422,7 @@ impl CareerIdentity {
 
     fn invalidate(&mut self) {
         self.refused = false;
+        self.refused_until = None;
         self.scope = None;
         self.signed_challenge = None;
         self.challenge_requested = false;
@@ -689,8 +694,20 @@ fn identity_driver(
     {
         identity.refused = true;
         identity.next_retry = None;
+        if identity.refused_until.is_none()
+            && career.view.error_code.as_deref() == Some(shared::career::error_code::ACCOUNT_BANNED)
+        {
+            identity.refused_until = Some(Instant::now() + crate::moderation::SUSPENDED_RETRY);
+        }
     }
     if identity.refused {
+        if identity
+            .refused_until
+            .is_some_and(|at| Instant::now() >= at)
+        {
+            // The next frame signs in from the start; a lifted ban lets it in.
+            identity.invalidate();
+        }
         return;
     }
     let now = Instant::now();
@@ -906,12 +923,69 @@ mod tests {
         assert!(identity.authenticated_for_scope("localhost:4000", 42, "session"));
     }
 
+    /// LR-15: a suspended account stops re-sending its sign-in, and signs in
+    /// again after `SUSPENDED_RETRY`, so a lifted ban needs no restart.
+    #[test]
+    fn a_suspended_account_pauses_its_sign_in_then_tries_again() {
+        let mut identity = identity();
+        identity.authenticate_sent = true;
+        identity.started = Some(Instant::now());
+        let mut session = ClientSession::admitted_for_test();
+        session.set_server_addr_for_test("localhost:4000");
+        let mut career = CareerClient::default();
+        career.nickname = "小明".into();
+        career.view = shared::career::CareerView {
+            storage_enabled: true,
+            error: Some(shared::moderation::ACCOUNT_BANNED_TEXT.into()),
+            error_code: Some(shared::career::error_code::ACCOUNT_BANNED.into()),
+            ..default()
+        };
+        let mut app = App::new();
+        app.add_message::<NicknameChanged>()
+            .add_message::<NetworkCommand>()
+            .insert_resource(identity)
+            .insert_resource(career)
+            .insert_resource(session)
+            .insert_resource(ClientSessionId("session".into()))
+            .insert_resource(GameStateSnapshot {
+                meta: shared::protocol::SnapshotMeta::new(42, 1, 1),
+                ..default()
+            })
+            .add_systems(Update, identity_driver);
+        let sent = |app: &mut App| {
+            app.update();
+            app.world_mut()
+                .resource_mut::<Messages<NetworkCommand>>()
+                .drain()
+                .collect::<Vec<_>>()
+        };
+        assert!(sent(&mut app).is_empty(), "refused: nothing is re-sent");
+        let identity = app.world().resource::<CareerIdentity>();
+        assert!(identity.refused);
+        let retry = identity.refused_until.unwrap();
+        assert!(retry > Instant::now() + crate::moderation::SUSPENDED_RETRY / 2);
+        assert!(sent(&mut app).is_empty(), "still waiting");
+        app.world_mut()
+            .resource_mut::<CareerIdentity>()
+            .refused_until = Some(Instant::now() - Duration::from_secs(1));
+        assert!(sent(&mut app).is_empty());
+        let again = sent(&mut app);
+        assert!(
+            matches!(
+                again.as_slice(),
+                [NetworkCommand::Career(CareerRequest::Challenge { .. })]
+            ),
+            "the sign-in starts over"
+        );
+    }
+
     #[test]
     fn explicit_auth_loss_restarts_handshake_without_reusing_old_authority() {
         for error in [
             "Sign in before using your profile.",
             "Account authorization could not be refreshed. Reconnect when the account service is available.",
             "This device was revoked. Authorize this device again from your account.",
+            shared::moderation::ACCOUNT_BANNED_TEXT,
         ] {
             let mut identity = identity();
             let challenge = AuthChallenge {

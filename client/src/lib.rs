@@ -44,6 +44,7 @@ mod minions;
 mod mobile_controls;
 mod mobile_ui;
 mod model_scale;
+mod moderation;
 mod navigation;
 mod net;
 mod party;

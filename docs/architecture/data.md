@@ -15,7 +15,7 @@ Snapshot: game dev 6d34f98, portal dev 604bc34, 2026-10-24. See [README](README.
 
 | Store | Technology | Schema owner | Writers | Durability | Detail |
 | --- | --- | --- | --- | --- | --- |
-| Career core (`public.career_*`) | PostgreSQL, versions 1–4 | `career-store` crate (migrations embedded with `include_str!`) | Every game server process (lobby and match workers) through `CareerStore`. The Account API may rename (`nickname`), add or revoke device keys, and change friendships. | Permanent. Match receipts are append-only. | [career-store README](../../career-store/migrations/postgres/README.md) |
+| Career core (`public.career_*`) | PostgreSQL, versions 1–5 | `career-store` crate (migrations embedded with `include_str!`) | Every game server process (lobby and match workers) through `CareerStore`. The Account API may rename (`nickname`), add or revoke device keys, and change friendships; its operator commands apply and lift sanctions and switch chat (LR-15). | Permanent. Match receipts are append-only. | [career-store README](../../career-store/migrations/postgres/README.md) |
 | Portal (`portal.*`) | PostgreSQL, same database, versions 1–7 and 9 (8 reserved for LR-20) | `account-api` crate | Account API. The game writes one table (`supporter_preferences`). | Mixed. TTL cleanup, see [Retention](#retention-and-cleanup). | [account-api README](../../account-api/README.md) |
 | Match root (`OMOBA_MATCH_ROOT`) | Files: JSON manifests and status | `server/src/match_allocation.rs`, `match_pool.rs` | Lobby (allocates) and match workers (report status) | Kept on disk. Finished allocations move to `archive/`. | [§ Match root](#match-root-allocation-manifests) |
 | Career outbox (`OMOBA_CAREER_OUTBOX`, per worker `outbox/`) | Files: one JSON per `result_id` | `server/src/career_backend.rs` | The career worker thread of each server process | Until the database acknowledges the record. Exceptions are listed under [Retention](#retention-and-cleanup). | [§ Outbox](#settlement-and-the-durable-outbox) |
@@ -40,7 +40,7 @@ flowchart LR
     lob[("lobby outbox")]
   end
   subgraph pg["PostgreSQL database (one per market/contour)"]
-    core[("public.career_*<br/>career schema v1-3")]
+    core[("public.career_*<br/>career schema v1-5")]
     portal[("portal.*<br/>portal schema v1-7")]
   end
   api["omoba-account-api<br/>portal runtime role"]
@@ -78,7 +78,7 @@ flowchart LR
   - **Dev contour.** It has its own Account API setup over `omoba_dev` ([ops/vps/dev/README.md](../../ops/vps/dev/README.md)). The dev portal `omoba-app-dev` was last recorded in guest mode. Whether it has since been switched to accounts is an open question in [system.md](system.md#open-questions).
 - **Career tables live in `public`.** Portal migrations reference `public.career_profiles` and `public.career_matches` by schema name (`account-api/migrations/001_portal.sql`). The Account API pins `search_path TO public` on every connection (`App::connect` in `account-api/src/lib.rs`).
 - **Two independent version tables.**
-  - `career_schema_version` (expected `[1,2,3,4]`, `SCHEMA_VERSIONS` in `career-store/src/career_store.rs`). `CareerStore::from_pool` creates it (`CREATE TABLE IF NOT EXISTS`), not `001_career.sql`.
+  - `career_schema_version` (expected `[1,2,3,4,5]`, `SCHEMA_VERSIONS` in `career-store/src/career_store.rs`). `CareerStore::from_pool` creates it (`CREATE TABLE IF NOT EXISTS`), not `001_career.sql`.
   - `portal.schema_version` (expected `[1..7, 9]`, `PORTAL_SCHEMA` in `account-api/src/lib.rs`).
 
   A portal migration never touches `career_schema_version` (comment in `001_portal.sql`).
@@ -95,8 +95,8 @@ Migrations run only on the explicit admin path. Runtime processes check versions
 
 | Command | Applies | Lock | Pool | Source |
 | --- | --- | --- | --- | --- |
-| `cargo run -p server --bin migrate-career` (or the packaged `migrate-career`) | Career v1–4 | `pg_advisory_xact_lock(721946001)`, one transaction | `CareerStore::open_pool`: 4 connections unless `OMOBA_SERVER_ROLE=match`, same session settings as the game | `server/src/bin/migrate-career.rs` → `CareerStore::connect` → `from_pool` |
-| `omoba-account-api migrate` | Career v1–4 first (`CareerStore::connect`), then portal v1–7 and 9 in a second transaction | `721946001` for career, `721946101` for portal | Career step as above. Portal step uses a separate 1-connection pool. | `account-api/src/lib.rs` `migrate` |
+| `cargo run -p server --bin migrate-career` (or the packaged `migrate-career`) | Career v1–5 | `pg_advisory_xact_lock(721946001)`, one transaction | `CareerStore::open_pool`: 4 connections unless `OMOBA_SERVER_ROLE=match`, same session settings as the game | `server/src/bin/migrate-career.rs` → `CareerStore::connect` → `from_pool` |
+| `omoba-account-api migrate` | Career v1–5 first (`CareerStore::connect`), then portal v1–7 and 9 in a second transaction | `721946001` for career, `721946101` for portal | Career step as above. Portal step uses a separate 1-connection pool. | `account-api/src/lib.rs` `migrate` |
 
 | Career version | File | Change |
 | --- | --- | --- |
@@ -104,8 +104,9 @@ Migrations run only on the explicit admin path. Runtime processes check versions
 | 2 | `002_player_handles.sql` | `nickname#1234` handles. Locks `career_profiles` with ACCESS EXCLUSIVE, adds the function `career_assign_handle` (trigger `career_handle_assignment`) and the unique ICU index `career_player_handle`, and backfills existing rows. See [player-handles.md](../player-handles.md). |
 | 3 | `003_device_keys.sql` | `career_keys.revoked_at` (tombstone) and `label`, plus the partial index `career_active_keys` |
 | 4 | `004_admission_limits.sql` | Admission limits (LR-16). `career_admission_salt` (one random salt) and `career_profile_admissions` (one row per profile created for a new key: salted SHA-256 of the source IP, time; rows deleted after 48 h). The SECURITY DEFINER function `career_prune_unplayed_profiles(min_age_days, max_profiles)` deletes profiles whose only key is older than `min_age_days` (≥ 7), that never played and that no other row references; its `search_path` is pinned to the migration's schemas plus `pg_temp`, and PUBLIC cannot execute it. |
+| 5 | `005_sanctions.sql` | Moderation (LR-15). `career_sanctions` (profile, kind `chat_mute`/`matchmaking_ban`/`ranked_ban`/`account_ban`/`name_reset`, reason, created at and by, `expires_at` or NULL until lifted, lifted at and by and why), `career_moderation_events` (the append-only audit: time, actor, action, profile, sanction, JSON detail; trigger `career_moderation_event_guard` refuses UPDATE and any DELETE of a row younger than a year) and `career_chat_switch` (one row: the database-wide chat switch). |
 
-- **Version sets.** `from_pool` upgrades from `[]`, `[1]`, `[1,2]` or `[1,2,3]` and rejects any other version set. `runtime_from_pool` accepts only `[1,2,3,4]` (`career-store/src/career_store.rs`).
+- **Version sets.** `from_pool` upgrades from `[]`, `[1]`, `[1,2]`, `[1,2,3]` or `[1,2,3,4]` and rejects any other version set. `runtime_from_pool` accepts only `[1,2,3,4,5]` (`career-store/src/career_store.rs`).
 - **Statement timeout.** `from_pool` sets `statement_timeout='120s'` with `SET LOCAL` only when v2 is pending. Because it is transaction-local and v3 and v4 run in the same transaction, it also covers them in that run. Otherwise the pool's 10 s timeout applies.
 
 | Portal version | File | Adds |
@@ -122,7 +123,7 @@ Migrations run only on the explicit admin path. Runtime processes check versions
 **What happens on a version mismatch.**
 
 - **Game server.** It keeps running against a wrong or missing career version. Its `omoba-career` thread calls `CareerStore::connect_runtime`, discards the error with `.ok()` and retries every 2 s (`server/src/career_backend.rs`). Meanwhile records stay in the outbox; a sign-in or account action waits up to 10 s for the store and then replies "Profile storage is unavailable. Retry shortly."
-- **Account API.** It refuses to start unless career is exactly `[1,2,3,4]` (`runtime_from_pool`, called inside `App::connect`) and portal is exactly `PORTAL_SCHEMA` (`[1..7, 9]`, `validate_portal_schema`). The portal process therefore depends on the career version too.
+- **Account API.** It refuses to start unless career is exactly `[1,2,3,4,5]` (`runtime_from_pool`, called inside `App::connect`) and portal is exactly `PORTAL_SCHEMA` (`[1..7, 9]`, `validate_portal_schema`). The portal process therefore depends on the career version too.
 - **Migrate commands.** They fail on unknown version sets.
 
 **Rollout order** (inferred, not stated as a rule in the repo):
@@ -153,6 +154,7 @@ This rule is inferred from `account-api/ops/grants.sql` and PostgreSQL semantics
 - SELECT, plus `INSERT(public_key, profile_id)`, on `career_keys`.
 - SELECT on `career_admission_salt`; SELECT, INSERT and DELETE on `career_profile_admissions` (the new-profile counter, LR-16).
 - EXECUTE on `career_prune_unplayed_profiles(integer, integer)`: the only way the game role deletes a profile with its key (retention of never-played, unlinked profiles).
+- SELECT on `career_sanctions` and `career_chat_switch` (LR-15): sanctions at sign-in and every access refresh, the chat switch every 5 s.
 - USAGE on all sequences in `public`.
 - SELECT on `portal.supporter_grants`.
 - SELECT, INSERT and UPDATE on `portal.supporter_preferences`.
@@ -164,6 +166,7 @@ This rule is inferred from `account-api/ops/grants.sql` and PostgreSQL semantics
 - `UPDATE(nickname)` on `career_profiles`.
 - `INSERT(public_key, profile_id, label)` and `UPDATE(revoked_at)` on `career_keys`.
 - INSERT, UPDATE and DELETE on `career_friendships`.
+- Moderation (LR-15, the operator commands): SELECT, INSERT and `UPDATE(lifted_at, lifted_by, lift_reason)` on `career_sanctions`; SELECT and INSERT on `career_moderation_events`; SELECT and `UPDATE(enabled, changed_at, changed_by)` on `career_chat_switch`; USAGE on their two identity sequences. No runtime role may delete a sanction or an audit row.
 - `portal.schema_version`: SELECT only.
 - USAGE on all sequences in `portal`.
 - Full DML on the other portal tables, with these exceptions:
@@ -255,6 +258,7 @@ Key invariants. Full rules are in the [career-store README](../../career-store/m
 
 - **Identity.** A public key maps to a separately generated random `profile_id`. `authenticate` serializes this per key with `pg_advisory_xact_lock(hashtextextended(key, 721946002))`. Signing in again never renames the profile. A revoked key fails sign-in and can never create a new profile.
 - **New profiles (LR-16).** A game sign-in (`authenticate_from`) creates a profile for an unknown key only while its source IP created fewer than `OMOBA_LIMIT_NEW_PROFILES_PER_IP` profiles in the last 24 hours and everyone fewer than `OMOBA_LIMIT_NEW_PROFILES_TOTAL`. The check and the insert run under `pg_advisory_xact_lock(721946004)` in the sign-in transaction, counted in `career_profile_admissions`, which keeps a salted hash of the source, never the address.
+- **Sanctions (LR-15).** A sanction is active while `lifted_at` is NULL and `expires_at` is NULL or in the future. Game servers read a profile's active sanctions with its sign-in and with every 10-second access refresh (`CareerStore::access`: key, current name and sanctions in one query), so nothing caches them longer. `CareerStore::rename` and the portal's `PATCH /v1/me/profile` refuse while a `name_reset` is active. A sanction's foreign key keeps its profile out of the unplayed-profile retention.
 - **Device keys.** At most 16 active keys per profile. `devices::complete` refuses with `device_limit` (`account-api/src/devices.rs`).
 - **Match JSON.** `allocation`, `checkpoint`, `intent` and `result` hold `shared::career::MatchResult`, capped at 1 MiB (`MAX_JSON`). Match-time names and loadouts are frozen and never follow later renames.
 - **Friendships.** One row per unordered pair (`low_id < high_id`). At most 64 friends plus pending requests per account. Both profile rows are locked in sorted order. Remove, reject and cancel DELETE the row (`apply_friend_action`).
@@ -445,6 +449,8 @@ The Account API runs `read::project(128)` and `App::cleanup` every 5 s, `reconci
 | `career_matches`, `career_participants` | Permanent. The trigger forbids DELETE and settled rows are immutable. | `001_career.sql` triggers |
 | `career_profiles`, `career_keys` | Permanent, except never-played, unlinked profiles: the lobby deletes them, with their only key, once that key is older than `OMOBA_PROFILE_RETENTION_DAYS` (default 30; hourly, 200 per run). Kept are profiles with a match, XP, a friend, another or a revoked key, a live presence, or any portal row (sign-in link, session, Supporter grant, settings). Revoked keys stay as tombstones. | `career_prune_unplayed_profiles` (schema 4), called by the lobby's career worker (LR-16) |
 | `career_profile_admissions` | 48 hours (the new-profile limits count 24 hours) | `CareerStore::prune_unplayed_profiles` (LR-16) |
+| `career_sanctions` | Permanent; a lifted or expired row stays as the record. Its foreign key keeps the profile from unplayed-profile retention. | `005_sanctions.sql`, no runtime DELETE grant (LR-15) |
+| `career_moderation_events` | At least a year: the trigger refuses UPDATE and deleting a row younger than a year; nothing deletes rows automatically. No foreign key, so the record outlives the profile. | `005_sanctions.sql` (LR-15) |
 | `career_active_profiles` | Until settlement | `finish_inner` |
 | `career_friendships` | Until removed, rejected or cancelled (row DELETEd) | `apply_friend_action` |
 | `career_presence` | Row kept. Reads as offline 30 s after the last refresh. Deleted with a pruned profile. | `touch_presences` |

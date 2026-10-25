@@ -197,6 +197,14 @@ pub async fn mutate(
         "me/profile" => {
             let n: Nickname = parse(body)?;
             let nickname = normalize_nickname(&n.nickname).map_err(|_| invalid())?;
+            // A moderator's name reset locks renames until it ends (LR-15).
+            let locked: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM career_sanctions WHERE profile_id=$1 AND kind='name_reset' AND lifted_at IS NULL AND (expires_at IS NULL OR expires_at > clock_timestamp()))")
+                .bind(&s.profile_id)
+                .fetch_one(&mut *tx)
+                .await?;
+            if locked {
+                return Err(Error(StatusCode::FORBIDDEN, "name_locked"));
+            }
             sqlx::query("UPDATE career_profiles SET nickname=$2 WHERE profile_id=$1")
                 .bind(&s.profile_id)
                 .bind(nickname)
