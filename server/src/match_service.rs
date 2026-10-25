@@ -1,5 +1,5 @@
 //! One public lobby schedules independent, immutable game workers.
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
@@ -8,6 +8,7 @@ use shared::career::ProfileSummary;
 use shared::match_service::{InMatch, MatchAllocation, MatchPreference, MatchServiceView};
 use shared::wire::{GameState, ServerPacket};
 
+use crate::admission::{Limits, PRACTICE_ABANDON_WINDOW, SourceIp};
 use crate::match_allocation::{AllocatedHuman, Manifest, Phase, Status, Worker, unix_ms};
 use crate::runtime::ServerRuntime;
 
@@ -20,6 +21,11 @@ const CASUAL_BOT_FILL: Duration = Duration::from_secs(30);
 const RANKED_CASUAL_OFFER: Duration = Duration::from_secs(300);
 /// A Ranked party whose members are not one rated cohort (LR-08).
 const RANKED_PARTY_COHORT: &str = "ranked_party_cohort";
+/// A roster whose every human comes from one IP that already holds
+/// `arenas_per_ip` arenas alone (LR-16).
+const ARENA_LIMIT: &str = "arena_limit";
+/// vs Bots from an IP that left too many vs Bots allocations unplayed (LR-16).
+const PRACTICE_COOLDOWN: &str = "practice_cooldown";
 
 /// What one `FindMatch` asks for (LR-08).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -77,6 +83,119 @@ pub(crate) struct Lobby {
     requests: HashMap<String, (String, u64, Instant)>,
     order: u64,
     last_poll: Option<Instant>,
+    /// Per-source limits (LR-16), and what they track in memory only: the IP
+    /// of each profile's latest FindMatch, the IPs of each live allocation
+    /// this lobby made, and when each IP left a vs Bots allocation unplayed.
+    limits: Limits,
+    sources: HashMap<String, SourceIp>,
+    arena_sources: HashMap<String, Vec<SourceIp>>,
+    abandons: HashMap<SourceIp, VecDeque<Instant>>,
+}
+
+impl Lobby {
+    fn new(pool: crate::match_pool::Pool, limits: Limits) -> Self {
+        Self {
+            pool,
+            waiting: Vec::new(),
+            assignments: HashMap::new(),
+            errors: HashMap::new(),
+            requests: HashMap::new(),
+            order: 0,
+            last_poll: None,
+            limits,
+            sources: HashMap::new(),
+            arena_sources: HashMap::new(),
+            abandons: HashMap::new(),
+        }
+    }
+
+    /// Live arenas `ip` holds alone: every human of the allocation came from it.
+    fn arenas_held(&self, ip: SourceIp) -> usize {
+        self.arena_sources
+            .iter()
+            .filter(|(id, ips)| {
+                ips.as_slice() == [ip]
+                    && self
+                        .pool
+                        .slots
+                        .get(*id)
+                        .is_some_and(|slot| !slot.terminal())
+            })
+            .count()
+    }
+
+    /// Whether `ip` cools down after leaving too many vs Bots allocations
+    /// unplayed within [`PRACTICE_ABANDON_WINDOW`].
+    fn cooling(&self, ip: SourceIp, now: Instant) -> bool {
+        self.abandons.get(&ip).is_some_and(|times| {
+            let recent = times
+                .iter()
+                .filter(|at| now.saturating_duration_since(**at) < PRACTICE_ABANDON_WINDOW)
+                .count();
+            recent >= self.limits.practice_abandons
+                && times.back().is_some_and(|last| {
+                    now.saturating_duration_since(*last) < self.limits.practice_cooldown
+                })
+        })
+    }
+
+    /// Why a roster of `members` (indices into `waiting`) for `queue` may not
+    /// get an arena now, as a lobby failure code.
+    fn refusal(
+        &self,
+        members: &[usize],
+        queue: MatchPreference,
+        now: Instant,
+    ) -> Option<&'static str> {
+        let mut ips: Vec<SourceIp> = members
+            .iter()
+            .filter_map(|&i| {
+                self.sources
+                    .get(&self.waiting[i].profile.profile_id)
+                    .copied()
+            })
+            .collect();
+        ips.sort();
+        ips.dedup();
+        if queue == MatchPreference::BotPractice && ips.iter().any(|ip| self.cooling(*ip, now)) {
+            return Some(PRACTICE_COOLDOWN);
+        }
+        match ips.as_slice() {
+            [ip] if self.arenas_held(*ip) >= self.limits.arenas_per_ip => Some(ARENA_LIMIT),
+            _ => None,
+        }
+    }
+
+    /// Records the vs Bots allocations that ended without their match ever
+    /// running, and forgets the IPs of every ended allocation.
+    fn track_abandons(&mut self, now: Instant) {
+        let pool = &self.pool;
+        let abandons = &mut self.abandons;
+        self.arena_sources.retain(|id, ips| {
+            let Some(slot) = pool.slots.get(id) else {
+                return false;
+            };
+            if !slot.terminal() {
+                return true;
+            }
+            if slot.manifest.preference == MatchPreference::BotPractice && !slot.ran() {
+                for ip in ips.iter() {
+                    abandons.entry(*ip).or_default().push_back(now);
+                }
+            }
+            false
+        });
+        let keep = PRACTICE_ABANDON_WINDOW.max(self.limits.practice_cooldown);
+        abandons.retain(|_, times| {
+            while times
+                .front()
+                .is_some_and(|at| now.saturating_duration_since(*at) >= keep)
+            {
+                times.pop_front();
+            }
+            !times.is_empty()
+        });
+    }
 }
 #[derive(Default)]
 pub(crate) enum MatchService {
@@ -104,7 +223,7 @@ impl MatchService {
         }
     }
     /// `bound` is this process's bound UDP address (`SERVER_ADDR`).
-    pub fn from_env(bound: std::net::SocketAddr) -> Result<Self, String> {
+    pub fn from_env(bound: std::net::SocketAddr, limits: Limits) -> Result<Self, String> {
         match std::env::var("OMOBA_SERVER_ROLE").ok().as_deref() {
             None | Some("") | Some("standalone") => Ok(Self::Standalone),
             Some("lobby") => {
@@ -120,13 +239,8 @@ impl MatchService {
                     })
                     .collect();
                 Ok(Self::Lobby(Lobby {
-                    pool,
-                    waiting: Vec::new(),
                     assignments,
-                    errors: HashMap::new(),
-                    requests: HashMap::new(),
-                    order: 0,
-                    last_poll: None,
+                    ..Lobby::new(pool, limits)
                 }))
             }
             Some("match") => {
@@ -161,6 +275,8 @@ impl MatchService {
             Some(_) => Err("Invalid OMOBA_SERVER_ROLE".into()),
         }
     }
+    /// `source` is the IP the signed FindMatch came from (LR-16).
+    #[allow(clippy::too_many_arguments)]
     pub fn enqueue(
         &mut self,
         profile: ProfileSummary,
@@ -168,6 +284,7 @@ impl MatchService {
         request_id: u64,
         search: Search,
         party: Option<(u64, usize)>,
+        source: SourceIp,
         now: Instant,
     ) {
         let preference = search.preference;
@@ -182,6 +299,7 @@ impl MatchService {
             (session.clone(), request_id, now),
         );
         lobby.errors.remove(&profile.profile_id);
+        lobby.sources.insert(profile.profile_id.clone(), source);
         // A new request can arrive between worker settlement and the lobby's
         // periodic pruning. Never bind it to the completed allocation.
         if let Some(slot) = lobby
@@ -223,6 +341,18 @@ impl MatchService {
         if lobby.waiting.len() >= MAX_WAITING {
             lobby.errors.insert(profile.profile_id, "queue_full".into());
             return;
+        }
+        // vs Bots allocates at once: refuse it here rather than after queueing.
+        if preference == MatchPreference::BotPractice && party.is_none() {
+            let refusal = if lobby.cooling(source, now) {
+                Some(PRACTICE_COOLDOWN)
+            } else {
+                (lobby.arenas_held(source) >= lobby.limits.arenas_per_ip).then_some(ARENA_LIMIT)
+            };
+            if let Some(code) = refusal {
+                lobby.errors.insert(profile.profile_id, code.into());
+                return;
+            }
         }
         lobby.order = lobby.order.saturating_add(1);
         lobby.waiting.push(Waiting {
@@ -345,6 +475,7 @@ impl MatchService {
             false
         });
         expire_waiting(&mut lobby.waiting, now);
+        lobby.track_abandons(now);
         lobby.requests.retain(|profile, (_, _, touched)| {
             now.saturating_duration_since(*touched) < Duration::from_secs(120)
                 || lobby.assignments.contains_key(profile)
@@ -356,6 +487,9 @@ impl MatchService {
         lobby
             .errors
             .retain(|profile, _| lobby.requests.contains_key(profile));
+        lobby
+            .sources
+            .retain(|profile, _| lobby.requests.contains_key(profile));
         // At most four OS process launches per scheduling pass.
         for _ in 0..4 {
             if lobby.pool.full() {
@@ -364,6 +498,19 @@ impl MatchService {
             let Some((indices, queue)) = select(&lobby.waiting, now) else {
                 break;
             };
+            if let Some(code) = lobby.refusal(&indices, queue, now) {
+                let refused: HashSet<_> = indices
+                    .iter()
+                    .map(|&i| lobby.waiting[i].profile.profile_id.clone())
+                    .collect();
+                for profile in &refused {
+                    lobby.errors.insert(profile.clone(), code.into());
+                }
+                lobby
+                    .waiting
+                    .retain(|w| !refused.contains(&w.profile.profile_id));
+                continue;
+            }
             let selected: Vec<_> = indices.iter().map(|&i| lobby.waiting[i].clone()).collect();
             let teams = split_teams(&selected);
             let humans = selected
@@ -391,6 +538,13 @@ impl MatchService {
             };
             match lobby.pool.allocate(manifest) {
                 Ok(id) => {
+                    let mut ips: Vec<SourceIp> = selected
+                        .iter()
+                        .filter_map(|w| lobby.sources.get(&w.profile.profile_id).copied())
+                        .collect();
+                    ips.sort();
+                    ips.dedup();
+                    lobby.arena_sources.insert(id.clone(), ips);
                     for w in &selected {
                         lobby
                             .assignments
@@ -849,6 +1003,10 @@ mod tests {
     use std::time::Instant;
 
     use super::*;
+    /// One player's own IP.
+    fn home() -> SourceIp {
+        SourceIp::of(std::net::SocketAddr::from(([203, 0, 113, 1], 40000)))
+    }
     fn w(id: u64, p: MatchPreference, now: Instant) -> Waiting {
         Waiting {
             profile: ProfileSummary::new(format!("{id:064x}"), "Player".into()),
@@ -1024,6 +1182,7 @@ mod tests {
                     also_casual,
                 },
                 None,
+                home(),
                 at,
             );
         };
@@ -1122,6 +1281,7 @@ mod tests {
                     1,
                     queue.into(),
                     None,
+                    home(),
                     now,
                 );
             }
@@ -1216,15 +1376,7 @@ mod tests {
             last_status: None,
             terminal_at: None,
         };
-        let lobby = Lobby {
-            pool,
-            waiting: vec![],
-            assignments: HashMap::new(),
-            errors: HashMap::new(),
-            requests: HashMap::new(),
-            order: 0,
-            last_poll: None,
-        };
+        let lobby = Lobby::new(pool, Limits::default());
         for role in [
             MatchService::Standalone,
             MatchService::Lobby(lobby),
@@ -1272,13 +1424,10 @@ mod tests {
         receipt.phase = Phase::Settling;
         pool.write_status_for_test(&id, &receipt);
         let mut service = MatchService::Lobby(Lobby {
-            pool,
-            waiting: vec![],
             assignments: HashMap::from([(entry.profile.profile_id.clone(), id.clone())]),
-            errors: HashMap::new(),
-            requests: HashMap::new(),
             order: 1,
             last_poll: Some(now),
+            ..Lobby::new(pool, Limits::default())
         });
         assert!(
             matches!(
@@ -1302,6 +1451,7 @@ mod tests {
             2,
             entry.preference.into(),
             None,
+            home(),
             now,
         );
         assert_eq!(
@@ -1320,16 +1470,12 @@ mod tests {
 
     fn lobby_with(pool: crate::match_pool::Pool, assignments: &[(&Waiting, &str)]) -> MatchService {
         MatchService::Lobby(Lobby {
-            pool,
-            waiting: vec![],
             assignments: assignments
                 .iter()
                 .map(|(w, id)| (w.profile.profile_id.clone(), (*id).to_owned()))
                 .collect(),
-            errors: HashMap::new(),
-            requests: HashMap::new(),
             order: 1,
-            last_poll: None,
+            ..Lobby::new(pool, Limits::default())
         })
     }
 
@@ -1367,6 +1513,7 @@ mod tests {
                 request_id,
                 entry.preference.into(),
                 None,
+                home(),
                 now,
             );
         };
@@ -1445,6 +1592,7 @@ mod tests {
             2,
             entry.preference.into(),
             None,
+            home(),
             now,
         );
         assert!(matches!(
@@ -1544,5 +1692,155 @@ mod tests {
         q[9].preference = MatchPreference::Casual;
         q[9].casual_since = Some(now);
         assert!(select(&q, now).is_none());
+    }
+
+    /// A practice lobby with room for several arenas, and the receipt a
+    /// worker writes: `phase` with a fresh heartbeat.
+    fn practice_lobby() -> (MatchService, std::path::PathBuf) {
+        let mut pool = crate::match_pool::Pool::for_test();
+        pool.set_capacity_for_test(8);
+        let directory = pool.test_directory().to_path_buf();
+        (lobby_with(pool, &[]), directory)
+    }
+    fn report(service: &mut MatchService, profile: &str, phase: Phase) {
+        let MatchService::Lobby(lobby) = service else {
+            unreachable!()
+        };
+        let id = lobby.assignments[profile].clone();
+        lobby.pool.adopt_for_test(&id);
+        lobby.pool.write_status_for_test(
+            &id,
+            &Status {
+                allocation_id: id.clone(),
+                server_epoch: 7,
+                heartbeat_ms: unix_ms(),
+                phase,
+                result_id: None,
+                ends_by_ms: None,
+            },
+        );
+    }
+    fn practice(service: &mut MatchService, entry: &Waiting, source: SourceIp, at: Instant) {
+        service.enqueue(
+            entry.profile.clone(),
+            entry.session.clone(),
+            1,
+            MatchPreference::BotPractice.into(),
+            None,
+            source,
+            at,
+        );
+    }
+    fn failed(service: &MatchService, entry: &Waiting, at: Instant) -> Option<String> {
+        match service.view(&entry.profile.profile_id, &entry.session, at) {
+            Some(MatchServiceView::Failed { code }) => Some(code),
+            _ => None,
+        }
+    }
+    fn neighbour() -> SourceIp {
+        SourceIp::of(std::net::SocketAddr::from(([198, 51, 100, 2], 40000)))
+    }
+
+    /// LR-16: a second vs Bots allocation from an IP whose first one is
+    /// Forming or Running is refused with a code the client shows in its own
+    /// words; another IP is not affected, and the IP plays again once its
+    /// match ended.
+    #[test]
+    fn a_second_bot_practice_from_one_ip_is_refused_while_the_first_holds_an_arena() {
+        let now = Instant::now();
+        let (mut service, directory) = practice_lobby();
+        let (first, second, other) = (
+            w(1, MatchPreference::BotPractice, now),
+            w(2, MatchPreference::BotPractice, now),
+            w(3, MatchPreference::BotPractice, now),
+        );
+        practice(&mut service, &first, home(), now);
+        service.tick(now);
+        for (phase, at) in [(Phase::Forming, 1), (Phase::Running, 2)] {
+            let at = now + Duration::from_secs(at);
+            report(&mut service, &first.profile.profile_id, phase);
+            service.tick(at);
+            practice(&mut service, &second, home(), at);
+            assert_eq!(failed(&service, &second, at).as_deref(), Some(ARENA_LIMIT));
+        }
+        // Another IP gets its own arena.
+        let at = now + Duration::from_secs(2);
+        practice(&mut service, &other, neighbour(), at);
+        service.tick(now + Duration::from_secs(3));
+        assert!(matches!(
+            service.view(&other.profile.profile_id, &other.session, at),
+            Some(MatchServiceView::Allocating | MatchServiceView::Assigned { .. })
+        ));
+        // A party or a lone Casual player from that IP is held to the same
+        // rule when bots would fill the match: it waits, then is refused.
+        let casual = w(4, MatchPreference::Casual, now);
+        let at = now + Duration::from_secs(4);
+        service.enqueue(
+            casual.profile.clone(),
+            casual.session.clone(),
+            1,
+            MatchPreference::Casual.into(),
+            None,
+            home(),
+            at,
+        );
+        let fill = at + CASUAL_BOT_FILL + Duration::from_secs(1);
+        service.enqueue(
+            casual.profile.clone(),
+            casual.session.clone(),
+            1,
+            MatchPreference::Casual.into(),
+            None,
+            home(),
+            fill,
+        );
+        service.tick(fill);
+        assert_eq!(
+            failed(&service, &casual, fill).as_deref(),
+            Some(ARENA_LIMIT)
+        );
+        // The first match ended: the IP may practice again.
+        report(&mut service, &first.profile.profile_id, Phase::Finished);
+        let later = fill + Duration::from_secs(1);
+        service.tick(later);
+        practice(&mut service, &second, home(), later);
+        assert_eq!(failed(&service, &second, later), None);
+        let _ = std::fs::remove_dir_all(directory); // Only this test's unique fixture.
+    }
+
+    /// LR-16: an IP that left `practice_abandons` vs Bots allocations
+    /// unplayed within ten minutes cools down; a played match never counts.
+    #[test]
+    fn repeated_abandoned_bot_practice_triggers_a_short_cooldown() {
+        let limits = Limits::default();
+        let start = Instant::now();
+        let (mut service, directory) = practice_lobby();
+        let mut at = start;
+        for id in 1..=limits.practice_abandons as u64 {
+            let entry = w(id, MatchPreference::BotPractice, start);
+            practice(&mut service, &entry, home(), at);
+            at += Duration::from_secs(1);
+            service.tick(at);
+            assert_eq!(failed(&service, &entry, at), None, "{id}");
+            // Allocated, never joined: the worker gives up.
+            report(&mut service, &entry.profile.profile_id, Phase::Failed);
+            at += Duration::from_secs(1);
+            service.tick(at);
+        }
+        let next = w(100, MatchPreference::BotPractice, start);
+        practice(&mut service, &next, home(), at);
+        assert_eq!(
+            failed(&service, &next, at).as_deref(),
+            Some(PRACTICE_COOLDOWN)
+        );
+        // Only that IP cools down, and only for a while.
+        let other = w(101, MatchPreference::BotPractice, start);
+        practice(&mut service, &other, neighbour(), at);
+        assert_eq!(failed(&service, &other, at), None);
+        let after = at + limits.practice_cooldown;
+        service.tick(after);
+        practice(&mut service, &next, home(), after);
+        assert_eq!(failed(&service, &next, after), None);
+        let _ = std::fs::remove_dir_all(directory); // Only this test's unique fixture.
     }
 }

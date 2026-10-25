@@ -33,6 +33,7 @@ mod i18n;
 mod input_bindings;
 mod input_context;
 mod jungle;
+mod legal;
 mod map_visuals;
 mod maps;
 mod match_hud;

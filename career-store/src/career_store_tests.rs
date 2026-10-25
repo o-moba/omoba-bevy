@@ -173,7 +173,7 @@ async fn career_store_identity_reopen_and_explicit_rename() {
             .fetch_all(&f.store.pool)
             .await
             .unwrap();
-    assert_eq!(versions, [1, 2, 3]);
+    assert_eq!(versions, SCHEMA_VERSIONS);
     f.close().await;
 }
 
@@ -1285,5 +1285,189 @@ async fn career_store_public_worker_recovery_does_not_settle_another_epoch() {
             .unwrap()
             .is_empty()
     );
+    f.close().await;
+}
+
+/// LR-16: new device keys create profiles only within the per-source and the
+/// total 24-hour limits; existing keys always sign in; no raw address is kept.
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "requires OMOBA_TEST_DATABASE_URL and real PostgreSQL"]
+async fn career_store_limits_new_profiles_per_source_and_in_total() {
+    let f = Fixture::new().await;
+    let limits = NewProfileLimits {
+        per_source: 2,
+        total: 3,
+    };
+    let key = |n: u64| format!("{n:064x}");
+    let home = "203.0.113.7";
+    let first = f
+        .store
+        .authenticate_from(&key(1), "One", home, limits)
+        .await
+        .unwrap();
+    f.store
+        .authenticate_from(&key(2), "Two", home, limits)
+        .await
+        .unwrap();
+    assert_eq!(
+        f.store
+            .authenticate_from(&key(3), "Three", home, limits)
+            .await
+            .unwrap_err(),
+        NEW_PROFILE_LIMIT_ERROR
+    );
+    // A refused key created nothing, and an existing key keeps working.
+    let profiles: i64 = sqlx::query_scalar("SELECT count(*) FROM career_profiles")
+        .fetch_one(&f.store.pool)
+        .await
+        .unwrap();
+    assert_eq!(profiles, 2);
+    assert_eq!(
+        f.store
+            .authenticate_from(&key(1), "Ignored", home, limits)
+            .await
+            .unwrap(),
+        first
+    );
+    // Another network still gets the last place of the day, then nobody does.
+    f.store
+        .authenticate_from(&key(4), "Four", "198.51.100.9", limits)
+        .await
+        .unwrap();
+    assert_eq!(
+        f.store
+            .authenticate_from(&key(5), "Five", "192.0.2.1", limits)
+            .await
+            .unwrap_err(),
+        NEW_PROFILES_PAUSED_ERROR
+    );
+    // Rows hold a salted hash, never the address.
+    let raw: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM career_profile_admissions WHERE source IN ($1, $2)",
+    )
+    .bind(home)
+    .bind("198.51.100.9")
+    .fetch_one(&f.store.pool)
+    .await
+    .unwrap();
+    assert_eq!(raw, 0);
+    // The window is 24 hours: yesterday's profiles no longer count.
+    sqlx::query(
+        "UPDATE career_profile_admissions SET created_at = clock_timestamp() - interval '25 hours'",
+    )
+    .execute(&f.store.pool)
+    .await
+    .unwrap();
+    // Two new keys race for the last place of one source: exactly one wins.
+    let tight = NewProfileLimits {
+        per_source: 1,
+        total: 100,
+    };
+    let (six, seven) = (key(6), key(7));
+    let (a, b) = tokio::join!(
+        f.store.authenticate_from(&six, "Six", home, tight),
+        f.store.authenticate_from(&seven, "Seven", home, tight)
+    );
+    assert_eq!(usize::from(a.is_ok()) + usize::from(b.is_ok()), 1);
+    // Retention drops admission rows after 48 hours.
+    sqlx::query(
+        "UPDATE career_profile_admissions SET created_at = clock_timestamp() - interval '49 hours' WHERE created_at < clock_timestamp() - interval '24 hours'",
+    )
+    .execute(&f.store.pool)
+    .await
+    .unwrap();
+    f.store.prune_unplayed_profiles(30, 100).await.unwrap();
+    let left: i64 = sqlx::query_scalar("SELECT count(*) FROM career_profile_admissions")
+        .fetch_one(&f.store.pool)
+        .await
+        .unwrap();
+    assert_eq!(left, 1);
+    f.close().await;
+}
+
+/// LR-16: the retention job deletes only profiles whose one key is older than
+/// the retention age, that never played, and that nothing else holds.
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "requires OMOBA_TEST_DATABASE_URL and real PostgreSQL"]
+async fn career_store_prunes_only_old_unplayed_unlinked_profiles() {
+    let f = Fixture::new().await;
+    let unplayed = f.profile(1).await;
+    let recent = f.profile(2).await;
+    let (played, opponent) = (f.profile(3).await, f.profile(4).await);
+    let (friend, other_friend) = (f.profile(5).await, f.profile(6).await);
+    let two_keys = f.profile(7).await;
+    let online = f.profile(8).await;
+    let revoked = f.profile(9).await;
+    let held = f.profile(10).await;
+    let finished = result(&played, &opponent, 1);
+    f.store.start(starting(&finished)).await.unwrap();
+    f.store.settle(finished).await.unwrap();
+    f.store
+        .friend_action(
+            &friend.profile_id,
+            &other_friend.profile_id,
+            FriendAction::Request,
+        )
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO career_keys(public_key, profile_id) VALUES ($1, $2)")
+        .bind(format!("{:064x}", 70))
+        .bind(&two_keys.profile_id)
+        .execute(&f.store.pool)
+        .await
+        .unwrap();
+    f.store
+        .touch_presences(&[(online.profile_id.clone(), None)])
+        .await
+        .unwrap();
+    sqlx::query("UPDATE career_keys SET revoked_at = clock_timestamp() WHERE profile_id = $1")
+        .bind(&revoked.profile_id)
+        .execute(&f.store.pool)
+        .await
+        .unwrap();
+    // A row elsewhere (as a portal link or Supporter grant would be) holds a profile.
+    sqlx::raw_sql(
+        "CREATE TABLE portal_link (profile_id text REFERENCES career_profiles(profile_id))",
+    )
+    .execute(&f.store.pool)
+    .await
+    .unwrap();
+    sqlx::query("INSERT INTO portal_link VALUES ($1)")
+        .bind(&held.profile_id)
+        .execute(&f.store.pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "UPDATE career_keys SET created_at = clock_timestamp() - interval '31 days' WHERE profile_id <> $1",
+    )
+    .bind(&recent.profile_id)
+    .execute(&f.store.pool)
+    .await
+    .unwrap();
+    assert!(f.store.prune_unplayed_profiles(3, 100).await.is_err());
+    assert!(f.store.prune_unplayed_profiles(30, 0).await.is_err());
+    assert_eq!(f.store.prune_unplayed_profiles(30, 100).await.unwrap(), 1);
+    assert!(f.store.profile(&unplayed.profile_id).await.is_err());
+    for kept in [
+        &recent,
+        &played,
+        &opponent,
+        &friend,
+        &other_friend,
+        &two_keys,
+        &online,
+        &revoked,
+        &held,
+    ] {
+        assert!(
+            f.store.profile(&kept.profile_id).await.is_ok(),
+            "{}",
+            kept.nickname
+        );
+    }
+    // The pruned key is free again: signing in makes a fresh profile.
+    let again = f.profile(1).await;
+    assert_ne!(again.profile_id, unplayed.profile_id);
+    assert_eq!(f.store.prune_unplayed_profiles(30, 100).await.unwrap(), 0);
     f.close().await;
 }

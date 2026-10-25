@@ -162,13 +162,24 @@ impl Plugin for NetworkingPlugin {
                 UPDATE_INTERVAL_SECONDS,
                 TimerMode::Repeating,
             )))
+            // The lobby transport opens at boot only once the region's legal
+            // documents are accepted, else in the frame the player accepts
+            // them (LR-06, `crate::legal`).
             .add_systems(
                 Startup,
                 (
-                    start_networking.after(crate::persistence::load_persistent_client_settings),
+                    start_networking
+                        .after(crate::persistence::load_persistent_client_settings)
+                        .run_if(crate::legal::bound_and_accepted),
                     setup_connection_status_ui,
                     offline::setup_banner,
                 ),
+            )
+            .add_systems(
+                Update,
+                start_networking
+                    .run_if(on_message::<crate::legal::LegalAccepted>)
+                    .before(ClientNetPipeline::SendLocalState),
             )
             .add_systems(
                 Update,
@@ -221,6 +232,8 @@ impl Plugin for NetworkingPlugin {
                     flush_session_events,
                 )
                     .chain()
+                    // Every transport (re)start but the boot one is here.
+                    .distributive_run_if(crate::legal::bound_and_accepted)
                     .in_set(ClientNetPipeline::SessionLifecycle),
             )
             .add_systems(
@@ -233,5 +246,41 @@ impl Plugin for NetworkingPlugin {
                     .in_set(NetworkGroundingSet)
                     .before(bevy::transform::TransformSystems::Propagate),
             );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::legal::gate_tests::{assert_carries, gate, on_acceptance};
+
+    /// LR-06: no lobby transport opens before the region's legal documents
+    /// are accepted. The boot start waits for the acceptance and runs again
+    /// in its frame; every later (re)start is in the gated session lifecycle.
+    #[test]
+    fn the_lobby_waits_for_the_legal_acceptance() {
+        let mut app = App::new();
+        app.add_plugins(NetworkingPlugin);
+        let start = IntoSystem::system_type_id(&start_networking);
+        assert_carries(&app, Startup, start, gate(), "start_networking at boot");
+        assert_carries(
+            &app,
+            Update,
+            start,
+            on_acceptance(),
+            "start_networking on acceptance",
+        );
+        for (system, what) in [
+            (
+                IntoSystem::system_type_id(&update_session_lifecycle),
+                "update_session_lifecycle",
+            ),
+            (
+                IntoSystem::system_type_id(&retry_pending_join),
+                "retry_pending_join",
+            ),
+        ] {
+            assert_carries(&app, Update, system, gate(), what);
+        }
     }
 }

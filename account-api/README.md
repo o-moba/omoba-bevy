@@ -4,7 +4,8 @@ Rust 0.21.0-rc.1 HTTP adapter for the existing game career store. Axum 0.8.9,
 SQLx PostgreSQL, ring 0.17.14. No HTTP endpoint can settle matches or change rewards.
 The adapter reuses the game friendship transaction and nickname validation rules.
 [OpenAPI 3.1](docs/openapi.json) describes the wire contract. Game core schema is
-version 3 (revocable device keys); portal schema has its own version 7 and never runs Prisma/Drizzle push.
+version 4 (3 = revocable device keys, 4 = admission limits and profile retention, LR-16);
+portal schema has its own version 7 and never runs Prisma/Drizzle push.
 
 ## Database and migration
 
@@ -29,7 +30,10 @@ No role has ownership or CREATE on public/portal. On databases predating Postgre
 15, remove public CREATE permission as part of administration. The portal can update
 only the nickname column in career_profiles, read core career tables, mutate friend
 relations, and maintain portal tables. It can enroll a proved new device key into an explicitly approved existing profile, and revoke keys. It cannot create game profiles or alter XP,
-rating, match outcomes, allocation identities or core migration versions.
+rating, match outcomes, allocation identities or core migration versions. The game role
+counts new profiles in `career_profile_admissions` and may run only the owner-defined
+`career_prune_unplayed_profiles` to delete profiles that never played (LR-16); it still
+cannot delete a device key itself.
 
 ## Runtime
 

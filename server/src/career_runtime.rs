@@ -1042,6 +1042,7 @@ impl ServerRuntime {
                     request.request_id,
                     search,
                     party,
+                    crate::admission::SourceIp::of(addr),
                     now,
                 );
             }
