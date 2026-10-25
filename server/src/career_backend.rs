@@ -21,9 +21,22 @@ use omoba_career_store::career_store::CareerStore;
 use serde::{Deserialize, Serialize};
 use shared::career::*;
 
+use crate::admission::{Limits, SourceIp};
 use crate::career_port::CareerPort;
 
 const MAX_CLIENTS: usize = 512;
+/// A client of an IP at its limit gives way to a newcomer from that IP once
+/// it was idle this long (a reconnect leaves its old endpoint behind).
+const STALE_CLIENT: Duration = Duration::from_secs(30);
+/// One Login job per endpoint and challenge at a time; a lost reply is
+/// retried after this long.
+const LOGIN_IN_FLIGHT: Duration = Duration::from_secs(10);
+/// A Login or account action waits this long for the database to connect
+/// before it is answered "unavailable".
+const STORE_WAIT: Duration = Duration::from_secs(10);
+/// How often the lobby runs the retention job, and its batch.
+const RETENTION_INTERVAL: Duration = Duration::from_secs(3600);
+const RETENTION_BATCH: u32 = 200;
 const MAX_JOBS: usize = 256;
 const COSMETIC_CACHE_TTL: Duration = Duration::from_secs(30);
 const CHALLENGE_TTL: Duration = Duration::from_secs(30);
@@ -71,6 +84,8 @@ struct Client {
     profile_ready: bool,
     supporter_checked: Option<Instant>,
     key_checked: Option<Instant>,
+    /// When a Login job for the current challenge went to the worker.
+    login_sent: Option<Instant>,
 }
 impl Default for Client {
     fn default() -> Self {
@@ -85,6 +100,7 @@ impl Default for Client {
             profile_ready: false,
             supporter_checked: None,
             key_checked: None,
+            login_sent: None,
         }
     }
 }
@@ -346,6 +362,7 @@ pub(crate) struct CareerBackend<L: JobLink = WorkerLink> {
     matches: HashMap<String, String>,
     pending_ids: HashSet<String>,
     rejected: HashMap<String, String>,
+    limits: Limits,
 }
 #[cfg(test)]
 pub(crate) type MemoryCareer = CareerBackend<MemoryLink>;
@@ -366,6 +383,7 @@ impl<L: JobLink> CareerBackend<L> {
             matches: HashMap::new(),
             pending_ids: HashSet::new(),
             rejected: HashMap::new(),
+            limits: Limits::default(),
         }
     }
 }
@@ -391,7 +409,7 @@ impl MemoryCareer {
     }
 }
 impl CareerBackend {
-    pub fn new(epoch: u64) -> Self {
+    pub fn new(epoch: u64, limits: Limits) -> Self {
         let url = std::env::var("OMOBA_DATABASE_URL")
             .ok()
             .filter(|v| !v.trim().is_empty());
@@ -413,34 +431,45 @@ impl CareerBackend {
             Some("match") => RecoveryScope::Epoch(epoch),
             _ => RecoveryScope::Global,
         };
-        Self::with_recovery(epoch, url, outbox, scope)
+        Self::with_recovery(epoch, url, outbox, scope, limits)
     }
     #[cfg(test)]
     fn with_config(epoch: u64, url: Option<String>, outbox: PathBuf) -> Self {
-        Self::with_recovery(epoch, url, outbox, RecoveryScope::Global)
+        Self::with_recovery(epoch, url, outbox, RecoveryScope::Global, Limits::default())
     }
     fn with_recovery(
         epoch: u64,
         url: Option<String>,
         outbox: PathBuf,
         scope: RecoveryScope,
+        limits: Limits,
     ) -> Self {
         let (reply_tx, rx) = mpsc::sync_channel(MAX_JOBS * 2);
+        // Match workers are many short processes: only the lobby (and a
+        // standalone server) runs the retention job.
+        let admission = Admission {
+            new_profiles: limits.new_profiles,
+            retention_days: limits
+                .retention_days
+                .filter(|_| !matches!(scope, RecoveryScope::Epoch(_))),
+        };
         let tx = url.map(|url| {
             let (tx, jobs) = mpsc::sync_channel(MAX_JOBS);
             std::thread::Builder::new()
                 .name("omoba-career".into())
-                .spawn(move || worker(url, outbox, jobs, reply_tx, scope))
+                .spawn(move || worker(url, outbox, jobs, reply_tx, scope, admission))
                 .expect("career worker starts");
             tx
         });
-        Self::over(
+        let mut backend = Self::over(
             epoch,
             WorkerLink {
                 tx,
                 rx: Mutex::new(rx),
             },
-        )
+        );
+        backend.limits = limits;
+        backend
     }
     #[cfg(test)]
     pub fn test_with_database(epoch: u64, url: String, outbox: PathBuf) -> Self {
@@ -449,6 +478,29 @@ impl CareerBackend {
 }
 
 impl<L: JobLink> CareerBackend<L> {
+    /// Whether a new client at `addr` fits: at most [`MAX_CLIENTS`] in all and
+    /// `endpoints_per_ip` per IP (LR-16). At its IP's limit, that IP's stalest
+    /// client gives way once idle for [`STALE_CLIENT`] and not in a match: a
+    /// reconnecting device leaves its old endpoint behind.
+    fn make_room(&mut self, addr: SocketAddr) -> bool {
+        let ip = SourceIp::of(addr);
+        let mut same_ip = self
+            .clients
+            .iter()
+            .filter(|(other, _)| SourceIp::of(**other) == ip)
+            .map(|(other, client)| (*other, client.touched, client.playing))
+            .collect::<Vec<_>>();
+        if same_ip.len() >= self.limits.endpoints_per_ip {
+            same_ip.retain(|(_, touched, playing)| !playing && touched.elapsed() >= STALE_CLIENT);
+            let Some((stalest, _, _)) = same_ip.into_iter().min_by_key(|(_, touched, _)| *touched)
+            else {
+                return false;
+            };
+            self.clients.remove(&stalest);
+        }
+        self.clients.len() < MAX_CLIENTS
+    }
+
     fn record(&mut self, kind: RecordKind, result: MatchResult) -> bool {
         if self.rejected.contains_key(&result.result_id) {
             return false;
@@ -644,7 +696,7 @@ impl<L: JobLink> CareerPort for CareerBackend<L> {
         if !self.enabled() {
             return;
         }
-        if !self.clients.contains_key(&addr) && self.clients.len() >= MAX_CLIENTS {
+        if !self.clients.contains_key(&addr) && !self.make_room(addr) {
             return;
         }
         let c = self.clients.entry(addr).or_default();
@@ -697,6 +749,7 @@ impl<L: JobLink> CareerPort for CareerBackend<L> {
                 };
                 // A new handshake invalidates old authorization on this endpoint.
                 c.auth = None;
+                c.login_sent = None;
                 c.sequence = 0;
                 c.view = CareerView::default();
                 c.challenge = Some((challenge.clone(), now));
@@ -720,9 +773,19 @@ impl<L: JobLink> CareerPort for CareerBackend<L> {
                     return;
                 }
                 c.view.loading = true;
-                if !self.link.try_send(Job::Login { addr, challenge }) {
-                    c.view.error = Some("Account service is busy. Retry shortly.".into());
-                    c.view.loading = false;
+                c.view.error = None;
+                c.view.error_code = None;
+                // One Login per challenge at a time: retries of a sign-in that is
+                // still being answered add no database work (LR-16).
+                if c.login_sent
+                    .is_some_and(|at| now.duration_since(at) < LOGIN_IN_FLIGHT)
+                {
+                    return;
+                }
+                // A full queue is not an error: the client retries the same
+                // signed challenge shortly, as it does for a lost reply.
+                if self.link.try_send(Job::Login { addr, challenge }) {
+                    c.login_sent = Some(now);
                 }
             }
             CareerRequest::Authorized {
@@ -851,6 +914,7 @@ impl<L: JobLink> CareerPort for CareerBackend<L> {
                         continue;
                     }
                     c.view.loading = false;
+                    c.login_sent = None;
                     match result {
                         Ok(mut view) => {
                             view.auth_nonce = Some(challenge.nonce.clone());
@@ -861,7 +925,10 @@ impl<L: JobLink> CareerPort for CareerBackend<L> {
                             c.profile_ready = true;
                             c.sequence = 0;
                         }
-                        Err(e) => c.view.error = Some(e),
+                        Err(e) => {
+                            c.view.error_code = sign_in_error_code(&e).map(str::to_owned);
+                            c.view.error = Some(e);
+                        }
                     }
                 }
                 Reply::Action {
@@ -1222,12 +1289,133 @@ fn recover_outbox(outbox: &Path) -> RecoveredOutbox {
     }
 }
 
+/// What the worker needs of the admission limits (LR-16).
+#[derive(Clone, Copy)]
+pub(crate) struct Admission {
+    new_profiles: omoba_career_store::career_store::NewProfileLimits,
+    /// Retention of profiles that never played; `None` in match workers.
+    retention_days: Option<u32>,
+}
+
+#[cfg(test)]
+impl Admission {
+    pub(crate) fn for_test() -> Self {
+        Self {
+            new_profiles: Limits::default().new_profiles,
+            retention_days: None,
+        }
+    }
+}
+
+const STORE_UNAVAILABLE: &str = "Profile storage is unavailable. Retry shortly.";
+
+/// A sign-in or account action that waited [`STORE_WAIT`] for the database.
+fn unavailable(job: Job) -> Option<Reply> {
+    match job {
+        Job::Login { addr, challenge } => Some(Reply::Login {
+            addr,
+            challenge,
+            result: Err(STORE_UNAVAILABLE.into()),
+        }),
+        Job::Action {
+            addr,
+            nonce,
+            action,
+            ..
+        } => Some(Reply::Action {
+            addr,
+            nonce,
+            request_id: action_id(&action),
+            result: Err(STORE_UNAVAILABLE.into()),
+        }),
+        _ => None,
+    }
+}
+
+/// Answers a sign-in or an account action with a connected store. A sign-in
+/// of a new key counts against the new-profile limits of its source IP.
+fn answer(
+    rt: &tokio::runtime::Runtime,
+    store: &CareerStore,
+    job: Job,
+    admission: &Admission,
+) -> Option<Reply> {
+    match job {
+        Job::Login { addr, challenge } => {
+            let source = SourceIp::of(addr).key();
+            let result = rt.block_on(async {
+                let profile = store
+                    .authenticate_from(
+                        &challenge.public_key,
+                        &challenge.nickname,
+                        &source,
+                        admission.new_profiles,
+                    )
+                    .await?;
+                let (history, _) = store.history(&profile.profile_id, None).await?;
+                let last_result = match history.first() {
+                    Some(last) => store
+                        .detail(&profile.profile_id, &last.result_id)
+                        .await
+                        .ok(),
+                    None => None,
+                };
+                Ok(CareerView {
+                    supporter: store.supporter_status(&profile.profile_id).await.ok(),
+                    profile: Some(profile),
+                    last_result,
+                    ..Default::default()
+                })
+            });
+            Some(Reply::Login {
+                addr,
+                challenge,
+                result,
+            })
+        }
+        Job::Action {
+            addr,
+            nonce,
+            profile_id,
+            public_key,
+            action,
+        } => {
+            let request_id = action_id(&action);
+            let result = rt.block_on(async {
+                if !store.key_is_active(&public_key, &profile_id).await? {
+                    return Err("This device has been revoked.".into());
+                }
+                account_action(store, &profile_id, action).await
+            });
+            Some(Reply::Action {
+                addr,
+                nonce,
+                result,
+                request_id,
+            })
+        }
+        _ => None,
+    }
+}
+
+/// The client's code for a refused sign-in (`CareerView::error_code`).
+fn sign_in_error_code(error: &str) -> Option<&'static str> {
+    use omoba_career_store::career_store::{NEW_PROFILE_LIMIT_ERROR, NEW_PROFILES_PAUSED_ERROR};
+    use shared::career::error_code;
+    match error {
+        NEW_PROFILE_LIMIT_ERROR => Some(error_code::NEW_PROFILE_LIMIT),
+        NEW_PROFILES_PAUSED_ERROR => Some(error_code::NEW_PROFILES_PAUSED),
+        _ => None,
+    }
+}
+
 fn worker(
     url: String,
     outbox: PathBuf,
     jobs: Receiver<Job>,
     replies: SyncSender<Reply>,
     scope: RecoveryScope,
+    admission: Admission,
 ) {
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -1242,6 +1430,12 @@ fn worker(
     let mut heartbeat = Instant::now();
     let mut connected = true;
     let mut _heartbeat_task = None;
+    // Sign-ins and account actions that arrived while the database was not
+    // connected (after a host reboot): answered once it is, or "unavailable"
+    // after STORE_WAIT, instead of failing at once.
+    let mut parked: VecDeque<(Instant, Job)> = VecDeque::new();
+    // The first retention run waits out a restart's reconnect storm.
+    let mut next_retention = Instant::now() + Duration::from_secs(300);
     while connected || !pending.is_empty() {
         if store.is_none() && last_retry.elapsed() >= Duration::from_secs(2) {
             last_retry = Instant::now();
@@ -1281,58 +1475,13 @@ fn worker(
                 pending.insert(id, record);
                 last_retry = Instant::now() - Duration::from_secs(3);
             }
-            Ok(Job::Login { addr, challenge }) => {
-                let result = match &store {
-                    Some(store) => rt.block_on(async {
-                        let profile = store
-                            .authenticate(&challenge.public_key, &challenge.nickname)
-                            .await?;
-                        let (history, _) = store.history(&profile.profile_id, None).await?;
-                        let last_result = match history.first() {
-                            Some(last) => store
-                                .detail(&profile.profile_id, &last.result_id)
-                                .await
-                                .ok(),
-                            None => None,
-                        };
-                        Ok(CareerView {
-                            supporter: store.supporter_status(&profile.profile_id).await.ok(),
-                            profile: Some(profile),
-                            last_result,
-                            ..Default::default()
-                        })
-                    }),
-                    None => Err("Profile storage is unavailable. Retry shortly.".into()),
-                };
-                let _ = replies.try_send(Reply::Login {
-                    addr,
-                    challenge,
-                    result,
-                });
-            }
-            Ok(Job::Action {
-                addr,
-                nonce,
-                profile_id,
-                public_key,
-                action,
-            }) => {
-                let request_id = action_id(&action);
-                let result = match &store {
-                    Some(s) => rt.block_on(async {
-                        if !s.key_is_active(&public_key, &profile_id).await? {
-                            return Err("This device has been revoked.".into());
-                        }
-                        account_action(s, &profile_id, action).await
-                    }),
-                    None => Err("Profile storage is unavailable. Retry shortly.".into()),
-                };
-                let _ = replies.try_send(Reply::Action {
-                    addr,
-                    nonce,
-                    result,
-                    request_id,
-                });
+            Ok(job @ (Job::Login { .. } | Job::Action { .. })) => {
+                if parked.len() >= MAX_JOBS
+                    && let Some(reply) = parked.pop_front().and_then(|(_, job)| unavailable(job))
+                {
+                    let _ = replies.try_send(reply);
+                }
+                parked.push_back((Instant::now(), job));
             }
             Ok(Job::RefreshAccess {
                 addr,
@@ -1366,6 +1515,31 @@ fn worker(
             }
             Err(mpsc::RecvTimeoutError::Disconnected) => connected = false,
             Err(mpsc::RecvTimeoutError::Timeout) => {}
+        }
+        while let Some((at, _)) = parked.front() {
+            let waited = at.elapsed() >= STORE_WAIT;
+            let reply = match &store {
+                Some(s) => parked
+                    .pop_front()
+                    .and_then(|(_, job)| answer(&rt, s, job, &admission)),
+                None if waited => parked.pop_front().and_then(|(_, job)| unavailable(job)),
+                None => break,
+            };
+            if let Some(reply) = reply {
+                let _ = replies.try_send(reply);
+            }
+        }
+        if let (Some(days), Some(s)) = (admission.retention_days, &store)
+            && Instant::now() >= next_retention
+        {
+            next_retention = Instant::now() + RETENTION_INTERVAL;
+            match rt.block_on(s.prune_unplayed_profiles(days, RETENTION_BATCH)) {
+                Ok(0) => {}
+                Ok(pruned) => println!(
+                    "PROFILE_RETENTION pruned={pruned} min_age_days={days} (never played, unlinked)"
+                ),
+                Err(error) => eprintln!("Profile retention failed: {error}"),
+            }
         }
         if last_retry.elapsed() >= Duration::from_secs(2) || !connected {
             last_retry = Instant::now();
@@ -1529,6 +1703,106 @@ mod tests {
     use ed25519_dalek::{Signer, SigningKey};
 
     use super::*;
+
+    fn challenge_request(n: u8) -> CareerRequest {
+        CareerRequest::Challenge {
+            public_key: hex(SigningKey::from_bytes(&[n; 32]).verifying_key().as_bytes()),
+            nickname: "Player".into(),
+            session_id: format!("session-{n}"),
+        }
+    }
+    fn at(ip: [u8; 4], port: u16) -> SocketAddr {
+        SocketAddr::from((ip, port))
+    }
+
+    /// LR-16: one IP holds at most `endpoints_per_ip` career clients; another
+    /// IP is not affected, and an idle client of that IP gives way.
+    #[test]
+    fn one_ip_holds_at_most_n_career_clients() {
+        let limit = Limits::default().endpoints_per_ip;
+        let mut backend = MemoryCareer::test_backend(7);
+        for port in 0..20 {
+            backend.handle(at([203, 0, 113, 9], 50000 + port), challenge_request(1));
+        }
+        let admitted = (0..20)
+            .filter(|port| {
+                backend
+                    .view(at([203, 0, 113, 9], 50000 + port))
+                    .challenge
+                    .is_some()
+            })
+            .count();
+        assert_eq!(admitted, limit);
+        backend.handle(at([203, 0, 113, 10], 50000), challenge_request(2));
+        assert!(
+            backend
+                .view(at([203, 0, 113, 10], 50000))
+                .challenge
+                .is_some()
+        );
+        // A reconnect after the old endpoint went quiet takes its place.
+        let idle = at([203, 0, 113, 9], 50000);
+        backend.clients.get_mut(&idle).unwrap().touched =
+            Instant::now().checked_sub(STALE_CLIENT).unwrap();
+        let returning = at([203, 0, 113, 9], 60000);
+        backend.handle(returning, challenge_request(1));
+        assert!(backend.view(returning).challenge.is_some());
+        assert!(!backend.clients.contains_key(&idle));
+    }
+
+    /// LR-16: retries of one sign-in queue one Login, a full queue is no
+    /// error (the client retries), and a refused new profile carries its code.
+    #[test]
+    fn a_sign_in_queues_one_login_and_a_refusal_carries_its_code() {
+        use omoba_career_store::career_store::NEW_PROFILE_LIMIT_ERROR;
+        let key = SigningKey::from_bytes(&[3; 32]);
+        let addr = at([203, 0, 113, 9], 50000);
+        let mut backend = MemoryCareer::test_backend(7);
+        backend.handle(addr, challenge_request(3));
+        let challenge = backend.view(addr).challenge.unwrap();
+        let authenticate = CareerRequest::Authenticate {
+            challenge: challenge.clone(),
+            signature: hex(&key.sign(&challenge.signing_bytes()).to_bytes()),
+        };
+        // Fill the worker queue: the sign-in waits without an error.
+        for _ in 0..MAX_JOBS {
+            backend.link.jobs.push_back(Job::Presence(Vec::new()));
+        }
+        backend.clients.get_mut(&addr).unwrap().last_request = None;
+        backend.handle(addr, authenticate.clone());
+        assert_eq!(backend.view(addr).error, None);
+        backend.link.jobs.clear();
+        for _ in 0..3 {
+            backend.clients.get_mut(&addr).unwrap().last_request = None;
+            backend.handle(addr, authenticate.clone());
+        }
+        let logins = |backend: &MemoryCareer| {
+            backend
+                .link
+                .jobs
+                .iter()
+                .filter(|job| matches!(job, Job::Login { .. }))
+                .count()
+        };
+        assert_eq!(logins(&backend), 1);
+        backend.link.replies.push_back(Reply::Login {
+            addr,
+            challenge,
+            result: Err(NEW_PROFILE_LIMIT_ERROR.into()),
+        });
+        backend.poll();
+        let view = backend.view(addr);
+        assert_eq!(
+            view.error_code.as_deref(),
+            Some(shared::career::error_code::NEW_PROFILE_LIMIT)
+        );
+        assert_eq!(view.error.as_deref(), Some(NEW_PROFILE_LIMIT_ERROR));
+        assert!(view.profile.is_none());
+        // Answered: a later retry asks the store again.
+        backend.clients.get_mut(&addr).unwrap().last_request = None;
+        backend.handle(addr, authenticate);
+        assert_eq!(logins(&backend), 2);
+    }
     #[test]
     fn supporter_is_denied_for_free_expired_disabled_stale_and_unauthenticated_profiles() {
         use shared::supporter::{AuraStyle, SupporterStatus};

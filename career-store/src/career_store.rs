@@ -21,10 +21,27 @@ use std::{
 };
 
 const MIGRATION: &str = include_str!("../migrations/postgres/001_career.sql");
+/// Every core career schema version, in order; a runtime requires all of them.
+pub const SCHEMA_VERSIONS: [i32; 4] = [1, 2, 3, 4];
 const RULESET: &str = "verdant-default-v1";
 pub(crate) const PUBLIC_CASUAL_RULESET: &str = "public-casual-v1";
 const MAX_JSON: usize = 1024 * 1024;
 const MAX_SOCIAL: i64 = 64;
+
+/// How many profiles new device keys may create in 24 hours (LR-16): from one
+/// source and in total. A key that already has a profile is never counted.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct NewProfileLimits {
+    pub per_source: u32,
+    pub total: u32,
+}
+
+/// A new key from a source that already created `per_source` profiles today.
+pub const NEW_PROFILE_LIMIT_ERROR: &str = "Too many new profiles were created from this network today. Try again tomorrow, or sign in on a device that already has a profile.";
+/// A new key while `total` profiles were created today.
+pub const NEW_PROFILES_PAUSED_ERROR: &str = "New profiles are paused for today. Try again later, or sign in on a device that already has a profile.";
+/// Admission rows older than this are deleted; the limits look back 24 hours.
+const ADMISSION_RETENTION: &str = "48 hours";
 
 #[derive(Clone)]
 pub struct CareerStore {
@@ -180,7 +197,7 @@ impl CareerStore {
                 .fetch_all(&pool)
                 .await
                 .map_err(|e| StoreError::from(e).to_string())?;
-        if versions != [1, 2, 3] {
+        if versions != SCHEMA_VERSIONS {
             return Err("Unsupported career database schema version.".into());
         }
         let owner: String = sqlx::query_scalar("SELECT gen_random_uuid()::text")
@@ -236,7 +253,7 @@ impl CareerStore {
             sqlx::query("INSERT INTO career_schema_version VALUES (1)")
                 .execute(&mut *tx)
                 .await?;
-        } else if versions != [1] && versions != [1, 2] && versions != [1, 2, 3] {
+        } else if !(1..=SCHEMA_VERSIONS.len()).any(|n| versions == SCHEMA_VERSIONS[..n]) {
             return Err("Unsupported career database schema version.".into());
         }
         if !versions.contains(&2) {
@@ -253,6 +270,13 @@ impl CareerStore {
             sqlx::raw_sql(include_str!("../migrations/postgres/003_device_keys.sql"))
                 .execute(&mut *tx)
                 .await?;
+        }
+        if !versions.contains(&4) {
+            sqlx::raw_sql(include_str!(
+                "../migrations/postgres/004_admission_limits.sql"
+            ))
+            .execute(&mut *tx)
+            .await?;
         }
         tx.commit().await?;
         let owner: String = sqlx::query_scalar("SELECT gen_random_uuid()::text")
@@ -278,12 +302,28 @@ impl CareerStore {
         public_key: &str,
         nickname: &str,
     ) -> Result<ProfileSummary, String> {
-        retry(|| self.authenticate_inner(public_key, nickname)).await
+        retry(|| self.authenticate_inner(public_key, nickname, None)).await
+    }
+
+    /// [`Self::authenticate`] for a game sign-in from `source` (one IP: an IPv4
+    /// address or an IPv6 /64). A known key signs in as before; a new key gets
+    /// a profile only within `limits` (LR-16). A refusal is
+    /// [`NEW_PROFILE_LIMIT_ERROR`] or [`NEW_PROFILES_PAUSED_ERROR`] and creates
+    /// nothing.
+    pub async fn authenticate_from(
+        &self,
+        public_key: &str,
+        nickname: &str,
+        source: &str,
+        limits: NewProfileLimits,
+    ) -> Result<ProfileSummary, String> {
+        retry(|| self.authenticate_inner(public_key, nickname, Some((source, limits)))).await
     }
     async fn authenticate_inner(
         &self,
         public_key: &str,
         nickname: &str,
+        admission: Option<(&str, NewProfileLimits)>,
     ) -> StoreResult<ProfileSummary> {
         check_id(public_key)?;
         let nickname = normalize_nickname(nickname)?;
@@ -299,6 +339,9 @@ impl CareerStore {
                 return Err("This device key was revoked. Link a new device or use a recovery code.".into());
             }
             let profile = profile_row(&row)?; tx.commit().await?; return Ok(profile);
+        }
+        if let Some((source, limits)) = admission {
+            admit_new_profile(&mut tx, source, limits).await?;
         }
         let id: String = sqlx::query_scalar("SELECT replace(gen_random_uuid()::text,'-','') || replace(gen_random_uuid()::text,'-','')")
             .fetch_one(&mut *tx).await?;
@@ -701,6 +744,33 @@ impl CareerStore {
         Ok(result)
     }
 
+    /// The retention job (LR-16): deletes at most `max_profiles` profiles whose
+    /// only key is older than `min_age_days` and that never played and are linked
+    /// to nothing (`career_prune_unplayed_profiles`, schema 4), and admission
+    /// rows older than 48 hours. Returns how many profiles went.
+    pub async fn prune_unplayed_profiles(
+        &self,
+        min_age_days: u32,
+        max_profiles: u32,
+    ) -> Result<u32, String> {
+        let days = i32::try_from(min_age_days).map_err(|_| "Invalid retention age.")?;
+        let limit = i32::try_from(max_profiles).map_err(|_| "Invalid retention batch.")?;
+        retry(|| async {
+            sqlx::query(&format!(
+                "DELETE FROM career_profile_admissions WHERE created_at < clock_timestamp() - interval '{ADMISSION_RETENTION}'"
+            ))
+            .execute(&self.pool)
+            .await?;
+            let pruned: i32 = sqlx::query_scalar("SELECT career_prune_unplayed_profiles($1, $2)")
+                .bind(days)
+                .bind(limit)
+                .fetch_one(&self.pool)
+                .await?;
+            Ok(u32::try_from(pruned).unwrap_or(0))
+        })
+        .await
+    }
+
     pub async fn heartbeat(&self) -> Result<(), String> {
         retry(|| async {
             sqlx::query("UPDATE career_matches SET lease_until=clock_timestamp()+interval '90 seconds' WHERE owner_id=$1 AND status!='settled' AND lease_until>clock_timestamp()")
@@ -970,6 +1040,47 @@ impl CareerStore {
 
 pub fn friendship_etag(created_epoch: &str, requested_by: &str, accepted: bool) -> String {
     format!("v1:{created_epoch}:{requested_by}:{}", u8::from(accepted))
+}
+
+/// Counts a new profile for `source` inside the sign-in transaction, or refuses
+/// it when the source or everyone already reached today's limit (LR-16). One
+/// transaction-scoped lock serializes the check and the insert, so concurrent
+/// keys cannot both take the last place.
+async fn admit_new_profile(
+    tx: &mut Transaction<'_, Postgres>,
+    source: &str,
+    limits: NewProfileLimits,
+) -> StoreResult<()> {
+    if source.is_empty() || source.len() > 64 {
+        return Err("Invalid sign-in source.".into());
+    }
+    sqlx::query("SELECT pg_advisory_xact_lock(721946004)")
+        .execute(&mut **tx)
+        .await?;
+    let row = sqlx::query(
+        "WITH h AS (SELECT encode(sha256(convert_to(salt || $1, 'UTF8')), 'hex') AS source FROM career_admission_salt) \
+         SELECT h.source, \
+           (SELECT count(*) FROM career_profile_admissions a WHERE a.source = h.source AND a.created_at > clock_timestamp() - interval '24 hours') AS from_source, \
+           (SELECT count(*) FROM career_profile_admissions a WHERE a.created_at > clock_timestamp() - interval '24 hours') AS total \
+         FROM h",
+    )
+    .bind(source)
+    .fetch_one(&mut **tx)
+    .await?;
+    let from_source: i64 = row.try_get("from_source")?;
+    let total: i64 = row.try_get("total")?;
+    if total >= i64::from(limits.total) {
+        return Err(NEW_PROFILES_PAUSED_ERROR.into());
+    }
+    if from_source >= i64::from(limits.per_source) {
+        return Err(NEW_PROFILE_LIMIT_ERROR.into());
+    }
+    let hashed: String = row.try_get("source")?;
+    sqlx::query("INSERT INTO career_profile_admissions(source) VALUES($1)")
+        .bind(hashed)
+        .execute(&mut **tx)
+        .await?;
+    Ok(())
 }
 
 fn check_id(id: &str) -> StoreResult<()> {

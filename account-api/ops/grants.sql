@@ -34,6 +34,12 @@ GRANT USAGE ON ALL SEQUENCES IN SCHEMA public TO :"game_role";
 -- broad grants when upgrading an existing game role, then grant only registration.
 REVOKE INSERT,UPDATE,DELETE ON career_keys FROM :"game_role";
 GRANT SELECT,INSERT(public_key,profile_id) ON career_keys TO :"game_role";
+-- Admission limits (career schema 4, LR-16): the game counts profiles created for
+-- new keys and drops counter rows after 48 hours. Only the owner-defined retention
+-- function deletes unplayed, unlinked profiles and their keys.
+GRANT SELECT ON career_admission_salt TO :"game_role";
+GRANT SELECT,INSERT,DELETE ON career_profile_admissions TO :"game_role";
+GRANT EXECUTE ON FUNCTION career_prune_unplayed_profiles(integer, integer) TO :"game_role";
 -- Neither runtime role receives schema CREATE, ownership, or migration privileges.
 -- In a legacy database, explicitly remove public schema CREATE from PUBLIC before
 -- deployment. Fresh PostgreSQL 15+ databases already use the owner-only default.

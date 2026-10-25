@@ -82,6 +82,8 @@ class FakeSystem:
         self.fail_sshd_test = False
         self.fail_caddy_validate = False
         self.fail_migrate = False
+        self.fail_nft_check = False
+        self.nft_loaded = False
         self.ufw = {"active": False, "incoming": "deny", "rules": []}
         self.dns = {NAMES[key]: {socket.AF_INET: {RU_IP}, socket.AF_INET6: set()} for key in ru_host.HOST_KEYS}
         # PostgreSQL after `apt-get install postgresql` (Ubuntu 24.04: 16 with ICU, localhost).
@@ -174,6 +176,8 @@ class FakeSystem:
             return 0, ""
         if name == "ufw":
             return self.ufw_command(args[1:])
+        if name == "nft":
+            return self.nft(args[1:])
         if name == "sshd":
             return self.sshd(args[1:])
         if name == "caddy":
@@ -257,7 +261,8 @@ class FakeSystem:
         if verb == "daemon-reload":
             return 0, ""
         unit = args[1]
-        assert unit in ("caddy", "postgresql", "ssh.service", *SERVER_SERVICES, "omoba-portal-ru", *TIMERS), args
+        assert unit in ("caddy", "postgresql", "ssh.service", *SERVER_SERVICES, "omoba-portal-ru",
+                        "omoba-limits-ru", *TIMERS), args
         if verb == "enable":
             self.enabled.add(unit)
         elif verb == "disable":
@@ -271,9 +276,19 @@ class FakeSystem:
             raise AssertionError(f"unexpected systemctl {args}")
         return 0, ""
 
+    def nft(self, args):
+        if args[:2] == ["-c", "-f"]:
+            assert os.path.isfile(args[2]), args
+            return (1, "", "Error: syntax error, unexpected newline") if self.fail_nft_check else (0, "")
+        if args == ["list", "table", "inet", "omoba_limits"]:
+            return (0, "table inet omoba_limits {\n}\n") if self.nft_loaded else (1, "", "Error: No such file or directory")
+        raise AssertionError(f"unexpected nft {args}")
+
     def stop(self, unit):
         state = self.unit(unit)
         state.update(active=False, MainPID="0")
+        if unit == "omoba-limits-ru":
+            self.nft_loaded = False
         if unit == "omoba-lobby-ru":
             self.udp.discard(("0.0.0.0", 4000))
         self.tcp.discard({"omoba-account-api-ru": ("127.0.0.1", 40550),
@@ -301,6 +316,10 @@ class FakeSystem:
             if not os.path.isfile(self.p("/opt/omoba-ru/portal/current/server.js")):
                 return 1, "", "exec failed"
             self.tcp.add(("127.0.0.1", 3010))
+        elif unit == "omoba-limits-ru":
+            if not os.path.isfile(self.p(ru_host.NFT_RULES)) or "nftables" not in self.packages:
+                return 1, "", "nft: no such file"
+            self.nft_loaded = True
         state["active"] = True
         state["NRestarts"] = "0"
         return 0, ""
@@ -310,7 +329,8 @@ class FakeSystem:
         for unit in list(self.units):
             self.stop(unit)
         Path(self.p("/proc/sys/kernel/random/boot_id")).write_text("boot-2\n")
-        for unit in ("postgresql", "caddy", "omoba-lobby-ru", "omoba-account-api-ru", "omoba-portal-ru", *TIMERS):
+        for unit in ("postgresql", "caddy", "omoba-limits-ru", "omoba-lobby-ru", "omoba-account-api-ru",
+                     "omoba-portal-ru", *TIMERS):
             if unit in self.enabled:
                 self.start(unit)
 
@@ -487,6 +507,7 @@ class HostCase(unittest.TestCase):
     def payload(self, **extra):
         return {"expected_ip": RU_IP, "dev_ip": None, "behind_nat": False, "units": dict(KIT["units"]),
                 "examples": dict(KIT["examples"]), "caddyfile": KIT["caddyfile"], "names": dict(NAMES),
+                "nftables": KIT["nftables"], "limits_unit": KIT["limits_unit"],
                 "backup_kit_z": KIT["backup_kit_z"], **extra}
 
     def bootstrap(self, **extra):
@@ -638,6 +659,24 @@ class RuKitTest(unittest.TestCase):
         self.assertEqual(ru_host.firewall_rules(wider, {2222})[-1][1], "41000:41005/udp")
         self.assertEqual(ru_host.firewall_rules(wider, {2222})[0][1], "2222/tcp")
 
+    def test_the_per_source_limits_cover_the_lobby_and_the_arenas_and_nothing_else(self):
+        self.assertEqual(ru_host.nftables_problems(KIT["nftables"], KIT["units"]["lobby"]), [])
+        self.assertEqual(ru_host.limits_unit_problems(KIT["limits_unit"]), [])
+        cases = {
+            "OMOBA_ARENA_PORTS": KIT["nftables"].replace("41000-41001", "41000-41002"),
+            "OMOBA_LOBBY_PORT": KIT["nftables"].replace("OMOBA_LOBBY_PORT = 4000", "OMOBA_LOBBY_PORT = 4001"),
+            "flushes rules": KIT["nftables"].replace("delete table inet omoba_limits", "flush ruleset"),
+            "only table inet omoba_limits": KIT["nftables"] + "\ntable inet filter {\n}\n",
+            "udp dport $OMOBA_ARENA_PORTS": "\n".join(line for line in KIT["nftables"].splitlines()
+                                                     if "@arena_v" not in line),
+        }
+        for needle, text in cases.items():
+            problems = ru_host.nftables_problems(text, KIT["units"]["lobby"])
+            self.assertTrue(any(needle in problem for problem in problems), (needle, problems))
+        single = KIT["units"]["lobby"].replace("OMOBA_MATCH_CAPACITY=2", "OMOBA_MATCH_CAPACITY=1")
+        self.assertEqual(ru_host.nftables_problems(KIT["nftables"].replace("41000-41001", "41000"), single), [])
+        self.assertTrue(ru_host.limits_unit_problems(KIT["limits_unit"].replace("RemainAfterExit=yes", "")))
+
     def test_env_examples_are_complete_placeholders(self):
         for kind, text in KIT["examples"].items():
             self.assertEqual(ru_host.example_problems(kind, text), [], kind)
@@ -782,6 +821,10 @@ To                         Action      From
             ru_host.parse_env(KIT["examples"]["lobby"])[0], "95.163.10.21", None))
         self.assertIn("OMOBA_MATCH_PUBLIC_HOST is 95.163.10.21, not RU_IP 95.163.10.20",
                       ru_host.env_problems("lobby", lobby, KIT["examples"]["lobby"], RU_IP)[0])
+        # The documented admission knobs (README "Admission limits") are no surprise; others are.
+        tuned = lobby + "OMOBA_LIMIT_ENDPOINTS_PER_IP=16\nOMOBA_PROFILE_RETENTION_DAYS=0\nOMOBA_LIMITS=1\n"
+        self.assertEqual(ru_host.env_problems("lobby", tuned, KIT["examples"]["lobby"])[1],
+                         ["OMOBA_LIMITS is not in lobby.env.example"])
 
     def test_postgres_must_be_16_with_icu_on_loopback(self):
         good = {"version": 160004, "icu": True, "listen": "localhost", "port": 5432, "database_owner": None}
@@ -939,8 +982,9 @@ class BootstrapTest(HostCase):
         for kind in ru_host.KINDS:
             self.assertEqual(Path(fake.p(ru_host.unit_path(kind))).read_text(), KIT["units"][kind])
         self.assertIn(["systemctl", "daemon-reload"], fake.calls)
-        self.assertEqual(fake.enabled, {"postgresql", "caddy", *TIMERS},
-                         "no RU unit is enabled before its release exists; the backup timers are")
+        self.assertEqual(fake.enabled, {"postgresql", "caddy", "omoba-limits-ru", *TIMERS},
+                         "no RU game unit is enabled before its release exists; the backup timers and "
+                         "the per-source limits are")
         # Backups (LR-03): the tool, its units and timers, backup.env with placeholders only.
         backup = ru_host.decode_backup_kit(KIT["backup_kit_z"])
         script = fake.p(ru_host.BACKUP_SCRIPT)
@@ -953,6 +997,11 @@ class BootstrapTest(HostCase):
         self.assertEqual(os.stat(env).st_mode & 0o777, 0o600)
         self.assertEqual(Path(env).read_text(), (ROOT / "ops/vps/ru/backup.env.example").read_text())
         self.assertIn("gnupg", fake.packages)
+        # Per-source UDP limits (LR-16): the checked file, its unit, loaded.
+        self.assertEqual(Path(fake.p(ru_host.NFT_RULES)).read_text(), KIT["nftables"])
+        self.assertEqual(Path(fake.p("/etc/systemd/system/omoba-limits-ru.service")).read_text(), KIT["limits_unit"])
+        self.assertTrue(fake.nft_loaded)
+        self.assertIn("nftables", fake.packages)
         # What is left is shipping, the portal runtime and nothing about the host itself.
         remaining = "\n".join(result["remaining"])
         self.assertIn("no lobby/Account API release yet (ship)", remaining)
@@ -1022,10 +1071,30 @@ class BootstrapTest(HostCase):
         wider = KIT["units"]["lobby"].replace("OMOBA_MATCH_CAPACITY=2", "OMOBA_MATCH_CAPACITY=4")
         payload = self.payload(kind="bootstrap", vkid=VK_ID)
         payload["units"]["lobby"] = wider
-        self.fresh().bootstrap(payload)
+        # The per-source limits must cover the same range: the kit edits both files.
+        with self.assertRaises(ru_host.Refused) as refused:
+            self.fresh().bootstrap(payload)
+        self.assertIn("OMOBA_ARENA_PORTS is '41000-41001', not the lobby unit's 41000-41003",
+                      refused.exception.message)
+        payload["nftables"] = KIT["nftables"].replace("41000-41001", "41000-41003")
+        result = self.fresh().bootstrap(payload)
         self.assertEqual([rule[1] for rule in self.fake.ufw["rules"]],
                          ["22/tcp", "443/tcp", "4000/udp", "41000:41003/udp"])
         self.assertIn(["ufw", "--force", "delete", "allow", "41000:41001/udp"], self.fake.calls)
+        self.assertIn("systemctl restart omoba-limits-ru", result["done"])
+        self.assertIn("41000-41003", Path(self.fake.p(ru_host.NFT_RULES)).read_text())
+
+    def test_per_source_limits_are_checked_before_they_replace_the_old_file(self):
+        self.bootstrap()
+        self.fake.fail_nft_check = True
+        payload = self.payload(kind="bootstrap", vkid=VK_ID)
+        payload["nftables"] = KIT["nftables"].replace("burst 800 packets", "burst 900 packets")
+        with self.assertRaises(SystemExit) as refused:
+            self.fresh().bootstrap(payload)
+        self.assertIn("nft -c refused", str(refused.exception))
+        self.assertEqual(Path(self.fake.p(ru_host.NFT_RULES)).read_text(), KIT["nftables"])
+        self.assertFalse(os.path.exists(self.fake.p(ru_host.NFT_RULES + ".next")))
+        self.assertTrue(self.fake.nft_loaded, "the loaded limits stay")
 
     @unittest.skipUnless(HAS_DATA_FILTER, "needs Python with the tarfile data filter (3.12+)")
     def test_node_from_an_official_tarball(self):
@@ -1331,9 +1400,11 @@ class PortalAndRebootTest(HostCase):
         os.unlink(self.fake.p(ru_host.SSHD_DROPIN))
         self.fake.dns[NAMES["lobby"]][socket.AF_INET] = set()
         os.chmod(self.fake.p(ru_host.ENV_PATHS["portal"]), 0o644)
+        self.fake.nft_loaded = False
         problems = "\n".join(self.fresh().status(self.payload())["problems"])
         for needle in ("ufw opens 5432/tcp", "PostgreSQL listens on ['0.0.0.0:5432']", "sshd passwordauthentication",
-                       f"{NAMES['lobby']} has no A record", "portal.env has mode 0o644"):
+                       f"{NAMES['lobby']} has no A record", "portal.env has mode 0o644",
+                       "nftables table inet omoba_limits is not loaded"):
             self.assertIn(needle, problems)
 
 
