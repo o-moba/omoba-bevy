@@ -416,6 +416,19 @@ impl ServerRuntime {
         let Some(profile) = self.career.backend.profile(addr) else {
             return;
         };
+        // This standalone queue is rated: a matchmaking or ranked ban
+        // refuses it (LR-15).
+        if let Some((code, _)) = shared::moderation::queue_refusal(
+            &self.career.backend.sanctions(addr),
+            shared::match_service::MatchPreference::Ranked,
+            crate::moderation::unix_now(),
+        ) {
+            self.career_error(
+                addr,
+                format!("Matchmaking is restricted for this profile ({code})."),
+            );
+            return;
+        }
         if let Err(error) = self.career.queue.enqueue(id, profile.clone(), now) {
             self.career_error(addr, error.to_string());
             return;
@@ -1031,6 +1044,22 @@ impl ServerRuntime {
                 self.career.backend.profile(addr),
                 self.career.backend.authenticated_session(addr),
             ) {
+                // A matchmaking or ranked ban refuses the search, localized
+                // with its end from the career view (LR-15).
+                if let Some((code, _)) = shared::moderation::queue_refusal(
+                    &self.career.backend.sanctions(addr),
+                    request.preference,
+                    crate::moderation::unix_now(),
+                ) {
+                    self.match_service.refuse(
+                        &profile.profile_id,
+                        session,
+                        request.request_id,
+                        code,
+                        now,
+                    );
+                    continue;
+                }
                 let party = self.party_tag(addr);
                 let search = crate::match_service::Search {
                     preference: request.preference,

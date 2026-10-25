@@ -24,6 +24,7 @@ pub mod map;
 pub mod market;
 pub mod match_service;
 pub mod math;
+pub mod moderation;
 pub mod navigation;
 pub mod party;
 pub mod practice;
