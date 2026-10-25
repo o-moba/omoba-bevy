@@ -16,9 +16,9 @@ contacted; nothing on the host changes without --apply:
         --node-tarball node-v22.<x>.<y>-linux-x64.tar.xz --node-sha256 <SHASUMS256.txt line>
     python3 ops/vps/ru/ru_host.py bootstrap ... --check   # read-only preflight on the host
     python3 ops/vps/ru/ru_host.py bootstrap ... --apply
-    # 2. lobby + Account API from the RU Linux package (pg_dump, migrations, grants)
-    python3 scripts/release.py build linux --market ru
-    python3 ops/vps/ru/ru_host.py ship --package dist/v<v>-ru/omoba-<v>-ru-linux-x64.tar.gz --apply
+    # 2. lobby + Account API from the RU server bundle (pg_dump, migrations, grants)
+    python3 scripts/release.py build server --market ru
+    python3 ops/vps/ru/ru_host.py ship --package dist/v<v>-ru/server/omoba-<v>-ru-server-linux-x64.tar.gz --apply
     # 3. portal: omoba-web built with the RU env (README.md, "Portal bundle")
     python3 ops/vps/ru/ru_host.py portal-bundle --web ../omoba-web
     python3 ops/vps/ru/ru_host.py ship-portal --bundle dist/portal-ru/omoba-portal-ru-<rev>.tar.gz --apply
@@ -150,7 +150,7 @@ AUTHORIZED_KEYS = "/root/.ssh/authorized_keys"
 SAFE_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
 KINDS = ("lobby", "account-api", "portal")
-SERVER_KINDS = ("lobby", "account-api")   # shipped together from the RU Linux package
+SERVER_KINDS = ("lobby", "account-api")   # shipped together from the RU server bundle
 UNIT_FILES = {"lobby": "omoba-lobby-ru.service", "account-api": "omoba-account-api-ru.service",
               "portal": "omoba-portal-ru.service"}
 ENV_EXAMPLES = {"lobby": "lobby.env.example", "account-api": "account-api.env.example",
@@ -201,7 +201,9 @@ PLACEHOLDER = "CHANGE_ME"
 LOOPBACK = frozenset({"127.0.0.1", "localhost", "::1"})
 
 SERVER_BINARIES = ("omoba-server", "omoba-account-api")
-RU_PACKAGE = re.compile(r"omoba-(\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?)-ru-linux-x64\.tar\.gz")
+# The RU server bundle (release.py `build server --market ru`, LR-22); the RU player
+# packages carry no server tools.
+RU_PACKAGE = re.compile(r"omoba-(\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?)-ru-server-linux-x64\.tar\.gz")
 SERVER_RELEASE = re.compile(r"\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?-ru-[0-9a-f]{7,40}")
 PORTAL_BUNDLE = re.compile(r"omoba-portal-ru-([0-9a-f]{7,40})\.tar\.gz")
 PORTAL_RELEASE = re.compile(r"[0-9a-f]{7}-[0-9a-f]{8}")
@@ -818,6 +820,9 @@ def example_problems(kind: str, text: str) -> list[str]:
         problems.append("OMOBA_MATCH_PUBLIC_HOST must be a placeholder (bootstrap fills in $RU_IP)")
     if kind == "portal" and values.get("PORT") != str(PORTAL_ADDR[1]):
         problems.append(f"PORT must be {PORTAL_ADDR[1]}")
+    # The RU landing is the portal's own guest home (LR-22); the portal refuses a website URL.
+    if kind == "portal" and "OMOBA_SITE_URL" in values:
+        problems.append("OMOBA_SITE_URL must not be set: the RU landing is the portal's own home page")
     for key, value in values.items():
         if (key.endswith("_SECRET") or key == "OMOBA_VKID_CLIENT_ID") and PLACEHOLDER not in value:
             problems.append(f"{key} must stay a placeholder in the example")
@@ -3013,16 +3018,16 @@ def source_revision(explicit: str | None, version: str) -> str:
 
 
 def read_package(package: Path) -> tuple:
-    """(version, {binary: bytes}) from an RU Linux package only."""
+    """(version, {binary: bytes}) from an RU server bundle only."""
     match = RU_PACKAGE.fullmatch(package.name)
     if not match:
-        raise Refused(f"{package.name} is not an RU Linux package (omoba-<version>-ru-linux-x64.tar.gz); "
-                      "build it with: python3 scripts/release.py build linux --market ru")
+        raise Refused(f"{package.name} is not an RU server bundle (omoba-<version>-ru-server-linux-x64.tar.gz); "
+                      "build it with: python3 scripts/release.py build server --market ru")
     version = match.group(1)
     binaries = {}
     with tarfile.open(package, "r:gz") as archive:
         for name in SERVER_BINARIES:
-            member_name = f"omoba-{version}-ru/{name}"
+            member_name = f"omoba-{version}-ru-server/{name}"
             members = [member for member in archive.getmembers() if member.name == member_name]
             if len(members) != 1 or not members[0].isfile():
                 raise Refused(f"{package.name} has no regular file {member_name}")
@@ -3362,8 +3367,9 @@ def main(argv=None) -> int:
     bootstrap.add_argument("--node-sha256", help="its sha256 from nodejs.org/dist/v<x.y.z>/SHASUMS256.txt")
     bootstrap.add_argument("--country-confirmed", action="store_true",
                            help="the provider confirms the server is in Russia although whois does not say RU")
-    ship = sub.add_parser("ship", help="install or update the RU lobby and Account API from the RU Linux package")
-    ship.add_argument("--package", required=True, help="omoba-<v>-ru-linux-x64.tar.gz from release.py --market ru")
+    ship = sub.add_parser("ship", help="install or update the RU lobby and Account API from the RU server bundle")
+    ship.add_argument("--package", required=True,
+                      help="omoba-<v>-ru-server-linux-x64.tar.gz from release.py build server --market ru")
     ship.add_argument("--revision", help="source commit (default: HEAD of this clean checkout)")
     ship.add_argument("--local-backup-only", action="store_true",
                       help="before launch, while backup.env names no storage: only a plain rollback dump on the "

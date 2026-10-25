@@ -1,6 +1,7 @@
 # RU market Account API (docs/markets.md): game accounts, devices and sign in with
-# VK ID. Install `omoba-account-api` from the RU Linux package: it is built with
-# OMOBA_MARKET=ru, so it refuses payment settings and serves no Ekza library.
+# VK ID. Install `omoba-account-api` from the RU server bundle (release.py build
+# server --market ru): it is built with OMOBA_MARKET=ru, so it refuses payment
+# settings and serves no Ekza library.
 # Installed and shipped by ops/vps/ru/ru_host.py (README.md). It starts after the
 # local PostgreSQL and never stops retrying (every 5 s, no start limit).
 [Unit]

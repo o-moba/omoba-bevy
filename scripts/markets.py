@@ -88,6 +88,10 @@ class Market:
     (shared/src/market.rs Market::payment_providers)."""
     legal: Legal = Legal()
     """Legal documents, source link, player channels and age sign; global has none."""
+    player_readme: str = "playtest"
+    """The README.txt of its production player packages (LR-22): `playtest` (English, with
+    practice-server hosting notes) or `ru` (Russian: install, VK ID sign-in, support, legal
+    links, age sign and system requirements; no hosting notes). Dev builds keep `playtest`."""
 
     @property
     def label(self) -> str:
@@ -99,6 +103,13 @@ class Market:
         """The account region this market's servers serve, as the download catalog names it.
         LR-68 turns the market into a runtime region; this stays the one place that says so."""
         return self.key
+
+    @property
+    def server_bundle(self) -> bool:
+        """Whether the market runs its own servers (lobby and Account API, ops/vps/ru): they ship
+        as a separate server bundle (`release.py build server`, LR-22), never inside a player
+        package."""
+        return self.account_api is not None
 
     @property
     def downloads(self) -> str | None:
@@ -130,7 +141,8 @@ MARKETS = {
                              privacy="https://omoba.ru/privacy",
                              terms="https://omoba.ru/terms",
                              source="https://github.com/o-moba/omoba-bevy/tree/v{version}-ru",
-                             age_rating="12+")),
+                             age_rating="12+"),
+                 player_readme="ru"),
     "cn": Market("cn", {"ekza": False, "supporter": False, "vk_sign_in": False}, "zh-Hans", "cn",
                  platforms=(), zones=("cn.omoba.io",),
                  blocked="the CN market has no servers or sign-in providers yet (docs/markets.md)"),

@@ -707,40 +707,211 @@ class Markets(unittest.TestCase):
                     re.findall(r'(\w+): (None|Some\("([^"]*)"\))', arm)}
             self.assertEqual(rust, dataclasses.asdict(legal), key)
 
-    def test_ru_readme_names_the_age_sign_documents_and_source_tag(self):
+    def test_ru_readme_is_russian_with_support_policies_and_age_sign(self):
+        """LR-22: the RU player packages carry a Russian README: install, VK ID sign-in, support,
+        the legal documents, the age sign and system requirements; no hosting notes."""
+        import json
+        import re
         import markets
         ru = release.resolve_flavor(market="ru")
         legal = markets.MARKETS["ru"].legal
-        for target in ("macos", "windows", "linux"):
+        ui = {key: release.client_text("ru", key) for key in (
+            "queue.ranked", "queue.casual", "queue.bots", "home.button.offline_practice",
+            "career.button.profile", "devices.button.vk", "career.button.devices")}
+        classes = len(json.loads((release.ROOT / "shared/assets/catalog/heroes.json").read_text())["classes"])
+        for target in ("macos", "windows", "linux", "android"):
             readme = release.player_readme("0.45.0", target, ru)
-            self.assertIn(f"Age rating: {legal.age_rating}", readme)
-            self.assertIn(f"Privacy policy: {legal.privacy}", readme)
-            self.assertIn(f"Terms of use: {legal.terms}", readme)
-            self.assertIn("Source code of this release: https://github.com/o-moba/omoba-bevy/tree/v0.45.0-ru",
-                          readme)
-            # Support and community stay out until the owner provides them (LR-21).
-            self.assertNotIn("Support", readme)
-            self.assertNotIn("Telegram", readme)
-        # The source tag is the RU release tag `draft` creates.
-        self.assertTrue(legal.source_for("0.45.0").endswith("/tree/" + release.release_tag("prod", None, "0.45.0", "ru")))
-        # A dev build has no public tag; the global README is unchanged.
-        self.assertNotIn("Source code", release.player_readme("0.45.0", "linux", release.resolve_flavor("dev", market="ru")))
-        self.assertNotIn("LEGAL", release.player_readme("0.45.0", "linux"))
+            with self.subTest(target=target):
+                # Russian: no English section, hosting or server notes of the playtest README.
+                letters = re.findall(r"[A-Za-zА-Яа-яЁё]", readme)
+                cyrillic = [c for c in letters if re.match(r"[А-Яа-яЁё]", c)]
+                self.assertGreater(len(cyrillic) / len(letters), 0.75)
+                for english in ("PLAY WITH A FRIEND", "HOSTING", "practice server", "GAME_SERVER_ADDR", "UDP port 4000",
+                                "Host Practice Server", "host-practice.sh", "omoba-practice.service",
+                                "omoba-account-api", "LEGAL", "playtest build"):
+                    self.assertNotIn(english, readme)
+                self.assertTrue(readme.startswith("OMOBA 0.45.0 — Открытая бета\n"))
+                self.assertIn(f"Возрастная категория: {legal.age_rating}\n", readme.split("\n\n")[0] + "\n")
+                self.assertIn(f"Пользовательское соглашение: {legal.terms}", readme)
+                self.assertIn(f"Политика конфиденциальности: {legal.privacy}", readme)
+                self.assertIn("Исходный код этой версии: https://github.com/o-moba/omoba-bevy/tree/v0.45.0-ru", readme)
+                self.assertIn(f"классов героев: {classes}.", readme)
+                for key in ("queue.ranked", "queue.casual", "queue.bots", "home.button.offline_practice"):
+                    self.assertIn(f"«{ui[key]}»", readme)
+                # Sign-in with VK ID, named as the game's buttons, and the recovery path.
+                self.assertIn(f"«{ui['career.button.profile']}» → «{ui['devices.button.vk']}»", readme)
+                self.assertIn(f"«{ui['career.button.devices']}»", readme)
+                self.assertIn("VK, OK или Mail.ru", readme)
+                self.assertIn("Сайт игры и загрузки: https://omoba.ru", readme)
+                self.assertIn("СИСТЕМНЫЕ ТРЕБОВАНИЯ", readme)
+                for line in release.ru_system_requirements(target):
+                    self.assertIn(line, readme)
+                # Support and community stay out until the owner provides them (LR-21).
+                self.assertNotIn("Поддержка:", readme)
+                self.assertNotIn("Telegram", readme)
+        self.assertIn("xattr -dr com.apple.quarantine /path/to/Omoba.app", release.player_readme("0.45.0", "macos", ru))
+        self.assertIn("tar -xzf omoba-0.45.0-ru-linux-x64.tar.gz\n      cd omoba-0.45.0-ru && ./omoba",
+                      release.player_readme("0.45.0", "linux", ru))
+        self.assertEqual(release.readme_gaps(ru), ["support e-mail", "community (VK or Telegram)"])
         provided = dataclasses_replace_legal(ru_market=markets.MARKETS["ru"], support_email="help@omoba.ru",
-                                             community_telegram="https://t.me/omoba_ru")
+                                             community_vk="https://vk.com/omoba", community_telegram="https://t.me/omoba_ru")
         from unittest import mock
         with mock.patch.dict(markets.MARKETS, {"ru": provided}):
             readme = release.player_readme("0.45.0", "linux", ru)
-        self.assertIn("Support: help@omoba.ru", readme)
-        self.assertIn("Telegram: https://t.me/omoba_ru", readme)
+            self.assertEqual(release.readme_gaps(ru), [])
+        support = readme[readme.index("ОБРАТНАЯ СВЯЗЬ И ПОДДЕРЖКА"):readme.index("СИСТЕМНЫЕ ТРЕБОВАНИЯ")]
+        self.assertEqual(support.splitlines()[1:4], ["Поддержка: help@omoba.ru", "Сообщество ВКонтакте: https://vk.com/omoba",
+                                                     "Telegram: https://t.me/omoba_ru"])
+        # Without VK ID sign-in the README names only the game's own account path.
+        no_vk = release.resolve_flavor(market="ru", features={"vk_sign_in": False})
+        self.assertNotIn("VK ID", release.player_readme("0.45.0", "windows", no_vk))
+        # The source tag is the RU release tag `draft` creates.
+        self.assertTrue(legal.source_for("0.45.0").endswith("/tree/" + release.release_tag("prod", None, "0.45.0", "ru")))
+        # A dev build keeps the English tester README with the bilingual legal block and no source tag.
+        dev = release.player_readme("0.45.0", "linux", release.resolve_flavor("dev", market="ru"))
+        self.assertIn("DEV TEST BUILD", dev)
+        self.assertIn(f"Возрастная категория / Age rating: {legal.age_rating}", dev)
+        self.assertNotIn("Source code", dev)
+        self.assertEqual(release.readme_gaps(release.resolve_flavor("dev", market="ru")), [])
+        self.assertEqual(release.readme_gaps(release.PROD), [])
+
+    def test_ru_system_requirements_follow_how_the_packages_are_built(self):
+        import re
+        self.assertEqual(release.mac_info_plist("0.45.0", release.PROD, None)["LSMinimumSystemVersion"], release.MAC_MIN_SYSTEM)
+        self.assertIn(f"macOS {release.MAC_MIN_SYSTEM.split('.')[0]} или новее", release.ru_system_requirements("macos")[0])
+        manifest = (release.ROOT / "mobile/android/AndroidManifest.xml").read_text()
+        api = int(re.search(r'minSdkVersion="(\d+)"', manifest).group(1))
+        self.assertEqual(release.android_minimums(), (api, True))
+        self.assertIn(f"Android {release.ANDROID_RELEASES[api]} или новее (API {api}) с поддержкой Vulkan.",
+                      release.ru_system_requirements("android"))
+        # Linux packages are built on Debian 12 (bookworm): its glibc is the minimum.
+        self.assertIn('image = f"rust:{toolchain}-bookworm"', (release.ROOT / "scripts/release.py").read_text())
+        self.assertEqual(release.LINUX_MIN_GLIBC, "2.36")
+        self.assertIn("glibc 2.36", release.ru_system_requirements("linux")[0])
+        # The render backends the game compiles: DirectX 12 and Vulkan (bevy_render's wgpu
+        # features), so Windows needs either and Linux and Android need Vulkan.
+        self.assertIn("DirectX 12 или Vulkan", " ".join(release.ru_system_requirements("windows")))
+        self.assertIn("Vulkan", " ".join(release.ru_system_requirements("linux")))
+
+    def test_the_global_and_dev_readmes_are_unchanged(self):
+        """LR-22 changes only the RU production README: these are the exact bytes before it."""
+        import hashlib
+        cases = {("macos", release.PROD): "b946a7e6d96a2faa663c4977663c9cf308133e2c573ddfe76c8905b29ef44df3",
+                 ("windows", release.PROD): "df78b7397b91bc0d4e018f7daa587b9b3d112ea88c4aedb622fc78da733bc410",
+                 ("linux", release.PROD): "492823c6226a29a908cc4003add6f0fec117d361a561a330b6ba6b3d0d0299d4",
+                 ("android", release.PROD): "6b2bfff4e45636941ec3492eeb68f3392e898f0b45aa1de9058a124d6809816e",
+                 ("linux", release.resolve_flavor(server="77.246.105.57:4000")):
+                     "8aae7af23308babb6d39481e616ae57e1f405a222ad7b6c8741a0399dbe77f0b",
+                 ("linux", release.resolve_flavor("dev")): "947518629a43e87e4007d491d405b1c5825b0f5d2089ccccd67bda9199292765",
+                 ("linux", release.resolve_flavor("dev", market="ru")):
+                     "04d443ad9963a1ade074073d1055c0337865322c0ff18307fd0a5ddedc12e248",
+                 ("macos", release.resolve_flavor("dev", market="ru")):
+                     "8e092002df7d674e1172b8fcb1442e34f652afbaaae82450f971f21f989bdd47"}
+        for (target, flavor), digest in cases.items():
+            with self.subTest(target=target, contour=flavor.contour, market=flavor.market, server=flavor.server):
+                text = release.player_readme("0.45.0", target, flavor)
+                self.assertEqual(hashlib.sha256(text.encode()).hexdigest(), digest, text)
+
+    def test_the_ru_servers_ship_as_their_own_bundle_not_in_the_player_package(self):
+        """LR-22: the RU Linux player package has no omoba-account-api; the lobby and the
+        Account API are the separate server bundle that ru_host.py ships."""
+        import tarfile
+        from unittest import mock
+        import markets
+        ru = release.resolve_flavor(market="ru")
+        self.assertTrue(markets.MARKETS["ru"].server_bundle)
+        self.assertFalse(markets.MARKETS["global"].server_bundle)
+        self.assertEqual(release.linux_binaries(ru), ("client", "server"))
+        self.assertEqual(release.build_targets("server", ru, {}), ["server"])
+        for flavor in (release.PROD, release.resolve_flavor("dev"), release.resolve_flavor("dev", market="ru")):
+            with self.subTest(contour=flavor.contour, market=flavor.market), self.assertRaises(SystemExit):
+                release.build_targets("server", flavor, {})
+        with tempfile.TemporaryDirectory() as temporary, mock.patch.object(release, "stage_common"):
+            root = Path(temporary)
+            for name in ("client", "server", "account"):
+                (root / name).write_bytes(name.encode())
+            release.stage_linux(root / "player", "0.45.0", ru, root / "client", root / "server")
+            self.assertEqual(sorted(p.name for p in (root / "player").iterdir()),
+                             ["host-practice.sh", "omoba", "omoba-practice.service", "omoba-server"])
+            with self.assertRaises(SystemExit):
+                release.stage_linux(root / "player2", "0.45.0", ru, root / "client", root / "server",
+                                    {"omoba-account-api": root / "account"})
+            # The bundle: both servers, notices and an operator README.
+            stage = root / release.server_bundle_root("0.45.0", "ru")
+            release.stage_server_bundle(stage, "0.45.0", ru, {"server": root / "server", "omoba-account-api": root / "account"})
+            self.assertEqual((stage / "omoba-server").read_bytes(), b"server")
+            self.assertEqual((stage / "omoba-account-api").read_bytes(), b"account")
+            self.assertTrue((stage / "omoba-account-api").stat().st_mode & 0o111)
+            self.assertTrue((stage / "legal/LICENSE").is_file() and (stage / "ATTRIBUTION.md").is_file())
+            self.assertFalse((stage / "omoba").exists() or (stage / "assets").exists())
+            note = (stage / "README.txt").read_text()
+            self.assertIn("This is not a game package", note)
+            self.assertIn("ru_host.py ship --package", note)
+            self.assertIn("OMOBA_MARKET=ru (ekza off, supporter on, vk_sign_in on)", note)
+            for bad in ({"server": root / "server"}, {"server": root / "server", "omoba-account-api": root / "account",
+                                                      "client": root / "client"}):
+                with self.assertRaises(SystemExit):
+                    release.stage_server_bundle(root / "bad", "0.45.0", ru, bad)
+            with self.assertRaises(SystemExit):
+                release.stage_server_bundle(root / "global", "0.45.0", release.PROD,
+                                            {"server": root / "server", "omoba-account-api": root / "account"})
+            # build_server_bundle packs it beside, not among, the player packages.
+            out = root / "dist/v0.45.0-ru"
+            out.mkdir(parents=True)
+            with mock.patch.object(release, "linux_release_binaries",
+                                   return_value={"server": root / "server", "omoba-account-api": root / "account"}) as built:
+                archive = release.build_server_bundle("0.45.0", out, ru)
+            built.assert_called_once_with(ru, ("server", "omoba-account-api"))
+            self.assertEqual(archive, out / "server/omoba-0.45.0-ru-server-linux-x64.tar.gz")
+            with tarfile.open(archive) as bundle:
+                names = bundle.getnames()
+            self.assertIn("omoba-0.45.0-ru-server/omoba-server", names)
+            self.assertIn("omoba-0.45.0-ru-server/omoba-account-api", names)
+            self.assertIn(archive.name, (out / "server/SHA256SUMS.txt").read_text())
+            self.assertEqual([p.name for p in out.iterdir()], ["server"])
+
+    def test_ru_build_all_plans_the_players_and_the_server_bundle(self):
+        import contextlib
+        import io
+        import json
+        from unittest import mock
+        report = {"platforms": dict.fromkeys(release.PLATFORMS, True), "free_gib": 100.0}
+        with tempfile.TemporaryDirectory() as temporary, \
+                mock.patch.object(release, "check_report", return_value=report), \
+                mock.patch.object(release, "workspace_version", return_value="0.45.0"), \
+                mock.patch.object(release.subprocess, "check_call", side_effect=AssertionError("ran")), \
+                mock.patch.object(release.subprocess, "Popen", side_effect=AssertionError("ran")), \
+                contextlib.redirect_stdout(io.StringIO()) as output:
+            self.assertEqual(release.main(["build", "all", "--market", "ru", "--dry-run", "--out", temporary]), 0)
+            plan = json.loads(output.getvalue())
+        self.assertEqual([Path(p).name for p in plan["packages"]], [
+            "Omoba-0.45.0-ru-macos-arm64.zip", "Omoba-0.45.0-ru-windows-x64.zip", "omoba-0.45.0-ru-linux-x64.tar.gz",
+            release.artifact_name("0.45.0", "android", "prod", "ru")])
+        self.assertEqual(plan["linux_binaries"], ["client", "server"])
+        self.assertEqual(plan["server_bundle"], str(Path(temporary) / "v0.45.0-ru/server/omoba-0.45.0-ru-server-linux-x64.tar.gz"))
+        self.assertEqual(plan["readme"], "ru")
+        self.assertEqual(plan["readme_gaps"], ["support e-mail", "community (VK or Telegram)"])
+        # Without a Linux builder there is no bundle either; the global plan has none.
+        no_linux = {**report["platforms"], "linux": False}
+        self.assertNotIn("server", release.build_targets("all", release.resolve_flavor(market="ru"), no_linux))
+        self.assertNotIn("server", release.build_targets("all", release.PROD, report["platforms"]))
 
     def test_readmes_say_how_progress_survives_a_reinstall(self):
         """LR-18: progress follows the VK-linked account where the market signs in with VK
         ID; recovery codes everywhere an account service exists; nothing in dev builds."""
+        # The RU README is Russian (LR-22), with the game's own button names.
+        ui = lambda key: release.client_text("ru", key)
         ru = " ".join(release.player_readme("0.45.0", "android", release.resolve_flavor(market="ru")).split())
-        self.assertIn("Progress follows the VK-linked account", ru)
         self.assertIn("Прогресс следует за аккаунтом, привязанным к VK", ru)
-        self.assertIn('"Protect progress"', ru)
+        self.assertIn(f"«{ui('career.button.profile')}» → «{ui('protect.button.open')}» → "
+                      f"«{ui('protect.button.create')}»", ru)
+        self.assertIn("войдите с тем же VK ID или введите код: "
+                      f"«{ui('career.button.profile')}» → «{ui('career.button.devices')}» → "
+                      f"«{ui('protect.button.enter_code')}»", ru)
+        no_vk = " ".join(release.player_readme("0.45.0", "android", release.resolve_flavor(
+            market="ru", features={"vk_sign_in": False})).split())
+        self.assertIn(f"«{ui('protect.button.create')}»", no_vk)
+        self.assertIn("После переустановки или на новом устройстве введите код:", no_vk)
         with_service = " ".join(release.player_readme(
             "0.45.0", "linux", release.resolve_flavor(account_api="https://account.example.org",
                                                       portal="https://players.example.org")).split())
@@ -776,9 +947,10 @@ class Markets(unittest.TestCase):
         self.assertFalse(any(key.startswith("OMOBA_FEATURE_") for key in defaults))
         self.assertEqual(release.artifact_name("0.45.0", "windows", "prod", "ru"), "Omoba-0.45.0-ru-windows-x64.zip")
         self.assertEqual(release.dist_path("0.45.0", Path("/d"), "prod", "ru"), Path("/d/v0.45.0-ru"))
-        self.assertEqual(release.linux_binaries(ru), ("client", "server", "omoba-account-api"))
+        # The RU player package carries no server tools; its servers are the bundle (LR-22).
+        self.assertEqual(release.linux_binaries(ru), ("client", "server"))
         self.assertEqual(release.build_targets("all", ru, {p: True for p in release.PLATFORMS}),
-                         ["macos", "windows", "linux", "android"])
+                         ["macos", "windows", "linux", "android", "server"])
         with self.assertRaises(SystemExit):
             release.build_targets("ios", ru, {p: True for p in release.PLATFORMS})
         # The global build is unchanged.

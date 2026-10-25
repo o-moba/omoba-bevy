@@ -44,8 +44,8 @@ These commands do not pass `--locked`:
 | Crate (package name) | Targets | Where it ends up |
 |---|---|---|
 | `client` | lib + bin `client`. Android builds the lib as a `cdylib` through `cargo rustc` | Every client package: the desktop executable, Android `libclient.so`, the iOS executable `client` |
-| `server` | bins `server`, `migrate-career` | `server` ships in every desktop package as the practice host. The dev and RU lobbies run the `omoba-server` from their contour or market Linux package. The production lobby is built separately (see [Release flow](#release-flow)) |
-| `account-api` (`omoba-account-api`) | lib + bin `omoba-account-api`. Examples `hero-supporter-fixture`, `seed-local-portal` | Linux packages of the dev contour and of the free markets (ru, cn) (`DEV_LINUX_TOOLS`, `MARKET_LINUX_TOOLS` in release.py). It is not in the global Linux package |
+| `server` | bins `server`, `migrate-career` | `server` ships in every desktop package as the practice host. The dev lobby runs the `omoba-server` of the dev Linux package, the RU lobby the one of the RU server bundle. The production lobby is built separately (see [Release flow](#release-flow)) |
+| `account-api` (`omoba-account-api`) | lib + bin `omoba-account-api`. Examples `hero-supporter-fixture`, `seed-local-portal` | The dev Linux package (`DEV_LINUX_TOOLS` in release.py) and the server bundle of a market with its own servers (RU, `SERVER_BUNDLE_BINARIES`, `build server`, LR-22). No player package of a production build carries it |
 | `shared` | lib. Examples `compatibility`, `export_workshop` | Linked by every crate except `arena-sync`, whose only dependencies are reqwest, serde_json, sha2 and base64. `compatibility` writes and checks the manifest |
 | `common` | lib. Feature `test-support`, test `bot_difficulty_sim` (`required-features = ["test-support"]`) | Linked by client and server |
 | `passport` (`omoba-passport`) | lib + operator bins (`avatar-pack-install`, `passport-import`, `validate-runtime-vrm`, `weapon-build`, `weapon-import`) | The lib is linked by client **and server**. The bins are not packaged |
@@ -92,7 +92,7 @@ How the scrub works:
 
   A direct `mobile/android/build.py` run (`make android`) scrubs less; see [Open questions](#open-questions).
 - **The list stays in step with the sources.** `test_every_compile_time_setting_in_the_sources_is_scrubbed` git-greps every `option_env!("…")` in `*.rs`. It fails `make test-scripts` and CI when release.py does not list one. Other tests check that the market presets and setting names match the Rust modules, and that the CI `dev-contour` job uses exactly the dev contour's values.
-- **One cargo invocation, one set of values.** The Flavor's environment applies to the whole invocation. So `server` and `omoba-account-api` in a Linux package carry the same market. `server` also links `omoba-passport`, so it carries the same registry and passport defaults as the client.
+- **One cargo invocation, one set of values.** The Flavor's environment applies to the whole invocation. So `server` and `omoba-account-api` in a Linux package or a server bundle carry the same market. `server` also links `omoba-passport`, so it carries the same registry and passport defaults as the client.
 - **Runtime overrides are desktop-only.** `connection_profile::desktop_override` reads `GAME_SERVER_ADDR` and similar variables, and returns nothing on Android and iOS. See [connection-profiles.md](../connection-profiles.md).
 
 ```mermaid
@@ -204,7 +204,7 @@ When `check` counts a platform as buildable (`check_report`):
 4. Each platform builder runs. With `all`, a failure is recorded and the other platforms continue, and the exit code is 1 only when nothing was built. A single-platform build fails fast.
 5. `write_checksums()` writes `SHA256SUMS.txt` over every file in the dist folder, even after some platforms failed. A JSON summary with `built` and `failed` is printed.
 
-The shared desktop staging step (`stage_common`) copies **only tracked** `client/assets` (`git ls-files`). It runs the fail-closed asset content gate `validate_candidate_assets.validate()` against `client/assets/config/asset_policy.json`. It then adds the legal notices (`package_licenses`), `ATTRIBUTION.md` and a generated player `README.txt` (UTF-8). A market with a legal table (RU) ends that README with its age sign, user agreement, privacy policy, the source tree of `v<version>-<market>` (not for dev builds) and the support and community channels that are set (`legal_readme`, markets.py `Legal`; LR-06).
+The shared desktop staging step (`stage_common`) copies **only tracked** `client/assets` (`git ls-files`). It runs the fail-closed asset content gate `validate_candidate_assets.validate()` against `client/assets/config/asset_policy.json`. It then adds the legal notices (`package_licenses`), `ATTRIBUTION.md` and a generated player `README.txt` (UTF-8). `player_readme` picks the market's production README (markets.py `player_readme`): the English playtest README, or for RU the Russian one (`ru_player_readme`, LR-22: release status and age sign, the game with its class count from `shared/assets/catalog/heroes.json` and its modes and buttons from `client/i18n/ru`, install, VK ID sign-in and how progress survives a reinstall (LR-18), support and community channels that are set, system requirements read from the build (`MAC_MIN_SYSTEM`, `LINUX_MIN_GLIBC`, the APK manifest), the documents and the source tree of `v<version>-<market>`; no hosting notes). Dev builds always use the English README, which a market with a legal table ends with the bilingual legal block (`legal_readme`, markets.py `Legal`; LR-06).
 
 ### Artifact and dist naming
 
@@ -214,7 +214,8 @@ The names come from `artifact_name()` and `dist_path()`, where `<label>` is `[-<
 |---|---|---|
 | macOS | `Omoba-<v><label>-macos-arm64.zip` | `Omoba[ Dev].app` (`Contents/MacOS/client`, `server`, `Resources/assets`, `Omoba.icns`), `Host Practice Server.command`, `legal/`, README |
 | Windows | `Omoba-<v><label>-windows-x64.zip` | `Omoba.exe`, `omoba-server.exe`, `assets/`, `Host Practice Server.bat`, `legal/`, README |
-| Linux | `omoba-<v><label>-linux-x64.tar.gz` | `omoba`, `omoba-server`, plus `omoba-account-api` for the dev contour or a free market (ru, cn), `assets/`, `host-practice.sh`, `omoba-practice.service`, `legal/`, README |
+| Linux | `omoba-<v><label>-linux-x64.tar.gz` | `omoba`, `omoba-server`, plus `omoba-account-api` for the dev contour only, `assets/`, `host-practice.sh`, `omoba-practice.service`, `legal/`, README |
+| Server bundle (a market with its own servers: RU) | `server/omoba-<v><label>-server-linux-x64.tar.gz` (`build server`, also in `build all`), its own `server/SHA256SUMS.txt` | `omoba-server`, `omoba-account-api`, `legal/`, `ATTRIBUTION.md`, an operator README. Not a player package: `draft` and `publish` skip the `server/` folder |
 | Android | `Omoba-<v><label>-android-{universal\|arm64}.apk` | `universal` when `OMOBA_ANDROID_UNIVERSAL=1` (`make release-all`, `release-ru`, `release-publish`, `release-ru-publish`) |
 | iOS | `Omoba-<v><label>-ios.ipa` when export succeeds; always `Omoba-<v><label>-ios-<build>.xcarchive` | — |
 | Shared | `compatibility.json` and `SHA256SUMS.txt`, then `downloads.json` (publish to a market's download host), `ipfs.json` (publish) and `releases.json` (catalog). `draft` writes `dist/<tag>-notes.md` | — |
@@ -225,7 +226,8 @@ The names come from `artifact_name()` and `dist_path()`, where `<label>` is `[-<
 |---|---|---|
 | macOS (Apple silicon) | `build_macos` | macOS host only. Runs `cargo build --locked --release -p client -p server` with the Flavor environment. Assembles the `.app` and `Info.plist` (`LSMinimumSystemVersion` 12.0, `CFBundleShortVersionString` = the version without pre-release). Signs ad hoc (`codesign --sign -`, not notarized) and zips with `ditto` |
 | Windows x64 | `build_windows` | Native on Windows. On macOS it is cross-built with **cargo-xwin**: `xwin_env` puts `cargo-xwin` and `clang-cl` on PATH, sets `XWIN_CACHE_DIR` in the shared target, `+crt-static` and `CARGO_INCREMENTAL=0`. `stage_windows` checks that both executables are x64 PE. Unsigned |
-| Linux x64 | `build_linux` | Native on Linux. On macOS it builds inside Docker `rust:<toolchain>-bookworm` (`linux/amd64`, toolchain read from `rust-toolchain.toml`, cache `target/linux-docker`). See the offline fallback below |
+| Linux x64 | `build_linux` | Native on Linux. On macOS it builds inside Docker `rust:<toolchain>-bookworm` (`linux/amd64`, toolchain read from `rust-toolchain.toml`, cache `target/linux-docker`; `linux_release_binaries`). See the offline fallback below |
+| Server bundle (RU) | `build_server_bundle` | The same Linux build (`linux_release_binaries`) of `server` and `omoba-account-api` only, staged by `stage_server_bundle` into `server/`. Refused for the dev contour and for a market without its own servers (`require_server_bundle`) |
 | Android | `build_android` → [mobile/android/build.py](../../mobile/android/build.py) | No Gradle; details below |
 | iOS | `build_ios` → `xcodebuild archive` → build phase [xcode_build.py](../../mobile/ios/xcode_build.py) | macOS + Xcode; details below |
 
@@ -376,7 +378,7 @@ The sequence and its owner-only steps are in [RELEASING.md](../RELEASING.md) ("T
 
 Which binaries each lobby runs:
 
-- **Dev and RU lobbies** run binaries from their contour or market Linux package. `ops/vps/dev/lobby_dev.py ship --package` refuses anything that is not a dev Linux package (`read_package`, `DEV_PACKAGE`). `ops/vps/ru/ru_host.py ship --package` likewise accepts only the RU Linux package (`read_package`, `RU_PACKAGE`: `omoba-<v>-ru-linux-x64.tar.gz`, x86-64 ELF binaries).
+- **Dev and RU lobbies** run binaries from the dev Linux package and the RU server bundle. `ops/vps/dev/lobby_dev.py ship --package` refuses anything that is not a dev Linux package (`read_package`, `DEV_PACKAGE`). `ops/vps/ru/ru_host.py ship --package` likewise accepts only the RU server bundle (`read_package`, `RU_PACKAGE`: `omoba-<v>-ru-server-linux-x64.tar.gz`, x86-64 ELF binaries).
 - **The production lobby** is built separately. [ops/vps/README.md](../../ops/vps/README.md) builds only Linux `server` and `omoba-account-api` with `--release --locked` into `/opt/omoba/releases/<source>/`. The global Linux package does not contain `omoba-account-api`.
 
 ## Player portal (`omoba-web`)

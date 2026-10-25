@@ -784,6 +784,11 @@ class RuKitTest(unittest.TestCase):
         for kind in ru_host.KINDS:
             unit_env = ru_host.parse_unit(KIT["units"][kind])[1]
             self.assertFalse(set(ru_host.parse_env(KIT["examples"][kind])[0]) & set(unit_env), kind)
+        # The RU landing is the portal's own guest home (LR-22): no website URL to point elsewhere.
+        self.assertNotIn("OMOBA_SITE_URL", ru_host.parse_env(KIT["examples"]["portal"])[0])
+        with_site = KIT["examples"]["portal"] + "OMOBA_SITE_URL=https://omoba.io\n"
+        self.assertTrue(any("OMOBA_SITE_URL must not be set" in problem
+                            for problem in ru_host.example_problems("portal", with_site)))
 
     def test_kit_refuses_an_inconsistent_caddyfile(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -1736,26 +1741,48 @@ class MacPackageTest(unittest.TestCase):
         self.work = tempfile.TemporaryDirectory()
         self.addCleanup(self.work.cleanup)
 
-    def package(self, name="omoba-0.45.0-ru-linux-x64.tar.gz", top="omoba-0.45.0-ru", server=SERVER):
+    def package(self, name="omoba-0.45.0-ru-server-linux-x64.tar.gz", top="omoba-0.45.0-ru-server", server=SERVER,
+                members=("omoba-server", "omoba-account-api")):
         path = Path(self.work.name) / name
         with tarfile.open(path, "w:gz") as archive:
             for member, data in (("omoba-server", server), ("omoba-account-api", ACCOUNT_API), ("omoba", b"client")):
+                if member != "omoba" and member not in members:
+                    continue
                 info = tarfile.TarInfo(f"{top}/{member}")
                 info.size, info.mode = len(data), 0o755
                 archive.addfile(info, io.BytesIO(data))
         return path
 
-    def test_only_an_ru_linux_package_ships(self):
+    def test_only_the_ru_server_bundle_ships(self):
         version, binaries = ru_host.read_package(self.package())
         self.assertEqual(version, "0.45.0")
         self.assertEqual(binaries["omoba-server"], SERVER)
-        for name, top in (("omoba-0.45.0-linux-x64.tar.gz", "omoba-0.45.0"),
+        self.assertEqual(binaries["omoba-account-api"], ACCOUNT_API)
+        self.assertEqual(ru_host.read_package(self.package("omoba-0.46.0-rc.1-ru-server-linux-x64.tar.gz",
+                                                           "omoba-0.46.0-rc.1-ru-server"))[0], "0.46.0-rc.1")
+        # Player packages (LR-22: the RU one has no omoba-account-api) and other markets are refused.
+        for name, top in (("omoba-0.45.0-ru-linux-x64.tar.gz", "omoba-0.45.0-ru"),
+                          ("omoba-0.45.0-linux-x64.tar.gz", "omoba-0.45.0"),
                           ("omoba-0.45.0-dev-linux-x64.tar.gz", "omoba-0.45.0-dev"),
-                          ("omoba-0.45.0-ru-dev-linux-x64.tar.gz", "omoba-0.45.0-ru-dev")):
+                          ("omoba-0.45.0-ru-dev-linux-x64.tar.gz", "omoba-0.45.0-ru-dev"),
+                          ("omoba-0.45.0-server-linux-x64.tar.gz", "omoba-0.45.0-server")):
             with self.assertRaises(ru_host.Refused, msg=name):
                 ru_host.read_package(self.package(name, top))
+        # The bundle's folder is part of its name; a bundle without the Account API is refused.
+        with self.assertRaises(ru_host.Refused):
+            ru_host.read_package(self.package(top="omoba-0.45.0-ru"))
+        with self.assertRaises(ru_host.Refused):
+            ru_host.read_package(self.package(members=("omoba-server",)))
         with self.assertRaises(ru_host.Refused):
             ru_host.read_package(self.package(server=elf(machine=b"\xb7\x00")))
+
+    def test_the_bundle_name_is_the_one_release_py_builds(self):
+        import release
+        name = release.server_bundle_name("0.45.0", "ru")
+        self.assertEqual(name, "omoba-0.45.0-ru-server-linux-x64.tar.gz")
+        self.assertEqual(ru_host.RU_PACKAGE.fullmatch(name).group(1), "0.45.0")
+        self.assertEqual(release.server_bundle_root("0.45.0", "ru"), "omoba-0.45.0-ru-server")
+        self.assertIsNone(ru_host.RU_PACKAGE.fullmatch(release.artifact_name("0.45.0", "linux", "prod", "ru")))
 
     def test_ship_apply_uploads_only_what_the_host_asks_for(self):
         package = self.package()

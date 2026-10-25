@@ -7,10 +7,9 @@ match workers (UDP 4000, 41000–41001), the Account API (behind Caddy at
 from the global production host: each market has its own database, accounts and
 device keys. Background and the release steps: [docs/markets.md](../../../docs/markets.md).
 
-Only binaries from the RU Linux package (`python3 scripts/release.py build linux
---market ru`, `omoba-<version>-ru-linux-x64.tar.gz`) may run here: they are built
-with `OMOBA_MARKET=ru` (no Ekza, Hero Supporter through YooKassa only, VK ID sign-in;
-the shop settings and the webhook are in [YooKassa](#yookassa)).
+Only binaries from the RU server bundle may run here ([Server bundle](#server-bundle)):
+they are built with `OMOBA_MARKET=ru` (no Ekza, Hero Supporter through YooKassa only, VK
+ID sign-in; the shop settings and the webhook are in [YooKassa](#yookassa)).
 
 > **Status (LR-01, LR-03, LR-23, LR-17 ops).** Everything up to the host is ready: [ru_host.py](ru_host.py)
 > sets up a fresh Ubuntu host, ships the server package and the portal, checks the
@@ -149,10 +148,10 @@ the kit files it names.
      and started), the drop-in that gives every PostgreSQL cluster unit the alert,
      `/opt/omoba-ru/alerts.env` from `alerts.env.example` (written once, never replaced)
      and the journal limits, after which `systemd-journald` restarts.
-2. **Lobby and Account API** from the RU Linux package:
+2. **Lobby and Account API** from the RU server bundle ([Server bundle](#server-bundle)):
    ```sh
-   python3 scripts/release.py build linux --market ru
-   python3 ops/vps/ru/ru_host.py ship --package dist/v<v>-ru/omoba-<v>-ru-linux-x64.tar.gz --apply
+   python3 scripts/release.py build server --market ru
+   python3 ops/vps/ru/ru_host.py ship --package dist/v<v>-ru/server/omoba-<v>-ru-server-linux-x64.tar.gz --apply
    ```
    Refused while a match runs. It stages `/opt/omoba-ru/releases/<v>-ru-<sha7>/`
    (immutable, sha256-checked); when a schema exists it runs the pre-migration backup
@@ -175,6 +174,30 @@ the kit files it names.
    when nothing is missing) and once per new host `reboot-check --apply`.
 
 Each change is appended to `/opt/omoba-ru/deployments.jsonl`.
+
+## Server bundle
+
+The RU lobby and Account API ship as their own bundle, never inside a player package
+(LR-22): the RU Linux player package (`omoba-<v>-ru-linux-x64.tar.gz`) holds the game,
+its practice server and the Russian README, and no `omoba-account-api`.
+
+```sh
+python3 scripts/release.py build server --market ru   # also part of `build all --market ru` / make release-ru
+# -> dist/v<v>-ru/server/omoba-<v>-ru-server-linux-x64.tar.gz (+ SHA256SUMS.txt there)
+```
+
+| Inside `omoba-<v>-ru-server/` | |
+| --- | --- |
+| `omoba-server` | the lobby and its match workers ([omoba-lobby-ru.service](omoba-lobby-ru.service)) |
+| `omoba-account-api` | the Account API and `omoba-account-api migrate` ([omoba-account-api-ru.service](omoba-account-api-ru.service)) |
+| `legal/`, `ATTRIBUTION.md`, `README.txt` | licence notices and an operator note |
+
+Both are built in one cargo invocation with the RU market's environment (the same
+values as the RU clients), on Linux or in the pinned `rust:<toolchain>-bookworm`
+container. The bundle sits in `server/` beside the player packages: `release.py draft`
+attaches and `publish` offers only the player packages. `ru_host.py ship` accepts only
+this file name (`RU_PACKAGE`, x86-64 ELF binaries); a player package or another
+market's file is refused before anything is contacted.
 
 ## Portal bundle
 

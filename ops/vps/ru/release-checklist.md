@@ -21,8 +21,8 @@ they are written; `python3 ops/vps/ru/ru_host.py names` prints them.
 | # | Check | How | Pass when |
 | --- | --- | --- | --- |
 | S1 | Local gate | `make check` on the release commit (the owner decides on local results, not GitHub CI) | green |
-| S2 | RU packages | `make release-ru`; keep `compatibility.json` and `SHA256SUMS` | all four platforms built |
-| S3 | Server ship | `ru_host.py ship --package dist/v<v>-ru/omoba-<v>-ru-linux-x64.tar.gz --check`, then `--apply` | preflight `ok`, result `DEPLOYED` (or `UNCHANGED`), the pre-migration backup listed (an off-host set and a rollback dump) when a schema existed |
+| S2 | RU packages | `make release-ru`; keep `compatibility.json` and `SHA256SUMS` | all four platforms and the server bundle (`dist/v<v>-ru/server/`) built; the Linux player package has no `omoba-account-api` and every README.txt is the Russian one |
+| S3 | Server ship | `ru_host.py ship --package dist/v<v>-ru/server/omoba-<v>-ru-server-linux-x64.tar.gz --check`, then `--apply` | preflight `ok`, result `DEPLOYED` (or `UNCHANGED`), the pre-migration backup listed (an off-host set and a rollback dump) when a schema existed |
 | S4 | Portal ship | `ru_host.py portal-bundle --web <omoba-web>`, `ru_host.py ship-portal --bundle … --apply` | `DEPLOYED` (or `UNCHANGED`) |
 | S5 | Host status | `ru_host.py status` | `"ok": true`, no problems (backups included: a set off-host from the last 26 h, a passed restore drill, a current escrow) |
 | S6 | Public preflight | `make release-ru-preflight` from a computer outside the host (DNS, the lobby's UDP compatibility check, HTTPS routes; `python3 scripts/release.py preflight --market ru --contract dist/v<v>-ru/compatibility.json` also compares the release) | prints `"ready": true` |
