@@ -162,10 +162,20 @@ operation receipt refers to them. No replay recording or player-presence fabrica
 Optional `OMOBA_RELEASE_CATALOG` points to a curated JSON file:
 `{"releases":[]}` is a valid honest empty catalog. Entries follow the OpenAPI Release
 schema: platform, architecture, version, HTTPS URL, SHA-256, decimal size_bytes,
-RFC3339 published_at, installation instructions, test_status. Populate only after
+RFC3339 published_at, installation instructions, test_status. Optional per entry
+(LR-14, LR-68 rules): `channel` (`[a-z0-9_-]{1,32}`, `direct` when absent),
+`min_release` (the oldest release of that channel and platform that may still play
+online, never above `version`) and `update_url` (the HTTPS page the game's update button
+opens, at most 256 bytes, a query allowed; `shared::compatibility::valid_update_url`). Populate only after
 independently fetching/verifying the exact public artifact. Never list an unsigned
 or privately provisioned IPA as publicly installable. No upload or shell launcher
 exists in the browser. Missing configuration shows no downloads.
+
+The game reads the same `GET /v1/releases` at boot and after an update-required
+mismatch (LR-14, `passport/src/release_catalog.rs`): the newest entry of its channel for
+its platform and architecture (`universal` matches any) drives the **Update available**
+banner, its `min_release` can require the update, and its `update_url` is the button
+target. An empty catalog offers no update.
 
 ## Backup, restore, rollback
 

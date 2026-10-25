@@ -309,7 +309,12 @@ pub fn releases(app: &App) -> Result<Value> {
     }
     let source = std::fs::read(path)
         .map_err(|_| Error(StatusCode::SERVICE_UNAVAILABLE, "catalog_unavailable"))?;
-    let value: Value = parse(&source)?;
+    catalog(&source)
+}
+/// A curated `releases.json` (account-api/README.md#downloads), checked whole:
+/// one bad entry refuses the catalog.
+fn catalog(source: &[u8]) -> Result<Value> {
+    let value: Value = parse(source)?;
     let items = value
         .get("releases")
         .and_then(Value::as_array)
@@ -329,6 +334,43 @@ pub fn releases(app: &App) -> Result<Value> {
             || uri.query().is_some()
         {
             return Err(invalid());
+        }
+        // Optional since LR-14 (LR-68 rules), held to the game's own rules
+        // (`passport/src/release_catalog.rs`): the build channel (absent =
+        // direct), the channel's minimum release and its update page.
+        if let Some(page) = item.get("update_url")
+            && !page
+                .as_str()
+                .is_some_and(shared::compatibility::valid_update_url)
+        {
+            return Err(invalid());
+        }
+        if let Some(channel) = item.get("channel")
+            && !channel.as_str().is_some_and(|channel| {
+                (1..=32).contains(&channel.len())
+                    && channel
+                        .bytes()
+                        .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b"_-".contains(&b))
+            })
+        {
+            return Err(invalid());
+        }
+        if let Some(minimum) = item.get("min_release") {
+            let version = item.get("version").and_then(Value::as_str);
+            let at_most_version =
+                minimum
+                    .as_str()
+                    .zip(version)
+                    .is_some_and(|(minimum, version)| {
+                        minimum.len() <= 64
+                            && matches!(
+                                shared::compatibility::release_order(minimum, version),
+                                Some(std::cmp::Ordering::Less | std::cmp::Ordering::Equal)
+                            )
+                    });
+            if !at_most_version {
+                return Err(invalid());
+            }
         }
         if crypto::decode::<32>(
             item.get("sha256")
@@ -370,6 +412,45 @@ pub fn releases(app: &App) -> Result<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn catalog_entries_are_checked_with_their_optional_fields() {
+        let entry = |extra: Value| {
+            let mut entry = json!({
+                "platform": "linux", "architecture": "x86_64", "version": "0.46.0",
+                "url": "https://d.example/omoba.tar.gz", "sha256": "a".repeat(64),
+                "size_bytes": "1", "published_at": "2026-10-25T00:00:00Z",
+                "instructions": "Unpack and run.", "test_status": "playtest",
+            });
+            for (key, value) in extra.as_object().unwrap() {
+                entry[key] = value.clone();
+            }
+            serde_json::to_vec(&json!({ "releases": [entry] })).unwrap()
+        };
+        for good in [
+            json!({}),
+            json!({"channel": "direct", "min_release": "0.46.0",
+                   "update_url": "https://omoba.example/download?platform=linux"}),
+            json!({"min_release": "0.46.0-rc.1"}),
+        ] {
+            let listed = catalog(&entry(good.clone())).unwrap();
+            assert_eq!(listed["releases"][0]["version"], "0.46.0", "{good}");
+        }
+        for bad in [
+            json!({"url": "https://d.example/omoba.tar.gz?x=1"}),
+            json!({"update_url": "http://omoba.example/download"}),
+            json!({"update_url": "https://user@omoba.example/download"}),
+            json!({"update_url": format!("https://omoba.example/{}", "a".repeat(256))}),
+            json!({"update_url": null}),
+            json!({"channel": "App Store"}),
+            json!({"channel": ""}),
+            json!({"min_release": 46}),
+            json!({"min_release": ""}),
+            json!({"min_release": "soon"}),
+            json!({"min_release": "0.46.1"}),
+        ] {
+            assert!(catalog(&entry(bad.clone())).is_err(), "{bad}");
+        }
+    }
     #[test]
     fn query_is_strict() {
         assert_eq!(

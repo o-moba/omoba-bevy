@@ -197,7 +197,14 @@ unit's only writable folder.
 Downloads on the portal: `make release-ru-publish` also writes
 `dist/v<version>-ru/releases.json` from the verified IPFS receipts; copy it to
 `/opt/omoba-ru/releases.json` and set `OMOBA_RELEASE_CATALOG` to it in
-`/opt/omoba-ru/account-api.env`.
+`/opt/omoba-ru/account-api.env`. The game reads the same catalog for its
+**Update available** banner and the **Update required** download button (LR-14).
+For a release that changes the compatibility contract, install the new catalog and
+post the player notice **before** shipping the server
+([RELEASING.md](../../../docs/RELEASING.md#updates-and-contract-changes-lr-14)).
+`release.py catalog --market ru --min-release X` writes a catalog that requires the
+update from games older than X even without a server switch (also a forced update:
+notice first).
 
 ## Backups, escrow and restore drill
 

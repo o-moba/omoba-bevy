@@ -22,7 +22,7 @@ Status values: **Accepted** (in force and implemented), **Accepted, partly imple
 | [010](#adr-010-authoritative-combat-lives-in-agpl-common-shared-by-the-server-and-offline-practice) | Combat engine in AGPL `common`, shared with offline practice | 2026-09-29 | Accepted |
 | [011](#adr-011-server-io-behind-ports-match-policy-in-one-matchrules-value) | Server I/O behind ports; match policy in one `MatchRules` | 2026-09-24 | Accepted |
 | [012](#adr-012-hero-item-and-skill-catalogs-are-embedded-validated-json) | Hero, item and skill catalogs are embedded, validated JSON | 2026-09-24 / 09-29 | Accepted |
-| [013](#adr-013-a-compatibility-preflight-before-every-session-deploy-the-server-first) | Compatibility preflight before every session; deploy the server first | 2026-10-05 | Accepted |
+| [013](#adr-013-a-compatibility-preflight-before-every-session-deploy-the-server-first) | Compatibility preflight before every session; deploy the server first (amended by LR-14: clients ship first, forced update) | 2026-10-05 | Accepted |
 | [014](#adr-014-trusted-career-persistence-only-the-game-server-settles-the-runtime-runs-no-ddl) | Only the game server settles results; runtime runs no DDL | 2026-09-14 to 09-15 | Accepted |
 | [015](#adr-015-public-service-one-lobby-and-one-process-per-match-rating-only-for-bot-free-pvp) | One lobby plus per-match worker processes; rating only for PvP | 2026-09-22 | Accepted |
 | [016](#adr-016-the-player-portal-is-a-separate-bff-over-the-account-api-and-the-ekza-registry) | The player portal is a separate BFF over the Account API and the Ekza Registry | 2026-09-15 | Accepted |
@@ -341,10 +341,12 @@ sequenceDiagram
 - The release builder writes `compatibility.json` next to the packages. Distribution waits until the live lobby and a staged worker verify that manifest.
 
 **Consequences.**
-- Rollouts go server first, then clients. A rollback must be checked against every supported client.
+- Rollouts went server first, then clients (0.41.0). Amended by LR-14 below. A rollback must be checked against every supported client.
 - The preflight diagnoses an accidental mismatch. It does not authenticate or encrypt the server.
 
-**Links:** [../release-compatibility.md](../release-compatibility.md), [../RELEASING.md](../RELEASING.md#compatibility-gate).
+**Amendment (2026-10-25, LR-14, launch default O-12).** Client and server ship together and a contract change is a forced update. A contract-changing release stages and verifies the server, publishes the clients and the release catalog, notifies players, and only then switches the production servers. A report may carry an additive `update` notice (`min_release`, `url`). The client reads a mismatch as **Update required** (download button to the portal's download page) or **Servers updating** (a game newer than the server keeps retrying), and reads the market's release catalog (`GET /v1/releases`) for the **Update available** banner. Notice links count only on the client's own portal. Catalog entries carry `channel` (`direct`), `min_release` and `update_url`; the client reads only its own channel's entries and chooses the button target per (channel, platform), so the format survives LR-68.
+
+**Links:** [../release-compatibility.md](../release-compatibility.md), [../RELEASING.md](../RELEASING.md#compatibility-gate), [../RELEASING.md](../RELEASING.md#updates-and-contract-changes-lr-14).
 
 ## ADR-014: Trusted career persistence: only the game server settles; the runtime runs no DDL
 
