@@ -11,15 +11,19 @@ Only binaries from the RU Linux package (`python3 scripts/release.py build linux
 --market ru`, `omoba-<version>-ru-linux-x64.tar.gz`) may run here: they are built
 with `OMOBA_MARKET=ru` (no Ekza, no payments, VK ID sign-in).
 
-> **Status (LR-01, LR-03, LR-23).** Everything up to the host is ready: [ru_host.py](ru_host.py)
+> **Status (LR-01, LR-03, LR-23, LR-17 ops).** Everything up to the host is ready: [ru_host.py](ru_host.py)
 > sets up a fresh Ubuntu host, ships the server package and the portal, checks the
 > whole host and runs the reboot test; [ru_backup.py](ru_backup.py) backs it up every
 > night, encrypted and off-host, before every migration, and drills a restore every
 > month ([Backups](#backups-escrow-and-restore-drill)); the host serves the game
-> packages and counts their downloads ([Downloads](#downloads)). Still open before a public launch:
-> monitoring and alerts beyond the backups (LR-17) and the capacity measurement (LR-09).
-> The owner buys the VPS, sets DNS, creates the VK ID app, provides the backup storage
-> in Russia, makes the backup key and names the escrow holder.
+> packages and counts their downloads ([Downloads](#downloads)); every unit failure,
+> low disk, a stopped backup timer and a stuck match worker alert the owner, the journal
+> is bounded, and an external probe watches the public names every minute
+> ([Monitoring and alerts](#monitoring-and-alerts)). Still open before a public launch:
+> the lobby's own metrics and their alerts (LR-17, server part) and the capacity
+> measurement (LR-09). The owner buys the VPS, sets DNS, creates the VK ID app, provides
+> the backup storage in Russia, makes the backup key, names the escrow holder, creates
+> the Telegram bot and picks the probe host.
 > See [the launch-readiness plan](../../../docs/plans/launch-readiness.md) and the
 > [RU release checklist](release-checklist.md).
 
@@ -53,7 +57,7 @@ Everything below runs on this one host; only Caddy listens publicly for HTTP.
 
 | Piece | Where | Started by |
 | --- | --- | --- |
-| PostgreSQL 16+ (Ubuntu package, ICU `und-x-icu`), database `omoba_ru`, `127.0.0.1:5432` only | cluster `/var/lib/postgresql` | `postgresql.service` |
+| PostgreSQL 16+ (Ubuntu package, ICU `und-x-icu`), database `omoba_ru`, `127.0.0.1:5432` only | cluster `/var/lib/postgresql` | `postgresql@<version>-main.service` (`postgresql.service` is postgresql-common's wrapper, a oneshot that stays active) |
 | Lobby + match workers, user `omoba-ru` | `/opt/omoba-ru/current/omoba-server`, state in `/var/lib/omoba-ru` | [omoba-lobby-ru.service](omoba-lobby-ru.service) |
 | Account API, user `omoba-ru`, `127.0.0.1:40550` | `/opt/omoba-ru/current/omoba-account-api` | [omoba-account-api-ru.service](omoba-account-api-ru.service) |
 | Portal, user `omoba-portal-ru`, `127.0.0.1:3010` | `/opt/omoba-ru/portal/current/server.js` on `/opt/omoba-ru/node/current/bin/node` | [omoba-portal-ru.service](omoba-portal-ru.service) |
@@ -62,9 +66,11 @@ Everything below runs on this one host; only Caddy listens publicly for HTTP.
 | Downloads (LR-23): packages, root 0755/0644, and Caddy's log of them | `/opt/omoba-ru/downloads/<tag>/`; `/var/log/caddy/omoba-ru-downloads.log` (caddy, 0640) | `release.py publish --market ru` (rsync); read by `caddy.service` |
 | Env files (root, 0600) | `/opt/omoba-ru/{lobby,account-api,portal}.env` from the `*.env.example` files here | read by systemd |
 | Backups (LR-03), root | [ru_backup.py](ru_backup.py) as `/opt/omoba-ru/backup/ru_backup.py`; settings `/opt/omoba-ru/backup.env` (root 0600, from [backup.env.example](backup.env.example)), keys in `/opt/omoba-ru/backup-keys/` (0700); host copies in `/var/backups/omoba-ru/` (0700) | [omoba-backup-ru.timer](omoba-backup-ru.timer) nightly, [omoba-restore-drill-ru.timer](omoba-restore-drill-ru.timer) monthly, [omoba-backup-check-ru.timer](omoba-backup-check-ru.timer) hourly |
+| Monitoring and alerts (LR-17), root | [ru_monitor.py](ru_monitor.py) as `/opt/omoba-ru/monitor/ru_monitor.py`; settings `/opt/omoba-ru/alerts.env` (root 0600, from [alerts.env.example](alerts.env.example)); state in `/var/lib/omoba-ru-monitor/`; journal limits `/etc/systemd/journald.conf.d/50-omoba-ru.conf` ([journald-omoba-ru.conf](journald-omoba-ru.conf)); the PostgreSQL alert drop-in `/etc/systemd/system/postgresql@.service.d/50-omoba-ru-alert.conf` ([postgresql-alert-ru.conf](postgresql-alert-ru.conf)) | [omoba-alert-ru@.service](omoba-alert-ru@.service) on any unit's failure (`OnFailure=`), [omoba-monitor-ru.timer](omoba-monitor-ru.timer) every 5 minutes |
 
 All three OMOBA units restart on any exit every 5 s without a start limit
-(`Restart=always`, `StartLimitIntervalSec=0`); the lobby and the Account API start
+(`Restart=always`, `StartLimitIntervalSec=0`), and each failure alerts the owner
+([Monitoring and alerts](#monitoring-and-alerts)); the lobby and the Account API start
 after `postgresql.service` and pull it in. A reboot brings everything back with no
 manual step; `ru_host.py reboot-check --apply` proves it.
 
@@ -136,6 +142,11 @@ the kit files it names.
      and started), and `/opt/omoba-ru/backup.env` from `backup.env.example`, written
      once with placeholders and never replaced. Until the owner fills it, the nightly
      backup fails and alerts, and `status` lists what is missing.
+   - The monitoring kit (LR-17), installed before the units that name it: `ru_monitor.py`,
+     the alert template `omoba-alert-ru@.service`, the host check and its timer (enabled
+     and started), the drop-in that gives every PostgreSQL cluster unit the alert,
+     `/opt/omoba-ru/alerts.env` from `alerts.env.example` (written once, never replaced)
+     and the journal limits, after which `systemd-journald` restarts.
 2. **Lobby and Account API** from the RU Linux package:
    ```sh
    python3 scripts/release.py build linux --market ru
@@ -196,9 +207,13 @@ unit's only writable folder.
   records for the three names of `ru_host.py names` point here; no AAAA for the
   lobby), memory and disk, and the backups: the installed kit and timers and
   `ru_backup.py check --remote` (a set off-host from the last 26 h, no failed run or
-  drill, a successful drill in the last 35 days, a current escrow, complete settings).
-- `python3 scripts/release.py preflight --market ru` from any computer: lobby DNS,
-  `https://account.omoba.ru/health/ready`, the portal, and the topology: through
+  drill, a successful drill in the last 35 days, a current escrow, complete settings),
+  and the monitoring: the installed kit, its timer, `alerts.env`, the journal limits and
+  `ru_monitor.py check` (free disk, match workers).
+- `python3 scripts/release.py preflight --market ru` from any computer: lobby DNS, the
+  lobby's UDP compatibility check (with `--contract dist/v<v>-ru/compatibility.json`,
+  compatible with that release), `https://account.omoba.ru/health/ready`, the portal,
+  and the topology: through
   the portal `GET /api/me` must be the Account API's 401 and `GET /api/releases` 200
   (a 403 there means a portal route was refused, LR-02), and
   `https://account.omoba.ru/v1/me` must be 403 (portal routes stay off the public
@@ -278,6 +293,57 @@ computer in Russia), download one package from the portal's download page, compa
 SHA-256 with the page, then run `ru_host.py downloads --since <today>` and record the
 count for that platform with the date, network and platform in `docs/progress/`.
 
+## Monitoring and alerts
+
+LR-17. The owner learns of an outage within minutes without logging in. On the host,
+[ru_monitor.py](ru_monitor.py) reports what the host itself can see; outside it, the
+[external probe](../../probe/README.md) reports what players would see, including the
+whole host being gone. Both send to the RU host's one Telegram bot; without the bot,
+alerts stay in the journal.
+
+| Alert | Source | When | Repeats while it lasts |
+| --- | --- | --- | --- |
+| A unit failed: lobby, Account API, portal, backup, restore drill, backup check, host check, per-source limits (LR-16), a PostgreSQL cluster | `OnFailure=omoba-alert-ru@%n.service` in every RU unit and, by [postgresql-alert-ru.conf](postgresql-alert-ru.conf), in every `postgresql@<version>-<name>.service` → `ru_monitor.py unit-failed` | at once, also on each crash before `Restart=` brings a service back (systemd 254+; Ubuntu 24.04 has 255) | hourly for a service; daily for a timer job, whose tool sends the details itself |
+| An enabled RU service or Caddy is not running | `ru_monitor.py check --alert` ([omoba-monitor-ru.timer](omoba-monitor-ru.timer), every 5 minutes) | at the next check | hourly |
+| A PostgreSQL cluster that starts at boot (`/etc/postgresql/<version>/<name>/`, as `pg_lsclusters` lists it) is not running, or port 5432 accepts no connection (`pg_isready`, no login). `postgresql.service` is only postgresql-common's wrapper, active whatever its clusters do, so the check watches `postgresql@<version>-<name>.service` | the same check; a crash also alerts at once through the drop-in, under the same alert | at the next check | hourly |
+| A backup, drill or backup-check timer is disabled or stopped: no backup is made, or a missing one is no longer reported | the same check | at the next check | hourly |
+| Free disk below 15% on a filesystem the host writes to (`/`, PostgreSQL, `/var/lib/omoba-ru`, `/var/backups/omoba-ru`, `/var/log`, `/opt/omoba-ru`) | the same check | at the next check | hourly |
+| A live match worker has written no heartbeat (`<match root>/<allocation>/status.json`) for 5 minutes while the lobby has run that long (the lobby relaunches a stale worker after 100 s) | the same check | at the next check | hourly |
+| No backup for 26 h, a failed backup or drill, no drill for 35 days, a stale escrow | `ru_backup.py check --alert`, hourly (LR-03) | at once | every 6 h |
+| The lobby's UDP compatibility check, `/health/ready` or the portal fails from outside | the external probe, every minute | after 2 failed rounds in a row | hourly |
+
+Each alert says once when its problem is gone: "resolved" after 15 minutes without it,
+or "answers again" from the probe. Messages carry unit names, paths, numbers and
+allocation ids, never a log line, an address or a secret. Not watched yet, because they
+need the lobby's own metrics (LR-17, server part): the queue's capacity wait, failed
+allocations and the database connection state.
+
+**Set up once (owner).**
+
+1. Create a bot with @BotFather and a chat (or channel) for the alerts, and add the bot
+   to it. Read the chat id, for example from
+   `https://api.telegram.org/bot<token>/getUpdates` after a message in the chat.
+2. On the host, uncomment and fill `OMOBA_TELEGRAM_BOT_TOKEN` and `OMOBA_TELEGRAM_CHAT_ID`
+   in `/opt/omoba-ru/alerts.env`. Then `python3 /opt/omoba-ru/monitor/ru_monitor.py
+   test-alert` must print `sent`, and the message must arrive. The backup alerts use
+   the same bot unless `backup.env` names its own. The token is not in the escrow: a
+   lost one is replaced in @BotFather.
+3. Install the [external probe](../../probe/README.md) on a machine outside this host,
+   with the same bot.
+
+**Knobs** in `alerts.env`: `OMOBA_ALERT_DISK_MIN_FREE_PERCENT` (15),
+`OMOBA_ALERT_WORKER_STALE_SECONDS` (300), `OMOBA_ALERT_REPEAT_MINUTES` (60),
+`OMOBA_ALERT_JOB_REPEAT_HOURS` (24) and `OMOBA_ALERT_RECOVERY_MINUTES` (15).
+`ru_monitor.py check` prints the host's state now, and
+`journalctl -u 'omoba-alert-ru@*' -u omoba-monitor-ru` shows what was alerted.
+
+**Journal limits.** [journald-omoba-ru.conf](journald-omoba-ru.conf) keeps the journal on
+disk (`Storage=persistent`), at most 1 GiB (`SystemMaxUse=1G`) and 30 days
+(`MaxRetentionSec=30day`, one file a day so whole days age out). Some lobby and Account
+API lines carry a player's IP address, so the privacy policy (LR-04) states these 30
+days, next to the 90 days of the download log. The match archive and `worker.log` are
+bounded by the lobby itself (LR-17, server part).
+
 ## Backups, escrow and restore drill
 
 [ru_backup.py](ru_backup.py) runs on the host as root; `ru_host.py bootstrap` installs
@@ -298,9 +364,10 @@ up with the next run. A failed
 backup or drill alerts at once; the hourly check alerts when no backup succeeded for
 26 h, when no drill succeeded for 35 days, and when the escrow is missing or stale.
 Alerts go to the journal (`journalctl -u omoba-backup-ru -u omoba-restore-drill-ru -u
-omoba-backup-check-ru`) and, with `OMOBA_TELEGRAM_BOT_TOKEN` and `OMOBA_TELEGRAM_CHAT_ID`
-in `backup.env`, to Telegram (one message per problem at most every 6 h, and one when
-everything passes again).
+omoba-backup-check-ru`) and to Telegram through the host's bot in `alerts.env` (or a bot
+of its own in `backup.env`): one message per problem at most every 6 h, and one when
+everything passes again. A failed backup unit also alerts like any RU unit, at most
+daily ([Monitoring and alerts](#monitoring-and-alerts)).
 
 **Escrow holder:** not named yet (owner checklist, LR-03). Record here who holds the
 backup secret key and the secrets escrow, how to reach them and where the files are

@@ -464,6 +464,7 @@ The Account API runs `read::project(128)` and `App::cleanup` every 5 s, and `rec
 | Outbox files: unreadable | Kept for manual recovery | `recover_outbox` |
 | Match root allocation directories | Until the lobby archives them after a terminal phase (timers in [protocols.md §5](protocols.md#5-lobby--worker-allocation-handoff)) | `Pool::poll`, `Pool::from_env` |
 | Match root `archive/`, with each `worker.log` | Never pruned by code. `worker.log` is opened for append on every launch and never rotated. | `match_pool.rs` |
+| RU host journal (every unit's output; some lobby and Account API lines carry an IP address) | 30 days and at most 1 GiB, on disk (`MaxRetentionSec`, `SystemMaxUse`). The privacy policy (LR-04) states it. | `ops/vps/ru/journald-omoba-ru.conf` (LR-17) |
 
 ### Projection
 
@@ -574,7 +575,7 @@ Back up before every schema change. Never delete live match directories or drop 
 - **Sets.** Every night and before every migration (`ru_host.py ship`), one set holds `pg_dump -Fc` of `omoba_ru`, the match root with `archive/` and every allocation `outbox/`, the lobby outbox and a manifest (rows and an order-independent digest per table, both version tables, checksums). It is encrypted to the backup key with GnuPG and signed with it, then copied off-host to storage in Russia, which keeps 14 daily and 8 weekly sets.
 - **Restore drill.** Every month the newest off-host set is restored into the scratch database `omoba_ru_restore_drill`. Its tables, row counts, row digests and schema versions are compared with the manifest, and the scratch database is dropped. A set the backup key did not sign is never restored.
 - **Secrets.** The secrets above (the env files with `OMOBA_PORTAL_SECRET` and `OMOBA_SOCIAL_SECRET`) and the backup keys are escrowed offline, encrypted to the escrow holder's key.
-- **Alerts.** A failed backup or drill alerts at once; an hourly check alerts when no backup has succeeded for 26 h.
+- **Alerts.** A failed backup or drill alerts at once; an hourly check alerts when no backup has succeeded for 26 h. A stopped backup timer, which would make neither backups nor that alert, is reported by the host check of `ru_monitor.py` (LR-17), and all of them go to the host's one Telegram bot in `alerts.env`.
 
 Runbook: [ops/vps/ru/README.md](../../ops/vps/ru/README.md#backups-escrow-and-restore-drill).
 

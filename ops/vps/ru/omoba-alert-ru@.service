@@ -1,0 +1,26 @@
+# Owner alert for a failed RU unit (LR-17): every RU unit names it as
+# OnFailure=omoba-alert-ru@%n.service, so systemd starts omoba-alert-ru@<unit>.service when
+# that unit fails, also on every crash before Restart= brings a service back (systemd 254+,
+# RestartMode=normal). ru_monitor.py journals it and, with the bot in alerts.env, sends it to
+# Telegram: at once, then at most hourly for a service and daily for a timer job.
+# It has no OnFailure= itself: an alert about an alert would loop.
+# Installed by ops/vps/ru/ru_host.py bootstrap (README.md, "Monitoring and alerts").
+[Unit]
+Description=OMOBA RU owner alert: %i failed
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /opt/omoba-ru/monitor/ru_monitor.py unit-failed %i
+TimeoutStartSec=2min
+StateDirectory=omoba-ru-monitor
+StateDirectoryMode=0700
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+MemoryMax=128M

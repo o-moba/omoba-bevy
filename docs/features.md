@@ -1130,6 +1130,16 @@ follows.
 - Copy in en, ru and zh-Hans (`client/i18n/*/legal.json`).
 - Code: `shared/src/market.rs` (`Market::legal`, `Legal`), `scripts/markets.py` (`Legal`), `client/src/legal.rs`, `client/src/pause_menu.rs` (About tab), `scripts/release.py` (`legal_readme`, `require_public_source_tag`). See [markets](markets.md#legal-documents-and-links-lr-06) and [the session note](progress/2026-10-24-lr-06-client.md).
 
+## RU host monitoring and alerts (LR-17 ops, unreleased)
+
+- The owner hears about an RU outage on Telegram within minutes, without logging in to the host. Without a bot, every alert still goes to the journal.
+- On the host, every RU unit and every PostgreSQL cluster unit names `OnFailure=omoba-alert-ru@%n.service`, so any failure alerts at once, also each crash before systemd restarts a service. A check every 5 minutes reports an enabled service or Caddy not running, a PostgreSQL cluster down (its `postgresql@<version>-main.service`, not the always-active `postgresql.service` wrapper, or no connection on port 5432), a stopped backup timer, free disk below 15% and a match worker whose heartbeat stopped. Reminders come hourly (daily for a timer job), and a "resolved" message follows once the problem is gone.
+- Outside the host, an external probe runs every minute against the lobby's UDP compatibility check, the Account API `/health/ready` and the portal, and alerts after 2 failed rounds in a row. `release.py preflight` runs the same UDP check and, with `--contract`, compares the server with a release.
+- A journald drop-in keeps the RU host's journal on disk, at most 1 GiB and 30 days.
+- The host's one Telegram bot lives in `alerts.env`; the backup alerts (LR-03) use it too. The public names come from `scripts/markets.py`.
+- Not yet: the lobby's queue, capacity and allocation metrics with their alerts, and bounded match archives (LR-17 server part).
+- Code: `ops/vps/ru/ru_monitor.py`, `ops/vps/ru/omoba-alert-ru@.service`, `ops/vps/ru/omoba-monitor-ru.{service,timer}`, `ops/vps/ru/postgresql-alert-ru.conf`, `ops/vps/ru/alerts.env.example`, `ops/vps/ru/journald-omoba-ru.conf`, `ops/vps/ru/ru_host.py` (install and `status`), `scripts/market_probe.py`, `ops/probe/`, `scripts/release.py` (`preflight`). See [Monitoring and alerts](../ops/vps/ru/README.md#monitoring-and-alerts), [the external probe](../ops/probe/README.md) and [the session note](progress/2026-10-24-lr-17-ops.md).
+
 ## Multiplayer Session Reliability
 
 - **TASK-14 (client)**: Explicit session states, non-blocking wait when the server is down, bounded `WaitingForServer` timeout, stale snapshot detection while connected, UDP transport error thresholds, snapshot-channel disconnect detection when the UDP thread ends, full teardown (replicated entities + team overlay) on disconnect, manual reconnect via **Retry** (no silent rejoin into a match), pause menu auto-closes on **Disconnected**, minimap hidden unless **Connected**.

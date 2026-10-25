@@ -1,0 +1,27 @@
+# The RU host check every 5 minutes (LR-17): RU services enabled but not running, Caddy, the
+# PostgreSQL cluster (its postgresql@<version>-main.service and a connection on port 5432),
+# failed backup runs and stopped backup timers, free disk below 15% and match workers whose
+# heartbeat stopped. Problems go to the journal and, with the bot in
+# alerts.env, to Telegram (README.md, "Monitoring and alerts"). It exits 0 once its alerts
+# went out; it fails only when the check itself breaks, which alerts like any RU unit.
+# Installed by ops/vps/ru/ru_host.py bootstrap; started by omoba-monitor-ru.timer.
+[Unit]
+Description=OMOBA RU host check
+OnFailure=omoba-alert-ru@%n.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /opt/omoba-ru/monitor/ru_monitor.py check --alert
+TimeoutStartSec=3min
+StateDirectory=omoba-ru-monitor
+StateDirectoryMode=0700
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+MemoryMax=128M

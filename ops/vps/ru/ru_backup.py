@@ -29,7 +29,8 @@ stays on the host and goes up with the next run. The drill restores the newest
 off-host set into <database>_restore_drill, compares tables, row counts, digests and
 schema versions with the manifest and drops the scratch database. Failures alert:
 always in the journal, and through Telegram when OMOBA_TELEGRAM_BOT_TOKEN and
-OMOBA_TELEGRAM_CHAT_ID are set. No secret is printed, logged or put in argv.
+OMOBA_TELEGRAM_CHAT_ID are set, in /opt/omoba-ru/alerts.env (the host's one bot, LR-17)
+or here. No secret is printed, logged or put in argv.
 """
 from __future__ import annotations
 
@@ -102,6 +103,8 @@ DEFAULTS = {
     "OMOBA_BACKUP_KEEP_DAILY": "14",
     "OMOBA_BACKUP_KEEP_WEEKLY": "8",
     "OMOBA_BACKUP_KEEP_LOCAL": "2",
+    # The host's one Telegram bot (LR-17, ru_monitor.py); used unless this file names its own.
+    "OMOBA_ALERTS_ENV": "/opt/omoba-ru/alerts.env",
 }
 OPTIONAL_KEYS = ("OMOBA_BACKUP_TARGET", "OMOBA_BACKUP_S3_ENDPOINT", "OMOBA_BACKUP_S3_REGION",
                  "OMOBA_BACKUP_S3_ACCESS_KEY_ID", "OMOBA_BACKUP_S3_SECRET_ACCESS_KEY",
@@ -195,7 +198,23 @@ class Config:
         return self.get("OMOBA_BACKUP_GPG_IDENTITY_FILE")
 
     def secrets(self) -> list:
-        return [self.values[key] for key in SECRET_KEYS if self.values.get(key) and PLACEHOLDER not in self.values[key]]
+        own = [self.values[key] for key in SECRET_KEYS if self.values.get(key) and PLACEHOLDER not in self.values[key]]
+        return own + [value for value in self.telegram()[:1] if value]
+
+    def telegram(self) -> tuple[str, str]:
+        """(token, chat) of the bot: this file's own lines, else the host's one bot in
+        OMOBA_ALERTS_ENV (alerts.env, LR-17); ("", "") without one."""
+        token, chat = self.get("OMOBA_TELEGRAM_BOT_TOKEN"), self.get("OMOBA_TELEGRAM_CHAT_ID")
+        if token or chat:
+            return token, chat
+        if not hasattr(self, "_shared_bot"):
+            try:
+                values = parse_env_text(Path(self.get("OMOBA_ALERTS_ENV")).read_text())[0]
+            except (OSError, ValueError):
+                values = {}
+            token, chat = values.get("OMOBA_TELEGRAM_BOT_TOKEN", ""), values.get("OMOBA_TELEGRAM_CHAT_ID", "")
+            self._shared_bot = ("", "") if not token or not chat or PLACEHOLDER in token + chat else (token, chat)
+        return self._shared_bot
 
 
 def redact(text: str, hidden=()) -> str:
@@ -964,7 +983,7 @@ class Context:
                 self.telegram(f"OMOBA RU backups on {socket.gethostname()}: all checks pass again")
 
     def telegram(self, text: str) -> bool:
-        token, chat = self.cfg.get("OMOBA_TELEGRAM_BOT_TOKEN"), self.cfg.get("OMOBA_TELEGRAM_CHAT_ID")
+        token, chat = self.cfg.telegram()
         if not token or not chat:
             return False
         data = urllib.parse.urlencode({"chat_id": chat, "text": redact(text, self.cfg.secrets())[:3500],

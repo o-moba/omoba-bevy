@@ -3,7 +3,7 @@
 The host half runs against a temporary filesystem root with fake apt / dpkg-query /
 systemctl / ufw / sshd / caddy / runuser psql / useradd / install / ss / ip / pgrep /
 node / omoba-account-api / the installed ru_backup.py (LR-03, tested on its own in
-test_ru_backup.py), fake DNS and fake loopback HTTP, so nothing here needs ssh, root,
+test_ru_backup.py) and ru_monitor.py (LR-17, test_ru_monitor.py), fake DNS and fake loopback HTTP, so nothing here needs ssh, root,
 PostgreSQL, Caddy or systemd. The Mac half is exercised with ssh, scp and
 whois mocked. A bootstrap → ship → ship-portal → status → reboot round runs end to end
 against the fakes.
@@ -55,7 +55,7 @@ def elf(body: bytes = b"server", machine: bytes = b"\x3e\x00") -> bytes:
 SERVER = elf(b"omoba-server ru 1")
 ACCOUNT_API = elf(b"omoba-account-api ru 1")
 SERVER_SERVICES = ("omoba-lobby-ru", "omoba-account-api-ru")
-TIMERS = ru_host.BACKUP_TIMERS
+TIMERS = (*ru_host.BACKUP_TIMERS, ru_host.MONITOR_TIMER)
 
 
 def ufw_line(to: str, action: str, source: str, comment: str) -> str:
@@ -97,6 +97,8 @@ class FakeSystem:
         self.backups_configured = False
         self.fail_backup = False
         self.backup_runs = []
+        # ru_monitor.py check (LR-17): [(code, text)] it finds.
+        self.monitor_problems = []
         self.write("/etc/os-release", 'ID=ubuntu\nVERSION_ID="24.04"\n')
         self.write("/proc/meminfo", "MemTotal: 4014000 kB\nMemAvailable: 2500000 kB\n")
         self.write("/proc/sys/kernel/random/boot_id", "boot-1\n")
@@ -202,6 +204,8 @@ class FakeSystem:
             return 0, found.group().decode() + "\n"
         if name.endswith("/omoba-account-api"):
             return self.migrate(args, env)
+        if name == "/usr/bin/python3" and args[1] == self.p(ru_host.MONITOR_SCRIPT):
+            return self.monitor_tool(args[1:])
         if name == "/usr/bin/python3":
             return self.backup_tool(args[1:])
         raise AssertionError(f"unexpected command {args}")
@@ -233,6 +237,15 @@ class FakeSystem:
                               "rollback_dump": dump, "uploaded": [] if local_only else ["x"],
                               "mode": "local-only" if local_only else None}) + "\n"
 
+    def monitor_tool(self, args):
+        """The installed ru_monitor.py (its own behaviour is test_ru_monitor.py's)."""
+        assert os.path.isfile(args[0]) and args[1:] == ["check", "--json"], args
+        problems = self.monitor_problems
+        return (1 if problems else 0), json.dumps({
+            "ok": not problems, "problems": [text for _, text in problems], "codes": [code for code, _ in problems],
+            "warnings": ["no Telegram bot in /opt/omoba-ru/alerts.env: alerts reach the journal only"],
+            "facts": {"disk": {"/": {"free_percent": 71.0}}, "workers": {"live": 0}, "units": {}}})
+
     def install_package(self, package):
         self.packages.add(package)
         if package == "postgresql":
@@ -261,7 +274,7 @@ class FakeSystem:
         if verb == "daemon-reload":
             return 0, ""
         unit = args[1]
-        assert unit in ("caddy", "postgresql", "ssh.service", *SERVER_SERVICES, "omoba-portal-ru",
+        assert unit in ("caddy", "postgresql", "ssh.service", "systemd-journald", *SERVER_SERVICES, "omoba-portal-ru",
                         "omoba-limits-ru", *TIMERS), args
         if verb == "enable":
             self.enabled.add(unit)
@@ -508,7 +521,7 @@ class HostCase(unittest.TestCase):
         return {"expected_ip": RU_IP, "dev_ip": None, "behind_nat": False, "units": dict(KIT["units"]),
                 "examples": dict(KIT["examples"]), "caddyfile": KIT["caddyfile"], "names": dict(NAMES),
                 "nftables": KIT["nftables"], "limits_unit": KIT["limits_unit"],
-                "backup_kit_z": KIT["backup_kit_z"], **extra}
+                "backup_kit_z": KIT["backup_kit_z"], "monitor_kit_z": KIT["monitor_kit_z"], **extra}
 
     def bootstrap(self, **extra):
         return self.fresh().bootstrap(self.payload(kind="bootstrap", vkid=VK_ID, **extra))
@@ -645,6 +658,90 @@ class RuKitTest(unittest.TestCase):
         with self.assertRaises(ru_host.Refused) as refused:
             ru_host.Host(tempfile.gettempdir(), run=lambda *a, **k: None).payload_backup_kit(payload)
         self.assertIn("Persistent", refused.exception.message)
+
+    def test_every_ru_unit_alerts_on_failure(self):
+        """LR-17: the services, the backup jobs and the host check name the alert template;
+        the template itself does not (an alert about the alert would loop)."""
+        backup = ru_host.decode_backup_kit(KIT["backup_kit_z"])
+        monitor = ru_host.decode_monitor_kit(KIT["monitor_kit_z"])
+        named = {**{ru_host.UNIT_FILES[kind]: text for kind, text in KIT["units"].items()},
+                 **{name: text for name, text in backup["units"].items() if name.endswith(".service")},
+                 ru_host.MONITOR_SERVICE: monitor["units"][ru_host.MONITOR_SERVICE],
+                 ru_host.LIMITS_UNIT_FILE: KIT["limits_unit"]}
+        self.assertEqual(len(named), 8)
+        for name, text in named.items():
+            self.assertEqual(ru_host.parse_unit(text)[0]["Unit.OnFailure"], ["omoba-alert-ru@%n.service"], name)
+        template = ru_host.parse_unit(monitor["units"][ru_host.ALERT_UNIT])[0]
+        self.assertNotIn("Unit.OnFailure", template)
+        self.assertEqual(template["Service.ExecStart"],
+                         ["/usr/bin/python3 /opt/omoba-ru/monitor/ru_monitor.py unit-failed %i"])
+        lobby = KIT["units"]["lobby"].replace("OnFailure=omoba-alert-ru@%n.service\n", "")
+        self.assertTrue(any("OnFailure" in problem for problem in ru_host.unit_problems("lobby", lobby)))
+        job = backup["units"]["omoba-backup-ru.service"].replace("OnFailure=omoba-alert-ru@%n.service\n", "")
+        self.assertTrue(any("OnFailure" in problem for problem in ru_host.backup_unit_problems("omoba-backup-ru.service", job)))
+        limits = KIT["limits_unit"].replace("OnFailure=omoba-alert-ru@%n.service\n", "")
+        self.assertTrue(any("OnFailure" in problem for problem in ru_host.limits_unit_problems(limits)))
+        # Every PostgreSQL cluster unit too, by a drop-in for postgresql@.service: Ubuntu's
+        # postgresql.service is only a wrapper that stays active.
+        self.assertEqual(ru_host.parse_unit(monitor["pg_alert"])[0], {"Unit.OnFailure": ["omoba-alert-ru@%n.service"]})
+        self.assertEqual(ru_host.PG_ALERT_DROPIN, "/etc/systemd/system/postgresql@.service.d/50-omoba-ru-alert.conf")
+
+    def test_the_monitor_kit_passes_every_rule(self):
+        monitor = ru_host.decode_monitor_kit(KIT["monitor_kit_z"])
+        self.assertEqual(set(monitor["units"]), set(ru_host.MONITOR_UNITS))
+        self.assertEqual(ru_host.monitor_kit_problems(monitor, (NAMES["zone"],)), [])
+        self.assertEqual(ru_host.alerts_example_problems(monitor["env_example"]), [])
+        self.assertEqual(monitor["script"], (ROOT / "ops/vps/ru/ru_monitor.py").read_text())
+        timer = ru_host.parse_unit(monitor["units"][ru_host.MONITOR_TIMER])[0]
+        self.assertEqual(timer["Timer.OnCalendar"], ["*-*-* *:00/5:00"], "every 5 minutes")
+        journald = ru_host.parse_unit(monitor["journald"])[0]
+        self.assertEqual(journald["Journal.SystemMaxUse"], ["1G"])
+        self.assertEqual(journald["Journal.MaxRetentionSec"], ["30day"])
+        self.assertEqual(journald["Journal.Storage"], ["persistent"])
+
+    def test_a_weakened_monitor_kit_is_refused(self):
+        monitor = ru_host.decode_monitor_kit(KIT["monitor_kit_z"])
+        template, check = monitor["units"][ru_host.ALERT_UNIT], monitor["units"][ru_host.MONITOR_SERVICE]
+        cases = {
+            (ru_host.ALERT_UNIT, "would loop"): template.replace("[Service]", "OnFailure=omoba-alert-ru@%n.service\n\n[Service]"),
+            (ru_host.ALERT_UNIT, "ExecStart"): template.replace("unit-failed %i", "unit-failed x"),
+            (ru_host.MONITOR_SERVICE, "OnFailure"): check.replace("OnFailure=omoba-alert-ru@%n.service\n", ""),
+            (ru_host.MONITOR_SERVICE, "StateDirectory"): check.replace("StateDirectory=omoba-ru-monitor\n", ""),
+            (ru_host.MONITOR_SERVICE, "ReadWritePaths"): check.replace("[Service]\n", "[Service]\nReadWritePaths=/opt\n"),
+            (ru_host.MONITOR_SERVICE, "[Install]"): check + "\n[Install]\nWantedBy=multi-user.target\n",
+            (ru_host.MONITOR_SERVICE, "production/dev path"): check.replace(
+                "ExecStart=/usr/bin/python3", "ExecStartPre=/opt/omoba/x\nExecStart=/usr/bin/python3"),
+            (ru_host.MONITOR_TIMER, "OnCalendar"): monitor["units"][ru_host.MONITOR_TIMER].replace(
+                "OnCalendar=*-*-* *:00/5:00\n", ""),
+        }
+        for (name, needle), text in cases.items():
+            problems = ru_host.monitor_unit_problems(name, text)
+            self.assertTrue(any(needle in problem for problem in problems), (name, needle, problems))
+        for needle, text in {"SystemMaxUse": monitor["journald"].replace("SystemMaxUse=1G\n", ""),
+                             "MaxRetentionSec": monitor["journald"].replace("MaxRetentionSec=30day\n", ""),
+                             "persistent": monitor["journald"].replace("Storage=persistent", "Storage=volatile")}.items():
+            self.assertTrue(any(needle in problem for problem in ru_host.journald_problems(text)), needle)
+        example = monitor["env_example"]
+        for needle, text in {"unknown setting": example + "OMOBA_ALERT_DISK=5\n",
+                             "placeholder": example.replace("#OMOBA_TELEGRAM_BOT_TOKEN=CHANGE_ME",
+                                                            "OMOBA_TELEGRAM_BOT_TOKEN=123:abc")}.items():
+            self.assertTrue(any(needle in problem for problem in ru_host.alerts_example_problems(text)), needle)
+        import ru_monitor
+        with mock.patch.object(ru_monitor, "TIMERS", {"omoba-backup-ru.timer": "x"}):
+            self.assertIn("ru_monitor.py's host layout differs from ru_host.py's",
+                          ru_host.alerts_example_problems(example))
+        for text in ("", monitor["pg_alert"].replace("OnFailure=", "OnSuccess="),
+                     monitor["pg_alert"] + "\n[Service]\nRestart=always\n"):
+            self.assertEqual(ru_host.pg_alert_problems(text),
+                             ["postgresql-alert-ru.conf: only [Unit] OnFailure=omoba-alert-ru@%n.service belongs in it"])
+        with mock.patch.object(ru_monitor, "PG_ADDRESS", ("127.0.0.1", 5433)):
+            self.assertIn("ru_monitor.py's host layout differs from ru_host.py's",
+                          ru_host.alerts_example_problems(example))
+        broken = dict(monitor, journald="[Journal]\n")
+        payload = HostCase.payload(self, monitor_kit_z=ru_host.encode_backup_kit(broken))
+        with self.assertRaises(ru_host.Refused) as refused:
+            ru_host.Host(tempfile.gettempdir(), run=lambda *a, **k: None).payload_monitor_kit(payload)
+        self.assertIn("Storage must be persistent", refused.exception.message)
 
     def test_the_payload_stays_far_below_the_argv_limit(self):
         # The whole `python3 - remote <mode> <payload>` must fit one argument (128 KiB on Linux).
@@ -889,6 +986,7 @@ class BootstrapTest(HostCase):
         self.assertTrue(report["ok"], report)
         self.assertIn("apt-get install postgresql caddy ufw", report["would"][0])
         self.assertTrue(any("omoba-portal-ru" in step for step in report["would"]))
+        self.assertIn(f"install {ru_host.PG_ALERT_DROPIN} (the alert for a failed PostgreSQL cluster)", report["would"])
         self.assertTrue(any("placeholder" in warning for warning in report["warnings"]))
         self.assertTrue(any("Node.js" in warning for warning in report["warnings"]))
         changes = [call for call in self.fake.calls
@@ -997,6 +1095,30 @@ class BootstrapTest(HostCase):
         self.assertEqual(os.stat(env).st_mode & 0o777, 0o600)
         self.assertEqual(Path(env).read_text(), (ROOT / "ops/vps/ru/backup.env.example").read_text())
         self.assertIn("gnupg", fake.packages)
+        # Monitoring (LR-17): the tool, the alert template and the host check, alerts.env with
+        # placeholders only, the journal limits (journald restarted to read them).
+        monitor = ru_host.decode_monitor_kit(KIT["monitor_kit_z"])
+        script = fake.p(ru_host.MONITOR_SCRIPT)
+        self.assertEqual(Path(script).read_text(), (ROOT / "ops/vps/ru/ru_monitor.py").read_text())
+        self.assertEqual(os.stat(script).st_mode & 0o777, 0o755)
+        for name in ru_host.MONITOR_UNITS:
+            self.assertEqual(Path(fake.p(f"/etc/systemd/system/{name}")).read_text(), monitor["units"][name], name)
+        alerts = fake.p(ru_host.ALERTS_ENV)
+        self.assertEqual(os.stat(alerts).st_mode & 0o777, 0o600)
+        self.assertEqual(Path(alerts).read_text(), (ROOT / "ops/vps/ru/alerts.env.example").read_text())
+        self.assertEqual(Path(fake.p(ru_host.JOURNALD_DROPIN)).read_text(),
+                         (ROOT / "ops/vps/ru/journald-omoba-ru.conf").read_text())
+        self.assertEqual(Path(fake.p(ru_host.PG_ALERT_DROPIN)).read_text(),
+                         (ROOT / "ops/vps/ru/postgresql-alert-ru.conf").read_text())
+        self.assertIn(f"install {ru_host.PG_ALERT_DROPIN}", result["done"])
+        self.assertIn(["systemctl", "restart", "systemd-journald"], fake.calls)
+        self.assertTrue(fake.unit(ru_host.MONITOR_TIMER)["active"])
+        # The alert template is in place before any unit that names it.
+        done = result["done"]
+        self.assertLess(done.index(f"install /etc/systemd/system/{ru_host.ALERT_UNIT}"),
+                        done.index(f"install {ru_host.unit_path('lobby')}"))
+        self.assertLess(done.index(f"install /etc/systemd/system/{ru_host.ALERT_UNIT}"),
+                        done.index(f"install /etc/systemd/system/{ru_host.LIMITS_UNIT_FILE}"))
         # Per-source UDP limits (LR-16): the checked file, its unit, loaded.
         self.assertEqual(Path(fake.p(ru_host.NFT_RULES)).read_text(), KIT["nftables"])
         self.assertEqual(Path(fake.p("/etc/systemd/system/omoba-limits-ru.service")).read_text(), KIT["limits_unit"])
@@ -1370,6 +1492,47 @@ class PortalAndRebootTest(HostCase):
         self.assertIn("/opt/omoba-ru/backup/ru_backup.py is not ops/vps/ru/ru_backup.py (bootstrap installs it)",
                       problems)
         self.assertFalse(any(problem.startswith("backups: ") for problem in problems), "a changed tool is not run")
+
+    def test_status_reports_the_monitoring(self):
+        """LR-17: the kit, its timer, alerts.env, the journal limits and the host check's disk and
+        worker findings (its unit findings are status's own)."""
+        self.ship()
+        self.ship_portal(portal_bundle(self.work.name))
+        report = self.fresh().status(self.payload())
+        self.assertTrue(report["ok"], report["problems"])
+        self.assertEqual(report["facts"]["monitor"], {"disk": {"/": {"free_percent": 71.0}}, "workers": {"live": 0}})
+        self.assertIn("monitor: no Telegram bot in /opt/omoba-ru/alerts.env: alerts reach the journal only",
+                      report["warnings"])
+        self.fake.monitor_problems = [("disk:/", "only 9% free on the filesystem of / (1.8 of 20.0 GiB; alert below 15%)"),
+                                      ("unit:omoba-portal-ru.service", "omoba-portal-ru.service is not running"),
+                                      ("postgres:connect", "PostgreSQL does not accept connections on port 5432")]
+        self.fake.enabled.discard(ru_host.MONITOR_TIMER)
+        os.chmod(self.fake.p(ru_host.ALERTS_ENV), 0o644)
+        os.unlink(self.fake.p(ru_host.JOURNALD_DROPIN))
+        os.unlink(self.fake.p(ru_host.PG_ALERT_DROPIN))
+        problems = self.fresh().status(self.payload())["problems"]
+        for needle in ("monitor: only 9% free on the filesystem of /",
+                       "omoba-monitor-ru.timer is not enabled: the host check would not run after a reboot",
+                       "/opt/omoba-ru/alerts.env must be root-owned with mode 0600",
+                       "/etc/systemd/journald.conf.d/50-omoba-ru.conf is not ops/vps/ru/journald-omoba-ru.conf",
+                       "/etc/systemd/system/postgresql@.service.d/50-omoba-ru-alert.conf is not "
+                       "ops/vps/ru/postgresql-alert-ru.conf (bootstrap installs it): a crashed PostgreSQL alerts only "
+                       "at the next host check"):
+            self.assertTrue(any(problem.startswith(needle) for problem in problems), (needle, problems))
+        self.assertFalse([problem for problem in problems if "monitor: omoba-portal-ru" in problem
+                          or "monitor: PostgreSQL" in problem], "status checks units and PostgreSQL itself")
+        # Bootstrap puts the limits, the drop-in and the timer back and leaves the owner's alerts.env alone.
+        Path(self.fake.p(ru_host.ALERTS_ENV)).write_text("OMOBA_ALERT_DISK_MIN_FREE_PERCENT=20\n")
+        done = self.bootstrap()["done"]
+        self.assertIn(f"install {ru_host.JOURNALD_DROPIN}", done)
+        self.assertIn(f"install {ru_host.PG_ALERT_DROPIN}", done)
+        self.assertIn(f"systemctl enable {ru_host.MONITOR_TIMER}", done)
+        self.assertEqual(Path(self.fake.p(ru_host.ALERTS_ENV)).read_text(), "OMOBA_ALERT_DISK_MIN_FREE_PERCENT=20\n")
+        Path(self.fake.p(ru_host.MONITOR_SCRIPT)).write_text("#!/usr/bin/env python3\n")
+        problems = self.fresh().status(self.payload())["problems"]
+        self.assertIn("/opt/omoba-ru/monitor/ru_monitor.py is not ops/vps/ru/ru_monitor.py (bootstrap installs it)",
+                      problems)
+        self.assertFalse(any(problem.startswith("monitor: ") for problem in problems), "a changed tool is not run")
 
     def test_status_lists_published_downloads_and_a_log_caddy_cannot_write(self):
         """LR-23: release.py publish fills DOWNLOADS/<tag>/; Caddy must own its download log."""
