@@ -53,6 +53,12 @@ class Market:
     """Why the market cannot be packaged yet."""
     android: dict[str, str] = field(default_factory=dict)
     """Production Android identity override: bundle_id, display_name."""
+    downloads_path: str | None = None
+    """The market's own download host: this path on its portal origin (LR-23). `release.py
+    publish` uploads the packages there, the download catalog links them and IPFS is the
+    mirror. None: the catalog links the IPFS copies."""
+    release_label: str = "playtest"
+    """The release status players see next to every download (catalog `test_status`)."""
     payment_providers: tuple[str, ...] = ()
     """Who sells Hero Supporter access while `supporter` is on
     (shared/src/market.rs Market::payment_providers)."""
@@ -61,6 +67,17 @@ class Market:
     def label(self) -> str:
         """Inserted after the version in package and dist names (`-ru`); global adds none."""
         return "" if self.key == "global" else f"-{self.key}"
+
+    @property
+    def region(self) -> str:
+        """The account region this market's servers serve, as the download catalog names it.
+        LR-68 turns the market into a runtime region; this stays the one place that says so."""
+        return self.key
+
+    @property
+    def downloads(self) -> str | None:
+        """Base URL of the market's packages (`<portal><downloads_path>`), or None."""
+        return f"{self.portal}{self.downloads_path}" if self.portal and self.downloads_path else None
 
 
 MARKETS = {
@@ -76,6 +93,9 @@ MARKETS = {
                  platforms=("macos", "windows", "linux", "android"),
                  zones=("omoba.ru",),
                  android={"bundle_id": "space.ekza.omoba.ru", "display_name": "OMOBA"},
+                 # LR-23: packages on the RU host (Caddy, ops/vps/ru/Caddyfile.ru), IPFS mirror.
+                 downloads_path="/downloads",
+                 release_label="Открытая бета",
                  # Hero Supporter donations through YooKassa on the RU portal only.
                  payment_providers=("yookassa",)),
     "cn": Market("cn", {"ekza": False, "supporter": False, "vk_sign_in": False}, "zh-Hans", "cn",

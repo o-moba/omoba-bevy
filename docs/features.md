@@ -1122,6 +1122,14 @@ follows.
 - Copy in en, ru and zh-Hans (`client/i18n/*/update.json`); the release rule is in [RELEASING.md](RELEASING.md#updates-and-contract-changes-lr-14).
 - Code: `shared/src/compatibility.rs` (`UpdateNotice`, `ReleaseVersion`, `mismatch_side`, `download_page`), `server/src/public_transport.rs`, `passport/src/release_catalog.rs`, `client/src/update.rs`, `client/src/frontend/home.rs`, `client/src/net/status_ui.rs`. See [the session note](progress/2026-10-24-lr-14.md).
 
+## RU downloads from the RU host (LR-23, unreleased)
+
+- RU players download the game (Windows, Linux, macOS, Android) from the RU host at `omoba.ru/downloads/v<version>/`, served by Caddy on the portal's site; the Pinata IPFS copy of the same bytes is the mirror.
+- `make release-ru-publish` copies the packages with rsync (a published file is never replaced), reads each one back over HTTPS and checks SHA-256 and size, pins the IPFS mirror, and writes `releases.json`: host URL, `mirror_url`, status «Открытая бета», region `ru`, channel `direct`. `make release-ru-verify-downloads` downloads everything the RU portal lists and checks it byte for byte.
+- Downloads are counted per platform, version and day: Caddy logs only download requests (address shortened to /24 or /48, no headers, 90 days) and `ru_host.py downloads` prints the totals from the host; no address leaves it.
+- The download path and the status label live in the RU profile of `scripts/markets.py` (`downloads_path`, `release_label`, `region`); the global market keeps its IPFS links and the `playtest` label.
+- Code: `scripts/release.py` (`publish_to_host`, `release_catalog`, `downloads_report`), `scripts/markets.py`, `ops/vps/ru/Caddyfile.ru`, `ops/vps/ru/ru_downloads.py`, `ops/vps/ru/ru_host.py` (`downloads`, the download folder and log). See [RU downloads](../ops/vps/ru/README.md#downloads) and [the session note](progress/2026-10-24-lr-23.md).
+
 ## Multiplayer Session Reliability
 
 - **TASK-14 (client)**: Explicit session states, non-blocking wait when the server is down, bounded `WaitingForServer` timeout, stale snapshot detection while connected, UDP transport error thresholds, snapshot-channel disconnect detection when the UDP thread ends, full teardown (replicated entities + team overlay) on disconnect, manual reconnect via **Retry** (no silent rejoin into a match), pause menu auto-closes on **Disconnected**, minimap hidden unless **Connected**.

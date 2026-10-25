@@ -166,8 +166,11 @@ RFC3339 published_at, installation instructions, test_status. Optional per entry
 (LR-14, LR-68 rules): `channel` (`[a-z0-9_-]{1,32}`, `direct` when absent),
 `min_release` (the oldest release of that channel and platform that may still play
 online, never above `version`) and `update_url` (the HTTPS page the game's update button
-opens, at most 256 bytes, a query allowed; `shared::compatibility::valid_update_url`). Populate only after
-independently fetching/verifying the exact public artifact. Never list an unsigned
+opens, at most 256 bytes, a query allowed; `shared::compatibility::valid_update_url`).
+Optional `region` and `mirror_url` (LR-23: the market, an IPFS copy of the same bytes)
+are passed through unchanged; `scripts/release.py catalog` writes them and only HTTPS
+links. Populate only after independently fetching/verifying the exact public
+artifact (`release.py verify-downloads`). Never list an unsigned
 or privately provisioned IPA as publicly installable. No upload or shell launcher
 exists in the browser. Missing configuration shows no downloads.
 
