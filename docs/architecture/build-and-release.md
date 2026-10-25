@@ -133,7 +133,7 @@ flowchart LR
 - `ci` refuses the free markets (ru, cn).
 - `preflight --market cn` returns a not-ready report with exit code 1.
 - `markets` lists cn.
-- `publish`, `draft` and `catalog` call only `market_presets.market()` or `release_tag()`, and neither checks `blocked`. Neither does a direct `mobile/android/build.py --market cn`.
+- `publish`, `draft`, `catalog` and `verify-downloads` call only `market_presets.market()` or `release_tag()`, and none checks `blocked`. Neither does a direct `mobile/android/build.py --market cn`.
 
 `resolve_flavor()` validates the endpoints and refuses to mix contours or markets:
 
@@ -178,12 +178,13 @@ On Android, `identity_for()` and `manifest_for()` set the package and label from
 | `notes` | Prints the `CHANGELOG.md` section for the current version, or else `[Unreleased]` | None |
 | `draft` | Rewrites `SHA256SUMS.txt` over the dist folder, then runs `gh release create --draft --prerelease` against `o-moba/omoba-bevy`. If the release exists, it runs `gh release upload --clobber` instead. Notes come from CHANGELOG. The target defaults to `main` (dev contour: `dev`). A market gets its own tag and title | Creates or updates a **draft** |
 | `ci` | Runs `gh workflow run release.yml --ref <branch> -f tag=…` (+ `contour`/`server`/`registry`). `--branch` defaults to `main`, or `dev` for the dev contour; `--ref` names the tag. Global market only | Starts a workflow |
-| `publish` | Pins each package in the dist folder (iOS `.ipa` included) to IPFS through Pinata. The `PINATA_JWT` token goes to curl on stdin. It then downloads each package back through the gateway (`--gateway`, default `https://ekza.mypinata.cloud`), compares SHA-256 and records `ipfs.json`. Packages already pinned with the same hash are skipped | Network; pins |
+| `publish` | For a market with a download host (`downloads_path` in `scripts/markets.py`; RU, LR-23) and the prod contour, first copies the packages (no `.ipa`) with `rsync -r -t -p --ignore-existing` into `<--rsync-target>/v<version>/` (or `$OMOBA_DOWNLOADS_RSYNC_TARGET`; refused on the production or dev VPS, also through the ssh alias's HostName), downloads each one back from `<portal><downloads_path>/v<version>/<file>`, compares SHA-256 and size and records `downloads.json`. A file already on the host is never replaced, so a rebuilt package fails the read-back. Then, for every market, it pins each package in the dist folder (iOS `.ipa` included) to IPFS through Pinata. The `PINATA_JWT` token goes to curl on stdin. It then downloads each package back through the gateway (`--gateway`, default `https://ekza.mypinata.cloud`), compares SHA-256 and records `ipfs.json`. Packages already uploaded or pinned with the same hash are skipped. `--dry-run` prints the rsync command, the URLs and the pins and contacts nothing | Network; rsync over ssh; pins |
 | `markets` | Prints every market's features, servers, platforms and `blocked` state | None |
 | `preflight [--market ru]` | Checks DNS of the market's lobby, `GET <account_api>/health/ready` and `GET <portal>/`. `--market` defaults to `ru` | Read-only network; exits 1 when not ready |
-| `catalog [--market ru]` | Turns `ipfs.json` receipts into `releases.json` in the Account API download schema (`OMOBA_RELEASE_CATALOG`, [account-api/README.md#downloads](../../account-api/README.md#downloads)). Covers macOS, Windows, Linux and Android only; prod contour; HTTPS URL and SHA-256 required. `--market` defaults to `ru`. Every Android entry is labelled `universal` (`CATALOG_PLATFORMS`), even for an arm64-only APK. Every entry carries `channel: direct` (`CATALOG_CHANNEL`) and, when the market has a portal, `update_url` (`<portal>/download?platform=…`). `--min-release X` adds `min_release` (refused when newer than the release): older games of that channel show Update required (LR-14). A market with a source link (RU) is refused until its public tag `v<version>-<market>` exists on GitHub (`require_public_source_tag`, `git ls-remote`; LR-06) | Writes `dist/…/releases.json` |
+| `catalog [--market ru]` | Turns the receipts into `releases.json` in the Account API download schema (`OMOBA_RELEASE_CATALOG`, [account-api/README.md#downloads](../../account-api/README.md#downloads)). A market with a download host lists `downloads.json` (the URL must be its host's) with the IPFS copy of the same SHA-256 as `mirror_url`; other markets list `ipfs.json`. Every entry carries the market's `release_label` as `test_status` (RU «Открытая бета», otherwise `playtest`), `region` (the market's), `channel: direct` (`CATALOG_CHANNEL`) and, when the market has a portal, `update_url` (`<portal>/download?platform=…`). Covers macOS, Windows, Linux and Android only; prod contour; HTTPS URL and SHA-256 required. `--market` defaults to `ru`. Every Android entry is labelled `universal` (`CATALOG_PLATFORMS`), even for an arm64-only APK. `--min-release X` adds `min_release` (refused when newer than the release): older games of that channel show Update required (LR-14). A market with a source link (RU) is refused until its public tag `v<version>-<market>` exists on GitHub (`require_public_source_tag`, `git ls-remote`; LR-06) | Writes `dist/…/releases.json` |
+| `verify-downloads [--market ru] [--catalog …]` | Reads the catalog the portal serves (`<portal>/api/releases`, or a file / https URL), downloads every package and its `mirror_url`, and checks the host, `region`, `channel`, `test_status`, SHA-256 and size. Ready only when every platform of the market is listed and correct | Read-only network; exits 1 when not ready |
 
-Nothing publishes on its own. `draft` makes drafts only, `publish` pins to IPFS, and `build ios --upload` is the only step that uploads to Apple. Each has to be asked for explicitly (module docstring, RELEASING.md).
+Nothing publishes on its own. `draft` makes drafts only, `publish` uploads to the market's download host and pins to IPFS, and `build ios --upload` is the only step that uploads to Apple. Each has to be asked for explicitly (module docstring, RELEASING.md).
 
 When `check` counts a platform as buildable (`check_report`):
 
@@ -216,7 +217,7 @@ The names come from `artifact_name()` and `dist_path()`, where `<label>` is `[-<
 | Linux | `omoba-<v><label>-linux-x64.tar.gz` | `omoba`, `omoba-server`, plus `omoba-account-api` for the dev contour or a free market (ru, cn), `assets/`, `host-practice.sh`, `omoba-practice.service`, `legal/`, README |
 | Android | `Omoba-<v><label>-android-{universal\|arm64}.apk` | `universal` when `OMOBA_ANDROID_UNIVERSAL=1` (`make release-all`, `release-ru`, `release-publish`, `release-ru-publish`) |
 | iOS | `Omoba-<v><label>-ios.ipa` when export succeeds; always `Omoba-<v><label>-ios-<build>.xcarchive` | — |
-| Shared | `compatibility.json` and `SHA256SUMS.txt`, then `ipfs.json` (publish) and `releases.json` (catalog). `draft` writes `dist/<tag>-notes.md` | — |
+| Shared | `compatibility.json` and `SHA256SUMS.txt`, then `downloads.json` (publish to a market's download host), `ipfs.json` (publish) and `releases.json` (catalog). `draft` writes `dist/<tag>-notes.md` | — |
 
 ### Platform builders
 
@@ -343,7 +344,8 @@ Every job that runs cargo installs Rust 1.95.0 explicitly with `dtolnay/rust-too
 | `release-testflight` | `build ios --upload` |
 | `release-check`, `release-ci`, `release-draft`, `release-notes`, `release-publish` | The matching release.py command |
 | `release-markets`, `release-ru`, `release-ru-preflight` | `markets`, `build all --market ru`, `preflight --market ru` |
-| `release-ru-publish` | `publish --market ru`, then `catalog --market ru` |
+| `release-ru-publish` | `publish --market ru --rsync-target $(RU_DOWNLOADS_TARGET)` (default `${RU_HOST:-vds-ru}:/opt/omoba-ru/downloads`), then `catalog --market ru` |
+| `release-ru-verify-downloads` | `verify-downloads --market ru` |
 
 `RELEASE_SERVER=host:port` adds `--server` to the targets that use `RELEASE_FLAGS`. `release-all` takes `PROD_SERVER` instead.
 
@@ -363,8 +365,9 @@ flowchart TD
   PROBE -->|exit 0| SRV["deploy server first<br/>ops/vps runbooks"]
   SRV --> DIST{"distribute"}
   DIST --> UP["release.py draft<br/>upload into the draft"]
-  DIST --> IPFS["release.py publish<br/>IPFS + ipfs.json"]
+  DIST --> IPFS["release.py publish<br/>market download host + downloads.json<br/>IPFS + ipfs.json"]
   IPFS --> CAT["release.py catalog<br/>releases.json for OMOBA_RELEASE_CATALOG"]
+  CAT --> VER["release.py verify-downloads<br/>what the portal lists, byte for byte"]
   DIST --> TF["build ios --upload<br/>TestFlight"]
   UP --> PUB["owner smoke-tests one package per platform<br/>gh release edit --draft=false"]
 ```

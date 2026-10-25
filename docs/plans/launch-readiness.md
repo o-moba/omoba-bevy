@@ -606,10 +606,10 @@ Area: distribution · **major** · S · ops
   - The status label is chosen by the owner (e.g. "Открытая бета").
   - Downloads are counted per platform.
 - **Acceptance:**
-  - [ ] `releases.json` URLs are on `omoba.ru` and their SHA-256 values verify.
-  - [ ] The portal shows the chosen status.
-  - [ ] Download counts per platform are available.
-  - [ ] A test download from a Russian network is recorded.
+  - [ ] `releases.json` URLs are on `omoba.ru` and their SHA-256 values verify. Code done (2026-10-24): `release.py publish --market ru` uploads to `omoba.ru/downloads/v<version>/` (Caddy on the RU portal site) and reads every package back; `catalog` refuses a URL off the host and adds the IPFS copy as `mirror_url`; `verify-downloads` re-checks what the portal lists. Needs the RU host for the first real run.
+  - [ ] The portal shows the chosen status. The catalog carries «Открытая бета» (`scripts/markets.py` `release_label`) as `test_status`, which the portal's download page already prints; needs the host to see it.
+  - [ ] Download counts per platform are available. Code done: Caddy logs only download requests (shortened addresses, no headers, 90 days) and `ru_host.py downloads` prints totals per platform, version and day (`ru_downloads.py`). Needs the host.
+  - [ ] A test download from a Russian network is recorded. Procedure in `ops/vps/ru/README.md#downloads` and release checklist S11; needs the host and a Russian connection.
 - **Depends on:** LR-01
 
 #### LR-24 — Android release build and durable signing key

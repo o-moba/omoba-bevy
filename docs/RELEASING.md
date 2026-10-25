@@ -39,7 +39,11 @@ current checkout, pointed at `PROD_SERVER` (default: the live test server), into
 less than ~20 GB is free (`OMOBA_MIN_FREE_GIB`). `make release-publish` then pins
 each package to IPFS with `PINATA_JWT`, downloads it back through the gateway,
 compares the SHA-256 and records the links in `dist/v<version>/ipfs.json`;
-packages already pinned with the same hash are skipped.
+packages already pinned with the same hash are skipped. RU packages (`make
+release-ru`) go to the RU host first: `make release-ru-publish` uploads them to
+`omoba.ru/downloads/`, reads each back, pins the IPFS mirror and writes
+`releases.json` with the status «Открытая бета»; `make release-ru-verify-downloads`
+checks what the RU portal lists ([RU downloads](../ops/vps/ru/README.md#downloads), LR-23).
 
 One-time setup on the Mac:
 

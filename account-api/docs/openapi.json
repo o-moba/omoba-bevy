@@ -6253,6 +6253,15 @@
             "format": "uri",
             "maxLength": 256,
             "description": "HTTPS page the game's update button opens for this channel and platform."
+          },
+          "region": {
+            "type": "string",
+            "description": "The account region the package serves (scripts/markets.py, LR-23); passed through."
+          },
+          "mirror_url": {
+            "type": "string",
+            "format": "uri",
+            "description": "An HTTPS mirror (IPFS) of the same bytes as `url` (LR-23); passed through."
           }
         },
         "required": [

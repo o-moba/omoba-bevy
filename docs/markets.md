@@ -23,6 +23,7 @@ typo in a market or feature name fails the build.
 | Account API / portal | none in production | `account.omoba.ru` / `omoba.ru` | not decided |
 | Settings folder | `omoba-bevy` | `omoba-bevy-ru` | `omoba-bevy-cn` |
 | Packages | `Omoba-<v>-*` | `Omoba-<v>-ru-*` in `dist/v<v>-ru/` | — |
+| Downloads | IPFS links | `omoba.ru/downloads/` on the RU host, IPFS mirror, status «Открытая бета» | — |
 | Android app | `space.ekza.omoba.beta` | `space.ekza.omoba.ru`, "OMOBA" | — |
 | Platforms | macOS, Windows, Linux, Android, iOS | macOS, Windows, Linux, Android | none yet (blocked) |
 | Legal documents to accept on first launch | none | `omoba.ru/terms`, `omoba.ru/privacy`, version `0-draft` | none |
@@ -39,7 +40,8 @@ are deployed (`make release-ru-preflight` checks).
   `OMOBA_FEATURE_EKZA|SUPPORTER|VK_SIGN_IN=on|off` flips one feature of its preset
   for a test build. Both are `const`: unknown values are a compile error.
 - `scripts/markets.py` — the same presets plus each market's servers, settings
-  folder, Android identity and platforms, for `scripts/release.py` and
+  folder, Android identity, platforms, download path and release status label, for
+  `scripts/release.py` and
   `mobile/android/build.py`. `scripts/test_release.py` checks it against the Rust
   module.
 - `Market::legal` (Rust) and `Legal` (`markets.py`) — the legal documents, source
@@ -188,7 +190,9 @@ The steps that need accounts, money or legal decisions are the owner's.
    used (public PKCE client).
 4. **Packages.** `make release-ru` builds `dist/v<version>-ru/`: macOS, Windows,
    Linux (with the RU `omoba-server` and `omoba-account-api`) and Android
-   (`space.ekza.omoba.ru`). `make release-ru-publish` pins them to IPFS.
+   (`space.ekza.omoba.ru`). `make release-ru-publish` uploads them to the RU host
+   (`omoba.ru/downloads/`), pins the IPFS mirror and writes `releases.json`
+   (`ops/vps/ru/README.md#downloads`).
 5. **Servers** with `ops/vps/ru/ru_host.py` (`ops/vps/ru/README.md`): `bootstrap`
    sets up the host (PostgreSQL with ICU, Caddy with `Caddyfile.ru`, firewall,
    key-only SSH, users, env files with secrets made on the host, the database and
@@ -211,7 +215,11 @@ The steps that need accounts, money or legal decisions are the owner's.
 7. **Distribution.** Publish the GitHub release `v<version>-ru` first (`release.py
    draft --market ru`, then `gh release edit v<version>-ru --draft=false`): the game's
    About page and the README link its source, and `catalog` refuses until the tag
-   exists. Then publish the IPFS links on the RU portal (`OMOBA_RELEASE_CATALOG`)
-   and, if wanted, RuStore / VK Play (store accounts and age rating are the owner's).
+   exists (LR-06). Then install `releases.json` as the RU Account API's
+   `OMOBA_RELEASE_CATALOG`: the portal's download page and the game's update button
+   then link the RU host, with IPFS as the mirror and the status «Открытая бета».
+   `make release-ru-verify-downloads` checks every listed package byte for byte; a
+   test download from a Russian network and `ru_host.py downloads` prove the counts
+   (LR-23). RuStore / VK Play later (store accounts and age rating are the owner's).
 
 iOS is not packaged for RU: it needs its own App Store Connect record.
