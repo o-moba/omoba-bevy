@@ -452,6 +452,10 @@ impl Pool {
         &self.root
     }
 
+    pub(crate) fn set_capacity_for_test(&mut self, capacity: usize) {
+        self.capacity = capacity;
+    }
+
     pub(crate) fn for_test() -> Pool {
         let mut random = [0; 16];
         getrandom::fill(&mut random).unwrap();

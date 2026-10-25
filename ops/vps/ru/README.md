@@ -58,6 +58,7 @@ Everything below runs on this one host; only Caddy listens publicly for HTTP.
 | Account API, user `omoba-ru`, `127.0.0.1:40550` | `/opt/omoba-ru/current/omoba-account-api` | [omoba-account-api-ru.service](omoba-account-api-ru.service) |
 | Portal, user `omoba-portal-ru`, `127.0.0.1:3010` | `/opt/omoba-ru/portal/current/server.js` on `/opt/omoba-ru/node/current/bin/node` | [omoba-portal-ru.service](omoba-portal-ru.service) |
 | Caddy, TCP 443 | `/etc/caddy/Caddyfile` = [Caddyfile.ru](Caddyfile.ru) | `caddy.service` |
+| Per-source UDP limits (nftables table `inet omoba_limits`) | `/opt/omoba-ru/nftables-omoba.conf` = [nftables-omoba.conf](nftables-omoba.conf) | [omoba-limits-ru.service](omoba-limits-ru.service) (oneshot) |
 | Downloads (LR-23): packages, root 0755/0644, and Caddy's log of them | `/opt/omoba-ru/downloads/<tag>/`; `/var/log/caddy/omoba-ru-downloads.log` (caddy, 0640) | `release.py publish --market ru` (rsync); read by `caddy.service` |
 | Env files (root, 0600) | `/opt/omoba-ru/{lobby,account-api,portal}.env` from the `*.env.example` files here | read by systemd |
 | Backups (LR-03), root | [ru_backup.py](ru_backup.py) as `/opt/omoba-ru/backup/ru_backup.py`; settings `/opt/omoba-ru/backup.env` (root 0600, from [backup.env.example](backup.env.example)), keys in `/opt/omoba-ru/backup-keys/` (0700); host copies in `/var/backups/omoba-ru/` (0700) | [omoba-backup-ru.timer](omoba-backup-ru.timer) nightly, [omoba-restore-drill-ru.timer](omoba-restore-drill-ru.timer) monthly, [omoba-backup-check-ru.timer](omoba-backup-check-ru.timer) hourly |
@@ -99,7 +100,7 @@ the kit files it names.
        --node-sha256 <its line in nodejs.org/dist/v22.<x>.<y>/SHASUMS256.txt>
    python3 ops/vps/ru/ru_host.py bootstrap … --check   # then --apply
    ```
-   - Packages from Ubuntu's own mirrors only (`postgresql caddy ufw openssh-server gnupg`);
+   - Packages from Ubuntu's own mirrors only (`postgresql caddy ufw nftables openssh-server gnupg`);
      no third-party apt repository. PostgreSQL must be 16+ with the `und-x-icu`
      collation and listen on loopback only, or bootstrap stops before writing secrets.
    - Node.js ≥ 20.9 for the portal (Next.js 16): the uploaded official tarball
@@ -125,6 +126,10 @@ the kit files it names.
      range read from the lobby unit (`OMOBA_MATCH_FIRST_PORT` + `OMOBA_MATCH_CAPACITY`).
      Port 80 stays closed: Caddy falls back to the TLS-ALPN challenge on 443 for its
      certificates. If the provider has its own firewall, open the same ports there.
+   - Per-source UDP limits ([Admission limits](#admission-limits-lr-16)):
+     [nftables-omoba.conf](nftables-omoba.conf) as `/opt/omoba-ru/nftables-omoba.conf`
+     after `nft -c` accepts it, and [omoba-limits-ru.service](omoba-limits-ru.service),
+     enabled and started. A refused file leaves the loaded limits as they were.
    - The three unit files; `postgresql` and `caddy` enabled; an OMOBA unit is
      enabled once its release exists, so a boot never starts a missing binary.
    - The backup kit: `ru_backup.py`, its three services and timers (the timers enabled
@@ -182,7 +187,8 @@ unit's only writable folder.
 ## Check
 
 - `python3 ops/vps/ru/ru_host.py status`: marker, Ubuntu, packages, PostgreSQL
-  (version, ICU, loopback, roles, schema), Caddy and its Caddyfile, firewall, sshd,
+  (version, ICU, loopback, roles, schema), Caddy and its Caddyfile, firewall, the
+  per-source limits (file, unit, table `inet omoba_limits` loaded), sshd,
   users and folder modes, env files, Node.js, releases, units enabled and running,
   UDP 4000, `127.0.0.1:40550/health/ready`, the portal on `127.0.0.1:3010`, the
   download folder and Caddy's download log (owned by `caddy`; `facts.downloads` lists
@@ -370,6 +376,59 @@ Never restore over the running database as a test; the monthly drill does that s
   and `ship-portal`. Check before announcing it: ratings and match history on the
   portal, sign-in with an existing recovery code, and VK sign-in of an existing linked
   account (it works only with the escrowed `OMOBA_SOCIAL_SECRET`).
+
+## Admission limits (LR-16)
+
+Two layers keep one source (an address, or a household or carrier NAT behind
+one address) from crowding everyone else out. Both count **per source
+address**: many players behind one address share one budget, so the defaults
+leave room for about eight players on one address.
+
+**In the kernel** ([nftables-omoba.conf](nftables-omoba.conf), its own table
+`inet omoba_limits`, loaded by [omoba-limits-ru.service](omoba-limits-ru.service);
+it never flushes ufw's rules). Over-rate datagrams are dropped before the game
+reads them:
+
+| Port | Rate per source address | Burst |
+| --- | --- | --- |
+| UDP 4000 (lobby) | 400 datagrams/s | 800 |
+| UDP arena range (41000–41001) | 1200 datagrams/s | 2400 |
+
+- To change a rate, edit the rule in `nftables-omoba.conf` and run `ru_host.py
+  bootstrap --apply` (it runs `nft -c` first, then restarts the unit).
+- The file's `OMOBA_LOBBY_PORT` and `OMOBA_ARENA_PORTS` must match the lobby unit
+  (`OMOBA_MATCH_FIRST_PORT` … `+ OMOBA_MATCH_CAPACITY - 1`): `ru_host.py` refuses a
+  kit where they differ, so a capacity change edits both files.
+- On the host: `nft list table inet omoba_limits` shows the rules with their drop
+  counters; `systemctl stop omoba-limits-ru` removes the table (emergency only;
+  `status` then reports it).
+
+**In the game** (lobby and match workers). Defaults are the production values; to
+change one, add the line to `/opt/omoba-ru/lobby.env` (the workers inherit it) and
+restart the lobby. A malformed value stops the lobby with a message naming it. The
+lobby logs the values it runs with (`Admission limits: …`).
+
+| Setting | Default | What it limits |
+| --- | --- | --- |
+| `OMOBA_LIMIT_PROBES_PER_IP` | 8 | Transport probes per second from one IP, and, counted separately, compatibility replies |
+| `OMOBA_LIMIT_PROBES_PER_NETWORK` | 32 | The same per IPv4 /24 (IPv6 /48) |
+| `OMOBA_LIMIT_PROBES_GLOBAL` | 64 | The same for everyone together |
+| `OMOBA_LIMIT_PROBES_NEW_RESERVE` | 16 | Part of the global budget only a source's first datagram of the second may use (0 = none) |
+| `OMOBA_LIMIT_ENDPOINTS_PER_IP` | 8 | Return-path endpoints, and career clients, one IP holds at once. An unproven endpoint expires after 5 s and a proven one after 30 s without traffic; an idle career client gives way to a newcomer of its IP after 30 s |
+| `OMOBA_LIMIT_NEW_PROFILES_PER_IP` | 10 | Profiles new device keys may create from one IP in 24 hours; existing keys always sign in |
+| `OMOBA_LIMIT_NEW_PROFILES_TOTAL` | 5000 | The same for everyone together (then «new profiles are paused») |
+| `OMOBA_LIMIT_ARENAS_PER_IP` | 1 | Running or forming arenas one IP holds alone (every human of the match came from it) |
+| `OMOBA_LIMIT_PRACTICE_ABANDONS` | 3 | vs Bots allocations from one IP left unplayed within 10 minutes before a cooldown |
+| `OMOBA_LIMIT_PRACTICE_COOLDOWN_SECS` | 120 | That cooldown |
+| `OMOBA_PROFILE_RETENTION_DAYS` | 30 | The lobby deletes, hourly and 200 at a time, profiles whose only key is older than this, that never played and that nothing else holds (a friend, a portal link, a sign-in, a Supporter grant); 0 = off, otherwise 7–3650 |
+
+- One IP is an IPv4 address or an IPv6 /64. The new-profile counter is durable
+  (PostgreSQL, career schema 4): it stores a salted hash of the address, never the
+  address, and deletes rows after 48 hours.
+- Refusals reach the player in their language: the new-profile limit at sign-in,
+  `arena_limit` and `practice_cooldown` on the searching screen.
+- The journal shows `PROFILE_RETENTION pruned=N …` when the retention job deleted
+  profiles.
 
 ## Rollback
 

@@ -490,7 +490,21 @@ pub struct CareerView {
     pub last_result: Option<MatchResult>,
     pub queue: QueueView,
     pub error: Option<String>,
+    /// A stable code for `error` that the client shows in its own words
+    /// ([`error_code`]); `error` stays the English fallback. Additive: older
+    /// peers ignore it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error_code: Option<String>,
     pub loading: bool,
+}
+
+/// Stable codes of [`CareerView::error_code`].
+pub mod error_code {
+    /// A new device key from a network that created today's share of new
+    /// profiles (LR-16).
+    pub const NEW_PROFILE_LIMIT: &str = "new_profile_limit";
+    /// A new device key while new profiles are paused for today (LR-16).
+    pub const NEW_PROFILES_PAUSED: &str = "new_profiles_paused";
 }
 
 #[cfg(test)]

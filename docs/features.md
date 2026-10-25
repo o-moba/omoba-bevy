@@ -1109,6 +1109,17 @@ follows.
 - The download path and the status label live in the RU profile of `scripts/markets.py` (`downloads_path`, `release_label`, `region`); the global market keeps its IPFS links and the `playtest` label.
 - Code: `scripts/release.py` (`publish_to_host`, `release_catalog`, `downloads_report`), `scripts/markets.py`, `ops/vps/ru/Caddyfile.ru`, `ops/vps/ru/ru_downloads.py`, `ops/vps/ru/ru_host.py` (`downloads`, the download folder and log). See [RU downloads](../ops/vps/ru/README.md#downloads) and [the session note](progress/2026-10-24-lr-23.md).
 
+## Admission and abuse limits (LR-16, unreleased)
+
+- One source (an address, or a household or carrier NAT behind one) can no longer lock everyone else out of login or hold the arenas: transport probes and compatibility replies are budgeted per IP and per /24 before the global budget, which keeps a reserve for new sources; one IP holds at most 8 endpoints and 8 career clients.
+- New device keys create profiles only within 10 per IP and 5000 in all per 24 hours, counted durably in PostgreSQL (career schema 4, a salted hash of the address, never the address); existing keys always sign in. The refusal («Too many new profiles were created from your network today…») is shown in the player's language, and the client stops retrying it.
+- One IP holds at most one arena alone (every human from it): a second vs Bots, or a bot-filled Casual match, from that IP gets «A match from your network is already running…». Three vs Bots allocations left unplayed within 10 minutes give that IP a 2-minute vs Bots cooldown.
+- The lobby deletes profiles that never played and that nothing else holds (friend, portal link, sign-in, Supporter grant) 30 days after their key was created, 200 per hour, logging `PROFILE_RETENTION pruned=N`.
+- A sign-in during a reconnect storm or a database restart waits instead of failing: one Login per endpoint at a time, a full worker queue is silent, and an unconnected database is waited for up to 10 s. A harness test reconnects 300 clients after a lobby restart without an error.
+- The RU host ships kernel per-source rate limits for UDP 4000 and the arena range (`ops/vps/ru/nftables-omoba.conf`, unit `omoba-limits-ru`), installed and checked by `ru_host.py`. Every limit is a setting (`OMOBA_LIMIT_*`, `OMOBA_PROFILE_RETENTION_DAYS`) documented in [ops/vps/ru/README.md](../ops/vps/ru/README.md#admission-limits-lr-16).
+- Copy in en, ru and zh-Hans (`client/i18n/*/admission.json`, `queue.failed.arena_limit`, `queue.failed.practice_cooldown`).
+- Code: `server/src/admission.rs`, `server/src/public_transport.rs`, `server/src/career_backend.rs`, `server/src/match_service.rs`, `career-store/migrations/postgres/004_admission_limits.sql`, `career-store/src/career_store.rs` (`authenticate_from`, `prune_unplayed_profiles`), `harness/tests/admission.rs`. See [the session note](progress/2026-10-24-lr-16.md).
+
 ## Legal acceptance, About and age sign in the game (LR-06, unreleased)
 
 - An RU build opens with a card before anything else: «Перед игрой», the age sign `12+`, links to the User Agreement and the Privacy Policy on `omoba.ru` (opened in the browser), the document version (`0-draft`), a language switch and «Я принимаю…». **Continue** stays disabled until the switch is on.

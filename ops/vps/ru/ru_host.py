@@ -152,7 +152,17 @@ ICU_COLLATION = "und-x-icu"
 MIN_POSTGRES = 16
 MIN_UBUNTU = (24, 4)
 MIN_NODE = (20, 9)        # Next.js 16
-PACKAGES = ("postgresql", "caddy", "ufw", "openssh-server", "gnupg")
+PACKAGES = ("postgresql", "caddy", "ufw", "nftables", "openssh-server", "gnupg")
+# Per-source UDP limits (LR-16): ops/vps/ru/nftables-omoba.conf, loaded by its own
+# oneshot unit. It replaces only its own table, never ufw's.
+NFT_RULES = OPT + "/nftables-omoba.conf"
+NFT_TABLE = ("inet", "omoba_limits")
+LIMITS_UNIT_FILE = "omoba-limits-ru.service"
+LIMITS_UNIT = LIMITS_UNIT_FILE[:-len(".service")]
+LIMITS_UNIT_RULES = {"Service.Type": "oneshot", "Service.RemainAfterExit": "yes",
+                     "Service.ExecStart": f"/usr/sbin/nft -f {NFT_RULES}",
+                     "Service.ExecStop": f"/usr/sbin/nft delete table {' '.join(NFT_TABLE)}",
+                     "Install.WantedBy": "multi-user.target"}
 # The RU public names and DNS zone are written only in scripts/markets.py (MARKETS["ru"]):
 # the Mac half reads them there (ru_names) and hands them to the host half in every
 # payload, so the DNS, Caddyfile and unit checks follow a rename of that one file.
@@ -272,7 +282,8 @@ def is_foreign_name(value: str, own_zones=()) -> bool:
 
 
 ALLOWED_WRITES = (OPT, STATE, BACKUPS, CADDY_LOGS, CADDYFILE, CADDYFILE + ".orig", CADDYFILE + ".omoba-next",
-                  SSHD_DROPIN, *(f"{UNIT_DIR}/{name}" for name in (*UNIT_FILES.values(), *BACKUP_UNITS)))
+                  SSHD_DROPIN, *(f"{UNIT_DIR}/{name}" for name in (*UNIT_FILES.values(), *BACKUP_UNITS)),
+                  f"{UNIT_DIR}/{LIMITS_UNIT_FILE}")
 
 
 def assert_ru_constants() -> None:
@@ -622,8 +633,14 @@ def env_problems(kind: str, text: str, example: str, expected_ip: str | None = N
                      for key in values if key in unit_env]
     if any(token in (text or "").lower() for token in FORBIDDEN_TOKENS):
         problems.append("mentions hosted Supabase or the production project")
-    warnings += [f"{key} is not in {ENV_EXAMPLES[kind]}" for key in values if key not in wanted]
+    warnings += [f"{key} is not in {ENV_EXAMPLES[kind]}" for key in values
+                 if key not in wanted and not optional_setting(kind, key)]
     return problems, warnings
+
+
+def optional_setting(kind: str, key: str) -> bool:
+    """A documented setting an env file may add (README.md, "Admission limits", LR-16)."""
+    return kind == "lobby" and (key.startswith("OMOBA_LIMIT_") or key == "OMOBA_PROFILE_RETENTION_DAYS")
 
 
 def placeholder_fill(values: dict, expected_ip: str | None, vkid: str | None) -> dict:
@@ -718,6 +735,34 @@ def firewall_problems(status: dict, rules) -> list[str]:
     for to in sorted({rule["to"] for rule in open_rules if rule["to"] not in expected}):
         problems.append(f"ufw opens {to}, which the RU host does not use: ufw delete allow {to}")
     return problems
+
+
+def nftables_problems(text: str, lobby_unit: str) -> list[str]:
+    """Every reason this is not the RU limits file for the lobby unit's ports; empty means it is."""
+    problems = []
+    first, last = arena_ports(lobby_unit)
+    arenas = str(first) if first == last else f"{first}-{last}"
+    defines = dict(re.findall(r"(?m)^define\s+(\w+)\s*=\s*(\S+)\s*$", text or ""))
+    if defines.get("OMOBA_LOBBY_PORT") != str(LOBBY_PORT):
+        problems.append(f"OMOBA_LOBBY_PORT is {defines.get('OMOBA_LOBBY_PORT')!r}, not {LOBBY_PORT}")
+    if defines.get("OMOBA_ARENA_PORTS") != arenas:
+        problems.append(f"OMOBA_ARENA_PORTS is {defines.get('OMOBA_ARENA_PORTS')!r}, not the lobby unit's {arenas}")
+    code = "\n".join(line.split("#", 1)[0] for line in (text or "").splitlines())
+    if re.search(r"\bflush\s+ruleset\b", code) or re.search(r"\bflush\s+table\s+(?!inet\s+omoba_limits\b)", code):
+        problems.append("it flushes rules it does not own (ufw's included)")
+    tables = set(re.findall(r"(?m)^\s*(?:delete\s+)?table\s+(\w+\s+\w+)", code))
+    if tables != {" ".join(NFT_TABLE)}:
+        problems.append(f"it must define only table {' '.join(NFT_TABLE)}, found {sorted(tables)}")
+    for port in ("$OMOBA_LOBBY_PORT", "$OMOBA_ARENA_PORTS"):
+        if not re.search(rf"udp dport {re.escape(port)} update @\w+ \{{ ip6? saddr limit rate over \d+/second", code):
+            problems.append(f"no per-source limit for udp dport {port}")
+    return [f"nftables-omoba.conf: {problem}" for problem in problems]
+
+
+def limits_unit_problems(text: str) -> list[str]:
+    directives = parse_unit(text or "")[0]
+    return [f"{LIMITS_UNIT_FILE}: {key.split('.', 1)[1]} must be {expected!r}"
+            for key, expected in LIMITS_UNIT_RULES.items() if directives.get(key) != [expected]]
 
 
 def sshd_problems(effective: str) -> list[str]:
@@ -1231,6 +1276,20 @@ class Host:
             raise Refused("; ".join(problems))
         return examples
 
+    def payload_limits(self, payload: dict) -> tuple[str, str]:
+        """The per-source limits file and its unit from the Mac half, checked (LR-16)."""
+        rules, unit = payload.get("nftables"), payload.get("limits_unit")
+        if not rules or not unit:
+            raise Refused("payload lacks nftables-omoba.conf or omoba-limits-ru.service")
+        problems = nftables_problems(rules, (payload.get("units") or {}).get("lobby", ""))
+        problems += limits_unit_problems(unit)
+        if problems:
+            raise Refused("; ".join(problems))
+        return rules, unit
+
+    def limits_loaded(self) -> bool:
+        return self.run(["nft", "list", "table", *NFT_TABLE], check=False).returncode == 0
+
     def ssh_effective(self) -> str:
         return self.out("sshd", "-T")
 
@@ -1414,6 +1473,19 @@ class Host:
         if self.read(SSHD_DROPIN) != SSHD_TEXT:
             problems.append(f"{SSHD_DROPIN} is missing or changed (bootstrap writes it)")
         problems += sshd_problems(effective)
+        # per-source UDP limits (LR-16)
+        try:
+            rules, limits_unit = self.payload_limits(payload)
+            if self.read(NFT_RULES) != rules:
+                problems.append(f"{NFT_RULES} is not ops/vps/ru/nftables-omoba.conf (bootstrap installs it)")
+            if self.read(f"{UNIT_DIR}/{LIMITS_UNIT_FILE}") != limits_unit:
+                problems.append(f"{UNIT_DIR}/{LIMITS_UNIT_FILE} differs from ops/vps/ru/{LIMITS_UNIT_FILE}")
+            if not self.enabled(LIMITS_UNIT) or not self.active(LIMITS_UNIT):
+                problems.append(f"{LIMITS_UNIT} must be enabled and running (per-source UDP limits)")
+            if "nftables" not in missing and not self.limits_loaded():
+                problems.append(f"nftables table {' '.join(NFT_TABLE)} is not loaded")
+        except Refused as refusal:
+            problems.append(refusal.message)
         # users, folders, env files
         for user, home in USERS.items():
             entry = self.passwd(user)
@@ -1547,6 +1619,11 @@ class Host:
             would.append(f"write {SSHD_DROPIN} (key-only SSH), sshd -t, reload ssh")
         rules = firewall_rules(units["lobby"], ssh_ports(self.ssh_effective()))
         would.append("ufw: deny incoming; allow " + ", ".join(spec for _, spec, _ in rules) + "; enable")
+        nftables, limits_unit = self.payload_limits(payload)
+        if (self.read(NFT_RULES) != nftables or self.read(f"{UNIT_DIR}/{LIMITS_UNIT_FILE}") != limits_unit
+                or not self.enabled(LIMITS_UNIT) or not self.active(LIMITS_UNIT)):
+            would.append(f"install nftables-omoba.conf as {NFT_RULES} (nft -c first) and {LIMITS_UNIT_FILE}; "
+                         f"enable + start {LIMITS_UNIT} (per-source UDP limits)")
         for kind in KINDS:
             if self.read(unit_path(kind)) != units.get(kind):
                 would.append(f"install {unit_path(kind)}")
@@ -1572,6 +1649,7 @@ class Host:
         backup = self.payload_backup_kit(payload)
         if set(units) != set(KINDS) or "caddyfile" not in payload:
             raise Refused("payload lacks the units or Caddyfile.ru")
+        nftables, limits_unit = self.payload_limits(payload)
         self.mutating = True
         done = self.write_marker(payload["expected_ip"])
         done += self.install_packages()
@@ -1587,6 +1665,7 @@ class Host:
         done += self.ensure_caddy(payload["caddyfile"])
         done += self.ensure_ssh()
         done += self.ensure_firewall(units["lobby"])
+        done += self.ensure_limits(nftables, limits_unit)
         done += self.ensure_units(units)
         done += self.ensure_backup_kit(backup)
         self._record({"mode": "bootstrap", "done": done})
@@ -1805,6 +1884,37 @@ class Host:
         if problems:
             raise SystemExit("firewall: " + "; ".join(problems))
         return [" ".join(command) for command in commands]
+
+    def ensure_limits(self, nftables: str, limits_unit: str) -> list:
+        """Per-source UDP limits (LR-16): the checked rules file and its oneshot unit, enabled and
+        loaded. `nft -c` validates a new file first; a refused file leaves the old one in place."""
+        done, changed = [], False
+        if self.read(NFT_RULES) != nftables:
+            self.write_guard(NFT_RULES)
+            candidate = NFT_RULES + ".next"
+            self._write(candidate, nftables, 0o644)
+            result = self.run(["nft", "-c", "-f", self.p(candidate)], check=False)
+            if result.returncode:
+                os.unlink(self.p(candidate))
+                raise SystemExit(f"nft -c refused nftables-omoba.conf: {(result.stderr or result.stdout).strip()[-400:]}")
+            os.replace(self.p(candidate), self.p(NFT_RULES))
+            done.append(f"install {NFT_RULES} (nftables-omoba.conf)")
+            changed = True
+        path = f"{UNIT_DIR}/{LIMITS_UNIT_FILE}"
+        if self.read(path) != limits_unit:
+            self._write(path, limits_unit, 0o644)
+            self.command("systemctl", "daemon-reload")
+            done.append(f"install {path}")
+            changed = True
+        if not self.enabled(LIMITS_UNIT):
+            self.command("systemctl", "enable", LIMITS_UNIT)
+            done.append(f"systemctl enable {LIMITS_UNIT}")
+        if changed or not self.active(LIMITS_UNIT):
+            self.command("systemctl", "restart", LIMITS_UNIT)
+            done.append(f"systemctl restart {LIMITS_UNIT}")
+        if not self.limits_loaded():
+            raise SystemExit(f"nftables table {' '.join(NFT_TABLE)} is not loaded after starting {LIMITS_UNIT}")
+        return done
 
     def ensure_units(self, units: dict) -> list:
         """Install the unit files; enable postgresql, caddy and each RU unit whose release is
@@ -2463,7 +2573,10 @@ def kit(names: dict | None = None) -> dict:
     units = {kind: (RU_DIR / name).read_text() for kind, name in UNIT_FILES.items()}
     examples = {kind: (RU_DIR / name).read_text() for kind, name in ENV_EXAMPLES.items()}
     caddyfile = (RU_DIR / "Caddyfile.ru").read_text()
+    nftables = (RU_DIR / "nftables-omoba.conf").read_text()
+    limits_unit = (RU_DIR / LIMITS_UNIT_FILE).read_text()
     problems = [problem for kind, text in units.items() for problem in unit_problems(kind, text, own_zones)]
+    problems += nftables_problems(nftables, units["lobby"]) + limits_unit_problems(limits_unit)
     problems += [problem for kind, text in examples.items() for problem in example_problems(kind, text)]
     for key in ("account_api", "portal"):
         if not re.search(rf"(?m)^{re.escape(names[key])}\s*\{{", caddyfile):
@@ -2488,6 +2601,7 @@ def kit(names: dict | None = None) -> dict:
     if problems:
         raise Refused("the RU host kit is inconsistent: " + "; ".join(problems))
     return {"units": units, "examples": examples, "caddyfile": caddyfile, "names": names,
+            "nftables": nftables, "limits_unit": limits_unit,
             "backup_kit_z": encode_backup_kit(backup)}
 
 
@@ -2573,7 +2687,8 @@ def resolve_target(args, need_ip: bool, country: bool = False, config_reader=Non
 def base_payload(target: dict, files: dict) -> dict:
     return {"expected_ip": target["expected_ip"], "dev_ip": target["dev_ip"], "behind_nat": target["behind_nat"],
             "units": files["units"], "examples": files["examples"], "caddyfile": files["caddyfile"],
-            "names": files["names"], "backup_kit_z": files["backup_kit_z"]}
+            "names": files["names"], "nftables": files["nftables"], "limits_unit": files["limits_unit"],
+            "backup_kit_z": files["backup_kit_z"]}
 
 
 def ssh_remote(alias: str, mode: str, payload: dict | None = None, check: bool = True):
@@ -2701,7 +2816,7 @@ def command_bootstrap(args) -> int:
         f"env files {', '.join(ENV_PATHS.values())} (root 0600; secrets generated on the host, never replaced)",
         f"roles {', '.join(DB_ROLES)}, database {DB_NAME}",
         f"Caddyfile.ru -> {CADDYFILE}; {SSHD_DROPIN} (key-only SSH); ufw: SSH, {HTTPS_PORT}/tcp, "
-        f"{LOBBY_PORT}/udp, the arena range",
+        f"{LOBBY_PORT}/udp, the arena range; per-source UDP limits ({NFT_RULES}, {LIMITS_UNIT_FILE})",
         "units installed; postgresql, caddy and units with a release enabled; full status at the end"]}
 
     def apply() -> int:

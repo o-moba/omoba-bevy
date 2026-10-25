@@ -336,7 +336,7 @@ sequenceDiagram
 **Decision.**
 - Every new transport sends a small JSON preflight before `Hello` (offline practice has none). Lobby-to-worker redirects, retries and reconnects each run a fresh check.
 - The contract is owned by `shared/src/compatibility.rs` (`ReleaseContract::current`) and has these fields: `handshake` (`HANDSHAKE_VERSION`, 1), `release` (`CARGO_PKG_VERSION`, informational), `protocol` (`PROTOCOL_VERSION`), `catalog` (`loadout::CATALOG_REVISION`), `geometry` (`map::GEOMETRY_ID`) and `gameplay` (`GAMEPLAY_REVISION`, now `"dawnweaver-2026-10-11-reference"`).
-- Probes and reports are at most 2 KiB (`MAX_PROBE_BYTES`). Each attempt carries a 16-byte nonce. All probe sources share a budget of 64 replies per second per process (`docs/release-compatibility.md`, "Bounds and trust").
+- Probes and reports are at most 2 KiB (`MAX_PROBE_BYTES`). Each attempt carries a 16-byte nonce. Replies are budgeted per second per process: 8 per source IP and 32 per network first, then 64 in all with 16 kept for new sources (LR-16; `docs/release-compatibility.md`, "Bounds and trust").
 - A confirmed mismatch names its category and stops automatic reconnect. A four-second timeout reports verification as unavailable, not as a mismatch.
 - The release builder writes `compatibility.json` next to the packages. Distribution waits until the live lobby and a staged worker verify that manifest.
 
@@ -379,7 +379,7 @@ sequenceDiagram
 - Public roles admit only signed commands (`omoba.gameplay.command.v1`).
 - Reward policy `public-casual-v1`: approved bot-filled games give 50 XP for a win and 25 XP for a loss and do not change rating. Rating comes only from eligible bot-free PvP, which gives 150/100 XP. Newcomers (fewer than 20 rated matches) are matched separately, and the compatible rating spread is bounded at 300 points.
 - Since LR-08 the player chooses the queue, and the queue decides rating, not the head count: only **Ranked** (ten humans of one rated cohort, never bot-filled) can be rated. **Casual PvP** (every cohort together, bots after 30 s, possibly ten humans) and **vs Bots** settle as `public-casual-v1` with reasons `casual_queue` and `allocated_bots`. The lobby and the store share one cohort policy (`career-store/src/matchmaking.rs`), so the lobby never forms a rated roster the store rejects.
-- Public admission limits per process: at most 512 endpoint records, 64 probes per second, 120 packets per second per endpoint; datagrams capped at 12 KiB and signed command payloads at 8 KiB (`docs/public-mvp.md`). These bound application work; they are not a measured DDoS capacity.
+- Public admission limits per process: at most 512 endpoint records (8 per source IP), 64 probes per second with per-IP and per-network budgets checked first and a reserve for new sources, 120 packets per second per endpoint; datagrams capped at 12 KiB and signed command payloads at 8 KiB (`docs/public-mvp.md`). Since LR-16 new profiles, arenas held by one IP and abandoned vs Bots allocations are limited per source too ([ops/vps/ru/README.md › Admission limits](../../ops/vps/ru/README.md#admission-limits-lr-16)). These bound application work; they are not a measured DDoS capacity.
 
 **Consequences.**
 - There is one region and one coordinator, with no distributed lobby scheduling. Ranked can wait when the compatible count is too small; after 5 minutes it offers to also search Casual PvP (owner default O-1, [match-progression.md](../match-progression.md#low-population-ranked-policy)).

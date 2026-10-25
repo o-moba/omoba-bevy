@@ -1203,6 +1203,39 @@ fn result_title(result: &MatchResult, career: &CareerClient) -> &'static str {
         },
     }
 }
+/// The server's refusal in the player's language: its own copy for a code
+/// the client knows (`admission.error.<code>`, LR-16), otherwise the
+/// server's text.
+pub(crate) fn server_error_text(view: &CareerView) -> Option<String> {
+    let error = view.error.as_ref()?;
+    Some(
+        view.error_code
+            .as_deref()
+            .and_then(admission_error)
+            .map_or_else(|| error.clone(), str::to_owned),
+    )
+}
+
+fn admission_error(code: &str) -> Option<&'static str> {
+    let known = !code.is_empty()
+        && code
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte == b'_');
+    known
+        .then(|| lookup(&format!("admission.error.{code}")))
+        .flatten()
+}
+
+/// A sign-in refusal that retrying on this connection cannot change: no new
+/// profile for this device today (LR-16).
+pub(crate) fn refuses_sign_in(code: &str) -> bool {
+    use shared::career::error_code;
+    matches!(
+        code,
+        error_code::NEW_PROFILE_LIMIT | error_code::NEW_PROFILES_PAUSED
+    )
+}
+
 pub(crate) fn queue_text(queue: &QueueView) -> Option<String> {
     match queue {
         QueueView::Waiting {
@@ -2622,8 +2655,10 @@ fn render(
                             Name::new("CareerBody"),
                         ))
                         .with_children(|body| {
-                            if let Some(error) =
-                                career.request_error.as_ref().or(career.view.error.as_ref())
+                            if let Some(error) = career
+                                .request_error
+                                .clone()
+                                .or_else(|| server_error_text(&career.view))
                             {
                                 label(body, error, 14.0, ui::GOLD, "CareerServerError");
                             }
@@ -2705,6 +2740,82 @@ mod tests {
             (IntoSystem::system_type_id(&web::poll), "pairing poll"),
         ] {
             assert_carries(&app, Update, system, gate(), what);
+        }
+    }
+
+    /// LR-16: a refused new profile and the lobby's per-source refusals read
+    /// in the player's language; an unknown code keeps the server's text.
+    #[test]
+    fn admission_refusals_follow_the_language() {
+        if crate::i18n::testing::isolated("career::tests::admission_refusals_follow_the_language") {
+            return;
+        }
+        use crate::i18n::{I18nPlugin, Locale, LocaleId};
+        use shared::career::error_code;
+        use shared::match_service::MatchServiceView;
+        let refused = CareerView {
+            error: Some("server text".into()),
+            error_code: Some(error_code::NEW_PROFILE_LIMIT.into()),
+            ..default()
+        };
+        let paused = CareerView {
+            error_code: Some(error_code::NEW_PROFILES_PAUSED.into()),
+            ..refused.clone()
+        };
+        let unknown = CareerView {
+            error: Some("server text".into()),
+            error_code: Some("not_a_known_code".into()),
+            ..default()
+        };
+        let failed = |code: &str| {
+            crate::match_service::status_text(&MatchServiceView::Failed { code: code.into() })
+        };
+        assert!(refuses_sign_in(error_code::NEW_PROFILE_LIMIT));
+        assert!(refuses_sign_in(error_code::NEW_PROFILES_PAUSED));
+        assert!(!refuses_sign_in("queue_full"));
+        assert_eq!(server_error_text(&unknown).as_deref(), Some("server text"));
+        assert_eq!(server_error_text(&CareerView::default()), None);
+        let mut app = App::new();
+        app.add_plugins(I18nPlugin::default());
+        for (locale, limit, pause, arena, cooldown) in [
+            (
+                "en",
+                "Too many new profiles",
+                "New profiles are paused",
+                "A match from your network",
+                "Several vs Bots matches",
+            ),
+            (
+                "ru",
+                "Сегодня из вашей сети",
+                "Создание новых профилей",
+                "Из вашей сети уже идёт матч",
+                "Несколько матчей против ботов",
+            ),
+            (
+                "zh-Hans",
+                "你的网络在一天内",
+                "新资料的创建已暂停",
+                "你的网络已有一场对局",
+                "多场人机对战",
+            ),
+        ] {
+            app.world_mut()
+                .resource_mut::<Locale>()
+                .set(LocaleId::parse(locale).unwrap());
+            assert!(
+                server_error_text(&refused).unwrap().starts_with(limit),
+                "{locale}"
+            );
+            assert!(
+                server_error_text(&paused).unwrap().starts_with(pause),
+                "{locale}"
+            );
+            assert!(failed("arena_limit").starts_with(arena), "{locale}");
+            assert!(
+                failed("practice_cooldown").starts_with(cooldown),
+                "{locale}"
+            );
         }
     }
 

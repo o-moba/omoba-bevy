@@ -13,7 +13,7 @@ use shared::career::QueueView;
 
 use super::AppScreen;
 use super::widgets;
-use crate::career::CareerClient;
+use crate::career::{CareerClient, server_error_text};
 use crate::i18n::{Localized, data, tr, trf};
 use crate::match_service::{CasualOffer, MatchServiceClient};
 use crate::net::{ClientSession, GameState, GameStateSnapshot, SessionUiCommand};
@@ -270,13 +270,16 @@ fn refresh_status(
     }
     let text = if session.state() != crate::net::ClientConnectionState::Connected {
         super::home::connection_line(&session).0
-    } else if let Some(error) = career
-        .view
-        .error
-        .as_ref()
-        .filter(|_| career.view.match_service.is_some())
-    {
-        error.clone()
+    } else if let Some(error) = server_error_text(&career.view).filter(|_| {
+        career.view.match_service.is_some()
+            || career
+                .view
+                .error_code
+                .as_deref()
+                .is_some_and(crate::career::refuses_sign_in)
+    }) {
+        // A refused new profile (LR-16) can never reach the queue: say why.
+        error
     } else if let Some(view) = &career.view.match_service {
         if flow
             .as_deref()
