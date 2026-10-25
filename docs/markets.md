@@ -158,10 +158,13 @@ The steps that need accounts, money or legal decisions are the owner's.
    `ops/vps/ru/README.md#topology`). Backups: the owner provides storage in Russia,
    makes the backup key and names the escrow holder; `bootstrap` installs the nightly
    backup, the monthly restore drill and their check, and `ship` backs up before every
-   migration (`ops/vps/ru/README.md#backups-escrow-and-restore-drill`).
+   migration (`ops/vps/ru/README.md#backups-escrow-and-restore-drill`). Alerts: `bootstrap`
+   installs the host monitoring and the journal limits; the owner puts the Telegram bot in
+   `/opt/omoba-ru/alerts.env` and runs the external probe on another machine
+   (`ops/vps/ru/README.md#monitoring-and-alerts`, `ops/probe/README.md`).
 6. **Check.** `ru_host.py status` (the whole host, read-only) and, on a new host,
-   `ru_host.py reboot-check --apply`; `make release-ru-preflight` (DNS,
-   `/health/ready`, portal, and the portal ↔ Account API path: `/api/me` 401 and
+   `ru_host.py reboot-check --apply`; `make release-ru-preflight` (DNS, the lobby's UDP
+   compatibility check, `/health/ready`, portal, and the portal ↔ Account API path: `/api/me` 401 and
    `/api/releases` 200 through the portal, a public `/v1/me` refused with 403), then
    one real round: install the RU package, play a bot match, Profile →
    «Войти через VK ID», link, sign in on the portal, sign in on a second device.

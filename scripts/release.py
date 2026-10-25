@@ -52,7 +52,7 @@ ecosystem, no purchases, Russian by default, VK ID sign-in on the RU portal);
 `--feature ekza=on` flips one feature for a test build without a new market:
 
     python3 scripts/release.py markets                      # presets, servers, platforms
-    python3 scripts/release.py preflight --market ru        # are the RU servers up?
+    python3 scripts/release.py preflight --market ru        # are the RU servers up? (DNS, UDP, HTTPS)
     python3 scripts/release.py build all --market ru        # Omoba-<v>-ru-* in dist/v<v>-ru/
     python3 scripts/release.py build macos --market ru --server 127.0.0.1:4000 \
         --account-api http://127.0.0.1:40550 --portal http://127.0.0.1:3010   # local RU stack
@@ -109,6 +109,7 @@ from contours import (ACCOUNT_API_ENV, PORTAL_ORIGIN_ENV, DEV_ACCOUNT_API, DEV_P
                       DEV_PASSPORT, DEV_REGISTRY, MOBILE, PASSPORT_DEFAULT_ENV, REGISTRY_DEFAULT_ENV,
                       SERVER_DEFAULT_ENV)
 from ios_release_guard import require_production_source
+import market_probe  # noqa: E402
 import markets as market_presets  # noqa: E402
 from markets import FEATURE_ENVS, MARKET_ENV, MARKETS  # noqa: E402
 CLIENT_DEFAULT_ENVS = (SERVER_DEFAULT_ENV, REGISTRY_DEFAULT_ENV, PASSPORT_DEFAULT_ENV, CONFIG_SUFFIX_ENV)
@@ -1479,9 +1480,11 @@ PORTAL_ROUTE_PROBLEMS = {
 }
 
 
-def preflight_report(market: str, resolve=None, fetch=None) -> dict:
-    """Whether a market's lobby name resolves, its Account API / portal answer over HTTPS,
-    and the portal reaches the Account API while the public API name refuses portal routes."""
+def preflight_report(market: str, resolve=None, fetch=None, udp=None, contract: dict | None = None) -> dict:
+    """Whether a market's lobby name resolves and answers the UDP compatibility check (LR-17;
+    with `contract`, compatibly with that release), its Account API / portal answer over
+    HTTPS, and the portal reaches the Account API while the public API name refuses portal
+    routes."""
     import socket
     import urllib.request
     preset = market_presets.market(market)
@@ -1500,6 +1503,10 @@ def preflight_report(market: str, resolve=None, fetch=None) -> dict:
             checks["lobby_dns"] = {"host": host, "ok": True, "addresses": resolve(host)}
         except OSError as error:
             checks["lobby_dns"] = {"host": host, "ok": False, "error": type(error).__name__}
+        # The pre-game exchange every client sends first (scripts/market_probe.py, which the
+        # external probe of ops/probe runs every minute).
+        checks["lobby_udp"] = market_probe.lobby_check(preset.lobby, addresses=checks["lobby_dns"].get("addresses", []),
+                                                       udp=udp, expected=contract)
     for name, url in (("account_api", preset.account_api and preset.account_api + "/health/ready"),
                       ("portal", preset.portal and preset.portal + "/")):
         if not url:
@@ -1529,8 +1536,19 @@ def preflight_report(market: str, resolve=None, fetch=None) -> dict:
             "checks": checks}
 
 
+def read_contract(path: Path) -> dict:
+    """A release's compatibility.json (write_compatibility_manifest)."""
+    try:
+        contract = json.loads(Path(path).read_text())
+    except (OSError, ValueError) as error:
+        raise SystemExit(f"--contract {path}: {error}") from None
+    if not market_probe.valid_contract(contract):
+        raise SystemExit(f"--contract {path} is not a release compatibility contract")
+    return {key: contract[key] for key in market_probe.CONTRACT_KEYS}
+
+
 def command_preflight(args) -> int:
-    report = preflight_report(args.market)
+    report = preflight_report(args.market, contract=read_contract(args.contract) if args.contract else None)
     print(json.dumps(report, indent=2))
     return 0 if report["ready"] else 1
 
@@ -1806,9 +1824,11 @@ def main(argv=None) -> int:
                    "-<market> package names (scripts/markets.py)")
     sub.add_parser("check", help="what this host can build")
     sub.add_parser("markets", help="print every market's features, servers and platforms")
-    preflight = sub.add_parser("preflight", help="check that a market's servers answer (DNS, HTTPS health, "
-                                                 "portal to Account API)")
+    preflight = sub.add_parser("preflight", help="check that a market's servers answer (DNS, the lobby's UDP "
+                                                 "compatibility check, HTTPS health, portal to Account API)")
     preflight.add_argument("--market", choices=tuple(MARKETS), default="ru")
+    preflight.add_argument("--contract", type=Path, help="a release's compatibility.json: the lobby must answer "
+                                                         "compatibly with it (dist/v<v>-<market>/compatibility.json)")
     catalog = sub.add_parser("catalog", help="write the Account API download catalog from publish receipts")
     catalog.add_argument("--market", choices=tuple(MARKETS), default="ru")
     catalog.add_argument("--out", type=Path)

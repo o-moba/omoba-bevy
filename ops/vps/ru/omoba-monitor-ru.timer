@@ -1,0 +1,11 @@
+# Every 5 minutes, and 3 minutes after a boot. LR-17.
+[Unit]
+Description=OMOBA RU host check every 5 minutes
+
+[Timer]
+OnCalendar=*-*-* *:00/5:00
+OnBootSec=3min
+AccuracySec=15s
+
+[Install]
+WantedBy=timers.target

@@ -25,6 +25,8 @@ contacted; nothing on the host changes without --apply:
     # 4. backups (LR-03): the owner fills /opt/omoba-ru/backup.env and the keys, then the
     #    secrets go to the escrow holder, encrypted to the holder's public key
     python3 ops/vps/ru/ru_host.py escrow --recipient-file holder-public.asc --out omoba-ru-secrets.asc
+    #    monitoring (LR-17) is installed by bootstrap: the owner adds the Telegram bot to
+    #    /opt/omoba-ru/alerts.env; the external probe runs elsewhere (ops/probe/README.md)
     # 5. everything at once, read-only; then a reboot that must bring it all back
     python3 ops/vps/ru/ru_host.py status
     python3 ops/vps/ru/ru_host.py reboot-check --apply
@@ -44,7 +46,8 @@ on anything but Ubuntu 24.04+ x86-64, or where $RU_IP is not a local address
 (--behind-nat accepts provider NAT). Bootstrap writes /opt/omoba-ru/host.json; every
 later run needs it to name market ru and $RU_IP. It writes only below /opt/omoba-ru,
 /var/lib/omoba-ru, /var/backups/omoba-ru, /var/log/caddy (the download log), its own unit
-files, /etc/caddy/Caddyfile and /etc/ssh/sshd_config.d/00-omoba-ru.conf, never prints or
+files, /etc/caddy/Caddyfile, /etc/ssh/sshd_config.d/00-omoba-ru.conf and the journal limits
+/etc/systemd/journald.conf.d/50-omoba-ru.conf (LR-17), never prints or
 passes a secret in argv, never overwrites a generated secret, never interrupts a running
 match, never migrates without the encrypted off-host backup of ru_backup.py (LR-03) and
 rolls a failed ship back to the previous release.
@@ -117,6 +120,22 @@ BACKUP_UNITS = ("omoba-backup-ru.service", "omoba-backup-ru.timer", "omoba-resto
 BACKUP_TIMERS = tuple(name for name in BACKUP_UNITS if name.endswith(".timer"))
 BACKUP_COMMANDS = {"omoba-backup-ru.service": "backup --reason nightly", "omoba-restore-drill-ru.service": "drill",
                    "omoba-backup-check-ru.service": "check --alert"}
+# Monitoring and alerts (LR-17): ru_monitor.py, the OnFailure= alert every RU unit names, the
+# 5-minute host check with its timer, alerts.env (the host's one Telegram bot and the alert
+# thresholds) and the journal limits.
+MONITOR_TOOL_DIR = OPT + "/monitor"
+MONITOR_SCRIPT = MONITOR_TOOL_DIR + "/ru_monitor.py"
+ALERTS_ENV = OPT + "/alerts.env"
+ALERTS_ENV_EXAMPLE = "alerts.env.example"
+ALERT_UNIT = "omoba-alert-ru@.service"
+ON_FAILURE = "omoba-alert-ru@%n.service"
+MONITOR_SERVICE, MONITOR_TIMER = "omoba-monitor-ru.service", "omoba-monitor-ru.timer"
+MONITOR_UNITS = (ALERT_UNIT, MONITOR_SERVICE, MONITOR_TIMER)
+MONITOR_COMMANDS = {ALERT_UNIT: "unit-failed %i", MONITOR_SERVICE: "check --alert"}
+MONITOR_STATE = "omoba-ru-monitor"   # StateDirectory= of both services (/var/lib/omoba-ru-monitor)
+JOURNALD_DIR = "/etc/systemd/journald.conf.d"
+JOURNALD_DROPIN = JOURNALD_DIR + "/50-omoba-ru.conf"
+JOURNALD_SOURCE = "journald-omoba-ru.conf"
 PYTHON = "/usr/bin/python3"
 UNIT_DIR = "/etc/systemd/system"
 CADDYFILE = "/etc/caddy/Caddyfile"
@@ -136,7 +155,7 @@ DIRS = ((OPT, "root", "0755"), (RELEASES, "root", "0755"), (PORTAL, "root", "075
         (PORTAL_RELEASES, "root", "0755"), (NODE, "root", "0755"), (INCOMING, "root", "0700"),
         *((path, USER, "0700") for path in STATE_DIRS),
         (BACKUP_TOOL_DIR, "root", "0755"), (BACKUP_KEYS, "root", "0700"), (BACKUPS, "root", "0700"),
-        (DOWNLOADS, "root", "0755"), (CADDY_LOGS, CADDY_USER, "0750"))
+        (DOWNLOADS, "root", "0755"), (CADDY_LOGS, CADDY_USER, "0750"), (MONITOR_TOOL_DIR, "root", "0755"))
 USERS = {USER: STATE, PORTAL_USER: "/nonexistent"}
 
 LOBBY_PORT = 4000
@@ -194,7 +213,7 @@ FORBIDDEN_TOKENS = ("snrjxwutqxokeujuiepn", "supabase.co", "supabase.com")
 
 # ---------------------------------------------------------------- what the units must say
 
-COMMON_UNIT_RULES = {"Unit.StartLimitIntervalSec": "0", "Service.Restart": "always",
+COMMON_UNIT_RULES = {"Unit.StartLimitIntervalSec": "0", "Unit.OnFailure": ON_FAILURE, "Service.Restart": "always",
                      "Service.NoNewPrivileges": "true", "Service.ProtectSystem": "strict",
                      "Install.WantedBy": "multi-user.target"}
 UNIT_RULES = {
@@ -272,7 +291,8 @@ def is_foreign_name(value: str, own_zones=()) -> bool:
 
 
 ALLOWED_WRITES = (OPT, STATE, BACKUPS, CADDY_LOGS, CADDYFILE, CADDYFILE + ".orig", CADDYFILE + ".omoba-next",
-                  SSHD_DROPIN, *(f"{UNIT_DIR}/{name}" for name in (*UNIT_FILES.values(), *BACKUP_UNITS)))
+                  SSHD_DROPIN, JOURNALD_DROPIN,
+                  *(f"{UNIT_DIR}/{name}" for name in (*UNIT_FILES.values(), *BACKUP_UNITS, *MONITOR_UNITS)))
 
 
 def assert_ru_constants() -> None:
@@ -281,7 +301,8 @@ def assert_ru_constants() -> None:
         if touches_foreign(path):
             raise Refused(f"RU path {path} is inside a production or dev path")
     if USER in FOREIGN_USERS or PORTAL_USER in FOREIGN_USERS or \
-            any(name.rsplit(".", 1)[0] in FOREIGN_UNITS for name in (*UNIT_FILES.values(), *BACKUP_UNITS)):
+            any(name.rsplit(".", 1)[0] in FOREIGN_UNITS
+                for name in (*UNIT_FILES.values(), *BACKUP_UNITS, *MONITOR_UNITS)):
         raise Refused("an RU user or unit equals a production or dev one")
     if is_foreign_name(DEFAULT_HOST):
         raise Refused("RU host defaults name another contour")
@@ -450,7 +471,7 @@ def backup_unit_problems(name: str, text: str, own_zones=()) -> list[str]:
         rules = {"Service.Type": "oneshot", "Service.ExecStart": f"{PYTHON} {BACKUP_SCRIPT} {BACKUP_COMMANDS[name]}",
                  "Service.NoNewPrivileges": "true", "Service.ProtectSystem": "strict",
                  "Service.ProtectHome": "true", "Service.PrivateTmp": "true", "Service.ReadWritePaths": BACKUPS,
-                 "Service.UMask": "0077"}
+                 "Service.UMask": "0077", "Unit.OnFailure": ON_FAILURE}
         if not directives.get("Service.TimeoutStartSec"):
             problems.append(f"{name}: [Service] TimeoutStartSec is missing")
         if any(key.startswith("Install.") for key in directives):
@@ -465,6 +486,12 @@ def backup_unit_problems(name: str, text: str, own_zones=()) -> list[str]:
             problems.append(f"{name}: [Timer] needs exactly one OnCalendar=")
         if name != "omoba-backup-check-ru.timer" and directives.get("Timer.Persistent") != ["true"]:
             problems.append(f"{name}: [Timer] Persistent must be true (a missed run happens at the next boot)")
+    return problems + rule_problems(name, directives, rules, own_zones)
+
+
+def rule_problems(name: str, directives: dict, rules: dict, own_zones=()) -> list[str]:
+    """Each rule's value exactly once, and no production/dev path or other contour's host."""
+    problems = []
     for key, expected in rules.items():
         if directives.get(key, []) != [expected]:
             section, option = key.split(".", 1)
@@ -477,6 +504,63 @@ def backup_unit_problems(name: str, text: str, own_zones=()) -> list[str]:
             for token in re.findall(r"[A-Za-z0-9][A-Za-z0-9.-]*", value):
                 if is_foreign_name(token, own_zones):
                     problems.append(f"{name}: {key} references another contour's host {token}")
+    return problems
+
+
+def monitor_unit_problems(name: str, text: str, own_zones=()) -> list[str]:
+    """Every reason this is not the RU monitoring unit or timer `name` (LR-17)."""
+    directives, _ = parse_unit(text or "")
+    problems = []
+    if name.endswith(".service"):
+        rules = {"Service.Type": "oneshot", "Service.ExecStart": f"{PYTHON} {MONITOR_SCRIPT} {MONITOR_COMMANDS[name]}",
+                 "Service.StateDirectory": MONITOR_STATE, "Service.NoNewPrivileges": "true",
+                 "Service.ProtectSystem": "strict", "Service.ProtectHome": "true", "Service.PrivateTmp": "true",
+                 "Service.UMask": "0077"}
+        if name == ALERT_UNIT:
+            if "Unit.OnFailure" in directives:
+                problems.append(f"{name}: [Unit] OnFailure= would loop (an alert about the alert)")
+        else:
+            rules["Unit.OnFailure"] = ON_FAILURE
+        if not directives.get("Service.TimeoutStartSec"):
+            problems.append(f"{name}: [Service] TimeoutStartSec is missing")
+        if directives.get("Service.ReadWritePaths"):
+            problems.append(f"{name}: [Service] it writes only its StateDirectory; no ReadWritePaths=")
+        if any(key.startswith("Install.") for key in directives):
+            problems.append(f"{name}: OnFailure= or its timer starts it; it has no [Install] section")
+    else:
+        rules = {"Install.WantedBy": "timers.target"}
+        if len(directives.get("Timer.OnCalendar", [])) != 1:
+            problems.append(f"{name}: [Timer] needs exactly one OnCalendar=")
+    return problems + rule_problems(name, directives, rules, own_zones)
+
+
+def journald_problems(text: str) -> list[str]:
+    """The journal drop-in keeps the journal on disk, bounded in size and age (LR-17)."""
+    directives, _ = parse_unit(text or "")
+    problems = []
+    if {key.split(".", 1)[0] for key in directives} != {"Journal"}:
+        problems.append(f"{JOURNALD_SOURCE}: only a [Journal] section belongs in it")
+    if directives.get("Journal.Storage") != ["persistent"]:
+        problems.append(f"{JOURNALD_SOURCE}: Storage must be persistent (logs survive a reboot)")
+    for key in ("SystemMaxUse", "MaxRetentionSec"):
+        if len(directives.get(f"Journal.{key}", [])) != 1:
+            problems.append(f"{JOURNALD_SOURCE}: [Journal] {key}= must be set once")
+    return problems
+
+
+def monitor_kit_problems(monitor, own_zones=()) -> list[str]:
+    if not isinstance(monitor, dict) or not isinstance(monitor.get("units"), dict) or \
+            set(monitor["units"]) != set(MONITOR_UNITS):
+        return ["the monitor kit lacks its units"]
+    problems = [problem for name, text in monitor["units"].items()
+                for problem in monitor_unit_problems(name, text, own_zones)]
+    script = monitor.get("script")
+    if not isinstance(script, str) or not script.startswith("#!/usr/bin/env python3\n") or "LR-17" not in script:
+        problems.append("the monitor kit lacks ru_monitor.py")
+    example = monitor.get("env_example")
+    if not isinstance(example, str) or "\nOMOBA_ALERT_DISK_MIN_FREE_PERCENT=" not in example:
+        problems.append(f"the monitor kit lacks {ALERTS_ENV_EXAMPLE}")
+    problems += journald_problems(monitor.get("journald"))
     return problems
 
 
@@ -495,17 +579,22 @@ def backup_kit_problems(backup, own_zones=()) -> list[str]:
 
 
 def encode_backup_kit(backup: dict) -> str:
+    """A tool kit (the backup kit, the monitor kit) as it travels in the payload."""
     return base64.b64encode(zlib.compress(json.dumps(backup, sort_keys=True).encode(), 9)).decode()
 
 
-def decode_backup_kit(raw) -> dict:
+def decode_backup_kit(raw, what: str = "the backup kit (ops/vps/ru/ru_backup.py and its units)") -> dict:
     if not isinstance(raw, str) or not raw or not PAYLOAD.fullmatch(raw):
-        raise Refused("payload lacks the backup kit (ops/vps/ru/ru_backup.py and its units)")
+        raise Refused(f"payload lacks {what}")
     inflater = zlib.decompressobj()
     data = inflater.decompress(base64.b64decode(raw), 1 << 21)
     if inflater.unconsumed_tail:
-        raise Refused("the backup kit in the payload is too large")
+        raise Refused(f"{what.split(' (')[0]} in the payload is too large")
     return json.loads(data)
+
+
+def decode_monitor_kit(raw) -> dict:
+    return decode_backup_kit(raw, "the monitor kit (ops/vps/ru/ru_monitor.py, its units and journal limits)")
 
 
 # ---------------------------------------------------------------- env files
@@ -1222,6 +1311,14 @@ class Host:
             raise Refused("the backup kit is not the RU one: " + "; ".join(problems))
         return backup
 
+    def payload_monitor_kit(self, payload: dict) -> dict:
+        """ru_monitor.py, its units, alerts.env.example and the journal limits (LR-17)."""
+        monitor = decode_monitor_kit(payload.get("monitor_kit_z"))
+        problems = monitor_kit_problems(monitor, (self.payload_names(payload)["zone"],))
+        if problems:
+            raise Refused("the monitor kit is not the RU one: " + "; ".join(problems))
+        return monitor
+
     def payload_examples(self, payload: dict) -> dict:
         examples = payload.get("examples") or {}
         if set(examples) != set(KINDS):
@@ -1466,6 +1563,10 @@ class Host:
         more, notes, facts["backups"] = self.backup_report(payload)
         problems += more
         warnings += notes
+        # monitoring and alerts (LR-17)
+        more, notes, facts["monitor"] = self.monitor_report(payload)
+        problems += more
+        warnings += notes
         # what answers
         if ("0.0.0.0", LOBBY_PORT) not in self.listeners("udp"):
             problems.append(f"the lobby does not listen on UDP {LOBBY_PORT}")
@@ -1557,8 +1658,17 @@ class Host:
                   if self.read(f"{UNIT_DIR}/{name}") != backup["units"][name]]
         if not os.path.lexists(self.p(BACKUP_ENV)):
             would.append(f"write {BACKUP_ENV} (root 0600) from {BACKUP_ENV_EXAMPLE}; the owner names the storage")
+        monitor = self.payload_monitor_kit(payload)
+        if self.read(MONITOR_SCRIPT) != monitor["script"]:
+            would.append(f"install {MONITOR_SCRIPT}")
+        would += [f"install {UNIT_DIR}/{name}" for name in MONITOR_UNITS
+                  if self.read(f"{UNIT_DIR}/{name}") != monitor["units"][name]]
+        if not os.path.lexists(self.p(ALERTS_ENV)):
+            would.append(f"write {ALERTS_ENV} (root 0600) from {ALERTS_ENV_EXAMPLE}; the owner adds the Telegram bot")
+        if self.read(JOURNALD_DROPIN) != monitor["journald"]:
+            would.append(f"install {JOURNALD_DROPIN} (journal limits), restart systemd-journald")
         would.append("systemctl enable postgresql caddy (+ each RU unit whose release is installed) and start "
-                     + " ".join(BACKUP_TIMERS))
+                     + " ".join((*BACKUP_TIMERS, MONITOR_TIMER)))
         more, notes = dns_problems(self.resolve, payload["expected_ip"], names)
         warnings += [f"DNS: {note}" for note in more + notes]
         return {"mode": "preflight", "kind": "bootstrap", "ok": not problems, "problems": problems,
@@ -1570,6 +1680,7 @@ class Host:
         units = self.payload_units(payload)
         examples = self.payload_examples(payload)
         backup = self.payload_backup_kit(payload)
+        monitor = self.payload_monitor_kit(payload)
         if set(units) != set(KINDS) or "caddyfile" not in payload:
             raise Refused("payload lacks the units or Caddyfile.ru")
         self.mutating = True
@@ -1587,6 +1698,7 @@ class Host:
         done += self.ensure_caddy(payload["caddyfile"])
         done += self.ensure_ssh()
         done += self.ensure_firewall(units["lobby"])
+        done += self.ensure_monitor_kit(monitor)    # first: every unit below names its alert
         done += self.ensure_units(units)
         done += self.ensure_backup_kit(backup)
         self._record({"mode": "bootstrap", "done": done})
@@ -1851,6 +1963,83 @@ class Host:
                 self.command("systemctl", "start", timer)
                 done.append(f"systemctl start {timer}")
         return done
+
+    def ensure_monitor_kit(self, monitor: dict) -> list:
+        """ru_monitor.py, the alert template, the host check and its timer, alerts.env with
+        placeholders (never replaced) and the journal limits (LR-17)."""
+        done = []
+        if self.read(MONITOR_SCRIPT) != monitor["script"]:
+            self._write(MONITOR_SCRIPT, monitor["script"], 0o755)
+            done.append(f"install {MONITOR_SCRIPT}")
+        changed = False
+        for name in MONITOR_UNITS:
+            path = f"{UNIT_DIR}/{name}"
+            if self.read(path) != monitor["units"][name]:
+                self._write(path, monitor["units"][name], 0o644)
+                done.append(f"install {path}")
+                changed = True
+        if changed:
+            self.command("systemctl", "daemon-reload")
+        if self.read(ALERTS_ENV) is None:
+            if os.path.lexists(self.p(ALERTS_ENV)):
+                raise Refused(f"{ALERTS_ENV} exists and is not a regular file")
+            self._write_secret(ALERTS_ENV, monitor["env_example"])
+            done.append(f"write {ALERTS_ENV} from {ALERTS_ENV_EXAMPLE} (the owner adds the Telegram bot)")
+        if self.read(JOURNALD_DROPIN) != monitor["journald"]:
+            if not os.path.isdir(self.p(JOURNALD_DIR)):
+                self.command("install", "-d", "-o", "root", "-g", "root", "-m", "0755", self.p(JOURNALD_DIR))
+            self._write(JOURNALD_DROPIN, monitor["journald"], 0o644)
+            self.command("systemctl", "restart", "systemd-journald")
+            done += [f"install {JOURNALD_DROPIN}", "systemctl restart systemd-journald"]
+        if not self.enabled(MONITOR_TIMER):
+            self.command("systemctl", "enable", MONITOR_TIMER)
+            done.append(f"systemctl enable {MONITOR_TIMER}")
+        if not self.active(MONITOR_TIMER):
+            self.command("systemctl", "start", MONITOR_TIMER)
+            done.append(f"systemctl start {MONITOR_TIMER}")
+        return done
+
+    def monitor_report(self, payload: dict) -> tuple[list, list, dict]:
+        """The monitor kit as installed, its timer, the journal limits and the host check's disk
+        and worker findings (`ru_monitor.py check`; its unit findings are this status's own)."""
+        monitor = self.payload_monitor_kit(payload)
+        problems, warnings = [], []
+        script_ok = self.read(MONITOR_SCRIPT) == monitor["script"]
+        if not script_ok:
+            problems.append(f"{MONITOR_SCRIPT} is not ops/vps/ru/ru_monitor.py (bootstrap installs it)")
+        for name in MONITOR_UNITS:
+            if self.read(f"{UNIT_DIR}/{name}") != monitor["units"][name]:
+                problems.append(f"{UNIT_DIR}/{name} differs from ops/vps/ru/{name} (bootstrap installs it)")
+        if self.read(JOURNALD_DROPIN) != monitor["journald"]:
+            problems.append(f"{JOURNALD_DROPIN} is not ops/vps/ru/{JOURNALD_SOURCE} (bootstrap installs it)")
+        local = self.p(ALERTS_ENV)
+        if not os.path.isfile(local) or os.path.islink(local):
+            problems.append(f"{ALERTS_ENV} is missing (bootstrap writes it)")
+        else:
+            info = os.stat(local)
+            if info.st_mode & 0o777 != 0o600 or info.st_uid != self.root_uid:
+                problems.append(f"{ALERTS_ENV} must be root-owned with mode 0600")
+        if not self.enabled(MONITOR_TIMER):
+            problems.append(f"{MONITOR_TIMER} is not enabled: the host check would not run after a reboot")
+        elif not self.active(MONITOR_TIMER):
+            problems.append(f"{MONITOR_TIMER} is not active")
+        facts = {}
+        if script_ok:
+            result = self.run([PYTHON, self.p(MONITOR_SCRIPT), "check", "--json"], check=False, timeout=120)
+            try:
+                report = json.loads(result.stdout)
+            except ValueError:
+                report = None
+            if not isinstance(report, dict) or not isinstance(report.get("problems"), list) or \
+                    len(report.get("codes") or []) != len(report["problems"]):
+                problems.append(f"monitor: ru_monitor.py check did not answer "
+                                f"({redact(result.stderr.strip())[-300:] or 'no output'})")
+            else:
+                problems += [f"monitor: {text}" for code, text in zip(report["codes"], report["problems"])
+                             if not str(code).startswith("unit:")]
+                warnings += [f"monitor: {warning}" for warning in report.get("warnings") or []]
+                facts = {key: (report.get("facts") or {}).get(key) for key in ("disk", "workers")}
+        return problems, warnings, facts
 
     def backup_tool(self, *args, timeout: int = 180):
         """The installed ru_backup.py; (exit code, its JSON answer or None, stderr)."""
@@ -2485,10 +2674,37 @@ def kit(names: dict | None = None) -> dict:
               "env_example": (RU_DIR / BACKUP_ENV_EXAMPLE).read_text()}
     problems += backup_kit_problems(backup, own_zones)
     problems += backup_example_problems(backup["env_example"])
+    monitor = {"script": (RU_DIR / "ru_monitor.py").read_text(),
+               "units": {name: (RU_DIR / name).read_text() for name in MONITOR_UNITS},
+               "env_example": (RU_DIR / ALERTS_ENV_EXAMPLE).read_text(),
+               "journald": (RU_DIR / JOURNALD_SOURCE).read_text()}
+    problems += monitor_kit_problems(monitor, own_zones)
+    problems += alerts_example_problems(monitor["env_example"])
     if problems:
         raise Refused("the RU host kit is inconsistent: " + "; ".join(problems))
     return {"units": units, "examples": examples, "caddyfile": caddyfile, "names": names,
-            "backup_kit_z": encode_backup_kit(backup)}
+            "backup_kit_z": encode_backup_kit(backup), "monitor_kit_z": encode_backup_kit(monitor)}
+
+
+def alerts_example_problems(text: str) -> list[str]:
+    """alerts.env.example: only settings ru_monitor.py knows, no real bot token; and the
+    monitor watches exactly this kit's units, folders and match root."""
+    if str(RU_DIR) not in sys.path:
+        sys.path.insert(0, str(RU_DIR))
+    import ru_monitor
+    values, problems = ru_monitor.parse_env_text(text)
+    problems = [f"{ALERTS_ENV_EXAMPLE}: {problem}" for problem in problems]
+    for key in ru_monitor.TELEGRAM_KEYS:
+        if key in values and ru_monitor.PLACEHOLDER not in values[key]:
+            problems.append(f"{ALERTS_ENV_EXAMPLE}: {key} must stay a {PLACEHOLDER} placeholder")
+    jobs = tuple(name for name in BACKUP_UNITS if name.endswith(".service"))
+    if ru_monitor.ENV_FILE != ALERTS_ENV or ru_monitor.STATE_DIR != f"/var/lib/{MONITOR_STATE}" or \
+            ru_monitor.MATCH_ROOT != UNIT_ENV_RULES["lobby"]["OMOBA_MATCH_ROOT"] or \
+            set(ru_monitor.SERVICES) != set(UNIT_FILES.values()) or ru_monitor.LOBBY != UNIT_FILES["lobby"] or \
+            set(ru_monitor.JOBS) != set(jobs) or set(ru_monitor.TIMERS) != set(BACKUP_TIMERS) or \
+            not {BACKUPS, STATE}.issubset(ru_monitor.DISK_PATHS):
+        problems.append("ru_monitor.py's host layout differs from ru_host.py's")
+    return problems
 
 
 def backup_example_problems(text: str) -> list[str]:
@@ -2573,7 +2789,7 @@ def resolve_target(args, need_ip: bool, country: bool = False, config_reader=Non
 def base_payload(target: dict, files: dict) -> dict:
     return {"expected_ip": target["expected_ip"], "dev_ip": target["dev_ip"], "behind_nat": target["behind_nat"],
             "units": files["units"], "examples": files["examples"], "caddyfile": files["caddyfile"],
-            "names": files["names"], "backup_kit_z": files["backup_kit_z"]}
+            "names": files["names"], "backup_kit_z": files["backup_kit_z"], "monitor_kit_z": files["monitor_kit_z"]}
 
 
 def ssh_remote(alias: str, mode: str, payload: dict | None = None, check: bool = True):
@@ -2702,6 +2918,8 @@ def command_bootstrap(args) -> int:
         f"roles {', '.join(DB_ROLES)}, database {DB_NAME}",
         f"Caddyfile.ru -> {CADDYFILE}; {SSHD_DROPIN} (key-only SSH); ufw: SSH, {HTTPS_PORT}/tcp, "
         f"{LOBBY_PORT}/udp, the arena range",
+        "monitoring (LR-17): ru_monitor.py, the OnFailure= alert, the 5-minute host check, "
+        f"{ALERTS_ENV} (placeholders) and the journal limits {JOURNALD_DROPIN}",
         "units installed; postgresql, caddy and units with a release enabled; full status at the end"]}
 
     def apply() -> int:

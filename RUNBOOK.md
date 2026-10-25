@@ -285,3 +285,23 @@ Player data never lives on a development machine. On the RU host,
   with `ru_host.py bootstrap` after the escrowed env files and keys are put back. Never
   test a restore over the running database: the monthly restore drill (2nd of the month)
   does that in a scratch database, and `ru_host.py status` reports its result.
+
+## RU host alerts (LR-17)
+
+Alerts reach the owner's Telegram chat (the bot in `/opt/omoba-ru/alerts.env` on the host
+and in the external probe's settings) and always the journal. What each one means and
+what to look at first; the full list is in
+[ops/vps/ru/README.md › Monitoring and alerts](ops/vps/ru/README.md#monitoring-and-alerts).
+
+| Alert | First look |
+| --- | --- |
+| `<unit> failed (…)`, from `omoba-alert-ru@` | `journalctl -u <unit> -n 200`. A service is restarted by systemd every 5 s; repeated failures mean a crash loop: roll back (`ru_host.py rollback`) when a release caused it |
+| `<unit> is not running` | `systemctl status <unit>`; an enabled RU service must run. PostgreSQL down takes the lobby and the Account API with it |
+| `<timer> is disabled/inactive` | `systemctl enable --now <timer>`; without it no backup is made or none is reported |
+| `only N% free on the filesystem of <path>` | `df -h`, `du -xsh /var/backups/omoba-ru/* /var/lib/omoba-ru/matches/archive`; the journal keeps itself to 1 GiB |
+| `match worker <id> (…) has written no heartbeat` | `journalctl -u omoba-lobby-ru`; the lobby relaunches stale workers, so a lasting one is stuck: its directory under `/var/lib/omoba-ru/matches/` |
+| `OMOBA ru: down (external probe …)` | `python3 scripts/release.py preflight --market ru` from the Mac, then `ru_host.py status`. All three checks down at once usually means the host or its network; only the lobby means `omoba-lobby-ru` or the firewall (UDP 4000) |
+| Backup alerts (`OMOBA RU backups on …`) | [RU host backups and restore](#ru-host-backups-and-restore-lr-03) |
+
+`python3 /opt/omoba-ru/monitor/ru_monitor.py check` prints what the host check sees now,
+and `test-alert` sends one message to prove the bot works.
