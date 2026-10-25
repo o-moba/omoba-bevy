@@ -70,7 +70,10 @@ wire_enums! {
     crate::protocol::wire::ServerPacket => Strict [Party, Social, Career, Snapshot],
     crate::party::PartyCommand => Strict [Presence, Invite, Accept, Decline, Leave, Kick, Launch],
     crate::public_transport::PublicClientDatagram => Strict [TransportProbe, TransportProof, TransportBootstrap, SignedCommand],
-    crate::public_transport::PublicServerDatagram => Strict [TransportChallenge],
+    // LR-09 added `ServerFull` without a protocol bump: the server sends it only
+    // where it used to send nothing (a probe at the endpoint ceiling), and an
+    // older client drops a datagram it cannot decode, so it still sees silence.
+    crate::public_transport::PublicServerDatagram => Strict [TransportChallenge, ServerFull],
     crate::career::CareerRequest => Strict [FindMatch, SupporterStatus, EquipSupporterAura, Social, Challenge, Authenticate, History, Detail, Friends, Friend, Profile, LookupPlayer, Rename, Authorized, CancelQueue],
     crate::utility::UtilityAction => Strict [Dash, Haste, Recall, CancelRecall],
     crate::map::Team => Strict [Green, Blue],

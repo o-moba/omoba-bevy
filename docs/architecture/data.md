@@ -430,6 +430,7 @@ Layout (`server/src/match_pool.rs`, `match_allocation.rs`):
 | `<allocation_id>/worker.log` | Worker stdout and stderr, appended on every launch | Worker process |
 | `<allocation_id>/outbox/` | That worker's career outbox ([§ Outbox](#settlement-and-the-durable-outbox)) | Worker |
 | `archive/<allocation_id>/` | Terminal allocations, moved whole by `archive()` | Lobby |
+| `capacity.json` | The arena report (LR-09): capacity, occupied arenas, players searching and waiting for a free arena, since when, the longest wait. Rewritten every 5 s; the RU host monitor alerts on it | Lobby (`server/src/capacity.rs`) |
 | `lobby-outbox/` | Only with the packaged `launch-lobby.sh`. The systemd units keep it beside the root. | Lobby |
 
 All JSON is written with `atomic_json` (temp file, fsync, rename, directory fsync).

@@ -1172,6 +1172,16 @@ follows.
 - Copy in en, ru and zh-Hans (`client/i18n/*/moderation.json`).
 - Code: `shared/src/moderation.rs`, `career-store/migrations/postgres/005_sanctions.sql`, `career-store/src/moderation.rs`, `account-api/src/moderation.rs`, `server/src/career_backend.rs`, `server/src/social.rs`, `server/src/party.rs`, `server/src/match_service.rs`, `client/src/moderation.rs`, `client/src/social.rs`. See [the session note](progress/2026-10-24-lr-15.md).
 
+## Arena capacity: full pool and full server (LR-09, unreleased)
+
+- When every arena is busy, a search whose match is ready waits in line and says so: «All arenas are busy · you are number 2 in line · about 3 min». The place follows the order the lobby seats rosters (vs Bots, then Ranked, then Casual PvP); the estimate appears once arenas have freed in the last 15 minutes. A search that is not ready yet (Ranked 3/10) keeps showing its own progress.
+- The searching screen then offers **Play offline practice while you wait** in one tap: it leaves the queue and opens the practice picker with the chosen hero. The same offer appears when the server is too full to sign in.
+- A full server answers instead of staying silent: at 512 endpoints a new player's probe gets `server_full`, and at 512 career clients its sign-in gets the `server_full` code. The game shows «The server is full. Retrying…» and keeps trying.
+- The lobby reports a busy pool: `<match root>/capacity.json` every 5 s and `CAPACITY_METRIC` journal lines; on the RU host `ru_monitor.py` alerts the owner after a 2-minute wait (`OMOBA_ALERT_CAPACITY_WAIT_SECONDS`).
+- The load probe is ready for the RU host: mixed queues, the lobby unit's cgroup limits, a maximum time to Running, and per-arena-type snapshot gaps, bytes per player, CPU and RSS (`CAPACITY_RESULT`). The measurement itself and the final capacity need the host ([Arena capacity](../ops/vps/ru/README.md#arena-capacity-lr-09)).
+- Copy in en, ru and zh-Hans (`client/i18n/*/capacity.json`, `admission.error.server_full`).
+- Code: `server/src/capacity.rs`, `server/src/match_service.rs` (`Lobby::refresh_line`), `server/src/match_pool.rs`, `server/src/public_transport.rs`, `server/src/career_backend.rs`, `shared/src/match_service.rs` (`CapacityLine`), `shared/src/public_transport.rs` (`ServerFull`), `client/src/match_service.rs`, `client/src/frontend/searching.rs`, `client/src/net/{public_transport,transport,session}.rs`, `client/src/career_identity.rs`, `ops/vps/ru/ru_monitor.py`, `scripts/test_public_mvp.mjs`. See [the session note](progress/2026-10-24-lr-09.md).
+
 ## Multiplayer Session Reliability
 
 - **TASK-14 (client)**: Explicit session states, non-blocking wait when the server is down, bounded `WaitingForServer` timeout, stale snapshot detection while connected, UDP transport error thresholds, snapshot-channel disconnect detection when the UDP thread ends, full teardown (replicated entities + team overlay) on disconnect, manual reconnect via **Retry** (no silent rejoin into a match), pause menu auto-closes on **Disconnected**, minimap hidden unless **Connected**.

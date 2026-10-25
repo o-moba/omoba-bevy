@@ -711,6 +711,11 @@ fn identity_driver(
         return;
     }
     let now = Instant::now();
+    if career.view.error_code.as_deref() == Some(shared::career::error_code::SERVER_FULL) {
+        // LR-09: a full server takes the sign-in once a place frees; keep
+        // asking at the usual pace instead of giving up.
+        identity.started = Some(now);
+    }
     if identity
         .started
         .is_some_and(|started| now.duration_since(started) >= AUTH_TIMEOUT)
@@ -921,6 +926,53 @@ mod tests {
         identity.observe_server_auth(&rejection, "other:4000", 42);
         identity.observe_server_auth(&rejection, "localhost:4000", 41);
         assert!(identity.authenticated_for_scope("localhost:4000", 42, "session"));
+    }
+
+    /// LR-09: a server at its client ceiling answers "server full"; the
+    /// sign-in keeps asking instead of timing out, so it gets in once a
+    /// place frees.
+    #[test]
+    fn a_full_server_keeps_the_sign_in_going() {
+        let mut identity = identity();
+        identity.started = Some(Instant::now() - AUTH_TIMEOUT);
+        let mut session = ClientSession::admitted_for_test();
+        session.set_server_addr_for_test("localhost:4000");
+        let mut career = CareerClient::default();
+        career.nickname = "小明".into();
+        career.view = shared::career::CareerView {
+            storage_enabled: true,
+            error: Some("The server is full right now.".into()),
+            error_code: Some(shared::career::error_code::SERVER_FULL.into()),
+            ..default()
+        };
+        let mut app = App::new();
+        app.add_message::<NicknameChanged>()
+            .add_message::<NetworkCommand>()
+            .insert_resource(identity)
+            .insert_resource(career)
+            .insert_resource(session)
+            .insert_resource(ClientSessionId("session".into()))
+            .insert_resource(GameStateSnapshot {
+                meta: shared::protocol::SnapshotMeta::new(42, 1, 1),
+                ..default()
+            })
+            .add_systems(Update, identity_driver);
+        app.update();
+        let sent: Vec<_> = app
+            .world_mut()
+            .resource_mut::<Messages<NetworkCommand>>()
+            .drain()
+            .collect();
+        assert!(
+            matches!(
+                sent.as_slice(),
+                [NetworkCommand::Career(CareerRequest::Challenge { .. })]
+            ),
+            "{sent:?}"
+        );
+        let identity = app.world().resource::<CareerIdentity>();
+        assert!(!identity.refused);
+        assert!(identity.next_retry.is_some(), "the next try is scheduled");
     }
 
     /// LR-15: a suspended account stops re-sending its sign-in, and signs in

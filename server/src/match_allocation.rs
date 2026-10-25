@@ -760,7 +760,10 @@ pub(crate) mod runtime_tests {
             panic!("missing path challenge");
         };
         let PublicServerDatagram::TransportChallenge { path_nonce, .. } =
-            serde_json::from_slice(&challenge).unwrap();
+            serde_json::from_slice(&challenge).unwrap()
+        else {
+            panic!("a transport challenge is expected")
+        };
         let proof = serde_json::to_vec(&PublicClientDatagram::TransportProof {
             server_epoch: epoch,
             path_nonce,
@@ -1086,7 +1089,10 @@ pub(crate) mod runtime_tests {
             let mut buffer = [0; 4096];
             let (len, _) = client.recv_from(&mut buffer).unwrap();
             let PublicServerDatagram::TransportChallenge { path_nonce, .. } =
-                serde_json::from_slice(&buffer[..len]).unwrap();
+                serde_json::from_slice(&buffer[..len]).unwrap()
+            else {
+                panic!("a transport challenge is expected")
+            };
             deliver(
                 rt,
                 client,
@@ -1227,7 +1233,10 @@ pub(crate) mod runtime_tests {
             panic!("missing path challenge");
         };
         let PublicServerDatagram::TransportChallenge { path_nonce, .. } =
-            serde_json::from_slice(&bytes).unwrap();
+            serde_json::from_slice(&bytes).unwrap()
+        else {
+            panic!("a transport challenge is expected")
+        };
         let proof = serde_json::to_vec(&PublicClientDatagram::TransportProof {
             server_epoch: rt.server_epoch,
             path_nonce,

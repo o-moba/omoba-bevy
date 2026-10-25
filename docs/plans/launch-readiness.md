@@ -289,12 +289,12 @@ Area: capacity · **blocker** · M · ops (+S code)
     - CPU and RSS
     - snapshot bytes per second per player (input to LR-28)
 
-    p95 stays under 100 ms at the chosen capacity.
-  - [ ] `ops/vps/ru/README.md` states the capacity, the UDP range, MemoryMax/CPUQuota and the measured per-arena cost.
-  - [ ] 20 simulated solo Bot-practice players all reach Running within 60 s.
-  - [ ] With the pool full, the searching screen shows a position or ETA and "Play offline practice while you wait".
-  - [ ] At the endpoint or career-client ceiling, the lobby replies "server full" (test).
-  - [ ] A capacity-busy alert fires through LR-17.
+    p95 stays under 100 ms at the chosen capacity. The probe records all of it (`--mix`, `--limits-from` the lobby unit, `CAPACITY_RESULT` lines, per-arena-type report); the run needs the RU host ([README › Arena capacity](../../ops/vps/ru/README.md#arena-capacity-lr-09)).
+  - [ ] `ops/vps/ru/README.md` states the capacity, the UDP range, MemoryMax/CPUQuota and the measured per-arena cost. The section and the procedure are in place with today's placeholder values; the measured figures need the host.
+  - [ ] 20 simulated solo Bot-practice players all reach Running within 60 s. Ready as `--clients=20 --preference=bot_practice --capacity=20 --max-wait-secs=60`; needs the host.
+  - [x] With the pool full, the searching screen shows a position or ETA and "Play offline practice while you wait". Done: the lobby's `capacity_line{position, eta_secs}` and the one-tap offer (it leaves the queue for the practice picker), covered by UI-tree tests; native captures need an unlocked screen.
+  - [x] At the endpoint or career-client ceiling, the lobby replies "server full" (test). Done: `server_full` datagram at 512 endpoints, `error_code` `server_full` at 512 career clients; the client says so and keeps trying.
+  - [x] A capacity-busy alert fires through LR-17. Done: the lobby's `capacity.json` and `CAPACITY_METRIC` lines; `ru_monitor.py check` alerts after `OMOBA_ALERT_CAPACITY_WAIT_SECONDS` (120).
 - **Depends on:** LR-01, LR-10, LR-11 (re-measure after both), LR-17
 
 #### LR-10 — Bot route-planning CPU budget
@@ -462,7 +462,7 @@ Area: observability · **major** · M · ops (+S code)
   - [ ] Alerts exist for:
     - any unit failure (`OnFailure=`): shipped, every RU unit and, by a drop-in, every PostgreSQL cluster unit → `omoba-alert-ru@.service` (`ru_monitor.py unit-failed`)
     - free disk below 15%: shipped (`ru_monitor.py check`, every 5 minutes)
-    - capacity wait longer than N min: needs `QUEUE_METRIC` (server part)
+    - capacity wait longer than N min: shipped by LR-09, `ru_monitor.py check` reads the lobby's `<match root>/capacity.json` (`OMOBA_ALERT_CAPACITY_WAIT_SECONDS`, 120)
     - failed allocations above N per hour: needs `QUEUE_METRIC` (server part)
     - a missing backup (LR-03): shipped, `ru_backup.py check --alert` on the host's one bot, plus a stopped backup timer
     - stale worker heartbeats: shipped, a live worker's `status.json` older than 5 minutes while the lobby runs

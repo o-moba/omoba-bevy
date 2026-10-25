@@ -4,6 +4,7 @@ mod balance;
 mod balance_probe;
 mod basic_attack;
 mod bots;
+mod capacity;
 mod career_backend;
 mod career_port;
 mod career_runtime;

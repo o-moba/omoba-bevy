@@ -69,6 +69,12 @@ pub enum MatchServiceView {
         /// every member asked for it.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         also_casual: bool,
+        /// Every arena is busy and this player's roster is ready (LR-09): its
+        /// place in the line for the next free arena and the estimated wait.
+        /// Set exactly when `capacity_wait` is. Additive: protocol 11 clients
+        /// without it show the plain capacity wait.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        capacity_line: Option<CapacityLine>,
     },
     Allocating,
     Assigned {
@@ -84,6 +90,24 @@ pub enum MatchServiceView {
     Failed {
         code: String,
     },
+}
+
+/// A ready roster's place in the line for a free arena (LR-09).
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CapacityLine {
+    /// 1 = this roster gets the next arena that frees.
+    pub position: u32,
+    /// Estimated whole seconds until then, from how fast arenas freed
+    /// recently. `None` until the lobby has seen arenas free.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub eta_secs: Option<u64>,
+}
+
+impl CapacityLine {
+    /// The estimate in whole minutes, rounded up and at least one.
+    pub fn eta_minutes(&self) -> Option<u64> {
+        self.eta_secs.map(|secs| secs.div_ceil(60).max(1))
+    }
 }
 
 /// A running match that still holds this profile's seat (LR-13).
@@ -259,6 +283,7 @@ mod tests {
             searching,
             casual_offer_after_secs: offer,
             also_casual,
+            capacity_line: None,
         };
         let plain = serde_json::to_string(&waiting(None, None, false)).unwrap();
         for field in ["searching", "casual_offer_after_secs", "also_casual"] {
@@ -289,6 +314,67 @@ mod tests {
             serde_json::from_str::<MatchServiceView>(&plain).unwrap(),
             waiting(None, None, false)
         );
+    }
+
+    /// LR-09: the place in the line for a free arena is additive. A plain
+    /// capacity wait keeps its bytes, and an older client reads it as one.
+    #[test]
+    fn the_capacity_line_is_additive_on_the_wire() {
+        let waiting = |capacity_line| MatchServiceView::Waiting {
+            preference: MatchPreference::BotPractice,
+            humans: 1,
+            needed: 1,
+            elapsed_secs: 40,
+            bot_fill_after_secs: None,
+            capacity_wait: true,
+            searching: None,
+            casual_offer_after_secs: None,
+            also_casual: false,
+            capacity_line,
+        };
+        let plain = serde_json::to_string(&waiting(None)).unwrap();
+        assert!(!plain.contains("capacity_line"), "{plain}");
+        let line = waiting(Some(CapacityLine {
+            position: 3,
+            eta_secs: Some(130),
+        }));
+        let bytes = serde_json::to_string(&line).unwrap();
+        assert!(
+            bytes.contains(r#""capacity_line":{"position":3,"eta_secs":130}"#),
+            "{bytes}"
+        );
+        assert_eq!(
+            serde_json::from_str::<MatchServiceView>(&bytes).unwrap(),
+            line
+        );
+        assert_eq!(
+            serde_json::from_str::<LegacyWaiting>(&bytes).unwrap(),
+            LegacyWaiting::Waiting {
+                preference: MatchPreference::BotPractice,
+                humans: 1,
+                needed: 1,
+                elapsed_secs: 40,
+                bot_fill_after_secs: None,
+                capacity_wait: true,
+            }
+        );
+        // No estimate yet: the position alone.
+        let unknown = serde_json::to_string(&CapacityLine {
+            position: 1,
+            eta_secs: None,
+        })
+        .unwrap();
+        assert_eq!(unknown, r#"{"position":1}"#);
+        let minutes = |secs| {
+            CapacityLine {
+                position: 1,
+                eta_secs: Some(secs),
+            }
+            .eta_minutes()
+        };
+        assert_eq!(minutes(0), Some(1));
+        assert_eq!(minutes(61), Some(2));
+        assert_eq!(CapacityLine::default().eta_minutes(), None);
     }
 
     #[test]

@@ -247,6 +247,59 @@ class CheckTest(MonitorCase):
         self.assertEqual(self.check()["codes"], [f"unit:{LOBBY}"], "a stopped lobby is the problem, not its workers")
 
 
+class CapacityTest(MonitorCase):
+    """LR-09: the lobby's arena report (server/src/capacity.rs) and the capacity alert."""
+
+    def report(self, busy_for=None, age=1.0, **extra):
+        clock_ms = int(self.host.clock * 1000)
+        report = {"version": 1, "updated_ms": clock_ms - int(age * 1000), "capacity": 2, "occupied": 2,
+                  "searching": 5, "waiting_for_arena": 3 if busy_for is not None else 0,
+                  "busy_since_ms": None if busy_for is None else clock_ms - int(busy_for * 1000),
+                  "longest_wait_secs": int(busy_for or 0), "busy_periods": 1, **extra}
+        Path(self.p(ru_monitor.CAPACITY_REPORT)).write_text(json.dumps(report))
+
+    def test_a_long_wait_for_a_free_arena_alerts(self):
+        self.assertEqual(self.check()["facts"]["capacity"], {"skipped": "no report (a lobby before LR-09)"})
+        self.report()
+        report = self.check()
+        self.assertTrue(report["ok"], report["problems"])
+        self.assertEqual(report["facts"]["capacity"]["busy_seconds"], 0)
+        self.report(busy_for=60)
+        self.assertTrue(self.check()["ok"], "a short wait is not an alert")
+        self.report(busy_for=150)
+        report = self.check()
+        self.assertEqual(report["codes"], ["capacity:arenas"])
+        self.assertEqual(report["problems"][0],
+                         "players have waited for a free arena for 2 min: 2 of 2 arenas busy, 3 players waiting "
+                         "(the longest 150 s); check CPU and memory, then raise OMOBA_MATCH_CAPACITY "
+                         "(README.md, \"Arena capacity\")")
+        self.settings(BOT + "OMOBA_ALERT_CAPACITY_WAIT_SECONDS=300\n")
+        self.assertTrue(self.check()["ok"])
+        self.settings(BOT)
+        # A stale report (the lobby stopped writing) or a stopped lobby is no capacity alert.
+        self.report(busy_for=900, age=600)
+        self.assertEqual(self.check()["facts"]["capacity"], {"skipped": "the report is stale"})
+        self.report(busy_for=900)
+        self.host.units[LOBBY]["ActiveState"] = "inactive"
+        self.assertEqual(self.check()["codes"], [f"unit:{LOBBY}"])
+        self.host.units[LOBBY]["ActiveState"] = "active"
+        Path(self.p(ru_monitor.CAPACITY_REPORT)).write_text("{")
+        self.assertEqual(self.check()["facts"]["capacity"], {"skipped": "the report is unreadable"})
+
+    def test_the_alert_resolves_once_arenas_free(self):
+        self.report(busy_for=200)
+        monitor = self.monitor()
+        first = monitor.alert_check()
+        self.assertEqual(len(self.telegram.sent), 1)
+        self.assertIn("players have waited for a free arena", self.telegram.sent[0])
+        self.assertFalse(first["ok"])
+        self.report()
+        self.host.clock += 16 * 60
+        self.report()
+        self.monitor().alert_check()
+        self.assertIn("arena capacity: ok again", self.telegram.sent[-1])
+
+
 class AlertTest(MonitorCase):
     def alert(self):
         return self.monitor().alert_check()
