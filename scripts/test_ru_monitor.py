@@ -371,6 +371,21 @@ class UnitFailedTest(MonitorCase):
         self.monitor().alert_check()
         self.assertIn("omoba-nftables-ru.service: ok again", self.telegram.sent[-1])
 
+    def test_a_failed_oneshot_without_a_timer_stays_down(self):
+        """The per-source limits (LR-16) are a oneshot that stays active; no timer reruns it."""
+        limits = "omoba-limits-ru.service"
+        self.host.units[limits] = {"LoadState": "loaded", "ActiveState": "failed", "SubState": "failed",
+                                   "Result": "exit-code", "NRestarts": "0", "Type": "oneshot",
+                                   "RemainAfterExit": "yes"}
+        self.failed(limits, service_result="exit-code", exit_code="exited", exit_status="1")
+        self.assertEqual(self.telegram.sent, ["OMOBA RU host ru-1: unit failed\n- omoba-limits-ru.service failed "
+                                              "(exit-code, exited 1); it stays down, 0 restarts so far "
+                                              "(journalctl -u omoba-limits-ru.service)"])
+        self.host.units[limits].update(ActiveState="active", SubState="exited", Result="success")
+        self.host.clock += 3600
+        self.monitor().alert_check()
+        self.assertIn("omoba-limits-ru.service: ok again", self.telegram.sent[-1])
+
     def test_a_crashed_cluster_is_one_alert_from_the_drop_in_and_the_check(self):
         """postgresql-alert-ru.conf gives the cluster unit OnFailure=; the host check reports it
         under the same code, so one crash is one message until the hourly reminder."""

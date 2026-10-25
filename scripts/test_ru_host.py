@@ -666,8 +666,9 @@ class RuKitTest(unittest.TestCase):
         monitor = ru_host.decode_monitor_kit(KIT["monitor_kit_z"])
         named = {**{ru_host.UNIT_FILES[kind]: text for kind, text in KIT["units"].items()},
                  **{name: text for name, text in backup["units"].items() if name.endswith(".service")},
-                 ru_host.MONITOR_SERVICE: monitor["units"][ru_host.MONITOR_SERVICE]}
-        self.assertEqual(len(named), 7)
+                 ru_host.MONITOR_SERVICE: monitor["units"][ru_host.MONITOR_SERVICE],
+                 ru_host.LIMITS_UNIT_FILE: KIT["limits_unit"]}
+        self.assertEqual(len(named), 8)
         for name, text in named.items():
             self.assertEqual(ru_host.parse_unit(text)[0]["Unit.OnFailure"], ["omoba-alert-ru@%n.service"], name)
         template = ru_host.parse_unit(monitor["units"][ru_host.ALERT_UNIT])[0]
@@ -678,6 +679,8 @@ class RuKitTest(unittest.TestCase):
         self.assertTrue(any("OnFailure" in problem for problem in ru_host.unit_problems("lobby", lobby)))
         job = backup["units"]["omoba-backup-ru.service"].replace("OnFailure=omoba-alert-ru@%n.service\n", "")
         self.assertTrue(any("OnFailure" in problem for problem in ru_host.backup_unit_problems("omoba-backup-ru.service", job)))
+        limits = KIT["limits_unit"].replace("OnFailure=omoba-alert-ru@%n.service\n", "")
+        self.assertTrue(any("OnFailure" in problem for problem in ru_host.limits_unit_problems(limits)))
         # Every PostgreSQL cluster unit too, by a drop-in for postgresql@.service: Ubuntu's
         # postgresql.service is only a wrapper that stays active.
         self.assertEqual(ru_host.parse_unit(monitor["pg_alert"])[0], {"Unit.OnFailure": ["omoba-alert-ru@%n.service"]})
@@ -1114,6 +1117,8 @@ class BootstrapTest(HostCase):
         done = result["done"]
         self.assertLess(done.index(f"install /etc/systemd/system/{ru_host.ALERT_UNIT}"),
                         done.index(f"install {ru_host.unit_path('lobby')}"))
+        self.assertLess(done.index(f"install /etc/systemd/system/{ru_host.ALERT_UNIT}"),
+                        done.index(f"install /etc/systemd/system/{ru_host.LIMITS_UNIT_FILE}"))
         # Per-source UDP limits (LR-16): the checked file, its unit, loaded.
         self.assertEqual(Path(fake.p(ru_host.NFT_RULES)).read_text(), KIT["nftables"])
         self.assertEqual(Path(fake.p("/etc/systemd/system/omoba-limits-ru.service")).read_text(), KIT["limits_unit"])

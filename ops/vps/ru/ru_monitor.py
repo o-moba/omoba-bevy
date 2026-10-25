@@ -78,7 +78,7 @@ DISK_PATHS = ("/", "/var/lib/postgresql", "/var/lib/omoba-ru", "/var/backups/omo
 LIVE_PHASES = ("ready", "forming", "running", "settling", "recovering")
 MAX_WORKER_DIRS = 4096
 UNIT_PROPERTIES = ("LoadState", "ActiveState", "SubState", "UnitFileState", "Result", "NRestarts", "Type",
-                   "ActiveEnterTimestampMonotonic")
+                   "RemainAfterExit", "ActiveEnterTimestampMonotonic")
 UNIT_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9:_.@\\-]{0,200}\.(?:service|timer|socket|mount|target|path)")
 MONITOR_VALUE = re.compile(r"[A-Za-z0-9_+-]{1,40}")
 ALLOCATION = re.compile(r"[0-9a-f]{32}")
@@ -509,7 +509,8 @@ class Monitor:
         how = detail.get("service_result") or facts.get("Result") or "failed"
         if detail.get("exit_status"):
             how += f", {detail.get('exit_code') or 'status'} {detail['exit_status']}"
-        job = facts.get("Type") == "oneshot"
+        # A timer job; a oneshot that stays active (the per-source limits, LR-16) has no timer.
+        job = facts.get("Type") == "oneshot" and facts.get("RemainAfterExit") != "yes"
         if job:
             text = f"{name} failed ({how}); the timer runs it again on schedule (journalctl -u {name})"
             repeat = self.cfg.number("OMOBA_ALERT_JOB_REPEAT_HOURS") * 3600

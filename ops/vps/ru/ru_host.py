@@ -184,7 +184,7 @@ NFT_RULES = OPT + "/nftables-omoba.conf"
 NFT_TABLE = ("inet", "omoba_limits")
 LIMITS_UNIT_FILE = "omoba-limits-ru.service"
 LIMITS_UNIT = LIMITS_UNIT_FILE[:-len(".service")]
-LIMITS_UNIT_RULES = {"Service.Type": "oneshot", "Service.RemainAfterExit": "yes",
+LIMITS_UNIT_RULES = {"Unit.OnFailure": ON_FAILURE, "Service.Type": "oneshot", "Service.RemainAfterExit": "yes",
                      "Service.ExecStart": f"/usr/sbin/nft -f {NFT_RULES}",
                      "Service.ExecStop": f"/usr/sbin/nft delete table {' '.join(NFT_TABLE)}",
                      "Install.WantedBy": "multi-user.target"}

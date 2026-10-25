@@ -6,6 +6,7 @@
 Description=OMOBA RU per-source UDP limits (nftables)
 After=ufw.service
 Before=omoba-lobby-ru.service
+OnFailure=omoba-alert-ru@%n.service
 
 [Service]
 Type=oneshot
