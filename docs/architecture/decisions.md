@@ -336,7 +336,7 @@ sequenceDiagram
 **Decision.**
 - Every new transport sends a small JSON preflight before `Hello` (offline practice has none). Lobby-to-worker redirects, retries and reconnects each run a fresh check.
 - The contract is owned by `shared/src/compatibility.rs` (`ReleaseContract::current`) and has these fields: `handshake` (`HANDSHAKE_VERSION`, 1), `release` (`CARGO_PKG_VERSION`, informational), `protocol` (`PROTOCOL_VERSION`), `catalog` (`loadout::CATALOG_REVISION`), `geometry` (`map::GEOMETRY_ID`) and `gameplay` (`GAMEPLAY_REVISION`, now `"dawnweaver-2026-10-11-reference"`).
-- Probes and reports are at most 2 KiB (`MAX_PROBE_BYTES`). Each attempt carries a 16-byte nonce. All probe sources share a budget of 64 replies per second per process (`docs/release-compatibility.md`, "Bounds and trust").
+- Probes and reports are at most 2 KiB (`MAX_PROBE_BYTES`). Each attempt carries a 16-byte nonce. Replies are budgeted per second per process: 8 per source IP and 32 per network first, then 64 in all with 16 kept for new sources (LR-16; `docs/release-compatibility.md`, "Bounds and trust").
 - A confirmed mismatch names its category and stops automatic reconnect. A four-second timeout reports verification as unavailable, not as a mismatch.
 - The release builder writes `compatibility.json` next to the packages. Distribution waits until the live lobby and a staged worker verify that manifest.
 
