@@ -613,6 +613,7 @@ fn render_draft(
     scroll: Res<DraftScrollMemory>,
     locale: Option<Res<Locale>>,
     mut party_stage: Option<ResMut<super::party_stage::PartyStage>>,
+    flow: Option<Res<crate::match_service::MatchServiceClient>>,
     mut last: Local<String>,
 ) {
     let Ok(window) = windows.single() else {
@@ -621,6 +622,10 @@ fn render_draft(
     let Some(draft) = &game.prematch else {
         return;
     };
+    // The public lobby's queue and Rated/Unrated badge (LR-08).
+    let badge = flow
+        .as_deref()
+        .and_then(crate::match_service::MatchServiceClient::match_badge);
     // Completes "Connect Ekza" from this screen and keeps the library current
     // (about every 15 s), so a weapon claimed on the web appears in the picker.
     crate::passport::poll_account();
@@ -654,7 +659,7 @@ fn render_draft(
         window.width()
     );
     let key = format!(
-        "{key}:{:?}:{}:{}:{}:{}",
+        "{key}:{:?}:{}:{}:{}:{}:{badge:?}",
         state.picker_tab,
         omoba_passport::weapon_store::snapshot().0,
         crate::passport::account_connected(),
@@ -751,15 +756,31 @@ fn render_draft(
                     TextLayout::justify(Justify::Center).with_linebreak(LineBreak::NoWrap),
                     Name::new("DraftSelectionClock"),
                 ));
-                action_button(
-                    header,
-                    tr("common.cancel"),
-                    DraftAction::Leave,
-                    "DraftCancel",
-                    86.0,
-                    false,
-                    false,
-                );
+                header
+                    .spawn(Node {
+                        column_gap: Val::Px(12.0),
+                        align_items: AlignItems::Center,
+                        ..default()
+                    })
+                    .with_children(|end| {
+                        if let Some(badge) = &badge {
+                            end.spawn((
+                                widgets::label(badge, 13.0, theme::GOLD),
+                                TextLayout::justify(Justify::Right)
+                                    .with_linebreak(LineBreak::NoWrap),
+                                Name::new("DraftQueueBadge"),
+                            ));
+                        }
+                        action_button(
+                            end,
+                            tr("common.cancel"),
+                            DraftAction::Leave,
+                            "DraftCancel",
+                            86.0,
+                            false,
+                            false,
+                        );
+                    });
             });
             root.spawn(Node {
                 flex_grow: 1.0,
@@ -1886,6 +1907,20 @@ mod tests {
         .init_resource::<DraftScrollMemory>()
         .init_resource::<AvatarThumbnails>()
         .add_systems(Update, render_draft);
+        // A Ranked allocation from the public lobby: the header names it
+        // with its rating badge (LR-08).
+        let mut flow = crate::match_service::MatchServiceClient::default();
+        flow.allocation = Some(shared::match_service::MatchAllocation {
+            allocation_id: "a".repeat(32),
+            endpoint: "127.0.0.1:41000".into(),
+            preference: shared::match_service::MatchPreference::Ranked,
+            team: shared::map::Team::Green,
+            human_count: 10,
+            bot_count: 0,
+            rated: true,
+            join_deadline_ms: 0,
+        });
+        app.insert_resource(flow);
         app.world_mut().spawn((Window::default(), PrimaryWindow));
         app.update();
         let label = |app: &mut App, id: &str| {
@@ -1908,6 +1943,7 @@ mod tests {
                 .iter()
                 .any(|text| text == "Assemble your team")
         );
+        assert!(texts(&mut app).iter().any(|text| text == "Ranked · Rated"));
         let plate_texts = |app: &mut App| -> Vec<String> {
             let plate = app
                 .world_mut()
@@ -1940,6 +1976,10 @@ mod tests {
         );
         let shown = texts(&mut app);
         assert!(shown.iter().any(|text| text == "组建你的队伍"), "{shown:?}");
+        assert!(
+            shown.iter().any(|text| text == "排位赛 · 计入排位"),
+            "{shown:?}"
+        );
         let plate = plate_texts(&mut app);
         assert!(plate[0].starts_with("Local"), "{plate:?}");
         assert_eq!(plate[1], "战士");

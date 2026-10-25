@@ -521,6 +521,7 @@ fn observe(
         ],
         0 if std::env::var("OMOBA_PUBLIC_MVP_QA").as_deref() == Ok("1") => &[
             "HomePlay",
+            "HomeRanked",
             "HomeBotPractice",
             "HomeCustomizeCard",
             "HomeAccount",

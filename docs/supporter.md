@@ -19,6 +19,11 @@ usability or App Review acceptance. The Apple verification policy is under
 the separately approved production dependency. Do not enable Apple checkout with
 a mock verifier or a service that only decodes JWT payloads.
 
+**Planned (ADR-025; LR-67, LR-69):**
+- Tiers count provider-neutral points: YooKassa gives 1 point per ruble, and each Apple tier product gives 100 to 10 000.
+- Seven non-renewing 30-day Apple products ($0.99 to $99.99) replace the monthly subscription, which was never sold.
+- The iOS app shows no web payment link.
+
 ## Monthly Hero status and public thanks
 
 Hero is the player-facing name for the existing Supporter cosmetic entitlement.

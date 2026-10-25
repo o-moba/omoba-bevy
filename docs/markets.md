@@ -6,6 +6,12 @@ language and how players sign in. It is a compile-time choice: a Russian build
 cannot be switched to the Ekza ecosystem or to payments at run time, and a
 typo in a market or feature name fails the build.
 
+> **Planned (ADR-025, LR-68):** one app per platform for Russia and the
+> international market. The account's region, confirmed on first launch, will
+> choose servers, sign-in and payments at run time. The compile-time market then
+> stays only for server binaries, CI and the RU-locked builds until LR-68 R3.
+> This page describes what is built today.
+
 | | `global` (default) | `ru` | `cn` |
 | --- | --- | --- | --- |
 | Who | Europe and the rest of the world | Russia | mainland China |

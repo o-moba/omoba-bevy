@@ -402,14 +402,7 @@ fn worker_command(
         .env("OMOBA_CAREER_OUTBOX", directory.join("outbox"))
         .env("SERVER_ADDR", &m.bind)
         .env("OMOBA_TEAM_SIZE", "5")
-        .env(
-            "OMOBA_MATCH_MODE",
-            if m.humans.len() == 10 {
-                "release"
-            } else {
-                "practice"
-            },
-        )
+        .env("OMOBA_MATCH_MODE", m.match_mode().id())
         .env_remove("OMOBA_MAP_CONFIG")
         .env_remove("OMOBA_TARGETING_QA")
         .env_remove(shared::bot_profile::BotDifficulty::ENV);

@@ -1,9 +1,9 @@
 # Bot practice, match chat and reactions
 
 The standalone practice launcher starts a playable arena with one human and fills
-vacant seats with labelled bot heroes. The separate public lobby offers Quick bot
-fallback and Play with bots, saves approved human progression, and freezes its
-allocated roster. See [the public multiplayer guide](public-mvp.md). The behavior
+vacant seats with labelled bot heroes. The separate public lobby offers Casual
+PvP (bots after 30 s), Ranked (never bots) and vs Bots, saves approved human
+progression, and freezes its allocated roster. See [the public multiplayer guide](public-mvp.md). The behavior
 below describes standalone practice unless explicitly stated otherwise. Chat and picture reactions work in admitted matches and
 use a separate, bounded social stream.
 
