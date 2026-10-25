@@ -2229,8 +2229,9 @@ mod tests {
     }
 
     /// LR-18 acceptance: a fresh install is asked to protect its progress
-    /// after its first match. "Not now" hides the card until the first ranked
-    /// match; Protect opens Protect progress; a protected account is not asked.
+    /// after its first match. "Not now" hides the card for three completed
+    /// matches or until the first ranked match; Protect opens Protect progress;
+    /// a protected account is not asked.
     #[test]
     fn a_fresh_install_is_asked_to_protect_its_progress_after_the_first_match() {
         use crate::career::{CareerModal, protection::ProtectPrompt};
@@ -2276,12 +2277,23 @@ mod tests {
         app.update();
         assert!(!banner(&mut app));
         assert_eq!(app.world().resource::<ProtectPrompt>().record().declines, 1);
+        set_profile(&mut app, 3, 0);
+        app.update();
+        assert!(
+            !banner(&mut app),
+            "two more casual matches do not bring it back"
+        );
         set_profile(&mut app, 4, 0);
         app.update();
-        assert!(!banner(&mut app), "casual matches do not bring it back");
+        assert!(banner(&mut app), "the third one does");
+        harness::press(app.world_mut(), "HomeProtectLater");
+        app.update();
+        app.update();
+        assert!(!banner(&mut app));
+        assert_eq!(app.world().resource::<ProtectPrompt>().record().declines, 2);
         set_profile(&mut app, 5, 1);
         app.update();
-        assert!(banner(&mut app), "the first ranked match does");
+        assert!(banner(&mut app), "the first ranked match comes sooner");
         harness::press(app.world_mut(), "HomeProtect");
         app.update();
         assert_eq!(

@@ -12,9 +12,10 @@
 //!   after a second press.
 //! - **Home card.** After the first completed match, and again after the first
 //!   ranked match, a dismissible card asks to link VK ID or save a recovery code;
-//!   after that a decline hides it until the next completed match. It stops when
-//!   the profile is protected or after three declines ([`PromptRecord`], kept in
-//!   the region folder as [`PROMPT_FILE`]).
+//!   a decline hides it for three completed matches, or until the first ranked
+//!   match if that comes sooner. It stops when the profile is protected or after
+//!   three declines ([`PromptRecord`], kept in the region folder as
+//!   [`PROMPT_FILE`]).
 //! - **Region.** The copy comes from the region's sign-in methods through
 //!   [`vk_offered`], this module's one read of the market (LR-68 R0 swaps it for
 //!   the bound region).
@@ -31,6 +32,9 @@ use std::sync::{Mutex, mpsc};
 pub(crate) const PROMPT_FILE: &str = "protect_prompt.json";
 /// After this many "Not now" presses the card stops coming back.
 pub(crate) const MAX_DECLINES: u8 = 3;
+/// A "Not now" lasts this many completed matches (the first ranked match ends it
+/// sooner), so a player who never plays ranked is asked again too.
+pub(crate) const REASK_AFTER_MATCHES: u32 = 3;
 /// A record larger than this is not ours.
 const MAX_RECORD_BYTES: u64 = 4096;
 /// An automatic status read that failed waits this long before the next one.
@@ -73,9 +77,9 @@ pub(crate) struct PromptRecord {
 }
 impl PromptRecord {
     /// The card is due for `profile` (when it is not protected): after the
-    /// first completed match; after a decline, at the first ranked match, and
-    /// once that has passed, at the next completed match; never after
-    /// [`MAX_DECLINES`].
+    /// first completed match; after a decline, at the first ranked match or
+    /// [`REASK_AFTER_MATCHES`] completed matches later, whichever comes first;
+    /// never after [`MAX_DECLINES`].
     pub(crate) fn due(&self, profile: &ProfileSummary) -> bool {
         if self.declines >= MAX_DECLINES || profile.matches_played == 0 {
             return false;
@@ -83,10 +87,10 @@ impl PromptRecord {
         if self.declines == 0 {
             return true;
         }
-        if !self.declined_after_ranked {
-            return profile.rated_matches > 0;
-        }
-        profile.matches_played > self.declined_at_matches
+        let first_ranked = !self.declined_after_ranked && profile.rated_matches > 0;
+        first_ranked
+            || profile.matches_played
+                >= self.declined_at_matches.saturating_add(REASK_AFTER_MATCHES)
     }
     fn decline(&mut self, profile: &ProfileSummary) {
         self.declines = self.declines.saturating_add(1).min(MAX_DECLINES);
@@ -480,21 +484,33 @@ mod tests {
         assert!(!record.due(&profile(0, 0)));
         assert!(record.due(&profile(1, 0)));
         record.decline(&profile(1, 0));
-        // Casual matches do not bring it back; the first ranked match does.
-        assert!(!record.due(&profile(5, 0)));
-        assert!(record.due(&profile(6, 1)));
-        record.decline(&profile(6, 1));
-        assert!(!record.due(&profile(6, 1)));
-        // After the ranked match a decline lasts until the next completed match.
-        assert!(record.due(&profile(7, 1)));
-        record.decline(&profile(7, 1));
+        // The first ranked match brings it back before three casual matches do.
+        assert!(!record.due(&profile(3, 0)));
+        assert!(record.due(&profile(3, 1)));
+        record.decline(&profile(3, 1));
+        assert!(!record.due(&profile(3, 1)));
+        // After that a decline lasts three completed matches.
+        assert!(!record.due(&profile(5, 2)));
+        assert!(record.due(&profile(6, 2)));
+        record.decline(&profile(6, 2));
         assert_eq!(record.declines, MAX_DECLINES);
         assert!(!record.due(&profile(50, 20)));
-        // A first match that was ranked: each later match brings it back.
+        // A player who never plays ranked is asked again every three matches.
+        let mut casual = PromptRecord::default();
+        assert!(casual.due(&profile(1, 0)));
+        casual.decline(&profile(1, 0));
+        assert!(!casual.due(&profile(3, 0)));
+        assert!(casual.due(&profile(4, 0)));
+        casual.decline(&profile(4, 0));
+        assert!(!casual.due(&profile(6, 0)));
+        assert!(casual.due(&profile(7, 0)));
+        casual.decline(&profile(7, 0));
+        assert!(!casual.due(&profile(100, 0)));
+        // A first match that was ranked: no second ranked trigger, three matches.
         let mut ranked_first = PromptRecord::default();
         ranked_first.decline(&profile(1, 1));
-        assert!(!ranked_first.due(&profile(1, 1)));
-        assert!(ranked_first.due(&profile(2, 1)));
+        assert!(!ranked_first.due(&profile(3, 3)));
+        assert!(ranked_first.due(&profile(4, 4)));
     }
 
     #[test]
