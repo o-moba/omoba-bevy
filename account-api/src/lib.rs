@@ -38,8 +38,11 @@ pub const PORTAL_MIGRATION: &str = include_str!("../migrations/001_portal.sql");
 pub const EKZA_LIBRARY_MIGRATION: &str = include_str!("../migrations/005_ekza_library.sql");
 pub const CLASS_BUILDS_MIGRATION: &str = include_str!("../migrations/004_class_builds.sql");
 pub const SOCIAL_MIGRATION: &str = include_str!("../migrations/007_social_sign_in.sql");
+/// Portal schema 9 (LR-67): YooKassa supporter donations and Hero tier points.
+/// Number 8 is reserved for LR-20 feedback (launch-readiness section 7).
+pub const YOOKASSA_MIGRATION: &str = include_str!("../migrations/009_yookassa_supporter.sql");
 /// Every portal schema version this build serves, in order.
-pub const PORTAL_SCHEMA: [i32; 7] = [1, 2, 3, 4, 5, 6, 7];
+pub const PORTAL_SCHEMA: [i32; 8] = [1, 2, 3, 4, 5, 6, 7, 9];
 #[derive(Clone)]
 pub struct Config {
     pub origin: String,
@@ -121,8 +124,9 @@ pub fn game_error(message: String) -> Error {
 }
 
 fn validate_portal_schema(versions: &[i32]) -> Result<()> {
-    // Recognition reads require migration 6 and social sign-in migration 7, including
-    // existing endpoints. Reject an old deployment at startup instead of failing later.
+    // Recognition reads require migration 6, social sign-in migration 7 and the
+    // Hero tier reads migration 9, including existing endpoints. Reject an old
+    // deployment at startup instead of failing later.
     if versions != PORTAL_SCHEMA {
         return Err(Error(
             StatusCode::SERVICE_UNAVAILABLE,
@@ -166,15 +170,11 @@ impl App {
                 "invalid_billing_configuration",
             )
         })?;
-        // A free market's build refuses payment configuration instead of ignoring it.
-        if !shared::market::FEATURES.supporter
-            && (billing.apple.is_some() || billing.solana.is_some())
-        {
-            return Err(Error(
-                StatusCode::SERVICE_UNAVAILABLE,
-                "billing_configured_without_supporter",
-            ));
-        }
+        // A free market's build refuses payment configuration instead of ignoring
+        // it, and a market refuses another market's providers (LR-67).
+        billing
+            .check_market(supporter::market_providers())
+            .map_err(|code| Error(StatusCode::SERVICE_UNAVAILABLE, code))?;
         Ok(Self {
             ekza: Arc::new(ekza_library::EkzaConfig::from_env(&config.origin)?),
             social: Arc::new(social::SocialConfig::from_env().map_err(|_| {
@@ -250,6 +250,7 @@ pub async fn migrate(url: &str) -> std::result::Result<(), String> {
         (5, EKZA_LIBRARY_MIGRATION),
         (6, SUPPORTER_RECOGNITION_MIGRATION),
         (7, SOCIAL_MIGRATION),
+        (9, YOOKASSA_MIGRATION),
     ] {
         let applied: bool = sqlx::query_scalar(
             "SELECT EXISTS(SELECT 1 FROM portal.schema_version WHERE version=$1)",
@@ -390,9 +391,11 @@ async fn dispatch(
             _ => Err(forbidden()),
         };
     }
-    // A free market's build serves no payment or Supporter route at all.
-    if !shared::market::FEATURES.supporter
-        && (path.starts_with("supporter") || path.starts_with("me/supporter"))
+    // A free market's build serves no payment or Supporter route at all, and a
+    // market serves no route of a provider it does not sell through (LR-67).
+    if (path.starts_with("supporter") || path.starts_with("me/supporter"))
+        && (!shared::market::FEATURES.supporter
+            || !supporter::provider_route_allowed(path, supporter::market_providers()))
     {
         return Err(forbidden());
     }
@@ -564,15 +567,16 @@ mod schema_tests {
     use super::*;
 
     #[test]
-    fn runtime_requires_complete_schema_seven_before_serving_existing_routes() {
-        assert!(validate_portal_schema(&[1, 2, 3, 4, 5, 6, 7]).is_ok());
+    fn runtime_requires_complete_schema_nine_before_serving_existing_routes() {
+        assert!(validate_portal_schema(&[1, 2, 3, 4, 5, 6, 7, 9]).is_ok());
         for old_or_unknown in [
             vec![1, 2, 3],
             vec![1, 2, 3, 4],
             vec![1, 2, 3, 4, 5],
             vec![1, 2, 3, 4, 5, 6],
-            vec![1, 2, 3, 5, 6, 7],
-            vec![1, 2, 3, 4, 5, 6, 7, 8],
+            vec![1, 2, 3, 4, 5, 6, 7],
+            vec![1, 2, 3, 5, 6, 7, 9],
+            vec![1, 2, 3, 4, 5, 6, 7, 9, 10],
         ] {
             let error = validate_portal_schema(&old_or_unknown).unwrap_err();
             assert_eq!(error.0, StatusCode::SERVICE_UNAVAILABLE);

@@ -2729,7 +2729,7 @@
             }
           },
           "403": {
-            "description": "Active Supporter required",
+            "description": "Active Supporter required: supporter_required without an active grant, tier_required for a tier style the account's points do not reach.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2796,6 +2796,13 @@
                       "solar",
                       "lunar",
                       "verdant",
+                      "rose",
+                      "jade",
+                      "azure",
+                      "crimson",
+                      "prism_i",
+                      "prism_ii",
+                      "prism_iii",
                       null
                     ]
                   }
@@ -6326,6 +6333,11 @@
               "null"
             ],
             "description": "True/false only when verified provider renewal information exists; null means unknown. Cancellation preserves paid access until expiry unless refunded."
+          },
+          "tier_points": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Provider-neutral Hero tier points this grant adds while it covers a moment (YooKassa: whole rubles kept after refunds; Apple and Solana: 0). Absent from older replies: read as 0."
           }
         },
         "required": [
@@ -6352,6 +6364,13 @@
               "solar",
               "lunar",
               "verdant",
+              "rose",
+              "jade",
+              "azure",
+              "crimson",
+              "prism_i",
+              "prism_ii",
+              "prism_iii",
               null
             ]
           },
@@ -6367,13 +6386,28 @@
             "items": {
               "$ref": "#/components/schemas/SupporterGrant"
             }
+          },
+          "tier_points": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Sum of the tier points of the grants covering the moment of the read (portal.supporter_points). Rose 100, Jade 250, Azure 500, Crimson 1000, Prism I 2500, Prism II 5000, Prism III 10000."
+          },
+          "tier_until": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "End of the current tier (UTC epoch seconds) from a sweep over the active grants; null without a tier."
           }
         },
         "required": [
           "active",
           "equipped_aura",
           "active_until",
-          "grants"
+          "grants",
+          "tier_points",
+          "tier_until"
         ]
       },
       "SupporterDashboard": {
@@ -6402,25 +6436,56 @@
                   "enum": [
                     "solar",
                     "lunar",
-                    "verdant"
+                    "verdant",
+                    "rose",
+                    "jade",
+                    "azure",
+                    "crimson",
+                    "prism_i",
+                    "prism_ii",
+                    "prism_iii"
                   ]
                 },
                 "name": {
                   "type": "string"
+                },
+                "tier_points": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "description": "Points the style needs on top of an active grant; 0 for the base styles."
+                },
+                "unlocked": {
+                  "type": "boolean",
+                  "description": "Whether this account may wear the style now (shared entitlement rule)."
                 }
               },
               "required": [
                 "id",
-                "name"
+                "name",
+                "tier_points",
+                "unlocked"
               ]
             }
+          },
+          "providers": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "apple",
+                "solana",
+                "yookassa"
+              ]
+            },
+            "description": "Payment providers this market sells through (global: apple, solana; RU: yookassa)."
           }
         },
         "required": [
           "supporter",
           "apple",
           "solana",
-          "catalog"
+          "catalog",
+          "providers"
         ]
       },
       "SupporterCheckout": {
@@ -6553,6 +6618,13 @@
                           "solar",
                           "lunar",
                           "verdant",
+                          "rose",
+                          "jade",
+                          "azure",
+                          "crimson",
+                          "prism_i",
+                          "prism_ii",
+                          "prism_iii",
                           null
                         ]
                       }

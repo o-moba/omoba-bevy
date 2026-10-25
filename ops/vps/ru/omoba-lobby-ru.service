@@ -10,6 +10,8 @@ Description=OMOBA RU lobby and bounded match workers
 After=network-online.target postgresql.service
 Wants=network-online.target postgresql.service
 StartLimitIntervalSec=0
+# Any failure (also each crash before the restart) alerts the owner (LR-17).
+OnFailure=omoba-alert-ru@%n.service
 
 [Service]
 Type=simple

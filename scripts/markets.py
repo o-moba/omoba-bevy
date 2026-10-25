@@ -7,14 +7,18 @@ step. One source for scripts/release.py and mobile/android/build.py.
 A market is a preset of features plus the market's own servers:
 
 - **global** (default): Europe and the rest of the world, today's product: Ekza
-  ecosystem on, Hero Supporter purchases on, game <-> website pairing.
-- **ru**: a free game on Russian servers. Ekza off, purchases off, Russian by
-  default, sign-in with VK ID (VK, OK, Mail.ru) on the RU player portal. Its own
+  ecosystem on, Hero Supporter purchases on (Apple, Solana), game <-> website pairing.
+- **ru**: Russian servers. Ekza off, Hero Supporter auras sold only through
+  YooKassa donations on the RU portal (LR-67), Russian by default, sign-in with
+  VK ID (VK, OK, Mail.ru) on the RU player portal. Its own
   settings folder (`omoba-bevy-ru`), package names (`Omoba-<v>-ru-*`) and Android
   app (`space.ekza.omoba.ru`), so it never shares device keys with a global
   install: each market has its own account service.
 - **cn**: a free game for mainland China, Simplified Chinese by default. Its
   servers and sign-in providers are not decided, so it cannot be packaged yet.
+
+Each market also carries its legal table (`Legal`, LR-06): documents to accept, source
+link, support and community channels and age sign; global and cn have none.
 
 The contour (prod / dev, scripts/contours.py) is a separate axis: `--market ru
 --contour dev` is the OMOBA Dev tester app with RU features.
@@ -26,6 +30,28 @@ from dataclasses import dataclass, field
 MARKET_ENV = "OMOBA_MARKET"
 FEATURES = ("ekza", "supporter", "vk_sign_in")
 FEATURE_ENVS = {name: f"OMOBA_FEATURE_{name.upper()}" for name in FEATURES}
+PAYMENT_PROVIDERS = ("apple", "solana", "yookassa")
+
+
+@dataclass(frozen=True)
+class Legal:
+    """A market's legal documents, source link, player channels and age sign (LR-06, LR-07,
+    LR-21): shared/src/market.rs `Market::legal`, field for field. None is "not provided" and
+    is not shown (the README skips it, the game hides it)."""
+    version: str | None = None
+    """Version of the user agreement and privacy policy the game asks a player to accept."""
+    privacy: str | None = None
+    terms: str | None = None
+    source: str | None = None
+    """Public source tree of a release; `{version}` stands for the release (`0.45.0`)."""
+    support_email: str | None = None
+    community_vk: str | None = None
+    community_telegram: str | None = None
+    age_rating: str | None = None
+    """Age category sign (436-FZ), for example `12+`."""
+
+    def source_for(self, version: str) -> str | None:
+        return self.source.replace("{version}", version) if self.source else None
 
 
 @dataclass(frozen=True)
@@ -57,6 +83,11 @@ class Market:
     mirror. None: the catalog links the IPFS copies."""
     release_label: str = "playtest"
     """The release status players see next to every download (catalog `test_status`)."""
+    payment_providers: tuple[str, ...] = ()
+    """Who sells Hero Supporter access while `supporter` is on
+    (shared/src/market.rs Market::payment_providers)."""
+    legal: Legal = Legal()
+    """Legal documents, source link, player channels and age sign; global has none."""
 
     @property
     def label(self) -> str:
@@ -76,10 +107,11 @@ class Market:
 
 
 MARKETS = {
-    "global": Market("global", {"ekza": True, "supporter": True, "vk_sign_in": False}, "en", None),
+    "global": Market("global", {"ekza": True, "supporter": True, "vk_sign_in": False}, "en", None,
+                     payment_providers=("apple", "solana")),
     # The RU servers are planned under omoba.ru (REG.RU; docs/markets.md: DNS, hosting in
     # Russia, VK ID app). A build bakes these names in; they answer once deployed.
-    "ru": Market("ru", {"ekza": False, "supporter": False, "vk_sign_in": True}, "ru", "ru",
+    "ru": Market("ru", {"ekza": False, "supporter": True, "vk_sign_in": True}, "ru", "ru",
                  lobby="lobby.omoba.ru:4000",
                  account_api="https://account.omoba.ru",
                  portal="https://omoba.ru",
@@ -89,7 +121,16 @@ MARKETS = {
                  android={"bundle_id": "space.ekza.omoba.ru", "display_name": "OMOBA"},
                  # LR-23: packages on the RU host (Caddy, ops/vps/ru/Caddyfile.ru), IPFS mirror.
                  downloads_path="/downloads",
-                 release_label="Открытая бета"),
+                 release_label="Открытая бета",
+                 # Hero Supporter donations through YooKassa on the RU portal only.
+                 payment_providers=("yookassa",),
+                 # Drafts (LR-04) until the counsel-approved texts bring a new version; support
+                 # and community wait for the owner (LR-21); 12+ is a placeholder (LR-07).
+                 legal=Legal(version="0-draft",
+                             privacy="https://omoba.ru/privacy",
+                             terms="https://omoba.ru/terms",
+                             source="https://github.com/o-moba/omoba-bevy/tree/v{version}-ru",
+                             age_rating="12+")),
     "cn": Market("cn", {"ekza": False, "supporter": False, "vk_sign_in": False}, "zh-Hans", "cn",
                  platforms=(), zones=("cn.omoba.io",),
                  blocked="the CN market has no servers or sign-in providers yet (docs/markets.md)"),
@@ -129,6 +170,11 @@ def market_env(key: str, overrides: dict[str, bool] | None = None) -> dict[str, 
         if value != preset[name]:
             env[FEATURE_ENVS[name]] = "on" if value else "off"
     return env
+
+
+def payment_providers(key: str, overrides: dict[str, bool] | None = None) -> tuple[str, ...]:
+    """The providers one build sells through: none while `supporter` is off."""
+    return market(key).payment_providers if resolve_features(key, overrides)["supporter"] else ()
 
 
 def config_dir(market_key: str, contour_suffix: str | None) -> str:

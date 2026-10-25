@@ -9,6 +9,14 @@ from urllib.parse import urlsplit
 
 import release
 
+# A lobby that answers the UDP compatibility check (scripts/market_probe.py, LR-17).
+SERVER_CONTRACT = {"handshake": 1, "release": "0.45.0", "protocol": 11, "catalog": "catalog-1",
+                   "geometry": "geometry-1", "gameplay": "gameplay-1"}
+
+
+def LOBBY_UP(address, port, client, timeout):
+    return {"ok": True, "rtt_ms": 41, "server": dict(SERVER_CONTRACT)}
+
 
 class ReleaseHelpers(unittest.TestCase):
     def test_workspace_version_reads_the_canonical_field(self):
@@ -628,12 +636,19 @@ exec "$DIR/Omoba.app/Contents/MacOS/server"
         self.assertIn("ekza-bevy-sdk", (release.ROOT / "Cargo.toml").read_text())
 
 
+def dataclasses_replace_legal(ru_market, **legal):
+    """`ru_market` with these `Legal` fields replaced."""
+    import dataclasses
+    return dataclasses.replace(ru_market, legal=dataclasses.replace(ru_market.legal, **legal))
+
+
 class Markets(unittest.TestCase):
     def test_presets_mirror_the_rust_market_module(self):
         import re
         import markets
         source = (release.ROOT / "shared/src/market.rs").read_text()
-        features = source[source.index("pub const fn default_features"):source.index("pub const fn default_locale")]
+        features = source[source.index("pub const fn default_features"):source.index("pub const fn payment_providers")]
+        providers = source[source.index("pub const fn payment_providers"):source.index("pub const fn default_locale")]
         locales = source[source.index("pub const fn default_locale"):source.index("pub const fn storage_suffix")]
         suffixes = source[source.index("pub const fn storage_suffix"):source.index("impl Features")]
         names = {"global": "Global", "ru": "Ru", "cn": "Cn"}
@@ -643,12 +658,90 @@ class Markets(unittest.TestCase):
             arm = re.search(rf"Self::{variant} => Features \{{(.*?)\}}", features, re.S).group(1)
             rust = {name: value == "true" for name, value in re.findall(r"(\w+): (true|false)", arm)}
             self.assertEqual(rust, preset.features, key)
+            arm = re.search(rf"Self::{variant} => &\[(.*?)\]", providers, re.S).group(1)
+            listed = tuple(re.findall(r"PaymentProvider::(\w+)", arm))
+            keys = {"Apple": "apple", "Solana": "solana", "YooKassa": "yookassa"}
+            self.assertEqual(tuple(keys[name] for name in listed), preset.payment_providers, key)
             self.assertIn(f'Self::{variant} => "{preset.locale}"', locales)
             expected = f'Some("{preset.storage_suffix}")' if preset.storage_suffix else "None"
             self.assertIn(f"Self::{variant} => {expected}", suffixes)
         for name, env in markets.FEATURE_ENVS.items():
             self.assertIn(f'option_env!("{env}")', source, name)
         self.assertIn('option_env!("OMOBA_MARKET")', source)
+        for provider in markets.PAYMENT_PROVIDERS:
+            self.assertIn(f'=> "{provider}"', source[source.index("impl PaymentProvider"):], provider)
+
+    def test_ru_sells_only_yookassa_and_global_keeps_apple_and_solana(self):
+        import markets
+        self.assertEqual(markets.payment_providers("ru"), ("yookassa",))
+        self.assertEqual(markets.payment_providers("global"), ("apple", "solana"))
+        self.assertEqual(markets.payment_providers("cn"), ())
+        self.assertTrue(markets.MARKETS["ru"].features["supporter"])
+        # Turning supporter off sells nothing; the build bakes only the switch.
+        self.assertEqual(markets.payment_providers("ru", {"supporter": False}), ())
+        self.assertEqual(markets.market_env("ru", {"supporter": False}),
+                         {"OMOBA_MARKET": "ru", "OMOBA_FEATURE_SUPPORTER": "off"})
+        self.assertEqual(markets.market_env("ru"), {"OMOBA_MARKET": "ru"})
+
+    def test_legal_links_mirror_the_rust_market_module(self):
+        """LR-06: markets.py `Legal` equals shared/src/market.rs `Market::legal`, field for field."""
+        import dataclasses
+        import re
+        import markets
+        source = (release.ROOT / "shared/src/market.rs").read_text()
+        table = source[source.index("pub const fn legal"):source.index("pub struct Legal")]
+        struct = source[source.index("pub struct Legal"):source.index("impl Legal")]
+        fields = [field.name for field in dataclasses.fields(markets.Legal)]
+        self.assertEqual(re.findall(r"pub (\w+): Option<&'static str>", struct), fields)
+        variants = ["Global", "Ru", "Cn"]
+        for index, (key, variant) in enumerate(zip(("global", "ru", "cn"), variants)):
+            start = table.index(f"Self::{variant} =>")
+            arm = table[start:table.index("Self::" + variants[index + 1]) if index + 1 < len(variants) else None]
+            legal = markets.MARKETS[key].legal
+            if legal == markets.Legal():
+                self.assertIn(f"Self::{variant} => Legal::NONE", arm, key)
+                continue
+            rust = {name: value or None for name, _, value in
+                    re.findall(r'(\w+): (None|Some\("([^"]*)"\))', arm)}
+            self.assertEqual(rust, dataclasses.asdict(legal), key)
+
+    def test_ru_readme_names_the_age_sign_documents_and_source_tag(self):
+        import markets
+        ru = release.resolve_flavor(market="ru")
+        legal = markets.MARKETS["ru"].legal
+        for target in ("macos", "windows", "linux"):
+            readme = release.player_readme("0.45.0", target, ru)
+            self.assertIn(f"Age rating: {legal.age_rating}", readme)
+            self.assertIn(f"Privacy policy: {legal.privacy}", readme)
+            self.assertIn(f"Terms of use: {legal.terms}", readme)
+            self.assertIn("Source code of this release: https://github.com/o-moba/omoba-bevy/tree/v0.45.0-ru",
+                          readme)
+            # Support and community stay out until the owner provides them (LR-21).
+            self.assertNotIn("Support", readme)
+            self.assertNotIn("Telegram", readme)
+        # The source tag is the RU release tag `draft` creates.
+        self.assertTrue(legal.source_for("0.45.0").endswith("/tree/" + release.release_tag("prod", None, "0.45.0", "ru")))
+        # A dev build has no public tag; the global README is unchanged.
+        self.assertNotIn("Source code", release.player_readme("0.45.0", "linux", release.resolve_flavor("dev", market="ru")))
+        self.assertNotIn("LEGAL", release.player_readme("0.45.0", "linux"))
+        provided = dataclasses_replace_legal(ru_market=markets.MARKETS["ru"], support_email="help@omoba.ru",
+                                             community_telegram="https://t.me/omoba_ru")
+        from unittest import mock
+        with mock.patch.dict(markets.MARKETS, {"ru": provided}):
+            readme = release.player_readme("0.45.0", "linux", ru)
+        self.assertIn("Support: help@omoba.ru", readme)
+        self.assertIn("Telegram: https://t.me/omoba_ru", readme)
+
+    def test_publication_needs_the_public_source_tag(self):
+        listed = "abc123\trefs/tags/v0.45.0-ru\n"
+        self.assertEqual(release.require_public_source_tag("0.45.0", "ru", lambda tag: listed), "v0.45.0-ru")
+        for listing in ("", "abc123\trefs/tags/v0.45.0-ru-dev.1\n"):
+            with self.assertRaises(SystemExit) as refused:
+                release.require_public_source_tag("0.45.0", "ru", lambda tag, listing=listing: listing)
+            self.assertIn("v0.45.0-ru", str(refused.exception))
+        # A market without a source link checks nothing.
+        self.assertIsNone(release.require_public_source_tag("0.45.0", "global",
+                                                            lambda tag: self.fail("no lookup")))
 
     def test_ru_build_bakes_its_market_servers_folder_and_names(self):
         ru = release.resolve_flavor(market="ru")
@@ -720,13 +813,71 @@ class Markets(unittest.TestCase):
                                          ref=None, branch=None), "0.45.0")
 
     def test_preflight_reports_each_server(self):
-        down = release.preflight_report("ru", resolve=lambda host: (_ for _ in ()).throw(OSError()),
+        down = release.preflight_report("ru", udp=LOBBY_UP, resolve=lambda host: (_ for _ in ()).throw(OSError()),
                                         fetch=lambda url: 503)
         self.assertFalse(down["ready"])
         self.assertEqual(down["checks"]["account_api"]["url"], "https://account.omoba.ru/health/ready")
-        up = release.preflight_report("ru", resolve=lambda host: ["203.0.113.7"], fetch=self.ru_host())
+        up = release.preflight_report("ru", udp=LOBBY_UP, resolve=lambda host: ["203.0.113.7"], fetch=self.ru_host())
         self.assertTrue(up["ready"], up)
         self.assertFalse(release.preflight_report("cn")["ready"])
+
+    def test_preflight_fails_a_server_that_answers_without_http(self):
+        import http.client
+
+        def garbled(url):
+            raise http.client.BadStatusLine("garbage")
+        report = release.preflight_report("ru", udp=LOBBY_UP, resolve=lambda host: ["203.0.113.7"], fetch=garbled)
+        self.assertFalse(report["ready"])
+        http_checks = {name: check["error"] for name, check in report["checks"].items() if "url" in check}
+        self.assertEqual(set(http_checks.values()), {"BadStatusLine"})
+        self.assertIn("portal", http_checks)
+
+    def test_preflight_probes_the_lobby_over_udp(self):
+        """LR-17: the lobby must answer the UDP compatibility check at the address DNS gave."""
+        calls = []
+
+        def silent(address, port, client, timeout):
+            calls.append((address, port, client))
+            return {"ok": False, "error": "no compatibility reply in 4 s"}
+        dns = lambda host: ["203.0.113.7"]
+        report = release.preflight_report("ru", udp=silent, resolve=dns, fetch=self.ru_host())
+        self.assertFalse(report["ready"])
+        self.assertEqual([name for name, check in report["checks"].items() if not check["ok"]], ["lobby_udp"])
+        self.assertEqual(report["checks"]["lobby_udp"]["endpoint"], release.MARKETS["ru"].lobby)
+        self.assertEqual(calls, [("203.0.113.7", 4000, None)], "the RU lobby port from scripts/markets.py")
+        up = release.preflight_report("ru", udp=LOBBY_UP, resolve=dns, fetch=self.ru_host())
+        self.assertTrue(up["ready"], up)
+        self.assertEqual(up["checks"]["lobby_udp"]["server"], SERVER_CONTRACT)
+        # Without an address there is nothing to probe, and nothing is sent.
+        calls.clear()
+        no_dns = release.preflight_report("ru", udp=silent, resolve=lambda host: (_ for _ in ()).throw(OSError()),
+                                          fetch=self.ru_host())
+        self.assertFalse(no_dns["checks"]["lobby_udp"]["ok"])
+        self.assertEqual(calls, [])
+
+    def test_preflight_compares_the_lobby_with_a_release_contract(self):
+        dns = lambda host: ["203.0.113.7"]
+        sent = []
+
+        def lobby(address, port, client, timeout):
+            sent.append(client)
+            return LOBBY_UP(address, port, client, timeout)
+        same = release.preflight_report("ru", udp=lobby, resolve=dns, fetch=self.ru_host(),
+                                        contract={**SERVER_CONTRACT, "release": "0.45.1"})
+        self.assertTrue(same["ready"], same)
+        self.assertEqual(sent[0]["release"], "0.45.1", "the release's own contract is sent")
+        self.assertTrue(same["checks"]["lobby_udp"]["compatible"])
+        older = release.preflight_report("ru", udp=lobby, resolve=dns, fetch=self.ru_host(),
+                                         contract={**SERVER_CONTRACT, "protocol": SERVER_CONTRACT["protocol"] - 1})
+        self.assertFalse(older["ready"])
+        self.assertEqual(older["checks"]["lobby_udp"]["issue"], "protocol")
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "compatibility.json"
+            path.write_text(json.dumps({**SERVER_CONTRACT, "extra": 1}))
+            self.assertEqual(release.read_contract(path), SERVER_CONTRACT)
+            path.write_text(json.dumps({**SERVER_CONTRACT, "catalog": "bad label!"}))
+            with self.assertRaises(SystemExit):
+                release.read_contract(path)
 
     @staticmethod
     def ru_host(**overrides):
@@ -738,14 +889,14 @@ class Markets(unittest.TestCase):
         dns = lambda host: ["203.0.113.7"]
         for url in ("https://omoba.ru/api/me", "https://omoba.ru/api/releases"):
             with self.subTest(url):
-                report = release.preflight_report("ru", resolve=dns, fetch=self.ru_host(**{url: 403}))
+                report = release.preflight_report("ru", udp=LOBBY_UP, resolve=dns, fetch=self.ru_host(**{url: 403}))
                 self.assertFalse(report["ready"])
                 failed = [check for check in report["checks"].values() if not check["ok"]]
                 self.assertEqual([check["url"] for check in failed], [url])
                 self.assertIn("LR-02", failed[0]["problem"])
         # A portal that cannot use the Account API at all is not ready either.
         for status in (400, 500, 502, 503):
-            report = release.preflight_report("ru", resolve=dns, fetch=self.ru_host(**{"https://omoba.ru/api/me": status}))
+            report = release.preflight_report("ru", udp=LOBBY_UP, resolve=dns, fetch=self.ru_host(**{"https://omoba.ru/api/me": status}))
             self.assertFalse(report["checks"]["portal_account"]["ok"], status)
             self.assertNotIn("problem", report["checks"]["portal_account"])
         # The portal and health answer, but the gated route is unreachable over the network.
@@ -753,10 +904,10 @@ class Markets(unittest.TestCase):
             if url.endswith("/api/releases"):
                 raise OSError("reset")
             return self.ru_host()(url)
-        self.assertEqual(release.preflight_report("ru", resolve=dns, fetch=unreachable)["checks"]["portal_releases"]["error"], "OSError")
+        self.assertEqual(release.preflight_report("ru", udp=LOBBY_UP, resolve=dns, fetch=unreachable)["checks"]["portal_releases"]["error"], "OSError")
 
     def test_preflight_fails_when_the_public_account_api_passes_portal_routes(self):
-        report = release.preflight_report("ru", resolve=lambda host: ["203.0.113.7"],
+        report = release.preflight_report("ru", udp=LOBBY_UP, resolve=lambda host: ["203.0.113.7"],
                                           fetch=self.ru_host(**{"https://account.omoba.ru/v1/me": 401}))
         self.assertFalse(report["ready"])
         closed = report["checks"]["account_api_portal_routes_closed"]
@@ -823,7 +974,10 @@ class Markets(unittest.TestCase):
             out = Path(temporary) / "v0.45.0-ru"
             out.mkdir()
             args = mock.Mock(market="ru", out=Path(temporary), min_release=None)
+            # LR-06: the public source tag exists (no network in tests).
+            tagged = lambda tag: f"abc\trefs/tags/{tag}\n"  # noqa: E731
             with mock.patch.object(release, "workspace_version", return_value="0.45.0"), \
+                    mock.patch.object(release, "remote_tag_listing", tagged), \
                     contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()) as err:
                 (out / "ipfs.json").write_text(json.dumps({"linux": {"file": name, "bytes": 5, "sha256": "c" * 64,
                                                                      "url": "https://gw/ipfs/x/" + name}}))

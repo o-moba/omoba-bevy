@@ -1,5 +1,12 @@
 //! Server-authorized cosmetics. Preview has a separate camera and never equips a
 //! world actor; all live aura components come only from the server snapshot.
+//!
+//! Hero tiers (LR-67): ten styles share one 23-element effect. The four solid
+//! tiers (Rose, Jade, Azure, Crimson) are palettes; the three Prism tiers cycle
+//! their hue every frame on the style's shared materials, so every wearer of
+//! one style shimmers in sync, faster and brighter per tier (Prism II adds
+//! stronger sparkles, Prism III a crown ring in place of one spark). How a
+//! player can buy access comes from [`payment_surface`].
 // i18n-strict
 use crate::ui::living_background::{self, LivingBands, LivingScene};
 use crate::{
@@ -24,9 +31,13 @@ use bevy::{
 };
 use shared::{
     career::CareerRequest,
+    market::{PaymentProvider, sells, sells_tiers},
     supporter::{AuraStyle, SupporterStatus},
 };
 use std::collections::HashMap;
+
+/// Every style has its own shared materials.
+const STYLE_COUNT: usize = AuraStyle::ALL.len();
 
 const PREVIEW_LAYER: usize = 29;
 const AURA_RADIUS: f32 = 0.94;
@@ -37,6 +48,7 @@ const ORBIT_COUNT: usize = 3;
 const TRAIL_SAMPLES: usize = 6;
 const GLINT_COUNT: usize = 8;
 const TRAIL_STEP: f64 = 0.24;
+const CROWN_HEIGHT: f32 = 2.02;
 // Each 3D orbit is two shared ribbons plus two head billboards. Unlike the old
 // 18 stretched spheres, ribbons cost 1,536 triangles total and no vertex uploads.
 pub(crate) const HERO_AURA_ELEMENT_BUDGET: usize = 1 + 2 + ORBIT_COUNT * 4 + GLINT_COUNT;
@@ -59,6 +71,79 @@ enum AuraParticle {
     RibbonCore,
     RibbonGlow,
     Glint,
+    /// Prism III: a ring above the head, taking one spark's place in the budget.
+    Crown,
+}
+
+/// How this build lets a player buy Hero access (launch-readiness section 7,
+/// "Purchase surface"; LR-68 adds the channel axis).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum PaymentSurface {
+    /// Nothing is sold here (the panel still previews and equips).
+    None,
+    /// StoreKit in the iOS app (global Apple).
+    StoreKit,
+    /// «Поддержать на сайте»: the region portal's `/supporter` in the browser.
+    Website,
+}
+
+/// The one accessor over the build's market for the Supporter UI (LR-68 R0
+/// swaps its body for the bound region and channel). M0 builds are the
+/// `direct` channel: an iOS build never links to a web payment.
+pub(crate) fn payment_surface() -> PaymentSurface {
+    payment_surface_for(shared::market::payment_providers(), cfg!(target_os = "ios"))
+}
+
+/// The purchase surface for a provider list on iOS or another platform.
+pub(crate) fn payment_surface_for(providers: &[PaymentProvider], ios: bool) -> PaymentSurface {
+    if ios {
+        if sells(providers, PaymentProvider::Apple) {
+            PaymentSurface::StoreKit
+        } else {
+            PaymentSurface::None
+        }
+    } else if sells(providers, PaymentProvider::YooKassa) {
+        PaymentSurface::Website
+    } else {
+        // Global desktop and Android stay as before: no in-game link to Solana.
+        PaymentSurface::None
+    }
+}
+
+/// What the panel offers, read once from [`payment_surface`] and the market.
+#[derive(Resource, Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct PurchaseOffer {
+    pub surface: PaymentSurface,
+    /// Whether a provider here carries tier points (the tier styles and the
+    /// tier line are shown); unlocked tier styles always show.
+    pub tiers: bool,
+}
+impl Default for PurchaseOffer {
+    fn default() -> Self {
+        Self {
+            surface: payment_surface(),
+            tiers: sells_tiers(shared::market::payment_providers()),
+        }
+    }
+}
+
+/// Opens the region portal's Supporter page. Function pointers so tests can
+/// observe the link without a browser.
+#[derive(Resource, Clone, Copy)]
+pub(crate) struct SupporterWebsite {
+    pub url: fn() -> Result<String, String>,
+    pub open: fn(&str) -> Result<(), String>,
+}
+impl Default for SupporterWebsite {
+    fn default() -> Self {
+        Self {
+            url: || {
+                omoba_passport::web_account::WebAccountApi::from_env()
+                    .map(|api| omoba_passport::supporter_account::website_url(&api))
+            },
+            open: crate::platform::open_external_url,
+        }
+    }
 }
 
 #[derive(Component, Clone, Copy, PartialEq, Eq)]
@@ -120,6 +205,8 @@ struct Orbit {
     flat: bool,
     particle: AuraParticle,
     preview: bool,
+    /// Spark brightness: 1 for most styles, more for Prism II and III.
+    sparkle: f32,
 }
 #[derive(Component)]
 struct PreviewCamera;
@@ -144,52 +231,129 @@ enum Action {
     Refresh,
     Purchase,
     Restore,
+    Website,
 }
+type Styled<T> = [Handle<T>; STYLE_COUNT];
 #[derive(Resource, Default)]
 struct AuraAssets {
     ring: Handle<Mesh>,
+    crown: Handle<Mesh>,
     ribbon_core: Handle<Mesh>,
     ribbon_glow: Handle<Mesh>,
     flat_orb: Handle<Mesh>,
     glow_quad: Handle<Mesh>,
-    material: [Handle<StandardMaterial>; 3],
-    flat: [Handle<ColorMaterial>; 3],
-    cores: [Handle<StandardMaterial>; 3],
-    halos: [Handle<StandardMaterial>; 3],
-    trails: [Handle<StandardMaterial>; 3],
-    ribbon_cores: [Handle<StandardMaterial>; 3],
-    flat_cores: [Handle<ColorMaterial>; 3],
-    flat_halos: [Handle<ColorMaterial>; 3],
-    flat_trails: [Handle<ColorMaterial>; 3],
-    mantles: [Handle<StandardMaterial>; 3],
-    radiance: [Handle<StandardMaterial>; 3],
-    flat_mantles: [Handle<ColorMaterial>; 3],
-    flat_radiance: [Handle<ColorMaterial>; 3],
+    material: Styled<StandardMaterial>,
+    flat: Styled<ColorMaterial>,
+    cores: Styled<StandardMaterial>,
+    halos: Styled<StandardMaterial>,
+    trails: Styled<StandardMaterial>,
+    ribbon_cores: Styled<StandardMaterial>,
+    flat_cores: Styled<ColorMaterial>,
+    flat_halos: Styled<ColorMaterial>,
+    flat_trails: Styled<ColorMaterial>,
+    mantles: Styled<StandardMaterial>,
+    radiance: Styled<StandardMaterial>,
+    flat_mantles: Styled<ColorMaterial>,
+    flat_radiance: Styled<ColorMaterial>,
     preview: Handle<Image>,
 }
 fn style_index(style: AuraStyle) -> usize {
-    match style {
-        AuraStyle::Solar => 0,
-        AuraStyle::Lunar => 1,
-        AuraStyle::Verdant => 2,
-    }
+    AuraStyle::ALL
+        .iter()
+        .position(|candidate| *candidate == style)
+        .expect("every style is listed")
 }
+/// A style's tint; the Prism tints at the start of their cycle.
 fn color(style: AuraStyle) -> Color {
     match style {
         AuraStyle::Solar => Color::srgb(1., 0.67, 0.24),
         AuraStyle::Lunar => Color::srgb(0.43, 0.69, 1.),
         AuraStyle::Verdant => Color::srgb(0.25, 0.96, 0.65),
+        AuraStyle::Rose => Color::srgb(1., 0.42, 0.72),
+        AuraStyle::Jade => Color::srgb(0.10, 0.80, 0.45),
+        AuraStyle::Azure => Color::srgb(0.15, 0.48, 1.),
+        AuraStyle::Crimson => Color::srgb(0.95, 0.10, 0.18),
+        AuraStyle::PrismI | AuraStyle::PrismII | AuraStyle::PrismIII => prism_tint(style, 0., 0.),
+    }
+}
+
+/// Hue cycles per second, glow gain and spark size of a Prism tier; `None`
+/// for a style with a fixed palette. Each tier shimmers faster and brighter.
+fn prism(style: AuraStyle) -> Option<(f64, f32, f32)> {
+    match style {
+        AuraStyle::PrismI => Some((0.08, 1.0, 1.0)),
+        AuraStyle::PrismII => Some((0.16, 1.15, 1.5)),
+        AuraStyle::PrismIII => Some((0.30, 1.3, 1.8)),
+        _ => None,
+    }
+}
+fn prism_tint(style: AuraStyle, seconds: f64, offset_degrees: f32) -> Color {
+    let speed = prism(style).map_or(0., |(speed, _, _)| speed);
+    let hue = ((seconds * speed).rem_euclid(1.) * 360.) as f32 + offset_degrees;
+    Color::hsl(hue.rem_euclid(360.), 0.9, 0.62)
+}
+fn sparkle(style: AuraStyle) -> f32 {
+    prism(style).map_or(1., |(_, _, sparkle)| sparkle)
+}
+
+/// Base colours of one style's shared materials, 3D and 2D. Prism styles get
+/// three hues at once (orbits, heads, body glow) so the aura reads as a rainbow.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Palette {
+    ring: Color,
+    ring_emissive: LinearRgba,
+    core: Color,
+    halo: Color,
+    trail: Color,
+    ribbon_core: Color,
+    mantle: Color,
+    radiance: Color,
+    flat_ring: Color,
+    flat_core: Color,
+    flat_halo: Color,
+    flat_trail: Color,
+    flat_mantle: Color,
+    flat_radiance: Color,
+}
+fn palette(style: AuraStyle, seconds: f64) -> Palette {
+    let glow = prism(style).map_or(1., |(_, glow, _)| glow);
+    let tint = |offset: f32| {
+        if prism(style).is_some() {
+            prism_tint(style, seconds, offset)
+        } else {
+            color(style)
+        }
+    };
+    let (orbit, head, body) = (tint(0.), tint(120.), tint(240.));
+    let hdr = |tint: Color, white: f32, gain: f32| {
+        crate::game_vfx::hdr_tint(tint.mix(&Color::WHITE, white), gain * glow)
+    };
+    Palette {
+        ring: orbit.with_alpha(0.22),
+        ring_emissive: LinearRgba::from(orbit) * 0.25 * glow,
+        core: hdr(head, 0.85, 2.2).with_alpha(1.0),
+        halo: hdr(head, 0.1, 2.2).with_alpha(0.85),
+        trail: hdr(orbit, 0.10, 2.2).with_alpha(0.65),
+        ribbon_core: hdr(orbit, 0.92, 4.0),
+        // Daylit maps need a broad HDR halo, not only tiny orbit highlights.
+        mantle: hdr(body, 0.25, 6.).with_alpha(0.23),
+        radiance: hdr(body, 0.75, 6.).with_alpha(0.12),
+        flat_ring: orbit.with_alpha(0.24),
+        flat_core: head.mix(&Color::WHITE, 0.85),
+        flat_halo: head.with_alpha(0.7),
+        flat_trail: orbit.with_alpha(0.65),
+        flat_mantle: body.with_alpha(0.48),
+        flat_radiance: body.mix(&Color::WHITE, 0.72).with_alpha(0.25),
     }
 }
 
 // Shared materials and analytic paths keep the per-hero budget fixed. No emitter
 // churn, dynamic lights, or bloom dependency on mobile renderers.
-fn particle_material(style: AuraStyle, alpha: f32, white: f32) -> StandardMaterial {
-    let tint = color(style).mix(&Color::WHITE, white);
+fn particle_material(base_color: Color) -> StandardMaterial {
     StandardMaterial {
         // Unlit materials draw base_color directly; emissive alone does not
         // brighten them. Use the same HDR convention as the game's other VFX.
-        base_color: crate::game_vfx::hdr_tint(tint, 2.2).with_alpha(alpha),
+        base_color,
         unlit: true,
         alpha_mode: AlphaMode::Add,
         double_sided: true,
@@ -200,15 +364,6 @@ fn particle_material(style: AuraStyle, alpha: f32, white: f32) -> StandardMateri
 
 fn glow_texture(star: bool) -> Image {
     glow_texture_with_falloff(star, 3.)
-}
-
-fn body_glow_material(style: AuraStyle, alpha: f32, white: f32) -> StandardMaterial {
-    StandardMaterial {
-        // Daylit maps need a broad HDR halo, not only tiny orbit highlights.
-        base_color: crate::game_vfx::hdr_tint(color(style).mix(&Color::WHITE, white), 6.)
-            .with_alpha(alpha),
-        ..particle_material(style, alpha, white)
-    }
 }
 
 fn glow_texture_with_falloff(star: bool, falloff: f32) -> Image {
@@ -369,8 +524,25 @@ fn particle_pose(orbit: &Orbit, seconds: f64) -> Transform {
                 phase.sin() * radius,
             );
             // Fade to zero at each wrap: rising sparks never pop at the feet.
-            let sparkle = (std::f32::consts::PI * age).sin().powi(2) * 1.35;
+            let sparkle = (std::f32::consts::PI * age).sin().powi(2) * 1.35 * orbit.sparkle;
             (point, Vec3::new(0.8, 1.65, 1.) * sparkle, Quat::IDENTITY)
+        }
+        AuraParticle::Crown => {
+            // A slow, slightly tilting ring above the head (Prism III).
+            let tilt = 0.10 * (seconds as f32 * 1.7).sin();
+            let pulse = 1. + 0.06 * (seconds as f32 * 2.3).sin();
+            let rotation = if orbit.flat {
+                Quat::IDENTITY
+            } else {
+                Quat::from_rotation_y((seconds * 0.9).rem_euclid(std::f64::consts::TAU) as f32)
+                    * Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2 + tilt)
+            };
+            let squash = if orbit.flat { 0.42 } else { 1. };
+            (
+                Vec3::Y * CROWN_HEIGHT,
+                Vec3::new(pulse, pulse * squash, pulse),
+                rotation,
+            )
         }
     };
     let mut projected = project_particle(position, orbit.flat);
@@ -397,6 +569,8 @@ impl Plugin for SupporterPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<SupporterUiState>()
             .init_resource::<SupporterPlatformState>()
+            .init_resource::<PurchaseOffer>()
+            .init_resource::<SupporterWebsite>()
             .init_resource::<AuraRegistry>()
             .add_message::<SupporterPlatformAction>()
             .add_ui_action::<Action>()
@@ -417,7 +591,10 @@ impl Plugin for SupporterPlugin {
             )
             .add_systems(
                 Update,
-                sync_auras.after(crate::net::ClientNetPipeline::ApplySnapshot),
+                (
+                    sync_auras.after(crate::net::ClientNetPipeline::ApplySnapshot),
+                    shimmer_prisms.after(sync_auras),
+                ),
             )
             .add_systems(
                 PostUpdate,
@@ -447,80 +624,72 @@ fn setup(
     let glow = images.add(glow_texture(false));
     let body_glow = images.add(glow_texture_with_falloff(false, 1.5));
     let star = images.add(glow_texture(true));
+    let palettes = AuraStyle::ALL.map(|style| palette(style, 0.));
     let aura = AuraAssets {
         ring: meshes.add(Annulus::new(AURA_RADIUS - 0.025, AURA_RADIUS)),
+        crown: meshes.add(Annulus::new(0.27, 0.33)),
         ribbon_core: meshes.add(ribbon_mesh(0.018)),
         ribbon_glow: meshes.add(ribbon_mesh(0.075)),
         flat_orb: meshes.add(Circle::new(0.065)),
         glow_quad: meshes.add(Rectangle::new(0.13, 0.13)),
-        material: AuraStyle::ALL.map(|s| {
+        material: palettes.map(|p| {
             materials.add(StandardMaterial {
-                base_color: color(s).with_alpha(0.22),
-                emissive: LinearRgba::from(color(s)) * 0.25,
-                unlit: true,
-                alpha_mode: AlphaMode::Add,
-                double_sided: true,
-                cull_mode: None,
-                ..default()
+                emissive: p.ring_emissive,
+                ..particle_material(p.ring)
             })
         }),
-        flat: AuraStyle::ALL.map(|s| flat.add(color(s).with_alpha(0.24))),
-        cores: AuraStyle::ALL.map(|s| {
+        flat: palettes.map(|p| flat.add(p.flat_ring)),
+        cores: palettes.map(|p| {
             materials.add(StandardMaterial {
                 base_color_texture: Some(star.clone()),
-                ..particle_material(s, 1.0, 0.85)
+                ..particle_material(p.core)
             })
         }),
-        halos: AuraStyle::ALL.map(|s| {
+        halos: palettes.map(|p| {
             materials.add(StandardMaterial {
                 base_color_texture: Some(glow.clone()),
-                ..particle_material(s, 0.85, 0.1)
+                ..particle_material(p.halo)
             })
         }),
-        trails: AuraStyle::ALL.map(|s| materials.add(particle_material(s, 0.65, 0.10))),
-        ribbon_cores: AuraStyle::ALL.map(|s| {
-            materials.add(StandardMaterial {
-                base_color: crate::game_vfx::hdr_tint(color(s).mix(&Color::WHITE, 0.92), 4.0),
-                ..particle_material(s, 1., 0.92)
-            })
-        }),
-        flat_cores: AuraStyle::ALL.map(|s| {
+        trails: palettes.map(|p| materials.add(particle_material(p.trail))),
+        ribbon_cores: palettes.map(|p| materials.add(particle_material(p.ribbon_core))),
+        flat_cores: palettes.map(|p| {
             flat.add(ColorMaterial {
-                color: color(s).mix(&Color::WHITE, 0.85),
+                color: p.flat_core,
                 texture: Some(star.clone()),
                 ..default()
             })
         }),
-        flat_halos: AuraStyle::ALL.map(|s| {
+        flat_halos: palettes.map(|p| {
             flat.add(ColorMaterial {
-                color: color(s).with_alpha(0.7),
+                color: p.flat_halo,
                 texture: Some(glow.clone()),
                 ..default()
             })
         }),
-        flat_trails: AuraStyle::ALL.map(|s| flat.add(color(s).with_alpha(0.65))),
-        mantles: AuraStyle::ALL.map(|s| {
+        flat_trails: palettes.map(|p| flat.add(p.flat_trail)),
+        mantles: palettes.map(|p| {
             materials.add(StandardMaterial {
                 base_color_texture: Some(body_glow.clone()),
-                ..body_glow_material(s, 0.23, 0.25)
+                ..particle_material(p.mantle)
             })
         }),
-        radiance: AuraStyle::ALL.map(|s| {
+        radiance: palettes.map(|p| {
             materials.add(StandardMaterial {
                 base_color_texture: Some(body_glow.clone()),
-                ..body_glow_material(s, 0.12, 0.75)
+                ..particle_material(p.radiance)
             })
         }),
-        flat_mantles: AuraStyle::ALL.map(|s| {
+        flat_mantles: palettes.map(|p| {
             flat.add(ColorMaterial {
-                color: color(s).with_alpha(0.48),
+                color: p.flat_mantle,
                 texture: Some(glow.clone()),
                 ..default()
             })
         }),
-        flat_radiance: AuraStyle::ALL.map(|s| {
+        flat_radiance: palettes.map(|p| {
             flat.add(ColorMaterial {
-                color: color(s).mix(&Color::WHITE, 0.72).with_alpha(0.25),
+                color: p.flat_radiance,
                 texture: Some(glow.clone()),
                 ..default()
             })
@@ -623,7 +792,13 @@ fn spawn_aura(
             particles.extend([(i, AuraParticle::RibbonCore), (i, AuraParticle::RibbonGlow)]);
         }
     }
-    particles.extend((0..GLINT_COUNT).map(|i| (i, AuraParticle::Glint)));
+    // The Prism III crown takes the last spark's place: the budget is unchanged.
+    let crowned = style == AuraStyle::PrismIII;
+    let glints = GLINT_COUNT - usize::from(crowned);
+    particles.extend((0..glints).map(|i| (i, AuraParticle::Glint)));
+    if crowned {
+        particles.push((0, AuraParticle::Crown));
+    }
     let mut elements = 1; // Ground ring.
     for (index_orbit, particle) in particles {
         elements += 1;
@@ -632,6 +807,7 @@ fn spawn_aura(
             flat,
             particle,
             preview: layer == PREVIEW_LAYER,
+            sparkle: sparkle(style),
         };
         let (material, flat_material) = match particle {
             AuraParticle::Mantle => (&assets.mantles[index], &assets.flat_mantles[index]),
@@ -644,6 +820,7 @@ fn spawn_aura(
                 (&assets.trails[index], &assets.flat_trails[index])
             }
             AuraParticle::RibbonCore => (&assets.ribbon_cores[index], &assets.flat_trails[index]),
+            AuraParticle::Crown => (&assets.ribbon_cores[index], &assets.flat_cores[index]),
         };
         let orb = commands
             .spawn((
@@ -657,11 +834,16 @@ fn spawn_aura(
             .id();
         let billboard = !matches!(
             particle,
-            AuraParticle::Trail(_) | AuraParticle::RibbonCore | AuraParticle::RibbonGlow
+            AuraParticle::Trail(_)
+                | AuraParticle::RibbonCore
+                | AuraParticle::RibbonGlow
+                | AuraParticle::Crown
         );
         if flat {
             commands.entity(orb).insert((
-                Mesh2d(if billboard {
+                Mesh2d(if matches!(particle, AuraParticle::Crown) {
+                    assets.crown.clone()
+                } else if billboard {
                     assets.glow_quad.clone()
                 } else {
                     assets.flat_orb.clone()
@@ -673,6 +855,7 @@ fn spawn_aura(
                 Mesh3d(match particle {
                     AuraParticle::RibbonCore => assets.ribbon_core.clone(),
                     AuraParticle::RibbonGlow => assets.ribbon_glow.clone(),
+                    AuraParticle::Crown => assets.crown.clone(),
                     _ => assets.glow_quad.clone(),
                 }),
                 MeshMaterial3d(material.clone()),
@@ -717,6 +900,70 @@ fn sync_auras(
             );
             commands.entity(root).insert(AuraOwner(actor));
             registry.0.insert(actor, (root, style, *mode));
+        }
+    }
+}
+
+/// Prism styles cycle their hue on their shared materials: one update per
+/// style and frame, whatever the number of wearers, so they shimmer in sync.
+/// Styles nobody wears (and the closed preview) are left untouched.
+fn shimmer_prisms(
+    time: Res<Time>,
+    assets: Res<AuraAssets>,
+    registry: Res<AuraRegistry>,
+    state: Res<SupporterUiState>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut flat: ResMut<Assets<ColorMaterial>>,
+) {
+    let seconds = time.elapsed_secs_f64();
+    for style in [AuraStyle::PrismI, AuraStyle::PrismII, AuraStyle::PrismIII] {
+        let worn = registry.0.values().any(|(_, worn, _)| *worn == style)
+            || (state.open && state.selected == style);
+        if worn {
+            paint(
+                &assets,
+                style,
+                &palette(style, seconds),
+                &mut materials,
+                &mut flat,
+            );
+        }
+    }
+}
+fn paint(
+    assets: &AuraAssets,
+    style: AuraStyle,
+    palette: &Palette,
+    materials: &mut Assets<StandardMaterial>,
+    flat: &mut Assets<ColorMaterial>,
+) {
+    let index = style_index(style);
+    for (handle, color) in [
+        (&assets.material[index], palette.ring),
+        (&assets.cores[index], palette.core),
+        (&assets.halos[index], palette.halo),
+        (&assets.trails[index], palette.trail),
+        (&assets.ribbon_cores[index], palette.ribbon_core),
+        (&assets.mantles[index], palette.mantle),
+        (&assets.radiance[index], palette.radiance),
+    ] {
+        if let Some(mut material) = materials.get_mut(handle) {
+            material.base_color = color;
+        }
+    }
+    if let Some(mut ring) = materials.get_mut(&assets.material[index]) {
+        ring.emissive = palette.ring_emissive;
+    }
+    for (handle, color) in [
+        (&assets.flat[index], palette.flat_ring),
+        (&assets.flat_cores[index], palette.flat_core),
+        (&assets.flat_halos[index], palette.flat_halo),
+        (&assets.flat_trails[index], palette.flat_trail),
+        (&assets.flat_mantles[index], palette.flat_mantle),
+        (&assets.flat_radiance[index], palette.flat_radiance),
+    ] {
+        if let Some(mut material) = flat.get_mut(handle) {
+            material.color = color;
         }
     }
 }
@@ -823,7 +1070,10 @@ fn animate_orbits(
         if !orbit.flat
             && !matches!(
                 orbit.particle,
-                AuraParticle::Trail(_) | AuraParticle::RibbonCore | AuraParticle::RibbonGlow
+                AuraParticle::Trail(_)
+                    | AuraParticle::RibbonCore
+                    | AuraParticle::RibbonGlow
+                    | AuraParticle::Crown
             )
         {
             if let Some((_, pose, _)) = cameras
@@ -893,7 +1143,9 @@ fn actions(
     mut activated: MessageReader<Activated<Action>>,
     mut state: ResMut<SupporterUiState>,
     mut career: ResMut<CareerClient>,
-    platform: Res<SupporterPlatformState>,
+    mut platform: ResMut<SupporterPlatformState>,
+    offer: Res<PurchaseOffer>,
+    website: Res<SupporterWebsite>,
     mut platform_actions: MessageWriter<SupporterPlatformAction>,
     mut requests: MessageWriter<NetworkCommand>,
     mut sequence: Local<u64>,
@@ -909,13 +1161,7 @@ fn actions(
                     request_id: id,
                 }));
             }
-            Action::Equip
-                if career
-                    .view
-                    .supporter
-                    .as_ref()
-                    .is_some_and(|status| status.active) =>
-            {
+            Action::Equip if style_unlocked(career.view.supporter.as_ref(), state.selected) => {
                 requests.write(NetworkCommand::Career(CareerRequest::EquipSupporterAura {
                     request_id: id,
                     aura: Some(state.selected),
@@ -938,10 +1184,61 @@ fn actions(
             Action::Restore if platform.available && !platform.busy => {
                 platform_actions.write(SupporterPlatformAction::Restore);
             }
+            Action::Website if offer.surface == PaymentSurface::Website => {
+                platform.message = Some(PlatformMessage::Key(
+                    match (website.url)().and_then(|url| (website.open)(&url)) {
+                        Ok(()) => "tier.website.opened",
+                        Err(_) => "tier.website.unavailable",
+                    },
+                ));
+            }
             _ => {}
         }
         // Only one modal owns input. The account is still the source of truth.
         career.modal = CareerModal::Closed;
+    }
+}
+
+/// Whether the server would let this player wear `style` now (the shared
+/// entitlement rule over the last status the server sent).
+fn style_unlocked(status: Option<&SupporterStatus>, style: AuraStyle) -> bool {
+    status.is_some_and(|status| style.unlocked(status.active, status.tier_points))
+}
+
+/// The styles the panel lists: the base styles, the tier styles where this
+/// build sells tiers, and any tier style the player has unlocked anyway.
+fn listed_styles(offer: &PurchaseOffer, status: Option<&SupporterStatus>) -> Vec<AuraStyle> {
+    AuraStyle::ALL
+        .into_iter()
+        .filter(|style| style.tier().is_none() || offer.tiers || style_unlocked(status, *style))
+        .collect()
+}
+
+/// The tier line: the current tier until when, then the step-down; or how
+/// donations add up. `None` where this build sells no tiers and none is held.
+fn tier_label(offer: &PurchaseOffer, status: Option<&SupporterStatus>) -> Option<String> {
+    let tier = status.and_then(SupporterStatus::tier);
+    match (tier, status) {
+        (Some(tier), Some(status)) => {
+            let name = data::aura(tier.style());
+            let until = status
+                .tier_until
+                .map(utc_timestamp)
+                .unwrap_or_else(|| "—".into());
+            Some(match status.next_tier() {
+                Some(next) => trf(
+                    "tier.status.step_down",
+                    &[
+                        ("tier", &name),
+                        ("until", &until),
+                        ("next", &data::aura(next.style())),
+                    ],
+                ),
+                None => trf("tier.status.until", &[("tier", &name), ("until", &until)]),
+            })
+        }
+        _ if offer.tiers => Some(tr("tier.status.none").into()),
+        _ => None,
     }
 }
 
@@ -1013,6 +1310,7 @@ fn render_panel(
     state: Res<SupporterUiState>,
     career: Res<CareerClient>,
     platform: Res<SupporterPlatformState>,
+    offer: Res<PurchaseOffer>,
     assets: Res<AuraAssets>,
     roots: Query<Entity, With<SupporterRoot>>,
     windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
@@ -1027,12 +1325,16 @@ fn render_panel(
         .as_ref()
         .is_some_and(|game| matches!(game.state, GameState::Running))
         && !screen.as_ref().is_some_and(|screen| screen.get().is_menu());
-    let summary = status_label(career.view.supporter.as_ref());
+    let status = career.view.supporter.as_ref();
+    let summary = status_label(status);
+    let tier = tier_label(&offer, status);
     let key = format!(
-        "{}|{:?}|{}|{:?}|{}|{:?}|{}|{}|{}",
+        "{}|{:?}|{}|{:?}|{:?}|{:?}|{}|{:?}|{}|{}|{}",
         state.open,
         state.selected,
         summary,
+        tier,
+        status.map(|s| (s.equipped_aura, s.tier_points)),
         *platform,
         career.nickname,
         career.view.error,
@@ -1118,6 +1420,14 @@ fn render_panel(
                     ui::text(if compact { 12. } else { 14. }),
                     TextColor(ui::IVORY),
                 ));
+                if let Some(tier) = tier {
+                    panel.spawn((
+                        Text::new(tier),
+                        ui::text(if compact { 11. } else { 13. }),
+                        TextColor(ui::GOLD),
+                        TestId::new("SupporterTier"),
+                    ));
+                }
                 panel
                     .spawn((Node {
                         flex_direction: FlexDirection::Row,
@@ -1145,12 +1455,21 @@ fn render_panel(
                             ..default()
                         },))
                             .with_children(|choices| {
-                                for style in AuraStyle::ALL {
+                                // Every listed style previews for free; the
+                                // server decides what can be worn.
+                                for style in listed_styles(&offer, status) {
                                     button(
                                         choices,
                                         if state.selected == style {
                                             trf(
                                                 "supporter.aura.preview",
+                                                &[("aura", &data::aura(style))],
+                                            )
+                                        } else if status.is_some_and(|s| s.active)
+                                            && !style_unlocked(status, style)
+                                        {
+                                            trf(
+                                                "tier.style.locked",
                                                 &[("aura", &data::aura(style))],
                                             )
                                         } else {
@@ -1160,13 +1479,12 @@ fn render_panel(
                                         true,
                                     );
                                 }
-                                let active =
-                                    career.view.supporter.as_ref().is_some_and(|s| s.active);
+                                let active = status.is_some_and(|s| s.active);
                                 button(
                                     choices,
                                     tr("supporter.equip").into(),
                                     Action::Equip,
-                                    active,
+                                    style_unlocked(status, state.selected),
                                 );
                                 button(
                                     choices,
@@ -1198,7 +1516,14 @@ fn render_panel(
                         ..default()
                     },))
                     .with_children(|row| {
-                        if platform.available {
+                        if offer.surface == PaymentSurface::Website {
+                            button(
+                                row,
+                                tr("tier.purchase.website").into(),
+                                Action::Website,
+                                true,
+                            );
+                        } else if offer.surface == PaymentSurface::StoreKit && platform.available {
                             button(
                                 row,
                                 platform
@@ -1276,6 +1601,7 @@ impl Action {
             Self::Refresh => "SupporterRefresh".into(),
             Self::Purchase => "SupporterPurchase".into(),
             Self::Restore => "SupporterRestore".into(),
+            Self::Website => "SupporterWebsite".into(),
         }
     }
 }
@@ -1358,6 +1684,7 @@ mod tests {
                             flat,
                             particle,
                             preview: false,
+                            sparkle: 1.,
                         },
                         t,
                     );
@@ -1382,6 +1709,7 @@ mod tests {
                     flat,
                     particle: AuraParticle::Trail(0),
                     preview: false,
+                    sparkle: 1.,
                 },
                 2.,
             );
@@ -1391,6 +1719,7 @@ mod tests {
                     flat,
                     particle: AuraParticle::Trail(TRAIL_SAMPLES - 1),
                     preview: false,
+                    sparkle: 1.,
                 },
                 2.,
             );
@@ -1436,6 +1765,7 @@ mod tests {
                         flat: false,
                         particle: AuraParticle::RibbonCore,
                         preview: false,
+                        sparkle: 1.,
                     };
                     let pose = particle_pose(&orbit, seconds);
                     let tip = pose.transform_point(Vec3::from(points[1]));
@@ -1530,12 +1860,14 @@ mod tests {
     #[test]
     fn hero_glows_preserve_transparency_and_rising_sparks_fade_at_wrap() {
         for style in AuraStyle::ALL {
-            let material = body_glow_material(style, 0.48, 0.40);
-            assert!(material.unlit);
-            assert_eq!(material.alpha_mode, AlphaMode::Add);
-            let tint = material.base_color.to_linear();
-            assert!(tint.red.max(tint.green).max(tint.blue) > 1.);
-            assert!(material.base_color.alpha() < 0.5);
+            for glow in [palette(style, 0.).mantle, palette(style, 7.5).radiance] {
+                let material = particle_material(glow);
+                assert!(material.unlit);
+                assert_eq!(material.alpha_mode, AlphaMode::Add);
+                let tint = material.base_color.to_linear();
+                assert!(tint.red.max(tint.green).max(tint.blue) > 1., "{style:?}");
+                assert!(material.base_color.alpha() < 0.5);
+            }
         }
         for flat in [false, true] {
             for particle in [AuraParticle::Mantle, AuraParticle::Radiance] {
@@ -1546,6 +1878,7 @@ mod tests {
                             flat,
                             particle,
                             preview: false,
+                            sparkle: 1.,
                         },
                         tick as f64 / 60.,
                     );
@@ -1562,6 +1895,7 @@ mod tests {
                 flat,
                 particle: AuraParticle::Glint,
                 preview: false,
+                sparkle: 1.,
             };
             let lifetime = 1. / 0.38;
             assert_eq!(particle_pose(&spark, 0.).scale, Vec3::ZERO);
@@ -1745,6 +2079,7 @@ mod tests {
                 valid_until: 300,
                 revoked: false,
                 renewal_enabled: Some(false),
+                tier_points: 0,
             },
         );
         assert!(!purchase_allowed_at(&career, 100));
@@ -1795,6 +2130,42 @@ mod tests {
             "Hero 已激活 · \n外观有效期至 1970-01-01 00:00 UTC"
         );
         assert_ne!(data::aura(AuraStyle::Solar), AuraStyle::Solar.label());
+        // The tier line and the website button in English and Russian.
+        let grant = |until: i64, points: u32| shared::supporter::SupporterGrantSummary {
+            provider: "yookassa".into(),
+            valid_from: 0,
+            valid_until: until,
+            revoked: false,
+            renewal_enabled: Some(false),
+            tier_points: points,
+        };
+        let crimson = SupporterStatus::from_grants(
+            vec![grant(86_400, 900), grant(172_800, 300)],
+            100,
+            1200,
+            None,
+        );
+        let ru = PurchaseOffer {
+            surface: PaymentSurface::Website,
+            tiers: true,
+        };
+        app.world_mut()
+            .resource_mut::<Locale>()
+            .set(LocaleId::parse("en").unwrap());
+        assert_eq!(
+            tier_label(&ru, Some(&crimson)).unwrap(),
+            "Hero tier Crimson until 1970-01-02 00:00 UTC, then Jade."
+        );
+        assert_eq!(tr("tier.purchase.website"), "Support on the website");
+        app.world_mut()
+            .resource_mut::<Locale>()
+            .set(LocaleId::parse("ru").unwrap());
+        assert_eq!(
+            tier_label(&ru, Some(&crimson)).unwrap(),
+            "Уровень Hero «Багрянец» до 1970-01-02 00:00 UTC, затем «Нефрит»."
+        );
+        assert_eq!(tr("tier.purchase.website"), "Поддержать на сайте");
+        assert_eq!(data::aura(AuraStyle::PrismIII), "Призма III");
     }
 
     #[test]
@@ -1850,6 +2221,8 @@ mod tests {
         let mut app = harness::kit_app();
         app.init_resource::<SupporterUiState>()
             .init_resource::<SupporterPlatformState>()
+            .init_resource::<PurchaseOffer>()
+            .init_resource::<SupporterWebsite>()
             .init_resource::<CareerClient>()
             .add_message::<SupporterPlatformAction>()
             .add_message::<NetworkCommand>()
@@ -1882,5 +2255,327 @@ mod tests {
         harness::press(app.world_mut(), "SupporterClose");
         app.update();
         assert!(!app.world().resource::<SupporterUiState>().open);
+    }
+
+    fn tier_status(points: u32, equipped: AuraStyle) -> SupporterStatus {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+        SupporterStatus::from_grants(
+            vec![shared::supporter::SupporterGrantSummary {
+                provider: "yookassa".into(),
+                valid_from: now - 60,
+                valid_until: now + 86_400,
+                revoked: false,
+                renewal_enabled: Some(false),
+                tier_points: points,
+            }],
+            now,
+            points,
+            Some(Some(equipped)),
+        )
+    }
+
+    #[test]
+    fn the_purchase_surface_follows_the_market_and_ios_never_links_to_the_web() {
+        use shared::market::Market;
+        let ru = Market::Ru.payment_providers();
+        let global = Market::Global.payment_providers();
+        assert_eq!(payment_surface_for(ru, false), PaymentSurface::Website);
+        assert_eq!(payment_surface_for(ru, true), PaymentSurface::None);
+        assert_eq!(payment_surface_for(global, true), PaymentSurface::StoreKit);
+        // Global desktop and Android are unchanged: no in-game purchase link.
+        assert_eq!(payment_surface_for(global, false), PaymentSurface::None);
+        assert_eq!(payment_surface_for(&[], false), PaymentSurface::None);
+        assert_eq!(payment_surface_for(&[], true), PaymentSurface::None);
+        assert_eq!(
+            payment_surface(),
+            payment_surface_for(shared::market::payment_providers(), cfg!(target_os = "ios"))
+        );
+    }
+
+    #[test]
+    fn listed_styles_and_the_tier_line_follow_what_the_market_sells() {
+        let ru = PurchaseOffer {
+            surface: PaymentSurface::Website,
+            tiers: true,
+        };
+        let global = PurchaseOffer {
+            surface: PaymentSurface::None,
+            tiers: false,
+        };
+        assert_eq!(listed_styles(&ru, None), AuraStyle::ALL.to_vec());
+        assert_eq!(listed_styles(&global, None), AuraStyle::BASE.to_vec());
+        assert!(tier_label(&global, None).is_none());
+        assert!(tier_label(&ru, None).is_some());
+        let crimson = tier_status(1000, AuraStyle::Crimson);
+        // An unlocked tier style shows even where tiers are not sold.
+        assert_eq!(
+            listed_styles(&global, Some(&crimson)),
+            [
+                AuraStyle::Solar,
+                AuraStyle::Lunar,
+                AuraStyle::Verdant,
+                AuraStyle::Rose,
+                AuraStyle::Jade,
+                AuraStyle::Azure,
+                AuraStyle::Crimson
+            ]
+        );
+        assert!(tier_label(&ru, Some(&crimson)).is_some());
+        assert!(style_unlocked(Some(&crimson), AuraStyle::Crimson));
+        assert!(!style_unlocked(Some(&crimson), AuraStyle::PrismI));
+        assert!(style_unlocked(Some(&crimson), AuraStyle::Lunar));
+        assert!(!style_unlocked(None, AuraStyle::Solar));
+    }
+
+    static OPENED: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
+    fn panel_app(offer: PurchaseOffer, status: Option<SupporterStatus>) -> App {
+        use crate::ui::test_id::harness;
+        let mut app = harness::kit_app();
+        app.init_resource::<SupporterUiState>()
+            .init_resource::<SupporterPlatformState>()
+            .init_resource::<CareerClient>()
+            .init_resource::<AuraAssets>()
+            .insert_resource(crate::ui::UiPlatform(crate::platform::UiProfile::Desktop))
+            .insert_resource(offer)
+            .insert_resource(SupporterWebsite {
+                url: || Ok("https://portal.test/supporter".into()),
+                open: |url| {
+                    OPENED.lock().unwrap().push(url.into());
+                    Ok(())
+                },
+            })
+            .add_message::<SupporterPlatformAction>()
+            .add_message::<NetworkCommand>()
+            .add_ui_action::<Action>()
+            .add_systems(
+                Update,
+                (actions.after(UiSet::Dispatch), render_panel.after(actions)),
+            );
+        app.world_mut()
+            .resource_mut::<CareerClient>()
+            .view
+            .supporter = status;
+        app.world_mut().resource_mut::<SupporterUiState>().open = true;
+        app.update();
+        app
+    }
+
+    /// RU UI tree: the panel reads the purchase surface (website, no StoreKit
+    /// button), lists the tier styles, gates Equip by the tier and opens the
+    /// portal's Supporter page.
+    #[test]
+    fn ru_panel_offers_the_website_and_equips_only_unlocked_tier_styles() {
+        use crate::ui::test_id::harness;
+        let mut app = panel_app(
+            PurchaseOffer {
+                surface: PaymentSurface::Website,
+                tiers: true,
+            },
+            Some(tier_status(1000, AuraStyle::Crimson)),
+        );
+        let world = app.world_mut();
+        for style in AuraStyle::ALL {
+            assert!(
+                harness::find(world, &format!("SupporterAura-{}", style.id())).is_some(),
+                "{style:?}"
+            );
+        }
+        assert!(harness::find(world, "SupporterWebsite").is_some());
+        assert!(harness::find(world, "SupporterPurchase").is_none());
+        assert!(harness::find(world, "SupporterRestore").is_none());
+        assert!(harness::find(world, "SupporterTier").is_some());
+        let requests = |app: &mut App| {
+            app.world_mut()
+                .resource_mut::<Messages<NetworkCommand>>()
+                .drain()
+                .filter_map(|command| match command {
+                    NetworkCommand::Career(CareerRequest::EquipSupporterAura { aura, .. }) => aura,
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+        // Prism I previews but cannot be equipped with 1000 points.
+        harness::press(app.world_mut(), "SupporterAura-prism_i");
+        app.update();
+        app.update();
+        assert_eq!(
+            app.world().resource::<SupporterUiState>().selected,
+            AuraStyle::PrismI
+        );
+        harness::press(app.world_mut(), "SupporterEquip");
+        app.update();
+        assert!(requests(&mut app).is_empty());
+        harness::press(app.world_mut(), "SupporterAura-crimson");
+        app.update();
+        app.update();
+        harness::press(app.world_mut(), "SupporterEquip");
+        app.update();
+        assert_eq!(requests(&mut app), [AuraStyle::Crimson]);
+        OPENED.lock().unwrap().clear();
+        harness::press(app.world_mut(), "SupporterWebsite");
+        app.update();
+        assert_eq!(*OPENED.lock().unwrap(), ["https://portal.test/supporter"]);
+        assert_eq!(
+            app.world().resource::<SupporterPlatformState>().message,
+            Some(PlatformMessage::Key("tier.website.opened"))
+        );
+    }
+
+    /// A build without a web surface (global desktop, or any iOS build without
+    /// StoreKit) shows no purchase link and, global, only the base styles.
+    #[test]
+    fn panels_without_a_web_surface_show_no_link() {
+        use crate::ui::test_id::harness;
+        let mut app = panel_app(
+            PurchaseOffer {
+                surface: PaymentSurface::None,
+                tiers: false,
+            },
+            Some(SupporterStatus::default()),
+        );
+        let world = app.world_mut();
+        assert!(harness::find(world, "SupporterWebsite").is_none());
+        assert!(harness::find(world, "SupporterPurchase").is_none());
+        assert!(harness::find(world, "SupporterTier").is_none());
+        assert!(harness::find(world, "SupporterAura-solar").is_some());
+        assert!(harness::find(world, "SupporterAura-rose").is_none());
+        // An iOS RU build: tiers are listed but nothing links to the web.
+        let mut app = panel_app(
+            PurchaseOffer {
+                surface: PaymentSurface::None,
+                tiers: true,
+            },
+            None,
+        );
+        let world = app.world_mut();
+        assert!(harness::find(world, "SupporterWebsite").is_none());
+        assert!(harness::find(world, "SupporterAura-prism_iii").is_some());
+        harness::press(world, "SupporterRefresh");
+    }
+
+    /// Other players' tier auras render within the element budget (the Prism
+    /// III crown replaces one spark), and every wearer of a Prism style shares
+    /// its materials, which change colour over time while solid tiers do not.
+    #[test]
+    fn tier_auras_render_on_other_players_and_prisms_shimmer_in_sync() {
+        let mut app = App::new();
+        app.init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<StandardMaterial>>()
+            .init_resource::<Assets<ColorMaterial>>()
+            .init_resource::<Assets<Image>>()
+            .init_resource::<Time>()
+            .init_resource::<AuraRegistry>()
+            .init_resource::<SupporterUiState>()
+            .insert_resource(PlayerVisualMode::Models3d)
+            .add_systems(Startup, setup)
+            .add_systems(Update, (sync_auras, shimmer_prisms, animate_orbits).chain());
+        let wearers: Vec<Entity> = [
+            AuraStyle::PrismII,
+            AuraStyle::PrismII,
+            AuraStyle::PrismIII,
+            AuraStyle::Crimson,
+            AuraStyle::Rose,
+        ]
+        .into_iter()
+        .map(|style| {
+            app.world_mut()
+                .spawn((RemotePlayer, NetworkSupporterAura(Some(style))))
+                .id()
+        })
+        .collect();
+        app.update();
+        let roots: Vec<Entity> = wearers
+            .iter()
+            .map(|actor| app.world().resource::<AuraRegistry>().0[actor].0)
+            .collect();
+        for root in &roots {
+            assert_eq!(
+                app.world().get::<Children>(*root).unwrap().len(),
+                HERO_AURA_ELEMENT_BUDGET
+            );
+        }
+        let crowns = |app: &mut App| {
+            app.world_mut()
+                .query::<&Orbit>()
+                .iter(app.world())
+                .filter(|orbit| matches!(orbit.particle, AuraParticle::Crown))
+                .count()
+        };
+        assert_eq!(crowns(&mut app), 1, "only Prism III wears the crown");
+        let core = |app: &mut App, root: Entity| {
+            let children: Vec<Entity> = app.world().get::<Children>(root).unwrap().to_vec();
+            children
+                .into_iter()
+                .find(|child| {
+                    app.world()
+                        .get::<Orbit>(*child)
+                        .is_some_and(|orbit| matches!(orbit.particle, AuraParticle::Core))
+                })
+                .and_then(|child| app.world().get::<MeshMaterial3d<StandardMaterial>>(child))
+                .unwrap()
+                .0
+                .clone()
+        };
+        let shared = core(&mut app, roots[0]);
+        assert_eq!(shared, core(&mut app, roots[1]), "one material per style");
+        let crimson = core(&mut app, roots[3]);
+        let colour = |app: &App, handle: &Handle<StandardMaterial>| {
+            app.world()
+                .resource::<Assets<StandardMaterial>>()
+                .get(handle)
+                .unwrap()
+                .base_color
+        };
+        let before = (colour(&app, &shared), colour(&app, &crimson));
+        let assets_before = app.world().resource::<Assets<StandardMaterial>>().len();
+        for _ in 0..30 {
+            app.world_mut()
+                .resource_mut::<Time>()
+                .advance_by(std::time::Duration::from_secs_f64(1. / 60.));
+            app.update();
+        }
+        assert_ne!(colour(&app, &shared), before.0, "Prism II shimmers");
+        assert_eq!(colour(&app, &crimson), before.1, "Crimson stays red");
+        assert_eq!(
+            app.world().resource::<Assets<StandardMaterial>>().len(),
+            assets_before
+        );
+        // The 2D fallback has its own budget and keeps the crown inside it.
+        *app.world_mut().resource_mut::<PlayerVisualMode>() = PlayerVisualMode::Sprite2d;
+        app.update();
+        let flat_root = app.world().resource::<AuraRegistry>().0[&wearers[2]].0;
+        assert_eq!(
+            app.world().get::<Children>(flat_root).unwrap().len(),
+            FLAT_AURA_ELEMENT_BUDGET
+        );
+        assert_eq!(crowns(&mut app), 1);
+    }
+
+    #[test]
+    fn every_style_has_a_distinct_palette_and_prism_tiers_grow_in_intensity() {
+        let solid: Vec<Color> = AuraStyle::ALL
+            .iter()
+            .filter(|style| prism(**style).is_none())
+            .map(|style| color(*style))
+            .collect();
+        for (i, a) in solid.iter().enumerate() {
+            for b in &solid[i + 1..] {
+                assert_ne!(a, b);
+            }
+        }
+        let tiers = [AuraStyle::PrismI, AuraStyle::PrismII, AuraStyle::PrismIII];
+        for pair in tiers.windows(2) {
+            let (low, high) = (prism(pair[0]).unwrap(), prism(pair[1]).unwrap());
+            assert!(high.0 > low.0 && high.1 > low.1 && high.2 >= low.2);
+        }
+        // Three hues at once: orbits, heads and the body glow differ.
+        let p = palette(AuraStyle::PrismI, 3.);
+        assert_ne!(p.flat_trail.with_alpha(1.), p.flat_halo.with_alpha(1.));
+        assert_eq!(sparkle(AuraStyle::Solar), 1.);
+        assert!(sparkle(AuraStyle::PrismIII) > sparkle(AuraStyle::PrismI));
     }
 }

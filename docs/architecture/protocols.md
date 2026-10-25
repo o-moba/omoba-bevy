@@ -24,15 +24,15 @@ Snapshot: game dev 6d34f98, portal dev 604bc34, 2026-10-24. See [README](README.
 
 | Marker | Value | Defined in |
 | --- | --- | --- |
-| `PROTOCOL_VERSION` | `11` | `shared/src/protocol.rs` |
+| `PROTOCOL_VERSION` | `12` (tier aura styles, LR-67) | `shared/src/protocol.rs` |
 | `HANDSHAKE_VERSION` | `1` | `shared/src/compatibility.rs` |
 | `CATALOG_REVISION` | `standard-kits-8` | `shared/src/loadout.rs` |
 | `GEOMETRY_ID` | `verdant-confluence-compact-v2` | `shared/src/map.rs` |
 | `GAMEPLAY_REVISION` | `dawnweaver-2026-10-11-reference` | `shared/src/compatibility.rs` |
-| `POLICY_PROTOCOL_VERSION` / `POLICY_HANDSHAKE_VERSION` | `11` / `1` | `shared/src/protocol/wire_enums.rs` |
+| `POLICY_PROTOCOL_VERSION` / `POLICY_HANDSHAKE_VERSION` | `12` / `1` | `shared/src/protocol/wire_enums.rs` |
 | Snapshot fragment magic | `OMB1` | `shared/src/transport.rs` |
 | Allocation manifest | `version: 1` (exact) | `server/src/match_allocation.rs` (`Manifest::validate`) |
-| Portal schema | `[1..=7]` required exactly | `account-api/src/lib.rs` (`PORTAL_SCHEMA`, `validate_portal_schema`) |
+| Portal schema | `[1..=7, 9]` required exactly (8 reserved for LR-20) | `account-api/src/lib.rs` (`PORTAL_SCHEMA`, `validate_portal_schema`) |
 | Core career schema | `[1, 2, 3, 4, 5]` required exactly (3 = revocable device keys, 4 = admission limits and profile retention, 5 = sanctions, moderation audit and chat switch) | `career-store/src/career_store.rs` (`CareerStore::runtime_from_pool`); described in `account-api/README.md` |
 | Ekza SDK | pinned git rev `d18ec72…` (crate version 0.9.0 at that rev) | root `Cargo.toml` |
 | Registry envelopes | `ekza.avatar.catalog.v2`, `ekza.asset.catalog.v2` | `ekza-bevy-sdk` `src/registry.rs` (avatar, string literal in `catalog_v2`) and `src/assets.rs` (`CATALOG_SCHEMA`, asset) |
@@ -77,7 +77,7 @@ These values change from release to release. Read them from the source when it m
 
 ### 1.3 Connection sequence
 
-The client runs one UDP I/O thread per transport (`client/src/net/transport.rs`, `run_udp_client`). Each new transport opens with a preflight: first connect, Retry, reconnect, server change and lobby → worker redirect all count. Offline practice (`client/src/net/offline.rs`, `LocalPractice`) uses the same `ClientPacket`/`ServerPacket` channels in-process, with no socket and no preflight.
+The client runs one UDP I/O thread per transport (`client/src/net/transport.rs`, `run_udp_client`). Each new transport opens with a preflight: first connect, Retry, reconnect, server change and lobby → worker redirect all count. The first connect happens at boot, or in a market with legal documents (RU) only once the player accepted them (`client/src/legal.rs`, LR-06). Offline practice (`client/src/net/offline.rs`, `LocalPractice`) uses the same `ClientPacket`/`ServerPacket` channels in-process, with no socket and no preflight.
 
 ```mermaid
 sequenceDiagram
@@ -328,7 +328,7 @@ The client validates the endpoint (`persistence::validate_game_server_addr`), se
 - `FindMatch` adds no queue entry while the profile holds that seat. The view is computed from the receipt on every career view, without waiting for a lobby tick.
 - Once the worker reports `finished` or `failed` for a match the lobby saw running (`Slot::ran`), the next tick drops the assignment without an error, and the next `FindMatch` queues. `allocation_cancelled_or_expired` is reported only for an allocation that failed before it ran.
 - The client never hands off to an in-match allocation. The searching screen shows the `rejoin` copy ("You are still in a match · it ends in N min at the latest") with **Resume** and keeps retrying `FindMatch`. Resume sends `SessionUiCommand::ResumeMatch`: the saved resume hint when it names the same allocation, otherwise the view's allocation with this search's lock-in, which the worker reads as a reclaim. A blocked join returns to the lobby (`net/recovery.rs` `resume_actions`, `MatchServiceClient::resume_in_match`).
-- The field is additive (`serde(default)`, skipped when absent). A protocol 11 client without it reads a plain handoff, as before. A new `MatchServiceView` variant would need a protocol bump (`MatchServiceView` is strict in `wire_enums.rs`), and protocol 12 is reserved for LR-67.
+- The field is additive (`serde(default)`, skipped when absent). A client without it reads a plain handoff, as before. A new `MatchServiceView` variant would need a protocol bump (`MatchServiceView` is strict in `wire_enums.rs`); protocol 12 went to the LR-67 tier aura styles.
 
 **Worker admission** (`authorize_allocated_join`):
 
@@ -347,7 +347,7 @@ The client validates the endpoint (`persistence::validate_game_server_addr`), se
 
 - Required env: `OMOBA_DATABASE_URL`; `OMOBA_PORTAL_ORIGIN`, an exact HTTPS origin with no path, query or trailing slash (`http://127.0.0.1:3010` / `http://localhost:3010` only with `OMOBA_ALLOW_INSECURE_LOCAL=1`); `OMOBA_PORTAL_SECRET`, 32 bytes in hex.
 - `OMOBA_ACCOUNT_BIND` defaults to `127.0.0.1:40550` and must be loopback. Optional: `OMOBA_TRUST_LOOPBACK_PROXY=1`, `OMOBA_RELEASE_CATALOG`. `omoba-account-api migrate` applies migrations instead of serving.
-- Schema checks: career schema exactly `[1, 2, 3, 4, 5]` (`CareerStore::runtime_from_pool`) and portal schema exactly `[1..7]` (`validate_portal_schema`).
+- Schema checks: career schema exactly `[1, 2, 3, 4, 5]` (`CareerStore::runtime_from_pool`) and portal schema exactly `[1..7, 9]` (`validate_portal_schema`).
 - Configuration checks: billing, social (VK) and Ekza settings must parse, and a build without `supporter` refuses Apple or Solana billing settings.
 - Any failure prints `Account API: <code>` and exits 1. Startup refusal codes: `unsupported_portal_schema`, `invalid_billing_configuration`, `billing_configured_without_supporter`, `invalid_social_configuration`, `ekza_unavailable` (no Ekza origin can be derived). A career-schema mismatch passes through `game_error` and prints as `invalid_request`. None of these codes is ever returned in an HTTP response.
 - Background loops: projection (`read::project`, 128 per pass) plus `cleanup` every 5 s; Apple reconciliation (`supporter::reconcile_apple`) every 300 s.
@@ -500,13 +500,13 @@ Umbrella context, including the Registry lifecycle and the HTTP-contract table: 
 
 ## 9. Market switches
 
-`shared::market::{MARKET, FEATURES}` are `const`s computed from `option_env!("OMOBA_MARKET")` and `OMOBA_FEATURE_{EKZA,SUPPORTER,VK_SIGN_IN}`. An unknown value is a compile-time panic. `scripts/markets.py` mirrors the presets, and `scripts/test_release.py` checks the two against each other ([markets.md](../markets.md)). The `ekza-bevy-sdk` crate stays linked in every build. The switches remove **behaviour and requests**, not the dependency. The free markets (ru, cn) turn `ekza` and `supporter` off; ru also turns `vk_sign_in` on.
+`shared::market::{MARKET, FEATURES}` are `const`s computed from `option_env!("OMOBA_MARKET")` and `OMOBA_FEATURE_{EKZA,SUPPORTER,VK_SIGN_IN}`. An unknown value is a compile-time panic. `scripts/markets.py` mirrors the presets and each market's payment providers, and `scripts/test_release.py` checks the two against each other ([markets.md](../markets.md)). The `ekza-bevy-sdk` crate stays linked in every build. The switches remove **behaviour and requests**, not the dependency. ru and cn turn `ekza` off; cn also turns `supporter` off; ru turns `vk_sign_in` on and sells Hero Supporter through YooKassa only (LR-67): the client has the panel and every player's aura but no StoreKit bridge, and the Account API refuses Apple and Solana settings and serves no Apple or Solana route.
 
-| Contract | `ekza` off (free markets: ru, cn) | `supporter` off (free markets: ru, cn) | `vk_sign_in` on (ru) |
+| Contract | `ekza` off (ru, cn) | `supporter` off (cn) | `vk_sign_in` on (ru) |
 | --- | --- | --- | --- |
 | Client | Ekza Registry and passport pinned to a closed loopback port, desktop overrides ignored. No store, account link, weapon library or placements (`connection_profile.rs` `for_market`, `client/src/passport.rs` `initialize_store`). A saved Ekza weapon falls back to the class default | no Supporter panel or StoreKit bridge | "Sign in with VK ID" through the portal, native `auth/social/link` |
 | Game server | `PassportAdmissions::for_market(false)`: no passport API, Registry fetches fail without a request. Protected avatars and `ekza-` weapons are denied, shipped content stays free | — | — |
-| Account API | `me/ekza-library*` → 404 | `supporter*`, `me/supporter*` → 404. Refuses to start with Apple/Solana settings | VK routes active when configured |
+| Account API | `me/ekza-library*` → 404 | `supporter*`, `me/supporter*` → 404. Refuses to start with Apple, Solana or YooKassa settings | VK routes active when configured |
 | Portal BFF | Ekza library routes, `/api/ekza/*`, `/api/sponsor/*` → 404 | Supporter routes and `supporters` → 404 | `auth/social/*`, `me/social/*` allowed |
 | UDP protocol | unchanged. `Join.passport_ticket` and `HandheldSelection::Item` remain on the wire but are refused | unchanged (`supporter_aura` stays, granted only from stored grants) | unchanged |
 
@@ -535,7 +535,7 @@ Tracked on other pages: per-IP rate limits behind the hosted dev ingress's `X-Re
 1. **OpenAPI drift.** `account-api/docs/openapi.json` has `info.version` `0.21.0-rc.1` (the workspace is 0.44.0 at the snapshot). It omits `/v1/auth/devices/*`, `/v1/me/devices*`, `/v1/me/recovery-codes`, `GET /v1/supporters` and `PATCH /v1/me/supporter/recognition`, and declares no security on the `me/supporter*` routes.
 2. **Unreachable routes?** `POST /v1/me/supporter/apple/{prepare,verify}` exist in `dispatch` but appear in neither the BFF allowlist nor any ingress native list. Native StoreKit uses `/v1/supporter/native`. Their intended caller is unclear.
 3. **Global production Account API ingress.** [markets.md](../markets.md) says the global market has none, and the repo holds only the dev and RU ingress configs. Their native lists differ the way the market presets do: dev has the Supporter route, RU has the VK link route ([system.md › Account API ingress allowlists](./system.md#account-api-ingress-allowlists)). That is not written down as a rule.
-4. **Protocol 11 rationale.** The comment above `PROTOCOL_VERSION` still describes version 10. `CHANGELOG.md` records "protocol 11" only as part of a coordinated contract bump.
+4. **Protocol 11 rationale.** The comment above `PROTOCOL_VERSION` describes versions 10 and 12, not 11. `CHANGELOG.md` records "protocol 11" only as part of a coordinated contract bump.
 5. **Lobby/worker binary skew.** `Manifest` checks `version == 1`, but `Status` has no version. Recovery relaunches whatever `OMOBA_MATCH_EXECUTABLE` (or lobby executable) is configured at that moment. Rules for contract skew between a restarted lobby, running workers and a replaced binary are not documented.
 6. **Pre-handshake clients on public roles** get no reply when their `transport_probe` carries another protocol: they see a timeout, not a mismatch message. Is that intended now that every supported client runs the preflight?
 7. **`TransportChallenge.lobby`** is sent by the server but ignored by the client's `handle_challenge`, so its purpose is unclear.

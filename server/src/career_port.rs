@@ -93,4 +93,7 @@ pub(crate) trait CareerPort {
     );
     #[cfg(test)]
     fn test_set_chat_switch(&mut self, enabled: Option<bool>);
+    /// Start the next access refresh (presence, key and Supporter status) now.
+    #[cfg(test)]
+    fn test_refresh_now(&mut self);
 }

@@ -19,7 +19,9 @@
 //! rather than gating their systems: without Ekza no `SponsorshipPlugin`
 //! (registry-served community sculptures), without Supporter neither
 //! `SupporterPlugin` nor `SupporterStoreKitPlugin` (the StoreKit tick reads the
-//! first one's resources). Disabled plugins keep their place in the order.
+//! first one's resources), and `SupporterStoreKitPlugin` only where the market
+//! sells through Apple (an RU build renders auras and links to the portal, but
+//! has no StoreKit bridge; LR-67). Disabled plugins keep their place in the order.
 //!
 //! Nothing else reads the world inside `build`. The debug tooling
 //! (`SandboxPlugin`, `DebugAccessPlugin`, `PracticeSandboxPlugin`,
@@ -27,7 +29,7 @@
 //! (where it used to be last), so the build order is unchanged.
 
 use bevy::app::{PluginGroup, PluginGroupBuilder};
-use shared::market::Features;
+use shared::market::{Features, PaymentProvider};
 
 use crate::{
     battlefield_atmosphere::BattlefieldAtmospherePlugin,
@@ -81,12 +83,15 @@ use crate::{
     world2d::World2dPlugin,
 };
 
-/// Preferences, the server session, the match service and the career identity.
+/// The legal gate, preferences, the server session, the match service and
+/// the career identity. `LegalPlugin` comes first: its acceptance decides
+/// whether the boot opens any region traffic (LR-06).
 pub(crate) struct NetPlugins;
 
 impl PluginGroup for NetPlugins {
     fn build(self) -> PluginGroupBuilder {
         PluginGroupBuilder::start::<Self>()
+            .add(crate::legal::LegalPlugin)
             .add(ClientPersistencePlugin)
             .add(NetworkingPlugin)
             .add(crate::update::ClientUpdatePlugin)
@@ -184,12 +189,15 @@ pub(crate) struct UiPlugins;
 
 impl PluginGroup for UiPlugins {
     fn build(self) -> PluginGroupBuilder {
-        ui_plugins(shared::market::FEATURES)
+        ui_plugins(
+            shared::market::FEATURES,
+            shared::market::payment_providers(),
+        )
     }
 }
 
-/// [`UiPlugins`] of a build with `features`.
-fn ui_plugins(features: Features) -> PluginGroupBuilder {
+/// [`UiPlugins`] of a build with `features` selling through `providers`.
+fn ui_plugins(features: Features, providers: &[PaymentProvider]) -> PluginGroupBuilder {
     let group = PluginGroupBuilder::start::<UiPlugins>()
         .add(UiKitPlugin)
         .add(crate::connection_profile::ConnectionProfilePlugin)
@@ -214,12 +222,15 @@ fn ui_plugins(features: Features) -> PluginGroupBuilder {
         .add(CareerPlugin)
         .add(SupporterPlugin)
         .add(SupporterStoreKitPlugin);
-    if features.supporter {
+    let group = if features.supporter {
         group
     } else {
+        group.disable::<SupporterPlugin>()
+    };
+    if features.supporter && shared::market::sells(providers, PaymentProvider::Apple) {
         group
-            .disable::<SupporterPlugin>()
-            .disable::<SupporterStoreKitPlugin>()
+    } else {
+        group.disable::<SupporterStoreKitPlugin>()
     }
 }
 
@@ -228,11 +239,15 @@ mod tests {
     use super::*;
     use shared::market::Market;
 
+    fn market_ui(market: Market, features: Features) -> PluginGroupBuilder {
+        ui_plugins(features, shared::market::providers_of(market, features))
+    }
+
     #[test]
     fn free_markets_register_no_ekza_placements_and_no_supporter_store() {
         let global = Market::Global.default_features();
         assert!(presentation_plugins(global).enabled::<crate::sponsorship::SponsorshipPlugin>());
-        let ui = ui_plugins(global);
+        let ui = market_ui(Market::Global, global);
         assert!(ui.enabled::<SupporterPlugin>() && ui.enabled::<SupporterStoreKitPlugin>());
         for market in [Market::Ru, Market::Cn] {
             let features = market.default_features();
@@ -240,15 +255,33 @@ mod tests {
             assert!(presentation.contains::<crate::sponsorship::SponsorshipPlugin>());
             assert!(!presentation.enabled::<crate::sponsorship::SponsorshipPlugin>());
             assert!(presentation.enabled::<Verdant3dPlugin>(), "{market:?}");
-            let ui = ui_plugins(features);
-            assert!(!ui.enabled::<SupporterPlugin>() && !ui.enabled::<SupporterStoreKitPlugin>());
+            let ui = market_ui(market, features);
+            assert!(!ui.enabled::<SupporterStoreKitPlugin>(), "{market:?}");
             assert!(ui.enabled::<CareerPlugin>(), "{market:?}");
         }
+        assert!(!market_ui(Market::Cn, Market::Cn.default_features()).enabled::<SupporterPlugin>());
         // One feature flips one gate.
         let supporter_only = Features {
             ekza: false,
             ..global
         };
-        assert!(ui_plugins(supporter_only).enabled::<SupporterPlugin>());
+        assert!(market_ui(Market::Global, supporter_only).enabled::<SupporterPlugin>());
+    }
+
+    /// LR-67: an RU client draws the Supporter panel and everyone's auras
+    /// (`SupporterPlugin`) but has no StoreKit bridge; turning `supporter` off
+    /// in an RU test build removes both.
+    #[test]
+    fn ru_registers_the_supporter_plugin_without_storekit() {
+        let ru = Market::Ru.default_features();
+        let ui = market_ui(Market::Ru, ru);
+        assert!(ui.enabled::<SupporterPlugin>());
+        assert!(!ui.enabled::<SupporterStoreKitPlugin>());
+        let free = Features {
+            supporter: false,
+            ..ru
+        };
+        let ui = market_ui(Market::Ru, free);
+        assert!(!ui.enabled::<SupporterPlugin>() && !ui.enabled::<SupporterStoreKitPlugin>());
     }
 }

@@ -2,8 +2,9 @@
 
 ## Markets and sign in with VK ID
 
-Each build serves one market: `global` (today's product), `ru` (a free game on
-Russian servers, no Ekza ecosystem, no purchases, Russian by default) or `cn`
+Each build serves one market: `global` (today's product), `ru` (Russian servers,
+no Ekza ecosystem, Hero Supporter auras sold only through YooKassa donations on
+the RU portal, Russian by default) or `cn`
 (prepared, not packaged yet). `release.py --market ru` makes the RU set with its
 own servers, settings folder and Android app. RU players sign in with VK ID
 (VK, OK, Mail.ru) on the RU portal and from Profile in the game; the game's
@@ -538,7 +539,27 @@ purchase/restore and retains unfinished transactions until server confirmation.
 The Apple adapter requires an authenticated verifier and App Store setup; local
 fixtures are not proof of a real sandbox purchase or App Review approval.
 
-Core career schema is version 3 and portal schema is version 6. Run owner migrations and the
+### Monthly Hero tiers (LR-67)
+
+Russian players donate on the RU portal through YooKassa; every donation is a
+30-day grant worth one tier point per ruble, and the donations covering now add up
+to a tier: Rose (100), Jade (250), Azure (500), Crimson (1000) and Prism I–III
+(2500, 5000, 10000). Each tier unlocks its own aura style on top of Solar, Lunar
+and Verdant, which any active grant unlocks; everyone in a match sees it. One
+shared rule decides what a player may wear (Account API, career store and the
+game server, which re-checks every refresh), and a style the tier no longer
+covers steps down to the best one it does. The four solid tiers are new palettes
+of the 23-element aura; the Prism tiers shimmer through the rainbow in sync for
+all wearers, faster and brighter per tier, Prism III with a crown ring inside the
+same budget. The Supporter panel shows the tier with its end date and the tier it
+steps down to, lists the styles and, on RU desktop and Android builds, opens
+«Поддержать на сайте» (`<portal>/supporter`); iOS builds never link to a web
+payment. Protocol 12 carries the new styles; portal schema 9 stores amounts,
+points and the durable YooKassa attempts and refunds, and the Account API
+settles re-read payments and refunds exactly once. The checkout, webhook and
+portal pages follow in LR-67b and LR-67c. See [Hero tiers](supporter.md#hero-tiers).
+
+Core career schema is version 3 and portal schema is versions 1–7 and 9. Run owner migrations and the
 updated runtime grants before deploying matching game/API releases. See
 [Supporter operations](supporter.md) for rollout boundaries and test procedures.
 
@@ -1119,6 +1140,26 @@ follows.
 - The RU host ships kernel per-source rate limits for UDP 4000 and the arena range (`ops/vps/ru/nftables-omoba.conf`, unit `omoba-limits-ru`), installed and checked by `ru_host.py`. Every limit is a setting (`OMOBA_LIMIT_*`, `OMOBA_PROFILE_RETENTION_DAYS`) documented in [ops/vps/ru/README.md](../ops/vps/ru/README.md#admission-limits-lr-16).
 - Copy in en, ru and zh-Hans (`client/i18n/*/admission.json`, `queue.failed.arena_limit`, `queue.failed.practice_cooldown`).
 - Code: `server/src/admission.rs`, `server/src/public_transport.rs`, `server/src/career_backend.rs`, `server/src/match_service.rs`, `career-store/migrations/postgres/004_admission_limits.sql`, `career-store/src/career_store.rs` (`authenticate_from`, `prune_unplayed_profiles`), `harness/tests/admission.rs`. See [the session note](progress/2026-10-24-lr-16.md).
+
+## Legal acceptance, About and age sign in the game (LR-06, unreleased)
+
+- An RU build opens with a card before anything else: «Перед игрой», the age sign `12+`, links to the User Agreement and the Privacy Policy on `omoba.ru` (opened in the browser), the document version (`0-draft`), a language switch and «Я принимаю…». **Continue** stays disabled until the switch is on.
+- Until the player accepts, the game opens no lobby connection, does not read the release catalog and offers no VK sign-in, device link or website pairing. The acceptance is kept in the market's settings folder (`legal_acceptance.json`: region, document version, time); a new document version asks again. It is not sent to a server yet.
+- Settings → «Об игре» shows the build label, `12+`, both documents and the source code of this release (`github.com/o-moba/omoba-bevy/tree/v<version>-ru`). Support e-mail, VK community and Telegram appear there once the owner provides them. The boot splash shows `12+` too.
+- RU package READMEs end with the age sign and the same links. `release.py catalog --market ru` refuses until the public tag `v<version>-ru` exists.
+- The global build is unchanged: its market has no legal table, so no card, no About page and no gate.
+- Copy in en, ru and zh-Hans (`client/i18n/*/legal.json`).
+- Code: `shared/src/market.rs` (`Market::legal`, `Legal`), `scripts/markets.py` (`Legal`), `client/src/legal.rs`, `client/src/pause_menu.rs` (About tab), `scripts/release.py` (`legal_readme`, `require_public_source_tag`). See [markets](markets.md#legal-documents-and-links-lr-06) and [the session note](progress/2026-10-24-lr-06-client.md).
+
+## RU host monitoring and alerts (LR-17 ops, unreleased)
+
+- The owner hears about an RU outage on Telegram within minutes, without logging in to the host. Without a bot, every alert still goes to the journal.
+- On the host, every RU unit and every PostgreSQL cluster unit names `OnFailure=omoba-alert-ru@%n.service`, so any failure alerts at once, also each crash before systemd restarts a service. A check every 5 minutes reports an enabled service or Caddy not running, a PostgreSQL cluster down (its `postgresql@<version>-main.service`, not the always-active `postgresql.service` wrapper, or no connection on port 5432), a stopped backup timer, free disk below 15% and a match worker whose heartbeat stopped. Reminders come hourly (daily for a timer job), and a "resolved" message follows once the problem is gone.
+- Outside the host, an external probe runs every minute against the lobby's UDP compatibility check, the Account API `/health/ready` and the portal, and alerts after 2 failed rounds in a row. `release.py preflight` runs the same UDP check and, with `--contract`, compares the server with a release.
+- A journald drop-in keeps the RU host's journal on disk, at most 1 GiB and 30 days.
+- The host's one Telegram bot lives in `alerts.env`; the backup alerts (LR-03) use it too. The public names come from `scripts/markets.py`.
+- Not yet: the lobby's queue, capacity and allocation metrics with their alerts, and bounded match archives (LR-17 server part).
+- Code: `ops/vps/ru/ru_monitor.py`, `ops/vps/ru/omoba-alert-ru@.service`, `ops/vps/ru/omoba-monitor-ru.{service,timer}`, `ops/vps/ru/postgresql-alert-ru.conf`, `ops/vps/ru/alerts.env.example`, `ops/vps/ru/journald-omoba-ru.conf`, `ops/vps/ru/ru_host.py` (install and `status`), `scripts/market_probe.py`, `ops/probe/`, `scripts/release.py` (`preflight`). See [Monitoring and alerts](../ops/vps/ru/README.md#monitoring-and-alerts), [the external probe](../ops/probe/README.md) and [the session note](progress/2026-10-24-lr-17-ops.md).
 
 ## Moderation minimum (LR-15, unreleased)
 

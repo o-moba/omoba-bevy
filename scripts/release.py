@@ -52,7 +52,7 @@ ecosystem, no purchases, Russian by default, VK ID sign-in on the RU portal);
 `--feature ekza=on` flips one feature for a test build without a new market:
 
     python3 scripts/release.py markets                      # presets, servers, platforms
-    python3 scripts/release.py preflight --market ru        # are the RU servers up?
+    python3 scripts/release.py preflight --market ru        # are the RU servers up? (DNS, UDP, HTTPS)
     python3 scripts/release.py build all --market ru        # Omoba-<v>-ru-* in dist/v<v>-ru/
     python3 scripts/release.py build macos --market ru --server 127.0.0.1:4000 \
         --account-api http://127.0.0.1:40550 --portal http://127.0.0.1:3010   # local RU stack
@@ -109,6 +109,7 @@ from contours import (ACCOUNT_API_ENV, PORTAL_ORIGIN_ENV, DEV_ACCOUNT_API, DEV_P
                       DEV_PASSPORT, DEV_REGISTRY, MOBILE, PASSPORT_DEFAULT_ENV, REGISTRY_DEFAULT_ENV,
                       SERVER_DEFAULT_ENV)
 from ios_release_guard import require_production_source
+import market_probe  # noqa: E402
 import markets as market_presets  # noqa: E402
 from markets import FEATURE_ENVS, MARKET_ENV, MARKETS  # noqa: E402
 CLIENT_DEFAULT_ENVS = (SERVER_DEFAULT_ENV, REGISTRY_DEFAULT_ENV, PASSPORT_DEFAULT_ENV, CONFIG_SUFFIX_ENV)
@@ -585,7 +586,30 @@ ANDROID
 - {"OMOBA Dev installs beside OMOBA; its Connection button picks Dev, Local or Custom." if flavor.dev else "It plays on the public OMOBA lobby."}
 """,
     }.get(target, "")
-    return common + specific + "\nLicenses and attributions: see the legal/ folder and ATTRIBUTION.md.\n"
+    return (common + specific + legal_readme(version, flavor)
+            + "\nLicenses and attributions: see the legal/ folder and ATTRIBUTION.md.\n")
+
+
+def legal_readme(version: str, flavor: Flavor = PROD) -> str:
+    """The market's age sign, documents, source and channels (LR-06, LR-07, LR-21), from
+    markets.py `Legal`; a link the market does not have is left out, a market without any
+    (global) adds nothing. A dev build has no public source tag, so it names none."""
+    legal = MARKETS[flavor.market].legal
+    lines = []
+    if legal.age_rating:
+        lines.append(f"Возрастная категория / Age rating: {legal.age_rating}")
+    for label, value in (("Пользовательское соглашение / Terms of use", legal.terms),
+                         ("Политика конфиденциальности / Privacy policy", legal.privacy),
+                         ("Исходный код этой версии / Source code of this release",
+                          None if flavor.dev else legal.source_for(version)),
+                         ("Поддержка / Support", legal.support_email),
+                         ("Сообщество ВКонтакте / VK community", legal.community_vk),
+                         ("Telegram", legal.community_telegram)):
+        if value:
+            lines.append(f"{label}: {value}")
+    if not lines:
+        return ""
+    return "\nПРАВОВАЯ ИНФОРМАЦИЯ / LEGAL\n" + "\n".join(lines) + "\n"
 
 
 # ---------------------------------------------------------------- checks
@@ -673,7 +697,7 @@ def stage_common(destination: Path, version: str, target: str, flavor: Flavor, a
         raise SystemExit("packaged asset content gate failed: " + "; ".join(gate["errors"]))
     copy_legal_notices(collect_legal_notices(ROOT), destination / "legal")
     shutil.copy2(ROOT / "ATTRIBUTION.md", destination / "ATTRIBUTION.md")
-    (destination / "README.txt").write_text(player_readme(version, target, flavor))
+    (destination / "README.txt").write_text(player_readme(version, target, flavor), encoding="utf-8")
 
 
 def zip_tree(source: Path, archive: Path, root_name: str):
@@ -1459,7 +1483,9 @@ def command_markets(args) -> int:
                             "settings_folder": market_presets.config_dir(key, None),
                             "lobby": preset.lobby or BETA_LOBBY, "account_api": preset.account_api,
                             "portal": preset.portal, "platforms": list(preset.platforms),
-                            "blocked": preset.blocked} for key, preset in MARKETS.items()}, indent=2))
+                            "legal": {name: value for name, value in vars(preset.legal).items() if value},
+                            "blocked": preset.blocked} for key, preset in MARKETS.items()},
+                     indent=2, ensure_ascii=False))
     return 0
 
 
@@ -1479,9 +1505,12 @@ PORTAL_ROUTE_PROBLEMS = {
 }
 
 
-def preflight_report(market: str, resolve=None, fetch=None) -> dict:
-    """Whether a market's lobby name resolves, its Account API / portal answer over HTTPS,
-    and the portal reaches the Account API while the public API name refuses portal routes."""
+def preflight_report(market: str, resolve=None, fetch=None, udp=None, contract: dict | None = None) -> dict:
+    """Whether a market's lobby name resolves and answers the UDP compatibility check (LR-17;
+    with `contract`, compatibly with that release), its Account API / portal answer over
+    HTTPS, and the portal reaches the Account API while the public API name refuses portal
+    routes."""
+    import http.client
     import socket
     import urllib.request
     preset = market_presets.market(market)
@@ -1500,6 +1529,10 @@ def preflight_report(market: str, resolve=None, fetch=None) -> dict:
             checks["lobby_dns"] = {"host": host, "ok": True, "addresses": resolve(host)}
         except OSError as error:
             checks["lobby_dns"] = {"host": host, "ok": False, "error": type(error).__name__}
+        # The pre-game exchange every client sends first (scripts/market_probe.py, which the
+        # external probe of ops/probe runs every minute).
+        checks["lobby_udp"] = market_probe.lobby_check(preset.lobby, addresses=checks["lobby_dns"].get("addresses", []),
+                                                       udp=udp, expected=contract)
     for name, url in (("account_api", preset.account_api and preset.account_api + "/health/ready"),
                       ("portal", preset.portal and preset.portal + "/")):
         if not url:
@@ -1507,7 +1540,7 @@ def preflight_report(market: str, resolve=None, fetch=None) -> dict:
         try:
             status = fetch(url)
             checks[name] = {"url": url, "ok": 200 <= status < 400, "status": status}
-        except OSError as error:
+        except (OSError, http.client.HTTPException) as error:
             checks[name] = {"url": url, "ok": False, "error": type(error).__name__}
     if preset.account_api and preset.portal:
         origins = {"portal": preset.portal, "account_api": preset.account_api}
@@ -1515,7 +1548,7 @@ def preflight_report(market: str, resolve=None, fetch=None) -> dict:
             url = origins[origin] + path
             try:
                 status = fetch(url)
-            except OSError as error:
+            except (OSError, http.client.HTTPException) as error:
                 checks[name] = {"url": url, "ok": False, "expected": expected, "error": type(error).__name__}
                 continue
             check = {"url": url, "ok": status == expected, "status": status, "expected": expected}
@@ -1529,8 +1562,19 @@ def preflight_report(market: str, resolve=None, fetch=None) -> dict:
             "checks": checks}
 
 
+def read_contract(path: Path) -> dict:
+    """A release's compatibility.json (write_compatibility_manifest)."""
+    try:
+        contract = json.loads(Path(path).read_text())
+    except (OSError, ValueError) as error:
+        raise SystemExit(f"--contract {path}: {error}") from None
+    if not market_probe.valid_contract(contract):
+        raise SystemExit(f"--contract {path} is not a release compatibility contract")
+    return {key: contract[key] for key in market_probe.CONTRACT_KEYS}
+
+
 def command_preflight(args) -> int:
-    report = preflight_report(args.market)
+    report = preflight_report(args.market, contract=read_contract(args.contract) if args.contract else None)
     print(json.dumps(report, indent=2))
     return 0 if report["ready"] else 1
 
@@ -1622,6 +1666,33 @@ def release_catalog(receipt: dict, version: str, market: str, published_at: str,
     return {"releases": releases}
 
 
+def public_source_tag(version: str, market: str) -> str | None:
+    """The tag whose tree the game's About page and the README link as this release's source
+    (markets.py `Legal.source`, LR-06): `v<version>-<market>`; None without a source link."""
+    if not market_presets.market(market).legal.source:
+        return None
+    return release_tag("prod", None, version, market)
+
+
+def remote_tag_listing(tag: str) -> str:
+    """`git ls-remote` of one tag in the public repository (read-only)."""
+    return subprocess.run(["git", "ls-remote", "--tags", f"https://github.com/{REPO}.git", f"refs/tags/{tag}"],
+                          capture_output=True, text=True, timeout=60).stdout
+
+
+def require_public_source_tag(version: str, market: str, listing=None) -> str | None:
+    """LR-06: the public tag exists before the release is published to players, so the
+    source link in the game and the README never points at nothing."""
+    tag = public_source_tag(version, market)
+    listing = listing or remote_tag_listing
+    if tag and f"refs/tags/{tag}" not in listing(tag).split():
+        raise SystemExit(f"the public tag {tag} is missing on github.com/{REPO}; the game's About page and "
+                         f"the README link its source (LR-06). Publish the release first "
+                         f"(`release.py draft --market {market}`, then `gh release edit {tag} --draft=false "
+                         f"--repo {REPO}`) and rerun.")
+    return tag
+
+
 def command_catalog(args) -> int:
     version = workspace_version()
     preset = market_presets.market(args.market)
@@ -1630,6 +1701,7 @@ def command_catalog(args) -> int:
     receipt_path = out / "downloads.json" if preset.downloads else ipfs_path
     if not receipt_path.is_file():
         raise SystemExit(f"{receipt_path} is missing: run `publish --market {args.market}` first")
+    require_public_source_tag(version, args.market)
     mirrors = json.loads(ipfs_path.read_text()) if preset.downloads and ipfs_path.is_file() else None
     published = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(receipt_path.stat().st_mtime))
     catalog = release_catalog(json.loads(receipt_path.read_text()), version, args.market, published,
@@ -1806,9 +1878,11 @@ def main(argv=None) -> int:
                    "-<market> package names (scripts/markets.py)")
     sub.add_parser("check", help="what this host can build")
     sub.add_parser("markets", help="print every market's features, servers and platforms")
-    preflight = sub.add_parser("preflight", help="check that a market's servers answer (DNS, HTTPS health, "
-                                                 "portal to Account API)")
+    preflight = sub.add_parser("preflight", help="check that a market's servers answer (DNS, the lobby's UDP "
+                                                 "compatibility check, HTTPS health, portal to Account API)")
     preflight.add_argument("--market", choices=tuple(MARKETS), default="ru")
+    preflight.add_argument("--contract", type=Path, help="a release's compatibility.json: the lobby must answer "
+                                                         "compatibly with it (dist/v<v>-<market>/compatibility.json)")
     catalog = sub.add_parser("catalog", help="write the Account API download catalog from publish receipts")
     catalog.add_argument("--market", choices=tuple(MARKETS), default="ru")
     catalog.add_argument("--out", type=Path)
