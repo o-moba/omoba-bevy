@@ -619,11 +619,16 @@ fn render_loading(
     latch: Option<Res<LoadingLatch>>,
     tips: Option<Res<crate::help_overlay::BeginnerTips>>,
     mut party_stage: Option<ResMut<super::party_stage::PartyStage>>,
+    flow: Option<Res<crate::match_service::MatchServiceClient>>,
     mut last: Local<String>,
 ) {
     let Ok(window) = windows.single() else {
         return;
     };
+    // The public lobby's queue and Rated/Unrated badge (LR-08).
+    let badge = flow
+        .as_deref()
+        .and_then(crate::match_service::MatchServiceClient::match_badge);
     // Tablets retain the roomy stage; landscape phones get compact controls.
     let form = if window.height() < 500.0 {
         Form::Phone
@@ -636,7 +641,7 @@ fn render_loading(
     let phase = game.prematch.as_ref().map(|p| p.phase);
     let roster_key = game.prematch.as_ref().map(|p| (&p.players, &p.error));
     let key = format!(
-        "{phase:?}:{}:{}:{}:{}:{form:?}:{}:{}",
+        "{phase:?}:{}:{}:{}:{}:{form:?}:{}:{}:{badge:?}",
         serde_json::to_string(&roster_key).unwrap_or_default(),
         window.width(),
         window.height(),
@@ -719,7 +724,14 @@ fn render_loading(
                 }
                 None => spawn_connecting_body(root, &shell, show_tips),
             };
-            let footer = spawn_footer(root, &shell, tip_index, show_tips, window.width());
+            let footer = spawn_footer(
+                root,
+                &shell,
+                tip_index,
+                show_tips,
+                window.width(),
+                badge.as_deref(),
+            );
             parts = Some(LoadingParts {
                 ring: ring.or(body.ring),
                 headline: body.headline,
@@ -1281,12 +1293,15 @@ fn loading_tip_swipes(
     }
 }
 
+/// `badge` is the public lobby's queue and Rated/Unrated badge (LR-08),
+/// shown first on the status row.
 fn spawn_footer(
     root: &mut ChildSpawnerCommands,
     shell: &Shell,
     tip_index: usize,
     show_tips: bool,
     viewport_width: f32,
+    badge: Option<&str>,
 ) -> (Entity, Entity, Entity) {
     let position = if shell.desktop() {
         let width = (viewport_width - shell.left - shell.right).clamp(0.0, 904.0);
@@ -1391,6 +1406,19 @@ fn spawn_footer(
                 ..default()
             })
             .with_children(|row| {
+                if let Some(badge) = badge {
+                    row.spawn((
+                        Text::new(badge),
+                        theme::role_text(TextRole::Caption),
+                        TextColor(color::TEXT_GOLD),
+                        TextLayout::new(Justify::Left, LineBreak::NoWrap),
+                        Node {
+                            flex_shrink: 0.0,
+                            ..default()
+                        },
+                        Name::new("LoadingQueueBadge"),
+                    ));
+                }
                 stage = row
                     .spawn((
                         Text::new(""),
@@ -1710,7 +1738,7 @@ mod tests {
             .add_ui_action::<LoadingAction>()
             .add_systems(Update, loading_actions.after(crate::ui::UiSet::Dispatch));
         harness::spawn_ui(app.world_mut(), |root| {
-            spawn_footer(root, &Shell::of(Form::Phone, None), 0, true, 844.0);
+            spawn_footer(root, &Shell::of(Form::Phone, None), 0, true, 844.0, None);
         });
         app.update();
         harness::press(app.world_mut(), "LoadingTipPrevious");
@@ -1723,10 +1751,36 @@ mod tests {
         assert_eq!(app.world().resource::<LoadingLatch>().tip, 0);
         let mut hidden = harness::kit_app();
         harness::spawn_ui(hidden.world_mut(), |root| {
-            spawn_footer(root, &Shell::of(Form::Phone, None), 0, false, 844.0);
+            spawn_footer(root, &Shell::of(Form::Phone, None), 0, false, 844.0, None);
         });
         assert!(harness::find(hidden.world_mut(), "LoadingTipNext").is_none());
         assert!(harness::find(hidden.world_mut(), "LoadingTipText").is_none());
+        let badge = |app: &mut App| {
+            app.world_mut()
+                .query::<(&Name, &Text)>()
+                .iter(app.world())
+                .find(|(name, _)| name.as_str() == "LoadingQueueBadge")
+                .map(|(_, text)| text.0.clone())
+        };
+        assert_eq!(
+            badge(&mut hidden),
+            None,
+            "no badge away from the public lobby"
+        );
+        // LR-08: an allocated match names its queue and rating on the
+        // status row.
+        let mut public = harness::kit_app();
+        harness::spawn_ui(public.world_mut(), |root| {
+            spawn_footer(
+                root,
+                &Shell::of(Form::Phone, None),
+                0,
+                false,
+                844.0,
+                Some("Ranked · Rated"),
+            );
+        });
+        assert_eq!(badge(&mut public).as_deref(), Some("Ranked · Rated"));
     }
 
     #[test]
@@ -1780,6 +1834,7 @@ mod tests {
                     0,
                     true,
                     size.x as f32,
+                    Some("Casual PvP · Unrated"),
                 );
             });
         app.finish();

@@ -3,7 +3,9 @@
 //! Text comes from the `searching` dictionary: the static labels are
 //! `Localized`, the status and hero lines are rewritten every frame. A player
 //! still seated in a running match gets the `rejoin` copy and a Resume button
-//! instead of a handoff (LR-13).
+//! instead of a handoff (LR-13). On the public lobby the screen names the
+//! queue with its Rated/Unrated badge, and a long Ranked search offers to also
+//! search Casual PvP (LR-08, `queue` dictionary).
 // i18n-strict
 
 use bevy::prelude::*;
@@ -13,7 +15,7 @@ use super::AppScreen;
 use super::widgets;
 use crate::career::CareerClient;
 use crate::i18n::{Localized, data, tr, trf};
-use crate::match_service::MatchServiceClient;
+use crate::match_service::{CasualOffer, MatchServiceClient};
 use crate::net::{ClientSession, GameState, GameStateSnapshot, SessionUiCommand};
 use crate::team::TeamSelection;
 use crate::ui::living_background::{self, LivingBands, LivingScene};
@@ -29,7 +31,12 @@ impl Plugin for SearchingScreenPlugin {
             .add_systems(OnEnter(AppScreen::Searching), spawn_searching)
             .add_systems(
                 Update,
-                (searching_actions, refresh_status, refresh_resume)
+                (
+                    searching_actions,
+                    refresh_status,
+                    refresh_resume,
+                    refresh_queue,
+                )
                     .chain()
                     .after(UiSet::Dispatch)
                     .run_if(in_state(AppScreen::Searching)),
@@ -48,10 +55,23 @@ struct SearchingHero;
 #[derive(Component)]
 struct SearchingResume;
 
+/// "Ranked · Rated": the queue of this search and its rating (LR-08).
+#[derive(Component)]
+struct SearchingQueue;
+
+/// The Casual offer's line on a long Ranked search (O-1).
+#[derive(Component)]
+struct SearchingOffer;
+
+/// "Also search Casual PvP", shown while the offer stands.
+#[derive(Component)]
+struct SearchingAlsoCasual;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum SearchingAction {
     Cancel,
     Resume,
+    AlsoCasual,
 }
 
 /// One status line for the screen. The career queue is authoritative when the
@@ -154,11 +174,37 @@ fn spawn_searching(
                 ));
                 body.spawn(widgets::heading(Localized::new("searching.heading"), 34.0));
                 body.spawn((
+                    widgets::label("", 14.0, theme::GOLD),
+                    SearchingQueue,
+                    Name::new("SearchingQueue"),
+                ));
+                body.spawn((
                     widgets::label(tr("searching.status.contacting"), 16.0, theme::IVORY),
                     SearchingStatus,
                     Name::new("SearchingStatus"),
                 ));
                 body.spawn((widgets::label(&hero, 14.0, theme::MUTED), SearchingHero));
+                body.spawn((
+                    widgets::label("", 13.0, theme::IVORY),
+                    TextLayout::justify(Justify::Center),
+                    Node {
+                        max_width: Val::Percent(100.0),
+                        display: Display::None,
+                        ..default()
+                    },
+                    SearchingOffer,
+                    Name::new("SearchingOffer"),
+                ));
+                let also_casual = screen_button(
+                    body,
+                    Localized::new("queue.offer.accept"),
+                    ButtonKind::Secondary,
+                    SearchingAction::AlsoCasual,
+                    "SearchingAlsoCasual",
+                );
+                body.commands()
+                    .entity(also_casual)
+                    .insert(SearchingAlsoCasual);
                 let resume = screen_button(
                     body,
                     Localized::new("rejoin.resume"),
@@ -181,8 +227,16 @@ fn spawn_searching(
 fn searching_actions(
     mut session_ui: MessageWriter<SessionUiCommand>,
     mut activated: MessageReader<Activated<SearchingAction>>,
+    mut flow: Option<ResMut<MatchServiceClient>>,
 ) {
     for Activated { action, .. } in activated.read() {
+        if *action == SearchingAction::AlsoCasual {
+            // Keeps the Ranked place; the next FindMatch carries it (O-1).
+            if let Some(flow) = flow.as_deref_mut() {
+                flow.take_casual_offer();
+            }
+            continue;
+        }
         session_ui.write(match action {
             // One path for every server mode: the server drops the queue
             // entry or the seat, the client drops the join, and the shell
@@ -192,6 +246,7 @@ fn searching_actions(
             SearchingAction::Cancel => SessionUiCommand::LeaveMatch,
             // Back to the running match's seat (`net::recovery::resume_actions`).
             SearchingAction::Resume => SessionUiCommand::ResumeMatch,
+            SearchingAction::AlsoCasual => unreachable!("handled above"),
         });
     }
 }
@@ -267,6 +322,53 @@ fn refresh_resume(
     }
 }
 
+/// The queue badge and the Casual offer (LR-08): the badge names this
+/// search's queue, or its match's once allocated; the offer line and button
+/// follow the lobby's answer and this player's choice.
+fn refresh_queue(
+    career: Res<CareerClient>,
+    flow: Option<Res<MatchServiceClient>>,
+    party: Option<Res<crate::party::PartyClient>>,
+    mut texts: Query<
+        (&mut Text, &mut Node, Has<SearchingQueue>),
+        Or<(With<SearchingQueue>, With<SearchingOffer>)>,
+    >,
+    mut buttons: Query<&mut Node, (With<SearchingAlsoCasual>, Without<Text>)>,
+) {
+    let badge = flow.as_deref().and_then(|flow| flow.badge(&career.view));
+    let offer = flow
+        .as_deref()
+        .map_or(CasualOffer::Hidden, |flow| flow.casual_offer(&career.view));
+    let in_party = party.as_deref().is_some_and(|party| party.in_party());
+    let line = match offer {
+        CasualOffer::Hidden => None,
+        CasualOffer::Offered => Some(tr("queue.offer.hint")),
+        CasualOffer::Pending if in_party => Some(tr("queue.offer.party_pending")),
+        CasualOffer::Pending | CasualOffer::Searching => Some(tr("queue.also_casual")),
+    };
+    let show = |node: &mut Node, visible: bool| {
+        let display = if visible {
+            Display::Flex
+        } else {
+            Display::None
+        };
+        if node.display != display {
+            node.display = display;
+        }
+    };
+    for (mut text, mut node, is_badge) in &mut texts {
+        let value = if is_badge { badge.as_deref() } else { line };
+        show(&mut node, value.is_some());
+        let value = value.unwrap_or_default();
+        if text.0 != value {
+            value.clone_into(&mut text.0);
+        }
+    }
+    for mut node in &mut buttons {
+        show(&mut node, offer == CasualOffer::Offered);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -327,7 +429,7 @@ mod tests {
         let allocation = MatchAllocation {
             allocation_id: "a".repeat(32),
             endpoint: "127.0.0.1:41000".into(),
-            preference: MatchPreference::Quick,
+            preference: MatchPreference::Casual,
             team: shared::map::Team::Green,
             human_count: 1,
             bot_count: 9,
@@ -421,6 +523,110 @@ mod tests {
         assert!(!shown(&mut app, "SearchingResume"));
         assert!(hero_shown(&mut app));
         assert_eq!(status(&mut app), "Матч найден · подготовка арены…");
+    }
+
+    /// LR-08: a Ranked search names its queue and rating, shows how many
+    /// search it, and after five minutes offers to also search Casual PvP;
+    /// taking the offer keeps the search and its Ranked place.
+    #[test]
+    fn a_long_ranked_search_offers_casual_pvp() {
+        if crate::i18n::testing::isolated(
+            "frontend::searching::tests::a_long_ranked_search_offers_casual_pvp",
+        ) {
+            return;
+        }
+        use crate::i18n::I18nPlugin;
+        use crate::ui::test_id::harness;
+        use shared::match_service::{MatchPreference, MatchServiceView};
+        let mut app = harness::kit_app();
+        app.add_plugins((bevy::state::app::StatesPlugin, I18nPlugin::default()))
+            .insert_state(AppScreen::Searching)
+            .insert_resource(crate::ui::UiPlatform(crate::platform::UiProfile::Desktop))
+            .init_resource::<TeamSelection>()
+            .init_resource::<CareerClient>()
+            .init_resource::<GameStateSnapshot>()
+            .add_message::<SessionUiCommand>()
+            .add_plugins(SearchingScreenPlugin);
+        let mut session = ClientSession::default();
+        session.set_state_for_test(crate::net::ClientConnectionState::Connected);
+        app.insert_resource(session);
+        let mut flow = MatchServiceClient::default();
+        flow.active = true;
+        flow.preference = MatchPreference::Ranked;
+        app.insert_resource(flow);
+        let wait = |elapsed_secs, also_casual| MatchServiceView::Waiting {
+            preference: MatchPreference::Ranked,
+            humans: 3,
+            needed: 10,
+            elapsed_secs,
+            bot_fill_after_secs: None,
+            capacity_wait: false,
+            searching: Some(4),
+            casual_offer_after_secs: Some(300),
+            also_casual,
+        };
+        let answer = |app: &mut App, view| {
+            let mut career = app.world_mut().resource_mut::<CareerClient>();
+            career.view.match_service_request_id = Some(0);
+            career.view.match_service = Some(view);
+        };
+        let text = |app: &mut App, id: &str| -> Option<String> {
+            let entity = harness::find(app.world_mut(), id)
+                .or_else(|| {
+                    app.world_mut()
+                        .query::<(Entity, &Name)>()
+                        .iter(app.world())
+                        .find(|(_, name)| name.as_str() == id)
+                        .map(|(entity, _)| entity)
+                })
+                .unwrap_or_else(|| panic!("no {id}"));
+            (app.world().get::<Node>(entity).unwrap().display != Display::None)
+                .then(|| app.world().get::<Text>(entity).map(|t| t.0.clone()))
+                .map(Option::unwrap_or_default)
+        };
+        answer(&mut app, wait(120, false));
+        app.update();
+        app.update();
+        assert_eq!(
+            text(&mut app, "SearchingQueue").as_deref(),
+            Some("Ranked · Rated")
+        );
+        let status = text(&mut app, "SearchingStatus").unwrap();
+        assert!(
+            status.contains("3/10") && status.contains("no bots"),
+            "{status}"
+        );
+        assert!(status.ends_with("4 searching this queue"), "{status}");
+        assert_eq!(text(&mut app, "SearchingOffer"), None);
+        assert!(text(&mut app, "SearchingAlsoCasual").is_none());
+
+        answer(&mut app, wait(300, false));
+        app.update();
+        assert!(
+            text(&mut app, "SearchingOffer")
+                .unwrap()
+                .contains("keep your place in Ranked")
+        );
+        assert!(text(&mut app, "SearchingAlsoCasual").is_some());
+        harness::press(app.world_mut(), "SearchingAlsoCasual");
+        app.update();
+        assert!(
+            app.world()
+                .resource::<Messages<SessionUiCommand>>()
+                .is_empty(),
+            "the search goes on"
+        );
+        assert!(text(&mut app, "SearchingAlsoCasual").is_none());
+        answer(&mut app, wait(302, true));
+        app.update();
+        assert_eq!(
+            text(&mut app, "SearchingOffer").as_deref(),
+            Some("Also searching Casual PvP · your place in Ranked is kept")
+        );
+        assert_eq!(
+            app.world().resource::<MatchServiceClient>().preference,
+            MatchPreference::Ranked
+        );
     }
 
     #[test]

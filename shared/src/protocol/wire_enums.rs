@@ -88,7 +88,7 @@ wire_enums! {
     crate::sandbox::SandboxCommand => Strict [ApplyConfig, Refill, ResetCooldowns, Teleport, ResetActor, AddXp, GrantItem, ResetDuel, ResetAnalytics, SpawnWave, FrameStep, ForceCast],
     crate::social::SocialCommand => Strict [Subscribe, Chat, Reaction],
     crate::match_service::TakeoverPolicy => Strict [Idle, Bot],
-    crate::match_service::MatchPreference => Strict [Quick, HumansOnly, BotPractice],
+    crate::match_service::MatchPreference => Strict [Casual, Ranked, BotPractice],
     crate::supporter::AuraStyle => Strict [Solar, Lunar, Verdant],
     crate::handheld::HandheldSelection => Strict [ClassDefault, Unequipped, Item],
     crate::career::FriendAction => Strict [Request, Accept, Reject, Cancel, Remove],

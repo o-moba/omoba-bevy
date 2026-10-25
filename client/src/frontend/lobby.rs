@@ -545,20 +545,34 @@ fn spawn_lobby(
                                         button(
                                             actions,
                                             tr("lobby.button.play_bots"),
-                                            if phone { 212.0 } else { 272.0 },
+                                            if phone { 176.0 } else { 272.0 },
                                             ButtonKind::Primary,
                                             LobbyAction::Play(MatchPreference::BotPractice),
                                             "LobbyPlayBots",
                                         );
+                                        // The public lobby's PvP queues (LR-08).
                                         if sig.public {
-                                            button(
-                                                actions,
-                                                tr("lobby.button.quick_match"),
-                                                if phone { 160.0 } else { 208.0 },
-                                                ButtonKind::Secondary,
-                                                LobbyAction::Play(MatchPreference::Quick),
-                                                "LobbyQuickMatch",
-                                            );
+                                            for (label, queue, id) in [
+                                                (
+                                                    "queue.casual",
+                                                    MatchPreference::Casual,
+                                                    "LobbyCasual",
+                                                ),
+                                                (
+                                                    "queue.ranked",
+                                                    MatchPreference::Ranked,
+                                                    "LobbyRanked",
+                                                ),
+                                            ] {
+                                                button(
+                                                    actions,
+                                                    tr(label),
+                                                    if phone { 142.0 } else { 208.0 },
+                                                    ButtonKind::Secondary,
+                                                    LobbyAction::Play(queue),
+                                                    id,
+                                                );
+                                            }
                                         }
                                     } else {
                                         let waiting = view
@@ -1176,6 +1190,63 @@ mod tests {
                 launch: None,
             }),
             ..Default::default()
+        }
+    }
+
+    /// LR-08: the lobby's queue buttons launch the party into that queue,
+    /// or send a solo player to hero select for it.
+    #[test]
+    fn queue_buttons_launch_the_party_or_pick_the_solo_queue() {
+        use crate::ui::{Activated, UiActionAppExt};
+        let run = |view: PartyView, queue: MatchPreference| {
+            let mut app = App::new();
+            app.add_plugins(bevy::state::app::StatesPlugin)
+                .init_state::<AppScreen>()
+                .init_resource::<ClientSession>()
+                .init_resource::<crate::career::CareerClient>()
+                .init_resource::<crate::match_service::MatchServiceClient>()
+                .insert_resource({
+                    let mut party = PartyClient::default();
+                    party.view = view;
+                    party
+                })
+                .add_message::<NetworkCommand>()
+                .add_message::<crate::net::SessionUiCommand>()
+                .add_ui_action::<LobbyAction>()
+                .add_systems(Update, lobby_actions);
+            app.world_mut().write_message(Activated {
+                action: LobbyAction::Play(queue),
+                source: Entity::PLACEHOLDER,
+            });
+            app.update();
+            let launched: Vec<_> = app
+                .world_mut()
+                .resource_mut::<Messages<NetworkCommand>>()
+                .drain()
+                .filter_map(|command| match command {
+                    NetworkCommand::Party(PartyCommand::Launch { preference }) => Some(preference),
+                    _ => None,
+                })
+                .collect();
+            let picked = app
+                .world()
+                .resource::<crate::match_service::MatchServiceClient>()
+                .preference;
+            (launched, picked)
+        };
+        for queue in [
+            MatchPreference::Ranked,
+            MatchPreference::Casual,
+            MatchPreference::BotPractice,
+        ] {
+            assert_eq!(run(party_view(1, 1, &[1, 2]), queue).0, [queue]);
+            let (launched, picked) = run(PartyView::default(), queue);
+            assert!(launched.is_empty());
+            assert_eq!(picked, queue);
+            assert!(
+                run(party_view(2, 1, &[1, 2]), queue).0.is_empty(),
+                "a member waits"
+            );
         }
     }
 

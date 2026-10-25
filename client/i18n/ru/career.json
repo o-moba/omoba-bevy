@@ -25,6 +25,7 @@
   "career.result.my_progress": "Ваш рейтинг: {rating} · +{xp} очков опыта",
   "career.unrated.allocated_bots": "Матч не имеет рейтинга, так как на открытые места были добавлены боты.",
   "career.unrated.server_interrupted": "Сервер отключился до завершения матча, поэтому матч не имеет рейтинга.",
+  "career.unrated.casual_queue": "Матчи в обычном PvP не влияют на рейтинг.",
   "career.queue.waiting": "Поиск подходящего матча · {compatible}/{needed} подходящих игроков · {elapsed}\n{hint}",
   "career.queue.hint_newcomer": "Новые игроки играют с другими новичками.",
   "career.queue.hint_rating": "Ожидание игроков с похожим опытом и рейтингом.",

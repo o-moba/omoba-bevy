@@ -25,6 +25,7 @@
   "career.result.my_progress": "你的排位分：{rating}  ·  生涯经验 +{xp}",
   "career.unrated.allocated_bots": "电脑玩家补足了空位，本局不计排位。",
   "career.unrated.server_interrupted": "服务器在对局结束前中断，本局不计排位。",
+  "career.unrated.casual_queue": "匹配对战不计排位。",
   "career.queue.waiting": "正在寻找公平对局 · {compatible}/{needed} 名匹配玩家 · {elapsed}\n{hint}",
   "career.queue.hint_newcomer": "新玩家会与其他新手匹配。",
   "career.queue.hint_rating": "正在等待经验和排位分相近的玩家。",

@@ -530,6 +530,14 @@ impl ServerRuntime {
         if roster.iter().any(|participant| participant.is_bot) {
             return Err("Bot participants are not eligible for ranked play.");
         }
+        // Only a Ranked allocation is rated (LR-08), whatever its head count.
+        if self
+            .match_service
+            .worker()
+            .is_some_and(|w| !w.manifest.preference.rated())
+        {
+            return Err("Only Ranked matches are rated.");
+        }
         if !self.career_queue_enabled() && self.match_service.worker().is_none() {
             return Err("Development or legacy guest match.");
         }
@@ -625,8 +633,19 @@ impl ServerRuntime {
                 outcome: MatchOutcome::Interrupted,
                 winner: None,
                 rated: eligibility.is_ok(),
+                // The queue says why it is unrated: Casual PvP never is
+                // rated, vs Bots seats bots (LR-08).
                 unrated_reason: if public_casual {
-                    Some("allocated_bots".into())
+                    Some(
+                        if self.match_service.worker().is_some_and(|w| {
+                            w.manifest.preference == shared::match_service::MatchPreference::Casual
+                        }) {
+                            "casual_queue"
+                        } else {
+                            "allocated_bots"
+                        }
+                        .into(),
+                    )
                 } else {
                     eligibility.err().map(str::to_owned)
                 },
@@ -1006,14 +1025,25 @@ impl ServerRuntime {
             // seat. Reuse normal cancellation so the remaining roster can queue.
             self.cancel_career_entry(player_id, now);
         }
-        for (addr, request_id, preference) in self.career.backend.take_match_requests() {
+        for request in self.career.backend.take_match_requests() {
+            let addr = request.addr;
             if let (Some(profile), Some(session)) = (
                 self.career.backend.profile(addr),
                 self.career.backend.authenticated_session(addr),
             ) {
                 let party = self.party_tag(addr);
-                self.match_service
-                    .enqueue(profile, session, request_id, preference, party, now);
+                let search = crate::match_service::Search {
+                    preference: request.preference,
+                    also_casual: request.also_casual,
+                };
+                self.match_service.enqueue(
+                    profile,
+                    session,
+                    request.request_id,
+                    search,
+                    party,
+                    now,
+                );
             }
         }
         self.handle_rejected_career_start(now);

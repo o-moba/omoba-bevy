@@ -194,7 +194,7 @@ mod tests {
                 }],
                 launch: Some(PartyLaunch {
                     sequence: 2,
-                    preference: MatchPreference::Quick,
+                    preference: MatchPreference::Ranked,
                 }),
             }),
             invites: vec![PartyInvite {

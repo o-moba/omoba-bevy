@@ -254,15 +254,15 @@ Area: matchmaking/modes · **blocker** · M · code (owner sets the policy)
   - Searching, draft and loading show the queue and a Rated/Unrated badge.
   - The owner's low-population ranked policy (O-1) is recorded in `docs/match-progression.md`.
 - **Acceptance:**
-  - [ ] Distinct Ranked and Casual variants exist. Old clients' Quick/HumansOnly either keeps working on the wire or receives update-required (LR-14).
-  - [ ] Unit tests:
+  - [x] Distinct Ranked and Casual variants exist. Old clients' Quick/HumansOnly either keeps working on the wire or receives update-required (LR-14). Done: `MatchPreference::{Casual, Ranked}` keep the wire names `quick`/`humans_only`; every new field is additive, so protocol 11 stays.
+  - [x] Unit tests:
     - 10 humans in Casual → unrated
     - 10 humans in Ranked → rated
     - Ranked never bot-fills
-  - [ ] One newcomer and one veteran in Casual after 30 s get one allocation with 2 humans.
-  - [ ] A party {1000 newcomer, 1400 veteran} plus 8 solo players never yields a rated manifest the store rejects.
-  - [ ] Frontend QA captures in en and ru show the three choices and the rated badge.
-  - [ ] `docs/features.md` and `docs/public-mvp.md` describe the shipped modes, and the orphan key is either used or removed.
+  - [x] One newcomer and one veteran in Casual after 30 s get one allocation with 2 humans.
+  - [x] A party {1000 newcomer, 1400 veteran} plus 8 solo players never yields a rated manifest the store rejects.
+  - [ ] Frontend QA captures in en and ru show the three choices and the rated badge. UI-tree tests cover both languages; the native captures need an unlocked screen.
+  - [x] `docs/features.md` and `docs/public-mvp.md` describe the shipped modes, and the orphan key is either used or removed.
 - **Depends on:** O-1, O-2
 
 #### LR-09 — Arena capacity measured and sized on the RU host

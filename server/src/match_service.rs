@@ -3,6 +3,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
+use omoba_career_store::matchmaking::{fits_cohort, same_cohort};
 use shared::career::ProfileSummary;
 use shared::match_service::{InMatch, MatchAllocation, MatchPreference, MatchServiceView};
 use shared::wire::{GameState, ServerPacket};
@@ -11,7 +12,33 @@ use crate::match_allocation::{AllocatedHuman, Manifest, Phase, Status, Worker, u
 use crate::runtime::ServerRuntime;
 
 const MAX_WAITING: usize = 128;
-const QUICK_WAIT: Duration = Duration::from_secs(30);
+/// Casual PvP waits this long for more humans, then bots fill the empty seats
+/// (owner default O-2).
+const CASUAL_BOT_FILL: Duration = Duration::from_secs(30);
+/// After this long a Ranked search may also search Casual PvP, keeping its
+/// place in Ranked (owner default O-1).
+const RANKED_CASUAL_OFFER: Duration = Duration::from_secs(300);
+/// A Ranked party whose members are not one rated cohort (LR-08).
+const RANKED_PARTY_COHORT: &str = "ranked_party_cohort";
+
+/// What one `FindMatch` asks for (LR-08).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct Search {
+    pub preference: MatchPreference,
+    /// A Ranked search that also searches Casual PvP. Honoured once the
+    /// offer is due; a retry without it withdraws it.
+    pub also_casual: bool,
+}
+
+impl From<MatchPreference> for Search {
+    fn from(preference: MatchPreference) -> Self {
+        Self {
+            preference,
+            also_casual: false,
+        }
+    }
+}
+
 #[derive(Clone)]
 struct Waiting {
     profile: ProfileSummary,
@@ -22,6 +49,25 @@ struct Waiting {
     order: u64,
     /// (party id, members the party waits for). Refreshed on every retry.
     party: Option<(u64, usize)>,
+    /// Since when this entry searches Casual PvP: a Casual entry from the
+    /// start, a Ranked entry once it took the Casual offer. The Casual bot
+    /// fill counts from here.
+    casual_since: Option<Instant>,
+}
+
+impl Waiting {
+    /// Mirrors a Ranked entry's request to also search Casual PvP, once the
+    /// offer is due. A Casual entry always searches Casual.
+    fn also_casual(&mut self, also_casual: bool, now: Instant) {
+        if self.preference != MatchPreference::Ranked {
+            return;
+        }
+        if !also_casual {
+            self.casual_since = None;
+        } else if now.saturating_duration_since(self.queued) >= RANKED_CASUAL_OFFER {
+            self.casual_since.get_or_insert(now);
+        }
+    }
 }
 pub(crate) struct Lobby {
     pool: crate::match_pool::Pool,
@@ -120,10 +166,11 @@ impl MatchService {
         profile: ProfileSummary,
         session: String,
         request_id: u64,
-        preference: MatchPreference,
+        search: Search,
         party: Option<(u64, usize)>,
         now: Instant,
     ) {
+        let preference = search.preference;
         let Self::Lobby(lobby) = self else {
             return;
         };
@@ -165,6 +212,7 @@ impl MatchService {
             if existing.session == session && existing.preference == preference {
                 existing.touched = now;
                 existing.party = party;
+                existing.also_casual(search.also_casual, now);
             } else {
                 lobby
                     .errors
@@ -185,6 +233,7 @@ impl MatchService {
             touched: now,
             order: lobby.order,
             party,
+            casual_since: (preference == MatchPreference::Casual).then_some(now),
         });
     }
     pub fn cancel(&mut self, profile: &str) {
@@ -239,7 +288,8 @@ impl MatchService {
                             team: h.team,
                             human_count: slot.manifest.humans.len() as u32,
                             bot_count: 10 - slot.manifest.humans.len() as u32,
-                            rated: slot.manifest.humans.len() == 10,
+                            // Only Ranked is rated, when the match is eligible.
+                            rated: slot.manifest.preference.rated(),
                             join_deadline_ms: slot.manifest.join_deadline_ms,
                         },
                         in_match,
@@ -253,30 +303,12 @@ impl MatchService {
         if let Some(code) = lobby.errors.get(profile) {
             return Some(MatchServiceView::Failed { code: code.clone() });
         }
-        if let Some(w) = lobby
+        if let Some(index) = lobby
             .waiting
             .iter()
-            .find(|w| w.profile.profile_id == profile)
+            .position(|w| w.profile.profile_id == profile)
         {
-            let humans = lobby
-                .waiting
-                .iter()
-                .filter(|other| compatible(w, other))
-                .count()
-                .min(10) as u32;
-            return Some(MatchServiceView::Waiting {
-                preference: w.preference,
-                humans,
-                needed: if w.preference == MatchPreference::BotPractice {
-                    w.party.map_or(1, |(_, size)| size as u32)
-                } else {
-                    10
-                },
-                elapsed_secs: now.saturating_duration_since(w.queued).as_secs(),
-                bot_fill_after_secs: (w.preference == MatchPreference::Quick)
-                    .then_some(QUICK_WAIT.as_secs()),
-                capacity_wait: lobby.pool.full(),
-            });
+            return Some(waiting_view(&lobby.waiting, index, lobby.pool.full(), now));
         }
         Some(MatchServiceView::Idle)
     }
@@ -329,7 +361,7 @@ impl MatchService {
             if lobby.pool.full() {
                 break;
             }
-            let Some(indices) = select(&lobby.waiting, now) else {
+            let Some((indices, queue)) = select(&lobby.waiting, now) else {
                 break;
             };
             let selected: Vec<_> = indices.iter().map(|&i| lobby.waiting[i].clone()).collect();
@@ -353,7 +385,7 @@ impl MatchService {
                 allocation_id: id,
                 endpoint: String::new(),
                 bind: String::new(),
-                preference: selected[0].preference,
+                preference: queue,
                 humans,
                 join_deadline_ms: unix_ms() + 180_000,
             };
@@ -385,10 +417,84 @@ fn expire_waiting(waiting: &mut Vec<Waiting>, now: Instant) {
     waiting.retain(|w| now.saturating_duration_since(w.touched) < Duration::from_secs(15));
 }
 
-fn compatible(a: &Waiting, b: &Waiting) -> bool {
-    a.preference == b.preference
-        && a.profile.newcomer() == b.profile.newcomer()
-        && (i64::from(a.profile.rating) - i64::from(b.profile.rating)).abs() <= 300
+/// This unit searches `queue`: its own queue, and Casual PvP too for a Ranked
+/// unit whose every member took the Casual offer.
+fn searches(waiting: &[Waiting], unit: &[usize], queue: MatchPreference) -> bool {
+    match queue {
+        MatchPreference::Casual => unit.iter().all(|&i| waiting[i].casual_since.is_some()),
+        _ => unit.iter().all(|&i| waiting[i].preference == queue),
+    }
+}
+
+/// The searching screen's view of one queued entry.
+fn waiting_view(
+    waiting: &[Waiting],
+    index: usize,
+    capacity_wait: bool,
+    now: Instant,
+) -> MatchServiceView {
+    let w = &waiting[index];
+    let units = units(waiting);
+    let own = units.iter().find(|unit| unit.contains(&index));
+    let ranked = w.preference == MatchPreference::Ranked;
+    // The lobby never seats a mixed party in Ranked: say so instead of
+    // waiting forever (LR-08).
+    if ranked && own.is_some_and(|unit| !same_cohort(unit.iter().map(|&i| &waiting[i].profile))) {
+        return MatchServiceView::Failed {
+            code: RANKED_PARTY_COHORT.into(),
+        };
+    }
+    let count = |queue| {
+        waiting
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| searches(waiting, &[*i], queue))
+            .count()
+    };
+    let (humans, needed, searching) = match w.preference {
+        MatchPreference::BotPractice => {
+            let size = w.party.map_or(1, |(_, size)| size);
+            (own.map_or(1, Vec::len), size, None)
+        }
+        // The largest rated cohort this player can be seated in.
+        MatchPreference::Ranked => {
+            let peers = waiting
+                .iter()
+                .filter(|low| {
+                    low.preference == w.preference && fits_cohort(&low.profile, &w.profile)
+                })
+                .map(|low| {
+                    waiting
+                        .iter()
+                        .filter(|other| {
+                            other.preference == w.preference
+                                && fits_cohort(&low.profile, &other.profile)
+                        })
+                        .count()
+                })
+                .max()
+                .unwrap_or(1);
+            (peers, 10, Some(count(MatchPreference::Ranked)))
+        }
+        MatchPreference::Casual => {
+            let all = count(MatchPreference::Casual);
+            (all, 10, Some(all))
+        }
+    };
+    MatchServiceView::Waiting {
+        preference: w.preference,
+        humans: humans.min(10) as u32,
+        needed: needed as u32,
+        elapsed_secs: now.saturating_duration_since(w.queued).as_secs(),
+        bot_fill_after_secs: (w.preference == MatchPreference::Casual)
+            .then_some(CASUAL_BOT_FILL.as_secs()),
+        capacity_wait,
+        searching: searching.map(|n| n as u32),
+        casual_offer_after_secs: ranked.then_some(RANKED_CASUAL_OFFER.as_secs()),
+        // For a party, only once every member took the offer.
+        also_casual: ranked
+            && own.is_some_and(|unit| searches(waiting, unit, MatchPreference::Casual)),
+    }
 }
 /// Queue units: a party's queued members travel together, everyone else
 /// alone. A party is a unit only once every member it waits for has queued
@@ -494,54 +600,80 @@ fn split_teams(selected: &[Waiting]) -> Vec<shared::map::Team> {
     teams
 }
 
-fn select(waiting: &[Waiting], now: Instant) -> Option<Vec<usize>> {
+/// The next allocation and its queue (LR-08), or `None`.
+///
+/// - vs Bots: the oldest practice unit, at once.
+/// - Ranked: ten humans of one rated cohort (the career store's policy, so
+///   the store never rejects the roster), never filled with bots. A Ranked
+///   roster goes before a Casual one, which keeps a Ranked player's place
+///   while it also searches Casual.
+/// - Casual PvP: every unit that searches Casual, whatever its rating or
+///   newcomer cohort; once anyone has searched Casual for
+///   [`CASUAL_BOT_FILL`], bots fill the empty seats.
+///
+/// Among rosters of one queue the oldest wins.
+fn select(waiting: &[Waiting], now: Instant) -> Option<(Vec<usize>, MatchPreference)> {
     let units = units(waiting);
-    let mut best: Option<Vec<usize>> = None;
-    for anchor in &units {
-        let low = anchor
-            .iter()
-            .map(|&i| &waiting[i])
-            .min_by_key(|w| w.profile.rating)
-            .expect("units are never empty");
-        if low.preference == MatchPreference::BotPractice {
-            return Some(anchor.clone());
-        }
-        let mut cohort: Vec<&Vec<usize>> = vec![anchor];
-        for unit in &units {
-            if std::ptr::eq(unit, anchor)
-                || !unit.iter().all(|&i| {
-                    compatible(low, &waiting[i]) && waiting[i].profile.rating >= low.profile.rating
-                })
-            {
+    if let Some(unit) = units
+        .iter()
+        .find(|unit| searches(waiting, unit, MatchPreference::BotPractice))
+    {
+        return Some((unit.clone(), MatchPreference::BotPractice));
+    }
+    let older = |a: &Vec<usize>, b: &Vec<usize>| {
+        a.iter()
+            .map(|&i| waiting[i].order)
+            .cmp(b.iter().map(|&i| waiting[i].order))
+            .is_lt()
+    };
+    for queue in [MatchPreference::Ranked, MatchPreference::Casual] {
+        let mut best: Option<Vec<usize>> = None;
+        for anchor in units.iter().filter(|unit| searches(waiting, unit, queue)) {
+            let low = anchor
+                .iter()
+                .map(|&i| &waiting[i])
+                .min_by_key(|w| w.profile.rating)
+                .expect("units are never empty");
+            // Ranked admits a unit only when its every member fits the
+            // cohort that starts at the anchor's lowest rating.
+            let fits = |unit: &Vec<usize>| {
+                queue != MatchPreference::Ranked
+                    || unit
+                        .iter()
+                        .all(|&i| fits_cohort(&low.profile, &waiting[i].profile))
+            };
+            if !fits(anchor) {
                 continue;
             }
-            let mut sizes: Vec<usize> = cohort.iter().map(|u| u.len()).collect();
-            sizes.push(unit.len());
-            if splits(&sizes) {
-                cohort.push(unit);
+            let mut cohort: Vec<&Vec<usize>> = vec![anchor];
+            for unit in &units {
+                if std::ptr::eq(unit, anchor) || !searches(waiting, unit, queue) || !fits(unit) {
+                    continue;
+                }
+                let mut sizes: Vec<usize> = cohort.iter().map(|u| u.len()).collect();
+                sizes.push(unit.len());
+                if splits(&sizes) {
+                    cohort.push(unit);
+                }
+            }
+            let mut members: Vec<usize> = cohort.iter().flat_map(|u| u.iter().copied()).collect();
+            members.sort_by_key(|&i| waiting[i].order);
+            let ready = members.len() == 10
+                || (queue == MatchPreference::Casual
+                    && members.iter().any(|&i| {
+                        waiting[i].casual_since.is_some_and(|since| {
+                            now.saturating_duration_since(since) >= CASUAL_BOT_FILL
+                        })
+                    }));
+            if ready && best.as_ref().is_none_or(|b| older(&members, b)) {
+                best = Some(members);
             }
         }
-        let mut members: Vec<usize> = cohort.iter().flat_map(|u| u.iter().copied()).collect();
-        members.sort_by_key(|&i| waiting[i].order);
-        if members.len() < 10
-            && (low.preference == MatchPreference::HumansOnly
-                || members
-                    .iter()
-                    .all(|&i| now.saturating_duration_since(waiting[i].queued) < QUICK_WAIT))
-        {
-            continue;
-        }
-        if best.as_ref().is_none_or(|b| {
-            members
-                .iter()
-                .map(|&i| waiting[i].order)
-                .cmp(b.iter().map(|&i| waiting[i].order))
-                .is_lt()
-        }) {
-            best = Some(members);
+        if let Some(members) = best {
+            return Some((members, queue));
         }
     }
-    best
+    None
 }
 impl ServerRuntime {
     pub(crate) fn send_lobby_snapshots(&mut self, now: Instant) {
@@ -726,43 +858,300 @@ mod tests {
             touched: now,
             order: id,
             party: None,
+            casual_since: (p == MatchPreference::Casual).then_some(now),
         }
+    }
+    /// The indices `select` picks, for a queue that must form.
+    fn picked(waiting: &[Waiting], now: Instant, queue: MatchPreference) -> Vec<usize> {
+        let (members, picked) = select(waiting, now).expect("a roster forms");
+        assert_eq!(picked, queue);
+        members
     }
     #[test]
     fn abandoned_queue_expires_without_explicit_find_match_retry() {
         let now = Instant::now();
-        let mut waiting = vec![w(1, MatchPreference::HumansOnly, now)];
+        let mut waiting = vec![w(1, MatchPreference::Ranked, now)];
         expire_waiting(&mut waiting, now + Duration::from_secs(14));
         assert_eq!(waiting.len(), 1);
         // Runtime heartbeats do not touch queue intent. Only enqueue/retry does.
         expire_waiting(&mut waiting, now + Duration::from_secs(15));
         assert!(waiting.is_empty());
-        waiting.push(w(2, MatchPreference::HumansOnly, now));
+        waiting.push(w(2, MatchPreference::Ranked, now));
         waiting[0].touched = now + Duration::from_secs(14);
         expire_waiting(&mut waiting, now + Duration::from_secs(15));
         assert_eq!(waiting.len(), 1);
     }
 
+    /// LR-08: Casual bot-fills after 30 s; Ranked never bot-fills, however
+    /// long it waits and however many humans short it is.
     #[test]
-    fn quick_waits_thirty_seconds_and_humans_never_fill() {
+    fn casual_waits_thirty_seconds_and_ranked_never_bot_fills() {
         let now = Instant::now();
-        let mut q = vec![w(1, MatchPreference::Quick, now)];
+        let q = vec![w(1, MatchPreference::Casual, now)];
         assert!(select(&q, now + Duration::from_secs(29)).is_none());
-        assert_eq!(select(&q, now + QUICK_WAIT), Some(vec![0]));
-        q[0].preference = MatchPreference::HumansOnly;
-        assert!(select(&q, now + Duration::from_secs(999)).is_none());
+        assert_eq!(
+            picked(&q, now + CASUAL_BOT_FILL, MatchPreference::Casual),
+            vec![0]
+        );
+        let ranked: Vec<_> = (1..=9)
+            .map(|i| w(i, MatchPreference::Ranked, now))
+            .collect();
+        assert!(select(&ranked, now + Duration::from_secs(99_999)).is_none());
     }
     #[test]
-    fn full_humans_and_practice_allocate_immediately() {
+    fn full_queues_and_practice_allocate_immediately() {
         let now = Instant::now();
-        let q: Vec<_> = (1..=10)
-            .map(|i| w(i, MatchPreference::HumansOnly, now))
-            .collect();
-        assert_eq!(select(&q, now).unwrap().len(), 10);
+        for queue in [MatchPreference::Ranked, MatchPreference::Casual] {
+            let q: Vec<_> = (1..=10).map(|i| w(i, queue, now)).collect();
+            assert_eq!(picked(&q, now, queue).len(), 10);
+        }
         assert_eq!(
-            select(&[w(1, MatchPreference::BotPractice, now)], now),
-            Some(vec![0])
+            picked(
+                &[w(1, MatchPreference::BotPractice, now)],
+                now,
+                MatchPreference::BotPractice
+            ),
+            vec![0]
         );
+    }
+
+    /// LR-08 acceptance: one newcomer and one veteran in Casual get one
+    /// allocation with both after 30 s; their cohorts no longer split them
+    /// into two bot games.
+    #[test]
+    fn casual_groups_a_newcomer_and_a_veteran_before_bots_fill() {
+        let now = Instant::now();
+        let mut veteran = w(2, MatchPreference::Casual, now + Duration::from_secs(5));
+        veteran.profile.rating = 1400;
+        veteran.profile.rated_matches = 40;
+        let q = vec![w(1, MatchPreference::Casual, now), veteran];
+        assert!(q[0].profile.newcomer() && !q[1].profile.newcomer());
+        assert!(select(&q, now + Duration::from_secs(29)).is_none());
+        let both = picked(&q, now + CASUAL_BOT_FILL, MatchPreference::Casual);
+        assert_eq!(both, vec![0, 1]);
+        let chosen: Vec<_> = both.iter().map(|&i| q[i].clone()).collect();
+        let manifest = manifest_for(&chosen, MatchPreference::Casual);
+        assert_eq!(manifest.humans.len(), 2);
+        assert_eq!(manifest.validate(), Ok(()));
+    }
+
+    /// LR-08 acceptance: a party {1000 newcomer, 1400 veteran} with 8 solo
+    /// players never yields a rated roster the store would reject, whichever
+    /// cohort the solos are in. Ranked tells the party why; Casual seats all
+    /// ten unrated.
+    #[test]
+    fn a_mixed_party_never_yields_a_rated_roster_the_store_rejects() {
+        let now = Instant::now();
+        for solos_rating in [1000, 1400] {
+            for solos_veterans in [false, true] {
+                let party = |id, rating, rated_matches| {
+                    let mut entry = in_party(w(id, MatchPreference::Ranked, now), 9, 2);
+                    entry.profile.rating = rating;
+                    entry.profile.rated_matches = rated_matches;
+                    entry
+                };
+                let mut q = vec![party(1, 1000, 0), party(2, 1400, 40)];
+                for id in 3..=10 {
+                    let mut solo = w(id, MatchPreference::Ranked, now);
+                    solo.profile.rating = solos_rating;
+                    solo.profile.rated_matches = if solos_veterans { 40 } else { 0 };
+                    q.push(solo);
+                }
+                let later = now + Duration::from_secs(99_999);
+                assert!(
+                    select(&q, later).is_none(),
+                    "{solos_rating} {solos_veterans}"
+                );
+                assert_eq!(
+                    waiting_view(&q, 0, false, now),
+                    MatchServiceView::Failed {
+                        code: RANKED_PARTY_COHORT.into()
+                    }
+                );
+                // Every Ranked roster the lobby can still form passes the
+                // store's own check.
+                for id in 11..=12 {
+                    let mut solo = w(id, MatchPreference::Ranked, now);
+                    solo.profile.rating = solos_rating;
+                    solo.profile.rated_matches = if solos_veterans { 40 } else { 0 };
+                    q.push(solo);
+                }
+                let (members, queue) = select(&q, later).expect("ten solos form Ranked");
+                assert_eq!(queue, MatchPreference::Ranked);
+                assert!(!members.contains(&0) && !members.contains(&1));
+                assert!(same_cohort(members.iter().map(|&i| &q[i].profile)));
+
+                // The same ten in Casual PvP: one unrated roster.
+                q.truncate(10);
+                for entry in &mut q {
+                    entry.preference = MatchPreference::Casual;
+                    entry.casual_since = Some(now);
+                }
+                let all = picked(&q, now, MatchPreference::Casual);
+                assert_eq!(all.len(), 10);
+                let chosen: Vec<_> = all.iter().map(|&i| q[i].clone()).collect();
+                let teams = split_teams(&chosen);
+                assert_eq!(teams[0], teams[1], "the party plays together");
+                assert!(
+                    !manifest_for(&chosen, MatchPreference::Casual)
+                        .preference
+                        .rated()
+                );
+            }
+        }
+    }
+
+    /// O-1: after five minutes a Ranked search may also search Casual PvP.
+    /// It keeps its place in Ranked: a full Ranked roster still takes it,
+    /// and otherwise Casual bot-fills 30 s after the offer was taken.
+    #[test]
+    fn ranked_offers_casual_after_five_minutes_and_keeps_its_place() {
+        let now = Instant::now();
+        let mut service = lobby_with(crate::match_pool::Pool::for_test(), &[]);
+        let directory = match &service {
+            MatchService::Lobby(lobby) => lobby.pool.test_directory().to_path_buf(),
+            _ => unreachable!(),
+        };
+        let ranked = w(1, MatchPreference::Ranked, now);
+        let (profile, session) = (&ranked.profile.profile_id, &ranked.session);
+        let find = |service: &mut MatchService, also_casual, at| {
+            service.enqueue(
+                ranked.profile.clone(),
+                session.clone(),
+                1,
+                Search {
+                    preference: MatchPreference::Ranked,
+                    also_casual,
+                },
+                None,
+                at,
+            );
+        };
+        let view = |service: &MatchService, at| match service.view(profile, session, at) {
+            Some(MatchServiceView::Waiting {
+                searching,
+                casual_offer_after_secs,
+                also_casual,
+                bot_fill_after_secs,
+                ..
+            }) => (
+                searching,
+                casual_offer_after_secs,
+                also_casual,
+                bot_fill_after_secs,
+            ),
+            other => panic!("expected a wait, got {other:?}"),
+        };
+        find(&mut service, false, now);
+        assert_eq!(view(&service, now), (Some(1), Some(300), false, None));
+        // Too early: the lobby ignores the request.
+        let early = now + Duration::from_secs(299);
+        find(&mut service, true, early);
+        assert!(!view(&service, early).2);
+        let offered = now + RANKED_CASUAL_OFFER;
+        find(&mut service, true, offered);
+        assert!(view(&service, offered).2);
+        let MatchService::Lobby(lobby) = &mut service else {
+            unreachable!()
+        };
+        assert!(select(&lobby.waiting, offered + Duration::from_secs(29)).is_none());
+        // A full Ranked roster goes first and keeps this player's place.
+        let mut q = lobby.waiting.clone();
+        q.extend((2..=10).map(|i| w(i, MatchPreference::Ranked, offered)));
+        let ranked_roster = picked(&q, offered + CASUAL_BOT_FILL, MatchPreference::Ranked);
+        assert!(ranked_roster.contains(&0));
+        // A Casual player meets it in Casual PvP.
+        lobby.waiting.push(w(11, MatchPreference::Casual, offered));
+        assert_eq!(
+            picked(
+                &lobby.waiting,
+                offered + CASUAL_BOT_FILL,
+                MatchPreference::Casual
+            ),
+            vec![0, 1]
+        );
+        // Casual counts it among its searchers; withdrawing ends that.
+        let casual_count = |lobby: &Lobby| match waiting_view(&lobby.waiting, 1, false, offered) {
+            MatchServiceView::Waiting { searching, .. } => searching,
+            other => panic!("{other:?}"),
+        };
+        assert_eq!(casual_count(lobby), Some(2));
+        find(&mut service, false, offered);
+        let MatchService::Lobby(lobby) = &service else {
+            unreachable!()
+        };
+        assert_eq!(casual_count(lobby), Some(1));
+        let _ = std::fs::remove_dir_all(directory); // Only this test's unique fixture.
+    }
+
+    /// A Ranked party searches Casual only once every member took the offer.
+    #[test]
+    fn a_ranked_party_also_searches_casual_only_together() {
+        let now = Instant::now();
+        let mut q = vec![
+            in_party(w(1, MatchPreference::Ranked, now), 4, 2),
+            in_party(w(2, MatchPreference::Ranked, now), 4, 2),
+        ];
+        let offered = now + RANKED_CASUAL_OFFER;
+        q[0].also_casual(true, offered);
+        let late = offered + Duration::from_secs(999);
+        assert!(select(&q, late).is_none());
+        let also = |q: &[Waiting]| match waiting_view(q, 0, false, late) {
+            MatchServiceView::Waiting { also_casual, .. } => also_casual,
+            other => panic!("{other:?}"),
+        };
+        assert!(!also(&q), "one member alone does not move the party");
+        q[1].also_casual(true, offered);
+        assert!(also(&q));
+        assert_eq!(picked(&q, late, MatchPreference::Casual), vec![0, 1]);
+    }
+
+    /// LR-08: the lobby reports `rated` from the queue, not the head count.
+    #[test]
+    fn ten_humans_are_rated_only_in_ranked() {
+        let now = Instant::now();
+        for queue in [MatchPreference::Casual, MatchPreference::Ranked] {
+            let pool = crate::match_pool::Pool::for_test();
+            let directory = pool.test_directory().to_path_buf();
+            let mut service = lobby_with(pool, &[]);
+            let entries: Vec<_> = (1..=10).map(|i| w(i, queue, now)).collect();
+            for entry in &entries {
+                service.enqueue(
+                    entry.profile.clone(),
+                    entry.session.clone(),
+                    1,
+                    queue.into(),
+                    None,
+                    now,
+                );
+            }
+            service.tick(now);
+            let MatchService::Lobby(lobby) = &service else {
+                unreachable!()
+            };
+            assert!(lobby.waiting.is_empty(), "{queue:?}");
+            let (id, slot) = lobby.pool.slots.iter().next().unwrap();
+            assert_eq!(slot.manifest.preference, queue);
+            assert_eq!(slot.manifest.humans.len(), 10);
+            let receipt = Status {
+                allocation_id: id.clone(),
+                server_epoch: 7,
+                heartbeat_ms: unix_ms(),
+                phase: Phase::Ready,
+                result_id: None,
+                ends_by_ms: None,
+            };
+            lobby.pool.write_status_for_test(id, &receipt);
+            let Some(MatchServiceView::Assigned { allocation, .. }) =
+                service.view(&entries[0].profile.profile_id, &entries[0].session, now)
+            else {
+                panic!("expected a handoff");
+            };
+            assert_eq!(allocation.preference, queue);
+            assert_eq!((allocation.human_count, allocation.bot_count), (10, 0));
+            assert_eq!(allocation.rated, queue == MatchPreference::Ranked);
+            let _ = std::fs::remove_dir_all(directory); // Only this test's unique fixture.
+        }
     }
     fn in_party(mut entry: Waiting, party: u64, size: usize) -> Waiting {
         entry.party = Some((party, size));
@@ -776,24 +1165,24 @@ mod tests {
         assert!(select(&q, now).is_none(), "the friend has not queued yet");
         q.push(w(2, MatchPreference::BotPractice, now));
         // A stranger's practice is its own allocation.
-        assert_eq!(select(&q, now), Some(vec![1]));
+        assert_eq!(picked(&q, now, MatchPreference::BotPractice), vec![1]);
         q.remove(1);
         q.push(in_party(w(3, MatchPreference::BotPractice, now), 7, 2));
-        let picked = select(&q, now).unwrap();
-        assert_eq!(picked, vec![0, 1]);
-        let chosen: Vec<_> = picked.iter().map(|&i| q[i].clone()).collect();
+        let together = picked(&q, now, MatchPreference::BotPractice);
+        assert_eq!(together, vec![0, 1]);
+        let chosen: Vec<_> = together.iter().map(|&i| q[i].clone()).collect();
         let teams = split_teams(&chosen);
         assert_eq!(teams, vec![shared::map::Team::Green; 2]);
     }
 
-    fn manifest_for(chosen: &[Waiting]) -> Manifest {
+    fn manifest_for(chosen: &[Waiting], queue: MatchPreference) -> Manifest {
         let teams = split_teams(chosen);
         Manifest {
             version: 1,
             allocation_id: "a".repeat(32),
             endpoint: "127.0.0.1:41000".into(),
             bind: "127.0.0.1:41000".into(),
-            preference: chosen[0].preference,
+            preference: queue,
             humans: chosen
                 .iter()
                 .zip(teams)
@@ -815,7 +1204,10 @@ mod tests {
         let pool = crate::match_pool::Pool::for_test();
         let directory = pool.test_directory().to_path_buf();
         let worker = Worker {
-            manifest: manifest_for(&[w(1, MatchPreference::BotPractice, now)]),
+            manifest: manifest_for(
+                &[w(1, MatchPreference::BotPractice, now)],
+                MatchPreference::BotPractice,
+            ),
             directory: directory.clone(),
             recovery: false,
             origin_epoch: 0,
@@ -865,7 +1257,7 @@ mod tests {
         let entry = w(1, MatchPreference::BotPractice, now);
         let mut pool = crate::match_pool::Pool::for_test();
         let id = pool
-            .allocate(manifest_for(std::slice::from_ref(&entry)))
+            .allocate(manifest_for(std::slice::from_ref(&entry), entry.preference))
             .unwrap();
         let mut receipt = Status {
             allocation_id: id.clone(),
@@ -908,7 +1300,7 @@ mod tests {
             entry.profile.clone(),
             entry.session.clone(),
             2,
-            entry.preference,
+            entry.preference.into(),
             None,
             now,
         );
@@ -953,7 +1345,7 @@ mod tests {
         let mut pool = crate::match_pool::Pool::for_test();
         let directory = pool.test_directory().to_path_buf();
         let id = pool
-            .allocate(manifest_for(std::slice::from_ref(&entry)))
+            .allocate(manifest_for(std::slice::from_ref(&entry), entry.preference))
             .unwrap();
         let mut receipt = Status {
             allocation_id: id.clone(),
@@ -973,7 +1365,7 @@ mod tests {
                 entry.profile.clone(),
                 session.clone(),
                 request_id,
-                entry.preference,
+                entry.preference.into(),
                 None,
                 now,
             );
@@ -1035,7 +1427,7 @@ mod tests {
         let mut pool = crate::match_pool::Pool::for_test();
         let directory = pool.test_directory().to_path_buf();
         let id = pool
-            .allocate(manifest_for(std::slice::from_ref(&entry)))
+            .allocate(manifest_for(std::slice::from_ref(&entry), entry.preference))
             .unwrap();
         let mut receipt = Status {
             allocation_id: id.clone(),
@@ -1051,7 +1443,7 @@ mod tests {
             entry.profile.clone(),
             session.clone(),
             2,
-            entry.preference,
+            entry.preference.into(),
             None,
             now,
         );
@@ -1080,25 +1472,27 @@ mod tests {
             in_party(w(1, MatchPreference::BotPractice, now), 7, 2),
             in_party(w(2, MatchPreference::BotPractice, now), 7, 2),
         ];
-        let chosen: Vec<_> = select(&q, now)
-            .unwrap()
+        let chosen: Vec<_> = picked(&q, now, MatchPreference::BotPractice)
             .iter()
             .map(|&i| q[i].clone())
             .collect();
-        let manifest = manifest_for(&chosen);
+        let manifest = manifest_for(&chosen, MatchPreference::BotPractice);
         assert_eq!(manifest.validate(), Ok(()));
         // A solo practice still validates; a split bot practice does not.
-        assert_eq!(manifest_for(&chosen[..1]).validate(), Ok(()));
+        assert_eq!(
+            manifest_for(&chosen[..1], MatchPreference::BotPractice).validate(),
+            Ok(())
+        );
         let mut split = manifest;
         split.humans[1].team = shared::map::Team::Blue;
         assert!(split.validate().is_err());
     }
 
     #[test]
-    fn quick_matches_keep_every_party_on_one_team() {
+    fn casual_matches_keep_every_party_on_one_team() {
         let now = Instant::now();
         let mut q: Vec<_> = (1..=10)
-            .map(|i| w(i, MatchPreference::Quick, now))
+            .map(|i| w(i, MatchPreference::Casual, now))
             .collect();
         for i in [0, 1, 2] {
             q[i] = in_party(q[i].clone(), 1, 3);
@@ -1106,9 +1500,9 @@ mod tests {
         for i in [5, 6] {
             q[i] = in_party(q[i].clone(), 2, 2);
         }
-        let picked = select(&q, now).unwrap();
-        assert_eq!(picked.len(), 10);
-        let chosen: Vec<_> = picked.iter().map(|&i| q[i].clone()).collect();
+        let ten = picked(&q, now, MatchPreference::Casual);
+        assert_eq!(ten.len(), 10);
+        let chosen: Vec<_> = ten.iter().map(|&i| q[i].clone()).collect();
         let teams = split_teams(&chosen);
         let team_of = |order: u64| teams[chosen.iter().position(|c| c.order == order).unwrap()];
         assert!([2, 3].iter().all(|&o| team_of(o) == team_of(1)));
@@ -1126,28 +1520,29 @@ mod tests {
         assert!(splits(&[3, 2, 3, 2]));
         assert!(!splits(&[4, 3, 3]));
         assert!(!splits(&[4, 2, 2, 2]));
-        // A lone party in a bot-filled quick match still plays together.
+        // A lone party in a bot-filled Casual match still plays together.
         let now = Instant::now();
         let q = vec![
-            in_party(w(1, MatchPreference::Quick, now), 3, 2),
-            in_party(w(2, MatchPreference::Quick, now), 3, 2),
+            in_party(w(1, MatchPreference::Casual, now), 3, 2),
+            in_party(w(2, MatchPreference::Casual, now), 3, 2),
         ];
-        let picked = select(&q, now + QUICK_WAIT).unwrap();
-        let chosen: Vec<_> = picked.iter().map(|&i| q[i].clone()).collect();
+        let pair = picked(&q, now + CASUAL_BOT_FILL, MatchPreference::Casual);
+        let chosen: Vec<_> = pair.iter().map(|&i| q[i].clone()).collect();
         let teams = split_teams(&chosen);
         assert_eq!(teams[0], teams[1]);
     }
 
     #[test]
-    fn rating_windows_and_preferences_stay_separate() {
+    fn ranked_rating_windows_and_queues_stay_separate() {
         let now = Instant::now();
         let mut q: Vec<_> = (1..=10)
-            .map(|i| w(i, MatchPreference::HumansOnly, now))
+            .map(|i| w(i, MatchPreference::Ranked, now))
             .collect();
         q[9].profile.rating = 1400;
         assert!(select(&q, now).is_none());
         q[9].profile.rating = 1000;
-        q[9].preference = MatchPreference::Quick;
+        q[9].preference = MatchPreference::Casual;
+        q[9].casual_since = Some(now);
         assert!(select(&q, now).is_none());
     }
 }
