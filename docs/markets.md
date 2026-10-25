@@ -145,7 +145,10 @@ The steps that need accounts, money or legal decisions are the owner's.
    the RU `omoba-account-api migrate`, applies `account-api/ops/grants.sql` and
    starts the lobby and the Account API; `portal-bundle` + `ship-portal` install the
    RU portal (omoba-web with `OMOBA_MARKET=ru`, calling the Account API on loopback:
-   `ops/vps/ru/README.md#topology`).
+   `ops/vps/ru/README.md#topology`). Backups: the owner provides storage in Russia,
+   makes the backup key and names the escrow holder; `bootstrap` installs the nightly
+   backup, the monthly restore drill and their check, and `ship` backs up before every
+   migration (`ops/vps/ru/README.md#backups-escrow-and-restore-drill`).
 6. **Check.** `ru_host.py status` (the whole host, read-only) and, on a new host,
    `ru_host.py reboot-check --apply`; `make release-ru-preflight` (DNS,
    `/health/ready`, portal, and the portal ↔ Account API path: `/api/me` 401 and

@@ -562,6 +562,17 @@ Sources: [account-api README](../../account-api/README.md) "Backup, restore, rol
 
 Back up before every schema change. Never delete live match directories or drop the database (production and RU runbooks).
 
+### RU host
+
+`ops/vps/ru/ru_backup.py` (LR-03) automates the list above on the RU host:
+
+- **Sets.** Every night and before every migration (`ru_host.py ship`), one set holds `pg_dump -Fc` of `omoba_ru`, the match root with `archive/` and every allocation `outbox/`, the lobby outbox and a manifest (rows and an order-independent digest per table, both version tables, checksums). It is encrypted to the backup key with GnuPG and signed with it, then copied off-host to storage in Russia, which keeps 14 daily and 8 weekly sets.
+- **Restore drill.** Every month the newest off-host set is restored into the scratch database `omoba_ru_restore_drill`. Its tables, row counts, row digests and schema versions are compared with the manifest, and the scratch database is dropped. A set the backup key did not sign is never restored.
+- **Secrets.** The secrets above (the env files with `OMOBA_PORTAL_SECRET` and `OMOBA_SOCIAL_SECRET`) and the backup keys are escrowed offline, encrypted to the escrow holder's key.
+- **Alerts.** A failed backup or drill alerts at once; an hourly check alerts when no backup has succeeded for 26 h.
+
+Runbook: [ops/vps/ru/README.md](../../ops/vps/ru/README.md#backups-escrow-and-restore-drill).
+
 ### Restore
 
 1. Restore into a **new isolated database**.
@@ -604,7 +615,7 @@ Drift in older documents is listed once, in [README](README.md#known-drift-in-ol
 - **No pruning of `<match_root>/archive/`.** Is there an operator procedure or retention period? The lobby's startup bounds ([system.md › Lobby scheduling bounds](system.md#lobby-scheduling-bounds)) count only entries directly in the root, where `archive/` is a single entry, so the archive grows without bound. `worker.log` is never capped either. LR-17 in the [launch-readiness plan](../plans/launch-readiness.md) asks for retention by age or size.
 - **Rejected tombstones found at restart are never deleted.** Is manual cleanup of these outbox files expected, or should a later run remove them?
 - **No account or profile erasure path.** `career_matches` is append-only by trigger. Nothing deletes `career_profiles`, `career_keys`, supporter rows or `recovery_codes`. How should a data-erasure request be handled? LR-42 in the [launch-readiness plan](../plans/launch-readiness.md) proposes a deletion flow.
-- **Production backups.** The repository ships no backup timer, WAL archiving or off-host copy. The host runbooks only say to back up (with `pg_dump -Fc`) before schema changes, and the career-store README leaves backup schedule, replication and disaster recovery as "deployment work". Whether the production host has backups outside the repository is not documented. For RU, `ops/vps/ru/ru_host.py ship` takes that `pg_dump -Fc` on the host (`/var/backups/omoba-ru/`) before every migration, and LR-03 in the [launch-readiness plan](../plans/launch-readiness.md) makes automated off-host backups a launch blocker. The dev runbook only mentions a Registry backup that contains `omoba_dev.dump`.
+- **Production backups.** For the global production host the repository ships no backup timer, WAL archiving or off-host copy. Its runbook only says to back up (with `pg_dump -Fc`) before schema changes, and the career-store README leaves backup schedule, replication and disaster recovery as "deployment work". Whether that host has backups outside the repository is not documented. The RU host has nightly, pre-migration and off-host backups with a monthly restore drill ([RU host](#ru-host), LR-03), but no WAL archiving: up to a day of data can be lost. The dev runbook only mentions a Registry backup that contains `omoba_dev.dump`.
 - **Dedicated schema for career.** The career-store README says to "use a dedicated database/schema". But the portal foreign keys and the Account API's `search_path` require career tables in `public`, so in practice only a dedicated *database* seems to work. Please confirm.
 - **Three Ekza credential stores.** The market page and sponsorship placements keep Ekza Registry tokens in portal cookies ([protocols.md §7](protocols.md#7-portal-bff-omoba-web)). The class workshop keeps a sealed link in `portal.ekza_library_links`. Is this split intended long-term?
 - **Concurrent cleanup.** `App::cleanup` runs on every Account API replica without election, unlike the projection and Apple reconciliation. It looks idempotent and mostly bounded, but the delivery clear is unbounded and contention with several replicas has not been measured.

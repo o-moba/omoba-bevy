@@ -134,7 +134,8 @@ Worker `status.json` reports ready/forming/running/settling/finished/failed/reco
 heartbeat, epoch and result ID. Endpoint assignment waits for a worker readiness
 receipt; process spawn alone is insufficient. Watch worker/lobby logs, stale
 heartbeats, queue waits, database failures, CPU, RSS and egress. Back up PostgreSQL
-and durable match/outbox directories and exercise restore before public launch.
+and durable match/outbox directories and exercise restore before public launch (on the
+RU host `ops/vps/ru/ru_backup.py` does both, LR-03).
 
 A lobby restart rediscovers workers from immutable manifests. Crashed matches are
 recovered as interrupted; simulation is not restored mid-frame. Recovery is scoped

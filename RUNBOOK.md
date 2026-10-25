@@ -257,3 +257,31 @@ Use two terminals (or `make start` / `make stop`). Constants live in `client/src
 | 6 | Block UDP (e.g. firewall) while **Connected** | Stale snapshot or transport rule → **Disconnected** same as server kill. |
 
 **Preferences file** (graphics + stable client session id): see `client/src/persistence.rs` (`OMOBA_CLIENT_CONFIG_DIR` or default OS path). The lobby comes from the build's connection profile; on a desktop a non-empty `GAME_SERVER_ADDR` overrides it (a saved `game_server_addr` is no longer read). Production builds have no in-game server selection; dev builds (`--contour dev`) switch between their Dev, Local and Custom profiles in Home → Connection, applied at the next start. See [docs/connection-profiles.md](docs/connection-profiles.md).
+
+## RU host backups and restore (LR-03)
+
+Player data never lives on a development machine. On the RU host,
+[ops/vps/ru/ru_backup.py](ops/vps/ru/ru_backup.py) backs it up; the full procedure is in
+[ops/vps/ru/README.md › Backups, escrow and restore drill](ops/vps/ru/README.md#backups-escrow-and-restore-drill).
+
+- **Where the backups are.** Every night at 00:30 UTC and before every migration, one
+  encrypted, signed set `omoba-ru-<UTC>-<reason>.tar.gpg` holds the database (`pg_dump -Fc`
+  of `omoba_ru`, career and portal) and the match and outbox archive
+  (`/var/lib/omoba-ru/matches`, `/var/lib/omoba-ru/lobby-outbox`). It goes off-host to the
+  storage in Russia named by `OMOBA_BACKUP_TARGET` in `/opt/omoba-ru/backup.env` (S3-compatible
+  or SFTP, provided by the owner), which keeps 14 daily and 8 weekly sets. The host keeps
+  the newest two in `/var/backups/omoba-ru/sets/` and a plain rollback dump of each
+  migration in `/var/backups/omoba-ru/`. `ru_backup.py list` on the host shows them all.
+- **Escrow holder.** Not named yet (the owner names them). They keep the backup secret key
+  and the encrypted secrets escrow (`OMOBA_PORTAL_SECRET`, the never-rotated
+  `OMOBA_SOCIAL_SECRET`, the env files, the backup keys, later the Android release key)
+  offline. The ops README's escrow table records who, how to reach them, where the files
+  are and the date of the latest escrow.
+- **Restore.** Stop the lobby, the Account API and the portal; on the host
+  `ru_backup.py fetch --set latest --out /var/backups/omoba-ru/restore` (downloads,
+  verifies the signature and the checksums, unpacks), then `pg_restore` the
+  `database.dump` and unpack `state.tar.gz` as the ops README says; start the services and
+  check ratings, match history, a recovery code and VK sign-in. A lost VPS is rebuilt
+  with `ru_host.py bootstrap` after the escrowed env files and keys are put back. Never
+  test a restore over the running database: the monthly restore drill (2nd of the month)
+  does that in a scratch database, and `ru_host.py status` reports its result.
