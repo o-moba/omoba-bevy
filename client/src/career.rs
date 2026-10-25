@@ -24,6 +24,8 @@ use shared::career::{
 use std::time::{Duration, Instant};
 #[path = "career_devices.rs"]
 mod devices;
+#[path = "career_protection.rs"]
+pub(crate) mod protection;
 #[path = "career_web.rs"]
 mod web;
 
@@ -38,6 +40,8 @@ pub(crate) enum CareerModal {
     FriendProfile,
     WebLink,
     Devices,
+    /// Protect progress (LR-18): status, recovery codes, VK ID.
+    Protect,
 }
 
 #[derive(Clone, PartialEq)]
@@ -56,6 +60,7 @@ pub(crate) struct CareerClient {
     pub view: CareerView,
     web: web::WebState,
     devices: devices::DeviceState,
+    pub(crate) protection: protection::ProtectionState,
     pub public_profile_id: Option<String>,
     pub nickname: String,
     pub local_player_id: Option<u64>,
@@ -89,6 +94,7 @@ impl Default for CareerClient {
             view: CareerView::default(),
             web: web::WebState::default(),
             devices: devices::DeviceState::default(),
+            protection: protection::ProtectionState::default(),
             public_profile_id: None,
             nickname: "Player".into(), // i18n-allow: protocol default nickname
             local_player_id: None,
@@ -226,6 +232,11 @@ impl CareerClient {
             .map(|profile| profile.profile_id.clone());
         self.view = view;
         self.modal = modal;
+        // Profile and Protect progress show an account not protected yet.
+        self.protection.status = Some(shared::device_account::AccountProtection {
+            active_devices: 1,
+            ..default()
+        });
     }
     /// Call on an account OR server namespace change before applying a new view.
     /// Never mix another server's history with this server's authenticated profile.
@@ -237,9 +248,15 @@ impl CareerClient {
         let mut devices = std::mem::take(&mut self.devices);
         devices.focused = false;
         devices.recovery_code.clear();
+        // Protection belongs to this installation's key, which a server scope
+        // never changes; issued codes leave with the closed modal.
+        let mut protection = std::mem::take(&mut self.protection);
+        protection.codes.clear();
+        protection.confirm_replace = false;
         *self = Self::default();
         self.request_sequence = request_sequence;
         self.devices = devices;
+        self.protection = protection;
     }
     /// A default/live snapshot does not erase the last immutable result receipt.
     pub fn apply_view(&mut self, mut next: CareerView) {
@@ -380,6 +397,18 @@ impl CareerClient {
         self.form_error = None;
         self.nickname_focused = true;
         self.friend_code_focused = false;
+        // Profile shows the account's protection: read it afresh.
+        self.protection.wanted = true;
+    }
+    /// Opens Protect progress (LR-18) from the Home card or Profile.
+    pub(crate) fn open_protect_modal(&mut self) {
+        self.modal = CareerModal::Protect;
+        self.nickname_focused = false;
+        self.friend_code_focused = false;
+        self.preedit.clear();
+        self.protection.confirm_replace = false;
+        self.protection.message = None;
+        self.protection.wanted = true;
     }
     /// Opens the exact receipt accepted by the result screen. A late live
     /// snapshot may already have replaced `last_result` with another outcome.
@@ -398,6 +427,9 @@ impl CareerClient {
         self.web.dismiss();
         self.devices.focused = false;
         self.devices.recovery_code.clear();
+        // Recovery codes are shown once: closing the modal forgets them.
+        self.protection.codes.clear();
+        self.protection.confirm_replace = false;
         self.modal = CareerModal::Closed;
         self.nickname_focused = false;
         self.friend_code_focused = false;
@@ -417,9 +449,13 @@ const CAREER_WHEEL_STEP: f32 = 28.0;
 pub(crate) struct CareerPlugin;
 impl Plugin for CareerPlugin {
     fn build(&self, app: &mut App) {
+        if !app.world().contains_resource::<protection::ProtectPrompt>() {
+            app.insert_resource(protection::ProtectPrompt::load());
+        }
         app.init_resource::<CareerClient>()
             .init_resource::<web::Worker>()
             .init_resource::<devices::Worker>()
+            .init_resource::<protection::Worker>()
             .init_resource::<crate::career_identity::CareerIdentity>()
             .add_message::<NicknameChanged>()
             .add_message::<bevy::input::touch::TouchInput>()
@@ -429,14 +465,15 @@ impl Plugin for CareerPlugin {
                 (
                     web::poll,
                     devices::poll,
+                    protection::poll,
                     bump_gesture_epoch_on_navigation,
                     actions,
                     dismiss_with_escape,
                     nickname_input,
                 )
                     .chain()
-                    // VK sign-in, device links and website pairing wait for
-                    // the region's legal acceptance (LR-06).
+                    // VK sign-in, device links, website pairing and account
+                    // protection wait for the region's legal acceptance (LR-06).
                     .distributive_run_if(crate::legal::bound_and_accepted)
                     .after(UiSet::Dispatch)
                     .after(crate::mobile_ui::address_keyboard)
@@ -491,10 +528,16 @@ enum Action {
     DevicesRecoveryEdit,
     DevicesRecover,
     DevicesConfirm,
+    /// «Enter a recovery code»: a device request that asks for a saved code.
+    DevicesRecoveryStart,
     /// Sign in with VK ID: a device request whose code opens the portal in a browser.
     SocialStart,
     /// Link the waiting VK sign-in to this game profile.
     SocialLink,
+    /// Protect progress (LR-18).
+    ProtectOpen,
+    /// Create or replace the recovery codes in the game.
+    ProtectRotate,
     WebOpen,
     WebEdit,
     WebLookup,
@@ -685,6 +728,7 @@ fn actions(
     identity: Res<crate::career_identity::CareerIdentity>,
     mut web_worker: ResMut<web::Worker>,
     mut device_worker: ResMut<devices::Worker>,
+    mut protection_worker: ResMut<protection::Worker>,
     mut supporter: Option<ResMut<crate::supporter::SupporterUiState>>,
 ) {
     if social
@@ -699,6 +743,7 @@ fn actions(
     for Activated { action, .. } in activated.read() {
         web::act(action, &mut career, &identity, &mut web_worker);
         devices::act(action, &mut career, &identity, &mut device_worker);
+        protection::act(action, &mut career, &identity, &mut protection_worker);
         match action {
             // A build without Supporter has no panel to open.
             Action::Supporter if !shared::market::FEATURES.supporter => {}
@@ -717,8 +762,11 @@ fn actions(
             | Action::DevicesRecoveryEdit
             | Action::DevicesRecover
             | Action::DevicesConfirm
+            | Action::DevicesRecoveryStart
             | Action::SocialStart
-            | Action::SocialLink => {}
+            | Action::SocialLink
+            | Action::ProtectOpen
+            | Action::ProtectRotate => {}
             Action::WebOpen
             | Action::WebEdit
             | Action::WebLookup
@@ -1728,6 +1776,21 @@ fn profile_body(parent: &mut ChildSpawnerCommands, career: &CareerClient) {
         ui::MUTED,
         "CareerRatingExplanation",
     );
+    // The account's protection (LR-18); Protect progress is in the row below.
+    if career.view.profile.is_some() {
+        let protected = career
+            .protection
+            .status
+            .as_ref()
+            .is_some_and(|status| status.protected());
+        label(
+            parent,
+            protection::profile_line(&career.protection),
+            15.0,
+            if protected { ui::JADE } else { ui::GOLD },
+            "CareerProtection",
+        );
+    }
     parent
         .spawn(Node {
             margin: UiRect::top(Val::Px(12.0)),
@@ -1743,16 +1806,16 @@ fn profile_body(parent: &mut ChildSpawnerCommands, career: &CareerClient) {
         });
 }
 
-/// The account row under the profile: devices, the website and, in a build
-/// that sells Supporter, "Support OMOBA".
 /// The Profile's account buttons: «Sign in with VK ID» first where the market
-/// signs in with VK, then devices and the website, and Supporter where sold.
+/// signs in with VK, then Protect progress, devices and the website, and
+/// Supporter where sold.
 fn account_links(features: shared::market::Features) -> Vec<(&'static str, Action, &'static str)> {
     let mut links = Vec::new();
     if devices::vk_button_visible(features) {
         links.push(("devices.button.vk", Action::SocialStart, "CareerVkSignIn"));
     }
     links.extend([
+        ("protect.button.open", Action::ProtectOpen, "CareerProtect"),
         (
             "career.button.devices",
             Action::DevicesOpen,
@@ -2493,6 +2556,7 @@ fn render(
         CareerModal::Profile
             | CareerModal::WebLink
             | CareerModal::Devices
+            | CareerModal::Protect
             | CareerModal::FriendProfile
     );
     let width = (viewport.x - insets[0] - insets[2] - if phone { 12.0 } else { 48.0 })
@@ -2512,7 +2576,7 @@ fn render(
             match career.modal {
                 CareerModal::WebLink => 420.0,
                 CareerModal::Devices | CareerModal::FriendProfile => 560.0,
-                CareerModal::Profile => 640.0,
+                CareerModal::Profile | CareerModal::Protect => 640.0,
                 _ => f32::MAX,
             }
         });
@@ -2690,6 +2754,7 @@ fn render(
                                 CareerModal::Profile => profile_body(body, &career),
                                 CareerModal::WebLink => web::body(body, &career),
                                 CareerModal::Devices => devices::body(body, &career),
+                                CareerModal::Protect => protection::body(body, &career),
                                 CareerModal::Friends => friends_body(body, &career),
                                 CareerModal::FriendProfile => visited_profile_body(body, &career),
                                 CareerModal::History => history_body(
@@ -2734,8 +2799,8 @@ mod tests {
     use super::*;
 
     /// LR-06 acceptance: a fresh profile cannot start a VK sign-in, a device
-    /// link or website pairing (or poll the Account API for them) before it
-    /// accepted the region's legal documents.
+    /// link, website pairing or an account-protection read (or poll the
+    /// Account API for them) before it accepted the region's legal documents.
     #[test]
     fn vk_sign_in_devices_and_pairing_wait_for_the_legal_acceptance() {
         use crate::legal::gate_tests::{assert_carries, gate};
@@ -2744,6 +2809,10 @@ mod tests {
         for (system, what) in [
             (IntoSystem::system_type_id(&actions), "career actions"),
             (IntoSystem::system_type_id(&devices::poll), "device poll"),
+            (
+                IntoSystem::system_type_id(&protection::poll),
+                "protection poll",
+            ),
             (IntoSystem::system_type_id(&web::poll), "pairing poll"),
         ] {
             assert_carries(&app, Update, system, gate(), what);
@@ -2838,19 +2907,28 @@ mod tests {
         };
         assert_eq!(
             names(Market::Global),
-            ["CareerDevices", "CareerWebsite", "CareerSupporter"]
+            [
+                "CareerProtect",
+                "CareerDevices",
+                "CareerWebsite",
+                "CareerSupporter"
+            ]
         );
         // RU sells supporter auras through YooKassa on the portal (LR-67).
         assert_eq!(
             names(Market::Ru),
             [
                 "CareerVkSignIn",
+                "CareerProtect",
                 "CareerDevices",
                 "CareerWebsite",
                 "CareerSupporter"
             ]
         );
-        assert_eq!(names(Market::Cn), ["CareerDevices", "CareerWebsite"]);
+        assert_eq!(
+            names(Market::Cn),
+            ["CareerProtect", "CareerDevices", "CareerWebsite"]
+        );
     }
 
     /// O11: a store avatar's portrait resolves through the passport path
@@ -3865,6 +3943,7 @@ mod tests {
             .init_resource::<crate::career_identity::CareerIdentity>()
             .init_resource::<web::Worker>()
             .init_resource::<devices::Worker>()
+            .init_resource::<protection::Worker>()
             .init_resource::<crate::social::SocialClient>()
             .add_message::<NetworkCommand>()
             .add_message::<NicknameChanged>()

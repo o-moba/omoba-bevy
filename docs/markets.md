@@ -175,6 +175,16 @@ a code is single-use and expires in five minutes; unlinking needs a fresh sign-i
 (`DELETE /v1/me/social/vk`). Contract: `account-api/docs/openapi.json`; tests:
 `account-api/tests/social_postgres.rs`.
 
+**Protect progress (LR-18).** Progress follows the VK-linked account: after a
+reinstall or on a new phone, Profile → «Войти через VK ID» with the same VK ID
+brings back the same profile. After the first completed match, and again after the
+first ranked match, Home asks to link VK ID or save a recovery code until the profile
+is protected or the player declined three times; Profile shows the protection, and
+«Защитить прогресс» creates recovery codes in the game
+(`POST /v1/auth/devices/recovery-codes`, signed by the device key). «Ввести код
+восстановления» sits next to the VK and device options. Support restores nothing by
+hand: [account recovery](account-recovery.md).
+
 ## Adding a market
 
 1. Add the variant and its preset, locale, storage suffix and legal table to

@@ -1,7 +1,8 @@
 //! Bounded native account enrollment transport. HTTPS policy matches web pairing.
 use crate::web_account::WebAccountApi;
 use shared::device_account::{
-    DeviceAction, DeviceEnrollmentStatus, SignedDeviceEnrollment, SignedSocialLink,
+    AccountProtection, DeviceAction, DeviceEnrollmentStatus, SignedDeviceEnrollment,
+    SignedNativeRecoveryRequest, SignedSocialLink,
 };
 
 pub struct DeviceAccountApi {
@@ -49,6 +50,25 @@ impl DeviceAccountApi {
         self.inner.request(
             "v1/auth/social/link",
             serde_json::to_value(proof).map_err(|_| "Invalid sign-in link.")?,
+        )
+    }
+    /// This game's account protection, or a new set of recovery codes (LR-18),
+    /// signed by its active key.
+    pub fn recovery(
+        &self,
+        proof: &SignedNativeRecoveryRequest,
+    ) -> Result<AccountProtection, String> {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(|_| "Invalid system clock.")?
+            .as_secs();
+        proof
+            .request
+            .validate(self.origin(), &proof.request.public_key, now)
+            .map_err(str::to_owned)?;
+        self.inner.request(
+            "v1/auth/devices/recovery-codes",
+            serde_json::to_value(proof).map_err(|_| "Invalid account request.")?,
         )
     }
     /// The portal page that signs the player in for an enrollment code (`/connect`).

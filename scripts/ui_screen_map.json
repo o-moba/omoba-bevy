@@ -696,6 +696,19 @@
       "fixture": "fixture data, labelled"
     },
     {
+      "id": "career-protect",
+      "title": "Career \u00b7 protect progress",
+      "run": "career",
+      "frame": "10-protect.png",
+      "profiles": [
+        "desktop",
+        "phone"
+      ],
+      "route": "Profile \u2192 Protect progress, or the Home card after the first match",
+      "source": "client/src/career_protection.rs",
+      "fixture": "fixture data, labelled"
+    },
+    {
       "id": "supporter-solar",
       "title": "Hero \u00b7 Solar aura preview",
       "run": "supporter",

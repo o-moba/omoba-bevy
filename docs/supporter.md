@@ -205,9 +205,10 @@ proof of possession and account-owner authorization. Existing/previously revoked
 keys cannot be reassigned. Native enrollment uses a separate signature domain
 from web pairing and gameplay messages, and expires after five minutes.
 
-The Devices page generates eight single-use 256-bit recovery codes. Store them
-in a password manager: plaintext is shown once, never saved by the website, and
-the database stores keyed hashes. A new set invalidates unused old codes. To
+The Devices page, or Profile → Protect progress in the game (LR-18, signed by
+the device key), generates eight single-use 256-bit recovery codes. Store them
+in a password manager: plaintext is shown once, never saved by the website or
+the game, and the database stores keyed hashes. A new set invalidates unused old codes. To
 recover, enter one code in the new device's recovery screen, confirm the named
 account and restart. Afterwards review Devices and revoke lost devices. Recovery
 does not silently delete other valid native devices.

@@ -586,8 +586,36 @@ ANDROID
 - {"OMOBA Dev installs beside OMOBA; its Connection button picks Dev, Local or Custom." if flavor.dev else "It plays on the public OMOBA lobby."}
 """,
     }.get(target, "")
-    return (common + specific + legal_readme(version, flavor)
+    return (common + specific + progress_readme(flavor) + legal_readme(version, flavor)
             + "\nLicenses and attributions: see the legal/ folder and ATTRIBUTION.md.\n")
+
+
+def progress_readme(flavor: Flavor = PROD) -> str:
+    """How progress survives a reinstall (LR-18), for a production build with an account
+    service: where the market signs in with VK ID, progress follows the VK-linked
+    account; everywhere, recovery codes. A dev build's accounts may be reset, so it says
+    nothing."""
+    if flavor.dev or not flavor.account_api:
+        return ""
+    if flavor.resolved_features["vk_sign_in"]:
+        return """
+ПРОГРЕСС / YOUR PROGRESS
+Рейтинг, уровень и история хранятся на сервере. Прогресс следует за аккаунтом,
+привязанным к VK: привяжите VK ID (Профиль -> «Войти через VK ID») или сохраните
+коды восстановления (Профиль -> «Защитить прогресс»). После переустановки или на
+новом устройстве войдите с тем же VK ID или введите код («Привязать или
+восстановить аккаунт»).
+Your rating, level and history are kept on the server. Progress follows the
+VK-linked account: link VK ID (Profile -> "Sign in with VK ID") or save recovery
+codes (Profile -> "Protect progress"). After a reinstall or on a new device, sign
+in with the same VK ID or enter a code ("Link or recover account").
+"""
+    return """
+YOUR PROGRESS
+Your rating, level and history are kept on the server, and this installation's key
+opens them. Save recovery codes (Profile -> "Protect progress") so a reinstall or a
+new device can come back to the same profile ("Link or recover account").
+"""
 
 
 def legal_readme(version: str, flavor: Flavor = PROD) -> str:
