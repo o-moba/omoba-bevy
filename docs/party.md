@@ -15,9 +15,11 @@ It is the minimum social loop for playtesting with a friend.
    party.
 4. The lobby shows a 3D line-up: every member's avatar on a pedestal (the
    leader's is gold), with name plates (Ready / In match / Away).
-5. The leader presses **PLAY VS BOTS** (or **Quick match** on a public lobby,
-   or PLAY on Home). Every member is moved to hero select with the leader's
-   queue preference. Members that are not leaders see "Waiting for … to start".
+5. The leader presses **PLAY VS BOTS** (or **Casual PvP** / **Ranked** on a
+   public lobby, or a queue button on Home). Every member is moved to hero select
+   with the leader's queue. Members that are not leaders see "Waiting for … to
+   start". A Ranked party must be one rated cohort (LR-08); otherwise its members
+   are told to play Casual PvP together.
 6. **Leave party** passes the lead to the next member; the leader can **Kick**.
    A party of one dissolves.
 

@@ -6,10 +6,21 @@ keeps its saved device key, and moves to its assigned arena automatically.
 
 ## Player experience
 
-- **Quick match:** search compatible players for up to 30 seconds, then fill empty
-  seats with server bots. A full compatible roster starts immediately.
-- **Wait for players:** wait for ten compatible humans; never fill with bots.
-- **Play with bots:** one human and nine bots, as soon as a worker is available.
+Home and the party lobby offer three queues (LR-08); the searching, draft and
+loading screens name the queue with a Rated/Unrated badge:
+
+- **Casual PvP:** every human searching Casual plays together, whatever their
+  rating or newcomer cohort; after 30 seconds server bots fill the empty seats.
+  Ten humans start immediately. Never rated; awards casual XP.
+- **Ranked:** ten humans of one rated cohort; never filled with bots. The
+  searching screen shows how many players search Ranked, and after 5 minutes
+  offers to also search Casual PvP without losing the place in Ranked.
+- **vs Bots:** one player or one party against server bots, as soon as a worker
+  is available.
+
+The wire names predate the split: `humans_only` is Ranked, `quick` is Casual PvP,
+so older protocol 11 clients keep working (an old Quick search plays Casual PvP).
+The policy is in [match-progression.md › Queues](match-progression.md#queues-ranked-casual-pvp-and-vs-bots).
 
 Players select an initial hero, inspect their assigned team, lock their choices,
 see a shared three-second countdown, and load together. The server waits for all
@@ -34,16 +45,18 @@ Only the game server submits results. Allocation/start, checkpoints, terminal
 intent and settlement use durable receipts and a private outbox; retries cannot
 award rewards twice. Restarting a client keeps its key and retrieves its profile.
 
-Approved completed bot-filled games award 50 XP for a win or 25 XP for a loss;
-they do not change competitive rating. Eligible bot-free PvP keeps the existing
-rating calculation and 150/100 win/loss XP. Interrupted, development, custom-map
-and standalone practice matches do not grant public progression rewards.
-This public casual policy is `public-casual-v1` with reason `allocated_bots`.
+Completed Casual PvP and vs Bots games award 50 XP for a win or 25 XP for a
+loss; they do not change competitive rating, even with ten humans. Eligible Ranked
+matches keep the existing rating calculation and 150/100 win/loss XP.
+Interrupted, development, custom-map and standalone practice matches do not grant
+public progression rewards. This public casual policy is `public-casual-v1` with
+reason `casual_queue` (Casual PvP) or `allocated_bots` (vs Bots).
 
-Newcomer cohorts (fewer than 20 rated matches) remain separated from experienced
-players; compatible rating spread is bounded by the existing 300-point policy.
-Humans-only queues can therefore wait when the total online count is sufficient
-but the compatible count is not. This MVP has one region/coordinator, not global
+In Ranked, newcomer cohorts (fewer than 20 rated matches) remain separated from
+experienced players; compatible rating spread is bounded by the existing
+300-point policy, shared with the store's rated-start check. Ranked can therefore
+wait when the total online count is sufficient but the compatible count is not;
+that is what the Casual PvP offer after 5 minutes is for. This MVP has one region/coordinator, not global
 regional matchmaking or horizontal distributed lobby scheduling.
 
 ## Prepare a host
@@ -134,7 +147,8 @@ Worker `status.json` reports ready/forming/running/settling/finished/failed/reco
 heartbeat, epoch and result ID. Endpoint assignment waits for a worker readiness
 receipt; process spawn alone is insufficient. Watch worker/lobby logs, stale
 heartbeats, queue waits, database failures, CPU, RSS and egress. Back up PostgreSQL
-and durable match/outbox directories and exercise restore before public launch.
+and durable match/outbox directories and exercise restore before public launch (on the
+RU host `ops/vps/ru/ru_backup.py` does both, LR-03).
 
 A lobby restart rediscovers workers from immutable manifests. Crashed matches are
 recovered as interrupted; simulation is not restored mid-frame. Recovery is scoped

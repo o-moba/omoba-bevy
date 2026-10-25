@@ -143,11 +143,11 @@ Area: persistence · **blocker** · S · ops
   - A restore into a scratch database runs automatically every month.
   - A failed backup raises an alert.
 - **Acceptance:**
-  - [ ] A systemd timer is shipped in `ops/vps/ru`, and backups for the last N days exist off-host.
-  - [ ] The restore script checks schema versions and row counts.
-  - [ ] A restore onto a scratch host keeps ratings, history counts, an existing recovery code and VK sign-in working.
-  - [ ] An alert fires when no backup has run for more than 26 h (through LR-17).
-  - [ ] `RUNBOOK.md` and the ops README name the backup location, the escrow holder and the restore steps.
+  - [ ] A systemd timer is shipped in `ops/vps/ru`, and backups for the last N days exist off-host. Shipped: `omoba-backup-ru.timer` (nightly), `omoba-restore-drill-ru.timer` (monthly) and `omoba-backup-check-ru.timer` (hourly), installed by `ru_host.py bootstrap`; `ru_host.py ship` backs up before every migration. Off-host sets need the host and the owner's storage in Russia (`ru_backup.py check --remote` and `ru_host.py status` count them).
+  - [x] The restore script checks schema versions and row counts (`ru_backup.py drill`: tables, row counts, a digest of every table's rows, both schema version lists, the state archive; proven against real PostgreSQL in `scripts/test_ru_backup.py`).
+  - [ ] A restore onto a scratch host keeps ratings, history counts, an existing recovery code and VK sign-in working. The PostgreSQL round-trip test restores ratings, match participants, a recovery code hash and a VK identity row unchanged; the sign-in checks need the host (README › Restore, onto a new host).
+  - [x] An alert fires when no backup has run for more than 26 h: the hourly `ru_backup.py check --alert` (journal, and Telegram once `OMOBA_TELEGRAM_BOT_TOKEN` is set); LR-17 can reuse it.
+  - [ ] `RUNBOOK.md` and the ops README name the backup location, the escrow holder and the restore steps. Location and restore steps are written; the escrow holder is the owner's to name (README escrow table).
 - **Depends on:** LR-01, LR-17
 
 #### LR-04 — Russian legal documents
@@ -254,15 +254,15 @@ Area: matchmaking/modes · **blocker** · M · code (owner sets the policy)
   - Searching, draft and loading show the queue and a Rated/Unrated badge.
   - The owner's low-population ranked policy (O-1) is recorded in `docs/match-progression.md`.
 - **Acceptance:**
-  - [ ] Distinct Ranked and Casual variants exist. Old clients' Quick/HumansOnly either keeps working on the wire or receives update-required (LR-14).
-  - [ ] Unit tests:
+  - [x] Distinct Ranked and Casual variants exist. Old clients' Quick/HumansOnly either keeps working on the wire or receives update-required (LR-14). Done: `MatchPreference::{Casual, Ranked}` keep the wire names `quick`/`humans_only`; every new field is additive, so protocol 11 stays.
+  - [x] Unit tests:
     - 10 humans in Casual → unrated
     - 10 humans in Ranked → rated
     - Ranked never bot-fills
-  - [ ] One newcomer and one veteran in Casual after 30 s get one allocation with 2 humans.
-  - [ ] A party {1000 newcomer, 1400 veteran} plus 8 solo players never yields a rated manifest the store rejects.
-  - [ ] Frontend QA captures in en and ru show the three choices and the rated badge.
-  - [ ] `docs/features.md` and `docs/public-mvp.md` describe the shipped modes, and the orphan key is either used or removed.
+  - [x] One newcomer and one veteran in Casual after 30 s get one allocation with 2 humans.
+  - [x] A party {1000 newcomer, 1400 veteran} plus 8 solo players never yields a rated manifest the store rejects.
+  - [ ] Frontend QA captures in en and ru show the three choices and the rated badge. UI-tree tests cover both languages; the native captures need an unlocked screen.
+  - [x] `docs/features.md` and `docs/public-mvp.md` describe the shipped modes, and the orphan key is either used or removed.
 - **Depends on:** O-1, O-2
 
 #### LR-09 — Arena capacity measured and sized on the RU host

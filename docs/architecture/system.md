@@ -47,7 +47,7 @@ Snapshot: game dev 6d34f98, portal dev 604bc34, 2026-10-24. See [README](README.
 Sources: `server/src/match_service.rs`, `server/src/match_pool.rs`, `server/src/match_allocation.rs`, `client/src/match_service.rs`. This is the lifecycle in outline. The file shapes, the worker's environment and every timer (readiness, port hold, relaunch, archive, join deadline) are in [protocols.md §5](protocols.md#5-lobby--worker-allocation-handoff). The directory layout, ownership and retention are in [data.md › Match root](data.md#match-root-allocation-manifests).
 
 1. The client reaches the lobby over UDP, passes return-path validation and opens a career session signed with its device key.
-2. A `FindMatch` request with a preference (quick, humans only or bot practice) enters the queue. The [matchmaking rules](#matchmaking-rules) below decide who plays together.
+2. A `FindMatch` request with a queue (Ranked, Casual PvP or vs Bots; wire names `humans_only`, `quick`, `bot_practice`) enters the queue. The [matchmaking rules](#matchmaking-rules) below decide who plays together.
 3. The lobby takes a free port from its worker pool and writes an immutable `manifest.json` into a new allocation directory under `OMOBA_MATCH_ROOT`. The manifest names the players and their teams, the worker's bind address, the public endpoint the client will dial and a join deadline.
    - It then spawns the worker, by default its own binary, in role `match`. The worker inherits the lobby's environment except a few local-only overrides, and gets its own career outbox inside the allocation directory.
    - If the spawn fails, the lobby writes a `failed` status and reports `worker_spawn_failed`.
@@ -78,16 +78,18 @@ Sources: `server/src/match_service.rs`, `server/src/match_pool.rs`, `server/src/
 
 ### Matchmaking rules
 
-Sources: `server/src/match_service.rs` (`compatible`, `units`, `select`, `split_teams`, `view`); [party.md](../party.md); [bot-practice-and-social.md](../bot-practice-and-social.md).
+Sources: `server/src/match_service.rs` (`units`, `searches`, `select`, `split_teams`, `waiting_view`), `career-store/src/matchmaking.rs` (`fits_cohort`, `same_cohort`); [party.md](../party.md); [bot-practice-and-social.md](../bot-practice-and-social.md); policy in [match-progression.md › Queues](../match-progression.md#queues-ranked-casual-pvp-and-vs-bots).
 
-- **Compatibility.** Two entries can share a match only with the same preference, the same newcomer status (`ProfileSummary::newcomer`) and ratings within 300 of each other.
-- **Parties.** A party queues as one unit of at most 5 players. It becomes a unit only once every member it waits for has queued with the same preference.
-- **Selection.** Each unit anchors a cohort at its lowest rating. Compatible units with an equal or higher rating join the cohort while the cohort can still be split into two teams of at most 5. The cohort whose earliest entry queued first wins.
-  - Humans only needs 10 players.
-  - Quick needs 10 players, or fills the rest with bots once any member has waited 30 s.
-  - Bot practice allocates the first such unit at once: one player or one party, all on one team.
+- **Queues (LR-08).** `MatchPreference::Ranked` (wire `humans_only`), `Casual` (wire `quick`) and `BotPractice`. The wire names predate the split, so protocol 11 clients keep working: an old Quick request searches Casual PvP.
+- **Rated cohort.** One policy for the lobby, the career queue and the store's rated start: one newcomer bracket (`ProfileSummary::newcomer`) and at most `MAX_RATING_SPREAD` (300) between the lowest and highest rating (`fits_cohort`, `same_cohort`). The lobby has no literal of its own, so a Ranked roster always passes the store's check.
+- **Parties.** A party queues as one unit of at most 5 players. It becomes a unit only once every member it waits for has queued with the same preference. A Ranked party whose members are not one rated cohort is never seated; its members see `Failed{ranked_party_cohort}`.
+- **Selection.** vs Bots first, then Ranked, then Casual PvP; within a queue the roster whose earliest entry queued first wins.
+  - vs Bots allocates the first such unit at once: one player or one party, all on one team.
+  - Ranked anchors a cohort at each unit's lowest rating and admits units that fit it while two teams of at most 5 can be seated. It needs 10 humans and never fills with bots.
+  - Casual PvP admits every unit that searches Casual, whatever its rating or cohort. It needs 10 players, or fills the rest with bots once any member has searched Casual for 30 s (`CASUAL_BOT_FILL`).
+  - After 300 s (`RANKED_CASUAL_OFFER`) a Ranked entry may also search Casual PvP (`FindMatch.also_casual`) and keeps its Ranked place: a full Ranked roster still goes first. Its Casual bot fill counts from when it took the offer. A party searches Casual only once every member took it.
 - **Teams.** Parties stay together. Head counts are made as even as possible, then rating sums as close as possible. A lone party plays Green.
-- **Mode.** An allocation with 10 humans runs `release` rules and the view marks it `rated`. Any other allocation runs `practice` with bots.
+- **Mode.** Only a Ranked allocation runs `release` rules, and the view marks only it `rated` (`Manifest::match_mode`). Casual PvP and vs Bots run worker `practice` rules: bots take the empty seats (none when ten humans queued Casual), and the round settles as `public-casual-v1`, never rated.
 
 ### Inside one server process
 
@@ -254,7 +256,7 @@ The dev VPS is a dedicated host and is never the production VPS. Tools read its 
 
 ### RU host (planned)
 
-A single VPS in Russia is meant to serve everything Russian players reach. Russian personal-data law (152-FZ) requires VK-linked accounts, sessions and IP rate limits to be stored in Russia. RU builds already contain the DNS names, which start answering once the host is deployed. Runbooks: [markets.md › RU release runbook](../markets.md#ru-release-runbook) and [ops/vps/ru/README.md](../../ops/vps/ru/README.md). The host is not deployed yet. `ops/vps/ru/ru_host.py` sets a fresh Ubuntu host up and ships to it (LR-01); off-host backups (LR-03) and monitoring (LR-17) are still open ([launch-readiness.md](../plans/launch-readiness.md)).
+A single VPS in Russia is meant to serve everything Russian players reach. Russian personal-data law (152-FZ) requires VK-linked accounts, sessions and IP rate limits to be stored in Russia. RU builds already contain the DNS names, which start answering once the host is deployed. Runbooks: [markets.md › RU release runbook](../markets.md#ru-release-runbook) and [ops/vps/ru/README.md](../../ops/vps/ru/README.md). The host is not deployed yet. `ops/vps/ru/ru_host.py` sets a fresh Ubuntu host up and ships to it (LR-01), and `ops/vps/ru/ru_backup.py` backs it up off-host (LR-03); monitoring (LR-17) is still open ([launch-readiness.md](../plans/launch-readiness.md)).
 
 | Item | Value | Source |
 | --- | --- | --- |
@@ -264,7 +266,8 @@ A single VPS in Russia is meant to serve everything Russian players reach. Russi
 | Ingress | Caddy on TCP 443 with automatic HTTPS. `account.omoba.ru` allows `GET /health/live` and `/health/ready` and the native POST allowlist (see [below](#account-api-ingress-allowlists)); everything else, every portal route included, gets 403. `omoba.ru` proxies to the portal. Both overwrite `X-Real-IP` with the client's address. | [Caddyfile.ru](../../ops/vps/ru/Caddyfile.ru) |
 | Database | Ubuntu's PostgreSQL 16+ with the `und-x-icu` collation, on `127.0.0.1:5432` only. Database `omoba_ru` (UTF8, collation C.UTF-8), owner role `omoba_owner` (no login outside migrations) and the runtime roles `omoba_game` and `omoba_portal`, whose passwords are generated on the host into the root-only env files | [ops/vps/ru/README.md](../../ops/vps/ru/README.md) |
 | Downloads | `make release-ru-publish` writes `releases.json` from the verified IPFS receipts. It is installed as `OMOBA_RELEASE_CATALOG`, and the portal lists it through the Account API `releases` read (`account-api/src/lib.rs`). | Same |
-| Host and deploy | `ru_host.py` runs on the Mac and pipes itself to `ssh root@<RU VPS> python3 -`. `bootstrap`: Ubuntu packages only, firewall (ufw: SSH, TCP 443, UDP 4000 and the arena range from the lobby unit), key-only SSH (`sshd_config.d/00-omoba-ru.conf`), users, env files, database, units. `ship` / `ship-portal`: staged immutable releases, `pg_dump` and migrations before the switch, verification and rollback. `status` checks everything read-only; `reboot-check` proves a reboot needs no manual step. The public names come from the RU profile in `scripts/markets.py` (`ru_host.py names`) and reach the host in each payload; DNS and the `Caddyfile.ru` sites are checked against them. It refuses the production and dev hosts on both sides and, for bootstrap, an address `whois` does not place in Russia. | [ru_host.py](../../ops/vps/ru/ru_host.py), [README](../../ops/vps/ru/README.md), [release-checklist.md](../../ops/vps/ru/release-checklist.md) |
+| Backups | `ru_backup.py`, installed by `bootstrap` with three timers: a nightly set (`pg_dump -Fc`, the match and outbox archive, a manifest) encrypted and signed with GnuPG and copied to storage in Russia (S3-compatible or SFTP; 14 daily and 8 weekly kept), a monthly restore drill into a scratch database, and an hourly check that alerts (journal, Telegram when configured) when no backup succeeded for 26 h. `ru_host.py escrow` encrypts the host's secrets on the host to the escrow holder's key. | [ru_backup.py](../../ops/vps/ru/ru_backup.py), [README › Backups](../../ops/vps/ru/README.md#backups-escrow-and-restore-drill) |
+| Host and deploy | `ru_host.py` runs on the Mac and pipes itself to `ssh root@<RU VPS> python3 -`. `bootstrap`: Ubuntu packages only, firewall (ufw: SSH, TCP 443, UDP 4000 and the arena range from the lobby unit), key-only SSH (`sshd_config.d/00-omoba-ru.conf`), users, env files, database, units. `ship` / `ship-portal`: staged immutable releases, the pre-migration backup (`ru_backup.py`) and migrations before the switch, verification and rollback; `ship` refuses to migrate while backups are not configured or the backup fails. `status` checks everything read-only; `reboot-check` proves a reboot needs no manual step. The public names come from the RU profile in `scripts/markets.py` (`ru_host.py names`) and reach the host in each payload; DNS and the `Caddyfile.ru` sites are checked against them. It refuses the production and dev hosts on both sides and, for bootstrap, an address `whois` does not place in Russia. | [ru_host.py](../../ops/vps/ru/ru_host.py), [README](../../ops/vps/ru/README.md), [release-checklist.md](../../ops/vps/ru/release-checklist.md) |
 
 ```mermaid
 flowchart LR

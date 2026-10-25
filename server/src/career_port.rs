@@ -16,6 +16,17 @@ use std::net::SocketAddr;
 use std::time::Instant;
 
 use shared::career::{CareerRequest, CareerView, MatchResult, ProfileSummary};
+use shared::match_service::MatchPreference;
+
+/// One signed `FindMatch` for the public lobby.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct MatchRequest {
+    pub addr: SocketAddr,
+    pub request_id: u64,
+    pub preference: MatchPreference,
+    /// A Ranked search that also searches Casual PvP (LR-08).
+    pub also_casual: bool,
+}
 
 pub(crate) trait CareerPort {
     /// Whether durable storage is configured; disabled stores accept nothing
@@ -40,9 +51,7 @@ pub(crate) trait CareerPort {
     // Signed requests in, side effects out (drained by the runtime each tick).
     fn handle(&mut self, addr: SocketAddr, request: CareerRequest);
     fn poll(&mut self);
-    fn take_match_requests(
-        &mut self,
-    ) -> Vec<(SocketAddr, u64, shared::match_service::MatchPreference)>;
+    fn take_match_requests(&mut self) -> Vec<MatchRequest>;
     fn take_cancelled(&mut self) -> Vec<SocketAddr>;
     fn take_social(&mut self) -> Vec<(SocketAddr, shared::social::SocialRequest)>;
     fn take_settled(&mut self) -> Vec<MatchResult>;

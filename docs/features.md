@@ -16,7 +16,11 @@ and forwards each player's address, so sign-in limits stay per player;
 sets a fresh Ubuntu host up in Russia (PostgreSQL with ICU, Caddy, firewall, key-only
 SSH, secrets made on the host), ships the lobby, Account API and portal with rollback,
 checks the whole host and proves a reboot needs no manual step; every service there
-restarts on its own. Each release runs the
+restarts on its own. `ops/vps/ru/ru_backup.py` backs the host up every night and before
+every migration: the database and the match archive, encrypted and signed, go to storage
+in Russia (14 daily and 8 weekly kept). A monthly drill restores the newest set into a
+scratch database and checks it. The secrets are escrowed offline, and a missed backup
+raises an alert. Each release runs the
 [RU release checklist](../ops/vps/ru/release-checklist.md). See [markets](markets.md).
 
 ## Temporary community sculptures
@@ -376,7 +380,7 @@ Play with a gamepad on macOS, Windows, Linux and iPhone: left stick moves (camer
 
 ## Party lobby and co-op vs bots (0.24.0)
 
-Home → **Party & friends** opens a party lobby: invite anyone connected to the same server (friends first when career storage is on), accept or decline invites from a Home toast, and see every member's avatar in a 3D line-up with leader and status plates. The leader's **PLAY VS BOTS** moves the whole party to hero select; the party is seated on one team and bots fill every other seat. Works on a database-free practice server and on the public lobby, where Play with bots allocates one arena for the party and Quick match never splits a party. See [the party guide](party.md). On desktop the lobby's **SERVER** field (Change → `host:port` → Enter) connects to another host and is remembered; release packages for every platform come from `scripts/release.py` ([releasing](RELEASING.md)).
+Home → **Party & friends** opens a party lobby: invite anyone connected to the same server (friends first when career storage is on), accept or decline invites from a Home toast, and see every member's avatar in a 3D line-up with leader and status plates. The leader's **PLAY VS BOTS** moves the whole party to hero select; the party is seated on one team and bots fill every other seat. Works on a database-free practice server and on the public lobby, where Play with bots allocates one arena for the party and Casual PvP and Ranked never split a party (LR-08). See [the party guide](party.md). On desktop the lobby's **SERVER** field (Change → `host:port` → Enter) connects to another host and is remembered; release packages for every platform come from `scripts/release.py` ([releasing](RELEASING.md)).
 
 ## Five classes and the Warden jungler (0.23.0-rc.6)
 
@@ -396,7 +400,7 @@ Starting durability and Q intervals now leave an early response window; levels i
 
 ## Public multiplayer MVP (0.22.0-rc.2)
 
-The public lobby offers Quick match (30-second bot fallback), Wait for players (ten humans only), and Play with bots. Independent worker processes own immutable ten-player rosters, automatic teams, shared draft/countdown/loading and a durable start barrier. New humans cannot replace bots after a match starts; existing participants can reconnect. PostgreSQL saves history and progression for approved allocated bot games, with competitive rating reserved for eligible bot-free PvP. Signed gameplay packets, bounded admission and isolated durable outboxes protect the public match boundary. See [launch, recovery and capacity instructions](public-mvp.md).
+The public lobby offers Casual PvP (30-second bot fallback, never rated), Ranked (ten humans of one cohort, never bot-filled) and vs Bots; see [LR-08](#ranked-casual-pvp-and-vs-bots-lr-08-unreleased). Independent worker processes own immutable ten-player rosters, automatic teams, shared draft/countdown/loading and a durable start barrier. New humans cannot replace bots after a match starts; existing participants can reconnect. PostgreSQL saves history and progression for approved allocated bot games, with competitive rating reserved for eligible bot-free PvP. Signed gameplay packets, bounded admission and isolated durable outboxes protect the public match boundary. See [launch, recovery and capacity instructions](public-mvp.md).
 
 ## Shared running and VRM skeletal motion (0.21.0-rc.5)
 
@@ -1089,6 +1093,16 @@ follows.
 - The server logs `MATCH_METRIC event=abandoned_reaped` and `event=duration_capped`.
 - A lobby that binds beyond loopback refuses to start while `OMOBA_MATCH_PUBLIC_HOST` is unset or loopback, because players would be sent to their own machine (LR-01).
 - Code: `server/src/match_lifecycle.rs`, `server/src/match_pool.rs` (`public_worker_host`). See [the session note](progress/2026-10-24-lr-11.md).
+
+## Ranked, Casual PvP and vs Bots (LR-08, unreleased)
+
+- Home and the party lobby offer three queues on the public lobby: **Casual PvP** (the main button), **Ranked** and **vs Bots**. A party leader launches the whole party into the chosen queue.
+- **Ranked**: ten humans of one rated cohort, rated when eligible, never filled with bots. **Casual PvP**: every human in the queue plays together whatever their rating or newcomer cohort; bots fill the empty seats after 30 s; never rated, 50/25 XP even with ten humans. **vs Bots**: at once, as before.
+- The queue, not the head count, decides rating: `rated == (queue == Ranked) && eligibility`. The lobby and the store share one cohort policy, so a mixed party ({1000 newcomer, 1400 veteran}) can no longer produce a rated roster the store rejects; in Ranked it is told to play Casual PvP together.
+- Searching, draft and loading name the queue with a Rated/Unrated badge. A Ranked search shows how many players search the queue and, after 5 minutes, offers **Also search Casual PvP** while keeping its place in Ranked (owner default O-1, [policy](match-progression.md#low-population-ranked-policy)).
+- Older protocol 11 clients keep working: the wire names stay (`quick` = Casual PvP, `humans_only` = Ranked) and every new field is additive.
+- Copy in en, ru and zh-Hans (`client/i18n/*/queue.json`); the orphan `home.button.humans_only` and the Quick match keys are removed.
+- Code: `server/src/match_service.rs` (`select`, `waiting_view`), `career-store/src/matchmaking.rs` (`fits_cohort`, `same_cohort`), `server/src/match_allocation.rs` (`Manifest::match_mode`), `shared/src/match_service.rs`, `client/src/match_service.rs`, `client/src/frontend/{home,lobby,searching,draft,loading}.rs`. See [the session note](progress/2026-10-24-lr-08.md).
 
 ## Honest state after leaving a running match (LR-13, unreleased)
 

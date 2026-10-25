@@ -60,7 +60,8 @@ impl Manifest {
             || [shared::map::Team::Green, shared::map::Team::Blue]
                 .iter()
                 .any(|t| self.humans.iter().filter(|h| h.team == *t).count() > 5)
-            || (self.preference == MatchPreference::HumansOnly && self.humans.len() != 10)
+            // Ranked is ten humans; it is never filled with bots.
+            || (self.preference == MatchPreference::Ranked && self.humans.len() != 10)
             // Bot practice seats one player or one party, all on one team.
             || (self.preference == MatchPreference::BotPractice
                 && (self.humans.len() > shared::party::MAX_PARTY_SIZE
@@ -69,6 +70,17 @@ impl Manifest {
             return Err("Invalid allocated match manifest".into());
         }
         Ok(())
+    }
+    /// The worker's match mode (LR-08). Only Ranked runs the rated release
+    /// rules. Casual PvP and vs Bots run worker practice rules: bots take the
+    /// empty seats (none when ten humans queued Casual), and the round settles
+    /// as `public-casual-v1`, never rated.
+    pub fn match_mode(&self) -> crate::match_rules::MatchMode {
+        if self.preference.rated() {
+            crate::match_rules::MatchMode::Release
+        } else {
+            crate::match_rules::MatchMode::Practice
+        }
     }
     pub fn read(path: &Path) -> Result<Self, String> {
         let bytes = fs::read(path).map_err(|_| "Cannot read allocation manifest")?;
@@ -239,10 +251,37 @@ mod tests {
         assert!(m.validate().is_err());
     }
     #[test]
-    fn humans_only_requires_full_roster() {
+    fn ranked_requires_full_roster() {
         let mut m = fixture();
-        m.preference = MatchPreference::HumansOnly;
+        m.preference = MatchPreference::Ranked;
         assert!(m.validate().is_err());
+    }
+
+    /// LR-08: the queue, not the head count, picks the worker rules. Ten
+    /// humans in Casual PvP play unrated practice rules; only Ranked is
+    /// release (rated) rules.
+    #[test]
+    fn only_ranked_runs_the_rated_release_rules() {
+        use crate::match_rules::MatchMode;
+        let mut m = fixture();
+        m.humans = (0..10_u8)
+            .map(|i| AllocatedHuman {
+                profile_id: format!("{i:064x}"),
+                session_id: format!("session-{i}"),
+                team: if i < 5 { Team::Green } else { Team::Blue },
+            })
+            .collect();
+        m.preference = MatchPreference::Casual;
+        assert_eq!(m.validate(), Ok(()));
+        assert_eq!(m.match_mode(), MatchMode::Practice);
+        m.preference = MatchPreference::Ranked;
+        assert_eq!(m.validate(), Ok(()));
+        assert_eq!(m.match_mode(), MatchMode::Release);
+        m.humans.truncate(1);
+        m.preference = MatchPreference::Casual;
+        assert_eq!(m.match_mode(), MatchMode::Practice);
+        m.preference = MatchPreference::BotPractice;
+        assert_eq!(m.match_mode(), MatchMode::Practice);
     }
 }
 
@@ -405,6 +444,97 @@ pub(crate) mod runtime_tests {
         assert_eq!(allocation.participants.len(), 10);
         rt.career.backend.test_ack_start(&allocation.result_id);
         assert!(rt.begin_career_round(now));
+    }
+
+    /// LR-08 acceptance: ten humans in Casual PvP are unrated (public casual,
+    /// `casual_queue`, no bots); the same ten humans in Ranked are rated.
+    #[test]
+    fn ten_allocated_humans_are_rated_only_in_ranked() {
+        for preference in [MatchPreference::Casual, MatchPreference::Ranked] {
+            let humans: Vec<_> = (0..10_u8)
+                .map(|i| AllocatedHuman {
+                    profile_id: format!("{:064x}", u64::from(i) + 1),
+                    session_id: format!("seat-{i}"),
+                    team: if i % 2 == 0 { Team::Green } else { Team::Blue },
+                })
+                .collect();
+            let manifest = Manifest {
+                version: 1,
+                allocation_id: "c".repeat(32),
+                endpoint: "127.0.0.1:41000".into(),
+                bind: "127.0.0.1:41000".into(),
+                preference,
+                humans: humans.clone(),
+                join_deadline_ms: unix_ms() + 180_000,
+            };
+            assert_eq!(manifest.validate(), Ok(()));
+            let socket = UdpSocket::bind("127.0.0.1:0").unwrap();
+            socket.set_nonblocking(true).unwrap();
+            let mut rt = ServerRuntime::new(
+                socket,
+                MatchConfig {
+                    mode: manifest.match_mode(),
+                    team_size: 5,
+                },
+            );
+            rt.career.backend = Box::new(crate::career_backend::MemoryCareer::test_backend(
+                rt.server_epoch,
+            ));
+            rt.match_service = crate::match_service::MatchService::Worker(Worker {
+                manifest,
+                directory: std::env::temp_dir().join(format!(
+                    "omoba-allocation-test-{}-{}",
+                    std::process::id(),
+                    rt.server_epoch
+                )),
+                recovery: false,
+                origin_epoch: 0,
+                aborted: false,
+                booted_at: Instant::now(),
+                last_status: None,
+                terminal_at: None,
+            });
+            let now = Instant::now();
+            for (i, human) in humans.iter().enumerate() {
+                let addr: SocketAddr = format!("127.0.0.1:{}", 60400 + i).parse().unwrap();
+                rt.career.backend.test_authenticated(
+                    addr,
+                    shared::career::ProfileSummary::new(
+                        human.profile_id.clone(),
+                        format!("Player {i}"),
+                    ),
+                    &human.session_id,
+                );
+                let join = ClientPacket::Join {
+                    handheld: Default::default(),
+                    prematch: false,
+                    team: Team::Green,
+                    character: default_character_choice(),
+                    hero_class: HeroClass::Mage,
+                    avatar: None,
+                    sprite_character: None,
+                    session_id: Some(human.session_id.clone()),
+                    passport_ticket: None,
+                };
+                rt.handle_packet(addr, join, now);
+            }
+            assert!(rt.allocated_humans_ready(), "{preference:?}");
+            assert!(!rt.begin_career_round(now), "waits for the durable start");
+            let allocation = rt.career_allocation_for_test().unwrap();
+            assert_eq!(allocation.participants.len(), 10);
+            assert!(allocation.participants.iter().all(|p| !p.is_bot));
+            match preference {
+                MatchPreference::Casual => {
+                    assert!(!allocation.rated);
+                    assert_eq!(allocation.ruleset, "public-casual-v1");
+                    assert_eq!(allocation.unrated_reason.as_deref(), Some("casual_queue"));
+                }
+                _ => {
+                    assert!(allocation.rated, "{:?}", allocation.unrated_reason);
+                    assert_eq!(allocation.ruleset, crate::career_runtime::RATED_RULESET);
+                }
+            }
+        }
     }
 
     #[test]
@@ -825,7 +955,7 @@ pub(crate) mod runtime_tests {
         ] {
             let profile = shared::career::ProfileSummary::new(profile, session.into());
             if let crate::match_service::MatchService::Worker(worker) = &mut rt.match_service {
-                worker.manifest.preference = MatchPreference::Quick;
+                worker.manifest.preference = MatchPreference::Casual;
                 worker.manifest.humans.push(AllocatedHuman {
                     profile_id: profile.profile_id.clone(),
                     session_id: session.into(),
@@ -896,7 +1026,7 @@ pub(crate) mod runtime_tests {
         let (mut rt, addr, join) = fixture();
         let now = Instant::now() + Duration::from_secs(30);
         if let crate::match_service::MatchService::Worker(worker) = &mut rt.match_service {
-            worker.manifest.preference = MatchPreference::Quick;
+            worker.manifest.preference = MatchPreference::Casual;
         }
         rt.maintain_roster(now);
         rt.career.backend.test_authenticated(

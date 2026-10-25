@@ -1073,20 +1073,11 @@ async fn append_participants(
     Ok(profiles)
 }
 fn validate_current_cohort(profiles: &BTreeMap<String, ProfileSummary>) -> StoreResult<()> {
-    let first = profiles
-        .values()
-        .next()
-        .ok_or("Rated allocation requires profiles.")?;
-    let (minimum, maximum) = profiles
-        .values()
-        .fold((first.rating, first.rating), |(low, high), profile| {
-            (low.min(profile.rating), high.max(profile.rating))
-        });
-    if profiles
-        .values()
-        .any(|profile| profile.newcomer() != first.newcomer())
-        || maximum - minimum > crate::matchmaking::MAX_RATING_SPREAD
-    {
+    if profiles.is_empty() {
+        return Err("Rated allocation requires profiles.".into());
+    }
+    // The same policy the queue and the lobby's Ranked search select with.
+    if !crate::matchmaking::same_cohort(profiles.values()) {
         // Queue snapshots on another process can outlive a completed match.
         // Locks are held through allocation commit, so current classification
         // cannot change after this check and before seats become authoritative.
@@ -1105,15 +1096,23 @@ fn roster_can_grow(result: &MatchResult) -> bool {
 /// The trusted allocator/runtime chooses this marker only after checking actual
 /// map/modifier settings. Persisted metadata still fails closed on malformed or
 /// unauthenticated rosters. This policy grants progression, never competitive Elo.
+///
+/// The reason names the queue: `allocated_bots` is vs Bots (and Quick before
+/// LR-08), which always seats bots; `casual_queue` is Casual PvP, which may
+/// seat ten humans. A recovered interruption keeps whichever roster it had.
 fn validate_public_casual(result: &MatchResult) -> StoreResult<()> {
     let interrupted_recovery = result.outcome != MatchOutcome::Completed
         && result.unrated_reason.as_deref() == Some("server_interrupted");
     let bots = result.participants.iter().filter(|p| p.is_bot).count();
+    let roster_fits_reason = match result.unrated_reason.as_deref() {
+        Some("allocated_bots") => bots > 0,
+        Some("casual_queue") => true,
+        _ => interrupted_recovery,
+    };
     if result.rated
-        || (result.unrated_reason.as_deref() != Some("allocated_bots") && !interrupted_recovery)
+        || !roster_fits_reason
         || result.map_profile != shared::map::ResolvedMap::default().map_profile
         || result.participants.len() != 10
-        || bots == 0
         || bots == result.participants.len()
         || result
             .participants

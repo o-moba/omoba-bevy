@@ -341,7 +341,7 @@ pub(crate) struct CareerBackend<L: JobLink = WorkerLink> {
     settled: Vec<MatchResult>,
     cancelled: Vec<SocketAddr>,
     social: Vec<(SocketAddr, shared::social::SocialRequest)>,
-    match_requests: Vec<(SocketAddr, u64, shared::match_service::MatchPreference)>,
+    match_requests: Vec<crate::career_port::MatchRequest>,
     last_presence: Instant,
     matches: HashMap<String, String>,
     pending_ids: HashSet<String>,
@@ -590,9 +590,7 @@ impl<L: JobLink> CareerPort for CareerBackend<L> {
     fn recovery_confirmed_since(&self, since: Instant) -> bool {
         self.recovery_checked.is_some_and(|at| at >= since)
     }
-    fn take_match_requests(
-        &mut self,
-    ) -> Vec<(SocketAddr, u64, shared::match_service::MatchPreference)> {
+    fn take_match_requests(&mut self) -> Vec<crate::career_port::MatchRequest> {
         std::mem::take(&mut self.match_requests)
     }
     fn gameplay_principal(
@@ -759,10 +757,16 @@ impl<L: JobLink> CareerPort for CareerBackend<L> {
                 if let CareerAction::FindMatch {
                     request_id,
                     preference,
+                    also_casual,
                 } = action
                 {
                     if c.view.profile.is_some() && self.match_requests.len() < MAX_JOBS {
-                        self.match_requests.push((addr, request_id, preference));
+                        self.match_requests.push(crate::career_port::MatchRequest {
+                            addr,
+                            request_id,
+                            preference,
+                            also_casual,
+                        });
                     }
                     return;
                 }

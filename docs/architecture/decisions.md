@@ -376,10 +376,11 @@ sequenceDiagram
 - Workers freeze their roster. Fresh players cannot join a running match, and a disconnected participant can reclaim their seat.
 - Public roles admit only signed commands (`omoba.gameplay.command.v1`).
 - Reward policy `public-casual-v1`: approved bot-filled games give 50 XP for a win and 25 XP for a loss and do not change rating. Rating comes only from eligible bot-free PvP, which gives 150/100 XP. Newcomers (fewer than 20 rated matches) are matched separately, and the compatible rating spread is bounded at 300 points.
+- Since LR-08 the player chooses the queue, and the queue decides rating, not the head count: only **Ranked** (ten humans of one rated cohort, never bot-filled) can be rated. **Casual PvP** (every cohort together, bots after 30 s, possibly ten humans) and **vs Bots** settle as `public-casual-v1` with reasons `casual_queue` and `allocated_bots`. The lobby and the store share one cohort policy (`career-store/src/matchmaking.rs`), so the lobby never forms a rated roster the store rejects.
 - Public admission limits per process: at most 512 endpoint records, 64 probes per second, 120 packets per second per endpoint; datagrams capped at 12 KiB and signed command payloads at 8 KiB (`docs/public-mvp.md`). These bound application work; they are not a measured DDoS capacity.
 
 **Consequences.**
-- There is one region and one coordinator, with no distributed lobby scheduling. Humans-only queues can wait when the compatible count is too small.
+- There is one region and one coordinator, with no distributed lobby scheduling. Ranked can wait when the compatible count is too small; after 5 minutes it offers to also search Casual PvP (owner default O-1, [match-progression.md](../match-progression.md#low-population-ranked-policy)).
 - Parties live in one server process's memory (`docs/party.md`).
 - Signed commands authenticate the client but do not encrypt the traffic or authenticate the server.
 
@@ -474,7 +475,7 @@ sequenceDiagram
 - There are four levels, Recruit, Regular, Veteran and Elite, with one name in code, on the wire and in the UI (D4). Elite is the bots as they were before the levels existed.
 - Lower levels are more cautious: they retreat earlier, never dive towers and focus less. Reaction time and aim are never slowed.
 - The practice level applies to both teams (D2). The picker's first-run default will be Regular (D3). Until the picker exists every host defaults to Elite, and `OMOBA_BOT_DIFFICULTY` is a tester override, read only by desktop offline practice and by a standalone server that fills with bots (`boot_bot_difficulty` in `server/src/bots.rs`).
-- Online play stays Elite: Quick-match fill, the lobby's Server bot match (D1), the party "Play vs bots" and takeover of a disconnected human. Lobby and match workers never read `OMOBA_BOT_DIFFICULTY`, and the lobby removes it from the worker environment (`server/src/match_pool.rs`, `env_remove`).
+- Online play stays Elite: Casual PvP fill (Quick match before LR-08), the lobby's Server bot match (D1), the party "Play vs bots" and takeover of a disconnected human. Lobby and match workers never read `OMOBA_BOT_DIFFICULTY`, and the lobby removes it from the worker environment (`server/src/match_pool.rs`, `env_remove`).
 - Personas, when built, always carry a visible AI label.
 - Competitive rating stays PvP-only and bot-free.
 

@@ -935,6 +935,104 @@ fn career_store_public_casual_policy_requires_frozen_authenticated_default_roste
     assert_eq!(pool_connections(None), 4);
 }
 
+/// A Casual PvP result (LR-08): ten authenticated humans, no bots, unrated.
+fn casual_pvp(profiles: &[ProfileSummary], n: u64) -> MatchResult {
+    let mut game = result(&profiles[0], &profiles[1], n);
+    game.map_profile = shared::map::ResolvedMap::default().map_profile;
+    game.ruleset = PUBLIC_CASUAL_RULESET.into();
+    game.rated = false;
+    game.unrated_reason = Some("casual_queue".into());
+    game.participants = profiles
+        .iter()
+        .zip(1..)
+        .map(|(profile, id)| {
+            participant(
+                profile,
+                id,
+                if id % 2 == 1 { Team::Green } else { Team::Blue },
+            )
+        })
+        .collect();
+    game
+}
+
+/// LR-08: Casual PvP may seat ten humans (`casual_queue`); vs Bots
+/// (`allocated_bots`) still needs at least one bot, and neither is rated.
+#[test]
+fn career_store_casual_pvp_admits_ten_humans_and_vs_bots_still_needs_bots() {
+    let profiles: Vec<_> = (0..10_u8)
+        .map(|n| ProfileSummary::new(format!("{n:064x}"), format!("Player-{n}")))
+        .collect();
+    let game = casual_pvp(&profiles, 1);
+    assert!(normalize(starting(&game)).is_ok());
+    assert!(normalize_terminal(game.clone()).is_ok());
+    assert!(!roster_can_grow(&game));
+    let mut rated = game.clone();
+    rated.rated = true;
+    assert!(normalize_terminal(rated).is_err());
+    let mut vs_bots = game.clone();
+    vs_bots.unrated_reason = Some("allocated_bots".into());
+    assert!(normalize_terminal(vs_bots).is_err(), "vs Bots without bots");
+    // A Casual PvP roster that bots filled is valid too.
+    let a = &profiles[0];
+    let b = &profiles[1];
+    let mut filled = public_casual(a, b, 2);
+    filled.unrated_reason = Some("casual_queue".into());
+    assert!(normalize_terminal(filled).is_ok());
+    let mut all_bots = public_casual(a, b, 3);
+    all_bots.unrated_reason = Some("casual_queue".into());
+    for p in &mut all_bots.participants[..2] {
+        p.is_bot = true;
+        p.profile_id = None;
+    }
+    assert!(normalize_terminal(all_bots).is_err(), "nobody to credit");
+    // The server can still interrupt a ten-human Casual PvP match.
+    let mut recovered = game;
+    recovered.outcome = MatchOutcome::Interrupted;
+    recovered.winner = None;
+    recovered.unrated_reason = Some("server_interrupted".into());
+    assert!(normalize_terminal(recovered).is_ok());
+}
+
+/// LR-08: ten humans in Casual PvP settle the casual XP and never touch
+/// rating, whatever their cohorts (a newcomer and a 1400 veteran here).
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "requires OMOBA_TEST_DATABASE_URL and real PostgreSQL"]
+async fn career_store_ten_human_casual_pvp_awards_casual_xp_without_rating() {
+    let f = Fixture::new().await;
+    let mut profiles = Vec::new();
+    for n in 1..=10 {
+        profiles.push(f.profile(n).await);
+    }
+    sqlx::query("UPDATE career_profiles SET rating=1400,rated_matches=40,matches_played=40,wins=20,losses=20 WHERE profile_id=$1")
+        .bind(&profiles[1].profile_id)
+        .execute(&f.store.pool)
+        .await
+        .unwrap();
+    let game = casual_pvp(&profiles, 1);
+    f.store.start(starting(&game)).await.unwrap();
+    let saved = f.store.settle(game).await.unwrap();
+    assert!(saved.saved && !saved.rated);
+    for (p, profile) in saved.participants.iter().zip(&profiles) {
+        assert!(p.rating.is_none());
+        let won = p.team == Team::Green;
+        assert_eq!(p.progression_xp_gained, if won { 50 } else { 25 });
+        let after = f.store.profile(&profile.profile_id).await.unwrap();
+        let before = if profile.profile_id == profiles[1].profile_id {
+            40
+        } else {
+            0
+        };
+        assert_eq!(after.matches_played, before + 1);
+        assert_eq!(after.progression_xp, if won { 50 } else { 25 });
+    }
+    let veteran = f.store.profile(&profiles[1].profile_id).await.unwrap();
+    assert_eq!((veteran.rating, veteran.rated_matches), (1400, 40));
+    let newcomer = f.store.profile(&profiles[0].profile_id).await.unwrap();
+    assert_eq!((newcomer.rating, newcomer.rated_matches), (1000, 0));
+    f.close().await;
+}
+
 #[tokio::test(flavor = "current_thread")]
 #[ignore = "requires OMOBA_TEST_DATABASE_URL and real PostgreSQL"]
 async fn career_store_public_casual_progression_is_idempotent_and_survives_reopen() {
