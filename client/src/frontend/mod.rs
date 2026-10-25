@@ -206,6 +206,10 @@ const UNCOMMITTED_GRACE_FRAMES: u8 = 3;
 /// nothing committed. A joined session has its own reconnect cadence.
 const MENU_RETRY_SECS: f32 = 5.0;
 
+/// Seconds between retries while this game is newer than the servers (LR-14:
+/// clients ship before the server), so it connects once they are updated.
+const SERVERS_UPDATING_RETRY_SECS: f32 = 30.0;
+
 /// Advances the shell from what the session and the server actually report.
 /// Screens never guess: `Searching` leaves only once the server admits the
 /// join, `Loading` leaves only once the local hero exists in a running match.
@@ -453,7 +457,8 @@ fn scale_menus_to_the_window(
 
 /// Before anything is committed nobody reconnects for the player, so the
 /// menus do: the career profile and the PLAY path come back on their own when
-/// the server does.
+/// the server does. An older game stops (it must update); a newer game keeps
+/// checking, slower, until the servers run its release.
 fn retry_connection_from_menus(
     time: Res<Time>,
     screen: Res<State<AppScreen>>,
@@ -464,23 +469,31 @@ fn retry_connection_from_menus(
     if automation_bypass() {
         return;
     }
+    use crate::net::CompatibilityVerdict;
     let offline = session.state() == crate::net::ClientConnectionState::Disconnected;
-    let incompatible = session
-        .compatibility_issue
-        .is_some_and(|issue| issue != shared::compatibility::CompatibilityIssue::Unavailable)
-        || matches!(
-            session.join_rejection(),
-            Some(
-                shared::protocol::JoinRejection::ProtocolMismatch
-                    | shared::protocol::JoinRejection::MapGeometryMismatch
-            )
-        );
+    let verdict = session.compatibility_verdict();
+    let servers_updating = verdict == Some(CompatibilityVerdict::ServersUpdating);
+    // A confirmed mismatch also records `ProtocolMismatch` as the join error.
+    let incompatible = !servers_updating
+        && (verdict == Some(CompatibilityVerdict::UpdateRequired)
+            || matches!(
+                session.join_rejection(),
+                Some(
+                    shared::protocol::JoinRejection::ProtocolMismatch
+                        | shared::protocol::JoinRejection::MapGeometryMismatch
+                )
+            ));
     if !screen.get().is_menu() || !offline || session.has_committed_join() || incompatible {
         *since_last = 0.0;
         return;
     }
     *since_last += time.delta_secs();
-    if *since_last >= MENU_RETRY_SECS {
+    let interval = if servers_updating {
+        SERVERS_UPDATING_RETRY_SECS
+    } else {
+        MENU_RETRY_SECS
+    };
+    if *since_last >= interval {
         *since_last = 0.0;
         retry.write(crate::net::SessionUiCommand::Retry);
     }
@@ -489,6 +502,43 @@ fn retry_connection_from_menus(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// LR-14: a game newer than the servers retries on the slow cadence (the
+    /// servers are about to switch); an older one never does.
+    #[test]
+    fn menu_retry_waits_for_updating_servers_but_not_for_an_outdated_game() {
+        use shared::compatibility::{CompatibilityIssue, ReleaseContract};
+        for (server_release, elapsed, retries) in [
+            ("0.0.1", MENU_RETRY_SECS + 1.0, 0),
+            ("0.0.1", SERVERS_UPDATING_RETRY_SECS + 1.0, 1),
+            ("999.0.0", SERVERS_UPDATING_RETRY_SECS + 1.0, 0),
+        ] {
+            let mut app = App::new();
+            let mut time: Time = Time::default();
+            time.advance_by(std::time::Duration::from_secs_f32(elapsed));
+            let mut session = ClientSession::default();
+            session.set_state_for_test(crate::net::ClientConnectionState::Disconnected);
+            session.compatibility_issue = Some(CompatibilityIssue::Gameplay);
+            session.server_contract = Some(ReleaseContract {
+                release: server_release.into(),
+                ..ReleaseContract::current()
+            });
+            session.reject_for_test(shared::protocol::JoinRejection::ProtocolMismatch);
+            app.insert_resource(time)
+                .insert_resource(State::new(AppScreen::Home))
+                .insert_resource(session)
+                .add_message::<crate::net::SessionUiCommand>()
+                .add_systems(Update, retry_connection_from_menus);
+            app.update();
+            assert_eq!(
+                app.world()
+                    .resource::<Messages<crate::net::SessionUiCommand>>()
+                    .len(),
+                retries,
+                "{server_release} after {elapsed}s"
+            );
+        }
+    }
 
     #[test]
     fn menu_retry_preserves_confirmed_incompatibility_but_retries_unavailable_servers() {

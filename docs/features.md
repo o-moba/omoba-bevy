@@ -15,7 +15,11 @@ and forwards each player's address, so sign-in limits stay per player;
 sets a fresh Ubuntu host up in Russia (PostgreSQL with ICU, Caddy, firewall, key-only
 SSH, secrets made on the host), ships the lobby, Account API and portal with rollback,
 checks the whole host and proves a reboot needs no manual step; every service there
-restarts on its own. Each release runs the
+restarts on its own. `ops/vps/ru/ru_backup.py` backs the host up every night and before
+every migration: the database and the match archive, encrypted and signed, go to storage
+in Russia (14 daily and 8 weekly kept). A monthly drill restores the newest set into a
+scratch database and checks it. The secrets are escrowed offline, and a missed backup
+raises an alert. Each release runs the
 [RU release checklist](../ops/vps/ru/release-checklist.md). See [markets](markets.md).
 
 ## Temporary community sculptures
@@ -1086,6 +1090,16 @@ follows.
 - The lobby never adds a second queue entry for a profile that still holds a running seat, and a played match that ended frees the seat without an error code.
 - Copy in en, ru and zh-Hans (`client/i18n/*/rejoin.json`).
 - Code: `server/src/match_service.rs` (`Lobby::view`), `server/src/match_pool.rs` (`Slot::ran`), worker `status.json` `ends_by_ms`, `shared/src/match_service.rs` (`InMatch`), `client/src/match_service.rs`, `client/src/frontend/searching.rs`. See [the session note](progress/2026-10-24-lr-13.md).
+
+## Client update path (LR-14, unreleased)
+
+- A game that the servers no longer admit shows **Update required** on Home. The download button takes Play's place and opens the market portal's download page for this platform (`<portal>/download?platform=…`; `https://omoba.ru/download` for RU builds). It also names the newest release from the catalog. iPhone builds say to update through the App Store or TestFlight and link nowhere. A build without a portal (global today) shows no button and says to download the new version from the official site.
+- A game newer than the servers shows «servers are switching to your version» and keeps checking every 30 s, so players who update before the server switch connect by themselves.
+- A newer release in the market's catalog (`GET /v1/releases`, read at boot and after a mismatch) shows a dismissible **Update available** banner on Home.
+- Catalog entries carry `channel` (`direct`), an optional `min_release` and `update_url` (`release.py catalog --min-release`). The game reads only its own channel; a game below `min_release` shows Update required even while the servers accept it, and `update_url` is the button target.
+- The compatibility report carries an additive update notice: the server's release as the minimum and its portal's download page. Clients open only links on their own portal. Production texts no longer suggest choosing another server.
+- Copy in en, ru and zh-Hans (`client/i18n/*/update.json`); the release rule is in [RELEASING.md](RELEASING.md#updates-and-contract-changes-lr-14).
+- Code: `shared/src/compatibility.rs` (`UpdateNotice`, `ReleaseVersion`, `mismatch_side`, `download_page`), `server/src/public_transport.rs`, `passport/src/release_catalog.rs`, `client/src/update.rs`, `client/src/frontend/home.rs`, `client/src/net/status_ui.rs`. See [the session note](progress/2026-10-24-lr-14.md).
 
 ## Admission and abuse limits (LR-16, unreleased)
 

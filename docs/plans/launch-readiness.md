@@ -143,11 +143,11 @@ Area: persistence · **blocker** · S · ops
   - A restore into a scratch database runs automatically every month.
   - A failed backup raises an alert.
 - **Acceptance:**
-  - [ ] A systemd timer is shipped in `ops/vps/ru`, and backups for the last N days exist off-host.
-  - [ ] The restore script checks schema versions and row counts.
-  - [ ] A restore onto a scratch host keeps ratings, history counts, an existing recovery code and VK sign-in working.
-  - [ ] An alert fires when no backup has run for more than 26 h (through LR-17).
-  - [ ] `RUNBOOK.md` and the ops README name the backup location, the escrow holder and the restore steps.
+  - [ ] A systemd timer is shipped in `ops/vps/ru`, and backups for the last N days exist off-host. Shipped: `omoba-backup-ru.timer` (nightly), `omoba-restore-drill-ru.timer` (monthly) and `omoba-backup-check-ru.timer` (hourly), installed by `ru_host.py bootstrap`; `ru_host.py ship` backs up before every migration. Off-host sets need the host and the owner's storage in Russia (`ru_backup.py check --remote` and `ru_host.py status` count them).
+  - [x] The restore script checks schema versions and row counts (`ru_backup.py drill`: tables, row counts, a digest of every table's rows, both schema version lists, the state archive; proven against real PostgreSQL in `scripts/test_ru_backup.py`).
+  - [ ] A restore onto a scratch host keeps ratings, history counts, an existing recovery code and VK sign-in working. The PostgreSQL round-trip test restores ratings, match participants, a recovery code hash and a VK identity row unchanged; the sign-in checks need the host (README › Restore, onto a new host).
+  - [x] An alert fires when no backup has run for more than 26 h: the hourly `ru_backup.py check --alert` (journal, and Telegram once `OMOBA_TELEGRAM_BOT_TOKEN` is set); LR-17 can reuse it.
+  - [ ] `RUNBOOK.md` and the ops README name the backup location, the escrow holder and the restore steps. Location and restore steps are written; the escrow holder is the owner's to name (README escrow table).
 - **Depends on:** LR-01, LR-17
 
 #### LR-04 — Russian legal documents
@@ -378,11 +378,12 @@ Area: install/update · **blocker** · M · code
   - The compatibility reply carries the minimum release and the update URL.
   - `docs/RELEASING.md` defines which changes bump `GAMEPLAY_REVISION`, says clients ship before the server, and requires a player notice before a forced update. The alternative is to move balance values into server data (O-12).
 - **Acceptance:**
-  - [ ] On a mismatch, the RU client shows "Требуется обновление" with a button to `omoba.ru/download` for its platform.
-  - [ ] A newer compatible build shows a banner on Home.
-  - [ ] The compatibility reply, or a signed document, carries min release and update URL, with tests for bad and expired documents.
-  - [ ] No production string mentions choosing a server, and all strings exist in en, ru and zh-Hans.
-  - [ ] The RELEASING.md rule is recorded.
+  - [x] On a mismatch, the RU client shows "Требуется обновление" with a button to `omoba.ru/download` for its platform. Done as Home's update panel: the download button replaces Play and opens `<portal>/download?platform=…` on the portal compiled from `scripts/markets.py` (UI-tree test in Russian; no visual check, the Mac's screen is locked).
+  - [x] A newer compatible build shows a banner on Home. Dismissible with **Later**; read from `GET /v1/releases` at boot and after a mismatch.
+  - [x] The compatibility reply, or a signed document, carries min release and update URL, with tests for bad and expired documents. Done in the reply (`UpdateNotice`, additive on handshake 1). Tests cover bad notices and catalogs, stale-nonce reports and stale catalogs; no signed document was added.
+  - [x] No production string mentions choosing a server, and all strings exist in en, ru and zh-Hans.
+  - [x] The RELEASING.md rule is recorded ("Updates and contract changes").
+  - [x] LR-68 rules (section 7). The catalog URL is the build's `account_api`. The reply stays `ReleaseContract` with the additive `UpdateNotice` and no protocol bump. Catalog entries carry `channel` (`direct`), `min_release` and `update_url` (`release.py catalog --min-release`; validated by the Account API and `passport::release_catalog`, absent fields tolerated). The client reads only its own channel's entries and picks the button target per (channel, platform): a direct build stays on its portal, and a store build would take only its catalog page, never a web download. A build with no link names the App Store or TestFlight only on iPhone; elsewhere it names the official site. `region` on entries stays with LR-23.
 - **Depends on:** LR-01, LR-23
 
 #### LR-15 — Moderation minimum: sanctions, chat kill switch, operator CLI

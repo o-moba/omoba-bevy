@@ -1,9 +1,10 @@
 """ops/vps/ru/ru_host.py: the RU host tool only ever targets the RU VPS (LR-01).
 
 The host half runs against a temporary filesystem root with fake apt / dpkg-query /
-systemctl / ufw / sshd / caddy / runuser psql / pg_dump / useradd / install / ss / ip /
-pgrep / node / omoba-account-api, fake DNS and fake loopback HTTP, so nothing here needs
-ssh, root, PostgreSQL, Caddy or systemd. The Mac half is exercised with ssh, scp and
+systemctl / ufw / sshd / caddy / runuser psql / useradd / install / ss / ip / pgrep /
+node / omoba-account-api / the installed ru_backup.py (LR-03, tested on its own in
+test_ru_backup.py), fake DNS and fake loopback HTTP, so nothing here needs ssh, root,
+PostgreSQL, Caddy or systemd. The Mac half is exercised with ssh, scp and
 whois mocked. A bootstrap → ship → ship-portal → status → reboot round runs end to end
 against the fakes.
 """
@@ -54,6 +55,7 @@ def elf(body: bytes = b"server", machine: bytes = b"\x3e\x00") -> bytes:
 SERVER = elf(b"omoba-server ru 1")
 ACCOUNT_API = elf(b"omoba-account-api ru 1")
 SERVER_SERVICES = ("omoba-lobby-ru", "omoba-account-api-ru")
+TIMERS = ru_host.BACKUP_TIMERS
 
 
 def ufw_line(to: str, action: str, source: str, comment: str) -> str:
@@ -91,6 +93,10 @@ class FakeSystem:
         self.schema = False
         self.sql, self.migrations, self.dumps = [], [], []
         self.grants = 0
+        # ru_backup.py: whether the owner has filled backup.env and the keys; its runs.
+        self.backups_configured = False
+        self.fail_backup = False
+        self.backup_runs = []
         self.write("/etc/os-release", 'ID=ubuntu\nVERSION_ID="24.04"\n')
         self.write("/proc/meminfo", "MemTotal: 4014000 kB\nMemAvailable: 2500000 kB\n")
         self.write("/proc/sys/kernel/random/boot_id", "boot-1\n")
@@ -183,11 +189,7 @@ class FakeSystem:
             assert args[1:4] == ["-u", "postgres", "--"], args
             if args[4] == "psql":
                 return self.psql(args[4:], stdin)
-            if args[4] == "pg_dump":
-                assert "omoba_ru" in args and "-Fc" in args, args
-                Path(args[args.index("-f") + 1]).write_bytes(b"PGDMP")
-                self.dumps.append(args[args.index("-f") + 1])
-                return 0, ""
+            raise AssertionError(f"unexpected runuser {args}")
         if name == "pgrep":
             assert args[1:] == ["-u", "omoba-ru", "-x", "omoba-server"], args
             lobby = self.unit("omoba-lobby-ru")
@@ -200,7 +202,36 @@ class FakeSystem:
             return 0, found.group().decode() + "\n"
         if name.endswith("/omoba-account-api"):
             return self.migrate(args, env)
+        if name == "/usr/bin/python3":
+            return self.backup_tool(args[1:])
         raise AssertionError(f"unexpected command {args}")
+
+    def backup_tool(self, args):
+        """The installed ru_backup.py (its own behaviour is test_ru_backup.py's)."""
+        assert args[0] == self.p(ru_host.BACKUP_SCRIPT) and os.path.isfile(args[0]), args
+        command = args[1]
+        not_configured = ["OMOBA_BACKUP_TARGET is not set: name the off-host storage in Russia"]
+        if command == "config":
+            assert args[2:] == ["--json"], args
+            ok = self.backups_configured
+            return (0 if ok else 1), json.dumps({"ok": ok, "problems": [] if ok else not_configured})
+        if command == "check":
+            assert args[2:] == ["--json", "--remote"], args
+            ok = self.backups_configured
+            return (0 if ok else 1), json.dumps({"ok": ok, "problems": [] if ok else not_configured,
+                                                 "warnings": [], "facts": {"off_host_sets": 3 if ok else 0}})
+        assert command == "backup" and args[2:6] == ["--reason", "pre-migration", "--release", args[5]], args
+        local_only = args[6:] == ["--local-only"]
+        assert local_only or args[6:] == [], args
+        self.backup_runs.append(args[5:])
+        if self.fail_backup:
+            return 1, "", "ERROR: sftp://backup@store.example:22/omoba failed: Connection refused"
+        dump = f"/var/backups/omoba-ru/omoba_ru-before-{args[5]}-20260921T000000Z.dump"
+        self.write(dump, "PGDMP")
+        self.dumps.append(dump)
+        return 0, json.dumps({"name": None if local_only else "omoba-ru-20260921T000000Z-pre-migration.tar.gpg",
+                              "rollback_dump": dump, "uploaded": [] if local_only else ["x"],
+                              "mode": "local-only" if local_only else None}) + "\n"
 
     def install_package(self, package):
         self.packages.add(package)
@@ -229,7 +260,7 @@ class FakeSystem:
             return 0, ""
         unit = args[1]
         assert unit in ("caddy", "postgresql", "ssh.service", *SERVER_SERVICES, "omoba-portal-ru",
-                        "omoba-limits-ru"), args
+                        "omoba-limits-ru", *TIMERS), args
         if verb == "enable":
             self.enabled.add(unit)
         elif verb == "disable":
@@ -297,7 +328,7 @@ class FakeSystem:
             self.stop(unit)
         Path(self.p("/proc/sys/kernel/random/boot_id")).write_text("boot-2\n")
         for unit in ("postgresql", "caddy", "omoba-limits-ru", "omoba-lobby-ru", "omoba-account-api-ru",
-                     "omoba-portal-ru"):
+                     "omoba-portal-ru", *TIMERS):
             if unit in self.enabled:
                 self.start(unit)
 
@@ -474,7 +505,8 @@ class HostCase(unittest.TestCase):
     def payload(self, **extra):
         return {"expected_ip": RU_IP, "dev_ip": None, "behind_nat": False, "units": dict(KIT["units"]),
                 "examples": dict(KIT["examples"]), "caddyfile": KIT["caddyfile"], "names": dict(NAMES),
-                "nftables": KIT["nftables"], "limits_unit": KIT["limits_unit"], **extra}
+                "nftables": KIT["nftables"], "limits_unit": KIT["limits_unit"],
+                "backup_kit_z": KIT["backup_kit_z"], **extra}
 
     def bootstrap(self, **extra):
         return self.fresh().bootstrap(self.payload(kind="bootstrap", vkid=VK_ID, **extra))
@@ -564,6 +596,58 @@ class RuKitTest(unittest.TestCase):
             self.assertTrue(any(needle in problem for problem in problems), (needle, problems))
         portal = KIT["units"]["portal"].replace("MemoryMax=512M\n", "")
         self.assertTrue(any("MemoryMax" in p for p in ru_host.unit_problems("portal", portal)))
+
+    def test_the_backup_units_and_example_pass_every_rule(self):
+        backup = ru_host.decode_backup_kit(KIT["backup_kit_z"])
+        self.assertEqual(set(backup["units"]), set(ru_host.BACKUP_UNITS))
+        self.assertEqual(ru_host.backup_kit_problems(backup, (NAMES["zone"],)), [])
+        self.assertEqual(ru_host.backup_example_problems(backup["env_example"]), [])
+        self.assertEqual(backup["script"], (ROOT / "ops/vps/ru/ru_backup.py").read_text())
+        for name, command in ru_host.BACKUP_COMMANDS.items():
+            directives, _ = ru_host.parse_unit(backup["units"][name])
+            self.assertEqual(directives["Service.ExecStart"],
+                             [f"/usr/bin/python3 /opt/omoba-ru/backup/ru_backup.py {command}"])
+        timer = ru_host.parse_unit(backup["units"]["omoba-backup-ru.timer"])[0]
+        self.assertEqual(timer["Timer.OnCalendar"], ["*-*-* 00:30:00 UTC"])
+        self.assertEqual(timer["Timer.Persistent"], ["true"])
+        drill = ru_host.parse_unit(backup["units"]["omoba-restore-drill-ru.timer"])[0]
+        self.assertEqual(drill["Timer.OnCalendar"], ["*-*-02 02:30:00 UTC"], "monthly")
+
+    def test_a_weakened_backup_unit_or_example_is_refused(self):
+        backup = ru_host.decode_backup_kit(KIT["backup_kit_z"])
+        service, timer = backup["units"]["omoba-backup-ru.service"], backup["units"]["omoba-backup-ru.timer"]
+        cases = {
+            ("omoba-backup-ru.service", "ExecStart"): service.replace("--reason nightly", "--reason manual"),
+            ("omoba-backup-ru.service", "ReadWritePaths"): service.replace("ReadWritePaths=/var/backups/omoba-ru",
+                                                                            "ReadWritePaths=/var/backups"),
+            ("omoba-backup-ru.service", "postgresql.service"): service.replace(
+                "Wants=network-online.target postgresql.service", "Wants=network-online.target"),
+            ("omoba-backup-ru.service", "production/dev path"): service.replace(
+                "ReadWritePaths=/var/backups/omoba-ru", "ReadWritePaths=/var/backups/omoba-ru /var/lib/omoba"),
+            ("omoba-backup-ru.service", "[Install]"): service + "\n[Install]\nWantedBy=multi-user.target\n",
+            ("omoba-backup-ru.timer", "Persistent"): timer.replace("Persistent=true", "Persistent=false"),
+            ("omoba-backup-ru.timer", "OnCalendar"): timer.replace("OnCalendar=*-*-* 00:30:00 UTC\n", ""),
+        }
+        for (name, needle), text in cases.items():
+            problems = ru_host.backup_unit_problems(name, text)
+            self.assertTrue(any(needle in problem for problem in problems), (needle, problems))
+        example = backup["env_example"]
+        for needle, text in {"unknown setting": example + "OMOBA_BACKUP_TARGT=s3://x/y\n",
+                             "placeholder": example.replace("#OMOBA_TELEGRAM_BOT_TOKEN=CHANGE_ME",
+                                                            "OMOBA_TELEGRAM_BOT_TOKEN=123:abc"),
+                             "inside /opt/omoba-ru/backup-keys": example.replace(
+                                 "/opt/omoba-ru/backup-keys/backup-public.asc", "/root/backup-public.asc")}.items():
+            self.assertTrue(any(needle in problem for problem in ru_host.backup_example_problems(text)), needle)
+        broken = dict(backup, units={**backup["units"], "omoba-backup-ru.timer": timer.replace("Persistent=true", "")})
+        payload = HostCase.payload(self, backup_kit_z=ru_host.encode_backup_kit(broken))
+        with self.assertRaises(ru_host.Refused) as refused:
+            ru_host.Host(tempfile.gettempdir(), run=lambda *a, **k: None).payload_backup_kit(payload)
+        self.assertIn("Persistent", refused.exception.message)
+
+    def test_the_payload_stays_far_below_the_argv_limit(self):
+        # The whole `python3 - remote <mode> <payload>` must fit one argument (128 KiB on Linux).
+        payload = HostCase.payload(self, kind="server", grants=GRANTS)
+        self.assertLess(len(ru_host.encode_payload(payload)), 100_000)
 
     def test_the_arena_range_comes_from_the_lobby_unit(self):
         self.assertEqual(ru_host.arena_ports(KIT["units"]["lobby"]), (41000, 41001))
@@ -890,8 +974,21 @@ class BootstrapTest(HostCase):
         for kind in ru_host.KINDS:
             self.assertEqual(Path(fake.p(ru_host.unit_path(kind))).read_text(), KIT["units"][kind])
         self.assertIn(["systemctl", "daemon-reload"], fake.calls)
-        self.assertEqual(fake.enabled, {"postgresql", "caddy", "omoba-limits-ru"},
-                         "no RU game unit is enabled before its release exists")
+        self.assertEqual(fake.enabled, {"postgresql", "caddy", "omoba-limits-ru", *TIMERS},
+                         "no RU game unit is enabled before its release exists; the backup timers and "
+                         "the per-source limits are")
+        # Backups (LR-03): the tool, its units and timers, backup.env with placeholders only.
+        backup = ru_host.decode_backup_kit(KIT["backup_kit_z"])
+        script = fake.p(ru_host.BACKUP_SCRIPT)
+        self.assertEqual(Path(script).read_text(), (ROOT / "ops/vps/ru/ru_backup.py").read_text())
+        self.assertEqual(os.stat(script).st_mode & 0o777, 0o755)
+        for name in ru_host.BACKUP_UNITS:
+            self.assertEqual(Path(fake.p(f"/etc/systemd/system/{name}")).read_text(), backup["units"][name], name)
+        self.assertTrue(all(fake.unit(timer)["active"] for timer in TIMERS))
+        env = fake.p(ru_host.BACKUP_ENV)
+        self.assertEqual(os.stat(env).st_mode & 0o777, 0o600)
+        self.assertEqual(Path(env).read_text(), (ROOT / "ops/vps/ru/backup.env.example").read_text())
+        self.assertIn("gnupg", fake.packages)
         # Per-source UDP limits (LR-16): the checked file, its unit, loaded.
         self.assertEqual(Path(fake.p(ru_host.NFT_RULES)).read_text(), KIT["nftables"])
         self.assertEqual(Path(fake.p("/etc/systemd/system/omoba-limits-ru.service")).read_text(), KIT["limits_unit"])
@@ -900,6 +997,7 @@ class BootstrapTest(HostCase):
         # What is left is shipping, the portal runtime and nothing about the host itself.
         remaining = "\n".join(result["remaining"])
         self.assertIn("no lobby/Account API release yet (ship)", remaining)
+        self.assertIn("backups: OMOBA_BACKUP_TARGET is not set", remaining)
         self.assertIn("Node.js >= 20.9 is missing", remaining)
         self.assertNotIn("ufw", remaining)
         self.assertNotIn("sshd", remaining)
@@ -923,6 +1021,12 @@ class BootstrapTest(HostCase):
             self.assertEqual(after[key], api[key], key)
         third = self.bootstrap()
         self.assertEqual(third["done"], [])
+        # The owner's backup settings are never replaced; a changed kit file is reinstalled.
+        Path(self.fake.p(ru_host.BACKUP_ENV)).write_text("OMOBA_BACKUP_TARGET=sftp://b@store.example/omoba\n")
+        Path(self.fake.p("/etc/systemd/system/omoba-backup-ru.timer")).write_text("[Timer]\n")
+        fourth = self.bootstrap()
+        self.assertEqual(fourth["done"], ["install /etc/systemd/system/omoba-backup-ru.timer"])
+        self.assertIn("sftp://b@store.example", Path(self.fake.p(ru_host.BACKUP_ENV)).read_text())
 
     def test_postgres_without_icu_or_on_a_public_address_stops_before_secrets(self):
         self.fake.pg.update(icu=False, listen="*")
@@ -1018,6 +1122,7 @@ class ShipTest(HostCase):
     def setUp(self):
         super().setUp()
         self.bootstrap()
+        self.fake.backups_configured = True   # the owner filled backup.env and the keys (LR-03)
 
     def test_first_ship_migrates_switches_and_enables(self):
         result, payload = self.ship()
@@ -1041,8 +1146,56 @@ class ShipTest(HostCase):
         newer = self.server_payload(version="0.45.1", revision="def5678", server=elf(b"omoba-server ru 2"))
         result, _ = self.ship(newer, server=elf(b"omoba-server ru 2"))
         self.assertEqual(result["previous"], "0.45.0-ru-abc1234")
+        self.assertEqual(self.fake.backup_runs, [["0.45.1-ru-def5678"]], "encrypted, off-host, before migrating")
         self.assertEqual(len(self.fake.dumps), 1)
         self.assertIn("/var/backups/omoba-ru/omoba_ru-before-0.45.1-ru-def5678-", self.fake.dumps[0])
+        backup = result["database"]["backup"]
+        self.assertEqual(backup["name"], "omoba-ru-20260921T000000Z-pre-migration.tar.gpg")
+        self.assertEqual(backup["rollback_dump"], self.fake.dumps[0])
+        history = json.loads(Path(self.fake.p(ru_host.HISTORY)).read_text().splitlines()[-1])
+        self.assertEqual(history["database"]["backup"]["name"], backup["name"])
+
+    def test_no_migration_without_an_off_host_backup(self):
+        self.ship()
+        migrations = len(self.fake.migrations)
+        newer = self.server_payload(version="0.45.1", revision="def5678", server=elf(b"omoba-server ru 2"))
+        # Not configured: refused before anything stops or migrates.
+        self.fake.backups_configured = False
+        preflight = self.fresh().ship_preflight(newer)
+        self.assertFalse(preflight["ok"])
+        self.assertIn("backups are not configured", "\n".join(preflight["problems"]))
+        with self.assertRaises(ru_host.Refused) as refused:
+            self.ship(newer, server=elf(b"omoba-server ru 2"))
+        self.assertIn("--local-backup-only", refused.exception.message)
+        self.assertEqual(len(self.fake.migrations), migrations)
+        self.assertEqual(os.readlink(self.fake.p(ru_host.CURRENT)), "releases/0.45.0-ru-abc1234")
+        self.assertTrue(self.fake.unit("omoba-lobby-ru")["active"], "nothing was stopped")
+        # A failing backup (storage down) stops the ship the same way.
+        self.fake.backups_configured, self.fake.fail_backup = True, True
+        with self.assertRaises(SystemExit) as failed:
+            self.ship(newer, server=elf(b"omoba-server ru 2"))
+        self.assertIn("the pre-migration backup failed, nothing was migrated", str(failed.exception))
+        self.assertIn("Connection refused", str(failed.exception))
+        self.assertEqual(len(self.fake.migrations), migrations)
+        self.assertEqual(os.readlink(self.fake.p(ru_host.CURRENT)), "releases/0.45.0-ru-abc1234")
+        # Before launch, without storage: only the plain rollback dump, on request.
+        self.fake.backups_configured, self.fake.fail_backup = False, False
+        local = dict(newer, local_backup_only=True)
+        self.assertTrue(self.fresh().ship_preflight(local)["ok"])
+        result, _ = self.ship(local, server=elf(b"omoba-server ru 2"))
+        self.assertEqual(result["status"], "DEPLOYED")
+        self.assertEqual(self.fake.backup_runs[-1], ["0.45.1-ru-def5678", "--local-only"])
+        self.assertEqual(result["database"]["backup"]["mode"], "local-only")
+
+    def test_ship_needs_the_current_backup_tool(self):
+        self.ship()
+        Path(self.fake.p(ru_host.BACKUP_SCRIPT)).write_text("#!/usr/bin/env python3\n# old\n")
+        newer = self.server_payload(version="0.45.1", revision="def5678")
+        with self.assertRaises(ru_host.Refused) as refused:
+            self.ship(newer)
+        self.assertIn("run bootstrap again", refused.exception.message)
+        self.bootstrap()
+        self.assertEqual(self.ship(newer)[0]["status"], "DEPLOYED")
 
     def test_ship_waits_for_the_vk_id_app_and_for_running_matches(self):
         self.tearDown()
@@ -1116,6 +1269,7 @@ class PortalAndRebootTest(HostCase):
         super().setUp()
         self.node = self.install_node()
         self.bootstrap(node=self.node)
+        self.fake.backups_configured = True
         self.work = tempfile.TemporaryDirectory()
 
     def tearDown(self):
@@ -1186,6 +1340,28 @@ class PortalAndRebootTest(HostCase):
         problems = self.fresh().status(self.payload())["problems"]
         self.assertIn("omoba-portal-ru is not enabled: it would not start after a reboot", problems)
         self.assertIn("omoba-portal-ru is not running", problems)
+
+    def test_status_reports_the_backups(self):
+        self.ship()
+        self.ship_portal(portal_bundle(self.work.name))
+        report = self.fresh().status(self.payload())
+        self.assertTrue(report["ok"], report["problems"])
+        self.assertEqual(report["facts"]["backups"], {"off_host_sets": 3})
+        self.fake.backups_configured = False
+        self.fake.enabled.discard("omoba-backup-ru.timer")
+        Path(self.fake.p("/etc/systemd/system/omoba-restore-drill-ru.timer")).write_text("[Timer]\n")
+        os.chmod(self.fake.p(ru_host.BACKUP_ENV), 0o644)
+        problems = "\n".join(self.fresh().status(self.payload())["problems"])
+        for needle in ("backups: OMOBA_BACKUP_TARGET is not set",
+                       "omoba-backup-ru.timer is not enabled: it would not run after a reboot",
+                       "omoba-restore-drill-ru.timer differs from ops/vps/ru/omoba-restore-drill-ru.timer",
+                       "/opt/omoba-ru/backup.env must be root-owned with mode 0600"):
+            self.assertIn(needle, problems)
+        Path(self.fake.p(ru_host.BACKUP_SCRIPT)).write_text("#!/usr/bin/env python3\n")
+        problems = self.fresh().status(self.payload())["problems"]
+        self.assertIn("/opt/omoba-ru/backup/ru_backup.py is not ops/vps/ru/ru_backup.py (bootstrap installs it)",
+                      problems)
+        self.assertFalse(any(problem.startswith("backups: ") for problem in problems), "a changed tool is not run")
 
     def test_status_reports_drift(self):
         self.ship()
@@ -1348,6 +1524,8 @@ class MacPackageTest(unittest.TestCase):
         self.assertEqual([mode for mode, _ in sent], ["preflight", "stage", "activate"])
         self.assertEqual(sent[-1][1]["release"], "0.45.0-ru-abc1234")
         self.assertEqual(sent[-1][1]["grants"], GRANTS)
+        self.assertIs(sent[-1][1]["local_backup_only"], False)
+        self.assertEqual(sent[-1][1]["backup_kit_z"], KIT["backup_kit_z"])
         self.assertEqual(len(uploads), 1)
         self.assertEqual(uploads[0][0][-1], "vds-ru:/opt/omoba-ru/releases/0.45.0-ru-abc1234/omoba-server.part")
         self.assertEqual(uploads[0][1], SERVER)
@@ -1390,6 +1568,54 @@ class MacPackageTest(unittest.TestCase):
         self.assertIn(f"{top}/.next/static/chunks/app.js", names)
         self.assertNotIn(f"{top}/.env", names)
         self.assertNotIn(f"{top}/.next/cache", names)
+
+
+class MacEscrowTest(unittest.TestCase):
+    """`ru_host.py escrow`: encrypted on the host to the holder's public key, saved here (LR-03)."""
+
+    def setUp(self):
+        self.work = tempfile.TemporaryDirectory()
+        self.addCleanup(self.work.cleanup)
+        self.public = Path(self.work.name) / "holder.asc"
+        self.public.write_text("-----BEGIN PGP PUBLIC KEY BLOCK-----\nxx\n-----END PGP PUBLIC KEY BLOCK-----\n")
+
+    def escrow(self, out, recipient=None, stdout=b"-----BEGIN PGP MESSAGE-----\nyy\n", code=0, alias="vds-ru"):
+        calls = []
+
+        def run(command, **kwargs):
+            calls.append((command, kwargs.get("input")))
+            return subprocess.CompletedProcess(command, code, stdout, b"")
+        with mock.patch.object(ru_host, "ssh_config", return_value={"hostname": RU_IP, "user": "root"}), \
+                contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            result = ru_host.command_escrow(args(host=alias, ip=RU_IP, recipient_file=str(recipient or self.public),
+                                                 out=str(out)), run=run)
+        return result, calls
+
+    def test_the_ciphertext_is_saved_owner_only_and_the_key_goes_by_stdin(self):
+        out = Path(self.work.name) / "omoba-ru-secrets.asc"
+        code, calls = self.escrow(out)
+        self.assertEqual(code, 0)
+        command, sent = calls[0]
+        self.assertEqual(command[:6], ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", "vds-ru"])
+        self.assertEqual(command[6:], ["/usr/bin/python3", "/opt/omoba-ru/backup/ru_backup.py", "escrow",
+                                       "--recipient-file", "-"])
+        self.assertEqual(sent, self.public.read_bytes())
+        self.assertEqual(out.read_bytes(), b"-----BEGIN PGP MESSAGE-----\nyy\n")
+        self.assertEqual(os.stat(out).st_mode & 0o777, 0o600)
+        with self.assertRaises(ru_host.Refused):
+            self.escrow(out)   # never overwritten
+
+    def test_refusals(self):
+        out = Path(self.work.name) / "x.asc"
+        secret = Path(self.work.name) / "secret.asc"
+        secret.write_text("-----BEGIN PGP PRIVATE KEY BLOCK-----\n")
+        with self.assertRaises(ru_host.Refused):
+            self.escrow(out, recipient=secret)
+        with self.assertRaises(ru_host.Refused):
+            self.escrow(out, alias="vds-eternal")
+        with self.assertRaises(SystemExit):
+            self.escrow(out, stdout=b"plaintext!", code=0)
+        self.assertFalse(out.exists())
 
 
 if __name__ == "__main__":

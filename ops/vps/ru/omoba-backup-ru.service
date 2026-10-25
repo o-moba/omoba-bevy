@@ -1,0 +1,30 @@
+# Nightly encrypted off-host backup of the RU host (LR-03): the whole database (career
+# and portal), the match root with its archive and outboxes, and the lobby outbox,
+# sealed with GnuPG and uploaded to the storage in Russia named in /opt/omoba-ru/backup.env.
+# Started by omoba-backup-ru.timer; `ru_host.py ship` runs the same tool before every
+# migration. A failure alerts (journal, Telegram when configured) and the hourly
+# omoba-backup-check-ru.timer alerts when no backup succeeded for 26 h.
+# Installed by ops/vps/ru/ru_host.py bootstrap (README.md, "Backups, escrow and restore drill").
+[Unit]
+Description=OMOBA RU encrypted off-host backup
+After=network-online.target postgresql.service
+Wants=network-online.target postgresql.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /opt/omoba-ru/backup/ru_backup.py backup --reason nightly
+TimeoutStartSec=4h
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ReadWritePaths=/var/backups/omoba-ru
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+MemoryMax=1G

@@ -22,7 +22,10 @@ contacted; nothing on the host changes without --apply:
     # 3. portal: omoba-web built with the RU env (README.md, "Portal bundle")
     python3 ops/vps/ru/ru_host.py portal-bundle --web ../omoba-web
     python3 ops/vps/ru/ru_host.py ship-portal --bundle dist/portal-ru/omoba-portal-ru-<rev>.tar.gz --apply
-    # 4. everything at once, read-only; then a reboot that must bring it all back
+    # 4. backups (LR-03): the owner fills /opt/omoba-ru/backup.env and the keys, then the
+    #    secrets go to the escrow holder, encrypted to the holder's public key
+    python3 ops/vps/ru/ru_host.py escrow --recipient-file holder-public.asc --out omoba-ru-secrets.asc
+    # 5. everything at once, read-only; then a reboot that must bring it all back
     python3 ops/vps/ru/ru_host.py status
     python3 ops/vps/ru/ru_host.py reboot-check --apply
     python3 ops/vps/ru/ru_host.py rollback --kind server|portal --release <name> --apply
@@ -40,8 +43,9 @@ on anything but Ubuntu 24.04+ x86-64, or where $RU_IP is not a local address
 later run needs it to name market ru and $RU_IP. It writes only below /opt/omoba-ru,
 /var/lib/omoba-ru, /var/backups/omoba-ru, its own unit files, /etc/caddy/Caddyfile
 and /etc/ssh/sshd_config.d/00-omoba-ru.conf, never prints or passes a secret in argv,
-never overwrites a generated secret, never interrupts a running match and rolls a
-failed ship back to the previous release.
+never overwrites a generated secret, never interrupts a running match, never migrates
+without the encrypted off-host backup of ru_backup.py (LR-03) and rolls a failed ship
+back to the previous release.
 """
 from __future__ import annotations
 
@@ -61,6 +65,7 @@ import sys
 import tarfile
 import tempfile
 import time
+import zlib
 from pathlib import Path
 from urllib.parse import unquote, urlsplit, urlunsplit
 
@@ -89,6 +94,18 @@ STATE = "/var/lib/omoba-ru"
 STATE_DIRS = (STATE, STATE + "/matches", STATE + "/lobby-outbox")
 PORTAL_CACHE = "/var/cache/omoba-portal-ru"   # the portal unit's CacheDirectory
 BACKUPS = "/var/backups/omoba-ru"
+# Backups (LR-03): ru_backup.py with its units and timers, its settings and keys.
+BACKUP_TOOL_DIR = OPT + "/backup"
+BACKUP_SCRIPT = BACKUP_TOOL_DIR + "/ru_backup.py"
+BACKUP_KEYS = OPT + "/backup-keys"
+BACKUP_ENV = OPT + "/backup.env"
+BACKUP_ENV_EXAMPLE = "backup.env.example"
+BACKUP_UNITS = ("omoba-backup-ru.service", "omoba-backup-ru.timer", "omoba-restore-drill-ru.service",
+                "omoba-restore-drill-ru.timer", "omoba-backup-check-ru.service", "omoba-backup-check-ru.timer")
+BACKUP_TIMERS = tuple(name for name in BACKUP_UNITS if name.endswith(".timer"))
+BACKUP_COMMANDS = {"omoba-backup-ru.service": "backup --reason nightly", "omoba-restore-drill-ru.service": "drill",
+                   "omoba-backup-check-ru.service": "check --alert"}
+PYTHON = "/usr/bin/python3"
 UNIT_DIR = "/etc/systemd/system"
 CADDYFILE = "/etc/caddy/Caddyfile"
 SSHD_DROPIN = "/etc/ssh/sshd_config.d/00-omoba-ru.conf"
@@ -105,7 +122,8 @@ ENV_PATHS = {kind: f"{OPT}/{name[:-len('.example')]}" for kind, name in ENV_EXAM
 # (path, owner, mode) of every folder bootstrap owns.
 DIRS = ((OPT, "root", "0755"), (RELEASES, "root", "0755"), (PORTAL, "root", "0755"),
         (PORTAL_RELEASES, "root", "0755"), (NODE, "root", "0755"), (INCOMING, "root", "0700"),
-        *((path, USER, "0700") for path in STATE_DIRS))
+        *((path, USER, "0700") for path in STATE_DIRS),
+        (BACKUP_TOOL_DIR, "root", "0755"), (BACKUP_KEYS, "root", "0700"), (BACKUPS, "root", "0700"))
 USERS = {USER: STATE, PORTAL_USER: "/nonexistent"}
 
 LOBBY_PORT = 4000
@@ -121,7 +139,7 @@ ICU_COLLATION = "und-x-icu"
 MIN_POSTGRES = 16
 MIN_UBUNTU = (24, 4)
 MIN_NODE = (20, 9)        # Next.js 16
-PACKAGES = ("postgresql", "caddy", "ufw", "nftables", "openssh-server")
+PACKAGES = ("postgresql", "caddy", "ufw", "nftables", "openssh-server", "gnupg")
 # Per-source UDP limits (LR-16): ops/vps/ru/nftables-omoba.conf, loaded by its own
 # oneshot unit. It replaces only its own table, never ufw's.
 NFT_RULES = OPT + "/nftables-omoba.conf"
@@ -251,7 +269,7 @@ def is_foreign_name(value: str, own_zones=()) -> bool:
 
 
 ALLOWED_WRITES = (OPT, STATE, BACKUPS, CADDYFILE, CADDYFILE + ".orig", CADDYFILE + ".omoba-next",
-                  SSHD_DROPIN, *(f"{UNIT_DIR}/{name}" for name in UNIT_FILES.values()),
+                  SSHD_DROPIN, *(f"{UNIT_DIR}/{name}" for name in (*UNIT_FILES.values(), *BACKUP_UNITS)),
                   f"{UNIT_DIR}/{LIMITS_UNIT_FILE}")
 
 
@@ -261,7 +279,7 @@ def assert_ru_constants() -> None:
         if touches_foreign(path):
             raise Refused(f"RU path {path} is inside a production or dev path")
     if USER in FOREIGN_USERS or PORTAL_USER in FOREIGN_USERS or \
-            any(name[:-len(".service")] in FOREIGN_UNITS for name in UNIT_FILES.values()):
+            any(name.rsplit(".", 1)[0] in FOREIGN_UNITS for name in (*UNIT_FILES.values(), *BACKUP_UNITS)):
         raise Refused("an RU user or unit equals a production or dev one")
     if is_foreign_name(DEFAULT_HOST):
         raise Refused("RU host defaults name another contour")
@@ -420,6 +438,72 @@ def unit_problems(kind: str, text: str, own_zones=()) -> list[str]:
         except Refused as refusal:
             problems.append(f"{name}: {refusal.message}")
     return problems
+
+
+def backup_unit_problems(name: str, text: str, own_zones=()) -> list[str]:
+    """Every reason this is not the RU backup unit or timer `name` (LR-03)."""
+    directives, _ = parse_unit(text or "")
+    problems = []
+    if name.endswith(".service"):
+        rules = {"Service.Type": "oneshot", "Service.ExecStart": f"{PYTHON} {BACKUP_SCRIPT} {BACKUP_COMMANDS[name]}",
+                 "Service.NoNewPrivileges": "true", "Service.ProtectSystem": "strict",
+                 "Service.ProtectHome": "true", "Service.PrivateTmp": "true", "Service.ReadWritePaths": BACKUPS,
+                 "Service.UMask": "0077"}
+        if not directives.get("Service.TimeoutStartSec"):
+            problems.append(f"{name}: [Service] TimeoutStartSec is missing")
+        if any(key.startswith("Install.") for key in directives):
+            problems.append(f"{name}: a timer starts it; it has no [Install] section")
+        if name != "omoba-backup-check-ru.service":
+            for key in ("Unit.After", "Unit.Wants"):
+                if "postgresql.service" not in " ".join(directives.get(key, [])).split():
+                    problems.append(f"{name}: [Unit] {key.split('.')[1]}= must include postgresql.service")
+    else:
+        rules = {"Install.WantedBy": "timers.target"}
+        if len(directives.get("Timer.OnCalendar", [])) != 1:
+            problems.append(f"{name}: [Timer] needs exactly one OnCalendar=")
+        if name != "omoba-backup-check-ru.timer" and directives.get("Timer.Persistent") != ["true"]:
+            problems.append(f"{name}: [Timer] Persistent must be true (a missed run happens at the next boot)")
+    for key, expected in rules.items():
+        if directives.get(key, []) != [expected]:
+            section, option = key.split(".", 1)
+            problems.append(f"{name}: [{section}] {option} must be exactly {expected!r}, found {directives.get(key, [])}")
+    for key, values in directives.items():
+        for value in values:
+            for token in re.findall(r"/[^\s\"']*", value):
+                if touches_foreign(token):
+                    problems.append(f"{name}: {key} references production/dev path {token}")
+            for token in re.findall(r"[A-Za-z0-9][A-Za-z0-9.-]*", value):
+                if is_foreign_name(token, own_zones):
+                    problems.append(f"{name}: {key} references another contour's host {token}")
+    return problems
+
+
+def backup_kit_problems(backup, own_zones=()) -> list[str]:
+    if not isinstance(backup, dict) or not isinstance(backup.get("units"), dict) or \
+            set(backup["units"]) != set(BACKUP_UNITS):
+        return ["the backup kit lacks its units"]
+    problems = [problem for name, text in backup["units"].items() for problem in backup_unit_problems(name, text, own_zones)]
+    script = backup.get("script")
+    if not isinstance(script, str) or not script.startswith("#!/usr/bin/env python3\n") or "LR-03" not in script:
+        problems.append("the backup kit lacks ru_backup.py")
+    example = backup.get("env_example")
+    if not isinstance(example, str) or "\nOMOBA_BACKUP_TARGET=" + PLACEHOLDER not in example:
+        problems.append(f"the backup kit lacks {BACKUP_ENV_EXAMPLE} with OMOBA_BACKUP_TARGET={PLACEHOLDER}")
+    return problems
+
+
+def encode_backup_kit(backup: dict) -> str:
+    return base64.b64encode(zlib.compress(json.dumps(backup, sort_keys=True).encode(), 9)).decode()
+
+
+def decode_backup_kit(raw) -> dict:
+    if not isinstance(raw, str) or not raw or not PAYLOAD.fullmatch(raw):
+        raise Refused("payload lacks the backup kit (ops/vps/ru/ru_backup.py and its units)")
+    inflater = zlib.decompressobj()
+    data = inflater.decompress(base64.b64decode(raw), 1 << 21)
+    if inflater.unconsumed_tail:
+        raise Refused("the backup kit in the payload is too large")
+    return json.loads(data)
 
 
 # ---------------------------------------------------------------- env files
@@ -1162,6 +1246,14 @@ class Host:
                 raise Refused("unit is not the RU unit: " + "; ".join(problems))
         return units
 
+    def payload_backup_kit(self, payload: dict) -> dict:
+        """ru_backup.py, its units and backup.env.example, as the Mac half read them (LR-03)."""
+        backup = decode_backup_kit(payload.get("backup_kit_z"))
+        problems = backup_kit_problems(backup, (self.payload_names(payload)["zone"],))
+        if problems:
+            raise Refused("the backup kit is not the RU one: " + "; ".join(problems))
+        return backup
+
     def payload_examples(self, payload: dict) -> dict:
         examples = payload.get("examples") or {}
         if set(examples) != set(KINDS):
@@ -1421,6 +1513,10 @@ class Host:
                 problems.append(f"{name} is not enabled: it would not start after a reboot")
             if not facts["units"][name]["active"]:
                 problems.append(f"{name} is not running")
+        # backups (LR-03)
+        more, notes, facts["backups"] = self.backup_report(payload)
+        problems += more
+        warnings += notes
         # what answers
         if ("0.0.0.0", LOBBY_PORT) not in self.listeners("udp"):
             problems.append(f"the lobby does not listen on UDP {LOBBY_PORT}")
@@ -1508,7 +1604,15 @@ class Host:
         for kind in KINDS:
             if self.read(unit_path(kind)) != units.get(kind):
                 would.append(f"install {unit_path(kind)}")
-        would.append("systemctl enable postgresql caddy (+ each RU unit whose release is installed)")
+        backup = self.payload_backup_kit(payload)
+        if self.read(BACKUP_SCRIPT) != backup["script"]:
+            would.append(f"install {BACKUP_SCRIPT}")
+        would += [f"install {UNIT_DIR}/{name}" for name in BACKUP_UNITS
+                  if self.read(f"{UNIT_DIR}/{name}") != backup["units"][name]]
+        if not os.path.lexists(self.p(BACKUP_ENV)):
+            would.append(f"write {BACKUP_ENV} (root 0600) from {BACKUP_ENV_EXAMPLE}; the owner names the storage")
+        would.append("systemctl enable postgresql caddy (+ each RU unit whose release is installed) and start "
+                     + " ".join(BACKUP_TIMERS))
         more, notes = dns_problems(self.resolve, payload["expected_ip"], names)
         warnings += [f"DNS: {note}" for note in more + notes]
         return {"mode": "preflight", "kind": "bootstrap", "ok": not problems, "problems": problems,
@@ -1519,6 +1623,7 @@ class Host:
         self.guard_identity(payload, require_marker=False)
         units = self.payload_units(payload)
         examples = self.payload_examples(payload)
+        backup = self.payload_backup_kit(payload)
         if set(units) != set(KINDS) or "caddyfile" not in payload:
             raise Refused("payload lacks the units or Caddyfile.ru")
         nftables, limits_unit = self.payload_limits(payload)
@@ -1538,6 +1643,7 @@ class Host:
         done += self.ensure_firewall(units["lobby"])
         done += self.ensure_limits(nftables, limits_unit)
         done += self.ensure_units(units)
+        done += self.ensure_backup_kit(backup)
         self._record({"mode": "bootstrap", "done": done})
         # Releases, DNS and the VK ID app may legitimately still be missing: report them.
         report = self.status(payload)
@@ -1794,6 +1900,104 @@ class Host:
                 done.append(f"systemctl enable {service}")
         return done
 
+    def ensure_backup_kit(self, backup: dict) -> list:
+        """ru_backup.py, its units and timers, and backup.env with placeholders (never replaced)."""
+        done = []
+        if self.read(BACKUP_SCRIPT) != backup["script"]:
+            self._write(BACKUP_SCRIPT, backup["script"], 0o755)
+            done.append(f"install {BACKUP_SCRIPT}")
+        changed = False
+        for name in BACKUP_UNITS:
+            path = f"{UNIT_DIR}/{name}"
+            if self.read(path) != backup["units"][name]:
+                self._write(path, backup["units"][name], 0o644)
+                done.append(f"install {path}")
+                changed = True
+        if changed:
+            self.command("systemctl", "daemon-reload")
+        if self.read(BACKUP_ENV) is None:
+            if os.path.lexists(self.p(BACKUP_ENV)):
+                raise Refused(f"{BACKUP_ENV} exists and is not a regular file")
+            self._write_secret(BACKUP_ENV, backup["env_example"])
+            done.append(f"write {BACKUP_ENV} from {BACKUP_ENV_EXAMPLE} (placeholders: the owner names the storage)")
+        for timer in BACKUP_TIMERS:
+            if not self.enabled(timer):
+                self.command("systemctl", "enable", timer)
+                done.append(f"systemctl enable {timer}")
+            if not self.active(timer):
+                self.command("systemctl", "start", timer)
+                done.append(f"systemctl start {timer}")
+        return done
+
+    def backup_tool(self, *args, timeout: int = 180):
+        """The installed ru_backup.py; (exit code, its JSON answer or None, stderr)."""
+        result = self.run([PYTHON, self.p(BACKUP_SCRIPT), *args], check=False, timeout=timeout)
+        try:
+            answer = json.loads(result.stdout.strip().splitlines()[-1] if args[0] == "backup" else result.stdout)
+        except (IndexError, ValueError):
+            answer = None
+        return result.returncode, answer, redact(result.stderr.strip())
+
+    def backup_report(self, payload: dict) -> tuple[list, list, dict]:
+        """The backup kit as installed, its timers and `ru_backup.py check --remote` (LR-03)."""
+        backup = self.payload_backup_kit(payload)
+        problems, warnings = [], []
+        script_ok = self.read(BACKUP_SCRIPT) == backup["script"]
+        if not script_ok:
+            problems.append(f"{BACKUP_SCRIPT} is not ops/vps/ru/ru_backup.py (bootstrap installs it)")
+        for name in BACKUP_UNITS:
+            if self.read(f"{UNIT_DIR}/{name}") != backup["units"][name]:
+                problems.append(f"{UNIT_DIR}/{name} differs from ops/vps/ru/{name} (bootstrap installs it)")
+        local = self.p(BACKUP_ENV)
+        if not os.path.isfile(local) or os.path.islink(local):
+            problems.append(f"{BACKUP_ENV} is missing (bootstrap writes it)")
+        else:
+            info = os.stat(local)
+            if info.st_mode & 0o777 != 0o600 or info.st_uid != self.root_uid:
+                problems.append(f"{BACKUP_ENV} must be root-owned with mode 0600")
+        for timer in BACKUP_TIMERS:
+            if not self.enabled(timer):
+                problems.append(f"{timer} is not enabled: it would not run after a reboot")
+            elif not self.active(timer):
+                problems.append(f"{timer} is not active")
+        facts = {}
+        if script_ok:
+            _, report, errors = self.backup_tool("check", "--json", "--remote")
+            if not isinstance(report, dict) or not isinstance(report.get("problems"), list):
+                problems.append(f"backups: ru_backup.py check did not answer ({errors[-300:] or 'no output'})")
+            else:
+                problems += [f"backups: {problem}" for problem in report["problems"]]
+                warnings += [f"backups: {warning}" for warning in report.get("warnings") or []]
+                facts = report.get("facts") or {}
+        return problems, warnings, facts
+
+    def backup_blockers(self, payload: dict) -> list:
+        """What stops the pre-migration backup of a ship (a schema exists)."""
+        backup = self.payload_backup_kit(payload)
+        if self.read(BACKUP_SCRIPT) != backup["script"]:
+            return [f"{BACKUP_SCRIPT} is missing or older than ops/vps/ru/ru_backup.py (run bootstrap again)"]
+        if payload.get("local_backup_only"):
+            return []
+        code, report, errors = self.backup_tool("config", "--json")
+        if code == 0 and isinstance(report, dict) and report.get("ok"):
+            return []
+        reasons = report.get("problems") if isinstance(report, dict) else [errors[-300:] or "no answer"]
+        return [f"backups are not configured ({'; '.join(map(str, reasons))}): fill {BACKUP_ENV} and the keys "
+                "(README.md, \"Backups, escrow and restore drill\") or, before launch only, ship with "
+                "--local-backup-only"]
+
+    def pre_migration_backup(self, release: str, local_only: bool) -> dict:
+        """`ru_backup.py backup --reason pre-migration`: the encrypted set goes off-host and a
+        plain rollback dump stays in /var/backups/omoba-ru (README.md, "Rollback")."""
+        if not self.mutating:
+            raise Refused("internal: a backup in a read-only mode")
+        args = ["backup", "--reason", "pre-migration", "--release", release] + (["--local-only"] if local_only else [])
+        code, answer, errors = self.backup_tool(*args, timeout=6 * 3600)
+        if code or not isinstance(answer, dict):
+            raise SystemExit(f"the pre-migration backup failed, nothing was migrated: {errors[-600:] or 'no output'}")
+        return {key: answer.get(key) for key in ("name", "rollback_dump", "uploaded", "target", "tables", "rows",
+                                                 "schema_versions", "mode")}
+
     # ---- shipping
 
     def server_blockers(self, payload: dict) -> list:
@@ -1829,8 +2033,13 @@ class Host:
             current = self.current(CURRENT, RELEASES)
             would = [f"{'verify staged' if os.path.isdir(self.p(directory)) else 'stage'} {directory}"]
             if payload.get("grants"):
-                would += ([f"pg_dump -Fc {DB_NAME} into {BACKUPS}"] if self.schema_ready() else []) + \
-                    [f"omoba-account-api migrate (temporary {DB_OWNER} login) + {GRANTS}"]
+                if self.schema_ready():
+                    problems += self.backup_blockers(payload)
+                    would.append("ru_backup.py backup --reason pre-migration: "
+                                 + (f"plain rollback dump in {BACKUPS} only (--local-backup-only)"
+                                    if payload.get("local_backup_only") else
+                                    f"encrypted set off-host + rollback dump in {BACKUPS}"))
+                would.append(f"omoba-account-api migrate (temporary {DB_OWNER} login) + {GRANTS}")
             would += [f"{CURRENT}: {current} -> {release}",
                       f"systemctl enable + restart {unit_name('account-api')} {unit_name('lobby')}",
                       f"verify UDP {LOBBY_PORT}, the lobby's exe, Account API /health/ready; roll back on failure"]
@@ -1928,16 +2137,6 @@ class Host:
         finally:
             self.psql("postgres", OWNER_NOLOGIN_SQL, check=False)
 
-    def backup_database(self, release: str) -> str:
-        """pg_dump -Fc before a schema change (README.md, "Rollback")."""
-        self.write_guard(BACKUPS)
-        if not os.path.isdir(self.p(BACKUPS)):
-            self.command("install", "-d", "-o", "postgres", "-g", "postgres", "-m", "0700", self.p(BACKUPS))
-        path = f"{BACKUPS}/{DB_NAME}-before-{release}-{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime(self.now()))}.dump"
-        self.command("runuser", "-u", "postgres", "--", "pg_dump", "-Fc", "-d", DB_NAME, "-f", self.p(path),
-                     timeout=1800)
-        return path
-
     def verify_unit(self, kind: str) -> None:
         result = self.run(["systemd-analyze", "verify", self.p(unit_path(kind))], check=False)
         if result.returncode:
@@ -1986,7 +2185,12 @@ class Host:
         self.guard_no_matches()
         database = None
         if grants is not None:
-            backup = self.backup_database(release) if self.schema_ready() else None
+            backup = None
+            if self.schema_ready():
+                blockers = self.backup_blockers(payload)
+                if blockers:
+                    raise Refused("; ".join(blockers))
+                backup = self.pre_migration_backup(release, bool(payload.get("local_backup_only")))
             self.migrate(directory, grants)
             database = {"migrated": True, "backup": backup}
         was_active = {kind: self.active(unit_name(kind)) for kind in SERVER_KINDS}
@@ -2313,10 +2517,37 @@ def kit(names: dict | None = None) -> dict:
     problems += [f"Caddyfile.ru names another contour's host {token}"
                  for token in re.findall(r"[A-Za-z0-9][A-Za-z0-9.-]*\.[a-z]{2,}", caddyfile)
                  if is_foreign_name(token, own_zones)]
+    backup = {"script": (RU_DIR / "ru_backup.py").read_text(),
+              "units": {name: (RU_DIR / name).read_text() for name in BACKUP_UNITS},
+              "env_example": (RU_DIR / BACKUP_ENV_EXAMPLE).read_text()}
+    problems += backup_kit_problems(backup, own_zones)
+    problems += backup_example_problems(backup["env_example"])
     if problems:
         raise Refused("the RU host kit is inconsistent: " + "; ".join(problems))
     return {"units": units, "examples": examples, "caddyfile": caddyfile, "names": names,
-            "nftables": nftables, "limits_unit": limits_unit}
+            "nftables": nftables, "limits_unit": limits_unit,
+            "backup_kit_z": encode_backup_kit(backup)}
+
+
+def backup_example_problems(text: str) -> list[str]:
+    """backup.env.example: only settings ru_backup.py knows, the shipped layout, no real secret."""
+    if str(RU_DIR) not in sys.path:
+        sys.path.insert(0, str(RU_DIR))
+    import ru_backup
+    values, problems = ru_backup.parse_env_text(text)
+    problems = [f"{BACKUP_ENV_EXAMPLE}: {problem}" for problem in problems]
+    for key in ("OMOBA_BACKUP_GPG_RECIPIENT_FILE", "OMOBA_BACKUP_GPG_IDENTITY_FILE"):
+        if not within(values.get(key, ""), BACKUP_KEYS):
+            problems.append(f"{BACKUP_ENV_EXAMPLE}: {key} must be inside {BACKUP_KEYS}")
+    for key in ("OMOBA_BACKUP_TARGET", *ru_backup.SECRET_KEYS):
+        if key in values and ru_backup.PLACEHOLDER not in values[key]:
+            problems.append(f"{BACKUP_ENV_EXAMPLE}: {key} must stay a {PLACEHOLDER} placeholder")
+    if ru_backup.ENV_FILE != BACKUP_ENV or ru_backup.DEFAULTS["OMOBA_BACKUP_DIR"] != BACKUPS or \
+            ru_backup.DEFAULTS["OMOBA_BACKUP_DATABASE"] != DB_NAME or \
+            ru_backup.DEFAULTS["OMOBA_BACKUP_STATE_DIRS"].split(":") != list(STATE_DIRS[1:]) or \
+            not ru_backup.DEFAULTS["OMOBA_BACKUP_GPG_RECIPIENT_FILE"].startswith(BACKUP_KEYS + "/"):
+        problems.append("ru_backup.py's host layout differs from ru_host.py's")
+    return problems
 
 
 def ssh_config(alias: str) -> dict | None:
@@ -2380,7 +2611,8 @@ def resolve_target(args, need_ip: bool, country: bool = False, config_reader=Non
 def base_payload(target: dict, files: dict) -> dict:
     return {"expected_ip": target["expected_ip"], "dev_ip": target["dev_ip"], "behind_nat": target["behind_nat"],
             "units": files["units"], "examples": files["examples"], "caddyfile": files["caddyfile"],
-            "names": files["names"], "nftables": files["nftables"], "limits_unit": files["limits_unit"]}
+            "names": files["names"], "nftables": files["nftables"], "limits_unit": files["limits_unit"],
+            "backup_kit_z": files["backup_kit_z"]}
 
 
 def ssh_remote(alias: str, mode: str, payload: dict | None = None, check: bool = True):
@@ -2533,12 +2765,15 @@ def command_ship(args) -> int:
              "grants_sha256": hashlib.sha256(grants.encode()).hexdigest(), "package": Path(args.package).name,
              "package_sha256": sha256_file(args.package), "tool": TOOL}
     payload = {**base_payload(target, files), "kind": "server", "release": release, "grants": grants,
-               "sha256": digests["omoba-server"], "account_api_sha256": digests["omoba-account-api"], "build": build}
+               "sha256": digests["omoba-server"], "account_api_sha256": digests["omoba-account-api"], "build": build,
+               "local_backup_only": bool(args.local_backup_only)}
+    backup = ("plain rollback dump only (--local-backup-only, before launch)" if args.local_backup_only else
+              "encrypted off-host set + rollback dump (ru_backup.py)")
     plan = {"release": release, "build": build, "steps": [
-        "preflight (read-only): marker, env files, PostgreSQL, no running match",
+        "preflight (read-only): marker, env files, PostgreSQL, no running match, backups configured",
         f"stage {RELEASES}/{release}/; scp the missing binaries as .part",
-        f"activate: sha256; pg_dump; migrate + grants; {CURRENT} -> {release}; units if changed; "
-        "restart; verify; roll back on failure (no-op when already running this release)"]}
+        f"activate: sha256; pre-migration backup: {backup}; migrate + grants; {CURRENT} -> {release}; "
+        "units if changed; restart; verify; roll back on failure (no-op when already running this release)"]}
 
     def apply() -> int:
         stage = json.loads(ssh_remote(target["alias"], "stage", payload))
@@ -2638,6 +2873,31 @@ def command_rollback(args) -> int:
     return plan_or_run(args, target, payload, plan, apply)
 
 
+def command_escrow(args, run=subprocess.run) -> int:
+    """The host's secrets, encrypted on the host to the escrow holder's public key, saved here
+    (LR-03). Plaintext never leaves the host; the holder keeps the file offline."""
+    recipient = Path(args.recipient_file).read_text()
+    if "BEGIN PGP PUBLIC KEY BLOCK" not in recipient or "PRIVATE KEY" in recipient:
+        raise Refused(f"{args.recipient_file} must be the escrow holder's armored PUBLIC key")
+    out = Path(args.out)
+    if out.exists():
+        raise Refused(f"{out} exists; escrow files are never overwritten")
+    target = resolve_target(args, need_ip=True)
+    result = run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", target["alias"], PYTHON, BACKUP_SCRIPT,
+                  "escrow", "--recipient-file", "-"], input=recipient.encode(), capture_output=True)
+    sys.stderr.write(result.stderr.decode(errors="replace"))
+    if result.returncode or not result.stdout.startswith(b"-----BEGIN PGP MESSAGE-----"):
+        raise SystemExit(f"escrow on {target['alias']} failed (exit {result.returncode})")
+    descriptor = os.open(out, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(descriptor, "wb") as handle:
+        handle.write(result.stdout)
+    print(json.dumps({"escrow": str(out), "bytes": len(result.stdout),
+                      "sha256": hashlib.sha256(result.stdout).hexdigest(),
+                      "next": "give it to the escrow holder for offline storage; the holder checks it with "
+                              "`gpg --decrypt <file> | tar -tzv`; delete this copy afterwards"}, indent=2))
+    return 0
+
+
 def command_status(args) -> int:
     target = resolve_target(args, need_ip=True)
     report = json.loads(ssh_remote(target["alias"], "status", base_payload(target, kit())))
@@ -2721,6 +2981,9 @@ def main(argv=None) -> int:
     ship = sub.add_parser("ship", help="install or update the RU lobby and Account API from the RU Linux package")
     ship.add_argument("--package", required=True, help="omoba-<v>-ru-linux-x64.tar.gz from release.py --market ru")
     ship.add_argument("--revision", help="source commit (default: HEAD of this clean checkout)")
+    ship.add_argument("--local-backup-only", action="store_true",
+                      help="before launch, while backup.env names no storage: only a plain rollback dump on the "
+                           "host before the migration (LR-03)")
     bundle = sub.add_parser("portal-bundle", help="pack an omoba-web RU standalone build (local only)")
     bundle.add_argument("--web", required=True, help="the omoba-web checkout, built with the RU env")
     bundle.add_argument("--out", help="output folder (default: dist/portal-ru)")
@@ -2736,7 +2999,11 @@ def main(argv=None) -> int:
     reboot.add_argument("--ready-timeout", type=int, default=300)
     sub.add_parser("names", help="print the RU public names from scripts/markets.py and the DNS records "
                                  "to set (local only)")
-    for command in (bootstrap, ship, portal, rollback, status, reboot):
+    escrow = sub.add_parser("escrow", help="encrypt the host's secrets to the escrow holder's public key and "
+                                           "save them here (LR-03)")
+    escrow.add_argument("--recipient-file", required=True, help="the escrow holder's armored public key")
+    escrow.add_argument("--out", required=True, help="where to save the encrypted file (must not exist)")
+    for command in (bootstrap, ship, portal, rollback, status, reboot, escrow):
         command.add_argument("--host", help=f"ssh alias of the RU VPS (default: ${HOST_ENV} or {DEFAULT_HOST})")
         command.add_argument("--ip", help=f"RU VPS IPv4 the alias must connect to (default: ${IP_ENV})")
         command.add_argument("--behind-nat", action="store_true",
@@ -2748,7 +3015,8 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
     return {"bootstrap": command_bootstrap, "ship": command_ship, "portal-bundle": command_portal_bundle,
             "ship-portal": command_ship_portal, "rollback": command_rollback, "status": command_status,
-            "reboot-check": command_reboot_check, "names": command_names}[args.command](args)
+            "reboot-check": command_reboot_check, "names": command_names,
+            "escrow": command_escrow}[args.command](args)
 
 
 if __name__ == "__main__":
