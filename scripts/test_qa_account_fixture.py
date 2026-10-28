@@ -1,5 +1,6 @@
 """Capture fixtures must restore routing without bypassing first-launch checks."""
 import json
+import os
 from pathlib import Path
 import stat
 import tempfile
@@ -22,7 +23,8 @@ class CaptureAccountFixture(unittest.TestCase):
             path = Path(env["OMOBA_CLIENT_CONFIG_DIR"]) / "account_region.json"
             self.assertEqual(json.loads(path.read_text()),
                              dict(schema=1, selected="global", pending=None, account=None))
-            self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
+            if os.name == "posix":
+                self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
             self.assertEqual(sorted(p.name for p in path.parent.iterdir()), [path.name])
 
     def test_existing_region_and_pending_switch_are_never_replaced(self):
