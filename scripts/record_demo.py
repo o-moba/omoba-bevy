@@ -26,6 +26,8 @@ runs slower than real time; raw PNG frames are deleted after encoding unless
 
     python3 scripts/record_demo.py --profile v2 --build --output /Volumes/work/omoba-v2
 """
+from qa_account_fixture import prepare_capture_account
+
 import argparse
 import datetime
 import json
@@ -137,6 +139,7 @@ def record_clip(name, clip, binaries, assets, raw, timeout, pace=15, window_at=N
     record = dict(clip=name, **{k: v for k, v in clip.items() if k != "size"}, size=list(clip["size"]))
     processes = []
     with tempfile.TemporaryDirectory(prefix=f"omoba-demo-{name}-") as workdir:
+        prepare_capture_account(workdir)
         host, port = free_address()
         env = clip_environment(clip, raw, f"{host}:{port}", workdir, assets, pace, window_at)
         try:

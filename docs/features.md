@@ -2,6 +2,9 @@
 
 ## Runtime account regions
 
+Native capture launchers seed a returning Global routing record in their own
+scratch configuration; the dedicated first-launch QA intentionally starts empty.
+
 Default clients select RU or International before regional traffic and restore a
 returning account's region automatically. Lobby, Account API, portal, legal gate,
 Ekza features and purchase offers follow one immutable binding. Keys and saved

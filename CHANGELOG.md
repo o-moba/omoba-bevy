@@ -5,6 +5,8 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Native screenshot/demo launchers seed an isolated returning Global account-region fixture so their ordinary screen captures keep working after first-launch region confirmation. Existing fixture state is preserved; first-launch QA stays empty.
+
 - 0.45.0: default native clients bind an account region (RU or International)
   before regional traffic, restore returning accounts automatically and isolate
   keys/state. Region changes require a cold restart; the restart screen stops old
