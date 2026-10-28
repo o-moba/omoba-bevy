@@ -262,13 +262,24 @@ pub async fn lookup(app: &App, s: &auth::Session, body: &[u8]) -> Result<Value> 
 struct Approval {
     enrollment_id: String,
     public_key: String,
+    /// The account shown by lookup. Optional only for older portal clients.
+    profile_id: Option<String>,
 }
 pub async fn approve(app: &App, s: &auth::Session, body: &[u8]) -> Result<Value> {
     let p: Approval = parse(body)?;
     if crypto::decode::<32>(&p.enrollment_id).is_none()
         || crypto::decode::<32>(&p.public_key).is_none()
+        || p.profile_id
+            .as_deref()
+            .is_some_and(|profile| crypto::decode::<32>(profile).is_none())
     {
         return Err(invalid());
+    }
+    if p.profile_id
+        .as_deref()
+        .is_some_and(|profile| profile != s.profile_id)
+    {
+        return Err(Error(StatusCode::CONFLICT, "account_changed"));
     }
     let mut tx = app.pool.begin().await?;
     fresh(&mut tx, s).await?;

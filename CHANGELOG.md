@@ -5,6 +5,16 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- RU registration: website-first VK ID/OK/Mail.ru sign-in can create a default-stat
+  profile and session; game-first linking preserves existing progress. Add portal
+  migration 10 with a bounded registration function, reviewed-account device approval,
+  separate status-poll quota, revoked-key race protection and provider returned-state
+  validation. Native sign-in retries temporary failures without rotating its proof
+  and validates completion before staging a key. A real portal/API/PG browser rehearsal
+  and signed public-lobby game journey cover the critical path. Live VK app, hosting,
+  DNS, release rollout and physical-device checks remain gates. See
+  [registration](docs/registration.md).
+
 - Native screenshot/demo launchers seed an isolated returning Global account-region fixture so their ordinary screen captures keep working after first-launch region confirmation. Existing fixture state is preserved; first-launch QA stays empty.
 
 - 0.45.0: default native clients bind an account region (RU or International)

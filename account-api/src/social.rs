@@ -4,8 +4,8 @@
 //! exchanges the code itself, so a forged "VK user X" claim from a caller is
 //! never trusted. A VK user is stored only as an HMAC of its user id under
 //! `OMOBA_SOCIAL_SECRET`. A linked identity signs the browser in like a game
-//! pairing does; an unlinked one gets a short browser ticket and is linked to a
-//! game profile only by that game's own signed confirmation ([`link`]).
+//! pairing does. Explicit website registration creates a fresh default profile;
+//! a game-initiated login gets a ticket and requires the game's signed link.
 use crate::{auth::Session, *};
 use ed25519_dalek::{Signature, VerifyingKey};
 use reqwest::{Client, Url};
@@ -123,10 +123,15 @@ struct VkSignIn {
     device_id: String,
     redirect_uri: String,
     state: String,
+    /// Only a website signup may create a fresh profile. Game-initiated linking
+    /// omits this, preserving the active game's existing profile and progress.
+    #[serde(default)]
+    register: bool,
 }
 #[derive(Deserialize)]
 struct VkToken {
     access_token: Option<String>,
+    state: Option<String>,
 }
 #[derive(Deserialize)]
 struct VkUserInfo {
@@ -223,6 +228,7 @@ impl VkConfig {
         }
         let token = serde_json::from_slice::<VkToken>(&body)
             .ok()
+            .filter(|t| t.state.as_deref() == Some(request.state.as_str()))
             .and_then(|t| t.access_token)
             .filter(|t| status.is_success() && token_like(t, 4096))
             .ok_or_else(provider_rejected)?;
@@ -273,7 +279,7 @@ pub async fn vk_sign_in(app: &App, body: &[u8]) -> Result<Value> {
     let (subject, name) = vk.verify(&p).await?;
     let current = now();
     let mut tx = app.pool.begin().await?;
-    let profile: Option<String> = sqlx::query_scalar(
+    let mut profile: Option<String> = sqlx::query_scalar(
         "INSERT INTO portal.social_identities(provider,subject_hash,method,created_at,last_login_at) VALUES($1,$2,$3,$4,$4)
          ON CONFLICT(provider,subject_hash) DO UPDATE SET last_login_at=$4,method=$3 RETURNING profile_id",
     )
@@ -283,6 +289,22 @@ pub async fn vk_sign_in(app: &App, body: &[u8]) -> Result<Value> {
     .bind(current)
     .fetch_one(&mut *tx)
     .await?;
+    if profile.is_none() && p.register {
+        // The identity UPSERT owns its row lock until commit. Concurrent first
+        // sign-ins see the same linked profile, never two fresh profiles.
+        profile = Some(
+            sqlx::query_scalar("SELECT portal.register_social_profile($1,$2)")
+                .bind(PROVIDER)
+                .bind(&subject)
+                .fetch_one(&mut *tx)
+                .await?,
+        );
+        sqlx::query("DELETE FROM portal.social_tickets WHERE provider=$1 AND subject_hash=$2")
+            .bind(PROVIDER)
+            .bind(&subject)
+            .execute(&mut *tx)
+            .await?;
+    }
     let Some(profile) = profile else {
         let ticket = crypto::random::<32>();
         let expiry = current + TICKET_SECONDS;
@@ -348,6 +370,25 @@ pub async fn ticket(app: &App, body: &[u8]) -> Result<Value> {
     Ok(json!({"display_name":row_text(&row,"display_name")?,
         "expires_at":timestamp(&app.pool,row.try_get("expires_at")?).await?,
         "linked":row.try_get::<bool,_>("linked")?}))
+}
+
+/// `POST /v1/auth/social/enrollment` (portal BFF only): an unlinked browser
+/// reviews the game's label and key fingerprint before offering its sign-in.
+/// The ticket and enrollment code authorize only this read, never a device key.
+pub async fn enrollment(app: &App, body: &[u8]) -> Result<Value> {
+    app.social.vk.as_ref().ok_or_else(not_configured)?;
+    let p: Attach = parse(body)?;
+    let code = p.code.trim().to_ascii_uppercase();
+    if code.len() != 8 || !code.bytes().all(|b| b.is_ascii_alphanumeric()) {
+        return Err(invalid());
+    }
+    let row = sqlx::query("SELECT e.enrollment_id,e.public_key,e.label,e.expires_at FROM portal.device_enrollments e,portal.social_tickets t JOIN portal.social_identities i USING(provider,subject_hash) WHERE e.code_hash=$1 AND e.expires_at>$3 AND e.state='pending' AND t.ticket_hash=$2 AND t.expires_at>$3 AND i.profile_id IS NULL")
+        .bind(crypto::mac(&app.config.secret,"device-code",&code))
+        .bind(ticket_hash(app,&p.social_ticket)?).bind(now())
+        .fetch_optional(&app.pool).await?.ok_or_else(forbidden)?;
+    Ok(json!({"enrollment_id":row_text(&row,"enrollment_id")?,
+        "public_key":row_text(&row,"public_key")?,"label":row_text(&row,"label")?,
+        "expires_at":timestamp(&app.pool,row.try_get("expires_at")?).await?}))
 }
 
 /// `POST /v1/auth/social/attach` (portal BFF only): offer an unlinked sign-in to
@@ -431,6 +472,13 @@ pub async fn link(app: &App, body: &[u8]) -> Result<Value> {
             .bind(&profile)
             .fetch_one(&mut *tx)
             .await?;
+    // Revocation locks the profile before changing the key. A check made before
+    // this lock is only a lookup; recheck and hold the key through commit.
+    let active: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM career_keys WHERE public_key=$1 AND profile_id=$2 AND revoked_at IS NULL FOR SHARE)")
+        .bind(&l.public_key).bind(&profile).fetch_one(&mut *tx).await?;
+    if !active {
+        return Err(forbidden());
+    }
     let subject = row_text(&social, "subject_hash")?;
     let linked_to: Option<String> = sqlx::query_scalar("SELECT profile_id FROM portal.social_identities WHERE provider=$1 AND subject_hash=$2 FOR UPDATE")
         .bind(PROVIDER).bind(&subject).fetch_optional(&mut *tx).await?.ok_or_else(forbidden)?;
@@ -531,6 +579,16 @@ pub async fn unlink(app: &App, s: &Session) -> Result<Value> {
         .bind(&s.session_id).bind(&s.profile_id).bind(now()).fetch_one(&mut *tx).await?;
     if !fresh {
         return Err(Error(StatusCode::FORBIDDEN, "fresh_confirmation_required"));
+    }
+    // A website-created profile starts with no device keys. Do not remove its
+    // only way back in before a game device or one-use recovery codes exist.
+    let recoverable: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM career_keys WHERE profile_id=$1 AND revoked_at IS NULL) OR EXISTS(SELECT 1 FROM portal.recovery_codes WHERE profile_id=$1 AND consumed_at IS NULL)")
+        .bind(&s.profile_id).fetch_one(&mut *tx).await?;
+    if !recoverable {
+        return Err(Error(
+            StatusCode::CONFLICT,
+            "recovery_required_before_unlink",
+        ));
     }
     let removed =
         sqlx::query("DELETE FROM portal.social_identities WHERE profile_id=$1 AND provider=$2")

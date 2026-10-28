@@ -6,7 +6,7 @@ The adapter reuses the game friendship transaction and nickname validation rules
 [OpenAPI 3.1](docs/openapi.json) describes the wire contract. Game core schema is
 version 5 (3 = revocable device keys, 4 = admission limits and profile retention, LR-16,
 5 = sanctions, moderation audit and chat switch, LR-15);
-portal schema has its own versions 1–7 and 9 (8 is reserved for LR-20 feedback) and never
+portal schema has its own versions 1–7, 9 and 10 (8 is reserved for LR-20 feedback) and never
 runs Prisma/Drizzle push.
 
 ## Database and migration
@@ -123,7 +123,7 @@ active devices) or issues a new set of codes (`rotate`, the same table and the
 same per-profile limit as `POST /v1/me/recovery-codes`). It needs no portal
 session and no schema change. Tests: `tests/recovery_native_postgres.rs`.
 
-## Sign in with VK ID (portal schema 7)
+## Sign in and website registration with VK ID (portal schema 10)
 
 Markets with the `vk_sign_in` feature (`docs/markets.md`; the RU build) sign
 players in with VK ID: VK, OK and Mail.ru are one VK ID web app (OAuth 2.1 with
@@ -135,19 +135,38 @@ every stored identity). Neither set disables the routes (404). A build without
 
 The portal BFF forwards the VK callback to `POST /v1/auth/social/vk`; this
 service exchanges the code at `id.vk.ru` (with the callback's `device_id` and
-`state`), reads the user, and never stores its token, name or e-mail: an identity
+`state`), requires the same state in the exchange response, reads the user,
+and never stores its token, name or e-mail: an identity
 is `HMAC(OMOBA_SOCIAL_SECRET, vk user id)`. A linked identity receives a normal
 seven-day browser session (label "VK ID", "OK" or "Mail.ru", the same 20-session
-cap). An unlinked one receives a 30-minute ticket. `POST /v1/auth/social/ticket`
-describes a ticket; `POST /v1/auth/social/attach` offers it to the pending game
+cap). An explicit website signup sends `register:true`: an unknown identity gets
+a new profile with database-owned default stats and a browser session. Concurrent
+first sign-ins resolve to the same profile. The bounded schema-10 definer function
+creates no device key and grants no general profile/stat write authority to the
+portal role. It never merges another profile or moves existing progress.
+
+A game-initiated `/connect` sign-in omits `register` (default false): an unlinked
+identity receives a 30-minute ticket. `POST /v1/auth/social/ticket` describes it;
+`POST /v1/auth/social/enrollment` reads the pending device label and key fingerprint
+using the ticket and code, without mutation. `POST /v1/auth/social/attach` offers it to the pending game
 enrollment whose code the game opened the browser with; the enrollment's status
 then reads `social_pending` with a short display name; the game links it with
 `POST /v1/auth/social/link`, signed by its active key over the enrollment
-(`shared::device_account::SocialLink`). A website sign-in never creates a game
-profile; one VK account links to one profile; `DELETE /v1/me/social/vk` (fresh
-session) unlinks. `vk`, `ticket` and `attach` are BFF routes: keep them off the
+(`shared::device_account::SocialLink`). Revocation is rechecked under the profile
+lock before linking. One VK account links to one profile; `DELETE /v1/me/social/vk`
+(fresh session) unlinks only when an active device or unused recovery code provides
+another way back in (`409 recovery_required_before_unlink` otherwise). `vk`,
+`ticket`, `enrollment` and `attach` are BFF routes: keep them off the
 public ingress (behind the portal ingress key, or loopback only as on RU). Expired tickets and unlinked identities idle for 30 days
-are cleaned up. Tests: `tests/social_postgres.rs` (loopback VK stand-in).
+are cleaned up. Linked zero-device website profiles are retained. Status polling
+has a separate IP quota from create/complete/recover, so waiting for VK cannot
+consume the device mutation budget. Tests: `tests/social_postgres.rs` (loopback VK
+stand-in; this does not establish real-provider application readiness).
+
+`POST /v1/me/devices/lookup` includes the reviewed `profile_id`. New portal clients
+send it with `POST /v1/me/devices/approve`; the API refuses `409 account_changed`
+before writes if another tab changed the browser's account after review. The field
+is optional only for compatibility with older clients.
 
 Free markets (`supporter` off) serve no `supporter` route and refuse Apple,
 Solana or YooKassa settings; without `ekza` there is no `me/ekza-library` route.
@@ -326,7 +345,7 @@ these capabilities. Old limited sessions are invalidated by the account upgrade.
 
 Portal migration 004 adds owner-scoped private class preferences; 005 adds the
 separate encrypted Ekza library connection. Startup requires exactly the portal
-schema versions this build serves (`PORTAL_SCHEMA`, 1–7 and 9) and runs no DDL, so run
+schema versions this build serves (`PORTAL_SCHEMA`, 1–7, 9 and 10) and runs no DDL, so run
 `migrate` first. No new browser authorization scopes are
 added: private named builds use the existing personal-settings consent.
 

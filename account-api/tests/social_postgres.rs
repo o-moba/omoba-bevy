@@ -35,10 +35,15 @@ async fn vk_fixture() -> String {
             && f.get("code_verifier").is_some_and(|v| v.len() >= 43)
             && !f.contains_key("client_secret");
         match f.get("code").and_then(|c| c.strip_prefix("user-")) {
-            Some(id) if ok => (
-                StatusCode::OK,
-                Json(json!({"access_token":format!("token-{id}"),"expires_in":3600})),
-            ),
+            Some(id) if ok => {
+                let mut token = json!({"access_token":format!("token-{id}"),"expires_in":3600,"state":f["state"]});
+                if f["state"] == "wrong-state" {
+                    token["state"] = json!("foreign-state");
+                } else if f["state"] == "missing-state" {
+                    token.as_object_mut().unwrap().remove("state");
+                }
+                (StatusCode::OK, Json(token))
+            }
             _ => (
                 StatusCode::BAD_REQUEST,
                 Json(json!({"error":"invalid_grant"})),
@@ -91,6 +96,12 @@ fn callback(code: &str) -> Vec<u8> {
         json!({"method":"ok_ru","code":code,"code_verifier":"v".repeat(43),
         "device_id":"device-1","redirect_uri":"https://players.test/api/auth/vk/callback","state":"s1"}),
     )
+}
+fn registration(user: &str, method: &str) -> Vec<u8> {
+    let mut request: Value = serde_json::from_slice(&callback(&format!("user-{user}"))).unwrap();
+    request["method"] = json!(method);
+    request["register"] = json!(true);
+    body(request)
 }
 fn vk_user() -> String {
     // Unique per test run: identities persist in the shared test database.
@@ -156,6 +167,8 @@ async fn website_registration_links_to_the_game_profile_only_after_game_confirma
         .authenticate(&public(&active), "Лиса")
         .await
         .unwrap();
+    sqlx::query("UPDATE career_profiles SET rating=1234,matches_played=3,progression_xp=1000 WHERE profile_id=$1")
+        .bind(&profile.profile_id).execute(&app.pool).await.unwrap();
     // Website first: VK sign-in of an unknown VK user registers, but signs nobody in.
     let first = social::vk_sign_in(&app, &callback(&format!("user-{user}")))
         .await
@@ -177,6 +190,19 @@ async fn website_registration_links_to_the_game_profile_only_after_game_confirma
 
     // The game opens the browser with its enrollment code; the browser offers the sign-in.
     let (pending, e, code) = game_request(&app).await;
+    let preview = social::enrollment(&app, &body(json!({"code":code,"social_ticket":ticket})))
+        .await
+        .unwrap();
+    assert_eq!(preview["enrollment_id"], e.enrollment_id);
+    assert_eq!(preview["public_key"], public(&pending));
+    assert_eq!(preview["label"], "Desktop");
+    let offers: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM portal.social_links WHERE enrollment_id=$1")
+            .bind(&e.enrollment_id)
+            .fetch_one(&app.pool)
+            .await
+            .unwrap();
+    assert_eq!(offers, 0, "review does not offer or approve the identity");
     let attached = social::attach(&app, &body(json!({"code":code,"social_ticket":ticket})))
         .await
         .unwrap();
@@ -231,6 +257,11 @@ async fn website_registration_links_to_the_game_profile_only_after_game_confirma
     assert_eq!(linked["state"], "linked");
     assert_eq!(linked["account_region"], shared::market::MARKET.key());
     assert_eq!(linked["profile_id"], profile.profile_id);
+    let saved = app.career.profile(&profile.profile_id).await.unwrap();
+    assert_eq!(
+        (saved.rating, saved.matches_played, saved.progression_xp),
+        (1234, 3, 1000)
+    );
     // A lost reply is safe to retry; the code can no longer approve any device.
     assert_eq!(
         social::link(&app, &link(&active, &e)).await.unwrap()["state"],
@@ -491,6 +522,39 @@ async fn social_sign_in_works_with_the_restricted_portal_role() {
         .await
         .unwrap();
     assert_eq!(signed_in["profile"]["profile_id"], profile.profile_id);
+    let fresh = social::vk_sign_in(&runtime, &registration(&vk_user(), "mail_ru"))
+        .await
+        .unwrap();
+    assert_eq!(fresh["state"], "signed_in");
+    let registered = owner
+        .career
+        .profile(fresh["profile"]["profile_id"].as_str().unwrap())
+        .await
+        .unwrap();
+    assert_eq!(
+        (
+            registered.rating,
+            registered.matches_played,
+            registered.progression_xp
+        ),
+        (1000, 0, 0)
+    );
+    for (provider, subject) in [
+        ("other", crypto::random::<32>()),
+        ("vk", "bad".into()),
+        ("vk", crypto::random::<32>()),
+    ] {
+        let error = sqlx::query("SELECT portal.register_social_profile($1,$2)")
+            .bind(provider)
+            .bind(subject)
+            .execute(&runtime.pool)
+            .await
+            .unwrap_err();
+        assert_eq!(
+            error.as_database_error().and_then(|e| e.code()).as_deref(),
+            Some("22023")
+        );
+    }
     runtime.cleanup().await.unwrap();
     // The runtime role still cannot touch game progress or move keys.
     for query in [
@@ -514,6 +578,16 @@ async fn http(
     token: Option<&str>,
     body: Value,
 ) -> (StatusCode, Value) {
+    http_from(app, method, path, token, body, "127.0.0.41:42124").await
+}
+async fn http_from(
+    app: &App,
+    method: &str,
+    path: &str,
+    token: Option<&str>,
+    body: Value,
+    address: &str,
+) -> (StatusCode, Value) {
     use axum::body::{Body, to_bytes};
     use tower::ServiceExt;
     let mut request = axum::http::Request::builder().method(method).uri(path);
@@ -524,7 +598,7 @@ async fn http(
         .body(Body::from(serde_json::to_vec(&body).unwrap()))
         .unwrap();
     request.extensions_mut().insert(axum::extract::ConnectInfo(
-        "127.0.0.1:42124".parse::<std::net::SocketAddr>().unwrap(),
+        address.parse::<std::net::SocketAddr>().unwrap(),
     ));
     let response = router(app.clone()).oneshot(request).await.unwrap();
     let status = response.status();
@@ -620,4 +694,262 @@ async fn social_routes_are_served_over_http_and_unlink_needs_a_session() {
     );
     let (status, _) = http(&app, "POST", "/v1/auth/social/unknown", None, json!({})).await;
     assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+#[ignore = "requires isolated owner OMOBA_PORTAL_TEST_DATABASE_URL"]
+async fn website_registration_creates_default_accounts_for_every_entry_method() {
+    let app = app().await;
+    let mut profiles = std::collections::HashSet::new();
+    for method in ["vkid", "ok_ru", "mail_ru"] {
+        let user = vk_user();
+        let first = social::vk_sign_in(&app, &registration(&user, method))
+            .await
+            .unwrap();
+        assert_eq!(first["state"], "signed_in");
+        let profile = first["profile"]["profile_id"].as_str().unwrap();
+        assert!(profiles.insert(profile.to_owned()));
+        let saved = app.career.profile(profile).await.unwrap();
+        assert_eq!(
+            (
+                saved.rating,
+                saved.rated_matches,
+                saved.matches_played,
+                saved.wins,
+                saved.losses,
+                saved.progression_xp
+            ),
+            (1000, 0, 0, 0, 0, 0)
+        );
+        let keys: i64 = sqlx::query_scalar("SELECT count(*) FROM career_keys WHERE profile_id=$1")
+            .bind(profile)
+            .fetch_one(&app.pool)
+            .await
+            .unwrap();
+        assert_eq!(
+            keys, 0,
+            "website signup does not invent a native device key"
+        );
+        let session = session_of(&app, first["session_token"].as_str().unwrap()).await;
+        let me = accounts::me(&app, &session).await.unwrap();
+        assert_eq!(me["social"][0]["method"], method);
+        assert_eq!(me["profile"]["profile_id"], profile);
+        let refusal = social::unlink(&app, &session).await.unwrap_err();
+        assert_eq!(
+            (refusal.0, refusal.1),
+            (StatusCode::CONFLICT, "recovery_required_before_unlink")
+        );
+
+        // A normal repeat (without registration intent) signs into the same profile.
+        let mut request: Value =
+            serde_json::from_slice(&callback(&format!("user-{user}"))).unwrap();
+        request["method"] = json!(method);
+        let (status, repeated) = http_from(
+            &app,
+            "POST",
+            "/v1/auth/social/vk",
+            None,
+            request,
+            "127.0.0.42:42124",
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(repeated["profile"]["profile_id"], profile);
+        assert_ne!(repeated["session_token"], first["session_token"]);
+        let linked = social::vk_sign_in(&app, &registration(&user, method))
+            .await
+            .unwrap();
+        assert_eq!(linked["profile"]["profile_id"], profile);
+    }
+}
+
+#[tokio::test]
+#[ignore = "requires isolated owner OMOBA_PORTAL_TEST_DATABASE_URL"]
+async fn concurrent_website_registration_creates_one_profile_for_the_verified_subject() {
+    let app = app().await;
+    let user = vk_user();
+    let mut attempts = Vec::new();
+    for method in ["vkid", "mail_ru", "ok_ru", "vkid", "mail_ru", "ok_ru"] {
+        let app = app.clone();
+        let request = registration(&user, method);
+        attempts.push(tokio::spawn(async move {
+            social::vk_sign_in(&app, &request).await.unwrap()
+        }));
+    }
+    let mut profile = None;
+    let mut sessions = std::collections::HashSet::new();
+    for attempt in attempts {
+        let signed_in = attempt.await.unwrap();
+        assert_eq!(signed_in["state"], "signed_in");
+        let id = signed_in["profile"]["profile_id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        if let Some(expected) = &profile {
+            assert_eq!(&id, expected);
+        } else {
+            profile = Some(id);
+        }
+        assert!(sessions.insert(signed_in["session_token"].as_str().unwrap().to_owned()));
+    }
+    let linked: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM portal.social_identities WHERE profile_id=$1")
+            .bind(profile.unwrap())
+            .fetch_one(&app.pool)
+            .await
+            .unwrap();
+    assert_eq!(linked, 1);
+}
+
+#[tokio::test]
+#[ignore = "requires isolated owner OMOBA_PORTAL_TEST_DATABASE_URL"]
+async fn token_exchange_requires_the_providers_returned_state() {
+    let app = app().await;
+    for state in ["missing-state", "wrong-state"] {
+        let mut request: Value = serde_json::from_slice(&registration(&vk_user(), "vkid")).unwrap();
+        request["state"] = json!(state);
+        let error = social::vk_sign_in(&app, &body(request)).await.unwrap_err();
+        assert_eq!(
+            (error.0, error.1),
+            (StatusCode::BAD_GATEWAY, "provider_rejected")
+        );
+    }
+}
+
+#[tokio::test]
+#[ignore = "requires isolated owner OMOBA_PORTAL_TEST_DATABASE_URL"]
+async fn polling_more_than_ten_times_does_not_spend_device_completion_quota() {
+    let app = app().await;
+    let registered = social::vk_sign_in(&app, &registration(&vk_user(), "vkid"))
+        .await
+        .unwrap();
+    let session = session_of(&app, registered["session_token"].as_str().unwrap()).await;
+    let key = random_key();
+    let e = enrollment(&key);
+    let address = "127.0.0.43:42124";
+    let (status, created) = http_from(
+        &app,
+        "POST",
+        "/v1/auth/devices/create",
+        None,
+        serde_json::from_slice(&signed(&key, &e, DeviceAction::Create, None)).unwrap(),
+        address,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    for _ in 0..15 {
+        let (status, _) = http_from(
+            &app,
+            "POST",
+            "/v1/auth/devices/status",
+            None,
+            serde_json::from_slice(&signed(&key, &e, DeviceAction::Status, None)).unwrap(),
+            address,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+    }
+    let preview = devices::lookup(&app, &session, &body(json!({"code":created["code"]})))
+        .await
+        .unwrap();
+    devices::approve(
+        &app,
+        &session,
+        &body(json!({"enrollment_id":preview["enrollment_id"],"public_key":preview["public_key"]})),
+    )
+    .await
+    .unwrap();
+    let (status, completed) = http_from(
+        &app,
+        "POST",
+        "/v1/auth/devices/complete",
+        None,
+        serde_json::from_slice(&signed(
+            &key,
+            &e,
+            DeviceAction::Complete,
+            Some(&session.profile_id),
+        ))
+        .unwrap(),
+        address,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(completed["state"], "consumed");
+    assert_eq!(completed["profile_id"], session.profile_id);
+    assert!(
+        app.career
+            .key_is_active(&public(&key), &session.profile_id)
+            .await
+            .unwrap()
+    );
+    // The newly registered website account now has a native way back in.
+    social::unlink(&app, &session).await.unwrap();
+}
+
+#[tokio::test]
+#[ignore = "requires isolated owner OMOBA_PORTAL_TEST_DATABASE_URL"]
+async fn a_key_revoked_while_social_link_waits_for_the_profile_cannot_link() {
+    let app = app().await;
+    let active = random_key();
+    let profile = app
+        .career
+        .authenticate(&public(&active), "Revocation race")
+        .await
+        .unwrap();
+    let ticket = social::vk_sign_in(&app, &callback(&format!("user-{}", vk_user())))
+        .await
+        .unwrap();
+    let (_, e, code) = game_request(&app).await;
+    social::attach(
+        &app,
+        &body(json!({"code":code,"social_ticket":ticket["social_ticket"]})),
+    )
+    .await
+    .unwrap();
+
+    // Hold the same profile lock revocation owns, but let link observe the old
+    // active key before it waits. This makes the TOCTOU ordering deterministic.
+    let mut revocation = app.pool.begin().await.unwrap();
+    let blocker: i32 = sqlx::query_scalar("SELECT pg_backend_pid()")
+        .fetch_one(&mut *revocation)
+        .await
+        .unwrap();
+    sqlx::query("SELECT profile_id FROM career_profiles WHERE profile_id=$1 FOR UPDATE")
+        .bind(&profile.profile_id)
+        .fetch_one(&mut *revocation)
+        .await
+        .unwrap();
+    let proof = link(&active, &e);
+    let linking_app = app.clone();
+    let linking = tokio::spawn(async move { social::link(&linking_app, &proof).await });
+    let mut waiting = false;
+    for _ in 0..100 {
+        waiting = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid)) AND query LIKE 'SELECT nickname FROM career_profiles%')")
+            .bind(blocker).fetch_one(&app.pool).await.unwrap();
+        if waiting {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    }
+    assert!(
+        waiting,
+        "social link must reach the profile lock before revocation commits"
+    );
+    sqlx::query("UPDATE career_keys SET revoked_at=clock_timestamp() WHERE public_key=$1")
+        .bind(public(&active))
+        .execute(&mut *revocation)
+        .await
+        .unwrap();
+    revocation.commit().await.unwrap();
+    let error = linking.await.unwrap().unwrap_err();
+    assert_eq!(error.0, StatusCode::NOT_FOUND);
+    let linked: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM portal.social_identities WHERE profile_id=$1)",
+    )
+    .bind(profile.profile_id)
+    .fetch_one(&app.pool)
+    .await
+    .unwrap();
+    assert!(!linked);
 }
