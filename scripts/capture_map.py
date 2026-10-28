@@ -6,6 +6,8 @@ Use --map-config examples/maps/two-tier.json for the contributor example.
 configured structure sprites. Scripted camera/cosmetic changes are declared.
 No browser, fabricated gameplay state, or physical-device claims.
 """
+from qa_account_fixture import prepare_capture_account
+
 import argparse
 import copy
 import json
@@ -325,6 +327,7 @@ def main():
     children, observer = [], None
     started = time.monotonic()
     with tempfile.TemporaryDirectory(prefix="omoba-map-qa-") as isolated:
+        prepare_capture_account(isolated)
         env = dict(os.environ, SERVER_ADDR=f"{address[0]}:{address[1]}", GAME_SERVER_ADDR=f"{address[0]}:{address[1]}",
                    OMOBA_MATCH_MODE="dev", OMOBA_CLIENT_CONFIG_DIR=str(Path(isolated) / "config"), OMOBA_ASSET_DIR=str(assets),
                    OMOBA_MAP_CONFIG=str(config), OMOBA_PLAYER_VISUAL_MODE=args.mode, OMOBA_DEBUG_UI="0",
