@@ -46,11 +46,14 @@ pub(crate) fn sanction_text(kind: SanctionKind, until: Option<i64>) -> Option<St
 /// The refusal text of a moderation `code`, with the end of the matching
 /// sanction from `sanctions`; `None` for any other code.
 pub(crate) fn refusal_text(code: &str, sanctions: &[Sanction]) -> Option<String> {
+    refusal_text_at(code, sanctions, unix_now())
+}
+fn refusal_text_at(code: &str, sanctions: &[Sanction], now: i64) -> Option<String> {
     if code == code::CHAT_DISABLED {
         return Some(tr("moderation.chat_disabled").to_owned());
     }
     let kind = shared::moderation::sanction_for_code(code)?;
-    let until = shared::moderation::active(sanctions, kind, unix_now()).and_then(|s| s.until);
+    let until = shared::moderation::active(sanctions, kind, now).and_then(|s| s.until);
     sanction_text(kind, until)
 }
 
@@ -113,7 +116,7 @@ mod tests {
             app.world_mut()
                 .resource_mut::<Locale>()
                 .set(LocaleId::parse(locale).unwrap());
-            let text = refusal_text(code::ACCOUNT_BANNED, &sanctions).unwrap();
+            let text = refusal_text_at(code::ACCOUNT_BANNED, &sanctions, until - 60).unwrap();
             assert!(text.starts_with(banned), "{locale}: {text}");
             assert!(text.contains("2026-10-26 09:00"), "{locale}: {text}");
             for code in [
@@ -122,7 +125,7 @@ mod tests {
                 code::NAME_LOCKED,
                 code::CHAT_MUTED,
             ] {
-                let text = refusal_text(code, &sanctions).unwrap();
+                let text = refusal_text_at(code, &sanctions, until - 60).unwrap();
                 assert!(text.contains("2026-10-26 09:00"), "{locale} {code}: {text}");
             }
             assert!(

@@ -281,6 +281,8 @@ struct SettingsServerAddrLabel;
 /// The Language row's value (the active language's native name).
 #[derive(Component)]
 struct LanguageValue;
+#[derive(Component)]
+pub(crate) struct AccountRegionValue;
 
 #[derive(Component)]
 struct PauseMenuPanel;
@@ -327,6 +329,7 @@ pub(crate) enum PauseAction {
     OpenPractice,
     /// Switch to the next shipped language.
     CycleLanguage,
+    AccountRegion,
     ToggleReduceMotion,
     ToggleBeginnerTips,
     ToggleFpsReadout,
@@ -1170,6 +1173,24 @@ fn setup_pause_menu_ui(mut commands: Commands, platform: Option<Res<crate::ui::U
                                     PauseAction::CycleLanguage,
                                     "PauseMenuLanguage",
                                 );
+                                if crate::account_region::selectable() {
+                                    widgets::toggle_row(
+                                        settings,
+                                        Localized::new("region.title"),
+                                        crate::i18n::tr(
+                                            if shared::region::market()
+                                                == shared::market::Market::Ru
+                                            {
+                                                "region.ru"
+                                            } else {
+                                                "region.global"
+                                            },
+                                        ),
+                                        AccountRegionValue,
+                                        PauseAction::AccountRegion,
+                                        "PauseMenuAccountRegionRow",
+                                    );
+                                }
                             });
                             settings_group(settings, SettingsTab::Sound, |settings| {
                                 section_title(
@@ -2992,7 +3013,7 @@ mod tests {
         let shown = crate::legal::about_shown();
         assert_eq!(
             shown,
-            matches!(shared::market::MARKET, shared::market::Market::Ru)
+            matches!(shared::region::market(), shared::market::Market::Ru)
         );
         assert_eq!(
             harness::find(app.world_mut(), "SettingsTabAbout").is_some(),

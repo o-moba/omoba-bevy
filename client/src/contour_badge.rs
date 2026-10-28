@@ -50,7 +50,7 @@ pub(crate) fn spawn(
         || crate::connection_profile::active().id,
         |connection| connection.profile.id,
     );
-    if crate::mobile_ui::offers_connection(connection) {
+    if contour.is_some() {
         let profile = surfaces::badge(
             parent,
             Localized::new(running.label_key()),

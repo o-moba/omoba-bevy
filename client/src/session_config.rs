@@ -15,8 +15,8 @@
 //!
 //! **Contour builds.** A build with `OMOBA_DEFAULT_CONFIG_DIR_SUFFIX` (a dev-contour
 //! tester build from `scripts/release.py build … --contour dev`) never offers or
-//! accepts the production lobby: its profiles are Dev, Local and Custom, and
-//! [`endpoint_allowed_for`] refuses the production VPS and every production `omoba.io` /
+//! accepts the production lobby. Its bound account region chooses the dev
+//! endpoints, and [`endpoint_allowed_for`] refuses the production VPS and every production `omoba.io` /
 //! `ekza.io` name in every address it validates (custom, `GAME_SERVER_ADDR`,
 //! match allocations).
 //!
@@ -34,7 +34,10 @@ pub const FALLBACK_GAME_SERVER_ADDR: &str = "127.0.0.1:4000";
 pub const BETA_GAME_SERVER_ADDR: &str = "77.246.105.57:4000";
 
 /// Hosts of the production lobby. A contour build never connects to them, on any port.
-const PRODUCTION_LOBBY_HOSTS: &[std::net::Ipv4Addr] = &[std::net::Ipv4Addr::new(77, 246, 105, 57)];
+const PRODUCTION_LOBBY_HOSTS: &[std::net::Ipv4Addr] = &[
+    std::net::Ipv4Addr::new(77, 246, 105, 57),
+    std::net::Ipv4Addr::new(212, 113, 117, 105),
+];
 
 /// Public production zones (global `omoba.io` and `ekza.io`, the RU market's `omoba.ru`);
 /// inside them only `<contour>.<zone>` names belong to a contour build.
@@ -56,7 +59,7 @@ pub(crate) const BUILD_CONTOUR: Option<&str> = match option_env!("OMOBA_DEFAULT_
 /// `{market}`. Empty in a build without Ekza, which names no market.
 pub(crate) fn market_address() -> String {
     use crate::connection_profile::{active, for_market};
-    for_market(active().clone(), shared::market::FEATURES.ekza).market
+    for_market(active().clone(), crate::account_region::features().ekza).market
 }
 
 /// The lobby this process connects to unless a desktop `GAME_SERVER_ADDR`
@@ -79,6 +82,11 @@ pub(crate) fn startup_server_addr() -> String {
 /// refuses the production lobby and every production `omoba.io` / `ekza.io` / `omoba.ru` name.
 /// This build's rule is `endpoint_allowed_for(BUILD_CONTOUR, host)`.
 pub(crate) fn endpoint_allowed_for(contour: Option<&str>, host: &str) -> bool {
+    if let Some(region) = shared::region::active()
+        && !region_endpoint_allowed(region.id, host)
+    {
+        return false;
+    }
     let Some(contour) = contour else {
         return true;
     };
@@ -99,6 +107,34 @@ pub(crate) fn endpoint_allowed_for(contour: Option<&str>, host: &str) -> bool {
     !PUBLIC_ZONES
         .iter()
         .any(|zone| in_zone(zone) && !in_zone(&format!("{contour}.{zone}")))
+}
+
+/// Known regional authorities cannot be crossed by an old desktop override or
+/// worker redirect. Explicit loopback/self-host endpoints remain developer tools.
+fn region_endpoint_allowed(region: shared::region::RegionId, host: &str) -> bool {
+    let host = host
+        .trim()
+        .trim_start_matches('[')
+        .trim_end_matches(']')
+        .trim_end_matches('.')
+        .to_ascii_lowercase();
+    let ip = host
+        .parse::<std::net::IpAddr>()
+        .ok()
+        .and_then(|ip| match ip {
+            std::net::IpAddr::V4(ip) => Some(ip),
+            std::net::IpAddr::V6(ip) => ip.to_ipv4_mapped(),
+        });
+    let ru = host == "omoba.ru"
+        || host.ends_with(".omoba.ru")
+        || ip == Some(std::net::Ipv4Addr::new(212, 113, 117, 105));
+    let global = host == "omoba.io"
+        || host.ends_with(".omoba.io")
+        || ip == Some(std::net::Ipv4Addr::new(77, 246, 105, 57));
+    match region {
+        shared::region::RegionId::Global => !ru,
+        shared::region::RegionId::Ru => !global,
+    }
 }
 
 /// The lobby compiled into this build (`OMOBA_DEFAULT_GAME_SERVER_ADDR`, set by
@@ -136,6 +172,33 @@ pub fn is_stale(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn account_region_refuses_known_foreign_lobbies_and_worker_redirects() {
+        use shared::region::RegionId;
+        for host in [
+            "77.246.105.57",
+            "LOBBY.OMOBA.IO",
+            "LOBBY.DEV.OMOBA.IO",
+            "[::ffff:77.246.105.57]",
+        ] {
+            assert!(!region_endpoint_allowed(RegionId::Ru, host), "{host}");
+            assert!(region_endpoint_allowed(RegionId::Global, host), "{host}");
+        }
+        for host in [
+            "212.113.117.105",
+            "LOBBY.OMOBA.RU.",
+            "LOBBY.DEV.OMOBA.RU",
+            "[::ffff:212.113.117.105]",
+        ] {
+            assert!(!region_endpoint_allowed(RegionId::Global, host), "{host}");
+            assert!(region_endpoint_allowed(RegionId::Ru, host), "{host}");
+        }
+        assert!(!endpoint_allowed_for(Some("dev"), "212.113.117.105"));
+        assert!(!endpoint_allowed_for(
+            Some("dev"),
+            "[::ffff:212.113.117.105]"
+        ));
+    }
 
     #[test]
     fn is_stale_none_is_stale() {
@@ -225,8 +288,8 @@ mod tests {
     #[test]
     fn this_builds_market_and_lobby_match_its_contour() {
         let address = market_address();
-        assert_eq!(address.is_empty(), !shared::market::FEATURES.ekza);
-        if shared::market::FEATURES.ekza {
+        assert_eq!(address.is_empty(), !crate::account_region::features().ekza);
+        if crate::account_region::features().ekza {
             assert_eq!(address == "app.omoba.io/market", BUILD_CONTOUR.is_none());
             assert!(endpoint_allowed_for(
                 BUILD_CONTOUR,

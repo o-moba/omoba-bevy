@@ -10,8 +10,8 @@ build phase (mobile/ios/xcode_build.py), so the two apps never share an identity
   ("OMOBA Dev", the icon with the DEV ribbon from scripts/make_dev_icons.py),
   settings folder `omoba-bevy-dev`, the dev lobby, dev registry and the closed
   passport compiled in as its Dev connection profile. It installs beside the
-  production app on one phone and offers the Dev / Local / Custom connection
-  profiles (client/src/connection_profile.rs).
+  production app on one phone. The account region chooses its endpoints;
+  player-facing raw connection configuration is hidden in both contours.
 """
 from __future__ import annotations
 
@@ -39,6 +39,9 @@ DEV_PASSPORT = "http://127.0.0.1:9/api/passport"
 DEV_CONFIG_SUFFIX = "dev"
 DEV_ACCOUNT_API = "https://account.dev.omoba.io"
 DEV_PORTAL_ORIGIN = "https://app.dev.omoba.io"
+DEV_RU_LOBBY = "lobby.dev.omoba.ru:4100"
+DEV_RU_ACCOUNT_API = "https://account.dev.omoba.ru"
+DEV_RU_PORTAL_ORIGIN = "https://dev.omoba.ru"
 
 
 @dataclass(frozen=True)
@@ -76,7 +79,7 @@ def contour_of_xcode_setting(value: str | None) -> str:
     raise ValueError(f"OMOBA_CONTOUR must be empty or dev, got {value!r}")
 
 
-def compile_defaults(contour: str, server: str | None = None) -> dict[str, str]:
+def compile_defaults(contour: str, server: str | None = None, market: str = "global") -> dict[str, str]:
     """The compile-time client defaults a phone build of `contour` bakes in.
 
     Production bakes in only an explicit server. Dev bakes in its own lobby
@@ -85,6 +88,9 @@ def compile_defaults(contour: str, server: str | None = None) -> dict[str, str]:
     if contour == "prod":
         return {SERVER_DEFAULT_ENV: server} if server else {}
     if contour == "dev":
+        if market == "ru":
+            return {SERVER_DEFAULT_ENV: server or DEV_RU_LOBBY, CONFIG_SUFFIX_ENV: DEV_CONFIG_SUFFIX,
+                    ACCOUNT_API_ENV: DEV_RU_ACCOUNT_API, PORTAL_ORIGIN_ENV: DEV_RU_PORTAL_ORIGIN}
         return {SERVER_DEFAULT_ENV: server or DEV_LOBBY, REGISTRY_DEFAULT_ENV: DEV_REGISTRY,
                 PASSPORT_DEFAULT_ENV: DEV_PASSPORT, CONFIG_SUFFIX_ENV: DEV_CONFIG_SUFFIX,
                 ACCOUNT_API_ENV: DEV_ACCOUNT_API, PORTAL_ORIGIN_ENV: DEV_PORTAL_ORIGIN}

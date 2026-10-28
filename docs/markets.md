@@ -1,17 +1,16 @@
-# Markets: one build per region
+# Markets and runtime account regions
 
-OMOBA is built separately for each market. A market decides which services and
-storefront rules a build has, who sells Hero Supporter access, which servers it
-talks to, the first-launch language and how players sign in. It is a
-compile-time choice: a Russian build cannot be switched to the Ekza ecosystem or
-to another market's payment providers at run time, and a typo in a market or
-feature name fails the build.
+Default native clients can bind International or RU before regional traffic.
+The account's remembered region restores automatically; first-time users confirm
+an account region and its legal documents. Settings changes require a cold start.
+See [account regions and profiles](connection-profiles.md) for storage, host policy
+and migration details.
 
-> **Planned (ADR-025, LR-68):** one app per platform for Russia and the
-> international market. The account's region, confirmed on first launch, will
-> choose servers, sign-in and payments at run time. The compile-time market then
-> stays only for server binaries, CI and the RU-locked builds until LR-68 R3.
-> This page describes what is built today.
+Compile-time markets still describe regional servers/APIs and locked RU packages.
+The tables below describe those presets. Routing is implemented; the remaining
+LR-68 store channels, Apple sign-in, deletion intake, device-wide preference
+migration and app-identity rollout are separate work. The [RU release gates](plans/ru-release-2026-10-28.md)
+distinguish repository code from live service readiness.
 
 | | `global` (default) | `ru` | `cn` |
 | --- | --- | --- | --- |
@@ -22,7 +21,7 @@ feature name fails the build.
 | Sign in with VK ID (`vk_sign_in`) | off | **on** | off |
 | First-launch language | English | Russian | Simplified Chinese |
 | Lobby | `77.246.105.57:4000` | `lobby.omoba.ru:4000` | not decided |
-| Account API / portal | none in production | `account.omoba.ru` / `omoba.ru` | not decided |
+| Account API / portal | `account.omoba.io` / `app.omoba.io` (API not provisioned) | `account.omoba.ru` / `omoba.ru` | not decided |
 | Settings folder | `omoba-bevy` | `omoba-bevy-ru` | `omoba-bevy-cn` |
 | Packages | `Omoba-<v>-*` | `Omoba-<v>-ru-*` in `dist/v<v>-ru/` | — |
 | Downloads | IPFS links | `omoba.ru/downloads/` on the RU host, IPFS mirror, status «Открытая бета» | — |

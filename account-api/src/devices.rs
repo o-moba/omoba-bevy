@@ -87,7 +87,7 @@ async fn render(app: &App, row: &PgRow) -> Result<Value> {
         }
         None => None,
     };
-    let mut value = json!({"state":row_text(row,"state")?,"profile_id":profile,"nickname":nickname,"code":null});
+    let mut value = json!({"account_region":shared::market::MARKET.key(),"state":row_text(row,"state")?,"profile_id":profile,"nickname":nickname,"code":null});
     // A pending enrollment a website VK sign-in was offered to waits for the game
     // to link that sign-in (`POST /v1/auth/social/link`).
     if row_text(row, "state")? == "pending"
@@ -125,7 +125,7 @@ pub async fn create(app: &App, body: &[u8]) -> Result<Value> {
                 .fetch_one(&mut *tx)
                 .await?;
         return Ok(
-            json!({"state":"consumed","profile_id":profile,"nickname":nickname,"code":null}),
+            json!({"account_region":shared::market::MARKET.key(),"state":"consumed","profile_id":profile,"nickname":nickname,"code":null}),
         );
     }
     let mut bytes = [0; 8];
@@ -228,7 +228,9 @@ pub async fn complete(app: &App, body: &[u8]) -> Result<Value> {
             .fetch_one(&mut *tx)
             .await?;
     tx.commit().await?;
-    Ok(json!({"state":"consumed","profile_id":target,"nickname":nickname,"code":null}))
+    Ok(
+        json!({"account_region":shared::market::MARKET.key(),"state":"consumed","profile_id":target,"nickname":nickname,"code":null}),
+    )
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]

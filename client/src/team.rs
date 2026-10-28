@@ -1856,7 +1856,7 @@ fn layout_spacious_picker(
         node.min_width = Val::Px(0.0);
         node.min_height = Val::Px(0.0);
     };
-    let hide_ekza = ekza_rows_hidden(session.is_offline(), shared::market::FEATURES.ekza);
+    let hide_ekza = ekza_rows_hidden(session.is_offline(), crate::account_region::features().ekza);
     for (name, id, class, action, mut node) in &mut nodes {
         let key = crate::ui::test_id::node_key(name, id).unwrap_or_default();
         if hide_ekza && (matches!(key, "EkzaConnectRow" | "StudioAvatarsLabel" | "PurchasedAvatarsHint" | "PickerRefreshStudio")

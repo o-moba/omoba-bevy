@@ -87,6 +87,12 @@ by your existing trusted ingress. Native clients need ingress routes for POST
 `/v1/supporter/apple/notifications` route. In a YooKassa market (RU) the ingress
 also passes YooKassa's webhook, `POST /v1/supporter/yookassa/notifications`, as its
 own public route. Next’s BFF uses the internal API.
+Native device enrollment/status/completion/recovery and social-link replies carry
+`account_region` (`global` or `ru`, the API process's compile-time market). A client
+validates it against its bound region before using the reply. This is additive for
+old clients; new clients still accept legacy replies without it only through their
+trusted regional API/portal pair. It does not migrate or merge accounts.
+
 Do not broadly expose all API routes as an alternative browser backend.
 `OMOBA_ALLOW_INSECURE_LOCAL=1` permits the exact localhost/127.0.0.1 portal on port
 3010 for isolated development; never enable it for a remote HTTP site.

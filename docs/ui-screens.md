@@ -21,7 +21,6 @@ Harness: `client/src/qa/frontend_qa.rs`; server: dev; env: `OMOBA_FRONTEND_QA_OU
 | Game menu | `08-menu.png` | desktop, phone | Escape / MENU | `client/src/pause_menu.rs` |  |
 | Settings · sound | `09-settings-sound.png` | desktop, phone | Game menu → Settings | `client/src/pause_menu.rs` |  |
 | Settings · graphics (bottom) | `10-settings-graphics.png` | desktop, phone | Game menu → Settings, scrolled down | `client/src/pause_menu.rs` |  |
-| Connection panel (dev builds) | `11-server.png` | phone | Home → Connection (dev-contour builds only) | `client/src/mobile_ui.rs` | Production builds have no server UI and skip this frame; capture with a `--contour dev` build |
 | Home help | `12-home-help.png` | phone | Home → ? (phone) | `client/src/help_overlay.rs` |  |
 | Home after help | `13-home-help-closed.png` | phone | Home → ? → close (phone) | `client/src/frontend/home.rs` |  |
 | Party lobby (solo) | `14-party-lobby.png` | desktop, phone | Home → Party & friends | `client/src/frontend/lobby.rs` |  |
@@ -187,3 +186,4 @@ Harness: `client/src/qa/frontend_qa/party.rs`; server: none; env: `OMOBA_PARTY_Q
 - `client/src/qa/dagger_qa.rs`: Focused Adventurer class preview and normal offline Q/W/E/R casts, plus clearly labelled synthetic rare-hit receipt presentation (OMOBA_DAGGER_QA_DIR). English852x393 only; optional synthetic focus, no raw-touch/device/RNG claims.
 - `client/src/qa/equipped_skills_qa.rs`: Focused synthetic accepted hybrid HUD and held-skill card (OMOBA_EQUIPPED_SKILLS_QA_DIR). English 852x393 only; actual input and UI readback, separate real-server harness proof. Not physical-device or multiplayer proof.
 - `client/src/qa/boot_qa.rs`: boot splash and the Home it reveals (OMOBA_BOOT_SPLASH_SHOTS); a transient overlay, not an AppScreen
+- `client/src/qa/account_region_qa.rs`: Focused native RU account-region confirmation and cold-switch proof (OMOBA_ACCOUNT_REGION_QA), one ru 852x393 desktop phone preview; isolated dev settings and offline game transport. Not a physical-device certification.

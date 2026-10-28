@@ -321,6 +321,9 @@ pub(crate) fn load_persistent_client_settings(
     mut motion: ResMut<MotionSettings>,
     mut saved_language: ResMut<SavedLanguage>,
 ) {
+    if !crate::account_region::bound() {
+        return;
+    }
     gate.suppress_saves = 3;
     initial_save_pending.0 = false;
 
@@ -373,12 +376,16 @@ pub(crate) fn load_persistent_client_settings(
         initial_save_pending.0 = true;
     }
 
-    team.handheld = restorable_handheld(disk.handheld, shared::market::FEATURES.ekza, |id| {
-        omoba_passport::weapons::catalog()
-            .items
-            .iter()
-            .any(|weapon| weapon.id == id)
-    });
+    team.handheld = restorable_handheld(
+        disk.handheld,
+        crate::account_region::features().ekza,
+        |id| {
+            omoba_passport::weapons::catalog()
+                .items
+                .iter()
+                .any(|weapon| weapon.id == id)
+        },
+    );
     if let Some(ch) = disk.character {
         team.character = ch;
     }

@@ -11,7 +11,20 @@ pub struct WebAccountApi {
 }
 impl WebAccountApi {
     pub fn new(base: &str, origin: &str, insecure_local: bool) -> Result<Self, String> {
-        validate_contour_endpoints(option_env!("OMOBA_DEFAULT_CONFIG_DIR_SUFFIX"), base, origin)?;
+        if insecure_local && loopback_origin(base) != loopback_origin(origin) {
+            return Err("A local account rehearsal requires both services on loopback.".into());
+        }
+        let rehearsal = !cfg!(any(target_os = "ios", target_os = "android"))
+            && insecure_local
+            && loopback_origin(base)
+            && loopback_origin(origin);
+        if !rehearsal {
+            validate_contour_endpoints(
+                option_env!("OMOBA_DEFAULT_CONFIG_DIR_SUFFIX"),
+                base,
+                origin,
+            )?;
+        }
         let base = trusted_url(base, insecure_local)?;
         let portal = trusted_url(origin, insecure_local)?;
         if portal.as_str().trim_end_matches('/') != origin {
@@ -30,6 +43,26 @@ impl WebAccountApi {
         })
     }
     pub fn from_env() -> Result<Self, String> {
+        if let Some(region) = shared::region::active() {
+            let endpoints = region.endpoints(option_env!("OMOBA_DEFAULT_CONFIG_DIR_SUFFIX"));
+            let desktop = !cfg!(any(target_os = "ios", target_os = "android"));
+            let insecure =
+                desktop && std::env::var("OMOBA_ALLOW_INSECURE_LOCAL").as_deref() == Ok("1");
+            let base = desktop
+                .then(|| std::env::var("OMOBA_ACCOUNT_API_URL").ok())
+                .flatten()
+                .unwrap_or(endpoints.account_api.clone());
+            let origin = desktop
+                .then(|| std::env::var("OMOBA_PORTAL_ORIGIN").ok())
+                .flatten()
+                .unwrap_or(endpoints.portal.clone());
+            if (base != endpoints.account_api || origin != endpoints.portal)
+                && !(insecure && loopback_origin(&base) && loopback_origin(&origin))
+            {
+                return Err("Account service does not belong to this account's region.".into());
+            }
+            return Self::new(&base, &origin, insecure);
+        }
         let base = std::env::var("OMOBA_ACCOUNT_API_URL")
             .ok()
             .or_else(|| option_env!("OMOBA_ACCOUNT_API_URL").map(str::to_owned))
@@ -43,6 +76,20 @@ impl WebAccountApi {
             &origin,
             std::env::var("OMOBA_ALLOW_INSECURE_LOCAL").as_deref() == Ok("1"),
         )
+    }
+    pub(crate) fn validate_account_region(
+        &self,
+        received: Option<shared::region::RegionId>,
+    ) -> Result<(), String> {
+        let expected = shared::region::active()
+            .map(|r| r.id)
+            .or_else(|| shared::region::RegionId::from_market(shared::market::MARKET));
+        if received.is_some() && received != expected {
+            return Err(
+                "This account belongs to another region. Sign in in its own region.".into(),
+            );
+        }
+        Ok(())
     }
     pub(crate) fn request<T: serde::de::DeserializeOwned>(
         &self,
@@ -153,12 +200,24 @@ fn validate_contour_endpoints(
     base: &str,
     origin: &str,
 ) -> Result<(), String> {
-    if contour == Some("dev")
-        && (base != "https://account.dev.omoba.io" || origin != "https://app.dev.omoba.io")
-    {
-        return Err("OMOBA Dev requires its DEV account service and player portal.".into());
+    if let Some(contour) = contour.filter(|s| !s.is_empty()) {
+        let region = shared::region::active()
+            .map(|p| p.id)
+            .or_else(|| shared::region::RegionId::from_market(shared::market::MARKET))
+            .unwrap_or(shared::region::RegionId::Global);
+        let expected = region.profile().endpoints(Some(contour));
+        if base != expected.account_api || origin != expected.portal {
+            return Err(
+                "OMOBA Dev requires its own region's DEV account service and portal.".into(),
+            );
+        }
     }
     Ok(())
+}
+fn loopback_origin(raw: &str) -> bool {
+    Url::parse(raw)
+        .ok()
+        .is_some_and(|u| matches!(u.host_str(), Some("127.0.0.1" | "localhost" | "[::1]")))
 }
 fn trusted_url(raw: &str, insecure: bool) -> Result<Url, String> {
     let u = Url::parse(raw).map_err(|_| "Invalid website address.")?;
@@ -179,9 +238,30 @@ fn trusted_url(raw: &str, insecure: bool) -> Result<Url, String> {
 mod tests {
     use super::*;
     #[test]
+    fn native_login_refuses_a_foreign_account_region_and_supports_legacy_replies() {
+        let expected = shared::region::RegionId::from_market(shared::market::MARKET)
+            .unwrap_or(shared::region::RegionId::Global);
+        let endpoints = expected
+            .profile()
+            .endpoints(option_env!("OMOBA_DEFAULT_CONFIG_DIR_SUFFIX"));
+        let api = WebAccountApi::new(&endpoints.account_api, &endpoints.portal, false).unwrap();
+        let foreign = if expected == shared::region::RegionId::Ru {
+            shared::region::RegionId::Global
+        } else {
+            shared::region::RegionId::Ru
+        };
+        assert!(api.validate_account_region(Some(foreign)).is_err());
+        assert!(api.validate_account_region(Some(expected)).is_ok());
+        assert!(api.validate_account_region(None).is_ok());
+    }
+    #[test]
     fn dev_account_transport_rejects_runtime_cross_contour_overrides() {
-        let dev_api = "https://account.dev.omoba.io";
-        let dev_portal = "https://app.dev.omoba.io";
+        let endpoints = shared::region::RegionId::from_market(shared::market::MARKET)
+            .unwrap()
+            .profile()
+            .endpoints(Some("dev"));
+        let dev_api = endpoints.account_api.as_str();
+        let dev_portal = endpoints.portal.as_str();
         assert!(validate_contour_endpoints(Some("dev"), dev_api, dev_portal).is_ok());
         for (base, origin) in [
             ("https://account.omoba.io", dev_portal),
@@ -195,6 +275,18 @@ mod tests {
             assert!(validate_contour_endpoints(Some("dev"), base, origin).is_err());
             assert!(validate_contour_endpoints(None, base, origin).is_ok());
         }
+    }
+    #[test]
+    fn explicit_desktop_loopback_rehearsal_preserves_the_regional_boundary() {
+        assert!(
+            WebAccountApi::new("http://127.0.0.1:40550", "http://localhost:3010", true).is_ok()
+        );
+        assert!(
+            WebAccountApi::new("http://127.0.0.1:40550", "https://foreign.example", true).is_err()
+        );
+        assert!(
+            WebAccountApi::new("http://127.0.0.1:40550", "http://localhost:3010", false).is_err()
+        );
     }
     #[test]
     fn rejects_untrusted_urls() {

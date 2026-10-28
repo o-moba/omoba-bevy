@@ -1367,8 +1367,8 @@ mod tests {
     /// Production's party lobby has no server field or connection row; a
     /// contour build's names its running profile and opens the panel.
     #[test]
-    fn only_a_contour_build_lobby_shows_the_connection_row() {
-        use crate::connection_profile::{ActiveConnection, ProfileId};
+    fn no_player_build_lobby_exposes_a_server_or_connection_row() {
+        use crate::connection_profile::ActiveConnection;
         use crate::ui::test_id::harness;
         for contour in [None, Some("dev")] {
             let connection = ActiveConnection::for_contour(contour, None);
@@ -1383,7 +1383,7 @@ mod tests {
                 None,
                 crate::team::CharacterChoice::default(),
             );
-            assert_eq!(sig.connection, contour.map(|_| ProfileId::Dev));
+            assert_eq!(sig.connection, None);
             for phone in [false, true] {
                 let mut app = harness::kit_app();
                 app.add_ui_action::<LobbyAction>();
@@ -1401,12 +1401,8 @@ mod tests {
                         name.starts_with("LobbyServer") || name.starts_with("LobbyConnection")
                     })
                     .count();
-                assert_eq!(
-                    server_ui > 0,
-                    contour.is_some(),
-                    "{contour:?} phone {phone}"
-                );
-                if contour.is_some() {
+                assert_eq!(server_ui, 0, "{contour:?} phone {phone}");
+                if server_ui > 0 {
                     harness::press(app.world_mut(), "LobbyConnectionChange");
                     app.update();
                     assert_eq!(

@@ -1,8 +1,21 @@
 # Feature Inventory
 
+## Runtime account regions
+
+Default clients select RU or International before regional traffic and restore a
+returning account's region automatically. Lobby, Account API, portal, legal gate,
+Ekza features and purchase offers follow one immutable binding. Keys and saved
+state remain in separate regional folders; switching stops regional traffic and
+requires a cold restart. Player-facing raw server configuration is removed in
+production and dev. Native enrollment replies expose their owning region and
+foreign replies are rejected. Dev denies both production IPs. The focused native
+RU phone-preview harness exercises first confirmation and switching; full store
+rollout and physical devices remain release gates. See [profiles](connection-profiles.md)
+and [release preparation](plans/ru-release-2026-10-28.md).
+
 ## Markets and sign in with VK ID
 
-Each build serves one market: `global` (today's product), `ru` (Russian servers,
+Regional server/API builds and locked client packages serve one market: `global` (today's product), `ru` (Russian servers,
 no Ekza ecosystem, Hero Supporter auras sold only through YooKassa donations on
 the RU portal, Russian by default) or `cn`
 (prepared, not packaged yet). `release.py --market ru` makes the RU set with its

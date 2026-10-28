@@ -795,7 +795,7 @@ fn spawn_connection_panel(root: &mut ChildSpawnerCommands, view: &PanelView, ani
 
 /// Where a built-in profile points: lobby, registry, market, Studio, passport.
 fn spawn_details(body: &mut ChildSpawnerCommands, profile: &ConnectionProfile) {
-    for (key, value) in detail_rows(profile, shared::market::FEATURES.ekza) {
+    for (key, value) in detail_rows(profile, crate::account_region::features().ekza) {
         body.spawn(caption(
             Localized::with_args(key, [("value", &value)]),
             color::TEXT_SECONDARY,
@@ -1384,93 +1384,32 @@ mod tests {
     /// The panel saves a profile for the next start: it never reconnects this
     /// process, refuses production, and choosing the running profile cancels.
     #[test]
-    fn the_connection_panel_saves_a_profile_for_the_next_start_and_never_connects() {
-        use crate::connection_profile::load_selection;
-        let path = scratch_selection("actions");
-        let mut app = actions_app(ActiveConnection::for_contour(
-            Some("dev"),
-            Some(path.clone()),
-        ));
-        fn entry(app: &App) -> &ServerEntry {
-            app.world().resource::<ServerEntry>()
+    fn obsolete_server_actions_never_change_the_account_route_or_create_a_config() {
+        for contour in [None, Some("dev")] {
+            let path = scratch_selection("no-player-config");
+            let original = ActiveConnection::for_contour(contour, Some(path.clone()));
+            let mut app = actions_app(original.clone());
+            for action in [
+                PhoneAction::Server,
+                PhoneAction::Profile(ProfileId::Local),
+                PhoneAction::Use,
+                PhoneAction::Confirm,
+            ] {
+                press(&mut app, action);
+            }
+            assert!(!app.world().resource::<ServerEntry>().open);
+            assert_eq!(
+                app.world().resource::<ActiveConnection>().profile,
+                original.profile
+            );
+            assert!(!path.exists());
+            assert!(
+                app.world()
+                    .resource::<Messages<crate::net::SessionUiCommand>>()
+                    .is_empty()
+            );
+            std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
         }
-        fn connection(app: &App) -> ActiveConnection {
-            app.world().resource::<ActiveConnection>().clone()
-        }
-        press(&mut app, PhoneAction::Server);
-        assert!(entry(&app).open);
-        assert_eq!(entry(&app).choice, Some(ProfileId::Dev));
-        press(&mut app, PhoneAction::Profile(ProfileId::Local));
-        press(&mut app, PhoneAction::Use);
-        assert_eq!(
-            entry(&app).confirming.as_ref().map(|profile| profile.id),
-            Some(ProfileId::Local),
-            "a switch asks first"
-        );
-        assert_eq!(
-            load_selection(&path),
-            None,
-            "nothing saved before confirming"
-        );
-        press(&mut app, PhoneAction::Confirm);
-        assert_eq!(entry(&app).notice, Some("connection.notice.saved"));
-        assert_eq!(load_selection(&path).unwrap().profile, ProfileId::Local);
-        assert_eq!(
-            connection(&app).profile.id,
-            ProfileId::Dev,
-            "runs Dev until a restart"
-        );
-        assert_eq!(
-            connection(&app).pending.map(|profile| profile.id),
-            Some(ProfileId::Local)
-        );
-        // A custom production lobby is refused and marks the lobby field.
-        press(&mut app, PhoneAction::Profile(ProfileId::Custom));
-        app.world_mut().resource_mut::<ServerEntry>().lobby = "77.246.105.57:4000".into();
-        press(&mut app, PhoneAction::Use);
-        assert_eq!(
-            entry(&app).error,
-            Some(("connection.error.production", Some(CustomField::Lobby)))
-        );
-        assert!(entry(&app).confirming.is_none());
-        app.world_mut().resource_mut::<ServerEntry>().lobby = "192.168.1.20:4000".into();
-        app.world_mut().resource_mut::<ServerEntry>().registry = "https://registry.ekza.io".into();
-        press(&mut app, PhoneAction::Use);
-        assert_eq!(
-            entry(&app).error,
-            Some(("connection.error.production", Some(CustomField::Registry)))
-        );
-        app.world_mut()
-            .resource_mut::<ServerEntry>()
-            .registry
-            .clear();
-        press(&mut app, PhoneAction::Use);
-        assert_eq!(
-            entry(&app)
-                .confirming
-                .as_ref()
-                .map(|profile| profile.lobby.as_str()),
-            Some("192.168.1.20:4000")
-        );
-        press(&mut app, PhoneAction::Back);
-        assert!(entry(&app).confirming.is_none());
-        assert_eq!(load_selection(&path).unwrap().profile, ProfileId::Local);
-        // Choosing the running profile cancels the saved switch at once.
-        press(&mut app, PhoneAction::Profile(ProfileId::Dev));
-        press(&mut app, PhoneAction::Use);
-        assert_eq!(entry(&app).notice, Some("connection.notice.kept"));
-        assert_eq!(connection(&app).pending, None);
-        assert_eq!(load_selection(&path).unwrap().profile, ProfileId::Dev);
-        press(&mut app, PhoneAction::Use);
-        assert_eq!(entry(&app).notice, Some("connection.notice.current"));
-        assert!(
-            app.world()
-                .resource::<Messages<crate::net::SessionUiCommand>>()
-                .is_empty(),
-            "the panel never connects this process anywhere"
-        );
-        assert!(app.world().resource::<Messages<AppExit>>().is_empty());
-        let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 
     #[test]
@@ -1547,104 +1486,41 @@ mod tests {
     }
 
     #[test]
-    fn a_dev_build_offers_the_kit_connection_panel_and_no_presets() {
-        for phone in [false, true] {
-            let connection = ActiveConnection::for_contour(Some("dev"), None);
-            let mut app = phone_ui_app(phone, connection.clone());
-            app.update();
-            assert_eq!(
-                connection_ui(&mut app),
-                if phone {
-                    vec!["LegacyPhoneServerButton", "ServerEntryRoot"]
-                } else {
-                    vec!["ServerEntryRoot"]
-                },
-                "closed: only the root (and the legacy bar's button)"
-            );
-            app.world_mut()
-                .resource_mut::<ServerEntry>()
-                .open_for(&ClientSession::default(), &connection);
-            app.update();
-            let shown = connection_ui(&mut app);
-            for id in [
-                "ServerEntryPanel",
-                "ServerEntryClose",
-                "ConnectionProfileDev",
-                "ConnectionProfileLocal",
-                "ConnectionProfileCustom",
-                "ConnectionRunning",
-                "ConnectionUse",
-            ] {
-                assert!(shown.iter().any(|name| name == id), "{id} in {shown:?}");
+    fn no_player_build_exposes_raw_server_configuration_even_for_forced_open_state() {
+        for contour in [None, Some("dev")] {
+            for phone in [false, true] {
+                let connection = ActiveConnection::for_contour(contour, None);
+                let mut app = phone_ui_app(phone, connection.clone());
+                app.update();
+                app.world_mut()
+                    .resource_mut::<ServerEntry>()
+                    .open_for(&ClientSession::default(), &connection);
+                app.update();
+                assert!(connection_ui(&mut app).is_empty());
             }
-            for absent in [
-                "ConnectionProfileProduction",
-                "ConnectionLobbyField",
-                "ServerKeypad",
-                "ConnectionRestart",
-            ] {
-                assert!(!shown.iter().any(|name| name == absent), "{absent}");
-            }
-            assert!(!shown.iter().any(|name| name.contains("Preset")));
-            // The custom profile shows its fields, and the keypad on a phone.
-            app.world_mut().resource_mut::<ServerEntry>().choice = Some(ProfileId::Custom);
-            app.update();
-            let custom = connection_ui(&mut app);
-            for id in ["ConnectionLobbyField", "ConnectionRegistryField"] {
-                assert!(custom.iter().any(|name| name == id), "{id}");
-            }
-            assert_eq!(custom.iter().any(|name| name == "ServerKeypad"), phone);
-            // The typed text is written into the field in place.
-            app.world_mut().resource_mut::<ServerEntry>().lobby = "192.168.1.20:4000".into();
-            app.update();
-            let mut values = app.world_mut().query::<(&ConnectionFieldValue, &Text)>();
-            assert!(values.iter(app.world()).any(|(value, text)| {
-                value.0 == CustomField::Lobby && text.0 == "192.168.1.20:4000"
-            }));
-            // Exactly one panel after the rebuilds.
-            assert_eq!(
-                connection_ui(&mut app)
-                    .iter()
-                    .filter(|name| *name == "ServerEntryPanel")
-                    .count(),
-                1
-            );
-            app.world_mut().resource_mut::<ServerEntry>().open = false;
-            app.update();
-            assert!(
-                !connection_ui(&mut app)
-                    .iter()
-                    .any(|name| name == "ServerEntryPanel")
-            );
         }
     }
 
     #[test]
-    fn a_saved_switch_shows_as_pending_and_offers_a_desktop_restart() {
-        let path = scratch_selection("pending");
+    fn obsolete_custom_server_preferences_cannot_restore_a_configuration_panel() {
+        let path = scratch_selection("obsolete-switch");
         let mut connection = ActiveConnection::for_contour(Some("dev"), Some(path.clone()));
-        let local = connection
-            .candidate(ProfileId::Local, &CustomEndpoints::default())
+        connection
+            .choose(
+                connection
+                    .candidate(ProfileId::Local, &Default::default())
+                    .unwrap(),
+            )
             .unwrap();
-        connection.choose(local).unwrap();
         let mut app = phone_ui_app(false, connection.clone());
         app.update();
         app.world_mut()
             .resource_mut::<ServerEntry>()
             .open_for(&ClientSession::default(), &connection);
         app.update();
-        let shown = connection_ui(&mut app);
-        assert_eq!(
-            app.world().resource::<ServerEntry>().choice,
-            Some(ProfileId::Local),
-            "opens on the profile that runs next"
-        );
-        assert!(shown.iter().any(|name| name == "ConnectionPending"));
-        assert_eq!(
-            shown.iter().any(|name| name == "ConnectionRestart"),
-            crate::platform::CAN_RELAUNCH
-        );
-        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+        assert!(connection_ui(&mut app).is_empty());
+        assert!(!app.world().resource::<ServerEntry>().open);
+        std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
     }
 
     /// A gamepad back over the server entry closes the entry only; the pause
@@ -1839,7 +1715,7 @@ mod tests {
         found.sort();
         assert_eq!(found, ["HelpBody", "ShopCards"]);
         let mut roots = app.world_mut().query::<(&Name, &ModalRoot)>();
-        assert!(roots.iter(app.world()).any(
+        assert!(!roots.iter(app.world()).any(
             |(name, root)| name.as_str() == "ServerEntryRoot" && root.0 == ModalId::ServerEntry
         ));
     }

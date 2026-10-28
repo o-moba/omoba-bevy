@@ -440,7 +440,9 @@ pub async fn link(app: &App, body: &[u8]) -> Result<Value> {
     if row_text(&social, "state")? == "linked" {
         // A lost response: the same game confirming again sees the same outcome.
         if linked_to.as_deref() == Some(profile.as_str()) {
-            return Ok(json!({"state":"linked","profile_id":profile,"nickname":nickname}));
+            return Ok(
+                json!({"account_region":shared::market::MARKET.key(),"state":"linked","profile_id":profile,"nickname":nickname}),
+            );
         }
         return Err(conflict());
     }
@@ -485,7 +487,9 @@ pub async fn link(app: &App, body: &[u8]) -> Result<Value> {
         .execute(&mut *tx)
         .await?;
     tx.commit().await?;
-    Ok(json!({"state":"linked","profile_id":profile,"nickname":nickname}))
+    Ok(
+        json!({"account_region":shared::market::MARKET.key(),"state":"linked","profile_id":profile,"nickname":nickname}),
+    )
 }
 
 /// The pending sign-in a native status poll reports (`state: social_pending`).

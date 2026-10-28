@@ -794,7 +794,7 @@ class Markets(unittest.TestCase):
         self.assertIn("Vulkan", " ".join(release.ru_system_requirements("linux")))
 
     def test_the_global_and_dev_readmes_are_unchanged(self):
-        """LR-22 changes only the RU production README: these are the exact bytes before it."""
+        """Snapshots: global/dev stay stable; RU dev names its own regional lobby."""
         import hashlib
         cases = {("macos", release.PROD): "b946a7e6d96a2faa663c4977663c9cf308133e2c573ddfe76c8905b29ef44df3",
                  ("windows", release.PROD): "df78b7397b91bc0d4e018f7daa587b9b3d112ea88c4aedb622fc78da733bc410",
@@ -804,9 +804,9 @@ class Markets(unittest.TestCase):
                      "8aae7af23308babb6d39481e616ae57e1f405a222ad7b6c8741a0399dbe77f0b",
                  ("linux", release.resolve_flavor("dev")): "947518629a43e87e4007d491d405b1c5825b0f5d2089ccccd67bda9199292765",
                  ("linux", release.resolve_flavor("dev", market="ru")):
-                     "04d443ad9963a1ade074073d1055c0337865322c0ff18307fd0a5ddedc12e248",
+                     "af6d89ee25959d6a87f5c57a51bfe34b4fb88c4e109ac64a7638efe667f461bf",
                  ("macos", release.resolve_flavor("dev", market="ru")):
-                     "8e092002df7d674e1172b8fcb1442e34f652afbaaae82450f971f21f989bdd47"}
+                     "7de29675683164d5965a58e0afb447559f7e50b30c854fe114c1621159ffed78"}
         for (target, flavor), digest in cases.items():
             with self.subTest(target=target, contour=flavor.contour, market=flavor.market, server=flavor.server):
                 text = release.player_readme("0.45.0", target, flavor)
@@ -988,8 +988,9 @@ class Markets(unittest.TestCase):
         self.assertEqual(flavor.label, "-ru-dev")
         defaults = flavor.client_defaults()
         self.assertEqual(defaults["OMOBA_MARKET"], "ru")
-        self.assertEqual(defaults["OMOBA_DEFAULT_GAME_SERVER_ADDR"], release.DEV_LOBBY)
-        self.assertEqual(defaults["OMOBA_ACCOUNT_API_URL"], release.DEV_ACCOUNT_API)
+        self.assertEqual(defaults["OMOBA_DEFAULT_GAME_SERVER_ADDR"], release.DEV_RU_LOBBY)
+        self.assertEqual(defaults["OMOBA_ACCOUNT_API_URL"], release.DEV_RU_ACCOUNT_API)
+        self.assertEqual(defaults["OMOBA_PORTAL_ORIGIN"], release.DEV_RU_PORTAL_ORIGIN)
         self.assertNotIn("OMOBA_DEFAULT_REGISTRY_URL", defaults)
 
     def test_market_releases_use_their_own_tag_and_stay_off_the_workflow(self):

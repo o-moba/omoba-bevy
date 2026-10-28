@@ -1,101 +1,64 @@
-# Connection profiles, the OMOBA Dev app and its release
+# Account regions, connection profiles and the OMOBA Dev app
 
-OMOBA ships as two apps that install side by side on one computer, iPhone or
-Android phone:
+The player chooses an account region on first launch, before regional network
+traffic. Returning installations restore the authenticated account binding (or a
+single existing regional identity) automatically. Home, Party and phone controls
+show no IP, port, server field or Dev/Local/Custom selector in either contour.
+Settings → Account region is available outside an active match or purchase; it
+preserves both profiles and requires a cold restart. The restart card blocks all
+regional traffic. Desktop Restart starts a new process and exits the old one;
+phones must close and reopen the app.
 
-| | OMOBA (production) | OMOBA Dev (dev contour) |
+`shared/src/region.rs` owns the endpoint sets. A process binds exactly once.
+`client/src/account_region.rs` stores bounded, private device metadata in
+`omoba-bevy-device[-contour]/account_region.json`: schema, selected region,
+pending switch and the authenticated public key/profile/region binding. No private
+key or bearer credential belongs there. A corrupt record asks again. Credentials
+are never submitted to two backends to discover an account's region.
+
+| Account | Production lobby / API / portal | Dev lobby / API / portal |
 | --- | --- | --- |
-| Build | default | `--contour dev` (`OMOBA_DEFAULT_CONFIG_DIR_SUFFIX=dev`) |
-| iOS / Android id | `space.ekza.omoba.beta`, "Omoba Beta" | `space.ekza.omoba.dev`, "OMOBA Dev" |
-| Desktop | `Omoba.app`, `space.ekza.omoba.desktop` | `Omoba Dev.app`, `space.ekza.omoba.desktop.dev`, `-dev` packages |
-| Icon | production icon | the same icon with a red DEV ribbon (`scripts/make_dev_icons.py`) |
-| Settings folder | `omoba-bevy` | `omoba-bevy-dev` |
-| Marking | none | window title `OMOBA DEV`, `DEV` badge and profile badge on Home, `DEV` under the match score strip |
-| Servers | production lobby and Ekza registry, always | the selected connection profile |
-| Server UI | none | Home → Connection, Party → Connection → Change |
+| International | `77.246.105.57:4000`, `account.omoba.io`, `app.omoba.io` | `lobby.dev.omoba.io:4100`, `account.dev.omoba.io`, `app.dev.omoba.io` |
+| RU | `lobby.omoba.ru:4000`, `account.omoba.ru`, `omoba.ru` | `lobby.dev.omoba.ru:4100`, `account.dev.omoba.ru`, `dev.omoba.ru` |
 
-The identities live in `scripts/contours.py`, shared by `scripts/release.py`,
-`mobile/android/build.py` and the Xcode build phase (`mobile/ios/xcode_build.py`).
+These are routing targets, not a claim that all services are deployed. The RU dev
+authority requires provisioning; unavailable RU services never fall back to global.
+See the [RU release gates](plans/ru-release-2026-10-28.md).
 
-## Production: no server selection
+Region folders preserve existing installations: `omoba-bevy`, `omoba-bevy-ru`
+(and `-dev` forms). Each owns its key, legal acceptance, preferences, account link,
+caches and match resume. With `OMOBA_CLIENT_CONFIG_DIR`, International retains the
+legacy root and the unified client's RU state uses `regions/ru`; locked RU packages
+retain their legacy root. Device-wide preference migration and iOS Keychain
+persistence from the full LR-68 plan remain future work.
 
-A production build has exactly one profile (`client/src/connection_profile.rs`):
-the compiled lobby (`77.246.105.57:4000` unless a release passes `--server`), the
-registry `https://registry.ekza.io`, the passport `https://avatar.ekza.io/api/passport`,
-the market `app.omoba.io/market`. It spawns no server field, preset, SERVER button
-or connection panel on desktop or phone, in Home, the party lobby or the legacy
-phone bar (tests: `production_builds_spawn_no_server_or_connection_ui_on_desktop_or_phone`,
-`only_a_contour_build_offers_the_connection_button_and_profile_badge`). The
-`game_server_addr` an older build saved is no longer read, so it cannot pin a
-build that has no way to change it. Likewise a match-resume hint
-(`match-resume.json`) is only offered when it names the lobby this process connects
-to; a hint an older build saved for a custom, LAN or local lobby is deleted at start
-instead of sending the player back there (`a_hint_for_another_lobby_is_dropped_and_deleted`).
+Production and dev are separate app identities (`scripts/contours.py`); dev retains
+its DEV markings. Both known production IPs, `77.246.105.57` and
+`212.113.117.105`, are denied in dev, including worker redirects. A bound region
+also refuses known foreign-region lobby hosts. This static host policy is not a
+signed server directory or a defense against arbitrary DNS rebinding.
 
-Developers and self-hosters of this open-source game override the endpoints on a
-**desktop** with environment variables (phones read none):
+Desktop developers can explicitly set `GAME_SERVER_ADDR`, `OMOBA_REGISTRY_URL`,
+`OMOBA_PASSPORT_URL` and `OMOBA_CLIENT_CONFIG_DIR`; phones ignore endpoint runtime
+overrides. Contour and known foreign-host guards still apply. Account API and
+portal overrides after binding are limited to explicit insecure loopback rehearsals
+(`OMOBA_ALLOW_INSECURE_LOCAL=1`, both endpoints loopback). RU disables Ekza and pins
+its registry/passport to closed loopback. Existing raw-profile resolver helpers
+remain internal for tooling/tests; saved `connection_profile.json` cannot reroute a
+player installation.
 
-| Variable | Overrides |
-| --- | --- |
-| `GAME_SERVER_ADDR=host:port` | the lobby (`make game` sets `127.0.0.1:4000`) |
-| `OMOBA_REGISTRY_URL=https://…` | the Ekza registry (stores, account link) |
-| `OMOBA_PASSPORT_URL=https://…/api/passport` | the Ekza passport (also `EKZA_PASSPORT_URL`) |
-| `OMOBA_CLIENT_CONFIG_DIR=/path` | the settings folder |
+`OMOBA_MARKET=ru` remains a locked RU client/server/API packaging option. Default
+clients register the union of regional plugins and gate integrations at runtime.
+Account API device replies include `account_region`; native clients reject a
+foreign region before accepting a reply. An older API may omit the field while
+its exact trusted regional origin continues to define the boundary.
 
-The desktop OMOBA Dev app reads the same variables over its running profile,
-but ignores one that names a production lobby, registry or passport (the same
-refusal as a custom profile).
-
-A build without Ekza (`OMOBA_MARKET=ru` or `cn`, or `OMOBA_FEATURE_EKZA=off`)
-runs every profile with the closed loopback registry (`http://127.0.0.1:9`) and
-passport, no market and no Studio, and ignores `OMOBA_REGISTRY_URL` and
-`OMOBA_PASSPORT_URL`; the connection panel of such a dev app shows only the
-lobby. Its settings folder carries the market (`omoba-bevy-ru`,
-`omoba-bevy-ru-dev`). See `shared/src/market.rs`.
-
-A self-hosted production build can also compile its own lobby and registry:
-`scripts/release.py build <platform> --server host:port --registry https://…`.
-
-## Dev: profiles Dev, Local, Custom
-
-| Profile | Lobby | Registry | Market | Studio | Passport |
-| --- | --- | --- | --- | --- | --- |
-| **Dev** (default) | `lobby.dev.omoba.io:4100` (or the build's `--server`) | `https://registry.dev.ekza.io` | `app.dev.omoba.io/market` | `hub.dev.ekza.io/studio` (the Ekza Hub) | closed (`http://127.0.0.1:9/api/passport`) |
-| **Local** | `127.0.0.1:4000` | `http://127.0.0.1:8018` | `127.0.0.1:3010/market` | `127.0.0.1:5188/studio` | closed |
-| **Custom** | typed `host:port` | typed origin, optional (else Dev's) | Dev's | Dev's | closed |
-
-There is no Production profile in the dev app. A custom lobby or registry that is
-the production VPS (any port) or a production `omoba.io` / `ekza.io` name is refused
-(`connection.error.production`), the same rule (`endpoint_allowed_for`) that already
-refuses production for `GAME_SERVER_ADDR` and match allocations. A registry is
-`https://` anywhere or `http://` on loopback only, without credentials, path, query
-or fragment (the SDK's rule).
-
-**Switching.** The Connection panel (kit modal: profile tiles, the profile's
-endpoints, custom text fields, a numeric keypad on phones) shows the running profile.
-**Use** asks to confirm; **Switch** saves the choice in
-`<settings>/connection_profile.json`. The switch applies **at the next start**: the
-Ekza stores, the account link and the `ekza://` asset source open once per process,
-so the running game never mixes two registries. On a desktop **Restart now** starts
-a fresh copy and exits; on a phone close the app and open it again. Choosing the
-running profile cancels a saved switch. Home shows the running profile next to the
-DEV badge.
-
-**Per-profile state.** Each profile keeps its own folder,
-`<settings>/profiles/<dev|local|custom-<hash>>/`, holding the Ekza account link
-(`ekza-store/account/session.json`; the SDK refuses a link for another registry),
-the avatar and weapon store caches (`ekza-store/`) and the match-resume hint. A
-custom profile's folder is keyed by its lobby and registry, so another custom server
-never sees its link. Graphics, audio, language, the profile card and the career
-identity stay shared. A dev build from before profiles kept its store in
-`<settings>/ekza-store`; the Dev profile adopts it once. Production keeps everything
-in the settings folder itself, as before.
-
-**Tests.** CI's `client in the dev contour` job compiles the client with the OMOBA
-Dev app's defaults (`scripts/contours.py`), runs both client clippy variants and
-`cargo test -p client` in a scratch `OMOBA_CLIENT_CONFIG_DIR`; the other jobs cover
-production. Unit tests never read a saved `connection_profile.json`, so a local
-dev-contour run is the Dev profile whatever the developer chose in their own app.
+Focused QA: a dev-contour native client with `OMOBA_ACCOUNT_REGION_QA=<output>`,
+`OMOBA_CLIENT_CONFIG_DIR=<empty scratch folder>`, `OMOBA_TOUCH_CONTROLS=1`,
+`OMOBA_LANGUAGE=ru`, `OMOBA_OFFLINE_PRACTICE=1` verifies first RU confirmation,
+late identity initialization and a blocked cold switch at 852×393. It writes two
+screenshots and a JSON result. This is a desktop phone preview, not a physical
+phone test.
 
 ## Building and releasing the dev app
 
@@ -123,8 +86,7 @@ python3 scripts/release.py ci --contour dev --ref v<version>-dev.1   # desktop +
   `OMOBA_GAME_SERVER` on the `xcodebuild` command line (empty server for production
   without `--server`), so these Xcode-run lines never reach a release archive, and it
   refuses an archive whose bundle id is not the requested app's. The LAN rehearsal
-  (`.ekza-lan/client.json`) applies to the production app's Debug runs only; the dev
-  app has Local and Custom.
+  (`.ekza-lan/client.json`) applies to the production app's Debug runs only; desktop dev rehearsals use explicit environment overrides.
 - Icons: `python3 scripts/make_dev_icons.py` regenerates the dev icons from the
   production ones (stdlib only, deterministic); `--check` and
   `scripts/test_dev_icons.py` fail when a committed icon is stale.
@@ -154,5 +116,5 @@ python3 scripts/release.py ci --contour dev --ref v<version>-dev.1   # desktop +
    (or the dev CI run), then `adb install -r dist/v<version>-dev/Omoba-<version>-dev-android-arm64.apk`
    or open the APK on the phone. It installs next to the production app
    (different package); uninstalling one never touches the other's data.
-6. **First start.** The dev app opens on the Dev profile. Home → Connection to pick
-   Local or Custom; confirm and restart.
+6. **First start.** Confirm an account region; returning installations restore it.
+   Settings → Account region changes it after a cold restart.

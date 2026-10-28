@@ -593,8 +593,11 @@ fn career_qa_capture() -> bool {
         && std::env::var_os("OMOBA_CAREER_QA_OUTPUT").is_some_and(|value| !value.is_empty())
 }
 
-fn load_identity(mut identity: ResMut<CareerIdentity>, mut career: ResMut<CareerClient>) {
-    if career_qa_capture() {
+pub(crate) fn load_identity(
+    mut identity: ResMut<CareerIdentity>,
+    mut career: ResMut<CareerClient>,
+) {
+    if career_qa_capture() || !crate::account_region::bound() {
         return;
     }
     let Some(directory) = identity_directory() else {
@@ -682,6 +685,13 @@ fn identity_driver(
         && career.view.auth_nonce.as_ref() == Some(&challenge.nonce)
         && career.view.profile.is_some()
     {
+        if identity.auth_nonce.is_none() {
+            if let (Ok(public_key), Some(profile)) =
+                (identity.public_key(), career.view.profile.as_ref())
+            {
+                crate::account_region::remember_account(&public_key, &profile.profile_id);
+            }
+        }
         identity.auth_nonce = Some(challenge.nonce.clone());
     }
     if identity.auth_nonce.is_some() {

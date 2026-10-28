@@ -32,10 +32,12 @@ impl DeviceAccountApi {
             DeviceAction::Recover => "v1/auth/devices/recover",
             DeviceAction::Complete => "v1/auth/devices/complete",
         };
-        self.inner.request(
+        let reply: DeviceEnrollmentStatus = self.inner.request(
             path,
             serde_json::to_value(proof).map_err(|_| "Invalid device request.")?,
-        )
+        )?;
+        self.inner.validate_account_region(reply.account_region)?;
+        Ok(reply)
     }
     /// Link the website sign-in waiting on an enrollment to this game's profile.
     pub fn link_social(&self, proof: &SignedSocialLink) -> Result<DeviceEnrollmentStatus, String> {
@@ -47,10 +49,12 @@ impl DeviceAccountApi {
             .link
             .validate(self.origin(), now)
             .map_err(str::to_owned)?;
-        self.inner.request(
+        let reply: DeviceEnrollmentStatus = self.inner.request(
             "v1/auth/social/link",
             serde_json::to_value(proof).map_err(|_| "Invalid sign-in link.")?,
-        )
+        )?;
+        self.inner.validate_account_region(reply.account_region)?;
+        Ok(reply)
     }
     /// This game's account protection, or a new set of recovery codes (LR-18),
     /// signed by its active key.

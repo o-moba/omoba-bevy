@@ -112,7 +112,11 @@ fn config_directory_name(market: shared::market::Market, suffix: Option<&str>) -
 /// The OS-owned writable directory for settings, excluding the filename.
 /// The explicit OMOBA_CLIENT_CONFIG_DIR override remains in persistence.rs.
 pub fn preferences_directory() -> Option<PathBuf> {
-    let name = config_directory_name(shared::market::MARKET, CONFIG_DIR_SUFFIX);
+    preferences_directory_for(shared::region::market())
+}
+
+pub(crate) fn preferences_directory_for(market: shared::market::Market) -> Option<PathBuf> {
+    let name = config_directory_name(market, CONFIG_DIR_SUFFIX);
     #[cfg(target_os = "android")]
     {
         bevy::android::ANDROID_APP
@@ -148,7 +152,7 @@ pub fn preferences_file_path(
     platform_directory: Option<PathBuf>,
     filename: &str,
 ) -> Option<PathBuf> {
-    settings_directory_from(override_directory, platform_directory)
+    runtime_directory(override_directory, platform_directory)
         .map(|directory| directory.join(filename))
 }
 
@@ -165,8 +169,25 @@ pub fn settings_directory_from(
 }
 
 /// This process's settings folder (`OMOBA_CLIENT_CONFIG_DIR`, else the OS one).
+fn runtime_directory(
+    override_directory: Option<&str>,
+    platform_directory: Option<PathBuf>,
+) -> Option<PathBuf> {
+    let directory = settings_directory_from(override_directory, platform_directory)?;
+    if override_directory.is_some_and(|s| !s.trim().is_empty()) {
+        Some(crate::account_region::override_directory(
+            directory,
+            shared::region::RegionId::from_market(shared::region::market())
+                .unwrap_or(shared::region::RegionId::Global),
+            shared::market::MARKET,
+        ))
+    } else {
+        Some(directory)
+    }
+}
+
 pub fn settings_directory() -> Option<PathBuf> {
-    settings_directory_from(
+    runtime_directory(
         std::env::var("OMOBA_CLIENT_CONFIG_DIR").ok().as_deref(),
         preferences_directory(),
     )
@@ -357,7 +378,7 @@ mod tests {
         // `omoba-bevy-dev` when OMOBA_DEFAULT_CONFIG_DIR_SUFFIX=dev, `omoba-bevy-ru`
         // when OMOBA_MARKET=ru.
         let expected = config_directory_name(
-            shared::market::MARKET,
+            shared::region::market(),
             option_env!("OMOBA_DEFAULT_CONFIG_DIR_SUFFIX"),
         );
         if let Some(directory) = preferences_directory() {

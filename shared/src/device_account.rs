@@ -80,6 +80,10 @@ pub struct SignedDeviceEnrollment {
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct DeviceEnrollmentStatus {
+    /// The regional authority that owns this account. Missing on older APIs;
+    /// their trusted portal origin still supplies the region boundary.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account_region: Option<crate::region::RegionId>,
     pub state: String,
     pub code: Option<String>,
     pub profile_id: Option<String>,

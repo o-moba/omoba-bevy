@@ -1857,7 +1857,7 @@ mod tests {
     /// Production Home has no server button anywhere; a contour build's Home
     /// opens the connection panel and names its running profile beside DEV.
     #[test]
-    fn only_a_contour_build_offers_the_connection_button_and_profile_badge() {
+    fn player_builds_hide_server_configuration_and_keep_the_dev_badge() {
         use crate::connection_profile::ActiveConnection;
         use crate::ui::test_id::harness;
         for (contour, profile) in [
@@ -1888,9 +1888,8 @@ mod tests {
                 .collect();
             let has = |id: &str| names.iter().any(|name| name == id);
             let dev = contour.is_some();
-            assert_eq!(
-                has("HomeServer") || has("PhoneServerButton"),
-                dev,
+            assert!(
+                !(has("HomeServer") || has("PhoneServerButton")),
                 "{contour:?}"
             );
             assert_eq!(has("ContourBadge"), dev);
@@ -1900,7 +1899,7 @@ mod tests {
     }
 
     #[test]
-    fn the_connection_button_opens_the_panel_only_in_a_contour_build() {
+    fn legacy_server_action_cannot_open_configuration_in_any_player_build() {
         use crate::connection_profile::ActiveConnection;
         use crate::ui::test_id::harness;
         for contour in [None, Some("dev")] {
@@ -1921,10 +1920,7 @@ mod tests {
                 source: Entity::PLACEHOLDER,
             });
             app.update();
-            assert_eq!(
-                app.world().resource::<crate::mobile_ui::ServerEntry>().open,
-                contour.is_some()
-            );
+            assert!(!app.world().resource::<crate::mobile_ui::ServerEntry>().open);
             assert!(
                 app.world()
                     .resource::<Messages<crate::net::SessionUiCommand>>()

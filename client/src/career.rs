@@ -746,7 +746,7 @@ fn actions(
         protection::act(action, &mut career, &identity, &mut protection_worker);
         match action {
             // A build without Supporter has no panel to open.
-            Action::Supporter if !shared::market::FEATURES.supporter => {}
+            Action::Supporter if !crate::account_region::features().supporter => {}
             Action::Supporter => {
                 career.close();
                 if let Some(state) = supporter.as_deref_mut() {
@@ -1800,7 +1800,7 @@ fn profile_body(parent: &mut ChildSpawnerCommands, career: &CareerClient) {
             ..default()
         })
         .with_children(|row| {
-            for (key, action, name) in account_links(shared::market::FEATURES) {
+            for (key, action, name) in account_links(crate::account_region::features()) {
                 button(row, tr(key), action, name);
             }
         });
@@ -3848,6 +3848,7 @@ mod tests {
         {
             let mut career = app.world_mut().resource_mut::<CareerClient>();
             career.devices.status = Some(shared::device_account::DeviceEnrollmentStatus {
+                account_region: None,
                 state: "pending".into(),
                 code: Some("ABCDEFGH".into()),
                 profile_id: None,

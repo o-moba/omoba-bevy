@@ -20,7 +20,7 @@ use std::time::{Duration, Instant};
 /// How often a VK sign-in request is checked while the browser is open.
 const SOCIAL_POLL: Duration = Duration::from_secs(3);
 
-/// Whether this build offers "Sign in with VK ID" (`shared::market::FEATURES`).
+/// Whether this build offers "Sign in with VK ID" (`crate::account_region::features()`).
 pub(super) fn vk_button_visible(features: shared::market::Features) -> bool {
     features.vk_sign_in
 }
@@ -582,7 +582,7 @@ pub(super) fn body(parent: &mut ChildSpawnerCommands, career: &CareerClient) {
     // Three equal ways in (LR-68 rules): the website (VK ID) where the region
     // signs in with it, a saved recovery code, another device.
     if !state.busy && !state.restart_required {
-        if vk_button_visible(shared::market::FEATURES) {
+        if vk_button_visible(crate::account_region::features()) {
             button(
                 parent,
                 tr("devices.button.vk"),
@@ -643,6 +643,7 @@ mod social_tests {
 
     fn status(state: &str, code: Option<&str>, profile: Option<&str>) -> DeviceEnrollmentStatus {
         DeviceEnrollmentStatus {
+            account_region: None,
             state: state.into(),
             code: code.map(str::to_owned),
             profile_id: profile.map(str::to_owned),
@@ -685,7 +686,7 @@ mod social_tests {
         }
         assert_eq!(
             options.iter().any(|found| found == "DeviceVkSignIn"),
-            vk_button_visible(shared::market::FEATURES)
+            vk_button_visible(crate::account_region::features())
         );
         {
             let mut career = app.world_mut().resource_mut::<CareerClient>();

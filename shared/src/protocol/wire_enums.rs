@@ -133,6 +133,10 @@ const NOT_UDP_WIRE: &[(&str, &str)] = &[
         "local client diagnosis and operator JSON, not a UDP field",
     ),
     ("DeviceAction", "account-api HTTP contract"),
+    (
+        "RegionId",
+        "native account HTTP contract and local routing metadata",
+    ),
     ("RecoveryAction", "account-api HTTP contract"),
     ("NativeSupporterAction", "account-api HTTP contract"),
     ("WebPairDecision", "account-api HTTP contract"),

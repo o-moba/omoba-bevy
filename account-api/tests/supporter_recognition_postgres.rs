@@ -1,4 +1,6 @@
 //! Synthetic paid periods in an explicitly isolated loopback PostgreSQL database.
+mod common;
+
 use axum::{
     body::{Body, to_bytes},
     extract::ConnectInfo,
@@ -22,7 +24,7 @@ async fn app() -> App {
         matches!(
             (options.get_port(), options.get_database()),
             (55581, Some("hero_tests")) | (5432, Some("omoba_test"))
-        ),
+        ) || common::launcher_database(&options),
         "Only the dedicated disposable Hero or CI test database"
     );
     migrate(&url).await.unwrap();

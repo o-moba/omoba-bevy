@@ -15,18 +15,10 @@
 //! - The QA harnesses override `WinitSettings` with `continuous()`, after
 //!   `platform::configure_app` and `DefaultPlugins`.
 //!
-//! The build's market (`shared::market::FEATURES`) disables whole plugins
-//! rather than gating their systems: without Ekza no `SponsorshipPlugin`
-//! (registry-served community sculptures), without Supporter neither
-//! `SupporterPlugin` nor `SupporterStoreKitPlugin` (the StoreKit tick reads the
-//! first one's resources), and `SupporterStoreKitPlugin` only where the market
-//! sells through Apple (an RU build renders auras and links to the portal, but
-//! has no StoreKit bridge; LR-67). Disabled plugins keep their place in the order.
-//!
-//! Nothing else reads the world inside `build`. The debug tooling
-//! (`SandboxPlugin`, `DebugAccessPlugin`, `PracticeSandboxPlugin`,
-//! `GodModePlugin`, `DebugConsolePlugin`) is `DebugPlugins`, right after `GameplayPlugins`
-//! (where it used to be last), so the build order is unchanged.
+//! Default clients register the union of regional plugins so first confirmation
+//! can bind either region without rebuilding the app. Runtime conditions stop
+//! inactive integrations, including every Ekza call while unbound or in RU.
+//! The group helpers still accept feature/provider sets for isolated market tests.
 
 use bevy::app::{PluginGroup, PluginGroupBuilder};
 use shared::market::{Features, PaymentProvider};
@@ -91,6 +83,7 @@ pub(crate) struct NetPlugins;
 impl PluginGroup for NetPlugins {
     fn build(self) -> PluginGroupBuilder {
         PluginGroupBuilder::start::<Self>()
+            .add(crate::account_region::AccountRegionPlugin)
             .add(crate::legal::LegalPlugin)
             .add(ClientPersistencePlugin)
             .add(NetworkingPlugin)
@@ -138,7 +131,11 @@ pub(crate) struct PresentationPlugins;
 
 impl PluginGroup for PresentationPlugins {
     fn build(self) -> PluginGroupBuilder {
-        presentation_plugins(shared::market::FEATURES)
+        presentation_plugins(Features {
+            ekza: true,
+            supporter: true,
+            vk_sign_in: true,
+        })
     }
 }
 
@@ -190,8 +187,16 @@ pub(crate) struct UiPlugins;
 impl PluginGroup for UiPlugins {
     fn build(self) -> PluginGroupBuilder {
         ui_plugins(
-            shared::market::FEATURES,
-            shared::market::payment_providers(),
+            Features {
+                ekza: true,
+                supporter: true,
+                vk_sign_in: true,
+            },
+            &[
+                PaymentProvider::Apple,
+                PaymentProvider::Solana,
+                PaymentProvider::YooKassa,
+            ],
         )
     }
 }

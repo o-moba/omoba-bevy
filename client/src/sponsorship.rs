@@ -26,6 +26,8 @@ impl Plugin for SponsorshipPlugin {
                 Update,
                 (poll, reconcile, animation_library, bind_animation)
                     .chain()
+                    .run_if(crate::legal::bound_and_accepted)
+                    .run_if(|| crate::account_region::features().ekza)
                     .before(crate::input_context::InputContextSet::Modal),
             );
     }
