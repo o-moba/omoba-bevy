@@ -1,8 +1,9 @@
 //! Practice-only server controllers. Actors use ordinary hero movement, attacks,
 //! resources and receipts; internal addresses are never network endpoints.
+use shared::clock::Instant;
 use std::collections::{HashMap, VecDeque};
 use std::net::SocketAddr;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use shared::bot_profile::BotDifficulty;
 use shared::map::{Lane, Team};

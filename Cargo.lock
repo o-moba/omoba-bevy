@@ -4692,6 +4692,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "omoba-browser"
+version = "0.45.0"
+dependencies = [
+ "bevy",
+ "common",
+ "serde_json",
+ "shared",
+]
+
+[[package]]
 name = "omoba-career-store"
 version = "0.45.0"
 dependencies = [
@@ -5685,6 +5695,7 @@ dependencies = [
 name = "shared"
 version = "0.45.0"
 dependencies = [
+ "bevy",
  "serde",
  "serde_json",
 ]

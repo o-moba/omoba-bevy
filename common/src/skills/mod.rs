@@ -1,8 +1,9 @@
 //! Bounded, authoritative execution of resolved skill definitions.
 //! Presets choose IDs; this module dispatches reusable effects, never hero classes.
+use shared::clock::Instant;
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::SocketAddr;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use shared::combat::{CombatEntityKind, CombatEvent, ProjectileStyle};
 use shared::loadout::{

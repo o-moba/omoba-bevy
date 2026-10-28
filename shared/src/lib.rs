@@ -10,6 +10,7 @@ use std::time::Duration;
 pub mod bot_profile;
 pub mod career;
 pub mod catalog;
+pub mod clock;
 pub mod combat;
 pub mod compatibility;
 pub mod debug;

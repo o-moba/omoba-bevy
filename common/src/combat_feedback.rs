@@ -1,7 +1,8 @@
 //! HP-loss receipts and explicit trap activations are retained briefly for UDP loss.
+use shared::clock::Instant;
 use std::collections::{HashMap, VecDeque};
 use std::net::SocketAddr;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use shared::combat::{CombatEntity, CombatEntityKind, CombatEvent, MinionKind, ProjectileStyle};
 use shared::wire::{ProjectileState, TargetId};

@@ -1,7 +1,8 @@
 //! Authoritative gameplay command entry, after host admission and pause policy.
 use crate::game_world::GameWorld;
+use shared::clock::Instant;
 use shared::wire::{ClientPacket, GameState};
-use std::{net::SocketAddr, ops::ControlFlow, time::Instant};
+use std::{net::SocketAddr, ops::ControlFlow};
 
 pub fn apply(
     world: &mut GameWorld,

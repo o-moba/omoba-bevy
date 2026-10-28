@@ -1,6 +1,7 @@
 //! Match-scoped utilities. Dash blinks through obstacles to a clear landing.
+use shared::clock::Instant;
 use std::collections::HashMap;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use shared::utility::*;
 use shared::wire::GameState;

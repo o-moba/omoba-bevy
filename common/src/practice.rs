@@ -4,8 +4,8 @@
 //! `place_dummy`) and the bot AI stay in `crate::bots`; the offline
 //! simulation implements the same commands for itself
 //! (`client/src/net/offline.rs`).
+use shared::clock::Instant;
 use std::net::SocketAddr;
-use std::time::Instant;
 
 use shared::HeroClass;
 use shared::debug::{DUMMY_DISTANCE, DUMMY_MAX_HP};

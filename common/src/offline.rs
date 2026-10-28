@@ -7,16 +7,14 @@ use crate::{
     host::CombatHost,
     match_rules::{MatchMode, MatchRules},
 };
+use shared::clock::Instant;
 use shared::{
     bot_profile::BotDifficulty,
     debug::{DebugAccess, DebugCommand, OFFLINE_PRACTICE_MODE},
     protocol::{JoinRejection, SnapshotMeta},
     wire::{ClientPacket, GameState, ServerPacket},
 };
-use std::{
-    net::SocketAddr,
-    time::{Duration, Instant},
-};
+use std::{net::SocketAddr, time::Duration};
 pub const START_LEVEL: u32 = 6;
 pub const EPOCH: u64 = u64::MAX;
 pub const LOCAL_ADDR: SocketAddr =

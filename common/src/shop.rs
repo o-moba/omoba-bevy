@@ -199,9 +199,10 @@ pub fn accrue_passive_gold(
 mod economy_tests {
     use super::*;
     use crate::game_world::GameWorld;
+    use shared::clock::Instant;
     use shared::combat::{CombatEntity, CombatEntityKind, CombatEvent};
     use shared::shop::ItemId::*;
-    use std::time::{Duration, Instant};
+    use std::time::Duration;
 
     fn fixture() -> (GameWorld, SocketAddr, Instant) {
         let now = Instant::now();

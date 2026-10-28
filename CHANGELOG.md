@@ -5,6 +5,14 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Browser practice: an additive Bevy/WebGL 2 renderer runs the existing OMOBA
+  authoritative practice simulation in WASM, with seven standard classes, bots,
+  the shipped Verdant 2D art, movement, Q/W/E/R combat, dash, recall, pause and
+  restart. It has no socket, credentials, career writes or rating rewards.
+  `scripts/build-web.sh` produces a lazy-loadable same-origin `/game/` bundle.
+  Native simulation clocks keep the exact standard-library type. See
+  [browser practice](docs/browser-practice.md) for build and scope.
+
 - Native screenshot/demo launchers seed an isolated returning Global account-region fixture so their ordinary screen captures keep working after first-launch region confirmation. Existing fixture state is preserved; first-launch QA stays empty.
 
 - 0.45.0: default native clients bind an account region (RU or International)
