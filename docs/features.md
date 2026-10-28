@@ -1,5 +1,15 @@
 # Feature Inventory
 
+## RU website and native registration
+
+Website-first VK ID, OK and Mail.ru sign-in creates one default-stat regional
+profile/session; repeat sign-in returns the same profile. Game-initiated unknown
+subjects still require the active game's explicit signed link to preserve progress.
+Device review binds the expected profile, temporary polling errors are recoverable,
+status traffic cannot consume completion quota, and revoked keys cannot race a new
+social link. See [registration](registration.md) for schema 10, source boundaries,
+real local browser/signed-game proof and remaining live-provider rollout gates.
+
 ## Runtime account regions
 
 Native capture launchers seed a returning Global routing record in their own
@@ -23,9 +33,10 @@ no Ekza ecosystem, Hero Supporter auras sold only through YooKassa donations on
 the RU portal, Russian by default) or `cn`
 (prepared, not packaged yet). `release.py --market ru` makes the RU set with its
 own servers, settings folder and Android app. RU players sign in with VK ID
-(VK, OK, Mail.ru) on the RU portal and from Profile in the game; the game's
-device key stays the account, and a VK sign-in is linked to a profile only after
-the game confirms. On the RU host the portal calls the Account API on loopback
+(VK, OK, Mail.ru) on the RU portal and from Profile in the game. Website registration
+can create a profile before a device exists; game-initiated linking preserves its
+existing profile only after the active game key confirms. Game authentication uses
+the enrolled device key. On the RU host the portal calls the Account API on loopback
 and forwards each player's address, so sign-in limits stay per player;
 `release.py preflight --market ru` checks that path
 ([topology](../ops/vps/ru/README.md#topology)). One tool, `ops/vps/ru/ru_host.py`,

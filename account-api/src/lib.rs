@@ -38,11 +38,13 @@ pub const PORTAL_MIGRATION: &str = include_str!("../migrations/001_portal.sql");
 pub const EKZA_LIBRARY_MIGRATION: &str = include_str!("../migrations/005_ekza_library.sql");
 pub const CLASS_BUILDS_MIGRATION: &str = include_str!("../migrations/004_class_builds.sql");
 pub const SOCIAL_MIGRATION: &str = include_str!("../migrations/007_social_sign_in.sql");
+pub const SOCIAL_REGISTRATION_MIGRATION: &str =
+    include_str!("../migrations/010_social_registration.sql");
 /// Portal schema 9 (LR-67): YooKassa supporter donations and Hero tier points.
 /// Number 8 is reserved for LR-20 feedback (launch-readiness section 7).
 pub const YOOKASSA_MIGRATION: &str = include_str!("../migrations/009_yookassa_supporter.sql");
 /// Every portal schema version this build serves, in order.
-pub const PORTAL_SCHEMA: [i32; 8] = [1, 2, 3, 4, 5, 6, 7, 9];
+pub const PORTAL_SCHEMA: [i32; 9] = [1, 2, 3, 4, 5, 6, 7, 9, 10];
 #[derive(Clone)]
 pub struct Config {
     pub origin: String,
@@ -251,6 +253,7 @@ pub async fn migrate(url: &str) -> std::result::Result<(), String> {
         (6, SUPPORTER_RECOGNITION_MIGRATION),
         (7, SOCIAL_MIGRATION),
         (9, YOOKASSA_MIGRATION),
+        (10, SOCIAL_REGISTRATION_MIGRATION),
     ] {
         let applied: bool = sqlx::query_scalar(
             "SELECT EXISTS(SELECT 1 FROM portal.schema_version WHERE version=$1)",
@@ -369,7 +372,11 @@ async fn dispatch(
     if method == Method::POST && path.starts_with("auth/devices/") {
         app.rate(
             &ip,
-            "device-enrollment",
+            if path == "auth/devices/status" {
+                "device-enrollment-status"
+            } else {
+                "device-enrollment"
+            },
             if path == "auth/devices/status" {
                 120
             } else {
@@ -392,6 +399,7 @@ async fn dispatch(
         return match path {
             "auth/social/vk" => social::vk_sign_in(app, body).await,
             "auth/social/ticket" => social::ticket(app, body).await,
+            "auth/social/enrollment" => social::enrollment(app, body).await,
             "auth/social/attach" => social::attach(app, body).await,
             "auth/social/link" => social::link(app, body).await,
             _ => Err(forbidden()),
@@ -586,8 +594,8 @@ mod schema_tests {
     use super::*;
 
     #[test]
-    fn runtime_requires_complete_schema_nine_before_serving_existing_routes() {
-        assert!(validate_portal_schema(&[1, 2, 3, 4, 5, 6, 7, 9]).is_ok());
+    fn runtime_requires_complete_schema_ten_before_serving_existing_routes() {
+        assert!(validate_portal_schema(&[1, 2, 3, 4, 5, 6, 7, 9, 10]).is_ok());
         for old_or_unknown in [
             vec![1, 2, 3],
             vec![1, 2, 3, 4],
@@ -595,7 +603,8 @@ mod schema_tests {
             vec![1, 2, 3, 4, 5, 6],
             vec![1, 2, 3, 4, 5, 6, 7],
             vec![1, 2, 3, 5, 6, 7, 9],
-            vec![1, 2, 3, 4, 5, 6, 7, 9, 10],
+            vec![1, 2, 3, 4, 5, 6, 7, 9],
+            vec![1, 2, 3, 4, 5, 6, 7, 9, 10, 11],
         ] {
             let error = validate_portal_schema(&old_or_unknown).unwrap_err();
             assert_eq!(error.0, StatusCode::SERVICE_UNAVAILABLE);

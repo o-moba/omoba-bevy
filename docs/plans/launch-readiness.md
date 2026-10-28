@@ -822,7 +822,7 @@ Area: architecture/accounts/distribution · **blocker for the first unified stor
     - **Route.** The game posts the identity token and authorization code to `POST /v1/auth/social/apple`. The request is signed by the device key with domain `omoba.social.apple.v1`, which binds the origin, enrollment id, token hash and expiry.
     - **The international Account API:**
       - verifies the JWT (issuer, audience = bundle id, nonce, expiry);
-      - stores only HMAC(`sub`) under `OMOBA_SOCIAL_SECRET` (portal migration 011 adds `'apple'`);
+      - stores only HMAC(`sub`) under `OMOBA_SOCIAL_SECRET` (portal migration 012 adds `'apple'`);
       - keeps only the sealed refresh token, for revocation;
       - follows ADR-004's link and switch rules and never creates a profile over HTTP.
     - **Web.** Sign in with Apple JS (Services ID) on `app.omoba.io`.
@@ -985,7 +985,7 @@ Area: monetization/iOS · **blocker for the first iOS release that shows auras**
       - `signedDate` is not used, so re-reads add no rows.
     - **Points.** `tier_points` comes from the Account API's catalog, never from the verifier or the client.
     - **Validation.** `VerifiedEvent::validate` requires exactly 30 days for Apple. The provider set is `apple|solana|yookassa`.
-    - **Portal migration 010** (numbered in merge order; LR-69 merges before Sign in with Apple's 011):
+    - **Portal migration 011** (numbered in merge order after registration 010; Sign in with Apple follows as 012):
       - Apple audit columns `product_id`, `storefront`, `price_milli`, `currency`;
       - `supporter_apple_customers(app_account_token, anchor_transaction_id, last_polled_at)`;
       - `supporter_apple_token_tombstones(app_account_token, erased_at)`, written by LR-42 erasure.
@@ -1108,7 +1108,7 @@ Area: monetization/iOS · **blocker for the first iOS release that shows auras**
     - `AppleRestore` credits two same-tier purchases;
     - the RU configuration accepts Apple settings and refuses Solana;
     - `months_supported` counts distinct months;
-    - `PORTAL_SCHEMA` and the grants match migration 010.
+    - `PORTAL_SCHEMA` and the grants match migration 011.
   - [ ] **Client tests.**
     - `not_this_region` and deferred foreign receipts never fill the 16-entry queue.
     - A region switch is blocked with an unfinished current-region transaction.
@@ -2149,7 +2149,7 @@ single, documented setting the owner can change later.
 | — | **App identity**: a new production identity (for example `io.omoba.game`, O-21) before the first public listing and before any IAP product exists. The same id is used across Play, RuStore and direct downloads, signed with one owner key enrolled in Play App Signing. | LR-68, LR-24 |
 | — | **Store-mode portal pages** (`?app=<channel>` in the URL, never in the session): no Supporter navigation, no `/supporter` or `/offer` links, no payment-method text. | LR-67, LR-68 |
 | — | **Region for players**: RU is open to anyone. Cards describe servers and language, not residence (O-32). | LR-68 |
-| — | **Reserved numbers**: portal migrations in merge order, currently 010 = LR-69 Apple tier products, 011 = Sign in with Apple. No game protocol bump for regions: `ReleaseContract.region` is an optional field; friend-code prefixes are client-side. | LR-68, LR-69 |
+| — | **Reserved numbers**: portal migrations in merge order, 010 = website social registration (2026-10-28), next 011 = LR-69 Apple tier products, then 012 = Sign in with Apple. No game protocol bump for regions: `ReleaseContract.region` is an optional field; friend-code prefixes are client-side. | LR-68, LR-69 |
 
 ### Rules for M0 items so they survive LR-68 (2026-10-25)
 

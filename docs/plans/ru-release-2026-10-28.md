@@ -4,6 +4,15 @@ This delivery prepares dev sources for the next coordinated main release. It is
 not a public launch, a server upgrade or a statement that every LR-68 item is done.
 Source version: 0.45.0. Base: dev 120ce63b6e6f47986c45f8830429847fc571fe52.
 
+## Registration follow-up (2026-10-28)
+
+[Registration](../registration.md) now covers website-first default-profile creation,
+game-first progress-preserving linking, all three VK ID methods, recoverable native
+polling, quota separation and account-review/key-revocation races. Portal schema 10
+and its restricted EXECUTE grant are required. Loopback browser and signed real-game
+proof do not certify real VK/Mail/OK credentials or deployed public services. The
+read-only DNS/VPS check still finds public RU login unavailable. No live changes.
+
 ## Routing delivered
 
 - One default client can bind RU or International. First-time players confirm an
