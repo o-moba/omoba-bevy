@@ -130,11 +130,22 @@ impl Qa {
         if self.first_only { &files[..1] } else { files }
     }
     fn viewport(&self) -> UVec2 {
-        if self.iphone {
+        let fallback = if self.iphone {
             UVec2::new(852, 393)
         } else {
             UVec2::new(1180, 820)
-        }
+        };
+        let dimension = |name: &str, default| {
+            std::env::var(name)
+                .ok()
+                .and_then(|v| v.parse::<u32>().ok())
+                .filter(|v| (320..=3840).contains(v))
+                .unwrap_or(default)
+        };
+        UVec2::new(
+            dimension("OMOBA_QA_WIDTH", fallback.x),
+            dimension("OMOBA_QA_HEIGHT", fallback.y),
+        )
     }
     fn settings(&self) -> bool {
         self.iphone && self.stage >= 5
@@ -271,7 +282,10 @@ fn prepare(
             }
         }
         commands.spawn((
-            Text::new("SYNTHETIC UX FIXTURE · 852×393"),
+            Text::new(format!(
+                "SYNTHETIC UX FIXTURE · {}×{}",
+                viewport.x, viewport.y
+            )),
             crate::ui::theme::text(9.0),
             TextColor(Color::srgb(1.0, 0.85, 0.35)),
             Node {
@@ -605,14 +619,9 @@ fn capture(
         }
         if !qa.settings() {
             let layout = mobile.layout();
-            let scale = mobile.combat_scale();
-            let attack = Vec2::new(
-                mobile.viewport.x - mobile.safe.right - 124.0 * scale,
-                mobile.viewport.y - mobile.safe.bottom - 76.0 * scale,
-            );
-            for (slot, angle) in [162.0_f32, 204.0, 246.0, 288.0].into_iter().enumerate() {
+            for slot in 0..4 {
                 let name = format!("MobileAbility-{slot}");
-                let expected = attack + Vec2::from_angle(angle.to_radians()) * 104.0 * scale;
+                let expected = layout.ability_centers[slot];
                 let node = measured.iter().find(|n| n["name"] == name);
                 let matches = node.is_some_and(|n| {
                     let rect = &n["rect"];
@@ -625,7 +634,9 @@ fn capture(
                         && layout.ability_centers[slot].distance(expected) < 0.01
                 });
                 if !matches {
-                    errors.push(format!("skill {slot} did not preserve its default center"));
+                    errors.push(format!(
+                        "skill {slot} does not match its touch capture center"
+                    ));
                 }
             }
             for name in [

@@ -5,6 +5,12 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Mobile in-match HUD: compact reference-sized attack/skills and utility discs,
+  larger independent touch regions, bottom-row Recall/Dash/Haste, an inward
+  transparent joystick, shallow score ribbon and small settings/chat controls
+  beside the minimap. Ally portraits, quick-buy art and ability detail badges
+  leave more of the battlefield visible; desktop/menu scale is unchanged.
+
 - Native screenshot/demo launchers seed an isolated returning Global account-region fixture so their ordinary screen captures keep working after first-launch region confirmation. Existing fixture state is preserved; first-launch QA stays empty.
 
 - 0.45.0: default native clients bind an account region (RU or International)

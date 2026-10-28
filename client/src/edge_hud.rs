@@ -20,7 +20,7 @@ use crate::{
         theme::{self as ui, ButtonKind, Form, TextStyle},
         tokens::{TextRole, border, color, radius, size, space},
         widgets::{
-            KitParts, controls,
+            KitParts, KitSkin, NoSlab, controls,
             game::{self, BarKind, BarValue, PortraitSpec, PortraitView},
             icon_node,
             surfaces::Tooltip,
@@ -199,6 +199,99 @@ const TARGET_LEVEL_DISC: crate::ui::tokens::Metric = crate::ui::tokens::Metric::
 /// Protected structure: the bar at 55 % opacity (`target-structure.md`).
 const PROTECTED_ALPHA: f32 = 0.55;
 
+/// A shallow painted ribbon; the transparent 44px button behind it still
+/// opens the scoreboard without requiring a precise tap on small numbers.
+fn spawn_phone_score_button(parent: &mut ChildSpawnerCommands) {
+    parent
+        .spawn((
+            crate::ui::widgets::button_bundle(
+                Node {
+                    width: Val::Percent(100.0),
+                    height: Val::Px(44.0),
+                    align_items: AlignItems::FlexStart,
+                    ..default()
+                },
+                ButtonKind::Tile,
+                EdgeAction::Score,
+                TestId::new("MatchScoreButton"),
+            ),
+            KitSkin::Tertiary,
+            NoSlab,
+            KitParts::default(),
+        ))
+        .insert(BackgroundColor(Color::NONE))
+        .with_children(|target| {
+            target
+                .spawn((
+                    Node {
+                        width: Val::Percent(100.0),
+                        height: Val::Px(crate::hud_layout::plate::SCORE_STRIP_PHONE.y),
+                        padding: UiRect::horizontal(Val::Px(6.0)),
+                        column_gap: Val::Px(6.0),
+                        align_items: AlignItems::Center,
+                        justify_content: JustifyContent::SpaceBetween,
+                        border: UiRect::all(Val::Px(border::HAIRLINE)),
+                        border_radius: BorderRadius::all(Val::Px(4.0)),
+                        ..default()
+                    },
+                    BackgroundColor(ui::perceptual(color::SURFACE_GLASS)),
+                    BorderColor::all(ui::perceptual(color::BORDER_HAIRLINE)),
+                    Pickable::IGNORE,
+                    Name::new("PhoneScoreRibbon"),
+                ))
+                .with_children(|ribbon| {
+                    ribbon
+                        .spawn(Node {
+                            column_gap: Val::Px(3.0),
+                            align_items: AlignItems::Center,
+                            ..default()
+                        })
+                        .with_children(|scores| {
+                            for (label, ink) in [
+                                (Some(ScoreLabel::Green), color::TEAM_GREEN),
+                                (None, color::TEXT_MUTED),
+                                (Some(ScoreLabel::Blue), color::TEAM_BLUE),
+                            ] {
+                                let mut text = scores.spawn((
+                                    Text::new(if label.is_some() { "—" } else { ":" }),
+                                    ui::styled_text(
+                                        TextStyle::new(TextRole::NumberSm)
+                                            .sized(crate::ui::tokens::Metric::new(11.0, 11.0)),
+                                    ),
+                                    TextColor(ink),
+                                    TextLayout::no_wrap(),
+                                ));
+                                if let Some(label) = label {
+                                    text.insert(label);
+                                }
+                            }
+                        });
+                    ribbon.spawn((
+                        Text::new("—:—"),
+                        MatchClockLabel,
+                        Name::new("MatchClockText"),
+                        ui::styled_text(
+                            TextStyle::new(TextRole::Eyebrow)
+                                .sized(crate::ui::tokens::Metric::new(10.0, 10.0)),
+                        ),
+                        TextColor(color::TEXT_MUTED),
+                        TextLayout::no_wrap(),
+                    ));
+                    ribbon.spawn((
+                        Text::new("—/—/—"),
+                        KdaLabel,
+                        Name::new("MatchKdaText"),
+                        ui::styled_text(
+                            TextStyle::new(TextRole::NumberSm)
+                                .sized(crate::ui::tokens::Metric::new(11.0, 11.0)),
+                        ),
+                        TextColor(color::TEXT_PRIMARY),
+                        TextLayout::no_wrap(),
+                    ));
+                });
+        });
+}
+
 fn setup(mut commands: Commands, mobile: Option<Res<MobileControls>>) {
     let form = Form::from_mobile(mobile.as_deref());
     commands
@@ -213,6 +306,10 @@ fn setup(mut commands: Commands, mobile: Option<Res<MobileControls>>) {
             Name::new("MatchScoreStrip"),
         ))
         .with_children(|strip| {
+            if form == Form::Phone {
+                spawn_phone_score_button(strip);
+                return;
+            }
             strip
                 .spawn(crate::ui::widgets::plate_button(
                     Node {
@@ -303,14 +400,23 @@ fn setup(mut commands: Commands, mobile: Option<Res<MobileControls>>) {
             Name::new("MatchMenuRoot"),
         ))
         .with_children(|root| {
-            let menu = controls::sized_icon_button(
-                root,
-                Icon::NavMenu,
-                Form::Desktop,
-                ButtonKind::Secondary,
-                EdgeAction::Menu,
-                "MatchMenuButton",
-            );
+            let menu = if form == Form::Phone {
+                controls::compact_hud_icon_button(
+                    root,
+                    Icon::NavSettings,
+                    EdgeAction::Menu,
+                    "MatchMenuButton",
+                )
+            } else {
+                controls::sized_icon_button(
+                    root,
+                    Icon::NavMenu,
+                    Form::Desktop,
+                    ButtonKind::Secondary,
+                    EdgeAction::Menu,
+                    "MatchMenuButton",
+                )
+            };
             root.commands().entity(menu).insert((
                 EdgePart,
                 Tooltip {
@@ -537,6 +643,7 @@ fn spawn_target_frame(commands: &mut Commands, form: Form) {
                         ..absolute(anatomy.column_x, anatomy.name_top)
                     },
                     TargetNameRow,
+                    Name::new("TargetHealthNameRow"),
                     Pickable::IGNORE,
                 ))
                 .with_children(|row| {
@@ -618,7 +725,9 @@ fn spawn_target_frame(commands: &mut Commands, form: Form) {
                         true,
                     );
                     let mut commands = slot.commands();
-                    commands.entity(bar).insert(TargetBar);
+                    commands
+                        .entity(bar)
+                        .insert((TargetBar, Name::new("TargetHealthBar")));
                     if let Some(fill) = parts.fill {
                         commands
                             .entity(fill)
@@ -1481,8 +1590,20 @@ fn layout(
         return;
     };
     let phone = mobile.enabled && window.height() < 600.0;
+    let target_column_width = if mobile.enabled {
+        (crate::hud_layout::HudLayout::phone(&mobile)
+            .target_frame
+            .width()
+            - 56.0)
+            .max(0.0)
+    } else {
+        TargetAnatomy::of(Form::Desktop).column_w
+    };
     for (name, id, mut node) in &mut nodes {
         match node_key(name, id).unwrap_or_default() {
+            "TargetHealthNameRow" | "TargetHealthBar" if mobile.enabled => {
+                node.width = Val::Px(target_column_width);
+            }
             "ScoreboardRoot" => {
                 node.padding = if phone {
                     UiRect {
@@ -1558,6 +1679,71 @@ mod tests {
             .unwrap()
             .0
     }
+    #[test]
+    fn phone_score_ribbon_keeps_numbers_in_a_shallow_face_and_a_larger_button() {
+        let mut app = App::new();
+        let mut mobile = MobileControls::default();
+        mobile.enabled = true;
+        app.insert_resource(mobile).add_systems(Startup, setup);
+        app.update();
+        let ribbon = named(&mut app, "PhoneScoreRibbon");
+        assert_eq!(
+            app.world().get::<Node>(ribbon).unwrap().height,
+            Val::Px(24.0)
+        );
+        let score = named(&mut app, "MatchScoreButton");
+        assert_eq!(
+            app.world().get::<Node>(score).unwrap().height,
+            Val::Px(44.0)
+        );
+        assert_eq!(
+            app.world().get::<BackgroundColor>(score).unwrap().0,
+            Color::NONE
+        );
+        let menu = named(&mut app, "MatchMenuButton");
+        let menu_node = app.world().get::<Node>(menu).unwrap();
+        assert_eq!(
+            (menu_node.width, menu_node.height),
+            (Val::Px(44.0), Val::Px(44.0))
+        );
+        let clock = named(&mut app, "MatchClockText");
+        let kda = named(&mut app, "MatchKdaText");
+        assert!(app.world().get::<MatchClockLabel>(clock).is_some());
+        assert!(app.world().get::<KdaLabel>(kda).is_some());
+    }
+
+    #[test]
+    fn narrow_target_keeps_its_name_and_health_bar_inside_the_responsive_plate() {
+        for width in [568.0, 693.0, 844.0] {
+            let mut app = App::new();
+            let mut mobile = MobileControls::default();
+            mobile.enabled = true;
+            mobile.viewport = Vec2::new(width, 320.0);
+            let expected = crate::hud_layout::HudLayout::phone(&mobile)
+                .target_frame
+                .width()
+                - 56.0;
+            let mut window = Window::default();
+            window.resolution.set(width, 320.0);
+            app.world_mut().spawn((window, PrimaryWindow));
+            app.insert_resource(mobile)
+                .add_systems(Startup, setup)
+                .add_systems(PostUpdate, layout);
+            app.update();
+            for name in ["TargetHealthNameRow", "TargetHealthBar"] {
+                let entity = named(&mut app, name);
+                assert_eq!(
+                    app.world().get::<Node>(entity).unwrap().width,
+                    Val::Px(expected)
+                );
+            }
+            let mut portraits = app
+                .world_mut()
+                .query_filtered::<Entity, With<TargetPortrait>>();
+            assert!(portraits.iter(app.world()).next().is_some());
+        }
+    }
+
     #[test]
     fn controller_start_opens_pause_like_the_menu_button_and_east_only_closes_it() {
         let mut app = app();

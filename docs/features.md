@@ -1,5 +1,22 @@
 # Feature Inventory
 
+## Compact mobile battle HUD
+
+The landscape touch HUD uses an 80 px attack disc, 50 px skill faces and 38 px
+utility artwork at its reference scale. Utility and target-selection capture
+regions remain at least 44 px; each finger retains its captured action while
+crossing neighboring buttons. The joystick keeps its familiar size with an
+inward anchor and a light transparent base. Recall, Haste and Dash sit along
+the bottom, opening the upper battlefield. The score is a shallow ribbon; small
+settings/chat discs beside the minimap have independent larger touch cells.
+Ally portraits, quick-buy art, mana pills and cooldown detail follow the compact
+phone presentation. Saved HUD group offsets remain bounded; desktop layout and
+menu scaling keep their existing behavior.
+
+Verification uses one English landscape phone preview and focused geometry/input
+tests. Physical Android play and long-session comfort are reported separately;
+a desktop-rendered preview alone does not establish either.
+
 ## Runtime account regions
 
 Native capture launchers seed a returning Global routing record in their own

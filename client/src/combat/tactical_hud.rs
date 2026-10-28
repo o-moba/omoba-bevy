@@ -370,6 +370,8 @@ pub(super) fn update_tactical_hud(
                 ))
                 .id();
             let cell = ((layout.allies.width() - 6.0) / 4.0).clamp(32.0, 44.0);
+            let phone = layout.form == crate::ui::theme::Form::Phone;
+            let portrait_side = (cell - 2.0).min(if phone { 22.0 } else { 32.0 });
             for (p, hp) in allies {
                 let col = commands
                     .spawn((
@@ -380,7 +382,7 @@ pub(super) fn update_tactical_hud(
                             border: UiRect::all(Val::Px(1.0)),
                             border_radius: BorderRadius::all(Val::Px(6.0)),
                             flex_direction: FlexDirection::Column,
-                            row_gap: Val::Px(3.0),
+                            row_gap: Val::Px(if phone { 2.0 } else { 3.0 }),
                             ..default()
                         },
                         Button,
@@ -395,13 +397,7 @@ pub(super) fn update_tactical_hud(
                         ChildOf(root),
                     ))
                     .id();
-                portrait(
-                    &mut commands,
-                    col,
-                    p,
-                    thumbs.as_deref(),
-                    (cell - 2.0).min(32.0),
-                );
+                portrait(&mut commands, col, p, thumbs.as_deref(), portrait_side);
                 if p.respawn_remaining_ms > 0 {
                     commands
                         .spawn((
@@ -409,7 +405,7 @@ pub(super) fn update_tactical_hud(
                                 position_type: PositionType::Absolute,
                                 top: Val::Px(0.0),
                                 width: Val::Percent(100.0),
-                                height: Val::Px(32.0),
+                                height: Val::Px(portrait_side),
                                 align_items: AlignItems::Center,
                                 justify_content: JustifyContent::Center,
                                 border_radius: BorderRadius::MAX,
@@ -424,7 +420,7 @@ pub(super) fn update_tactical_hud(
                         .with_child((
                             label(
                                 p.respawn_remaining_ms.div_ceil(1000).to_string(),
-                                19.0,
+                                if phone { 13.0 } else { 19.0 },
                                 Color::WHITE,
                             ),
                             Pickable::IGNORE,
@@ -433,8 +429,8 @@ pub(super) fn update_tactical_hud(
                 let bg = commands
                     .spawn((
                         Node {
-                            width: Val::Px((cell - 2.0).min(32.0)),
-                            height: Val::Px(5.0),
+                            width: Val::Px(portrait_side),
+                            height: Val::Px(if phone { 3.0 } else { 5.0 }),
                             ..default()
                         },
                         BackgroundColor(Color::BLACK),
@@ -465,6 +461,7 @@ pub(super) fn update_tactical_hud(
         }
         state.feed_key = key;
         if show && !state.feed.entries.is_empty() {
+            let phone = mobile.as_ref().is_some_and(|m| m.enabled);
             let root = commands
                 .spawn((
                     Node {
@@ -472,8 +469,13 @@ pub(super) fn update_tactical_hud(
                         left: Val::Px(layout.kill_feed().min.x),
                         top: Val::Px(layout.kill_feed().min.y),
                         width: Val::Px(layout.kill_feed().width()),
+                        height: if phone {
+                            Val::Px(layout.kill_feed().height())
+                        } else {
+                            Val::Auto
+                        },
                         flex_direction: FlexDirection::Column,
-                        row_gap: Val::Px(3.0),
+                        row_gap: Val::Px(if phone { 2.0 } else { 3.0 }),
                         overflow: Overflow::clip(),
                         ..default()
                     },
@@ -482,18 +484,24 @@ pub(super) fn update_tactical_hud(
                     Name::new("KillFeed"),
                 ))
                 .id();
-            let phone = mobile.as_ref().is_some_and(|m| m.enabled);
-            let portrait_size = if phone { 20.0 } else { 24.0 };
-            let font_size = if phone { 10.0 } else { 11.0 };
-            for (killer, victim, _) in state.feed.entries.iter().rev() {
+            let portrait_size = if phone { 16.0 } else { 24.0 };
+            let font_size = if phone { 9.0 } else { 11.0 };
+            for (killer, victim, _) in
+                state
+                    .feed
+                    .entries
+                    .iter()
+                    .rev()
+                    .take(if phone { 2 } else { 3 })
+            {
                 let row = commands
                     .spawn((
                         Node {
-                            column_gap: Val::Px(3.0),
+                            column_gap: Val::Px(if phone { 2.0 } else { 3.0 }),
                             max_width: Val::Percent(100.0),
                             align_self: AlignSelf::FlexEnd,
                             align_items: AlignItems::Center,
-                            padding: UiRect::all(Val::Px(2.0)),
+                            padding: UiRect::all(Val::Px(if phone { 1.0 } else { 2.0 })),
                             ..default()
                         },
                         BackgroundColor(Color::srgba(0.01, 0.02, 0.04, 0.85)),
@@ -519,7 +527,7 @@ pub(super) fn update_tactical_hud(
                 commands.spawn((
                     crate::ui::widgets::icon_node(
                         crate::ui::kit_assets::Icon::HudKill,
-                        16.0,
+                        if phone { 12.0 } else { 16.0 },
                         Color::WHITE,
                     ),
                     ChildOf(row),

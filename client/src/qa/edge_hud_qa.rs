@@ -420,8 +420,21 @@ pub(super) fn mobile_geometry_valid(
             return false;
         };
         let category = matches!(name, "MobileMinionAttack" | "MobileTowerAttack");
-        let minimum_visual = if category { 35.5 } else { 43.5 };
-        if rect.width().min(rect.height()) < minimum_visual
+        // Small phone artwork is deliberately distinct from its 44px input
+        // target. Check the rendered disc against the live layout, then
+        // validate capture separation below.
+        let expected_side = match name {
+            "MobileJoystick" => layout.joystick_radius * 2.0,
+            "MobileAttack" => layout.attack_radius * 2.0,
+            "MobileMinionAttack" | "MobileTowerAttack" => {
+                crate::mobile_controls::CATEGORY_DIAMETER * scale
+            }
+            "MobileRankMode" => layout.upgrade_radius * 2.0,
+            "MobileAttackCancel" => layout.cancel_radius * 2.0,
+            _ if name.starts_with("MobileAbility-") => layout.ability_radii[0] * 2.0,
+            _ => layout.auxiliary_radius * 2.0,
+        };
+        if (rect.width().min(rect.height()) - expected_side).abs() > 1.0
             || (rect.width() - rect.height()).abs() > 1.0
         {
             return false;
@@ -448,27 +461,6 @@ pub(super) fn mobile_geometry_valid(
         if expected.is_some_and(|expected| expected.distance(center) > 1.0) {
             return false;
         }
-        // All six skills/category controls share the 104px arc. Compact phones
-        // move Dash/Haste around the protected hero region; the remaining
-        // utilities keep their 168px arc. Check that contract independently of
-        // the exact rendered-vs-layout center comparison above.
-        let inner = name.starts_with("MobileAbility-");
-        let compact = mobile.viewport.x - mobile.safe.left - mobile.safe.right < 700.0;
-        let orbit = if inner || category {
-            Some(crate::ui::tokens::size::COMBAT_ORBIT_ABILITY_PHONE)
-        } else {
-            match name {
-                "MobileDash" if compact => Some(176.0),
-                "MobileHaste" if compact => Some(150.0),
-                "MobileDash" | "MobileHaste" | "MobileRecall" | "MobileRankMode"
-                | "MobileAttackCancel" => Some(crate::ui::tokens::size::COMBAT_ORBIT_UTILITY_PHONE),
-                _ => None,
-            }
-        };
-        if orbit.is_some_and(|orbit| (center.distance(attack.center()) - orbit * scale).abs() > 1.0)
-        {
-            return false;
-        }
         if let Some(slot) = name.strip_prefix("MobileAbility-") {
             // The rank ring shows only on an upgradable ability, on its disc.
             if let Some(rank) = shown(&format!("MobileRankRing-{slot}")) {
@@ -484,6 +476,9 @@ pub(super) fn mobile_geometry_valid(
                 return false;
             }
             radius = layout.category_radius;
+        }
+        if name != "MobileJoystick" {
+            radius = radius.max(22.0);
         }
         if name == "MobileJoystick" {
             // The capture circle (1.3 × r) may pass the safe bottom by the
