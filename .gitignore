@@ -69,6 +69,7 @@ docs/*
 !docs/bug-report-template.md
 !docs/mvp-scope-and-limitations.md
 !docs/account-recovery.md
+!docs/registration.md
 !docs/progress/
 !docs/progress/**
 !docs/support/

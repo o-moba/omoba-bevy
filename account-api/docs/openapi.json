@@ -3,7 +3,7 @@
   "info": {
     "title": "Omoba Account API",
     "version": "0.21.0-rc.1",
-    "description": "Browser clients use the Next.js BFF, not these bearer endpoints directly. No match/reward write endpoints. All private replies are no-store. Native proofs are domain-separated Ed25519; signing tuple is defined in shared/src/web_account.rs. Sign in with VK ID (portal schema 7) is enabled by OMOBA_VKID_CLIENT_ID and OMOBA_SOCIAL_SECRET in a vk_sign_in build; `auth/social/link` is native, the other social routes are the portal BFF's. Moderation (LR-15): while a profile has an active account ban, every session-authenticated route, pairing approval and completion and VK sign-in answer 403 `account_banned`; `PATCH /v1/me/profile` answers 403 `name_locked` while a moderator's name reset lasts. Sanctions are applied with the `omoba-account-api sanction|rename|chat` operator commands, never over HTTP."
+    "description": "Browser clients use the Next.js BFF, not these bearer endpoints directly. No match/reward write endpoints. All private replies are no-store. Native proofs are domain-separated Ed25519; signing tuple is defined in shared/src/web_account.rs. Sign in and explicit website registration with VK ID (portal schema 10) is enabled by OMOBA_VKID_CLIENT_ID and OMOBA_SOCIAL_SECRET in a vk_sign_in build; `auth/social/link` is native, the other social routes are the portal BFF's. Moderation (LR-15): while a profile has an active account ban, every session-authenticated route, pairing approval and completion and VK sign-in answer 403 `account_banned`; `PATCH /v1/me/profile` answers 403 `name_locked` while a moderator's name reset lasts. Sanctions are applied with the `omoba-account-api sanction|rename|chat` operator commands, never over HTTP."
   },
   "paths": {
     "/v1/auth/pairings": {
@@ -1713,7 +1713,7 @@
                   "nickname": {
                     "type": "string",
                     "maxLength": 25,
-                    "description": "Editable nickname#1234. Legacy bare names (1\u201320 codepoints) preserve the existing tag."
+                    "description": "Editable nickname#1234. Legacy bare names (1–20 codepoints) preserve the existing tag."
                   }
                 },
                 "required": [
@@ -4516,7 +4516,7 @@
     },
     "/v1/auth/social/vk": {
       "post": {
-        "summary": "Portal BFF only: verify a VK ID callback (code exchange happens here) and sign in, or register an unlinked identity",
+        "summary": "Portal BFF only: verify VK ID and sign in; register=true creates a fresh default profile, omitted/false keeps game linking explicit",
         "operationId": "post_auth_social_vk",
         "security": [],
         "responses": {
@@ -4646,7 +4646,7 @@
             }
           },
           "502": {
-            "description": "VK ID refused the authorization code",
+            "description": "VK ID refused the authorization code or returned missing/mismatched exchange state",
             "content": {
               "application/json": {
                 "schema": {
@@ -4691,6 +4691,11 @@
                   "state": {
                     "type": "string",
                     "maxLength": 512
+                  },
+                  "register": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Explicit website signup only. An unknown subject gets a fresh default-stat profile and session. Omit for game-initiated /connect flows so its existing progress is linked only by signed game confirmation."
                   }
                 },
                 "required": [
@@ -5226,7 +5231,7 @@
                   "receipt_email": {
                     "type": "string",
                     "maxLength": 254,
-                    "description": "Required for the \u00ab\u0427\u0435\u043a\u0438 \u043e\u0442 \u042eKassa\u00bb receipt; never a sign-in."
+                    "description": "Required for the «Чеки от ЮKassa» receipt; never a sign-in."
                   },
                   "quote": {
                     "$ref": "#/components/schemas/YooKassaQuote"
@@ -5535,6 +5540,363 @@
           }
         }
       }
+    },
+    "/v1/auth/social/enrollment": {
+      "post": {
+        "summary": "Portal BFF only: review a pending game device using an unlinked social ticket; does not attach or approve it",
+        "operationId": "post_auth_social_enrollment",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "enrollment_id": {
+                      "type": "string",
+                      "pattern": "^[0-9a-f]{64}$"
+                    },
+                    "public_key": {
+                      "type": "string",
+                      "pattern": "^[0-9a-f]{64}$"
+                    },
+                    "label": {
+                      "type": "string"
+                    },
+                    "expires_at": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  },
+                  "required": [
+                    "enrollment_id",
+                    "public_key",
+                    "label",
+                    "expires_at"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Absent or private resource",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "State/idempotency conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Shared rate limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Dependency unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "code": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9]{8}$"
+                  },
+                  "social_ticket": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$"
+                  }
+                },
+                "required": [
+                  "code",
+                  "social_ticket"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/me/devices/lookup": {
+      "post": {
+        "summary": "Review a pending game device as the current freshly signed-in account",
+        "operationId": "post_me_devices_lookup",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "enrollment_id": {
+                      "type": "string",
+                      "pattern": "^[0-9a-f]{64}$"
+                    },
+                    "public_key": {
+                      "type": "string",
+                      "pattern": "^[0-9a-f]{64}$"
+                    },
+                    "label": {
+                      "type": "string"
+                    },
+                    "expires_at": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "profile_id": {
+                      "type": "string",
+                      "pattern": "^[0-9a-f]{64}$"
+                    },
+                    "nickname": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "enrollment_id",
+                    "public_key",
+                    "label",
+                    "expires_at",
+                    "profile_id",
+                    "nickname"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Absent or private resource",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "State/idempotency conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Shared rate limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Dependency unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "code": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9]{8}$"
+                  }
+                },
+                "required": [
+                  "code"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/me/devices/approve": {
+      "post": {
+        "summary": "Approve the reviewed game device; profile_id must still match the current browser account",
+        "operationId": "post_me_devices_approve",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "const": "approved"
+                    }
+                  },
+                  "required": [
+                    "status"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Absent or private resource",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "account_changed when the reviewed profile differs from the current session; otherwise enrollment state changed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Shared rate limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Dependency unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "enrollment_id": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$"
+                  },
+                  "public_key": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$"
+                  },
+                  "profile_id": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$",
+                    "description": "Profile returned by lookup and shown in the review. New clients always send it; optional for older clients."
+                  }
+                },
+                "required": [
+                  "enrollment_id",
+                  "public_key"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -5571,7 +5933,7 @@
           "nickname": {
             "type": "string",
             "maxLength": 25,
-            "description": "Current public nickname#1234 handle, 1\u201320 Unicode codepoints plus four digits.",
+            "description": "Current public nickname#1234 handle, 1–20 Unicode codepoints plus four digits.",
             "pattern": "^[^#]{1,20}#[0-9]{4}$"
           },
           "rating": {
@@ -5620,7 +5982,7 @@
           },
           "nickname": {
             "type": "string",
-            "description": "Current public nickname#1234 handle, 1\u201320 Unicode codepoints plus four digits.",
+            "description": "Current public nickname#1234 handle, 1–20 Unicode codepoints plus four digits.",
             "maxLength": 25,
             "pattern": "^[^#]{1,20}#[0-9]{4}$"
           },
@@ -6732,7 +7094,7 @@
           "nickname": {
             "type": "string",
             "maxLength": 25,
-            "description": "Current public nickname#1234 handle, 1\u201320 Unicode codepoints plus four digits.",
+            "description": "Current public nickname#1234 handle, 1–20 Unicode codepoints plus four digits.",
             "pattern": "^[^#]{1,20}#[0-9]{4}$"
           }
         },
@@ -7611,7 +7973,7 @@
           "amount_minor": {
             "type": "integer",
             "format": "int64",
-            "description": "amount_rub \u00d7 100 (kopecks)"
+            "description": "amount_rub × 100 (kopecks)"
           },
           "currency": {
             "const": "RUB"

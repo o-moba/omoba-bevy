@@ -19,6 +19,13 @@ use std::time::{Duration, Instant};
 
 /// How often a VK sign-in request is checked while the browser is open.
 const SOCIAL_POLL: Duration = Duration::from_secs(3);
+/// Bound retries even if the service keeps rejecting a request. The player can
+/// check the same enrollment again; neither retries nor status checks rotate keys.
+const AUTOMATIC_RETRIES: u8 = 5;
+
+fn retry_delay(attempt: u8) -> Duration {
+    SOCIAL_POLL * (1 << attempt.saturating_sub(1).min(3))
+}
 
 /// Whether this build offers "Sign in with VK ID" (`crate::account_region::features()`).
 pub(super) fn vk_button_visible(features: shared::market::Features) -> bool {
@@ -46,9 +53,11 @@ pub(super) struct DeviceState {
 pub(super) struct Worker {
     key: Option<SigningKey>,
     pending: Option<Mutex<mpsc::Receiver<Result<DeviceEnrollmentStatus, String>>>>,
-    activating: bool,
+    activating: Option<String>,
     linking: bool,
     next_poll: Option<Instant>,
+    retry: Option<SignedDeviceEnrollment>,
+    retry_attempts: u8,
 }
 fn now() -> u64 {
     std::time::SystemTime::now()
@@ -66,6 +75,10 @@ pub(super) fn append(code: &mut String, text: &str) -> Result<(), &'static str> 
 fn launch(worker: &mut Worker, proof: SignedDeviceEnrollment) {
     let (tx, rx) = mpsc::sync_channel(1);
     worker.pending = Some(Mutex::new(rx));
+    worker.next_poll = None;
+    // Recovery codes are bearer secrets: leave retrying that operation to the
+    // player. The safe replayable enrollment requests carry no recovery code.
+    worker.retry = (proof.action != DeviceAction::Recover).then(|| proof.clone());
     std::thread::spawn(move || {
         let _ = tx.send(DeviceAccountApi::from_env().and_then(|api| api.send(&proof)));
     });
@@ -74,6 +87,9 @@ fn launch_link(worker: &mut Worker, proof: shared::device_account::SignedSocialL
     let (tx, rx) = mpsc::sync_channel(1);
     worker.pending = Some(Mutex::new(rx));
     worker.linking = true;
+    worker.retry = None;
+    worker.activating = None;
+    worker.next_poll = None;
     std::thread::spawn(move || {
         let _ = tx.send(DeviceAccountApi::from_env().and_then(|api| api.link_social(&proof)));
     });
@@ -129,6 +145,20 @@ pub(super) fn act(
         return;
     }
     let result = (|| -> Result<(), String> {
+        if matches!(action, Action::DevicesPoll)
+            && let Some(proof) = worker.retry.clone()
+        {
+            // Retry the original create/status/complete request. In particular,
+            // a lost create response must not produce a different enrollment.
+            if !enrollment_live(&career.devices, now()) {
+                return Err(tr("devices.error.expired").into());
+            }
+            worker.retry_attempts = 0;
+            launch(worker, proof);
+            career.devices.busy = true;
+            career.devices.message = None;
+            return Ok(());
+        }
         match action {
             Action::DevicesStart | Action::DevicesRecoveryStart | Action::SocialStart => {
                 let api = DeviceAccountApi::from_env()?;
@@ -173,6 +203,8 @@ pub(super) fn act(
                 career.devices.recovery_entry = matches!(action, Action::DevicesRecoveryStart);
                 career.devices.browser_opened = false;
                 worker.next_poll = None;
+                worker.activating = None;
+                worker.retry_attempts = 0;
                 launch(worker, proof);
             }
             Action::SocialLink => {
@@ -213,6 +245,12 @@ pub(super) fn act(
                 } else {
                     None
                 };
+                if target
+                    .as_deref()
+                    .is_some_and(|profile| !shared::career::valid_profile_id(profile))
+                {
+                    return Err(tr("devices.error.completion").into());
+                }
                 if operation == DeviceAction::Complete
                     && career
                         .devices
@@ -234,7 +272,8 @@ pub(super) fn act(
                     None
                 };
                 let proof = sign(worker, e, operation, target, code)?;
-                worker.activating = operation == DeviceAction::Complete;
+                worker.activating = proof.target_profile.clone();
+                worker.retry_attempts = 0;
                 launch(worker, proof);
                 career.devices.recovery_code.clear();
                 career.devices.focused = false;
@@ -258,7 +297,7 @@ pub(super) fn poll(
         // Read-only until a check is due: no per-frame change detection on the UI.
         let now_instant = Instant::now();
         if worker.next_poll.is_some_and(|due| now_instant >= due) {
-            social_tick(&mut career, &mut worker, &identity, now_instant);
+            request_tick(&mut career, &mut worker, &identity, now_instant);
         }
         return;
     }
@@ -288,6 +327,19 @@ pub(super) fn poll(
     }
     match value {
         Ok(mut status) => {
+            worker.retry = None;
+            worker.retry_attempts = 0;
+            let activating = worker.activating.take();
+            if activating
+                .as_deref()
+                .is_some_and(|target| !completion_matches(&status, target))
+            {
+                // Keep the approved account visible so the player can safely
+                // confirm again. Never stage a key from an unexpected reply.
+                worker.next_poll = None;
+                career.devices.message = Some(tr("devices.error.completion").into());
+                return;
+            }
             if status.code.is_none() {
                 status.code = career.devices.status.as_ref().and_then(|s| s.code.clone());
             }
@@ -310,7 +362,7 @@ pub(super) fn poll(
                 SocialNext::Stop => worker.next_poll = None,
             }
             career.devices.status = Some(status);
-            if worker.activating {
+            if activating.is_some() {
                 let result = career
                     .devices
                     .enrollment
@@ -326,9 +378,31 @@ pub(super) fn poll(
                 }
             }
         }
-        Err(error) => career.devices.message = Some(error),
+        Err(error) => {
+            career.devices.message = Some(error);
+            if worker.retry.is_some()
+                && enrollment_live(&career.devices, now())
+                && worker.retry_attempts < AUTOMATIC_RETRIES
+            {
+                worker.retry_attempts += 1;
+                worker.next_poll = Some(Instant::now() + retry_delay(worker.retry_attempts));
+            } else {
+                worker.next_poll = None;
+            }
+        }
     }
-    worker.activating = false;
+}
+fn completion_matches(status: &DeviceEnrollmentStatus, target: &str) -> bool {
+    status.state == "consumed"
+        && shared::career::valid_profile_id(target)
+        && status.profile_id.as_deref() == Some(target)
+}
+fn enrollment_live(state: &DeviceState, now_secs: u64) -> bool {
+    state
+        .enrollment
+        .as_ref()
+        .and_then(|e| e.expires_at.parse::<u64>().ok())
+        .is_some_and(|expiry| expiry > now_secs)
 }
 /// What a VK sign-in request does after a status reply.
 #[derive(Debug, PartialEq, Eq)]
@@ -380,9 +454,13 @@ fn finish_social(career: &mut CareerClient, worker: &mut Worker, message: String
     career.devices.browser_opened = false;
     career.devices.message = Some(message);
     worker.next_poll = None;
+    worker.activating = None;
+    worker.retry = None;
+    worker.retry_attempts = 0;
 }
-/// Re-check a VK sign-in request while the browser is open; stop when it expires.
-fn social_tick(
+/// Re-check browser sign-in or replay a failed enrollment operation. Every replay
+/// keeps the original proof/key and stops at expiry or the automatic retry limit.
+fn request_tick(
     career: &mut CareerClient,
     worker: &mut Worker,
     identity: &CareerIdentity,
@@ -391,21 +469,25 @@ fn social_tick(
     let Some(due) = worker.next_poll else {
         return;
     };
-    if now_instant < due || career.devices.busy || !career.devices.social {
+    if now_instant < due || career.devices.busy {
         return;
     }
     worker.next_poll = None;
-    let expired = career
-        .devices
-        .enrollment
-        .as_ref()
-        .and_then(|e| e.expires_at.parse::<u64>().ok())
-        .is_none_or(|expiry| expiry <= now());
-    if expired {
-        finish_social(career, worker, tr("devices.vk.expired").into());
+    if !enrollment_live(&career.devices, now()) {
+        let message = if career.devices.social {
+            tr("devices.vk.expired")
+        } else {
+            tr("devices.error.expired")
+        };
+        finish_social(career, worker, message.into());
         return;
     }
-    act(&Action::DevicesPoll, career, identity, worker);
+    if let Some(proof) = worker.retry.clone() {
+        launch(worker, proof);
+        career.devices.busy = true;
+    } else if career.devices.social {
+        act(&Action::DevicesPoll, career, identity, worker);
+    }
 }
 pub(super) fn body(parent: &mut ChildSpawnerCommands, career: &CareerClient) {
     let state = &career.devices;
@@ -461,6 +543,14 @@ pub(super) fn body(parent: &mut ChildSpawnerCommands, career: &CareerClient) {
                     22.,
                     ui::GOLD,
                     "DeviceCode",
+                );
+            }
+            if !state.busy {
+                button(
+                    parent,
+                    tr("devices.button.poll"),
+                    Action::DevicesPoll,
+                    "DevicePoll",
                 );
             }
         } else if status.state == "social_pending" {
@@ -579,6 +669,14 @@ pub(super) fn body(parent: &mut ChildSpawnerCommands, career: &CareerClient) {
             }
         }
     }
+    if state.enrollment.is_some() && state.status.is_none() && !state.busy {
+        button(
+            parent,
+            tr("devices.button.poll"),
+            Action::DevicesPoll,
+            "DevicePoll",
+        );
+    }
     // Three equal ways in (LR-68 rules): the website (VK ID) where the region
     // signs in with it, a saved recovery code, another device.
     if !state.busy && !state.restart_required {
@@ -649,6 +747,209 @@ mod social_tests {
             profile_id: profile.map(str::to_owned),
             nickname: None,
             social: None,
+        }
+    }
+
+    fn proof(action: DeviceAction) -> SignedDeviceEnrollment {
+        SignedDeviceEnrollment {
+            enrollment: DeviceEnrollment {
+                enrollment_id: "a".repeat(64),
+                public_key: "b".repeat(64),
+                origin: "https://omoba.ru".into(),
+                label: "Desktop".into(), // i18n-allow
+                expires_at: (now() + 240).to_string(),
+            },
+            action,
+            target_profile: (action == DeviceAction::Complete).then(|| "c".repeat(64)),
+            recovery_code: None,
+            signature: "d".repeat(128),
+        }
+    }
+
+    fn poll_app(proof: &SignedDeviceEnrollment) -> App {
+        let mut app = App::new();
+        app.insert_resource(CareerClient {
+            devices: DeviceState {
+                enrollment: Some(proof.enrollment.clone()),
+                status: Some(status(
+                    if proof.action == DeviceAction::Complete {
+                        "approved"
+                    } else {
+                        "pending"
+                    },
+                    Some("ABCD2345"), // i18n-allow
+                    proof.target_profile.as_deref(),
+                )),
+                social: true,
+                browser_opened: true,
+                ..default()
+            },
+            ..default()
+        })
+        .init_resource::<Worker>()
+        .init_resource::<CareerIdentity>()
+        .add_systems(Update, poll);
+        app
+    }
+
+    fn deliver(
+        app: &mut App,
+        proof: &SignedDeviceEnrollment,
+        reply: Result<DeviceEnrollmentStatus, String>,
+    ) {
+        let (tx, rx) = mpsc::sync_channel(1);
+        tx.send(reply).unwrap();
+        {
+            let mut worker = app.world_mut().resource_mut::<Worker>();
+            worker.pending = Some(Mutex::new(rx));
+            worker.retry = Some(proof.clone());
+            worker.activating = proof.target_profile.clone();
+        }
+        app.world_mut().resource_mut::<CareerClient>().devices.busy = true;
+        app.update();
+    }
+
+    #[test]
+    fn failed_social_status_keeps_the_enrollment_and_recovers_approval() {
+        let proof = proof(DeviceAction::Status);
+        let mut app = poll_app(&proof);
+        deliver(&mut app, &proof, Err("temporary failure".into())); // i18n-allow
+        let worker = app.world().resource::<Worker>();
+        assert!(worker.next_poll.is_some());
+        assert_eq!(worker.retry_attempts, 1);
+        assert_eq!(
+            serde_json::to_value(worker.retry.as_ref().unwrap()).unwrap(),
+            serde_json::to_value(&proof).unwrap(),
+            "retry the same proof, candidate key and enrollment"
+        );
+        let state = &app.world().resource::<CareerClient>().devices;
+        assert_eq!(state.enrollment.as_ref(), Some(&proof.enrollment));
+        assert_eq!(state.status.as_ref().unwrap().state, "pending");
+        assert!(!state.busy && !state.restart_required);
+
+        let target = "c".repeat(64);
+        deliver(
+            &mut app,
+            &proof,
+            Ok(status("approved", None, Some(&target))),
+        );
+        let worker = app.world().resource::<Worker>();
+        assert!(worker.retry.is_none() && worker.next_poll.is_none());
+        let state = &app.world().resource::<CareerClient>().devices;
+        assert_eq!(state.enrollment.as_ref(), Some(&proof.enrollment));
+        assert_eq!(state.status.as_ref().unwrap().profile_id, Some(target));
+        assert!(!state.restart_required, "approval still needs confirmation");
+    }
+
+    #[test]
+    fn completion_retries_are_bounded_and_retain_the_confirmed_account() {
+        let proof = proof(DeviceAction::Complete);
+        let mut app = poll_app(&proof);
+        for attempt in 1..=AUTOMATIC_RETRIES + 1 {
+            deliver(&mut app, &proof, Err("temporary failure".into())); // i18n-allow
+            let worker = app.world().resource::<Worker>();
+            assert_eq!(worker.activating, proof.target_profile);
+            assert_eq!(worker.retry_attempts, attempt.min(AUTOMATIC_RETRIES));
+            assert_eq!(worker.next_poll.is_some(), attempt <= AUTOMATIC_RETRIES);
+            assert_eq!(worker.retry.as_ref().unwrap().enrollment, proof.enrollment);
+            assert_eq!(
+                app.world()
+                    .resource::<CareerClient>()
+                    .devices
+                    .status
+                    .as_ref()
+                    .unwrap()
+                    .state,
+                "approved",
+                "keep the confirmation visible after a failed completion"
+            );
+        }
+        assert_eq!(retry_delay(1), Duration::from_secs(3));
+        assert_eq!(retry_delay(2), Duration::from_secs(6));
+        assert_eq!(retry_delay(3), Duration::from_secs(12));
+        assert_eq!(retry_delay(4), Duration::from_secs(24));
+        assert_eq!(retry_delay(u8::MAX), Duration::from_secs(24));
+    }
+
+    #[test]
+    fn unexpected_completion_cannot_replace_the_approved_account_or_stage_a_key() {
+        let proof = proof(DeviceAction::Complete);
+        for invalid in [
+            status("pending", None, proof.target_profile.as_deref()),
+            status("approved", None, proof.target_profile.as_deref()),
+            status("consumed", None, Some(&"e".repeat(64))),
+            status("consumed", None, None),
+        ] {
+            let mut app = poll_app(&proof);
+            deliver(&mut app, &proof, Ok(invalid));
+            let state = &app.world().resource::<CareerClient>().devices;
+            assert!(!state.restart_required);
+            assert_eq!(state.status.as_ref().unwrap().state, "approved");
+            assert_eq!(
+                state.status.as_ref().unwrap().profile_id,
+                proof.target_profile
+            );
+            assert_eq!(
+                state.message.as_deref(),
+                Some(tr("devices.error.completion")),
+                "reject the reply before attempting to access a staged key"
+            );
+        }
+        assert!(completion_matches(
+            &status("consumed", None, proof.target_profile.as_deref()),
+            proof.target_profile.as_deref().unwrap()
+        ));
+    }
+
+    #[test]
+    fn an_expired_retry_never_launches_transport_or_activates_the_candidate() {
+        for action in [
+            DeviceAction::Create,
+            DeviceAction::Status,
+            DeviceAction::Complete,
+        ] {
+            let mut proof = proof(action);
+            proof.enrollment.expires_at = now().saturating_sub(1).to_string();
+            let mut app = poll_app(&proof);
+            {
+                let mut worker = app.world_mut().resource_mut::<Worker>();
+                worker.next_poll = Some(Instant::now() - Duration::from_secs(1));
+                worker.retry = Some(proof.clone());
+                worker.activating = proof.target_profile.clone();
+            }
+            app.update();
+            let worker = app.world().resource::<Worker>();
+            assert!(worker.pending.is_none() && worker.next_poll.is_none());
+            assert!(worker.retry.is_none() && worker.activating.is_none());
+            let state = &app.world().resource::<CareerClient>().devices;
+            assert!(state.enrollment.is_none());
+            assert!(!state.restart_required);
+            assert_eq!(state.message.as_deref(), Some(tr("devices.vk.expired")));
+        }
+    }
+
+    #[test]
+    fn pending_social_and_lost_create_replies_offer_a_manual_check() {
+        let proof = proof(DeviceAction::Create);
+        let mut app = poll_app(&proof);
+        app.insert_resource(crate::ui::UiPlatform(UiProfile::Desktop))
+            .add_systems(Update, render);
+        app.world_mut().resource_mut::<CareerClient>().modal = CareerModal::Devices;
+        for has_status in [true, false] {
+            if !has_status {
+                app.world_mut()
+                    .resource_mut::<CareerClient>()
+                    .devices
+                    .status = None;
+            }
+            app.update();
+            assert!(
+                app.world_mut()
+                    .query::<crate::ui::test_id::NodeKey>()
+                    .iter(app.world())
+                    .any(|key| key.as_str() == "DevicePoll"),
+                "the same request remains checkable without creating another key"
+            );
         }
     }
 
