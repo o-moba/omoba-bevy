@@ -10,6 +10,12 @@ from qa_account_fixture import prepare_capture_account
 
 
 class CaptureAccountFixture(unittest.TestCase):
+    def test_package_smoke_seeds_its_flat_scratch_config(self):
+        with tempfile.TemporaryDirectory(prefix="omoba-region-fixture-") as scratch:
+            self.assertTrue(prepare_capture_account(scratch, in_root=True))
+            self.assertEqual(json.loads((Path(scratch) / "account_region.json").read_text())["selected"], "global")
+            self.assertFalse((Path(scratch) / "config").exists())
+
     def test_showcase_environment_restores_a_synthetic_returning_global_player(self):
         with tempfile.TemporaryDirectory(prefix="omoba-region-fixture-") as scratch:
             env = base_env(dict(size=(852, 393), profile="phone"), "/assets", scratch, "/output")

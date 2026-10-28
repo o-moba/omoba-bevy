@@ -90,6 +90,6 @@ synthetic returning-player routing metadata after first-launch confirmation was
 introduced. A Python helper now seeds only that Global selection, without copying
 keys, accepting legal documents or overriding existing records. Shared showcase/UI
 launchers and the standalone combat/map/vision/targeting/pickup/Verdant/demo runners
-use it. The dedicated first-launch harness still starts empty; runtime gates are
+and packaged-startup smoke use it. The dedicated first-launch harness still starts empty; runtime gates are
 unchanged. This follow-up changes Python/docs only; Rust files remain identical
 to the locally verified 0.45.0 delivery.

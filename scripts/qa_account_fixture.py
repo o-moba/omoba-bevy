@@ -8,14 +8,14 @@ import os
 from pathlib import Path
 
 
-def prepare_capture_account(scratch):
+def prepare_capture_account(scratch, *, in_root=False):
     """Seed Global routing only, never replacing a caller's existing state.
 
     Call only with the capture's own TemporaryDirectory. No user settings,
     acceptance record, private key or account credential is read or copied.
     """
     root = Path(scratch).resolve(strict=True)
-    directory = root / "config"
+    directory = root if in_root else root / "config"
     directory.mkdir(exist_ok=True)
     path = directory / "account_region.json"
     try:
