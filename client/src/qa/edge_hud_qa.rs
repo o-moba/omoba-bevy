@@ -1,7 +1,7 @@
 //! Opt-in presentation fixtures and production-action drivers for the edge HUD.
 //! Synthetic actors/ledger never leave the client. Purchases/utilities require
 //! authoritative receipts/acknowledgments, and are reported separately.
-use super::{BetaUiQa, clears_playfield, measured_logical_rect, measured_rect};
+use super::{BetaUiQa, compact_controls_clear_playfield, measured_logical_rect, measured_rect};
 use crate::{
     combat::{CombatStats, TargetState},
     input_context::{GameplayInputContext, InputContextSet},
@@ -492,10 +492,9 @@ pub(super) fn mobile_geometry_valid(
         {
             return false;
         }
-        if !clears_playfield(
+        if !compact_controls_clear_playfield(
             Rect::from_center_size(center, Vec2::splat(radius * 2.0)),
-            mobile.viewport,
-            true,
+            mobile,
         ) {
             return false;
         }
@@ -592,12 +591,12 @@ mod tests {
             (
                 "MobileMinionAttack".to_owned(),
                 layout.category_centers[0],
-                18.0 * mobile.combat_scale(),
+                crate::mobile_controls::CATEGORY_DIAMETER * 0.5 * mobile.combat_scale(),
             ),
             (
                 "MobileTowerAttack".to_owned(),
                 layout.category_centers[1],
-                18.0 * mobile.combat_scale(),
+                crate::mobile_controls::CATEGORY_DIAMETER * 0.5 * mobile.combat_scale(),
             ),
             (
                 "MobileDash".to_owned(),
@@ -651,7 +650,7 @@ mod tests {
     }
 
     #[test]
-    fn rendered_radial_guard_checks_orbit_art_and_expanded_touch_bounds() {
+    fn rendered_compact_guard_checks_art_and_expanded_touch_bounds() {
         for viewport in [
             Vec2::new(693.0, 320.0),
             Vec2::new(763.0, 390.0),
