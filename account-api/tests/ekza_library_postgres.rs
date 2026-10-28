@@ -1,4 +1,6 @@
 //! Explicit disposable PostgreSQL + local HTTP protocol fixture; no hosted writes.
+mod common;
+
 use axum::{
     Json, Router,
     extract::State,
@@ -134,7 +136,7 @@ async fn owner_bound_library_consent_keeps_credentials_private_and_survives_outa
         matches!(
             (parsed.get_port(), parsed.get_database()),
             (55581, Some("workshop_test")) | (5432, Some("omoba_test"))
-        ),
+        ) || common::launcher_database(&parsed),
         "Only the dedicated workshop or CI test database"
     );
     migrate(&url).await.unwrap();

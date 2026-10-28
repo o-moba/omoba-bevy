@@ -1,36 +1,15 @@
-//! The market's legal documents in the game (LR-06, LR-07): the first-launch
-//! acceptance card, Settings → About and the gate on online traffic.
-//!
-//! - **Table.** The document version, the links and the age sign come from
-//!   the market table (`shared::market::Market::legal`, mirrored by
-//!   `scripts/markets.py`) through [`bound_region`], this module's one read of
-//!   the market (LR-68 R0 swaps its body for the bound region). A link the
-//!   table does not have is not shown. A market without a document version
-//!   (global) shows no card and gates nothing; one without any entry shows no
-//!   About page either.
-//! - **Acceptance.** The card is a modal above every screen and below the
-//!   boot splash. It names the documents, opens them in the browser, shows
-//!   the age sign and lets the player switch the language. Continue stays
-//!   disabled until the player ticks the acceptance switch. The choice is
-//!   stored in the region folder (the settings folder,
-//!   `OMOBA_CLIENT_CONFIG_DIR` included) as [`ACCEPTANCE_FILE`]:
-//!   `{region, doc_version, accepted_at}` (Unix seconds, UTC). A record of
-//!   another region or document version asks again. Nothing is sent to a
-//!   server yet.
-//! - **Gate.** [`bound_and_accepted`] is the one run condition for region
-//!   traffic: the lobby transport (`net`: start, session lifecycle, menu
-//!   retry), the release catalog read (`update`) and the career actions
-//!   (`career`: VK sign-in, device links, website pairing) carry it. In the
-//!   frame the player accepts, [`LegalAccepted`] starts what the boot skipped.
-//!   Automation gets no exception: an RU harness writes the record into its
-//!   own `OMOBA_CLIENT_CONFIG_DIR` first.
-//!
-//! The card is built so the region choice of LR-68 can join it: region and
-//! legal become one Confirm.
+//! First-launch account-region confirmation, regional legal documents and the
+//! traffic gate. Returning installations restore their region; a first-time
+//! player confirms before regional calls or key creation. The region table owns
+//! document links/version; acceptance stays in that region's settings folder.
+//! A different region requires a cold start and a blocking restart card.
+//! `LegalAccepted` initializes the region's settings/identity and starts what
+//! startup skipped. Automation uses isolated settings and the same gate.
+//! See docs/connection-profiles.md and the remaining LR-68 release gates.
 // i18n-strict
 use std::path::{Path, PathBuf};
 
-use bevy::prelude::*;
+use bevy::{app::AppExit, prelude::*};
 use serde::{Deserialize, Serialize};
 use shared::market::Legal;
 
@@ -58,11 +37,10 @@ pub(crate) struct Region {
     pub legal: Legal,
 }
 
-/// This game's region: the module's one read of the market (LR-68 rules,
-/// `docs/plans/launch-readiness.md` section 7). Until LR-68 binds a region at
-/// run time it is the build's market.
+/// The bound runtime region; regional server/library compatibility falls back
+/// to the build market until first confirmation.
 pub(crate) fn bound_region() -> Region {
-    let market = shared::market::MARKET;
+    let market = shared::region::market();
     Region {
         id: market.key(),
         legal: market.legal(),
@@ -97,6 +75,10 @@ pub(crate) struct LegalAccepted;
 #[derive(Resource)]
 pub(crate) struct LegalConsent {
     region: Region,
+    choosing_region: bool,
+    restart_required: bool,
+    redraw: bool,
+    region_error: bool,
     file: Option<PathBuf>,
     /// The record of the current region and document version, if any.
     accepted: Option<Acceptance>,
@@ -108,6 +90,7 @@ pub(crate) struct LegalConsent {
     pub(crate) opened: Option<String>,
     open: fn(&str) -> Result<(), String>,
     now: fn() -> u64,
+    directory: fn(crate::account_region::RegionId) -> Option<PathBuf>,
 }
 
 fn unix_now() -> u64 {
@@ -119,10 +102,12 @@ fn unix_now() -> u64 {
 impl LegalConsent {
     /// This game's region and its record in the settings folder.
     pub(crate) fn load() -> Self {
-        Self::at(
+        let mut consent = Self::at(
             bound_region(),
             crate::platform::settings_directory().map(|directory| directory.join(ACCEPTANCE_FILE)),
-        )
+        );
+        consent.choosing_region = !crate::account_region::bound();
+        consent
     }
 
     /// `region` with its record at `file`.
@@ -134,6 +119,10 @@ impl LegalConsent {
         });
         Self {
             region,
+            choosing_region: false,
+            restart_required: false,
+            redraw: false,
+            region_error: false,
             file,
             accepted,
             checked: false,
@@ -141,12 +130,15 @@ impl LegalConsent {
             opened: None,
             open: crate::platform::open_external_url,
             now: unix_now,
+            directory: crate::account_region::regional_directory,
         }
     }
 
     /// The region's documents are accepted, or it has none to accept.
     pub(crate) fn accepted(&self) -> bool {
-        self.region.legal.version.is_none() || self.accepted.is_some()
+        !self.choosing_region
+            && !self.restart_required
+            && (self.region.legal.version.is_none() || self.accepted.is_some())
     }
 
     /// The card is up until the documents are accepted.
@@ -157,12 +149,46 @@ impl LegalConsent {
     /// Records the acceptance of the current version (the switch must be on)
     /// and saves it. A record that cannot be written still counts for this
     /// run; the card comes back at the next start.
+    fn can_continue(&self) -> bool {
+        if self.restart_required {
+            return false;
+        }
+        self.region.legal.version.is_none() || self.checked || self.accepted.is_some()
+    }
+
     fn accept(&mut self) -> bool {
+        if !self.can_continue() || !self.card_open() {
+            return false;
+        }
+        if self.choosing_region {
+            let id = if self.region.id == "ru" {
+                crate::account_region::RegionId::Ru
+            } else {
+                crate::account_region::RegionId::Global
+            };
+            if shared::region::active().is_some_and(|r| r.id != id) {
+                if let Err(error) = crate::account_region::request_switch(id) {
+                    warn!("Account region switch not saved: {error}");
+                    self.region_error = true;
+                    return false;
+                }
+                self.choosing_region = false;
+                self.restart_required = true;
+                self.redraw = true;
+                return false;
+            }
+            if let Err(error) = crate::account_region::bind_initial(id) {
+                warn!("Account region confirmation failed: {error}");
+                self.region_error = true;
+                return false;
+            }
+            self.choosing_region = false;
+        }
         let Some(version) = self.region.legal.version else {
-            return false;
+            return true;
         };
-        if !self.checked || self.accepted.is_some() {
-            return false;
+        if self.accepted.is_some() {
+            return true;
         }
         let record = Acceptance {
             region: self.region.id.to_owned(),
@@ -183,6 +209,12 @@ impl LegalConsent {
         );
         self.accepted = Some(record);
         true
+    }
+
+    pub(crate) fn open_region_choice(&mut self) {
+        self.choosing_region = true;
+        self.checked = false;
+        self.redraw = true;
     }
 
     /// Opens `link`; a link the browser refuses is shown as text.
@@ -206,6 +238,7 @@ impl LegalConsent {
         Self {
             open: |_| Ok(()),
             now: || 1_761_350_400,
+            directory: |_| None,
             ..Self::at(region, file)
         }
     }
@@ -232,10 +265,11 @@ fn write_record(path: &Path, record: &Acceptance) -> std::io::Result<()> {
 /// (unit tests of other modules) the table decides, closed for a region that
 /// asks.
 pub(crate) fn bound_and_accepted(consent: Option<Res<LegalConsent>>) -> bool {
-    match consent {
-        Some(consent) => consent.accepted(),
-        None => bound_region().legal.version.is_none(),
-    }
+    crate::account_region::bound()
+        && match consent {
+            Some(consent) => consent.accepted(),
+            None => bound_region().legal.version.is_none(),
+        }
 }
 
 /// A document or channel the game links.
@@ -308,6 +342,9 @@ impl LegalLink {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum LegalAction {
     ToggleAccept,
+    ChooseRegion(crate::account_region::RegionId),
+    CancelRegion,
+    Restart,
     Continue,
     CycleLanguage,
     Open(LegalLink),
@@ -320,13 +357,14 @@ impl Plugin for LegalPlugin {
         if !app.world().contains_resource::<LegalConsent>() {
             app.insert_resource(LegalConsent::load());
         }
-        app.add_message::<LegalAccepted>()
+        app.add_message::<AppExit>()
+            .add_message::<LegalAccepted>()
             .add_ui_action::<LegalAction>()
             .register_modal::<LegalConsent>(ModalId::Legal, LegalConsent::card_open)
             .add_systems(Startup, spawn_card)
             .add_systems(
                 Update,
-                (legal_actions, sync_legal_ui)
+                (legal_actions, rebuild_region_card, sync_legal_ui)
                     .chain()
                     .after(UiSet::Dispatch)
                     .before(UiSet::Paint),
@@ -441,7 +479,11 @@ fn spawn_card(
     if !consent.card_open() {
         return;
     }
-    let legal = consent.region.legal;
+    let legal = if consent.restart_required {
+        Legal::NONE
+    } else {
+        consent.region.legal
+    };
     let form = theme::Form::of(platform.as_deref().is_some_and(|p| p.is_mobile()));
     commands
         .spawn((
@@ -486,7 +528,14 @@ fn spawn_card(
                     ))
                     .with_children(|header| {
                         header.spawn((
-                            Localized::new("legal.card.title").into_text(),
+                            Localized::new(if consent.restart_required {
+                                "region.restart.title"
+                            } else if consent.choosing_region {
+                                "region.title"
+                            } else {
+                                "legal.card.title"
+                            })
+                            .into_text(),
                             theme::role_text(TextRole::Title),
                             TextColor(theme::GOLD),
                             Name::new("LegalCardTitle"),
@@ -512,8 +561,62 @@ fn spawn_card(
                         Name::new("LegalCardBody"),
                     ))
                     .with_children(|body| {
+                        if consent.choosing_region {
+                            body.spawn(Node {
+                                width: Val::Percent(100.0),
+                                column_gap: Val::Px(8.0),
+                                flex_shrink: 0.0,
+                                ..default()
+                            })
+                            .with_children(|choices| {
+                                for id in crate::account_region::RegionId::ALL {
+                                    let kind = if id.key() == consent.region.id {
+                                        ButtonKind::Primary
+                                    } else {
+                                        ButtonKind::Secondary
+                                    };
+                                    let mut node =
+                                        widgets::button_node(ButtonSize::Large, kind, form);
+                                    node.flex_grow = 1.0;
+                                    node.flex_basis = Val::Px(0.0);
+                                    node.min_width = Val::Px(0.0);
+                                    widgets::spawn_button(
+                                        choices,
+                                        node,
+                                        Localized::new(
+                                            if id == crate::account_region::RegionId::Ru {
+                                                "region.ru"
+                                            } else {
+                                                "region.global"
+                                            },
+                                        ),
+                                        TextStyle::new(TextRole::ButtonLg),
+                                        kind,
+                                        None,
+                                        LegalAction::ChooseRegion(id),
+                                        format!("AccountRegion-{}", id.key()).into(),
+                                        (),
+                                    );
+                                }
+                            });
+                            body.spawn((
+                                caption(Localized::new("region.separate_accounts")),
+                                Name::new("AccountRegionNotice"),
+                            ));
+                        }
                         body.spawn((
-                            Localized::new("legal.card.body").into_text(),
+                            Localized::new(if consent.restart_required {
+                                "region.restart.body"
+                            } else if consent.choosing_region {
+                                if consent.region.id == "ru" {
+                                    "region.ru.description"
+                                } else {
+                                    "region.global.description"
+                                }
+                            } else {
+                                "legal.card.body"
+                            })
+                            .into_text(),
                             theme::role_text(TextRole::Body),
                             TextColor(theme::IVORY),
                             Node {
@@ -557,44 +660,77 @@ fn spawn_card(
                             LegalAction::CycleLanguage,
                             "LegalLanguage",
                         );
-                        let switch = widgets::controls::toggle(
-                            body,
-                            Localized::new("legal.card.accept"),
-                            false,
-                            LegalAction::ToggleAccept,
-                            "LegalAccept",
-                        );
-                        body.commands().entity(switch).insert(AcceptSwitch);
                     });
                 panel
                     .spawn((
                         Node {
                             width: Val::Percent(100.0),
                             justify_content: JustifyContent::Center,
+                            flex_direction: FlexDirection::Column,
+                            row_gap: Val::Px(8.0),
                             flex_shrink: 0.0,
                             ..default()
                         },
                         Name::new("LegalCardFooter"),
                     ))
                     .with_children(|footer| {
+                        if legal.version.is_some() {
+                            let switch = widgets::controls::toggle(
+                                footer,
+                                Localized::new("legal.card.accept"),
+                                false,
+                                LegalAction::ToggleAccept,
+                                "LegalAccept",
+                            );
+                            footer.commands().entity(switch).insert(AcceptSwitch);
+                        }
                         let mut node =
                             widgets::button_node(ButtonSize::Large, ButtonKind::Primary, form);
                         node.width = Val::Percent(100.0);
                         let button = widgets::spawn_button(
                             footer,
                             node,
-                            Localized::new("legal.card.continue"),
+                            Localized::new(if consent.restart_required {
+                                "region.restart.button"
+                            } else {
+                                "legal.card.continue"
+                            }),
                             TextStyle::new(TextRole::ButtonLg),
                             ButtonKind::Primary,
                             Some(Icon::NavCheck),
-                            LegalAction::Continue,
+                            if consent.restart_required {
+                                LegalAction::Restart
+                            } else {
+                                LegalAction::Continue
+                            },
                             "LegalContinue".into(),
                             (),
                         );
+                        if consent.choosing_region && shared::region::active().is_some() {
+                            widgets::spawn_button(
+                                footer,
+                                widgets::button_node(
+                                    ButtonSize::Regular,
+                                    ButtonKind::Secondary,
+                                    form,
+                                ),
+                                Localized::new("region.cancel"),
+                                TextStyle::new(TextRole::ButtonLg),
+                                ButtonKind::Secondary,
+                                None,
+                                LegalAction::CancelRegion,
+                                "AccountRegionCancel".into(),
+                                (),
+                            );
+                        }
                         footer.commands().entity(button).insert((
                             ContinueButton,
                             Pressable {
-                                disabled: true,
+                                disabled: if consent.restart_required {
+                                    !crate::platform::CAN_RELAUNCH
+                                } else {
+                                    !consent.can_continue()
+                                },
                                 ..default()
                             },
                         ));
@@ -660,9 +796,46 @@ fn legal_actions(
     mut consent: ResMut<LegalConsent>,
     mut locale: Option<ResMut<Locale>>,
     mut accepted: MessageWriter<LegalAccepted>,
+    mut exit: MessageWriter<AppExit>,
 ) {
     for Activated { action, .. } in activated.read() {
         match *action {
+            LegalAction::CancelRegion => {
+                if consent.choosing_region && shared::region::active().is_some() {
+                    *consent = LegalConsent::load();
+                    consent.redraw = true;
+                }
+            }
+            LegalAction::Restart => {
+                if consent.restart_required && crate::platform::CAN_RELAUNCH {
+                    match crate::platform::relaunch() {
+                        Ok(()) => {
+                            exit.write(AppExit::Success);
+                        }
+                        Err(error) => {
+                            warn!("Could not restart: {error}");
+                            consent.region_error = true;
+                        }
+                    }
+                }
+            }
+            LegalAction::ChooseRegion(id) => {
+                if !consent.choosing_region {
+                    continue;
+                }
+                consent.region = Region {
+                    id: id.key(),
+                    legal: id.market().legal(),
+                };
+                consent.file = (consent.directory)(id).map(|base| base.join(ACCEPTANCE_FILE));
+                consent.accepted = consent.file.as_deref().and_then(read_record).filter(|r| {
+                    r.region == id.key()
+                        && Some(r.doc_version.as_str()) == id.market().legal().version
+                });
+                consent.checked = false;
+                consent.region_error = false;
+                consent.redraw = true;
+            }
             LegalAction::ToggleAccept => {
                 if consent.card_open() {
                     consent.checked = !consent.checked;
@@ -683,6 +856,24 @@ fn legal_actions(
             LegalAction::Open(link) => consent.open_link(link),
         }
     }
+}
+
+fn rebuild_region_card(world: &mut World) {
+    if !world.resource::<LegalConsent>().redraw {
+        return;
+    }
+    let roots: Vec<_> = world
+        .query_filtered::<Entity, With<LegalCardRoot>>()
+        .iter(world)
+        .collect();
+    for entity in roots {
+        world.despawn(entity);
+    }
+    world.resource_mut::<LegalConsent>().redraw = false;
+    use bevy::ecs::system::RunSystemOnce;
+    world
+        .run_system_once(spawn_card)
+        .expect("legal card resources");
 }
 
 #[allow(clippy::type_complexity)]
@@ -707,15 +898,21 @@ fn sync_legal_ui(
             widgets::ButtonStyle::set_selected(&mut style, consent.checked);
         }
         for mut pressable in &mut buttons {
-            if pressable.disabled == consent.checked {
-                pressable.disabled = !consent.checked;
-            }
+            pressable.disabled = if consent.restart_required {
+                !crate::platform::CAN_RELAUNCH
+            } else {
+                !consent.can_continue()
+            };
         }
-        let status = consent
-            .failed_link
-            .as_ref()
-            .map(|url| trf("legal.link.failed", &[("url", url)]))
-            .unwrap_or_default();
+        let status = if consent.region_error {
+            crate::i18n::tr("region.error.save").to_owned()
+        } else {
+            consent
+                .failed_link
+                .as_ref()
+                .map(|url| trf("legal.link.failed", &[("url", url)]))
+                .unwrap_or_default()
+        };
         for mut text in &mut statuses {
             if text.0 != status {
                 text.0.clone_from(&status);
@@ -899,6 +1096,60 @@ mod tests {
     fn continue_disabled(app: &mut App) -> bool {
         let button = harness::find(app.world_mut(), "LegalContinue").unwrap();
         app.world().get::<Pressable>(button).unwrap().disabled
+    }
+
+    #[test]
+    fn first_account_region_choice_rebuilds_documents_without_opening_the_gate() {
+        let mut consent = LegalConsent::for_test(
+            Region {
+                id: "global",
+                legal: Market::Global.legal(),
+            },
+            None,
+        );
+        consent.choosing_region = true;
+        let mut app = card_app(consent);
+        app.update();
+        app.update();
+        assert!(!app.world().resource::<LegalConsent>().accepted());
+        assert!(harness::find(app.world_mut(), "LegalAccept").is_none());
+        harness::press(app.world_mut(), "AccountRegion-ru");
+        app.update();
+        app.update();
+        assert!(continue_disabled(&mut app));
+        assert!(harness::find(app.world_mut(), "LegalAccept").is_some());
+        assert!(harness::find(app.world_mut(), "LegalTerms").is_some());
+        assert!(harness::find(app.world_mut(), "LegalPrivacy").is_some());
+        assert!(!app.world().resource::<LegalConsent>().accepted());
+        harness::press(app.world_mut(), "AccountRegion-global");
+        app.update();
+        app.update();
+        assert!(!continue_disabled(&mut app));
+        assert!(harness::find(app.world_mut(), "LegalAccept").is_none());
+        assert!(!app.world().resource::<LegalConsent>().accepted());
+    }
+
+    #[test]
+    fn pending_restart_keeps_the_card_and_gate_closed_even_for_global() {
+        let mut consent = LegalConsent::for_test(
+            Region {
+                id: "global",
+                legal: Market::Global.legal(),
+            },
+            None,
+        );
+        consent.restart_required = true;
+        assert!(consent.card_open());
+        assert!(!consent.accepted());
+        assert!(!consent.can_continue());
+        let mut app = card_app(consent);
+        app.update();
+        app.update();
+        assert_eq!(
+            app.world().resource::<crate::ui::ModalStack>().top(),
+            Some(ModalId::Legal)
+        );
+        assert!(harness::find(app.world_mut(), "LegalContinue").is_some());
     }
 
     /// LR-06 acceptance in the UI tree: the card is the top modal, Continue

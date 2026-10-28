@@ -113,6 +113,7 @@ REPO = "o-moba/omoba-bevy"
 # passport/src/community.rs, passport/src/lib.rs, client/src/platform.rs) and the
 # contours' identities: scripts/contours.py, shared with the mobile packagers.
 from contours import (ACCOUNT_API_ENV, PORTAL_ORIGIN_ENV, DEV_ACCOUNT_API, DEV_PORTAL_ORIGIN,
+                      DEV_RU_LOBBY, DEV_RU_ACCOUNT_API, DEV_RU_PORTAL_ORIGIN,
                       CONFIG_SUFFIX_ENV, CONTOURS, DEV_CONFIG_SUFFIX, DEV_LOBBY,  # noqa: E402
                       DEV_PASSPORT, DEV_REGISTRY, MOBILE, PASSPORT_DEFAULT_ENV, REGISTRY_DEFAULT_ENV,
                       SERVER_DEFAULT_ENV)
@@ -151,10 +152,10 @@ MAC_MIN_SYSTEM = "12.0"
 LINUX_MIN_GLIBC = "2.36"
 ANDROID_MANIFEST = ROOT / "mobile/android/AndroidManifest.xml"
 DEV_IP_ENV = "DEV_IP"
-PROD_VPS_IPS = frozenset({"77.246.105.57"})
+PROD_VPS_IPS = frozenset({"77.246.105.57", "212.113.117.105"})
 BETA_LOBBY = "77.246.105.57:4000"
 PUBLIC_ZONES = ("omoba.io", "ekza.io", "omoba.ru")
-DEV_ZONES = ("dev.omoba.io", "dev.ekza.io")
+DEV_ZONES = ("dev.omoba.io", "dev.ekza.io", "dev.omoba.ru")
 DEV_TAG = re.compile(r"v\d+\.\d+\.\d+-dev\.\d+")
 LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 
@@ -488,10 +489,11 @@ def resolve_flavor(contour: str = "prod", server: str | None = None, registry: s
             raise SystemExit(f"{server} is the global public lobby; a {market} build uses its market's lobby")
         overrides = tuple(sorted((features or {}).items()))
         if contour == "dev":
-            flavor = resolve_flavor("dev", server, registry, passport)
-            return Flavor("dev", flavor.server, flavor.registry if resolved["ekza"] else None,
-                          DEV_CONFIG_SUFFIX, flavor.passport if resolved["ekza"] else None, market,
-                          overrides, account_api, portal)
+            if is_prod_host(endpoint_host(server)):
+                raise SystemExit(f"a dev build must not point at production: {server}")
+            return Flavor("dev", server or DEV_RU_LOBBY, None,
+                          DEV_CONFIG_SUFFIX, None, market, overrides,
+                          DEV_RU_ACCOUNT_API, DEV_RU_PORTAL_ORIGIN)
         return Flavor("prod", server or preset.lobby, registry, None, passport, market, overrides,
                       account_api or preset.account_api, portal or preset.portal)
     if features:

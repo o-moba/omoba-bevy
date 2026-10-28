@@ -184,6 +184,7 @@ async fn device_enrollment_proves_new_key_preserves_profile_and_rejects_reassign
     .await
     .unwrap();
     assert_eq!(recovered["state"], "consumed");
+    assert_eq!(recovered["account_region"], shared::market::MARKET.key());
     assert_eq!(recovered["profile_id"], profile.profile_id);
     // A candidate registered in the game while its portal approval was pending
     // is never silently moved away from that progressed account.

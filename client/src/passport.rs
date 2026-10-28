@@ -72,7 +72,7 @@ pub fn is_connected() -> bool {
 /// Start pairing from the menu. A running attempt is left alone; a build
 /// without Ekza never starts one.
 pub fn connect() {
-    if is_connected() || !shared::market::FEATURES.ekza {
+    if is_connected() || !crate::account_region::features().ekza {
         return;
     }
     let mut pairing = PAIRING.lock().unwrap();
@@ -203,7 +203,8 @@ pub fn clear_tickets() {
 }
 
 pub fn initialize() {
-    if !shared::market::FEATURES.ekza
+    if !crate::account_region::bound()
+        || !crate::account_region::features().ekza
         || !std::env::var("OMOBA_PASSPORT_CONNECT").is_ok_and(|value| value == "1")
     {
         return;
@@ -226,7 +227,7 @@ pub fn initialize() {
 /// none of them (no store, account link, weapon library or placements) and
 /// mounts no `ekza://` source.
 pub fn initialize_store() -> Option<std::path::PathBuf> {
-    if !shared::market::FEATURES.ekza {
+    if !crate::account_region::bound() || !crate::account_region::features().ekza {
         return None;
     }
     let root = crate::connection_profile::profile_file(crate::connection_profile::STORE_DIR)?;

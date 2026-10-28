@@ -41,11 +41,12 @@ def contour_build_settings(env: dict[str, str], root: Path = ROOT) -> dict[str, 
     name = contour(env)
     try:
         # Use the CLI's same cross-contour endpoint validation for direct Xcode.
-        flavor = resolve_flavor(name, server=env.get('OMOBA_GAME_SERVER') or None)
+        flavor = resolve_flavor(name, server=env.get('OMOBA_GAME_SERVER') or None,
+                                market=env.get('OMOBA_MARKET') or 'global')
     except SystemExit as error:
         raise ValueError(str(error)) from error
     if name == 'dev':
-        return compile_defaults('dev', flavor.server)
+        return flavor.client_defaults()
     return {**ekza_build_settings(env, root), **compile_defaults('prod', flavor.server)}
 
 

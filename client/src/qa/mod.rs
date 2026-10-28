@@ -12,6 +12,7 @@ use bevy::app::{PluginGroup, PluginGroupBuilder};
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 
+mod account_region_qa;
 pub(crate) mod animation_qa;
 mod audio_qa;
 mod beta_ui_qa;
@@ -79,8 +80,9 @@ impl PluginGroup for QaPlugins {
             .add(result_qa::ResultQaPlugin)
             .add(ui_gallery::UiGalleryPlugin)
             .add(help_qa::HelpQaPlugin)
-            .add(boot_qa::BootQaPlugin);
-        if shared::market::FEATURES.supporter {
+            .add(boot_qa::BootQaPlugin)
+            .add(account_region_qa::AccountRegionQaPlugin);
+        if crate::account_region::features().supporter {
             group
         } else {
             group

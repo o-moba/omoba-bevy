@@ -5,6 +5,16 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- 0.45.0: default native clients bind an account region (RU or International)
+  before regional traffic, restore returning accounts automatically and isolate
+  keys/state. Region changes require a cold restart; the restart screen stops old
+  regional traffic. Lobby, account login, portal, legal documents, Ekza and purchase
+  offers follow the bound region. Player-facing raw server configuration is removed
+  in both contours. Native device replies identify their owning region and foreign
+  replies are refused. RU dev uses a separate authority; dev also refuses the new
+  RU production IP. No server deployment or public package is included. See
+  [remaining RU release gates](docs/plans/ru-release-2026-10-28.md).
+
 - RU market: the Russian servers move to the owner's **omoba.ru** domain
   (registered at REG.RU): `https://omoba.ru` is the RU portal and landing (VK ID
   callback `https://omoba.ru/api/auth/vk/callback`), `https://account.omoba.ru`

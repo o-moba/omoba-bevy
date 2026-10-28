@@ -45,7 +45,7 @@ const FRESH: Duration = Duration::from_secs(10);
 /// Whether the region signs players in with VK ID: the prompt and the Protect
 /// modal offer to link it. The module's one read of the market.
 pub(crate) fn vk_offered() -> bool {
-    devices::vk_button_visible(shared::market::FEATURES)
+    devices::vk_button_visible(crate::account_region::features())
 }
 
 /// What the Protect modal and Profile show.
@@ -108,6 +108,9 @@ pub(crate) struct ProtectPrompt {
 impl ProtectPrompt {
     /// The record in this region's settings folder.
     pub(crate) fn load() -> Self {
+        if !crate::account_region::bound() {
+            return Self::at(None);
+        }
         Self::at(crate::platform::settings_directory().map(|directory| directory.join(PROMPT_FILE)))
     }
     pub(crate) fn at(file: Option<PathBuf>) -> Self {

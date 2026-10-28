@@ -1,0 +1,13 @@
+{
+  "region.title": "Your account region",
+  "region.ru": "Russia",
+  "region.global": "International",
+  "region.separate_accounts": "Each region has its own account, friends and progress. The server is selected automatically for your account.",
+  "region.ru.description": "Russian-language servers in Russia. Sign in through VK ID, OK or Mail.ru.",
+  "region.global.description": "International servers and the omoba.io account.",
+  "region.error.save": "Could not save your account region. Check that the app can save settings and try again.",
+  "region.restart.title": "Restart to switch accounts",
+  "region.restart.body": "Your other region and its account will open after restarting OMOBA. Your current profile and progress stay in their own region. On a phone, close the app and open it again.",
+  "region.restart.button": "Restart OMOBA",
+  "region.cancel": "Keep current account"
+}

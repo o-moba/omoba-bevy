@@ -229,6 +229,7 @@ async fn website_registration_links_to_the_game_profile_only_after_game_confirma
     );
     let linked = social::link(&app, &link(&active, &e)).await.unwrap();
     assert_eq!(linked["state"], "linked");
+    assert_eq!(linked["account_region"], shared::market::MARKET.key());
     assert_eq!(linked["profile_id"], profile.profile_id);
     // A lost reply is safe to retry; the code can no longer approve any device.
     assert_eq!(

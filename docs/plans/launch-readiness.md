@@ -692,6 +692,17 @@ Area: monetization · **launch scope** (owner request 2026-10-24) · L · code +
 - **Depends on:** LR-01, LR-02, LR-04/LR-06 (offer), LR-14 (protocol bump ships with the update path)
 
 #### LR-68 — One app per platform; the account's region chooses servers, sign-in, data and payments
+
+**2026-10-28 delivery:** the routing foundation is implemented in 0.45.0:
+`shared::region`, first confirmation, remembered account binding, isolated keys,
+raw-server UI removal, runtime feature/provider selection and blocking cold
+switching. This does not close all R0–R3 criteria. See the
+[current delivery and remaining gates](ru-release-2026-10-28.md). The implementation
+uses `account_region.json`, retains regional preferences for now and keeps legacy
+explicit config roots compatible. RU dev now has its own regional authority
+(`*.dev.omoba.ru`) rather than using the global dev API: the new account-region
+reply must agree with the backend that owns the identity. Provisioning it is an
+ops gate; it never falls back to global.
 Area: architecture/accounts/distribution · **blocker for the first unified store release** (R0 is inside M0) · L · code + ops + owner
 - **Now:**
   - **Region is a compile-time build axis.**
@@ -780,7 +791,7 @@ Area: architecture/accounts/distribution · **blocker for the first unified stor
     - **Policy table** (`validate_contour_endpoints` is generalized to (region, contour)):
       - (`ru`, prod): allow `omoba.ru` and subdomains, plus loopback and private LAN (desktop only). Deny everything else, including `omoba.io`, `ekza.io` and `77.246.105.57`.
       - (`global`, prod): allow `omoba.io`, `ekza.io` and the Ekza asset/IPFS gateway hosts (enumerated in R1, for example `*.mypinata.cloud`). Deny `omoba.ru`.
-      - (`global`, dev) and (`ru`, dev): allow only the `dev.omoba.io` and `dev.ekza.io` subdomains. RU on the dev contour uses the global dev servers. This exception holds on the dev contour only, which carries no real RU data.
+      - (`global`, dev): `dev.omoba.io` and `dev.ekza.io`; (`ru`, dev): its own `dev.omoba.ru` authority. Changed with the 2026-10-28 routing foundation so the authenticated account region agrees with its backend.
     - **Where it is enforced:**
       - profile resolution;
       - `WebAccountApi::new`;

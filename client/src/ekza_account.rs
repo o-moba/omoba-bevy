@@ -167,7 +167,7 @@ pub fn account_connected() -> bool {
 /// The menu button toggles between connecting and signing out of this
 /// installation. A build without Ekza never connects.
 pub fn connect_account() {
-    if !shared::market::FEATURES.ekza {
+    if !crate::account_region::features().ekza {
         return;
     }
     let mut state = STATE.lock().unwrap();

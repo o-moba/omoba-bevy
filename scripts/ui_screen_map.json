@@ -27,7 +27,10 @@
       "note": "Front-end shell screens driven directly; searching/loading/post-match have no real match behind them.",
       "sources": [
         "client/src/qa/frontend_qa.rs"
-      ]
+      ],
+      "ignore": {
+        "11-server.png": "Legacy frame is skipped in all player builds; raw server configuration was removed with account-region routing."
+      }
     },
     "flow": {
       "area": "02-matchmaking",
@@ -275,18 +278,6 @@
       ],
       "route": "Game menu \u2192 Settings, scrolled down",
       "source": "client/src/pause_menu.rs"
-    },
-    {
-      "id": "server-entry",
-      "title": "Connection panel (dev builds)",
-      "run": "shell",
-      "frame": "11-server.png",
-      "profiles": [
-        "phone"
-      ],
-      "route": "Home \u2192 Connection (dev-contour builds only)",
-      "source": "client/src/mobile_ui.rs",
-      "fixture": "Production builds have no server UI and skip this frame; capture with a `--contour dev` build"
     },
     {
       "id": "home-help",
@@ -1092,6 +1083,7 @@
     "client/src/qa/combat_polish_qa.rs": "Focused synthetic iPad combat presentation fixtures (OMOBA_COMBAT_POLISH_QA_DIR): vitals, upgrades, held attack, kill feed, concealment and rocket. English 1180x820 by default; OMOBA_IPHONE_UX_QA=1 selects focused 852x393 iPhone gameplay, empty attack, concealment, dash aim, recall and FPS/HUD settings with checked UI readback. Not physical-device or multiplayer proof.",
     "client/src/qa/dagger_qa.rs": "Focused Adventurer class preview and normal offline Q/W/E/R casts, plus clearly labelled synthetic rare-hit receipt presentation (OMOBA_DAGGER_QA_DIR). English852x393 only; optional synthetic focus, no raw-touch/device/RNG claims.",
     "client/src/qa/equipped_skills_qa.rs": "Focused synthetic accepted hybrid HUD and held-skill card (OMOBA_EQUIPPED_SKILLS_QA_DIR). English 852x393 only; actual input and UI readback, separate real-server harness proof. Not physical-device or multiplayer proof.",
-    "client/src/qa/boot_qa.rs": "boot splash and the Home it reveals (OMOBA_BOOT_SPLASH_SHOTS); a transient overlay, not an AppScreen"
+    "client/src/qa/boot_qa.rs": "boot splash and the Home it reveals (OMOBA_BOOT_SPLASH_SHOTS); a transient overlay, not an AppScreen",
+    "client/src/qa/account_region_qa.rs": "Focused native RU account-region confirmation and cold-switch proof (OMOBA_ACCOUNT_REGION_QA), one ru 852x393 desktop phone preview; isolated dev settings and offline game transport. Not a physical-device certification."
   }
 }

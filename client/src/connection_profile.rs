@@ -1,31 +1,11 @@
-//! Connection profiles: which lobby, Ekza registry, passport, market and Studio
-//! this build talks to, and where it keeps the state that belongs to them.
-//!
-//! - A **production** build has exactly one profile, [`ProfileId::Production`]:
-//!   the public lobby, the Ekza registry and passport, `app.omoba.io/market`. It
-//!   shows no server or connection selector anywhere. Desktop developers and
-//!   self-hosters override it with environment variables (`GAME_SERVER_ADDR`,
-//!   `OMOBA_REGISTRY_URL`, `OMOBA_PASSPORT_URL`); phones read none.
-//! - A **contour** build (`OMOBA_DEFAULT_CONFIG_DIR_SUFFIX`, the `dev` tester
-//!   app) offers [`ProfileId::Dev`] (the default: the contour's own lobby,
-//!   registry, market and Studio, the closed passport), [`ProfileId::Local`]
-//!   (services on this computer, loopback only) and [`ProfileId::Custom`] (a
-//!   typed lobby and an optional registry). It never offers production, and a
-//!   custom production lobby or registry is refused.
-//!
-//! The choice is saved in [`SELECTION_FILE`] in the settings folder and applies
-//! at the next start: the Ekza stores, the account link and the `ekza://` asset
-//! source are opened once per process, so a running game never switches
-//! registries under them. Each contour profile keeps its Ekza link, store
-//! caches and match-resume hint in `profiles/<key>/` of the settings folder
-//! ([`profile_file`]); production keeps them in the settings folder itself.
-//! Graphics, audio, language and the career identity stay shared.
-//!
-//! A build without Ekza (`shared::market::FEATURES.ekza` off, the free RU/CN
-//! markets) pins the closed loopback registry and passport and names no market
-//! or Studio whatever its profile names ([`for_market`]), and takes no desktop
-//! registry or passport override: no Ekza host is ever contacted. The profile
-//! itself (and the choice saved for the next start) is unchanged.
+//! Regional connection profiles. The account binds one region before traffic;
+//! `install` resolves its contour endpoints and pins the process-wide SDK URLs.
+//! Player builds show no raw server selector, including dev. Legacy profile
+//! resolvers and storage helpers remain for tooling and backwards compatibility;
+//! a saved raw profile is not an input to player routing. Desktop operator
+//! overrides still pass contour/known-region guards; phones read none.
+//! RU closes Ekza endpoints. Region keys/state never share a folder with Global.
+//! See docs/connection-profiles.md for first confirmation and cold switching.
 // i18n-strict
 use std::io;
 use std::path::{Path, PathBuf};
@@ -119,9 +99,9 @@ pub(crate) fn profiles_for(contour: Option<&str>) -> &'static [ProfileId] {
     }
 }
 
-/// Whether this build shows a connection selector (only contour builds do).
+/// Player builds never expose raw server configuration.
 pub(crate) fn selectable() -> bool {
-    profiles_for(BUILD_CONTOUR).len() > 1
+    false
 }
 
 /// What a custom profile names.
@@ -525,11 +505,22 @@ fn saved_choice(path: Option<&Path>) -> Option<Selection> {
 }
 
 /// The profile this process runs with, resolved once.
+static UNBOUND: std::sync::LazyLock<ConnectionProfile> =
+    std::sync::LazyLock::new(|| ConnectionProfile {
+        id: ProfileId::Production,
+        lobby: "127.0.0.1:9".into(),
+        registry: CLOSED_REGISTRY.into(),
+        passport: CLOSED_PASSPORT.into(),
+        market: String::new(),
+        studio: String::new(),
+        storage: PathBuf::new(),
+    });
+
 pub(crate) fn active() -> &'static ConnectionProfile {
-    ACTIVE.get_or_init(|| {
-        let saved = saved_choice(selection_path().as_deref());
-        resolve(BUILD_CONTOUR, saved.as_ref(), &COMPILED)
-    })
+    if cfg!(test) {
+        return ACTIVE.get_or_init(|| resolve(BUILD_CONTOUR, None, &COMPILED));
+    }
+    ACTIVE.get().unwrap_or(&UNBOUND)
 }
 
 /// A desktop developer override from the environment; phones read none.
@@ -584,14 +575,32 @@ fn endpoint_override(keys: &[&str], ekza: bool) -> Option<String> {
 /// pins the registry and passport it names (or the desktop overrides) for the
 /// whole process. A contour build's Dev profile adopts a pre-profile store.
 pub(crate) fn install() -> &'static ConnectionProfile {
-    let profile = active();
+    if !crate::account_region::bound() {
+        return active();
+    }
+    let profile = ACTIVE.get_or_init(|| {
+        let Some(region) = shared::region::active() else {
+            return resolve(BUILD_CONTOUR, None, &COMPILED);
+        };
+        let endpoints = region.endpoints(BUILD_CONTOUR);
+        let compiled = if region.id.market() == shared::market::MARKET {
+            COMPILED
+        } else {
+            Compiled::default()
+        };
+        let mut profile = resolve(BUILD_CONTOUR, None, &compiled);
+        if compiled.lobby.is_none() {
+            profile.lobby = endpoints.lobby;
+        }
+        for_market(profile, crate::account_region::features().ekza)
+    });
     if BUILD_CONTOUR.is_some()
         && let Some(base) = crate::platform::settings_directory()
         && adopt_legacy_store(&base, profile)
     {
         eprintln!("Moved the Ekza store into {}", profile.storage.display());
     }
-    let ekza = shared::market::FEATURES.ekza;
+    let ekza = crate::account_region::features().ekza;
     let pinned = for_market(profile.clone(), ekza);
     let registry = endpoint_override(&[omoba_passport::store::REGISTRY_URL_ENV], ekza)
         .unwrap_or_else(|| pinned.registry.clone());
@@ -674,7 +683,7 @@ impl ActiveConnection {
 
     /// Whether this build shows a connection selector.
     pub(crate) fn selectable(&self) -> bool {
-        self.choices().len() > 1
+        false
     }
 
     /// The profile that will run after a restart: the pending one, else the running one.
@@ -747,7 +756,7 @@ mod tests {
             [ProfileId::Dev, ProfileId::Local, ProfileId::Custom]
         );
         assert!(!profiles_for(Some("dev")).contains(&ProfileId::Production));
-        assert_eq!(selectable(), BUILD_CONTOUR.is_some());
+        assert!(!selectable());
     }
 
     #[test]
@@ -1087,7 +1096,7 @@ mod tests {
         let directory = temporary("choose");
         let path = directory.join(SELECTION_FILE);
         let mut connection = ActiveConnection::for_contour(Some("dev"), Some(path.clone()));
-        assert!(connection.selectable());
+        assert!(!connection.selectable());
         assert_eq!(connection.profile.id, ProfileId::Dev);
         let local = connection
             .candidate(ProfileId::Local, &CustomEndpoints::default())

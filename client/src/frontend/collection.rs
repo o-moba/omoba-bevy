@@ -206,7 +206,7 @@ fn spawn_catalogue_grid(
     filter: CollectionFilter,
     handheld: &shared::handheld::HandheldSelection,
 ) {
-    let ekza = shared::market::FEATURES.ekza;
+    let ekza = crate::account_region::features().ekza;
     grid.spawn(Node {
         flex_wrap: FlexWrap::Wrap,
         column_gap: Val::Px(8.0),
@@ -1695,7 +1695,7 @@ mod tests {
     fn connection_status_changes_do_not_replace_pressed_controls_or_scroll() {
         // Ekza controls: a build without Ekza has none
         // (`a_build_without_ekza_lists_only_shipped_avatars_and_weapons`).
-        if !shared::market::FEATURES.ekza {
+        if !crate::account_region::features().ekza {
             return;
         }
         let mut app = App::new();
@@ -1953,7 +1953,7 @@ mod tests {
     fn the_weapons_tab_puts_the_library_and_its_market_hint_first() {
         // Ekza controls: a build without Ekza has none
         // (`a_build_without_ekza_lists_only_shipped_avatars_and_weapons`).
-        if !shared::market::FEATURES.ekza {
+        if !crate::account_region::features().ekza {
             return;
         }
         let mut app = App::new();

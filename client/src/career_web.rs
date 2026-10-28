@@ -186,7 +186,7 @@ pub(super) fn body(parent: &mut ChildSpawnerCommands, career: &CareerClient) {
         label(
             parent,
             trf(
-                challenge_key(shared::market::FEATURES.supporter),
+                challenge_key(crate::account_region::features().supporter),
                 &[
                     ("origin", &c.origin),
                     (

@@ -91,7 +91,10 @@ pub(crate) enum PaymentSurface {
 /// swaps its body for the bound region and channel). M0 builds are the
 /// `direct` channel: an iOS build never links to a web payment.
 pub(crate) fn payment_surface() -> PaymentSurface {
-    payment_surface_for(shared::market::payment_providers(), cfg!(target_os = "ios"))
+    payment_surface_for(
+        crate::account_region::payment_providers(),
+        cfg!(target_os = "ios"),
+    )
 }
 
 /// The purchase surface for a provider list on iOS or another platform.
@@ -122,7 +125,7 @@ impl Default for PurchaseOffer {
     fn default() -> Self {
         Self {
             surface: payment_surface(),
-            tiers: sells_tiers(shared::market::payment_providers()),
+            tiers: sells_tiers(crate::account_region::payment_providers()),
         }
     }
 }
@@ -172,6 +175,8 @@ pub(crate) enum SupporterPlatformAction {
 pub(crate) struct SupporterPlatformState {
     pub available: bool,
     pub busy: bool,
+    /// Unfinished StoreKit receipts must stay with this region until settled.
+    pub pending_receipts: bool,
     pub price_label: Option<String>,
     pub message: Option<PlatformMessage>,
 }
@@ -2291,7 +2296,10 @@ mod tests {
         assert_eq!(payment_surface_for(&[], true), PaymentSurface::None);
         assert_eq!(
             payment_surface(),
-            payment_surface_for(shared::market::payment_providers(), cfg!(target_os = "ios"))
+            payment_surface_for(
+                crate::account_region::payment_providers(),
+                cfg!(target_os = "ios")
+            )
         );
     }
 

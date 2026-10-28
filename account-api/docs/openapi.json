@@ -4941,6 +4941,14 @@
                     },
                     "nickname": {
                       "type": "string"
+                    },
+                    "account_region": {
+                      "type": "string",
+                      "enum": [
+                        "global",
+                        "ru"
+                      ],
+                      "description": "Owning regional authority. Older APIs omit it; native clients reject a different region."
                     }
                   },
                   "required": [

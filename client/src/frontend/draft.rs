@@ -887,8 +887,9 @@ fn render_draft(
                         let connected = crate::passport::account_connected();
                         let owned = choices.iter().any(|c| c.group == HandheldGroup::Library);
                         // Without Ekza there is no library: no heading, hint or Connect.
-                        let library_listed = HandheldGroup::listed(shared::market::FEATURES.ekza)
-                            .contains(&HandheldGroup::Library);
+                        let library_listed =
+                            HandheldGroup::listed(crate::account_region::features().ekza)
+                                .contains(&HandheldGroup::Library);
                         if library_listed {
                             picker
                                 .spawn(Node {
@@ -1029,7 +1030,7 @@ fn render_draft(
                             ))
                             .with_children(|avatars| {
                                 for &defaults in super::collection::avatar_sections(
-                                    shared::market::FEATURES.ekza,
+                                    crate::account_region::features().ekza,
                                 ) {
                                     avatars.spawn((
                                         widgets::label(

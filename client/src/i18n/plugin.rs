@@ -156,7 +156,7 @@ impl Plugin for I18nPlugin {
             Startup::Environment => startup_locale(
                 std::env::var(LANGUAGE_ENV).ok().as_deref(),
                 crate::persistence::saved_language,
-                market_locale(shared::market::MARKET),
+                market_locale(shared::region::market()),
             ),
         };
         app.insert_resource(Locale::process_wide(id));

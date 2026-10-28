@@ -178,16 +178,21 @@ impl Plugin for NetworkingPlugin {
             .add_systems(
                 Update,
                 start_networking
+                    .after(crate::account_region::ActivateRegion)
                     .run_if(on_message::<crate::legal::LegalAccepted>)
                     .before(ClientNetPipeline::SendLocalState),
             )
             .add_systems(
                 Update,
-                send_local_state.in_set(ClientNetPipeline::SendLocalState),
+                send_local_state
+                    .run_if(crate::account_region::bound)
+                    .in_set(ClientNetPipeline::SendLocalState),
             )
             .add_systems(
                 Update,
-                send_network_commands.in_set(ClientNetPipeline::SendCommands),
+                send_network_commands
+                    .run_if(crate::account_region::bound)
+                    .in_set(ClientNetPipeline::SendCommands),
             )
             .add_systems(Update, offline::sync_banner)
             .add_systems(
@@ -246,6 +251,17 @@ impl Plugin for NetworkingPlugin {
                     .in_set(NetworkGroundingSet)
                     .before(bevy::transform::TransformSystems::Propagate),
             );
+    }
+}
+
+/// A region switch takes effect only at the next cold start. Dropping the sole
+/// outgoing channel closes its UDP thread; no old account traffic continues.
+pub(crate) fn stop_for_region_switch(world: &mut World) {
+    if world
+        .remove_resource::<transport::NetworkChannels>()
+        .is_some()
+    {
+        world.insert_resource(ClientSession::default());
     }
 }
 

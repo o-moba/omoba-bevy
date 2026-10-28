@@ -1,4 +1,6 @@
 //! Explicit disposable PostgreSQL fixture; never inherit the production database URL.
+mod common;
+
 use axum::body::{Body, to_bytes};
 use axum::extract::ConnectInfo;
 use axum::http::{HeaderMap, Request, StatusCode};
@@ -18,12 +20,11 @@ fn database(variable: &str) -> String {
         "127.0.0.1",
         "Only isolated loopback fixtures"
     );
-    // The local workshop fixture and the existing CI service use distinct pairs.
     assert!(
         matches!(
             (options.get_port(), options.get_database()),
             (55581, Some("workshop_test")) | (5432, Some("omoba_test"))
-        ),
+        ) || common::launcher_database(&options),
         "Only the dedicated workshop or CI test database"
     );
     url

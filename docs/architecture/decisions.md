@@ -548,7 +548,7 @@ sequenceDiagram
 ## ADR-025: One app per platform; the account's region chooses servers, sign-in and payments; tiers are provider-neutral points
 
 - **Date:** 2026-10-24 (owner decisions). Implementation: LR-67 (amended), LR-68 and LR-69 in [../plans/launch-readiness.md](../plans/launch-readiness.md).
-- **Status:** Accepted; implementation pending. Amends:
+- **Status:** Accepted; routing foundation implemented on 2026-10-28 (0.45.0). Immutable runtime binding, account metadata, isolated folders, native region replies and cold switching are present. Full LR-68 store-channel, sign-in, deletion, Keychain and app-identity work remains pending; see [release gates](../plans/ru-release-2026-10-28.md). Amends:
   - **ADR-003:** clients bind a runtime region, and servers keep the compile-time market.
   - **ADR-004:** adds Sign in with Apple (international), equal first-party sign-in options, and unlink.
   - **ADR-005:** the unified client registers the union of plugins and gates region-specific systems with run conditions.

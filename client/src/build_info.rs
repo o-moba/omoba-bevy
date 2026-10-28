@@ -19,7 +19,7 @@ pub(crate) fn label() -> &'static str {
                 cfg!(debug_assertions),
                 receipt.as_deref(),
             ),
-            shared::market::MARKET,
+            shared::region::market(),
         )
     })
 }

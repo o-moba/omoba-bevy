@@ -98,7 +98,7 @@ def contour_env(env: dict, contour: str, server: str | None, market: str = "glob
         # The production app never takes a contour's settings folder from the shell
         # (scripts/release.py already hands it a scrubbed environment).
         env.pop("OMOBA_DEFAULT_CONFIG_DIR_SUFFIX", None)
-    env.update(compile_defaults(contour, server))
+    env.update(compile_defaults(contour, server, market))
     if market != "global":
         env[MARKET_ENV] = market
         if contour == "prod":
