@@ -193,6 +193,12 @@ pub(crate) struct CareerIdentity {
     saved_nickname: String,
     failed_nickname: Option<String>,
     pending_rename: Option<(String, u64, String)>,
+    /// The server refused a new profile for this key (LR-16): stop re-sending
+    /// the sign-in on this connection; a reconnect tries again.
+    refused: bool,
+    /// A suspended account (LR-15) signs in again at this time, so lifting
+    /// the ban restores access without restarting the game.
+    refused_until: Option<Instant>,
 }
 
 /// An in-process signing capability scoped to one authenticated server session.
@@ -248,6 +254,7 @@ impl CareerIdentity {
                 "Sign in before using your profile." // i18n-allow
                     | "Account authorization could not be refreshed. Reconnect when the account service is available." // i18n-allow
                     | "This device was revoked. Authorize this device again from your account." // i18n-allow
+                    | shared::moderation::ACCOUNT_BANNED_TEXT
             )
         ) {
             // Reusing the saved key is safe: the new Authenticate still needs
@@ -309,6 +316,48 @@ impl CareerIdentity {
             .map_err(str::to_owned)?;
         let signature = hex(&key.sign(&request.signing_bytes()).to_bytes());
         Ok(shared::supporter::SignedNativeSupporterRequest { request, signature })
+    }
+
+    /// Only typed requests about this key's own account protection are signed
+    /// (LR-18: read it, or issue recovery codes).
+    pub(crate) fn sign_recovery_request(
+        &self,
+        action: shared::device_account::RecoveryAction,
+        trusted_origin: &str,
+        now_secs: u64,
+    ) -> Result<shared::device_account::SignedNativeRecoveryRequest, String> {
+        let key = self.key.as_ref().ok_or(tr("identity.not_ready"))?;
+        let mut nonce = [0; 32];
+        getrandom::fill(&mut nonce).map_err(|_| tr("identity.random_unavailable"))?;
+        let request = shared::device_account::NativeRecoveryRequest {
+            origin: trusted_origin.into(),
+            public_key: self.public_key()?,
+            nonce: hex(&nonce),
+            expires_at: now_secs
+                .saturating_add(shared::device_account::RECOVERY_REQUEST_SECONDS - 5),
+            action,
+        };
+        request
+            .validate(trusted_origin, &request.public_key, now_secs)
+            .map_err(str::to_owned)?;
+        let signature = hex(&key.sign(&request.signing_bytes()).to_bytes());
+        Ok(shared::device_account::SignedNativeRecoveryRequest { request, signature })
+    }
+
+    /// Only the typed link of a pending enrollment's website sign-in is signed.
+    pub(crate) fn sign_social_link(
+        &self,
+        enrollment: &shared::device_account::DeviceEnrollment,
+        trusted_origin: &str,
+        now_secs: u64,
+    ) -> Result<shared::device_account::SignedSocialLink, String> {
+        let link =
+            shared::device_account::SocialLink::for_enrollment(enrollment, self.public_key()?);
+        link.validate(trusted_origin, now_secs)
+            .map_err(str::to_owned)?;
+        let key = self.key.as_ref().ok_or(tr("identity.not_ready"))?;
+        let signature = hex(&key.sign(&link.signing_bytes()).to_bytes());
+        Ok(shared::device_account::SignedSocialLink { link, signature })
     }
 
     pub(crate) fn enrollment_directory(&self) -> Result<PathBuf, String> {
@@ -398,6 +447,8 @@ impl CareerIdentity {
     }
 
     fn invalidate(&mut self) {
+        self.refused = false;
+        self.refused_until = None;
         self.scope = None;
         self.signed_challenge = None;
         self.challenge_requested = false;
@@ -542,8 +593,11 @@ fn career_qa_capture() -> bool {
         && std::env::var_os("OMOBA_CAREER_QA_OUTPUT").is_some_and(|value| !value.is_empty())
 }
 
-fn load_identity(mut identity: ResMut<CareerIdentity>, mut career: ResMut<CareerClient>) {
-    if career_qa_capture() {
+pub(crate) fn load_identity(
+    mut identity: ResMut<CareerIdentity>,
+    mut career: ResMut<CareerClient>,
+) {
+    if career_qa_capture() || !crate::account_region::bound() {
         return;
     }
     let Some(directory) = identity_directory() else {
@@ -631,6 +685,13 @@ fn identity_driver(
         && career.view.auth_nonce.as_ref() == Some(&challenge.nonce)
         && career.view.profile.is_some()
     {
+        if identity.auth_nonce.is_none() {
+            if let (Ok(public_key), Some(profile)) =
+                (identity.public_key(), career.view.profile.as_ref())
+            {
+                crate::account_region::remember_account(&public_key, &profile.profile_id);
+            }
+        }
         identity.auth_nonce = Some(challenge.nonce.clone());
     }
     if identity.auth_nonce.is_some() {
@@ -660,7 +721,37 @@ fn identity_driver(
         }
         return;
     }
+    if identity.authenticate_sent
+        && career
+            .view
+            .error_code
+            .as_deref()
+            .is_some_and(crate::career::refuses_sign_in)
+    {
+        identity.refused = true;
+        identity.next_retry = None;
+        if identity.refused_until.is_none()
+            && career.view.error_code.as_deref() == Some(shared::career::error_code::ACCOUNT_BANNED)
+        {
+            identity.refused_until = Some(Instant::now() + crate::moderation::SUSPENDED_RETRY);
+        }
+    }
+    if identity.refused {
+        if identity
+            .refused_until
+            .is_some_and(|at| Instant::now() >= at)
+        {
+            // The next frame signs in from the start; a lifted ban lets it in.
+            identity.invalidate();
+        }
+        return;
+    }
     let now = Instant::now();
+    if career.view.error_code.as_deref() == Some(shared::career::error_code::SERVER_FULL) {
+        // LR-09: a full server takes the sign-in once a place frees; keep
+        // asking at the usual pace instead of giving up.
+        identity.started = Some(now);
+    }
     if identity
         .started
         .is_some_and(|started| now.duration_since(started) >= AUTH_TIMEOUT)
@@ -737,6 +828,97 @@ mod tests {
             current.verifying_key()
         );
         std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn a_social_link_is_signed_by_the_active_key_for_one_enrollment() {
+        use ed25519_dalek::{Signature, VerifyingKey};
+        let identity = CareerIdentity {
+            key: Some(SigningKey::from_bytes(&[3; 32])),
+            ..default()
+        };
+        let pending = SigningKey::from_bytes(&[4; 32]);
+        let origin = "https://omoba.ru";
+        let enrollment = shared::device_account::DeviceEnrollment {
+            enrollment_id: "a".repeat(64),
+            public_key: hex(pending.verifying_key().as_bytes()),
+            origin: origin.into(),
+            label: "Desktop".into(), // i18n-allow
+            expires_at: "1200".into(),
+        };
+        let proof = identity
+            .sign_social_link(&enrollment, origin, 1000)
+            .unwrap();
+        assert_eq!(proof.link.public_key, identity.public_key().unwrap());
+        assert_eq!(proof.link.enrollment_key, enrollment.public_key);
+        let key = VerifyingKey::from_bytes(&decode_key(&proof.link.public_key).unwrap()).unwrap();
+        let mut signature = [0; 64];
+        for (i, byte) in signature.iter_mut().enumerate() {
+            *byte = u8::from_str_radix(&proof.signature[i * 2..i * 2 + 2], 16).unwrap();
+        }
+        key.verify_strict(
+            &proof.link.signing_bytes(),
+            &Signature::from_bytes(&signature),
+        )
+        .unwrap();
+        // Another portal, an expired request or a key without an identity is refused.
+        assert!(
+            identity
+                .sign_social_link(&enrollment, "https://evil.example", 1000)
+                .is_err()
+        );
+        assert!(
+            identity
+                .sign_social_link(&enrollment, origin, 1200)
+                .is_err()
+        );
+        assert!(
+            CareerIdentity::default()
+                .sign_social_link(&enrollment, origin, 1000)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn a_recovery_request_is_signed_by_the_active_key_with_a_fresh_nonce() {
+        use ed25519_dalek::{Signature, VerifyingKey};
+        use shared::device_account::RecoveryAction;
+        let identity = CareerIdentity {
+            key: Some(SigningKey::from_bytes(&[5; 32])),
+            ..default()
+        };
+        let origin = "https://omoba.ru";
+        let first = identity
+            .sign_recovery_request(RecoveryAction::Rotate, origin, 1000)
+            .unwrap();
+        let second = identity
+            .sign_recovery_request(RecoveryAction::Rotate, origin, 1000)
+            .unwrap();
+        assert_ne!(first.request.nonce, second.request.nonce);
+        assert_eq!(first.request.public_key, identity.public_key().unwrap());
+        assert_eq!(first.request.action, RecoveryAction::Rotate);
+        assert!(
+            first
+                .request
+                .validate(origin, &first.request.public_key, 1000)
+                .is_ok()
+        );
+        let key =
+            VerifyingKey::from_bytes(&decode_key(&first.request.public_key).unwrap()).unwrap();
+        let mut signature = [0; 64];
+        for (i, byte) in signature.iter_mut().enumerate() {
+            *byte = u8::from_str_radix(&first.signature[i * 2..i * 2 + 2], 16).unwrap();
+        }
+        key.verify_strict(
+            &first.request.signing_bytes(),
+            &Signature::from_bytes(&signature),
+        )
+        .unwrap();
+        assert!(
+            CareerIdentity::default()
+                .sign_recovery_request(RecoveryAction::Status, origin, 1000)
+                .is_err()
+        );
     }
 
     #[test]
@@ -824,12 +1006,116 @@ mod tests {
         assert!(identity.authenticated_for_scope("localhost:4000", 42, "session"));
     }
 
+    /// LR-09: a server at its client ceiling answers "server full"; the
+    /// sign-in keeps asking instead of timing out, so it gets in once a
+    /// place frees.
+    #[test]
+    fn a_full_server_keeps_the_sign_in_going() {
+        let mut identity = identity();
+        identity.started = Some(Instant::now() - AUTH_TIMEOUT);
+        let mut session = ClientSession::admitted_for_test();
+        session.set_server_addr_for_test("localhost:4000");
+        let mut career = CareerClient::default();
+        career.nickname = "小明".into();
+        career.view = shared::career::CareerView {
+            storage_enabled: true,
+            error: Some("The server is full right now.".into()),
+            error_code: Some(shared::career::error_code::SERVER_FULL.into()),
+            ..default()
+        };
+        let mut app = App::new();
+        app.add_message::<NicknameChanged>()
+            .add_message::<NetworkCommand>()
+            .insert_resource(identity)
+            .insert_resource(career)
+            .insert_resource(session)
+            .insert_resource(ClientSessionId("session".into()))
+            .insert_resource(GameStateSnapshot {
+                meta: shared::protocol::SnapshotMeta::new(42, 1, 1),
+                ..default()
+            })
+            .add_systems(Update, identity_driver);
+        app.update();
+        let sent: Vec<_> = app
+            .world_mut()
+            .resource_mut::<Messages<NetworkCommand>>()
+            .drain()
+            .collect();
+        assert!(
+            matches!(
+                sent.as_slice(),
+                [NetworkCommand::Career(CareerRequest::Challenge { .. })]
+            ),
+            "{sent:?}"
+        );
+        let identity = app.world().resource::<CareerIdentity>();
+        assert!(!identity.refused);
+        assert!(identity.next_retry.is_some(), "the next try is scheduled");
+    }
+
+    /// LR-15: a suspended account stops re-sending its sign-in, and signs in
+    /// again after `SUSPENDED_RETRY`, so a lifted ban needs no restart.
+    #[test]
+    fn a_suspended_account_pauses_its_sign_in_then_tries_again() {
+        let mut identity = identity();
+        identity.authenticate_sent = true;
+        identity.started = Some(Instant::now());
+        let mut session = ClientSession::admitted_for_test();
+        session.set_server_addr_for_test("localhost:4000");
+        let mut career = CareerClient::default();
+        career.nickname = "小明".into();
+        career.view = shared::career::CareerView {
+            storage_enabled: true,
+            error: Some(shared::moderation::ACCOUNT_BANNED_TEXT.into()),
+            error_code: Some(shared::career::error_code::ACCOUNT_BANNED.into()),
+            ..default()
+        };
+        let mut app = App::new();
+        app.add_message::<NicknameChanged>()
+            .add_message::<NetworkCommand>()
+            .insert_resource(identity)
+            .insert_resource(career)
+            .insert_resource(session)
+            .insert_resource(ClientSessionId("session".into()))
+            .insert_resource(GameStateSnapshot {
+                meta: shared::protocol::SnapshotMeta::new(42, 1, 1),
+                ..default()
+            })
+            .add_systems(Update, identity_driver);
+        let sent = |app: &mut App| {
+            app.update();
+            app.world_mut()
+                .resource_mut::<Messages<NetworkCommand>>()
+                .drain()
+                .collect::<Vec<_>>()
+        };
+        assert!(sent(&mut app).is_empty(), "refused: nothing is re-sent");
+        let identity = app.world().resource::<CareerIdentity>();
+        assert!(identity.refused);
+        let retry = identity.refused_until.unwrap();
+        assert!(retry > Instant::now() + crate::moderation::SUSPENDED_RETRY / 2);
+        assert!(sent(&mut app).is_empty(), "still waiting");
+        app.world_mut()
+            .resource_mut::<CareerIdentity>()
+            .refused_until = Some(Instant::now() - Duration::from_secs(1));
+        assert!(sent(&mut app).is_empty());
+        let again = sent(&mut app);
+        assert!(
+            matches!(
+                again.as_slice(),
+                [NetworkCommand::Career(CareerRequest::Challenge { .. })]
+            ),
+            "the sign-in starts over"
+        );
+    }
+
     #[test]
     fn explicit_auth_loss_restarts_handshake_without_reusing_old_authority() {
         for error in [
             "Sign in before using your profile.",
             "Account authorization could not be refreshed. Reconnect when the account service is available.",
             "This device was revoked. Authorize this device again from your account.",
+            shared::moderation::ACCOUNT_BANNED_TEXT,
         ] {
             let mut identity = identity();
             let challenge = AuthChallenge {

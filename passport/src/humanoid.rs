@@ -3,7 +3,8 @@
 //! This is deliberately separate from `validate_humanoid_profile`: accepting a
 //! rig here does not approve a Studio rendition or change the published five-clip
 //! `humanoid-glb-v1` admission contract. The supported subset is self-contained
-//! GLB, VRM 0/1, TRS nodes with positive uniform scales, and mapped humanoid bones
+//! GLB, VRM 0/1, TRS nodes with positive scales (uniform on humanoid bones and
+//! their ancestors; see `validate_load_bearing_scales`), and mapped humanoid bones
 //! present in the skins instantiated by scene 0. Materials, springs, expressions
 //! and constraints are not implemented by this skeletal adapter. Required glTF
 //! extensions are restricted to the verified renderer subset: KHR_materials_unlit
@@ -17,6 +18,8 @@ use std::collections::{BTreeMap, HashSet, VecDeque};
 pub const MAX_HUMANOID_NODES: usize = 4096;
 pub const MAX_HUMANOID_JSON_BYTES: usize = 4 * 1024 * 1024;
 pub const MAX_HUMANOID_GLB_BYTES: usize = 50 * 1024 * 1024;
+/// Most semantic bones a VRM humanoid map may assign.
+pub const MAX_HUMANOID_BONES: usize = 64;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum VrmVersion {
@@ -178,11 +181,9 @@ impl HumanoidRig {
                 *component = (*component as f64 / length) as f32;
             }
             let scale = vector(node, "scale", [1.0; 3], index)?;
-            if scale.iter().any(|v| !(1e-6..=1e6).contains(v))
-                || scale
-                    .iter()
-                    .any(|v| (*v - scale[0]).abs() > scale[0] * 1e-5)
-            {
+            // Positive and bounded everywhere; uniformity is checked below only
+            // where the retargeter reads it (humanoid bones and their ancestors).
+            if scale.iter().any(|v| !(1e-6..=1e6).contains(v)) {
                 return Err(format!(
                     "VRM node {index} requires positive uniform scale in 0.000001..=1000000"
                 ));
@@ -256,6 +257,7 @@ impl HumanoidRig {
             }
         }
         let (version, bones) = parse_bones(document, node_count)?;
+        validate_load_bearing_scales(&nodes, &parents, &bones)?;
         for bone in required_bones(version) {
             if !bones.contains_key(bone) {
                 return Err(format!("VRM humanoid map is missing required bone {bone}"));
@@ -316,6 +318,39 @@ impl HumanoidRig {
     }
 }
 
+/// The retargeter composes rest transforms with one uniform scale per node
+/// (`scale[0]`) along every humanoid bone's ancestry, so a humanoid bone or any of
+/// its ancestors must be uniform within 1e-5. Other nodes (hair, accessories,
+/// helper leaves) are never retargeted: Bevy renders their authored transforms
+/// unchanged, so exporter roundoff such as `[0.99975, 1, 0.99968]` on a bag strap
+/// does not reject the whole avatar. They still need a positive bounded scale.
+fn validate_load_bearing_scales(
+    nodes: &[RigNode],
+    parents: &[Option<usize>],
+    bones: &BTreeMap<String, usize>,
+) -> Result<(), String> {
+    let mut checked = HashSet::new();
+    for &bone in bones.values() {
+        let mut current = Some(bone);
+        while let Some(index) = current {
+            if !checked.insert(index) {
+                break;
+            }
+            let scale = nodes[index].scale;
+            if scale
+                .iter()
+                .any(|v| (*v - scale[0]).abs() > scale[0] * 1e-5)
+            {
+                return Err(format!(
+                    "VRM node {index} requires positive uniform scale in 0.000001..=1000000"
+                ));
+            }
+            current = parents[index];
+        }
+    }
+    Ok(())
+}
+
 /// Keep this conservative list aligned with the pinned Bevy GLTF loader and its
 /// enabled gltf-json validators. Understanding a humanoid map alone does not make
 /// a required extension safe to ignore during rendering.
@@ -374,7 +409,8 @@ fn node_index(value: &Value, count: usize, context: &str) -> Result<usize, Strin
         .ok_or_else(|| format!("VRM {context} index is missing or out of range"))
 }
 
-fn required_bones(version: VrmVersion) -> Vec<&'static str> {
+/// The semantic bones a rig of this VRM version must map.
+pub fn required_bones(version: VrmVersion) -> Vec<&'static str> {
     let mut bones = vec![
         "hips",
         "spine",
@@ -415,7 +451,7 @@ fn parse_bones(
             let bones = extension["humanoid"]["humanBones"]
                 .as_array()
                 .ok_or("VRM0 humanBones must be an array")?;
-            if bones.len() > 64 {
+            if bones.len() > MAX_HUMANOID_BONES {
                 return Err("VRM humanoid map exceeds 64 bones".into());
             }
             let entries = bones
@@ -438,7 +474,7 @@ fn parse_bones(
             let bones = extension["humanoid"]["humanBones"]
                 .as_object()
                 .ok_or("VRM1 humanBones must be an object")?;
-            if bones.len() > 64 {
+            if bones.len() > MAX_HUMANOID_BONES {
                 return Err("VRM humanoid map exceeds 64 bones".into());
             }
             (

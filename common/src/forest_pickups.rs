@@ -1,7 +1,8 @@
 //! Server-owned finite healing resources. Movement is the only collection input.
+use shared::clock::Instant;
 use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use shared::forest_pickups::{
     FOREST_PICKUP_COUNT, ForestPickupState, HEAL_FRACTION, PICKUP_RADIUS, RESPAWN_SECS,

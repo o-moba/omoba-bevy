@@ -3,6 +3,7 @@
   "web.instructions": "打开玩家网站，在此输入网站上的八位代码。只批准你本人发起的登录。",
   "web.code_field": "代码：{code}",
   "web.challenge": "网站：{origin}\n账号：{account}\n读取生涯记录；管理好友、昵称和隐私。\n授权和撤销设备、创建恢复码、管理支持者。此操作将授予账号控制权。\n过期时间：{expires}（Unix 秒）。",
+  "web.challenge_free": "网站：{origin}\n账号：{account}\n读取生涯记录；管理好友、昵称和隐私。\n授权和撤销设备、创建恢复码。此操作将授予账号控制权。\n过期时间：{expires}（Unix 秒）。",
   "web.busy": "正在联系网站…",
   "web.decision_sent": "已发送决定。请返回网站。",
   "web.button.lookup": "查询代码",

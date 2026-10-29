@@ -8,14 +8,24 @@ runtime support. Start from OMOBA main `00cff781`. The separate Wildspark
 [PR #77](https://github.com/o-moba/omoba-bevy/pull/77) is a useful art/motion
 reference, not a prerequisite or an already merged contract.
 
+## Classic policy update — 2026-10-30
+
+The owner now requires one recognizable canonical hero design per class in
+Classic. Cosmetic skins must derive from its reviewed base; arbitrary avatar/class
+independence below describes the earlier proposal, not the new Classic policy.
+The [hero-design authoring foundation](../hero-designs.md) exports explicit
+unconfigured assignments until licensed game-owned bases are reviewed. Workshop
+and other modes need their own explicit admission. A valid rig or generic avatar
+approval never provides the missing Classic binding.
+
 ## Product outcome
 
 An artist opens **Studio → Games → OMOBA → Wildspark**, sees her skills and the
 models each needs, rotates the current baseline models, downloads an authoring
 reference and offers a replacement for a specific requirement. For the weapon
 switch, the page shows **two distinct guns: repeater and launcher**. It explains
-where each appears and which other skills reuse it. A class is gameplay; Anna
-or another humanoid is an avatar appearance. They must remain independent.
+where each appears and which other skills reuse it. A class owns gameplay; in Classic its appearance must preserve the canonical
+hero identity. Skins retain that reviewed base instead of accepting any humanoid.
 
 A game owner publishes an immutable, game-owned requirements catalogue. Studio
 makes it discoverable and manages contributions against it. The OMOBA website

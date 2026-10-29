@@ -1,10 +1,15 @@
-//! On-disk client preferences: graphics, character selection, optional server address.
+//! On-disk client preferences: graphics, character and avatar selection, the
+//! last server address (informational).
 //!
 //! **Load path**: `OMOBA_CLIENT_CONFIG_DIR` if set, else platform default
 //! (`~/.config/omoba-bevy/client_preferences.json` on Unix,
 //! `%APPDATA%/omoba-bevy/client_preferences.json` on Windows).
 //!
-//! **Server address precedence** matches [`crate::session_config`] docs.
+//! **Server address.** `game_server_addr` is still written (older builds read
+//! it) but no longer read: the connection profile decides the lobby
+//! ([`crate::session_config::startup_server_addr`]), so an address saved by an
+//! older build's server field can never pin a production build that has no
+//! server selection.
 
 use std::fs;
 use std::io;
@@ -24,7 +29,7 @@ use crate::model_scale::{
     DEFAULT_MODEL_TARGET_HEIGHT, MAX_MODEL_TARGET_HEIGHT, MIN_MODEL_TARGET_HEIGHT,
     ModelScaleSettings,
 };
-use crate::session_config::{DEFAULT_GAME_SERVER_ADDR, FALLBACK_GAME_SERVER_ADDR};
+use crate::session_config::FALLBACK_GAME_SERVER_ADDR;
 use crate::team::CharacterChoice;
 use crate::ui::living_background::MotionSettings;
 use crate::world::{
@@ -38,10 +43,6 @@ const LEGACY_DEFAULT_MODEL_TARGET_HEIGHT: f32 = 1.15;
 const SCHEMA_3_DEFAULT_MODEL_TARGET_HEIGHT: f32 = 1.45;
 const PREFS_FILENAME: &str = "client_preferences.json";
 const CLIENT_SESSION_ID_MAX_LEN: usize = 64;
-
-/// Address loaded from disk for use when `GAME_SERVER_ADDR` is unset (validated).
-#[derive(Resource, Default, Clone)]
-pub struct FileGameServerAddr(pub Option<String>);
 
 /// Last address used for UDP (env, file, or default), for persisting alongside graphics prefs.
 #[derive(Resource, Default, Clone)]
@@ -61,8 +62,7 @@ pub struct ClientPersistencePlugin;
 
 impl Plugin for ClientPersistencePlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<FileGameServerAddr>()
-            .init_resource::<AudioSettings>()
+        app.init_resource::<AudioSettings>()
             .init_resource::<BeginnerTips>()
             .init_resource::<RenderSettings>()
             .init_resource::<HudPositionSettings>()
@@ -99,12 +99,18 @@ struct ClientPreferencesFile {
     handheld: shared::handheld::HandheldSelection,
     #[serde(default = "default_schema_version")]
     schema_version: u32,
+    /// The last lobby, written for older builds; never read back.
     #[serde(default)]
     game_server_addr: Option<String>,
     #[serde(default)]
     client_session_id: Option<String>,
     #[serde(default)]
     character: Option<CharacterChoice>,
+    /// The picked 3D avatar: a shipped roster slug or an Ekza store slug.
+    /// Absent before 0.45 (no schema bump: older builds ignore it). Restored
+    /// only while the player may still pick it.
+    #[serde(default)]
+    avatar: Option<String>,
     #[serde(default)]
     model_target_height: Option<f32>,
     #[serde(default)]
@@ -170,14 +176,24 @@ pub(crate) fn preferences_path() -> Option<PathBuf> {
     )
 }
 
-/// Validates `host:port` or a parseable [`SocketAddr`] string for client config.
+/// Validates `host:port` or a parseable [`SocketAddr`] string for client config. A
+/// contour (dev) build also refuses the production lobby here, so neither a custom
+/// profile, `GAME_SERVER_ADDR` nor a match allocation can reach it
+/// ([`crate::session_config::endpoint_allowed_for`]).
 pub fn validate_game_server_addr(raw: &str) -> Option<String> {
+    validate_game_server_addr_in(crate::session_config::BUILD_CONTOUR, raw)
+}
+
+/// [`validate_game_server_addr`] for a build of `contour`.
+pub(crate) fn validate_game_server_addr_in(contour: Option<&str>, raw: &str) -> Option<String> {
     let t = raw.trim();
     if t.is_empty() {
         return None;
     }
     if let Ok(address) = t.parse::<SocketAddr>() {
-        return (address.port() != 0).then(|| address.to_string());
+        return (address.port() != 0
+            && crate::session_config::endpoint_allowed_for(contour, &address.ip().to_string()))
+        .then(|| address.to_string());
     }
     let (host, port_str) = t.rsplit_once(':')?;
     let host = host.trim();
@@ -198,7 +214,8 @@ pub fn validate_game_server_addr(raw: &str) -> Option<String> {
         return None;
     }
     let port: u16 = port_str.trim().parse().ok()?;
-    (port != 0).then(|| format!("{host}:{port}"))
+    (port != 0 && crate::session_config::endpoint_allowed_for(contour, dns_name))
+        .then(|| format!("{host}:{port}"))
 }
 
 pub fn clamp_model_target_height(value: f32) -> f32 {
@@ -238,7 +255,7 @@ pub fn clamp_lighting_settings(mut s: LightingSettings) -> LightingSettings {
 }
 
 /// The shipped locale a stored `language` names; unknown or absent is `None`
-/// (the caller's English default).
+/// (the caller's default: the market's language).
 fn stored_language(language: Option<&str>) -> Option<crate::i18n::LocaleId> {
     language.and_then(crate::i18n::LocaleId::parse)
 }
@@ -271,7 +288,7 @@ fn write_preferences_file(path: &Path, prefs: &ClientPreferencesFile) -> io::Res
 /// Writes `data` to a sibling temp file, then renames it over `path`. A
 /// crash or full disk mid-write leaves the previous file (and its
 /// `client_session_id`) intact instead of a truncated one.
-fn write_atomically(path: &Path, data: &[u8]) -> io::Result<()> {
+pub(crate) fn write_atomically(path: &Path, data: &[u8]) -> io::Result<()> {
     let mut temp_name = path.file_name().unwrap_or_default().to_os_string();
     temp_name.push(".tmp");
     let temp = path.with_file_name(temp_name);
@@ -288,9 +305,8 @@ fn write_atomically(path: &Path, data: &[u8]) -> io::Result<()> {
     result
 }
 
-/// Startup: load JSON if present and apply to resources; always sets [`FileGameServerAddr`].
+/// Startup: load JSON if present and apply to resources.
 pub(crate) fn load_persistent_client_settings(
-    mut file_addr: ResMut<FileGameServerAddr>,
     mut lighting: ResMut<LightingSettings>,
     mut model: ResMut<ModelScaleSettings>,
     mut team: ResMut<crate::team::TeamSelection>,
@@ -305,8 +321,10 @@ pub(crate) fn load_persistent_client_settings(
     mut motion: ResMut<MotionSettings>,
     mut saved_language: ResMut<SavedLanguage>,
 ) {
+    if !crate::account_region::bound() {
+        return;
+    }
     gate.suppress_saves = 3;
-    file_addr.0 = None;
     initial_save_pending.0 = false;
 
     let Some(path) = preferences_path() else {
@@ -347,14 +365,6 @@ pub(crate) fn load_persistent_client_settings(
         *camera = CameraSettings { zoom }.sanitized();
     }
 
-    if let Some(addr_raw) = disk.game_server_addr.as_deref() {
-        if let Some(addr) = validate_game_server_addr(addr_raw) {
-            file_addr.0 = Some(addr);
-        } else {
-            warn!("Ignoring invalid game_server_addr in preferences file.");
-        }
-    }
-
     if let Some(raw_session_id) = disk.client_session_id.as_deref() {
         if let Some(session_id) = validate_client_session_id(raw_session_id) {
             client_session_id.0 = session_id;
@@ -366,9 +376,24 @@ pub(crate) fn load_persistent_client_settings(
         initial_save_pending.0 = true;
     }
 
-    team.handheld = disk.handheld;
+    team.handheld = restorable_handheld(
+        disk.handheld,
+        crate::account_region::features().ekza,
+        |id| {
+            omoba_passport::weapons::catalog()
+                .items
+                .iter()
+                .any(|weapon| weapon.id == id)
+        },
+    );
     if let Some(ch) = disk.character {
         team.character = ch;
+    }
+    if let Some(slug) = disk.avatar.as_deref() {
+        match restorable_avatar(slug) {
+            Some(slug) => team.avatar = Some(slug),
+            None => info!("Saved avatar {slug:?} is not available; keeping the default avatar."),
+        }
     }
 
     if let Some(h) = disk.model_target_height {
@@ -400,6 +425,31 @@ pub(crate) fn load_persistent_client_settings(
     }
 }
 
+/// A saved handheld a build with `ekza` can still equip. An Ekza build keeps it
+/// as saved (the store checks an item when it is used); a build without Ekza
+/// keeps only packaged props, so a saved Ekza item becomes the class default.
+fn restorable_handheld(
+    saved: shared::handheld::HandheldSelection,
+    ekza: bool,
+    packaged: impl Fn(&str) -> bool,
+) -> shared::handheld::HandheldSelection {
+    match saved {
+        shared::handheld::HandheldSelection::Item(id) if !ekza && !packaged(&id) => {
+            info!("Saved handheld {id:?} is not packaged; equipping the class default.");
+            shared::handheld::HandheldSelection::ClassDefault
+        }
+        saved => saved,
+    }
+}
+
+/// A saved avatar slug this player may still pick: shipped, or an Ekza store
+/// avatar the offline catalogue already lists and [`crate::passport::can_select`]
+/// allows. A withdrawn or unknown slug is dropped so a join never asks for it.
+fn restorable_avatar(slug: &str) -> Option<String> {
+    let avatar = omoba_passport::avatars::avatar_definition(slug.trim())?;
+    crate::passport::can_select(avatar).then(|| avatar.slug.clone())
+}
+
 fn build_file_from_state(
     lighting: &LightingSettings,
     model: &ModelScaleSettings,
@@ -415,6 +465,7 @@ fn build_file_from_state(
         game_server_addr: Some(game_server_addr.to_string()),
         client_session_id: Some(client_session_id.to_string()),
         character: Some(character),
+        avatar: None,
         model_target_height: Some(model.target_height),
         illuminance: Some(lighting.illuminance),
         ambient_brightness: Some(lighting.ambient_brightness),
@@ -431,7 +482,8 @@ fn build_file_from_state(
 }
 
 /// The language to write: the one picked in Settings this session, else the
-/// one the file already held (`None` stays absent, which reads as English).
+/// one the file already held (`None` stays absent, which reads as the
+/// market's language).
 pub(crate) fn language_to_save(
     locale: Option<&crate::i18n::Locale>,
     saved: &SavedLanguage,
@@ -443,6 +495,8 @@ pub(crate) fn language_to_save(
 }
 
 /// Writes current resources to disk (graphics + character + active server display string).
+/// `None` for `handheld`, `avatar`, `render`, `hud_position` or `tips` keeps
+/// the stored value; `Some(None)` for `avatar` clears it.
 pub(crate) fn save_client_preferences_to_disk(
     lighting: &LightingSettings,
     model: &ModelScaleSettings,
@@ -454,6 +508,7 @@ pub(crate) fn save_client_preferences_to_disk(
     motion: &MotionSettings,
     language: Option<crate::i18n::LocaleId>,
     handheld: Option<&shared::handheld::HandheldSelection>,
+    avatar: Option<Option<&str>>,
     render: Option<&RenderSettings>,
     hud_position: Option<&HudPositionSettings>,
     tips: Option<&BeginnerTips>,
@@ -465,7 +520,7 @@ pub(crate) fn save_client_preferences_to_disk(
         ));
     };
     let addr = validate_game_server_addr(game_server_addr).unwrap_or_else(|| {
-        validate_game_server_addr(DEFAULT_GAME_SERVER_ADDR)
+        validate_game_server_addr(crate::session_config::default_server_addr())
             .unwrap_or_else(|| FALLBACK_GAME_SERVER_ADDR.to_string())
     });
     let session_id =
@@ -494,6 +549,10 @@ pub(crate) fn save_client_preferences_to_disk(
         .copied()
         .or_else(|| previous.as_ref().map(|p| p.beginner_tips))
         .unwrap_or_default();
+    prefs.avatar = match avatar {
+        Some(avatar) => avatar.map(str::to_owned),
+        None => previous.as_ref().and_then(|p| p.avatar.clone()),
+    };
     prefs.handheld = handheld
         .cloned()
         .or_else(|| previous.map(|p| p.handheld))
@@ -547,7 +606,7 @@ fn save_client_preferences_on_change(
         model.as_ref(),
         team.character,
         if addr.is_empty() {
-            DEFAULT_GAME_SERVER_ADDR
+            crate::session_config::default_server_addr()
         } else {
             addr
         },
@@ -557,6 +616,7 @@ fn save_client_preferences_on_change(
         motion.as_ref(),
         language_to_save(locale.as_deref(), &saved_language),
         Some(&team.handheld),
+        Some(team.avatar.as_deref()),
         Some(&render),
         Some(&hud_position),
         Some(&tips),
@@ -598,6 +658,7 @@ pub(crate) fn reset_graphics_to_defaults(
         None,
         None,
         None,
+        None,
     ) {
         warn!("Failed to save preferences after reset: {e}");
     }
@@ -606,6 +667,40 @@ pub(crate) fn reset_graphics_to_defaults(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_build_without_ekza_restores_only_packaged_handhelds() {
+        use shared::handheld::HandheldSelection as H;
+        use shared::market::Market;
+        let packaged = |id: &str| id == "forge-sword";
+        let ekza_item = H::Item(format!("ekza-{}", "a".repeat(32)));
+        let global = Market::Global.default_features().ekza;
+        assert_eq!(
+            restorable_handheld(ekza_item.clone(), global, packaged),
+            ekza_item
+        );
+        for market in [Market::Ru, Market::Cn] {
+            let ekza = market.default_features().ekza;
+            assert_eq!(
+                restorable_handheld(ekza_item.clone(), ekza, packaged),
+                H::ClassDefault
+            );
+            for kept in [
+                H::ClassDefault,
+                H::Unequipped,
+                H::Item("forge-sword".into()),
+            ] {
+                assert_eq!(restorable_handheld(kept.clone(), ekza, packaged), kept);
+            }
+        }
+        // The real packaged catalogue lists the class defaults' props.
+        assert!(
+            omoba_passport::weapons::catalog()
+                .items
+                .iter()
+                .any(|weapon| weapon.id == "forge-sword")
+        );
+    }
 
     fn scratch_dir(name: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!(
@@ -660,6 +755,132 @@ mod tests {
         next.update();
         assert!(!next.world().resource::<BeginnerTips>().enabled);
         assert_eq!(next.world().resource::<CameraSettings>().zoom, 0.9);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// A picked avatar, shipped or from Ekza Studio, is the selection on the
+    /// next launch; one the player can no longer pick keeps the default.
+    #[test]
+    fn a_picked_avatar_is_restored_on_the_next_launch_while_still_selectable() {
+        if crate::i18n::testing::isolated(
+            "persistence::tests::a_picked_avatar_is_restored_on_the_next_launch_while_still_selectable",
+        ) {
+            return;
+        }
+        use ekza_bevy_sdk::passport::{ProjectSupport, ProtectedAvatar, Rendition};
+        let legacy: ClientPreferencesFile =
+            serde_json::from_str(r#"{"schema_version":8,"character":"paco"}"#).unwrap();
+        assert_eq!(legacy.avatar, None);
+        let dir = scratch_dir("avatar");
+        // SAFETY: this test is isolated in its own process before changing env.
+        unsafe {
+            std::env::set_var("OMOBA_CLIENT_CONFIG_DIR", &dir);
+        }
+        let launch = || {
+            let mut app = App::new();
+            app.init_resource::<LightingSettings>()
+                .init_resource::<ModelScaleSettings>()
+                .init_resource::<crate::team::TeamSelection>()
+                .add_plugins(ClientPersistencePlugin);
+            app.update();
+            app
+        };
+        let avatar = |app: &App| {
+            app.world()
+                .resource::<crate::team::TeamSelection>()
+                .avatar
+                .clone()
+        };
+        let default = crate::team::TeamSelection::default().avatar;
+        // A free Studio avatar from the offline catalogue (process-global
+        // registry; this body runs in its own process).
+        let protected = ProtectedAvatar {
+            avatar_id: "ekza:avatar:5ab84bd7-b19a-41c5-9b76-14b737cc356b".into(),
+            support: ProjectSupport {
+                project_id: "omoba".into(),
+                platform: "desktop".into(),
+                profile: "humanoid-glb-v1".into(),
+                status: "approved".into(),
+                rendition: Rendition {
+                    id: "sha256:".to_owned() + &"d".repeat(64),
+                    url: "https://registry.example/v1/studio/assets/d/rendition".into(),
+                    sha256: "d".repeat(64),
+                    size_bytes: 4096,
+                    format: "glb".into(),
+                },
+            },
+        };
+        let studio = omoba_passport::avatars::register_store_avatar(
+            omoba_passport::avatars::AvatarDefinition {
+                slug: omoba_passport::protected_slug(&protected),
+                display_name: "Pyre Sorcerer".into(),
+                collection: "Ekza store".into(),
+                license: "CC0-1.0".into(),
+                source_url: protected.support.rendition.url.clone(),
+                author: Some("jinx-artist".into()),
+                attribution: None,
+                thumbnail: None,
+                passport: Some(protected),
+                free: true,
+            },
+        )
+        .unwrap()
+        .slug
+        .clone();
+        let shipped = omoba_passport::avatars::avatar_roster()
+            .last()
+            .unwrap()
+            .slug
+            .clone();
+        assert_ne!(Some(&shipped), default.as_ref());
+        for picked in [shipped, studio] {
+            let mut app = launch();
+            for _ in 0..5 {
+                app.update();
+            }
+            app.world_mut()
+                .resource_mut::<crate::team::TeamSelection>()
+                .avatar = Some(picked.clone());
+            app.update();
+            assert_eq!(
+                read_preferences_file(&dir.join(PREFS_FILENAME))
+                    .unwrap()
+                    .avatar
+                    .as_deref(),
+                Some(picked.as_str())
+            );
+            assert_eq!(avatar(&launch()), Some(picked));
+        }
+        // Withdrawn from the catalogue (unknown here) or never valid: default.
+        for stale in [format!("ekza-{}", "e".repeat(64)), "../agnes".into()] {
+            let mut file = read_preferences_file(&dir.join(PREFS_FILENAME)).unwrap();
+            file.avatar = Some(stale);
+            write_preferences_file(&dir.join(PREFS_FILENAME), &file).unwrap();
+            assert_eq!(avatar(&launch()), default);
+        }
+        // A graphics reset keeps the stored avatar.
+        let mut file = read_preferences_file(&dir.join(PREFS_FILENAME)).unwrap();
+        file.avatar = Some("agnes".into());
+        write_preferences_file(&dir.join(PREFS_FILENAME), &file).unwrap();
+        reset_graphics_to_defaults(
+            &mut LightingSettings::default(),
+            &mut ModelScaleSettings::default(),
+            &mut CameraSettings::default(),
+            &mut ClientPrefsSaveGate::default(),
+            CharacterChoice::Paco,
+            "game.local:4000",
+            "avatar-relaunch",
+            &AudioSettings::default(),
+            &MotionSettings::default(),
+            None,
+        );
+        assert_eq!(
+            read_preferences_file(&dir.join(PREFS_FILENAME))
+                .unwrap()
+                .avatar
+                .as_deref(),
+            Some("agnes")
+        );
         fs::remove_dir_all(dir).unwrap();
     }
 
@@ -867,6 +1088,7 @@ mod tests {
             Some(&shared::handheld::HandheldSelection::Item(
                 "forge-hammer".into(),
             )),
+            None,
             None,
             None,
             None,
@@ -1116,7 +1338,7 @@ mod tests {
                 &LightingSettings::default(),
                 &ModelScaleSettings { target_height },
                 CharacterChoice::Paco,
-                DEFAULT_GAME_SERVER_ADDR,
+                FALLBACK_GAME_SERVER_ADDR,
                 "scale-migration-test",
                 &AudioSettings::default(),
                 &CameraSettings::default(),

@@ -94,7 +94,9 @@ impl Plugin for FrontendQaPlugin {
                 dimension("OMOBA_QA_WIDTH", 1280),
                 dimension("OMOBA_QA_HEIGHT", 720),
             ),
-            stage: if std::env::var("OMOBA_SERVER_ENTRY_QA").as_deref() == Ok("1") {
+            stage: if std::env::var("OMOBA_SERVER_ENTRY_QA").as_deref() == Ok("1")
+                && crate::connection_profile::selectable()
+            {
                 10
             } else {
                 0
@@ -241,6 +243,7 @@ fn drive(
     mut pause: ResMut<crate::pause_menu::PauseMenuState>,
     mut settings_tab: ResMut<crate::pause_menu::SelectedSettingsTab>,
     server: Option<ResMut<crate::mobile_ui::ServerEntry>>,
+    connection: Option<Res<crate::connection_profile::ActiveConnection>>,
     mut scrolls: Query<(crate::qa::QaName, &ComputedNode, &mut ScrollPosition)>,
     mut career: ResMut<crate::career::CareerClient>,
     mut fixture_labels: Query<&mut Node, With<ResultFixtureLabel>>,
@@ -284,7 +287,7 @@ fn drive(
     };
     if let Some(mut server) = server {
         if qa.stage == 10 && !server.open {
-            server.open_for(&session);
+            crate::mobile_ui::open_connection_panel(&mut server, &session, connection.as_deref());
         } else if qa.stage != 10 {
             server.open = false;
         }
@@ -397,6 +400,10 @@ fn observe(
             return;
         }
         qa.stage += 1;
+        // Production builds have no connection panel to capture.
+        if qa.stage == 10 && !crate::connection_profile::selectable() {
+            qa.stage += 1;
+        }
         if std::env::var("OMOBA_PLAYTEST_UI_QA").as_deref() == Ok("1") {
             while qa.stage < VIEWS.len() && ![0, 1, 2, 6, 7, 11, 12, 13].contains(&qa.stage) {
                 qa.stage += 1;
@@ -487,6 +494,7 @@ fn observe(
             || name.as_str().starts_with("Searching")
             || name.as_str().starts_with("PostMatch")
             || name.as_str().starts_with("Server")
+            || name.as_str().starts_with("Connection")
             || name.as_str().starts_with("Help")
             || name.as_str() == "PhoneMenuBar"
             || name.as_str().starts_with("HeroSelect")
@@ -513,6 +521,7 @@ fn observe(
         ],
         0 if std::env::var("OMOBA_PUBLIC_MVP_QA").as_deref() == Ok("1") => &[
             "HomePlay",
+            "HomeRanked",
             "HomeBotPractice",
             "HomeCustomizeCard",
             "HomeAccount",
@@ -559,12 +568,13 @@ fn observe(
             "PauseMenuResetGraphicsButton",
             "BackButton",
         ],
+        // A contour build's connection panel (production builds skip stage 10).
         10 => &[
-            "ServerPresetBeta",
-            "ServerPresetLocal",
-            "ServerConnectButton",
-            "ServerCloseButton",
-            "ServerKeyboardButton",
+            "ConnectionProfileDev",
+            "ConnectionProfileLocal",
+            "ConnectionProfileCustom",
+            "ConnectionUse",
+            "ServerEntryClose",
         ],
         11 => &["HelpDismissButton"],
         12 if mobile.enabled && viewport.y < 600.0 => &[

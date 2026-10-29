@@ -510,7 +510,8 @@ fn capture(
             "LobbyBack",
             "LobbyFriends",
             "LobbyPlayBots",
-            "LobbyQuickMatch",
+            "LobbyCasual",
+            "LobbyRanked",
             "LobbyAccept88",
         ],
         1 => vec![
@@ -526,7 +527,8 @@ fn capture(
             "LobbyBack",
             "LobbyLeave",
             "LobbyPlayBots",
-            "LobbyQuickMatch",
+            "LobbyCasual",
+            "LobbyRanked",
             "LobbySocialScroll",
         ],
         5 => vec![

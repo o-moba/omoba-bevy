@@ -21,7 +21,7 @@ bone names, optional joints and rest orientations after validated binding.
   - https://raw.githubusercontent.com/J-Ponzo/gltf-universal-animation-library/main/glTF/AnimationLibrary_Godot_Standard.bin
 
 The generated library records the SHA-256 of both inputs. No new download is
-needed to regenerate it. Three exporter tables define its 55 motions.
+needed to regenerate it. Three exporter tables define its 57 motions.
 
 ### Full-rate clips (`CLIPS` in `scripts/export_humanoid_motion.py`)
 
@@ -36,8 +36,8 @@ key at which the strike or gesture is fully formed.
 | `attack` | `Sword_Attack` | No | 0.417 s | Shared attack fallback |
 | `cast` | `Spell_Simple_Shoot` | No | 0.083 s | Shared cast fallback |
 | `death` | `Death01` | No | - | Shared death fallback |
-| `spell_prepare` | `Spell_Simple_Enter` | No | 0.417 s | Dawn ray preparation; hold last pose until authoritative release |
-| `spell_finish` | `Spell_Simple_Exit` | No | 0.25 s | Dawn field gesture |
+| `spell_prepare` | `Spell_Simple_Enter` | No | 0.417 s | One-hand spell enter; no shipped row plays it since Dawn Ray took `spell_charge` |
+| `spell_finish` | `Spell_Simple_Exit` | No | 0.25 s | Dawnweaver and Emberveil basic attacks; Orbital Field, Renew and the Thorn Volley recast |
 | `pistol_shoot` | `Pistol_Shoot` | No | 0.042 s | Wildspark shooting and Repeater basic attacks |
 | `pistol_aim` | `Pistol_Aim_Neutral` | No | 0 s | Static aim pose for profile authoring |
 | `punch` | `Punch_Cross` | No | 0.25 s | Right cross |
@@ -119,6 +119,8 @@ are hemisphere-corrected between keys. Row fields:
 | `toss_underhand` | `PickUp_Table`, `Idle_Loop` | 4 / 0.4 | 0.13 s | Underhand toss with the left hand (approx.) |
 | `place_quick` | `Interact` | 5 / 0.6 | 0.15 s | Quick placing gesture (0.6 s where the source clip takes 2 s) |
 | `kneel_plant` | `Fixing_Kneeling` | 7 / 0.75 | 0.36 s | Kneel, set both hands low, stand |
+| `spell_charge` | `Spell_Simple_Enter`, `Spell_Simple_Idle_Loop`, `Pistol_Aim_Neutral`, `Pistol_Aim_Up` | 7 / 0.8 | 0.64 s | Dawn Ray charge: one hand opens the spell, both hands gather in front and rise overhead, held; spans the 0.8 s warning at rate 1 (approx.) |
+| `ray_release` | `Spell_Simple_Shoot`, `Push_Loop`, `Hit_Chest`, `Idle_Loop` | 6 / 0.6 | 0.05 s | Dawn Ray release: the shot, a braced two-hand push held while the beam lives, a recoil lean, settle (approx.) |
 | `dagger_backstab` | `Punch_Cross`, `Crouch_Idle_Loop` | 6 / 0.65 | 0.11 s | Dagger stab, then a drop into a crouch (approx.) |
 
 Not available from this library and not faked: a true kick, a bow draw, a
@@ -163,7 +165,7 @@ GLB-writing functions. Do not rerun legacy baking to add Run to models.
 
 ## Shared asset contract (version 1)
 
-The JSON resource is roughly 1.30 MiB and contains 55 motions (572 keys) for 52
+The JSON resource is roughly 1.33 MiB and contains 57 motions (585 keys) for 52
 semantic bones. Its schema uses glTF right-handed, Y-up coordinates and
 `[x, y, z, w]` unit quaternions. Numeric values are rounded to seven decimal
 places.

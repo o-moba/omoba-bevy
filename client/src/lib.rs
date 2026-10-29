@@ -1,6 +1,7 @@
 use bevy::{asset::AssetPlugin, prelude::*};
 mod skill_presentation;
 
+mod account_region;
 mod audio_settings;
 mod battlefield_atmosphere;
 mod bosses;
@@ -11,6 +12,8 @@ mod career_identity;
 mod combat;
 mod combat_feedback;
 mod combat_visuals;
+mod connection_profile;
+mod contour_badge;
 mod creatures3d;
 mod dash_preview;
 mod debug;
@@ -31,6 +34,7 @@ mod i18n;
 mod input_bindings;
 mod input_context;
 mod jungle;
+mod legal;
 mod map_visuals;
 mod maps;
 mod match_hud;
@@ -41,6 +45,7 @@ mod minions;
 mod mobile_controls;
 mod mobile_ui;
 mod model_scale;
+mod moderation;
 mod navigation;
 mod net;
 mod party;
@@ -64,6 +69,7 @@ mod session_config;
 mod shop;
 mod skill_icons;
 mod social;
+mod sponsorship;
 mod sprite;
 mod sprite_roster;
 mod supporter;
@@ -71,6 +77,7 @@ mod supporter_storekit;
 mod team;
 mod team_vision;
 mod ui;
+mod update;
 mod verdant3d;
 mod vfx_clock;
 mod world;
@@ -84,6 +91,15 @@ use sprite::PlayerVisualMode;
 #[bevy_main]
 pub fn main() {
     shared::catalog::ensure_loaded();
+    account_region::install();
+    // Before the app (and its logger) exists, like the roster summary.
+    eprintln!(
+        "Market: {}",
+        shared::market::describe(shared::region::market(), crate::account_region::features())
+    );
+    // The connection profile decides the registry, passport and the profile's
+    // own folder before any store, account call or socket opens.
+    connection_profile::install();
     // The one environment read of the avatar roster source, before any screen,
     // QA harness or the passport store looks an avatar up.
     let roster_source = omoba_passport::avatars::RosterSource::from_env();
@@ -94,11 +110,18 @@ pub fn main() {
         qa::animation_qa::run(directory.into());
         return;
     }
+    #[cfg(feature = "qa")]
+    if std::env::var_os("OMOBA_SPONSOR_QA_DIR").is_some_and(|v| !v.is_empty()) {
+        qa::sponsorship_qa::run(passport::initialize_store());
+        return;
+    }
     if let Err(error) = sandbox::validate_launch() {
         eprintln!("Combat Test: {error}");
         return;
     }
-    passport::initialize();
+    if account_region::bound() {
+        passport::initialize();
+    }
     // Headless model size analyzer (prints a bind-pose height table and exits).
     if std::env::var("OMOBA_MEASURE_MODELS").is_ok_and(|value| value == "1") {
         model_scale::run_model_measurement_analyzer();
@@ -110,7 +133,19 @@ pub fn main() {
     platform::configure_app(&mut app);
     // Purchased Ekza avatars live outside the (possibly read-only) bundle.
     // Asset sources must exist before AssetPlugin is added.
-    if let Some(store_root) = passport::initialize_store() {
+    // Only Global uses Ekza. Register its known local root without constructing
+    // an HTTP client before the first account-region confirmation.
+    let store_root =
+        account_region::regional_directory(shared::region::RegionId::Global).map(|base| {
+            let profile = connection_profile::resolve(
+                session_config::BUILD_CONTOUR,
+                None,
+                &connection_profile::COMPILED,
+            );
+            connection_profile::profile_directory_in(&base, &profile)
+                .join(connection_profile::STORE_DIR)
+        });
+    if let Some(store_root) = store_root {
         app.register_asset_source(
             omoba_passport::store::ASSET_SOURCE,
             bevy::asset::io::AssetSourceBuilder::platform_default(
@@ -118,6 +153,10 @@ pub fn main() {
                 None,
             ),
         );
+    }
+    if account_region::bound() {
+        passport::initialize_store();
+        passport::poll_account();
     }
     app.add_plugins(
         DefaultPlugins
@@ -149,5 +188,7 @@ pub fn main() {
     }
 }
 
+#[cfg(test)]
+mod game_contract;
 #[cfg(test)]
 mod test_support;

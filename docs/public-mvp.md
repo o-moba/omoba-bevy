@@ -6,10 +6,21 @@ keeps its saved device key, and moves to its assigned arena automatically.
 
 ## Player experience
 
-- **Quick match:** search compatible players for up to 30 seconds, then fill empty
-  seats with server bots. A full compatible roster starts immediately.
-- **Wait for players:** wait for ten compatible humans; never fill with bots.
-- **Play with bots:** one human and nine bots, as soon as a worker is available.
+Home and the party lobby offer three queues (LR-08); the searching, draft and
+loading screens name the queue with a Rated/Unrated badge:
+
+- **Casual PvP:** every human searching Casual plays together, whatever their
+  rating or newcomer cohort; after 30 seconds server bots fill the empty seats.
+  Ten humans start immediately. Never rated; awards casual XP.
+- **Ranked:** ten humans of one rated cohort; never filled with bots. The
+  searching screen shows how many players search Ranked, and after 5 minutes
+  offers to also search Casual PvP without losing the place in Ranked.
+- **vs Bots:** one player or one party against server bots, as soon as a worker
+  is available.
+
+The wire names predate the split: `humans_only` is Ranked, `quick` is Casual PvP,
+so older protocol 11 clients keep working (an old Quick search plays Casual PvP).
+The policy is in [match-progression.md › Queues](match-progression.md#queues-ranked-casual-pvp-and-vs-bots).
 
 Players select an initial hero, inspect their assigned team, lock their choices,
 see a shared three-second countdown, and load together. The server waits for all
@@ -34,16 +45,18 @@ Only the game server submits results. Allocation/start, checkpoints, terminal
 intent and settlement use durable receipts and a private outbox; retries cannot
 award rewards twice. Restarting a client keeps its key and retrieves its profile.
 
-Approved completed bot-filled games award 50 XP for a win or 25 XP for a loss;
-they do not change competitive rating. Eligible bot-free PvP keeps the existing
-rating calculation and 150/100 win/loss XP. Interrupted, development, custom-map
-and standalone practice matches do not grant public progression rewards.
-This public casual policy is `public-casual-v1` with reason `allocated_bots`.
+Completed Casual PvP and vs Bots games award 50 XP for a win or 25 XP for a
+loss; they do not change competitive rating, even with ten humans. Eligible Ranked
+matches keep the existing rating calculation and 150/100 win/loss XP.
+Interrupted, development, custom-map and standalone practice matches do not grant
+public progression rewards. This public casual policy is `public-casual-v1` with
+reason `casual_queue` (Casual PvP) or `allocated_bots` (vs Bots).
 
-Newcomer cohorts (fewer than 20 rated matches) remain separated from experienced
-players; compatible rating spread is bounded by the existing 300-point policy.
-Humans-only queues can therefore wait when the total online count is sufficient
-but the compatible count is not. This MVP has one region/coordinator, not global
+In Ranked, newcomer cohorts (fewer than 20 rated matches) remain separated from
+experienced players; compatible rating spread is bounded by the existing
+300-point policy, shared with the store's rated-start check. Ranked can therefore
+wait when the total online count is sufficient but the compatible count is not;
+that is what the Casual PvP offer after 5 minutes is for. This MVP has one region/coordinator, not global
 regional matchmaking or horizontal distributed lobby scheduling.
 
 ## Prepare a host
@@ -88,6 +101,12 @@ clients. The first worker port must be nonzero and the range must fit in a UDP
 port number. `GAME_SERVER_ADDR=play.example.com:4000 ./client` connects a native
 client. Keep private state directories inaccessible to other users.
 
+The lobby refuses to start when it or its workers bind beyond loopback while
+`OMOBA_MATCH_PUBLIC_HOST` is unset or loopback. `OMOBA_MATCH_MAX_DURATION_SECS`
+(default 2700, 45 minutes) caps every running match; a capped match, or one that no
+human has attended for the 180 s reclaim window plus 30 s, settles as interrupted
+and unrated, and its worker exits.
+
 The packaged `launch-lobby.sh` validates required deployment values; review them
 before launching. `OMOBA_MATCH_EXECUTABLE` can override the worker binary; by
 default the lobby spawns the same server executable. Workers inherit the database
@@ -118,7 +137,16 @@ verification and dispatch, not active human combat or WAN conditions.
 Both probes completed allocation, draft, loading and the observation period;
 the bot-heavy case showed material scheduling/network degradation (maximum
 snapshot gap 622 ms). Keep the default 16-arena cap until the actual host is
-measured with the intended mode mix. A 100-arena configuration is a tested stress
+measured with the intended mode mix (the RU host: [ops/vps/ru/README.md › Arena
+capacity](../ops/vps/ru/README.md#arena-capacity-lr-09), LR-09).
+
+When every arena is busy, a search whose match is ready waits in line: the lobby gives it
+its place and, once arenas have freed recently, an estimated wait, and the searching
+screen offers Offline practice in one tap (it leaves the queue). The lobby rewrites
+`<match root>/capacity.json` every 5 s and logs `CAPACITY_METRIC` lines when the line
+forms, every minute while it lasts and when it clears; the RU host monitor alerts on a
+2-minute wait. At 512 endpoints or 512 career clients the lobby answers a newcomer
+"server full" instead of staying silent, and the game keeps trying. A 100-arena configuration is a tested stress
 case, not a recommended launch setting. Payload totals include startup/ramp-up
 and exclude IP/UDP overhead; they also show that egress capacity matters. Raw
 reports are in the task proof under `raw/capacity-human-100-v2` and
@@ -128,7 +156,8 @@ Worker `status.json` reports ready/forming/running/settling/finished/failed/reco
 heartbeat, epoch and result ID. Endpoint assignment waits for a worker readiness
 receipt; process spawn alone is insufficient. Watch worker/lobby logs, stale
 heartbeats, queue waits, database failures, CPU, RSS and egress. Back up PostgreSQL
-and durable match/outbox directories and exercise restore before public launch.
+and durable match/outbox directories and exercise restore before public launch (on the
+RU host `ops/vps/ru/ru_backup.py` does both, LR-03).
 
 A lobby restart rediscovers workers from immutable manifests. Crashed matches are
 recovered as interrupted; simulation is not restored mid-frame. Recovery is scoped
@@ -141,12 +170,19 @@ UDP admission validates return path before creating a gameplay endpoint, and
 world replication requires authenticated manifest membership. Empty bootstrap
 snapshots carry connection metadata only. Commands bind the
 saved Ed25519 key, transport nonce, authentication nonce, epoch, match and monotonic
-sequence. Per process, admission retains at most 512 endpoint records, accepts up
-to 64 probes per second, and limits each endpoint to 120 packets per second.
+sequence. Per process, admission retains at most 512 endpoint records (8 per source
+IP; a new source beyond 512 is answered `server_full`), accepts up to 64 probes per second after per-IP (8) and per-network (32)
+budgets with 16 kept for new sources, and limits each endpoint to 120 packets per
+second. New profiles, arenas held by one IP and abandoned vs Bots allocations are
+limited per source too (LR-16, `ops/vps/ru/README.md` "Admission limits").
 Challenges expire after five seconds; validated paths expire after 30 seconds
 without traffic. Public datagrams are capped at 12 KiB, with signed command payloads
 capped at 8 KiB. Each receive pass stops after 128 packets or two milliseconds.
 These limits bound application work; they are not a measured DDoS capacity.
+
+A player who left a running match keeps the seat (a bot plays it). Play on the
+lobby then answers with the in-match state and Resume, not a new queue entry,
+until the match ends; the next FindMatch after that queues (LR-13).
 
 A signed queue cancellation and signed Leave both clear lobby intent. Only explicit
 FindMatch retries renew a waiting entry; ordinary authenticated Home heartbeats do
@@ -169,24 +205,41 @@ OMOBA_TEST_DATABASE_URL='postgres://localhost/omoba_test' make test-postgres
 export OMOBA_TEST_DATABASE_URL='postgres://localhost/omoba_test'
 export HARNESS_SERVER_BIN="$PWD/target/debug/server"
 node scripts/test_public_mvp.mjs --scenario=lifecycle --clients=1 --preference=bot_practice
+node scripts/test_public_mvp.mjs --scenario=abandoned --clients=1 --preference=bot_practice
 node scripts/test_public_mvp.mjs --scenario=recovery --clients=1 --preference=bot_practice --seconds=5
 node scripts/test_public_mvp.mjs --clients=100 --preference=humans_only --seconds=30 --input-hz=20
 node scripts/test_public_mvp.mjs --clients=100 --preference=bot_practice --seconds=30 --input-hz=20
+node scripts/test_public_mvp.mjs --mix=bot_practice:5,quick:5,humans_only:10 --max-wait-secs=60
+node scripts/test_public_mvp.mjs --scenario=capacity-wait --clients=1 --preference=bot_practice
 ```
+
+`--mix` interleaves players of several queues; `--capacity` sets the lobby's arena count;
+`--max-wait-secs` fails the run when a player needs longer to reach Running;
+`--limits-from=<unit>` (Linux) runs the lobby and its workers under a systemd unit's
+memory, CPU and task limits. The report records, per arena type, the snapshot gaps, the
+time to Running and the snapshot bytes per second per player, and the lobby's and
+workers' CPU and RSS while everyone plays; `CAPACITY_RESULT` lines summarize it. The
+probe lifts the per-source limits (LR-16) for its own lobby, because all its players come
+from 127.0.0.1. `--scenario=capacity-wait` runs one arena: a second vs Bots player must
+see its place in line and the lobby must report the busy pool.
 
 The probe launches only loopback processes, tracks all process groups it creates,
 drives real signed packets/draft/loading, saves raw logs and reports, and stops its
 own processes. By default it sends signed current-pose Transform commands at a
 requested 20 Hz per running human. It records actual sent counts, observed rate,
 snapshot intervals and process CPU/RSS; stationary commands exercise authentication
-and dispatch but do not replace a moving-client, combat-input or WAN test.
+and dispatch but do not replace a moving-client, combat-input or WAN test. It reads
+`PROTOCOL_VERSION` from `shared/src/protocol.rs` and checks rosters on the live
+scoreboard, because vision filters the players in a snapshot.
 
 The recovery scenario requires local `ps` and `lsof`. It stops only the lobby to
 verify adoption of a surviving worker, then signals the exact owned worker and
 checks durable interrupted history and reassignment. It waits real clocks: an
 adopted worker can take about 100 seconds to be declared stale and the recovery
 child has a further 120-second gate. Allow several minutes; do not shorten database
-leases or fabricate timestamps to make this check pass. `--scenario=lobby-restart`
+leases or fabricate timestamps to make this check pass. The abandoned scenario
+leaves a running bot practice and waits the real reaping (about 210 s): Play must
+answer in-match until then and allocate a new match after. `--scenario=lobby-restart`
 runs only the shorter adoption check.
 
 Node uses built-in cryptography without an added package dependency. The task

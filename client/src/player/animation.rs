@@ -108,7 +108,7 @@ pub(super) struct CharacterAnimationSet {
 /// Grace period before Run falls back to Idle. Remote players advance in
 /// snapshot-interpolation bursts with still frames in between; without this
 /// hysteresis the animation flaps Run<->Idle several times per second.
-const LOCOMOTION_IDLE_GRACE_SECS: f32 = 0.25;
+pub(crate) const LOCOMOTION_IDLE_GRACE_SECS: f32 = 0.25;
 
 #[derive(Component)]
 pub(crate) struct PlayerAnimationBinding {
@@ -132,7 +132,7 @@ pub(crate) struct PlayerAnimationBinding {
 
 /// How long a windup started by an accepted cast is held while the telegraph of that cast
 /// is not replicated to this client. No telegraph of a skill that holds a pose lasts longer.
-pub(super) const UNSEEN_HOLD_SECS: f32 = 1.2;
+pub(crate) const UNSEEN_HOLD_SECS: f32 = 1.2;
 
 /// Evidence of the clip that carries a hero's pose.
 #[cfg(feature = "qa")]
@@ -389,9 +389,12 @@ pub(super) fn start_hero_animation(
     }
 }
 
+/// Seconds an outgoing clip takes to fade out under the clip that replaced it.
+pub(crate) const BLEND_SECS: f32 = 0.12;
+
 /// Fade outgoing clips without changing authoritative action timing or root movement.
 fn blend_hero_animation(player: &mut AnimationPlayer, current: AnimationNodeIndex, delta: f32) {
-    let step = (delta / 0.12).clamp(0.0, 1.0);
+    let step = (delta / BLEND_SECS).clamp(0.0, 1.0);
     let mut remove = Vec::new();
     let mut outgoing = 0.0;
     for (node, active) in player.playing_animations_mut() {
@@ -413,7 +416,7 @@ fn blend_hero_animation(player: &mut AnimationPlayer, current: AnimationNodeInde
     }
 }
 
-fn setup_player_animation_library(
+pub(super) fn setup_player_animation_library(
     mut library: ResMut<PlayerAnimationLibrary>,
     cosmetics: Option<Res<crate::combat_visuals::CombatVisualRegistry>>,
     catalog: Option<Res<PlayerModelCatalog>>,
@@ -578,13 +581,18 @@ fn setup_player_animation_library(
                         "Shared humanoid motion ready for {:?}: Run = Sprint_Loop (runtime retarget)",
                         key
                     );
+                    continue;
                 }
                 Err(error) => {
-                    library.sets.remove(&key);
-                    warn!("Humanoid motion unavailable for {:?}: {}", key, error);
+                    // A VRM-tagged model outside the runtime rig subset keeps the
+                    // legacy path: its embedded (rendition-baked) clips, as the
+                    // avatar preview and party stage already do.
+                    warn!(
+                        "Humanoid motion unavailable for {:?}: {}; using embedded clips",
+                        key, error
+                    );
                 }
             }
-            continue;
         }
 
         let find_clip = |substrings: &[&str]| -> Option<(String, Handle<AnimationClip>)> {
@@ -1051,6 +1059,9 @@ pub(super) fn sync_player_animation_state(
             crate::skill_presentation::own_windup_cue(registry, class, loadout, owner_id, effects)
         });
         let own_hold = own_cue.as_ref().is_some_and(|(_, cue)| cue.hold);
+        let own_effect = own_cue
+            .as_ref()
+            .and_then(|(id, _)| effects.iter().find(|effect| effect.id == *id));
         // What the body is asked for now: that telegraph while it is held, else the motion
         // of the latest accepted action.
         let plan = kit.and_then(|(registry, class, loadout)| {
@@ -1123,6 +1134,8 @@ pub(super) fn sync_player_animation_state(
             None
         };
         let ended_preview = preview.is_none() && binding.sandbox_preview.is_some();
+        // Seconds into its clip at which a held windup started in this frame enters.
+        let mut windup_entry = 0.0;
         if ended_preview {
             binding.playback = HeroAnimationPlayback::new(action.sequence);
         }
@@ -1198,6 +1211,7 @@ pub(super) fn sync_player_animation_state(
                 binding.skill_motion = None;
             }
             if live {
+                let seen = matches!(telegraph, Telegraph::Start(_));
                 let started = match telegraph {
                     Telegraph::Start(cue) => Some(Some(cue)),
                     Telegraph::Unchanged | Telegraph::Cancel if incoming && !own_hold => Some(plan),
@@ -1208,6 +1222,11 @@ pub(super) fn sync_player_animation_state(
                     if let Some(cue) = &cue {
                         binding.playback.state = set.motion(&cue.motion);
                         restart = true;
+                        // A warning first seen late is joined where it has got to.
+                        if seen {
+                            windup_entry =
+                                own_effect.map_or(0.0, |effect| cue.windup_entry_secs(effect));
+                        }
                     }
                     binding.skill_motion = cue;
                 }
@@ -1255,8 +1274,8 @@ pub(super) fn sync_player_animation_state(
                     active.repeat();
                 }
             }
-            // A clip the body was asked for by name enters where its row says and repeats
-            // when it is a loop.
+            // A clip the body was asked for by name enters where its row says, or where its
+            // late telegraph has got to, and repeats when it is a loop.
             if let Some((cue, active)) = binding
                 .playing_cue(set)
                 .zip(animation_player.animation_mut(node))
@@ -1270,9 +1289,9 @@ pub(super) fn sync_player_animation_state(
                     graphs.as_deref(),
                     clips.as_deref(),
                 )
-                .filter(|_| cue.start > 0.0)
+                .filter(|_| cue.start > 0.0 || windup_entry > 0.0)
                 {
-                    active.seek_to(cue.start * duration);
+                    active.seek_to((cue.start * duration).max(windup_entry).min(duration));
                 }
             }
         }

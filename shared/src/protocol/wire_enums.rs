@@ -27,7 +27,7 @@ use std::path::Path;
 use crate::protocol::PROTOCOL_VERSION;
 
 /// The protocol version this variant list was last reviewed for.
-const POLICY_PROTOCOL_VERSION: u16 = 11;
+const POLICY_PROTOCOL_VERSION: u16 = 12;
 // CompatibilityDatagram is an independent pre-game envelope; review its
 // variants against HANDSHAKE_VERSION, not the gameplay PROTOCOL_VERSION.
 const POLICY_HANDSHAKE_VERSION: u16 = 1;
@@ -70,7 +70,10 @@ wire_enums! {
     crate::protocol::wire::ServerPacket => Strict [Party, Social, Career, Snapshot],
     crate::party::PartyCommand => Strict [Presence, Invite, Accept, Decline, Leave, Kick, Launch],
     crate::public_transport::PublicClientDatagram => Strict [TransportProbe, TransportProof, TransportBootstrap, SignedCommand],
-    crate::public_transport::PublicServerDatagram => Strict [TransportChallenge],
+    // LR-09 added `ServerFull` without a protocol bump: the server sends it only
+    // where it used to send nothing (a probe at the endpoint ceiling), and an
+    // older client drops a datagram it cannot decode, so it still sees silence.
+    crate::public_transport::PublicServerDatagram => Strict [TransportChallenge, ServerFull],
     crate::career::CareerRequest => Strict [FindMatch, SupporterStatus, EquipSupporterAura, Social, Challenge, Authenticate, History, Detail, Friends, Friend, Profile, LookupPlayer, Rename, Authorized, CancelQueue],
     crate::utility::UtilityAction => Strict [Dash, Haste, Recall, CancelRecall],
     crate::map::Team => Strict [Green, Blue],
@@ -81,13 +84,16 @@ wire_enums! {
     crate::loadout::WeaponMode => Strict [Repeater, Rockets],
     crate::loadout::EffectVisualKind => Strict [Orb, Soul, Anchor, Healing, ShieldWall, Cage, Lantern, Bolt, Barrier, Field, BeamWarning, Beam, Trap, Rocket],
     crate::practice::PracticeCommand => Tolerant [Roster, ClearBots, SpawnDummy, SpawnMovingDummy, SpawnAggressiveDummy, SetNoCooldowns, StartDuel, Unsupported],
+    // Not carried yet; tolerant before the practice picker sends it.
+    crate::bot_profile::BotDifficulty => Tolerant [Recruit, Regular, Veteran, Elite, Unknown],
     crate::protocol::JoinRejection => Strict [MatchFull, SessionActive, ProtocolMismatch, MapGeometryMismatch, AvatarNotAuthorized, OfflineKitUnsupported],
     crate::protocol::wire::GameState => Strict [Lobby, Forming, Starting, Running, Victory],
     crate::sandbox::SandboxCommand => Strict [ApplyConfig, Refill, ResetCooldowns, Teleport, ResetActor, AddXp, GrantItem, ResetDuel, ResetAnalytics, SpawnWave, FrameStep, ForceCast],
     crate::social::SocialCommand => Strict [Subscribe, Chat, Reaction],
     crate::match_service::TakeoverPolicy => Strict [Idle, Bot],
-    crate::match_service::MatchPreference => Strict [Quick, HumansOnly, BotPractice],
-    crate::supporter::AuraStyle => Strict [Solar, Lunar, Verdant],
+    crate::match_service::MatchPreference => Strict [Casual, Ranked, BotPractice],
+    // Protocol 12 added the seven tier styles (LR-67).
+    crate::supporter::AuraStyle => Strict [Solar, Lunar, Verdant, Rose, Jade, Azure, Crimson, PrismI, PrismII, PrismIII],
     crate::handheld::HandheldSelection => Strict [ClassDefault, Unequipped, Item],
     crate::career::FriendAction => Strict [Request, Accept, Reject, Cancel, Remove],
     crate::career::CareerAction => Strict [FindMatch, SupporterStatus, EquipSupporterAura, Social, History, Detail, Friends, Friend, Profile, LookupPlayer, Rename, CancelQueue],
@@ -118,6 +124,8 @@ wire_enums! {
     crate::career::FriendPresence => Strict [Offline, Online, Playing],
     crate::sandbox::BotBehavior => Strict [Stationary, Flee, Attack, Fight],
     crate::protocol::wire::CharacterChoice => Strict [Ipfs, Toka, Wang, Cube, Paco],
+    // LR-15: `CareerView.sanctions`, `SocialView.mute`; tolerant so a later kind is additive.
+    crate::moderation::SanctionKind => Tolerant [ChatMute, MatchmakingBan, RankedBan, AccountBan, NameReset, Unknown],
 }
 
 /// Serde enums in `shared` that the UDP protocol does not carry, and why.
@@ -128,6 +136,11 @@ const NOT_UDP_WIRE: &[(&str, &str)] = &[
         "local client diagnosis and operator JSON, not a UDP field",
     ),
     ("DeviceAction", "account-api HTTP contract"),
+    (
+        "RegionId",
+        "native account HTTP contract and local routing metadata",
+    ),
+    ("RecoveryAction", "account-api HTTP contract"),
     ("NativeSupporterAction", "account-api HTTP contract"),
     ("WebPairDecision", "account-api HTTP contract"),
     ("PackAccess", "reaction pack catalog data"),
@@ -274,6 +287,14 @@ fn tolerant_enums_decode_an_unknown_value() {
             .unwrap(),
         crate::practice::PracticeCommand::Unsupported
     );
+    assert_eq!(
+        serde_json::from_str::<crate::bot_profile::BotDifficulty>(FUTURE).unwrap(),
+        crate::bot_profile::BotDifficulty::Unknown
+    );
+    assert_eq!(
+        serde_json::from_str::<crate::moderation::SanctionKind>(FUTURE).unwrap(),
+        crate::moderation::SanctionKind::Unknown
+    );
     let tolerant: Vec<&str> = WIRE_ENUMS
         .iter()
         .filter(|(_, decoding, _)| *decoding == Decoding::Tolerant)
@@ -284,10 +305,12 @@ fn tolerant_enums_decode_an_unknown_value() {
         [
             "HeroClass",
             "PracticeCommand",
+            "BotDifficulty",
             "PlayerActionKind",
             "CombatEntityKind",
             "ProjectileStyle",
-            "MinionKind"
+            "MinionKind",
+            "SanctionKind"
         ],
         "a tolerant enum needs an unknown-value case above"
     );

@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "revision": "standard-kits-7",
+  "revision": "standard-kits-8",
   "skills": [
     {
       "id": "dawn_bind",
@@ -29,7 +29,7 @@
       "id": "dawn_barrier",
       "slot": "w",
       "name": "Returning Aegis",
-      "description": "A returning light shields allies on both journeys.",
+      "description": "A returning light shields you and the allies it passes, out and back.",
       "targeting": "direction",
       "mana_cost": 18,
       "cooldown_secs": 12,
@@ -48,7 +48,7 @@
       "id": "dawn_field",
       "slot": "e",
       "name": "Luminous Field",
-      "description": "Place a slowing field; cast again to detonate it.",
+      "description": "Place a slowing field; cast again, or wait, to detonate it.",
       "targeting": "point",
       "mana_cost": 24,
       "cooldown_secs": 10,
@@ -67,7 +67,7 @@
       "id": "dawn_ray",
       "slot": "r",
       "name": "Horizon Ray",
-      "description": "A warned beam detonates Radiance marks and applies them again.",
+      "description": "A warned beam that burns hardest along its centre; detonates Radiance marks and applies them again.",
       "targeting": "direction",
       "mana_cost": 40,
       "cooldown_secs": 40,
@@ -77,7 +77,9 @@
       "effect": {
         "kind": "beam",
         "width": 0.8,
-        "damage": 72
+        "damage": 80,
+        "core_width": 0.35,
+        "edge_damage_multiplier": 0.6
       }
     },
     {

@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 use bevy::prelude::*;
 use shared::{
     career::CareerView,
-    match_service::{MatchAllocation, MatchPreference, MatchServiceView},
+    match_service::{CapacityLine, InMatch, MatchAllocation, MatchPreference, MatchServiceView},
 };
 
 use crate::{
@@ -38,6 +38,27 @@ pub(crate) struct MatchServiceClient {
     /// A fresh search must not re-enter a worker whose seat we already left.
     /// Its terminal disk receipt can lag the client result or reconnect cutoff.
     last_left_allocation: Option<String>,
+    /// The player chose Resume on the lobby's in-match state (LR-13). Like a
+    /// saved resume, a blocked join returns to the lobby instead of waiting.
+    resuming: bool,
+    /// This Ranked search took the offer to also search Casual PvP (LR-08,
+    /// owner default O-1); every `FindMatch` of the search carries it.
+    also_casual: bool,
+}
+
+/// The offer to also search Casual PvP on a Ranked search, as the searching
+/// screen shows it (LR-08, owner default O-1).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum CasualOffer {
+    /// Not a Ranked search, or too early.
+    Hidden,
+    /// The lobby offers it: show the button.
+    Offered,
+    /// Taken, but the lobby does not search Casual for this party yet: every
+    /// member must take it (or the lobby has not answered yet).
+    Pending,
+    /// The lobby also searches Casual PvP for this player.
+    Searching,
 }
 
 /// A queued "Play again": the lobby to return to and the lock-in to send.
@@ -84,6 +105,7 @@ impl MatchServiceClient {
         if !self.active {
             self.request_id = self.request_id.saturating_add(1);
             self.last_request = None;
+            self.also_casual = false;
         }
         self.active = true;
         self.pending_join = Some(command.clone());
@@ -116,6 +138,113 @@ impl MatchServiceClient {
         self.active && (self.pending_join.is_some() || self.allocation.is_none())
     }
 
+    /// The lobby's answer to this search, once it answered this request.
+    fn answer<'a>(&self, view: &'a CareerView) -> Option<&'a MatchServiceView> {
+        (self.active
+            && self.allocation.is_none()
+            && view.match_service_request_id == Some(self.request_id))
+        .then_some(view.match_service.as_ref())
+        .flatten()
+    }
+
+    /// The running match that still holds this player's seat, as the lobby
+    /// answered this search (LR-13): the searching screen offers Resume.
+    pub fn in_match<'a>(&self, view: &'a CareerView) -> Option<(&'a MatchAllocation, InMatch)> {
+        self.answer(view)?.in_match()
+    }
+
+    /// The lobby still hands out the allocation this player left, which the
+    /// search never re-enters: that match is closing, not connecting.
+    pub fn closing_left_allocation(&self, view: &CareerView) -> bool {
+        matches!(
+            self.answer(view),
+            Some(MatchServiceView::Assigned { allocation, in_match: None })
+                if self.last_left_allocation.as_deref() == Some(allocation.allocation_id.as_str())
+        )
+    }
+
+    /// Resume on the in-match state: go back to that seat with this search's
+    /// lock-in, which the worker reads as a reclaim of the retained hero.
+    /// Returns the endpoint to connect to, or `None` when nothing can be
+    /// resumed.
+    pub fn resume_in_match(&mut self, view: &CareerView) -> Option<String> {
+        let allocation = self.in_match(view)?.0.clone();
+        crate::persistence::validate_game_server_addr(&allocation.endpoint)?;
+        self.pending_join.as_ref()?;
+        let endpoint = allocation.endpoint.clone();
+        self.last_left_allocation = None;
+        self.allocation = Some(allocation);
+        self.last_request = None;
+        self.resuming = true;
+        Some(endpoint)
+    }
+
+    /// The offer to also search Casual PvP, from the lobby's answer to this
+    /// search.
+    pub fn casual_offer(&self, view: &CareerView) -> CasualOffer {
+        let Some(MatchServiceView::Waiting {
+            preference: MatchPreference::Ranked,
+            elapsed_secs,
+            casual_offer_after_secs: Some(after),
+            also_casual,
+            ..
+        }) = self.answer(view)
+        else {
+            return CasualOffer::Hidden;
+        };
+        if *also_casual {
+            CasualOffer::Searching
+        } else if self.also_casual {
+            CasualOffer::Pending
+        } else if elapsed_secs >= after {
+            CasualOffer::Offered
+        } else {
+            CasualOffer::Hidden
+        }
+    }
+
+    /// The searching screen offers Offline practice in one tap (LR-09): every
+    /// arena is busy and this search waits in the line for one, or the server
+    /// is too full to sign in.
+    pub fn offers_offline(&self, view: &CareerView) -> bool {
+        self.active
+            && self.allocation.is_none()
+            && (matches!(
+                self.answer(view),
+                Some(MatchServiceView::Waiting {
+                    capacity_wait: true,
+                    ..
+                })
+            ) || view.error_code.as_deref() == Some(shared::career::error_code::SERVER_FULL))
+    }
+
+    /// Takes the offer: this Ranked search also searches Casual PvP from the
+    /// next `FindMatch` on, which goes out at once.
+    pub fn take_casual_offer(&mut self) {
+        if self.active && self.preference == MatchPreference::Ranked {
+            self.also_casual = true;
+            self.last_request = None;
+        }
+    }
+
+    /// The queue and Rated/Unrated badge of this search or of its match:
+    /// the allocation once the lobby assigned one, otherwise the chosen
+    /// queue. `None` away from the public lobby, which has no queues.
+    pub fn badge(&self, view: &CareerView) -> Option<String> {
+        if self.allocation.is_some() {
+            return self.match_badge();
+        }
+        (self.active && view.match_service.is_some())
+            .then(|| queue_badge(self.preference, self.preference.rated()))
+    }
+
+    /// The badge of the allocated match (draft and loading).
+    pub fn match_badge(&self) -> Option<String> {
+        self.allocation
+            .as_ref()
+            .map(|allocation| queue_badge(allocation.preference, allocation.rated))
+    }
+
     pub fn take_return_to_lobby(&mut self) -> Option<String> {
         let allocation = self.allocation.take();
         if let Some(allocation) = &allocation {
@@ -124,6 +253,8 @@ impl MatchServiceClient {
         let destination = allocation.and(self.lobby_addr.take());
         self.active = false;
         self.resume_scope = None;
+        self.resuming = false;
+        self.also_casual = false;
         self.pending_join = None;
         self.last_request = None;
         self.lobby_addr = None;
@@ -205,7 +336,7 @@ fn update_match_service(
         {
             session.defer_active_seat_rejection();
         }
-        if flow.resume_scope.is_some() && session.join_blocked() {
+        if (flow.resume_scope.is_some() || flow.resuming) && session.join_blocked() {
             // Return through the normal cleanup once. The saved record remains
             // available for an explicit later attempt; no automatic loop from Home.
             session.abandon_join();
@@ -231,8 +362,13 @@ fn update_match_service(
         }
         return;
     }
+    // A running match is never a handoff: the player resumes it explicitly,
+    // and retries keep the search alive until it ends (LR-13).
     if career.view.match_service_request_id == Some(flow.request_id)
-        && let Some(MatchServiceView::Assigned { allocation }) = &career.view.match_service
+        && let Some(MatchServiceView::Assigned {
+            allocation,
+            in_match: None,
+        }) = &career.view.match_service
         && flow.last_left_allocation.as_deref() != Some(allocation.allocation_id.as_str())
     {
         if crate::persistence::validate_game_server_addr(&allocation.endpoint).is_some() {
@@ -256,6 +392,7 @@ fn update_match_service(
             shared::career::CareerRequest::FindMatch {
                 request_id: flow.request_id,
                 preference: flow.preference,
+                also_casual: flow.also_casual,
             },
         ));
     }
@@ -315,6 +452,33 @@ fn requeue_ready(
         && view.match_service.is_some()
 }
 
+/// A queue's name in the active language (LR-08).
+pub(crate) fn queue_name(preference: MatchPreference) -> &'static str {
+    tr(match preference {
+        MatchPreference::Ranked => "queue.ranked",
+        MatchPreference::Casual => "queue.casual",
+        MatchPreference::BotPractice => "queue.bots",
+    })
+}
+
+/// "Ranked · Rated": the queue and whether its match changes rating.
+pub(crate) fn queue_badge(preference: MatchPreference, rated: bool) -> String {
+    trf(
+        "queue.badge",
+        &[
+            ("queue", &queue_name(preference)),
+            (
+                "rating",
+                &tr(if rated {
+                    "queue.rated"
+                } else {
+                    "queue.unrated"
+                }),
+            ),
+        ],
+    )
+}
+
 /// The matchmaking status line for the searching screen, in the active language.
 pub(crate) fn status_text(view: &MatchServiceView) -> String {
     match view {
@@ -326,12 +490,15 @@ pub(crate) fn status_text(view: &MatchServiceView) -> String {
             elapsed_secs,
             bot_fill_after_secs,
             capacity_wait,
+            searching,
+            capacity_line,
+            ..
         } => {
             if *capacity_wait {
-                return tr("searching.match.capacity").into();
+                return capacity_text(capacity_line.as_ref());
             }
             let policy = match preference {
-                MatchPreference::Quick => {
+                MatchPreference::Casual => {
                     bot_fill_after_secs.map_or(tr("searching.match.preparing").into(), |seconds| {
                         trf(
                             "searching.match.bot_fill",
@@ -339,10 +506,10 @@ pub(crate) fn status_text(view: &MatchServiceView) -> String {
                         )
                     })
                 }
-                MatchPreference::HumansOnly => tr("searching.match.humans_only").into(),
+                MatchPreference::Ranked => tr("searching.match.humans_only").into(),
                 MatchPreference::BotPractice => tr("searching.match.bot_practice").into(),
             };
-            trf(
+            let waiting = trf(
                 "searching.match.waiting",
                 &[
                     ("humans", humans),
@@ -350,12 +517,63 @@ pub(crate) fn status_text(view: &MatchServiceView) -> String {
                     ("policy", &policy),
                     ("elapsed", elapsed_secs),
                 ],
-            )
+            );
+            // Everyone searching this queue, whatever their cohort (O-1).
+            match searching {
+                Some(count) => {
+                    format!("{waiting}\n{}", trf("queue.searching", &[("count", count)]))
+                }
+                None => waiting,
+            }
         }
         MatchServiceView::Allocating => tr("searching.match.allocating").into(),
+        MatchServiceView::Assigned {
+            in_match: Some(state),
+            ..
+        } => in_match_text(*state),
         MatchServiceView::Assigned { .. } => tr("searching.match.assigned").into(),
-        MatchServiceView::Failed { code } => trf("searching.match.failed", &[("code", code)]),
+        MatchServiceView::Failed { code } => failed_text(code),
     }
+}
+
+/// Every arena is busy (LR-09): the player's place in the line for the next
+/// free arena and the estimated wait, when the lobby sent them.
+fn capacity_text(line: Option<&CapacityLine>) -> String {
+    let Some(line) = line else {
+        return tr("searching.match.capacity").into();
+    };
+    match line.eta_minutes() {
+        Some(minutes) => trf(
+            "capacity.line_eta",
+            &[("position", &line.position), ("minutes", &minutes)],
+        ),
+        None => trf("capacity.line", &[("position", &line.position)]),
+    }
+}
+
+/// A lobby failure code: its own copy when the `queue` dictionary has one
+/// (`queue.failed.<code>`), otherwise the generic line with the code.
+fn failed_text(code: &str) -> String {
+    let known = !code.is_empty()
+        && code
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte == b'_');
+    known
+        .then(|| crate::i18n::lookup(&format!("queue.failed.{code}")))
+        .flatten()
+        .map_or_else(
+            || trf("searching.match.failed", &[("code", &code)]),
+            str::to_owned,
+        )
+}
+
+/// The in-match state (LR-13): the player is still in a running match, which
+/// ends by the given time at the latest.
+pub(crate) fn in_match_text(state: InMatch) -> String {
+    state.ends_within_minutes().map_or_else(
+        || tr("rejoin.status_open").to_owned(),
+        |minutes| trf("rejoin.status", &[("minutes", &minutes)]),
+    )
 }
 
 #[cfg(test)]
@@ -377,7 +595,7 @@ mod tests {
         MatchAllocation {
             allocation_id: "allocated".into(),
             endpoint: "127.0.0.1:4001".into(),
-            preference: MatchPreference::Quick,
+            preference: MatchPreference::Casual,
             team: shared::map::Team::Green,
             human_count: 1,
             bot_count: 9,
@@ -655,6 +873,7 @@ mod tests {
                 match_service_request_id: Some(request_id),
                 match_service: Some(MatchServiceView::Assigned {
                     allocation: allocation(),
+                    in_match: None,
                 }),
                 ..default()
             };
@@ -689,6 +908,7 @@ mod tests {
             .view
             .match_service = Some(MatchServiceView::Assigned {
             allocation: next_allocation.clone(),
+            in_match: None,
         });
         app.update();
         assert_eq!(
@@ -704,19 +924,416 @@ mod tests {
             .any(|command| matches!(command, SessionUiCommand::ConnectAllocated(endpoint) if endpoint == next_allocation.endpoint)));
     }
 
+    fn in_match(ends_within_secs: Option<u64>) -> MatchServiceView {
+        MatchServiceView::Assigned {
+            allocation: allocation(),
+            in_match: Some(InMatch { ends_within_secs }),
+        }
+    }
+
+    /// LR-13: Play after leaving a running match. The lobby answers with the
+    /// in-match state: no handoff and no endless "connecting", the search
+    /// keeps retrying (it queues once the match ends), and Resume goes back to
+    /// that seat with this search's lock-in.
+    #[test]
+    fn play_after_leaving_a_running_match_offers_resume_instead_of_a_handoff() {
+        let lobby = "127.0.0.1:4000";
+        let mut app = App::new();
+        app.init_resource::<CareerClient>()
+            .init_resource::<crate::net::recovery::ResumeMatchState>()
+            .add_message::<NetworkCommand>()
+            .add_message::<SessionUiCommand>()
+            .insert_resource(CareerIdentity::authenticated_for_test(lobby, 9, "seat-a"))
+            .insert_resource(ClientSessionId("seat-a".into()))
+            .insert_resource(GameStateSnapshot {
+                meta: shared::protocol::SnapshotMeta::new(9, 1, 1),
+                ..default()
+            })
+            .add_systems(
+                Update,
+                (crate::net::recovery::resume_actions, update_match_service).chain(),
+            );
+        let mut session = ClientSession::default();
+        session.set_state_for_test(crate::net::ClientConnectionState::Connected);
+        session.set_server_addr_for_test(lobby);
+        app.insert_resource(session);
+        // The player was in this allocation and pressed Leave …
+        let mut flow = MatchServiceClient {
+            active: true,
+            allocation: Some(allocation()),
+            lobby_addr: Some(lobby.into()),
+            ..default()
+        };
+        assert_eq!(flow.take_return_to_lobby().as_deref(), Some(lobby));
+        // … then Play on Home: a fresh search.
+        let idle = CareerView {
+            match_service: Some(MatchServiceView::Idle),
+            ..default()
+        };
+        assert!(flow.intercept_join(&idle, lobby, &lock_in()));
+        let request_id = flow.request_id;
+        app.insert_resource(flow);
+        app.world_mut().resource_mut::<CareerClient>().view = CareerView {
+            match_service_request_id: Some(request_id),
+            match_service: Some(in_match(Some(600))),
+            ..default()
+        };
+        let drain_network = |app: &mut App| {
+            app.world_mut()
+                .resource_mut::<Messages<NetworkCommand>>()
+                .drain()
+                .collect::<Vec<_>>()
+        };
+        let drain_session = |app: &mut App| {
+            app.world_mut()
+                .resource_mut::<Messages<SessionUiCommand>>()
+                .drain()
+                .collect::<Vec<_>>()
+        };
+        for _ in 0..2 {
+            app.world_mut()
+                .resource_mut::<MatchServiceClient>()
+                .last_request = Some(Instant::now() - Duration::from_secs(3));
+            app.update();
+            assert!(drain_session(&mut app).is_empty(), "never a handoff");
+            let sent = drain_network(&mut app);
+            assert!(
+                matches!(sent[..], [NetworkCommand::Career(shared::career::CareerRequest::FindMatch { request_id: id, .. })] if id == request_id),
+                "the search keeps retrying: {sent:?}"
+            );
+            let flow = app.world().resource::<MatchServiceClient>();
+            assert!(flow.allocation.is_none() && flow.is_searching());
+            let view = &app.world().resource::<CareerClient>().view;
+            let (seat, state) = flow.in_match(view).expect("the in-match state");
+            assert_eq!(seat.allocation_id, "allocated");
+            assert_eq!(state.ends_within_minutes(), Some(10));
+            assert!(!flow.closing_left_allocation(view));
+        }
+        // A stale answer (another request) offers nothing.
+        let mut stale = app.world().resource::<CareerClient>().view.clone();
+        stale.match_service_request_id = Some(request_id + 1);
+        assert!(
+            app.world()
+                .resource::<MatchServiceClient>()
+                .in_match(&stale)
+                .is_none()
+        );
+
+        // Resume.
+        app.world_mut().write_message(SessionUiCommand::ResumeMatch);
+        app.update();
+        let connect = drain_session(&mut app);
+        assert!(
+            connect.iter().any(|command| matches!(command, SessionUiCommand::ConnectAllocated(endpoint) if endpoint == "127.0.0.1:4001")),
+            "{connect:?}"
+        );
+        assert!(
+            drain_network(&mut app).is_empty(),
+            "no FindMatch once resuming"
+        );
+        {
+            let flow = app.world().resource::<MatchServiceClient>();
+            assert_eq!(
+                flow.allocation.as_ref().map(|a| a.allocation_id.as_str()),
+                Some("allocated")
+            );
+            assert!(flow.resuming && flow.last_left_allocation.is_none());
+        }
+        // On the worker, the retained lock-in reclaims the seat.
+        app.world_mut()
+            .resource_mut::<ClientSession>()
+            .set_server_addr_for_test("127.0.0.1:4001");
+        app.insert_resource(CareerIdentity::authenticated_for_test(
+            "127.0.0.1:4001",
+            9,
+            "seat-a",
+        ));
+        app.update();
+        assert!(matches!(
+            drain_network(&mut app)[..],
+            [NetworkCommand::JoinPrematch { .. }]
+        ));
+        // A worker that refuses the seat sends the player back to the lobby.
+        app.world_mut()
+            .resource_mut::<ClientSession>()
+            .reject_for_test(shared::protocol::JoinRejection::SessionActive);
+        app.update();
+        assert!(
+            drain_session(&mut app)
+                .iter()
+                .any(|command| matches!(command, SessionUiCommand::LeaveMatch))
+        );
+        assert!(!app.world().resource::<MatchServiceClient>().active);
+    }
+
+    /// The allocation this player left, while the lobby still hands it out
+    /// before its match runs, reads as closing, never as connecting.
+    #[test]
+    fn a_left_allocation_still_handed_out_reads_as_closing() {
+        let lobby = "127.0.0.1:4000";
+        let idle = CareerView {
+            match_service: Some(MatchServiceView::Idle),
+            ..default()
+        };
+        let mut flow = MatchServiceClient {
+            active: true,
+            allocation: Some(allocation()),
+            lobby_addr: Some(lobby.into()),
+            ..default()
+        };
+        flow.take_return_to_lobby();
+        assert!(flow.intercept_join(&idle, lobby, &lock_in()));
+        let mut view = CareerView {
+            match_service_request_id: Some(flow.request_id),
+            match_service: Some(MatchServiceView::Assigned {
+                allocation: allocation(),
+                in_match: None,
+            }),
+            ..default()
+        };
+        assert!(flow.closing_left_allocation(&view));
+        assert!(flow.in_match(&view).is_none());
+        view.match_service = Some(MatchServiceView::Assigned {
+            allocation: MatchAllocation {
+                allocation_id: "another".into(),
+                ..allocation()
+            },
+            in_match: None,
+        });
+        assert!(!flow.closing_left_allocation(&view), "a new match connects");
+    }
+
+    /// The in-match copy in every language, with and without a known end.
+    #[test]
+    fn the_in_match_state_is_localized() {
+        if crate::i18n::testing::isolated("match_service::tests::the_in_match_state_is_localized") {
+            return;
+        }
+        use crate::i18n::{I18nPlugin, Locale, LocaleId};
+        let mut app = App::new();
+        app.add_plugins(I18nPlugin::default());
+        assert_eq!(
+            status_text(&in_match(Some(121))),
+            "You are still in a match · it ends in 3 min at the latest.\nResume it, or wait here: the search starts when it ends."
+        );
+        assert_eq!(
+            status_text(&in_match(None)),
+            "You are still in a match.\nResume it, or wait here: the search starts when it ends."
+        );
+        for (locale, ends) in [
+            (
+                "ru",
+                "Вы всё ещё в матче · он закончится не позже чем через 3 мин.",
+            ),
+            ("zh-Hans", "你仍在一场对局中 · 最多 3 分钟后结束。"),
+        ] {
+            app.world_mut()
+                .resource_mut::<Locale>()
+                .set(LocaleId::parse(locale).unwrap());
+            let text = status_text(&in_match(Some(121)));
+            assert!(text.starts_with(ends), "{locale}: {text}");
+            assert!(!text.contains("match ·"), "{locale}: {text}");
+            assert_ne!(status_text(&in_match(None)), text);
+            assert_eq!(
+                tr("rejoin.resume"),
+                if locale == "ru" {
+                    "Вернуться в матч"
+                } else {
+                    "继续对局"
+                }
+            );
+        }
+    }
+
     #[test]
     fn human_only_copy_never_promises_bot_fallback() {
         let text = status_text(&MatchServiceView::Waiting {
-            preference: MatchPreference::HumansOnly,
+            preference: MatchPreference::Ranked,
             humans: 3,
             needed: 10,
             elapsed_secs: 50,
             bot_fill_after_secs: None,
             capacity_wait: false,
+            searching: Some(7),
+            casual_offer_after_secs: Some(300),
+            also_casual: false,
+            capacity_line: None,
         });
         assert!(text.contains("3/10"));
         assert!(text.contains("no bots"));
         assert!(!text.contains("fill empty"));
+        assert!(text.ends_with("\n7 searching this queue"), "{text}");
+    }
+
+    fn ranked_wait(elapsed_secs: u64, also_casual: bool) -> CareerView {
+        CareerView {
+            match_service_request_id: Some(0),
+            match_service: Some(MatchServiceView::Waiting {
+                preference: MatchPreference::Ranked,
+                humans: 2,
+                needed: 10,
+                elapsed_secs,
+                bot_fill_after_secs: None,
+                capacity_wait: false,
+                searching: Some(2),
+                casual_offer_after_secs: Some(300),
+                also_casual,
+                capacity_line: None,
+            }),
+            ..default()
+        }
+    }
+
+    /// O-1: after five minutes of Ranked the search may also search Casual
+    /// PvP. Taking the offer goes out at once on the next `FindMatch`, keeps
+    /// the Ranked preference, and a new search starts without it.
+    #[test]
+    fn a_ranked_search_takes_the_casual_offer_once_it_is_due() {
+        let mut flow = MatchServiceClient {
+            active: true,
+            preference: MatchPreference::Ranked,
+            ..default()
+        };
+        assert_eq!(
+            flow.casual_offer(&ranked_wait(299, false)),
+            CasualOffer::Hidden
+        );
+        assert_eq!(
+            flow.casual_offer(&ranked_wait(300, false)),
+            CasualOffer::Offered
+        );
+        flow.last_request = Some(Instant::now());
+        flow.take_casual_offer();
+        assert!(flow.also_casual && flow.last_request.is_none());
+        assert_eq!(
+            flow.casual_offer(&ranked_wait(301, false)),
+            CasualOffer::Pending
+        );
+        assert_eq!(
+            flow.casual_offer(&ranked_wait(302, true)),
+            CasualOffer::Searching
+        );
+        // Another queue has no offer; a Casual search cannot take one.
+        let mut casual = MatchServiceClient {
+            active: true,
+            preference: MatchPreference::Casual,
+            ..default()
+        };
+        casual.take_casual_offer();
+        assert!(!casual.also_casual);
+        // Leaving ends it; the next search starts without it.
+        flow.take_return_to_lobby();
+        assert!(!flow.also_casual);
+        flow.also_casual = true;
+        let view = CareerView {
+            match_service: Some(MatchServiceView::Idle),
+            ..default()
+        };
+        flow.active = false;
+        assert!(flow.intercept_join(&view, "127.0.0.1:4000", &lock_in()));
+        assert!(!flow.also_casual, "a new search starts in Ranked only");
+    }
+
+    /// The offer reaches the lobby on the next `FindMatch`, signed with it.
+    #[test]
+    fn find_match_carries_the_casual_offer() {
+        let lobby = "127.0.0.1:4000";
+        let mut app = App::new();
+        app.add_message::<NetworkCommand>()
+            .add_message::<SessionUiCommand>()
+            .init_resource::<CareerClient>()
+            .insert_resource(CareerIdentity::authenticated_for_test(lobby, 9, "seat-a"))
+            .insert_resource(ClientSessionId("seat-a".into()))
+            .insert_resource(GameStateSnapshot {
+                meta: shared::protocol::SnapshotMeta::new(9, 1, 1),
+                ..default()
+            })
+            .add_systems(Update, update_match_service);
+        let mut session = ClientSession::default();
+        session.set_state_for_test(crate::net::ClientConnectionState::Connected);
+        session.set_server_addr_for_test(lobby);
+        app.insert_resource(session);
+        app.insert_resource(MatchServiceClient {
+            active: true,
+            preference: MatchPreference::Ranked,
+            ..default()
+        });
+        let sent = |app: &mut App| -> Vec<(MatchPreference, bool)> {
+            app.world_mut()
+                .resource_mut::<Messages<NetworkCommand>>()
+                .drain()
+                .filter_map(|command| match command {
+                    NetworkCommand::Career(shared::career::CareerRequest::FindMatch {
+                        preference,
+                        also_casual,
+                        ..
+                    }) => Some((preference, also_casual)),
+                    _ => None,
+                })
+                .collect()
+        };
+        app.update();
+        assert_eq!(sent(&mut app), [(MatchPreference::Ranked, false)]);
+        app.world_mut()
+            .resource_mut::<MatchServiceClient>()
+            .take_casual_offer();
+        app.update();
+        assert_eq!(sent(&mut app), [(MatchPreference::Ranked, true)]);
+    }
+
+    /// LR-08: the badge names the queue and whether it is rated, from the
+    /// allocation once there is one; a failure code the queue dictionary
+    /// knows gets its own copy.
+    #[test]
+    fn the_queue_badge_and_failures_are_localized() {
+        if crate::i18n::testing::isolated(
+            "match_service::tests::the_queue_badge_and_failures_are_localized",
+        ) {
+            return;
+        }
+        use crate::i18n::{I18nPlugin, Locale, LocaleId};
+        let mut app = App::new();
+        app.add_plugins(I18nPlugin::default());
+        let lobby = CareerView {
+            match_service: Some(MatchServiceView::Idle),
+            ..default()
+        };
+        let mut flow = MatchServiceClient {
+            active: true,
+            preference: MatchPreference::Ranked,
+            ..default()
+        };
+        assert_eq!(flow.badge(&CareerView::default()), None, "no public lobby");
+        assert_eq!(flow.badge(&lobby).as_deref(), Some("Ranked · Rated"));
+        flow.preference = MatchPreference::Casual;
+        assert_eq!(flow.badge(&lobby).as_deref(), Some("Casual PvP · Unrated"));
+        flow.allocation = Some(allocation());
+        assert_eq!(
+            flow.badge(&CareerView::default()).as_deref(),
+            Some("Casual PvP · Unrated")
+        );
+        let party = MatchServiceView::Failed {
+            code: "ranked_party_cohort".into(),
+        };
+        assert_eq!(
+            status_text(&party),
+            "Your party's ratings are too far apart for Ranked.\nCancel and play Casual PvP together."
+        );
+        for (locale, ranked, bots) in [
+            (
+                "ru",
+                "Рейтинговый · С рейтингом",
+                "Против ботов · Без рейтинга",
+            ),
+            ("zh-Hans", "排位赛 · 计入排位", "人机对战 · 不计排位"),
+        ] {
+            app.world_mut()
+                .resource_mut::<Locale>()
+                .set(LocaleId::parse(locale).unwrap());
+            assert_eq!(queue_badge(MatchPreference::Ranked, true), ranked);
+            assert_eq!(queue_badge(MatchPreference::BotPractice, false), bots);
+            assert!(!status_text(&party).contains("ranked_party_cohort"));
+        }
     }
     /// The searching status follows the active language.
     #[test]
@@ -727,12 +1344,16 @@ mod tests {
         }
         use crate::i18n::{I18nPlugin, Locale, LocaleId};
         let waiting = MatchServiceView::Waiting {
-            preference: MatchPreference::Quick,
+            preference: MatchPreference::Casual,
             humans: 4,
             needed: 10,
             elapsed_secs: 12,
             bot_fill_after_secs: Some(30),
             capacity_wait: false,
+            searching: None,
+            casual_offer_after_secs: None,
+            also_casual: false,
+            capacity_line: None,
         };
         let failed = MatchServiceView::Failed {
             code: "no_capacity".into(),
@@ -761,6 +1382,104 @@ mod tests {
         assert_eq!(
             status_text(&MatchServiceView::Allocating),
             "已找到对局 · 正在准备竞技场…"
+        );
+    }
+
+    fn capacity_wait(line: Option<CapacityLine>) -> MatchServiceView {
+        MatchServiceView::Waiting {
+            preference: MatchPreference::BotPractice,
+            humans: 1,
+            needed: 1,
+            elapsed_secs: 20,
+            bot_fill_after_secs: None,
+            capacity_wait: true,
+            searching: None,
+            casual_offer_after_secs: None,
+            also_casual: false,
+            capacity_line: line,
+        }
+    }
+
+    /// LR-09: with every arena busy the status names the player's place in
+    /// the line and, once known, the estimated wait, in the active language;
+    /// an older lobby without the line keeps the plain capacity copy.
+    #[test]
+    fn a_capacity_wait_shows_the_place_in_line_and_the_estimate() {
+        if crate::i18n::testing::isolated(
+            "match_service::tests::a_capacity_wait_shows_the_place_in_line_and_the_estimate",
+        ) {
+            return;
+        }
+        use crate::i18n::{I18nPlugin, Locale, LocaleId};
+        let mut app = App::new();
+        app.add_plugins(I18nPlugin::default());
+        let place = capacity_wait(Some(CapacityLine {
+            position: 3,
+            eta_secs: None,
+        }));
+        let estimate = capacity_wait(Some(CapacityLine {
+            position: 2,
+            eta_secs: Some(130),
+        }));
+        assert_eq!(
+            status_text(&place),
+            "All arenas are busy · you are number 3 in line"
+        );
+        assert_eq!(
+            status_text(&estimate),
+            "All arenas are busy · you are number 2 in line · about 3 min"
+        );
+        assert_eq!(
+            status_text(&capacity_wait(None)),
+            "All arenas are busy. Your place in the queue is reserved."
+        );
+        app.world_mut()
+            .resource_mut::<Locale>()
+            .set(LocaleId::parse("ru").unwrap());
+        assert_eq!(
+            status_text(&place),
+            "Все арены заняты · ваше место в очереди: 3"
+        );
+        assert_eq!(
+            status_text(&estimate),
+            "Все арены заняты · ваше место в очереди: 2 · примерно 3 мин."
+        );
+    }
+
+    /// LR-09: the searching screen offers Offline practice while this search
+    /// waits for a free arena, or while the server is too full to sign in;
+    /// never for an ordinary wait or another request's answer.
+    #[test]
+    fn offline_practice_is_offered_only_while_arenas_or_the_server_are_full() {
+        let flow = MatchServiceClient {
+            active: true,
+            ..default()
+        };
+        let answered = |view: MatchServiceView| CareerView {
+            match_service_request_id: Some(0),
+            match_service: Some(view),
+            ..default()
+        };
+        assert!(
+            flow.offers_offline(&answered(capacity_wait(Some(CapacityLine {
+                position: 1,
+                eta_secs: None
+            }))))
+        );
+        assert!(flow.offers_offline(&answered(capacity_wait(None))));
+        assert!(!flow.offers_offline(&ranked_wait(10, false)));
+        let mut stale = answered(capacity_wait(None));
+        stale.match_service_request_id = Some(7);
+        assert!(!flow.offers_offline(&stale), "another request's answer");
+        let full = CareerView {
+            match_service: Some(MatchServiceView::Idle),
+            error_code: Some(shared::career::error_code::SERVER_FULL.into()),
+            ..default()
+        };
+        assert!(flow.offers_offline(&full));
+        assert!(
+            !MatchServiceClient::default().offers_offline(&full),
+            "not searching"
         );
     }
 }

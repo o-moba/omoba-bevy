@@ -8,11 +8,18 @@ use crate::{
 use bevy::prelude::*;
 use std::collections::HashMap;
 
+/// Seconds an accepted basic attack keeps the body turned to its aim.
+pub(crate) const BASIC_FACING_HOLD_SECS: f32 = 0.45;
+/// Seconds an accepted skill keeps the body turned to its aim.
+pub(crate) const SKILL_FACING_HOLD_SECS: f32 = 0.7;
+
 #[derive(Default)]
 pub(super) struct FacingState {
     sequence: Option<u64>,
     yaw: Option<f32>,
     remaining: f32,
+    /// The fired telegraph whose release last took the facing.
+    released: Option<u64>,
 }
 impl FacingState {
     fn update(
@@ -34,9 +41,9 @@ impl FacingState {
                 .flatten()
                 .filter(|v| v.is_finite());
             self.remaining = if action.slot == shared::BASIC_ATTACK_ACTION_SLOT {
-                0.45
+                BASIC_FACING_HOLD_SECS
             } else {
-                0.7
+                SKILL_FACING_HOLD_SECS
             };
         }
         self.sequence = Some(self.sequence.unwrap_or(0).max(action.sequence));
@@ -52,6 +59,23 @@ impl FacingState {
             }
             if self.yaw.is_some() {
                 self.remaining = self.remaining.max(0.35);
+            }
+        }
+        (self.remaining > 0.0).then_some(self.yaw).flatten()
+    }
+
+    /// The hero's own telegraph `effect` fired along `yaw`, and its release clip plays for
+    /// `secs`. The lane keeps the facing until that clip has played, also over an action
+    /// accepted in the same snapshot, whose gesture the release replaces. It is applied once
+    /// per effect: an action accepted later takes the body, and the facing, from the release.
+    fn release(&mut self, effect: u64, yaw: Option<f32>, secs: f32, alive: bool) -> Option<f32> {
+        if alive && self.released != Some(effect) {
+            self.released = Some(effect);
+            if let Some(yaw) = yaw.filter(|yaw| yaw.is_finite()) {
+                self.yaw = Some(yaw);
+            }
+            if self.yaw.is_some() && secs.is_finite() {
+                self.remaining = self.remaining.max(secs);
             }
         }
         (self.remaining > 0.0).then_some(self.yaw).flatten()
@@ -108,11 +132,12 @@ pub(super) fn face_confirmed_actions(
             }
             continue;
         }
-        // The hero's own telegraph, found by its owner and not by the latest action slot.
+        // The hero's own telegraph, found by its owner and not by the latest action slot:
+        // held while it warns, then the release of the very effect that fired.
         let effects = game
             .as_ref()
             .map_or(&[][..], |g| g.skill_effects.as_slice());
-        let warning = registry
+        let own = registry
             .as_deref()
             .zip(class)
             .zip(id)
@@ -125,16 +150,33 @@ pub(super) fn face_confirmed_actions(
                     effects,
                 )
             })
+            .and_then(|(effect, cue)| Some((effects.iter().find(|e| e.id == effect)?, cue)));
+        let warning = own
+            .as_ref()
             .filter(|(_, cue)| cue.hold)
-            .and_then(|(effect, _)| effects.iter().find(|e| e.id == effect));
-        if let Some(yaw) = state.1.entry(entity).or_default().update(
+            .map(|(effect, _)| *effect);
+        let released = own
+            .as_ref()
+            .filter(|(_, cue)| !cue.hold)
+            .and_then(|(effect, cue)| Some((*effect, cue.play_secs()?)));
+        let turn = state.1.entry(entity).or_default();
+        let mut yaw = turn.update(
             *action,
             *facing,
             stats.is_alive(),
             delta,
             warning.is_some(),
             warning.and_then(crate::skill_presentation::telegraph_yaw),
-        ) {
+        );
+        if let Some((effect, secs)) = released {
+            yaw = turn.release(
+                effect.id,
+                crate::skill_presentation::telegraph_yaw(effect),
+                secs,
+                stats.is_alive(),
+            );
+        }
+        if let Some(yaw) = yaw {
             // Hero -Z forward is shared with path following and semantic VRM alignment.
             pose.rotation = Quat::from_rotation_y(yaw);
         }
@@ -344,6 +386,65 @@ mod tests {
         facing.yaw = Some(f32::NAN);
         assert_eq!(state.update(action, facing, true, 0.01, false, None), None);
     }
+    /// ANIM-7: a fired telegraph keeps its lane until the release clip has played, also
+    /// over an action accepted in the same snapshot, once per effect.
+    #[test]
+    fn a_fired_telegraph_keeps_the_lane_through_its_release_clip() {
+        let lane = Some(0.4);
+        let mut state = FacingState {
+            sequence: Some(1),
+            ..default()
+        };
+        let mut action = PlayerCosmeticAction {
+            sequence: 2,
+            slot: 3,
+            kind: shared::PlayerActionKind::Cast,
+        };
+        let mut facing = PlayerActionFacing {
+            sequence: 2,
+            yaw: lane,
+        };
+        assert_eq!(state.update(action, facing, true, 0.01, true, lane), lane);
+        // The ray fires in the snapshot that brings a basic attack the other way. The body
+        // plays the release, so the lane keeps the facing for the whole 0.6 s clip.
+        action.sequence = 3;
+        action.slot = shared::BASIC_ATTACK_ACTION_SLOT;
+        facing.sequence = 3;
+        facing.yaw = Some(2.0);
+        assert_eq!(
+            state.update(action, facing, true, 0.1, false, None),
+            Some(2.0)
+        );
+        assert_eq!(state.release(9, lane, 0.6, true), lane);
+        for frame in 0..5 {
+            state.update(action, facing, true, 0.1, false, None);
+            assert_eq!(state.release(9, lane, 0.6, true), lane, "frame {frame}");
+        }
+        // The clip has played: the facing is given back, and the same effect does not take
+        // it again while the beam is still replicated.
+        state.update(action, facing, true, 0.11, false, None);
+        assert_eq!(state.release(9, lane, 0.6, true), None);
+
+        // An action accepted after the release started takes the body, and the facing.
+        let mut state = FacingState {
+            sequence: Some(3),
+            ..default()
+        };
+        assert_eq!(state.release(9, lane, 0.6, true), lane);
+        action.sequence = 4;
+        facing.sequence = 4;
+        assert_eq!(
+            state.update(action, facing, true, 0.1, false, None),
+            Some(2.0)
+        );
+        assert_eq!(state.release(9, lane, 0.6, true), Some(2.0));
+        // A dead caster faces no lane, and a release without a direction holds nothing.
+        assert_eq!(FacingState::default().release(9, lane, 0.6, false), None);
+        assert_eq!(
+            FacingState::default().release(9, Some(f32::NAN), 0.6, true),
+            None
+        );
+    }
     #[test]
     fn windup_facing_ignores_interleaved_action_yaw() {
         let lane = Some(-0.7);
@@ -481,13 +582,17 @@ mod tests {
             // Another hero's warning holds nobody: the bystander turns to its target.
             assert!(faces(&app, bystander, -1.0), "sequence {sequence}");
         }
-        // The ray has fired: the body is free for the next action, and so is the facing.
+        // The ray has fired in the snapshot that also brings a basic attack at -X. The body
+        // plays the release, not that attack, so the lane keeps the facing until the
+        // release clip has played, whatever path steering writes meanwhile.
+        app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+            std::time::Duration::from_millis(100),
+        ));
         app.world_mut()
             .resource_mut::<GameStateSnapshot>()
             .skill_effects[0]
             .kind = EffectVisualKind::Beam;
         app.world_mut().entity_mut(caster).insert((
-            Transform::IDENTITY,
             PlayerCosmeticAction {
                 sequence: 4,
                 slot: shared::BASIC_ATTACK_ACTION_SLOT,
@@ -495,6 +600,45 @@ mod tests {
             },
             PlayerActionFacing {
                 sequence: 4,
+                yaw: Some(shared::math::hero_yaw_towards(-1.0, 0.0)),
+            },
+        ));
+        let release = crate::skill_presentation::release_cue(
+            &crate::skill_presentation::SkillPresentation::target(),
+            SkillId::DawnRay,
+        )
+        .and_then(|cue| cue.play_secs())
+        .unwrap();
+        assert!(release > 0.5, "{release}");
+        let mut played = 0.0;
+        while played + 0.1 < release - 1e-3 {
+            app.world_mut()
+                .entity_mut(caster)
+                .insert(Transform::IDENTITY);
+            app.update();
+            played += 0.1;
+            assert!(faces(&app, caster, 1.0), "{played:.1} s into the release");
+        }
+        // The clip has played: the facing is free, and the next action turns the caster.
+        for _ in 0..3 {
+            app.world_mut()
+                .entity_mut(caster)
+                .insert(Transform::IDENTITY);
+            app.update();
+        }
+        assert_eq!(
+            app.world().get::<Transform>(caster).unwrap().rotation,
+            Quat::IDENTITY,
+            "after the release"
+        );
+        app.world_mut().entity_mut(caster).insert((
+            PlayerCosmeticAction {
+                sequence: 5,
+                slot: shared::BASIC_ATTACK_ACTION_SLOT,
+                kind: shared::PlayerActionKind::Attack,
+            },
+            PlayerActionFacing {
+                sequence: 5,
                 yaw: Some(shared::math::hero_yaw_towards(-1.0, 0.0)),
             },
         ));

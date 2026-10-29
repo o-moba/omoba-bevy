@@ -1,5 +1,6 @@
+use shared::clock::Instant;
 use std::collections::HashMap;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use shared::wire::{NeutralAiState, NeutralCampType, NeutralState};
 

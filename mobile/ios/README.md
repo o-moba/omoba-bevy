@@ -1,7 +1,7 @@
 # Install a development build on your iPhone
 
 For the Xcode interface, open **`mobile/ios/Omoba.xcodeproj`**, select the **Omoba**
-scheme and follow [Product → Archive and TestFlight](TESTFLIGHT.md). The command-line
+scheme for production or **Omoba Dev** for the test contour, and follow [Product → Archive and TestFlight](TESTFLIGHT.md). The command-line
 build/sign/install workflow below remains supported.
 
 For installation without connecting the iPhone to a Mac, use the separate

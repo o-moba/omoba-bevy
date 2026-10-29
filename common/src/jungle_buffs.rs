@@ -1,6 +1,7 @@
 //! Personal camp rewards shared by online and socket-free combat authority.
+use shared::clock::Instant;
 use shared::wire::NeutralCampType;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 pub const DURATION: Duration = Duration::from_secs(45);
 pub const FIRE_DAMAGE: f32 = 4.0;

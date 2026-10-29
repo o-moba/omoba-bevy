@@ -144,7 +144,7 @@ fn only_the_leader_launches_and_every_launch_is_new() {
         Err(PartyError::NotLeader)
     );
     let first = state.launch(1, MatchPreference::BotPractice, now).unwrap();
-    let second = state.launch(1, MatchPreference::Quick, now).unwrap();
+    let second = state.launch(1, MatchPreference::Casual, now).unwrap();
     assert!(second.sequence > first.sequence);
     let seen = state.view(2, now, |_| false, &no_friends()).party.unwrap();
     assert_eq!(seen.launch, Some(second));
@@ -363,7 +363,7 @@ fn a_launched_party_holds_the_draft_until_its_members_join() {
         addr(2),
         ClientPacket::Party {
             command: PartyCommand::Launch {
-                preference: MatchPreference::Quick,
+                preference: MatchPreference::Casual,
             },
         },
         now,
@@ -388,4 +388,64 @@ fn a_launched_party_holds_the_draft_until_its_members_join() {
     rt.handle_packet(addr(2), join("b", true), now);
     assert!(!rt.party_gathering(now));
     assert_eq!(team_of(&rt, 1), team_of(&rt, 2));
+}
+
+#[test]
+fn a_banned_player_leaves_presence_and_a_reset_name_shows_in_the_next_presence() {
+    use shared::career::ProfileSummary;
+    use shared::moderation::{Sanction, SanctionKind};
+    let (mut rt, clock) = practice_runtime(5);
+    let now = clock.now();
+    let rude = |name: &str| ProfileSummary::new("d".repeat(64), name.into());
+    rt.career
+        .backend
+        .test_authenticated(addr(2), rude("Rude#0001"), "two");
+    let one = presence(&mut rt, 1, now);
+    let two = presence(&mut rt, 2, now);
+    let seen = |rt: &ServerRuntime| -> Vec<String> {
+        rt.party
+            .view(one, now, |_| false, &no_friends())
+            .online
+            .into_iter()
+            .map(|player| player.nickname)
+            .collect()
+    };
+    assert_eq!(seen(&rt), ["Rude#0001"]);
+    // A moderator's name reset (the access refresh) shows in the next presence.
+    rt.career
+        .backend
+        .test_authenticated(addr(2), rude("Player#0042"), "two");
+    presence(&mut rt, 2, now);
+    assert_eq!(seen(&rt), ["Player#0042"]);
+    party_of_two(&mut rt, now);
+    assert!(rt.party.party_id_of(two).is_some());
+    // A matchmaking ban hides the player and takes it out of the party.
+    rt.career.backend.test_set_sanctions(
+        addr(2),
+        vec![Sanction {
+            kind: SanctionKind::MatchmakingBan,
+            until: None,
+        }],
+    );
+    presence(&mut rt, 2, now);
+    assert!(seen(&rt).is_empty());
+    assert_eq!(rt.party.party_id_of(two), None);
+    assert_eq!(rt.party.party_id_of(one), None, "a party of one dissolves");
+    assert_eq!(rt.party.invite(one, two, now), Err(PartyError::NotOnline));
+    // A chat mute or a ranked ban hides nobody.
+    rt.career.backend.test_set_sanctions(
+        addr(2),
+        vec![
+            Sanction {
+                kind: SanctionKind::ChatMute,
+                until: None,
+            },
+            Sanction {
+                kind: SanctionKind::RankedBan,
+                until: None,
+            },
+        ],
+    );
+    presence(&mut rt, 2, now);
+    assert_eq!(seen(&rt), ["Player#0042"]);
 }

@@ -1,0 +1,19 @@
+# Per-source UDP limits for the RU lobby and match workers (LR-16): loads
+# /opt/omoba-ru/nftables-omoba.conf (ops/vps/ru/nftables-omoba.conf), which
+# replaces only its own table `inet omoba_limits`. Installed, enabled and
+# started by ops/vps/ru/ru_host.py bootstrap; `ru_host.py status` checks it.
+[Unit]
+Description=OMOBA RU per-source UDP limits (nftables)
+After=ufw.service
+Before=omoba-lobby-ru.service
+OnFailure=omoba-alert-ru@%n.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/sbin/nft -f /opt/omoba-ru/nftables-omoba.conf
+ExecReload=/usr/sbin/nft -f /opt/omoba-ru/nftables-omoba.conf
+ExecStop=/usr/sbin/nft delete table inet omoba_limits
+
+[Install]
+WantedBy=multi-user.target

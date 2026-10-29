@@ -1,5 +1,6 @@
 //! Server-owned return-to-base channel, shared by online and offline matches.
-use std::time::{Duration, Instant};
+use shared::clock::Instant;
+use std::time::Duration;
 
 use crate::{balance::PLAYER_GROUND_Y, entities::ConnectedPlayer, game_world::GameWorld};
 use shared::{utility::RECALL_CHANNEL_SECS, wire::GameState};

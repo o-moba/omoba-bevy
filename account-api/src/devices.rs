@@ -2,7 +2,9 @@
 use crate::*;
 use ed25519_dalek::{Signature, VerifyingKey};
 use serde::Deserialize;
-use shared::device_account::{DeviceAction, SignedDeviceEnrollment};
+use shared::device_account::{
+    DeviceAction, RecoveryAction, SignedDeviceEnrollment, SignedNativeRecoveryRequest,
+};
 use sqlx::{Postgres, Transaction, postgres::PgRow};
 
 fn proof(app: &App, body: &[u8], action: DeviceAction) -> Result<SignedDeviceEnrollment> {
@@ -85,7 +87,16 @@ async fn render(app: &App, row: &PgRow) -> Result<Value> {
         }
         None => None,
     };
-    Ok(json!({"state":row_text(row,"state")?,"profile_id":profile,"nickname":nickname,"code":null}))
+    let mut value = json!({"account_region":shared::market::MARKET.key(),"state":row_text(row,"state")?,"profile_id":profile,"nickname":nickname,"code":null});
+    // A pending enrollment a website VK sign-in was offered to waits for the game
+    // to link that sign-in (`POST /v1/auth/social/link`).
+    if row_text(row, "state")? == "pending"
+        && let Some(social) = social::pending(app, &row_text(row, "enrollment_id")?).await?
+    {
+        value["state"] = json!("social_pending");
+        value["social"] = social;
+    }
+    Ok(value)
 }
 pub async fn create(app: &App, body: &[u8]) -> Result<Value> {
     let p = proof(app, body, DeviceAction::Create)?;
@@ -114,7 +125,7 @@ pub async fn create(app: &App, body: &[u8]) -> Result<Value> {
                 .fetch_one(&mut *tx)
                 .await?;
         return Ok(
-            json!({"state":"consumed","profile_id":profile,"nickname":nickname,"code":null}),
+            json!({"account_region":shared::market::MARKET.key(),"state":"consumed","profile_id":profile,"nickname":nickname,"code":null}),
         );
     }
     let mut bytes = [0; 8];
@@ -217,7 +228,9 @@ pub async fn complete(app: &App, body: &[u8]) -> Result<Value> {
             .fetch_one(&mut *tx)
             .await?;
     tx.commit().await?;
-    Ok(json!({"state":"consumed","profile_id":target,"nickname":nickname,"code":null}))
+    Ok(
+        json!({"account_region":shared::market::MARKET.key(),"state":"consumed","profile_id":target,"nickname":nickname,"code":null}),
+    )
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -249,13 +262,24 @@ pub async fn lookup(app: &App, s: &auth::Session, body: &[u8]) -> Result<Value> 
 struct Approval {
     enrollment_id: String,
     public_key: String,
+    /// The account shown by lookup. Optional only for older portal clients.
+    profile_id: Option<String>,
 }
 pub async fn approve(app: &App, s: &auth::Session, body: &[u8]) -> Result<Value> {
     let p: Approval = parse(body)?;
     if crypto::decode::<32>(&p.enrollment_id).is_none()
         || crypto::decode::<32>(&p.public_key).is_none()
+        || p.profile_id
+            .as_deref()
+            .is_some_and(|profile| crypto::decode::<32>(profile).is_none())
     {
         return Err(invalid());
+    }
+    if p.profile_id
+        .as_deref()
+        .is_some_and(|profile| profile != s.profile_id)
+    {
+        return Err(Error(StatusCode::CONFLICT, "account_changed"));
     }
     let mut tx = app.pool.begin().await?;
     fresh(&mut tx, s).await?;
@@ -283,28 +307,121 @@ pub async fn list(app: &App, s: &auth::Session) -> Result<Value> {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Empty {}
-pub async fn recovery_codes(app: &App, s: &auth::Session, body: &[u8]) -> Result<Value> {
-    let _: Empty = parse(body)?;
-    app.rate(&s.profile_id, "recovery-rotate", 2).await?;
-    let mut tx = app.pool.begin().await?;
-    fresh(&mut tx, s).await?;
-    sqlx::query("UPDATE portal.recovery_codes SET consumed_at=$2 WHERE profile_id=$1 AND consumed_at IS NULL").bind(&s.profile_id).bind(now()).execute(&mut *tx).await?;
+/// A new set of eight single-use codes for a locked profile; the unused codes of
+/// the old set stop working. Only keyed hashes are stored.
+async fn issue_recovery_codes(
+    tx: &mut Transaction<'_, Postgres>,
+    app: &App,
+    profile: &str,
+) -> Result<Vec<String>> {
+    sqlx::query("UPDATE portal.recovery_codes SET consumed_at=$2 WHERE profile_id=$1 AND consumed_at IS NULL").bind(profile).bind(now()).execute(&mut **tx).await?;
     let codes: Vec<String> = (0..8).map(|_| crypto::random::<32>()).collect();
     for code in &codes {
         sqlx::query(
             "INSERT INTO portal.recovery_codes(code_hash,profile_id,created_at) VALUES($1,$2,$3)",
         )
         .bind(crypto::mac(&app.config.secret, "recovery-code", code))
-        .bind(&s.profile_id)
+        .bind(profile)
         .bind(now())
-        .execute(&mut *tx)
+        .execute(&mut **tx)
         .await?;
     }
+    Ok(codes)
+}
+pub async fn recovery_codes(app: &App, s: &auth::Session, body: &[u8]) -> Result<Value> {
+    let _: Empty = parse(body)?;
+    app.rate(&s.profile_id, "recovery-rotate", 2).await?;
+    let mut tx = app.pool.begin().await?;
+    fresh(&mut tx, s).await?;
+    let codes = issue_recovery_codes(&mut tx, app, &s.profile_id).await?;
     audit(&mut tx, &s.profile_id, "recovery_codes_rotated").await?;
     tx.commit().await?;
     Ok(
         json!({"recovery_codes":codes,"warning":"Each code works once. New codes replace previous codes."}),
     )
+}
+/// What protects a profile from the loss of its devices
+/// (`shared::device_account::AccountProtection`).
+async fn protection(tx: &mut Transaction<'_, Postgres>, profile: &str) -> Result<Value> {
+    let remaining: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM portal.recovery_codes WHERE profile_id=$1 AND consumed_at IS NULL",
+    )
+    .bind(profile)
+    .fetch_one(&mut **tx)
+    .await?;
+    let linked: Vec<String> = sqlx::query_scalar(
+        "SELECT provider FROM portal.social_identities WHERE profile_id=$1 ORDER BY provider",
+    )
+    .bind(profile)
+    .fetch_all(&mut **tx)
+    .await?;
+    let devices: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM career_keys WHERE profile_id=$1 AND revoked_at IS NULL",
+    )
+    .bind(profile)
+    .fetch_one(&mut **tx)
+    .await?;
+    Ok(
+        json!({"recovery_codes_remaining":remaining,"linked_sign_ins":linked,"active_devices":devices}),
+    )
+}
+/// `POST /v1/auth/devices/recovery-codes` (native, LR-18): the game's **active**
+/// key reads its account's protection or issues recovery codes, without the
+/// portal. The key alone authorizes it: it already reaches a fresh portal session
+/// through web pairing, so this grants nothing new. Signed
+/// `omoba.recovery.native.v1`, at most 60 s old, single-use nonce.
+pub async fn native_recovery(app: &App, body: &[u8]) -> Result<Value> {
+    let signed: SignedNativeRecoveryRequest = parse(body)?;
+    let r = &signed.request;
+    r.validate(&app.config.origin, &r.public_key, now() as u64)
+        .map_err(|_| invalid())?;
+    let key = VerifyingKey::from_bytes(&crypto::decode::<32>(&r.public_key).ok_or_else(invalid)?)
+        .map_err(|_| invalid())?;
+    let signature =
+        Signature::from_bytes(&crypto::decode::<64>(&signed.signature).ok_or_else(invalid)?);
+    key.verify_strict(&r.signing_bytes(), &signature)
+        .map_err(|_| forbidden())?;
+    app.rate(&r.public_key, "recovery-native-key", 10).await?;
+    let mut tx = app.pool.begin().await?;
+    // A key never changes profile; only its revocation can race this request.
+    let profile: String = sqlx::query_scalar(
+        "SELECT profile_id FROM career_keys WHERE public_key=$1 AND revoked_at IS NULL",
+    )
+    .bind(&r.public_key)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or_else(forbidden)?;
+    // The same single-use nonce store as native Supporter requests: nonces are random
+    // per request, and the signature domain keeps the two kinds of proof apart. A
+    // replay is refused before it can spend the profile's rotation budget.
+    let consumed=sqlx::query("INSERT INTO portal.supporter_nonces(public_key,nonce,expires_at) VALUES($1,$2,$3) ON CONFLICT DO NOTHING").bind(&r.public_key).bind(&r.nonce).bind(r.expires_at as i64).execute(&mut *tx).await?.rows_affected();
+    if consumed == 0 {
+        return Err(Error(StatusCode::CONFLICT, "request_replayed"));
+    }
+    if r.action == RecoveryAction::Rotate {
+        app.rate(&profile, "recovery-rotate", 2).await?;
+        // Profile first, then the key: the order device revocation locks them in.
+        lock_profile(&mut tx, &profile).await?;
+    }
+    let active: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM career_keys WHERE public_key=$1 AND profile_id=$2 AND revoked_at IS NULL FOR SHARE)")
+        .bind(&r.public_key).bind(&profile).fetch_one(&mut *tx).await?;
+    if !active {
+        return Err(forbidden());
+    }
+    let codes = match r.action {
+        RecoveryAction::Status => Vec::new(),
+        RecoveryAction::Rotate => {
+            let codes = issue_recovery_codes(&mut tx, app, &profile).await?;
+            audit(&mut tx, &profile, "recovery_codes_rotated_in_game").await?;
+            codes
+        }
+    };
+    let mut value = protection(&mut tx, &profile).await?;
+    tx.commit().await?;
+    if !codes.is_empty() {
+        value["recovery_codes"] = json!(codes);
+    }
+    Ok(value)
 }
 pub async fn recover(app: &App, body: &[u8]) -> Result<Value> {
     let p = proof(app, body, DeviceAction::Recover)?;

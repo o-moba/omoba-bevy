@@ -39,7 +39,11 @@ current checkout, pointed at `PROD_SERVER` (default: the live test server), into
 less than ~20 GB is free (`OMOBA_MIN_FREE_GIB`). `make release-publish` then pins
 each package to IPFS with `PINATA_JWT`, downloads it back through the gateway,
 compares the SHA-256 and records the links in `dist/v<version>/ipfs.json`;
-packages already pinned with the same hash are skipped.
+packages already pinned with the same hash are skipped. RU packages (`make
+release-ru`) go to the RU host first: `make release-ru-publish` uploads them to
+`omoba.ru/downloads/`, reads each back, pins the IPFS mirror and writes
+`releases.json` with the status «Открытая бета»; `make release-ru-verify-downloads`
+checks what the RU portal lists ([RU downloads](../ops/vps/ru/README.md#downloads), LR-23).
 
 One-time setup on the Mac:
 
@@ -80,15 +84,77 @@ make compatibility-check GAME_SERVER_ADDR=HOST:PORT COMPATIBILITY_MANIFEST=dist/
 A nonzero result blocks distribution until diagnosed; do not bypass an unverified
 server. Direct Xcode/server builds must retain a manifest from the same frozen source.
 
+## Updates and contract changes (LR-14)
+
+Policy (launch default O-12): client and server ship together. Balance values stay
+compiled into both, so a contract change is a **forced update**. An incompatible
+game shows **Update required** with a download button, and a newer compatible
+release shows a dismissible **Update available** banner on Home. The game reads the
+market's release catalog (`GET /v1/releases` of its Account API, the `releases.json`
+installed as `OMOBA_RELEASE_CATALOG`) at boot and after a mismatch. The button opens a
+page on the portal compiled into the build (`scripts/markets.py`): the catalog entry's
+`update_url`, by default `<portal>/download?platform=<platform>`. The iPhone build has no
+link: it updates through the App Store or TestFlight. A build without a portal (the
+global market today) shows no button and tells players to download the new version from
+the official site. The lobby's compatibility report carries its release as the minimum
+and the portal's download page (`UpdateNotice`, [release-compatibility.md](release-compatibility.md)).
+
+**Catalog fields** (`scripts/release.py catalog`, [account-api/README.md](../account-api/README.md#downloads)).
+Every entry carries `channel` (`direct`). The game reads only the entries of its own
+channel; store channels arrive with LR-68. On a market with a portal, each entry also
+carries `update_url`, the page its update button opens. `catalog --min-release X` adds
+`min_release`: games of that channel and platform below X show **Update required** even
+while the servers still accept them. That is a forced update too, so it needs the same
+player notice (step 3 below). `min_release` may not be newer than the release itself.
+
+**What bumps a revision** (`shared/src/compatibility.rs` and the fields in
+[release-compatibility.md](release-compatibility.md)):
+
+- `GAMEPLAY_REVISION`: anything the client simulates, predicts or shows from its own
+  compiled data that must equal the server's. That covers shared simulation rules
+  (`common/src/sim/`, `common/src/command.rs`), movement, dash and collision, damage,
+  cooldown, cost and range numbers, hero and item stats and growth (`common::balance`,
+  the shared catalogs), targeting and vision rules, and offline-practice behaviour
+  shared with the server.
+- `PROTOCOL_VERSION`, `CATALOG_REVISION`, `GEOMETRY_ID`: a wire change, a skill or kit
+  contract change, or a map geometry change. Each has its own rule in
+  [release-compatibility.md](release-compatibility.md).
+- No bump for server-only behaviour the client does not predict: bot decisions,
+  matchmaking, match lifecycle, settlement, moderation, logging. The same goes for
+  UI, text, audio, textures, animation and VFX-only changes.
+- When unsure, bump. A needless forced update costs one download. A missing bump lets a
+  mismatched client mispredict silently.
+
+**Order of a contract-changing release:**
+
+1. Build and stage the new server. Verify the new client manifest against the staged
+   lobby and worker (`make compatibility-check`, [compatibility gate](#compatibility-gate)).
+2. **Ship the clients first.** Publish the packages to the download host and install the
+   new `releases.json`. Old clients now show **Update available**. A player who updates
+   early sees "the servers are switching to your version" and connects by itself once
+   they do (Home retries every 30 s).
+3. **Notify players before the forced update.** Post the time of the server switch in the
+   market's community channels, and leave at least the banner period between steps 2
+   and 4. Without a notice, a server switch must not change the contract.
+4. Switch the lobby and the workers. Old clients now get **Update required** and the
+   download button.
+
+**Alternative (O-12, not chosen for launch):** move balance values into server-sent
+data so balance-only changes stop being contract changes. That needs a protocol for the
+values, client-side caching and tests that prediction uses them. It is a later decision
+for the owner.
+
 ## Turnkey release
 
-1. Merge the release PR to `main` with CI green (`make check` locally first).
+1. Merge the release PR to `main` with CI green (`make check` locally first, and
+   `make sdk-pin-check SDK_BRANCH=main` so the pinned SDK commit is on SDK `main`).
 2. Bump `Cargo.toml` version, move `CHANGELOG.md` `[Unreleased]` entries into
    `## [x.y.z] - date`, update `docs/features.md`, commit to `main`.
-3. Optional: choose the server clients start on. Either pass
+3. Optional: choose the lobby clients use. Either pass
    `RELEASE_SERVER=host:port` to the make targets, set the repository
-   variable `OMOBA_RELEASE_SERVER` for CI, or leave it empty (players type the
-   address in the party lobby → SERVER → Change).
+   variable `OMOBA_RELEASE_SERVER` for CI, or leave it empty (the public lobby).
+   Production clients have no in-game server selection
+   ([connection profiles](connection-profiles.md)).
 4. **Desktop + Android:** push the tag (or run the workflow by hand):
 
    ```sh
@@ -105,6 +171,28 @@ server. Direct Xcode/server builds must retain a manifest from the same frozen s
    `make release-draft` upload local packages into the same draft (`--clobber`).
 7. Review the draft on GitHub, download one package per platform, smoke it,
    then publish: `gh release edit v0.24.0 --draft=false`.
+
+## DEV-contour tester builds
+
+Dev builds are the separate OMOBA Dev app for testers on the dev contour (dev lobby on
+the dedicated dev VPS, `registry.dev.ekza.io`) on every platform. They never replace or
+share state with a production install, and on phones they install beside it
+(`space.ekza.omoba.dev`, "OMOBA Dev", DEV-ribbon icon). In-game, Home → Connection
+switches between the Dev, Local and Custom profiles
+([connection profiles, owner checklist](connection-profiles.md)):
+
+```sh
+python3 scripts/release.py build all --contour dev --dry-run   # what gets baked in
+python3 scripts/release.py build all --contour dev             # every platform this host can build, into dist/v<version>-dev/
+python3 scripts/release.py build ios --contour dev --upload    # OMOBA Dev to App Store Connect (internal TestFlight)
+python3 scripts/release.py ci --contour dev --ref v<version>-dev.1 --dry-run
+```
+
+- Defaults: `lobby.dev.omoba.io:4100` (`--server <DEV_IP>:4100` when DNS is not set), `https://registry.dev.ekza.io`, passport `http://127.0.0.1:9/api/passport` (closed: there is no dev passport yet, and `avatar.ekza.io` is production; `--passport` takes a dev or loopback URL), settings folder `omoba-bevy-dev`, window title `OMOBA DEV`, `Omoba Dev.app` (bundle id `…desktop.dev`). The dev Linux package also carries `omoba-account-api`, the dev lobby's migration tool.
+- `-dev` appears in every package and dist directory name. Dev releases use `v<version>-dev.N` tags only, are drafts and prereleases, and target `dev`. The workflow's `contour=dev` input also builds the dev APK.
+- A dev build refuses production endpoints, and a production build refuses dev ones (and `$DEV_IP`). A dev client also refuses the production lobby at run time: it has no Production profile, and custom, `GAME_SERVER_ADDR` or allocated production addresses are rejected.
+- No build inherits a compile-time setting from the shell (`OMOBA_DEFAULT_*`, `OMOBA_ACCOUNT_API_URL`, `OMOBA_PORTAL_ORIGIN`, `EKZA_DEV_HTTP_HOST`), including the iOS archive.
+- The dev lobby itself is shipped with `ops/vps/dev/lobby_dev.py`; see [ops/vps/dev/README.md](../ops/vps/dev/README.md).
 
 ## Signing and trust
 

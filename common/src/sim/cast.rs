@@ -1,7 +1,7 @@
 //! Ability casts and skill upgrades.
 
+use shared::clock::Instant;
 use std::net::SocketAddr;
-use std::time::Instant;
 
 use shared::combat::{CombatEntityKind, ProjectileStyle};
 use shared::wire::{GameState, ProjectileState, TargetId};

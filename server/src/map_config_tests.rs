@@ -28,7 +28,12 @@ fn example() -> ResolvedMap {
 fn runtime(config: ResolvedMap) -> ServerRuntime {
     let socket = UdpSocket::bind("127.0.0.1:0").unwrap();
     socket.set_nonblocking(true).unwrap();
-    ServerRuntime::new_with_map(socket, MatchConfig::dev(), config)
+    ServerRuntime::new_with_map(
+        socket,
+        MatchConfig::dev(),
+        config,
+        crate::admission::Limits::default(),
+    )
 }
 fn mid_only() -> HashMap<u64, Structure> {
     let mut definition = example_definition();
@@ -368,6 +373,39 @@ fn instance_threat_overrides_drive_actual_range_damage_and_cooldown() {
         simulate_tower_attacks(&mut world, now + Duration::from_millis(1250)).len(),
         1
     );
+}
+
+#[test]
+fn a_tower_shoots_the_lowest_id_of_equally_near_minions_whatever_the_hash_seed() {
+    // Each `GameWorld` gets its own hash seed, so without a tie-break about
+    // half of these worlds would shoot minion 2 (this made the Elite trace
+    // nondeterministic on macOS).
+    for _ in 0..16 {
+        let mut world = GameWorld::empty();
+        world.structures = build_configured_structures(&example());
+        world.structures.retain(|&id, _| id == 3);
+        let tower = world.structures.get_mut(&3).unwrap();
+        tower.state.x = 0.0;
+        tower.state.z = 0.0;
+        spawn_minion_wave_for_team_lane(
+            &build_map_layout(),
+            &mut world.minions,
+            &mut 1,
+            Team::Blue,
+            Lane::Mid,
+        );
+        world.minions.retain(|&id, _| id <= 2);
+        for (id, x) in [(1, 3.0), (2, -3.0)] {
+            let minion = world.minions.get_mut(&id).unwrap();
+            minion.state.x = x;
+            minion.state.y = 0.0;
+            minion.state.z = 0.0;
+        }
+        let hp = [1, 2].map(|id| world.minions[&id].state.hp);
+        assert_eq!(simulate_tower_attacks(&mut world, Instant::now()).len(), 1);
+        assert!(world.minions[&1].state.hp < hp[0], "the lower id is shot");
+        assert_eq!(world.minions[&2].state.hp, hp[1]);
+    }
 }
 
 #[test]

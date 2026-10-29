@@ -9,11 +9,9 @@ use shared::wire::ClientPacket;
 
 use crate::camera::CameraState;
 use crate::domain::RoundId;
-use crate::persistence::{ClientSessionId, FileGameServerAddr};
+use crate::persistence::ClientSessionId;
 use crate::player::Player;
-use crate::session_config::{
-    DEFAULT_GAME_SERVER_ADDR, T_RETRY, T_STALE_SNAPSHOT, T_WAIT_MAX, is_stale,
-};
+use crate::session_config::{T_RETRY, T_STALE_SNAPSHOT, T_WAIT_MAX, is_stale};
 use crate::team::{CharacterChoice, Team, TeamSelection};
 
 use super::components::{
@@ -46,8 +44,6 @@ pub enum SessionUiCommand {
     ResumeMatch,
     /// Replace remote I/O with an in-process, unrated character practice.
     StartOffline,
-    /// Validated address chosen in the pre-join UI. Never transfers an active match.
-    ConnectTo(String),
     /// Switch to a trusted lobby allocation without overwriting the saved lobby.
     ConnectAllocated(String),
     /// Leave the current match or queue and return to the front end. The
@@ -152,6 +148,9 @@ impl ReconnectState {
     }
 }
 
+/// How long a "server full" answer is shown after the last one (LR-09).
+const SERVER_FULL_HOLD: Duration = Duration::from_secs(10);
+
 /// Session controller: owns lifecycle flags and join idempotency (single ownership vs UI/net).
 #[derive(Resource)]
 pub struct ClientSession {
@@ -175,6 +174,8 @@ pub struct ClientSession {
     pub(in crate::net) join_attempts: u32,
     pub(in crate::net) join_error: Option<JoinRejection>,
     pub(crate) server_contract: Option<shared::compatibility::ReleaseContract>,
+    /// The server's update notice from the same report (LR-14).
+    pub(crate) server_update: Option<shared::compatibility::UpdateNotice>,
     pub(crate) compatibility_issue: Option<shared::compatibility::CompatibilityIssue>,
     pub(in crate::net) join_exhausted: bool,
     pub(in crate::net) snapshot_order: SnapshotOrder,
@@ -186,6 +187,8 @@ pub struct ClientSession {
     pub(in crate::net) announced_join: bool,
     /// Lifecycle edges queued for `flush_session_events`.
     pub(in crate::net) outbox: Vec<SessionEvent>,
+    /// When the server last answered a probe "server full" (LR-09).
+    pub(in crate::net) server_full_at: Option<Instant>,
 }
 
 impl Default for ClientSession {
@@ -204,6 +207,7 @@ impl Default for ClientSession {
             join_attempts: 0,
             join_error: None,
             server_contract: None,
+            server_update: None,
             compatibility_issue: None,
             join_exhausted: false,
             snapshot_order: SnapshotOrder::default(),
@@ -213,6 +217,7 @@ impl Default for ClientSession {
             offline_return_addr: None,
             announced_join: false,
             outbox: Vec::new(),
+            server_full_at: None,
         }
     }
 }
@@ -265,6 +270,28 @@ fn should_attempt_reconnect(
 }
 
 impl ClientSession {
+    /// What the last compatibility check means for the player (LR-14):
+    /// `None` while nothing failed.
+    pub(crate) fn compatibility_verdict(&self) -> Option<super::CompatibilityVerdict> {
+        use shared::compatibility::{CompatibilityIssue, MismatchSide, ReleaseContract};
+        let issue = self.compatibility_issue?;
+        if issue == CompatibilityIssue::Unavailable {
+            return Some(super::CompatibilityVerdict::Unverified);
+        }
+        let side = self.server_contract.as_ref().map(|server| {
+            shared::compatibility::mismatch_side(
+                &ReleaseContract::current(),
+                server,
+                self.server_update.as_ref(),
+            )
+        });
+        Some(if side == Some(MismatchSide::ServerOutdated) {
+            super::CompatibilityVerdict::ServersUpdating
+        } else {
+            super::CompatibilityVerdict::UpdateRequired
+        })
+    }
+
     pub(crate) fn compatibility_summary(&self) -> String {
         let Some(server) = &self.server_contract else {
             return crate::i18n::tr("net.compatibility.pending").to_owned();
@@ -346,6 +373,12 @@ impl ClientSession {
         self.state = state;
     }
 
+    /// The server just answered "server full" (test fixtures only).
+    #[cfg(test)]
+    pub(crate) fn set_server_full_for_test(&mut self) {
+        self.server_full_at = Some(Instant::now());
+    }
+
     /// Overrides the in-flight join flag (test fixtures only).
     #[cfg(test)]
     pub(crate) fn set_join_in_flight_for_test(&mut self, in_flight: bool) {
@@ -400,6 +433,16 @@ impl ClientSession {
     /// A join the client still stands behind: locked in, and neither left nor
     /// abandoned. It survives a transport teardown, which is what tells a
     /// reconnect apart from "the player is back in the menus".
+    /// The server answered "server full" in the last few seconds and this
+    /// session is not connected (LR-09): the status line says so while the
+    /// probes go on.
+    pub(crate) fn server_full(&self) -> bool {
+        self.state != ClientConnectionState::Connected
+            && self
+                .server_full_at
+                .is_some_and(|at| at.elapsed() < SERVER_FULL_HOLD)
+    }
+
     pub fn has_committed_join(&self) -> bool {
         self.last_join.is_some()
     }
@@ -502,17 +545,13 @@ impl ClientSession {
 pub(in crate::net) fn start_networking(
     mut commands: Commands,
     mut client_session: ResMut<ClientSession>,
-    file_addr: Res<FileGameServerAddr>,
 ) {
-    let preferred_addr = std::env::var("GAME_SERVER_ADDR")
-        .ok()
-        .filter(|s| !s.trim().is_empty())
-        .or_else(|| file_addr.0.clone())
-        .unwrap_or_else(|| DEFAULT_GAME_SERVER_ADDR.to_owned());
+    // A desktop `GAME_SERVER_ADDR`, else the connection profile's lobby.
+    let preferred_addr = crate::session_config::startup_server_addr();
     let server_addr = validated_server_addr_or_default(&preferred_addr);
     if server_addr != preferred_addr {
         warn!(
-            "Ignoring invalid GAME_SERVER_ADDR/file value {preferred_addr:?}; falling back to {server_addr}"
+            "Ignoring invalid GAME_SERVER_ADDR value {preferred_addr:?}; falling back to {server_addr}"
         );
     }
     if std::env::var("OMOBA_OFFLINE_PRACTICE").is_ok_and(|v| v == "1") {
@@ -524,10 +563,20 @@ pub(in crate::net) fn start_networking(
     }
 }
 
+/// The lobby this process connects to: [`start_networking`]'s validated
+/// startup address. A saved match-resume hint must name it.
+pub(in crate::net) fn startup_lobby_addr() -> String {
+    validated_server_addr_or_default(&crate::session_config::startup_server_addr())
+}
+
 fn validated_server_addr_or_default(raw: &str) -> String {
     crate::persistence::validate_game_server_addr(raw)
-        .or_else(|| crate::persistence::validate_game_server_addr(DEFAULT_GAME_SERVER_ADDR))
-        .unwrap_or_else(|| "127.0.0.1:4000".to_owned())
+        .or_else(|| {
+            crate::persistence::validate_game_server_addr(
+                crate::session_config::default_server_addr(),
+            )
+        })
+        .unwrap_or_else(|| crate::session_config::FALLBACK_GAME_SERVER_ADDR.to_owned())
 }
 
 pub(in crate::net) fn retry_pending_join(
@@ -711,6 +760,7 @@ pub(in crate::net) fn perform_network_teardown(
     cam_state.locked = false;
 
     client_session.server_contract = None;
+    client_session.server_update = None;
     warn!("Network teardown: {reason}");
     if teardown_shows_select(client_session.last_join.is_some()) {
         // Nothing was committed: the player is somewhere in the front end and
@@ -842,24 +892,6 @@ pub(in crate::net) fn update_session_lifecycle(
                     &mut client_session,
                     offline::ADDRESS.into(),
                 );
-                incoming_dead.0 = false;
-                retried_this_frame = true;
-            }
-            SessionUiCommand::ConnectTo(raw) => {
-                if client_session.join_flow_committed || client_session.last_join.is_some() {
-                    continue;
-                }
-                let Some(address) = crate::persistence::validate_game_server_addr(raw) else {
-                    continue;
-                };
-                // Checked before `spawn_network_transport` overwrites the address.
-                if address != client_session.server_addr_display {
-                    client_session.outbox.push(SessionEvent::ServerScopeReset);
-                }
-                client_session.offline_return_addr = None;
-                client_session.ephemeral_endpoint = false;
-                commands.remove_resource::<NetworkChannels>();
-                spawn_network_transport(&mut commands, &mut client_session, address);
                 incoming_dead.0 = false;
                 retried_this_frame = true;
             }
@@ -1012,7 +1044,11 @@ pub(in crate::net) fn update_session_lifecycle(
 
     while let Ok(signal) = channels.signals.try_recv() {
         match signal {
-            NetThreadSignal::Compatibility { server, issue } => {
+            NetThreadSignal::Compatibility {
+                server,
+                issue,
+                update,
+            } => {
                 if issue.is_some() && client_session.state != ClientConnectionState::Disconnected {
                     perform_network_teardown(
                         if issue == Some(shared::compatibility::CompatibilityIssue::Unavailable) {
@@ -1035,6 +1071,7 @@ pub(in crate::net) fn update_session_lifecycle(
                     );
                 }
                 client_session.server_contract = server;
+                client_session.server_update = update;
                 client_session.compatibility_issue = issue;
                 if issue.is_some_and(|reason| {
                     reason != shared::compatibility::CompatibilityIssue::Unavailable
@@ -1065,6 +1102,9 @@ pub(in crate::net) fn update_session_lifecycle(
                 // joined session. Preserve the actionable message until Retry.
                 client_session.set_join_error(Some(JoinRejection::ProtocolMismatch));
                 client_session.stop_reconnecting();
+            }
+            NetThreadSignal::ServerFull => {
+                client_session.server_full_at = Some(Instant::now());
             }
             NetThreadSignal::TransportFailure => {
                 if client_session.state != ClientConnectionState::Disconnected {
@@ -1372,10 +1412,15 @@ mod tests {
             Update,
             (update_session_lifecycle, flush_session_events).chain(),
         );
+        let notice = shared::compatibility::UpdateNotice {
+            min_release: env!("CARGO_PKG_VERSION").into(),
+            url: None,
+        };
         signals_tx
             .send(NetThreadSignal::Compatibility {
                 server: Some(shared::compatibility::ReleaseContract::current()),
                 issue: Some(shared::compatibility::CompatibilityIssue::Catalog),
+                update: Some(notice.clone()),
             })
             .unwrap();
         app.update();
@@ -1386,18 +1431,24 @@ mod tests {
             Some(shared::compatibility::CompatibilityIssue::Catalog)
         );
         assert!(session.server_contract.is_some());
+        assert_eq!(session.server_update, Some(notice));
         assert!(!session.reconnect.active);
         assert!(crate::net::link_status(session).can_retry());
+        // Same release, another contract: this game is the one to update.
+        assert_eq!(
+            session.compatibility_verdict(),
+            Some(crate::net::CompatibilityVerdict::UpdateRequired)
+        );
         assert!(
             crate::net::link_status(session)
                 .detail()
                 .unwrap()
-                .contains("catalogue")
+                .contains("can no longer play online")
         );
     }
 
     #[test]
-    fn connect_and_leave_announce_scope_reset_transport_and_left() {
+    fn an_allocation_and_leave_announce_scope_reset_transport_and_left() {
         let server = UdpSocket::bind("127.0.0.1:0").unwrap();
         let address = server.local_addr().unwrap().to_string();
         let mut app = App::new();
@@ -1419,7 +1470,7 @@ mod tests {
             (update_session_lifecycle, flush_session_events).chain(),
         );
         app.world_mut()
-            .write_message(SessionUiCommand::ConnectTo(address.clone()));
+            .write_message(SessionUiCommand::ConnectAllocated(address.clone()));
         app.update();
         assert_eq!(
             drain_session_events(&mut app),
@@ -1484,7 +1535,7 @@ mod tests {
         configure_network_pipeline(&mut app);
 
         app.world_mut()
-            .write_message(SessionUiCommand::ConnectTo(address));
+            .write_message(SessionUiCommand::ConnectAllocated(address));
         app.update();
         assert!(
             app.world()
@@ -1832,7 +1883,7 @@ mod tests {
         flow.allocation = Some(shared::match_service::MatchAllocation {
             allocation_id: "handoff-test".into(),
             endpoint: arena_address.clone(),
-            preference: shared::match_service::MatchPreference::Quick,
+            preference: shared::match_service::MatchPreference::Casual,
             team: shared::map::Team::Green,
             human_count: 1,
             bot_count: 9,

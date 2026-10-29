@@ -133,14 +133,50 @@ pub(super) struct PassportAdmissions {
 
 impl Default for PassportAdmissions {
     fn default() -> Self {
+        Self::for_market(shared::market::FEATURES.ekza)
+    }
+}
+
+/// Why a build without Ekza admits no hosted item; no request is made.
+const NO_EKZA: &str = "this build has no Ekza services";
+
+fn no_weapons(_: &str) -> Result<Vec<ekza_bevy_sdk::assets::StoreAsset>, String> {
+    Err(NO_EKZA.into())
+}
+
+fn no_free_avatars(_: &str) -> Result<Vec<StoreAvatar>, String> {
+    Err(NO_EKZA.into())
+}
+
+impl PassportAdmissions {
+    /// The admissions of a build with `ekza`. Without Ekza there is no passport
+    /// and every registry read fails at once, without a request: a protected
+    /// avatar or `ekza-` weapon is denied, shipped content stays free.
+    fn for_market(ekza: bool) -> Self {
         let (sender, receiver) = mpsc::channel();
         Self {
             weapons: Arc::default(),
-            fetch_weapons: omoba_passport::weapon_store::fetch_approved,
-            api: PassportApi::from_env().ok(),
+            fetch_weapons: if ekza {
+                omoba_passport::weapon_store::fetch_approved
+            } else {
+                no_weapons
+            },
+            api: if ekza {
+                PassportApi::from_env().ok()
+            } else {
+                None
+            },
             free: Arc::default(),
-            fetch_free: omoba_passport::community::fetch_free,
-            registry: omoba_passport::community::registry_url(),
+            fetch_free: if ekza {
+                omoba_passport::community::fetch_free
+            } else {
+                no_free_avatars
+            },
+            registry: if ekza {
+                omoba_passport::community::registry_url()
+            } else {
+                String::new()
+            },
             pending: HashSet::new(),
             sender,
             receiver: Mutex::new(receiver),
@@ -192,10 +228,7 @@ impl PassportAdmissions {
             ))
             .expect("shipped props");
             if !shipped.items.iter().any(|item| item.id == *id) {
-                if id.len() != 37
-                    || !id.starts_with("ekza-")
-                    || !id[5..].bytes().all(|b| b.is_ascii_hexdigit())
-                {
+                if !is_ekza_weapon_slug(id) {
                     return Admission::Denied;
                 }
                 let cache = self.weapons.lock().unwrap();
@@ -402,6 +435,64 @@ impl PassportAdmissions {
     }
 }
 
+/// The store slug shape of a hosted handheld (`ekza-` and 32 hex digits).
+fn is_ekza_weapon_slug(id: &str) -> bool {
+    id.len() == 37 && id.starts_with("ekza-") && id[5..].bytes().all(|b| b.is_ascii_hexdigit())
+}
+
+/// The operator line for a loadout decision that names Ekza items: a hosted
+/// handheld and/or a store avatar (Studio or passport). Shipped props, roster
+/// avatars and malformed ids are not echoed, and tickets and session ids are
+/// never part of it. `None` when the loadout names no Ekza item.
+pub(crate) fn ekza_decision_line(
+    player: Option<u64>,
+    packet: &ClientPacket,
+    allowed: bool,
+) -> Option<String> {
+    use shared::prematch::{PrematchAction, PrematchRequest};
+    let (handheld, avatar) = match packet {
+        ClientPacket::Join {
+            handheld, avatar, ..
+        }
+        | ClientPacket::Prematch {
+            request:
+                PrematchRequest {
+                    action:
+                        PrematchAction::Select {
+                            handheld, avatar, ..
+                        },
+                    ..
+                },
+        } => (handheld, avatar),
+        _ => return None,
+    };
+    let handheld = match handheld {
+        shared::handheld::HandheldSelection::Item(id) if is_ekza_weapon_slug(id) => Some(id),
+        _ => None,
+    };
+    let avatar = avatar
+        .as_deref()
+        .map(str::trim)
+        .filter(|slug| ekza_bevy_sdk::passport::is_protected_slug(slug));
+    if handheld.is_none() && avatar.is_none() {
+        return None;
+    }
+    Some(format!(
+        "Ekza loadout {} for player {}: handheld {}, avatar {}",
+        if allowed { "admitted" } else { "denied" },
+        player.map_or_else(|| "?".to_owned(), |id| id.to_string()),
+        handheld.map_or("-", String::as_str),
+        avatar.unwrap_or("-"),
+    ))
+}
+
+/// Print [`ekza_decision_line`], if any.
+pub(crate) fn log_ekza_decision(player: Option<u64>, packet: &ClientPacket, allowed: bool) {
+    if let Some(line) = ekza_decision_line(player, packet, allowed) {
+        println!("{line}");
+    }
+}
+
 /// Make the granted avatar visible to slug normalization and to the clients
 /// that will render it. Roster entries are already known.
 fn register(slug: &str, granted: ProtectedAvatar) -> bool {
@@ -415,6 +506,7 @@ fn register(slug: &str, granted: ProtectedAvatar) -> bool {
         license: "See creator terms".into(),
         source_url: granted.support.rendition.url.clone(),
         author: None,
+        attribution: None,
         thumbnail: None,
         passport: Some(granted),
         free: false,
@@ -442,6 +534,7 @@ fn register_free(item: &StoreAvatar) -> bool {
             .unwrap_or_else(|| "See creator terms".into()),
         source_url: item.protected.support.rendition.url.clone(),
         author: item.author.clone(),
+        attribution: None,
         thumbnail: None,
         passport: Some(item.protected.clone()),
         free: true,
@@ -532,6 +625,7 @@ mod tests {
             name: "Community Robert".into(),
             author: Some("alice".into()),
             license: Some("CC0".into()),
+            attribution: None,
             thumbnail_url: None,
             protected,
             free,
@@ -1006,6 +1100,7 @@ mod weapon_tests {
             name: "Approved hammer".into(),
             author: None,
             license: None,
+            attribution: None,
             thumbnail_url: None,
             free: true,
             support: ProjectSupport {
@@ -1049,6 +1144,57 @@ mod weapon_tests {
         panic!("weapon admission did not finish")
     }
     #[test]
+    fn a_build_without_ekza_denies_every_hosted_item_and_keeps_shipped_content_free() {
+        let mut gate = PassportAdmissions::for_market(false);
+        assert!(gate.api.is_none() && gate.registry.is_empty());
+        // The fetchers fail at once: no registry is asked.
+        assert_eq!(
+            (gate.fetch_weapons)("https://registry.ekza.io")
+                .err()
+                .as_deref(),
+            Some(NO_EKZA)
+        );
+        assert!((gate.fetch_free)("https://registry.ekza.io").is_err());
+        let addr = |port: u16| SocketAddr::from(([127, 0, 0, 1], port));
+        // Shipped props and the default avatar need nothing.
+        assert!(matches!(
+            gate.begin(addr(50201), &join("forge-sword", None)),
+            Admission::Free
+        ));
+        // A hosted weapon: its (failing) read denies it, then the retry window does.
+        assert!(matches!(
+            gate.begin(addr(50202), &join(&item().slug, None)),
+            Admission::Pending
+        ));
+        assert!(!settle(&mut gate).allowed);
+        assert!(matches!(
+            gate.begin(addr(50203), &join(&item().slug, None)),
+            Admission::Denied
+        ));
+        // A protected avatar without a ticket: the free list is unavailable.
+        let protected = format!("ekza-{}", "a".repeat(64));
+        assert!(matches!(
+            gate.begin(addr(50204), &join("forge-sword", Some(&protected))),
+            Admission::Pending
+        ));
+        assert!(!settle(&mut gate).allowed);
+        // With a ticket: there is no passport to consume it at.
+        let mut ticketed = join("forge-sword", Some(&protected));
+        if let ClientPacket::Join {
+            passport_ticket, ..
+        } = &mut ticketed
+        {
+            *passport_ticket = Some("t".repeat(32));
+        }
+        assert!(matches!(
+            gate.begin(addr(50205), &ticketed),
+            Admission::Denied
+        ));
+        // An Ekza build reads its registry.
+        assert!(!PassportAdmissions::for_market(true).registry.is_empty());
+    }
+
+    #[test]
     fn approved_weapon_is_independently_admitted_but_cannot_bypass_avatar_gate() {
         let mut gate = PassportAdmissions {
             api: None,
@@ -1081,6 +1227,70 @@ mod weapon_tests {
             gate.begin(addr, &join(&format!("ekza-{}", "c".repeat(32)), None)),
             Admission::Denied
         ));
+    }
+    #[test]
+    fn ekza_decisions_log_slugs_and_player_but_never_secrets_or_junk() {
+        let avatar = format!("ekza-{}", "a".repeat(64));
+        let mut packet = join(&item().slug, Some(&format!(" {avatar} ")));
+        if let ClientPacket::Join {
+            passport_ticket, ..
+        } = &mut packet
+        {
+            *passport_ticket = Some("ticket-secret-0123456789".into());
+        }
+        let line = ekza_decision_line(Some(7), &packet, true).unwrap();
+        assert_eq!(
+            line,
+            format!(
+                "Ekza loadout admitted for player 7: handheld {}, avatar {avatar}",
+                item().slug
+            )
+        );
+        assert!(!line.contains("ticket-secret") && !line.contains("weapon-test"));
+        assert_eq!(
+            ekza_decision_line(None, &join(&item().slug, None), false).unwrap(),
+            format!(
+                "Ekza loadout denied for player ?: handheld {}, avatar -",
+                item().slug
+            )
+        );
+        // A draft selection is reported the same way.
+        let select = ClientPacket::Prematch {
+            request: shared::prematch::PrematchRequest {
+                server_epoch: 1,
+                match_id: 1,
+                generation: 1,
+                request_id: 1,
+                action: shared::prematch::PrematchAction::Select {
+                    handheld: HandheldSelection::ClassDefault,
+                    character: CharacterChoice::default(),
+                    hero_class: HeroClass::Mage,
+                    avatar: Some(avatar.clone()),
+                    sprite_character: None,
+                    role: shared::prematch::Role::Support,
+                    passport_ticket: None,
+                },
+            },
+        };
+        assert_eq!(
+            ekza_decision_line(Some(3), &select, false).unwrap(),
+            format!("Ekza loadout denied for player 3: handheld -, avatar {avatar}")
+        );
+        // Shipped props, roster avatars and malformed ids are not Ekza items.
+        for (weapon, avatar) in [
+            ("dagger", Some("agnes")),
+            ("ekza-not-hex\nforged line", Some("ekza-NOT-A-SLUG\nforged")),
+            ("ekza-0123", None),
+        ] {
+            assert_eq!(
+                ekza_decision_line(Some(7), &join(weapon, avatar), true),
+                None
+            );
+        }
+        assert_eq!(
+            ekza_decision_line(Some(7), &ClientPacket::Leave, true),
+            None
+        );
     }
     #[test]
     fn healthy_empty_revokes_future_weapon_use_and_outage_preserves_previous_catalogue() {

@@ -109,7 +109,8 @@ pub(crate) enum I18nSystems {
 
 impl I18nPlugin {
     /// The shipped client: `OMOBA_LANGUAGE`, else `language` from
-    /// `client_preferences.json`, else English.
+    /// `client_preferences.json`, else the market's language (English in the
+    /// global build).
     pub(crate) fn from_environment() -> Self {
         Self {
             startup: Startup::Environment,
@@ -125,15 +126,25 @@ impl I18nPlugin {
     }
 }
 
-/// `OMOBA_LANGUAGE` if it names a shipped locale, else the saved one.
-fn startup_locale(env: Option<&str>, saved: impl FnOnce() -> Option<LocaleId>) -> LocaleId {
+/// `OMOBA_LANGUAGE` if it names a shipped locale, else the saved one, else
+/// `fallback` (the first launch).
+fn startup_locale(
+    env: Option<&str>,
+    saved: impl FnOnce() -> Option<LocaleId>,
+    fallback: LocaleId,
+) -> LocaleId {
     if let Some(code) = env.map(str::trim).filter(|code| !code.is_empty()) {
         if let Some(id) = LocaleId::parse(code) {
             return id;
         }
         warn!("{LANGUAGE_ENV}={code:?} is not a shipped language; ignoring it.");
     }
-    saved().unwrap_or(LocaleId::ENGLISH)
+    saved().unwrap_or(fallback)
+}
+
+/// The first-launch language of `market`; English if this build does not ship it.
+fn market_locale(market: shared::market::Market) -> LocaleId {
+    LocaleId::parse(market.default_locale()).unwrap_or(LocaleId::ENGLISH)
 }
 
 impl Plugin for I18nPlugin {
@@ -145,6 +156,7 @@ impl Plugin for I18nPlugin {
             Startup::Environment => startup_locale(
                 std::env::var(LANGUAGE_ENV).ok().as_deref(),
                 crate::persistence::saved_language,
+                market_locale(shared::region::market()),
             ),
         };
         app.insert_resource(Locale::process_wide(id));
@@ -208,17 +220,40 @@ mod tests {
 
     #[test]
     fn startup_language_prefers_the_environment_then_the_saved_choice() {
-        assert_eq!(startup_locale(None, || None), LocaleId::ENGLISH);
+        let en = LocaleId::ENGLISH;
+        assert_eq!(startup_locale(None, || None, en), LocaleId::ENGLISH);
         let russian = LocaleId::parse("ru").expect("Russian ships");
-        assert_eq!(startup_locale(None, || Some(russian)), russian);
-        assert_eq!(startup_locale(Some("RU"), || None), russian);
-        assert_eq!(startup_locale(Some("unknown"), || Some(russian)), russian);
-        assert_eq!(startup_locale(None, || Some(zh())), zh());
-        assert_eq!(startup_locale(Some("zh-hans"), || None), zh());
-        assert_eq!(startup_locale(Some("en"), || Some(zh())), LocaleId::ENGLISH);
+        assert_eq!(startup_locale(None, || Some(russian), en), russian);
+        assert_eq!(startup_locale(Some("RU"), || None, en), russian);
+        assert_eq!(
+            startup_locale(Some("unknown"), || Some(russian), en),
+            russian
+        );
+        assert_eq!(startup_locale(None, || Some(zh()), en), zh());
+        assert_eq!(startup_locale(Some("zh-hans"), || None, en), zh());
+        assert_eq!(
+            startup_locale(Some("en"), || Some(zh()), en),
+            LocaleId::ENGLISH
+        );
         // An unknown or blank override falls through to the saved choice.
-        assert_eq!(startup_locale(Some("xx-Unknown"), || Some(zh())), zh());
-        assert_eq!(startup_locale(Some("  "), || None), LocaleId::ENGLISH);
+        assert_eq!(startup_locale(Some("xx-Unknown"), || Some(zh()), en), zh());
+        assert_eq!(startup_locale(Some("  "), || None, en), LocaleId::ENGLISH);
+    }
+
+    #[test]
+    fn the_first_launch_language_is_the_markets_and_the_player_choice_wins() {
+        use shared::market::Market;
+        let russian = LocaleId::parse("ru").expect("Russian ships");
+        assert_eq!(market_locale(Market::Global), LocaleId::ENGLISH);
+        assert_eq!(market_locale(Market::Ru), russian);
+        assert_eq!(market_locale(Market::Cn), zh());
+        let ru = market_locale(Market::Ru);
+        assert_eq!(startup_locale(None, || None, ru), russian);
+        assert_eq!(
+            startup_locale(None, || Some(LocaleId::ENGLISH), ru),
+            LocaleId::ENGLISH
+        );
+        assert_eq!(startup_locale(Some("zh-Hans"), || None, ru), zh());
     }
 
     #[test]

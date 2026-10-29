@@ -452,7 +452,7 @@ async fn portal_postgres_contract_and_security() {
             .fetch_all(&app.pool)
             .await
             .unwrap(),
-        vec![1, 2, 3]
+        omoba_career_store::career_store::SCHEMA_VERSIONS
     );
     println!(
         "PASS: real PostgreSQL migration, browser-bound pairing, concurrent completion, profile identity, strict writes, contact ACL, public opt-in, search, stale friendship protection, game/web synchronization, settlement, late projection, stats, u64, private match ACL and logout."

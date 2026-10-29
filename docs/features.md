@@ -1,5 +1,169 @@
 # Feature Inventory
 
+## Classic hero design authoring foundation
+
+The existing game-contract exporter also publishes a versioned hero design
+companion. It covers all canonical class IDs and fails closed on unassigned bases
+and mismatched Classic bindings. This is source/tooling support, not native
+C3 playback or a deployed skin catalogue. See [hero design policy](hero-designs.md).
+
+## Compact mobile battle HUD
+
+The landscape touch HUD uses an 80 px attack disc, 50 px skill faces and 38 px
+utility artwork at its reference scale. Utility and target-selection capture
+regions remain at least 44 px; each finger retains its captured action while
+crossing neighboring buttons. The joystick keeps its familiar size with an
+inward anchor and a light transparent base. Recall, Haste and Dash sit along
+the bottom, opening the upper battlefield. The score is a shallow ribbon; small
+settings/chat discs beside the minimap have independent larger touch cells.
+Ally portraits, quick-buy art, mana pills and cooldown detail follow the compact
+phone presentation. Saved HUD group offsets remain bounded; desktop layout and
+menu scaling keep their existing behavior.
+
+The movement stick floats within the lower-left region below the information
+stack: each fresh movement press chooses its base, drag moves the thumb, and
+release stops movement while retaining the last base. Safe-edge clamping starts
+neutral; a second finger cannot relocate the owned stick or shift combat buttons.
+Phone kill notices appear below purchases on the left, with two compact rows or
+one on short screens. Selecting a nearby visible enemy portrait also shows a
+small gold direction arrow in camera-relative screen axes and an outlined
+connector to the selected hero’s current projected position. Offscreen visible
+heroes keep an arrow at the correct viewport edge. Hidden/dead/stale entities,
+modal contexts and public death timers supply no connector or direction.
+
+The selected-target plate is144×40px at reference scale and shares the top
+safe edge with all four allied portraits. Public enemy death portraits are
+passive32px cells below allies; they contain no click target, direction vector
+or hidden position. Nearby living enemy lock targets retain44px right-side
+cells independently. Settings/chat are neighboring44px cells below the death
+row. If the narrowest phone cannot fit the map and all header blocks side by
+side, the104px map moves below the header while allies and target remain at
+the top. The left purchase/feed stack and movement bounds follow that map.
+
+`python3 scripts/check_phone_hud_layout.py` compiles and runs the same std-only
+Rust geometry used by the game, without Bevy, a window, assets or a GPU. Its
+contract enforces simultaneous top anchors, centering, actual ally cells,
+death/live separation and non-overlap over a deterministic width/inset grid;
+negative cases reject the previous lowered-avatar geometry.
+
+Verification uses one English landscape phone preview and focused geometry/input
+tests. Physical Android play and long-session comfort are reported separately;
+a desktop-rendered preview alone does not establish either.
+
+## iOS Universal Link return
+
+The RU portal can return to the existing iOS app through the prepared
+`https://ios.omoba.ru/auth` association. The dev app has a separate domain.
+The URL only opens the game; account access still requires the existing signed
+enrollment and player confirmation. Source includes the main-nib delegate,
+per-contour entitlements and archive preservation. Domain publication, Apple
+profile refresh and real-device tests remain pending. See
+[setup and checks](../mobile/ios/UNIVERSAL-LINKS.md).
+
+## RU website and native registration
+
+The portal's official VK ID OneTap widget uses the existing registration/linking
+contract. The Account API accepts its exact configured root redirect, alongside
+the ordinary browser callback, and verifies the code server-side. Unit and
+isolated PostgreSQL checks cover both root registration and preservation of the
+native signed-link path. Live activation and real-provider/device checks remain
+pending; no account migration or service change is performed by this source work.
+
+Website-first VK ID, OK and Mail.ru sign-in creates one default-stat regional
+profile/session; repeat sign-in returns the same profile. Game-initiated unknown
+subjects still require the active game's explicit signed link to preserve progress.
+Device review binds the expected profile, temporary polling errors are recoverable,
+status traffic cannot consume completion quota, and revoked keys cannot race a new
+social link. See [registration](registration.md) for schema 10, source boundaries,
+real local browser/signed-game proof and remaining live-provider rollout gates.
+
+## Browser-local practice
+
+`browser-client/` is an additive Bevy/WebGL 2 host of the same
+`common::offline::PracticeSession` used by native offline practice. It exposes
+seven standard class kits, real bot/hero/minion/tower simulation, movement,
+attacks, skills, dash, recall, pause and new matches, with bounded shipped
+Verdant terrain and character sprites. It does not load the native blocking
+HTTP/passport stack, create a device identity, join a network lobby or write
+career rewards. The portal owns VK sign-in independently; this practice iframe
+never receives a player token or key. Full browser multiplayer needs an admitted
+browser transport and a separately approved server rollout.
+
+`scripts/build-web.sh` builds the pinned wasm32 target into the existing shared
+cache B and emits `builds/browser-practice/` with relative paths and a hashed
+build manifest. The directory can be served unchanged under `/game/` and loaded
+lazily by `/play`. See [build, controls and limits](browser-practice.md).
+
+## Runtime account regions
+
+Native capture launchers seed a returning Global routing record in their own
+scratch configuration; the dedicated first-launch QA intentionally starts empty.
+
+Default clients select RU or International before regional traffic and restore a
+returning account's region automatically. Lobby, Account API, portal, legal gate,
+Ekza features and purchase offers follow one immutable binding. Keys and saved
+state remain in separate regional folders; switching stops regional traffic and
+requires a cold restart. Player-facing raw server configuration is removed in
+production and dev. Native enrollment replies expose their owning region and
+foreign replies are rejected. Dev denies both production IPs. The focused native
+RU phone-preview harness exercises first confirmation and switching; full store
+rollout and physical devices remain release gates. See [profiles](connection-profiles.md)
+and [release preparation](plans/ru-release-2026-10-28.md).
+
+## Markets and sign in with VK ID
+
+Regional server/API builds and locked client packages serve one market: `global` (today's product), `ru` (Russian servers,
+no Ekza ecosystem, Hero Supporter auras sold only through YooKassa donations on
+the RU portal, Russian by default) or `cn`
+(prepared, not packaged yet). `release.py --market ru` makes the RU set with its
+own servers, settings folder and Android app. RU players sign in with VK ID
+(VK, OK, Mail.ru) on the RU portal and from Profile in the game. Website registration
+can create a profile before a device exists; game-initiated linking preserves its
+existing profile only after the active game key confirms. Game authentication uses
+the enrolled device key. On the RU host the portal calls the Account API on loopback
+and forwards each player's address, so sign-in limits stay per player;
+`release.py preflight --market ru` checks that path
+([topology](../ops/vps/ru/README.md#topology)). One tool, `ops/vps/ru/ru_host.py`,
+sets a fresh Ubuntu host up in Russia (PostgreSQL with ICU, Caddy, firewall, key-only
+SSH, secrets made on the host), ships the lobby, Account API and portal with rollback,
+checks the whole host and proves a reboot needs no manual step; every service there
+restarts on its own. `ops/vps/ru/ru_backup.py` backs the host up every night and before
+every migration: the database and the match archive, encrypted and signed, go to storage
+in Russia (14 daily and 8 weekly kept). A monthly drill restores the newest set into a
+scratch database and checks it. The secrets are escrowed offline, and a missed backup
+raises an alert. Each release runs the
+[RU release checklist](../ops/vps/ru/release-checklist.md). See [markets](markets.md).
+
+## Temporary community sculptures
+
+One decorative slot beside the Wendigo pit displays the Registry-approved
+24-hour placement. Exact-byte model validation, profile-isolated caching,
+monotonic expiry and bounded revocation keep community art outside gameplay
+simulation. Clicking or tapping the rendered sculpture opens its approved title,
+credit and optional 1,000-character plain-text description in a scrollable card.
+Opening and closing gestures cannot trigger movement or combat; revocation or
+replacement closes stale cards. An original lucky waving cat exercises the
+optional rotation clip, which continues while the card is open.
+The coordinated Web/Studio pilot is free; paid crypto providers and hosted
+deployment remain separate work. See [runtime details](community-sculptures.md).
+
+## DEV account integration
+
+Packaged OMOBA Dev uses `account.dev.omoba.io` and `app.dev.omoba.io` for account
+confirmation and device-account features. Runtime overrides cannot redirect a DEV
+app to production. The DEV Account API keeps Ekza library consent on DEV Registry
+and Studio. The [DEV host helper](../ops/vps/dev/README.md#dev-account-api)
+prepares its isolated runtime role and HTTPS ingress; activation verifies the exact
+DEV binary and portal schema. Provider setup and tester availability remain separate.
+
+## Dev iOS workflow
+
+The shared **Omoba Dev** Xcode scheme builds the separate `space.ekza.omoba.dev`
+app for the dev contour. Run and Archive select dev settings without editing
+local contour values. The release script selects the same scheme. Apple signing,
+TestFlight upload, tester assignment and physical-device checks remain separate
+steps: [dev quickstart](dev-quickstart.md).
+
 Android launch diagnostics: `make android-diagnose` records the connected phone's
 OS, ABI, graphics capabilities, installed OMOBA version and app crash/exit evidence.
 Read-only by default; explicit `--launch` is available. See
@@ -9,6 +173,33 @@ Universal APKs cover multiple CPU ABIs; a GLES fallback is not implemented.
 ## 0.44.0 delivery
 
 Wildspark and the creator/workshop integration are merged, the Linux production server is updated, and a matching Windows x64 candidate is built locally. See the [delivery record](progress/2026-10-10-release-044.md) for source, checksums, compatibility, rollback and testing limits.
+
+## Dawnweaver reference iteration (next candidate)
+
+Horizon Ray is now centre-weighted: a target whose centre is within 0.35 of the beam
+axis takes the full 80, and damage eases (smoothstep) to 60% at its graze point, the
+beam half-width 0.8 plus its own radius. The Radiance detonation and the re-applied
+mark keep their full value. The caster stands still during the 0.8 s windup so the
+warned ray leaves from her (basic attacks and the field recast stay allowed); the
+client predicts the stop. A due ray survives a late server tick, a blocked spell no
+longer marks, and marks include the team damage buff.
+
+The fired ray draws its white core exactly at the damage core, with thin core lines
+in the warning; core hits draw a brighter burst than edge hits, Radiance detonations
+a gold pop, and the release an afterglow along the strip. A dedicated charge motion
+fills the windup and a two-hand push with recoil fires the ray; the lane facing lasts
+through the release. Every listener hears a rising charge when the warning appears,
+gained at the nearest point of the lane, then a new synthesized beam voice; core hits
+and Radiance bursts have their own cues. Direction skills whose effect ignores aim
+distance (beam, linear projectile, returning shield, impact rocket) send the far point
+of the aimed ray, so the server line meets the preview. Bots keep a Luminous Field
+until an enemy hero is about to leave it, do not spend damage skills on towers and
+lead the ray.
+
+Receipts gain additive `core_hit` and `radiance_burst` flags (protocol 11 decodes
+them as absent). Catalog `standard-kits-8` and gameplay revision
+`dawnweaver-2026-10-11-reference` require matching client and server. See
+[implementation and verification](progress/2026-10-11-dawnweaver-reference.md).
 
 ## Wildspark reference iteration (0.44.0 candidate)
 
@@ -45,17 +236,27 @@ downloads show current defaults without requiring a running game or Account API.
 
 An artist can prepare a requirement/revision-pinned brief and use the existing
 Studio upload route. This is discovery and preparation: Studio does not yet
-persist exact requirement bindings, and the game does not yet equip coordinated
-sets or remote projectile/prop skins. See the [iteration record](progress/2026-10-10-asset-catalog.md)
+persist exact requirement bindings. The game equips a one-GLB
+[Wildspark set](handheld-weapons.md#wildspark-set-repeater-and-launcher-in-one-glb)
+with both Q guns, but no other coordinated sets or remote projectile/prop skins.
+See the [iteration record](progress/2026-10-10-asset-catalog.md)
 and parent [design PR #78](https://github.com/o-moba/omoba-bevy/pull/78).
+
+## Idea: rating-unlocked skill slots
+
+Recorded 2026-10-12, not scheduled: as a character's rating grows it could unlock
+more than four skills, possibly up to about ten. The [idea and open questions](plans/rating-skill-slots.md)
+cover which rating counts, active versus known skills, ranked fairness, controls
+and the protocol impact.
 
 ## Planned: Studio model requirements by class and skill
 
 The [proposal and TODO](plans/studio-skill-asset-catalog.md) describe a game-owned
 requirements catalogue shared by Studio and the website: baseline 3D previews,
 artist contributions to specific skill/model roles and eventual coordinated
-cosmetic sets such as Wildspark’s two guns. The public discovery catalogue and local class workshop now exist; exact-slot
-Studio submissions, coordinated sets and runtime set equipping remain planned.
+cosmetic sets such as Wildspark’s two guns. The public discovery catalogue and local class workshop now exist,
+and the game equips a one-GLB Wildspark set. Exact-slot Studio submissions and
+other coordinated sets remain planned.
 
 ## First-match guidance and mobile comfort (0.44.0 candidate)
 
@@ -290,7 +491,7 @@ Play with a gamepad on macOS, Windows, Linux and iPhone: left stick moves (camer
 
 ## Party lobby and co-op vs bots (0.24.0)
 
-Home → **Party & friends** opens a party lobby: invite anyone connected to the same server (friends first when career storage is on), accept or decline invites from a Home toast, and see every member's avatar in a 3D line-up with leader and status plates. The leader's **PLAY VS BOTS** moves the whole party to hero select; the party is seated on one team and bots fill every other seat. Works on a database-free practice server and on the public lobby, where Play with bots allocates one arena for the party and Quick match never splits a party. See [the party guide](party.md). On desktop the lobby's **SERVER** field (Change → `host:port` → Enter) connects to another host and is remembered; release packages for every platform come from `scripts/release.py` ([releasing](RELEASING.md)).
+Home → **Party & friends** opens a party lobby: invite anyone connected to the same server (friends first when career storage is on), accept or decline invites from a Home toast, and see every member's avatar in a 3D line-up with leader and status plates. The leader's **PLAY VS BOTS** moves the whole party to hero select; the party is seated on one team and bots fill every other seat. Works on a database-free practice server and on the public lobby, where Play with bots allocates one arena for the party and Casual PvP and Ranked never split a party (LR-08). See [the party guide](party.md). On desktop the lobby's **SERVER** field (Change → `host:port` → Enter) connects to another host and is remembered; release packages for every platform come from `scripts/release.py` ([releasing](RELEASING.md)).
 
 ## Five classes and the Warden jungler (0.23.0-rc.6)
 
@@ -310,7 +511,7 @@ Starting durability and Q intervals now leave an early response window; levels i
 
 ## Public multiplayer MVP (0.22.0-rc.2)
 
-The public lobby offers Quick match (30-second bot fallback), Wait for players (ten humans only), and Play with bots. Independent worker processes own immutable ten-player rosters, automatic teams, shared draft/countdown/loading and a durable start barrier. New humans cannot replace bots after a match starts; existing participants can reconnect. PostgreSQL saves history and progression for approved allocated bot games, with competitive rating reserved for eligible bot-free PvP. Signed gameplay packets, bounded admission and isolated durable outboxes protect the public match boundary. See [launch, recovery and capacity instructions](public-mvp.md).
+The public lobby offers Casual PvP (30-second bot fallback, never rated), Ranked (ten humans of one cohort, never bot-filled) and vs Bots; see [LR-08](#ranked-casual-pvp-and-vs-bots-lr-08-unreleased). Independent worker processes own immutable ten-player rosters, automatic teams, shared draft/countdown/loading and a durable start barrier. New humans cannot replace bots after a match starts; existing participants can reconnect. PostgreSQL saves history and progression for approved allocated bot games, with competitive rating reserved for eligible bot-free PvP. Signed gameplay packets, bounded admission and isolated durable outboxes protect the public match boundary. See [launch, recovery and capacity instructions](public-mvp.md).
 
 ## Shared running and VRM skeletal motion (0.21.0-rc.5)
 
@@ -389,7 +590,19 @@ This is a lightweight Bevy mesh/material particle foundation, without an extra
 GPU particle plugin or dynamic lights. Phone performance still needs device QA.
 These source changes are newer than TestFlight 0.20.0 (4).
 
-## Shared accounts and Supporter cosmetics
+## Market builds
+
+One build serves one market (`shared/src/market.rs`). The global build is the
+full product. A free-market build (`OMOBA_MARKET=ru` or `cn`) ships the same
+heroes, packaged avatars, weapons and gameplay without the Ekza ecosystem and
+without purchases: no Ekza store, account link, wallet pairing, Studio tab or
+section, Ekza weapon library or catalogue, market hint, community sculpture or
+"Support OMOBA"; its client pins closed loopback Ekza endpoints and its server
+denies every hosted avatar or weapon. It opens in the market's language and keeps
+its settings in `omoba-bevy-<market>[-<contour>]`. The Home build line names the
+market (`· ru`); the startup log prints the full feature set.
+
+## Shared accounts and Hero Supporter cosmetics
 
 A native installation can enroll a separate device key into an existing account
 through explicit portal approval, without exporting its private seed or merging
@@ -402,14 +615,32 @@ Supporter provides three cosmetic aura styles (Solar, Lunar, Verdant) and a free
 isolated preview. The game server reads account grants from PostgreSQL, enforces
 expiry and revocation, and replicates the permitted style. Auras follow actor
 visibility/death and never change combat, XP, rating, or matchmaking. The portal
-shows billing source, paid period, renewal state and aura preferences.
+shows billing source, paid period, renewal state, aura preferences and lifetime
+credited months. The player-facing Hero status is cosmetic and follows the same
+verified active period. A public supporter directory links opted-in public
+profiles to their existing statistics-aware pages; expired support remains
+acknowledged, refunds remove its credit, and private profiles/statistics remain
+private. The lifetime count is independent of truncated payment history.
 
-Live aura VFX use three intersecting inclined orbits with bright cores, camera-facing glow sprites,
-eight tapered trail segments per orbit, four rising glints and a subtle ground ring.
-Each hero has a fixed 35 rendered elements; meshes/materials are shared and no dynamic
-lights or per-frame particle spawning are needed. Sprite mode projects the same paths
-with front/back layering. Native preview uses the same effect implementation.
-This source update is newer than TestFlight 0.20.0 (4).
+Hero aura VFX combine three intersecting, feathered ribbon orbits, bright moving
+heads, a gentler body glow, eight rising sparks and a subtle ground ring. One
+orbit runs in the opposite direction. Each 3D orbit has a shared static ribbon
+with core and glow layers, built from crossed sheets with 32 segments per sheet.
+The 23 rendered elements replace the previous 35; counted geometry is 1,632
+triangles per aura versus 13,056 previously, an eightfold reduction in triangles.
+This is a geometry count, not a measured eightfold GPU or frame-time improvement.
+Meshes and materials are preallocated and shared: animation changes transforms,
+without per-frame geometry uploads, new dynamic lights or dependencies. The
+body glow never replaces character materials. Sprite mode retains 35 elements
+with separate front/back depth sorting. Native preview and live actors share the
+effect implementation and the existing authorization/visibility cleanup.
+
+The owner's Lineage II reference inspired the luminous orbital treatment; this
+is an original OMOBA effect, not an exact recreation or reused game asset. New
+local 5v5 practice captures show the 23-element ribbon effect at normal zoom,
+during movement and close up, followed by server-driven removal. The desktop
+frame-time sample includes VSync and other scene work; it establishes no isolated
+GPU, power or mobile result. Earlier 35-element captures remain historical.
 
 Apple and Solana are separate provider adapters granting the same account right.
 Payment functionality is unavailable until the operator explicitly configures a
@@ -419,7 +650,32 @@ purchase/restore and retains unfinished transactions until server confirmation.
 The Apple adapter requires an authenticated verifier and App Store setup; local
 fixtures are not proof of a real sandbox purchase or App Review approval.
 
-Core career and portal schemas are both version 3. Run owner migrations and the
+### Monthly Hero tiers (LR-67)
+
+Russian players donate on the RU portal through YooKassa; every donation is a
+30-day grant worth one tier point per ruble, and the donations covering now add up
+to a tier: Rose (100), Jade (250), Azure (500), Crimson (1000) and Prism I–III
+(2500, 5000, 10000). Each tier unlocks its own aura style on top of Solar, Lunar
+and Verdant, which any active grant unlocks; everyone in a match sees it. One
+shared rule decides what a player may wear (Account API, career store and the
+game server, which re-checks every refresh), and a style the tier no longer
+covers steps down to the best one it does. The four solid tiers are new palettes
+of the 23-element aura; the Prism tiers shimmer through the rainbow in sync for
+all wearers, faster and brighter per tier, Prism III with a crown ring inside the
+same budget. The Supporter panel shows the tier with its end date and the tier it
+steps down to, lists the styles and, on RU desktop and Android builds, opens
+«Поддержать на сайте» (`<portal>/supporter`); iOS builds never link to a web
+payment. Protocol 12 carries the new styles; portal schema 9 stores amounts,
+points and the durable YooKassa attempts and refunds, and the Account API
+settles re-read payments and refunds exactly once. The Account API starts a
+donation (a 54-FZ receipt through «Чеки от ЮKassa», the Idempotence-Key stored
+before the payment is created), takes YooKassa's webhook without trusting its
+body, and reconciles open payments, lost creates (23 hours) and refunds every
+minute; new charges pause by themselves when the refund scan is stale. The RU
+portal pages follow in LR-67c. See [Hero tiers](supporter.md#hero-tiers) and
+[YooKassa donations](supporter.md#yookassa-donations).
+
+Core career schema is version 3 and portal schema is versions 1–7 and 9. Run owner migrations and the
 updated runtime grants before deploying matching game/API releases. See
 [Supporter operations](supporter.md) for rollout boundaries and test procedures.
 
@@ -495,6 +751,14 @@ match/menu state and mute/focus changes; missing audio does not block gameplay.
 Master, music, effects and UI volume are separately saved in client preferences.
 The scrolling settings menu supports mouse and touch. Stable cue IDs map to local
 Ogg assets in a versioned manifest. See [audio controls and authoring](game-audio.md).
+
+## Bot route-planning budget (LR-10, unreleased)
+
+- A bot plans a route at most once per `ROUTE_INTERVAL` (800 ms), whatever emptied its route: a new target, a retreat, a dash, a failed plan or a walked route. At its destination it plans nothing. Until the next plan it walks a clear straight line to the destination; the turret clip still stops it at an uncovered tower's range. Behind terrain or a structure, or after a failed plan, it holds still.
+- Route search reuses per-thread buffers: the static grid plus a bounding-box overlay of live structure discs, with stamped costs and visits instead of fresh full-grid vectors. A warm plan allocates only the route it returns; obstacle queries reuse a per-thread index list.
+- Measured in the difficulty simulator: 10–13 plans per bot-minute at every level, down from 199–254. The ladder and every gating check hold. The simulator now reports plans that found no route and gates each level at 80 plans per bot-minute.
+- Projectiles step in creation order, so two shots blocked by one wall in the same tick no longer depend on `HashMap` order.
+- Code: `common/src/bots.rs`, `shared/src/navigation/search.rs`, `shared/src/navigation/mod.rs`, `common/src/sim/projectiles.rs`. See [the session note](progress/2026-10-24-lr-10.md).
 
 ## Native bot practice and match communication
 
@@ -928,7 +1192,7 @@ follows.
 - Local multiplayer flow with server startup plus multi-client local play via `make start`.
 - Team join flow with character selection and player spawning.
 - Ekza Bevy SDK extraction: shared sibling `ekza-bevy-sdk` repository owns stable character ids, built-in 3D model manifest metadata, GLB validation, and Bevy model catalog loading for future dependency publishing.
-- Ekza avatar store at runtime: through `ekza-bevy-sdk`, the client reads the public registry catalogue for templates approved for `omoba` / `desktop` / `humanoid-glb-v1`, shows the ones the paired wallet owns in a separate "Your Ekza avatars" group below the shipped "Default avatars", and installs a model on first use (verified size, SHA-256, GLB envelope and embedded `idle/walk/attack/cast/death` clips) under the private settings directory, mounted as the `ekza://` asset source. Other players' store avatars are fetched the same way on demand with the legacy model as a stand-in. The server admits a store slug only from a ticket consumed at the configured passport origin whose grant hashes to that slug. Wallet pairing starts from the "Connect Ekza wallet" button in the picker (browser approval, non-blocking); purchase happens on the Ekza web storefront. `scripts/ekza_publish.py` publishes an on-chain template into a registry catalogue with a baked Omoba rendition, and `scripts/ekza_demo.py` runs the whole loop locally on devnet.
+- Ekza avatar store at runtime: through `ekza-bevy-sdk`, the client reads the public registry catalogue for templates approved for `omoba` / `desktop` / `humanoid-glb-v1`, shows the ones the paired wallet owns in a separate "Your Ekza avatars" group below the shipped "Default avatars", and installs a model on first use (verified size, SHA-256, GLB envelope and embedded `idle/walk/attack/cast/death` clips) under the private settings directory, mounted as the `ekza://` asset source. Other players' store avatars are fetched the same way on demand with the legacy model as a stand-in. The server admits a store slug only from a ticket consumed at the configured passport origin whose grant hashes to that slug. Wallet pairing starts from the "Connect Ekza wallet" button in the picker (browser approval, non-blocking); purchase happens on the Ekza web storefront. `scripts/ekza_publish.py` publishes an on-chain template into a registry catalogue with a baked Omoba rendition (VRM 0.x or VRM 1.0 source; VRM 1.0 is turned to face -Z), and `scripts/ekza_demo.py` runs the whole loop locally on devnet.
 - VRM avatar support: VRM 0.x avatars (glTF 2.0 binary with extra `VRM`/spring-bone/blendshape extensions) load through the existing glTF model catalog by staging them as `.glb` (the VRM extensions are `extensionsUsed`-only, so Bevy's loader ignores them and keeps the mesh + skeleton). Ships one selectable CC0 humanoid, `Paco` (ToxSam 100Avatars R3); see `ATTRIBUTION.md` and `scripts/convert_vrm_to_glb.py`. The avatar carries no animation clips, so it renders as a static skinned mesh via `NormalizeModelScale` like other models.
 - Core combat loop with projectiles, structures, minions, death, respawn, mana regeneration, and base-destruction win condition.
 - Map layout with three lanes and simple jungle blocks.
@@ -937,6 +1201,120 @@ follows.
 - Persistent local client preferences (graphics, character, optional server address, stable client session id) with safe clamping on load; override directory with `OMOBA_CLIENT_CONFIG_DIR` for tests or portable installs.
 - In-game match HUD (below minimap): level, XP, skill points, upgrade key label (`U`), local HP/mana, target hints, objective line, per-slot class ability lines (name, effect numbers, cooldown/lock state), and F1 help reminder; bottom-right skill bar shows `Q`–`R` keys with the selected class's ability names and ranks.
 - F1 toggle help overlay with movement, camera, targeting, casting, objective, and pause guidance; does not reset simulation when toggled. The panel is shown only while the match is `Running` (toggle state is preserved when returning to a live match so lobby/victory screens are not covered).
+
+## Every match ends (LR-11, unreleased)
+
+- A match worker whose humans all left (Leave, crash or lost connection) keeps their heroes under bot control for the 180 s reclaim window plus 30 s. If nobody comes back, the round settles as **Interrupted** (unrated, no winner, no XP, stored once) and the worker retires and frees its port.
+- Any running match ends at a hard cap, `OMOBA_MATCH_MAX_DURATION_SECS` (default 2700 s = 45 minutes), also as **Interrupted**. Connected players get the terminal receipt and the result screen shows «Match interrupted». A standalone server starts a fresh round instead.
+- The server logs `MATCH_METRIC event=abandoned_reaped` and `event=duration_capped`.
+- A lobby that binds beyond loopback refuses to start while `OMOBA_MATCH_PUBLIC_HOST` is unset or loopback, because players would be sent to their own machine (LR-01).
+- Code: `server/src/match_lifecycle.rs`, `server/src/match_pool.rs` (`public_worker_host`). See [the session note](progress/2026-10-24-lr-11.md).
+
+## Ranked, Casual PvP and vs Bots (LR-08, unreleased)
+
+- Home and the party lobby offer three queues on the public lobby: **Casual PvP** (the main button), **Ranked** and **vs Bots**. A party leader launches the whole party into the chosen queue.
+- **Ranked**: ten humans of one rated cohort, rated when eligible, never filled with bots. **Casual PvP**: every human in the queue plays together whatever their rating or newcomer cohort; bots fill the empty seats after 30 s; never rated, 50/25 XP even with ten humans. **vs Bots**: at once, as before.
+- The queue, not the head count, decides rating: `rated == (queue == Ranked) && eligibility`. The lobby and the store share one cohort policy, so a mixed party ({1000 newcomer, 1400 veteran}) can no longer produce a rated roster the store rejects; in Ranked it is told to play Casual PvP together.
+- Searching, draft and loading name the queue with a Rated/Unrated badge. A Ranked search shows how many players search the queue and, after 5 minutes, offers **Also search Casual PvP** while keeping its place in Ranked (owner default O-1, [policy](match-progression.md#low-population-ranked-policy)).
+- Older protocol 11 clients keep working: the wire names stay (`quick` = Casual PvP, `humans_only` = Ranked) and every new field is additive.
+- Copy in en, ru and zh-Hans (`client/i18n/*/queue.json`); the orphan `home.button.humans_only` and the Quick match keys are removed.
+- Code: `server/src/match_service.rs` (`select`, `waiting_view`), `career-store/src/matchmaking.rs` (`fits_cohort`, `same_cohort`), `server/src/match_allocation.rs` (`Manifest::match_mode`), `shared/src/match_service.rs`, `client/src/match_service.rs`, `client/src/frontend/{home,lobby,searching,draft,loading}.rs`. See [the session note](progress/2026-10-24-lr-08.md).
+
+## Honest state after leaving a running match (LR-13, unreleased)
+
+- A player who left a running match (Leave, crash or lost connection) and presses **Play** sees «You are still in a match · it ends in N min at the latest» with **Resume match**, instead of a "Match found · connecting…" spinner that never connected. N is the duration cap, or the abandoned-match reaping while no human is connected.
+- **Resume** returns to the same hero in that match. Waiting on the screen also works: once the match ends, the search queues a new match by itself. **Cancel** returns Home.
+- The lobby never adds a second queue entry for a profile that still holds a running seat, and a played match that ended frees the seat without an error code.
+- Copy in en, ru and zh-Hans (`client/i18n/*/rejoin.json`).
+- Code: `server/src/match_service.rs` (`Lobby::view`), `server/src/match_pool.rs` (`Slot::ran`), worker `status.json` `ends_by_ms`, `shared/src/match_service.rs` (`InMatch`), `client/src/match_service.rs`, `client/src/frontend/searching.rs`. See [the session note](progress/2026-10-24-lr-13.md).
+
+## Client update path (LR-14, unreleased)
+
+- A game that the servers no longer admit shows **Update required** on Home. The download button takes Play's place and opens the market portal's download page for this platform (`<portal>/download?platform=…`; `https://omoba.ru/download` for RU builds). It also names the newest release from the catalog. iPhone builds say to update through the App Store or TestFlight and link nowhere. A build without a portal (global today) shows no button and says to download the new version from the official site.
+- A game newer than the servers shows «servers are switching to your version» and keeps checking every 30 s, so players who update before the server switch connect by themselves.
+- A newer release in the market's catalog (`GET /v1/releases`, read at boot and after a mismatch) shows a dismissible **Update available** banner on Home.
+- Catalog entries carry `channel` (`direct`), an optional `min_release` and `update_url` (`release.py catalog --min-release`). The game reads only its own channel; a game below `min_release` shows Update required even while the servers accept it, and `update_url` is the button target.
+- The compatibility report carries an additive update notice: the server's release as the minimum and its portal's download page. Clients open only links on their own portal. Production texts no longer suggest choosing another server.
+- Copy in en, ru and zh-Hans (`client/i18n/*/update.json`); the release rule is in [RELEASING.md](RELEASING.md#updates-and-contract-changes-lr-14).
+- Code: `shared/src/compatibility.rs` (`UpdateNotice`, `ReleaseVersion`, `mismatch_side`, `download_page`), `server/src/public_transport.rs`, `passport/src/release_catalog.rs`, `client/src/update.rs`, `client/src/frontend/home.rs`, `client/src/net/status_ui.rs`. See [the session note](progress/2026-10-24-lr-14.md).
+
+## RU downloads from the RU host (LR-23, unreleased)
+
+- RU players download the game (Windows, Linux, macOS, Android) from the RU host at `omoba.ru/downloads/v<version>/`, served by Caddy on the portal's site; the Pinata IPFS copy of the same bytes is the mirror.
+- `make release-ru-publish` copies the packages with rsync (a published file is never replaced), reads each one back over HTTPS and checks SHA-256 and size, pins the IPFS mirror, and writes `releases.json`: host URL, `mirror_url`, status «Открытая бета», region `ru`, channel `direct`. `make release-ru-verify-downloads` downloads everything the RU portal lists and checks it byte for byte.
+- Downloads are counted per platform, version and day: Caddy logs only download requests (address shortened to /24 or /48, no headers, 90 days) and `ru_host.py downloads` prints the totals from the host; no address leaves it.
+- The download path and the status label live in the RU profile of `scripts/markets.py` (`downloads_path`, `release_label`, `region`); the global market keeps its IPFS links and the `playtest` label.
+- Code: `scripts/release.py` (`publish_to_host`, `release_catalog`, `downloads_report`), `scripts/markets.py`, `ops/vps/ru/Caddyfile.ru`, `ops/vps/ru/ru_downloads.py`, `ops/vps/ru/ru_host.py` (`downloads`, the download folder and log). See [RU downloads](../ops/vps/ru/README.md#downloads) and [the session note](progress/2026-10-24-lr-23.md).
+
+## RU web entry point, Russian README and server bundle (LR-22, unreleased)
+
+- The RU landing is the RU portal's own guest home at `omoba.ru` (omoba-web, hosted in Russia, no foreign analytics): the number of hero classes counted from the game's catalog, the Verdant Arena, Ranked, Casual PvP, vs Bots and Offline practice named as the game names them, download buttons from the RU release catalog with SHA-256 and sizes in МБ, the status «Открытая бета» in the page language, the legal, source and community links and the age sign `12+`. Signed-in players go from `/` to `/me`; the workshop is labelled experimental; no RU page shows donate, wallet, crypto or Ekza content. The omoba.io landing is unchanged.
+- RU player packages carry a Russian README.txt: what the game is, install, sign-in with VK ID («Профиль» → «Войти через VK ID»), how progress survives a reinstall (it follows the VK-linked account; recovery codes, LR-18), support and community channels once the owner sets them, the package's system requirements, the documents, the release's source and the age sign. It has no hosting notes. The global and dev READMEs are unchanged byte for byte.
+- The RU Linux player package no longer carries `omoba-account-api`: the RU lobby and Account API are their own server bundle (`release.py build server --market ru`, also in `make release-ru`), the only file `ru_host.py ship` accepts.
+- The RU portal serves a public `/delete` page (`omoba.ru/delete`, linked from every legal footer): how to have an account deleted without signing in, in ru, en and zh. Until deletion ships in the game (LR-42, LR-69) it is the operator's e-mail procedure from the privacy policy: device keys refused once the request is confirmed, erasure within 30 days, match results kept anonymised. The support address appears once the owner sets it (LR-21).
+- Code: `scripts/release.py` (`ru_player_readme`, `ru_system_requirements`, `build_server_bundle`, `stage_server_bundle`), `scripts/markets.py` (`player_readme`, `server_bundle`), `ops/vps/ru/ru_host.py` (`RU_PACKAGE`); omoba-web `src/components/guest-home.tsx`, `src/components/deletion.tsx`, `src/lib/releases.mjs`, `src/lib/market-profile.mjs` (`marketLanding`, `delete`). See [markets](markets.md#legal-documents-and-links-lr-06), [the RU server bundle](../ops/vps/ru/README.md#server-bundle) and [the session note](progress/2026-10-24-lr-22.md).
+
+## Admission and abuse limits (LR-16, unreleased)
+
+- One source (an address, or a household or carrier NAT behind one) can no longer lock everyone else out of login or hold the arenas: transport probes and compatibility replies are budgeted per IP and per /24 before the global budget, which keeps a reserve for new sources; one IP holds at most 8 endpoints and 8 career clients.
+- New device keys create profiles only within 10 per IP and 5000 in all per 24 hours, counted durably in PostgreSQL (career schema 4, a salted hash of the address, never the address); existing keys always sign in. The refusal («Too many new profiles were created from your network today…») is shown in the player's language, and the client stops retrying it.
+- One IP holds at most one arena alone (every human from it): a second vs Bots, or a bot-filled Casual match, from that IP gets «A match from your network is already running…». Three vs Bots allocations left unplayed within 10 minutes give that IP a 2-minute vs Bots cooldown.
+- The lobby deletes profiles that never played and that nothing else holds (friend, portal link, sign-in, Supporter grant) 30 days after their key was created, 200 per hour, logging `PROFILE_RETENTION pruned=N`.
+- A sign-in during a reconnect storm or a database restart waits instead of failing: one Login per endpoint at a time, a full worker queue is silent, and an unconnected database is waited for up to 10 s. A harness test reconnects 300 clients after a lobby restart without an error.
+- The RU host ships kernel per-source rate limits for UDP 4000 and the arena range (`ops/vps/ru/nftables-omoba.conf`, unit `omoba-limits-ru`), installed and checked by `ru_host.py`. Every limit is a setting (`OMOBA_LIMIT_*`, `OMOBA_PROFILE_RETENTION_DAYS`) documented in [ops/vps/ru/README.md](../ops/vps/ru/README.md#admission-limits-lr-16).
+- Copy in en, ru and zh-Hans (`client/i18n/*/admission.json`, `queue.failed.arena_limit`, `queue.failed.practice_cooldown`).
+- Code: `server/src/admission.rs`, `server/src/public_transport.rs`, `server/src/career_backend.rs`, `server/src/match_service.rs`, `career-store/migrations/postgres/004_admission_limits.sql`, `career-store/src/career_store.rs` (`authenticate_from`, `prune_unplayed_profiles`), `harness/tests/admission.rs`. See [the session note](progress/2026-10-24-lr-16.md).
+
+## Legal acceptance, About and age sign in the game (LR-06, unreleased)
+
+- An RU build opens with a card before anything else: «Перед игрой», the age sign `12+`, links to the User Agreement and the Privacy Policy on `omoba.ru` (opened in the browser), the document version (`0-draft`), a language switch and «Я принимаю…». **Continue** stays disabled until the switch is on.
+- Until the player accepts, the game opens no lobby connection, does not read the release catalog and offers no VK sign-in, device link or website pairing. The acceptance is kept in the market's settings folder (`legal_acceptance.json`: region, document version, time); a new document version asks again. It is not sent to a server yet.
+- Settings → «Об игре» shows the build label, `12+`, both documents and the source code of this release (`github.com/o-moba/omoba-bevy/tree/v<version>-ru`). Support e-mail, VK community and Telegram appear there once the owner provides them. The boot splash shows `12+` too.
+- RU package READMEs end with the age sign and the same links. `release.py catalog --market ru` refuses until the public tag `v<version>-ru` exists.
+- The global build is unchanged: its market has no legal table, so no card, no About page and no gate.
+- Copy in en, ru and zh-Hans (`client/i18n/*/legal.json`).
+- Code: `shared/src/market.rs` (`Market::legal`, `Legal`), `scripts/markets.py` (`Legal`), `client/src/legal.rs`, `client/src/pause_menu.rs` (About tab), `scripts/release.py` (`legal_readme`, `require_public_source_tag`). See [markets](markets.md#legal-documents-and-links-lr-06) and [the session note](progress/2026-10-24-lr-06-client.md).
+
+## RU host monitoring and alerts (LR-17 ops, unreleased)
+
+- The owner hears about an RU outage on Telegram within minutes, without logging in to the host. Without a bot, every alert still goes to the journal.
+- On the host, every RU unit and every PostgreSQL cluster unit names `OnFailure=omoba-alert-ru@%n.service`, so any failure alerts at once, also each crash before systemd restarts a service. A check every 5 minutes reports an enabled service or Caddy not running, a PostgreSQL cluster down (its `postgresql@<version>-main.service`, not the always-active `postgresql.service` wrapper, or no connection on port 5432), a stopped backup timer, free disk below 15% and a match worker whose heartbeat stopped. Reminders come hourly (daily for a timer job), and a "resolved" message follows once the problem is gone.
+- Outside the host, an external probe runs every minute against the lobby's UDP compatibility check, the Account API `/health/ready` and the portal, and alerts after 2 failed rounds in a row. `release.py preflight` runs the same UDP check and, with `--contract`, compares the server with a release.
+- A journald drop-in keeps the RU host's journal on disk, at most 1 GiB and 30 days.
+- The host's one Telegram bot lives in `alerts.env`; the backup alerts (LR-03) use it too. The public names come from `scripts/markets.py`.
+- Not yet: the lobby's queue, capacity and allocation metrics with their alerts, and bounded match archives (LR-17 server part).
+- Code: `ops/vps/ru/ru_monitor.py`, `ops/vps/ru/omoba-alert-ru@.service`, `ops/vps/ru/omoba-monitor-ru.{service,timer}`, `ops/vps/ru/postgresql-alert-ru.conf`, `ops/vps/ru/alerts.env.example`, `ops/vps/ru/journald-omoba-ru.conf`, `ops/vps/ru/ru_host.py` (install and `status`), `scripts/market_probe.py`, `ops/probe/`, `scripts/release.py` (`preflight`). See [Monitoring and alerts](../ops/vps/ru/README.md#monitoring-and-alerts), [the external probe](../ops/probe/README.md) and [the session note](progress/2026-10-24-lr-17-ops.md).
+
+## Protect progress (LR-18, unreleased)
+
+- After the first completed match, and again after the first ranked match, Home shows a dismissible card: «Защитите прогресс: VK ID или код восстановления.» (Protect / Not now). A "Not now" hides it for three completed matches, or until the first ranked match if that comes sooner, so players who never play ranked are asked again too; it stops once the profile is protected or after three declines. The record (`protect_prompt.json`: declines, matches at the last decline) lives in the region's settings folder.
+- Profile shows the account's protection (VK ID linked, unused recovery codes, or not protected yet) and a «Защитить прогресс» button. The Protect modal links VK ID where the region signs in with it and creates or replaces recovery codes in the game; replacing a set that still has unused codes needs a second press. The eight codes are shown once, grouped for reading, never stored or logged, and gone when the modal closes.
+- The codes come from a native Account API route signed by the device key (`POST /v1/auth/devices/recovery-codes`, `omoba.recovery.native.v1`, single-use nonce), on the RU and dev ingress allowlists; no portal session and no schema change.
+- «Привязать или восстановить аккаунт» offers «Ввести код восстановления» next to «Войти через VK ID» and the device request, and a request started from it asks for the code first.
+- Progress follows the VK-linked account; RU package READMEs and the RU portal (guest home, sign-in, `/connect`, Devices; o-moba/omoba-web#20) say so. The VK-verified support procedure is [account recovery](account-recovery.md); Android keeps `allowBackup=false` ([ADR-026](architecture/decisions.md#adr-026-android-keeps-allowbackupfalse-progress-survives-a-reinstall-through-vk-id-or-recovery-codes)).
+- Copy in en, ru and zh-Hans (`client/i18n/*/protect.json`).
+- Code: `shared/src/device_account.rs` (`NativeRecoveryRequest`, `AccountProtection`), `account-api/src/devices.rs` (`native_recovery`), `passport/src/device_account.rs`, `client/src/career_protection.rs`, `client/src/career_identity.rs` (`sign_recovery_request`), `client/src/career_devices.rs`, `client/src/frontend/home.rs`, `scripts/release.py` (`progress_readme`). See [the session note](progress/2026-10-24-lr-18.md).
+
+## Moderation minimum (LR-15, unreleased)
+
+- Operators put sanctions on a profile with `omoba-account-api sanction add|list|lift` and look players up with `omoba-account-api player <Name#1234 | profile-id>`: `chat_mute`, `matchmaking_ban`, `ranked_ban`, `account_ban` and `name_reset`, each for a duration (`30m`, `7d`, …) or until lifted, with a reason and the operator's name. Procedure: [RUNBOOK.md › Moderation](../RUNBOOK.md#moderation-lr-15).
+- Game servers read a profile's sanctions at sign-in and every 10 seconds, so applying or lifting one takes effect without a restart. An account ban refuses the game sign-in (and ends a signed-in session), every website session and new website sign-in; a matchmaking ban refuses every search, a ranked ban only Ranked; account and matchmaking bans hide the player from party presence and take them out of their party; a chat mute refuses their chat and drops what they sent in the last 30 seconds, while reactions stay.
+- `omoba-account-api rename <player>` resets a name to `Player#NNNN` and locks renames (game and website) until the reset ends; party presence shows the new name within seconds.
+- Chat kill switch: `OMOBA_CHAT=off` on a server (the RU lobby unit sets it, owner default O-9; match workers inherit it), or `omoba-account-api chat off` for every server of the database within seconds. Reactions are never switched off.
+- The player sees each refusal in their language with its end in UTC: the suspended sign-in and the search refusals on the search screen and the career panel, «muted until …» or «chat is turned off» in the match chat, which then offers no keyboard. A suspended client signs in again every minute, so a lifted ban needs no restart.
+- Every moderation action writes an audit row in the same transaction (`career_moderation_events`, career schema 5); rows are append-only and cannot be deleted before they are a year old. A sanctioned profile is never pruned as unplayed, so a ban on a throwaway key holds.
+- Copy in en, ru and zh-Hans (`client/i18n/*/moderation.json`).
+- Code: `shared/src/moderation.rs`, `career-store/migrations/postgres/005_sanctions.sql`, `career-store/src/moderation.rs`, `account-api/src/moderation.rs`, `server/src/career_backend.rs`, `server/src/social.rs`, `server/src/party.rs`, `server/src/match_service.rs`, `client/src/moderation.rs`, `client/src/social.rs`. See [the session note](progress/2026-10-24-lr-15.md).
+
+## Arena capacity: full pool and full server (LR-09, unreleased)
+
+- When every arena is busy, a search whose match is ready waits in line and says so: «All arenas are busy · you are number 2 in line · about 3 min». The place follows the order the lobby seats rosters (vs Bots, then Ranked, then Casual PvP); the estimate appears once arenas have freed in the last 15 minutes. A search that is not ready yet (Ranked 3/10) keeps showing its own progress.
+- The searching screen then offers **Play offline practice while you wait** in one tap: it leaves the queue and opens the practice picker with the chosen hero. The same offer appears when the server is too full to sign in.
+- A full server answers instead of staying silent: at 512 endpoints a new player's probe gets `server_full`, and at 512 career clients its sign-in gets the `server_full` code. The game shows «The server is full. Retrying…» and keeps trying.
+- The lobby reports a busy pool: `<match root>/capacity.json` every 5 s and `CAPACITY_METRIC` journal lines; on the RU host `ru_monitor.py` alerts the owner after a 2-minute wait (`OMOBA_ALERT_CAPACITY_WAIT_SECONDS`).
+- The load probe is ready for the RU host: mixed queues, the lobby unit's cgroup limits, a maximum time to Running, and per-arena-type snapshot gaps, bytes per player, CPU and RSS (`CAPACITY_RESULT`). The measurement itself and the final capacity need the host ([Arena capacity](../ops/vps/ru/README.md#arena-capacity-lr-09)).
+- Copy in en, ru and zh-Hans (`client/i18n/*/capacity.json`, `admission.error.server_full`).
+- Code: `server/src/capacity.rs`, `server/src/match_service.rs` (`Lobby::refresh_line`), `server/src/match_pool.rs`, `server/src/public_transport.rs`, `server/src/career_backend.rs`, `shared/src/match_service.rs` (`CapacityLine`), `shared/src/public_transport.rs` (`ServerFull`), `client/src/match_service.rs`, `client/src/frontend/searching.rs`, `client/src/net/{public_transport,transport,session}.rs`, `client/src/career_identity.rs`, `ops/vps/ru/ru_monitor.py`, `scripts/test_public_mvp.mjs`. See [the session note](progress/2026-10-24-lr-09.md).
 
 ## Multiplayer Session Reliability
 
@@ -1049,8 +1427,14 @@ local sign out. The client stores its scoped opaque credential in
 `ekza-store/account/session.json` under its private settings directory (0600 on
 Unix), restores it with a fresh SDK library check, and refreshes every 15 seconds.
 Registry outages retain credentials; authorization rejection clears them. Sign
-out removes the local credential and invalidates pending background work;
-Studio Account revokes access server-side. Public approved community models
+out removes the local credential and invalidates pending background work, then
+asks the registry to end that link (`DELETE /v1/account/session` through the
+SDK's `AccountSession::disconnect`). The request runs in the background and is
+best effort: signing out never waits for it, and offline the link stays valid
+until it expires or Studio Account revokes it. A new pairing that replaces a
+saved link (for example one a startup outage left unrestored) ends the old link
+the same way once the new one is saved; the SDK refuses, without sending it, a
+saved token for another server or game. Public approved community models
 remain free after logout. Catalogue identity, metadata, live entitlement changes
 and scrolling stay intact when an account is restored or signed out.
 
@@ -1162,3 +1546,16 @@ exposing credentials to the browser. This is a prototype for local gameplay and
 community contribution, with no public/ranked custom-class admission or automatic
 skin installation. See [community workshop](community-workshop.md) and
 [native build import](class-workshop-game.md).
+
+### Hero aura world verification (2026-10-15)
+
+The current ribbon revision is captured on the actual Agnes roster character
+in a server-backed local 5v5 practice match, in English at 1280×720. Normal,
+moving and close views plus 24 sampled motion frames show 23 effect elements;
+revocation clears the replicated aura and removes them all. The short 3.24-second
+MP4 contains those 24 sampled frames, not a 60-fps recording. A separate warmed
+180-frame sample per state at VSync 60 records similar whole-frame pacing with
+the aura on and off; ongoing bots, jungle and HUD work prevent isolating its GPU
+cost. The earlier 35-element body-glow captures remain historical. See
+[Supporter operations](supporter.md#live-hero-world-verification) for results,
+limits and the reproducible QA scope. No real payment or deployment is implied.

@@ -1595,7 +1595,7 @@ fn type_page(body: &mut ChildSpawnerCommands) {
         (TextRole::Heading, "pause.title"),
         (TextRole::NameLg, "career.friends.title"),
         (TextRole::Eyebrow, "kit.gallery.sample.eyebrow"),
-        (TextRole::ButtonLg, "home.play.quick_match"),
+        (TextRole::ButtonLg, "queue.play.casual"),
         (TextRole::Button, "pause.button.resume"),
         (TextRole::Label, "pause.audio.master"),
         (TextRole::Body, "career.friends.scope"),
