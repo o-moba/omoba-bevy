@@ -5,6 +5,23 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Phone top HUD: a smaller144×40 selected target and allied portraits keep the
+  top edge together. Passive enemy death timers use a separate row below allies;
+  live lock targets keep their right-side slots. Settings/chat sit together
+  below the death row. The runtime layout has a fast renderer-free Rust contract
+  test, including the avatar-drop regression and narrow-screen fallback.
+
+- Mobile HUD interactions: the movement stick reanchors on a fresh lower-left
+  press and keeps its base after release; the kill feed sits below purchases on
+  the left. A selected visible enemy portrait shows a gold camera-relative
+  direction arrow, with stale/hidden targets excluded and touch ownership kept.
+
+- Mobile in-match HUD: compact reference-sized attack/skills and utility discs,
+  larger independent touch regions, bottom-row Recall/Dash/Haste, an inward
+  transparent joystick, shallow score ribbon and small settings/chat controls
+  beside the minimap. Ally portraits, quick-buy art and ability detail badges
+  leave more of the battlefield visible; desktop/menu scale is unchanged.
+
 - RU registration: website-first VK ID/OK/Mail.ru sign-in can create a default-stat
   profile and session; game-first linking preserves existing progress. Add portal
   migration 10 with a bounded registration function, reviewed-account device approval,

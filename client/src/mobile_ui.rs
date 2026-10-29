@@ -1746,6 +1746,7 @@ mod tests {
         let mut app = App::new();
         let mut mobile = MobileControls::default();
         mobile.enabled = true;
+        mobile.safe.top = 12.0;
         app.insert_resource(mobile)
             .init_resource::<ClientSession>()
             .init_resource::<ServerEntry>()
@@ -1755,53 +1756,64 @@ mod tests {
             .add_systems(Startup, setup_phone_ui)
             .add_systems(Update, sync_phone_ui)
             .add_systems(PostUpdate, adapt_phone_layout);
-        for (scale, shop_open) in [
-            (1.0, false),
-            (0.61, false),
-            (0.61, true),
-            (0.61, false),
-            (0.8, false),
-            (1.0, false),
+        // This consumer fixture does not run refresh_mobile_layout. Feed it
+        // both production inset values; the producer's screen policy is tested
+        // separately in compact_match_gutter_preserves_menu_and_loading_safe_area.
+        for (screen, expected_top) in [
+            (crate::frontend::AppScreen::Home, 12.0),
+            (crate::frontend::AppScreen::InMatch, 4.0),
+            (crate::frontend::AppScreen::Home, 12.0),
         ] {
-            app.world_mut().resource_mut::<UiScale>().0 = scale;
-            app.world_mut()
-                .resource_mut::<crate::shop::ShopState>()
-                .open = shop_open;
-            app.update();
-            let mut buttons = app.world_mut().query::<(&UiAction<PhoneAction>, &Node)>();
-            for (UiAction(action), node) in buttons.iter(app.world()) {
-                if matches!(
-                    action,
-                    PhoneAction::Help | PhoneAction::Menu | PhoneAction::Server
-                ) {
-                    let Val::Px(height) = node.height else {
-                        panic!("explicit target height")
-                    };
-                    let Val::Px(width) = node.width else {
-                        panic!("explicit target width")
-                    };
-                    assert!((height * scale - 44.0).abs() < 0.001);
-                    assert!(width * scale >= 47.999);
+            app.insert_resource(State::new(screen));
+            app.world_mut().resource_mut::<MobileControls>().safe.top = expected_top;
+            for (scale, shop_open) in [
+                (1.0, false),
+                (0.61, false),
+                (0.61, true),
+                (0.61, false),
+                (0.8, false),
+                (1.0, false),
+            ] {
+                app.world_mut().resource_mut::<UiScale>().0 = scale;
+                app.world_mut()
+                    .resource_mut::<crate::shop::ShopState>()
+                    .open = shop_open;
+                app.update();
+                let mut buttons = app.world_mut().query::<(&UiAction<PhoneAction>, &Node)>();
+                for (UiAction(action), node) in buttons.iter(app.world()) {
+                    if matches!(
+                        action,
+                        PhoneAction::Help | PhoneAction::Menu | PhoneAction::Server
+                    ) {
+                        let Val::Px(height) = node.height else {
+                            panic!("explicit target height")
+                        };
+                        let Val::Px(width) = node.width else {
+                            panic!("explicit target width")
+                        };
+                        assert!((height * scale - 44.0).abs() < 0.001);
+                        assert!(width * scale >= 47.999);
+                    }
                 }
-            }
-            let mut bars = app.world_mut().query_filtered::<&Node, With<PhoneBar>>();
-            let node = bars.single(app.world()).unwrap();
-            assert_eq!(node.display, Display::None);
-            let Val::Px(top) = node.top else {
-                panic!("safe top")
-            };
-            let Val::Px(right) = node.right else {
-                panic!("safe right")
-            };
-            assert!((top * scale - 12.0).abs() < 0.001);
-            assert!((right * scale - 32.0).abs() < 0.001);
-            let mut fonts = app.world_mut().query::<(&Text, &TextFont)>();
-            for (text, font) in fonts.iter(app.world()) {
-                if matches!(text.0.as_str(), "?" | "MENU" | "SERVER") {
-                    let bevy::text::FontSize::Px(px) = font.font_size else {
-                        panic!("phone font must remain pixel-sized");
-                    };
-                    assert!((px * scale - 14.0).abs() < 0.001);
+                let mut bars = app.world_mut().query_filtered::<&Node, With<PhoneBar>>();
+                let node = bars.single(app.world()).unwrap();
+                assert_eq!(node.display, Display::None);
+                let Val::Px(top) = node.top else {
+                    panic!("safe top")
+                };
+                let Val::Px(right) = node.right else {
+                    panic!("safe right")
+                };
+                assert!((top * scale - expected_top).abs() < 0.001);
+                assert!((right * scale - 32.0).abs() < 0.001);
+                let mut fonts = app.world_mut().query::<(&Text, &TextFont)>();
+                for (text, font) in fonts.iter(app.world()) {
+                    if matches!(text.0.as_str(), "?" | "MENU" | "SERVER") {
+                        let bevy::text::FontSize::Px(px) = font.font_size else {
+                            panic!("phone font must remain pixel-sized");
+                        };
+                        assert!((px * scale - 14.0).abs() < 0.001);
+                    }
                 }
             }
         }

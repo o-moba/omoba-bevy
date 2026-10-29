@@ -202,6 +202,7 @@ fn configure_target_presentation(app: &mut App) {
             crate::targeting::draw_locked_target,
             crate::targeting::refresh_aim_projection,
             crate::targeting::draw_targeting_ui.after(crate::targeting::refresh_aim_projection),
+            enemy_portraits::draw_enemy_portrait_directions,
         )
             .after(crate::net::NetworkGroundingSet)
             .after(bevy::camera::CameraUpdateSystems)

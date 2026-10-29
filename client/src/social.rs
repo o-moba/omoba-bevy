@@ -1631,14 +1631,23 @@ fn render(
                 Name::new("SocialEntry"),
             ))
             .with_children(|p| {
-                let chat = crate::ui::widgets::controls::sized_icon_button(
-                    p,
-                    crate::ui::kit_assets::Icon::NavMessageCircle,
-                    crate::ui::theme::Form::Desktop,
-                    ButtonKind::Secondary,
-                    SocialAction::Chat,
-                    "SocialOpenChat",
-                );
+                let chat = if phone {
+                    crate::ui::widgets::controls::compact_hud_icon_button(
+                        p,
+                        crate::ui::kit_assets::Icon::NavMessageCircle,
+                        SocialAction::Chat,
+                        "SocialOpenChat",
+                    )
+                } else {
+                    crate::ui::widgets::controls::sized_icon_button(
+                        p,
+                        crate::ui::kit_assets::Icon::NavMessageCircle,
+                        crate::ui::theme::Form::Desktop,
+                        ButtonKind::Secondary,
+                        SocialAction::Chat,
+                        "SocialOpenChat",
+                    )
+                };
                 p.commands()
                     .entity(chat)
                     .insert(crate::ui::widgets::surfaces::Tooltip {
