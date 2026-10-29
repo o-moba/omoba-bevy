@@ -321,11 +321,12 @@ impl HudLayout {
             bar.min.y - space::S8 - plate::UPGRADE_CHIP.y,
             plate::UPGRADE_CHIP,
         );
+        let feed = phone_kill_feed_rect(viewport, safe);
         Self {
             form,
             viewport,
             allies,
-            kill_feed: phone_kill_feed_rect(viewport, safe),
+            kill_feed: feed,
             minimap,
             buff_chips: Rect::default(),
             target_frame: target,
@@ -359,7 +360,7 @@ impl HudLayout {
             ability_bar: bar,
             player_status: rect(
                 left,
-                quick_buy_top + slot + PHONE_STACK_GAP,
+                feed.max.y + PHONE_STACK_GAP,
                 plate::PLAYER_STATUS_PHONE,
             ),
             equipment: Rect::default(),
@@ -669,6 +670,7 @@ mod tests {
                 for occupied in [
                     hud.minimap,
                     hud.quick_buy,
+                    hud.player_status,
                     hud.region(HudRegion::MenuButton),
                     hud.region(HudRegion::SocialEntry),
                     hud.allies,
@@ -832,7 +834,7 @@ mod tests {
         assert_eq!(hud.quick_buy.min.y, hud.minimap.max.y + PHONE_STACK_GAP);
         assert_eq!(
             hud.player_status.min.y,
-            hud.quick_buy.max.y + PHONE_STACK_GAP
+            hud.kill_feed.max.y + PHONE_STACK_GAP
         );
         let controls = mobile.layout();
         let circles: Vec<_> = controls
@@ -973,7 +975,7 @@ mod tests {
         mobile.safe.bottom = 21.0;
         let l = HudLayout::phone(&mobile);
         assert_eq!(at(l.minimap), (57.0, 4.0, 120.0, 120.0));
-        assert_eq!(at(l.player_status), (57.0, 176.0, 200.0, 48.0));
+        assert_eq!(at(l.player_status), (57.0, 210.0, 200.0, 48.0));
         assert_eq!(at(l.quick_buy), (47.0, 128.0, 132.0, 44.0));
         assert_eq!(at(l.target_frame), (330.0, 4.0, 184.0, 44.0));
         assert_eq!(at(l.brush_chip), (350.0, 56.0, 144.0, 24.0));
@@ -1077,7 +1079,7 @@ mod tests {
             );
             assert_eq!(
                 layout.player_status.min.y,
-                layout.quick_buy.max.y + PHONE_STACK_GAP
+                layout.kill_feed.max.y + PHONE_STACK_GAP
             );
         }
     }

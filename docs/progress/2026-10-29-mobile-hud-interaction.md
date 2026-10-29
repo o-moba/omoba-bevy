@@ -13,14 +13,17 @@ movement strips. Frontend/gamepad/focus/death gates keep their existing behavior
 
 `hud_layout.rs` and `tactical_hud.rs` place compact kill notices directly below
 quick-buy on the left. The pure stack geometry also bounds fresh movement input;
-short screens use one row while ordinary phones retain two. Desktop is unchanged.
+short screens use one row while ordinary phones retain two. Phone/controller
+status follows the feed without overlap; touch mode hides that status. Desktop
+is unchanged.
 
 `enemy_portraits.rs` adds a small gold bearing inside the selected portrait's
 existing touch cell. It uses the current camera and entity transforms, including
 2D mapping, and requires the exact live visible enemy identity. No vector is
 shown for hidden/dead/missing/stale targets or position-free public death timers.
-Arrow paint does not intercept taps and stationary geometry does not dirty UI
-layout each frame.
+A dark under-stroke keeps the gold arrow readable over portrait hair. Arrow
+paint does not intercept taps and stationary geometry does not dirty UI layout
+each frame.
 
 Evidence and current check receipts are kept in
 `.agent/tasks/MOBILE-HUD-INTERACTION-20261029/`. Native verification uses only the

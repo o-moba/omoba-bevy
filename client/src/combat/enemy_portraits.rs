@@ -43,10 +43,12 @@ pub(super) struct EnemyPortraitDirection(EnemyPortraitAction);
 pub(super) struct EnemyPortraitDirectionStroke {
     action: EnemyPortraitAction,
     index: usize,
+    width: f32,
 }
 
 const DIRECTION_OVERLAY_SIDE: f32 = 40.0;
 const DIRECTION_STROKE_WIDTH: f32 = 2.0;
+const DIRECTION_OUTLINE_WIDTH: f32 = 4.0;
 
 /// Both endpoints are projected through the same current camera. Raw world XZ
 /// would point the wrong way after an orbit or when the 2D renderer is selected.
@@ -85,7 +87,7 @@ fn portrait_screen_direction(
 }
 
 /// Three short strokes remain inside the portrait's 40px content box at every
-/// angle, including their 2px width. They cannot paint over another HUD cell.
+/// angle, including their 4px outline. They cannot paint over another HUD cell.
 fn direction_strokes(direction: Vec2) -> [(Vec2, Vec2); 3] {
     let center = Vec2::splat(DIRECTION_OVERLAY_SIDE * 0.5);
     let tip = center + direction * 17.0;
@@ -120,20 +122,36 @@ fn spawn_portrait_direction(parent: &mut ChildSpawnerCommands, action: EnemyPort
             )),
         ))
         .with_children(|arrow| {
-            for (index, (a, b)) in direction_strokes(Vec2::X).into_iter().enumerate() {
-                let (node, transform) = crate::minimap::line_node(a, b, DIRECTION_STROKE_WIDTH);
-                arrow.spawn((
-                    node,
-                    transform,
-                    BackgroundColor(color::GOLD_400),
-                    Pickable::IGNORE,
-                    EnemyPortraitDirectionStroke { action, index },
-                    Name::new(if index == 0 {
-                        format!("EnemyPortraitDirection-{}", action.target.id)
-                    } else {
-                        format!("EnemyPortraitDirectionHead-{}-{index}", action.target.id)
-                    }),
-                ));
+            for (outline, width, paint) in [
+                (
+                    true,
+                    DIRECTION_OUTLINE_WIDTH,
+                    Color::srgba(0.01, 0.015, 0.025, 0.95),
+                ),
+                (false, DIRECTION_STROKE_WIDTH, color::GOLD_400),
+            ] {
+                for (index, (a, b)) in direction_strokes(Vec2::X).into_iter().enumerate() {
+                    let (node, transform) = crate::minimap::line_node(a, b, width);
+                    arrow.spawn((
+                        node,
+                        transform,
+                        BackgroundColor(paint),
+                        Pickable::IGNORE,
+                        ZIndex(if outline { 0 } else { 1 }),
+                        EnemyPortraitDirectionStroke {
+                            action,
+                            index,
+                            width,
+                        },
+                        Name::new(if outline {
+                            format!("EnemyPortraitDirectionOutline-{}-{index}", action.target.id)
+                        } else if index == 0 {
+                            format!("EnemyPortraitDirection-{}", action.target.id)
+                        } else {
+                            format!("EnemyPortraitDirectionHead-{}-{index}", action.target.id)
+                        }),
+                    ));
+                }
             }
         });
 }
@@ -432,8 +450,7 @@ pub(super) fn draw_enemy_portrait_directions(
     for (stroke, mut node, mut transform) in &mut strokes {
         if let Some((_, direction)) = matches(stroke.action) {
             let (a, b) = direction_strokes(direction)[stroke.index];
-            let (next_node, next_transform) =
-                crate::minimap::line_node(a, b, DIRECTION_STROKE_WIDTH);
+            let (next_node, next_transform) = crate::minimap::line_node(a, b, stroke.width);
             node.set_if_neq(next_node);
             transform.set_if_neq(next_transform);
         } else if node.display != Display::None {
@@ -713,12 +730,26 @@ mod tests {
             },
         );
         app.update();
-        assert!(app.world().resource::<StrokeChanges>().0 > 0);
+        assert_eq!(app.world().resource::<StrokeChanges>().0, 6);
+        let mut strokes = app
+            .world_mut()
+            .query::<(&EnemyPortraitDirectionStroke, &ZIndex, &Pickable)>();
+        for (stroke, layer, pickable) in strokes.iter(app.world()) {
+            assert_eq!(
+                layer.0,
+                if stroke.width == DIRECTION_OUTLINE_WIDTH {
+                    0
+                } else {
+                    1
+                }
+            );
+            assert!(!pickable.is_hoverable && !pickable.should_block_lower);
+        }
         app.update();
         assert_eq!(app.world().resource::<StrokeChanges>().0, 0);
         *app.world_mut().get_mut::<Transform>(camera).unwrap() = camera_pose(Vec3::X);
         app.update();
-        assert!(app.world().resource::<StrokeChanges>().0 > 0);
+        assert_eq!(app.world().resource::<StrokeChanges>().0, 6);
     }
 
     #[test]
@@ -729,7 +760,7 @@ mod tests {
             for (a, b) in direction_strokes(direction) {
                 for point in [a, b] {
                     assert!(
-                        point.distance(center) + DIRECTION_STROKE_WIDTH * 0.5
+                        point.distance(center) + DIRECTION_OUTLINE_WIDTH * 0.5
                             < DIRECTION_OVERLAY_SIDE * 0.5
                     );
                 }
