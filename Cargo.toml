@@ -1,5 +1,5 @@
 [workspace]
-members = ["account-api", "arena-sync", "career-store", "client", "common", "harness", "passport", "server", "shared"]
+members = ["account-api", "arena-sync", "browser-client", "career-store", "client", "common", "harness", "passport", "server", "shared"]
 resolver = "2"
 
 [workspace.package]

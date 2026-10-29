@@ -55,6 +55,7 @@ docs/*
 !docs/community-sculptures.md
 !docs/release-compatibility.md
 !docs/bot-practice-and-social.md
+!docs/browser-practice.md
 !docs/game-audio.md
 !docs/economy.md
 !docs/adventurer.md

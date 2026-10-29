@@ -7,11 +7,13 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		A00000000000000000000024 /* OmobaAppDelegate.xib in Resources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000000A /* OmobaAppDelegate.xib */; };
 		A00000000000000000000022 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000006 /* Assets.xcassets */; };
 		A00000000000000000000023 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000007 /* PrivacyInfo.xcprivacy */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		A0000000000000000000000A /* OmobaAppDelegate.xib */ = {isa = PBXFileReference; lastKnownFileType = file.xib; path = OmobaAppDelegate.xib; sourceTree = "<group>"; };
 		A00000000000000000000005 /* OmobaBeta.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = OmobaBeta.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A00000000000000000000006 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A00000000000000000000007 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
@@ -23,6 +25,7 @@
 		A00000000000000000000003 = {
 			isa = PBXGroup;
 			children = (
+				A0000000000000000000000A /* OmobaAppDelegate.xib */,
 				A00000000000000000000006 /* Assets.xcassets */,
 				A00000000000000000000007 /* PrivacyInfo.xcprivacy */,
 				A00000000000000000000008 /* xcode_build.py */,
@@ -70,6 +73,9 @@
 					A00000000000000000000002 = {
 						CreatedOnToolsVersion = 26.0;
 						ProvisioningStyle = Automatic;
+						SystemCapabilities = {
+							com.apple.AssociatedDomains = { enabled = 1; };
+						};
 					};
 				};
 			};
@@ -98,6 +104,7 @@
 			files = (
 				A00000000000000000000022 /* Assets.xcassets in Resources */,
 				A00000000000000000000023 /* PrivacyInfo.xcprivacy in Resources */,
+				A00000000000000000000024 /* OmobaAppDelegate.xib in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

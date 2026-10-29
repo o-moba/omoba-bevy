@@ -1,8 +1,8 @@
 //! Jungle camp and raid boss AI, damage and rewards.
 
+use shared::clock::Instant;
 use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::time::Instant;
 
 use shared::combat::{CombatEntityKind, CombatEvent, ProjectileStyle};
 use shared::wire::{GameState, NeutralAiState, NeutralCampType};

@@ -19,10 +19,11 @@ ID sign-in; the shop settings and the webhook are in [YooKassa](#yookassa)).
 > packages and counts their downloads ([Downloads](#downloads)); every unit failure,
 > low disk, a stopped backup timer and a stuck match worker alert the owner, the journal
 > is bounded, and an external probe watches the public names every minute
-> ([Monitoring and alerts](#monitoring-and-alerts)). Still open before a public launch:
-> the lobby's own metrics and their alerts (LR-17, server part) and the capacity
-> measurement (LR-09). The owner buys the VPS, sets DNS, creates the VK ID app, provides
-> the backup storage in Russia, makes the backup key, names the escrow holder, creates
+> ([Monitoring and alerts](#monitoring-and-alerts)). Players waiting too long for a free
+> arena alert too, and the capacity probe is ready to run here ([Arena capacity](#arena-capacity-lr-09)).
+> Still open before a public launch: the lobby's other metrics and their alerts (LR-17,
+> server part) and the capacity measurement on this host (LR-09). The owner buys the
+> VPS, sets DNS, creates the VK ID app, provides the backup storage in Russia, makes the backup key, names the escrow holder, creates
 > the Telegram bot and picks the probe host.
 > See [the launch-readiness plan](../../../docs/plans/launch-readiness.md) and the
 > [RU release checklist](release-checklist.md).
@@ -334,13 +335,14 @@ alerts stay in the journal.
 | A backup, drill or backup-check timer is disabled or stopped: no backup is made, or a missing one is no longer reported | the same check | at the next check | hourly |
 | Free disk below 15% on a filesystem the host writes to (`/`, PostgreSQL, `/var/lib/omoba-ru`, `/var/backups/omoba-ru`, `/var/log`, `/opt/omoba-ru`) | the same check | at the next check | hourly |
 | A live match worker has written no heartbeat (`<match root>/<allocation>/status.json`) for 5 minutes while the lobby has run that long (the lobby relaunches a stale worker after 100 s) | the same check | at the next check | hourly |
+| Players have waited for a free arena for 2 minutes: every arena busy while a ready roster waits, from the lobby's `<match root>/capacity.json` (LR-09, [Arena capacity](#arena-capacity-lr-09)) | the same check | at the next check | hourly |
 | No backup for 26 h, a failed backup or drill, no drill for 35 days, a stale escrow | `ru_backup.py check --alert`, hourly (LR-03) | at once | every 6 h |
 | The lobby's UDP compatibility check, `/health/ready` or the portal fails from outside | the external probe, every minute | after 2 failed rounds in a row | hourly |
 
 Each alert says once when its problem is gone: "resolved" after 15 minutes without it,
 or "answers again" from the probe. Messages carry unit names, paths, numbers and
 allocation ids, never a log line, an address or a secret. Not watched yet, because they
-need the lobby's own metrics (LR-17, server part): the queue's capacity wait, failed
+need the lobby's own metrics (LR-17, server part): failed
 allocations and the database connection state.
 
 **Set up once (owner).**
@@ -357,7 +359,7 @@ allocations and the database connection state.
    with the same bot.
 
 **Knobs** in `alerts.env`: `OMOBA_ALERT_DISK_MIN_FREE_PERCENT` (15),
-`OMOBA_ALERT_WORKER_STALE_SECONDS` (300), `OMOBA_ALERT_REPEAT_MINUTES` (60),
+`OMOBA_ALERT_WORKER_STALE_SECONDS` (300), `OMOBA_ALERT_CAPACITY_WAIT_SECONDS` (120), `OMOBA_ALERT_REPEAT_MINUTES` (60),
 `OMOBA_ALERT_JOB_REPEAT_HOURS` (24) and `OMOBA_ALERT_RECOVERY_MINUTES` (15).
 `ru_monitor.py check` prints the host's state now, and
 `journalctl -u 'omoba-alert-ru@*' -u omoba-monitor-ru` shows what was alerted.
@@ -521,6 +523,99 @@ lobby logs the values it runs with (`Admission limits: …`).
   `arena_limit` and `practice_cooldown` on the searching screen.
 - The journal shows `PROFILE_RETENTION pruned=N …` when the retention job deleted
   profiles.
+
+## Arena capacity (LR-09)
+
+Every vs Bots player, and every bot-filled Casual match, takes a whole arena (a match
+worker with nine or more server bots), so the arena count, not the player count, is what
+runs out. The lobby and all its workers share the lobby unit's cgroup limits.
+
+**Setting now: a placeholder, not measured on this host.**
+
+| Setting | Value | Where |
+| --- | --- | --- |
+| Arenas (`OMOBA_MATCH_CAPACITY`) | 2 | [omoba-lobby-ru.service](omoba-lobby-ru.service); `ru_host.py` allows 1–64 |
+| UDP arena range | 41000–41001 (`OMOBA_MATCH_FIRST_PORT` … `+ capacity - 1`) | the same unit; `OMOBA_ARENA_PORTS` in [nftables-omoba.conf](nftables-omoba.conf) must match, and `bootstrap` opens it in ufw |
+| `MemoryHigh` / `MemoryMax` | 600M / 700M | the lobby unit (lobby and every worker together) |
+| `CPUQuota` / `TasksMax` | 150% / 128 | the lobby unit |
+
+**Measured per-arena cost on this host** (fill in from the probe's `CAPACITY_RESULT`
+lines, below):
+
+| Arena type | Arenas | Snapshot gap p95 / p99 | Slowest to Running | Bytes/s per player | Lobby + workers CPU (mean) | RSS (peak) |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| vs Bots | — | — | — | — | — | — |
+| Mixed (vs Bots, Casual, Ranked) | — | — | — | — | — | — |
+
+For scale only (not this host, no cgroup limits): on the developer Mac (Apple M4 Pro, dev
+build, 2026-10-25) 20 vs Bots arenas took 26% of one core and 312 MiB in all (about 1.3%
+and 16 MiB each), every player reached Running within 14 s, snapshot gaps were p95 65 /
+p99 110 ms, and each player received about 270 kB/s of snapshots.
+
+**When every arena is busy.** A search whose match is ready but has no free arena waits in
+line: the searching screen shows its place («Все арены заняты · ваше место в очереди: 2 ·
+примерно 3 мин.»; the estimate appears once arenas have freed in the last 15 minutes) and
+offers **Офлайн-тренировка, пока ждёте**, which leaves the queue. vs Bots goes first, then
+Ranked, then Casual PvP, as the lobby seats them. The lobby reports it:
+
+- `<match root>/capacity.json` (`/var/lib/omoba-ru/matches/capacity.json`), rewritten every
+  5 s: `capacity`, `occupied` (arenas holding their port), `searching`,
+  `waiting_for_arena` (players in line), `busy_since_ms` (since when someone waits),
+  `longest_wait_secs`, `busy_periods`. `ru_monitor.py check` alerts when the wait reaches
+  `OMOBA_ALERT_CAPACITY_WAIT_SECONDS` (120) ([Monitoring and alerts](#monitoring-and-alerts)).
+- The journal: `CAPACITY_METRIC event=busy|still_busy|clear capacity=… occupied=…
+  searching=… waiting_for_arena=… longest_wait_secs=… busy_secs=…` when the line forms or
+  clears and every minute while it lasts
+  (`journalctl -u omoba-lobby-ru -g CAPACITY_METRIC`).
+- A full server answers instead of staying silent: at 512 endpoints a new player's
+  transport probe gets `server_full`, and at 512 career clients its sign-in gets the
+  `server_full` code. The game shows «Сервер заполнен. Повторяем попытку…» and keeps trying.
+
+**Measure** on this host before launch (or on an identical one), with the release that
+will run. The probe ([scripts/test_public_mvp.mjs](../../../scripts/test_public_mvp.mjs),
+Node built-ins only) starts its own loopback lobby from the installed server on ports
+45500 and 45600+, under the lobby unit's own limits, against a disposable database; the
+running RU lobby, its ports and `omoba_ru` are not touched. Its synthetic players all come
+from 127.0.0.1, so it lifts the per-source limits for its own lobby.
+
+1. On the Mac, copy the probe and the release's contract:
+   ```sh
+   ssh $RU_HOST mkdir -p /root/capacity
+   scp scripts/test_public_mvp.mjs dist/v<v>-ru/compatibility.json $RU_HOST:/root/capacity/
+   ```
+2. On the host as root, a disposable role and database, migrated by the installed release:
+   ```sh
+   cd /root/capacity && PW=$(openssl rand -hex 24)
+   runuser -u postgres -- psql -v ON_ERROR_STOP=1 <<SQL
+   CREATE ROLE omoba_capacity LOGIN PASSWORD '$PW';
+   CREATE DATABASE omoba_capacity OWNER omoba_capacity;
+   SQL
+   export OMOBA_TEST_DATABASE_URL="postgres://omoba_capacity:$PW@127.0.0.1:5432/omoba_capacity"
+   OMOBA_DATABASE_URL="$OMOBA_TEST_DATABASE_URL" /opt/omoba-ru/current/omoba-account-api migrate
+   export HARNESS_SERVER_BIN=/opt/omoba-ru/current/omoba-server PATH=/opt/omoba-ru/node/current/bin:$PATH
+   P="node test_public_mvp.mjs --contract=compatibility.json --limits-from=/etc/systemd/system/omoba-lobby-ru.service --input-hz=20 --seconds=120"
+   ```
+3. Run, one at a time (each prints `CAPACITY_RESULT` lines and writes `report.json`):
+   ```sh
+   $P --clients=4 --preference=bot_practice --capacity=4 --output=bots-4      # raise 4 → 8 → 12 … while p95 < 100 ms
+   $P --clients=20 --preference=bot_practice --capacity=20 --max-wait-secs=60 --output=bots-20
+   $P --mix=bot_practice:5,quick:5,humans_only:10 --capacity=<N> --max-wait-secs=60 --output=mixed-20
+   ```
+   Pass: snapshot gap p95 stays under 100 ms at the chosen capacity, and the 20 vs Bots
+   players and the mixed 20 all reach Running within 60 s (`--max-wait-secs` fails the run
+   otherwise; Casual waits its 30 s for bots by design). If 20 vs Bots arenas do not fit,
+   raise `CPUQuota`/`MemoryMax` (the host is 2 vCPU / 4 GB shared with PostgreSQL, the
+   Account API and the portal) or take a bigger host (owner, O-16).
+4. Set and record: `OMOBA_MATCH_CAPACITY` and the cgroup limits in the lobby unit, the
+   same arena range in `nftables-omoba.conf` (`OMOBA_ARENA_PORTS`), PostgreSQL
+   `max_connections` (one per worker, [data.md](../../../docs/architecture/data.md)), then
+   `ru_host.py bootstrap --apply` (firewall and limits) and `ship`. Fill both tables above
+   and keep the `CAPACITY_RESULT` lines and the reports in `docs/progress/`.
+5. Clean up: `runuser -u postgres -- psql -c 'DROP DATABASE omoba_capacity' -c 'DROP ROLE
+   omoba_capacity'`, then `rm -rf /root/capacity`.
+
+`--scenario=capacity-wait` checks the full-pool path end to end: with one arena busy, a
+second vs Bots player sees its place in line and the lobby reports the busy pool.
 
 ## YooKassa
 

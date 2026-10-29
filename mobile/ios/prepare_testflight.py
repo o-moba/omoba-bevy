@@ -18,6 +18,7 @@ import tempfile
 
 from build_device import ROOT, inspect_macho, output, resolve_identity, sha256, validate_dsym, validate_profile
 from contours import MOBILE
+from universal_links import DOMAIN_KEY, require_associated_domains
 
 
 def validate_build_number(value: str) -> str:
@@ -83,6 +84,13 @@ def main(argv: list[str] | None = None) -> int:
     identity = resolve_identity(args.identity, output(["security", "find-identity", "-v", "-p", "codesigning"]).decode())
     profile = plistlib.loads(output(["security", "cms", "-D", "-i", str(app / "embedded.mobileprovision")]))
     entitlements = validate_profile(profile, info["CFBundleIdentifier"], identity)
+    # Retain an existing app's domains during re-signing; never silently drop
+    # this capability or add it to an older binary without a validated profile.
+    signed = plistlib.loads(output(["codesign", "--display", "--entitlements", ":-", str(app)]))
+    domains = signed.get(DOMAIN_KEY, [])
+    if not isinstance(domains, list) or not all(isinstance(domain, str) for domain in domains):
+        raise ValueError('Signed app has invalid Associated Domains.')
+    entitlements.update(require_associated_domains(profile, domains))
     assets = ROOT / "mobile/ios/Assets.xcassets"
     if not (assets / f"{icon}.appiconset/AppIcon.png").is_file():
         raise ValueError("Bundled 1024px beta app icon is missing.")

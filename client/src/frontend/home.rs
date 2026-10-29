@@ -419,6 +419,10 @@ pub(crate) fn connection_line(session: &ClientSession) -> (String, Color) {
         }
         None => {}
     }
+    if session.server_full() {
+        // LR-09: the server answered, but has no room right now.
+        return (tr("capacity.server_full").to_owned(), theme::GOLD);
+    }
     match session.state() {
         ClientConnectionState::Connected => (tr("home.connection.online").to_owned(), theme::JADE),
         ClientConnectionState::Connecting | ClientConnectionState::WaitingForServer => {
@@ -1822,6 +1826,13 @@ mod tests {
             let (line, _) = connection_line(&session);
             assert!(!line.is_empty(), "{state:?} must have a status line");
         }
+        // LR-09: a "server full" answer while not connected says so.
+        let mut session = ClientSession::default();
+        session.set_state_for_test(ClientConnectionState::WaitingForServer);
+        session.set_server_full_for_test();
+        assert_eq!(connection_line(&session).0, "The server is full. Retrying…");
+        session.set_state_for_test(ClientConnectionState::Connected);
+        assert_ne!(connection_line(&session).0, "The server is full. Retrying…");
     }
 
     /// The title row holds the brand and, only in a contour build, its badge.

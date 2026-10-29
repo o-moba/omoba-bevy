@@ -1,5 +1,58 @@
 # Feature Inventory
 
+## Compact mobile battle HUD
+
+The landscape touch HUD uses an 80 px attack disc, 50 px skill faces and 38 px
+utility artwork at its reference scale. Utility and target-selection capture
+regions remain at least 44 px; each finger retains its captured action while
+crossing neighboring buttons. The joystick keeps its familiar size with an
+inward anchor and a light transparent base. Recall, Haste and Dash sit along
+the bottom, opening the upper battlefield. The score is a shallow ribbon; small
+settings/chat discs beside the minimap have independent larger touch cells.
+Ally portraits, quick-buy art, mana pills and cooldown detail follow the compact
+phone presentation. Saved HUD group offsets remain bounded; desktop layout and
+menu scaling keep their existing behavior.
+
+The movement stick floats within the lower-left region below the information
+stack: each fresh movement press chooses its base, drag moves the thumb, and
+release stops movement while retaining the last base. Safe-edge clamping starts
+neutral; a second finger cannot relocate the owned stick or shift combat buttons.
+Phone kill notices appear below purchases on the left, with two compact rows or
+one on short screens. Selecting a nearby visible enemy portrait also shows a
+small gold direction arrow in camera-relative screen axes and an outlined
+connector to the selected hero’s current projected position. Offscreen visible
+heroes keep an arrow at the correct viewport edge. Hidden/dead/stale entities,
+modal contexts and public death timers supply no connector or direction.
+
+The selected-target plate is144×40px at reference scale and shares the top
+safe edge with all four allied portraits. Public enemy death portraits are
+passive32px cells below allies; they contain no click target, direction vector
+or hidden position. Nearby living enemy lock targets retain44px right-side
+cells independently. Settings/chat are neighboring44px cells below the death
+row. If the narrowest phone cannot fit the map and all header blocks side by
+side, the104px map moves below the header while allies and target remain at
+the top. The left purchase/feed stack and movement bounds follow that map.
+
+`python3 scripts/check_phone_hud_layout.py` compiles and runs the same std-only
+Rust geometry used by the game, without Bevy, a window, assets or a GPU. Its
+contract enforces simultaneous top anchors, centering, actual ally cells,
+death/live separation and non-overlap over a deterministic width/inset grid;
+negative cases reject the previous lowered-avatar geometry.
+
+Verification uses one English landscape phone preview and focused geometry/input
+tests. Physical Android play and long-session comfort are reported separately;
+a desktop-rendered preview alone does not establish either.
+
+## iOS Universal Link return
+
+The RU portal can return to the existing iOS app through the prepared
+`https://ios.omoba.ru/auth` association. The dev app has a separate domain.
+The URL only opens the game; account access still requires the existing signed
+enrollment and player confirmation. Source includes the main-nib delegate,
+per-contour entitlements and archive preservation. Domain publication, Apple
+profile refresh and real-device tests remain pending. See
+[setup and checks](../mobile/ios/UNIVERSAL-LINKS.md).
+
 ## RU website and native registration
 
 The portal's official VK ID OneTap widget uses the existing registration/linking
@@ -16,6 +69,23 @@ Device review binds the expected profile, temporary polling errors are recoverab
 status traffic cannot consume completion quota, and revoked keys cannot race a new
 social link. See [registration](registration.md) for schema 10, source boundaries,
 real local browser/signed-game proof and remaining live-provider rollout gates.
+
+## Browser-local practice
+
+`browser-client/` is an additive Bevy/WebGL 2 host of the same
+`common::offline::PracticeSession` used by native offline practice. It exposes
+seven standard class kits, real bot/hero/minion/tower simulation, movement,
+attacks, skills, dash, recall, pause and new matches, with bounded shipped
+Verdant terrain and character sprites. It does not load the native blocking
+HTTP/passport stack, create a device identity, join a network lobby or write
+career rewards. The portal owns VK sign-in independently; this practice iframe
+never receives a player token or key. Full browser multiplayer needs an admitted
+browser transport and a separately approved server rollout.
+
+`scripts/build-web.sh` builds the pinned wasm32 target into the existing shared
+cache B and emits `builds/browser-practice/` with relative paths and a hashed
+build manifest. The directory can be served unchanged under `/game/` and loaded
+lazily by `/play`. See [build, controls and limits](browser-practice.md).
 
 ## Runtime account regions
 
@@ -1228,6 +1298,16 @@ follows.
 - Every moderation action writes an audit row in the same transaction (`career_moderation_events`, career schema 5); rows are append-only and cannot be deleted before they are a year old. A sanctioned profile is never pruned as unplayed, so a ban on a throwaway key holds.
 - Copy in en, ru and zh-Hans (`client/i18n/*/moderation.json`).
 - Code: `shared/src/moderation.rs`, `career-store/migrations/postgres/005_sanctions.sql`, `career-store/src/moderation.rs`, `account-api/src/moderation.rs`, `server/src/career_backend.rs`, `server/src/social.rs`, `server/src/party.rs`, `server/src/match_service.rs`, `client/src/moderation.rs`, `client/src/social.rs`. See [the session note](progress/2026-10-24-lr-15.md).
+
+## Arena capacity: full pool and full server (LR-09, unreleased)
+
+- When every arena is busy, a search whose match is ready waits in line and says so: «All arenas are busy · you are number 2 in line · about 3 min». The place follows the order the lobby seats rosters (vs Bots, then Ranked, then Casual PvP); the estimate appears once arenas have freed in the last 15 minutes. A search that is not ready yet (Ranked 3/10) keeps showing its own progress.
+- The searching screen then offers **Play offline practice while you wait** in one tap: it leaves the queue and opens the practice picker with the chosen hero. The same offer appears when the server is too full to sign in.
+- A full server answers instead of staying silent: at 512 endpoints a new player's probe gets `server_full`, and at 512 career clients its sign-in gets the `server_full` code. The game shows «The server is full. Retrying…» and keeps trying.
+- The lobby reports a busy pool: `<match root>/capacity.json` every 5 s and `CAPACITY_METRIC` journal lines; on the RU host `ru_monitor.py` alerts the owner after a 2-minute wait (`OMOBA_ALERT_CAPACITY_WAIT_SECONDS`).
+- The load probe is ready for the RU host: mixed queues, the lobby unit's cgroup limits, a maximum time to Running, and per-arena-type snapshot gaps, bytes per player, CPU and RSS (`CAPACITY_RESULT`). The measurement itself and the final capacity need the host ([Arena capacity](../ops/vps/ru/README.md#arena-capacity-lr-09)).
+- Copy in en, ru and zh-Hans (`client/i18n/*/capacity.json`, `admission.error.server_full`).
+- Code: `server/src/capacity.rs`, `server/src/match_service.rs` (`Lobby::refresh_line`), `server/src/match_pool.rs`, `server/src/public_transport.rs`, `server/src/career_backend.rs`, `shared/src/match_service.rs` (`CapacityLine`), `shared/src/public_transport.rs` (`ServerFull`), `client/src/match_service.rs`, `client/src/frontend/searching.rs`, `client/src/net/{public_transport,transport,session}.rs`, `client/src/career_identity.rs`, `ops/vps/ru/ru_monitor.py`, `scripts/test_public_mvp.mjs`. See [the session note](progress/2026-10-24-lr-09.md).
 
 ## Multiplayer Session Reliability
 

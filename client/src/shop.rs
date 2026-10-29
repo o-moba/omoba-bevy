@@ -18,7 +18,7 @@ use crate::{
         theme::{self as ui, ButtonKind, Form},
         tokens::{TextRole, border, color, radius, size, space},
         widgets::{
-            ButtonStyle, KitParts, KitSkin, game, icon_node,
+            ButtonStyle, KitParts, KitSkin, NoSlab, game, icon_node,
             surfaces::{Tooltip, TooltipText},
         },
     },
@@ -263,7 +263,67 @@ pub(crate) fn spawn_gold_row(parent: &mut ChildSpawnerCommands) {
 /// An item slot button (`item-slot.md` look: `color.surface.0`, subtle
 /// border, radius 6) whose icon and price the owner paints: quick-buy
 /// offers keep their availability colours, which the kit would repaint.
+fn compact_shop_face(name: impl Into<String>) -> impl Bundle {
+    (
+        Node {
+            width: Val::Px(crate::hud_layout::PHONE_QUICK_BUY_FACE),
+            height: Val::Px(crate::hud_layout::PHONE_QUICK_BUY_FACE),
+            flex_shrink: 0.0,
+            flex_direction: FlexDirection::Column,
+            justify_content: JustifyContent::Center,
+            align_items: AlignItems::Center,
+            border: UiRect::all(Val::Px(border::HAIRLINE)),
+            border_radius: BorderRadius::all(Val::Px(4.0)),
+            ..default()
+        },
+        BackgroundColor(ui::perceptual(color::SURFACE_GLASS)),
+        BorderColor::all(color::BORDER_SUBTLE),
+        Pickable::IGNORE,
+        Name::new(name.into()),
+    )
+}
+
+fn quick_offer_contents(parent: &mut ChildSpawnerCommands, form: Form, slot: usize) {
+    let phone = form == Form::Phone;
+    let side = if phone {
+        crate::hud_layout::PHONE_QUICK_BUY_FACE
+    } else {
+        size::ITEM_SLOT.at(form)
+    };
+    parent.spawn((
+        icon_node(
+            Icon::NavShoppingBag,
+            game::ITEM_ICON.min(side - space::S8),
+            color::GOLD_400,
+        ),
+        Visibility::Hidden,
+        QuickBuyIcon { slot, shown: None },
+    ));
+    parent.spawn((
+        Text::new("—"),
+        if phone {
+            ui::styled_text(
+                ui::TextStyle::new(TextRole::NumberSm)
+                    .sized(crate::ui::tokens::Metric::new(9.0, 9.0)),
+            )
+        } else {
+            ui::role_text(TextRole::NumberSm)
+        },
+        TextColor(color::TEXT_MUTED),
+        TextShadow::default(),
+        Node {
+            position_type: PositionType::Absolute,
+            right: Val::Px(space::S2),
+            bottom: Val::Px(0.0),
+            ..default()
+        },
+        QuickBuyPrice(slot),
+        Name::new(format!("QuickBuyPrice-{slot}")),
+    ));
+}
+
 fn slot_button(parent: &mut ChildSpawnerCommands, form: Form, slot: usize) -> Entity {
+    let phone = form == Form::Phone;
     let side = size::ITEM_SLOT.at(form);
     let mut button = parent.spawn((
         crate::ui::widgets::button_bundle(
@@ -273,7 +333,7 @@ fn slot_button(parent: &mut ChildSpawnerCommands, form: Form, slot: usize) -> En
                 flex_shrink: 0.0,
                 justify_content: JustifyContent::Center,
                 align_items: AlignItems::Center,
-                border: UiRect::all(Val::Px(border::HAIRLINE)),
+                border: UiRect::all(Val::Px(if phone { 0.0 } else { border::HAIRLINE })),
                 border_radius: BorderRadius::all(Val::Px(game::ITEM_SLOT_RADIUS)),
                 ..default()
             },
@@ -281,7 +341,11 @@ fn slot_button(parent: &mut ChildSpawnerCommands, form: Form, slot: usize) -> En
             ShopAction::QuickBuy(slot),
             TestId::new(format!("QuickBuy-{slot}")),
         ),
-        KitSkin::ShopCard,
+        if phone {
+            KitSkin::Tertiary
+        } else {
+            KitSkin::ShopCard
+        },
         KitParts::default(),
         UiTransform::IDENTITY,
         QuickBuySlot(slot),
@@ -291,38 +355,23 @@ fn slot_button(parent: &mut ChildSpawnerCommands, form: Form, slot: usize) -> En
         },
         TooltipText::default(),
     ));
+    if phone {
+        button.insert((NoSlab, BackgroundColor(Color::NONE)));
+    }
     button.with_children(|slot_node| {
-        slot_node.spawn((
-            icon_node(
-                Icon::NavShoppingBag,
-                game::ITEM_ICON.min(side - space::S8),
-                color::GOLD_400,
-            ),
-            Visibility::Hidden,
-            QuickBuyIcon { slot, shown: None },
-        ));
-        slot_node.spawn((
-            Text::new("—"),
-            ui::role_text(TextRole::NumberSm),
-            TextColor(color::TEXT_MUTED),
-            TextShadow::default(),
-            Node {
-                position_type: PositionType::Absolute,
-                right: Val::Px(space::S2),
-                bottom: Val::Px(0.0),
-                ..default()
-            },
-            QuickBuyPrice(slot),
-            Name::new(format!("QuickBuyPrice-{slot}")),
-        ));
+        if phone {
+            slot_node
+                .spawn(compact_shop_face(format!("PhoneQuickBuyFace-{slot}")))
+                .with_children(|face| quick_offer_contents(face, form, slot));
+        } else {
+            quick_offer_contents(slot_node, form, slot);
+        }
     });
     button.id()
 }
 
-/// Phone: the quick-buy row under the status plate (`hud.md` phone
-/// `quick-buy`): gold button + two offers, 44 each, gap `space.8`. Desktop
-/// has the gold row in the status plate and the offers in the equipment
-/// plate, so nothing is spawned here.
+/// Phone quick-buy: three independent 44px touch cells, with compact 30px
+/// painted faces. Removing the old gaps brings the row closer to map width.
 fn setup_quick_buy(
     mut commands: Commands,
     mobile: Option<Res<crate::mobile_controls::MobileControls>>,
@@ -331,12 +380,12 @@ fn setup_quick_buy(
         return;
     }
     let form = Form::Phone;
-    let side = size::ITEM_SLOT.at(form);
+    let side = crate::hud_layout::PHONE_QUICK_BUY_SLOT;
     commands
         .spawn((
             Node {
                 position_type: PositionType::Absolute,
-                column_gap: Val::Px(space::S8),
+                column_gap: Val::Px(crate::hud_layout::PHONE_QUICK_BUY_GAP),
                 ..default()
             },
             HudRegion::QuickBuy,
@@ -344,42 +393,43 @@ fn setup_quick_buy(
             Name::new("QuickBuyHud"),
         ))
         .with_children(|row| {
-            let mut parts = KitParts::default();
-            let mut gold = row.spawn((
+            row.spawn((
                 crate::ui::widgets::button_bundle(
                     Node {
                         width: Val::Px(side),
                         height: Val::Px(side),
                         flex_shrink: 0.0,
-                        flex_direction: FlexDirection::Column,
                         justify_content: JustifyContent::Center,
                         align_items: AlignItems::Center,
-                        border: UiRect::all(Val::Px(border::HAIRLINE)),
-                        border_radius: BorderRadius::all(Val::Px(game::ITEM_SLOT_RADIUS)),
                         ..default()
                     },
                     ButtonKind::ShopItem,
                     ShopAction::Toggle,
                     TestId::new("GoldShopButton"),
                 ),
-                KitSkin::ShopCard,
+                KitSkin::Tertiary,
+                NoSlab,
+                KitParts::default(),
                 UiTransform::IDENTITY,
-            ));
-            gold.with_children(|button| {
-                parts.icon = Some(
-                    button
-                        .spawn(icon_node(Icon::HudGold, size::ICON_MD, color::GOLD_400))
-                        .id(),
-                );
-                button.spawn((
-                    Text::new("0"),
-                    ui::role_text(TextRole::NumberSm),
-                    TextColor(color::TEXT_GOLD),
-                    QuickGold,
-                    Name::new("QuickGoldText"),
-                ));
+            ))
+            .insert(BackgroundColor(Color::NONE))
+            .with_children(|target| {
+                target
+                    .spawn(compact_shop_face("PhoneGoldFace"))
+                    .with_children(|face| {
+                        face.spawn(icon_node(Icon::HudGold, 14.0, color::GOLD_400));
+                        face.spawn((
+                            Text::new("0"),
+                            ui::styled_text(
+                                ui::TextStyle::new(TextRole::NumberSm)
+                                    .sized(crate::ui::tokens::Metric::new(10.0, 10.0)),
+                            ),
+                            TextColor(color::TEXT_GOLD),
+                            QuickGold,
+                            Name::new("QuickGoldText"),
+                        ));
+                    });
             });
-            gold.insert(parts);
             for slot in 0..2 {
                 slot_button(row, form, slot);
             }
@@ -1453,6 +1503,40 @@ fn update_shop(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn phone_shop_shortcuts_keep_distinct_touch_cells_around_smaller_faces() {
+        let mut app = App::new();
+        let mut controls = crate::mobile_controls::MobileControls::default();
+        controls.enabled = true;
+        app.insert_resource(controls)
+            .add_systems(Startup, setup_quick_buy);
+        app.update();
+        let mut buttons = app
+            .world_mut()
+            .query::<(&TestId, &Node, &BackgroundColor)>();
+        let buttons: Vec<_> = buttons.iter(app.world()).collect();
+        assert_eq!(buttons.len(), 3);
+        for (id, node, fill) in buttons {
+            assert!(matches!(
+                id.as_str(),
+                "GoldShopButton" | "QuickBuy-0" | "QuickBuy-1"
+            ));
+            assert_eq!((node.width, node.height), (Val::Px(44.0), Val::Px(44.0)));
+            assert_eq!(fill.0, Color::NONE);
+        }
+        let mut faces = app.world_mut().query::<(&Name, &Node)>();
+        let faces: Vec<_> = faces
+            .iter(app.world())
+            .filter(|(name, _)| {
+                name.as_str() == "PhoneGoldFace" || name.as_str().starts_with("PhoneQuickBuyFace-")
+            })
+            .collect();
+        assert_eq!(faces.len(), 3);
+        for (_, node) in faces {
+            assert_eq!((node.width, node.height), (Val::Px(30.0), Val::Px(30.0)));
+        }
+    }
 
     /// hud.md `equipment` (replaces the hidden 224 px panel this test used
     /// to size): desktop spawns the 200 × 102 plate with six 40 px slots in

@@ -165,7 +165,19 @@ impl Pool {
         Ok(pool)
     }
     pub fn full(&self) -> bool {
-        self.slots.values().filter(|s| s.occupies_port()).count() >= self.capacity
+        self.occupied() >= self.capacity
+    }
+    /// Arenas holding their port: live, or retired less than 35 s ago.
+    pub fn occupied(&self) -> usize {
+        self.slots.values().filter(|s| s.occupies_port()).count()
+    }
+    pub fn capacity(&self) -> usize {
+        self.capacity
+    }
+    /// The match root (`OMOBA_MATCH_ROOT`), where the lobby also reports its
+    /// capacity (LR-09).
+    pub fn root(&self) -> &std::path::Path {
+        &self.root
     }
     pub fn allocate(&mut self, mut manifest: Manifest) -> Result<String, String> {
         if self.full() {

@@ -20,7 +20,10 @@ the host's one Telegram bot and the alert thresholds.
 - free disk below OMOBA_ALERT_DISK_MIN_FREE_PERCENT (15) on any filesystem the host
   writes to;
 - a live match worker whose heartbeat (status.json) is older than
-  OMOBA_ALERT_WORKER_STALE_SECONDS (300) while the lobby runs.
+  OMOBA_ALERT_WORKER_STALE_SECONDS (300) while the lobby runs;
+- players waiting for a free arena for OMOBA_ALERT_CAPACITY_WAIT_SECONDS (120) or longer:
+  every arena busy while a ready roster waits, as the lobby reports it in
+  <match root>/capacity.json (LR-09).
 
 Every problem goes to the journal; with the bot, also to Telegram: at once, then a
 reminder every OMOBA_ALERT_REPEAT_MINUTES (60) while it lasts (every
@@ -54,6 +57,8 @@ ENV_FILE = "/opt/omoba-ru/alerts.env"
 PLACEHOLDER = "CHANGE_ME"
 STATE_DIR = "/var/lib/omoba-ru-monitor"            # StateDirectory= of its units
 MATCH_ROOT = "/var/lib/omoba-ru/matches"           # OMOBA_MATCH_ROOT of the lobby unit
+CAPACITY_REPORT = MATCH_ROOT + "/capacity.json"    # the lobby's arena report (server/src/capacity.rs)
+CAPACITY_FRESH_SECONDS = 120                        # the lobby rewrites it every 5 s
 SAFE_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
 # The RU host's units (ru_host.py checks these lists against its own kit).
@@ -85,11 +90,13 @@ ALLOCATION = re.compile(r"[0-9a-f]{32}")
 DEFAULTS = {
     "OMOBA_ALERT_DISK_MIN_FREE_PERCENT": "15",
     "OMOBA_ALERT_WORKER_STALE_SECONDS": "300",
+    "OMOBA_ALERT_CAPACITY_WAIT_SECONDS": "120",
     "OMOBA_ALERT_REPEAT_MINUTES": "60",
     "OMOBA_ALERT_JOB_REPEAT_HOURS": "24",
     "OMOBA_ALERT_RECOVERY_MINUTES": "15",
 }
 LIMITS = {"OMOBA_ALERT_DISK_MIN_FREE_PERCENT": (1, 90), "OMOBA_ALERT_WORKER_STALE_SECONDS": (120, 86400),
+          "OMOBA_ALERT_CAPACITY_WAIT_SECONDS": (30, 86400),
           "OMOBA_ALERT_REPEAT_MINUTES": (5, 10080), "OMOBA_ALERT_JOB_REPEAT_HOURS": (1, 720),
           "OMOBA_ALERT_RECOVERY_MINUTES": (5, 1440)}
 TELEGRAM_KEYS = ("OMOBA_TELEGRAM_BOT_TOKEN", "OMOBA_TELEGRAM_CHAT_ID")
@@ -186,7 +193,8 @@ def label(code: str) -> str:
     """What a problem code is about, for the "resolved" message."""
     kind, _, subject = code.partition(":")
     return {"unit": subject, "disk": f"free disk on {subject}", "worker": f"match worker {subject[:8]}",
-            "postgres": "PostgreSQL"}.get(kind, "alerts.env" if kind == "config" else code)
+            "postgres": "PostgreSQL", "capacity": "arena capacity"}.get(
+        kind, "alerts.env" if kind == "config" else code)
 
 
 # ---------------------------------------------------------------- the monitor
@@ -387,6 +395,43 @@ class Monitor:
                                  f"{int(age // 60000)} min (journalctl -u {LOBBY})", repeat))
         return problems, facts
 
+    def capacity_problems(self, lobby: dict) -> tuple[list, dict]:
+        """Players waiting for a free arena too long (LR-09), from the report the running lobby
+        rewrites every 5 s. A missing report (an older lobby) or a stale one (the lobby is
+        down or restarting; the unit check says so) is no capacity alert."""
+        threshold = self.cfg.number("OMOBA_ALERT_CAPACITY_WAIT_SECONDS")
+        repeat = self.cfg.number("OMOBA_ALERT_REPEAT_MINUTES") * 60
+        if lobby.get("ActiveState") != "active":
+            return [], {"skipped": "the lobby is not running"}
+        path = self.p(CAPACITY_REPORT)
+        try:
+            if os.path.getsize(path) > 65536:
+                return [], {"skipped": "the report is too large"}
+            report = json.loads(Path(path).read_text())
+        except FileNotFoundError:
+            return [], {"skipped": "no report (a lobby before LR-09)"}
+        except (OSError, ValueError):
+            return [], {"skipped": "the report is unreadable"}
+        numbers = {key: report.get(key) if isinstance(report, dict) else None
+                   for key in ("updated_ms", "capacity", "occupied", "searching", "waiting_for_arena",
+                               "busy_since_ms", "longest_wait_secs")}
+        numbers = {key: value for key, value in numbers.items()
+                   if isinstance(value, int) and not isinstance(value, bool)}
+        now_ms = self.now() * 1000
+        if "updated_ms" not in numbers or now_ms - numbers["updated_ms"] > CAPACITY_FRESH_SECONDS * 1000:
+            return [], {"skipped": "the report is stale"}
+        facts = {key: numbers.get(key) for key in ("capacity", "occupied", "searching", "waiting_for_arena",
+                                                   "longest_wait_secs")}
+        since = numbers.get("busy_since_ms")
+        facts["busy_seconds"] = int(max(0, now_ms - since) // 1000) if since is not None else 0
+        if since is None or facts["busy_seconds"] < threshold:
+            return [], facts
+        return [("capacity:arenas",
+                 f"players have waited for a free arena for {facts['busy_seconds'] // 60} min: "
+                 f"{facts['occupied']} of {facts['capacity']} arenas busy, {facts['waiting_for_arena']} "
+                 f"players waiting (the longest {facts['longest_wait_secs']} s); check CPU and memory, then "
+                 f"raise OMOBA_MATCH_CAPACITY (README.md, \"Arena capacity\")", repeat)], facts
+
     def check(self) -> dict:
         problems, warnings, facts = [], [], {}
         for text in self.cfg.problems:
@@ -398,6 +443,8 @@ class Monitor:
         more, facts["disk"] = self.disk_problems()
         problems += more
         more, facts["workers"] = self.worker_problems(facts["units"].get(LOBBY, {}))
+        problems += more
+        more, facts["capacity"] = self.capacity_problems(facts["units"].get(LOBBY, {}))
         problems += more
         if not self.cfg.telegram()[0]:
             warnings.append(f"no Telegram bot in {self.cfg.path}: alerts reach the journal only")
@@ -564,7 +611,8 @@ def main(argv=None, stdout=None, monitor=None) -> int:
     sub = parser.add_subparsers(dest="command", required=True)
     failed = sub.add_parser("unit-failed", help="OnFailure= handler: alert that UNIT failed")
     failed.add_argument("unit")
-    check = sub.add_parser("check", help="units, timers, PostgreSQL, disk and match workers; exit 1 on a problem "
+    check = sub.add_parser("check", help="units, timers, PostgreSQL, disk, match workers and arena capacity; "
+                                         "exit 1 on a problem "
                                          "(with --alert: exit 0 once the alerts went out)")
     check.add_argument("--json", action="store_true")
     check.add_argument("--alert", action="store_true", help="alert (journal, Telegram) and remember what was sent")

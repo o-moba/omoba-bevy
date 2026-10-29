@@ -1,4 +1,5 @@
 {
   "admission.error.new_profile_limit": "你的网络在一天内已创建了过多新资料。请明天再试，或在已有资料的设备上登录。",
-  "admission.error.new_profiles_paused": "新资料的创建已暂停一天。请稍后再试，或在已有资料的设备上登录。"
+  "admission.error.new_profiles_paused": "新资料的创建已暂停一天。请稍后再试，或在已有资料的设备上登录。",
+  "admission.error.server_full": "服务器已满，正在重试…"
 }

@@ -137,7 +137,16 @@ verification and dispatch, not active human combat or WAN conditions.
 Both probes completed allocation, draft, loading and the observation period;
 the bot-heavy case showed material scheduling/network degradation (maximum
 snapshot gap 622 ms). Keep the default 16-arena cap until the actual host is
-measured with the intended mode mix. A 100-arena configuration is a tested stress
+measured with the intended mode mix (the RU host: [ops/vps/ru/README.md › Arena
+capacity](../ops/vps/ru/README.md#arena-capacity-lr-09), LR-09).
+
+When every arena is busy, a search whose match is ready waits in line: the lobby gives it
+its place and, once arenas have freed recently, an estimated wait, and the searching
+screen offers Offline practice in one tap (it leaves the queue). The lobby rewrites
+`<match root>/capacity.json` every 5 s and logs `CAPACITY_METRIC` lines when the line
+forms, every minute while it lasts and when it clears; the RU host monitor alerts on a
+2-minute wait. At 512 endpoints or 512 career clients the lobby answers a newcomer
+"server full" instead of staying silent, and the game keeps trying. A 100-arena configuration is a tested stress
 case, not a recommended launch setting. Payload totals include startup/ramp-up
 and exclude IP/UDP overhead; they also show that egress capacity matters. Raw
 reports are in the task proof under `raw/capacity-human-100-v2` and
@@ -162,7 +171,7 @@ world replication requires authenticated manifest membership. Empty bootstrap
 snapshots carry connection metadata only. Commands bind the
 saved Ed25519 key, transport nonce, authentication nonce, epoch, match and monotonic
 sequence. Per process, admission retains at most 512 endpoint records (8 per source
-IP), accepts up to 64 probes per second after per-IP (8) and per-network (32)
+IP; a new source beyond 512 is answered `server_full`), accepts up to 64 probes per second after per-IP (8) and per-network (32)
 budgets with 16 kept for new sources, and limits each endpoint to 120 packets per
 second. New profiles, arenas held by one IP and abandoned vs Bots allocations are
 limited per source too (LR-16, `ops/vps/ru/README.md` "Admission limits").
@@ -200,7 +209,19 @@ node scripts/test_public_mvp.mjs --scenario=abandoned --clients=1 --preference=b
 node scripts/test_public_mvp.mjs --scenario=recovery --clients=1 --preference=bot_practice --seconds=5
 node scripts/test_public_mvp.mjs --clients=100 --preference=humans_only --seconds=30 --input-hz=20
 node scripts/test_public_mvp.mjs --clients=100 --preference=bot_practice --seconds=30 --input-hz=20
+node scripts/test_public_mvp.mjs --mix=bot_practice:5,quick:5,humans_only:10 --max-wait-secs=60
+node scripts/test_public_mvp.mjs --scenario=capacity-wait --clients=1 --preference=bot_practice
 ```
+
+`--mix` interleaves players of several queues; `--capacity` sets the lobby's arena count;
+`--max-wait-secs` fails the run when a player needs longer to reach Running;
+`--limits-from=<unit>` (Linux) runs the lobby and its workers under a systemd unit's
+memory, CPU and task limits. The report records, per arena type, the snapshot gaps, the
+time to Running and the snapshot bytes per second per player, and the lobby's and
+workers' CPU and RSS while everyone plays; `CAPACITY_RESULT` lines summarize it. The
+probe lifts the per-source limits (LR-16) for its own lobby, because all its players come
+from 127.0.0.1. `--scenario=capacity-wait` runs one arena: a second vs Bots player must
+see its place in line and the lobby must report the busy pool.
 
 The probe launches only loopback processes, tracks all process groups it creates,
 drives real signed packets/draft/loading, saves raw logs and reports, and stops its

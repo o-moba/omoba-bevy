@@ -280,6 +280,10 @@ pub(crate) fn link_status(session: &ClientSession) -> LinkStatus {
 
 fn connection_line(client_session: &ClientSession) -> String {
     let addr = &client_session.server_addr_display;
+    if client_session.server_full() {
+        // LR-09: the server answered, but has no room right now.
+        return tr("capacity.server_full").to_owned();
+    }
     match client_session.state {
         ClientConnectionState::Connecting => trf("net.status.connecting", &[("addr", addr)]),
         ClientConnectionState::WaitingForServer => trf(

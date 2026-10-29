@@ -148,6 +148,9 @@ impl ReconnectState {
     }
 }
 
+/// How long a "server full" answer is shown after the last one (LR-09).
+const SERVER_FULL_HOLD: Duration = Duration::from_secs(10);
+
 /// Session controller: owns lifecycle flags and join idempotency (single ownership vs UI/net).
 #[derive(Resource)]
 pub struct ClientSession {
@@ -184,6 +187,8 @@ pub struct ClientSession {
     pub(in crate::net) announced_join: bool,
     /// Lifecycle edges queued for `flush_session_events`.
     pub(in crate::net) outbox: Vec<SessionEvent>,
+    /// When the server last answered a probe "server full" (LR-09).
+    pub(in crate::net) server_full_at: Option<Instant>,
 }
 
 impl Default for ClientSession {
@@ -212,6 +217,7 @@ impl Default for ClientSession {
             offline_return_addr: None,
             announced_join: false,
             outbox: Vec::new(),
+            server_full_at: None,
         }
     }
 }
@@ -367,6 +373,12 @@ impl ClientSession {
         self.state = state;
     }
 
+    /// The server just answered "server full" (test fixtures only).
+    #[cfg(test)]
+    pub(crate) fn set_server_full_for_test(&mut self) {
+        self.server_full_at = Some(Instant::now());
+    }
+
     /// Overrides the in-flight join flag (test fixtures only).
     #[cfg(test)]
     pub(crate) fn set_join_in_flight_for_test(&mut self, in_flight: bool) {
@@ -421,6 +433,16 @@ impl ClientSession {
     /// A join the client still stands behind: locked in, and neither left nor
     /// abandoned. It survives a transport teardown, which is what tells a
     /// reconnect apart from "the player is back in the menus".
+    /// The server answered "server full" in the last few seconds and this
+    /// session is not connected (LR-09): the status line says so while the
+    /// probes go on.
+    pub(crate) fn server_full(&self) -> bool {
+        self.state != ClientConnectionState::Connected
+            && self
+                .server_full_at
+                .is_some_and(|at| at.elapsed() < SERVER_FULL_HOLD)
+    }
+
     pub fn has_committed_join(&self) -> bool {
         self.last_join.is_some()
     }
@@ -1080,6 +1102,9 @@ pub(in crate::net) fn update_session_lifecycle(
                 // joined session. Preserve the actionable message until Retry.
                 client_session.set_join_error(Some(JoinRejection::ProtocolMismatch));
                 client_session.stop_reconnecting();
+            }
+            NetThreadSignal::ServerFull => {
+                client_session.server_full_at = Some(Instant::now());
             }
             NetThreadSignal::TransportFailure => {
                 if client_session.state != ClientConnectionState::Disconnected {

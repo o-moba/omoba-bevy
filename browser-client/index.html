@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="color-scheme" content="dark" />
+  <link rel="icon" href="data:," />
+  <title>OMOBA · Browser practice</title>
+  <link data-trunk rel="rust" href="Cargo.toml" data-bin="omoba-browser" data-wasm-opt="z" />
+  <link data-trunk rel="copy-dir" href="static/assets" />
+  <style>
+    *{box-sizing:border-box}html,body{width:100%;height:100%;margin:0;overflow:hidden;background:#07110d;color:#ecf0db;font-family:system-ui,sans-serif}
+    #game{display:block;width:100%;height:100%;outline:none}#loading{position:fixed;inset:0;display:grid;place-content:center;text-align:center;gap:14px;background:#07110d;z-index:3}
+    #loading strong{font-size:32px;letter-spacing:.25em;color:#eed18b}#loading small{color:#a4b7a1;max-width:360px;line-height:1.6}
+    #loading[hidden]{display:none}.spinner{margin:0 auto;width:28px;height:28px;border:2px solid #364d37;border-top-color:#b3db78;border-radius:50%;animation:spin 1s linear infinite}
+    @keyframes spin{to{transform:rotate(360deg)}}@media(prefers-reduced-motion:reduce){.spinner{animation:none}}
+  </style>
+</head>
+<body>
+  <div id="loading" role="status"><strong>OMOBA</strong><div class="spinner"></div><span>Opening Verdant Confluence</span><small>Real OMOBA combat. A local practice match with bots, without rating or account writes.</small></div>
+  <canvas id="game" tabindex="0" aria-label="OMOBA local bot practice. Arrow keys or right-click to move, Q W E R for skills, Space to attack, F to dash, B to recall, Escape to pause, N to restart."></canvas>
+  <script>
+    const canvas=document.getElementById('game');
+    canvas.addEventListener('contextmenu',event=>event.preventDefault());
+    canvas.addEventListener('pointerdown',()=>canvas.focus());
+    window.addEventListener('TrunkApplicationStarted',event=>{
+      window.__omobaPractice=event.detail.wasm;
+      document.getElementById('loading').hidden=true;
+      canvas.focus();
+      parent.postMessage({type:'omoba-practice-ready'},location.origin);
+    });
+    const failed=()=>{
+      const loading=document.getElementById('loading');loading.hidden=false;
+      loading.querySelector('span').textContent='The game could not start';
+      loading.querySelector('small').textContent='Reload to try again. Use a desktop browser with WebGL 2 enabled.';
+      parent.postMessage({type:'omoba-practice-error'},location.origin);
+    };
+    window.addEventListener('error',failed);window.addEventListener('unhandledrejection',failed);
+  </script>
+</body>
+</html>

@@ -5,6 +5,33 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Selected live enemy portraits now connect to the hero’s current projected
+  position with a gold outlined line. Offscreen targets keep a clipped edge
+  arrow; stale, hidden, dead and modal targets clear the connector.
+
+- Phone top HUD: a smaller144×40 selected target and allied portraits keep the
+  top edge together. Passive enemy death timers use a separate row below allies;
+  live lock targets keep their right-side slots. Settings/chat sit together
+  below the death row. The runtime layout has a fast renderer-free Rust contract
+  test, including the avatar-drop regression and narrow-screen fallback.
+
+- Mobile HUD interactions: the movement stick reanchors on a fresh lower-left
+  press and keeps its base after release; the kill feed sits below purchases on
+  the left. A selected visible enemy portrait shows a gold camera-relative
+  direction arrow, with stale/hidden targets excluded and touch ownership kept.
+
+- Mobile in-match HUD: compact reference-sized attack/skills and utility discs,
+  larger independent touch regions, bottom-row Recall/Dash/Haste, an inward
+  transparent joystick, shallow score ribbon and small settings/chat controls
+  beside the minimap. Ally portraits, quick-buy art and ability detail badges
+  leave more of the battlefield visible; desktop/menu scale is unchanged.
+
+- Prepare iOS Universal Link return from the existing RU web sign-in flow.
+  The main-nib delegate accepts only a fixed per-contour HTTPS return path;
+  the signed enrollment and explicit in-game confirmation remain authoritative.
+  Xcode/CLI domain entitlements and archive preservation are included. DNS/TLS,
+  website publication, profile refresh and physical-device acceptance remain
+  rollout gates. See [iOS links](mobile/ios/UNIVERSAL-LINKS.md).
 - RU OneTap sign-in accepts the configured portal's exact root redirect in
   addition to its existing browser callback. The Account API still verifies
   PKCE, returned state and provider identity; website registration and signed
@@ -20,6 +47,14 @@ All notable changes are recorded here. The canonical version is
   and signed public-lobby game journey cover the critical path. Live VK app, hosting,
   DNS, release rollout and physical-device checks remain gates. See
   [registration](docs/registration.md).
+
+- Browser practice: an additive Bevy/WebGL 2 renderer runs the existing OMOBA
+  authoritative practice simulation in WASM, with seven standard classes, bots,
+  the shipped Verdant 2D art, movement, Q/W/E/R combat, dash, recall, pause and
+  restart. It has no socket, credentials, career writes or rating rewards.
+  `scripts/build-web.sh` produces a lazy-loadable same-origin `/game/` bundle.
+  Native simulation clocks keep the exact standard-library type. See
+  [browser practice](docs/browser-practice.md) for build and scope.
 
 - Native screenshot/demo launchers seed an isolated returning Global account-region fixture so their ordinary screen captures keep working after first-launch region confirmation. Existing fixture state is preserved; first-launch QA stays empty.
 

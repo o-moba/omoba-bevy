@@ -471,6 +471,12 @@ fn fill_ability(
     view: AbilityView,
     side: f32,
 ) -> Entity {
+    // Small phone faces shrink their detail with the artwork. Desktop and
+    // the existing 64px kit faces keep their original metrics.
+    let detail_scale = (side / size::ABILITY.phone).min(1.0);
+    let scaled =
+        |metric: Metric| Metric::new(metric.desktop * detail_scale, metric.phone * detail_scale);
+    let cost_side = ABILITY_COST * detail_scale;
     let mut parts = KitParts::default();
     let mut ability = None;
     let mut commands = parent.commands();
@@ -566,12 +572,16 @@ fn fill_ability(
                 Pickable::IGNORE,
             ))
             .with_children(|veil| {
-                veil.spawn(icon_node(Icon::NavLock, size::ICON_MD, color::TEXT_MUTED));
+                veil.spawn(icon_node(
+                    Icon::NavLock,
+                    size::ICON_MD * detail_scale,
+                    color::TEXT_MUTED,
+                ));
                 veil_label = veil
                     .spawn((
                         Text::new(locked_label(view.unlock_level)),
                         theme::styled_text(
-                            TextStyle::keep_case(TextRole::Label).sized(LOCKED_LABEL),
+                            TextStyle::keep_case(TextRole::Label).sized(scaled(LOCKED_LABEL)),
                         ),
                         TextColor(color::TEXT_SECONDARY),
                         TextLayout::no_wrap(),
@@ -637,19 +647,20 @@ fn fill_ability(
         button
             .spawn((full(), Pickable::IGNORE))
             .with_children(|centre| {
-                seconds = centre
-                    .spawn((
-                        Text::new(
-                            view.cooldown.map_or_else(String::new, |(remaining, _)| {
+                seconds =
+                    centre
+                        .spawn((
+                            Text::new(view.cooldown.map_or_else(String::new, |(remaining, _)| {
                                 cooldown_text(remaining)
-                            }),
-                        ),
-                        theme::styled_text(TextStyle::new(TextRole::NumberLg).sized(COOLDOWN_TEXT)),
-                        TextColor(color::TEXT_PRIMARY),
-                        TextShadow::default(),
-                        initially(cooling),
-                    ))
-                    .id();
+                            })),
+                            theme::styled_text(
+                                TextStyle::new(TextRole::NumberLg).sized(scaled(COOLDOWN_TEXT)),
+                            ),
+                            TextColor(color::TEXT_PRIMARY),
+                            TextShadow::default(),
+                            initially(cooling),
+                        ))
+                        .id();
             });
         let key = view.key.map(|key| {
             let mut text = Entity::PLACEHOLDER;
@@ -696,7 +707,7 @@ fn fill_ability(
                 .spawn((
                     Node {
                         position_type: PositionType::Absolute,
-                        bottom: Val::Px(-(ABILITY_COST / 2.0)),
+                        bottom: Val::Px(-(cost_side / 2.0)),
                         left: Val::Px(0.0),
                         right: Val::Px(0.0),
                         justify_content: JustifyContent::Center,
@@ -711,8 +722,8 @@ fn fill_ability(
                 ))
                 .with_child((
                     Node {
-                        min_width: Val::Px(ABILITY_COST),
-                        height: Val::Px(ABILITY_COST),
+                        min_width: Val::Px(cost_side),
+                        height: Val::Px(cost_side),
                         padding: UiRect::horizontal(Val::Px(space::S4)),
                         justify_content: JustifyContent::Center,
                         align_items: AlignItems::Center,
@@ -725,7 +736,10 @@ fn fill_ability(
                     Pickable::IGNORE,
                     children![(
                         Text::new(cost.to_string()),
-                        theme::role_text(TextRole::NumberSm),
+                        theme::styled_text(
+                            TextStyle::new(TextRole::NumberSm)
+                                .sized(scaled(TextRole::NumberSm.style().size))
+                        ),
                         TextColor(color::BAR_MANA),
                         AbilityCost,
                     )],
@@ -2796,6 +2810,65 @@ mod tests {
             (half as f32 + middle.0 * band as f32) as usize,
         );
         assert_eq!(at(x, y)[3], 255);
+    }
+
+    #[test]
+    fn compact_ability_face_scales_cost_pill_and_cooldown_with_its_artwork() {
+        let mut app = App::new();
+        let root = app.world_mut().spawn(Node::default()).id();
+        let view = AbilityView {
+            ability: None,
+            icon: Icon::HudAttack,
+            key: None,
+            cost: Some(48),
+            rank: 1,
+            cooldown: Some((3.0, 5.0)),
+            locked: false,
+            unlock_level: None,
+            no_mana: false,
+            pips: false,
+            ring: true,
+        };
+        app.world_mut()
+            .commands()
+            .entity(root)
+            .with_children(|parent| {
+                ability_face(parent, view, 50.0, AbilityFace::default());
+            });
+        app.world_mut().flush();
+        let (node, parts) = app
+            .world_mut()
+            .query::<(&Node, &AbilityParts)>()
+            .single(app.world())
+            .map(|(node, parts)| (node.clone(), *parts))
+            .unwrap();
+        assert_eq!((node.width, node.height), (Val::Px(50.0), Val::Px(50.0)));
+        let pill = app.world().get::<Children>(parts.cost.unwrap()).unwrap()[0];
+        let pill_node = app.world().get::<Node>(pill).unwrap();
+        let Val::Px(height) = pill_node.height else {
+            panic!("cost pill must have a pixel height")
+        };
+        assert!(
+            height <= 15.0,
+            "cost badge cannot retain its old oversized face"
+        );
+        let number = app.world().get::<Children>(pill).unwrap()[0];
+        assert!(
+            app.world()
+                .get::<TextFont>(number)
+                .unwrap()
+                .font_size
+                .eval(Vec2::ONE, 16.0)
+                <= height
+        );
+        assert!(
+            app.world()
+                .get::<TextFont>(parts.seconds)
+                .unwrap()
+                .font_size
+                .eval(Vec2::ONE, 16.0)
+                < COOLDOWN_TEXT.phone
+        );
     }
 
     /// The ring replaces the rim on a phone face: the learned layer shows
