@@ -1,5 +1,7 @@
 # Android target panel anchoring — 2026-10-29
 
+This build450011 record is superseded by [the combined top-row contract](2026-10-29-hud-top-rows.md), which keeps allies at the top as well and uses build450012.
+
 The owner reported that the selected target sat below the top center on their
 OPPO PKB110. The phone has a2374×1080 landscape framebuffer and480dpi override;
 a791×360 native preview reproduces the unwanted48px downward shift. Existing
