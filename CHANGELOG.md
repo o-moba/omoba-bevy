@@ -5,6 +5,10 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Selected live enemy portraits now connect to the hero’s current projected
+  position with a gold outlined line. Offscreen targets keep a clipped edge
+  arrow; stale, hidden, dead and modal targets clear the connector.
+
 - Phone top HUD: a smaller144×40 selected target and allied portraits keep the
   top edge together. Passive enemy death timers use a separate row below allies;
   live lock targets keep their right-side slots. Settings/chat sit together

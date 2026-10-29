@@ -19,8 +19,10 @@ release stops movement while retaining the last base. Safe-edge clamping starts
 neutral; a second finger cannot relocate the owned stick or shift combat buttons.
 Phone kill notices appear below purchases on the left, with two compact rows or
 one on short screens. Selecting a nearby visible enemy portrait also shows a
-small gold direction arrow in camera-relative screen axes. Hidden/dead/stale
-entities and public death timers supply no direction.
+small gold direction arrow in camera-relative screen axes and an outlined
+connector to the selected hero’s current projected position. Offscreen visible
+heroes keep an arrow at the correct viewport edge. Hidden/dead/stale entities,
+modal contexts and public death timers supply no connector or direction.
 
 The selected-target plate is144×40px at reference scale and shares the top
 safe edge with all four allied portraits. Public enemy death portraits are

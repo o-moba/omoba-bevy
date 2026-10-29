@@ -4,7 +4,7 @@ use bevy::{prelude::*, window::PrimaryWindow};
 
 use crate::{
     camera::MainCamera,
-    hud_layout::{HudLayout, ui_viewport},
+    hud_layout::{HudLayout, ui_viewport, world_to_ui},
     input_context::GameplayInputContext,
     mobile_controls::MobileControls,
     net::{
@@ -51,6 +51,94 @@ pub(super) struct EnemyPortraitDirectionStroke {
     action: EnemyPortraitAction,
     index: usize,
     width: f32,
+}
+
+#[derive(Component)]
+pub(super) struct EnemyTargetConnectorStroke {
+    action: EnemyPortraitAction,
+    index: usize,
+    width: f32,
+}
+
+/// Actual portrait-to-world segment, clipped along its ray so an offscreen
+/// enemy points to the correct edge without changing the direction.
+fn target_connector(portrait: Rect, target: Vec2, viewport: Vec2) -> Option<[(Vec2, Vec2); 3]> {
+    if !portrait.min.is_finite()
+        || !portrait.max.is_finite()
+        || !target.is_finite()
+        || !viewport.is_finite()
+        || portrait.width() <= 0.0
+        || portrait.height() <= 0.0
+        || viewport.min_element() <= 16.0
+    {
+        return None;
+    }
+    let center = portrait.center();
+    let direction = (target - center).try_normalize()?;
+    let start = center + direction * (portrait.size().max_element() * 0.5 + 2.0);
+    if (target - center).length() <= (start - center).length() {
+        return None;
+    }
+    let delta = target - start;
+    let bounds = Rect::from_corners(Vec2::splat(8.0), viewport - Vec2::splat(8.0));
+    let (mut enter, mut leave) = (0.0_f32, 1.0_f32);
+    for (a, d, lo, hi) in [
+        (start.x, delta.x, bounds.min.x, bounds.max.x),
+        (start.y, delta.y, bounds.min.y, bounds.max.y),
+    ] {
+        if d.abs() < 0.00001 {
+            if a < lo || a > hi {
+                return None;
+            }
+        } else {
+            let (t0, t1) = ((lo - a) / d, (hi - a) / d);
+            enter = enter.max(t0.min(t1));
+            leave = leave.min(t0.max(t1));
+        }
+    }
+    if enter >= leave {
+        return None;
+    }
+    let a = start + delta * enter;
+    let b = start + delta * leave;
+    if !a.is_finite() || !b.is_finite() || a.distance(b) < 2.0 {
+        return None;
+    }
+    let head = 8.0_f32.min(a.distance(b) * 0.4);
+    let normal = Vec2::new(-direction.y, direction.x) * (head * 0.5);
+    let base = b - direction * head;
+    Some([(a, b), (base + normal, b), (base - normal, b)])
+}
+
+fn spawn_target_connector(parent: &mut ChildSpawnerCommands, action: EnemyPortraitAction) {
+    for (outline, width, paint) in [
+        (true, 4.0, Color::srgba(0.01, 0.015, 0.025, 0.85)),
+        (false, 2.0, color::GOLD_400),
+    ] {
+        for index in 0..3 {
+            parent.spawn((
+                Node {
+                    position_type: PositionType::Absolute,
+                    display: Display::None,
+                    ..default()
+                },
+                UiTransform::IDENTITY,
+                BackgroundColor(paint),
+                Pickable::IGNORE,
+                GlobalZIndex(10),
+                EnemyTargetConnectorStroke {
+                    action,
+                    index,
+                    width,
+                },
+                Name::new(format!(
+                    "EnemyTargetConnector{}-{}-{index}",
+                    if outline { "Outline" } else { "" },
+                    action.target.id
+                )),
+            ));
+        }
+    }
 }
 
 const DIRECTION_OVERLAY_SIDE: f32 = 40.0;
@@ -385,6 +473,7 @@ pub(super) fn sync_enemy_portraits(
             .with_children(|button| {
                 spawn_portrait_art(button, view, action.target.id, slot.width());
                 spawn_portrait_direction(button, action);
+                spawn_target_connector(button, action);
             });
     }
     for (index, (id, view, secs)) in dead.into_iter().enumerate() {
@@ -482,10 +571,38 @@ pub(super) fn draw_enemy_portrait_directions(
     camera: Query<(Entity, &Camera), With<MainCamera>>,
     poses: bevy::transform::helper::TransformHelper,
     validity: TargetValidity,
-    mut arrows: Query<(&EnemyPortraitDirection, &mut Node)>,
+    geometry: (
+        Query<&Window, With<PrimaryWindow>>,
+        Option<Res<UiScale>>,
+        Query<
+            (&EnemyPortraitAction, &Node),
+            (
+                Without<EnemyPortraitDirection>,
+                Without<EnemyPortraitDirectionStroke>,
+                Without<EnemyTargetConnectorStroke>,
+            ),
+        >,
+    ),
+    mut connectors: Query<
+        (&EnemyTargetConnectorStroke, &mut Node, &mut UiTransform),
+        (
+            Without<EnemyPortraitDirection>,
+            Without<EnemyPortraitDirectionStroke>,
+        ),
+    >,
+    mut arrows: Query<
+        (&EnemyPortraitDirection, &mut Node),
+        (
+            Without<EnemyTargetConnectorStroke>,
+            Without<EnemyPortraitDirectionStroke>,
+        ),
+    >,
     mut strokes: Query<
         (&EnemyPortraitDirectionStroke, &mut Node, &mut UiTransform),
-        Without<EnemyPortraitDirection>,
+        (
+            Without<EnemyPortraitDirection>,
+            Without<EnemyTargetConnectorStroke>,
+        ),
     >,
 ) {
     let bearing = (|| {
@@ -522,10 +639,34 @@ pub(super) fn draw_enemy_portrait_directions(
             poses.compute_global_transform(entity).ok()?.translation(),
             mode.as_deref().copied()?,
         )?;
-        Some((EnemyPortraitAction { entity, target }, direction))
+        let position = poses.compute_global_transform(entity).ok()?.translation();
+        let render = if mode.as_deref().copied()? == PlayerVisualMode::Sprite2d {
+            crate::world2d::simulation_xz_to_render_xy(position).extend(0.0)
+        } else {
+            position
+        };
+        let point = camera
+            .world_to_viewport(&poses.compute_global_transform(camera_entity).ok()?, render)
+            .ok()?;
+        let viewport = geometry
+            .0
+            .single()
+            .ok()
+            .map(|w| ui_viewport(w, geometry.1.as_deref()))
+            .or_else(|| {
+                camera
+                    .logical_viewport_size()
+                    .map(|v| world_to_ui(v, geometry.1.as_deref()))
+            })?;
+        Some((
+            EnemyPortraitAction { entity, target },
+            direction,
+            world_to_ui(point, geometry.1.as_deref()),
+            viewport,
+        ))
     })();
     let matches = |action: EnemyPortraitAction| {
-        bearing.filter(|(selected, _)| {
+        bearing.filter(|(selected, _, _, _)| {
             selected.entity == action.entity && selected.target == action.target
         })
     };
@@ -539,8 +680,35 @@ pub(super) fn draw_enemy_portrait_directions(
             node.display = next;
         }
     }
+    for (stroke, mut node, mut transform) in &mut connectors {
+        let segment = matches(stroke.action).and_then(|(_, _, point, viewport)| {
+            let (_, button) = geometry.2.iter().find(|(a, _)| **a == stroke.action)?;
+            let (Val::Px(x), Val::Px(y), Val::Px(w), Val::Px(h)) =
+                (button.left, button.top, button.width, button.height)
+            else {
+                return None;
+            };
+            let origin = Vec2::new(x, y);
+            let endpoints = target_connector(
+                Rect::from_corners(origin, origin + Vec2::new(w, h)),
+                point,
+                viewport,
+            )?;
+            Some((
+                endpoints[stroke.index].0 - origin,
+                endpoints[stroke.index].1 - origin,
+            ))
+        });
+        if let Some((a, b)) = segment {
+            let (next_node, next_transform) = crate::minimap::line_node(a, b, stroke.width);
+            node.set_if_neq(next_node);
+            transform.set_if_neq(next_transform);
+        } else if node.display != Display::None {
+            node.display = Display::None;
+        }
+    }
     for (stroke, mut node, mut transform) in &mut strokes {
-        if let Some((_, direction)) = matches(stroke.action) {
+        if let Some((_, direction, _, _)) = matches(stroke.action) {
             let (a, b) = direction_strokes(direction)[stroke.index];
             let (next_node, next_transform) = crate::minimap::line_node(a, b, stroke.width);
             node.set_if_neq(next_node);
@@ -740,6 +908,84 @@ mod tests {
             .query::<(&EnemyPortraitDirection, &Node)>()
             .iter(app.world())
             .any(|(arrow, node)| arrow.0.target.id == id && node.display != Display::None)
+    }
+
+    #[test]
+    fn connector_reaches_visible_world_point_and_clips_offscreen_rays() {
+        let portrait = Rect::from_corners(Vec2::new(705.0, 52.0), Vec2::new(749.0, 96.0));
+        let view = Vec2::new(791.0, 360.0);
+        for target in [
+            Vec2::new(395.0, 180.0),
+            Vec2::new(395.0, -240.0),
+            Vec2::new(-600.0, 190.0),
+            Vec2::new(1400.0, 800.0),
+        ] {
+            let lines = target_connector(portrait, target, view).unwrap();
+            let (a, b) = lines[0];
+            assert!((a - portrait.center()).length() >= 24.0 - 0.001);
+            assert!(
+                (b - a)
+                    .normalize()
+                    .dot((target - portrait.center()).normalize())
+                    > 0.99999
+            );
+            for p in [a, b] {
+                assert!(p.x >= 7.99 && p.y >= 7.99 && p.x <= view.x - 7.99 && p.y <= view.y - 7.99);
+            }
+            if target.x > 8.0
+                && target.y > 8.0
+                && target.x < view.x - 8.0
+                && target.y < view.y - 8.0
+            {
+                assert!(b.distance(target) < 0.001);
+            } else {
+                assert!(
+                    (b.x - 8.0).abs() < 0.01
+                        || (b.y - 8.0).abs() < 0.01
+                        || (b.x - view.x + 8.0).abs() < 0.01
+                        || (b.y - view.y + 8.0).abs() < 0.01
+                );
+            }
+        }
+        assert!(target_connector(portrait, portrait.center(), view).is_none());
+        assert!(target_connector(portrait, Vec2::splat(f32::NAN), view).is_none());
+    }
+
+    #[test]
+    fn connector_is_passive_and_reaches_the_edge_for_an_offscreen_visible_enemy() {
+        let (mut app, _) = direction_app();
+        let actor = enemy(&mut app, 17, 20.0);
+        app.world_mut()
+            .resource_mut::<TargetState>()
+            .selected_entity = Some(actor);
+        app.world_mut()
+            .resource_mut::<TargetState>()
+            .selected_target = Some(TargetId {
+            kind: TargetKind::Player,
+            id: 17,
+        });
+        app.update();
+        let mut lines =
+            app.world_mut()
+                .query::<(&EnemyTargetConnectorStroke, &Node, &Pickable, &GlobalZIndex)>();
+        assert_eq!(
+            lines
+                .iter(app.world())
+                .filter(|(_, n, _, _)| n.display != Display::None)
+                .count(),
+            6
+        );
+        for (_, _, pickable, z) in lines.iter(app.world()) {
+            assert_eq!(*pickable, Pickable::IGNORE);
+            assert_eq!(z.0, 10);
+        }
+        app.world_mut().get_mut::<CombatStats>(actor).unwrap().hp = 0.0;
+        app.update();
+        assert!(
+            !lines
+                .iter(app.world())
+                .any(|(_, n, _, _)| n.display != Display::None)
+        );
     }
 
     #[test]
@@ -988,6 +1234,13 @@ mod tests {
             assert!(
                 !direction_shown(&mut app, 17),
                 "ineligible direction remains for case {invalid}"
+            );
+            assert!(
+                !app.world_mut()
+                    .query::<(&EnemyTargetConnectorStroke, &Node)>()
+                    .iter(app.world())
+                    .any(|(_, node)| node.display != Display::None),
+                "ineligible connector remains for case {invalid}"
             );
         }
     }

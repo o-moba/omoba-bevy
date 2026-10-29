@@ -142,6 +142,12 @@ impl Qa {
         }
     }
     fn target_x(&self) -> f32 {
+        if std::env::var("OMOBA_TARGET_CONNECTOR_QA").as_deref() == Ok("offscreen") {
+            return 6.0;
+        }
+        if std::env::var("OMOBA_TARGET_CONNECTOR_QA").as_deref() == Ok("visible") {
+            return -14.0;
+        }
         if self.interaction == Some(true) {
             -36.0
         } else {
@@ -620,7 +626,7 @@ fn capture(
     if qa.iphone {
         let measured: Vec<_> = nodes.iter().filter_map(|(name, id, node, computed, pose, inherited, text, clip)| {
             let name = crate::ui::test_id::node_key(name, id)?;
-            let watched = (qa.round2 && matches!(name,"MinimapAimIntersection" | "MinimapAimLine" | "MatchClockText" | "MatchKdaText" | "PauseMenuShowFpsToggle")) || name.starts_with("Mobile") || name.starts_with("EnemyPortrait-") || name.starts_with("EnemyDeathPortrait-") || name.starts_with("EnemyPortraitDirection") || name == "Enemy respawn countdown" || name.starts_with("AllyCamera-") || name.starts_with("PauseMenuHud")
+            let watched = (qa.round2 && matches!(name,"MinimapAimIntersection" | "MinimapAimLine" | "MatchClockText" | "MatchKdaText" | "PauseMenuShowFpsToggle")) || name.starts_with("Mobile") || name.starts_with("EnemyPortrait-") || name.starts_with("EnemyDeathPortrait-") || name.starts_with("EnemyPortraitDirection") || name.starts_with("EnemyTargetConnector") || name == "Enemy respawn countdown" || name.starts_with("AllyCamera-") || name.starts_with("PauseMenuHud")
                 || matches!(name, "AlliedVitals" | "TargetHealthRoot" | "KillFeed" | "QuickBuyHud" | "GoldShopButton" | "HeroOverheadPlate" | "HiddenOverheadIcon" | "MeasuredFps" | "MatchMenuButton" | "SocialOpenChat" | "SocialOpenWheel" | "PauseMenuRenderFpsControls" | "IphoneUxFixtureLabel" | "TargetAimLabel" | "LockedTargetLabel" | "ActionFeedback" | "BrushStatus" | "CareerEntryActions" | "CareerProfileButton" | "CareerHistoryButton" | "CareerFriendsButton" | "CareerQueueLeaveButton");
             watched.then(|| {
                 let rect = Rect::from_center_size(pose.translation, computed.size() * pose.to_scale_angle_translation().0.abs());
