@@ -694,9 +694,16 @@ pub(super) fn draw_enemy_portrait_directions(
                 point,
                 viewport,
             )?;
+            // Absolute child coordinates start inside the parent's border.
+            // Compensate it so the projected world endpoint stays exact.
+            let (Val::Px(border_x), Val::Px(border_y)) = (button.border.left, button.border.top)
+            else {
+                return None;
+            };
+            let child_origin = origin + Vec2::new(border_x, border_y);
             Some((
-                endpoints[stroke.index].0 - origin,
-                endpoints[stroke.index].1 - origin,
+                endpoints[stroke.index].0 - child_origin,
+                endpoints[stroke.index].1 - child_origin,
             ))
         });
         if let Some((a, b)) = segment {
@@ -979,6 +986,32 @@ mod tests {
             assert_eq!(*pickable, Pickable::IGNORE);
             assert_eq!(z.0, 10);
         }
+        // Reconstruct the painted shaft in screen coordinates, including the
+        // portrait border. Its tip must hit the camera's right inset exactly.
+        let (root, _) = portraits(&mut app)[0];
+        let button = app.world().get::<Node>(root).unwrap();
+        let px = |v| match v {
+            Val::Px(value) => value,
+            _ => panic!("expected pixel geometry"),
+        };
+        let child_origin = Vec2::new(
+            px(button.left) + px(button.border.left),
+            px(button.top) + px(button.border.top),
+        );
+        let tip = app
+            .world_mut()
+            .query::<(&EnemyTargetConnectorStroke, &Node, &UiTransform)>()
+            .iter(app.world())
+            .find(|(stroke, _, _)| stroke.index == 0 && stroke.width == 2.0)
+            .map(|(_, node, transform)| {
+                let middle = Vec2::new(
+                    px(node.left) + px(node.width) * 0.5,
+                    px(node.top) + px(node.height) * 0.5,
+                );
+                child_origin + middle + transform.rotation * Vec2::new(px(node.width) * 0.5, 0.0)
+            })
+            .unwrap();
+        assert!((tip.x - (844.0 - 8.0)).abs() < 0.01, "{tip:?}");
         app.world_mut().get_mut::<CombatStats>(actor).unwrap().hp = 0.0;
         app.update();
         assert!(
