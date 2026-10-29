@@ -5,6 +5,10 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Phone target HUD: keep the selected target at the top center on Android-sized
+  landscape screens; move allied portraits into a clear secondary lane when
+  needed and shorten the target text/HP column on the narrowest phones.
+
 - Mobile HUD interactions: the movement stick reanchors on a fresh lower-left
   press and keeps its base after release; the kill feed sits below purchases on
   the left. A selected visible enemy portrait shows a gold camera-relative

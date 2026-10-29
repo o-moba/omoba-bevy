@@ -277,33 +277,55 @@ impl HudLayout {
         let score = plate::SCORE_STRIP_PHONE;
         let score_x = right - score.x;
         let between = (safe.left + viewport.x - safe.right) * 0.5;
-        let allies = rect(minimap.max.x + 6.0, top, Vec2::new(134.0, 44.0));
         let icon_buttons = rect(minimap.max.x + 4.0, top + 44.0, Vec2::new(44.0, 88.0));
-        let target_w = 184.0;
-        let centred_target_left = between - target_w * 0.5;
-        let crowded_top = centred_target_left < allies.max.x + space::S4
-            || centred_target_left + target_w > score_x - space::S4;
-        // Short landscape phones cannot fit allies, selected target and
-        // score on one line. Keep the full target information in a second
-        // lane, between the service stack and the enemy portrait columns.
-        let (target_left, target_top, target_w) = if crowded_top {
-            let lane_left = icon_buttons.max.x + space::S4;
-            let enemy_left = right - 3.0 * 44.0 - 2.0 * space::S4;
-            let lane_right = (enemy_left - space::S4).max(lane_left);
-            let width = target_w.min(lane_right - lane_left);
-            (
-                (between - width * 0.5).clamp(lane_left, lane_right - width),
-                top + 44.0 + space::S4,
-                width,
-            )
-        } else {
-            (centred_target_left, top, target_w)
-        };
+        // The selected target owns the top centre. Narrow phones shorten
+        // its text/HP column symmetrically instead of lowering the plate.
+        let target_half_width = (score_x - space::S4 - between)
+            .min(between - minimap.max.x - space::S4)
+            .max(0.0);
+        let target_w = 184.0_f32.min(target_half_width * 2.0);
         let target = rect(
-            target_left,
-            target_top,
+            between - target_w * 0.5,
+            top,
             Vec2::new(target_w, plate::TARGET_FRAME_H_PHONE),
         );
+        let mut allies = rect(minimap.max.x + 6.0, top, Vec2::new(134.0, 44.0));
+        let allies_below = allies.max.x + space::S4 > target.min.x;
+        if allies_below {
+            // Keep all four real 32px ally cells clear of the service
+            // column, target and opposite enemy portraits.
+            allies = rect(
+                icon_buttons.max.x + space::S4,
+                target.max.y + space::S4,
+                allies.size(),
+            );
+        }
+        let brush_top = if allies_below {
+            allies.max.y + space::S8
+        } else {
+            top + PHONE_BRUSH_TOP
+        };
+        let mut brush = rect(
+            between - plate::BRUSH_CHIP.x * 0.5,
+            brush_top,
+            plate::BRUSH_CHIP,
+        );
+        let service_overlap = brush.intersect(icon_buttons);
+        if service_overlap.width() > 0.0 && service_overlap.height() > 0.0 {
+            brush = rect(
+                brush.min.x,
+                icon_buttons.max.y + space::S4,
+                plate::BRUSH_CHIP,
+            );
+        }
+        let feedback_top = if allies_below {
+            // Enemy portraits occupy two rows below the 44px score hit
+            // area; a full-width notice must start below those rows too.
+            let enemy_bottom = top + 44.0 + space::S4 + 2.0 * 44.0 + space::S4;
+            (brush.max.y + space::S4).max(enemy_bottom + space::S4)
+        } else {
+            top + PHONE_FEEDBACK_TOP
+        };
         let slot = PHONE_QUICK_BUY_SLOT;
         let quick_buy_top = minimap.max.y + PHONE_STACK_GAP;
         let safe_centre = (safe.left + viewport.x - safe.right) * 0.5;
@@ -322,6 +344,26 @@ impl HudLayout {
             plate::UPGRADE_CHIP,
         );
         let feed = phone_kill_feed_rect(viewport, safe);
+        let player_status = rect(
+            left,
+            feed.max.y + PHONE_STACK_GAP,
+            plate::PLAYER_STATUS_PHONE,
+        );
+        let mut feedback = rect(
+            between - plate::FEEDBACK_PHONE.x * 0.5,
+            feedback_top,
+            plate::FEEDBACK_PHONE,
+        );
+        for occupied in [feed, player_status] {
+            let overlap = feedback.intersect(occupied);
+            if overlap.width() > 0.0 && overlap.height() > 0.0 {
+                feedback = rect(
+                    occupied.max.x + space::S4,
+                    feedback_top,
+                    plate::FEEDBACK_PHONE,
+                );
+            }
+        }
         Self {
             form,
             viewport,
@@ -330,39 +372,15 @@ impl HudLayout {
             minimap,
             buff_chips: Rect::default(),
             target_frame: target,
-            brush_chip: rect(
-                (if crowded_top {
-                    target.center().x
-                } else {
-                    between
-                }) - plate::BRUSH_CHIP.x * 0.5,
-                if crowded_top {
-                    target.max.y + space::S8
-                } else {
-                    top + PHONE_BRUSH_TOP
-                },
-                plate::BRUSH_CHIP,
-            ),
+            brush_chip: brush,
             score_strip: rect(score_x, top, score),
             // Menu above chat, beside the minimap. Painted faces are only
             // 24px; the two nonoverlapping 44px cells remain easy to tap.
             icon_buttons,
-            action_feedback: rect(
-                target.min.x,
-                if crowded_top {
-                    target.max.y + space::S8 + plate::BRUSH_CHIP.y + space::S4
-                } else {
-                    top + PHONE_FEEDBACK_TOP
-                },
-                plate::FEEDBACK_PHONE,
-            ),
+            action_feedback: feedback,
             upgrade_chip: chip,
             ability_bar: bar,
-            player_status: rect(
-                left,
-                feed.max.y + PHONE_STACK_GAP,
-                plate::PLAYER_STATUS_PHONE,
-            ),
+            player_status,
             equipment: Rect::default(),
             quick_buy: rect(
                 // The 132px touch row begins at the safe edge. Its 30px
@@ -729,8 +747,8 @@ mod tests {
     }
 
     #[test]
-    fn narrow_phone_target_uses_a_separate_lane_without_covering_other_controls() {
-        for width in [693.0, 568.0] {
+    fn phone_target_keeps_top_centre_when_allies_need_a_separate_lane() {
+        for width in [568.0, 693.0, 791.0, 795.0, 796.0, 797.0, 844.0] {
             for inset in [32.0, 47.0] {
                 let mut mobile = MobileControls::default();
                 mobile.viewport = Vec2::new(width, 320.0);
@@ -740,8 +758,14 @@ mod tests {
                 let hud = HudLayout::phone(&mobile);
                 let target = hud.target_frame;
                 assert_eq!(target.height(), plate::TARGET_FRAME_H_PHONE);
-                assert!(target.width() >= 138.0 && target.width() <= 184.0);
-                assert_eq!(target.min.y, hud.allies.max.y + space::S4);
+                assert!(target.width() >= 126.0 && target.width() <= 184.0);
+                assert_eq!(target.min.y, mobile.safe.top);
+                assert_eq!(target.center().x, width * 0.5);
+                assert_eq!(hud.allies.width(), 134.0);
+                if hud.allies.min.y > target.min.y {
+                    assert_eq!(hud.allies.min.y, target.max.y + space::S4);
+                    assert!(hud.allies.min.x >= hud.icon_buttons.max.x + space::S4);
+                }
                 let occupied = [
                     hud.minimap,
                     hud.allies,
@@ -757,6 +781,29 @@ mod tests {
                         overlap.width() <= 0.0 || overlap.height() <= 0.0,
                         "{width}/{inset}: target {target:?} covers {occupied:?}"
                     );
+                }
+                let secondary = [hud.allies, hud.brush_chip, hud.action_feedback];
+                let obstacles = [
+                    hud.minimap,
+                    hud.quick_buy,
+                    hud.kill_feed,
+                    hud.player_status,
+                    hud.region(HudRegion::MenuButton),
+                    hud.region(HudRegion::SocialEntry),
+                    hud.region(HudRegion::ScoreStrip),
+                ];
+                for (i, area) in secondary.into_iter().enumerate() {
+                    for occupied in obstacles
+                        .into_iter()
+                        .chain(hud.enemy_portrait_slots())
+                        .chain(secondary.into_iter().skip(i + 1))
+                    {
+                        let overlap = area.intersect(occupied);
+                        assert!(
+                            overlap.width() <= 0.0 || overlap.height() <= 0.0,
+                            "{width}/{inset}: secondary {area:?} covers {occupied:?}"
+                        );
+                    }
                 }
                 let controls = mobile.layout();
                 let discs = controls
@@ -781,6 +828,22 @@ mod tests {
         let hud = HudLayout::phone(&mobile);
         assert_eq!(hud.target_frame.min, Vec2::new(330.0, 4.0));
         assert_eq!(hud.target_frame.size(), Vec2::new(184.0, 44.0));
+    }
+
+    #[test]
+    fn phone_target_stays_centred_with_asymmetric_safe_insets() {
+        let mut mobile = MobileControls::default();
+        mobile.viewport = Vec2::new(791.0, 360.0);
+        mobile.safe.left = 47.0;
+        mobile.safe.right = 32.0;
+        for top in [0.0, 4.0, 12.0] {
+            mobile.safe.top = top;
+            let hud = HudLayout::phone(&mobile);
+            assert_eq!(hud.target_frame.min.y, top.max(4.0));
+            assert_eq!(hud.target_frame.center().x, 403.0);
+            assert_eq!(hud.target_frame.width(), 184.0);
+            assert_eq!(hud.allies.min.y, hud.target_frame.max.y + space::S4);
+        }
     }
 
     #[test]
@@ -979,7 +1042,7 @@ mod tests {
         assert_eq!(at(l.quick_buy), (47.0, 128.0, 132.0, 44.0));
         assert_eq!(at(l.target_frame), (330.0, 4.0, 184.0, 44.0));
         assert_eq!(at(l.brush_chip), (350.0, 56.0, 144.0, 24.0));
-        assert_eq!(at(l.action_feedback), (330.0, 84.0, 220.0, 40.0));
+        assert_eq!(at(l.action_feedback), (312.0, 84.0, 220.0, 40.0));
         assert_eq!(at(l.score_strip), (627.0, 4.0, 160.0, 24.0));
         assert_eq!(at(l.icon_buttons), (181.0, 48.0, 44.0, 88.0));
         assert_eq!(at(l.skill_card), (282.0, 64.0, 280.0, 148.0));
