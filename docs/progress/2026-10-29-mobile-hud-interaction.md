@@ -36,4 +36,15 @@ build 450010; its exact source/hash/build result is recorded in `android/artifac
 The known adjacent omoba-ui CJK-font handoff drift is unchanged; isolated Git
 verification retains the normal CI installed-asset/token-lock checks. No shared
 assets/tokens, dependencies, server rules/protocol, infrastructure or CI changed.
-Physical installation remains separate because the phone is disconnected.
+Final client tests: 1521 passed, 1 ignored. Final formatting and both Clippy
+configurations passed. The earlier full workspace run passed 2415 Rust tests
+with 88 opt-in ignores; unchanged Python/iOS suites passed in a clean Git worktree.
+Both final native states and independent code/visual review pass.
+
+The OPPO PKB110 became available at finalization. Build 450010 installed over
+440010; its installed APK hash matches the signed candidate and activity/process
+launch succeeded without a crash in the short check. The screen was asleep with
+keyguard active and remained blank in captures, so physical UI, gameplay and
+multitouch are unverified. No PIN/account/security settings changed. Runtime source
+is `147f0c6`; APK SHA256:
+`94e87595e76c0670258c8881105e9f85b3ea7178c23197f2a4e5c0c0c56728ab`.
