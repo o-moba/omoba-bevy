@@ -173,15 +173,15 @@ impl TargetAnatomy {
             },
             Form::Phone => Self {
                 portrait: PortraitSpec {
-                    side: 36.0,
+                    side: 32.0,
                     ring: false,
                     disc: TARGET_LEVEL_DISC.phone,
                     disc_at: Vec2::new(-4.0, -4.0),
                     icon: size::ICON_SM,
                 },
                 portrait_at: space::S4,
-                column_x: 48.0,
-                column_w: 128.0,
+                column_x: 44.0,
+                column_w: 92.0,
                 name_top_hero: 3.0,
                 name_top: 3.0,
                 name_h: 18.0,
@@ -1594,7 +1594,7 @@ fn layout(
         (crate::hud_layout::HudLayout::phone(&mobile)
             .target_frame
             .width()
-            - 56.0)
+            - 52.0)
             .max(0.0)
     } else {
         TargetAnatomy::of(Form::Desktop).column_w
@@ -1722,7 +1722,7 @@ mod tests {
             let expected = crate::hud_layout::HudLayout::phone(&mobile)
                 .target_frame
                 .width()
-                - 56.0;
+                - 52.0;
             let mut window = Window::default();
             window.resolution.set(width, 320.0);
             app.world_mut().spawn((window, PrimaryWindow));

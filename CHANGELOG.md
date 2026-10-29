@@ -5,9 +5,11 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
-- Phone target HUD: keep the selected target at the top center on Android-sized
-  landscape screens; move allied portraits into a clear secondary lane when
-  needed and shorten the target text/HP column on the narrowest phones.
+- Phone top HUD: a smaller144×40 selected target and allied portraits keep the
+  top edge together. Passive enemy death timers use a separate row below allies;
+  live lock targets keep their right-side slots. Settings/chat sit together
+  below the death row. The runtime layout has a fast renderer-free Rust contract
+  test, including the avatar-drop regression and narrow-screen fallback.
 
 - Mobile HUD interactions: the movement stick reanchors on a fresh lower-left
   press and keeps its base after release; the kill feed sits below purchases on

@@ -22,12 +22,20 @@ one on short screens. Selecting a nearby visible enemy portrait also shows a
 small gold direction arrow in camera-relative screen axes. Hidden/dead/stale
 entities and public death timers supply no direction.
 
-The selected-target plate remains at the top center of the safe area across
-phone widths. If the allied portrait row no longer fits beside it, the whole
-row moves below, clear of the service column and enemy portraits. Narrow
-phones shorten the target name/HP column symmetrically instead of displacing
-the target. Brush/action notices follow the free lane without covering the
-left kill feed.
+The selected-target plate is144×40px at reference scale and shares the top
+safe edge with all four allied portraits. Public enemy death portraits are
+passive32px cells below allies; they contain no click target, direction vector
+or hidden position. Nearby living enemy lock targets retain44px right-side
+cells independently. Settings/chat are neighboring44px cells below the death
+row. If the narrowest phone cannot fit the map and all header blocks side by
+side, the104px map moves below the header while allies and target remain at
+the top. The left purchase/feed stack and movement bounds follow that map.
+
+`python3 scripts/check_phone_hud_layout.py` compiles and runs the same std-only
+Rust geometry used by the game, without Bevy, a window, assets or a GPU. Its
+contract enforces simultaneous top anchors, centering, actual ally cells,
+death/live separation and non-overlap over a deterministic width/inset grid;
+negative cases reject the previous lowered-avatar geometry.
 
 Verification uses one English landscape phone preview and focused geometry/input
 tests. Physical Android play and long-session comfort are reported separately;

@@ -203,6 +203,7 @@ fn prepare(
         ResMut<crate::pause_menu::SelectedSettingsTab>,
     ),
     mut utilities: Query<&mut crate::net::PlayerUtility, With<Player>>,
+    screen: Option<Res<State<crate::frontend::AppScreen>>>,
     _main_thread: bevy::ecs::system::NonSendMarker,
 ) {
     if qa.started.elapsed().as_secs() > 240 {
@@ -228,6 +229,15 @@ fn prepare(
         return;
     };
     if !matches!(game.state, GameState::Running) {
+        return;
+    }
+    // A running server snapshot can arrive while the frontend still loads
+    // the match. Start one-shot touch fixtures only once its UI owns input.
+    if qa.iphone
+        && screen
+            .as_ref()
+            .is_some_and(|screen| *screen.get() != crate::frontend::AppScreen::InMatch)
+    {
         return;
     }
     qa.frames += 1;
@@ -610,7 +620,7 @@ fn capture(
     if qa.iphone {
         let measured: Vec<_> = nodes.iter().filter_map(|(name, id, node, computed, pose, inherited, text, clip)| {
             let name = crate::ui::test_id::node_key(name, id)?;
-            let watched = (qa.round2 && matches!(name,"MinimapAimIntersection" | "MinimapAimLine" | "MatchClockText" | "MatchKdaText" | "PauseMenuShowFpsToggle")) || name.starts_with("Mobile") || name.starts_with("EnemyPortrait-") || name.starts_with("EnemyPortraitDirection") || name == "Enemy respawn countdown" || name.starts_with("AllyCamera-") || name.starts_with("PauseMenuHud")
+            let watched = (qa.round2 && matches!(name,"MinimapAimIntersection" | "MinimapAimLine" | "MatchClockText" | "MatchKdaText" | "PauseMenuShowFpsToggle")) || name.starts_with("Mobile") || name.starts_with("EnemyPortrait-") || name.starts_with("EnemyDeathPortrait-") || name.starts_with("EnemyPortraitDirection") || name == "Enemy respawn countdown" || name.starts_with("AllyCamera-") || name.starts_with("PauseMenuHud")
                 || matches!(name, "AlliedVitals" | "TargetHealthRoot" | "KillFeed" | "QuickBuyHud" | "GoldShopButton" | "HeroOverheadPlate" | "HiddenOverheadIcon" | "MeasuredFps" | "MatchMenuButton" | "SocialOpenChat" | "SocialOpenWheel" | "PauseMenuRenderFpsControls" | "IphoneUxFixtureLabel" | "TargetAimLabel" | "LockedTargetLabel" | "ActionFeedback" | "BrushStatus" | "CareerEntryActions" | "CareerProfileButton" | "CareerHistoryButton" | "CareerFriendsButton" | "CareerQueueLeaveButton");
             watched.then(|| {
                 let rect = Rect::from_center_size(pose.translation, computed.size() * pose.to_scale_angle_translation().0.abs());
@@ -715,7 +725,7 @@ fn capture(
             }
         }
         if qa.stage == 0
-            && (!visible("EnemyPortrait-99001")
+            && (!visible("EnemyDeathPortrait-99001")
                 || !measured.iter().any(|node| {
                     node["name"] == "Enemy respawn countdown"
                         && node["visible"] == true

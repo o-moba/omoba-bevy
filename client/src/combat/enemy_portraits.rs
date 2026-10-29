@@ -24,10 +24,17 @@ use crate::{
 
 use super::{CombatStats, PendingCast, TargetState, WorldPointerState};
 
-#[derive(Component, Clone, Copy, Debug)]
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct EnemyPortraitAction {
     entity: Entity,
     target: TargetId,
+}
+
+/// Position-free public death information; never a targeting action.
+#[derive(Component, Clone, Copy, Debug)]
+pub(super) struct EnemyDeathPortrait {
+    player_id: u64,
+    side: f32,
 }
 
 #[derive(Component)]
@@ -163,7 +170,7 @@ fn nearby(origin: Vec3, point: Vec3) -> bool {
 }
 
 /// Live locks require replicated visible nearby entities. Public scoreboard death
-/// timers add disabled portraits without revealing hidden enemy positions.
+/// timers have separate passive roots and never carry a world entity/position.
 #[allow(clippy::type_complexity)]
 pub(super) fn sync_enemy_portraits(
     mut commands: Commands,
@@ -187,12 +194,17 @@ pub(super) fn sync_enemy_portraits(
     >,
     validity: TargetValidity,
     selected: Res<TargetState>,
-    mut buttons: Query<(Entity, &EnemyPortraitAction, &mut Node, &mut BorderColor)>,
+    mut buttons: Query<
+        (Entity, &EnemyPortraitAction, &mut Node, &mut BorderColor),
+        Without<EnemyDeathPortrait>,
+    >,
+    mut deaths: Query<(Entity, &EnemyDeathPortrait, &mut Node), Without<EnemyPortraitAction>>,
     mut portraits: Query<(&EnemyPortraitArt, &mut PortraitView)>,
     mut timers: Query<(&EnemyRespawnLabel, &mut Text)>,
 ) {
     let local = local.single().ok();
     let mut visible = Vec::new();
+    let mut dead = Vec::new();
     if matches!(game.state, GameState::Running)
         && screen
             .as_ref()
@@ -225,24 +237,18 @@ pub(super) fn sync_enemy_portraits(
                     grey: false,
                     strong_rim: selected.selected_entity == Some(entity),
                 },
-                0_u32,
             ));
         }
-        // Death timers are public match information; this carries no live enemy position.
+        // A public death timer wins over a stale replicated live entity, but
+        // provides only identity/art/time, never a world target or position.
         if let Some(board) = &game.scoreboard {
             for row in &board.players {
                 if Team::from(row.team) == *team || row.respawn_remaining_ms == 0 {
                     continue;
                 }
-                visible.retain(|(action, _, _)| action.target.id != row.player_id);
-                visible.push((
-                    EnemyPortraitAction {
-                        entity: Entity::PLACEHOLDER,
-                        target: TargetId {
-                            kind: TargetKind::Player,
-                            id: row.player_id,
-                        },
-                    },
+                visible.retain(|(action, _)| action.target.id != row.player_id);
+                dead.push((
+                    row.player_id,
                     PortraitView {
                         art: row
                             .avatar
@@ -250,7 +256,7 @@ pub(super) fn sync_enemy_portraits(
                             .and_then(omoba_passport::avatars::avatar_definition)
                             .and_then(crate::passport::thumbnail_asset_path),
                         fallback: game::class_icon(row.hero_class),
-                        level: Some(row.level),
+                        level: None,
                         xp: 0.0,
                         grey: true,
                         strong_rim: false,
@@ -260,9 +266,14 @@ pub(super) fn sync_enemy_portraits(
             }
         }
     }
-    // Stable identities avoid reshuffling portraits as enemies move around.
-    visible.sort_by_key(|(action, _, _)| action.target.id);
+    // Each phone class owns its own stable indices. A death appearing or
+    // expiring cannot shift any of the live right-side lock buttons.
+    visible.sort_by_key(|(action, _)| (action.target.id, action.entity.to_bits()));
+    visible.dedup_by_key(|(action, _)| action.target.id);
     visible.truncate(5);
+    dead.sort_by_key(|(id, _, _)| *id);
+    dead.dedup_by_key(|(id, _, _)| *id);
+    dead.truncate(5);
     let viewport = window.single().ok().map_or_else(
         || {
             mobile
@@ -271,64 +282,98 @@ pub(super) fn sync_enemy_portraits(
         },
         |window| ui_viewport(window, ui_scale.as_deref()),
     );
-    let slots = HudLayout::resolve(viewport, mobile.as_deref(), false).enemy_portrait_slots();
+    let layout = HudLayout::resolve(viewport, mobile.as_deref(), false);
+    let phone = layout.form == crate::ui::theme::Form::Phone;
+    let live_slots = layout.enemy_portrait_slots();
+    let death_slots = if phone {
+        layout.enemy_death_portrait_slots()
+    } else {
+        live_slots
+    };
+    // Desktop retains the original shared ID-sorted right column. Its death
+    // roots are still passive, even though their geometry remains unchanged.
+    let mut desktop_ids: Vec<_> = visible
+        .iter()
+        .map(|(action, _)| action.target.id)
+        .chain(dead.iter().map(|(id, _, _)| *id))
+        .collect();
+    desktop_ids.sort_unstable();
+    desktop_ids.dedup();
+    desktop_ids.truncate(5);
+    if !phone {
+        visible.retain(|(action, _)| desktop_ids.contains(&action.target.id));
+        dead.retain(|(id, _, _)| desktop_ids.contains(id));
+    }
+    let slot_index = |id, independent| {
+        if phone {
+            independent
+        } else {
+            desktop_ids.binary_search(&id).unwrap()
+        }
+    };
     for (button, action, mut node, mut border) in &mut buttons {
-        let Some(slot) = visible.iter().position(|(entry, _, _)| {
-            entry.target == action.target && entry.entity == action.entity
-        }) else {
+        let Some(index) = visible.iter().position(|(entry, _)| entry == action) else {
             commands.entity(button).despawn();
             continue;
         };
-        node.left = Val::Px(slots[slot].min.x);
-        node.top = Val::Px(slots[slot].min.y);
+        let slot = live_slots[slot_index(action.target.id, index)];
+        node.left = Val::Px(slot.min.x);
+        node.top = Val::Px(slot.min.y);
         *border = BorderColor::all(if selected.selected_entity == Some(action.entity) {
             color::GOLD_400
         } else {
             color::STATE_DANGER
         });
     }
+    for (root, death, mut node) in &mut deaths {
+        let Some(index) = dead.iter().position(|(id, _, _)| *id == death.player_id) else {
+            commands.entity(root).despawn();
+            continue;
+        };
+        let slot = death_slots[slot_index(death.player_id, index)];
+        if death.side != slot.width() {
+            // Recreate immutable portrait anatomy if the input form changes.
+            commands.entity(root).despawn();
+            continue;
+        }
+        node.left = Val::Px(slot.min.x);
+        node.top = Val::Px(slot.min.y);
+    }
     for (art, mut view) in &mut portraits {
-        if let Some((_, next, _)) = visible
+        if let Some(next) = visible
             .iter()
-            .find(|(entry, _, _)| entry.target.id == art.0)
+            .find(|(entry, _)| entry.target.id == art.0)
+            .map(|(_, view)| view)
+            .or_else(|| {
+                dead.iter()
+                    .find(|(id, _, _)| *id == art.0)
+                    .map(|(_, view, _)| view)
+            })
         {
             view.set_if_neq(next.clone());
         }
     }
     for (label, mut text) in &mut timers {
-        let value = visible
+        let value = dead
             .iter()
-            .find(|(action, _, _)| action.target.id == label.0)
+            .find(|(id, _, _)| *id == label.0)
             .map_or(0, |(_, _, secs)| *secs);
-        text.0 = if value > 0 {
-            value.to_string()
-        } else {
-            String::new()
-        };
+        text.0 = value.to_string();
     }
-    for (slot, (action, view, secs)) in visible.into_iter().enumerate() {
-        if buttons.iter().any(|(_, existing, _, _)| {
-            existing.target == action.target && existing.entity == action.entity
-        }) {
+    for (index, (action, view)) in visible.into_iter().enumerate() {
+        if buttons
+            .iter()
+            .any(|(_, existing, _, _)| *existing == action)
+        {
             continue;
         }
+        let slot = live_slots[slot_index(action.target.id, index)];
         // Each button owns one immutable target identity for its entire life.
-        // An enemy disappearing during a tap cannot turn that tap into a lock on its replacement.
+        // A disappearing target never transfers its pending tap to a replacement.
         commands
             .spawn((
                 Button,
-                Node {
-                    position_type: PositionType::Absolute,
-                    left: Val::Px(slots[slot].min.x),
-                    top: Val::Px(slots[slot].min.y),
-                    width: Val::Px(44.0),
-                    height: Val::Px(44.0),
-                    align_items: AlignItems::Center,
-                    justify_content: JustifyContent::Center,
-                    border: UiRect::all(Val::Px(2.0)),
-                    border_radius: BorderRadius::MAX,
-                    ..default()
-                },
+                portrait_node(slot),
                 BackgroundColor(color::SURFACE_1_OPAQUE),
                 BorderColor::all(color::STATE_DANGER),
                 ZIndex(18),
@@ -338,26 +383,38 @@ pub(super) fn sync_enemy_portraits(
                 Name::new(format!("EnemyPortrait-{}", action.target.id)),
             ))
             .with_children(|button| {
-                game::live_portrait(
-                    button,
-                    view,
-                    PortraitSpec {
-                        side: 36.0,
-                        ring: false,
-                        disc: 14.0,
-                        disc_at: Vec2::new(-space::S4, -space::S4),
-                        icon: 24.0,
-                    },
-                    EnemyPortraitArt(action.target.id),
-                );
-                button.spawn((
-                    Text::new(if secs > 0 {
-                        secs.to_string()
-                    } else {
-                        String::new()
-                    }),
+                spawn_portrait_art(button, view, action.target.id, slot.width());
+                spawn_portrait_direction(button, action);
+            });
+    }
+    for (index, (id, view, secs)) in dead.into_iter().enumerate() {
+        let slot = death_slots[slot_index(id, index)];
+        if deaths
+            .iter()
+            .any(|(_, existing, _)| existing.player_id == id && existing.side == slot.width())
+        {
+            continue;
+        }
+        commands
+            .spawn((
+                portrait_node(slot),
+                BackgroundColor(color::SURFACE_1_OPAQUE),
+                BorderColor::all(color::STATE_DANGER),
+                Pickable::IGNORE,
+                ZIndex(18),
+                EnemyDeathPortrait {
+                    player_id: id,
+                    side: slot.width(),
+                },
+                TestId::new(format!("EnemyDeathPortrait-{id}")),
+                Name::new(format!("EnemyDeathPortrait-{id}")),
+            ))
+            .with_children(|portrait| {
+                spawn_portrait_art(portrait, view, id, slot.width());
+                portrait.spawn((
+                    Text::new(secs.to_string()),
                     TextFont {
-                        font_size: (19.0).into(),
+                        font_size: (if phone { 14.0 } else { 19.0 }).into(),
                         ..default()
                     },
                     TextColor(Color::WHITE),
@@ -367,12 +424,47 @@ pub(super) fn sync_enemy_portraits(
                     },
                     ZIndex(2),
                     Pickable::IGNORE,
-                    EnemyRespawnLabel(action.target.id),
+                    EnemyRespawnLabel(id),
                     Name::new("Enemy respawn countdown"),
                 ));
-                spawn_portrait_direction(button, action);
             });
     }
+}
+
+fn portrait_node(slot: Rect) -> Node {
+    Node {
+        position_type: PositionType::Absolute,
+        left: Val::Px(slot.min.x),
+        top: Val::Px(slot.min.y),
+        width: Val::Px(slot.width()),
+        height: Val::Px(slot.height()),
+        align_items: AlignItems::Center,
+        justify_content: JustifyContent::Center,
+        border: UiRect::all(Val::Px(2.0)),
+        border_radius: BorderRadius::MAX,
+        ..default()
+    }
+}
+
+fn spawn_portrait_art(
+    parent: &mut ChildSpawnerCommands,
+    view: PortraitView,
+    id: u64,
+    cell_side: f32,
+) {
+    let compact = cell_side < 44.0;
+    game::live_portrait(
+        parent,
+        view,
+        PortraitSpec {
+            side: cell_side - 8.0,
+            ring: false,
+            disc: if compact { 12.0 } else { 14.0 },
+            disc_at: Vec2::new(-space::S4, -space::S4),
+            icon: if compact { 16.0 } else { 24.0 },
+        },
+        EnemyPortraitArt(id),
+    );
 }
 
 /// Refresh after camera follow/grounding and before UI layout. Only a selected
@@ -469,18 +561,21 @@ pub(super) fn activate_enemy_portrait(
     mut pending: ResMut<PendingCast>,
     mut basic: ResMut<BasicAttackState>,
     mut pointer: ResMut<WorldPointerState>,
-    mut buttons: Query<&mut Node, With<EnemyPortraitAction>>,
+    mut buttons: Query<
+        (Option<&EnemyPortraitAction>, &mut Node),
+        Or<(With<EnemyPortraitAction>, With<EnemyDeathPortrait>)>,
+    >,
 ) {
     // Resolve after modal toggles so portraits disappear on the same frame
     // as Settings/shop/scoreboard opens, then reappear when gameplay resumes.
-    for mut node in &mut buttons {
+    for (_, mut node) in &mut buttons {
         node.display = if context.gameplay_allowed() {
             Display::Flex
         } else {
             Display::None
         };
     }
-    for Activated { action, .. } in activated.read() {
+    for Activated { source, action } in activated.read() {
         pointer.consumed_primary_press = true;
         pointer.consumed_secondary_press = true;
         if !context.gameplay_allowed() {
@@ -489,7 +584,10 @@ pub(super) fn activate_enemy_portrait(
         let Ok((origin, team, stats)) = local.single() else {
             continue;
         };
-        if action.entity == Entity::PLACEHOLDER
+        if !buttons
+            .get(*source)
+            .is_ok_and(|(current, _)| current == Some(action))
+            || action.entity == Entity::PLACEHOLDER
             || !stats.is_alive()
             || visibility
                 .get(action.entity)
@@ -560,6 +658,51 @@ mod tests {
             .iter(app.world())
             .map(|(entity, action)| (entity, *action))
             .collect()
+    }
+
+    fn death_portraits(app: &mut App) -> Vec<(Entity, EnemyDeathPortrait)> {
+        app.world_mut()
+            .query::<(Entity, &EnemyDeathPortrait)>()
+            .iter(app.world())
+            .map(|(entity, death)| (entity, *death))
+            .collect()
+    }
+
+    fn death_row(id: u64, milliseconds: u32) -> shared::live_score::LiveScorePlayer {
+        shared::live_score::LiveScorePlayer {
+            player_id: id,
+            nickname: "Hidden opponent".into(),
+            avatar: None,
+            team: shared::map::Team::Blue,
+            hero_class: shared::HeroClass::Ranger,
+            kills: 0,
+            deaths: 1,
+            assists: 0,
+            earned_gold: 0,
+            level: 3,
+            connected: true,
+            respawn_remaining_ms: milliseconds,
+        }
+    }
+
+    fn set_deaths(app: &mut App, rows: Vec<shared::live_score::LiveScorePlayer>) {
+        app.world_mut()
+            .resource_mut::<GameStateSnapshot>()
+            .scoreboard = Some(shared::live_score::LiveScoreboard {
+            players: rows,
+            ..default()
+        });
+    }
+
+    fn live_positions(app: &mut App) -> Vec<(u64, Val, Val)> {
+        let mut positions: Vec<_> = app
+            .world_mut()
+            .query::<(&EnemyPortraitAction, &Node)>()
+            .iter(app.world())
+            .map(|(action, node)| (action.target.id, node.left, node.top))
+            .collect();
+        positions.sort_by_key(|(id, _, _)| *id);
+        positions
     }
 
     fn projection_camera() -> Camera {
@@ -936,42 +1079,44 @@ mod tests {
     }
 
     #[test]
-    fn public_death_portrait_has_no_position_cannot_lock_and_expires_at_respawn() {
+    fn public_death_portrait_is_position_free_passive_and_expires_at_respawn() {
         let mut app = app();
-        let row = shared::live_score::LiveScorePlayer {
-            player_id: 77,
-            nickname: "Hidden opponent".into(),
-            avatar: None,
-            team: shared::map::Team::Blue,
-            hero_class: shared::HeroClass::Ranger,
-            kills: 0,
-            deaths: 1,
-            assists: 0,
-            earned_gold: 0,
-            level: 3,
-            connected: true,
-            respawn_remaining_ms: 2400,
-        };
-        app.world_mut()
-            .resource_mut::<GameStateSnapshot>()
-            .scoreboard = Some(shared::live_score::LiveScoreboard {
-            players: vec![row],
-            ..default()
-        });
+        set_deaths(&mut app, vec![death_row(77, 2400)]);
         app.update();
-        let (source, action) = portraits(&mut app)[0];
-        assert_eq!(
-            action.entity,
-            Entity::PLACEHOLDER,
-            "no remote world entity or position is required"
+        let deaths = death_portraits(&mut app);
+        assert_eq!(deaths.len(), 1);
+        let (source, death) = deaths[0];
+        assert_eq!(death.player_id, 77);
+        assert!(portraits(&mut app).is_empty());
+        assert!(app.world().get::<EnemyPortraitAction>(source).is_none());
+        assert!(
+            app.world()
+                .get::<UiAction<EnemyPortraitAction>>(source)
+                .is_none()
         );
+        assert!(app.world().get::<Button>(source).is_none());
+        assert!(app.world().get::<Transform>(source).is_none());
+        assert!(app.world().get::<RemotePlayer>(source).is_none());
+        let pickable = app.world().get::<Pickable>(source).unwrap();
+        assert!(!pickable.is_hoverable && !pickable.should_block_lower);
         let node = app.world().get::<Node>(source).unwrap();
-        assert_eq!((node.width, node.height), (Val::Px(44.0), Val::Px(44.0)));
+        assert_eq!((node.width, node.height), (Val::Px(32.0), Val::Px(32.0)));
+        let hud = HudLayout::phone(app.world().resource::<MobileControls>());
+        assert_eq!(node.left, Val::Px(hud.allies.min.x));
+        assert!(matches!(node.top, Val::Px(y) if y >= hud.allies.max.y + space::S4));
         assert!(
             app.world_mut()
                 .query::<&PortraitView>()
                 .iter(app.world())
                 .any(|view| view.grey)
+        );
+        assert!(
+            app.world_mut()
+                .query::<&EnemyPortraitDirection>()
+                .iter(app.world())
+                .next()
+                .is_none(),
+            "public death data cannot own a spatial bearing"
         );
         let countdown = |app: &mut App| {
             app.world_mut()
@@ -984,6 +1129,38 @@ mod tests {
                 .clone()
         };
         assert_eq!(countdown(&mut app), "3");
+        set_deaths(&mut app, vec![death_row(77, 999)]);
+        app.update();
+        assert_eq!(countdown(&mut app), "1");
+        app.world_mut()
+            .resource_mut::<GameplayInputContext>()
+            .modal_open = true;
+        app.update();
+        assert_eq!(
+            app.world().get::<Node>(source).unwrap().display,
+            Display::None
+        );
+        app.world_mut()
+            .resource_mut::<GameplayInputContext>()
+            .modal_open = false;
+        app.update();
+        assert_eq!(
+            app.world().get::<Node>(source).unwrap().display,
+            Display::Flex
+        );
+        set_deaths(&mut app, vec![death_row(77, 0)]);
+        app.update();
+        assert!(death_portraits(&mut app).is_empty());
+        assert!(
+            portraits(&mut app).is_empty(),
+            "living hidden enemies stay absent"
+        );
+        let live = enemy(&mut app, 77, 3.0);
+        app.update();
+        let (new_source, action) = portraits(&mut app)[0];
+        assert_eq!(action.entity, live);
+        // Even a forged queued activation using the old passive root cannot
+        // borrow the newly visible live entity's targeting action.
         app.world_mut().write_message(Activated { source, action });
         app.update();
         assert!(
@@ -992,39 +1169,129 @@ mod tests {
                 .selected_target
                 .is_none()
         );
-        app.world_mut()
-            .resource_mut::<GameStateSnapshot>()
-            .scoreboard
-            .as_mut()
-            .unwrap()
-            .players[0]
-            .respawn_remaining_ms = 999;
+        app.world_mut().write_message(Activated {
+            source: new_source,
+            action,
+        });
         app.update();
-        assert_eq!(countdown(&mut app), "1");
-        app.world_mut()
-            .resource_mut::<GameStateSnapshot>()
-            .scoreboard
-            .as_mut()
-            .unwrap()
-            .players[0]
-            .respawn_remaining_ms = 0;
-        app.update();
-        assert!(
-            portraits(&mut app).is_empty(),
-            "a living hidden enemy must not remain on the public HUD"
+        assert_eq!(
+            app.world().resource::<TargetState>().selected_entity,
+            Some(live)
         );
-        let live = enemy(&mut app, 77, 3.0);
+    }
+
+    #[test]
+    fn phone_death_row_does_not_consume_or_reorder_live_lock_slots() {
+        let mut app = app();
+        enemy(&mut app, 20, 3.0);
+        enemy(&mut app, 40, 4.0);
         app.update();
-        assert_eq!(portraits(&mut app)[0].1.entity, live);
+        let before = live_positions(&mut app);
+        set_deaths(&mut app, vec![death_row(10, 3000), death_row(30, 1500)]);
+        app.update();
+        assert_eq!(live_positions(&mut app), before);
+        let mut dead: Vec<_> = death_portraits(&mut app)
+            .into_iter()
+            .map(|(entity, death)| {
+                let node = app.world().get::<Node>(entity).unwrap();
+                (death.player_id, node.left, node.top)
+            })
+            .collect();
+        dead.sort_by_key(|(id, _, _)| *id);
+        let slots =
+            HudLayout::phone(app.world().resource::<MobileControls>()).enemy_death_portrait_slots();
+        assert_eq!(
+            dead[0],
+            (10, Val::Px(slots[0].min.x), Val::Px(slots[0].min.y))
+        );
+        assert_eq!(
+            dead[1],
+            (30, Val::Px(slots[1].min.x), Val::Px(slots[1].min.y))
+        );
+        set_deaths(&mut app, vec![death_row(30, 1000)]);
+        app.update();
+        assert_eq!(live_positions(&mut app), before);
+        assert_eq!(death_portraits(&mut app).len(), 1);
+        set_deaths(&mut app, vec![]);
+        app.update();
+        assert_eq!(live_positions(&mut app), before);
+        assert!(death_portraits(&mut app).is_empty());
+    }
+
+    #[test]
+    fn public_death_replaces_a_stale_live_snapshot_and_rejects_its_queued_tap() {
+        let (mut app, _) = direction_app();
+        let live = enemy(&mut app, 17, 3.0);
+        app.update();
+        let (source, action) = portraits(&mut app)[0];
+        // The world snapshot still says alive: public death information must
+        // remove the live action before an already queued click is handled.
+        assert!(app.world().get::<CombatStats>(live).unwrap().is_alive());
+        set_deaths(&mut app, vec![death_row(17, 2500)]);
+        app.world_mut().write_message(Activated { source, action });
+        app.update();
+        assert!(portraits(&mut app).is_empty());
+        assert_eq!(death_portraits(&mut app).len(), 1);
+        assert!(app.world().get_entity(source).is_err());
+        assert!(
+            app.world()
+                .resource::<TargetState>()
+                .selected_entity
+                .is_none()
+        );
+        assert!(!direction_shown(&mut app, 17));
+        set_deaths(&mut app, vec![]);
+        app.update();
+        let (replacement_source, replacement_action) = portraits(&mut app)[0];
+        assert_ne!(replacement_source, source);
+        assert_eq!(replacement_action, action);
         app.world_mut().write_message(Activated { source, action });
         app.update();
         assert!(
             app.world()
                 .resource::<TargetState>()
-                .selected_target
-                .is_none(),
-            "a stale dead portrait cannot become a live lock"
+                .selected_entity
+                .is_none()
         );
+    }
+
+    #[test]
+    fn desktop_keeps_shared_column_and_rebuilds_death_anatomy_on_form_change() {
+        let mut app = app();
+        app.world_mut().resource_mut::<MobileControls>().enabled = false;
+        enemy(&mut app, 20, 3.0);
+        enemy(&mut app, 40, 4.0);
+        set_deaths(&mut app, vec![death_row(30, 3000)]);
+        app.update();
+        let slots = HudLayout::desktop(Vec2::new(852.0, 393.0), false).enemy_portrait_slots();
+        let live = live_positions(&mut app);
+        assert_eq!(
+            live[0],
+            (20, Val::Px(slots[0].min.x), Val::Px(slots[0].min.y))
+        );
+        assert_eq!(
+            live[1],
+            (40, Val::Px(slots[2].min.x), Val::Px(slots[2].min.y))
+        );
+        let (old_root, _) = death_portraits(&mut app)[0];
+        let node = app.world().get::<Node>(old_root).unwrap();
+        assert_eq!(
+            (node.left, node.top),
+            (Val::Px(slots[1].min.x), Val::Px(slots[1].min.y))
+        );
+        assert_eq!(node.width, Val::Px(44.0));
+        app.world_mut().resource_mut::<MobileControls>().enabled = true;
+        app.update();
+        let deaths = death_portraits(&mut app);
+        assert_eq!(deaths.len(), 1);
+        let (new_root, _) = deaths[0];
+        assert_ne!(old_root, new_root);
+        assert!(app.world().get_entity(old_root).is_err());
+        assert_eq!(
+            app.world().get::<Node>(new_root).unwrap().width,
+            Val::Px(32.0)
+        );
+        assert!(app.world().get::<Button>(new_root).is_none());
     }
 
     #[test]

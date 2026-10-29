@@ -397,14 +397,14 @@ pub(super) fn update_tactical_hud(
                         position_type: PositionType::Absolute,
                         left: Val::Px(layout.allies.min.x),
                         top: Val::Px(layout.allies.min.y),
-                        column_gap: Val::Px(2.0),
+                        column_gap: Val::Px(layout.ally_cell_gap),
                         ..default()
                     },
                     Name::new("AlliedVitals"),
                     ZIndex(12),
                 ))
                 .id();
-            let cell = ((layout.allies.width() - 6.0) / 4.0).clamp(32.0, 44.0);
+            let cell = layout.ally_cell_width;
             let phone = layout.form == crate::ui::theme::Form::Phone;
             let portrait_side = (cell - 2.0).min(if phone { 22.0 } else { 32.0 });
             for (p, hp) in allies {
@@ -412,7 +412,7 @@ pub(super) fn update_tactical_hud(
                     .spawn((
                         Node {
                             width: Val::Px(cell),
-                            height: Val::Px(44.0),
+                            height: Val::Px(layout.ally_cell_height),
                             align_items: AlignItems::Center,
                             border: UiRect::all(Val::Px(1.0)),
                             border_radius: BorderRadius::all(Val::Px(6.0)),

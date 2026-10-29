@@ -14,6 +14,8 @@ use crate::mobile_controls::{MobileControls, MobileSafeInsets};
 use crate::ui::theme::Form;
 use crate::ui::tokens::{size, space};
 
+pub(crate) mod phone_rows;
+
 /// Plate sizes the redline measures in px without a token of their own.
 pub(crate) mod plate {
     use bevy::prelude::Vec2;
@@ -27,10 +29,8 @@ pub(crate) mod plate {
     pub const UPGRADE_CHIP: Vec2 = Vec2::new(148.0, 24.0);
     pub const ABILITY_BAR: Vec2 = Vec2::new(344.0, 108.0);
     pub const PLAYER_STATUS_DESKTOP: Vec2 = Vec2::new(288.0, 72.0);
-    pub const PLAYER_STATUS_PHONE: Vec2 = Vec2::new(200.0, 48.0);
     pub const EQUIPMENT: Vec2 = Vec2::new(200.0, 102.0);
     pub const TARGET_FRAME_H_DESKTOP: f32 = 56.0;
-    pub const TARGET_FRAME_H_PHONE: f32 = 44.0;
     /// Controller reminder strip, bottom-centre above the ability bar
     /// (hud.md § States, Controller active: y 520–572 at 720).
     pub const LEGEND_H: f32 = 52.0;
@@ -54,14 +54,9 @@ const BRUSH_TOP: f32 = 80.0;
 const BUFF_TOP: f32 = 200.0;
 const KILL_FEED_TOP: f32 = 100.0;
 /// Phone faces use less paint without reducing their independent tap areas.
-pub(crate) const PHONE_QUICK_BUY_SLOT: f32 = 44.0;
+pub(crate) const PHONE_QUICK_BUY_SLOT: f32 = phone_rows::BUY_SLOT;
 pub(crate) const PHONE_QUICK_BUY_GAP: f32 = 0.0;
 pub(crate) const PHONE_QUICK_BUY_FACE: f32 = 30.0;
-const PHONE_STACK_GAP: f32 = 4.0;
-const PHONE_KILL_FEED_H: f32 = 30.0;
-const PHONE_KILL_FEED_SHORT_H: f32 = 16.0;
-const PHONE_BRUSH_TOP: f32 = 52.0;
-const PHONE_FEEDBACK_TOP: f32 = 80.0;
 /// Phone skill hold card: `safe top + 64` (skill-description.md).
 const PHONE_CARD_TOP: f32 = 64.0;
 /// Desktop skill tooltip bottom: `space.8` above the upgrade chip (564 at
@@ -69,10 +64,10 @@ const PHONE_CARD_TOP: f32 = 64.0;
 const TOOLTIP_BOTTOM_WITH_CHIP: f32 = UPGRADE_FROM_BOTTOM + space::S8;
 const TOOLTIP_BOTTOM_WITHOUT_CHIP: f32 = ABILITY_FROM_BOTTOM + space::S8;
 
-/// Width of the service group: stacked phone targets or the desktop row.
+/// Width of the service group: neighboring phone targets or the desktop row.
 pub(crate) fn icon_row_width(form: Form) -> f32 {
     if form == Form::Phone {
-        44.0
+        88.0
     } else {
         3.0 * size::ICON_BUTTON.at(form) + 2.0 * space::S8
     }
@@ -102,6 +97,11 @@ pub(crate) struct HudLayout {
     pub buff_chips: Rect,
     pub target_frame: Rect,
     pub allies: Rect,
+    pub ally_cell_width: f32,
+    pub ally_cell_height: f32,
+    pub ally_cell_gap: f32,
+    pub enemy_deaths: [Rect; 5],
+    pub enemy_live: [Rect; 5],
     pub kill_feed: Rect,
     pub brush_chip: Rect,
     pub score_strip: Rect,
@@ -136,25 +136,21 @@ fn phone_minimap_size(viewport: Vec2) -> f32 {
 /// The left information stack ends below quick-buy, independently of the
 /// movement layout. Floating-stick bounds can reserve this rectangle without
 /// calling `MobileControls::layout` recursively.
+fn phone_plan(viewport: Vec2, safe: MobileSafeInsets) -> phone_rows::Layout {
+    phone_rows::solve(phone_rows::Input {
+        width: viewport.x,
+        height: viewport.y,
+        safe_left: safe.left,
+        safe_right: safe.right,
+        safe_top: safe.top,
+        map_side: phone_minimap_size(viewport),
+    })
+}
+fn from_phone_box(b: phone_rows::Box2) -> Rect {
+    rect(b.left, b.top, Vec2::new(b.width, b.height))
+}
 pub(crate) fn phone_kill_feed_rect(viewport: Vec2, safe: MobileSafeInsets) -> Rect {
-    let top = safe.top.max(4.0)
-        + phone_minimap_size(viewport)
-        + PHONE_STACK_GAP
-        + PHONE_QUICK_BUY_SLOT
-        + PHONE_STACK_GAP;
-    let height = if viewport.y <= 340.0 {
-        PHONE_KILL_FEED_SHORT_H
-    } else {
-        PHONE_KILL_FEED_H
-    };
-    rect(
-        safe.left + 10.0,
-        top,
-        Vec2::new(
-            180.0_f32.min((viewport.x - safe.left - safe.right - 20.0).max(0.0)),
-            height,
-        ),
-    )
+    from_phone_box(phone_plan(viewport, safe).kill_feed)
 }
 
 impl HudLayout {
@@ -196,6 +192,11 @@ impl HudLayout {
                 inset + 50.0,
                 Vec2::new(176.0, 44.0),
             ),
+            ally_cell_width: 42.5,
+            ally_cell_height: 44.0,
+            ally_cell_gap: 2.0,
+            enemy_deaths: [Rect::default(); 5],
+            enemy_live: [Rect::default(); 5],
             kill_feed: rect(
                 (w - inset - 280.0).max(space::S16),
                 KILL_FEED_TOP,
@@ -266,73 +267,12 @@ impl HudLayout {
     /// map's readable size, keep service targets alongside it and paint only
     /// a shallow score ribbon on the opposite edge.
     pub(crate) fn phone(mobile: &MobileControls) -> Self {
-        let form = Form::Phone;
         let viewport = mobile.viewport;
         let safe = mobile.safe;
-        let left = safe.left + 10.0;
-        let right = viewport.x - safe.right - 10.0;
-        let top = safe.top.max(4.0);
-        let map_size = phone_minimap_size(viewport);
-        let minimap = rect(left, top, Vec2::splat(map_size));
-        let score = plate::SCORE_STRIP_PHONE;
-        let score_x = right - score.x;
-        let between = (safe.left + viewport.x - safe.right) * 0.5;
-        let icon_buttons = rect(minimap.max.x + 4.0, top + 44.0, Vec2::new(44.0, 88.0));
-        // The selected target owns the top centre. Narrow phones shorten
-        // its text/HP column symmetrically instead of lowering the plate.
-        let target_half_width = (score_x - space::S4 - between)
-            .min(between - minimap.max.x - space::S4)
-            .max(0.0);
-        let target_w = 184.0_f32.min(target_half_width * 2.0);
-        let target = rect(
-            between - target_w * 0.5,
-            top,
-            Vec2::new(target_w, plate::TARGET_FRAME_H_PHONE),
-        );
-        let mut allies = rect(minimap.max.x + 6.0, top, Vec2::new(134.0, 44.0));
-        let allies_below = allies.max.x + space::S4 > target.min.x;
-        if allies_below {
-            // Keep all four real 32px ally cells clear of the service
-            // column, target and opposite enemy portraits.
-            allies = rect(
-                icon_buttons.max.x + space::S4,
-                target.max.y + space::S4,
-                allies.size(),
-            );
-        }
-        let brush_top = if allies_below {
-            allies.max.y + space::S8
-        } else {
-            top + PHONE_BRUSH_TOP
-        };
-        let mut brush = rect(
-            between - plate::BRUSH_CHIP.x * 0.5,
-            brush_top,
-            plate::BRUSH_CHIP,
-        );
-        let service_overlap = brush.intersect(icon_buttons);
-        if service_overlap.width() > 0.0 && service_overlap.height() > 0.0 {
-            brush = rect(
-                brush.min.x,
-                icon_buttons.max.y + space::S4,
-                plate::BRUSH_CHIP,
-            );
-        }
-        let feedback_top = if allies_below {
-            // Enemy portraits occupy two rows below the 44px score hit
-            // area; a full-width notice must start below those rows too.
-            let enemy_bottom = top + 44.0 + space::S4 + 2.0 * 44.0 + space::S4;
-            (brush.max.y + space::S4).max(enemy_bottom + space::S4)
-        } else {
-            top + PHONE_FEEDBACK_TOP
-        };
-        let slot = PHONE_QUICK_BUY_SLOT;
-        let quick_buy_top = minimap.max.y + PHONE_STACK_GAP;
+        let plan = phone_plan(viewport, safe);
+        let ally_cells = plan.ally_cells();
         let safe_centre = (safe.left + viewport.x - safe.right) * 0.5;
         let card = plate::SKILL_CARD;
-        // A controller hides the touch combat group and shows the desktop
-        // ability bar (hud.md § States): bottom-centre in the safe area,
-        // the upgrade chip above it.
         let bar = rect(
             safe_centre - plate::ABILITY_BAR.x * 0.5,
             viewport.y - safe.bottom - plate::ABILITY_BAR.y,
@@ -343,84 +283,59 @@ impl HudLayout {
             bar.min.y - space::S8 - plate::UPGRADE_CHIP.y,
             plate::UPGRADE_CHIP,
         );
-        let feed = phone_kill_feed_rect(viewport, safe);
-        let player_status = rect(
-            left,
-            feed.max.y + PHONE_STACK_GAP,
-            plate::PLAYER_STATUS_PHONE,
-        );
-        let mut feedback = rect(
-            between - plate::FEEDBACK_PHONE.x * 0.5,
-            feedback_top,
-            plate::FEEDBACK_PHONE,
-        );
-        for occupied in [feed, player_status] {
-            let overlap = feedback.intersect(occupied);
-            if overlap.width() > 0.0 && overlap.height() > 0.0 {
-                feedback = rect(
-                    occupied.max.x + space::S4,
-                    feedback_top,
-                    plate::FEEDBACK_PHONE,
-                );
-            }
-        }
         Self {
-            form,
+            form: Form::Phone,
             viewport,
-            allies,
-            kill_feed: feed,
-            minimap,
+            minimap: from_phone_box(plan.minimap),
+            allies: from_phone_box(plan.allies),
+            ally_cell_width: ally_cells[0].width,
+            ally_cell_height: ally_cells[0].height,
+            ally_cell_gap: ally_cells[1].left - ally_cells[0].right(),
+            enemy_deaths: plan.deaths.map(from_phone_box),
+            enemy_live: plan.live_slots().map(from_phone_box),
+            target_frame: from_phone_box(plan.target),
+            score_strip: from_phone_box(plan.score),
+            icon_buttons: rect(
+                plan.menu.left,
+                plan.menu.top,
+                Vec2::new(plan.chat.right() - plan.menu.left, plan.menu.height),
+            ),
+            brush_chip: from_phone_box(plan.brush),
+            action_feedback: from_phone_box(plan.feedback),
+            kill_feed: from_phone_box(plan.kill_feed),
+            quick_buy: from_phone_box(plan.quick_buy),
+            player_status: from_phone_box(plan.player_status),
             buff_chips: Rect::default(),
-            target_frame: target,
-            brush_chip: brush,
-            score_strip: rect(score_x, top, score),
-            // Menu above chat, beside the minimap. Painted faces are only
-            // 24px; the two nonoverlapping 44px cells remain easy to tap.
-            icon_buttons,
-            action_feedback: feedback,
             upgrade_chip: chip,
             ability_bar: bar,
-            player_status,
             equipment: Rect::default(),
-            quick_buy: rect(
-                // The 132px touch row begins at the safe edge. Its 30px
-                // painted faces align closely with the 120px minimap,
-                // without touching the adjacent chat cell.
-                safe.left,
-                quick_buy_top,
-                Vec2::new(3.0 * slot + 2.0 * PHONE_QUICK_BUY_GAP, slot),
-            ),
             legend: Rect::default(),
             skill_card: rect(safe_centre - card.x * 0.5, safe.top + PHONE_CARD_TOP, card),
+        }
+    }
+
+    /// Passive public death timers live under allies on phones. Desktop
+    /// retains its shared right-hand column through the portrait owner.
+    pub(crate) fn enemy_death_portrait_slots(&self) -> [Rect; 5] {
+        if self.form == Form::Phone {
+            self.enemy_deaths
+        } else {
+            self.enemy_portrait_slots()
         }
     }
 
     /// Five hero targets fit the free right edge. On a phone two rows wrap
     /// leftward above the skill orbit; the fifth uses only the top row.
     pub(crate) fn enemy_portrait_slots(&self) -> [Rect; 5] {
+        if self.form == Form::Phone {
+            return self.enemy_live;
+        }
         let side = 44.0;
         let step = side + space::S4;
-        // Phone menu/chat live at the minimap. Enemy targets deliberately
-        // keep the opposite edge, independent of that chrome placement.
-        let right = if self.form == Form::Phone {
-            self.score_strip.max.x
-        } else {
-            self.icon_buttons.max.x
-        };
-        let top = if self.form == Form::Phone {
-            self.region(HudRegion::ScoreStrip).max.y + space::S4
-        } else {
-            self.kill_feed.max.y + space::S12
-        };
         std::array::from_fn(|slot| {
-            let (column, row) = if self.form == Form::Phone {
-                (slot / 2, slot % 2)
-            } else {
-                (0, slot)
-            };
             rect(
-                right - side - column as f32 * step,
-                top + row as f32 * step,
+                self.icon_buttons.max.x - side,
+                self.kill_feed.max.y + space::S12 + slot as f32 * step,
                 Vec2::splat(side),
             )
         })
@@ -449,8 +364,8 @@ impl HudLayout {
             ),
             HudRegion::ScoreStrip => self.score_strip,
             HudRegion::SocialEntry if self.form == Form::Phone => rect(
-                self.icon_buttons.min.x,
-                self.icon_buttons.min.y + button,
+                self.icon_buttons.min.x + button,
+                self.icon_buttons.min.y,
                 Vec2::splat(button),
             ),
             HudRegion::SocialEntry => Rect::from_corners(
@@ -672,18 +587,19 @@ mod tests {
                 let feed = hud.kill_feed();
                 assert_eq!(feed, phone_kill_feed_rect(viewport, mobile.safe));
                 assert_eq!(feed.min.x, hud.minimap.min.x);
-                assert_eq!(feed.min.y, hud.quick_buy.max.y + PHONE_STACK_GAP);
+                assert_eq!(feed.min.y, hud.quick_buy.max.y + phone_rows::GAP);
                 assert_eq!(feed.width(), 180.0);
                 let short = viewport.y <= 340.0;
                 assert_eq!(
                     feed.height(),
                     if short {
-                        PHONE_KILL_FEED_SHORT_H
+                        phone_rows::FEED_SHORT_HEIGHT
                     } else {
-                        PHONE_KILL_FEED_H
+                        phone_rows::FEED_HEIGHT
                     }
                 );
-                let stick_diameter = if short { 88.0 } else { 104.0 };
+                let stick_diameter = mobile.layout().joystick_radius * 2.0;
+                assert!(stick_diameter >= 44.0);
                 assert!(feed.max.y + space::S4 + stick_diameter <= viewport.y - mobile.safe.bottom);
                 for occupied in [
                     hud.minimap,
@@ -734,7 +650,7 @@ mod tests {
         mobile.safe.top = 12.0;
         for (viewport, expected) in [
             (Vec2::new(844.0, 384.0), (57.0, 184.0, 180.0, 30.0)),
-            (Vec2::new(568.0, 320.0), (57.0, 184.0, 180.0, 16.0)),
+            (Vec2::new(568.0, 320.0), (57.0, 216.0, 180.0, 16.0)),
             (Vec2::new(1180.0, 820.0), (57.0, 208.0, 180.0, 30.0)),
         ] {
             mobile.viewport = viewport;
@@ -742,12 +658,17 @@ mod tests {
             assert_eq!(at(feed), expected);
             assert_eq!(HudLayout::phone(&mobile).kill_feed(), feed);
             assert!(feed.max.x <= viewport.x - mobile.safe.right);
-            assert!(feed.max.y + space::S4 + 88.0 <= viewport.y - mobile.safe.bottom);
+            let stick = mobile.layout();
+            assert!(stick.joystick_radius >= 22.0);
+            assert!(
+                feed.max.y + space::S4 + stick.joystick_radius * 2.0
+                    <= viewport.y - mobile.safe.bottom
+            );
         }
     }
 
     #[test]
-    fn phone_target_keeps_top_centre_when_allies_need_a_separate_lane() {
+    fn phone_allies_and_target_share_top_edge_at_every_supported_width() {
         for width in [568.0, 693.0, 791.0, 795.0, 796.0, 797.0, 844.0] {
             for inset in [32.0, 47.0] {
                 let mut mobile = MobileControls::default();
@@ -757,15 +678,19 @@ mod tests {
                 mobile.safe.top = 4.0;
                 let hud = HudLayout::phone(&mobile);
                 let target = hud.target_frame;
-                assert_eq!(target.height(), plate::TARGET_FRAME_H_PHONE);
-                assert!(target.width() >= 126.0 && target.width() <= 184.0);
+                assert_eq!(target.height(), phone_rows::TARGET_HEIGHT);
+                assert!(target.width() >= 126.0 && target.width() <= 144.0);
                 assert_eq!(target.min.y, mobile.safe.top);
                 assert_eq!(target.center().x, width * 0.5);
                 assert_eq!(hud.allies.width(), 134.0);
-                if hud.allies.min.y > target.min.y {
-                    assert_eq!(hud.allies.min.y, target.max.y + space::S4);
-                    assert!(hud.allies.min.x >= hud.icon_buttons.max.x + space::S4);
-                }
+                assert_eq!(hud.allies.min.y, mobile.safe.top);
+                assert_eq!(hud.ally_cell_width, 32.0);
+                assert_eq!(hud.ally_cell_height, 44.0);
+                assert_eq!(hud.ally_cell_gap, 2.0);
+                assert_eq!(
+                    hud.enemy_death_portrait_slots()[0].min.y,
+                    hud.allies.max.y + 4.0
+                );
                 let occupied = [
                     hud.minimap,
                     hud.allies,
@@ -826,8 +751,8 @@ mod tests {
         mobile.viewport = Vec2::new(844.0, 384.0);
         mobile.safe.top = 4.0;
         let hud = HudLayout::phone(&mobile);
-        assert_eq!(hud.target_frame.min, Vec2::new(330.0, 4.0));
-        assert_eq!(hud.target_frame.size(), Vec2::new(184.0, 44.0));
+        assert_eq!(hud.target_frame.min, Vec2::new(350.0, 4.0));
+        assert_eq!(hud.target_frame.size(), Vec2::new(144.0, 40.0));
     }
 
     #[test]
@@ -841,8 +766,8 @@ mod tests {
             let hud = HudLayout::phone(&mobile);
             assert_eq!(hud.target_frame.min.y, top.max(4.0));
             assert_eq!(hud.target_frame.center().x, 403.0);
-            assert_eq!(hud.target_frame.width(), 184.0);
-            assert_eq!(hud.allies.min.y, hud.target_frame.max.y + space::S4);
+            assert_eq!(hud.target_frame.width(), 144.0);
+            assert_eq!(hud.allies.min.y, top.max(4.0));
         }
     }
 
@@ -856,8 +781,12 @@ mod tests {
         let chat = layout.region(HudRegion::SocialEntry);
         assert_eq!(menu.size(), Vec2::splat(44.0));
         assert_eq!(chat.size(), Vec2::splat(44.0));
-        assert_eq!(menu.min.y, layout.minimap.min.y + 44.0);
-        assert_eq!(chat.min.y, menu.max.y);
+        assert_eq!(
+            menu.min.y,
+            layout.enemy_death_portrait_slots()[0].max.y + 4.0
+        );
+        assert_eq!(chat.min.y, menu.min.y);
+        assert_eq!(chat.min.x, menu.max.x);
         assert!(menu.min.x >= layout.minimap.max.x);
         assert!(chat.min.x > layout.quick_buy.max.x);
         assert!(menu.min.y >= layout.allies.max.y);
@@ -879,7 +808,7 @@ mod tests {
         let controls = mobile.layout();
         let feed = layout.kill_feed();
         assert_eq!(feed.min.x, layout.minimap.min.x);
-        assert_eq!(feed.min.y, layout.quick_buy.max.y + PHONE_STACK_GAP);
+        assert_eq!(feed.min.y, layout.quick_buy.max.y + phone_rows::GAP);
         assert!(feed.max.x < controls.utility_centers[0].x - controls.auxiliary_radius);
         assert!(feed.max.y <= mobile.viewport.y - mobile.safe.bottom);
         assert_eq!(layout.target_frame.center().x, mobile.viewport.x * 0.5);
@@ -894,10 +823,10 @@ mod tests {
         mobile.viewport = Vec2::new(852.0, 393.0);
         let hud = HudLayout::phone(&mobile);
         assert_eq!(hud.quick_buy.min.x, mobile.safe.left);
-        assert_eq!(hud.quick_buy.min.y, hud.minimap.max.y + PHONE_STACK_GAP);
+        assert_eq!(hud.quick_buy.min.y, hud.minimap.max.y + phone_rows::GAP);
         assert_eq!(
             hud.player_status.min.y,
-            hud.kill_feed.max.y + PHONE_STACK_GAP
+            hud.kill_feed.max.y + phone_rows::GAP
         );
         let controls = mobile.layout();
         let circles: Vec<_> = controls
@@ -1040,11 +969,11 @@ mod tests {
         assert_eq!(at(l.minimap), (57.0, 4.0, 120.0, 120.0));
         assert_eq!(at(l.player_status), (57.0, 210.0, 200.0, 48.0));
         assert_eq!(at(l.quick_buy), (47.0, 128.0, 132.0, 44.0));
-        assert_eq!(at(l.target_frame), (330.0, 4.0, 184.0, 44.0));
-        assert_eq!(at(l.brush_chip), (350.0, 56.0, 144.0, 24.0));
-        assert_eq!(at(l.action_feedback), (312.0, 84.0, 220.0, 40.0));
+        assert_eq!(at(l.target_frame), (350.0, 4.0, 144.0, 40.0));
+        assert_eq!(at(l.brush_chip), (350.0, 92.0, 144.0, 24.0));
+        assert_eq!(at(l.action_feedback), (312.0, 120.0, 220.0, 40.0));
         assert_eq!(at(l.score_strip), (627.0, 4.0, 160.0, 24.0));
-        assert_eq!(at(l.icon_buttons), (181.0, 48.0, 44.0, 88.0));
+        assert_eq!(at(l.icon_buttons), (181.0, 88.0, 88.0, 44.0));
         assert_eq!(at(l.skill_card), (282.0, 64.0, 280.0, 148.0));
         // Quick-buy ends above the protected passage (y 242), also at the
         // runtime's conservative insets (32/32/12/20).
@@ -1138,11 +1067,11 @@ mod tests {
             assert_eq!(layout.quick_buy.min.x + 10.0, layout.minimap.min.x);
             assert_eq!(
                 layout.quick_buy.min.y,
-                layout.minimap.max.y + PHONE_STACK_GAP
+                layout.minimap.max.y + phone_rows::GAP
             );
             assert_eq!(
                 layout.player_status.min.y,
-                layout.kill_feed.max.y + PHONE_STACK_GAP
+                layout.kill_feed.max.y + phone_rows::GAP
             );
         }
     }
