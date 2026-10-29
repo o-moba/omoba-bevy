@@ -8,5 +8,10 @@ license.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 
+# Reuse the pinned engine's browser clock. Native shared stays renderer-free and
+# keeps exactly std::time::Instant; no networking or identity contract changes.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+bevy = { version = "0.19.1", default-features = false, features = ["std", "web"] }
+
 [lints]
 workspace = true

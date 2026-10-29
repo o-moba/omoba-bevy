@@ -5,8 +5,8 @@ use crate::{
     game_world::GameWorld,
     match_rules::MatchRules,
 };
+use shared::clock::Instant;
 use shared::{map::Team, wire::GameState};
-use std::time::Instant;
 
 pub struct CombatHost<'a> {
     pub world: &'a mut GameWorld,

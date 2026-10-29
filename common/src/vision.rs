@@ -1,5 +1,5 @@
 //! Server-owned sight; no client visibility claims participate in combat or replication.
-use std::time::Instant;
+use shared::clock::Instant;
 
 use shared::combat::{CombatEntity, CombatEntityKind};
 use shared::map::Team;

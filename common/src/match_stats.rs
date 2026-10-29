@@ -1,7 +1,8 @@
 //! Lifetime round accounting from accepted HP-loss receipts, independent of
 //! connected endpoints and the short, repeated cosmetic event stream.
+use shared::clock::Instant;
 use std::collections::BTreeMap;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use shared::career::{MAX_PARTICIPANTS, MatchStats, ParticipantResult};
 use shared::combat::{CombatEntityKind, CombatEvent};
@@ -324,7 +325,7 @@ impl RoundLedger {
 pub fn update_live_timers(
     board: &mut shared::live_score::LiveScoreboard,
     world: &crate::game_world::GameWorld,
-    now: std::time::Instant,
+    now: shared::clock::Instant,
 ) {
     board.elapsed_secs = world.match_elapsed_secs.max(0.0) as u64;
     for row in &mut board.players {

@@ -1,7 +1,7 @@
 //! Structure protection, damage and tower fire.
 
+use shared::clock::Instant;
 use std::collections::HashMap;
-use std::time::Instant;
 
 use shared::combat::{CombatEntityKind, CombatEvent, ProjectileStyle};
 use shared::map::{Lane, Team};

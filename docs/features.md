@@ -61,6 +61,23 @@ status traffic cannot consume completion quota, and revoked keys cannot race a n
 social link. See [registration](registration.md) for schema 10, source boundaries,
 real local browser/signed-game proof and remaining live-provider rollout gates.
 
+## Browser-local practice
+
+`browser-client/` is an additive Bevy/WebGL 2 host of the same
+`common::offline::PracticeSession` used by native offline practice. It exposes
+seven standard class kits, real bot/hero/minion/tower simulation, movement,
+attacks, skills, dash, recall, pause and new matches, with bounded shipped
+Verdant terrain and character sprites. It does not load the native blocking
+HTTP/passport stack, create a device identity, join a network lobby or write
+career rewards. The portal owns VK sign-in independently; this practice iframe
+never receives a player token or key. Full browser multiplayer needs an admitted
+browser transport and a separately approved server rollout.
+
+`scripts/build-web.sh` builds the pinned wasm32 target into the existing shared
+cache B and emits `builds/browser-practice/` with relative paths and a hashed
+build manifest. The directory can be served unchanged under `/game/` and loaded
+lazily by `/play`. See [build, controls and limits](browser-practice.md).
+
 ## Runtime account regions
 
 Native capture launchers seed a returning Global routing record in their own

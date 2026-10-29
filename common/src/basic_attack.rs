@@ -1,8 +1,8 @@
 //! Individual server-authorized basic strikes. Clients own repeat/chase intent;
 //! the server owns target legality, range, timing, equipment and damage.
+use shared::clock::Instant;
 use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::time::Instant;
 
 use shared::combat::{CombatEntityKind, ProjectileStyle};
 use shared::map::Team;
