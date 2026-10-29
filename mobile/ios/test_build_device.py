@@ -249,6 +249,21 @@ class DeviceTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "report already exists"):
                 device.main(["--binary", str(self.binary), "--output", str(out)])
 
+    def test_old_binary_cannot_be_given_the_new_universal_link_nib(self):
+        self.repository()
+        (self.root/'mobile/ios/Info.plist').write_bytes(plistlib.dumps({'NSMainNibFile': 'OmobaAppDelegate'}))
+        out = self.root/'universal-link-output'
+        real_output = device.output
+        def tool(command, **kwargs):
+            return b'' if command[:3] == ['xcrun', 'nm', '-j'] else real_output(command, **kwargs)
+        with patch.object(device, 'ROOT', self.root), patch.object(device, 'check_tools'), \
+             patch.object(device, 'output', side_effect=tool), \
+             patch.object(device, 'collect_legal_notices', return_value={'LICENSE': b'synthetic notice'}):
+            for extra in ([], ['--check']):
+                with self.assertRaisesRegex(ValueError, 'Rebuild from current source'):
+                    device.main(['--binary', str(self.binary), '--output', str(out), *extra])
+                self.assertFalse(out.exists())
+
     def test_untracked_legal_notice_rejected(self):
         self.repository()
         with patch.object(device, "ROOT", self.root), patch.object(device, "collect_legal_notices", return_value={"LICENSES/private.txt": b"untracked"}):

@@ -22,6 +22,13 @@ All notable changes are recorded here. The canonical version is
   beside the minimap. Ally portraits, quick-buy art and ability detail badges
   leave more of the battlefield visible; desktop/menu scale is unchanged.
 
+- Prepare iOS Universal Link return from the existing RU web sign-in flow.
+  The main-nib delegate accepts only a fixed per-contour HTTPS return path;
+  the signed enrollment and explicit in-game confirmation remain authoritative.
+  Xcode/CLI domain entitlements and archive preservation are included. DNS/TLS,
+  website publication, profile refresh and physical-device acceptance remain
+  rollout gates. See [iOS links](mobile/ios/UNIVERSAL-LINKS.md).
+
 - RU registration: website-first VK ID/OK/Mail.ru sign-in can create a default-stat
   profile and session; game-first linking preserves existing progress. Add portal
   migration 10 with a bounded registration function, reviewed-account device approval,

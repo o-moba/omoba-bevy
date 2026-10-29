@@ -115,6 +115,8 @@ class ArchiveTests(unittest.TestCase):
                 return uuid_output(command)
             if command[:2] == ["codesign", "--verify"]:
                 return b""
+            if command[:2] == ["codesign", "--display"]:
+                return plistlib.dumps({})
             if command[:2] == ["security", "find-identity"]:
                 return f'1) {identity} "Apple Development: Fixture"'.encode()
             if command[:2] == ["security", "cms"]:
@@ -148,6 +150,7 @@ class ArchiveTests(unittest.TestCase):
                    "ApplicationIdentifierPrefix": ["TESTTEAM"], "DeveloperCertificates": [cert],
                    "Entitlements": {"application-identifier": "TESTTEAM.*", "get-task-allow": True,
                                     "com.apple.developer.team-identifier": "TESTTEAM"}}
+        profile['Entitlements']['com.apple.developer.associated-domains'] = ['applinks:ios.dev.omoba.io']
         entitlements = dict(profile["Entitlements"], **{"application-identifier": "TESTTEAM.space.ekza.omoba.dev"})
         def tool(command):
             if command[:3] == ["xcrun", "dwarfdump", "--uuid"]:
