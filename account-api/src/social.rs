@@ -58,7 +58,7 @@ impl SocialConfig {
     }
     /// `OMOBA_VKID_CLIENT_ID` (the VK ID app id) and `OMOBA_SOCIAL_SECRET`
     /// (64 lowercase hex, never rotated: it keys every stored identity) enable
-    /// VK ID; neither set disables it. Only a `vk_sign_in` build accepts them.
+    /// VK ID; neither set disables it. Only an RU `vk_sign_in` build accepts them.
     pub fn from_env() -> std::result::Result<Self, &'static str> {
         let var = |key| std::env::var_os(key).map(|v| v.to_string_lossy().into_owned());
         let fixture = var("OMOBA_VKID_LOCAL_FIXTURE_ORIGIN");
@@ -67,8 +67,10 @@ impl SocialConfig {
             (Some(client_id), Some(secret)) => (client_id, secret),
             _ => return Err("Set both OMOBA_VKID_CLIENT_ID and OMOBA_SOCIAL_SECRET"),
         };
-        if !shared::market::FEATURES.vk_sign_in {
-            return Err("VK ID is configured, but this build has no vk_sign_in feature");
+        if !matches!(shared::market::MARKET, shared::market::Market::Ru)
+            || !shared::market::FEATURES.vk_sign_in
+        {
+            return Err("VK ID requires an OMOBA_MARKET=ru build with vk_sign_in enabled");
         }
         let secret = crypto::decode::<32>(&secret)
             .ok_or("OMOBA_SOCIAL_SECRET must be 32 random bytes in lowercase hex")?;

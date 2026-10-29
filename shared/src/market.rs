@@ -308,6 +308,11 @@ impl Features {
         let Some(vk_sign_in) = switch(vk_sign_in, preset.vk_sign_in) else {
             return Err(Feature::VkSignIn);
         };
+        // VK is an RU account service. A generic feature override must never
+        // expose it in the international or CN region.
+        if vk_sign_in && !matches!(market, Market::Ru) {
+            return Err(Feature::VkSignIn);
+        }
         Ok(Self {
             ekza,
             supporter,
@@ -339,6 +344,9 @@ pub const FEATURES: Features = match Features::resolve(
     option_env!("OMOBA_FEATURE_VK_SIGN_IN"),
 ) {
     Ok(features) => features,
+    Err(Feature::VkSignIn) => {
+        panic!("OMOBA_FEATURE_VK_SIGN_IN must be empty, on or off; on requires OMOBA_MARKET=ru")
+    }
     Err(_) => panic!("OMOBA_FEATURE_* must be empty, on or off"),
 };
 
@@ -502,6 +510,33 @@ mod tests {
         assert_eq!(
             Features::resolve(Market::Ru, None, None, Some("1")),
             Err(Feature::VkSignIn)
+        );
+    }
+
+    #[test]
+    fn vk_cannot_be_enabled_outside_the_ru_account_region() {
+        for market in [Market::Global, Market::Cn] {
+            assert_eq!(
+                Features::resolve(market, None, None, Some("on")),
+                Err(Feature::VkSignIn)
+            );
+            for value in [None, Some(""), Some("off")] {
+                assert!(
+                    !Features::resolve(market, None, None, value)
+                        .unwrap()
+                        .vk_sign_in
+                );
+            }
+        }
+        assert!(
+            Features::resolve(Market::Ru, None, None, Some("on"))
+                .unwrap()
+                .vk_sign_in
+        );
+        assert!(
+            !Features::resolve(Market::Ru, None, None, Some("off"))
+                .unwrap()
+                .vk_sign_in
         );
     }
 

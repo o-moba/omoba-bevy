@@ -147,6 +147,16 @@ mod tests {
     #[test]
     fn each_account_region_has_one_authority_and_its_own_contour() {
         assert!(!features_for(Market::Ru).ekza);
+        assert!(!features_for(Market::Global).vk_sign_in);
+        assert!(!features_for(Market::Cn).vk_sign_in);
+        assert_eq!(
+            features_for(Market::Ru).vk_sign_in,
+            if crate::market::MARKET == Market::Ru {
+                crate::market::FEATURES.vk_sign_in
+            } else {
+                true
+            }
+        );
         for region in RegionId::ALL {
             let profile = region.profile();
             let live = profile.endpoints(None);
