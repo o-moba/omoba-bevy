@@ -5,6 +5,12 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Creator tooling exports a game-owned Classic hero design policy beside the
+  animation contract. All 17 bases stay explicitly unconfigured until reviewed;
+  strict bindings reject `any`, wrong identities and stale hashes/revisions.
+  Legacy v1 remains unchanged; native admission/C3 and rollout remain gates.
+
+
 - Selected live enemy portraits now connect to the hero’s current projected
   position with a gold outlined line. Offscreen targets keep a clipped edge
   arrow; stale, hidden, dead and modal targets clear the connector.

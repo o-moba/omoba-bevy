@@ -95,6 +95,14 @@ The validator reports version and rig size or a concrete compatibility error. Th
 
 The opt-in native audit accepts a separate asset directory containing `clipless-vrm0.glb` and `clipless-vrm1.glb`. It loads actual meshes through Bevy and the same player animation systems; these fixtures are not Studio ownership evidence.
 
+## Classic identity boundary
+
+Humanoid runtime compatibility is independent of the game-owned
+[Classic hero design policy](hero-designs.md). Classic skins must retain the
+canonical hero's approved base and binding. The companion authoring exporter
+explicitly blocks unassigned classes; it does not implement new native admission
+or revoke existing avatar approvals. Engine retargeting is not art approval.
+
 ## Studio/SDK contract
 
 The published `humanoid-glb-v1` contract still requires its existing five embedded clips. The hosted rendition builder (`scripts/ekza_build_rendition.py` → `retarget_animations.retarget_avatar`) bakes them from VRM 0.x and VRM 1.0 sources. For VRM 1.0 it reads the `VRMC_vrm` humanBones object, drives `thumbMetacarpal/thumbProximal/thumbDistal` from the same source bones as the VRM 0.x `thumbProximal/thumbIntermediate/thumbDistal` (as `retarget.rs::source_semantic` does), and turns the scene roots 180° about Y so the rendition rests facing -Z like every VRM 0.x avatar the game renders (shared helper `retarget_animations.normalize_vrm1_rest_facing`, recorded as `asset.extras.omoba_rest_yaw180`; a re-bake does not turn it again). VRM 0.x renditions are byte-identical to the previous builder. The local import (`convert_vrm_to_glb.py`) applies the same turn to VRM 1.0 and copies VRM 0.x byte for byte. If the runtime rig rejects a VRM-tagged model, the match client uses its embedded clips (the legacy path), as the avatar preview and party stage already did, instead of leaving it static. `validate_humanoid_profile`, checksum validation, immutable rendition identity and server admission remain intact. Approved SDK avatars with VRM metadata gain runtime Run after their normal verified load.

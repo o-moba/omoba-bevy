@@ -10,6 +10,7 @@ import tempfile
 import unittest
 
 import build_game_contract_fixtures as fixtures
+import hero_designs
 from export_game_contract import (CONTRACT, INPUTS, PACKAGE_SCHEMA_FILE, PROFILE, PROFILE_SCHEMA_FILE, PROTOCOL, ROOT,
                                   SCHEMA_FILE, ContractError, export, finish, read_contract, render, revision_of,
                                   schema_errors)
@@ -45,7 +46,7 @@ class GameContractTests(unittest.TestCase):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         root = Path(temporary.name)
-        for path in set(INPUTS) | {CONTRACT, SCHEMA_FILE, PROFILE_SCHEMA_FILE, PROTOCOL}:
+        for path in set(INPUTS) | set(hero_designs.INPUTS) | {CONTRACT, SCHEMA_FILE, PROFILE_SCHEMA_FILE, PROTOCOL}:
             (root / path).parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(ROOT / path, root / path)
         return root

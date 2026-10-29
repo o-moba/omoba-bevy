@@ -1,5 +1,12 @@
 # Feature Inventory
 
+## Classic hero design authoring foundation
+
+The existing game-contract exporter also publishes a versioned hero design
+companion. It covers all canonical class IDs and fails closed on unassigned bases
+and mismatched Classic bindings. This is source/tooling support, not native
+C3 playback or a deployed skin catalogue. See [hero design policy](hero-designs.md).
+
 ## Compact mobile battle HUD
 
 The landscape touch HUD uses an 80 px attack disc, 50 px skill faces and 38 px

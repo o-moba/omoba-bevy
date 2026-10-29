@@ -17,6 +17,15 @@ This export implements discovery and preparation of a contribution brief. It doe
 not add a Registry endpoint or imply that publishing a model approves it for a
 particular requirement.
 
+## Classic hero identity
+
+The [game-owned hero design companion](hero-designs.md) adds canonical class/base
+binding for the new Classic direction. It is exported with the game contract,
+not inferred from the older generic avatar catalogue. Every current assignment
+is explicitly unconfigured; discovery and a compatible rig grant no Classic
+approval. The contract's `any` target remains useful authoring context outside
+this gate and cannot override a concrete Classic target.
+
 ## Export and check
 
 Python 3.10 or newer is sufficient; there are no third-party Python dependencies.

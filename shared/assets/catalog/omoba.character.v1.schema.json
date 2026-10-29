@@ -187,6 +187,225 @@
         },
         "gripMetadata": { "oneOf": [{ "const": "ekza_handheld_v1" }, { "type": "null" }] }
       }
+    },
+    "heroDesignRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "classId",
+        "status",
+        "heroDesignId",
+        "baseRevision",
+        "baseSha256",
+        "designContractRevision"
+      ],
+      "properties": {
+        "classId": {
+          "$ref": "#/$defs/id"
+        },
+        "status": {
+          "enum": [
+            "configured",
+            "unconfigured"
+          ]
+        },
+        "heroDesignId": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9._-]{0,95}$"
+            }
+          ]
+        },
+        "baseRevision": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "string",
+              "pattern": "^sha256-[a-f0-9]{64}$"
+            }
+          ]
+        },
+        "baseSha256": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/sha256"
+            }
+          ]
+        },
+        "designContractRevision": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "string",
+              "pattern": "^sha256-[a-f0-9]{64}$"
+            }
+          ]
+        }
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "status": {
+              "const": "unconfigured"
+            },
+            "heroDesignId": {
+              "type": "null"
+            },
+            "baseRevision": {
+              "type": "null"
+            },
+            "baseSha256": {
+              "type": "null"
+            },
+            "designContractRevision": {
+              "type": "null"
+            }
+          }
+        },
+        {
+          "properties": {
+            "status": {
+              "const": "configured"
+            },
+            "heroDesignId": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9._-]{0,95}$"
+            },
+            "baseRevision": {
+              "type": "string",
+              "pattern": "^sha256-[a-f0-9]{64}$"
+            },
+            "baseSha256": {
+              "$ref": "#/$defs/sha256"
+            },
+            "designContractRevision": {
+              "type": "string",
+              "pattern": "^sha256-[a-f0-9]{64}$"
+            }
+          }
+        }
+      ]
+    },
+    "heroDesignPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "gameId",
+        "modeScope",
+        "gameContractRevision",
+        "revision",
+        "source",
+        "classes"
+      ],
+      "properties": {
+        "schema": {
+          "const": "omoba.hero-designs.v1"
+        },
+        "gameId": {
+          "const": "omoba"
+        },
+        "modeScope": {
+          "const": "classic"
+        },
+        "gameContractRevision": {
+          "type": "string",
+          "pattern": "^sha256-[a-f0-9]{64}$"
+        },
+        "revision": {
+          "type": "string",
+          "pattern": "^sha256-[a-f0-9]{64}$"
+        },
+        "source": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "commit",
+            "exporter",
+            "inputsSha256"
+          ],
+          "properties": {
+            "commit": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{40}$"
+            },
+            "exporter": {
+              "const": "scripts/export_game_contract.py"
+            },
+            "inputsSha256": {
+              "$ref": "#/$defs/sha256"
+            }
+          }
+        },
+        "classes": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 256,
+          "items": {
+            "$ref": "#/$defs/heroDesignRecord"
+          }
+        }
+      }
+    },
+    "classicBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "gameId",
+        "modeScope",
+        "classId",
+        "heroDesignId",
+        "baseRevision",
+        "baseSha256",
+        "designContractRevision",
+        "gameContractRevision",
+        "heroDesignsRevision"
+      ],
+      "properties": {
+        "gameId": {
+          "const": "omoba"
+        },
+        "modeScope": {
+          "const": "classic"
+        },
+        "classId": {
+          "$ref": "#/$defs/id"
+        },
+        "heroDesignId": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9._-]{0,95}$"
+        },
+        "baseRevision": {
+          "type": "string",
+          "pattern": "^sha256-[a-f0-9]{64}$"
+        },
+        "baseSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "designContractRevision": {
+          "type": "string",
+          "pattern": "^sha256-[a-f0-9]{64}$"
+        },
+        "gameContractRevision": {
+          "type": "string",
+          "pattern": "^sha256-[a-f0-9]{64}$"
+        },
+        "heroDesignsRevision": {
+          "type": "string",
+          "pattern": "^sha256-[a-f0-9]{64}$"
+        }
+      }
     }
   }
 }
