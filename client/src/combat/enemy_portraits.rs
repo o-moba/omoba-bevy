@@ -133,7 +133,7 @@ fn spawn_target_connector(parent: &mut ChildSpawnerCommands, action: EnemyPortra
                 },
                 Name::new(format!(
                     "EnemyTargetConnector{}-{}-{index}",
-                    if outline { "Outline" } else { "" },
+                    if outline { "Outline" } else { "" }, // i18n-allow: diagnostic entity-name suffix
                     action.target.id
                 )),
             ));
