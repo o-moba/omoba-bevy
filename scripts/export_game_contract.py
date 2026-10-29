@@ -15,6 +15,10 @@ reader of the protocol does (GAME-PROTOCOL-SPEC §3.5) and writes it:
     python3 scripts/export_game_contract.py --output shared/assets/catalog
     python3 scripts/export_game_contract.py --output shared/assets/catalog --check
 
+The same command publishes the additive Classic hero-design companion
+`hero-designs.json`; see docs/hero-designs.md. An unassigned base blocks Classic
+authoring and does not change legacy v1 or implement native admission.
+
 A body that has not changed keeps its header, so the revision moves only with data. Standard
 library only. Reference: docs/game-contract.md.
 """
@@ -31,6 +35,7 @@ import subprocess
 import sys
 
 from export_asset_catalog import CatalogError, canonical, load_json
+import hero_designs
 
 ROOT = Path(__file__).resolve().parents[1]
 SCHEMA = "ekza.game-contract.v1"
@@ -545,11 +550,11 @@ def render(document):
     return json.dumps(document, indent=2, ensure_ascii=False, allow_nan=False).encode() + b"\n"
 
 
-def write_output(output, data, check=False):
+def write_output(output, data, check=False, filename="game-contract.json"):
     output = Path(output).absolute()
     if output.is_symlink():
         raise CatalogError("Output directory cannot be a symlink")
-    destination = output / "game-contract.json"
+    destination = output / filename
     if check:
         if not destination.is_file() or destination.read_bytes() != data:
             raise CatalogError(f"Stale export file: {destination}; run without --check")
@@ -569,7 +574,14 @@ def export(root=ROOT, output=None, check=False, commit=None):
     document = finish(root, body, commit)
     data = render(document)
     read_contract(data, root)
-    write_output(output if output is not None else root / CATALOG, data, check)
+    destination = output if output is not None else root / CATALOG
+    previous_path = root / CATALOG / hero_designs.EXPORT
+    previous = previous_path.read_bytes() if previous_path.is_file() else None
+    designs = hero_designs.build_export(root, document["revision"], commit, previous)
+    # Refuse invalid policy before writing either output. Core v1/v2 animation
+    # contract bytes stay independent of the additive Classic identity policy.
+    write_output(destination, data, check)
+    write_output(destination, render(designs), check, hero_designs.EXPORT)
     return document
 
 
