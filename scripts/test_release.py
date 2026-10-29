@@ -645,6 +645,16 @@ def dataclasses_replace_legal(ru_market, **legal):
 
 
 class Markets(unittest.TestCase):
+    def test_vk_is_restricted_to_ru_even_with_a_feature_override(self):
+        import markets
+        for key in ("global", "cn"):
+            self.assertFalse(markets.resolve_features(key)["vk_sign_in"])
+            for resolve in (markets.resolve_features, markets.market_env):
+                with self.assertRaisesRegex(SystemExit, "requires --market ru"):
+                    resolve(key, {"vk_sign_in": True})
+        self.assertTrue(markets.resolve_features("ru", {"vk_sign_in": True})["vk_sign_in"])
+        self.assertFalse(markets.resolve_features("ru", {"vk_sign_in": False})["vk_sign_in"])
+
     def test_presets_mirror_the_rust_market_module(self):
         import re
         import markets
