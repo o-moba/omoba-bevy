@@ -7,6 +7,15 @@ profile merge and no discovery by submitting credentials to both regional backen
 
 ## Website first
 
+The RU portal also embeds VK ID OneTap for the owner's app `54863720`.
+Its registered redirect is the exact portal root, `https://omoba.ru`; ordinary
+redirect buttons retain `/api/auth/vk/callback`. Both are bound to the configured
+portal origin, with no other path/host accepted. The SDK receives only a public
+PKCE challenge; the BFF retains its verifier and exchanges the callback through
+this Account API. No provider token or user-id claim supplied by browser code can
+establish an OMOBA session. See omoba-web `docs/vk-one-tap.md` for the CSRF-bound
+prepare/complete endpoints and production activation gates.
+
 1. Open the RU portal and choose VK ID, OK or Mail.ru. All three are entry methods
    of the same VK ID application; see the [official provider enum](https://github.com/VKCOM/vkid-web-sdk/blob/master/src/widgets/oauthList/types.ts).
 2. The BFF starts authorization with PKCE and a state cookie. The API exchanges

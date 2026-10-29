@@ -32,6 +32,11 @@ All notable changes are recorded here. The canonical version is
   Xcode/CLI domain entitlements and archive preservation are included. DNS/TLS,
   website publication, profile refresh and physical-device acceptance remain
   rollout gates. See [iOS links](mobile/ios/UNIVERSAL-LINKS.md).
+- RU OneTap sign-in accepts the configured portal's exact root redirect in
+  addition to its existing browser callback. The Account API still verifies
+  PKCE, returned state and provider identity; website registration and signed
+  game-first linking retain their existing semantics. No SQL migration or
+  production activation is included.
 
 - RU registration: website-first VK ID/OK/Mail.ru sign-in can create a default-stat
   profile and session; game-first linking preserves existing progress. Add portal

@@ -65,6 +65,28 @@ The market is independent of the build **contour** (`docs/connection-profiles.md
 `--market ru --contour dev` is the OMOBA Dev tester app with RU features, the dev
 lobby and the `omoba-bevy-ru-dev` folder.
 
+### VK regional boundary
+
+VK, OK and Mail.ru sign-in belongs only to the **RU account region**. The client
+offers it after that region is confirmed, opens that region's portal in the
+browser, and keeps the existing signed device approval flow. International
+accounts do not show it, including when the interface language is Russian.
+An explicit `vk_sign_in=on` override for `global` or `cn` is rejected by both
+the Rust feature resolver and the release tooling. The Account API also refuses
+configured VK credentials in a non-RU binary.
+
+For an RU dev package use `scripts/release.py build <platform> --market ru --contour dev`.
+`OMOBA_MARKET=ru` selects the server/API market at compilation;
+`OMOBA_FEATURE_VK_SIGN_IN=off` disables VK within RU. The matching portal uses
+`OMOBA_CONTOUR=dev`, `OMOBA_MARKET=ru` and its own registered dev VK application.
+Never use the production VK redirect or production account endpoints in dev.
+
+These are account and service boundaries, not a check of the player's physical
+country. A confirmed RU account can currently be used abroad. Restricting entry
+to a country allowlist needs trusted IP geolocation at the ingress and a matching
+availability policy for both portal and app; language, time zone and user-supplied
+country headers are not country evidence.
+
 ## What each feature switches
 
 **`ekza` off** — the game contains only its packaged content and never contacts

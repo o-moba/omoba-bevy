@@ -171,11 +171,14 @@ def parse_feature_overrides(values: list[str] | None) -> dict[str, bool]:
 def resolve_features(key: str, overrides: dict[str, bool] | None = None) -> dict[str, bool]:
     features = dict(market(key).features)
     features.update(overrides or {})
+    if key != "ru" and features["vk_sign_in"]:
+        raise SystemExit("vk_sign_in=on requires --market ru (OMOBA_MARKET=ru)")
     return features
 
 
 def market_env(key: str, overrides: dict[str, bool] | None = None) -> dict[str, str]:
     """The compile-time market environment one build bakes in (shared/src/market.rs)."""
+    resolve_features(key, overrides)
     env = {} if key == "global" else {MARKET_ENV: key}
     preset = market(key).features
     for name, value in (overrides or {}).items():
