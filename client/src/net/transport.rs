@@ -48,6 +48,9 @@ pub enum NetThreadSignal {
     TransportFailure,
     /// A framed reply uses a different application protocol. No payload was applied.
     ProtocolMismatch,
+    /// The server answered this transport's probe "server full" (LR-09): it
+    /// holds as many endpoints as it can; the probes go on.
+    ServerFull,
     Compatibility {
         server: Option<ReleaseContract>,
         issue: Option<CompatibilityIssue>,
@@ -320,6 +323,12 @@ pub(in crate::net) fn run_udp_client(
             match socket.recv(&mut recv_buf) {
                 Ok(len) => {
                     consecutive_recv_errors = 0;
+                    if let Some(ours) = public_transport.server_full(&recv_buf[..len]) {
+                        if ours {
+                            let _ = signals.send(NetThreadSignal::ServerFull);
+                        }
+                        continue;
+                    }
                     if public_transport.handle_challenge(&socket, &recv_buf[..len]) {
                         continue;
                     }

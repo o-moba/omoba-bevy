@@ -5,7 +5,9 @@ use std::time::{Duration, Instant};
 
 use omoba_career_store::matchmaking::{fits_cohort, same_cohort};
 use shared::career::ProfileSummary;
-use shared::match_service::{InMatch, MatchAllocation, MatchPreference, MatchServiceView};
+use shared::match_service::{
+    CapacityLine, InMatch, MatchAllocation, MatchPreference, MatchServiceView,
+};
 use shared::wire::{GameState, ServerPacket};
 
 use crate::admission::{Limits, PRACTICE_ABANDON_WINDOW, SourceIp};
@@ -90,6 +92,11 @@ pub(crate) struct Lobby {
     sources: HashMap<String, SourceIp>,
     arena_sources: HashMap<String, Vec<SourceIp>>,
     abandons: HashMap<SourceIp, VecDeque<Instant>>,
+    /// While every arena is busy: each queued profile whose roster is ready,
+    /// with its place in the line for the next free arena (LR-09).
+    line: HashMap<String, u32>,
+    turnover: crate::capacity::Turnover,
+    capacity: crate::capacity::CapacityMetric,
 }
 
 impl Lobby {
@@ -106,6 +113,62 @@ impl Lobby {
             sources: HashMap::new(),
             arena_sources: HashMap::new(),
             abandons: HashMap::new(),
+            line: HashMap::new(),
+            turnover: Default::default(),
+            capacity: Default::default(),
+        }
+    }
+
+    /// Recomputes the line for a free arena (LR-09), empty unless every
+    /// arena is busy: the rosters ready to start, in the order they get an
+    /// arena (`select`'s: vs Bots, then Ranked, then Casual PvP), each of
+    /// their profiles with its 1-based place. A roster the per-source limits
+    /// would refuse takes no place.
+    fn refresh_line(&mut self, now: Instant) {
+        self.line.clear();
+        if !self.pool.full() {
+            return;
+        }
+        let mut remaining: Vec<usize> = (0..self.waiting.len()).collect();
+        let mut position = 0_u32;
+        loop {
+            let rest: Vec<Waiting> = remaining.iter().map(|&i| self.waiting[i].clone()).collect();
+            let Some((members, queue)) = select(&rest, now) else {
+                break;
+            };
+            let members: Vec<usize> = members.iter().map(|&i| remaining[i]).collect();
+            if self.refusal(&members, queue, now).is_none() {
+                position += 1;
+                for &i in &members {
+                    self.line
+                        .insert(self.waiting[i].profile.profile_id.clone(), position);
+                }
+            }
+            remaining.retain(|i| !members.contains(i));
+        }
+    }
+
+    /// The capacity-busy metric after a scheduling pass (LR-09): the journal
+    /// line and `<match root>/capacity.json`.
+    fn report_capacity(&mut self, now: Instant) {
+        let update = self.capacity.update(
+            crate::capacity::Sample {
+                capacity: self.pool.capacity(),
+                occupied: self.pool.occupied(),
+                searching: self.waiting.len(),
+                line: &self.line,
+            },
+            now,
+            unix_ms(),
+        );
+        if let Some(line) = &update.log {
+            println!("{line}");
+        }
+        if update.write {
+            let _ = crate::match_allocation::atomic_json(
+                &self.pool.root().join(crate::capacity::REPORT_FILE),
+                &update.report,
+            );
         }
     }
 
@@ -365,6 +428,10 @@ impl MatchService {
             party,
             casual_since: (preference == MatchPreference::Casual).then_some(now),
         });
+        // A newcomer to a full lobby learns its place at once.
+        if lobby.pool.full() {
+            lobby.refresh_line(now);
+        }
     }
     /// Answers a `FindMatch` with a refusal `code` instead of queueing it (a
     /// moderation sanction, LR-15): the profile leaves the queue, and its view
@@ -461,7 +528,11 @@ impl MatchService {
             .iter()
             .position(|w| w.profile.profile_id == profile)
         {
-            return Some(waiting_view(&lobby.waiting, index, lobby.pool.full(), now));
+            let line = lobby.line.get(profile).map(|&position| CapacityLine {
+                position,
+                eta_secs: lobby.turnover.eta_secs(position, now),
+            });
+            return Some(waiting_view(&lobby.waiting, index, line, now));
         }
         Some(MatchServiceView::Idle)
     }
@@ -477,6 +548,7 @@ impl MatchService {
         }
         lobby.last_poll = Some(now);
         lobby.pool.poll();
+        lobby.turnover.observe(lobby.pool.occupied(), now);
         lobby.assignments.retain(|profile, id| {
             if let Some(slot) = lobby.pool.slots.get(id) {
                 if !slot.terminal() {
@@ -588,6 +660,9 @@ impl MatchService {
                 }
             }
         }
+        lobby.turnover.settle(lobby.pool.occupied());
+        lobby.refresh_line(now);
+        lobby.report_capacity(now);
     }
 }
 fn expire_waiting(waiting: &mut Vec<Waiting>, now: Instant) {
@@ -603,11 +678,12 @@ fn searches(waiting: &[Waiting], unit: &[usize], queue: MatchPreference) -> bool
     }
 }
 
-/// The searching screen's view of one queued entry.
+/// The searching screen's view of one queued entry. `line` is its place in
+/// the line for a free arena, while every arena is busy (LR-09).
 fn waiting_view(
     waiting: &[Waiting],
     index: usize,
-    capacity_wait: bool,
+    line: Option<CapacityLine>,
     now: Instant,
 ) -> MatchServiceView {
     let w = &waiting[index];
@@ -665,12 +741,13 @@ fn waiting_view(
         elapsed_secs: now.saturating_duration_since(w.queued).as_secs(),
         bot_fill_after_secs: (w.preference == MatchPreference::Casual)
             .then_some(CASUAL_BOT_FILL.as_secs()),
-        capacity_wait,
+        capacity_wait: line.is_some(),
         searching: searching.map(|n| n as u32),
         casual_offer_after_secs: ranked.then_some(RANKED_CASUAL_OFFER.as_secs()),
         // For a party, only once every member took the offer.
         also_casual: ranked
             && own.is_some_and(|unit| searches(waiting, unit, MatchPreference::Casual)),
+        capacity_line: line,
     }
 }
 /// Queue units: a party's queued members travel together, everyone else
@@ -1144,7 +1221,7 @@ mod tests {
                     "{solos_rating} {solos_veterans}"
                 );
                 assert_eq!(
-                    waiting_view(&q, 0, false, now),
+                    waiting_view(&q, 0, None, now),
                     MatchServiceView::Failed {
                         code: RANKED_PARTY_COHORT.into()
                     }
@@ -1253,7 +1330,7 @@ mod tests {
             vec![0, 1]
         );
         // Casual counts it among its searchers; withdrawing ends that.
-        let casual_count = |lobby: &Lobby| match waiting_view(&lobby.waiting, 1, false, offered) {
+        let casual_count = |lobby: &Lobby| match waiting_view(&lobby.waiting, 1, None, offered) {
             MatchServiceView::Waiting { searching, .. } => searching,
             other => panic!("{other:?}"),
         };
@@ -1278,7 +1355,7 @@ mod tests {
         q[0].also_casual(true, offered);
         let late = offered + Duration::from_secs(999);
         assert!(select(&q, late).is_none());
-        let also = |q: &[Waiting]| match waiting_view(q, 0, false, late) {
+        let also = |q: &[Waiting]| match waiting_view(q, 0, None, late) {
             MatchServiceView::Waiting { also_casual, .. } => also_casual,
             other => panic!("{other:?}"),
         };
@@ -1963,6 +2040,139 @@ mod tests {
         service.tick(after);
         practice(&mut service, &next, home(), after);
         assert_eq!(failed(&service, &next, after), None);
+        let _ = std::fs::remove_dir_all(directory); // Only this test's unique fixture.
+    }
+
+    /// LR-09: with every arena busy, each ready roster sees its place in the
+    /// line for the next free arena (vs Bots first, as `select` seats them),
+    /// with an estimate once arenas have freed; a search that is not ready
+    /// (Ranked 1/10) shows its own progress. The lobby reports the busy
+    /// period in `capacity.json`.
+    #[test]
+    fn a_full_lobby_shows_each_ready_roster_its_place_in_the_line() {
+        use crate::capacity::{CapacityReport, REPORT_FILE};
+        let now = Instant::now();
+        let pool = crate::match_pool::Pool::for_test(); // one arena
+        let directory = pool.test_directory().to_path_buf();
+        let mut service = lobby_with(pool, &[]);
+        let ip = |n: u8| SourceIp::of(std::net::SocketAddr::from(([198, 51, 100, n], 40000)));
+        let first = w(1, MatchPreference::BotPractice, now);
+        practice(&mut service, &first, ip(1), now);
+        service.tick(now);
+        report(&mut service, &first.profile.profile_id, Phase::Running);
+        let (second, third) = (
+            w(2, MatchPreference::BotPractice, now),
+            w(3, MatchPreference::BotPractice, now),
+        );
+        let ranked = w(4, MatchPreference::Ranked, now);
+        let at = now + Duration::from_secs(1);
+        service.enqueue(
+            ranked.profile.clone(),
+            ranked.session.clone(),
+            1,
+            MatchPreference::Ranked.into(),
+            None,
+            ip(4),
+            at,
+        );
+        practice(&mut service, &second, ip(2), at);
+        practice(&mut service, &third, ip(3), at);
+        let line = |service: &MatchService, entry: &Waiting, at| match service.view(
+            &entry.profile.profile_id,
+            &entry.session,
+            at,
+        ) {
+            Some(MatchServiceView::Waiting {
+                capacity_wait,
+                capacity_line,
+                ..
+            }) => {
+                assert_eq!(capacity_wait, capacity_line.is_some());
+                capacity_line
+            }
+            other => panic!("expected a wait, got {other:?}"),
+        };
+        // Known at once, before the next pass.
+        assert_eq!(
+            line(&service, &second, at),
+            Some(CapacityLine {
+                position: 1,
+                eta_secs: None
+            })
+        );
+        service.tick(at);
+        assert_eq!(line(&service, &third, at).unwrap().position, 2);
+        assert_eq!(
+            line(&service, &ranked, at),
+            None,
+            "not ready: no capacity wait"
+        );
+        let read = || -> CapacityReport {
+            serde_json::from_slice(&std::fs::read(directory.join(REPORT_FILE)).unwrap()).unwrap()
+        };
+        let busy = read();
+        assert_eq!(
+            (
+                busy.capacity,
+                busy.occupied,
+                busy.searching,
+                busy.waiting_for_arena
+            ),
+            (1, 1, 3, 2)
+        );
+        assert!(busy.busy_since_ms.is_some());
+        assert_eq!(busy.busy_periods, 1);
+
+        // The match ends and its port frees: the first in line gets it.
+        let MatchService::Lobby(lobby) = &mut service else {
+            unreachable!()
+        };
+        let id = lobby.assignments[&first.profile.profile_id].clone();
+        lobby.pool.write_status_for_test(
+            &id,
+            &Status {
+                allocation_id: id.clone(),
+                server_epoch: 7,
+                heartbeat_ms: unix_ms() - 36_000,
+                phase: Phase::Finished,
+                result_id: None,
+                ends_by_ms: None,
+            },
+        );
+        let freed = now + Duration::from_secs(2);
+        service.tick(freed);
+        let MatchService::Lobby(lobby) = &service else {
+            unreachable!()
+        };
+        assert!(lobby.assignments.contains_key(&second.profile.profile_id));
+        assert_eq!(line(&service, &third, freed).unwrap().position, 1);
+        // A minute on, one arena freed in 61 s: about a minute to wait.
+        let later = now + Duration::from_secs(61);
+        practice(&mut service, &third, ip(3), later);
+        service.enqueue(
+            ranked.profile.clone(),
+            ranked.session.clone(),
+            1,
+            MatchPreference::Ranked.into(),
+            None,
+            ip(4),
+            later,
+        );
+        service.tick(later);
+        assert_eq!(
+            line(&service, &third, later),
+            Some(CapacityLine {
+                position: 1,
+                eta_secs: Some(61)
+            })
+        );
+        // Nobody ready waits any more: the busy period is over.
+        service.cancel(&third.profile.profile_id);
+        service.tick(later + Duration::from_secs(1));
+        let clear = read();
+        assert_eq!(clear.busy_since_ms, None);
+        assert_eq!(clear.waiting_for_arena, 0);
+        assert_eq!(clear.searching, 1);
         let _ = std::fs::remove_dir_all(directory); // Only this test's unique fixture.
     }
 }

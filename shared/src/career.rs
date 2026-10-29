@@ -514,6 +514,9 @@ pub mod error_code {
     pub const ACCOUNT_BANNED: &str = crate::moderation::code::ACCOUNT_BANNED;
     /// A rename while a moderator's `name_reset` is active (LR-15).
     pub const NAME_LOCKED: &str = crate::moderation::code::NAME_LOCKED;
+    /// The server holds as many career clients as it can (LR-09): the
+    /// sign-in is not taken now, and retrying later succeeds.
+    pub const SERVER_FULL: &str = "server_full";
 }
 
 #[cfg(test)]

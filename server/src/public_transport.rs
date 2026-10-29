@@ -123,14 +123,26 @@ impl PublicTransport {
                 return Decision::Drop;
             }
             if !self.endpoints.contains_key(&addr) {
+                if self.endpoints.len() >= MAX_ENDPOINTS {
+                    // Say so instead of leaving the player to time out
+                    // (LR-09); like the challenge, never more bytes than the
+                    // probe, and within the probe budget it already took.
+                    let reply =
+                        serde_json::to_vec(&PublicServerDatagram::ServerFull { client_nonce })
+                            .expect("server full serializes");
+                    return if reply.len() <= bytes.len() {
+                        Decision::Reply(reply)
+                    } else {
+                        Decision::Drop
+                    };
+                }
                 let ip = SourceIp::of(addr);
-                if self.endpoints.len() >= MAX_ENDPOINTS
-                    || self
-                        .endpoints
-                        .keys()
-                        .filter(|other| SourceIp::of(**other) == ip)
-                        .count()
-                        >= self.limits.endpoints_per_ip
+                if self
+                    .endpoints
+                    .keys()
+                    .filter(|other| SourceIp::of(**other) == ip)
+                    .count()
+                    >= self.limits.endpoints_per_ip
                 {
                     return Decision::Drop;
                 }
@@ -313,7 +325,10 @@ mod tests {
         };
         assert!(reply.len() <= bytes.len());
         let PublicServerDatagram::TransportChallenge { path_nonce, .. } =
-            serde_json::from_slice(&reply).unwrap();
+            serde_json::from_slice(&reply).unwrap()
+        else {
+            panic!("a transport challenge is expected")
+        };
         let proof = encode(PublicClientDatagram::TransportProof {
             server_epoch: 7,
             path_nonce: path_nonce.clone(),
@@ -495,6 +510,63 @@ mod tests {
         }
         assert!(!gate.validated(address(2001), now + CHALLENGE_TTL + VALIDATED_TTL));
     }
+    /// LR-09: at the endpoint ceiling a new source's probe is answered
+    /// "server full" (its own nonce, never more bytes than it sent) instead
+    /// of silence; no endpoint is created, and a freed place admits it.
+    #[test]
+    fn a_probe_at_the_endpoint_ceiling_gets_server_full() {
+        let mut gate = PublicTransport::default();
+        let now = Instant::now();
+        for index in 0..MAX_ENDPOINTS as u16 {
+            gate.endpoints.insert(
+                address(index),
+                Endpoint {
+                    client_nonce: "b".repeat(32),
+                    path_nonce: "c".repeat(64),
+                    created: now,
+                    touched: now,
+                    validated: true,
+                    last_probe: now,
+                    rate_started: now,
+                    packets: 0,
+                    auth_nonce: None,
+                    sequence: 0,
+                },
+            );
+        }
+        let bytes = probe();
+        let newcomer = address(4000);
+        let Decision::Reply(reply) = gate.receive(newcomer, &bytes, 7, 2, true, None, now) else {
+            panic!("a full server answers the probe")
+        };
+        assert!(reply.len() <= bytes.len());
+        assert_eq!(
+            serde_json::from_slice::<PublicServerDatagram>(&reply).unwrap(),
+            PublicServerDatagram::ServerFull {
+                client_nonce: "a".repeat(32)
+            }
+        );
+        assert_eq!(gate.endpoints.len(), MAX_ENDPOINTS);
+        assert!(!gate.endpoints.contains_key(&newcomer));
+        // A known endpoint still gets its challenge.
+        let known = encode(PublicClientDatagram::TransportProbe {
+            protocol_version: shared::protocol::PROTOCOL_VERSION,
+            client_nonce: "b".repeat(32),
+            padding: "0".repeat(PROBE_PADDING_BYTES),
+        });
+        let later = now + Duration::from_secs(1);
+        let Decision::Reply(reply) = gate.receive(address(1), &known, 7, 2, true, None, later)
+        else {
+            panic!("a known endpoint is challenged")
+        };
+        assert!(matches!(
+            serde_json::from_slice(&reply).unwrap(),
+            PublicServerDatagram::TransportChallenge { .. }
+        ));
+        // A place frees: the newcomer is challenged.
+        gate.endpoints.remove(&address(2));
+        validate(&mut gate, newcomer, later + Duration::from_secs(1));
+    }
     #[test]
     fn expired_mobile_path_requires_new_proof_and_rejects_old_signed_packets() {
         let mut gate = PublicTransport::default();
@@ -599,7 +671,10 @@ mod tests {
             let addr = SocketAddr::from(([203, 0, 113, 9], 50000 + port));
             if let Decision::Reply(reply) = gate.receive(addr, &probe(), 7, 2, false, None, now) {
                 let PublicServerDatagram::TransportChallenge { path_nonce, .. } =
-                    serde_json::from_slice(&reply).unwrap();
+                    serde_json::from_slice(&reply).unwrap()
+                else {
+                    panic!("a transport challenge is expected")
+                };
                 let proof = encode(PublicClientDatagram::TransportProof {
                     server_epoch: 7,
                     path_nonce,

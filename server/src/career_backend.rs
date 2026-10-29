@@ -26,6 +26,8 @@ use crate::admission::{Limits, SourceIp};
 use crate::career_port::CareerPort;
 
 const MAX_CLIENTS: usize = 512;
+/// The English fallback of [`shared::career::error_code::SERVER_FULL`].
+const SERVER_FULL_TEXT: &str = "The server is full right now. Signing in again shortly.";
 /// A client of an IP at its limit gives way to a newcomer from that IP once
 /// it was idle this long (a reconnect leaves its old endpoint behind).
 const STALE_CLIENT: Duration = Duration::from_secs(30);
@@ -658,6 +660,13 @@ impl<L: JobLink> CareerPort for CareerBackend<L> {
     }
     fn view(&self, addr: SocketAddr) -> CareerView {
         let mut view = self.clients.get(&addr).map(|c|c.view.clone()).unwrap_or_else(|| CareerView {error:(!self.enabled()).then(||"Career storage is not configured on this server. Guest matches are unranked.".into()),..Default::default()});
+        // At the client ceiling a new endpoint's requests are not taken: say
+        // so, and its retries get in once a place frees (LR-09).
+        if self.enabled() && !self.clients.contains_key(&addr) && self.clients.len() >= MAX_CLIENTS
+        {
+            view.error = Some(SERVER_FULL_TEXT.into());
+            view.error_code = Some(shared::career::error_code::SERVER_FULL.into());
+        }
         view.storage_enabled = self.enabled();
         if let Some(status) = &mut view.supporter {
             if status
@@ -1877,6 +1886,42 @@ mod tests {
         backend.handle(returning, challenge_request(1));
         assert!(backend.view(returning).challenge.is_some());
         assert!(!backend.clients.contains_key(&idle));
+    }
+
+    /// LR-09: at the career-client ceiling a new endpoint's sign-in is
+    /// answered "server full" instead of silence; clients already in keep
+    /// their view, and the retry gets in once a place frees.
+    #[test]
+    fn a_sign_in_at_the_client_ceiling_gets_server_full() {
+        use shared::career::error_code;
+        let mut backend = MemoryCareer::test_backend(7);
+        for index in 0..MAX_CLIENTS {
+            let index = u16::try_from(index).unwrap();
+            backend.handle(
+                at([10, (index >> 8) as u8, index as u8, 1], 40000),
+                challenge_request(1),
+            );
+        }
+        assert_eq!(backend.clients.len(), MAX_CLIENTS);
+        let inside = at([10, 0, 0, 1], 40000);
+        assert!(backend.view(inside).challenge.is_some());
+        assert_eq!(backend.view(inside).error_code, None);
+        let newcomer = at([198, 51, 100, 7], 50000);
+        backend.handle(newcomer, challenge_request(2));
+        let view = backend.view(newcomer);
+        assert!(view.challenge.is_none());
+        assert_eq!(view.error_code.as_deref(), Some(error_code::SERVER_FULL));
+        assert_eq!(view.error.as_deref(), Some(SERVER_FULL_TEXT));
+        assert!(!backend.clients.contains_key(&newcomer));
+        // A place frees (the endpoint went away): the retry signs in.
+        backend.forget(inside);
+        backend.handle(newcomer, challenge_request(2));
+        let view = backend.view(newcomer);
+        assert!(view.challenge.is_some());
+        assert_eq!(view.error_code, None);
+        // Without career storage nothing is full.
+        let disabled = MemoryCareer::disabled(7);
+        assert_eq!(disabled.view(newcomer).error_code, None);
     }
 
     /// LR-16: retries of one sign-in queue one Login, a full queue is no

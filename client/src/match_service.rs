@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 use bevy::prelude::*;
 use shared::{
     career::CareerView,
-    match_service::{InMatch, MatchAllocation, MatchPreference, MatchServiceView},
+    match_service::{CapacityLine, InMatch, MatchAllocation, MatchPreference, MatchServiceView},
 };
 
 use crate::{
@@ -201,6 +201,21 @@ impl MatchServiceClient {
         } else {
             CasualOffer::Hidden
         }
+    }
+
+    /// The searching screen offers Offline practice in one tap (LR-09): every
+    /// arena is busy and this search waits in the line for one, or the server
+    /// is too full to sign in.
+    pub fn offers_offline(&self, view: &CareerView) -> bool {
+        self.active
+            && self.allocation.is_none()
+            && (matches!(
+                self.answer(view),
+                Some(MatchServiceView::Waiting {
+                    capacity_wait: true,
+                    ..
+                })
+            ) || view.error_code.as_deref() == Some(shared::career::error_code::SERVER_FULL))
     }
 
     /// Takes the offer: this Ranked search also searches Casual PvP from the
@@ -476,10 +491,11 @@ pub(crate) fn status_text(view: &MatchServiceView) -> String {
             bot_fill_after_secs,
             capacity_wait,
             searching,
+            capacity_line,
             ..
         } => {
             if *capacity_wait {
-                return tr("searching.match.capacity").into();
+                return capacity_text(capacity_line.as_ref());
             }
             let policy = match preference {
                 MatchPreference::Casual => {
@@ -517,6 +533,21 @@ pub(crate) fn status_text(view: &MatchServiceView) -> String {
         } => in_match_text(*state),
         MatchServiceView::Assigned { .. } => tr("searching.match.assigned").into(),
         MatchServiceView::Failed { code } => failed_text(code),
+    }
+}
+
+/// Every arena is busy (LR-09): the player's place in the line for the next
+/// free arena and the estimated wait, when the lobby sent them.
+fn capacity_text(line: Option<&CapacityLine>) -> String {
+    let Some(line) = line else {
+        return tr("searching.match.capacity").into();
+    };
+    match line.eta_minutes() {
+        Some(minutes) => trf(
+            "capacity.line_eta",
+            &[("position", &line.position), ("minutes", &minutes)],
+        ),
+        None => trf("capacity.line", &[("position", &line.position)]),
     }
 }
 
@@ -1126,6 +1157,7 @@ mod tests {
             searching: Some(7),
             casual_offer_after_secs: Some(300),
             also_casual: false,
+            capacity_line: None,
         });
         assert!(text.contains("3/10"));
         assert!(text.contains("no bots"));
@@ -1146,6 +1178,7 @@ mod tests {
                 searching: Some(2),
                 casual_offer_after_secs: Some(300),
                 also_casual,
+                capacity_line: None,
             }),
             ..default()
         }
@@ -1320,6 +1353,7 @@ mod tests {
             searching: None,
             casual_offer_after_secs: None,
             also_casual: false,
+            capacity_line: None,
         };
         let failed = MatchServiceView::Failed {
             code: "no_capacity".into(),
@@ -1348,6 +1382,104 @@ mod tests {
         assert_eq!(
             status_text(&MatchServiceView::Allocating),
             "已找到对局 · 正在准备竞技场…"
+        );
+    }
+
+    fn capacity_wait(line: Option<CapacityLine>) -> MatchServiceView {
+        MatchServiceView::Waiting {
+            preference: MatchPreference::BotPractice,
+            humans: 1,
+            needed: 1,
+            elapsed_secs: 20,
+            bot_fill_after_secs: None,
+            capacity_wait: true,
+            searching: None,
+            casual_offer_after_secs: None,
+            also_casual: false,
+            capacity_line: line,
+        }
+    }
+
+    /// LR-09: with every arena busy the status names the player's place in
+    /// the line and, once known, the estimated wait, in the active language;
+    /// an older lobby without the line keeps the plain capacity copy.
+    #[test]
+    fn a_capacity_wait_shows_the_place_in_line_and_the_estimate() {
+        if crate::i18n::testing::isolated(
+            "match_service::tests::a_capacity_wait_shows_the_place_in_line_and_the_estimate",
+        ) {
+            return;
+        }
+        use crate::i18n::{I18nPlugin, Locale, LocaleId};
+        let mut app = App::new();
+        app.add_plugins(I18nPlugin::default());
+        let place = capacity_wait(Some(CapacityLine {
+            position: 3,
+            eta_secs: None,
+        }));
+        let estimate = capacity_wait(Some(CapacityLine {
+            position: 2,
+            eta_secs: Some(130),
+        }));
+        assert_eq!(
+            status_text(&place),
+            "All arenas are busy · you are number 3 in line"
+        );
+        assert_eq!(
+            status_text(&estimate),
+            "All arenas are busy · you are number 2 in line · about 3 min"
+        );
+        assert_eq!(
+            status_text(&capacity_wait(None)),
+            "All arenas are busy. Your place in the queue is reserved."
+        );
+        app.world_mut()
+            .resource_mut::<Locale>()
+            .set(LocaleId::parse("ru").unwrap());
+        assert_eq!(
+            status_text(&place),
+            "Все арены заняты · ваше место в очереди: 3"
+        );
+        assert_eq!(
+            status_text(&estimate),
+            "Все арены заняты · ваше место в очереди: 2 · примерно 3 мин."
+        );
+    }
+
+    /// LR-09: the searching screen offers Offline practice while this search
+    /// waits for a free arena, or while the server is too full to sign in;
+    /// never for an ordinary wait or another request's answer.
+    #[test]
+    fn offline_practice_is_offered_only_while_arenas_or_the_server_are_full() {
+        let flow = MatchServiceClient {
+            active: true,
+            ..default()
+        };
+        let answered = |view: MatchServiceView| CareerView {
+            match_service_request_id: Some(0),
+            match_service: Some(view),
+            ..default()
+        };
+        assert!(
+            flow.offers_offline(&answered(capacity_wait(Some(CapacityLine {
+                position: 1,
+                eta_secs: None
+            }))))
+        );
+        assert!(flow.offers_offline(&answered(capacity_wait(None))));
+        assert!(!flow.offers_offline(&ranked_wait(10, false)));
+        let mut stale = answered(capacity_wait(None));
+        stale.match_service_request_id = Some(7);
+        assert!(!flow.offers_offline(&stale), "another request's answer");
+        let full = CareerView {
+            match_service: Some(MatchServiceView::Idle),
+            error_code: Some(shared::career::error_code::SERVER_FULL.into()),
+            ..default()
+        };
+        assert!(flow.offers_offline(&full));
+        assert!(
+            !MatchServiceClient::default().offers_offline(&full),
+            "not searching"
         );
     }
 }
