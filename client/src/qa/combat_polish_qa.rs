@@ -27,6 +27,13 @@ impl Plugin for CombatPolishQaPlugin {
             pending: false,
             iphone: std::env::var("OMOBA_IPHONE_UX_QA").is_ok_and(|v| v == "1") || round2_mode(),
             round2: round2_mode(),
+            interaction: std::env::var("OMOBA_HUD_INTERACTION_QA")
+                .ok()
+                .and_then(|v| match v.as_str() {
+                    "forward" => Some(false),
+                    "back" => Some(true),
+                    _ => None,
+                }),
             fps_hidden_once: false,
             first_only: std::env::var("OMOBA_COMBAT_POLISH_QA_ONLY_FIRST").as_deref() == Ok("1"),
             fixture_target: None,
@@ -61,6 +68,8 @@ struct Qa {
     pending: bool,
     iphone: bool,
     round2: bool,
+    /// Opt-in, two-state proof for floating movement and portrait direction.
+    interaction: Option<bool>,
     fps_hidden_once: bool,
     first_only: bool,
     fixture_target: Option<Entity>,
@@ -74,7 +83,7 @@ fn round2_mode() -> bool {
 // Only presentation geometry is injected: production aim logic has its own
 // authority/visibility tests. Keep this after its per-frame reset.
 fn fixture_aim(qa: Res<Qa>, mut aim: ResMut<crate::combat::standard::SkillAimVector>) {
-    if qa.round2 && qa.stage == 0 {
+    if qa.round2 && qa.interaction.is_none() && qa.stage == 0 {
         aim.0 = Some((Vec2::new(-22.0, -10.0), Vec2::new(38.0, -10.0), 1.0));
     }
 }
@@ -125,6 +134,20 @@ fn fixture_actor_position(index: usize) -> Vec3 {
 }
 
 impl Qa {
+    fn interaction_stick(&self) -> Vec2 {
+        if self.interaction == Some(true) {
+            Vec2::new(180.0, 300.0)
+        } else {
+            Vec2::new(105.0, 280.0)
+        }
+    }
+    fn target_x(&self) -> f32 {
+        if self.interaction == Some(true) {
+            -36.0
+        } else {
+            -8.0
+        }
+    }
     fn files(&self) -> &'static [&'static str] {
         let files: &'static [&'static str] = if self.iphone { &IPHONE_FILES } else { &FILES };
         if self.first_only { &files[..1] } else { files }
@@ -213,7 +236,11 @@ fn prepare(
             let actor = commands
                 .spawn((
                     Transform::from_translation(if qa.round2 && id == 999 {
-                        Vec3::new(-8.0, map.terrain_height_3d(-8.0, -10.0), -10.0)
+                        Vec3::new(
+                            qa.target_x(),
+                            map.terrain_height_3d(qa.target_x(), -10.0),
+                            -10.0,
+                        )
                     } else {
                         fixture_actor_position(index)
                     }),
@@ -252,31 +279,37 @@ fn prepare(
                         Transform::from_xyz(0.0, 1.05, 0.0),
                         Name::new("Round2SyntheticEnemyBody"),
                     ));
-                    commands.spawn((
-                        crate::net::NetworkStructure,
-                        crate::net::NetworkStructureId(990099),
-                        crate::net::NetworkStructureAttackRange(10.0),
-                        crate::net::StructureKind::Tower,
-                        if *team == crate::team::Team::Green {
-                            crate::team::Team::Blue
-                        } else {
-                            crate::team::Team::Green
-                        },
-                        CombatStats {
-                            hp: 1000.0,
-                            max_hp: 1000.0,
-                            mana: 0.0,
-                            max_mana: 0.0,
-                        },
-                        Mesh3d(meshes.add(Cuboid::new(1.4, 3.0, 1.4))),
-                        MeshMaterial3d(materials.add(StandardMaterial {
-                            base_color: Color::srgb(0.50, 0.11, 0.09),
-                            ..default()
-                        })),
-                        Transform::from_xyz(-12.0, map.terrain_height_3d(-12.0, -2.0) + 1.5, -2.0),
-                        Visibility::Visible,
-                        Name::new("Round2SyntheticTower"),
-                    ));
+                    if qa.interaction.is_none() {
+                        commands.spawn((
+                            crate::net::NetworkStructure,
+                            crate::net::NetworkStructureId(990099),
+                            crate::net::NetworkStructureAttackRange(10.0),
+                            crate::net::StructureKind::Tower,
+                            if *team == crate::team::Team::Green {
+                                crate::team::Team::Blue
+                            } else {
+                                crate::team::Team::Green
+                            },
+                            CombatStats {
+                                hp: 1000.0,
+                                max_hp: 1000.0,
+                                mana: 0.0,
+                                max_mana: 0.0,
+                            },
+                            Mesh3d(meshes.add(Cuboid::new(1.4, 3.0, 1.4))),
+                            MeshMaterial3d(materials.add(StandardMaterial {
+                                base_color: Color::srgb(0.50, 0.11, 0.09),
+                                ..default()
+                            })),
+                            Transform::from_xyz(
+                                -12.0,
+                                map.terrain_height_3d(-12.0, -2.0) + 1.5,
+                                -2.0,
+                            ),
+                            Visibility::Visible,
+                            Name::new("Round2SyntheticTower"),
+                        ));
+                    }
                 }
                 qa.fixture_target = Some(actor);
             }
@@ -341,6 +374,22 @@ fn prepare(
                 TouchPhase::Canceled,
                 mobile.layout().utility_centers[0],
             ));
+        }
+        if qa.interaction.is_some() && qa.stage == 0 {
+            let down = qa.interaction_stick();
+            let end = down + Vec2::new(20.0, -10.0);
+            match qa.frames {
+                60 => {
+                    touch.write(gesture(995, TouchPhase::Started, down));
+                }
+                61 => {
+                    touch.write(gesture(995, TouchPhase::Moved, end));
+                }
+                62 => {
+                    touch.write(gesture(995, TouchPhase::Ended, end));
+                }
+                _ => {}
+            }
         }
         if qa.round2 && qa.stage == 5 && matches!(qa.frames, 10 | 20) {
             presses.press("PauseMenuShowFpsToggle");
@@ -561,14 +610,14 @@ fn capture(
     if qa.iphone {
         let measured: Vec<_> = nodes.iter().filter_map(|(name, id, node, computed, pose, inherited, text, clip)| {
             let name = crate::ui::test_id::node_key(name, id)?;
-            let watched = (qa.round2 && matches!(name,"MinimapAimIntersection" | "MinimapAimLine" | "MatchClockText" | "MatchKdaText" | "PauseMenuShowFpsToggle")) || name.starts_with("Mobile") || name.starts_with("EnemyPortrait-") || name == "Enemy respawn countdown" || name.starts_with("AllyCamera-") || name.starts_with("PauseMenuHud")
-                || matches!(name, "AlliedVitals" | "TargetHealthRoot" | "KillFeed" | "HeroOverheadPlate" | "HiddenOverheadIcon" | "MeasuredFps" | "MatchMenuButton" | "SocialOpenChat" | "SocialOpenWheel" | "PauseMenuRenderFpsControls" | "IphoneUxFixtureLabel" | "TargetAimLabel" | "LockedTargetLabel" | "ActionFeedback" | "BrushStatus" | "CareerEntryActions" | "CareerProfileButton" | "CareerHistoryButton" | "CareerFriendsButton" | "CareerQueueLeaveButton");
+            let watched = (qa.round2 && matches!(name,"MinimapAimIntersection" | "MinimapAimLine" | "MatchClockText" | "MatchKdaText" | "PauseMenuShowFpsToggle")) || name.starts_with("Mobile") || name.starts_with("EnemyPortrait-") || name.starts_with("EnemyPortraitDirection") || name == "Enemy respawn countdown" || name.starts_with("AllyCamera-") || name.starts_with("PauseMenuHud")
+                || matches!(name, "AlliedVitals" | "TargetHealthRoot" | "KillFeed" | "QuickBuyHud" | "GoldShopButton" | "HeroOverheadPlate" | "HiddenOverheadIcon" | "MeasuredFps" | "MatchMenuButton" | "SocialOpenChat" | "SocialOpenWheel" | "PauseMenuRenderFpsControls" | "IphoneUxFixtureLabel" | "TargetAimLabel" | "LockedTargetLabel" | "ActionFeedback" | "BrushStatus" | "CareerEntryActions" | "CareerProfileButton" | "CareerHistoryButton" | "CareerFriendsButton" | "CareerQueueLeaveButton");
             watched.then(|| {
                 let rect = Rect::from_center_size(pose.translation, computed.size() * pose.to_scale_angle_translation().0.abs());
                 let viewport = Rect::from_corners(Vec2::ZERO, qa.viewport().as_vec2());
                 let shown = rect.intersect(viewport).intersect(clip.map_or(viewport, |c| c.clip));
                 serde_json::json!({"name":name, "visible":node.display != Display::None && shown.width() > 1.0 && shown.height() > 1.0 && computed.size().min_element() > 0.0 && inherited.is_none_or(|v| v.get()),
-                    "rect":[rect.min.x,rect.min.y,rect.max.x,rect.max.y], "text":text.map(|t|t.0.as_str())})
+                    "rect":[rect.min.x,rect.min.y,rect.max.x,rect.max.y], "rotation_radians":pose.to_scale_angle_translation().1, "text":text.map(|t|t.0.as_str())})
             })
         }).collect();
         let visible = |name: &str| {
@@ -596,7 +645,7 @@ fn capture(
                 && mesh.is_some()
                 && visible.is_some_and(|v| v.get())
         });
-        if qa.round2 && qa.stage == 0 {
+        if qa.round2 && qa.interaction.is_none() && qa.stage == 0 {
             for name in ["MinimapAimIntersection", "MatchClockText", "MatchKdaText"] {
                 if !visible(name) {
                     errors.push(format!("round2 {name} not visible"));
@@ -697,6 +746,28 @@ fn capture(
                 errors.push(format!("{name} not visible"));
             }
         }
+        if qa.interaction.is_some() {
+            let layout = mobile.layout();
+            if layout.joystick_center.distance(qa.interaction_stick()) > 1.0
+                || mobile.movement != Vec2::ZERO
+                || mobile.has_active_gesture()
+            {
+                errors.push("floating stick did not retain a neutral released base".into());
+            }
+            if !visible("EnemyPortraitDirection-999") {
+                errors.push("selected live enemy portrait direction is not visible".into());
+            }
+            let feed = crate::hud_layout::phone_kill_feed_rect(mobile.viewport, mobile.safe);
+            let feed_node = measured
+                .iter()
+                .find(|n| n["name"] == "KillFeed" && n["visible"] == true);
+            if !feed_node.is_some_and(|n| {
+                (n["rect"][0].as_f64().unwrap() as f32 - feed.min.x).abs() < 1.0
+                    && (n["rect"][1].as_f64().unwrap() as f32 - feed.min.y).abs() < 1.0
+            }) {
+                errors.push("kill feed does not match the left purchase stack".into());
+            }
+        }
         if qa.stage == 1 && !hidden("ActionFeedback") {
             errors.push("empty attack showed an action feedback box".to_owned());
         }
@@ -718,6 +789,18 @@ fn capture(
         }
         let file = qa.files()[qa.stage];
         let fps_hidden_once = qa.fps_hidden_once;
+        let interaction_fixture = qa.interaction.map(|reverse| {
+            serde_json::json!({
+                "variant":if reverse {"back"} else {"forward"},
+                "scripted_touch_phases":["Started","Moved","Ended"],
+                "touch_down":qa.interaction_stick().to_array(),
+                "joystick_base":mobile.layout().joystick_center.to_array(),
+                "movement_after_release":mobile.movement.to_array(),
+                "active_gesture_after_release":mobile.has_active_gesture(),
+                "target_world_xz":[qa.target_x(),-10.0],
+                "manual_interaction_verified":false
+            })
+        });
         qa.reports.push(serde_json::json!({
             "file":file,
             "readiness":"PASS",
@@ -726,6 +809,7 @@ fn capture(
             "maximum_visible_world_overhead_plates":maximum_plates,
             "hostile_tower_fill_visible":tower_fill_visible,
             "fps_hidden_then_restored":fps_hidden_once,
+            "interaction_fixture":interaction_fixture,
             "nodes":measured
         }));
     }
@@ -760,7 +844,7 @@ fn readback(shot: On<ScreenshotCaptured>, mut qa: ResMut<Qa>, mut exit: MessageW
                 .map(|(index, id)| {
                     serde_json::json!({
                         "player_id":id,
-                        "position_xz":if qa.round2 && id == 999 {[-8.0,-10.0]} else {fixture_actor_position(index).xz().to_array()},
+                        "position_xz":if qa.round2 && id == 999 {[qa.target_x(),-10.0]} else {fixture_actor_position(index).xz().to_array()},
                         "world_model":qa.round2 && id == 999,
                         "placement":if qa.round2 && id == 999 {"visible_synthetic_capsule"} else {"off_camera"},
                         "purpose":"top_portraits_target_frame_and_visible_aim_cue"
@@ -768,7 +852,7 @@ fn readback(shot: On<ScreenshotCaptured>, mut qa: ResMut<Qa>, mut exit: MessageW
                 })
                 .collect::<Vec<_>>()
         });
-        let report = serde_json::json!({"presentation_fixture":true,"synthetic_window_focus":std::env::var("OMOBA_QA_SYNTHETIC_FOCUS").as_deref()==Ok("1"),"authoritative_multiplayer_verified":false,"physical_device_verified":false,"viewport":[viewport.x,viewport.y],"language":"en","fixture_actors":fixture_actors,"files":if qa.round2 && !qa.first_only {vec![IPHONE_FILES[0],IPHONE_FILES[5]]} else {qa.files().to_vec()},"round2_aim_geometry_injected":qa.round2,"synthetic_tower":qa.round2.then_some(serde_json::json!({"position_xz":[-12.0,-2.0],"radius":10.0})),"stages":qa.reports});
+        let report = serde_json::json!({"presentation_fixture":true,"synthetic_window_focus":std::env::var("OMOBA_QA_SYNTHETIC_FOCUS").as_deref()==Ok("1"),"authoritative_multiplayer_verified":false,"physical_device_verified":false,"viewport":[viewport.x,viewport.y],"language":"en","fixture_actors":fixture_actors,"files":if qa.round2 && !qa.first_only {vec![IPHONE_FILES[0],IPHONE_FILES[5]]} else {qa.files().to_vec()},"round2_aim_geometry_injected":qa.round2 && qa.interaction.is_none(),"synthetic_tower":(qa.round2 && qa.interaction.is_none()).then_some(serde_json::json!({"position_xz":[-12.0,-2.0],"radius":10.0})),"stages":qa.reports});
         let _ = std::fs::write(
             qa.directory.join("capture.json"),
             serde_json::to_vec_pretty(&report).unwrap(),

@@ -5,6 +5,11 @@ All notable changes are recorded here. The canonical version is
 
 ## [Unreleased]
 
+- Mobile HUD interactions: the movement stick reanchors on a fresh lower-left
+  press and keeps its base after release; the kill feed sits below purchases on
+  the left. A selected visible enemy portrait shows a gold camera-relative
+  direction arrow, with stale/hidden targets excluded and touch ownership kept.
+
 - Mobile in-match HUD: compact reference-sized attack/skills and utility discs,
   larger independent touch regions, bottom-row Recall/Dash/Haste, an inward
   transparent joystick, shallow score ribbon and small settings/chat controls

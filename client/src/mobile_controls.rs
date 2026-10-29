@@ -175,6 +175,8 @@ pub(crate) struct MobileControls {
     recall_active: bool,
     upgrade_mode: bool,
     captures: HashMap<u64, Capture>,
+    /// Session-local base; release preserves it, resize/HUD adjustments reset it.
+    floating_joystick: Option<Vec2>,
     upgrade_enabled: [bool; 4],
     layout_changed: bool,
     next_attack_gesture: u64,
@@ -207,6 +209,7 @@ impl Default for MobileControls {
             recall_active: false,
             upgrade_mode: false,
             captures: HashMap::new(),
+            floating_joystick: None,
             upgrade_enabled: [false; 4],
             layout_changed: false,
             next_attack_gesture: 0,
@@ -238,9 +241,38 @@ impl MobileControls {
             .min((usable_width / COMPACT_UTILITY_WIDTH).clamp(0.85, 1.25))
     }
 
+    /// Fresh movement presses belong only to the lower-left area below the
+    /// left information stack. A captured finger may subsequently leave it.
+    pub(crate) fn joystick_region(&self) -> Rect {
+        let feed = crate::hud_layout::phone_kill_feed_rect(self.viewport, self.safe);
+        let left = self.safe.left;
+        let right = self.viewport.x - self.safe.right;
+        let bottom = self.viewport.y - self.safe.bottom;
+        Rect::from_corners(
+            Vec2::new(
+                left,
+                (feed.max.y + 4.0).max(self.viewport.y * 0.5).min(bottom),
+            ),
+            Vec2::new(left + (right - left) * 0.35, bottom),
+        )
+    }
+
+    fn joystick_base_bounds(&self, radius: f32) -> Rect {
+        let region = self.joystick_region();
+        let min = Vec2::new(
+            region.min.x + radius,
+            (region.min.y + radius).min(region.max.y - radius),
+        );
+        Rect::from_corners(min, Vec2::new(region.max.x, region.max.y - radius).max(min))
+    }
+
     pub fn layout(&self) -> MobileLayout {
         let s = self.combat_scale();
         let joystick_scale = self.scale().max(1.0);
+        // Compact previews may leave less than a full stick below the feed.
+        // Fit its painted base to that strip; normal phone sizes keep 104px.
+        let joystick_radius =
+            (JOYSTICK_RADIUS * joystick_scale).min(self.joystick_region().height() * 0.5);
         let right = self.viewport.x - self.safe.right;
         let bottom = self.viewport.y - self.safe.bottom;
         let usable_width = right - self.safe.left;
@@ -263,7 +295,7 @@ impl MobileControls {
                 self.safe.left + usable_width * 0.17,
                 bottom - 90.0 * joystick_scale,
             ),
-            joystick_radius: JOYSTICK_RADIUS * joystick_scale,
+            joystick_radius,
             attack_center,
             attack_radius: ATTACK_RADIUS * s,
             cancel_center: relative(Vec2::new(38.0, -150.0)),
@@ -294,11 +326,6 @@ impl MobileControls {
                 (safe_max - max).max(Vec2::ZERO),
             )
         };
-        let joystick_shift = clamp_shift(
-            settings.joystick_offset,
-            layout.joystick_center - Vec2::splat(layout.joystick_radius),
-            layout.joystick_center + Vec2::splat(layout.joystick_radius),
-        );
         let circles: [(Vec2, f32); 12] = std::array::from_fn(|index| match index {
             0..=3 => (
                 layout.ability_centers[index],
@@ -317,6 +344,20 @@ impl MobileControls {
                 layout.auxiliary_radius.max(CONTROL_HIT_RADIUS),
             ),
         });
+        let stick_bounds = self.joystick_base_bounds(layout.joystick_radius);
+        layout.joystick_center = floating_stick_anchor(
+            layout.joystick_center,
+            stick_bounds,
+            layout.joystick_radius * JOYSTICK_CAPTURE,
+            &circles,
+            None,
+        );
+        // Resolve saved group adjustments against the stable settings anchor.
+        // A fresh movement press must never move another finger's combat group.
+        let requested_shift = settings.joystick_offset;
+        let joystick_shift = (layout.joystick_center + requested_shift)
+            .clamp(stick_bounds.min, stick_bounds.max)
+            - layout.joystick_center;
         let (min, max) = circles.into_iter().fold(
             (Vec2::splat(f32::INFINITY), Vec2::splat(f32::NEG_INFINITY)),
             |(min, max), (center, radius)| {
@@ -363,6 +404,16 @@ impl MobileControls {
             .chain(layout.category_centers.iter_mut())
         {
             *center += shift;
+        }
+        if let Some(desired) = self.floating_joystick {
+            let translated = circles.map(|(center, radius)| (center + shift, radius));
+            layout.joystick_center = floating_stick_anchor(
+                desired,
+                stick_bounds,
+                layout.joystick_radius * JOYSTICK_CAPTURE,
+                &translated,
+                Some(layout.joystick_center),
+            );
         }
         layout
     }
@@ -474,9 +525,8 @@ impl MobileControls {
                 ));
             }
         }
-        // Fixed anchor avoids moving the joystick under minimap/menu touches.
-        (point.distance(l.joystick_center) <= l.joystick_radius * JOYSTICK_CAPTURE)
-            .then_some((Control::Joystick, l.joystick_center))
+        (l.joystick_radius >= CONTROL_HIT_RADIUS && self.joystick_region().contains(point))
+            .then_some((Control::Joystick, point))
     }
 
     /// Only a fresh touch can capture gameplay. UI owns a gesture begun on
@@ -503,7 +553,7 @@ impl MobileControls {
                 if self.captures.contains_key(&id) {
                     return;
                 }
-                let Some((control, origin)) = self.hit_control(position) else {
+                let Some((control, _)) = self.hit_control(position) else {
                     return;
                 };
                 if self.captures.values().any(|c| {
@@ -517,6 +567,12 @@ impl MobileControls {
                         )
                 }) {
                     return;
+                }
+                if control == Control::Joystick {
+                    // Reanchor only after exclusive ownership is granted. Keep
+                    // analog travel relative to the finger's actual down point,
+                    // so clamping near an edge never produces movement on down.
+                    self.floating_joystick = Some(position);
                 }
                 if matches!(
                     control,
@@ -537,11 +593,7 @@ impl MobileControls {
                     id,
                     Capture {
                         control,
-                        origin: if control != Control::Joystick {
-                            position
-                        } else {
-                            origin
-                        },
+                        origin: position,
                         position,
                         raw_position: position,
                         canceled: false,
@@ -816,6 +868,45 @@ impl MobileControls {
     }
 }
 
+/// Project a desired base into its safe region and left of combat capture
+/// circles. Checking the nearest Y and both region ends also handles the
+/// single-height movement strip of short landscape screens.
+fn floating_stick_anchor(
+    desired: Vec2,
+    bounds: Rect,
+    capture_radius: f32,
+    combat: &[(Vec2, f32)],
+    fallback: Option<Vec2>,
+) -> Vec2 {
+    let desired = desired.clamp(bounds.min, bounds.max);
+    [
+        desired.y,
+        bounds.min.y,
+        bounds.max.y,
+        fallback.unwrap_or(bounds.center()).y,
+    ]
+    .into_iter()
+    .filter_map(|y| {
+        let right = combat.iter().fold(bounds.max.x, |right, (centre, radius)| {
+            let reach = capture_radius + radius + 2.0;
+            let dy = (y - centre.y).abs();
+            if dy < reach {
+                right.min(centre.x - (reach * reach - dy * dy).sqrt())
+            } else {
+                right
+            }
+        });
+        (right >= bounds.min.x).then(|| Vec2::new(desired.x.clamp(bounds.min.x, right), y))
+    })
+    .min_by(|a, b| {
+        a.distance_squared(desired)
+            .total_cmp(&b.distance_squared(desired))
+    })
+    // An already-resolved fallback remains valid if requested geometry
+    // has no new candidate; undersized strips have no joystick capture.
+    .unwrap_or_else(|| fallback.unwrap_or(bounds.min))
+}
+
 fn joystick_vector(delta: Vec2, radius: f32) -> Vec2 {
     let distance = delta.length();
     let dead_zone = radius * 0.16;
@@ -926,6 +1017,9 @@ fn refresh_mobile_layout(
     } else {
         4.0
     };
+    if position != mobile.hud_position || viewport != mobile.viewport {
+        mobile.floating_joystick = None;
+    }
     mobile.layout_changed = mobile.safe.top != top
         || position != mobile.hud_position
         || viewport != mobile.viewport
@@ -1614,12 +1708,12 @@ fn draw_mobile_controls(
             MobileVisual::Joystick => (
                 layout.joystick_center,
                 Vec2::splat(layout.joystick_radius * 2.0),
-                visible,
+                visible && layout.joystick_radius >= CONTROL_HIT_RADIUS,
             ),
             MobileVisual::Thumb => (
                 layout.joystick_center + mobile.joystick_thumb_offset(),
                 Vec2::splat(KNOB_RADIUS * 2.0 * layout.joystick_radius / JOYSTICK_RADIUS),
-                visible,
+                visible && layout.joystick_radius >= CONTROL_HIT_RADIUS,
             ),
             MobileVisual::Attack => {
                 label = tr("touch.attack").into();
@@ -2757,6 +2851,230 @@ mod tests {
         }
     }
     #[test]
+    fn floating_stick_reanchors_on_each_fresh_owner_and_keeps_base_after_release() {
+        let mut m = controls();
+        let first = Vec2::new(100.0, 280.0);
+        m.event(1, TouchPhase::Started, first);
+        assert_eq!(m.layout().joystick_center, first);
+        assert_eq!(m.movement, Vec2::ZERO);
+        m.event(1, TouchPhase::Moved, first + Vec2::new(35.0, -15.0));
+        assert_eq!(m.layout().joystick_center, first);
+        assert!(m.movement.x > 0.0 && m.movement.y < 0.0);
+        // Another movement finger cannot steal or relocate the owned stick.
+        let second = Vec2::new(180.0, 300.0);
+        m.event(2, TouchPhase::Started, second);
+        m.event(2, TouchPhase::Moved, second + Vec2::X * 40.0);
+        m.event(2, TouchPhase::Ended, second);
+        assert_eq!(m.layout().joystick_center, first);
+        assert!(m.movement.x > 0.0);
+        // Combat retains an independent owner while movement continues.
+        let attack = m.layout().attack_center;
+        m.event(3, TouchPhase::Started, attack);
+        m.event(3, TouchPhase::Ended, attack);
+        assert_eq!(m.attacks.len(), 1);
+        assert!(m.movement.x > 0.0);
+        m.event(1, TouchPhase::Ended, first + Vec2::new(35.0, -15.0));
+        assert_eq!(m.movement, Vec2::ZERO);
+        assert_eq!(m.joystick_thumb_offset(), Vec2::ZERO);
+        assert_eq!(m.layout().joystick_center, first);
+        m.event(4, TouchPhase::Started, second);
+        assert_eq!(m.layout().joystick_center, second);
+        assert_eq!(m.movement, Vec2::ZERO);
+        m.event(4, TouchPhase::Canceled, second);
+        assert_eq!(m.layout().joystick_center, second);
+        assert_eq!(m.movement, Vec2::ZERO);
+    }
+
+    #[test]
+    fn floating_press_never_repositions_the_combat_group_or_an_owned_skill() {
+        let mut m = controls();
+        m.viewport = Vec2::new(844.0, 384.0);
+        m.hud_position.combat_offset = Vec2::new(-60.0, 0.0);
+        let before = m.layout();
+        m.event(7, TouchPhase::Started, before.ability_centers[0]);
+        m.event(
+            7,
+            TouchPhase::Moved,
+            before.ability_centers[0] + Vec2::new(-30.0, -20.0),
+        );
+        let skill_origin = m.captures[&7].origin;
+        m.event(8, TouchPhase::Started, Vec2::new(290.0, 300.0));
+        let after = m.layout();
+        assert_eq!(after.attack_center, before.attack_center);
+        assert_eq!(after.ability_centers, before.ability_centers);
+        assert_eq!(after.utility_centers, before.utility_centers);
+        assert_eq!(after.recall_center, before.recall_center);
+        assert_eq!(after.cancel_center, before.cancel_center);
+        assert_eq!(m.captures[&7].origin, skill_origin);
+        assert!(m.aimed_skill().is_some());
+        m.event(8, TouchPhase::Ended, Vec2::new(290.0, 300.0));
+        assert_eq!(m.layout().ability_centers, before.ability_centers);
+        assert_eq!(m.captures[&7].origin, skill_origin);
+    }
+
+    #[test]
+    fn floating_stick_edge_press_is_neutral_and_never_owns_the_left_information_stack() {
+        let mut m = controls();
+        let region = m.joystick_region();
+        let edge = region.min + Vec2::ONE;
+        m.event(1, TouchPhase::Started, edge);
+        let layout = m.layout();
+        let feed = crate::hud_layout::phone_kill_feed_rect(m.viewport, m.safe);
+        assert!(layout.joystick_center.y - layout.joystick_radius >= feed.max.y + 3.99);
+        assert!(layout.joystick_center.x - layout.joystick_radius >= m.safe.left);
+        assert_eq!(m.movement, Vec2::ZERO);
+        assert_eq!(m.joystick_thumb_offset(), Vec2::ZERO);
+        m.event(1, TouchPhase::Ended, edge);
+        let retained = m.layout().joystick_center;
+        assert!(!m.owns_control_point(feed.center()));
+        assert!(!m.owns_control_point(Vec2::new(90.0, 90.0)));
+        let button = Rect::from_center_size(Vec2::new(180.0, 280.0), Vec2::splat(44.0));
+        m.event_with_ui(2, TouchPhase::Started, button.center(), &[button]);
+        assert!(m.captures.is_empty());
+        assert_eq!(m.layout().joystick_center, retained);
+    }
+
+    #[test]
+    fn resizing_or_editing_hud_settings_resets_the_session_stick_anchor() {
+        let mut app = App::new();
+        app.insert_resource(controls())
+            .add_message::<WindowFocused>()
+            .add_message::<AppLifecycle>()
+            .init_resource::<HudPositionSettings>()
+            .add_systems(Update, refresh_mobile_layout);
+        let mut window = Window::default();
+        window.resolution.set(844.0, 390.0);
+        let window = app.world_mut().spawn((window, PrimaryWindow)).id();
+        app.update();
+        {
+            let mut mobile = app.world_mut().resource_mut::<MobileControls>();
+            mobile.event(1, TouchPhase::Started, Vec2::new(105.0, 280.0));
+            mobile.event(1, TouchPhase::Ended, Vec2::new(105.0, 280.0));
+            assert!(mobile.floating_joystick.is_some());
+        }
+        app.world_mut()
+            .get_mut::<Window>(window)
+            .unwrap()
+            .resolution
+            .set(693.0, 320.0);
+        app.update();
+        assert!(
+            app.world()
+                .resource::<MobileControls>()
+                .floating_joystick
+                .is_none()
+        );
+        {
+            let mut mobile = app.world_mut().resource_mut::<MobileControls>();
+            let position = mobile.layout().joystick_center;
+            mobile.event(2, TouchPhase::Started, position);
+            mobile.event(2, TouchPhase::Ended, position);
+            assert!(mobile.floating_joystick.is_some());
+        }
+        app.world_mut()
+            .resource_mut::<HudPositionSettings>()
+            .joystick_offset
+            .x = 20.0;
+        app.update();
+        assert!(
+            app.world()
+                .resource::<MobileControls>()
+                .floating_joystick
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn short_landscape_fits_the_stick_and_too_small_strips_do_not_capture() {
+        let mut m = controls();
+        m.viewport = Vec2::new(568.0, 300.0);
+        let layout = m.layout();
+        let feed = crate::hud_layout::phone_kill_feed_rect(m.viewport, m.safe);
+        assert!(layout.joystick_radius >= CONTROL_HIT_RADIUS);
+        assert!(layout.joystick_radius < JOYSTICK_RADIUS);
+        assert!(layout.joystick_center.y - layout.joystick_radius >= feed.max.y + 3.99);
+        assert!(layout.joystick_center.y + layout.joystick_radius <= m.viewport.y - m.safe.bottom);
+        m.viewport.y = 240.0;
+        let region = m.joystick_region();
+        assert!(m.layout().joystick_radius < CONTROL_HIT_RADIUS);
+        assert!(!matches!(
+            m.hit_control(Vec2::new(region.min.x + 2.0, region.center().y)),
+            Some((Control::Joystick, _))
+        ));
+    }
+
+    #[test]
+    fn floating_stick_is_bounded_below_feed_and_clear_of_adjusted_combat_controls() {
+        for (viewport, inset) in [
+            (Vec2::new(568.0, 320.0), 32.0),
+            (Vec2::new(568.0, 320.0), 47.0),
+            (Vec2::new(693.0, 320.0), 32.0),
+            (Vec2::new(844.0, 384.0), 32.0),
+            (Vec2::new(932.0, 430.0), 32.0),
+            (Vec2::new(568.0, 430.0), 47.0),
+        ] {
+            for offset in [-60.0, 0.0, 60.0] {
+                let mut owned = 0;
+                for sample in [Vec2::splat(0.01), Vec2::splat(0.5), Vec2::splat(0.99)] {
+                    let mut m = controls();
+                    m.viewport = viewport;
+                    m.safe.left = inset;
+                    m.safe.right = inset;
+                    m.hud_position = HudPositionSettings {
+                        joystick_offset: Vec2::splat(offset),
+                        combat_offset: Vec2::new(-offset, offset),
+                    };
+                    let region = m.joystick_region();
+                    let point = region.min + region.size() * sample;
+                    if !matches!(m.hit_control(point), Some((Control::Joystick, _))) {
+                        continue;
+                    }
+                    m.event(1, TouchPhase::Started, point);
+                    owned += 1;
+                    let l = m.layout();
+                    let feed = crate::hud_layout::phone_kill_feed_rect(m.viewport, m.safe);
+                    assert!(l.joystick_center.x - l.joystick_radius >= inset - 0.01);
+                    assert!(l.joystick_center.y - l.joystick_radius >= feed.max.y + 3.99);
+                    assert!(
+                        l.joystick_center.y + l.joystick_radius
+                            <= viewport.y - m.safe.bottom + 0.01
+                    );
+                    for (center, radius) in l
+                        .ability_centers
+                        .into_iter()
+                        .zip(l.ability_radii)
+                        .chain(
+                            l.utility_centers
+                                .into_iter()
+                                .map(|p| (p, l.auxiliary_radius)),
+                        )
+                        .chain(
+                            l.category_centers
+                                .into_iter()
+                                .map(|p| (p, l.category_radius)),
+                        )
+                        .chain([
+                            (l.attack_center, l.attack_radius),
+                            (l.recall_center, l.auxiliary_radius),
+                            (l.cancel_center, l.cancel_radius),
+                            (l.upgrade_center, l.upgrade_radius),
+                        ])
+                    {
+                        assert!(
+                            l.joystick_center.distance(center) + 0.01
+                                >= l.joystick_radius * JOYSTICK_CAPTURE
+                                    + radius.max(CONTROL_HIT_RADIUS),
+                            "floating capture overlap at {viewport:?}, inset{inset}, offset{offset}: {point:?}"
+                        );
+                    }
+                    assert_eq!(m.movement, Vec2::ZERO);
+                }
+                assert!(owned > 0);
+            }
+        }
+    }
+
+    #[test]
     fn joystick_visible_throw_is_full_speed_and_inner_throw_remains_analog() {
         let mut m = controls();
         m.viewport = Vec2::new(852.0, 393.0);
@@ -3157,7 +3475,7 @@ mod tests {
     }
 
     #[test]
-    fn saved_offsets_cannot_put_recall_under_the_movement_capture_circle() {
+    fn saved_offsets_keep_recall_clear_and_movement_region_bounded() {
         for viewport in [
             Vec2::new(568.0, 320.0),
             Vec2::new(568.0, 430.0),
@@ -3192,7 +3510,13 @@ mod tests {
                         let point = l.joystick_center
                             + Vec2::from_angle(step as f32 * std::f32::consts::TAU / 32.0)
                                 * (stick - 0.01);
-                        assert!(matches!(m.hit_control(point), Some((Control::Joystick, _))));
+                        // The conservative separation circle stays clear of
+                        // Recall, but fresh capture now belongs only to the
+                        // bounded lower-left region, excluding the feed/home edge.
+                        assert_eq!(
+                            matches!(m.hit_control(point), Some((Control::Joystick, _))),
+                            m.joystick_region().contains(point),
+                        );
                     }
                 }
             }

@@ -3,6 +3,7 @@
 use bevy::{prelude::*, window::PrimaryWindow};
 
 use crate::{
+    camera::MainCamera,
     hud_layout::{HudLayout, ui_viewport},
     input_context::GameplayInputContext,
     mobile_controls::MobileControls,
@@ -11,6 +12,7 @@ use crate::{
         PlayerProgression, RemotePlayer, TargetId, TargetKind,
     },
     player::Player,
+    sprite::PlayerVisualMode,
     targeting::{BasicAttackState, TargetValidity},
     team::Team,
     ui::{
@@ -33,6 +35,108 @@ pub(super) struct EnemyPortraitArt(u64);
 
 #[derive(Component)]
 pub(super) struct EnemyRespawnLabel(u64);
+
+#[derive(Component)]
+pub(super) struct EnemyPortraitDirection(EnemyPortraitAction);
+
+#[derive(Component)]
+pub(super) struct EnemyPortraitDirectionStroke {
+    action: EnemyPortraitAction,
+    index: usize,
+}
+
+const DIRECTION_OVERLAY_SIDE: f32 = 40.0;
+const DIRECTION_STROKE_WIDTH: f32 = 2.0;
+
+/// Both endpoints are projected through the same current camera. Raw world XZ
+/// would point the wrong way after an orbit or when the 2D renderer is selected.
+fn portrait_screen_direction(
+    camera: &Camera,
+    camera_pose: &GlobalTransform,
+    origin: Vec3,
+    target: Vec3,
+    mode: PlayerVisualMode,
+) -> Option<Vec2> {
+    let affine = camera_pose.affine();
+    let determinant = affine.matrix3.determinant();
+    if !camera.is_active
+        || !origin.is_finite()
+        || !target.is_finite()
+        || !affine.is_finite()
+        || !determinant.is_finite()
+        || determinant.abs() < 0.000001
+        || !camera.computed.clip_from_view.is_finite()
+    {
+        return None;
+    }
+    let screen = |position| {
+        let render = if mode == PlayerVisualMode::Sprite2d {
+            crate::world2d::simulation_xz_to_render_xy(position).extend(0.0)
+        } else {
+            position
+        };
+        camera.world_to_viewport(camera_pose, render).ok()
+    };
+    let delta = screen(target)? - screen(origin)?;
+    if !delta.is_finite() {
+        return None;
+    }
+    delta.try_normalize()
+}
+
+/// Three short strokes remain inside the portrait's 40px content box at every
+/// angle, including their 2px width. They cannot paint over another HUD cell.
+fn direction_strokes(direction: Vec2) -> [(Vec2, Vec2); 3] {
+    let center = Vec2::splat(DIRECTION_OVERLAY_SIDE * 0.5);
+    let tip = center + direction * 17.0;
+    let base = tip - direction * 5.0;
+    let normal = Vec2::new(-direction.y, direction.x) * 3.0;
+    [
+        (center + direction * 5.0, tip),
+        (base + normal, tip),
+        (base - normal, tip),
+    ]
+}
+
+fn spawn_portrait_direction(parent: &mut ChildSpawnerCommands, action: EnemyPortraitAction) {
+    parent
+        .spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Percent(50.0),
+                top: Val::Percent(50.0),
+                width: Val::Px(DIRECTION_OVERLAY_SIDE),
+                height: Val::Px(DIRECTION_OVERLAY_SIDE),
+                display: Display::None,
+                ..default()
+            },
+            UiTransform::from_translation(Val2::new(Val::Percent(-50.0), Val::Percent(-50.0))),
+            Pickable::IGNORE,
+            ZIndex(3),
+            EnemyPortraitDirection(action),
+            Name::new(format!(
+                "EnemyPortraitDirectionOverlay-{}",
+                action.target.id
+            )),
+        ))
+        .with_children(|arrow| {
+            for (index, (a, b)) in direction_strokes(Vec2::X).into_iter().enumerate() {
+                let (node, transform) = crate::minimap::line_node(a, b, DIRECTION_STROKE_WIDTH);
+                arrow.spawn((
+                    node,
+                    transform,
+                    BackgroundColor(color::GOLD_400),
+                    Pickable::IGNORE,
+                    EnemyPortraitDirectionStroke { action, index },
+                    Name::new(if index == 0 {
+                        format!("EnemyPortraitDirection-{}", action.target.id)
+                    } else {
+                        format!("EnemyPortraitDirectionHead-{}-{index}", action.target.id)
+                    }),
+                ));
+            }
+        });
+}
 
 fn nearby(origin: Vec3, point: Vec3) -> bool {
     origin.is_finite()
@@ -248,7 +352,93 @@ pub(super) fn sync_enemy_portraits(
                     EnemyRespawnLabel(action.target.id),
                     Name::new("Enemy respawn countdown"),
                 ));
+                spawn_portrait_direction(button, action);
             });
+    }
+}
+
+/// Refresh after camera follow/grounding and before UI layout. Only a selected
+/// portrait's still-valid visible world entity may supply a bearing; public
+/// death timers never carry a position. Missing projection data fails closed.
+#[allow(clippy::type_complexity, clippy::too_many_arguments)]
+pub(super) fn draw_enemy_portrait_directions(
+    game: Option<Res<GameStateSnapshot>>,
+    screen: Option<Res<State<crate::frontend::AppScreen>>>,
+    context: Option<Res<GameplayInputContext>>,
+    mode: Option<Res<PlayerVisualMode>>,
+    selected: Res<TargetState>,
+    local: Query<(Entity, &Transform, &Team, &CombatStats), With<Player>>,
+    enemies: Query<(&Transform, Option<&Visibility>), (With<RemotePlayer>, Without<Player>)>,
+    camera: Query<(Entity, &Camera), With<MainCamera>>,
+    poses: bevy::transform::helper::TransformHelper,
+    validity: TargetValidity,
+    mut arrows: Query<(&EnemyPortraitDirection, &mut Node)>,
+    mut strokes: Query<
+        (&EnemyPortraitDirectionStroke, &mut Node, &mut UiTransform),
+        Without<EnemyPortraitDirection>,
+    >,
+) {
+    let bearing = (|| {
+        if !game
+            .as_ref()
+            .is_some_and(|game| matches!(game.state, GameState::Running))
+            || !context
+                .as_ref()
+                .is_some_and(|context| context.gameplay_allowed())
+            || screen
+                .as_ref()
+                .is_some_and(|screen| *screen.get() != crate::frontend::AppScreen::InMatch)
+        {
+            return None;
+        }
+        let (entity, target) = selected.selected_entity.zip(selected.selected_target)?;
+        if target.kind != TargetKind::Player || entity == Entity::PLACEHOLDER {
+            return None;
+        }
+        let (hero, origin, team, stats) = local.single().ok()?;
+        let (enemy, visibility) = enemies.get(entity).ok()?;
+        if !stats.is_alive()
+            || visibility == Some(&Visibility::Hidden)
+            || !validity.valid(entity, target, *team)
+            || !nearby(origin.translation, enemy.translation)
+        {
+            return None;
+        }
+        let (camera_entity, camera) = camera.single().ok()?;
+        let direction = portrait_screen_direction(
+            camera,
+            &poses.compute_global_transform(camera_entity).ok()?,
+            poses.compute_global_transform(hero).ok()?.translation(),
+            poses.compute_global_transform(entity).ok()?.translation(),
+            mode.as_deref().copied()?,
+        )?;
+        Some((EnemyPortraitAction { entity, target }, direction))
+    })();
+    let matches = |action: EnemyPortraitAction| {
+        bearing.filter(|(selected, _)| {
+            selected.entity == action.entity && selected.target == action.target
+        })
+    };
+    for (arrow, mut node) in &mut arrows {
+        let next = if matches(arrow.0).is_some() {
+            Display::Flex
+        } else {
+            Display::None
+        };
+        if node.display != next {
+            node.display = next;
+        }
+    }
+    for (stroke, mut node, mut transform) in &mut strokes {
+        if let Some((_, direction)) = matches(stroke.action) {
+            let (a, b) = direction_strokes(direction)[stroke.index];
+            let (next_node, next_transform) =
+                crate::minimap::line_node(a, b, DIRECTION_STROKE_WIDTH);
+            node.set_if_neq(next_node);
+            transform.set_if_neq(next_transform);
+        } else if node.display != Display::None {
+            node.display = Display::None;
+        }
     }
 }
 
@@ -353,6 +543,333 @@ mod tests {
             .iter(app.world())
             .map(|(entity, action)| (entity, *action))
             .collect()
+    }
+
+    fn projection_camera() -> Camera {
+        use bevy::camera::{ComputedCameraValues, RenderTargetInfo};
+        Camera {
+            computed: ComputedCameraValues {
+                clip_from_view: Mat4::from_scale(Vec3::new(0.1, 0.1, -0.01)),
+                target_info: Some(RenderTargetInfo {
+                    physical_size: UVec2::new(844, 384),
+                    scale_factor: 1.0,
+                }),
+                ..default()
+            },
+            ..default()
+        }
+    }
+
+    fn camera_pose(up: Vec3) -> Transform {
+        Transform::from_xyz(0.0, 50.0, 0.0).looking_at(Vec3::ZERO, up)
+    }
+
+    fn direction_app() -> (App, Entity) {
+        let mut app = app();
+        app.insert_resource(PlayerVisualMode::Models3d)
+            .add_systems(PostUpdate, draw_enemy_portrait_directions);
+        let camera = app
+            .world_mut()
+            .spawn((MainCamera, camera_pose(Vec3::NEG_Z), projection_camera()))
+            .id();
+        (app, camera)
+    }
+
+    fn direction_shown(app: &mut App, id: u64) -> bool {
+        app.world_mut()
+            .query::<(&EnemyPortraitDirection, &Node)>()
+            .iter(app.world())
+            .any(|(arrow, node)| arrow.0.target.id == id && node.display != Display::None)
+    }
+
+    #[test]
+    fn portrait_direction_uses_projected_screen_axes_and_camera_rotation() {
+        let camera = projection_camera();
+        let pose = GlobalTransform::from(camera_pose(Vec3::NEG_Z));
+        for (world, expected) in [
+            (Vec3::X * 4.0, Vec2::X),
+            (Vec3::Z * 4.0, Vec2::Y),
+            (Vec3::NEG_Z * 4.0, Vec2::NEG_Y),
+        ] {
+            let direction = portrait_screen_direction(
+                &camera,
+                &pose,
+                Vec3::ZERO,
+                world,
+                PlayerVisualMode::Models3d,
+            )
+            .unwrap();
+            assert!(direction.distance(expected) < 0.00001);
+        }
+        let rotated = GlobalTransform::from(camera_pose(Vec3::X));
+        let direction = portrait_screen_direction(
+            &camera,
+            &rotated,
+            Vec3::ZERO,
+            Vec3::X * 4.0,
+            PlayerVisualMode::Models3d,
+        )
+        .unwrap();
+        assert!(
+            direction.distance(Vec2::NEG_Y) < 0.00001,
+            "world +X becomes screen up after rotating the camera"
+        );
+        let direction = portrait_screen_direction(
+            &camera,
+            &rotated,
+            Vec3::ZERO,
+            Vec3::Z * 4.0,
+            PlayerVisualMode::Models3d,
+        )
+        .unwrap();
+        assert!(direction.distance(Vec2::X) < 0.00001);
+    }
+
+    #[test]
+    fn portrait_direction_honors_the_2d_projection_and_rejects_missing_geometry() {
+        let mut camera = projection_camera();
+        camera.computed.clip_from_view = Mat4::IDENTITY;
+        let direction = portrait_screen_direction(
+            &camera,
+            &GlobalTransform::IDENTITY,
+            Vec3::ZERO,
+            Vec3::Z * 0.5,
+            PlayerVisualMode::Sprite2d,
+        )
+        .unwrap();
+        assert!(
+            direction.distance(Vec2::NEG_Y) < 0.00001,
+            "simulation +Z becomes render +Y, which is screen up"
+        );
+        for target in [Vec3::ZERO, Vec3::NAN] {
+            assert!(
+                portrait_screen_direction(
+                    &camera,
+                    &GlobalTransform::IDENTITY,
+                    Vec3::ZERO,
+                    target,
+                    PlayerVisualMode::Sprite2d
+                )
+                .is_none()
+            );
+        }
+        assert!(
+            portrait_screen_direction(
+                &Camera::default(),
+                &GlobalTransform::IDENTITY,
+                Vec3::ZERO,
+                Vec3::X,
+                PlayerVisualMode::Sprite2d
+            )
+            .is_none()
+        );
+        assert!(
+            portrait_screen_direction(
+                &camera,
+                &GlobalTransform::from(Transform::from_scale(Vec3::ZERO)),
+                Vec3::ZERO,
+                Vec3::X,
+                PlayerVisualMode::Sprite2d
+            )
+            .is_none()
+        );
+        assert!(
+            portrait_screen_direction(
+                &projection_camera(),
+                &GlobalTransform::from(camera_pose(Vec3::NEG_Z)),
+                Vec3::ZERO,
+                Vec3::new(4.0, 100.0, 0.0),
+                PlayerVisualMode::Models3d
+            )
+            .is_none(),
+            "a point behind the camera has no trustworthy screen bearing"
+        );
+    }
+
+    #[test]
+    fn stationary_portrait_bearing_does_not_dirty_stroke_layout_each_frame() {
+        #[derive(Resource, Default)]
+        struct StrokeChanges(usize);
+        let (mut app, camera) = direction_app();
+        app.init_resource::<StrokeChanges>().add_systems(
+            Last,
+            |mut changes: ResMut<StrokeChanges>,
+             nodes: Query<
+                (),
+                (
+                    With<EnemyPortraitDirectionStroke>,
+                    Or<(Changed<Node>, Changed<UiTransform>)>,
+                ),
+            >| {
+                changes.0 = nodes.iter().count();
+            },
+        );
+        let target = enemy(&mut app, 17, 4.0);
+        *app.world_mut().resource_mut::<TargetState>() = TargetState::for_request(
+            target,
+            TargetId {
+                kind: TargetKind::Player,
+                id: 17,
+            },
+        );
+        app.update();
+        assert!(app.world().resource::<StrokeChanges>().0 > 0);
+        app.update();
+        assert_eq!(app.world().resource::<StrokeChanges>().0, 0);
+        *app.world_mut().get_mut::<Transform>(camera).unwrap() = camera_pose(Vec3::X);
+        app.update();
+        assert!(app.world().resource::<StrokeChanges>().0 > 0);
+    }
+
+    #[test]
+    fn direction_strokes_fit_inside_the_portrait_at_every_angle() {
+        let center = Vec2::splat(DIRECTION_OVERLAY_SIDE * 0.5);
+        for step in 0..64 {
+            let direction = Vec2::from_angle(step as f32 * std::f32::consts::TAU / 64.0);
+            for (a, b) in direction_strokes(direction) {
+                for point in [a, b] {
+                    assert!(
+                        point.distance(center) + DIRECTION_STROKE_WIDTH * 0.5
+                            < DIRECTION_OVERLAY_SIDE * 0.5
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn selected_portrait_direction_expires_with_visibility_identity_life_and_projection() {
+        for invalid in 0..13 {
+            let (mut app, camera) = direction_app();
+            let target = enemy(&mut app, 17, 4.0);
+            *app.world_mut().resource_mut::<TargetState>() = TargetState::for_request(
+                target,
+                TargetId {
+                    kind: TargetKind::Player,
+                    id: 17,
+                },
+            );
+            app.update();
+            assert!(direction_shown(&mut app, 17));
+            match invalid {
+                0 => {
+                    app.world_mut()
+                        .resource_mut::<TargetState>()
+                        .selected_target = None
+                }
+                1 => {
+                    app.world_mut()
+                        .resource_mut::<TargetState>()
+                        .selected_target
+                        .as_mut()
+                        .unwrap()
+                        .id = 999
+                }
+                2 => app.world_mut().get_mut::<CombatStats>(target).unwrap().hp = 0.0,
+                3 => {
+                    app.world_mut()
+                        .entity_mut(target)
+                        .insert(InheritedVisibility::HIDDEN);
+                }
+                4 => {
+                    app.world_mut()
+                        .entity_mut(target)
+                        .insert(Visibility::Hidden);
+                }
+                5 => {
+                    app.world_mut()
+                        .get_mut::<Transform>(target)
+                        .unwrap()
+                        .translation
+                        .x = shared::vision::HERO_SIGHT_RADIUS + 1.0
+                }
+                6 => {
+                    let mut heroes = app
+                        .world_mut()
+                        .query_filtered::<&mut CombatStats, With<Player>>();
+                    heroes.single_mut(app.world_mut()).unwrap().hp = 0.0;
+                }
+                7 => {
+                    app.world_mut()
+                        .resource_mut::<GameplayInputContext>()
+                        .modal_open = true
+                }
+                8 => app.world_mut().resource_mut::<GameStateSnapshot>().state = GameState::Lobby,
+                9 => {
+                    app.insert_resource(State::new(crate::frontend::AppScreen::Home));
+                }
+                10 => {
+                    app.world_mut()
+                        .get_mut::<Camera>(camera)
+                        .unwrap()
+                        .computed
+                        .target_info = None
+                }
+                11 => {
+                    app.world_mut().despawn(target);
+                }
+                _ => app.world_mut().get_mut::<Transform>(camera).unwrap().scale = Vec3::ZERO,
+            }
+            app.update();
+            assert!(
+                !direction_shown(&mut app, 17),
+                "ineligible direction remains for case {invalid}"
+            );
+        }
+    }
+
+    #[test]
+    fn portrait_direction_keeps_exact_selection_and_samples_current_camera_pose() {
+        let (mut app, camera) = direction_app();
+        let first = enemy(&mut app, 17, 4.0);
+        let second = enemy(&mut app, 18, 3.0);
+        app.update();
+        let (source, action) = portraits(&mut app)
+            .into_iter()
+            .find(|(_, action)| action.entity == first)
+            .unwrap();
+        app.world_mut().write_message(Activated { source, action });
+        app.update();
+        assert_eq!(
+            app.world().resource::<TargetState>().selected_entity,
+            Some(first)
+        );
+        assert!(direction_shown(&mut app, 17));
+        assert!(!direction_shown(&mut app, 18));
+        // GlobalTransform remains stale here: the presentation helper must use
+        // this frame's Transform, as the real camera-follow pipeline does.
+        *app.world_mut().get_mut::<Transform>(camera).unwrap() = camera_pose(Vec3::X);
+        app.update();
+        let mut arrows = app.world_mut().query::<(&Name, &UiTransform, &Pickable)>();
+        let (_, transform, pickable) = arrows
+            .iter(app.world())
+            .find(|(name, _, _)| name.as_str() == "EnemyPortraitDirection-17")
+            .unwrap();
+        assert!((transform.rotation * Vec2::X).distance(Vec2::NEG_Y) < 0.00001);
+        assert!(!pickable.is_hoverable && !pickable.should_block_lower);
+        app.world_mut()
+            .resource_mut::<TargetState>()
+            .selected_entity = Some(second);
+        app.update();
+        assert!(
+            !direction_shown(&mut app, 17) && !direction_shown(&mut app, 18),
+            "mismatched entity/identity cannot borrow a direction"
+        );
+        app.world_mut()
+            .resource_mut::<TargetState>()
+            .selected_target = Some(TargetId {
+            kind: TargetKind::Player,
+            id: 18,
+        });
+        app.update();
+        assert!(direction_shown(&mut app, 18));
+        app.world_mut().despawn(second);
+        enemy(&mut app, 18, 3.0);
+        app.update();
+        assert!(
+            !direction_shown(&mut app, 18),
+            "a replacement entity cannot inherit the stale selection"
+        );
     }
 
     #[test]

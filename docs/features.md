@@ -13,6 +13,15 @@ Ally portraits, quick-buy art, mana pills and cooldown detail follow the compact
 phone presentation. Saved HUD group offsets remain bounded; desktop layout and
 menu scaling keep their existing behavior.
 
+The movement stick floats within the lower-left region below the information
+stack: each fresh movement press chooses its base, drag moves the thumb, and
+release stops movement while retaining the last base. Safe-edge clamping starts
+neutral; a second finger cannot relocate the owned stick or shift combat buttons.
+Phone kill notices appear below purchases on the left, with two compact rows or
+one on short screens. Selecting a nearby visible enemy portrait also shows a
+small gold direction arrow in camera-relative screen axes. Hidden/dead/stale
+entities and public death timers supply no direction.
+
 Verification uses one English landscape phone preview and focused geometry/input
 tests. Physical Android play and long-session comfort are reported separately;
 a desktop-rendered preview alone does not establish either.
