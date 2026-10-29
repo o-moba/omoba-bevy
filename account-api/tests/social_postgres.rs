@@ -28,8 +28,10 @@ async fn vk_fixture() -> String {
     async fn token(Form(f): Form<HashMap<String, String>>) -> (StatusCode, Json<Value>) {
         let ok = f.get("grant_type").map(String::as_str) == Some("authorization_code")
             && f.get("client_id").map(String::as_str) == Some(CLIENT_ID)
-            && f.get("redirect_uri").map(String::as_str)
-                == Some("https://players.test/api/auth/vk/callback")
+            && matches!(
+                f.get("redirect_uri").map(String::as_str),
+                Some("https://players.test/api/auth/vk/callback" | "https://players.test")
+            )
             && f.get("device_id").is_some_and(|d| !d.is_empty())
             && f.get("state").is_some_and(|d| !d.is_empty())
             && f.get("code_verifier").is_some_and(|v| v.len() >= 43)
@@ -106,6 +108,38 @@ fn registration(user: &str, method: &str) -> Vec<u8> {
 fn vk_user() -> String {
     // Unique per test run: identities persist in the shared test database.
     (u64::from_str_radix(&crypto::random::<6>(), 16).unwrap() + 1).to_string()
+}
+
+#[tokio::test]
+#[ignore = "requires isolated owner OMOBA_PORTAL_TEST_DATABASE_URL"]
+async fn one_tap_root_can_register_and_sign_back_into_the_same_profile() {
+    let app = app().await;
+    let user = vk_user();
+    let mut request: Value = serde_json::from_slice(&registration(&user, "vkid")).unwrap();
+    request["redirect_uri"] = json!(ORIGIN);
+    let first = social::vk_sign_in(&app, &body(request.clone()))
+        .await
+        .unwrap();
+    let next = social::vk_sign_in(&app, &body(request)).await.unwrap();
+    assert_eq!(first["state"], "signed_in");
+    assert_eq!(
+        first["profile"]["profile_id"],
+        next["profile"]["profile_id"]
+    );
+    assert_ne!(first["session_token"], next["session_token"]);
+}
+
+#[tokio::test]
+#[ignore = "requires isolated owner OMOBA_PORTAL_TEST_DATABASE_URL"]
+async fn one_tap_game_link_at_root_still_requires_the_native_signed_profile_link() {
+    let app = app().await;
+    let mut request: Value =
+        serde_json::from_slice(&callback(&format!("user-{}", vk_user()))).unwrap();
+    request["redirect_uri"] = json!(ORIGIN);
+    let result = social::vk_sign_in(&app, &body(request)).await.unwrap();
+    assert_eq!(result["state"], "unlinked");
+    assert!(result.get("session_token").is_none());
+    assert_eq!(result["social_ticket"].as_str().unwrap().len(), 64);
 }
 fn enrollment(key: &SigningKey) -> DeviceEnrollment {
     DeviceEnrollment {

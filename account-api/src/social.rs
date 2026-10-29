@@ -258,6 +258,12 @@ impl VkConfig {
     }
 }
 
+fn portal_redirect(uri: &str, origin: &str) -> bool {
+    // OneTap callback mode uses the registered site root; the ordinary browser
+    // redirect retains its explicit callback. No other path/origin is accepted.
+    uri == origin || uri == format!("{origin}/api/auth/vk/callback")
+}
+
 /// `POST /v1/auth/social/vk` (portal BFF only): verify a VK ID callback and sign in.
 pub async fn vk_sign_in(app: &App, body: &[u8]) -> Result<Value> {
     let vk = app.social.vk.as_ref().ok_or_else(not_configured)?;
@@ -271,8 +277,7 @@ pub async fn vk_sign_in(app: &App, body: &[u8]) -> Result<Value> {
             .all(|b| b.is_ascii_alphanumeric() || b"-._~".contains(&b))
         || !token_like(&p.device_id, 512)
         || !token_like(&p.state, 512)
-        // The code is only accepted for this portal's own callback.
-        || p.redirect_uri != format!("{}/api/auth/vk/callback", app.config.origin)
+        || !portal_redirect(&p.redirect_uri, &app.config.origin)
     {
         return Err(invalid());
     }
@@ -620,6 +625,28 @@ pub async fn cleanup(app: &App) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn one_tap_root_and_legacy_callback_stay_bound_to_the_exact_portal() {
+        let origin = "https://omoba.ru";
+        assert!(portal_redirect(origin, origin));
+        assert!(portal_redirect(
+            "https://omoba.ru/api/auth/vk/callback",
+            origin
+        ));
+        for uri in [
+            "https://evil.example",
+            "https://omoba.ru.evil.example",
+            "https://omoba.ru/",
+            "https://omoba.ru/me",
+            "https://omoba.ru?next=evil",
+            "https://user@omoba.ru",
+            "http://omoba.ru",
+            "https://omoba.ru/api/auth/vk/callback?x=1",
+        ] {
+            assert!(!portal_redirect(uri, origin), "{uri}");
+        }
+    }
 
     #[test]
     fn display_names_keep_only_a_first_name_and_an_initial() {

@@ -2,6 +2,13 @@
 
 ## RU website and native registration
 
+The portal's official VK ID OneTap widget uses the existing registration/linking
+contract. The Account API accepts its exact configured root redirect, alongside
+the ordinary browser callback, and verifies the code server-side. Unit and
+isolated PostgreSQL checks cover both root registration and preservation of the
+native signed-link path. Live activation and real-provider/device checks remain
+pending; no account migration or service change is performed by this source work.
+
 Website-first VK ID, OK and Mail.ru sign-in creates one default-stat regional
 profile/session; repeat sign-in returns the same profile. Game-initiated unknown
 subjects still require the active game's explicit signed link to preserve progress.
