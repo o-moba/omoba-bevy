@@ -10,6 +10,13 @@ mod ui_profile;
 pub(crate) use ui_profile::{UiProfile, ui_profile};
 
 pub fn configure_app(app: &mut App) {
+    #[cfg(target_os = "ios")]
+    {
+        unsafe extern "C" {
+            fn omoba_universal_links_prepare();
+        }
+        unsafe { omoba_universal_links_prepare() };
+    }
     #[cfg(any(target_os = "android", target_os = "ios"))]
     app.insert_resource(bevy::winit::WinitSettings::mobile());
     #[cfg(not(any(target_os = "android", target_os = "ios")))]

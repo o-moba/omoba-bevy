@@ -1,5 +1,15 @@
 # Feature Inventory
 
+## iOS Universal Link return
+
+The RU portal can return to the existing iOS app through the prepared
+`https://ios.omoba.ru/auth` association. The dev app has a separate domain.
+The URL only opens the game; account access still requires the existing signed
+enrollment and player confirmation. Source includes the main-nib delegate,
+per-contour entitlements and archive preservation. Domain publication, Apple
+profile refresh and real-device tests remain pending. See
+[setup and checks](../mobile/ios/UNIVERSAL-LINKS.md).
+
 ## RU website and native registration
 
 Website-first VK ID, OK and Mail.ru sign-in creates one default-stat regional

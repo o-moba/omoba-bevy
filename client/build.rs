@@ -45,6 +45,8 @@ fn main() {
     generate_ui_assets();
     println!("cargo:rerun-if-changed=../mobile/ios/SupporterStoreKit.swift");
     println!("cargo:rerun-if-changed=../mobile/ios/BrowserBridge.swift");
+    println!("cargo:rerun-if-changed=../mobile/ios/UniversalLinkPolicy.swift");
+    println!("cargo:rerun-if-changed=../mobile/ios/UniversalLinks.swift");
     println!("cargo:rerun-if-changed=../mobile/ios/OmobaGameController.swift");
     println!("cargo:rerun-if-changed=../mobile/ios/PhoneLayoutPreview.swift");
     println!("cargo:rerun-if-changed=../mobile/ios/FramePacing.swift");
@@ -234,6 +236,8 @@ fn build_ios_bridges() {
         .arg(out.join("swift-module-cache"))
         .arg("../mobile/ios/SupporterStoreKit.swift")
         .arg("../mobile/ios/BrowserBridge.swift")
+        .arg("../mobile/ios/UniversalLinkPolicy.swift")
+        .arg("../mobile/ios/UniversalLinks.swift")
         .arg("../mobile/ios/OmobaGameController.swift")
         .arg("../mobile/ios/PhoneLayoutPreview.swift")
         .arg("../mobile/ios/FramePacing.swift")
