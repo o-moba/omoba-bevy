@@ -188,7 +188,7 @@ Area: legal (152-FZ) · **blocker** · S · owner
   - Either file a cross-border notice or state that no RU personal data leaves Russia. Check off-site backups, Pinata, and Vercel/Supabase analytics on RU-facing pages.
 - **Acceptance:**
   - [ ] The registry entry is linked in the owner checklist.
-  - [ ] The operator's name, address and support e-mail appear in the policy and in the RU portal footer.
+  - [ ] The operator's name, address and support e-mail appear in the policy and in the RU portal footer. Support e-mail provided: `prostosobolev@gmail.com` (2026-11-05); the RU privacy policy and user agreement are published as edition 1 on 2026-11-05 (owner-approved, without counsel review). The RKN operator notice has not been filed yet.
   - [ ] The cross-border position is recorded.
 - **Depends on:** —
 
@@ -537,13 +537,13 @@ Area: feedback · **major** · M · code
 Area: community/support · **major** · S · owner
 - **Now:**
   - The community runs on Discord (5 channels) plus a Telegram channel marked "needs-setup" (`community/projects/omoba/project.json`; `community/destinations.json:31-36`).
-  - There is no VK community, RU Telegram or support e-mail.
+  - There is no VK community or RU Telegram. The support e-mail is `prostosobolev@gmail.com` (owner, 2026-11-05).
   - Nothing is linked from the client (`client/i18n/ru`) or the RU portal (`market-web/src/components/portal.tsx:224`; `market-web/src/lib/navigation.mjs:65-80`).
 - **Requirement:**
   - A VK group with news, rules and a feedback topic.
   - A Russian Telegram channel and chat.
   - At least one moderator.
-  - A support e-mail that someone answers.
+  - A support e-mail that someone answers. Provided: `prostosobolev@gmail.com` (2026-11-05), in the game's About and the RU README.
   - Per-market community and support URLs in Home and Settings, the portal footer and sidebar, and the README (plumbing in LR-06). RU surfaces do not link Discord.
   - A dated launch plan committed in the community hub:
     - open-beta framing
@@ -590,7 +590,7 @@ Area: landing/portal/packages · **major** · M · code (the owner approves the 
   - [ ] The RU landing is indexed (Yandex Webmaster) with ru hreflang, and its claims match the current RU release. Code done (2026-10-24): omoba-web's RU guest home is indexable in production with a canonical link and `hreflang="ru"`; it counts the hero classes from the game's catalog snapshot, names the map and the LR-08 modes as the game does and lists the RU catalog's downloads. Needs the RU host, then the owner adds the site to Yandex Webmaster.
   - [x] RU landing and portal tests assert that `/donate`, wallets, "Ekza" and "crypto" are absent. omoba-web `tests/ru-landing.e2e.mjs` (ten RU pages, text and links) and `tests/landing.test.mjs`.
   - [x] With `OMOBA_MARKET=ru`, `/` renders the guest home when signed out and `/me` when signed in. `tests/ru-landing.e2e.mjs`.
-  - [x] `scripts/test_release.py` asserts the RU README is in Russian and includes the support e-mail, policy URLs and age sign. The real support e-mail waits for the owner (LR-21); until then `build` prints a note and the README names the portal.
+  - [x] `scripts/test_release.py` asserts the RU README is in Russian and includes the support e-mail, policy URLs and age sign. The support e-mail (`prostosobolev@gmail.com`) is set since 2026-11-05; the community still waits for the owner (LR-21), and until then `build` prints a note.
   - [x] The RU Linux player tarball has no `omoba-account-api`. The RU servers are the separate bundle `release.py build server --market ru` (`ops/vps/ru/README.md#server-bundle`), the only file `ru_host.py ship` accepts.
   - [x] The global landing and README are unchanged. The omoba.io landing is not touched; the global and dev READMEs are pinned byte for byte in `scripts/test_release.py`.
   - [x] A public `/delete` page (section 7, rules for LR-22; O-15). Code done (2026-10-25): omoba-web serves `omoba.ru/delete` without sign-in, in ru, en and zh, from the portal's legal table (portal-only `delete`, like `offer`; global and cn 404). It describes the manual e-mail procedure of the privacy draft (subject, nickname with tag, owner check, device keys refused once confirmed, erasure within 30 days, anonymised results); the address is a placeholder until LR-21. `tests/ru-landing.e2e.mjs`, `tests/market-profiles.e2e.mjs`, `tests/legal.test.mjs`. Needs owner: the support e-mail, counsel's check with the policy (LR-04), the URL in Play's Data safety form (LR-69).
@@ -2125,7 +2125,7 @@ single, documented setting the owner can change later.
 | O-16 | One RU VPS runs PostgreSQL, the lobby and workers, the Account API, the portal and the download host behind Caddy. | LR-01, LR-23 |
 | O-19 | Feedback and crash reports attach logs only when the player ticks a box (off by default). | LR-20 |
 | — | **RU landing** = the RU portal's guest home at `omoba.ru` (hosted in Russia, no foreign analytics); the omoba.io landing is not changed for M0. | LR-22 |
-| — | **Legal texts**: Russian drafts of the privacy policy and user agreement ship with a visible "проект" banner and version `0-draft`; the owner replaces them with the counsel-approved texts (LR-04) before publication. | LR-04, LR-06 |
+| — | **Legal texts**: the Russian privacy policy and user agreement are published as edition 1 (version `1`) on 2026-11-05, owner-approved without counsel review; a later counsel-reviewed edition gets a new version and asks every player again (LR-04). | LR-04, LR-06 |
 | — | **Age category**: plumbing with the RU value `12+` as a placeholder the owner confirms with counsel before publication (with chat off). | LR-07 |
 | — | **Release label**: «Открытая бета». | LR-23 |
 | — | **Owner notifications** (feedback, alerts): one Telegram bot configured on the RU host (`OMOBA_TELEGRAM_BOT_TOKEN`, `OMOBA_TELEGRAM_CHAT_ID`); without it, notifications go to the journal only. | LR-17, LR-20 |
