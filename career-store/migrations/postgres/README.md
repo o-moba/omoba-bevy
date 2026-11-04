@@ -2,7 +2,7 @@
 
 `career_store.rs` uses these PostgreSQL migrations with SQLx dynamic queries. It
 does not use the older SQLite prototype. `connect` applies career schema versions
-1–5 transactionally under a migration advisory lock, upgrades supported earlier
+1–6 transactionally under a migration advisory lock, upgrades supported earlier
 versions, and rejects unknown versions. Since 0.20.0-rc.1, use `migrate-career` (or Account API `migrate`)
 explicitly as the migration owner. The game worker uses `connect_runtime` and
 requires no DDL permissions; startup rejects missing/unknown versions. See
@@ -179,3 +179,10 @@ Each career-store test creates its own schema
 and removes that schema after success. No SQLite or mock adapter substitutes for
 these checks; database availability, actual run results and deployment durability
 must be reported separately.
+
+## Rating ladder (schema 6, LR-47)
+
+`006_rating_ladder.sql` adds the partial index `career_profiles_ladder`
+(`rating DESC, rated_matches DESC, profile_id` where `rated_matches >= 20`) that
+the Account API's `GET /v1/leaderboard` reads. No table or grant changes: the
+portal role already has `SELECT` on `career_profiles`.

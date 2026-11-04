@@ -820,7 +820,8 @@ impl ServerRuntime {
             round.result.rated = false;
             round.result.winner = None;
             if !self.rules.local_results {
-                round.result.unrated_reason = Some("The match did not finish normally.".into());
+                // A stable code (LR-31): the client and the portal localize it.
+                round.result.unrated_reason = Some("not_completed".into());
             }
         }
         for participant in &round.result.participants {

@@ -466,6 +466,17 @@ impl MatchService {
             lobby.pool.cancel(id);
         }
     }
+    /// Profiles this lobby has handed a live allocation (forming or running):
+    /// the party lobby shows them as "in match" (LR-55).
+    pub fn assigned_profiles(&self) -> impl Iterator<Item = &str> + '_ {
+        let assignments = match self {
+            Self::Lobby(lobby) => Some(&lobby.assignments),
+            _ => None,
+        };
+        assignments
+            .into_iter()
+            .flat_map(|a| a.keys().map(String::as_str))
+    }
     pub fn request_id(&self, profile: &str, session: &str) -> Option<u64> {
         if let Self::Lobby(l) = self {
             l.requests
