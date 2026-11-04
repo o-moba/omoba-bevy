@@ -25,8 +25,12 @@ the seven tier styles (protocol 12), YooKassa grant settlement and its durable
 tables (portal schema 9), the RU market selling through YooKassa only, and the
 in-game panel with the website link) and the YooKassa provider flow in the
 Account API (LR-67b: checkout, the webhook, reconciliation; [below](#yookassa-donations)).
-Not yet built: the RU portal pages (LR-67c). Tests use a loopback YooKassa
-stand-in; no real shop, test shop payment or fiscal receipt has been seen yet.
+The RU portal page (LR-67c, omoba-web PR #28) is built: `/supporter` with the seven
+tiers and a custom amount, BFF-owned idempotency, the return page that re-reads the
+payment, refunds in the history; `omoba.ru` serves it since 2026-11-05 with accounts
+still disabled («Оплата скоро откроется»). Tests use a loopback YooKassa stand-in; the
+test shop 1519761 has its webhook and receipt checks, the live shop `omoba.ru` is in
+moderation, and no real payment or fiscal receipt has been seen yet.
 
 **Planned (ADR-025; LR-69):**
 - Each Apple tier product gives 100 to 10 000 points (YooKassa already gives 1 point per ruble).
